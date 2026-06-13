@@ -9098,3 +9098,25 @@ The benchmark-then-migrate plan's terminal goal — all queries off Bun and onto
 ## Pruned (over-engineered / not needed)
 
 (none this pass — every remaining open issue was either genuinely actionable or verified merged; nothing met the clearly-speculative bar for removal.)
+
+---
+
+# #470: Fix stale TestDunningWorkerLimitedModeTakesNoAction (pre-#366 semantics)
+
+**Completed:** yes (commit f6209efc). Rewrote the test to #366 limited-mode-materialize
+semantics → `TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites`: a window-expired
+past_due sub is cancelled locally + entitlements revoked + NO provider writes (remote sub left
+for reconciliation, no rebill intent); an in-window past_due sub records exactly one PARKED
+system `manual_rebill` intent and is otherwise untouched. Validated: `go test -tags=integration
+./tests/ -run TestDunningWorkerLimitedMode` GREEN.
+
+---
+
+# #163: remove-dead-config-and-debug-prints
+
+**Completed:** yes (commit d7f032ab). Most listed targets were already gone (Config.Webhooks,
+RateLimit.Burst, nmi.go fmt.Println — removed in prior work). Removed the one genuinely-dead live
+item: the `subscription_type_id` (CCBill) config field on ProcessorConfig + CCBillConfig, its
+ToCCBillConfig copy, the tenant-secret populate line, and the config.example.yaml entry — declared
++ populated but never read. Left the LIVE inbound CCBill webhook field `SubscriptionTypeID` intact.
+Validated: build + vet + non-integration tests green.

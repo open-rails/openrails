@@ -32,17 +32,6 @@ Design notes:
 
 ---
 
-# #470: Fix stale TestDunningWorkerLimitedModeTakesNoAction (pre-#366 semantics) 
-
-**Completed:** no
-
-`tests/dunning_worker_test.go` `TestDunningWorkerLimitedModeTakesNoAction` still asserts the pre-#366 limited-mode contract (subscription stays `past_due`, `next_retry_at` non-nil — i.e. "takes no action"). Commit a67cc3f5 (#366 limited-mode materialize) changed the behavior deliberately: limited mode now materializes decisions — local window-expiry cancellations APPLY (subscription cancelled, entitlements revoked, remote processor sub left alive for reconciliation), and charge intents enqueue PARKED. The test was never updated and fails on every integration run (found during #469 verification; NOT a #469 regression — confirmed via a67cc3f5 history).
-
-**Tasks:**
-- [ ] Rewrite the test to assert #366 semantics: window-expired sub → cancelled locally + entitlements revoked + NO provider writes + parked charge intents; rename accordingly (e.g. TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites)
-- [ ] Keep/add a companion assertion that a NON-expired past_due sub takes no action in limited mode (the surviving half of the old contract)
-
----
 
 # #469: HARD CUT: control plane mandatory in standalone — remove verifier-only mode entirely
 
@@ -409,50 +398,6 @@ Adjust CCBill subscription entitlement logic to model paid term + retries (dunni
 
 ---
 
-# #163: remove-dead-config-and-debug-prints
-
-**Completed:** no
-
-Remove unused/dead config surface area and stray debug prints.
-
-## Metadata
-
-- Category: cleanup
-- Status: planned
-- Passes: false
-
-## Motivation
-
-- Keep OpenRails configuration minimal and accurate.
-- Avoid maintaining config keys/struct fields that have no behavioral effect.
-- Remove accidental stdout logging from production code paths.
-
-## Targets
-
-- Deprecated + unused config: `Config.Webhooks` / `WebhookConfig` / `WebhookRetryConfig` and `Config.GetWebhookRetryConfig()` (config/config.go:536, config/config.go:709)
-- Likely-dead CCBill config field: `subscription_type_id` in processor config (config/config.go:245, config/config.go:372)
-- Unused rate-limit knob: `RateLimit.Burst` (config/config.go:526)
-- Stray debug prints: `fmt.Println(...)` in NMI client request path (internal/integrations/nmi/nmi.go:1085)
-
-**Tasks:**
-- CODE REMOVALS:
-- [ ] Remove `Config.Webhooks` field and `WebhookConfig` / `WebhookRetryConfig` types from config/config.go
-- [ ] Remove `GetWebhookRetryConfig()` from config/config.go and delete any call sites if discovered
-- [ ] Remove `subscription_type_id` from `ProcessorConfig` (ccbill) and from `CCBillConfig`
-- [ ] Remove `RateLimit.Burst` from config/config.go and from any default rate limit definitions
-- [ ] Remove `fmt.Println` debug output in internal/integrations/nmi/nmi.go (direct request path)
-- 
-- DOCS / EXAMPLES:
-- [ ] Remove corresponding keys from config.example.yaml and .env.example
-- [ ] Ensure README.md does not mention removed keys; update if needed
-- 
-- COMPAT / SAFETY:
-- [ ] Confirm unknown config keys do not crash koanf load/validate (so removal doesn’t break old config files)
-- 
-- VERIFY:
-- [ ] `go test ./...` passes
-
----
 
 # #164: cloudflared-managed-dev-tunnel
 
