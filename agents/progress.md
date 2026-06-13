@@ -7,7 +7,61 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 472
+next_id: 473
+
+---
+
+# #472: Decouple money (fractional USD) from the custom-credit ledger
+
+**Priority:** high (architecture/correctness; supersedes the `usd_micro` provisioning follow-up from #336).
+**Status:** in progress (2026-06-13).
+
+## Decision (2026-06-13, Paul)
+`usd_micro` must NOT be a tenant-defined `credit_types` row. Two distinct concepts were conflated:
+- **Money (fractional USD)** — the universal dollar unit: micro-dollars (µ$ = 1e-6 USD; 1¢ = 10,000 µ$). Identical for every tenant; nobody defines it. (Stripe settles in integer *cents*; µ$ gives 4 dp below a cent so per-call usage accrues without rounding, then reconciles to cents at the gateway boundary.)
+- **Custom credits** — tenant-defined units (api-credits, tokens) a tenant bills in. Tenant-scoped `credit_types`.
+
+Chosen model: **PHYSICAL SEPARATION**. Money gets its own first-class tables/ledger (µ$, no `credit_type_id`); `credit_types`/`credit_*` serve ONLY custom credits. Run-from-empty (no data migration); schema folds into the consolidated `001_schema.up.sql` (#336).
+
+## Target money-domain schema (µ$, tenant-scoped, RLS, tenant_id NOT NULL, no credit_type_id)
+- `money_accounts`      ← from credit_account_settings (billing_mode prepaid/arrears, caps, auto_topup, outstanding_owed_micros, verified PM, suspension); unique(tenant_id, tenant_subject_id)
+- `money_balances`      ← from credit_balances (balance_micros, held_micros); unique(tenant_id, tenant_subject_id)
+- `money_transactions`  ← from credit_transactions (deposit/withdrawal/hold/capture/release; idempotency on source/source_id; status; expires_at)
+- `money_blocks`        ← from credit_blocks (expiring promo/grant dollars, FIFO)
+- `money_windows`       ← from credit_windows (prepaid bulk reservations)
+- `money_spend_limits`  ← from credit_spend_limits (per-actor µ$ caps)
+- `invoices`            ← drop credit_type_id; denominate µ$ directly (already money)
+- `budget_reservations` / `budget_window_state` ← already µ$ (no credit_type_id); leave — they ARE money
+- `usage_events`        ← keep as the metering record; link to exactly one of money_transaction_id / credit_transaction_id
+
+`credit_types` reverts to custom-only (no usd_micro; the global seed is already gone).
+
+## Service split
+- **MoneyService (new):** the dollar wallet — deposit (payment/refund), withdraw, hold/capture/release, prepaid windows, account settings, owed/arrears, invoices, suspension, auto-topup. µ$, no unit param.
+- **CreditsService (slimmed):** custom credits only — GetCreditTypeByName + balances/transactions/holds/windows/spend-limits/usage for tenant-defined types.
+- Today's money-centric files (money_in.go, invoice.go, arrears.go, suspension.go, spend_policy owed/topup) move to MoneyService.
+
+## Public API (#336 carry-over): slug in/out, uuid internal; money ops are unit-less µ$.
+
+## Stages (each lands GREEN)
+1. **Schema** — add money_* tables to consolidated 001 (additive; no gen/Go yet); verify apply on fresh PG + structural diff. No behavior change.
+2. **MoneyService** over money_* mirroring today's dollar paths; queries + sqlc + unit tests.
+3. **Money writers cutover** — payments deposit/refund, prepaid, arrears settle, invoices, auto-topup onto MoneyService.
+4. **Readers + service facade + self-account HTTP + admission money path** onto MoneyService.
+5. **Slim CreditsService** to custom-only; drop money columns/tables from the credit_* side.
+6. **Integration parity** — money wallet behaves as before; custom-credit path intact; full suite green.
+
+## Open sub-decisions
+- usage_events: single table with nullable money_transaction_id + credit_transaction_id (exactly one set) vs split → propose single table.
+- Promo DOLLARS expiry → keep money_blocks (FIFO) for granted/promo dollars.
+
+## Tasks
+- [ ] Stage 1: money_* schema in consolidated 001 (additive, green)
+- [ ] Stage 2: MoneyService + queries + unit tests
+- [ ] Stage 3: money writers cutover
+- [ ] Stage 4: readers + facade + self-account + admission
+- [ ] Stage 5: slim CreditsService; drop money columns from credit_*
+- [ ] Stage 6: integration parity + full green
 
 ---
 
