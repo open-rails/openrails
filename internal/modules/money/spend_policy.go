@@ -276,6 +276,10 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 	cur.TenantID = tenantID
 	cur.TenantSubjectID = payer.UUID()
 	cur.Currency = normalizeCurrency(cur.Currency)
+	// #474 invariant: money_accounts (billing settings) are external-currency-only.
+	if err := RequireBillingCurrency(cur.Currency); err != nil {
+		return nil, err
+	}
 	cur.UpdatedAt = now
 	if cur.ID == uuid.Nil {
 		cur.ID = uuidutil.NewV7()

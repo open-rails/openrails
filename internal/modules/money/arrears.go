@@ -34,8 +34,9 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.TenantSubj
 	if amount <= 0 {
 		return nil, fmt.Errorf("amount must be positive")
 	}
+	// #474 invariant: owed/arrears is external-currency-only (reject custom credits).
 	cur := normalizeCurrency(currency)
-	if err := ValidateCurrency(cur); err != nil {
+	if err := RequireBillingCurrency(cur); err != nil {
 		return nil, err
 	}
 	source = strings.TrimSpace(source)
@@ -179,6 +180,10 @@ func (s *MoneyService) chargeOneOutstanding(ctx context.Context, charger Charger
 	payer := identity.TenantSubjectID(r.TenantSubjectID)
 	snapshot := r.Owed
 	if snapshot <= 0 || r.PaymentMethodID == nil {
+		return false, nil
+	}
+	// #474 invariant: never charge a card for a custom-credit (non-currency) balance.
+	if err := RequireBillingCurrency(normalizeCurrency(r.Currency)); err != nil {
 		return false, nil
 	}
 	key := fmt.Sprintf("arrears:%s:%d", r.TenantSubjectID, snapshot)

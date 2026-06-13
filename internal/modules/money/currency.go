@@ -50,3 +50,14 @@ func CurrencyScale(c string) (int, bool) {
 	cur, ok := currencies[normalizeCurrency(c)]
 	return cur.Decimals, ok
 }
+
+// RequireBillingCurrency enforces the #474/#475 invariant at the billing layer:
+// billing (invoice/owed/charge/auto-topup/account-settings) is external-currency-
+// only, so a qualified custom-credit code (tenant/name, #475) is REJECTED here.
+// Ledger primitives (Deposit/Withdraw/Hold) keep using the looser ValidateCurrency.
+func RequireBillingCurrency(code string) error {
+	if strings.Contains(code, "/") {
+		return fmt.Errorf("money: custom-credit unit %q not allowed in billing (#474 invariant)", code)
+	}
+	return ValidateCurrency(code)
+}

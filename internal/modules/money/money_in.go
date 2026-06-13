@@ -158,6 +158,10 @@ func (s *MoneyService) RunAutoTopups(ctx context.Context, charger Charger, coold
 // after a charge-but-before-deposit crash does not double-charge.
 func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r moneyInAccount, cooldown time.Duration, now time.Time) (bool, error) {
 	payer := identity.TenantSubjectID(r.TenantSubjectID)
+	// #474 invariant: auto-topup charges a card → external-currency-only.
+	if err := RequireBillingCurrency(normalizeCurrency(r.Currency)); err != nil {
+		return false, nil
+	}
 	bucket := now.Truncate(max(cooldown, time.Minute)).Unix()
 	episode := fmt.Sprintf("autotopup:%s:%d", r.TenantSubjectID, bucket)
 	depositSourceID := uuid.NewSHA1(uuid.Nil, []byte(episode))
