@@ -36,8 +36,8 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/programs/token"
 	"github.com/open-rails/openrails/internal/billing/declinecode"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,7 +73,7 @@ func TestDevnetFailurePaths(t *testing.T) {
 		sub := freshFundedSubscriber(ctx, t, rc, raw, merchant, funder, usdc, 35_000_000, 2_000_000)
 		h := publishUSDCPlan(ctx, t, planSvc, amount, 720)
 		row := devnetSubscribe(ctx, t, rc, raw, prepSvc, sub, h, amount, 720) // pulls period 1
-		_, again := crankSvc.Crank(ctx, tenant.DefaultID, row, amount)
+		_, again := crankSvc.Crank(ctx, dbtest.TestTenantID, row, amount)
 		require.Error(t, again, "a crank in the same period (period 1 paid by subscribe) must be rejected")
 		cf := ClassifyCrankError(again)
 		require.Equal(t, declinecode.AlreadyPaid, cf.Category, "got %+v", cf)
@@ -91,7 +91,7 @@ func TestDevnetFailurePaths(t *testing.T) {
 		h := publishUSDCPlan(ctx, t, planSvc, amount, 720)
 		before, _ := rc.GetTokenBalanceForMint(ctx, merchant.PublicKey(), usdc)
 		res, perr := prepSvc.Prepare(ctx, PrepareSubscribeInput{
-			TenantID: tenant.DefaultID, SubscriberWallet: sub.PublicKey().String(),
+			TenantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(),
 			PlanID: h.PlanID, MintSymbol: "USDC", AmountBaseUnits: amount, PeriodHours: 720, PlanCreatedAt: h.CreatedAt,
 		})
 		// First-timer flow needs init first; the pre-flight rejects at the subscribe step.
@@ -99,7 +99,7 @@ func TestDevnetFailurePaths(t *testing.T) {
 			require.NoError(t, perr)
 			signAndSendBase64(ctx, t, rc, raw, sub, res.Transactions)
 			_, perr = prepSvc.Prepare(ctx, PrepareSubscribeInput{
-				TenantID: tenant.DefaultID, SubscriberWallet: sub.PublicKey().String(),
+				TenantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(),
 				PlanID: h.PlanID, MintSymbol: "USDC", AmountBaseUnits: amount, PeriodHours: 720, PlanCreatedAt: h.CreatedAt,
 			})
 		}
@@ -124,7 +124,7 @@ func TestDevnetFailurePaths(t *testing.T) {
 		t.Log("subscriber revoked the SPL token delegate (trustless on-chain cancel)")
 
 		before, _ := rc.GetTokenBalanceForMint(ctx, merchant.PublicKey(), usdc)
-		_, again := crankSvc.Crank(ctx, tenant.DefaultID, row, amount)
+		_, again := crankSvc.Crank(ctx, dbtest.TestTenantID, row, amount)
 		require.Error(t, again, "pull after revoke must fail")
 		cf := ClassifyCrankError(again)
 		// Custom:4 (OwnerMismatch) -> Terminal. Within the still-paid period the node

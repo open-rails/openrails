@@ -7,7 +7,7 @@ import (
 	authcore "github.com/open-rails/authkit/core"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 func TestResolvedServiceTokenAllowsTenantSubjectScopes(t *testing.T) {
@@ -15,15 +15,15 @@ func TestResolvedServiceTokenAllowsTenantSubjectScopes(t *testing.T) {
 	other := uuid.New()
 
 	tenantWide := &ResolvedServiceToken{
-		TenantID:  tenant.DefaultID,
-		Resources: []authcore.ServiceTokenResource{TenantResource(tenant.DefaultID)},
+		TenantID:  dbtest.TestTenantID,
+		Resources: []authcore.ServiceTokenResource{TenantResource(dbtest.TestTenantID)},
 	}
 	require.True(t, tenantWide.AllowsTenantSubject(subject))
 
 	subjectScoped := &ResolvedServiceToken{
-		TenantID: tenant.DefaultID,
+		TenantID: dbtest.TestTenantID,
 		Resources: []authcore.ServiceTokenResource{
-			TenantResource(tenant.DefaultID),
+			TenantResource(dbtest.TestTenantID),
 			TenantSubjectResource(subject),
 		},
 	}
@@ -32,16 +32,16 @@ func TestResolvedServiceTokenAllowsTenantSubjectScopes(t *testing.T) {
 }
 
 func TestValidateServiceTokenResourcesRequiresTenantAndKnownKinds(t *testing.T) {
-	require.ErrorIs(t, validateServiceTokenResources(tenant.DefaultID, nil), ErrServiceTokenScopeDenied)
-	require.ErrorIs(t, validateServiceTokenResources(tenant.DefaultID, []authcore.ServiceTokenResource{
+	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestTenantID, nil), ErrServiceTokenScopeDenied)
+	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
 		TenantSubjectResource(uuid.New()),
 	}), ErrServiceTokenScopeDenied)
-	require.ErrorIs(t, validateServiceTokenResources(tenant.DefaultID, []authcore.ServiceTokenResource{
-		TenantResource(tenant.DefaultID),
+	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
+		TenantResource(dbtest.TestTenantID),
 		{Kind: "openrails.unknown", ID: "x"},
 	}), ErrServiceTokenScopeDenied)
-	require.NoError(t, validateServiceTokenResources(tenant.DefaultID, []authcore.ServiceTokenResource{
-		TenantResource(tenant.DefaultID),
+	require.NoError(t, validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
+		TenantResource(dbtest.TestTenantID),
 		TenantSubjectResource(uuid.New()),
 	}))
 }

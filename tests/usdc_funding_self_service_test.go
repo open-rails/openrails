@@ -17,6 +17,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -33,12 +34,12 @@ type usdcFundingDelegatedResolver struct {
 func (r usdcFundingDelegatedResolver) ResolveDelegated(context.Context, string) (*controlplane.ResolvedDelegated, error) {
 	tenantID := r.tenantID
 	if tenantID.IsZero() {
-		tenantID = tenant.DefaultID
+		tenantID = dbtest.TestTenantID
 	}
 	return &controlplane.ResolvedDelegated{
-		Tenant:           tenant.DefaultSlug,
+		Tenant:           dbtest.TestTenantSlug,
 		TenantID:         tenantID,
-		TenantSlug:       tenant.DefaultSlug,
+		TenantSlug:       dbtest.TestTenantSlug,
 		DelegatedSubject: r.subject,
 		Permissions:      r.permissions,
 	}, nil
@@ -52,7 +53,7 @@ func newUSDCFundingSelfRouter(t *testing.T, suite *TestContainerSuite, subject s
 	ginroutes.RegisterSelfServiceRoutes(group, suite.App.Runtime, ginmw.DelegatedSelfRequired(usdcFundingDelegatedResolver{
 		subject:     subject,
 		permissions: permissions,
-		tenantID:    tenant.DefaultID,
+		tenantID:    dbtest.TestTenantID,
 	}))
 	return e
 }

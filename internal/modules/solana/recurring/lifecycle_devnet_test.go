@@ -40,8 +40,8 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -141,7 +141,7 @@ func TestDevnetLifecycle(t *testing.T) {
 		t.Log("cancel_subscription landed")
 
 		// In-period: a second pull is rejected by the cap (period 1 already paid).
-		_, immErr := crankSvc.Crank(ctx, tenant.DefaultID, row, amount)
+		_, immErr := crankSvc.Crank(ctx, dbtest.TestTenantID, row, amount)
 		require.Error(t, immErr, "an in-period re-pull must be rejected")
 		require.Equalf(t, 400, parseOnChainCode(immErr.Error()), "in-period re-pull should be cap-reached (400): %v", immErr)
 		t.Log("in-period re-pull correctly rejected (Custom:400, cap)")
@@ -153,7 +153,7 @@ func TestDevnetLifecycle(t *testing.T) {
 		t.Logf("waiting for the period (1h) to roll over; the post-rollover pull must be REJECTED with 508...")
 		var got508 bool
 		for !got508 {
-			_, perr := crankSvc.Crank(ctx, tenant.DefaultID, row, amount)
+			_, perr := crankSvc.Crank(ctx, dbtest.TestTenantID, row, amount)
 			if perr == nil {
 				t.Fatalf("❌ CANCEL DID NOT WORK: a pull SUCCEEDED after cancel — the merchant charged a new period")
 			}
@@ -185,7 +185,7 @@ func TestDevnetLifecycle(t *testing.T) {
 		require.Equal(t, subBefore-amount, subFinal, "subscriber must have paid exactly ONE period (no period-2 charge after cancel)")
 
 		// Surface the classifier's handling of 508 for follow-up (it may not map it yet).
-		_, post := crankSvc.Crank(ctx, tenant.DefaultID, row, amount)
+		_, post := crankSvc.Crank(ctx, dbtest.TestTenantID, row, amount)
 		if post != nil && strings.TrimSpace(post.Error()) != "" {
 			t.Logf("NOTE classifier on the cancelled (508) pull: %+v", ClassifyCrankError(post))
 		}

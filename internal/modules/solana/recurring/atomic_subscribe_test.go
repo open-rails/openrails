@@ -9,6 +9,7 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/solana"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -56,7 +57,7 @@ func newSubscribeSvc(t *testing.T, rpc prepareRPC) (*PrepareSubscribeService, so
 func newSubscribeInput(t *testing.T) PrepareSubscribeInput {
 	t.Helper()
 	return PrepareSubscribeInput{
-		TenantID:         tenant.DefaultID,
+		TenantID:         dbtest.TestTenantID,
 		SubscriberWallet: randKeyStr(t),
 		PlanID:           7,
 		MintSymbol:       "USDC",
@@ -216,7 +217,7 @@ func TestConfirmEnrollment_CreatesMembershipWithoutCrank(t *testing.T) {
 	svc := NewEnrollService(lc, repo, fakeBalanceChecker{bal: 2_039_280}, submitter, "devnet", testSolanaTokens())
 
 	sub, err := svc.ConfirmEnrollment(context.Background(), EnrollInput{
-		TenantID:         tenant.DefaultID,
+		TenantID:         dbtest.TestTenantID,
 		UserID:           "user-1",
 		PriceID:          uuid.New(),
 		SubscriberWallet: randKeyStr(t),
@@ -267,7 +268,7 @@ func TestConfirmEnrollment_FallsBackToPDAIdentifier(t *testing.T) {
 	svc := NewEnrollService(lc, repo, fakeBalanceChecker{bal: 1}, submitter, "devnet", testSolanaTokens())
 
 	if _, err := svc.ConfirmEnrollment(context.Background(), EnrollInput{
-		TenantID:         tenant.DefaultID,
+		TenantID:         dbtest.TestTenantID,
 		UserID:           "user-2",
 		PriceID:          uuid.New(),
 		SubscriberWallet: randKeyStr(t),

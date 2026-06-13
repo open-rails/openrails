@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	tenantpkg "github.com/open-rails/openrails/pkg/tenant"
 )
 
 // These tests pin the EMBEDDED mount of the host-pluggable self surface
@@ -31,8 +31,8 @@ func (s stubSelfAuthenticator) AuthenticateDelegated(context.Context, *http.Requ
 
 func selfPrincipal(perms ...string) *billingauth.DelegatedPrincipal {
 	return &billingauth.DelegatedPrincipal{
-		TenantID:    tenantpkg.DefaultID.String(),
-		TenantSlug:  tenantpkg.DefaultSlug,
+		TenantID:    dbtest.TestTenantID.String(),
+		TenantSlug:  dbtest.TestTenantSlug,
 		SubjectID:   "0d4cdb35-9f3f-4a16-bb83-90a8aa20a2c1",
 		Actor:       "platform:host",
 		Permissions: perms,

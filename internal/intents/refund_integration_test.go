@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // fakeNMIRefundGateway scripts the gateway for refund flows: the Direct Post
@@ -145,7 +144,7 @@ func (fx refundFixture) payload(amountCents int64) RefundPayload {
 func (fx refundFixture) enqueueParams(amountCents int64) EnqueueParams {
 	paymentID := fx.paymentID
 	return EnqueueParams{
-		TenantID:       tenant.DefaultID.UUID(),
+		TenantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeNMIRefund,
 		PaymentID:      &paymentID,

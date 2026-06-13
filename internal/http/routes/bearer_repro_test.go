@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -44,7 +45,7 @@ func TestRequiredMWPinsUserContextForHandler(t *testing.T) {
 		middleware.SecurityHeadersHTTP(),
 		middleware.CORSHTTP(nil),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.ResolveTenantHTTP(),
+		middleware.ResolveTenantHTTP(dbtest.TestTenantID),
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "/billing/v1/me/credits", nil)

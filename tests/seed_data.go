@@ -12,12 +12,12 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 func (suite *TestContainerSuite) ensureTenantSubject(ctx context.Context, userID string) uuid.UUID {
 	suite.t.Helper()
-	tenantSubjectID, err := dbrepo.EnsureTenantSubjectID(ctx, suite.Pool, tenant.DefaultID.UUID(), userID)
+	tenantSubjectID, err := dbrepo.EnsureTenantSubjectID(ctx, suite.Pool, dbtest.TestTenantID.UUID(), userID)
 	require.NoError(suite.t, err, "Failed to ensure tenant subject")
 	return tenantSubjectID
 }

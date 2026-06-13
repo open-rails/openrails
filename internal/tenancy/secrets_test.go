@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -12,7 +13,7 @@ func TestMemSecretStore_RoundTripPerTenant(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemorySecretStore()
 
-	a := tenant.DefaultID
+	a := dbtest.TestTenantID
 	b, err := tenant.ParseID("22222222-2222-2222-2222-222222222222")
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +50,7 @@ func TestMemSecretStore_RoundTripPerTenant(t *testing.T) {
 func TestMemSecretStore_RotationVersioning(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemorySecretStore()
-	id := tenant.DefaultID
+	id := dbtest.TestTenantID
 
 	v1, _ := store.Put(ctx, id, SecretStripeWebhookSigning, "whsec_1")
 	if v1.Version != 1 {
@@ -70,7 +71,7 @@ func TestMemSecretStore_RotationVersioning(t *testing.T) {
 func TestMemSecretStore_DeleteAndList(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemorySecretStore()
-	id := tenant.DefaultID
+	id := dbtest.TestTenantID
 
 	_, _ = store.Put(ctx, id, SecretStripeSecretKey, "sk")
 	_, _ = store.Put(ctx, id, SecretStripeWebhookSigning, "wh")
@@ -108,7 +109,7 @@ func TestMemSecretStore_ZeroTenantRejected(t *testing.T) {
 
 func TestServiceCredentialManagement_WriteOnlyStatusAndDelete(t *testing.T) {
 	ctx := context.Background()
-	id := tenant.DefaultID
+	id := dbtest.TestTenantID
 	store := NewMemorySecretStore()
 	svc := &Service{secrets: store}
 
@@ -151,7 +152,7 @@ func TestServiceCredentialManagement_WriteOnlyStatusAndDelete(t *testing.T) {
 
 func TestServiceCredentialManagement_ValidateOnlyDoesNotSave(t *testing.T) {
 	ctx := context.Background()
-	id := tenant.DefaultID
+	id := dbtest.TestTenantID
 	store := NewMemorySecretStore()
 	svc := &Service{secrets: store}
 
@@ -175,10 +176,10 @@ func TestServiceCredentialManagement_RejectsUnknownAndInvalidSecrets(t *testing.
 	ctx := context.Background()
 	svc := &Service{secrets: NewMemorySecretStore()}
 
-	if _, err := svc.PutCredential(ctx, tenant.DefaultID, "unknown/provider_key", "secret", "put", "admin-1"); err == nil {
+	if _, err := svc.PutCredential(ctx, dbtest.TestTenantID, "unknown/provider_key", "secret", "put", "admin-1"); err == nil {
 		t.Fatal("unknown secret should be rejected")
 	}
-	if _, err := svc.PutCredential(ctx, tenant.DefaultID, SecretStripeSecretKey, "not-stripe", "put", "admin-1"); err == nil {
+	if _, err := svc.PutCredential(ctx, dbtest.TestTenantID, SecretStripeSecretKey, "not-stripe", "put", "admin-1"); err == nil {
 		t.Fatal("invalid Stripe secret should be rejected")
 	}
 }
@@ -218,8 +219,8 @@ func (f *fakeVaultKV) ListSecrets(_ context.Context, _ string) ([]string, error)
 
 func TestVaultSecretStore_StubFailsClosed(t *testing.T) {
 	ctx := context.Background()
-	store := NewVaultSecretStore("secret", nil, staticTenantSlugResolver{tenant.DefaultID.String(): tenant.DefaultSlug}) // no live client
-	id := tenant.DefaultID
+	store := NewVaultSecretStore("secret", nil, staticTenantSlugResolver{dbtest.TestTenantID.String(): dbtest.TestTenantSlug}) // no live client
+	id := dbtest.TestTenantID
 	if _, err := store.Get(ctx, id, SecretStripeSecretKey); !errors.Is(err, ErrVaultNotConfigured) {
 		t.Fatalf("stub Get = %v, want ErrVaultNotConfigured", err)
 	}
@@ -231,8 +232,8 @@ func TestVaultSecretStore_StubFailsClosed(t *testing.T) {
 func TestVaultSecretStore_RoundTripWithFakeClient(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeVaultKV()
-	store := NewVaultSecretStore("secret", fake, staticTenantSlugResolver{tenant.DefaultID.String(): "cozy-art"})
-	id := tenant.DefaultID
+	store := NewVaultSecretStore("secret", fake, staticTenantSlugResolver{dbtest.TestTenantID.String(): "cozy-art"})
+	id := dbtest.TestTenantID
 
 	if _, err := store.Put(ctx, id, SecretStripeSecretKey, "sk_live"); err != nil {
 		t.Fatalf("put: %v", err)

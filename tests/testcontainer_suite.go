@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/migrate"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
@@ -335,6 +336,18 @@ func (suite *TestContainerSuite) runDatabaseMigrations() {
 
 	err = migrate.RunClickHouse(suite.ctx, suite.Config)
 	require.NoError(suite.t, err)
+
+	// #336: no default tenant — seed the tenant this suite's engine binds to,
+	// then configure it (slug) so ResolveTenant pins it.
+	seedPool, perr := pgxpool.New(suite.ctx, suite.Config.DB.URL)
+	require.NoError(suite.t, perr)
+	_, perr = seedPool.Exec(suite.ctx,
+		`INSERT INTO openrails.tenants (id, slug, name, status)
+		 VALUES ($1, $2, 'Test Tenant', 'active') ON CONFLICT (slug) DO NOTHING`,
+		dbtest.TestTenantID.UUID(), dbtest.TestTenantSlug)
+	seedPool.Close()
+	require.NoError(suite.t, perr)
+	suite.Config.Tenant = dbtest.TestTenantSlug
 }
 
 func envOrDefault(key, fallback string) string {

@@ -16,15 +16,16 @@ import (
 
 // blocklistEnv opens the shared migrated Postgres and returns a
 // BlocklistService plus the raw pgx pool (for cleanup/assertions). All
-// operations run under the default tenant via tenant.FromContextOrDefault,
+// operations run under the canonical test tenant (tenant.Require),
 // exactly like the credits integration harness.
 func blocklistEnv(t *testing.T) (*abuse.BlocklistService, *pgxpool.Pool, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
+	dbtest.EnsureTestTenant(ctx, t, pool)
 
 	var hasTable bool
 	require.NoError(t, pool.QueryRow(ctx,

@@ -54,9 +54,9 @@ import (
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // billingE2EHarness is a small reusable driver over the service-token-authenticated public
@@ -93,14 +93,14 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(ginmw.ResolveTenant())
+	router.Use(ginmw.ResolveTenant(dbtest.TestTenantID))
 	group := router.Group("/v1/service")
 	resolver := stubServiceTokenResolver{permissions: []string{
 		controlplane.PermCreditsRead,
 		controlplane.PermCreditsWrite,
 		controlplane.PermCreditsSpend,
 	}, resources: []authcore.ServiceTokenResource{
-		controlplane.TenantResource(tenant.DefaultID),
+		controlplane.TenantResource(dbtest.TestTenantID),
 	}}
 	// nil issuer-admin: the delegated issuer routes are
 	// irrelevant to the money path.

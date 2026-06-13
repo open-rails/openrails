@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -27,15 +28,15 @@ func TestTenantFilterScopesByTenant(t *testing.T) {
 	}
 }
 
-// TestTenantFilterDefaultTenant proves single-tenant / self-hosted installs are
-// still scoped to the well-known default tenant rather than reading unscoped.
-func TestTenantFilterDefaultTenant(t *testing.T) {
-	filter, args := tenantFilter(tenant.DefaultID, false)
+// TestTenantFilterScopedTenant proves a resolved tenant id is always scoped
+// to WHERE tenant_id = ? rather than reading unscoped.
+func TestTenantFilterScopedTenant(t *testing.T) {
+	filter, args := tenantFilter(dbtest.TestTenantID, false)
 	if !strings.Contains(filter, "tenant_id = ?") {
 		t.Fatalf("filter = %q, want a tenant_id predicate", filter)
 	}
-	if len(args) != 1 || args[0].(string) != tenant.DefaultID.String() {
-		t.Fatalf("args = %v, want default tenant id %q", args, tenant.DefaultID.String())
+	if len(args) != 1 || args[0].(string) != dbtest.TestTenantID.String() {
+		t.Fatalf("args = %v, want tenant id %q", args, dbtest.TestTenantID.String())
 	}
 }
 
@@ -44,7 +45,7 @@ func TestTenantFilterDefaultTenant(t *testing.T) {
 // tenants (issue #232). This path is library-only and must be gated on
 // controlplane.PermPlatformSuperadmin by its (future) caller.
 func TestTenantFilterCrossTenantHasNoPredicate(t *testing.T) {
-	filter, args := tenantFilter(tenant.DefaultID, true)
+	filter, args := tenantFilter(dbtest.TestTenantID, true)
 	if filter != "" {
 		t.Fatalf("cross-tenant filter = %q, want empty (no tenant predicate)", filter)
 	}

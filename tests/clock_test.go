@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // TestClockInTestSuite tests the clock integration with TestContainerSuite
@@ -185,7 +185,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	blockExpiry := mockClock.Now().Add(time.Hour)
 	block := &models.CreditBlock{
 		ID:              uuid.New(),
-		TenantID:        tenant.DefaultID.UUID(),
+		TenantID:        dbtest.TestTenantID.UUID(),
 		TenantSubjectID: suite.ensureTenantSubject(ctx, creditUserID),
 		CreditTypeID:    creditType.ID,
 		OriginalAmount:  75,

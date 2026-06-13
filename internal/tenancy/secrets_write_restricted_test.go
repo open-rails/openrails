@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 func TestWriteRestrictedSecretStoreBlocksRestrictedPut(t *testing.T) {
@@ -13,7 +13,7 @@ func TestWriteRestrictedSecretStoreBlocksRestrictedPut(t *testing.T) {
 		"solana/private_key": "encryption required",
 	})
 
-	_, err := store.Put(context.Background(), tenant.DefaultID, "solana/private_key", "secret")
+	_, err := store.Put(context.Background(), dbtest.TestTenantID, "solana/private_key", "secret")
 	if err == nil {
 		t.Fatal("expected restricted write to fail")
 	}
@@ -28,10 +28,10 @@ func TestWriteRestrictedSecretStoreAllowsOtherSecrets(t *testing.T) {
 	})
 
 	const value = "sk_test_123"
-	if _, err := store.Put(context.Background(), tenant.DefaultID, SecretStripeSecretKey, value); err != nil {
+	if _, err := store.Put(context.Background(), dbtest.TestTenantID, SecretStripeSecretKey, value); err != nil {
 		t.Fatalf("put unrestricted secret: %v", err)
 	}
-	got, err := store.Get(context.Background(), tenant.DefaultID, SecretStripeSecretKey)
+	got, err := store.Get(context.Background(), dbtest.TestTenantID, SecretStripeSecretKey)
 	if err != nil {
 		t.Fatalf("get unrestricted secret: %v", err)
 	}
@@ -43,14 +43,14 @@ func TestWriteRestrictedSecretStoreAllowsOtherSecrets(t *testing.T) {
 func TestWriteRestrictedSecretStoreAllowsExistingReads(t *testing.T) {
 	inner := NewMemorySecretStore()
 	const value = "existing-solana-key"
-	if _, err := inner.Put(context.Background(), tenant.DefaultID, "solana/private_key", value); err != nil {
+	if _, err := inner.Put(context.Background(), dbtest.TestTenantID, "solana/private_key", value); err != nil {
 		t.Fatalf("pre-put: %v", err)
 	}
 	store := NewWriteRestrictedSecretStore(inner, map[string]string{
 		"solana/private_key": "encryption required",
 	})
 
-	got, err := store.Get(context.Background(), tenant.DefaultID, "solana/private_key")
+	got, err := store.Get(context.Background(), dbtest.TestTenantID, "solana/private_key")
 	if err != nil {
 		t.Fatalf("get existing restricted secret: %v", err)
 	}

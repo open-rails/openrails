@@ -31,7 +31,7 @@ func startReconcilePostgres(t *testing.T) *db.DB {
 	pool, err := pgxpool.New(context.Background(), appDSN)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	appDB, err := db.NewWithPGXPool(pool)
+	appDB, err := db.NewWithPGXPool(pool, "") // default schema (shared harness)
 	require.NoError(t, err)
 	return appDB
 }
@@ -144,7 +144,7 @@ func reconcileSnapshot(t *testing.T, ctx context.Context, appDB *db.DB, seeded s
 
 func TestReconcileEngineIntegration(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := tenant.WithID(context.Background(), tenant.DefaultID)
+	baseCtx := tenant.WithID(context.Background(), dbtest.TestTenantID)
 
 	var seeded seededState
 	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
@@ -331,7 +331,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 // unresolvable one stays admin_pending.
 func TestReconcileMaterializeIntegration(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := tenant.WithID(context.Background(), tenant.DefaultID)
+	baseCtx := tenant.WithID(context.Background(), dbtest.TestTenantID)
 	store := &PGStore{DB: appDB}
 
 	suffix := uuid.NewString()[:8]
@@ -524,7 +524,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 // touches the intent rows, and a recovered intent's finding auto-resolves.
 func TestReconcileStuckIntentIntegration(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := tenant.WithID(context.Background(), tenant.DefaultID)
+	baseCtx := tenant.WithID(context.Background(), dbtest.TestTenantID)
 	store := &PGStore{DB: appDB}
 
 	suffix := uuid.NewString()[:8]
@@ -675,7 +675,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 // with its error instead of half-applying.
 func TestReconcileRunRecordsFailure(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := tenant.WithID(context.Background(), tenant.DefaultID)
+	baseCtx := tenant.WithID(context.Background(), dbtest.TestTenantID)
 	store := &PGStore{DB: appDB}
 	eng := &Engine{
 		Fetchers: map[Provider]ProcessorFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, err: fmt.Errorf("query.php unreachable")}},

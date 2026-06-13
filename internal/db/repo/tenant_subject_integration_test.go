@@ -11,14 +11,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 func TestEnsureTenantSubjectID_UUIDReusesExistingPayableID(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedPGXPool(t)
 
-	tenantID := tenant.DefaultID.UUID()
+	dbtest.EnsureTestTenant(ctx, t, pool)
+	tenantID := dbtest.TestTenantID.UUID()
 	userID := uuid.New()
 	createdAt := time.Now().UTC().Add(-time.Hour)
 	_, err := pool.Exec(ctx,
@@ -50,10 +50,10 @@ func TestEnsureTenantSubjectID_RejectsNonUUIDSubject(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedPGXPool(t)
 
-	_, err := EnsureTenantSubjectID(ctx, pool, tenant.DefaultID.UUID(), "legacy-user-123")
+	_, err := EnsureTenantSubjectID(ctx, pool, dbtest.TestTenantID.UUID(), "legacy-user-123")
 	require.ErrorContains(t, err, "UUID-only")
 
-	id, err := EnsureTenantSubjectID(ctx, pool, tenant.DefaultID.UUID(), "")
+	id, err := EnsureTenantSubjectID(ctx, pool, dbtest.TestTenantID.UUID(), "")
 	require.NoError(t, err)
 	require.Equal(t, uuid.Nil, id)
 }

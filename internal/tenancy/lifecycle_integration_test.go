@@ -18,7 +18,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/internal/db"
 )
 
 // schemaDDL stands up the minimal openrails.* schema the tenancy service touches:
@@ -47,9 +47,6 @@ CREATE TABLE IF NOT EXISTS openrails.tenants (
     suspended_at     TIMESTAMPTZ,
     deleted_at       TIMESTAMPTZ
 );
-INSERT INTO openrails.tenants (id, slug, name)
-VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default')
-ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS openrails.entitlements (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -166,7 +163,7 @@ func (f *fakeTenantProvisioner) EnsureAuthKitTenant(_ context.Context, slug stri
 func newSvc(t *testing.T) (*Service, *fakeTenantProvisioner) {
 	pool := newTestPool(t)
 	tenants := &fakeTenantProvisioner{}
-	svc, err := NewService(pool, tenants, NewMemorySecretStore())
+	svc, err := NewService(db.WrapPool(pool, ""), tenants, NewMemorySecretStore())
 	require.NoError(t, err)
 	return svc, tenants
 }
@@ -268,11 +265,6 @@ func TestDelete_RequiresExport(t *testing.T) {
 	// The directory row is tombstoned (no longer resolvable as active).
 	_, err = svc.Get(ctx, tn.ID)
 	require.True(t, errors.Is(err, ErrTenantNotFound))
-
-	// Default tenant can never be deleted.
-	_, _, err = svc.Export(ctx, tenant.DefaultID)
-	require.NoError(t, err)
-	require.Error(t, svc.Delete(ctx, tenant.DefaultID, DeleteOptions{Confirm: true}))
 }
 
 func TestCredentialRotation_WritesAudit(t *testing.T) {

@@ -41,14 +41,13 @@ import (
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
 	"github.com/open-rails/openrails/pkg/embedded"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 const conformanceToken = "openrails_st_conformance_token"
 
 // stubResolver accepts exactly conformanceToken as a tenant-wide PermAdmin
-// service token for the default tenant (the same fixed-principal pattern the
-// parity test uses), so the httptest server runs the REAL service-token
+// service token for the canonical test tenant (the same fixed-principal pattern
+// the parity test uses), so the httptest server runs the REAL service-token
 // middleware without a full AuthKit control plane.
 type stubResolver struct{}
 
@@ -60,10 +59,10 @@ func (stubResolver) ResolveServiceToken(_ context.Context, token string) (*contr
 	}
 	return &controlplane.ResolvedServiceToken{
 		AuthKitTenantSlug: "operator",
-		TenantID:          tenant.DefaultID,
-		TenantSlug:        tenant.DefaultSlug,
+		TenantID:          dbtest.TestTenantID,
+		TenantSlug:        dbtest.TestTenantSlug,
 		Permissions:       []string{controlplane.PermAdmin},
-		Resources:         []authcore.ServiceTokenResource{controlplane.TenantResource(tenant.DefaultID)},
+		Resources:         []authcore.ServiceTokenResource{controlplane.TenantResource(dbtest.TestTenantID)},
 	}, nil
 }
 
@@ -760,6 +759,7 @@ func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	appDB := dbtest.OpenAppDB(t, dsn)
 	pool := appDB.Pool()
+	dbtest.EnsureTestTenant(ctx, t, pool)
 
 	// Redis (admission throughput axis).
 	rc, err := tcredis.Run(ctx, "redis:7-alpine")
@@ -783,7 +783,7 @@ func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
 	// real service-token middleware + a fixed-principal stub resolver.
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(ginmw.ResolveTenant())
+	router.Use(ginmw.ResolveTenant(dbtest.TestTenantID))
 	ginroutes.RegisterServiceRoutes(
 		router.Group("/v1/service"),
 		rt.Embedded().App().Runtime,
@@ -817,13 +817,13 @@ func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
 		_, err := pool.Exec(ctx, `
 			INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject, created_at, last_seen_at)
 			VALUES ($1, $2, $3, $4, now(), now())`,
-			id, tenant.DefaultID.UUID(), issuer, subject)
+			id, dbtest.TestTenantID.UUID(), issuer, subject)
 		require.NoError(t, err)
 		// One active entitlement row for the entitlements steps.
 		_, err = pool.Exec(ctx, `
 			INSERT INTO openrails.entitlements (id, tenant_id, tenant_subject_id, entitlement, start_at, source_id, source_type)
 			VALUES ($1, $2, $3, 'premium', now() - interval '1 hour', $4, 'admin')`,
-			uuid.New(), tenant.DefaultID.UUID(), id, uuid.New())
+			uuid.New(), dbtest.TestTenantID.UUID(), id, uuid.New())
 		require.NoError(t, err)
 		return id, subject
 	}

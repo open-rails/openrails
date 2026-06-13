@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -65,10 +66,10 @@ func TestRequireServiceTokenTenantSubjectScope(t *testing.T) {
 		looksLikeServiceToken: true,
 		resolved: &controlplane.ResolvedServiceToken{
 			AuthKitTenantSlug: "operator",
-			TenantID:          tenant.DefaultID,
+			TenantID:          dbtest.TestTenantID,
 			Permissions:       []string{controlplane.PermCreditsSpend},
 			Resources: []authcore.ServiceTokenResource{
-				controlplane.TenantResource(tenant.DefaultID),
+				controlplane.TenantResource(dbtest.TestTenantID),
 				controlplane.TenantSubjectResource(payer),
 			},
 		},
@@ -102,15 +103,15 @@ func TestServiceTokenRequired_SucceedsForCorrectTenantAndPermission(t *testing.T
 		looksLikeServiceToken: true,
 		resolved: &controlplane.ResolvedServiceToken{
 			AuthKitTenantSlug: "operator",
-			TenantID:          tenant.DefaultID,
-			TenantSlug:        tenant.DefaultSlug,
+			TenantID:          dbtest.TestTenantID,
+			TenantSlug:        dbtest.TestTenantSlug,
 			Permissions:       []string{controlplane.PermCreditsWrite},
 		},
 	}
 	r := newServiceTokenTestRouter(resolver, controlplane.PermCreditsWrite)
 	w := doServiceTokenRequest(r, true)
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Contains(t, w.Body.String(), tenant.DefaultID.String())
+	require.Contains(t, w.Body.String(), dbtest.TestTenantID.String())
 }
 
 func TestServiceTokenRequired_SucceedsForServiceJWT(t *testing.T) {
@@ -118,15 +119,15 @@ func TestServiceTokenRequired_SucceedsForServiceJWT(t *testing.T) {
 		looksLikeServiceToken: false,
 		serviceJWTResolved: &controlplane.ResolvedServiceToken{
 			AuthKitTenantSlug: "cozy-art",
-			TenantID:          tenant.DefaultID,
-			TenantSlug:        tenant.DefaultSlug,
+			TenantID:          dbtest.TestTenantID,
+			TenantSlug:        dbtest.TestTenantSlug,
 			Permissions:       []string{controlplane.PermCreditsWrite},
 		},
 	}
 	r := newServiceTokenTestRouter(resolver, controlplane.PermCreditsWrite)
 	w := doServiceTokenRequest(r, true)
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Contains(t, w.Body.String(), tenant.DefaultID.String())
+	require.Contains(t, w.Body.String(), dbtest.TestTenantID.String())
 }
 
 func TestServiceTokenRequired_AdminPermissionSatisfiesAnyGate(t *testing.T) {
@@ -134,7 +135,7 @@ func TestServiceTokenRequired_AdminPermissionSatisfiesAnyGate(t *testing.T) {
 		looksLikeServiceToken: true,
 		resolved: &controlplane.ResolvedServiceToken{
 			AuthKitTenantSlug: "operator",
-			TenantID:          tenant.DefaultID,
+			TenantID:          dbtest.TestTenantID,
 			Permissions:       []string{controlplane.PermAdmin},
 		},
 	}
@@ -148,7 +149,7 @@ func TestServiceTokenRequired_DeniesMissingPermission(t *testing.T) {
 		looksLikeServiceToken: true,
 		resolved: &controlplane.ResolvedServiceToken{
 			AuthKitTenantSlug: "operator",
-			TenantID:          tenant.DefaultID,
+			TenantID:          dbtest.TestTenantID,
 			Permissions:       []string{controlplane.PermCreditsRead}, // read only
 		},
 	}
@@ -163,7 +164,7 @@ func TestServiceTokenRequired_DeniesUnknownPermissionSet(t *testing.T) {
 		looksLikeServiceToken: true,
 		resolved: &controlplane.ResolvedServiceToken{
 			AuthKitTenantSlug: "operator",
-			TenantID:          tenant.DefaultID,
+			TenantID:          dbtest.TestTenantID,
 			Permissions:       []string{"openrails:something:unknown"},
 		},
 	}

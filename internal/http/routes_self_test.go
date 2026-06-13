@@ -11,8 +11,8 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	tenantpkg "github.com/open-rails/openrails/pkg/tenant"
 )
 
 // Issue #339: the self-service surface is always mounted (#469); a
@@ -24,7 +24,7 @@ type mountTestDelegatedAuthenticator struct{}
 
 func (mountTestDelegatedAuthenticator) AuthenticateDelegated(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 	return &billingauth.DelegatedPrincipal{
-		TenantID:    tenantpkg.DefaultID.String(),
+		TenantID:    dbtest.TestTenantID.String(),
 		SubjectID:   "11111111-1111-1111-1111-111111111111",
 		Permissions: []string{controlplane.PermSelfBillingRead},
 	}, nil

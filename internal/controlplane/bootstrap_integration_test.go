@@ -20,17 +20,19 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-// minimalTenantsDDL creates just the openrails.tenants directory row the control
+// minimalTenantsDDL creates just the openrails.tenants directory table the control
 // plane updates. OpenRails 001_schema.up.sql owns the full table in production; the
-// control-plane bootstrap only needs the default row to exist.
+// control-plane bootstrap only needs the table (plus a row, seeded via
+// dbtest.EnsureTestTenant) to exist. slug is UNIQUE to match EnsureTestTenant's
+// ON CONFLICT (slug).
 const minimalTenantsDDL = `
 CREATE SCHEMA IF NOT EXISTS billing;
 CREATE TABLE IF NOT EXISTS openrails.tenants (
     id               UUID PRIMARY KEY,
-    slug             TEXT NOT NULL,
+    slug             TEXT NOT NULL UNIQUE,
     name             TEXT NOT NULL,
     status           TEXT NOT NULL DEFAULT 'active',
     authkit_tenant_id   TEXT,
@@ -39,9 +41,6 @@ CREATE TABLE IF NOT EXISTS openrails.tenants (
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at       TIMESTAMPTZ
 );
-INSERT INTO openrails.tenants (id, slug, name)
-VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default')
-ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS openrails.tenant_delegated_issuers (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -106,6 +105,7 @@ func applyBootstrapTestSchema(t *testing.T, ctx context.Context, pool *pgxpool.P
 	}
 	_, err = pool.Exec(ctx, minimalTenantsDDL)
 	require.NoError(t, err)
+	dbtest.EnsureTestTenant(ctx, t, pool)
 }
 
 func newTestControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
@@ -132,7 +132,7 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	cp := newTestControlPlane(t, pool)
 
 	// First run: creates the operator tenant, seeds role/perms, mints service token, records tenant.
-	res1, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: true})
+	res1, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapTenantSlug: dbtest.TestTenantSlug, MintInitialServiceToken: true})
 	require.NoError(t, err)
 	require.NotNil(t, res1)
 	require.True(t, res1.TenantCreated, "first run should create the bootstrap (default) tenant org")
@@ -145,19 +145,19 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	var authKitTenantSlug, authKitTenantID string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT authkit_tenant_slug, authkit_tenant_id FROM openrails.tenants WHERE id = $1::uuid`,
-		tenant.DefaultID.String()).Scan(&authKitTenantSlug, &authKitTenantID))
-	require.Equal(t, tenant.DefaultSlug, authKitTenantSlug)
+		dbtest.TestTenantID.String()).Scan(&authKitTenantSlug, &authKitTenantID))
+	require.Equal(t, dbtest.TestTenantSlug, authKitTenantSlug)
 	require.Equal(t, res1.BootstrapTenantID, authKitTenantID)
 
 	// The admin role holds the per-tenant catalog (full catalog EXCEPT the
 	// cross-tenant platform-superadmin permission, #226).
-	perms, err := cp.Core().GetRolePermissions(ctx, tenant.DefaultSlug, OperatorRole)
+	perms, err := cp.Core().GetRolePermissions(ctx, dbtest.TestTenantSlug, OperatorRole)
 	require.NoError(t, err)
 	require.ElementsMatch(t, OperatorRolePermissions(), perms)
 	require.NotContains(t, perms, PermPlatformSuperadmin)
 
 	// Second run: idempotent. No new org, no new service token.
-	res2, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: true})
+	res2, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapTenantSlug: dbtest.TestTenantSlug, MintInitialServiceToken: true})
 	require.NoError(t, err)
 	require.NotNil(t, res2)
 	require.False(t, res2.TenantCreated, "re-run must not recreate the bootstrap tenant org")
@@ -166,16 +166,16 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.Equal(t, res1.BootstrapTenantID, res2.BootstrapTenantID)
 
 	// Exactly one service token exists after two runs.
-	serviceTokens, err := cp.Core().ListServiceTokens(ctx, tenant.DefaultSlug)
+	serviceTokens, err := cp.Core().ListServiceTokens(ctx, dbtest.TestTenantSlug)
 	require.NoError(t, err)
 	require.Len(t, serviceTokens, 1, "exactly one admin service token after two bootstrap runs")
 	require.ElementsMatch(t, []string{ResourceKindTenant}, resourceKinds(serviceTokens[0].Resources))
-	require.Contains(t, resourceIDs(serviceTokens[0].Resources, ResourceKindTenant), tenant.DefaultID.String())
+	require.Contains(t, resourceIDs(serviceTokens[0].Resources, ResourceKindTenant), dbtest.TestTenantID.String())
 
 	resolved, err := cp.ResolveServiceToken(ctx, res1.ServiceTokenSecret)
 	require.NoError(t, err)
-	require.Equal(t, tenant.DefaultID, resolved.TenantID)
-	require.Contains(t, resourceIDs(resolved.Resources, ResourceKindTenant), tenant.DefaultID.String())
+	require.Equal(t, dbtest.TestTenantID, resolved.TenantID)
+	require.Contains(t, resourceIDs(resolved.Resources, ResourceKindTenant), dbtest.TestTenantID.String())
 }
 
 func resourceKinds(resources []authcore.ServiceTokenResource) []string {
@@ -201,13 +201,13 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	pool := newBootstrapTestPool(t)
 	cp := newTestControlPlane(t, pool)
 
-	_, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: false})
+	_, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapTenantSlug: dbtest.TestTenantSlug, MintInitialServiceToken: false})
 	require.NoError(t, err)
 
 	// Every per-tenant operator permission is granted to the operator role and
 	// shows up as an effective role permission; the cross-tenant platform
 	// superadmin permission is NOT (it is seeded only to the platform role, #226).
-	eff, err := cp.Core().EffectiveRolePermissions(ctx, tenant.DefaultSlug, OperatorRole)
+	eff, err := cp.Core().EffectiveRolePermissions(ctx, dbtest.TestTenantSlug, OperatorRole)
 	require.NoError(t, err)
 	for _, want := range OperatorRolePermissions() {
 		require.Containsf(t, eff, want, "operator role should effectively hold %q", want)
@@ -215,9 +215,9 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	require.NotContains(t, eff, PermPlatformSuperadmin)
 
 	// Re-running with the same catalog keeps the grant stable (replace, not grow).
-	_, err = cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: false})
+	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapTenantSlug: dbtest.TestTenantSlug, MintInitialServiceToken: false})
 	require.NoError(t, err)
-	eff2, err := cp.Core().EffectiveRolePermissions(ctx, tenant.DefaultSlug, OperatorRole)
+	eff2, err := cp.Core().EffectiveRolePermissions(ctx, dbtest.TestTenantSlug, OperatorRole)
 	require.NoError(t, err)
 	require.ElementsMatch(t, eff, eff2, fmt.Sprintf("permissions should be stable across reruns: %v vs %v", eff, eff2))
 }
@@ -246,7 +246,7 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateTenant(t *testing.T) {
 	require.NotNil(t, cp)
 
 	// Bootstrap the tenant operator tenant AND the platform tenant.
-	_, err = cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: false})
+	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapTenantSlug: dbtest.TestTenantSlug, MintInitialServiceToken: false})
 	require.NoError(t, err)
 	pres, err := cp.BootstrapPlatform(ctx)
 	require.NoError(t, err)
@@ -276,9 +276,9 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateTenant(t *testing.T) {
 	// A per-tenant admin (openrails:admin in their OWN tenant) is NOT a platform
 	// superadmin: HasPlatformSuperadmin evaluates the platform tenant, where they are
 	// not a member.
-	require.NoError(t, cp.Core().AddMember(ctx, tenant.DefaultSlug, tenantOperatorAdminID))
-	require.NoError(t, cp.Core().AssignRole(ctx, tenant.DefaultSlug, tenantOperatorAdminID, OperatorRole))
-	opIsAdmin, err := cp.IsAdmin(ctx, tenant.DefaultSlug, tenantOperatorAdminID)
+	require.NoError(t, cp.Core().AddMember(ctx, dbtest.TestTenantSlug, tenantOperatorAdminID))
+	require.NoError(t, cp.Core().AssignRole(ctx, dbtest.TestTenantSlug, tenantOperatorAdminID, OperatorRole))
+	opIsAdmin, err := cp.IsAdmin(ctx, dbtest.TestTenantSlug, tenantOperatorAdminID)
 	require.NoError(t, err)
 	require.True(t, opIsAdmin, "per-tenant admin should hold openrails:admin in their own tenant")
 	opIsPlatform, err := cp.HasPlatformSuperadmin(ctx, tenantOperatorAdminID)
@@ -317,15 +317,15 @@ func TestDelegatedTenantResolution(t *testing.T) {
 	_, err = pool.Exec(ctx, `
 		UPDATE openrails.tenants
 		   SET authkit_tenant_id = 'ak-default-id', authkit_tenant_slug = 'default-org', status = 'active'
-		 WHERE id = $1::uuid`, tenant.DefaultID.String())
+		 WHERE id = $1::uuid`, dbtest.TestTenantID.String())
 	require.NoError(t, err)
 
 	// Immutable uuid -> its OpenRails tenant. The slug is irrelevant to
 	// resolution (presentation/audit only).
 	tid, slug, err := cp.tenantForAuthKitTenant(ctx, "ak-default-id")
 	require.NoError(t, err)
-	require.Equal(t, tenant.DefaultID, tid)
-	require.Equal(t, "default", slug)
+	require.Equal(t, dbtest.TestTenantID, tid)
+	require.Equal(t, dbtest.TestTenantSlug, slug)
 
 	// Hard cut: a credential without a tenant uuid is rejected — there is no
 	// slug fallback, even when a slug-matching directory row exists.

@@ -7,42 +7,9 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestDefaultIDIsWellKnown(t *testing.T) {
-	const want = "00000000-0000-0000-0000-000000000001"
-	if got := DefaultID.String(); got != want {
-		t.Fatalf("DefaultID = %s, want %s", got, want)
-	}
-	if !DefaultID.IsDefault() {
-		t.Fatal("DefaultID.IsDefault() = false, want true")
-	}
-	if DefaultID.IsZero() {
-		t.Fatal("DefaultID.IsZero() = true, want false")
-	}
-}
-
-func TestFromContextOrDefault_DefaultsToDefaultTenant(t *testing.T) {
-	// A bare context with no resolved tenant must default to the default tenant,
-	// which is what lets single-tenant / self-hosted runs share the multi-tenant
-	// code path.
-	got := FromContextOrDefault(context.Background())
-	if got != DefaultID {
-		t.Fatalf("FromContextOrDefault(empty) = %s, want default %s", got, DefaultID)
-	}
-
-	// nil context must also be safe and default.
-	//nolint:staticcheck // deliberately passing a nil context to assert safety
-	if got := FromContextOrDefault(nil); got != DefaultID {
-		t.Fatalf("FromContextOrDefault(nil) = %s, want default %s", got, DefaultID)
-	}
-}
-
-func TestFromContextOrDefault_ReturnsResolvedTenant(t *testing.T) {
+func TestWithIDAndFromContext(t *testing.T) {
 	other := ID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
 	ctx := WithID(context.Background(), other)
-
-	if got := FromContextOrDefault(ctx); got != other {
-		t.Fatalf("FromContextOrDefault(resolved) = %s, want %s", got, other)
-	}
 
 	got, ok := FromContext(ctx)
 	if !ok {
@@ -63,8 +30,21 @@ func TestFromContext_NoTenant(t *testing.T) {
 	if _, ok := FromContext(ctx); ok {
 		t.Fatal("FromContext(zero id) ok = true, want false")
 	}
-	if got := FromContextOrDefault(ctx); got != DefaultID {
-		t.Fatalf("FromContextOrDefault(zero id) = %s, want default", got)
+}
+
+func TestRequire(t *testing.T) {
+	// Missing tenant surfaces as ErrNoTenant, never a silent fallback.
+	if _, err := Require(context.Background()); err != ErrNoTenant {
+		t.Fatalf("Require(empty) err = %v, want ErrNoTenant", err)
+	}
+
+	want := ID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
+	got, err := Require(WithID(context.Background(), want))
+	if err != nil {
+		t.Fatalf("Require(resolved): unexpected error %v", err)
+	}
+	if got != want {
+		t.Fatalf("Require(resolved) = %s, want %s", got, want)
 	}
 }
 

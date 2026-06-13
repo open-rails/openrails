@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) {
@@ -174,10 +173,11 @@ func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
 	finiteSourceID := uuid.New()
 	indefiniteSourceID := uuid.New()
 
+	dbtest.EnsureTestTenant(ctx, t, pool)
 	_, err = pool.Exec(ctx,
 		`INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject) VALUES ($1, $2, $3, $4)`,
 		tenantSubjectID,
-		tenant.FromContextOrDefault(ctx).UUID(),
+		dbtest.TestTenantID.UUID(),
 		"https://issuer.example",
 		"subject-"+tenantSubjectID.String(),
 	)

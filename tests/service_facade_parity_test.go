@@ -18,15 +18,15 @@ import (
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // stubServiceTokenResolver is a test resolver (issue #222) that accepts any non-empty
-// bearer token as a valid service token for the default tenant with the given
+// bearer token as a valid service token for the test tenant with the given
 // permissions, so the parity test can exercise the service-token-authenticated
 // public service routes without standing up a full AuthKit control plane.
 type stubServiceTokenResolver struct {
@@ -56,8 +56,8 @@ func (s stubServiceTokenResolver) ResolveServiceJWT(_ context.Context, token str
 func (s stubServiceTokenResolver) resolved() (*controlplane.ResolvedServiceToken, error) {
 	return &controlplane.ResolvedServiceToken{
 		AuthKitTenantSlug: "operator",
-		TenantID:          tenant.DefaultID,
-		TenantSlug:        tenant.DefaultSlug,
+		TenantID:          dbtest.TestTenantID,
+		TenantSlug:        dbtest.TestTenantSlug,
 		Permissions:       s.permissions,
 		Resources:         s.resources,
 	}, nil
@@ -90,7 +90,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 
 	ucb := &models.CreditBalance{
 		ID:              uuid.New(),
-		TenantID:        tenant.DefaultID.UUID(),
+		TenantID:        dbtest.TestTenantID.UUID(),
 		TenantSubjectID: tenantSubjectID,
 		CreditTypeID:    ct.ID,
 		Balance:         10_000,
@@ -109,7 +109,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	entSourceID := uuid.New()
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantID:        tenant.DefaultID.UUID(),
+		TenantID:        dbtest.TestTenantID.UUID(),
 		TenantSubjectID: tenantSubjectID,
 		Entitlement:     "premium-1",
 		StartAt:         time.Now().Add(-1 * time.Hour).UTC(),
@@ -124,13 +124,13 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	_, err = suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject, created_at, last_seen_at)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
-		legacyOnlyTenantSubjectID, tenant.DefaultID.UUID(),
+		legacyOnlyTenantSubjectID, dbtest.TestTenantID.UUID(),
 		"service-facade-parity-other", userID+"-other",
 		time.Now().UTC(), time.Now().UTC())
 	require.NoError(t, err)
 	legacyOnlyEnt := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantID:        tenant.DefaultID.UUID(),
+		TenantID:        dbtest.TestTenantID.UUID(),
 		TenantSubjectID: legacyOnlyTenantSubjectID,
 		Entitlement:     "legacy-user-only",
 		StartAt:         time.Now().Add(-1 * time.Hour).UTC(),
@@ -151,7 +151,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// is the same surface registered on the public handler at /v1/service/*.
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(ginmw.ResolveTenant())
+	router.Use(ginmw.ResolveTenant(dbtest.TestTenantID))
 	group := router.Group("/v1/service")
 	resolver := stubServiceTokenResolver{
 		permissions: []string{
@@ -161,7 +161,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 			controlplane.PermEntitlementsRead,
 		},
 		resources: []authcore.ServiceTokenResource{
-			controlplane.TenantResource(tenant.DefaultID),
+			controlplane.TenantResource(dbtest.TestTenantID),
 			controlplane.TenantSubjectResource(tenantSubjectID),
 		},
 	}
@@ -248,7 +248,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// 4) The same real service routes accept a resolved first-party service JWT
 	// principal; no OpenRails-generated runtime token is needed on these paths.
 	jwtRouter := gin.New()
-	jwtRouter.Use(ginmw.ResolveTenant())
+	jwtRouter.Use(ginmw.ResolveTenant(dbtest.TestTenantID))
 	jwtGroup := jwtRouter.Group("/v1/service")
 	jwtResolver := resolver
 	jwtResolver.serviceJWT = true

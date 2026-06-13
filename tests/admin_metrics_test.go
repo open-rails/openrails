@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 func seedMetricsData(t *testing.T, suite *TestContainerSuite, priceID uuid.UUID) {
@@ -78,7 +78,7 @@ func seedClickHouseDailyMetrics(t *testing.T, suite *TestContainerSuite, amount 
 	scheduled := int64(0)
 	entitlements := int64(1)
 	require.NoError(t, batch.Append(
-		time.Now().UTC(), "usd", tenant.DefaultID.String(),
+		time.Now().UTC(), "usd", dbtest.TestTenantID.String(),
 		amount, int64(0), int64(0), int64(0),
 		amount, amount,
 		int64(1), int64(0), amount,

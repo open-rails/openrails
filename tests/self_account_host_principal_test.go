@@ -16,12 +16,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // Issue #339 full loop: a HOST-AUTHENTICATED principal (the host-pluggable
@@ -41,8 +41,8 @@ type hostSeamAuthenticator struct {
 
 func (h hostSeamAuthenticator) AuthenticateDelegated(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 	return &billingauth.DelegatedPrincipal{
-		TenantID:    tenant.DefaultID.String(),
-		TenantSlug:  tenant.DefaultSlug,
+		TenantID:    dbtest.TestTenantID.String(),
+		TenantSlug:  dbtest.TestTenantSlug,
 		SubjectID:   h.subject,
 		Actor:       "https://auth.host.example",
 		Permissions: h.perms,

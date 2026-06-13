@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // fakeNMI scripts the gateway: the Query API (recurring report) answers
@@ -133,7 +132,7 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 func (fx intentFixture) enqueueDelete(t *testing.T, origin Origin, dueAt time.Time) gen.BillingProviderIntent {
 	t.Helper()
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
-		TenantID:       tenant.DefaultID.UUID(),
+		TenantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeNMIDeleteSubscription,
 		SubscriptionID: &fx.subID,
@@ -465,7 +464,7 @@ func TestRelevanceWindowExpiry(t *testing.T) {
 
 	expired := time.Now().Add(-time.Hour).UTC()
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
-		TenantID:       tenant.DefaultID.UUID(),
+		TenantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeNMIDeleteSubscription,
 		SubscriptionID: &fx.subID,

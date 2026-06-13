@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -66,8 +67,8 @@ func TestDelegatedSelfRequired_SucceedsAndBindsActingUser(t *testing.T) {
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
 			Tenant:           "operator",
-			TenantID:         tenant.DefaultID,
-			TenantSlug:       tenant.DefaultSlug,
+			TenantID:         dbtest.TestTenantID,
+			TenantSlug:       dbtest.TestTenantSlug,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermSelfBillingRead},
 			Email:            "user@example.test",
@@ -80,7 +81,7 @@ func TestDelegatedSelfRequired_SucceedsAndBindsActingUser(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	// Tenant pinned + acting user bound to delegated_sub so reused `me` handlers
 	// scope to this user.
-	require.Contains(t, w.Body.String(), tenant.DefaultID.String())
+	require.Contains(t, w.Body.String(), dbtest.TestTenantID.String())
 	require.Contains(t, w.Body.String(), "user-123")
 	require.Contains(t, w.Body.String(), "user@example.test")
 	require.Contains(t, w.Body.String(), "user123")
@@ -90,7 +91,7 @@ func TestDelegatedSelfRequired_DeniesMissingPermission(t *testing.T) {
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
 			Tenant:           "operator",
-			TenantID:         tenant.DefaultID,
+			TenantID:         dbtest.TestTenantID,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermSelfBillingRead}, // read only
 		},
@@ -109,7 +110,7 @@ func TestDelegatedSelfRequired_NoAdminOverride(t *testing.T) {
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
 			Tenant:           "operator",
-			TenantID:         tenant.DefaultID,
+			TenantID:         dbtest.TestTenantID,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermAdmin},
 		},

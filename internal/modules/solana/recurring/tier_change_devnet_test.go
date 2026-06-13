@@ -31,8 +31,8 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -70,7 +70,7 @@ func TestDevnetTierChange(t *testing.T) {
 
 		const prorated = uint64(1_000_000) // new_full(2) - old_unused(1) = 1 USDC, Model-B
 		res, err := tierSvc.Prepare(ctx, PrepareTierChangeInput{
-			TenantID: tenant.DefaultID, SubscriberWallet: sub.PublicKey().String(), MintSymbol: "USDC",
+			TenantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(), MintSymbol: "USDC",
 			OldPlanPDA: planA.PlanPDA, OldSubscriptionPDA: oldSubPDA.String(),
 			NewPlanID: planB.PlanID, NewAmountBaseUnits: highTier, NewPeriodHours: 720, NewPlanCreatedAt: planB.CreatedAt,
 			IsUpgrade: true, FirstChargeBaseUnits: prorated,
@@ -103,7 +103,7 @@ func TestDevnetTierChange(t *testing.T) {
 		require.NoError(t, err)
 
 		res, err := tierSvc.Prepare(ctx, PrepareTierChangeInput{
-			TenantID: tenant.DefaultID, SubscriberWallet: sub.PublicKey().String(), MintSymbol: "USDC",
+			TenantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(), MintSymbol: "USDC",
 			OldPlanPDA: planHigh.PlanPDA, OldSubscriptionPDA: oldSubPDA.String(),
 			NewPlanID: planLow.PlanID, NewAmountBaseUnits: lowTier, NewPeriodHours: 720, NewPlanCreatedAt: planLow.CreatedAt,
 			IsUpgrade: false,

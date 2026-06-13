@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/spool"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -71,10 +72,9 @@ func TestLogPaymentEventSpoolsWithDefaultsWhenClickHouseDown(t *testing.T) {
 	}
 }
 
-// TestLogPaymentEventStampsDefaultTenant proves that when no tenant is resolved
-// on the context (single-tenant / self-hosted install), the spooled analytics
-// event is still tenant-scoped to the well-known default tenant (issue #232).
-func TestLogPaymentEventStampsDefaultTenant(t *testing.T) {
+// TestLogPaymentEventStampsResolvedTenant proves the spooled analytics event is
+// tenant-scoped to the tenant resolved on the context (issue #232).
+func TestLogPaymentEventStampsResolvedTenant(t *testing.T) {
 	sp, err := spool.New(t.TempDir())
 	if err != nil {
 		t.Fatalf("create spool: %v", err)
@@ -85,15 +85,15 @@ func TestLogPaymentEventStampsDefaultTenant(t *testing.T) {
 		clock:  clockwork.NewFakeClockAt(time.Date(2026, 5, 12, 10, 30, 0, 0, time.UTC)),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(dbtest.WithTestTenant(context.Background()), 50*time.Millisecond)
 	defer cancel()
 	if err := svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "user-1", EventType: PaymentEventChargeSuccess, Processor: "test"}); err != nil {
 		t.Fatalf("log payment event: %v", err)
 	}
 
 	event := readOnlySpooledPayment(t, sp)
-	if event.TenantID != tenant.DefaultID.String() {
-		t.Fatalf("tenant_id = %q, want default %q", event.TenantID, tenant.DefaultID.String())
+	if event.TenantID != dbtest.TestTenantID.String() {
+		t.Fatalf("tenant_id = %q, want %q", event.TenantID, dbtest.TestTenantID.String())
 	}
 }
 
@@ -135,7 +135,7 @@ func TestLogSubscriptionEventStampsTenant(t *testing.T) {
 		clock:  clockwork.NewFakeClockAt(time.Date(2026, 5, 12, 10, 30, 0, 0, time.UTC)),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(dbtest.WithTestTenant(context.Background()), 50*time.Millisecond)
 	defer cancel()
 	if err := svc.LogSubscriptionEvent(ctx, SubscriptionEventData{SubscriptionID: uuid.New(), UserID: "user-1", EventType: PaymentEventSubscriptionCreated, Processor: "test"}); err != nil {
 		t.Fatalf("log subscription event: %v", err)
@@ -156,8 +156,8 @@ func TestLogSubscriptionEventStampsTenant(t *testing.T) {
 	if err := json.Unmarshal(rec.Data, &event); err != nil {
 		t.Fatalf("unmarshal event: %v", err)
 	}
-	if event.TenantID != tenant.DefaultID.String() {
-		t.Fatalf("tenant_id = %q, want default %q", event.TenantID, tenant.DefaultID.String())
+	if event.TenantID != dbtest.TestTenantID.String() {
+		t.Fatalf("tenant_id = %q, want %q", event.TenantID, dbtest.TestTenantID.String())
 	}
 }
 

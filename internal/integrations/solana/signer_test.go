@@ -8,6 +8,7 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -50,7 +51,7 @@ func TestKeypairSignerPublicKeyAndSign(t *testing.T) {
 	secrets := &fakeSecrets{value: key.String()}
 	signer := NewKeypairSigner(secrets, time.Minute)
 	ctx := context.Background()
-	tid := tenant.DefaultID
+	tid := dbtest.TestTenantID
 
 	pub, err := signer.PublicKey(ctx, tid)
 	if err != nil {
@@ -75,7 +76,7 @@ func TestKeypairSignerCachesWithinTTL(t *testing.T) {
 	secrets := &fakeSecrets{value: key.String()}
 	signer := NewKeypairSigner(secrets, time.Minute)
 	ctx := context.Background()
-	tid := tenant.DefaultID
+	tid := dbtest.TestTenantID
 
 	for i := range 5 {
 		if _, err := signer.PublicKey(ctx, tid); err != nil {
@@ -95,7 +96,7 @@ func TestKeypairSignerRefetchesAfterTTL(t *testing.T) {
 	current := time.Unix(1_700_000_000, 0)
 	ks.now = func() time.Time { return current }
 	ctx := context.Background()
-	tid := tenant.DefaultID
+	tid := dbtest.TestTenantID
 
 	if _, err := ks.PublicKey(ctx, tid); err != nil {
 		t.Fatalf("first: %v", err)
@@ -118,7 +119,7 @@ func TestKeypairSignerRefetchesAfterTTL(t *testing.T) {
 func TestKeypairSignerFailClosed(t *testing.T) {
 	secrets := &fakeSecrets{err: errors.New("vault unreachable")}
 	signer := NewKeypairSigner(secrets, time.Minute)
-	if _, err := signer.PublicKey(context.Background(), tenant.DefaultID); err == nil {
+	if _, err := signer.PublicKey(context.Background(), dbtest.TestTenantID); err == nil {
 		t.Fatal("expected error when secret store fails, got nil")
 	}
 }

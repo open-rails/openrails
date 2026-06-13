@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // archiveFixture seeds nothing catalog-side by default: the remote object is
@@ -49,7 +48,7 @@ func (fx *archiveFixture) runnerWith(cfg ModeView) *Runner {
 func (fx *archiveFixture) enqueueArchive(t *testing.T, objectID string, dueAt time.Time) uuid.UUID {
 	t.Helper()
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
-		TenantID:       tenant.DefaultID.UUID(),
+		TenantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "stripe",
 		IntentType:     TypeStripeArchivePrice,
 		Payload:        StripeArchivePayload{ObjectID: objectID, MarkerKey: "retired.usd.900.30"},
@@ -128,7 +127,7 @@ func TestArchiveIntentSynchronousEnqueueAndExecute(t *testing.T) {
 	fx.api.prices[objectID] = &catalog.StripePrice{ID: objectID, Active: true}
 
 	params := EnqueueParams{
-		TenantID:       tenant.DefaultID.UUID(),
+		TenantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "stripe",
 		IntentType:     TypeStripeArchivePrice,
 		Payload:        StripeArchivePayload{ObjectID: objectID, MarkerKey: "retired.usd.900.30"},

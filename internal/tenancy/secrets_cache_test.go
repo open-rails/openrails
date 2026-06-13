@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -78,7 +79,7 @@ func withClock(t *testing.T, inner TenantSecretStore, ttl time.Duration) (Tenant
 func TestCachedSecretStore_TTLHitThenExpiry(t *testing.T) {
 	ctx := context.Background()
 	backend := newCountingStore()
-	id := tenant.DefaultID
+	id := dbtest.TestTenantID
 	if _, err := backend.Put(ctx, id, SecretStripeSecretKey, "sk_1"); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +111,7 @@ func TestCachedSecretStore_TTLHitThenExpiry(t *testing.T) {
 func TestCachedSecretStore_PutRefreshesImmediately(t *testing.T) {
 	ctx := context.Background()
 	backend := newCountingStore()
-	id := tenant.DefaultID
+	id := dbtest.TestTenantID
 	cache, _ := withClock(t, backend, 45*time.Second)
 
 	if _, err := cache.Put(ctx, id, SecretStripeSecretKey, "sk_old"); err != nil {
@@ -135,7 +136,7 @@ func TestCachedSecretStore_PutRefreshesImmediately(t *testing.T) {
 func TestCachedSecretStore_DeleteInvalidates(t *testing.T) {
 	ctx := context.Background()
 	backend := newCountingStore()
-	id := tenant.DefaultID
+	id := dbtest.TestTenantID
 	cache, _ := withClock(t, backend, 45*time.Second)
 
 	if _, err := cache.Put(ctx, id, SecretStripeSecretKey, "sk_1"); err != nil {
@@ -156,7 +157,7 @@ func TestCachedSecretStore_DeleteInvalidates(t *testing.T) {
 func TestCachedSecretStore_ErrorsNotCached(t *testing.T) {
 	ctx := context.Background()
 	backend := newCountingStore()
-	id := tenant.DefaultID
+	id := dbtest.TestTenantID
 	cache, _ := withClock(t, backend, 45*time.Second)
 
 	// Backend transiently unavailable: the error must propagate and NOT be cached.
@@ -199,8 +200,8 @@ func (e errVaultKV) ListSecrets(context.Context, string) ([]string, error)      
 
 func TestVaultSecretStore_UnreachableIsBackendUnavailableNotAbsent(t *testing.T) {
 	ctx := context.Background()
-	store := NewVaultSecretStore("secret", errVaultKV{err: errors.New("dial tcp: connection refused")}, staticTenantSlugResolver{tenant.DefaultID.String(): tenant.DefaultSlug})
-	_, err := store.Get(ctx, tenant.DefaultID, SecretStripeSecretKey)
+	store := NewVaultSecretStore("secret", errVaultKV{err: errors.New("dial tcp: connection refused")}, staticTenantSlugResolver{dbtest.TestTenantID.String(): dbtest.TestTenantSlug})
+	_, err := store.Get(ctx, dbtest.TestTenantID, SecretStripeSecretKey)
 	if !errors.Is(err, ErrSecretBackendUnavailable) {
 		t.Fatalf("unreachable Get = %v, want wraps ErrSecretBackendUnavailable", err)
 	}
@@ -211,8 +212,8 @@ func TestVaultSecretStore_UnreachableIsBackendUnavailableNotAbsent(t *testing.T)
 
 func TestVaultSecretStore_AbsentIsNotFound(t *testing.T) {
 	ctx := context.Background()
-	store := NewVaultSecretStore("secret", newFakeVaultKV(), staticTenantSlugResolver{tenant.DefaultID.String(): tenant.DefaultSlug}) // empty store -> no value
-	_, err := store.Get(ctx, tenant.DefaultID, SecretStripeSecretKey)
+	store := NewVaultSecretStore("secret", newFakeVaultKV(), staticTenantSlugResolver{dbtest.TestTenantID.String(): dbtest.TestTenantSlug}) // empty store -> no value
+	_, err := store.Get(ctx, dbtest.TestTenantID, SecretStripeSecretKey)
 	if !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("absent Get = %v, want ErrSecretNotFound", err)
 	}
@@ -227,7 +228,7 @@ func TestVaultSecretStore_StubWrapsBackendUnavailable(t *testing.T) {
 	if !errors.Is(ErrVaultNotConfigured, ErrSecretBackendUnavailable) {
 		t.Fatal("ErrVaultNotConfigured must wrap ErrSecretBackendUnavailable")
 	}
-	_, err := NewVaultSecretStore("secret", nil, staticTenantSlugResolver{tenant.DefaultID.String(): tenant.DefaultSlug}).Get(context.Background(), tenant.DefaultID, SecretStripeSecretKey)
+	_, err := NewVaultSecretStore("secret", nil, staticTenantSlugResolver{dbtest.TestTenantID.String(): dbtest.TestTenantSlug}).Get(context.Background(), dbtest.TestTenantID, SecretStripeSecretKey)
 	if !errors.Is(err, ErrSecretBackendUnavailable) {
 		t.Fatalf("stub Get = %v, want wraps ErrSecretBackendUnavailable", err)
 	}

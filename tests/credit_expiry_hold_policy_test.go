@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry(t *testing.T) {
@@ -33,7 +33,7 @@ func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry
 	expiredAt := time.Now().Add(-1 * time.Hour).UTC()
 	batch := &models.CreditBlock{
 		ID:              uuid.New(),
-		TenantID:        tenant.DefaultID.UUID(),
+		TenantID:        dbtest.TestTenantID.UUID(),
 		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		CreditTypeID:    creditType.ID,
 		OriginalAmount:  100,

@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/tenancy"
 	tenantpkg "github.com/open-rails/openrails/pkg/tenant"
@@ -43,7 +44,7 @@ func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string) (*contr
 	}
 	tenantID := f.tenantID
 	if tenantID.IsZero() {
-		tenantID = tenantpkg.DefaultID
+		tenantID = dbtest.TestTenantID
 	}
 	return &controlplane.ResolvedDelegated{
 		Tenant:           "acme-org",
@@ -312,7 +313,7 @@ func TestTenantAdmin_SecretRoutesWriteOnlyRuntimeBehavior(t *testing.T) {
 	svc, err := tenancy.NewSecretManagementService(store)
 	require.NoError(t, err)
 
-	tenantA := tenantpkg.DefaultID
+	tenantA := dbtest.TestTenantID
 	tenantB, err := tenantpkg.ParseID("22222222-2222-2222-2222-222222222222")
 	require.NoError(t, err)
 	perms := []string{

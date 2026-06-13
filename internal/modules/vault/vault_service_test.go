@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -83,9 +84,9 @@ func TestApplyUpdatedCardMetadataClearsOmittedCardDetails(t *testing.T) {
 }
 
 func TestCreateVaultUsesTenantSecretMobiusKeyWithoutStaticClient(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), tenant.DefaultID)
+	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
 	store := tenancy.NewMemorySecretStore()
-	_, err := store.Put(ctx, tenant.DefaultID, tenancy.SecretNMIMobiusProductionKey, "tenant-mobius-key")
+	_, err := store.Put(ctx, dbtest.TestTenantID, tenancy.SecretNMIMobiusProductionKey, "tenant-mobius-key")
 	require.NoError(t, err)
 
 	seen := make(chan url.Values, 1)
@@ -138,7 +139,7 @@ func TestCreateVaultUsesTenantSecretMobiusKeyWithoutStaticClient(t *testing.T) {
 }
 
 func TestVaultFallsBackToStaticMobiusClientWhenTenantSecretMissing(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), tenant.DefaultID)
+	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
 	svc := &VaultService{
 		Config: vaultTestConfig(true, "static-mobius-key"),
 	}
@@ -149,7 +150,7 @@ func TestVaultFallsBackToStaticMobiusClientWhenTenantSecretMissing(t *testing.T)
 }
 
 func TestVaultMissingTenantSecretAndNoStaticClientReturnsMissingClient(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), tenant.DefaultID)
+	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
 	svc := &VaultService{
 		TenantSecrets: tenancy.NewMemorySecretStore(),
 	}
@@ -160,7 +161,7 @@ func TestVaultMissingTenantSecretAndNoStaticClientReturnsMissingClient(t *testin
 }
 
 func TestVaultFailsClosedWhenTenantSecretBackendUnavailable(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), tenant.DefaultID)
+	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
 	svc := &VaultService{
 		TenantSecrets: vaultUnavailableSecretStore{},
 		Config:        vaultTestConfig(true, "static-mobius-key"),

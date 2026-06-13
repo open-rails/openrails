@@ -18,16 +18,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // testAdminTenantSlug is the AuthKit org admin authority lives under in this
 // suite. HARDCUT (#312): admin authority is the LIVE openrails:admin permission
-// held in the caller's OWN tenant — the suite bootstraps the default tenant's
+// held in the caller's OWN tenant — the suite bootstraps the test tenant's
 // org (see initializeServer) and grants test admins the operator role there.
-const testAdminTenantSlug = tenant.DefaultSlug
+var testAdminTenantSlug = dbtest.TestTenantSlug
 
 var (
 	// Test issuer for auth verification (shared across tests)

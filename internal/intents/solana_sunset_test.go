@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -69,7 +70,7 @@ func sunsetIntent(t *testing.T, pda string) gen.BillingProviderIntent {
 	}
 	return gen.BillingProviderIntent{
 		ID:             uuid.New(),
-		TenantID:       tenant.DefaultID.UUID(),
+		TenantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "solana",
 		IntentType:     TypeSolanaSunsetPlan,
 		Payload:        payload,

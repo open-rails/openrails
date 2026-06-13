@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // fakeNMIRebillGateway scripts the gateway for rebill flows: the Direct Post
@@ -143,7 +142,7 @@ func (fx rebillFixture) enqueueParams(attempt int) EnqueueParams {
 	subID := fx.subID
 	windowEnd := fx.periodEnd.Add(14 * 24 * time.Hour)
 	return EnqueueParams{
-		TenantID:       tenant.DefaultID.UUID(),
+		TenantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeManualRebill,
 		SubscriptionID: &subID,

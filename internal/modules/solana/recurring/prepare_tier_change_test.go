@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -48,7 +49,7 @@ func randKeyStr(t *testing.T) string {
 func newTierChangeInput(t *testing.T) PrepareTierChangeInput {
 	t.Helper()
 	return PrepareTierChangeInput{
-		TenantID:           tenant.DefaultID,
+		TenantID:           dbtest.TestTenantID,
 		SubscriberWallet:   randKeyStr(t),
 		MintSymbol:         "USDC",
 		OldPlanPDA:         randKeyStr(t),

@@ -5,7 +5,7 @@ import (
 
 	authcore "github.com/open-rails/authkit/core"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 func TestResolvedServiceToken_HasPermission(t *testing.T) {
@@ -58,8 +58,8 @@ func TestValidateServiceTokenResourcesRejectsLegacyPayableKinds(t *testing.T) {
 	}
 	for _, kind := range legacyKinds {
 		t.Run(kind, func(t *testing.T) {
-			err := validateServiceTokenResources(tenant.DefaultID, []authcore.ServiceTokenResource{
-				TenantResource(tenant.DefaultID),
+			err := validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
+				TenantResource(dbtest.TestTenantID),
 				{Kind: kind, ID: "legacy"},
 			})
 			if err != ErrServiceTokenScopeDenied {
