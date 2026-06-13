@@ -925,7 +925,7 @@ Replace every bun query, model, and driver in openrails with sqlc-generated, typ
 # #336: Multi-tenant writers don't stamp tenant_id: checkout_sessions / subscriptions / payments / entitlements rows land under the DEFAULT tenant on delegated self-checkout
 
 **Completed:** no
-**Status:** open (found 2026-06-10 during the doujins->hentai0 cross-origin payment E2E)
+**Status:** IN PROGRESS 2026-06-13 — full audit done (scope is wider than the original 4 tables; see ## Audit), design chosen (pinned-tenant embedded client + GUC-derived column default; see ## Plan), implementing now.
 
 A real /v1/self/checkout charge (delegated token: iss=http://hentai0:4000, tenant=doujins, registered in billing.tenant_delegated_issuers) produced billing.checkout_sessions, billing.subscriptions, billing.payments, and billing.entitlements rows ALL with tenant_id=00000000-0000-0000-0000-000000000001 (default tenant), while billing.tenant_subjects correctly mapped the subject to the doujins tenant in the same request. ROOT CAUSE: those tables' tenant_id columns default to the hardcoded default-tenant uuid (the migration comments say: defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers) but the checkout-path writers never stamp it - models.CheckoutSession / Subscription / Payment / Entitlement carry NO TenantID field at all, so the INSERT always takes the column default. DelegatedSelfRequired DOES pin the resolved tenant on the request ctx (internal/http/middleware/ginmw/delegated.go:97) and TenantDBConn sets the app.tenant_id GUC, but the GUC only matters for RLS (no-op under the privileged dev role) - it does not change the INSERT default. Same bug class as the CreatePrice TenantID fix (pkg/service/service_definition_catalog.go:430). IMPACT: reads still work today because the self-surface scopes by tenant_subject_id, but tenant attribution/reporting is wrong, and under openrails_app+RLS (managed multi-tenant) these inserts would fail or rows would be invisible to the owning tenant. FIX SKETCH: add a TenantID field (bun tenant_id,type:uuid,nullzero) to CheckoutSession/Subscription/Payment/Entitlement (+ payment_methods/processor_customers/invoices - audit all tables with a tenant_id column whose model lacks the field) and stamp tenant.FromContextOrDefault(ctx) at the insert sites; or change the column defaults to current_setting('app.tenant_id')::uuid so the GUC pins it. Coordinate with #334 (bun->sqlc migration) - whichever lands second must carry the stamping.
 
@@ -936,6 +936,54 @@ A real /v1/self/checkout charge (delegated token: iss=http://hentai0:4000, tenan
 - [ ] Implement for checkout_sessions, subscriptions, payments, entitlements (+ payment_methods, processor_customers, invoices if affected)
 - [ ] Integration test: delegated self-checkout under a non-default tenant asserts tenant_id on all written rows == the token's tenant
 - [ ] Verify against the doujins/hentai0 E2E stack (delegated issuer http://hentai0:4000, tenant doujins)
+
+## Audit (2026-06-13)
+
+Swept every `openrails.*` table with a `tenant_id` column for INSERTs that omit it (→ silently take the static default-tenant default `…0001`). Wider than the original 4-table report. **No tenant_id-deriving trigger exists** (only `subscriptions_set_tier_group`). RLS `tenant_isolation` (`WITH CHECK (tenant_id = current_setting('app.tenant_id'))`) is present, so under the `openrails_app` role these inserts are REJECTED for a non-default tenant; under the dev BYPASSRLS role they silently land under the default tenant.
+
+BUGGY inserts (omit tenant_id):
+- `checkout_sessions` — CreateCheckoutSession
+- `subscriptions` — CreateSubscription
+- `payments` — CreatePayment, CreatePaymentIfNotExists, **and** reconciliation ReconcileBackfillPayment / ReconcileRecordRefund (INSERT omits, yet `ON CONFLICT (tenant_id, processor, transaction_id)` references it — extra-broken)
+- `payment_methods` — CreatePaymentMethod
+- `processor_customers` — UpsertProcessorCustomer (INSERT omits; ON CONFLICT references tenant_id)
+- `admin_grants` — CreateAdminGrant
+- `notification_queue` — CreateNotification
+- `catalog_drift_events` — InsertCatalogDriftEvent
+- `entitlements` — via reconciliation ReconcileGrantSubscriptionEntitlement (note: the primary CreateEntitlement DOES stamp it — that is the reference pattern)
+- `credit_types` — CreateCreditType (likely intentionally system-wide / not tenant-scoped — confirm; leave alone if so)
+
+CORRECT (stamp tenant_id with a COALESCE(arg, default) fallback): entitlements CreateEntitlement, prices, products, product_access_grants, product_entitlement_features, entitlement_features, invoices, linked_wallets, payment_blocklist, solana_subscriptions, tier_policies, usage_events, usdc_funding_sessions, budget_reservations, credit_account_settings, credit_blocks, credit_spend_limits, credit_transactions.
+
+**doujins side audited separately: CLEAN.** `migrate legacy` does direct DB inserts but explicitly stamps `opts.BillingTenantID` (resolved once from `openrails.tenants` slug='doujins') on all 9 billing-table inserts + ClickHouse analytics, and runs BYPASSRLS. Doujins' own tables have no tenant_id. No doujins changes needed; it deliberately bypasses the client and stamps columns directly, which is correct for an importer.
+
+## Plan (2026-06-13) — pinned-tenant embedded client + GUC-derived default
+
+Mechanism mirrors the just-landed configurable schema (#471, `DB.Schema` → search_path): a one-off construction-time tenant selection that the engine then respects everywhere, so embedded hosts (doujins/hentai0 — both the single `doujins` tenant) never pass tenant per-call.
+
+1. **GUC-derived column default.** New migration: for every affected table, `ALTER COLUMN tenant_id SET DEFAULT COALESCE(NULLIF(current_setting('app.tenant_id', true), '')::uuid, '00000000-0000-0000-0000-000000000001'::uuid)`. When the connection's `app.tenant_id` GUC is set (the existing WithTenantConn mechanism), omitted-tenant_id INSERTs stamp the correct tenant; when unset (single-tenant standalone), they fall back to the default tenant exactly as today. Fixes ALL the buggy inserts above at once, no per-query/repo churn, and makes the `payments` query comment ("column default + RLS own it") finally true. Idempotent + transactional.
+2. **`embed.Options.Tenant`** (slug; resolved to a tenant ID at New()). The embed Runtime wraps the Client's per-call contexts AND the worker contexts with `tenant.WithID(ctx, pinned)`, so WithTenantConn sets `app.tenant_id` from it on every embedded operation. Standalone HTTP is unchanged — it keeps resolving the tenant per-request from the delegated token via the existing middleware.
+3. **Ensure the GUC is set on every write connection.** Audit the embedded Client call path and the River worker write paths (dunning/lifecycle INSERT payments/subscriptions) to confirm they run on a WithTenantConn connection carrying the ctx tenant; wrap any that don't (standalone multi-tenant workers must set the GUC from the job's tenant — UPDATEs keep their existing tenant_id, but INSERTs need it).
+4. Leave the explicit-stamping queries as-is (they already pass the real tenant); the GUC default only governs the omitted-column case.
+
+REJECTED alternative: per-insert explicit stamping (add tenant_id arg to ~12 queries + repo methods + sqlc regen). More invasive and easy to miss a site; the GUC default is centralized and matches the schema-config precedent the owner asked for.
+
+## Findings refinement (2026-06-13, during implementation) — the conn IS pinned on the HTTP path
+
+Traced the actual write paths. The `app.tenant_id` GUC is NOT the missing piece on the HTTP surface:
+- `RegisterUserRoutes` (internal/http/routes/routes.go:84) wraps the ENTIRE self group — `/checkout` POST (CreateCheckoutSession), `/me/payment-methods`, `/me/subscriptions/*` — in `TenantDBConnMW(rt.DB)`, which pins a tenant-scoped connection and sets `app.tenant_id` from the request's resolved tenant. This applies to BOTH standalone (gin) AND embedded (embedhttp.go calls the same RegisterUserRoutes). So the delegated self-checkout that filed #336 already ran with the GUC set — the ONLY defect was the static column default ignoring it. **Migration 014 (GUC-derived default) is therefore the complete fix for the HTTP self-checkout repro**, standalone and embedded. This matches the issue's own line: "TenantDBConn sets the app.tenant_id GUC, but ... it does not change the INSERT default."
+- So `embed.Options.Tenant`/pinned-client is NOT needed for the checkout/self/admin paths (they resolve tenant per-request from the delegated token and pin the conn). It would only matter for direct `Client()` SDK writes that bypass HTTP — and those are credits/admit/authorize, which already stamp tenant_id explicitly. De-scoped unless a future direct-write consumer appears.
+
+**Remaining real gap: River worker INSERTs.** Workers (dunning/lifecycle in internal/river) do NOT call RunInTenantConn/WithTenantConn at all — no GUC is set on their connections. Workers that insert into explicit-tenant_id tables (credit_expiry, solana_crank) pass TenantID in the struct, so they're fine; but the dunning/lifecycle path that INSERTs `payments`/`subscriptions` (which omit tenant_id) would, post-migration, still take the default-tenant fallback (GUC unset) — wrong under multi-tenant AND wrong for doujins (whose tenant is NOT the default tenant). Fix: wrap each worker's per-subscription unit of work in `db.RunInTenantConn(tenant.WithID(ctx, sub.TenantID), …)` (the documented background analogue of the request middleware) so its INSERTs inherit the GUC. UPDATEs are unaffected (they keep the row's existing tenant_id).
+
+## Revised tasks (2026-06-13)
+- [x] Audit all tenant_id tables (openrails engine + doujins legacy-migrate) — see ## Audit
+- [x] Trace write paths: HTTP self/checkout/admin pin the tenant conn via TenantDBConnMW (standalone + embedded); workers do not — see ## Findings refinement
+- [x] Migration 014: GUC-derived `tenant_id` DEFAULT on the 9 affected tenant-scoped tables — fixes the HTTP path
+- [ ] Worker fix: wrap dunning/lifecycle per-subscription work in RunInTenantConn(sub.TenantID) so payment/subscription INSERTs carry the GUC
+- [ ] Integration test under the `openrails_app` role: delegated self-checkout under a non-default tenant → assert checkout_sessions/subscriptions/payments/payment_methods/entitlements rows all carry that tenant_id (NOT the default); plus a dunning-worker insert case
+- [ ] go build/vet + unit + integration green
+- [ ] (de-scoped) embed.Options.Tenant pinned-client — only if a direct non-HTTP Client() write to a tenant table appears; checkout path is covered by the conn middleware + migration. doujins needs NO changes either way.
 
 ---
 
