@@ -96,7 +96,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 		return nil, fmt.Errorf("expires_at required")
 	}
 
-	hold, err := s.moneyService().Hold(ctx, req.TenantSubjectID, req.Actor, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
+	hold, err := s.moneyService().Hold(ctx, req.TenantSubjectID, req.Actor, money.DefaultCurrency, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
 	if err != nil {
 		return nil, err
 	}

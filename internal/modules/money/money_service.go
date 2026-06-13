@@ -89,15 +89,19 @@ func (s *MoneyService) GetBalance(ctx context.Context, actorID string) (*models.
 	if err != nil {
 		return nil, err
 	}
-	return s.GetBalanceForTenantSubject(ctx, payer)
+	return s.GetBalanceForTenantSubject(ctx, payer, DefaultCurrency)
 }
 
 // GetBalanceForTenantSubject reads a balance scoped explicitly by tenant subject (issue
 // #221), for callers that own balances at a team org rather than a personal
 // org. The actor string is not required for an payer-scoped read.
-func (s *MoneyService) GetBalanceForTenantSubject(ctx context.Context, payer identity.TenantSubjectID) (*models.MoneyBalance, error) {
+func (s *MoneyService) GetBalanceForTenantSubject(ctx context.Context, payer identity.TenantSubjectID, currency string) (*models.MoneyBalance, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
+	}
+	cur := normalizeCurrency(currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
 	}
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -106,7 +110,7 @@ func (s *MoneyService) GetBalanceForTenantSubject(ctx context.Context, payer ide
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	row, err := s.db.Gen(ctx).GetMoneyBalance(ctx, gen.GetMoneyBalanceParams{
-		TenantID: tenantID, TenantSubjectID: payerID,
+		TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 	})
 	if err == nil {
 		return moneyBalanceFromGen(row), nil
@@ -115,6 +119,7 @@ func (s *MoneyService) GetBalanceForTenantSubject(ctx context.Context, payer ide
 		return &models.MoneyBalance{
 			TenantID:        tenantID,
 			TenantSubjectID: payerID,
+			Currency:        cur,
 			Balance:         0,
 			HeldBalance:     0,
 		}, nil
@@ -130,7 +135,7 @@ func (s *MoneyService) GetTransactions(ctx context.Context, actorID string, limi
 	if err != nil {
 		return nil, 0, err
 	}
-	return s.GetTransactionsByTenantSubject(ctx, payer, limit, offset)
+	return s.GetTransactionsByTenantSubject(ctx, payer, DefaultCurrency, limit, offset)
 }
 
 // GetTransactionsByTenantSubject lists money transactions for an EXPLICIT tenant subject
@@ -138,12 +143,16 @@ func (s *MoneyService) GetTransactions(ctx context.Context, actorID string, limi
 // the payer from a actor id — it filters tenant_subject_id directly, which is what the
 // org-level billing-account usage view (issue #242) needs. RLS-scoped to the
 // request tenant via Qx(ctx).
-func (s *MoneyService) GetTransactionsByTenantSubject(ctx context.Context, payer identity.TenantSubjectID, limit, offset int) ([]models.MoneyTransaction, int, error) {
+func (s *MoneyService) GetTransactionsByTenantSubject(ctx context.Context, payer identity.TenantSubjectID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
 	if s == nil || s.db == nil {
 		return nil, 0, fmt.Errorf("money service not initialized")
 	}
 	if payer.IsZero() {
 		return nil, 0, fmt.Errorf("payer required")
+	}
+	cur := normalizeCurrency(currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, 0, err
 	}
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -153,7 +162,7 @@ func (s *MoneyService) GetTransactionsByTenantSubject(ctx context.Context, payer
 	payerID := payer.UUID()
 	q := s.db.Gen(ctx)
 	total, err := q.CountMoneyTransactionsByPayer(ctx, gen.CountMoneyTransactionsByPayerParams{
-		TenantID: tenantID, TenantSubjectID: payerID,
+		TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -165,7 +174,7 @@ func (s *MoneyService) GetTransactionsByTenantSubject(ctx context.Context, payer
 		offset = 0
 	}
 	rows, err := q.ListMoneyTransactionsByPayer(ctx, gen.ListMoneyTransactionsByPayerParams{
-		TenantID: tenantID, TenantSubjectID: payerID,
+		TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 		Column3: int32(limit), Column4: int32(offset),
 	})
 	if err != nil {
@@ -201,7 +210,7 @@ func (s *MoneyService) GetAccountSettingsForTenantSubject(ctx context.Context, p
 // GetTransactionBySource looks up a single money transaction by its idempotency key.
 // For usage tracking, this is commonly used with transactionType="hold" and
 // (source, sourceID) = (metering_source, request_id).
-func (s *MoneyService) GetTransactionBySource(ctx context.Context, actorID string, transactionType string, source string, sourceID string) (*models.MoneyTransaction, error) {
+func (s *MoneyService) GetTransactionBySource(ctx context.Context, actorID string, currency string, transactionType string, source string, sourceID string) (*models.MoneyTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -230,9 +239,14 @@ func (s *MoneyService) GetTransactionBySource(ctx context.Context, actorID strin
 	if err != nil {
 		return nil, err
 	}
+	cur := normalizeCurrency(currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
+	}
 	row, err := s.db.Gen(ctx).GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
 		TenantID:        tid.UUID(),
 		TenantSubjectID: payer.UUID(),
+		Currency:        cur,
 		TransactionType: transactionType,
 		Source:          source,
 		SourceID:        &sourceID,
@@ -250,6 +264,7 @@ type DepositParams struct {
 	// stand-in, and a non-UUID Actor with no explicit payer is rejected.
 	TenantSubjectID *identity.TenantSubjectID
 	Actor           string
+	Currency        string // "" => DefaultCurrency (#472)
 	Amount          int64
 	Source          string
 	SourceID        *uuid.UUID
@@ -316,6 +331,10 @@ func ensureTenantSubject(ctx context.Context, q *gen.Queries, tenantID, tsid uui
 
 func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params DepositParams) (*models.MoneyTransaction, error) {
 	now := s.now()
+	cur := normalizeCurrency(params.Currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
+	}
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -329,7 +348,7 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 	if err := ensureTenantSubject(ctx, q, tenantID, payerID); err != nil {
 		return nil, err
 	}
-	bal, err := s.lockBalance(ctx, q, payer, params.Actor)
+	bal, err := s.lockBalance(ctx, q, payer, params.Actor, cur)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +361,7 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		v := params.SourceID.String()
 		sourceIDText = &v
 		existing, gerr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 			TransactionType: "deposit", Source: params.Source, SourceID: &v,
 		})
 		if gerr == nil {
@@ -362,7 +381,7 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 	newBal := bal.Balance + params.Amount
 
 	if err := q.SetMoneyBalance(ctx, gen.SetMoneyBalanceParams{
-		TenantID: tenantID, TenantSubjectID: payerID,
+		TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 		Balance: newBal, UpdatedAt: now,
 	}); err != nil {
 		return nil, err
@@ -372,6 +391,7 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		ID:              uuidutil.NewV7(),
 		TenantID:        tenantID,
 		TenantSubjectID: payerID,
+		Currency:        cur,
 		Actor:           params.Actor,
 		Amount:          params.Amount,
 		BalanceAfter:    &newBal,
@@ -391,6 +411,7 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		ID:                  uuidutil.NewV7(),
 		TenantID:            tenantID,
 		TenantSubjectID:     payerID,
+		Currency:            cur,
 		OriginalAmount:      params.Amount,
 		RemainingAmount:     params.Amount,
 		ExpiresAt:           params.ExpiresAt,
@@ -412,6 +433,7 @@ func insertParamsFromTransaction(t *models.MoneyTransaction) gen.InsertMoneyTran
 		ID:               t.ID,
 		TenantID:         t.TenantID,
 		TenantSubjectID:  t.TenantSubjectID,
+		Currency:         normalizeCurrency(t.Currency),
 		Actor:            t.Actor,
 		Resource:         t.Resource,
 		Amount:           t.Amount,
@@ -435,6 +457,7 @@ type WithdrawParams struct {
 	// single-tenant personal case; it is never a synthesized stand-in.
 	TenantSubjectID *identity.TenantSubjectID
 	Actor           string
+	Currency        string // "" => DefaultCurrency (#472)
 	Amount          int64
 	Source          string
 	SourceID        *uuid.UUID
@@ -465,12 +488,16 @@ func (s *MoneyService) Withdraw(ctx context.Context, params WithdrawParams) (*mo
 // reservation is charged against; when nil the payer is the actor (actorID)'s own
 // account/personal tenant-subject UUID for the self-hosted / single-tenant personal case
 // (never a synthesized stand-in).
-func (s *MoneyService) Hold(ctx context.Context, payer *identity.TenantSubjectID, actorID string, amount int64, source, sourceID string, expiresAt time.Time) (*models.MoneyTransaction, error) {
+func (s *MoneyService) Hold(ctx context.Context, payer *identity.TenantSubjectID, actorID, currency string, amount int64, source, sourceID string, expiresAt time.Time) (*models.MoneyTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	if amount <= 0 {
 		return nil, fmt.Errorf("amount must be positive")
+	}
+	cur := normalizeCurrency(currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
 	}
 
 	var hold *models.MoneyTransaction
@@ -494,7 +521,7 @@ func (s *MoneyService) Hold(ctx context.Context, payer *identity.TenantSubjectID
 		// Idempotency: treat (tenant, payer, source, source_id) as a unique key for
 		// holds. This prevents duplicate held_balance reservations on caller retries.
 		existing, gerr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 			TransactionType: "hold", Source: source, SourceID: &sourceID,
 		})
 		if gerr == nil {
@@ -505,7 +532,7 @@ func (s *MoneyService) Hold(ctx context.Context, payer *identity.TenantSubjectID
 			return gerr
 		}
 
-		bal, lerr := s.lockBalance(ctx, q, payerSubject, actorID)
+		bal, lerr := s.lockBalance(ctx, q, payerSubject, actorID, cur)
 		if lerr != nil {
 			return lerr
 		}
@@ -515,7 +542,7 @@ func (s *MoneyService) Hold(ctx context.Context, payer *identity.TenantSubjectID
 		}
 
 		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 			HeldBalance: bal.HeldBalance + amount, UpdatedAt: now,
 		}); err != nil {
 			return err
@@ -528,6 +555,7 @@ func (s *MoneyService) Hold(ctx context.Context, payer *identity.TenantSubjectID
 			ID:              uuidutil.NewV7(),
 			TenantID:        tenantID,
 			TenantSubjectID: payerID,
+			Currency:        cur,
 			Actor:           actorID,
 			Amount:          0,
 			Source:          source,
@@ -586,12 +614,13 @@ func (s *MoneyService) CaptureHold(ctx context.Context, holdID uuid.UUID, actual
 		}
 		tenantID := tid.UUID()
 		holdPayer := identity.TenantSubjectID(h.TenantSubjectID)
-		bal, lerr := s.lockBalance(ctx, q, holdPayer, h.Actor)
+		cur := normalizeCurrency(h.Currency)
+		bal, lerr := s.lockBalance(ctx, q, holdPayer, h.Actor, cur)
 		if lerr != nil {
 			return lerr
 		}
 		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			TenantID: tenantID, TenantSubjectID: h.TenantSubjectID,
+			TenantID: tenantID, TenantSubjectID: h.TenantSubjectID, Currency: cur,
 			HeldBalance: bal.HeldBalance - authorized, UpdatedAt: now,
 		}); err != nil {
 			return err
@@ -601,7 +630,7 @@ func (s *MoneyService) CaptureHold(ctx context.Context, holdID uuid.UUID, actual
 		// uncovered remainder to outstanding_owed instead of failing. availableAfter
 		// reflects this hold's reservation already released above.
 		availableAfter := bal.Balance - (bal.HeldBalance - authorized)
-		newBal, serr := s.captureSettleTx(ctx, q, holdPayer, h.Actor, actualAmount, availableAfter)
+		newBal, serr := s.captureSettleTx(ctx, q, holdPayer, h.Actor, cur, actualAmount, availableAfter)
 		if serr != nil {
 			return serr
 		}
@@ -653,12 +682,13 @@ func (s *MoneyService) ReleaseHold(ctx context.Context, holdID uuid.UUID) error 
 		}
 		tenantID := tid.UUID()
 		holdPayer := identity.TenantSubjectID(row.TenantSubjectID)
-		bal, lerr := s.lockBalance(ctx, q, holdPayer, row.Actor)
+		cur := normalizeCurrency(row.Currency)
+		bal, lerr := s.lockBalance(ctx, q, holdPayer, row.Actor, cur)
 		if lerr != nil {
 			return lerr
 		}
 		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			TenantID: tenantID, TenantSubjectID: row.TenantSubjectID,
+			TenantID: tenantID, TenantSubjectID: row.TenantSubjectID, Currency: cur,
 			HeldBalance: bal.HeldBalance - authorized, UpdatedAt: now,
 		}); err != nil {
 			return err
@@ -667,15 +697,16 @@ func (s *MoneyService) ReleaseHold(ctx context.Context, holdID uuid.UUID) error 
 	})
 }
 
-func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, actorID string, amount int64) (int64, error) {
+func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, actorID, currency string, amount int64) (int64, error) {
 	now := s.now()
+	cur := normalizeCurrency(currency)
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return 0, err
 	}
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
-	bal, err := s.lockBalance(ctx, q, payer, actorID)
+	bal, err := s.lockBalance(ctx, q, payer, actorID, cur)
 	if err != nil {
 		return 0, err
 	}
@@ -686,7 +717,7 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 
 	remaining := amount
 	blocks, err := q.ListSpendableMoneyBlocksForUpdate(ctx, gen.ListSpendableMoneyBlocksForUpdateParams{
-		TenantID: tenantID, TenantSubjectID: payerID, Now: now,
+		TenantID: tenantID, TenantSubjectID: payerID, Currency: cur, Now: now,
 	})
 	if err != nil {
 		return 0, err
@@ -712,7 +743,7 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 
 	newBal := bal.Balance - amount
 	if err := q.SetMoneyBalance(ctx, gen.SetMoneyBalanceParams{
-		TenantID: tenantID, TenantSubjectID: payerID,
+		TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 		Balance: newBal, UpdatedAt: now,
 	}); err != nil {
 		return 0, err
@@ -728,7 +759,8 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 // payer+tenant-scoped uniqueness (001_schema.up.sql). ON CONFLICT DO NOTHING
 // targets that constraint to avoid a duplicate-key error on concurrent
 // first-touch, after which the row is re-selected FOR UPDATE.
-func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, actorID string) (*models.MoneyBalance, error) {
+func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, actorID, currency string) (*models.MoneyBalance, error) {
+	cur := normalizeCurrency(currency)
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -736,7 +768,7 @@ func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer id
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	key := gen.LockMoneyBalanceParams{
-		TenantID: tenantID, TenantSubjectID: payerID,
+		TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 	}
 	row, err := q.LockMoneyBalance(ctx, key)
 	if err == nil {
@@ -747,7 +779,7 @@ func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer id
 	}
 
 	if err := q.InsertMoneyBalanceIfAbsent(ctx, gen.InsertMoneyBalanceIfAbsentParams{
-		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID,
+		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 		Now: s.now(),
 	}); err != nil {
 		return nil, err
@@ -761,6 +793,10 @@ func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer id
 
 func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params WithdrawParams) (*models.MoneyTransaction, error) {
 	now := s.now()
+	cur := normalizeCurrency(params.Currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
+	}
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -773,13 +809,13 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 	payerID := payer.UUID()
 	sourceIDText := (*string)(nil)
 	if params.SourceID != nil {
-		if _, err := s.lockBalance(ctx, q, payer, params.Actor); err != nil {
+		if _, err := s.lockBalance(ctx, q, payer, params.Actor, cur); err != nil {
 			return nil, err
 		}
 		v := params.SourceID.String()
 		sourceIDText = &v
 		existing, gerr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 			TransactionType: "withdrawal", Source: params.Source, SourceID: &v,
 		})
 		if gerr == nil {
@@ -789,7 +825,7 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 			return nil, gerr
 		}
 	}
-	newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, params.Actor, params.Amount)
+	newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, params.Actor, cur, params.Amount)
 	if err != nil {
 		return nil, err
 	}
@@ -798,6 +834,7 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 		ID:              uuidutil.NewV7(),
 		TenantID:        tenantID,
 		TenantSubjectID: payerID,
+		Currency:        cur,
 		Actor:           params.Actor,
 		Amount:          -params.Amount,
 		BalanceAfter:    &newBal,

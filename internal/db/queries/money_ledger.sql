@@ -1,38 +1,39 @@
 -- The money ledger (modules/money): balances, FIFO blocks, transactions.
--- amounts are micro-dollars (µ$ = 1e-6 USD); no credit_type dimension.
+-- amounts are integers in the row currency's minor unit (default µ$ = 1e-6 USD).
+-- currency is a system code (USD/USDC/EUR/JPY/SOL); the Go registry is authority.
 
 -- name: GetMoneyBalance :one
 SELECT * FROM openrails.money_balances
-WHERE tenant_id = $1 AND tenant_subject_id = $2
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency)
 LIMIT 1;
 
 -- name: LockMoneyBalance :one
 SELECT * FROM openrails.money_balances
-WHERE tenant_id = $1 AND tenant_subject_id = $2
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency)
 FOR UPDATE;
 
 -- name: InsertMoneyBalanceIfAbsent :exec
 -- First-touch materialization; ON CONFLICT DO NOTHING targets the
--- (tenant, payer) uniqueness so concurrent first-touch is safe.
+-- (tenant, payer, currency) uniqueness so concurrent first-touch is safe.
 INSERT INTO openrails.money_balances (
-    id, tenant_id, tenant_subject_id, balance, held_balance, created_at, updated_at
-) VALUES ($1, $2, $3, 0, 0, sqlc.arg(now), sqlc.arg(now))
-ON CONFLICT (tenant_id, tenant_subject_id) DO NOTHING;
+    id, tenant_id, tenant_subject_id, currency, balance, held_balance, created_at, updated_at
+) VALUES ($1, $2, $3, sqlc.arg(currency), 0, 0, sqlc.arg(now), sqlc.arg(now))
+ON CONFLICT (tenant_id, tenant_subject_id, currency) DO NOTHING;
 
 -- name: SetMoneyBalance :exec
 UPDATE openrails.money_balances
 SET balance = $3, updated_at = $4
-WHERE tenant_id = $1 AND tenant_subject_id = $2;
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: SetMoneyHeldBalance :exec
 UPDATE openrails.money_balances
 SET held_balance = $3, updated_at = $4
-WHERE tenant_id = $1 AND tenant_subject_id = $2;
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: ListSpendableMoneyBlocksForUpdate :many
 -- FIFO draw order: soonest-expiring first, then oldest.
 SELECT * FROM openrails.money_blocks
-WHERE tenant_id = $1 AND tenant_subject_id = $2
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency)
   AND remaining_amount > 0
   AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz)
 ORDER BY expires_at ASC NULLS LAST, created_at ASC
@@ -43,32 +44,32 @@ UPDATE openrails.money_blocks SET remaining_amount = $2 WHERE id = $1;
 
 -- name: InsertMoneyBlock :exec
 INSERT INTO openrails.money_blocks (
-    id, tenant_id, tenant_subject_id,
+    id, tenant_id, tenant_subject_id, currency,
     original_amount, remaining_amount, expires_at, source_transaction_id, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8);
 
 -- name: InsertMoneyTransaction :exec
 INSERT INTO openrails.money_transactions (
-    id, tenant_id, tenant_subject_id, actor, resource, metadata,
+    id, tenant_id, tenant_subject_id, currency, actor, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
     expires_at, description, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18);
+) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18);
 
 -- name: InsertMoneyTransactionIfAbsent :exec
 INSERT INTO openrails.money_transactions (
-    id, tenant_id, tenant_subject_id, actor, resource, metadata,
+    id, tenant_id, tenant_subject_id, currency, actor, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
     expires_at, description, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 ON CONFLICT DO NOTHING;
 
 -- name: GetMoneyTransactionByCoords :one
--- (tenant, payer, transaction_type, source, source_id) is the
+-- (tenant, payer, currency, transaction_type, source, source_id) is the
 -- idempotency key for deposits / withdrawals / holds.
 SELECT * FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency)
   AND transaction_type = $3 AND source = $4 AND source_id = $5
 LIMIT 1;
 
@@ -76,7 +77,7 @@ LIMIT 1;
 -- Unified-spend idempotency (#302): a withdrawal OR an owed accrual with these
 -- coordinates means the spend already happened.
 SELECT count(*) FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency)
   AND transaction_type IN ('withdrawal', 'owed_accrual')
   AND source = $3 AND source_id = $4;
 
@@ -95,13 +96,13 @@ WHERE id = $1;
 
 -- name: ListMoneyTransactionsByPayer :many
 SELECT * FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency)
 ORDER BY created_at DESC
 LIMIT $3::int OFFSET $4::int;
 
 -- name: CountMoneyTransactionsByPayer :one
 SELECT count(*) FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2;
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: SumSpentInMoneyWindow :one
 -- Spend counted against a rate cap since `since`: settled spend (withdrawals +
@@ -115,20 +116,20 @@ SELECT COALESCE(SUM(
         ELSE 0
     END), 0)::bigint
 FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency)
   AND created_at >= sqlc.arg(since)::timestamptz
   AND (sqlc.arg(actor)::text = '' OR actor = sqlc.arg(actor)::text);
 
 -- name: SumActiveMoneyHoldAuthorizations :one
 SELECT COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)::bigint
 FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency)
   AND transaction_type = 'hold' AND status = 'active';
 
 -- name: SumMoneyDeposits :one
 SELECT COALESCE(SUM(amount), 0)::bigint
 FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency)
   AND transaction_type = 'deposit';
 
 -- name: ListOrphanedExpiredMoneyHolds :many
@@ -140,7 +141,7 @@ ORDER BY expires_at ASC;
 -- name: SumMoneyMovementsInPeriodByPayer :many
 SELECT transaction_type, COALESCE(SUM(amount), 0)::bigint AS total
 FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency)
   AND created_at >= sqlc.arg(period_from)::timestamptz
   AND created_at < sqlc.arg(period_to)::timestamptz
 GROUP BY transaction_type;
@@ -148,12 +149,13 @@ GROUP BY transaction_type;
 -- name: ListMoneyHeldBalanceDrift :many
 -- Balance rows whose stored held_balance disagrees with the sum of their
 -- currently-active holds (reconciliation, alert-only).
-SELECT b.tenant_id, b.tenant_subject_id,
+SELECT b.tenant_id, b.tenant_subject_id, b.currency,
        b.held_balance AS stored,
        COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0))
                  FROM openrails.money_transactions t
                  WHERE t.tenant_id = b.tenant_id
                    AND t.tenant_subject_id = b.tenant_subject_id
+                   AND t.currency = b.currency
                    AND t.transaction_type = 'hold' AND t.status = 'active'), 0)::bigint AS computed
 FROM openrails.money_balances b
 WHERE b.tenant_id = $1
@@ -161,10 +163,11 @@ WHERE b.tenant_id = $1
                  FROM openrails.money_transactions t
                  WHERE t.tenant_id = b.tenant_id
                    AND t.tenant_subject_id = b.tenant_subject_id
+                   AND t.currency = b.currency
                    AND t.transaction_type = 'hold' AND t.status = 'active'), 0);
 
 -- name: ListMoneyBalanceAnomalies :many
-SELECT b.tenant_id, b.tenant_subject_id, b.balance, b.held_balance
+SELECT b.tenant_id, b.tenant_subject_id, b.currency, b.balance, b.held_balance
 FROM openrails.money_balances b
 WHERE b.tenant_id = $1
   AND (b.balance < 0 OR b.held_balance < 0 OR b.held_balance > b.balance);
@@ -173,9 +176,9 @@ WHERE b.tenant_id = $1
 
 -- name: InsertMoneyWindow :exec
 INSERT INTO openrails.money_windows (
-    id, tenant_id, tenant_subject_id,
+    id, tenant_id, tenant_subject_id, currency,
     held_amount, settled_amount, status, expires_at, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9);
 
 -- name: GetMoneyWindow :one
 SELECT * FROM openrails.money_windows WHERE id = $1 LIMIT 1;

@@ -30,7 +30,7 @@ func (s *MoneyService) CumulativePaidMicros(ctx context.Context, payer identity.
 	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
 		total, e = s.db.Gen(ctx).SumMoneyDeposits(ctx, gen.SumMoneyDepositsParams{
-			TenantID: tenantID, TenantSubjectID: payer.UUID(),
+			TenantID: tenantID, TenantSubjectID: payer.UUID(), Currency: DefaultCurrency,
 		})
 		return e
 	})
@@ -76,11 +76,11 @@ func (s *MoneyService) GraduateTier(ctx context.Context, payer identity.TenantSu
 	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		// Ensure a settings row exists (prepaid mode if creating; no-op when present).
-		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payer.UUID(), BillingModePrepaid, now); err != nil {
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payer.UUID(), DefaultCurrency, BillingModePrepaid, now); err != nil {
 			return err
 		}
 		return q.SetMoneyAccountTier(ctx, gen.SetMoneyAccountTierParams{
-			TenantID: tenantID, TenantSubjectID: payer.UUID(),
+			TenantID: tenantID, TenantSubjectID: payer.UUID(), Currency: DefaultCurrency,
 			Tier: tier, Now: now,
 		})
 	})

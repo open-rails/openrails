@@ -13,6 +13,7 @@ type MoneyBalance struct {
 	ID              uuid.UUID `json:"id"`
 	TenantID        uuid.UUID `json:"tenant_id"`
 	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	Currency        string    `json:"currency"`
 	Balance         int64     `json:"balance"`
 	HeldBalance     int64     `json:"held_balance"`
 	CreatedAt       time.Time `json:"created_at"`
@@ -23,6 +24,7 @@ type MoneyTransaction struct {
 	ID              uuid.UUID      `json:"id"`
 	TenantID        uuid.UUID      `json:"tenant_id"`
 	TenantSubjectID uuid.UUID      `json:"tenant_subject_id"`
+	Currency        string         `json:"currency"`
 	Actor           string         `json:"actor"`
 	Resource        *string        `json:"resource,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
@@ -44,6 +46,7 @@ type MoneyBlock struct {
 	ID                  uuid.UUID  `json:"id"`
 	TenantID            uuid.UUID  `json:"tenant_id"`
 	TenantSubjectID     uuid.UUID  `json:"tenant_subject_id"`
+	Currency            string     `json:"currency"`
 	OriginalAmount      int64      `json:"original_amount"`
 	RemainingAmount     int64      `json:"remaining_amount"`
 	ExpiresAt           *time.Time `json:"expires_at,omitempty"`
@@ -57,6 +60,7 @@ type MoneyWindow struct {
 	ID              uuid.UUID `json:"id"`
 	TenantID        uuid.UUID `json:"tenant_id"`
 	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	Currency        string    `json:"currency"`
 	HeldAmount      int64     `json:"held_amount"`
 	SettledAmount   int64     `json:"settled_amount"`
 	Status          string    `json:"status"` // open | closed | expired
@@ -71,6 +75,7 @@ type MoneyAccount struct {
 	ID              uuid.UUID `json:"id"`
 	TenantID        uuid.UUID `json:"tenant_id"`
 	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	Currency        string    `json:"currency"`
 
 	BillingMode              string     `json:"billing_mode"`
 	MaxSpendPerDayMicros     *int64     `json:"max_spend_per_day_micros,omitempty"`
@@ -104,6 +109,7 @@ type MoneySpendLimit struct {
 	ID                     uuid.UUID `json:"id"`
 	TenantID               uuid.UUID `json:"tenant_id"`
 	TenantSubjectID        uuid.UUID `json:"tenant_subject_id"`
+	Currency               string    `json:"currency"`
 	Actor                  string    `json:"actor"`
 	MaxSpendPerDayMicros   *int64    `json:"max_spend_per_day_micros,omitempty"`
 	MaxSpendPerMonthMicros *int64    `json:"max_spend_per_month_micros,omitempty"`

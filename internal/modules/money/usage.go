@@ -24,6 +24,7 @@ type RecordUsageParams struct {
 	// resolved from Actor (self-hosted/personal case), never synthesized.
 	Payer     *identity.TenantSubjectID
 	Actor     string // actor (attribution only)
+	Currency  string // "" => DefaultCurrency (#472)
 	EventType string // metered event kind, e.g. "gpt-4o"
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
 	// cached_input_tokens, requests, ...). Used for reporting + #298 throughput.
@@ -64,6 +65,10 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 	if params.Amount < 0 {
 		return nil, fmt.Errorf("amount must be >= 0")
 	}
+	cur := normalizeCurrency(params.Currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
+	}
 	payer, err := resolveTenantSubject(params.Payer, params.Actor)
 	if err != nil {
 		return nil, err
@@ -82,7 +87,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 
 		// Serialize per (tenant, payer) so the idempotency check below
 		// can't race a concurrent identical record into a double charge.
-		if _, err := s.lockBalance(ctx, q, payer, params.Actor); err != nil {
+		if _, err := s.lockBalance(ctx, q, payer, params.Actor, cur); err != nil {
 			return err
 		}
 
@@ -104,7 +109,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		// amount exceeds available balance.
 		var debitID *uuid.UUID
 		if params.Amount > 0 {
-			balID, owedID, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Actor, params.Source, params.SourceID, params.Amount)
+			balID, owedID, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Actor, cur, params.Source, params.SourceID, params.Amount)
 			if derr != nil {
 				return derr
 			}

@@ -42,7 +42,7 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSub
 	// one, so this is safe whether called from a request or directly.
 	var snap *CreditAccountSnapshot
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		bal, err := s.moneyService().GetBalanceForTenantSubject(ctx, payer)
+		bal, err := s.moneyService().GetBalanceForTenantSubject(ctx, payer, money.DefaultCurrency)
 		if err != nil {
 			return err
 		}
@@ -426,7 +426,7 @@ func (s *Service) GetTenantSubjectCreditTransactions(ctx context.Context, payer 
 	var total int
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
-		items, total, e = s.moneyService().GetTransactionsByTenantSubject(ctx, payer, limit, offset)
+		items, total, e = s.moneyService().GetTransactionsByTenantSubject(ctx, payer, money.DefaultCurrency, limit, offset)
 		return e
 	})
 	return items, total, err

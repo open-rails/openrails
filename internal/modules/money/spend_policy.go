@@ -158,8 +158,17 @@ func DefaultAccountSettings(payer identity.TenantSubjectID) *models.MoneyAccount
 // DefaultAccountSettings value when none exists (never nil, never an error for a
 // missing row).
 func (s *MoneyService) GetAccountSettings(ctx context.Context, payer identity.TenantSubjectID) (*models.MoneyAccount, error) {
+	return s.getAccountSettings(ctx, payer, DefaultCurrency)
+}
+
+// getAccountSettings is the currency-aware form (#472).
+func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.TenantSubjectID, currency string) (*models.MoneyAccount, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
+	}
+	cur := normalizeCurrency(currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
 	}
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -167,7 +176,7 @@ func (s *MoneyService) GetAccountSettings(ctx context.Context, payer identity.Te
 	}
 	tenantID := tid.UUID()
 	row, err := s.db.Gen(ctx).GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{
-		TenantID: tenantID, TenantSubjectID: payer.UUID(),
+		TenantID: tenantID, TenantSubjectID: payer.UUID(), Currency: cur,
 	})
 	if err == nil {
 		return settingsFromGen(row), nil
@@ -175,6 +184,7 @@ func (s *MoneyService) GetAccountSettings(ctx context.Context, payer identity.Te
 	if errors.Is(err, pgx.ErrNoRows) {
 		d := DefaultAccountSettings(payer)
 		d.TenantID = tenantID
+		d.Currency = cur
 		return d, nil
 	}
 	return nil, err
@@ -265,6 +275,7 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 
 	cur.TenantID = tenantID
 	cur.TenantSubjectID = payer.UUID()
+	cur.Currency = normalizeCurrency(cur.Currency)
 	cur.UpdatedAt = now
 	if cur.ID == uuid.Nil {
 		cur.ID = uuidutil.NewV7()
@@ -281,6 +292,7 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 		ID:                        cur.ID,
 		TenantID:                  cur.TenantID,
 		TenantSubjectID:           cur.TenantSubjectID,
+		Currency:                  cur.Currency,
 		BillingMode:               cur.BillingMode,
 		MaxSpendPerDayMicros:      cur.MaxSpendPerDayMicros,
 		MaxSpendPerMonthMicros:    cur.MaxSpendPerMonthMicros,
@@ -333,6 +345,7 @@ func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.TenantS
 		ID:                     uuidutil.NewV7(),
 		TenantID:               tenantID,
 		TenantSubjectID:        payer.UUID(),
+		Currency:               DefaultCurrency,
 		Actor:                  actor,
 		MaxSpendPerDayMicros:   nilIfNeg(maxDay),
 		MaxSpendPerMonthMicros: nilIfNeg(maxMonth),
@@ -343,6 +356,7 @@ func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.TenantS
 		ID:                     row.ID,
 		TenantID:               row.TenantID,
 		TenantSubjectID:        row.TenantSubjectID,
+		Currency:               row.Currency,
 		Actor:                  row.Actor,
 		MaxSpendPerDayMicros:   row.MaxSpendPerDayMicros,
 		MaxSpendPerMonthMicros: row.MaxSpendPerMonthMicros,
@@ -354,9 +368,9 @@ func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.TenantS
 	return row, nil
 }
 
-func (s *MoneyService) getSpendLimit(ctx context.Context, tenantID, payerID uuid.UUID, actor string) (*models.MoneySpendLimit, error) {
+func (s *MoneyService) getSpendLimit(ctx context.Context, tenantID, payerID uuid.UUID, currency, actor string) (*models.MoneySpendLimit, error) {
 	row, err := s.db.Gen(ctx).GetMoneySpendLimit(ctx, gen.GetMoneySpendLimitParams{
-		TenantID: tenantID, TenantSubjectID: payerID, Actor: actor,
+		TenantID: tenantID, TenantSubjectID: payerID, Currency: normalizeCurrency(currency), Actor: actor,
 	})
 	if err == nil {
 		return spendLimitFromGen(row), nil
@@ -371,18 +385,18 @@ func (s *MoneyService) getSpendLimit(ctx context.Context, tenantID, payerID uuid
 // settled spend (withdrawals + captured holds) PLUS currently-active holds
 // created in the window (so concurrent in-flight holds can't overshoot a cap).
 // When actor is non-empty the sum is scoped to that actor.
-func (s *MoneyService) spentInWindow(ctx context.Context, tenantID, payerID uuid.UUID, since time.Time, actor string) (int64, error) {
+func (s *MoneyService) spentInWindow(ctx context.Context, tenantID, payerID uuid.UUID, currency string, since time.Time, actor string) (int64, error) {
 	return s.db.Gen(ctx).SumSpentInMoneyWindow(ctx, gen.SumSpentInMoneyWindowParams{
-		TenantID: tenantID, TenantSubjectID: payerID,
+		TenantID: tenantID, TenantSubjectID: payerID, Currency: normalizeCurrency(currency),
 		Since: since, Actor: actor,
 	})
 }
 
 // activeHoldsTotal sums all currently-active hold authorizations for an payer
 // (current reservation exposure, regardless of window).
-func (s *MoneyService) activeHoldsTotal(ctx context.Context, tenantID, payerID uuid.UUID) (int64, error) {
+func (s *MoneyService) activeHoldsTotal(ctx context.Context, tenantID, payerID uuid.UUID, currency string) (int64, error) {
 	return s.db.Gen(ctx).SumActiveMoneyHoldAuthorizations(ctx, gen.SumActiveMoneyHoldAuthorizationsParams{
-		TenantID: tenantID, TenantSubjectID: payerID,
+		TenantID: tenantID, TenantSubjectID: payerID, Currency: normalizeCurrency(currency),
 	})
 }
 
@@ -395,7 +409,8 @@ func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.Ten
 	if s == nil || s.db == nil {
 		return SpendDecision{}, fmt.Errorf("money service not initialized")
 	}
-	settings, err := s.GetAccountSettings(ctx, payer)
+	cur := DefaultCurrency
+	settings, err := s.getAccountSettings(ctx, payer, cur)
 	if err != nil {
 		return SpendDecision{}, err
 	}
@@ -414,20 +429,20 @@ func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.Ten
 	// Per-actor caps (only when a limit row exists for this actor).
 	actor = strings.TrimSpace(actor)
 	if actor != "" {
-		lim, lerr := s.getSpendLimit(ctx, tenantID, payerID, actor)
+		lim, lerr := s.getSpendLimit(ctx, tenantID, payerID, cur, actor)
 		if lerr != nil {
 			return SpendDecision{}, lerr
 		}
 		if lim != nil && (lim.MaxSpendPerDayMicros != nil || lim.MaxSpendPerMonthMicros != nil) {
 			if lim.MaxSpendPerDayMicros != nil {
-				spent, e := s.spentInWindow(ctx, tenantID, payerID, dayStart, actor)
+				spent, e := s.spentInWindow(ctx, tenantID, payerID, cur, dayStart, actor)
 				if e != nil {
 					return SpendDecision{}, e
 				}
 				caps = append(caps, capInput{DenyActorDailyCap, lim.MaxSpendPerDayMicros, spent, &dayReset})
 			}
 			if lim.MaxSpendPerMonthMicros != nil {
-				spent, e := s.spentInWindow(ctx, tenantID, payerID, monStart, actor)
+				spent, e := s.spentInWindow(ctx, tenantID, payerID, cur, monStart, actor)
 				if e != nil {
 					return SpendDecision{}, e
 				}
@@ -438,14 +453,14 @@ func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.Ten
 
 	// Tenant-level daily / monthly caps.
 	if settings.MaxSpendPerDayMicros != nil {
-		spent, e := s.spentInWindow(ctx, tenantID, payerID, dayStart, "")
+		spent, e := s.spentInWindow(ctx, tenantID, payerID, cur, dayStart, "")
 		if e != nil {
 			return SpendDecision{}, e
 		}
 		caps = append(caps, capInput{DenyDailyCap, settings.MaxSpendPerDayMicros, spent, &dayReset})
 	}
 	if settings.MaxSpendPerMonthMicros != nil {
-		spent, e := s.spentInWindow(ctx, tenantID, payerID, monStart, "")
+		spent, e := s.spentInWindow(ctx, tenantID, payerID, cur, monStart, "")
 		if e != nil {
 			return SpendDecision{}, e
 		}
@@ -454,7 +469,7 @@ func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.Ten
 
 	// Outstanding exposure ceiling (settled owed + active holds + this estimate).
 	if settings.MaxOutstandingOwedMicros != nil {
-		held, e := s.activeHoldsTotal(ctx, tenantID, payerID)
+		held, e := s.activeHoldsTotal(ctx, tenantID, payerID, cur)
 		if e != nil {
 			return SpendDecision{}, e
 		}

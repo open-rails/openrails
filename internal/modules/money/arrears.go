@@ -27,12 +27,16 @@ const (
 // ledger row is written. Idempotent on (payer, source, source_id).
 // The payer's outstanding ceiling is enforced separately at authorize time
 // (CheckSpendAllowed); this is the settlement side. (#241)
-func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.TenantSubjectID, source, sourceID string, amount int64) (*models.MoneyTransaction, error) {
+func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.TenantSubjectID, currency, source, sourceID string, amount int64) (*models.MoneyTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	if amount <= 0 {
 		return nil, fmt.Errorf("amount must be positive")
+	}
+	cur := normalizeCurrency(currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
 	}
 	source = strings.TrimSpace(source)
 	sourceID = strings.TrimSpace(sourceID)
@@ -55,7 +59,7 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.TenantSubj
 
 		// Idempotency.
 		existing, gerr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 			TransactionType: txOwedAccrual, Source: source, SourceID: &sourceID,
 		})
 		if gerr == nil {
@@ -66,18 +70,18 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.TenantSubj
 			return gerr
 		}
 
-		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, BillingModeArrears, now); err != nil {
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModeArrears, now); err != nil {
 			return err
 		}
 		if err := q.AddMoneyOutstandingOwed(ctx, gen.AddMoneyOutstandingOwedParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 			Amount: amount, Now: now,
 		}); err != nil {
 			return err
 		}
 
 		trx = &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Actor: payerID.String(),
+			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Currency: cur, Actor: payerID.String(),
 			Amount: amount, TransactionType: txOwedAccrual, Status: "posted",
 			Source: source, SourceID: &sourceID, CreatedAt: now, UpdatedAt: now,
 		}
@@ -91,7 +95,7 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.TenantSubj
 
 // ensureSettingsRowTx inserts a default settings row for payer if one does not
 // exist, using the given billing mode. No-op when the row exists.
-func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, mode string, now time.Time) error {
+func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, currency, mode string, now time.Time) error {
 	// Materialize the payable tenant_subjects row so the money_accounts FK
 	// (migration 076) is satisfied — this is the shared choke point for settings
 	// writes (suspend/resume/verify/graduate/arrears) (#317).
@@ -99,14 +103,14 @@ func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, 
 		return err
 	}
 	return q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{
-		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID,
+		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Currency: normalizeCurrency(currency),
 		BillingMode: mode, Now: now,
 	})
 }
 
-// GetOutstandingOwed returns the current outstanding owed for payer.
-func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.TenantSubjectID) (int64, error) {
-	settings, err := s.GetAccountSettings(ctx, payer)
+// GetOutstandingOwed returns the current outstanding owed for payer in currency.
+func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.TenantSubjectID, currency string) (int64, error) {
+	settings, err := s.getAccountSettings(ctx, payer, currency)
 	if err != nil {
 		return 0, err
 	}
@@ -117,6 +121,7 @@ func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.Te
 type arrearsAccount struct {
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
+	Currency        string
 	Owed            int64
 	PaymentMethodID *uuid.UUID
 }
@@ -151,6 +156,7 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 		rows = append(rows, arrearsAccount{
 			TenantID:        r.TenantID,
 			TenantSubjectID: r.TenantSubjectID,
+			Currency:        r.Currency,
 			Owed:            r.OutstandingOwedMicros,
 			PaymentMethodID: r.AutoTopupPaymentMethodID,
 		})
@@ -203,7 +209,7 @@ func (s *MoneyService) chargeOneOutstanding(ctx context.Context, charger Charger
 		// Reduce owed by the snapshot (never below zero); CAS-style guard prevents a
 		// double-decrement if two runs race on the same snapshot.
 		n, uerr := q.ReduceMoneyOutstandingOwedSnapshot(ctx, gen.ReduceMoneyOutstandingOwedSnapshotParams{
-			TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID,
+			TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, Currency: normalizeCurrency(r.Currency),
 			Snapshot: snapshot, Now: now,
 		})
 		if uerr != nil {
@@ -216,7 +222,7 @@ func (s *MoneyService) chargeOneOutstanding(ctx context.Context, charger Charger
 
 		sid := key
 		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, Actor: r.TenantSubjectID.String(),
+			ID: uuidutil.NewV7(), TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, Currency: normalizeCurrency(r.Currency), Actor: r.TenantSubjectID.String(),
 			Amount: -snapshot, TransactionType: txOwedPayment, Status: "posted",
 			Source: "arrears_charge", SourceID: &sid, CreatedAt: now, UpdatedAt: now,
 		}

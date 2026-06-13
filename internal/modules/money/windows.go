@@ -46,6 +46,7 @@ const (
 type OpenWindowParams struct {
 	Payer     identity.TenantSubjectID
 	Actor     string // attribution; stamped on the ledger record
+	Currency  string // "" => DefaultCurrency (#472)
 	Amount    int64
 	ExpiresAt time.Time
 }
@@ -56,6 +57,7 @@ func creditWindowFromGen(r gen.BillingMoneyWindow) *models.MoneyWindow {
 		ID:              r.ID,
 		TenantID:        r.TenantID,
 		TenantSubjectID: r.TenantSubjectID,
+		Currency:        r.Currency,
 		HeldAmount:      r.HeldAmount,
 		SettledAmount:   r.SettledAmount,
 		Status:          r.Status,
@@ -83,6 +85,10 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 	if p.ExpiresAt.IsZero() {
 		return nil, fmt.Errorf("expires_at required")
 	}
+	cur := normalizeCurrency(p.Currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
+	}
 
 	var window *models.MoneyWindow
 	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -98,7 +104,7 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 			return err
 		}
 
-		bal, err := s.lockBalance(ctx, q, p.Payer, p.Actor)
+		bal, err := s.lockBalance(ctx, q, p.Payer, p.Actor, cur)
 		if err != nil {
 			return err
 		}
@@ -106,7 +112,7 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 			return ErrInsufficientCredits
 		}
 		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 			HeldBalance: bal.HeldBalance + p.Amount, UpdatedAt: now,
 		}); err != nil {
 			return err
@@ -117,6 +123,7 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 			ID:              uuidutil.NewV7(),
 			TenantID:        tenantID,
 			TenantSubjectID: payerID,
+			Currency:        cur,
 			HeldAmount:      p.Amount,
 			SettledAmount:   0,
 			Status:          "open",
@@ -125,7 +132,7 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 			UpdatedAt:       now,
 		}
 		if err := q.InsertMoneyWindow(ctx, gen.InsertMoneyWindowParams{
-			ID: w.ID, TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID,
+			ID: w.ID, TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID, Currency: w.Currency,
 			HeldAmount: w.HeldAmount, SettledAmount: w.SettledAmount,
 			Status: w.Status, ExpiresAt: w.ExpiresAt, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
 		}); err != nil {
@@ -154,6 +161,7 @@ func insertWindowRecordTx(ctx context.Context, q *gen.Queries, w *models.MoneyWi
 		ID:              uuidutil.NewV7(),
 		TenantID:        w.TenantID,
 		TenantSubjectID: w.TenantSubjectID,
+		Currency:        normalizeCurrency(w.Currency),
 		Actor:           actor,
 		Amount:          0,
 		TransactionType: txType,
@@ -246,11 +254,12 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 		w := creditWindowFromGen(wRow)
 		payer := identity.TenantSubjectID(w.TenantSubjectID)
 		actor := windowActor(item.Actor, w.TenantSubjectID)
+		cur := normalizeCurrency(w.Currency)
 
 		// Replay check FIRST (under the window lock) so a re-sent batch returns
 		// success even after the window has since closed/expired.
 		existing, derr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID,
+			TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID, Currency: cur,
 			TransactionType: "withdrawal", Source: windowSettleSource, SourceID: &res.RequestID,
 		})
 		if derr == nil {
@@ -271,7 +280,7 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 
 		// Capture mechanics: release this slice of the reservation, then debit the
 		// balance/FIFO blocks for it. Both target the payer's balance row.
-		bal, err := s.lockBalance(ctx, q, payer, actor)
+		bal, err := s.lockBalance(ctx, q, payer, actor, cur)
 		if err != nil {
 			return err
 		}
@@ -280,12 +289,12 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 			newHeld = 0
 		}
 		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID,
+			TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID, Currency: cur,
 			HeldBalance: newHeld, UpdatedAt: now,
 		}); err != nil {
 			return err
 		}
-		newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, actor, item.Amount)
+		newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, actor, cur, item.Amount)
 		if err != nil {
 			return err
 		}
@@ -301,6 +310,7 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 			ID:              uuidutil.NewV7(),
 			TenantID:        w.TenantID,
 			TenantSubjectID: w.TenantSubjectID,
+			Currency:        cur,
 			Actor:           actor,
 			Resource:        nilIfEmpty(strings.TrimSpace(item.Resource)),
 			Amount:          -item.Amount,
@@ -404,9 +414,10 @@ func (s *MoneyService) RefillWindow(ctx context.Context, windowID uuid.UUID, amo
 		}
 		payer := identity.TenantSubjectID(w.TenantSubjectID)
 		actor := w.TenantSubjectID.String()
+		cur := normalizeCurrency(w.Currency)
 
 		if amount > 0 {
-			bal, err := s.lockBalance(ctx, q, payer, actor)
+			bal, err := s.lockBalance(ctx, q, payer, actor, cur)
 			if err != nil {
 				return err
 			}
@@ -414,7 +425,7 @@ func (s *MoneyService) RefillWindow(ctx context.Context, windowID uuid.UUID, amo
 				return ErrInsufficientCredits
 			}
 			if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-				TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID,
+				TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID, Currency: cur,
 				HeldBalance: bal.HeldBalance + amount, UpdatedAt: now,
 			}); err != nil {
 				return err
@@ -473,9 +484,10 @@ func (s *MoneyService) CloseWindow(ctx context.Context, windowID uuid.UUID) (*mo
 			return nil
 		}
 		payer := identity.TenantSubjectID(w.TenantSubjectID)
+		cur := normalizeCurrency(w.Currency)
 
 		if remainder := w.HeldAmount - w.SettledAmount; remainder > 0 {
-			bal, err := s.lockBalance(ctx, q, payer, w.TenantSubjectID.String())
+			bal, err := s.lockBalance(ctx, q, payer, w.TenantSubjectID.String(), cur)
 			if err != nil {
 				return err
 			}
@@ -484,7 +496,7 @@ func (s *MoneyService) CloseWindow(ctx context.Context, windowID uuid.UUID) (*mo
 				newHeld = 0
 			}
 			if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-				TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID,
+				TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID, Currency: cur,
 				HeldBalance: newHeld, UpdatedAt: now,
 			}); err != nil {
 				return err
@@ -565,12 +577,13 @@ func (s *MoneyService) ExpireWindows(ctx context.Context, batchSize int) (int, e
 			type key struct {
 				TenantID        uuid.UUID
 				TenantSubjectID uuid.UUID
+				Currency        string
 			}
 			released := make(map[key]int64)
 			for i := range windows {
 				w := windows[i]
 				if rem := w.HeldAmount - w.SettledAmount; rem > 0 {
-					released[key{w.TenantID, w.TenantSubjectID}] += rem
+					released[key{w.TenantID, w.TenantSubjectID, normalizeCurrency(w.Currency)}] += rem
 				}
 				if err := q.SetMoneyWindowStatus(ctx, gen.SetMoneyWindowStatusParams{
 					ID: w.ID, Status: "expired", UpdatedAt: now,
@@ -580,7 +593,7 @@ func (s *MoneyService) ExpireWindows(ctx context.Context, batchSize int) (int, e
 			}
 			for k, amount := range released {
 				bal, err := q.LockMoneyBalance(ctx, gen.LockMoneyBalanceParams{
-					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID,
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, Currency: k.Currency,
 				})
 				if err != nil {
 					return err
@@ -590,7 +603,7 @@ func (s *MoneyService) ExpireWindows(ctx context.Context, batchSize int) (int, e
 					newHeld = 0
 				}
 				if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID,
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, Currency: k.Currency,
 					HeldBalance: newHeld, UpdatedAt: now,
 				}); err != nil {
 					return err

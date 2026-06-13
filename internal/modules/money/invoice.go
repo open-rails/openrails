@@ -101,7 +101,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Tenan
 
 		// --- money movements (ledger, by transaction_type) ---
 		movs, merr := q.SumMoneyMovementsInPeriodByPayer(ctx, gen.SumMoneyMovementsInPeriodByPayerParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: DefaultCurrency,
 			PeriodFrom: pfrom, PeriodTo: pto,
 		})
 		if merr != nil {
@@ -115,7 +115,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Tenan
 		// --- closing balance snapshot ---
 		var closing int64
 		bal, balErr := q.GetMoneyBalance(ctx, gen.GetMoneyBalanceParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: DefaultCurrency,
 		})
 		if balErr == nil {
 			closing = bal.Balance

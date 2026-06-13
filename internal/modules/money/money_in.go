@@ -43,6 +43,7 @@ type Alerter interface {
 type moneyInAccount struct {
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
+	Currency        string
 	Available       int64
 	Threshold       int64
 	AutoTopup       bool
@@ -69,6 +70,7 @@ func (s *MoneyService) belowThresholdAccounts(ctx context.Context) ([]moneyInAcc
 		out = append(out, moneyInAccount{
 			TenantID:        r.TenantID,
 			TenantSubjectID: r.TenantSubjectID,
+			Currency:        r.Currency,
 			Available:       r.Available,
 			Threshold:       r.Threshold,
 			AutoTopup:       r.AutoTopupEnabled,
@@ -161,7 +163,7 @@ func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r mone
 	depositSourceID := uuid.NewSHA1(uuid.Nil, []byte(episode))
 
 	// If this episode already deposited, we're done (idempotent).
-	existing, err := s.GetTransactionBySource(ctx, payer.UUID().String(), "deposit", "auto_topup", depositSourceID.String())
+	existing, err := s.GetTransactionBySource(ctx, payer.UUID().String(), r.Currency, "deposit", "auto_topup", depositSourceID.String())
 	if err == nil && existing != nil {
 		return false, nil
 	}
@@ -189,6 +191,7 @@ func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r mone
 	if _, err := s.Deposit(ctx, DepositParams{
 		TenantSubjectID:           &payer,
 		Actor:                     payer.UUID().String(),
+		Currency:                  r.Currency,
 		Amount:                    *r.TopupAmount * 10_000,
 		Source:                    "auto_topup",
 		SourceID:                  &depositSourceID,
@@ -207,11 +210,11 @@ func (s *MoneyService) stampMoneyInTimestamp(ctx context.Context, r moneyInAccou
 	switch column {
 	case "last_alert_at":
 		return s.db.Gen(ctx).StampMoneyAccountAlertAt(ctx, gen.StampMoneyAccountAlertAtParams{
-			TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, Now: &now,
+			TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, Currency: normalizeCurrency(r.Currency), Now: &now,
 		})
 	case "last_topup_at":
 		return s.db.Gen(ctx).StampMoneyAccountTopupAt(ctx, gen.StampMoneyAccountTopupAtParams{
-			TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, Now: &now,
+			TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, Currency: normalizeCurrency(r.Currency), Now: &now,
 		})
 	default:
 		return fmt.Errorf("money: unknown money-in timestamp column %q", column)

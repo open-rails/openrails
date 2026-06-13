@@ -698,7 +698,7 @@ func ServiceGetActorCredits(r *httprequest.Request) {
 		if !requireServiceTenantSubjectScope(r, *tenantSubjectID) {
 			return
 		}
-		bal, err := r.State.MoneyService.GetBalanceForTenantSubject(r.Request.Context(), *tenantSubjectID)
+		bal, err := r.State.MoneyService.GetBalanceForTenantSubject(r.Request.Context(), *tenantSubjectID, money.DefaultCurrency)
 		if err == nil {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance
@@ -742,7 +742,7 @@ func ServiceLookupCreditTransaction(r *httprequest.Request) {
 		transactionType = "hold"
 	}
 
-	trx, err := r.State.MoneyService.GetTransactionBySource(r.Request.Context(), actorID, transactionType, source, sourceID)
+	trx, err := r.State.MoneyService.GetTransactionBySource(r.Request.Context(), actorID, money.DefaultCurrency, transactionType, source, sourceID)
 	if err != nil {
 		if repo.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "not found")

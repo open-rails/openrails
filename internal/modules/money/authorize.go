@@ -21,6 +21,7 @@ import (
 type AuthorizeHoldInput struct {
 	Payer          identity.TenantSubjectID
 	Actor          string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
+	Currency       string // "" => DefaultCurrency (#472)
 	EstimateMicros int64
 	// Source + SourceID form the idempotency key for the placed hold (typically
 	// the request_id). A retry with the same coordinates returns the same hold.
@@ -72,6 +73,10 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 	if in.ExpiresAt.IsZero() {
 		return nil, fmt.Errorf("expires_at required")
 	}
+	cur := normalizeCurrency(in.Currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
+	}
 
 	var result *AuthorizeHoldResult
 	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -92,7 +97,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		// it as an allowed decision without re-evaluating (the original authorize
 		// already passed). Mirrors Hold's idempotency key.
 		existingRow, ierr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 			TransactionType: "hold", Source: in.Source, SourceID: &in.SourceID,
 		})
 		if ierr == nil {
@@ -100,7 +105,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			if merr != nil {
 				return merr
 			}
-			snap, serr := txSvc.snapshotTx(ctx, in.Payer)
+			snap, serr := txSvc.snapshotTx(ctx, in.Payer, cur)
 			if serr != nil {
 				return serr
 			}
@@ -119,13 +124,13 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 
 		// Lock the balance row FOR UPDATE up front: every subsequent read/decision in
 		// this tx is serialized behind it for the same (tenant, payer).
-		bal, lerr := txSvc.lockBalance(ctx, q, in.Payer, in.Payer.UUID().String())
+		bal, lerr := txSvc.lockBalance(ctx, q, in.Payer, in.Payer.UUID().String(), cur)
 		if lerr != nil {
 			return lerr
 		}
 		available := bal.Balance - bal.HeldBalance
 
-		settings, serr := txSvc.GetAccountSettings(ctx, in.Payer)
+		settings, serr := txSvc.getAccountSettings(ctx, in.Payer, cur)
 		if serr != nil {
 			return serr
 		}
@@ -160,7 +165,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		// Place the hold within the SAME tx + held lock.
 		amount := in.EstimateMicros
 		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 			HeldBalance: bal.HeldBalance + amount, UpdatedAt: now,
 		}); err != nil {
 			return err
@@ -173,6 +178,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			ID:              uuidutil.NewV7(),
 			TenantID:        tenantID,
 			TenantSubjectID: payerID,
+			Currency:        cur,
 			Actor:           strings.TrimSpace(in.Actor),
 			Amount:          0,
 			Source:          in.Source,
@@ -208,12 +214,13 @@ type accountSnapshot struct {
 }
 
 // snapshotTx reads the balance + settings snapshot using the (tx-scoped) service.
-func (s *MoneyService) snapshotTx(ctx context.Context, payer identity.TenantSubjectID) (accountSnapshot, error) {
-	bal, err := s.GetBalanceForTenantSubject(ctx, payer)
+func (s *MoneyService) snapshotTx(ctx context.Context, payer identity.TenantSubjectID, currency string) (accountSnapshot, error) {
+	cur := normalizeCurrency(currency)
+	bal, err := s.GetBalanceForTenantSubject(ctx, payer, cur)
 	if err != nil {
 		return accountSnapshot{}, err
 	}
-	settings, err := s.GetAccountSettings(ctx, payer)
+	settings, err := s.getAccountSettings(ctx, payer, cur)
 	if err != nil {
 		return accountSnapshot{}, err
 	}

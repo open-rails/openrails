@@ -46,11 +46,11 @@ func (s *MoneyService) SetPaymentMethodVerified(ctx context.Context, payer ident
 
 	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, BillingModePrepaid, now); err != nil {
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, DefaultCurrency, BillingModePrepaid, now); err != nil {
 			return err
 		}
 		return q.SetMoneyAccountPaymentVerified(ctx, gen.SetMoneyAccountPaymentVerifiedParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: DefaultCurrency,
 			Verified: verified, Now: now,
 		})
 	})
@@ -74,11 +74,11 @@ func (s *MoneyService) Suspend(ctx context.Context, payer identity.TenantSubject
 
 	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, BillingModePrepaid, now); err != nil {
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, DefaultCurrency, BillingModePrepaid, now); err != nil {
 			return err
 		}
 		return q.SuspendMoneyAccount(ctx, gen.SuspendMoneyAccountParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: DefaultCurrency,
 			Now: now, Reason: nilIfEmpty(reason),
 		})
 	})
@@ -100,11 +100,11 @@ func (s *MoneyService) Resume(ctx context.Context, payer identity.TenantSubjectI
 
 	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, BillingModePrepaid, now); err != nil {
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, DefaultCurrency, BillingModePrepaid, now); err != nil {
 			return err
 		}
 		return q.ResumeMoneyAccount(ctx, gen.ResumeMoneyAccountParams{
-			TenantID: tenantID, TenantSubjectID: payerID, UpdatedAt: now,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: DefaultCurrency, UpdatedAt: now,
 		})
 	})
 }

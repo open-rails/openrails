@@ -16,6 +16,7 @@ import (
 type HeldBalanceDrift struct {
 	TenantID        uuid.UUID `json:"tenant_id"`
 	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	Currency        string    `json:"currency"`
 	Stored          int64     `json:"stored_held_balance"`
 	Computed        int64     `json:"computed_held_balance"`
 }
@@ -24,6 +25,7 @@ type HeldBalanceDrift struct {
 type BalanceAnomaly struct {
 	TenantID        uuid.UUID `json:"tenant_id"`
 	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	Currency        string    `json:"currency"`
 	Balance         int64     `json:"balance"`
 	HeldBalance     int64     `json:"held_balance"`
 	Reason          string    `json:"reason"`
@@ -119,6 +121,7 @@ func (s *MoneyService) FindHeldBalanceDrift(ctx context.Context) ([]HeldBalanceD
 		out = append(out, HeldBalanceDrift{
 			TenantID:        r.TenantID,
 			TenantSubjectID: r.TenantSubjectID,
+			Currency:        r.Currency,
 			Stored:          r.Stored,
 			Computed:        r.Computed,
 		})
@@ -143,6 +146,7 @@ func (s *MoneyService) FindBalanceAnomalies(ctx context.Context) ([]BalanceAnoma
 		a := BalanceAnomaly{
 			TenantID:        r.TenantID,
 			TenantSubjectID: r.TenantSubjectID,
+			Currency:        r.Currency,
 			Balance:         r.Balance,
 			HeldBalance:     r.HeldBalance,
 		}
@@ -162,9 +166,13 @@ func (s *MoneyService) FindBalanceAnomalies(ctx context.Context) ([]BalanceAnoma
 // RepairHeldBalance recomputes held_balance for (payer, credit_type) from the sum
 // of active holds and writes it. This is the safe auto-repair for HeldBalanceDrift
 // (the active holds are the source of truth). Returns the corrected value.
-func (s *MoneyService) RepairHeldBalance(ctx context.Context, payer identity.TenantSubjectID) (int64, error) {
+func (s *MoneyService) RepairHeldBalance(ctx context.Context, payer identity.TenantSubjectID, currency string) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
+	}
+	cur := normalizeCurrency(currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return 0, err
 	}
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -172,12 +180,12 @@ func (s *MoneyService) RepairHeldBalance(ctx context.Context, payer identity.Ten
 	}
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
-	computed, err := s.activeHoldsTotal(ctx, tenantID, payerID)
+	computed, err := s.activeHoldsTotal(ctx, tenantID, payerID, cur)
 	if err != nil {
 		return 0, err
 	}
 	if err := s.db.Gen(ctx).SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-		TenantID: tenantID, TenantSubjectID: payerID,
+		TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 		HeldBalance: computed, UpdatedAt: s.now(),
 	}); err != nil {
 		return 0, err

@@ -29,6 +29,7 @@ import (
 type SpendParams struct {
 	Payer    *identity.TenantSubjectID
 	Actor    string
+	Currency string // "" => DefaultCurrency (#472)
 	Amount   int64
 	Source   string
 	SourceID string
@@ -47,6 +48,10 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 	}
 	params.Source = strings.TrimSpace(params.Source)
 	params.SourceID = strings.TrimSpace(params.SourceID)
+	cur := normalizeCurrency(params.Currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return err
+	}
 	payer, err := resolveTenantSubject(params.Payer, params.Actor)
 	if err != nil {
 		return err
@@ -56,7 +61,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 		q := gen.New(tx)
 
 		// Serialize per account and guard idempotency on the spend coordinates.
-		if _, err := s.lockBalance(ctx, q, payer, params.Actor); err != nil {
+		if _, err := s.lockBalance(ctx, q, payer, params.Actor, cur); err != nil {
 			return err
 		}
 		if params.SourceID != "" {
@@ -66,7 +71,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 			}
 			tenantID := tid.UUID()
 			existing, cerr := q.CountMoneySpendByCoords(ctx, gen.CountMoneySpendByCoordsParams{
-				TenantID: tenantID, TenantSubjectID: payer.UUID(),
+				TenantID: tenantID, TenantSubjectID: payer.UUID(), Currency: cur,
 				Source: params.Source, SourceID: &params.SourceID,
 			})
 			if cerr != nil {
@@ -77,7 +82,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 			}
 		}
 
-		_, _, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Actor, params.Source, params.SourceID, params.Amount)
+		_, _, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Actor, cur, params.Source, params.SourceID, params.Amount)
 		return serr
 	})
 }
@@ -89,12 +94,13 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 // Returns the balance-debit and owed-accrual transaction ids (either may be nil).
 func (s *MoneyService) spendBalanceThenOwedTx(
 	ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID,
-	userID, source, sourceID string, amount int64,
+	userID, currency, source, sourceID string, amount int64,
 ) (balanceTxnID, owedTxnID *uuid.UUID, err error) {
 	if amount <= 0 {
 		return nil, nil, fmt.Errorf("amount must be positive")
 	}
 	now := s.now()
+	cur := normalizeCurrency(currency)
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -102,7 +108,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
 
-	bal, err := s.lockBalance(ctx, q, payer, userID)
+	bal, err := s.lockBalance(ctx, q, payer, userID, cur)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -119,7 +125,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	// The remainder can only go to owed when the account has a credit line.
 	if fromOwed > 0 {
 		settingsRow, serr := q.LockMoneyAccountSettings(ctx, gen.LockMoneyAccountSettingsParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 		})
 		if errors.Is(serr, pgx.ErrNoRows) {
 			// No settings row => prepaid default => no credit line.
@@ -139,13 +145,13 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	}
 
 	if fromBalance > 0 {
-		if _, err := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, fromBalance); err != nil {
+		if _, err := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, cur, fromBalance); err != nil {
 			return nil, nil, err
 		}
 		newBal := bal.Balance - fromBalance
 		neg := -fromBalance
 		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Actor: userID,
+			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Currency: cur, Actor: userID,
 			Amount: neg, BalanceAfter: &newBal,
 			TransactionType: "withdrawal", Status: "posted",
 			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
@@ -158,13 +164,13 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 
 	if fromOwed > 0 {
 		if err := q.AddMoneyOutstandingOwed(ctx, gen.AddMoneyOutstandingOwedParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 			Amount: fromOwed, Now: now,
 		}); err != nil {
 			return nil, nil, err
 		}
 		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Actor: userID,
+			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Currency: cur, Actor: userID,
 			Amount: fromOwed, TransactionType: txOwedAccrual, Status: "posted",
 			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
 		}
@@ -191,8 +197,9 @@ func nullStr(s string) *string {
 // balance can't cover it. availableAfter is the available balance AFTER this
 // hold's reservation has been released. The capture is pre-authorized, so this
 // never re-gates. Returns the post-settlement balance.
-func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, userID string, amount, availableAfter int64) (int64, error) {
+func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, userID, currency string, amount, availableAfter int64) (int64, error) {
 	now := s.now()
+	cur := normalizeCurrency(currency)
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return 0, err
@@ -210,14 +217,14 @@ func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, paye
 
 	var newBal int64
 	if fromBalance > 0 {
-		nb, err := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, fromBalance)
+		nb, err := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, cur, fromBalance)
 		if err != nil {
 			return 0, err
 		}
 		newBal = nb
 	} else {
 		b, err := q.GetMoneyBalance(ctx, gen.GetMoneyBalanceParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 		})
 		if err != nil {
 			return 0, err
@@ -227,11 +234,11 @@ func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, paye
 
 	if fromOwed > 0 {
 		// Only reachable for an arrears credit line (a prepaid hold reserves balance).
-		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, BillingModeArrears, now); err != nil {
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModeArrears, now); err != nil {
 			return 0, err
 		}
 		if err := q.AddMoneyOutstandingOwed(ctx, gen.AddMoneyOutstandingOwedParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 			Amount: fromOwed, Now: now,
 		}); err != nil {
 			return 0, err

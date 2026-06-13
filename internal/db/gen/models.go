@@ -315,7 +315,7 @@ type BillingLinkedWallet struct {
 	UpdatedAt            time.Time
 }
 
-// Per-(tenant, tenant subject) money spend policy + money-in config. amounts are micro-dollars (µ$ = 1e-6 USD). Tensorhub SETS these; OpenRails STORES + ENFORCES them.
+// Per-(tenant, tenant subject, currency) money spend policy + money-in config. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD). Tensorhub SETS these; OpenRails STORES + ENFORCES them.
 type BillingMoneyAccount struct {
 	ID                        uuid.UUID
 	TenantID                  uuid.UUID
@@ -343,9 +343,11 @@ type BillingMoneyAccount struct {
 	SuspendedAt   *time.Time
 	SuspendReason *string
 	Tier          *string
+	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
+	Currency string
 }
 
-// amounts are micro-dollars (µ$ = 1e-6 USD).
+// amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
 type BillingMoneyBalance struct {
 	ID              uuid.UUID
 	Balance         int64
@@ -354,9 +356,11 @@ type BillingMoneyBalance struct {
 	UpdatedAt       time.Time
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
+	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
+	Currency string
 }
 
-// amounts are micro-dollars (µ$ = 1e-6 USD).
+// amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
 type BillingMoneyBlock struct {
 	ID                  uuid.UUID
 	OriginalAmount      int64
@@ -366,9 +370,11 @@ type BillingMoneyBlock struct {
 	CreatedAt           time.Time
 	TenantID            uuid.UUID
 	TenantSubjectID     uuid.UUID
+	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
+	Currency string
 }
 
-// Optional per-actor money spend caps for a tenant subject. amounts are micro-dollars (µ$ = 1e-6 USD). actor is a caller-supplied opaque principal string.
+// Optional per-(actor, currency) money spend caps for a tenant subject. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD). actor is a caller-supplied opaque principal string.
 type BillingMoneySpendLimit struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
@@ -379,9 +385,11 @@ type BillingMoneySpendLimit struct {
 	MaxSpendPerMonthMicros *int64
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
+	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
+	Currency string
 }
 
-// amounts are micro-dollars (µ$ = 1e-6 USD).
+// amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
 type BillingMoneyTransaction struct {
 	ID uuid.UUID
 	// Caller-supplied principal string (e.g. a username slug) that caused this charge. Opaque to OpenRails; used as the per-actor spend-cap grouping key and as attribution.
@@ -404,9 +412,11 @@ type BillingMoneyTransaction struct {
 	UpdatedAt        time.Time
 	TenantID         uuid.UUID
 	TenantSubjectID  uuid.UUID
+	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority. amount is this currency's minor unit.
+	Currency string
 }
 
-// Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. amounts are micro-dollars (µ$ = 1e-6 USD).
+// Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
 type BillingMoneyWindow struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
@@ -419,6 +429,8 @@ type BillingMoneyWindow struct {
 	ExpiresAt     time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
+	Currency string
 }
 
 // Queue for user notifications related to billing and subscriptions
