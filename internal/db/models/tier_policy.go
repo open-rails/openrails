@@ -29,9 +29,34 @@ type TierPolicy struct {
 // and rolling money-budget windows (#304, e.g. $2/4h, $5/week). Endpoint gating
 // denies a request whose model is not entitled (#298).
 type ThroughputPolicy struct {
+	// Windows is the DEFAULT throughput window list, applied to any
+	// endpoint-release without a per-release override (#472 G1).
 	Windows           []ThroughputWindow   `json:"windows"`
 	EntitledResources []string             `json:"entitled_resources,omitempty"`
 	BudgetWindows     []BudgetWindowPolicy `json:"budget_windows,omitempty"`
+
+	// ReleaseWindows holds per-(endpoint-release) throughput window VALUES (#472
+	// G1): the map key is the endpoint-release uuid (the host's releaseID, never a
+	// name). A release present here uses ITS windows; a release absent falls back
+	// to the default Windows above. This is how two releases under one payer carry
+	// different RPM/TPM/IPM/VPM.
+	ReleaseWindows map[string][]ThroughputWindow `json:"release_windows,omitempty"`
+
+	// QueueLimits are the batch/queue reservation-pool caps (#472 G2): each is a
+	// {unit, max} pool (NO time window) keyed per (payer, endpoint-release). The
+	// admit ACQUIRES the request's units on enqueue and the settle RELEASES them
+	// on completion; deny with BlockedBy="queue" when the in-flight sum would
+	// exceed max. tensorhub's instance is the count form (unit="request").
+	QueueLimits []QueueLimitPolicy `json:"queue_limits,omitempty"`
+}
+
+// QueueLimitPolicy is one batch/queue reservation-pool cap (#472 G2): at most
+// Max units of Unit may be IN-FLIGHT (reserved-but-not-yet-completed) at once
+// per (payer, endpoint-release). Unlike ThroughputWindow this is NOT a time
+// window — units are held while a job is pending and released on completion.
+type QueueLimitPolicy struct {
+	Unit string `json:"unit"` // "request" (count form, weight 1) | "token" | ...
+	Max  int64  `json:"max"`
 }
 
 // BudgetWindowPolicy is one rolling money-budget window for a tier (#304): at

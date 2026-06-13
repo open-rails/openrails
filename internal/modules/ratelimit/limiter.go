@@ -21,8 +21,12 @@ import (
 
 // Limit is one fixed-window throughput limit: at most Max units of Unit per Window.
 type Limit struct {
-	Unit   string        // "request" (default), "token", "image", "gpu_second", ...
-	Window time.Duration // e.g. time.Minute (RPM/TPM), 24h (RPD/TPD)
+	// Unit is any arbitrary unit string: "request" (default; RPM/RPD), "token"
+	// (TPM/TPD), "image" (IPM), "video" (VPM), "gpu_second", ... — "per minute"
+	// vs "per day" is just Window. The whichever-window-first deny means RPM+TPM
+	// (or any mix, incl. images/min + videos/min) compose for free (#472).
+	Unit   string        // "request" (default), "token", "image", "video", "gpu_second", ...
+	Window time.Duration // e.g. time.Minute (RPM/TPM/IPM/VPM), 24h (RPD/TPD)
 	Max    int64
 }
 
