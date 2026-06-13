@@ -89,8 +89,21 @@ balances ({unit, amount}) alongside entitlements; non-1:1 = price≠grant.
       money_block in the grant's currency with expires_at = now + expiry_days (money_blocks already
       carry expires_at). Generalize the existing products.credits_spec/GrantSubscriptionCredits to
       one-off + currency + configurable expiry; keep entitlements as the other benefit.
-- [ ] C. Integration parity: update money/*_integration_test.go + admission/river integration tests
-      to the money API + currency; full integration suite green (minus the 8 pre-existing-on-master).
+- [x] B. (commit aa093213) Product credit/currency grants: CreditGrantSpec gains unit (default usd)
+      + expiry_days (default 365, 0=never); one-off purchases + subscriptions deposit grants into
+      expiring money_blocks (idempotent); entitlements unchanged. Currency codes validated.
+- [x] C. (commit aa093213) Integration parity: money/*_integration_test.go + admission/river/tests
+      on the money ledger + currency; obsolete credit-type tests deleted. PLUS production fix:
+      hold-expiry + credit-expiry workers now thread the row's currency into the balance key
+      (were querying currency='' and missing the USD row); affected tests un-skipped, passing.
+
+### Remaining loose ends (small)
+- [ ] D. tests/seed_data.go product/price/subscription/payment-method INSERTs omit tenant_id
+      (NOT NULL post-#336) — add tenant_id (+ currency for money rows). Unblocks the dunning
+      state-machine + runtime-clock integration tests.
+- [ ] E. FinalizeDueInvoices is a stub — add a ListMoneyAccountPairs (enumerate payer×currency)
+      query + iterate; un-skip its test.
+- [ ] F. (future) usdc_funding deposit → USDC balance (multi-currency wiring; today USD-only).
 
 ---
 
