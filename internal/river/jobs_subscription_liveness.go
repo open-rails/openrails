@@ -13,8 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -166,14 +166,14 @@ func (w *SubscriptionLivenessWorker) Work(ctx context.Context, job *river.Job[Su
 	// nmi_delete intent for it would only generate verify noise.
 	lifecycleRemoteGone := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService, w.Clock)
 	lifecycleRemoteGone.SetConfig(w.Config)
-	creditsSvc := credits.NewCreditsService(w.DB, w.Clock)
+	moneySvc := money.NewMoneyService(w.DB, w.Clock)
 
 	deps := &livenessDeps{
 		lifecycle:           lifecycle,
 		lifecycleRemoteGone: lifecycleRemoteGone,
 		priceSvc:            priceSvc,
 		productSvc:          productSvc,
-		creditsSvc:          creditsSvc,
+		moneySvc:            moneySvc,
 	}
 
 	log.WithContext(ctx).WithField("count", len(cohort)).Info("Liveness: probing silent lapsed subscriptions")
@@ -226,7 +226,7 @@ type livenessDeps struct {
 	lifecycleRemoteGone *subscriptions.SubscriptionLifecycleService
 	priceSvc            *catalog.PriceService
 	productSvc          *catalog.ProductService
-	creditsSvc          *credits.CreditsService
+	moneySvc            *money.MoneyService
 }
 
 func (w *SubscriptionLivenessWorker) processSubscription(ctx context.Context, sub *models.Subscription, deps *livenessDeps) livenessOutcome {
@@ -489,11 +489,11 @@ func (w *SubscriptionLivenessWorker) repairChargedPeriod(
 
 	// Per-renewal credits mirror the dunning worker's post-renew grant:
 	// failures are logged, never fatal — the renewal is the money part.
-	if deps.creditsSvc != nil {
+	if deps.moneySvc != nil {
 		if updated, err := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID); err != nil {
 			logEntry.WithError(err).Warn("Liveness: load subscription after repair for credit grants")
 		} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
-			if err := deps.creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+			if err := deps.moneySvc.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 				SubscriptionID: sub.ID,
 				PeriodEnd:      updated.CurrentPeriodEndsAt.UTC(),
 				Cadence:        models.CreditGrantCadencePerRenewal,

@@ -19,9 +19,11 @@ import (
 var tenantOwnedTables = []string{
 	"products", "prices", "catalog_drift_events", "payment_methods",
 	"subscriptions", "entitlements", "payments", "admin_grants",
-	"notification_queue", "processor_customers", "credit_types",
-	"credit_transactions", "credit_blocks", "credit_balances",
+	"notification_queue", "processor_customers",
 	"checkout_sessions", "provider_intents",
+	// money ledger: blocks reference transactions, so purge blocks first (FK-safe).
+	"money_accounts", "money_balances", "money_blocks", "money_transactions",
+	"money_windows", "money_spend_limits",
 }
 
 // countTenantRows dispatches to the table's generated count query.
@@ -47,18 +49,22 @@ func countTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.CountTenantRowsNotificationQueue(ctx, id)
 	case "processor_customers":
 		return q.CountTenantRowsProcessorCustomers(ctx, id)
-	case "credit_types":
-		return q.CountTenantRowsCreditTypes(ctx, id)
-	case "credit_transactions":
-		return q.CountTenantRowsCreditTransactions(ctx, id)
-	case "credit_blocks":
-		return q.CountTenantRowsCreditBlocks(ctx, id)
-	case "credit_balances":
-		return q.CountTenantRowsCreditBalances(ctx, id)
 	case "checkout_sessions":
 		return q.CountTenantRowsCheckoutSessions(ctx, id)
 	case "provider_intents":
 		return q.CountTenantRowsProviderIntents(ctx, id)
+	case "money_accounts":
+		return q.CountTenantRowsMoneyAccounts(ctx, id)
+	case "money_balances":
+		return q.CountTenantRowsMoneyBalances(ctx, id)
+	case "money_blocks":
+		return q.CountTenantRowsMoneyBlocks(ctx, id)
+	case "money_transactions":
+		return q.CountTenantRowsMoneyTransactions(ctx, id)
+	case "money_windows":
+		return q.CountTenantRowsMoneyWindows(ctx, id)
+	case "money_spend_limits":
+		return q.CountTenantRowsMoneySpendLimits(ctx, id)
 	default:
 		return 0, fmt.Errorf("tenancy: no count query for table %q", table)
 	}
@@ -87,18 +93,22 @@ func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.PurgeTenantRowsNotificationQueue(ctx, id)
 	case "processor_customers":
 		return q.PurgeTenantRowsProcessorCustomers(ctx, id)
-	case "credit_types":
-		return q.PurgeTenantRowsCreditTypes(ctx, id)
-	case "credit_transactions":
-		return q.PurgeTenantRowsCreditTransactions(ctx, id)
-	case "credit_blocks":
-		return q.PurgeTenantRowsCreditBlocks(ctx, id)
-	case "credit_balances":
-		return q.PurgeTenantRowsCreditBalances(ctx, id)
 	case "checkout_sessions":
 		return q.PurgeTenantRowsCheckoutSessions(ctx, id)
 	case "provider_intents":
 		return q.PurgeTenantRowsProviderIntents(ctx, id)
+	case "money_accounts":
+		return q.PurgeTenantRowsMoneyAccounts(ctx, id)
+	case "money_balances":
+		return q.PurgeTenantRowsMoneyBalances(ctx, id)
+	case "money_blocks":
+		return q.PurgeTenantRowsMoneyBlocks(ctx, id)
+	case "money_transactions":
+		return q.PurgeTenantRowsMoneyTransactions(ctx, id)
+	case "money_windows":
+		return q.PurgeTenantRowsMoneyWindows(ctx, id)
+	case "money_spend_limits":
+		return q.PurgeTenantRowsMoneySpendLimits(ctx, id)
 	default:
 		return fmt.Errorf("tenancy: no purge query for table %q", table)
 	}

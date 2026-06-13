@@ -8,18 +8,18 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 )
 
-func (s *Service) creditsService() *credits.CreditsService {
+func (s *Service) moneyService() *money.MoneyService {
 	if s == nil || s.rt == nil {
 		return nil
 	}
-	return s.rt.CreditsService
+	return s.rt.MoneyService
 }
 
 func (s *Service) entitlementService() *entitlements.EntitlementService {
@@ -34,17 +34,6 @@ func (s *Service) runtime() (*app.Runtime, error) {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}
 	return s.rt, nil
-}
-
-func (s *Service) requireCreditTypeService() (*credits.CreditTypeService, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	if rt.CreditTypeService == nil {
-		return nil, fmt.Errorf("billing service: credit type service unavailable")
-	}
-	return rt.CreditTypeService, nil
 }
 
 func (s *Service) requireProductService() (*catalog.ProductService, error) {

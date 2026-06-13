@@ -44,56 +44,78 @@ func (q *Queries) CountTenantRowsCheckoutSessions(ctx context.Context, tenantID 
 	return count, err
 }
 
-const countTenantRowsCreditBalances = `-- name: CountTenantRowsCreditBalances :one
-SELECT count(*) FROM openrails.credit_balances WHERE tenant_id = $1
-`
-
-func (q *Queries) CountTenantRowsCreditBalances(ctx context.Context, tenantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countTenantRowsCreditBalances, tenantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countTenantRowsCreditBlocks = `-- name: CountTenantRowsCreditBlocks :one
-SELECT count(*) FROM openrails.credit_blocks WHERE tenant_id = $1
-`
-
-func (q *Queries) CountTenantRowsCreditBlocks(ctx context.Context, tenantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countTenantRowsCreditBlocks, tenantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countTenantRowsCreditTransactions = `-- name: CountTenantRowsCreditTransactions :one
-SELECT count(*) FROM openrails.credit_transactions WHERE tenant_id = $1
-`
-
-func (q *Queries) CountTenantRowsCreditTransactions(ctx context.Context, tenantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countTenantRowsCreditTransactions, tenantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countTenantRowsCreditTypes = `-- name: CountTenantRowsCreditTypes :one
-SELECT count(*) FROM openrails.credit_types WHERE tenant_id = $1
-`
-
-func (q *Queries) CountTenantRowsCreditTypes(ctx context.Context, tenantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countTenantRowsCreditTypes, tenantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countTenantRowsEntitlements = `-- name: CountTenantRowsEntitlements :one
 SELECT count(*) FROM openrails.entitlements WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsEntitlements(ctx context.Context, tenantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countTenantRowsEntitlements, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTenantRowsMoneyAccounts = `-- name: CountTenantRowsMoneyAccounts :one
+SELECT count(*) FROM openrails.money_accounts WHERE tenant_id = $1
+`
+
+func (q *Queries) CountTenantRowsMoneyAccounts(ctx context.Context, tenantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countTenantRowsMoneyAccounts, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTenantRowsMoneyBalances = `-- name: CountTenantRowsMoneyBalances :one
+SELECT count(*) FROM openrails.money_balances WHERE tenant_id = $1
+`
+
+func (q *Queries) CountTenantRowsMoneyBalances(ctx context.Context, tenantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countTenantRowsMoneyBalances, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTenantRowsMoneyBlocks = `-- name: CountTenantRowsMoneyBlocks :one
+SELECT count(*) FROM openrails.money_blocks WHERE tenant_id = $1
+`
+
+func (q *Queries) CountTenantRowsMoneyBlocks(ctx context.Context, tenantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countTenantRowsMoneyBlocks, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTenantRowsMoneySpendLimits = `-- name: CountTenantRowsMoneySpendLimits :one
+SELECT count(*) FROM openrails.money_spend_limits WHERE tenant_id = $1
+`
+
+func (q *Queries) CountTenantRowsMoneySpendLimits(ctx context.Context, tenantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countTenantRowsMoneySpendLimits, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTenantRowsMoneyTransactions = `-- name: CountTenantRowsMoneyTransactions :one
+SELECT count(*) FROM openrails.money_transactions WHERE tenant_id = $1
+`
+
+func (q *Queries) CountTenantRowsMoneyTransactions(ctx context.Context, tenantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countTenantRowsMoneyTransactions, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTenantRowsMoneyWindows = `-- name: CountTenantRowsMoneyWindows :one
+SELECT count(*) FROM openrails.money_windows WHERE tenant_id = $1
+`
+
+func (q *Queries) CountTenantRowsMoneyWindows(ctx context.Context, tenantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countTenantRowsMoneyWindows, tenantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -219,48 +241,66 @@ func (q *Queries) PurgeTenantRowsCheckoutSessions(ctx context.Context, tenantID 
 	return err
 }
 
-const purgeTenantRowsCreditBalances = `-- name: PurgeTenantRowsCreditBalances :exec
-DELETE FROM openrails.credit_balances WHERE tenant_id = $1
-`
-
-func (q *Queries) PurgeTenantRowsCreditBalances(ctx context.Context, tenantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeTenantRowsCreditBalances, tenantID)
-	return err
-}
-
-const purgeTenantRowsCreditBlocks = `-- name: PurgeTenantRowsCreditBlocks :exec
-DELETE FROM openrails.credit_blocks WHERE tenant_id = $1
-`
-
-func (q *Queries) PurgeTenantRowsCreditBlocks(ctx context.Context, tenantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeTenantRowsCreditBlocks, tenantID)
-	return err
-}
-
-const purgeTenantRowsCreditTransactions = `-- name: PurgeTenantRowsCreditTransactions :exec
-DELETE FROM openrails.credit_transactions WHERE tenant_id = $1
-`
-
-func (q *Queries) PurgeTenantRowsCreditTransactions(ctx context.Context, tenantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeTenantRowsCreditTransactions, tenantID)
-	return err
-}
-
-const purgeTenantRowsCreditTypes = `-- name: PurgeTenantRowsCreditTypes :exec
-DELETE FROM openrails.credit_types WHERE tenant_id = $1
-`
-
-func (q *Queries) PurgeTenantRowsCreditTypes(ctx context.Context, tenantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeTenantRowsCreditTypes, tenantID)
-	return err
-}
-
 const purgeTenantRowsEntitlements = `-- name: PurgeTenantRowsEntitlements :exec
 DELETE FROM openrails.entitlements WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsEntitlements(ctx context.Context, tenantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeTenantRowsEntitlements, tenantID)
+	return err
+}
+
+const purgeTenantRowsMoneyAccounts = `-- name: PurgeTenantRowsMoneyAccounts :exec
+DELETE FROM openrails.money_accounts WHERE tenant_id = $1
+`
+
+func (q *Queries) PurgeTenantRowsMoneyAccounts(ctx context.Context, tenantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeTenantRowsMoneyAccounts, tenantID)
+	return err
+}
+
+const purgeTenantRowsMoneyBalances = `-- name: PurgeTenantRowsMoneyBalances :exec
+DELETE FROM openrails.money_balances WHERE tenant_id = $1
+`
+
+func (q *Queries) PurgeTenantRowsMoneyBalances(ctx context.Context, tenantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeTenantRowsMoneyBalances, tenantID)
+	return err
+}
+
+const purgeTenantRowsMoneyBlocks = `-- name: PurgeTenantRowsMoneyBlocks :exec
+DELETE FROM openrails.money_blocks WHERE tenant_id = $1
+`
+
+func (q *Queries) PurgeTenantRowsMoneyBlocks(ctx context.Context, tenantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeTenantRowsMoneyBlocks, tenantID)
+	return err
+}
+
+const purgeTenantRowsMoneySpendLimits = `-- name: PurgeTenantRowsMoneySpendLimits :exec
+DELETE FROM openrails.money_spend_limits WHERE tenant_id = $1
+`
+
+func (q *Queries) PurgeTenantRowsMoneySpendLimits(ctx context.Context, tenantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeTenantRowsMoneySpendLimits, tenantID)
+	return err
+}
+
+const purgeTenantRowsMoneyTransactions = `-- name: PurgeTenantRowsMoneyTransactions :exec
+DELETE FROM openrails.money_transactions WHERE tenant_id = $1
+`
+
+func (q *Queries) PurgeTenantRowsMoneyTransactions(ctx context.Context, tenantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeTenantRowsMoneyTransactions, tenantID)
+	return err
+}
+
+const purgeTenantRowsMoneyWindows = `-- name: PurgeTenantRowsMoneyWindows :exec
+DELETE FROM openrails.money_windows WHERE tenant_id = $1
+`
+
+func (q *Queries) PurgeTenantRowsMoneyWindows(ctx context.Context, tenantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeTenantRowsMoneyWindows, tenantID)
 	return err
 }
 

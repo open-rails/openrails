@@ -29,73 +29,64 @@ func GetMyCredits(r *httprequest.Request) {
 		return
 	}
 
-	// The payer's balance rows are keyed by tenant_subject_id — the user's own
-	// personal tenant-subject UUID for self-service identities. (The bun-era
-	// query joined on a nonexistent credit_balances.user_id column and errored.)
-	payerID := identity.TenantSubjectIDFromString(user.ID).UUID()
-	rows, err := r.State.DB.Gen(r.Request.Context()).ListActiveCreditTypesWithBalance(r.Request.Context(), payerID)
+	// #472: one universal µ$ wallet, no credit_type dimension. Return the single
+	// money balance for the caller's own tenant-subject.
+	bal, err := r.State.MoneyService.GetBalance(r.Request.Context(), user.ID)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load credits")
 		return
 	}
 
-	resp := make([]creditBalanceResponse, 0, len(rows))
-	for _, row := range rows {
-		resp = append(resp, creditBalanceResponse{
-			Type:          row.Name,
-			DisplayName:   row.DisplayName,
-			Unit:          row.Unit,
-			DecimalPlaces: int(row.DecimalPlaces),
-			Balance:       derefInt64(row.Balance),
-			HeldBalance:   derefInt64(row.HeldBalance),
-		})
-	}
-
-	r.SuccessJSON(resp)
+	r.SuccessJSON([]creditBalanceResponse{{
+		Type:          moneyBalanceType,
+		DisplayName:   moneyBalanceDisplayName,
+		Unit:          moneyBalanceUnit,
+		DecimalPlaces: moneyBalanceDecimals,
+		Balance:       bal.Balance,
+		HeldBalance:   bal.HeldBalance,
+	}})
 }
 
+// money*Balance descriptors: the fixed unit metadata for the universal µ$ wallet
+// (#472 — money has no credit_type dimension).
+const (
+	moneyBalanceType        = "usd_micro"
+	moneyBalanceDisplayName = "USD"
+	moneyBalanceUnit        = "usd_micro"
+	moneyBalanceDecimals    = 6
+)
+
+// GetMyCreditsType returns the caller's money balance (#472: the :type param is
+// vestigial — money is the only unit).
 func GetMyCreditsType(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
-	creditType := strings.TrimSpace(r.Param("type"))
-	if creditType == "" {
-		r.ErrorJSON(http.StatusBadRequest, "credit type required")
-		return
-	}
 
-	bal, err := r.State.CreditsService.GetBalance(r.Request.Context(), user.ID, creditType)
+	bal, err := r.State.MoneyService.GetBalance(r.Request.Context(), user.ID)
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "credit type not found")
-		return
-	}
-	ct, err := r.State.CreditsService.GetCreditTypeByName(r.Request.Context(), creditType)
-	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "credit type not found")
+		r.ErrorJSON(http.StatusNotFound, "balance not found")
 		return
 	}
 
 	r.SuccessJSON(creditBalanceResponse{
-		Type:          creditType,
-		DisplayName:   ct.DisplayName,
-		Unit:          ct.Unit,
-		DecimalPlaces: ct.DecimalPlaces,
+		Type:          moneyBalanceType,
+		DisplayName:   moneyBalanceDisplayName,
+		Unit:          moneyBalanceUnit,
+		DecimalPlaces: moneyBalanceDecimals,
 		Balance:       bal.Balance,
 		HeldBalance:   bal.HeldBalance,
 	})
 }
 
+// GetMyCreditTransactions lists the caller's money transactions (#472: the :type
+// param is vestigial — money is the only unit).
 func GetMyCreditTransactions(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
-		return
-	}
-	creditType := strings.TrimSpace(r.Param("type"))
-	if creditType == "" {
-		r.ErrorJSON(http.StatusBadRequest, "credit type required")
 		return
 	}
 
@@ -108,7 +99,7 @@ func GetMyCreditTransactions(r *httprequest.Request) {
 		offset = 0
 	}
 
-	items, total, err := r.State.CreditsService.GetTransactions(r.Request.Context(), user.ID, creditType, limit, offset)
+	items, total, err := r.State.MoneyService.GetTransactions(r.Request.Context(), user.ID, limit, offset)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load transactions")
 		return
@@ -273,11 +264,4 @@ func GetMyInvoice(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(inv)
-}
-
-func derefInt64(v *int64) int64 {
-	if v == nil {
-		return 0
-	}
-	return *v
 }

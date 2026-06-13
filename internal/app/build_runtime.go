@@ -34,9 +34,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
@@ -331,8 +331,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		CheckoutService:          serviceInstances.CheckoutService,
 		CheckoutSessionService:   serviceInstances.CheckoutSessionService,
 		CardAbuseGuard:           cardAbuseGuard,
-		CreditsService:           serviceInstances.CreditsService,
-		CreditTypeService:        serviceInstances.CreditTypeService,
+		MoneyService:             serviceInstances.MoneyService,
 		ProcessorCustomerService: serviceInstances.ProcessorCustomerService,
 	}
 
@@ -686,8 +685,7 @@ type servicesInstances struct {
 
 	CheckoutService          *checkout.CheckoutService
 	CheckoutSessionService   *checkout.CheckoutSessionService
-	CreditsService           *credits.CreditsService
-	CreditTypeService        *credits.CreditTypeService
+	MoneyService             *money.MoneyService
 	ProcessorCustomerService *payments.ProcessorCustomerService
 }
 
@@ -701,8 +699,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	entitlementService := entitlements.NewEntitlementService(database, clock)
 	featureService := entitlements.NewFeatureService(database, clock)
 	productAccessService := productaccess.NewService(database, clock)
-	creditsService := credits.NewCreditsService(database, clock)
-	creditTypeService := credits.NewCreditTypeService(database)
+	moneyService := money.NewMoneyService(database, clock)
 	processorCustomerService := payments.NewProcessorCustomerService(database)
 	profileRepo := repo.NewProfileRepo(database)
 
@@ -796,7 +793,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		ProcessorCustomerService:     processorCustomerService,
 		CCBillRESTClient:             ccbillRESTClient,
 		NMIClients:                   nmiClients,
-		CreditsService:               creditsService,
+		MoneyService:                 moneyService,
 	}
 
 	// Create checkout service for unified checkout endpoint
@@ -877,8 +874,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		WebhookDispatcher:            webhookDispatcher,
 		CheckoutService:              checkoutService,
 		CheckoutSessionService:       checkoutSessionService,
-		CreditsService:               creditsService,
-		CreditTypeService:            creditTypeService,
+		MoneyService:                 moneyService,
 		ProcessorCustomerService:     processorCustomerService,
 	}
 }

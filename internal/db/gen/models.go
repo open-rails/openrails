@@ -249,126 +249,6 @@ type BillingCheckoutSession struct {
 	TenantSubjectID uuid.UUID
 }
 
-// Per-(tenant, tenant subject, credit_type) spend policy + money-in config (issue #237). Tensorhub SETS these; OpenRails STORES + ENFORCES them.
-type BillingCreditAccountSetting struct {
-	ID                        uuid.UUID
-	TenantID                  uuid.UUID
-	TenantSubjectID           uuid.UUID
-	CreditTypeID              uuid.UUID
-	BillingMode               string
-	MaxSpendPerDayMicros      *int64
-	MaxSpendPerMonthMicros    *int64
-	MaxOutstandingOwedMicros  *int64
-	LowBalanceThresholdMicros *int64
-	AutoTopupEnabled          bool
-	AutoTopupAmountCents      *int64
-	AutoTopupPaymentMethodID  *uuid.UUID
-	DefaultCreditExpiryDays   *int32
-	HardStopOnBreach          bool
-	AlertThresholdPct         int32
-	OutstandingOwedMicros     int64
-	LastAlertAt               *time.Time
-	LastTopupAt               *time.Time
-	CreatedAt                 time.Time
-	UpdatedAt                 time.Time
-	// True once the account has a verified payment method (set after a successful $1 auth-and-void verification charge — issue #299). The charge itself is a separate slice.
-	VerifiedPaymentMethod bool
-	VerifiedAt            *time.Time
-	// When set, the account is suspended (issue #299). Admission-deny-on-suspended wiring is a separate slice.
-	SuspendedAt   *time.Time
-	SuspendReason *string
-	Tier          *string
-}
-
-type BillingCreditBalance struct {
-	ID              uuid.UUID
-	CreditTypeID    uuid.UUID
-	Balance         int64
-	HeldBalance     int64
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-}
-
-type BillingCreditBlock struct {
-	ID                  uuid.UUID
-	CreditTypeID        uuid.UUID
-	OriginalAmount      int64
-	RemainingAmount     int64
-	ExpiresAt           *time.Time
-	SourceTransactionID *uuid.UUID
-	CreatedAt           time.Time
-	TenantID            uuid.UUID
-	TenantSubjectID     uuid.UUID
-}
-
-// Optional per-actor spend caps for a tenant subject (issue #237/#246). actor is a caller-supplied opaque principal string.
-type BillingCreditSpendLimit struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	CreditTypeID    uuid.UUID
-	// Caller-supplied principal string whose spend is capped by this row. Opaque to OpenRails.
-	Actor                  string
-	MaxSpendPerDayMicros   *int64
-	MaxSpendPerMonthMicros *int64
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
-}
-
-type BillingCreditTransaction struct {
-	ID uuid.UUID
-	// Caller-supplied principal string (e.g. a username slug) that caused this charge. Opaque to OpenRails; used as the per-actor spend-cap grouping key and as attribution.
-	Actor string
-	// Caller-supplied free-form string for what the charge was for (charge-A was for resource-B). Opaque to OpenRails; nullable.
-	Resource *string
-	// Optional caller-supplied long-tail attribution. Opaque to OpenRails; joins use source/source_id, never these.
-	Metadata         []byte
-	CreditTypeID     uuid.UUID
-	Amount           int64
-	BalanceAfter     *int64
-	TransactionType  string
-	Source           string
-	SourceID         *string
-	ExpiresAt        *time.Time
-	Description      *string
-	Status           string
-	AuthorizedAmount *int64
-	CapturedAmount   *int64
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	TenantID         uuid.UUID
-	TenantSubjectID  uuid.UUID
-}
-
-type BillingCreditType struct {
-	ID            uuid.UUID
-	Name          string
-	DisplayName   string
-	Unit          string
-	DecimalPlaces int32
-	IsActive      bool
-	CreatedAt     time.Time
-	TenantID      uuid.UUID
-}
-
-// Prepaid credit windows (issue #335): one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry.
-type BillingCreditWindow struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	CreditTypeID    uuid.UUID
-	// Total reserved for this window (open + refills). Reflected in credit_balances.held_balance while status=open.
-	HeldAmount int64
-	// Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.
-	SettledAmount int64
-	Status        string
-	ExpiresAt     time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-}
-
 type BillingEntitlement struct {
 	ID           uuid.UUID
 	Entitlement  string
@@ -399,12 +279,11 @@ type BillingEntitlementFeature struct {
 	UpdatedAt time.Time
 }
 
-// Monthly itemized statements (issue #303). Line items rolled up from openrails.usage_events; money movements from the credit ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.
+// Monthly itemized statements (issue #303). Line items rolled up from openrails.usage_events; money movements from the money ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.
 type BillingInvoice struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
-	CreditTypeID    uuid.UUID
 	Currency        string
 	PeriodFrom      time.Time
 	PeriodTo        time.Time
@@ -947,7 +826,7 @@ type BillingTenantSubject struct {
 	LastSeenAt time.Time
 }
 
-// Per-tenant-subject tier throughput policies for the admission check (issue #298). MONEY caps stay in credit_account_settings; rolling money budgets are #304.
+// Per-tenant-subject tier throughput policies for the admission check (issue #298). MONEY caps stay in money_accounts; rolling money budgets are #304.
 type BillingTierPolicy struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
@@ -967,17 +846,16 @@ type BillingUsageEvent struct {
 	// Caller-supplied principal string (e.g. a username slug) that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.
 	Actor string
 	// Caller-supplied free-form string for what was metered (tensorhub: endpoint slug; doujins: plan/item slug). Opaque to OpenRails; nullable, not a FK.
-	Resource            *string
-	CreditTypeID        uuid.UUID
-	EventType           string
-	Dimensions          []byte
-	Amount              int64
-	Source              string
-	SourceID            string
-	CreditTransactionID *uuid.UUID
-	Metadata            []byte
-	OccurredAt          time.Time
-	CreatedAt           time.Time
+	Resource           *string
+	EventType          string
+	Dimensions         []byte
+	Amount             int64
+	Source             string
+	SourceID           string
+	MoneyTransactionID *uuid.UUID
+	Metadata           []byte
+	OccurredAt         time.Time
+	CreatedAt          time.Time
 }
 
 // External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.

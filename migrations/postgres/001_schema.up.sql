@@ -375,258 +375,6 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.product_entitlement_feature
 COMMENT ON TABLE openrails.product_entitlement_features IS 'Stripe-shaped product_feature attachments (issue #245): which entitlement features a product grants when purchased. duration_days null = indefinite.';
 
 -- =============================================================================
--- credit_types
--- =============================================================================
-
-CREATE TABLE openrails.credit_types (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    name text NOT NULL,
-    display_name text NOT NULL,
-    unit text DEFAULT 'usd'::text NOT NULL,
-    decimal_places integer DEFAULT 2 NOT NULL,
-    is_active boolean DEFAULT true NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
-    CONSTRAINT credit_types_pkey PRIMARY KEY (id),
-    CONSTRAINT credit_types_tenant_name_key UNIQUE (tenant_id, name)
-);
-
-ALTER TABLE ONLY openrails.credit_types FORCE ROW LEVEL SECURITY;
-
-CREATE INDEX idx_credit_types_tenant_id ON openrails.credit_types USING btree (tenant_id);
-
-ALTER TABLE openrails.credit_types ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.credit_types USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_types TO openrails_app;
-
--- =============================================================================
--- credit_transactions
--- =============================================================================
-
-CREATE TABLE openrails.credit_transactions (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    actor text CONSTRAINT credit_transactions_actor_not_null NOT NULL,
-    resource text,
-    metadata jsonb,
-    credit_type_id uuid NOT NULL,
-    amount bigint NOT NULL,
-    balance_after bigint,
-    transaction_type text NOT NULL,
-    source text NOT NULL,
-    source_id text,
-    expires_at timestamp with time zone,
-    description text,
-    status text DEFAULT 'posted'::text NOT NULL,
-    authorized_amount bigint,
-    captured_amount bigint,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT credit_transactions_tenant_subject_id_not_null NOT NULL,
-    CONSTRAINT credit_transactions_pkey PRIMARY KEY (id),
-    CONSTRAINT credit_transactions_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id),
-    CONSTRAINT credit_transactions_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
-);
-
-ALTER TABLE ONLY openrails.credit_transactions FORCE ROW LEVEL SECURITY;
-
-CREATE INDEX idx_credit_holds_active_expires ON openrails.credit_transactions USING btree (expires_at) WHERE ((transaction_type = 'hold'::text) AND (status = 'active'::text));
-CREATE INDEX idx_credit_transactions_payer ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, created_at DESC);
-CREATE INDEX idx_credit_transactions_payer_actor ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, actor, created_at DESC);
-CREATE INDEX idx_credit_transactions_tenant_id ON openrails.credit_transactions USING btree (tenant_id);
-CREATE UNIQUE INDEX uniq_credit_deposit_idem_payer ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, source, source_id) WHERE ((transaction_type = 'deposit'::text) AND (source_id IS NOT NULL));
-CREATE UNIQUE INDEX uniq_credit_hold_idem_payer ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, source, source_id) WHERE (transaction_type = 'hold'::text);
-CREATE UNIQUE INDEX uniq_credit_withdrawal_idem_payer ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, source, source_id) WHERE ((transaction_type = 'withdrawal'::text) AND (source_id IS NOT NULL));
-
-ALTER TABLE openrails.credit_transactions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.credit_transactions USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_transactions TO openrails_app;
-
-COMMENT ON COLUMN openrails.credit_transactions.metadata IS 'Optional caller-supplied long-tail attribution. Opaque to OpenRails; joins use source/source_id, never these.';
-COMMENT ON COLUMN openrails.credit_transactions.actor IS 'Caller-supplied principal string (e.g. a username slug) that caused this charge. Opaque to OpenRails; used as the per-actor spend-cap grouping key and as attribution.';
-COMMENT ON COLUMN openrails.credit_transactions.resource IS 'Caller-supplied free-form string for what the charge was for (charge-A was for resource-B). Opaque to OpenRails; nullable.';
-
--- =============================================================================
--- credit_blocks
--- =============================================================================
-
-CREATE TABLE openrails.credit_blocks (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    credit_type_id uuid NOT NULL,
-    original_amount bigint NOT NULL,
-    remaining_amount bigint NOT NULL,
-    expires_at timestamp with time zone,
-    source_transaction_id uuid,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT credit_blocks_tenant_subject_id_not_null NOT NULL,
-    CONSTRAINT credit_blocks_pkey PRIMARY KEY (id),
-    CONSTRAINT credit_blocks_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id),
-    CONSTRAINT credit_blocks_source_transaction_id_fkey FOREIGN KEY (source_transaction_id) REFERENCES openrails.credit_transactions(id),
-    CONSTRAINT credit_blocks_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
-);
-
-ALTER TABLE ONLY openrails.credit_blocks FORCE ROW LEVEL SECURITY;
-
-CREATE INDEX idx_credit_blocks_payer ON openrails.credit_blocks USING btree (tenant_id, tenant_subject_id, credit_type_id, expires_at);
-CREATE INDEX idx_credit_blocks_tenant_id ON openrails.credit_blocks USING btree (tenant_id);
-
-ALTER TABLE openrails.credit_blocks ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.credit_blocks USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_blocks TO openrails_app;
-
--- =============================================================================
--- credit_balances
--- =============================================================================
-
-CREATE TABLE openrails.credit_balances (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    credit_type_id uuid NOT NULL,
-    balance bigint DEFAULT 0 NOT NULL,
-    held_balance bigint DEFAULT 0 NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT credit_balances_tenant_subject_id_not_null NOT NULL,
-    CONSTRAINT credit_balances_pkey PRIMARY KEY (id),
-    CONSTRAINT credit_balances_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id),
-    CONSTRAINT credit_balances_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
-);
-
-ALTER TABLE ONLY openrails.credit_balances FORCE ROW LEVEL SECURITY;
-
-CREATE INDEX idx_credit_balances_tenant_id ON openrails.credit_balances USING btree (tenant_id);
-CREATE UNIQUE INDEX uq_credit_balances_payer_type ON openrails.credit_balances USING btree (tenant_id, tenant_subject_id, credit_type_id);
-
-ALTER TABLE openrails.credit_balances ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.credit_balances USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_balances TO openrails_app;
-
--- =============================================================================
--- credit_account_settings
--- =============================================================================
-
-CREATE TABLE openrails.credit_account_settings (
-    id uuid NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT credit_account_settings_tenant_subject_id_not_null NOT NULL,
-    credit_type_id uuid NOT NULL,
-    billing_mode text DEFAULT 'prepaid'::text NOT NULL,
-    max_spend_per_day_micros bigint,
-    max_spend_per_month_micros bigint,
-    max_outstanding_owed_micros bigint,
-    low_balance_threshold_micros bigint,
-    auto_topup_enabled boolean DEFAULT false NOT NULL,
-    auto_topup_amount_cents bigint,
-    auto_topup_payment_method_id uuid,
-    default_credit_expiry_days integer,
-    hard_stop_on_breach boolean DEFAULT true NOT NULL,
-    alert_threshold_pct integer DEFAULT 80 NOT NULL,
-    outstanding_owed_micros bigint DEFAULT 0 NOT NULL,
-    last_alert_at timestamp with time zone,
-    last_topup_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    verified_payment_method boolean DEFAULT false NOT NULL,
-    verified_at timestamp with time zone,
-    suspended_at timestamp with time zone,
-    suspend_reason text,
-    tier text,
-    CONSTRAINT credit_account_settings_pkey PRIMARY KEY (id),
-    CONSTRAINT credit_account_settings_alert_pct_chk CHECK (((alert_threshold_pct >= 0) AND (alert_threshold_pct <= 100))),
-    CONSTRAINT credit_account_settings_billing_mode_chk CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text]))),
-    CONSTRAINT credit_account_settings_owed_nonneg_chk CHECK ((outstanding_owed_micros >= 0)),
-    CONSTRAINT credit_account_settings_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id) ON DELETE CASCADE,
-    CONSTRAINT credit_account_settings_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
-);
-
-ALTER TABLE ONLY openrails.credit_account_settings FORCE ROW LEVEL SECURITY;
-
-CREATE UNIQUE INDEX uq_credit_account_settings_payer_type ON openrails.credit_account_settings USING btree (tenant_id, tenant_subject_id, credit_type_id);
-
-ALTER TABLE openrails.credit_account_settings ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.credit_account_settings USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_account_settings TO openrails_app;
-
-COMMENT ON TABLE openrails.credit_account_settings IS 'Per-(tenant, tenant subject, credit_type) spend policy + money-in config (issue #237). Tensorhub SETS these; OpenRails STORES + ENFORCES them.';
-COMMENT ON COLUMN openrails.credit_account_settings.verified_payment_method IS 'True once the account has a verified payment method (set after a successful $1 auth-and-void verification charge — issue #299). The charge itself is a separate slice.';
-COMMENT ON COLUMN openrails.credit_account_settings.suspended_at IS 'When set, the account is suspended (issue #299). Admission-deny-on-suspended wiring is a separate slice.';
-
--- =============================================================================
--- credit_spend_limits
--- =============================================================================
-
-CREATE TABLE openrails.credit_spend_limits (
-    id uuid NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT credit_spend_limits_tenant_subject_id_not_null NOT NULL,
-    credit_type_id uuid NOT NULL,
-    actor text CONSTRAINT credit_spend_limits_actor_not_null NOT NULL,
-    max_spend_per_day_micros bigint,
-    max_spend_per_month_micros bigint,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT credit_spend_limits_pkey PRIMARY KEY (id),
-    CONSTRAINT credit_spend_limits_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id) ON DELETE CASCADE,
-    CONSTRAINT credit_spend_limits_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
-);
-
-ALTER TABLE ONLY openrails.credit_spend_limits FORCE ROW LEVEL SECURITY;
-
-CREATE UNIQUE INDEX uq_credit_spend_limits_payer_actor ON openrails.credit_spend_limits USING btree (tenant_id, tenant_subject_id, credit_type_id, actor);
-
-ALTER TABLE openrails.credit_spend_limits ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.credit_spend_limits USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_spend_limits TO openrails_app;
-
-COMMENT ON TABLE openrails.credit_spend_limits IS 'Optional per-actor spend caps for a tenant subject (issue #237/#246). actor is a caller-supplied opaque principal string.';
-COMMENT ON COLUMN openrails.credit_spend_limits.actor IS 'Caller-supplied principal string whose spend is capped by this row. Opaque to OpenRails.';
-
--- =============================================================================
--- credit_windows
--- =============================================================================
-
-CREATE TABLE openrails.credit_windows (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT credit_windows_tenant_subject_id_not_null NOT NULL,
-    credit_type_id uuid NOT NULL,
-    held_amount bigint NOT NULL,
-    settled_amount bigint DEFAULT 0 NOT NULL,
-    status text DEFAULT 'open'::text NOT NULL,
-    expires_at timestamp with time zone NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT credit_windows_pkey PRIMARY KEY (id),
-    CONSTRAINT credit_windows_status_chk CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text, 'expired'::text]))),
-    CONSTRAINT credit_windows_held_nonneg_chk CHECK ((held_amount >= 0)),
-    CONSTRAINT credit_windows_settled_within_held_chk CHECK (((settled_amount >= 0) AND (settled_amount <= held_amount))),
-    CONSTRAINT credit_windows_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id),
-    CONSTRAINT credit_windows_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id)
-);
-
-ALTER TABLE ONLY openrails.credit_windows FORCE ROW LEVEL SECURITY;
-
-CREATE INDEX idx_credit_windows_subject_status ON openrails.credit_windows USING btree (tenant_subject_id, status);
-CREATE INDEX idx_credit_windows_open_expires ON openrails.credit_windows USING btree (expires_at) WHERE (status = 'open'::text);
-CREATE INDEX idx_credit_windows_tenant_id ON openrails.credit_windows USING btree (tenant_id);
-
-ALTER TABLE openrails.credit_windows ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.credit_windows USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_windows TO openrails_app;
-
-COMMENT ON TABLE openrails.credit_windows IS 'Prepaid credit windows (issue #335): one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry.';
-COMMENT ON COLUMN openrails.credit_windows.held_amount IS 'Total reserved for this window (open + refills). Reflected in credit_balances.held_balance while status=open.';
-COMMENT ON COLUMN openrails.credit_windows.settled_amount IS 'Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.';
-
--- =============================================================================
 -- payment_methods
 -- =============================================================================
 
@@ -1047,7 +795,6 @@ CREATE TABLE openrails.invoices (
     id uuid DEFAULT uuidv7() NOT NULL,
     tenant_id uuid NOT NULL,
     tenant_subject_id uuid CONSTRAINT invoices_tenant_subject_id_not_null NOT NULL,
-    credit_type_id uuid NOT NULL,
     currency text DEFAULT ''::text NOT NULL,
     period_from timestamp with time zone NOT NULL,
     period_to timestamp with time zone NOT NULL,
@@ -1071,14 +818,14 @@ ALTER TABLE ONLY openrails.invoices FORCE ROW LEVEL SECURITY;
 
 CREATE INDEX idx_invoices_tenant_subject ON openrails.invoices USING btree (tenant_subject_id, period_from DESC);
 CREATE INDEX ix_invoices_payer ON openrails.invoices USING btree (tenant_id, tenant_subject_id, period_from DESC);
-CREATE UNIQUE INDEX uq_invoices_period ON openrails.invoices USING btree (tenant_id, tenant_subject_id, credit_type_id, period_from, period_to);
+CREATE UNIQUE INDEX uq_invoices_period ON openrails.invoices USING btree (tenant_id, tenant_subject_id, period_from, period_to);
 
 ALTER TABLE openrails.invoices ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON openrails.invoices USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoices TO openrails_app;
 
-COMMENT ON TABLE openrails.invoices IS 'Monthly itemized statements (issue #303). Line items rolled up from openrails.usage_events; money movements from the credit ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.';
+COMMENT ON TABLE openrails.invoices IS 'Monthly itemized statements (issue #303). Line items rolled up from openrails.usage_events; money movements from the money ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.';
 
 -- =============================================================================
 -- linked_wallets
@@ -1291,7 +1038,7 @@ CREATE POLICY tenant_isolation ON openrails.tier_policies USING ((tenant_id = (N
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tier_policies TO openrails_app;
 
-COMMENT ON TABLE openrails.tier_policies IS 'Per-tenant-subject tier throughput policies for the admission check (issue #298). MONEY caps stay in credit_account_settings; rolling money budgets are #304.';
+COMMENT ON TABLE openrails.tier_policies IS 'Per-tenant-subject tier throughput policies for the admission check (issue #298). MONEY caps stay in money_accounts; rolling money budgets are #304.';
 
 -- =============================================================================
 -- usage_events
@@ -1303,13 +1050,12 @@ CREATE TABLE openrails.usage_events (
     tenant_subject_id uuid CONSTRAINT usage_events_tenant_subject_id_not_null NOT NULL,
     actor text CONSTRAINT usage_events_actor_not_null NOT NULL,
     resource text,
-    credit_type_id uuid NOT NULL,
     event_type text NOT NULL,
     dimensions jsonb DEFAULT '{}'::jsonb NOT NULL,
     amount bigint NOT NULL,
     source text NOT NULL,
     source_id text NOT NULL,
-    credit_transaction_id uuid,
+    money_transaction_id uuid,
     metadata jsonb,
     occurred_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,

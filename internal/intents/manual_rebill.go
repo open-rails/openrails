@@ -20,8 +20,8 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -293,7 +293,7 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, p ManualRebil
 	if updated, err := h.DB.Gen(ctx).GetSubscriptionByID(ctx, p.SubscriptionID); err != nil {
 		log.WithContext(ctx).WithError(err).Warn("manual rebill finalize: load subscription after renew for credit grants")
 	} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
-		if err := credits.NewCreditsService(h.DB, h.Clock).GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+		if err := money.NewMoneyService(h.DB, h.Clock).GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 			SubscriptionID: p.SubscriptionID,
 			PeriodEnd:      updated.CurrentPeriodEndsAt.UTC(),
 			Cadence:        models.CreditGrantCadencePerRenewal,

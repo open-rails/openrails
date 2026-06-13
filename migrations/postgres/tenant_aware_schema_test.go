@@ -18,11 +18,14 @@ var tenantOwnedTables = []string{
 	"admin_grants",
 	"notification_queue",
 	"processor_customers",
-	"credit_types",
-	"credit_transactions",
-	"credit_blocks",
-	"credit_balances",
 	"checkout_sessions",
+	// #472: money ledger replaced the credit_* tables.
+	"money_accounts",
+	"money_balances",
+	"money_blocks",
+	"money_transactions",
+	"money_windows",
+	"money_spend_limits",
 }
 
 func loadSchema001(t *testing.T) string {

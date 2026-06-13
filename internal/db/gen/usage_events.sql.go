@@ -19,16 +19,14 @@ SELECT ue.event_type,
 FROM openrails.usage_events ue
 CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d
 WHERE ue.tenant_id = $1 AND ue.tenant_subject_id = $2
-  AND ($3::uuid IS NULL OR ue.credit_type_id = $3::uuid)
-  AND ue.occurred_at >= $4::timestamptz
-  AND ue.occurred_at < $5::timestamptz
+  AND ue.occurred_at >= $3::timestamptz
+  AND ue.occurred_at < $4::timestamptz
 GROUP BY ue.event_type, d.key
 `
 
 type AggregateUsageDimensionsParams struct {
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
-	CreditTypeID    *uuid.UUID
 	FromAt          time.Time
 	ToAt            time.Time
 }
@@ -44,7 +42,6 @@ func (q *Queries) AggregateUsageDimensions(ctx context.Context, arg AggregateUsa
 	rows, err := q.db.Query(ctx, aggregateUsageDimensions,
 		arg.TenantID,
 		arg.TenantSubjectID,
-		arg.CreditTypeID,
 		arg.FromAt,
 		arg.ToAt,
 	)
@@ -72,16 +69,14 @@ SELECT event_type,
        COUNT(*)::bigint AS event_count
 FROM openrails.usage_events
 WHERE tenant_id = $1 AND tenant_subject_id = $2
-  AND ($3::uuid IS NULL OR credit_type_id = $3::uuid)
-  AND occurred_at >= $4::timestamptz
-  AND occurred_at < $5::timestamptz
+  AND occurred_at >= $3::timestamptz
+  AND occurred_at < $4::timestamptz
 GROUP BY event_type
 `
 
 type AggregateUsageTotalsParams struct {
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
-	CreditTypeID    *uuid.UUID
 	FromAt          time.Time
 	ToAt            time.Time
 }
@@ -92,12 +87,11 @@ type AggregateUsageTotalsRow struct {
 	EventCount  int64
 }
 
-// Per-event_type rollup over [from, to). credit_type_id NULL = all credit types.
+// Per-event_type rollup over [from, to).
 func (q *Queries) AggregateUsageTotals(ctx context.Context, arg AggregateUsageTotalsParams) ([]AggregateUsageTotalsRow, error) {
 	rows, err := q.db.Query(ctx, aggregateUsageTotals,
 		arg.TenantID,
 		arg.TenantSubjectID,
-		arg.CreditTypeID,
 		arg.FromAt,
 		arg.ToAt,
 	)
@@ -120,7 +114,7 @@ func (q *Queries) AggregateUsageTotals(ctx context.Context, arg AggregateUsageTo
 }
 
 const getUsageEventByCoords = `-- name: GetUsageEventByCoords :one
-SELECT id, tenant_id, tenant_subject_id, actor, resource, credit_type_id, event_type, dimensions, amount, source, source_id, credit_transaction_id, metadata, occurred_at, created_at FROM openrails.usage_events
+SELECT id, tenant_id, tenant_subject_id, actor, resource, event_type, dimensions, amount, source, source_id, money_transaction_id, metadata, occurred_at, created_at FROM openrails.usage_events
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND event_type = $3
   AND source = $4 AND source_id = $5
 LIMIT 1
@@ -149,13 +143,12 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		&i.TenantSubjectID,
 		&i.Actor,
 		&i.Resource,
-		&i.CreditTypeID,
 		&i.EventType,
 		&i.Dimensions,
 		&i.Amount,
 		&i.Source,
 		&i.SourceID,
-		&i.CreditTransactionID,
+		&i.MoneyTransactionID,
 		&i.Metadata,
 		&i.OccurredAt,
 		&i.CreatedAt,
@@ -166,28 +159,27 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 const insertUsageEvent = `-- name: InsertUsageEvent :exec
 
 INSERT INTO openrails.usage_events (
-    id, tenant_id, tenant_subject_id, actor, resource, credit_type_id,
+    id, tenant_id, tenant_subject_id, actor, resource,
     event_type, dimensions, amount, source, source_id,
-    credit_transaction_id, metadata, occurred_at, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, '{}'::jsonb), $9, $10, $11, $12, $13, $14, $15)
+    money_transaction_id, metadata, occurred_at, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
 `
 
 type InsertUsageEventParams struct {
-	ID                  uuid.UUID
-	TenantID            uuid.UUID
-	TenantSubjectID     uuid.UUID
-	Actor               string
-	Resource            *string
-	CreditTypeID        uuid.UUID
-	EventType           string
-	Dimensions          []byte
-	Amount              int64
-	Source              string
-	SourceID            string
-	CreditTransactionID *uuid.UUID
-	Metadata            []byte
-	OccurredAt          time.Time
-	CreatedAt           time.Time
+	ID                 uuid.UUID
+	TenantID           uuid.UUID
+	TenantSubjectID    uuid.UUID
+	Actor              string
+	Resource           *string
+	EventType          string
+	Dimensions         []byte
+	Amount             int64
+	Source             string
+	SourceID           string
+	MoneyTransactionID *uuid.UUID
+	Metadata           []byte
+	OccurredAt         time.Time
+	CreatedAt          time.Time
 }
 
 // openrails.usage_events: append-only metered usage (#289), idempotent on
@@ -199,13 +191,12 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 		arg.TenantSubjectID,
 		arg.Actor,
 		arg.Resource,
-		arg.CreditTypeID,
 		arg.EventType,
 		arg.Dimensions,
 		arg.Amount,
 		arg.Source,
 		arg.SourceID,
-		arg.CreditTransactionID,
+		arg.MoneyTransactionID,
 		arg.Metadata,
 		arg.OccurredAt,
 		arg.CreatedAt,
@@ -215,29 +206,28 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 
 const insertUsageEventIfAbsent = `-- name: InsertUsageEventIfAbsent :exec
 INSERT INTO openrails.usage_events (
-    id, tenant_id, tenant_subject_id, actor, resource, credit_type_id,
+    id, tenant_id, tenant_subject_id, actor, resource,
     event_type, dimensions, amount, source, source_id,
-    credit_transaction_id, metadata, occurred_at, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, '{}'::jsonb), $9, $10, $11, $12, $13, $14, $15)
+    money_transaction_id, metadata, occurred_at, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (tenant_id, tenant_subject_id, event_type, source, source_id) DO NOTHING
 `
 
 type InsertUsageEventIfAbsentParams struct {
-	ID                  uuid.UUID
-	TenantID            uuid.UUID
-	TenantSubjectID     uuid.UUID
-	Actor               string
-	Resource            *string
-	CreditTypeID        uuid.UUID
-	EventType           string
-	Dimensions          []byte
-	Amount              int64
-	Source              string
-	SourceID            string
-	CreditTransactionID *uuid.UUID
-	Metadata            []byte
-	OccurredAt          time.Time
-	CreatedAt           time.Time
+	ID                 uuid.UUID
+	TenantID           uuid.UUID
+	TenantSubjectID    uuid.UUID
+	Actor              string
+	Resource           *string
+	EventType          string
+	Dimensions         []byte
+	Amount             int64
+	Source             string
+	SourceID           string
+	MoneyTransactionID *uuid.UUID
+	Metadata           []byte
+	OccurredAt         time.Time
+	CreatedAt          time.Time
 }
 
 func (q *Queries) InsertUsageEventIfAbsent(ctx context.Context, arg InsertUsageEventIfAbsentParams) error {
@@ -247,13 +237,12 @@ func (q *Queries) InsertUsageEventIfAbsent(ctx context.Context, arg InsertUsageE
 		arg.TenantSubjectID,
 		arg.Actor,
 		arg.Resource,
-		arg.CreditTypeID,
 		arg.EventType,
 		arg.Dimensions,
 		arg.Amount,
 		arg.Source,
 		arg.SourceID,
-		arg.CreditTransactionID,
+		arg.MoneyTransactionID,
 		arg.Metadata,
 		arg.OccurredAt,
 		arg.CreatedAt,

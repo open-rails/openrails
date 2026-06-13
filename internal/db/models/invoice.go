@@ -14,7 +14,6 @@ type Invoice struct {
 	ID              uuid.UUID `json:"id"`
 	TenantID        uuid.UUID `json:"tenant_id"`
 	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
-	CreditTypeID    uuid.UUID `json:"credit_type_id"`
 	Currency        string    `json:"currency"`
 
 	PeriodFrom time.Time `json:"period_from"`

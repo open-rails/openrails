@@ -17,9 +17,9 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -197,7 +197,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		// the remote NMI delete through the shared mechanism (#344).
 		lifecycle.SetDeferredDeleteScheduler(w.DeferDelete)
 	}
-	creditsSvc := credits.NewCreditsService(w.DB, w.Clock)
+	moneySvc := money.NewMoneyService(w.DB, w.Clock)
 
 	successCount := 0
 	failCount := 0
@@ -209,7 +209,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		// (payment inserts, lifecycle updates) carry the app.tenant_id GUC.
 		outcome := dunningOutcomeFailed
 		if err := w.DB.RunInTenantConn(tenant.WithID(ctx, tenant.ID(sub.TenantID)), func(tctx context.Context) error {
-			outcome = w.processSubscription(tctx, &sub, lifecycle, priceSvc, creditsSvc, materialize)
+			outcome = w.processSubscription(tctx, &sub, lifecycle, priceSvc, moneySvc, materialize)
 			return nil
 		}); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
@@ -244,7 +244,7 @@ func (w *DunningWorker) processSubscription(
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
 	priceSvc *catalog.PriceService,
-	creditsSvc *credits.CreditsService,
+	moneySvc *money.MoneyService,
 	materialize bool,
 ) dunningOutcome {
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
@@ -417,7 +417,7 @@ func (w *DunningWorker) processSubscription(
 		if refreshed, rerr := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID); rerr == nil &&
 			models.SubscriptionStatus(refreshed.Status) == models.StatusPastDue && txnID != "" {
 			logEntry.Warn("Dunning: repairing local lifecycle from durable successful rebill intent")
-			return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, creditsSvc, processor, txnID)
+			return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, moneySvc, processor, txnID)
 		}
 		logEntry.Info("Dunning: rebill successful")
 		return dunningOutcomeSucceeded
@@ -568,7 +568,7 @@ func (w *DunningWorker) applySuccessfulRebill(
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
 	priceSvc *catalog.PriceService,
-	creditsSvc *credits.CreditsService,
+	moneySvc *money.MoneyService,
 	processor models.Processor,
 	transactionID string,
 ) dunningOutcome {
@@ -594,11 +594,11 @@ func (w *DunningWorker) applySuccessfulRebill(
 		return dunningOutcomeFailed
 	}
 
-	if creditsSvc != nil {
+	if moneySvc != nil {
 		if updated, err := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID); err != nil {
 			logEntry.WithError(err).Warn("load subscription after rebill for credit grants")
 		} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
-			if err := creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+			if err := moneySvc.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 				SubscriptionID: sub.ID,
 				PeriodEnd:      updated.CurrentPeriodEndsAt.UTC(),
 				Cadence:        models.CreditGrantCadencePerRenewal,

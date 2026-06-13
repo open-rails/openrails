@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
@@ -27,9 +27,11 @@ type CreditAccountSnapshot struct {
 
 // GetCreditAccount returns the balance + policy snapshot for an tenant subject.
 func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*CreditAccountSnapshot, error) {
+	// #472: money is unit-less; creditType is vestigial and only echoed back on
+	// the snapshot. An empty value defaults to the implicit µ$ unit.
 	creditType = strings.TrimSpace(creditType)
 	if creditType == "" {
-		return nil, fmt.Errorf("credit_type required")
+		creditType = moneyBalanceType
 	}
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
@@ -40,11 +42,11 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSub
 	// one, so this is safe whether called from a request or directly.
 	var snap *CreditAccountSnapshot
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		bal, err := s.creditsService().GetBalanceForTenantSubject(ctx, payer, creditType)
+		bal, err := s.moneyService().GetBalanceForTenantSubject(ctx, payer)
 		if err != nil {
 			return err
 		}
-		settings, err := s.creditsService().GetAccountSettings(ctx, payer, creditType)
+		settings, err := s.moneyService().GetAccountSettings(ctx, payer)
 		if err != nil {
 			return err
 		}
@@ -64,7 +66,7 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSub
 
 // UsageRow is one per-event_type usage rollup over a window: summed host-priced
 // amount, event count, and summed per-dimension counts (issue #289). It mirrors
-// credits.UsageRollupRow but lives on the public facade so HTTP/library callers
+// money.UsageRollupRow but lives on the public facade so HTTP/library callers
 // don't import the internal credits package.
 type UsageRow struct {
 	EventType   string           `json:"event_type"`
@@ -84,7 +86,7 @@ func (s *Service) GetUsage(ctx context.Context, payer identity.TenantSubjectID, 
 	}
 	var out []UsageRow
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		rows, err := s.creditsService().AggregateUsage(ctx, payer, from, to)
+		rows, err := s.moneyService().AggregateUsage(ctx, payer, from, to)
 		if err != nil {
 			return err
 		}
@@ -174,7 +176,7 @@ func (s *Service) ListInvoices(ctx context.Context, payer identity.TenantSubject
 	var out []InvoiceDTO
 	var total int
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		rows, t, err := s.creditsService().ListInvoices(ctx, payer, limit, offset)
+		rows, t, err := s.moneyService().ListInvoices(ctx, payer, limit, offset)
 		if err != nil {
 			return err
 		}
@@ -200,7 +202,7 @@ func (s *Service) GetInvoice(ctx context.Context, payer identity.TenantSubjectID
 	}
 	var out *InvoiceDTO
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		inv, err := s.creditsService().GetInvoiceByID(ctx, payer, id)
+		inv, err := s.moneyService().GetInvoiceByID(ctx, payer, id)
 		if err != nil {
 			return err
 		}
@@ -220,21 +222,20 @@ func (s *Service) GetInvoice(ctx context.Context, payer identity.TenantSubjectID
 type AuthorizeSpendRequest struct {
 	TenantSubjectID identity.TenantSubjectID
 	Actor           string
-	CreditType      string
 	EstimateMicros  int64
 }
 
 // AuthorizeSpendResult is the decision returned to the caller (mirrors the
 // authorize route payload).
 type AuthorizeSpendResult struct {
-	Allowed               bool                `json:"allowed"`
-	DenyCode              string              `json:"deny_code,omitempty"`
-	BillingMode           string              `json:"billing_mode"`
-	AvailableMicros       int64               `json:"available_micros"`
-	OutstandingOwedMicros int64               `json:"outstanding_owed_micros"`
-	RetryAfterSeconds     int64               `json:"retry_after_seconds,omitempty"`
-	NextAllowedAt         *time.Time          `json:"next_allowed_at,omitempty"`
-	Caps                  []credits.CapResult `json:"caps,omitempty"`
+	Allowed               bool              `json:"allowed"`
+	DenyCode              string            `json:"deny_code,omitempty"`
+	BillingMode           string            `json:"billing_mode"`
+	AvailableMicros       int64             `json:"available_micros"`
+	OutstandingOwedMicros int64             `json:"outstanding_owed_micros"`
+	RetryAfterSeconds     int64             `json:"retry_after_seconds,omitempty"`
+	NextAllowedAt         *time.Time        `json:"next_allowed_at,omitempty"`
+	Caps                  []money.CapResult `json:"caps,omitempty"`
 }
 
 // DenyInsufficientBalance is the deny code when a prepaid account lacks the
@@ -245,10 +246,6 @@ const DenyInsufficientBalance = "insufficient_balance"
 // payer: the per-account/per-actor spend policy (CheckSpendAllowed) AND, for
 // prepaid accounts, available balance. It does NOT move money. (#235)
 func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest) (*AuthorizeSpendResult, error) {
-	req.CreditType = strings.TrimSpace(req.CreditType)
-	if req.CreditType == "" {
-		return nil, fmt.Errorf("credit_type required")
-	}
 	if req.EstimateMicros < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
 	}
@@ -256,11 +253,11 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 
-	snap, err := s.GetCreditAccount(ctx, req.TenantSubjectID, req.CreditType)
+	snap, err := s.GetCreditAccount(ctx, req.TenantSubjectID, "")
 	if err != nil {
 		return nil, err
 	}
-	dec, err := s.creditsService().CheckSpendAllowed(ctx, req.TenantSubjectID, req.CreditType, strings.TrimSpace(req.Actor), req.EstimateMicros)
+	dec, err := s.moneyService().CheckSpendAllowed(ctx, req.TenantSubjectID, strings.TrimSpace(req.Actor), req.EstimateMicros)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +275,7 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 
 	// Prepaid accounts are additionally gated on available balance; arrears
 	// accounts are gated by the outstanding ceiling inside CheckSpendAllowed.
-	if snap.BillingMode != credits.BillingModeArrears && req.EstimateMicros > snap.AvailableMicros {
+	if snap.BillingMode != money.BillingModeArrears && req.EstimateMicros > snap.AvailableMicros {
 		res.Allowed = false
 		if res.DenyCode == "" {
 			res.DenyCode = DenyInsufficientBalance
@@ -295,9 +292,11 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 type AuthorizeAndHoldRequest struct {
 	TenantSubjectID identity.TenantSubjectID
 	Actor           string
-	CreditType      string
-	EstimateMicros  int64
-	RequestID       string
+	// CreditType is accepted for wire compatibility but ignored — money is the
+	// only unit (#472).
+	CreditType     string // TODO(#472): drop once all callers stop sending it
+	EstimateMicros int64
+	RequestID      string
 	// ExpiresAt bounds the placed hold; when zero a default TTL is applied.
 	ExpiresAt time.Time
 }
@@ -305,15 +304,15 @@ type AuthorizeAndHoldRequest struct {
 // AuthorizeAndHoldResult is the combined decision + reservation returned by
 // AuthorizeAndHold. ReservationID is the placed hold's id when Allowed, else nil.
 type AuthorizeAndHoldResult struct {
-	Allowed               bool                `json:"allowed"`
-	DenyCode              string              `json:"deny_code,omitempty"`
-	BillingMode           string              `json:"billing_mode"`
-	AvailableMicros       int64               `json:"available_micros"`
-	OutstandingOwedMicros int64               `json:"outstanding_owed_micros"`
-	RemainingTodayMicros  *int64              `json:"remaining_today_micros,omitempty"`
-	RetryAfterSeconds     int64               `json:"retry_after_seconds,omitempty"`
-	ReservationID         *uuid.UUID          `json:"reservation_id,omitempty"`
-	Caps                  []credits.CapResult `json:"caps,omitempty"`
+	Allowed               bool              `json:"allowed"`
+	DenyCode              string            `json:"deny_code,omitempty"`
+	BillingMode           string            `json:"billing_mode"`
+	AvailableMicros       int64             `json:"available_micros"`
+	OutstandingOwedMicros int64             `json:"outstanding_owed_micros"`
+	RemainingTodayMicros  *int64            `json:"remaining_today_micros,omitempty"`
+	RetryAfterSeconds     int64             `json:"retry_after_seconds,omitempty"`
+	ReservationID         *uuid.UUID        `json:"reservation_id,omitempty"`
+	Caps                  []money.CapResult `json:"caps,omitempty"`
 }
 
 // authorizeHoldSource is the source label recorded on holds placed by the
@@ -332,10 +331,6 @@ const defaultAuthorizeHoldTTL = 15 * time.Minute
 // the same available balance: the balance row is locked for the duration of the
 // decision + hold. Idempotent on RequestID.
 func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequest) (*AuthorizeAndHoldResult, error) {
-	req.CreditType = strings.TrimSpace(req.CreditType)
-	if req.CreditType == "" {
-		return nil, fmt.Errorf("credit_type required")
-	}
 	if req.TenantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
@@ -351,10 +346,9 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 		expires = s.now().Add(defaultAuthorizeHoldTTL).UTC()
 	}
 
-	out, err := s.creditsService().AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
+	out, err := s.moneyService().AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
 		Payer:          req.TenantSubjectID,
 		Actor:          strings.TrimSpace(req.Actor),
-		CreditType:     req.CreditType,
 		EstimateMicros: req.EstimateMicros,
 		Source:         authorizeHoldSource,
 		SourceID:       req.RequestID,
@@ -386,9 +380,9 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 // remainingTodayCents extracts the remaining headroom under a daily cap (org or
 // per-actor) from the evaluated caps, for the authorize response's
 // remaining_today_micros field. Returns nil when no daily cap applies.
-func remainingTodayCents(caps []credits.CapResult) *int64 {
+func remainingTodayCents(caps []money.CapResult) *int64 {
 	for _, c := range caps {
-		if c.Code == credits.DenyDailyCap || c.Code == credits.DenyActorDailyCap {
+		if c.Code == money.DenyDailyCap || c.Code == money.DenyActorDailyCap {
 			r := c.Remaining
 			if r < 0 {
 				r = 0
@@ -401,13 +395,13 @@ func remainingTodayCents(caps []credits.CapResult) *int64 {
 
 // SetCreditAccountSettings upserts an payer's spend policy (issue #237/#235
 // admin surface). Thin passthrough to the credits service.
-func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.TenantSubjectID, creditType string, in credits.AccountSettingsInput) error {
+func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.TenantSubjectID, creditType string, in money.AccountSettingsInput) error {
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
 	// Pin a tenant connection so the upsert sets the RLS GUC under openrails_app (#227).
 	return s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		_, err := s.creditsService().UpsertAccountSettings(ctx, payer, strings.TrimSpace(creditType), in)
+		_, err := s.moneyService().UpsertAccountSettings(ctx, payer, in)
 		return err
 	})
 }
@@ -415,24 +409,24 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.T
 // GetCreditAccountSettings returns an payer's stored credit-account settings
 // (billing mode prepaid|arrears, spend caps, auto-top-up, expiry default) for the
 // org billing-account admin surface (issue #242). RLS-scoped.
-func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*models.CreditAccountSettings, error) {
+func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*models.MoneyAccount, error) {
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	return s.creditsService().GetAccountSettingsForTenantSubject(ctx, payer, strings.TrimSpace(creditType))
+	return s.moneyService().GetAccountSettingsForTenantSubject(ctx, payer)
 }
 
 // GetTenantSubjectCreditTransactions lists a tenant subject's credit transactions (usage) for
 // the billing-account admin surface (issue #242). RLS-scoped.
-func (s *Service) GetTenantSubjectCreditTransactions(ctx context.Context, payer identity.TenantSubjectID, creditType string, limit, offset int) ([]models.CreditTransaction, int, error) {
+func (s *Service) GetTenantSubjectCreditTransactions(ctx context.Context, payer identity.TenantSubjectID, creditType string, limit, offset int) ([]models.MoneyTransaction, int, error) {
 	if payer.IsZero() {
 		return nil, 0, fmt.Errorf("payer required")
 	}
-	var items []models.CreditTransaction
+	var items []models.MoneyTransaction
 	var total int
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
-		items, total, e = s.creditsService().GetTransactionsByTenantSubject(ctx, payer, strings.TrimSpace(creditType), limit, offset)
+		items, total, e = s.moneyService().GetTransactionsByTenantSubject(ctx, payer, limit, offset)
 		return e
 	})
 	return items, total, err
@@ -443,6 +437,6 @@ func (s *Service) SetSpendLimit(ctx context.Context, payer identity.TenantSubjec
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	_, err := s.creditsService().SetSpendLimit(ctx, payer, strings.TrimSpace(creditType), actor, maxDay, maxMonth)
+	_, err := s.moneyService().SetSpendLimit(ctx, payer, actor, maxDay, maxMonth)
 	return err
 }

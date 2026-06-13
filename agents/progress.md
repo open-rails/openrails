@@ -36,7 +36,18 @@ Chosen model: **PHYSICAL SEPARATION**. Money gets its own first-class tables/led
 
 `credit_types` reverts to custom-only (no usd_micro; the global seed is already gone).
 
-## Service split
+## REVISED 2026-06-13 (Paul: "make it as simple as possible, minimize code")
+ONE ledger = money. usd_micro is the only unit in real use; custom credits are unbuilt.
+So instead of two parallel ledgers: retarget the existing ~7k-line ledger to the money_*
+tables, DELETE the credit_type dimension, and DELETE the now-redundant credit_* ledger
+tables + credit_types + GetCreditTypeByName + credit_type_service (they only ever held
+usd_micro). Net: less code than today. Custom credits = FUTURE issue, rebuilt on the money
+ledger shape when a tenant actually defines one. `invoices`/`usage_events` drop credit_type_id.
+The Stage-2a money_*.sql + gen already exist; the work is to retarget the module to them,
+rename credits→money / CreditsService→MoneyService, drop credit_type everywhere, delete the
+credit_* side, and update callers.
+
+## Service split (original two-ledger sketch — superseded by the REVISED note above)
 - **MoneyService (new):** the dollar wallet — deposit (payment/refund), withdraw, hold/capture/release, prepaid windows, account settings, owed/arrears, invoices, suspension, auto-topup. µ$, no unit param.
 - **CreditsService (slimmed):** custom credits only — GetCreditTypeByName + balances/transactions/holds/windows/spend-limits/usage for tenant-defined types.
 - Today's money-centric files (money_in.go, invoice.go, arrears.go, suspension.go, spend_policy owed/topup) move to MoneyService.

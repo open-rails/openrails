@@ -6,15 +6,15 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
 
-// These workers drive the credit money-in + reconciliation flows (issues
+// These workers drive the money-in + reconciliation flows (issues
 // #239/#240/#241/#243). The auto-top-up and arrears workers need a
-// credits.Charger (off-session processor charge) and the low-balance worker
-// needs a credits.Alerter; when those are not configured the worker logs and
+// money.Charger (off-session processor charge) and the low-balance worker
+// needs a money.Alerter; when those are not configured the worker logs and
 // no-ops so it is safe to register before the processor/notification wiring
 // lands. The reconcile worker needs no external dependency and runs fully.
 
@@ -28,8 +28,8 @@ func (LowBalanceAlertArgs) Kind() string { return KindLowBalanceAlert }
 
 type LowBalanceAlertWorker struct {
 	river.WorkerDefaults[LowBalanceAlertArgs]
-	Credits  *credits.CreditsService
-	Alerter  credits.Alerter
+	Money    *money.MoneyService
+	Alerter  money.Alerter
 	Cooldown time.Duration
 }
 
@@ -37,7 +37,7 @@ func (LowBalanceAlertWorker) Kind() string { return KindLowBalanceAlert }
 
 func (w LowBalanceAlertWorker) Work(ctx context.Context, _ *river.Job[LowBalanceAlertArgs]) error {
 	logger := log.WithContext(ctx).WithField("worker", KindLowBalanceAlert)
-	if w.Credits == nil || w.Alerter == nil {
+	if w.Money == nil || w.Alerter == nil {
 		logger.Debug("low-balance alerter not configured; skipping")
 		return nil
 	}
@@ -45,7 +45,7 @@ func (w LowBalanceAlertWorker) Work(ctx context.Context, _ *river.Job[LowBalance
 	if cooldown <= 0 {
 		cooldown = 24 * time.Hour
 	}
-	n, err := w.Credits.RunLowBalanceAlerts(ctx, w.Alerter, cooldown)
+	n, err := w.Money.RunLowBalanceAlerts(ctx, w.Alerter, cooldown)
 	if err != nil {
 		return err
 	}
@@ -65,8 +65,8 @@ func (AutoTopupArgs) Kind() string { return KindAutoTopup }
 
 type AutoTopupWorker struct {
 	river.WorkerDefaults[AutoTopupArgs]
-	Credits  *credits.CreditsService
-	Charger  credits.Charger
+	Money    *money.MoneyService
+	Charger  money.Charger
 	Config   *config.Config
 	Cooldown time.Duration
 }
@@ -79,7 +79,7 @@ func (w AutoTopupWorker) Work(ctx context.Context, _ *river.Job[AutoTopupArgs]) 
 		logger.Warn("limited mode: skipping auto-top-up charges (#345)")
 		return nil
 	}
-	if w.Credits == nil || w.Charger == nil {
+	if w.Money == nil || w.Charger == nil {
 		logger.Debug("auto-top-up charger not configured; skipping")
 		return nil
 	}
@@ -87,7 +87,7 @@ func (w AutoTopupWorker) Work(ctx context.Context, _ *river.Job[AutoTopupArgs]) 
 	if cooldown <= 0 {
 		cooldown = time.Hour
 	}
-	n, err := w.Credits.RunAutoTopups(ctx, w.Charger, cooldown)
+	n, err := w.Money.RunAutoTopups(ctx, w.Charger, cooldown)
 	if err != nil {
 		return err
 	}
@@ -123,8 +123,8 @@ func (ArrearsChargeArgs) Kind() string { return KindArrearsCharge }
 
 type ArrearsChargeWorker struct {
 	river.WorkerDefaults[ArrearsChargeArgs]
-	Credits *credits.CreditsService
-	Charger credits.Charger
+	Money   *money.MoneyService
+	Charger money.Charger
 	Config  *config.Config
 }
 
@@ -136,11 +136,11 @@ func (w ArrearsChargeWorker) Work(ctx context.Context, job *river.Job[ArrearsCha
 		logger.Warn("limited mode: skipping arrears collection charges (#345)")
 		return nil
 	}
-	if w.Credits == nil || w.Charger == nil {
+	if w.Money == nil || w.Charger == nil {
 		logger.Debug("arrears charger not configured; skipping")
 		return nil
 	}
-	n, err := w.Credits.ChargeOutstanding(ctx, w.Charger, job.Args.ThresholdMicros)
+	n, err := w.Money.ChargeOutstanding(ctx, w.Charger, job.Args.ThresholdMicros)
 	if err != nil {
 		return err
 	}
@@ -160,16 +160,16 @@ func (InvoiceFinalizeArgs) Kind() string { return KindInvoiceFinalize }
 
 type InvoiceFinalizeWorker struct {
 	river.WorkerDefaults[InvoiceFinalizeArgs]
-	Credits *credits.CreditsService
-	Clock   clockwork.Clock
+	Money *money.MoneyService
+	Clock clockwork.Clock
 }
 
 func (InvoiceFinalizeWorker) Kind() string { return KindInvoiceFinalize }
 
 func (w InvoiceFinalizeWorker) Work(ctx context.Context, _ *river.Job[InvoiceFinalizeArgs]) error {
 	logger := log.WithContext(ctx).WithField("worker", KindInvoiceFinalize)
-	if w.Credits == nil {
-		logger.Debug("credits service not configured; skipping invoice finalize")
+	if w.Money == nil {
+		logger.Debug("money service not configured; skipping invoice finalize")
 		return nil
 	}
 	now := time.Now().UTC()
@@ -177,11 +177,11 @@ func (w InvoiceFinalizeWorker) Work(ctx context.Context, _ *river.Job[InvoiceFin
 		now = w.Clock.Now().UTC()
 	}
 	// Finalize the PREVIOUS calendar month [firstOfPrevMonth, firstOfThisMonth).
-	// Idempotent per (payer, credit_type, period), so running daily is safe and
-	// guarantees the prior month is finalized shortly after rollover.
+	// Idempotent per (payer, period), so running daily is safe and guarantees
+	// the prior month is finalized shortly after rollover.
 	firstThis := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	from := firstThis.AddDate(0, -1, 0)
-	n, err := w.Credits.FinalizeDueInvoices(ctx, from, firstThis)
+	n, err := w.Money.FinalizeDueInvoices(ctx, from, firstThis)
 	if err != nil {
 		return err
 	}
@@ -201,19 +201,19 @@ func (CreditReconcileArgs) Kind() string { return KindCreditReconcile }
 
 type CreditReconcileWorker struct {
 	river.WorkerDefaults[CreditReconcileArgs]
-	Credits *credits.CreditsService
-	Clock   clockwork.Clock
+	Money *money.MoneyService
+	Clock clockwork.Clock
 }
 
 func (CreditReconcileWorker) Kind() string { return KindCreditReconcile }
 
 func (w CreditReconcileWorker) Work(ctx context.Context, _ *river.Job[CreditReconcileArgs]) error {
 	logger := log.WithContext(ctx).WithField("worker", KindCreditReconcile)
-	if w.Credits == nil {
-		logger.Debug("credits service not configured; skipping reconcile")
+	if w.Money == nil {
+		logger.Debug("money service not configured; skipping reconcile")
 		return nil
 	}
-	rep, err := w.Credits.Reconcile(ctx)
+	rep, err := w.Money.Reconcile(ctx)
 	if err != nil {
 		return err
 	}

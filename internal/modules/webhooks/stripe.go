@@ -15,8 +15,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -40,7 +40,7 @@ type StripeWebhookService struct {
 	PurchaseRegistrar            stripePurchaseRegistrar
 	PaymentService               *payments.PaymentService
 	EventLogService              *analytics.EventLogService
-	CreditsService               *credits.CreditsService
+	MoneyService                 *money.MoneyService
 	DeduplicationService         *DeduplicationService
 	ProcessorCustomerService     *payments.ProcessorCustomerService
 	CheckoutSessionService       webhookCheckoutSessionStore
@@ -476,7 +476,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 		return err
 	}
 
-	if s.CreditsService != nil {
+	if s.MoneyService != nil {
 		periodEnd := stripeInvoicePeriodEnd(inv)
 		if periodEnd.IsZero() && sub.CurrentPeriodEndsAt != nil {
 			periodEnd = sub.CurrentPeriodEndsAt.UTC()
@@ -488,7 +488,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 				cadence = models.CreditGrantCadenceOnce
 				source = "subscription_initial"
 			}
-			if err := s.CreditsService.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+			if err := s.MoneyService.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 				SubscriptionID: sub.ID,
 				PeriodEnd:      periodEnd,
 				Cadence:        cadence,
@@ -747,8 +747,9 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 			log.WithContext(ctx).WithError(err).WithField("payment_id", result.PaymentID).Warn("failed to load payment snapshot for stripe purchase credits")
 		}
 	}
-	if len(creditsSpec) > 0 && s.CreditsService != nil {
-		for creditType, spec := range creditsSpec {
+	if len(creditsSpec) > 0 && s.MoneyService != nil {
+		// #472: the spec key is just a grant label now (money has no credit_type).
+		for grantKey, spec := range creditsSpec {
 			cadence := spec.Cadence
 			if cadence == "" {
 				cadence = models.CreditGrantCadenceOnce
@@ -756,7 +757,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 			if cadence != models.CreditGrantCadenceOnce {
 				continue
 			}
-			if strings.TrimSpace(creditType) == "" || spec.Amount <= 0 {
+			if strings.TrimSpace(grantKey) == "" || spec.Amount <= 0 {
 				continue
 			}
 			var expiresAt *time.Time
@@ -764,16 +765,15 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 				t := s.now().UTC().Add(time.Duration(*spec.ExpiresDays) * 24 * time.Hour)
 				expiresAt = &t
 			}
-			_, err = s.CreditsService.Deposit(ctx, credits.CreditDepositParams{
-				Actor:      userID,
-				CreditType: creditType,
-				Amount:     spec.Amount,
-				Source:     "purchase",
-				SourceID:   &result.PaymentID,
-				ExpiresAt:  expiresAt,
+			_, err = s.MoneyService.Deposit(ctx, money.DepositParams{
+				Actor:     userID,
+				Amount:    spec.Amount,
+				Source:    "purchase",
+				SourceID:  &result.PaymentID,
+				ExpiresAt: expiresAt,
 			})
 			if err != nil {
-				return fmt.Errorf("grant purchased credits (%s): %w", creditType, err)
+				return fmt.Errorf("grant purchased credits (%s): %w", grantKey, err)
 			}
 		}
 	}

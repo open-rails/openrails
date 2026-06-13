@@ -63,30 +63,6 @@ SELECT count(*) FROM openrails.processor_customers WHERE tenant_id = $1;
 -- name: PurgeTenantRowsProcessorCustomers :exec
 DELETE FROM openrails.processor_customers WHERE tenant_id = $1;
 
--- name: CountTenantRowsCreditTypes :one
-SELECT count(*) FROM openrails.credit_types WHERE tenant_id = $1;
-
--- name: PurgeTenantRowsCreditTypes :exec
-DELETE FROM openrails.credit_types WHERE tenant_id = $1;
-
--- name: CountTenantRowsCreditTransactions :one
-SELECT count(*) FROM openrails.credit_transactions WHERE tenant_id = $1;
-
--- name: PurgeTenantRowsCreditTransactions :exec
-DELETE FROM openrails.credit_transactions WHERE tenant_id = $1;
-
--- name: CountTenantRowsCreditBlocks :one
-SELECT count(*) FROM openrails.credit_blocks WHERE tenant_id = $1;
-
--- name: PurgeTenantRowsCreditBlocks :exec
-DELETE FROM openrails.credit_blocks WHERE tenant_id = $1;
-
--- name: CountTenantRowsCreditBalances :one
-SELECT count(*) FROM openrails.credit_balances WHERE tenant_id = $1;
-
--- name: PurgeTenantRowsCreditBalances :exec
-DELETE FROM openrails.credit_balances WHERE tenant_id = $1;
-
 -- name: CountTenantRowsCheckoutSessions :one
 SELECT count(*) FROM openrails.checkout_sessions WHERE tenant_id = $1;
 
@@ -98,3 +74,39 @@ SELECT count(*) FROM openrails.provider_intents WHERE tenant_id = $1;
 
 -- name: PurgeTenantRowsProviderIntents :exec
 DELETE FROM openrails.provider_intents WHERE tenant_id = $1;
+
+-- name: CountTenantRowsMoneyAccounts :one
+SELECT count(*) FROM openrails.money_accounts WHERE tenant_id = $1;
+
+-- name: PurgeTenantRowsMoneyAccounts :exec
+DELETE FROM openrails.money_accounts WHERE tenant_id = $1;
+
+-- name: CountTenantRowsMoneyBalances :one
+SELECT count(*) FROM openrails.money_balances WHERE tenant_id = $1;
+
+-- name: PurgeTenantRowsMoneyBalances :exec
+DELETE FROM openrails.money_balances WHERE tenant_id = $1;
+
+-- name: CountTenantRowsMoneyBlocks :one
+SELECT count(*) FROM openrails.money_blocks WHERE tenant_id = $1;
+
+-- name: PurgeTenantRowsMoneyBlocks :exec
+DELETE FROM openrails.money_blocks WHERE tenant_id = $1;
+
+-- name: CountTenantRowsMoneyTransactions :one
+SELECT count(*) FROM openrails.money_transactions WHERE tenant_id = $1;
+
+-- name: PurgeTenantRowsMoneyTransactions :exec
+DELETE FROM openrails.money_transactions WHERE tenant_id = $1;
+
+-- name: CountTenantRowsMoneyWindows :one
+SELECT count(*) FROM openrails.money_windows WHERE tenant_id = $1;
+
+-- name: PurgeTenantRowsMoneyWindows :exec
+DELETE FROM openrails.money_windows WHERE tenant_id = $1;
+
+-- name: CountTenantRowsMoneySpendLimits :one
+SELECT count(*) FROM openrails.money_spend_limits WHERE tenant_id = $1;
+
+-- name: PurgeTenantRowsMoneySpendLimits :exec
+DELETE FROM openrails.money_spend_limits WHERE tenant_id = $1;

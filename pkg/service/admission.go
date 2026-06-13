@@ -105,7 +105,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	store := admission.NewTierPolicyStore(s.rt.DB)
 	bl := abuse.NewBlocklistService(s.rt.DB)
 	bsvc := budgets.NewService(s.rt.DB)
-	adm := admission.NewAdmitter(lim, s.creditsService(), store, bl, bsvc)
+	adm := admission.NewAdmitter(lim, s.moneyService(), store, bl, bsvc)
 
 	// #404: tenant-scoped throughput. The host passes its per-tenant RPM/RPD
 	// windows; OpenRails enforces them on the invoke path BEFORE the per-actor
@@ -164,7 +164,6 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		Tier:            in.Tier,
 		Resource:        in.Resource,
 		Amounts:         in.Amounts,
-		CreditType:      in.CreditType,
 		EstimateMicros:  in.EstimateMicros,
 		Source:          source,
 		SourceID:        in.SourceID,

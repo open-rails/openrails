@@ -48,7 +48,6 @@ func ServiceOpenCreditWindow(r *httprequest.Request) {
 	w, err := svc.OpenWindow(r.Request.Context(), billingservice.OpenWindowRequest{
 		TenantSubjectID: *payer,
 		Actor:           req.Actor,
-		CreditType:      req.CreditType,
 		Amount:          req.Amount,
 		TTL:             time.Duration(req.TTLSeconds) * time.Second,
 	})

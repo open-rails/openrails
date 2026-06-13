@@ -26,8 +26,6 @@ type UsageEvent struct {
 	// Resource is the caller-supplied free-form string for what was metered
 	// (opaque to OpenRails; e.g. tensorhub endpoint slug). Nullable.
 	Resource *string `json:"resource,omitempty"`
-	// CreditTypeID is the credit type debited for this event.
-	CreditTypeID uuid.UUID `json:"credit_type_id"`
 	// EventType is the metered endpoint / model (e.g. "gpt-4o").
 	EventType string `json:"event_type"`
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
@@ -38,9 +36,9 @@ type UsageEvent struct {
 	// Source + SourceID form the idempotency key (SourceID is typically the request id).
 	Source   string `json:"source"`
 	SourceID string `json:"source_id"`
-	// CreditTransactionID links to the ledger debit this event produced.
-	CreditTransactionID *uuid.UUID     `json:"credit_transaction_id,omitempty"`
-	Metadata            map[string]any `json:"metadata,omitempty"`
-	OccurredAt          time.Time      `json:"occurred_at"`
-	CreatedAt           time.Time      `json:"created_at"`
+	// MoneyTransactionID links to the ledger debit this event produced.
+	MoneyTransactionID *uuid.UUID     `json:"money_transaction_id,omitempty"`
+	Metadata           map[string]any `json:"metadata,omitempty"`
+	OccurredAt         time.Time      `json:"occurred_at"`
+	CreatedAt          time.Time      `json:"created_at"`
 }

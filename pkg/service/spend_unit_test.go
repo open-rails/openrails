@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 )
 
 // TestRemainingTodayMicros picks the daily-cap headroom (org or per-actor) from
@@ -14,15 +14,15 @@ func TestRemainingTodayMicros(t *testing.T) {
 	}
 
 	// Only a monthly cap present: no daily headroom reported.
-	monthly := []credits.CapResult{{Code: credits.DenyMonthlyCap, Remaining: 500}}
+	monthly := []money.CapResult{{Code: money.DenyMonthlyCap, Remaining: 500}}
 	if r := remainingTodayCents(monthly); r != nil {
 		t.Fatalf("monthly-only => nil, got %v", *r)
 	}
 
 	// Tenant daily cap: report its remaining.
-	tenant := []credits.CapResult{
-		{Code: credits.DenyMonthlyCap, Remaining: 9000},
-		{Code: credits.DenyDailyCap, Remaining: 300},
+	tenant := []money.CapResult{
+		{Code: money.DenyMonthlyCap, Remaining: 9000},
+		{Code: money.DenyDailyCap, Remaining: 300},
 	}
 	r := remainingTodayCents(tenant)
 	if r == nil || *r != 300 {
@@ -30,14 +30,14 @@ func TestRemainingTodayMicros(t *testing.T) {
 	}
 
 	// Per-actor daily cap also counts as "today".
-	inv := []credits.CapResult{{Code: credits.DenyActorDailyCap, Remaining: 42}}
+	inv := []money.CapResult{{Code: money.DenyActorDailyCap, Remaining: 42}}
 	r = remainingTodayCents(inv)
 	if r == nil || *r != 42 {
 		t.Fatalf("actor daily remaining = %v, want 42", r)
 	}
 
 	// Negative remaining (over cap) clamps to zero.
-	over := []credits.CapResult{{Code: credits.DenyDailyCap, Remaining: -50}}
+	over := []money.CapResult{{Code: money.DenyDailyCap, Remaining: -50}}
 	r = remainingTodayCents(over)
 	if r == nil || *r != 0 {
 		t.Fatalf("over-cap remaining = %v, want 0", r)

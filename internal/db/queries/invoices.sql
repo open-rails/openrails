@@ -1,18 +1,18 @@
 -- openrails.invoices: monthly itemized statements (#303), immutable once
--- finalized; one per (tenant, payer, credit_type, period).
+-- finalized; one per (tenant, payer, period).
 
 -- name: GetInvoiceByPeriod :one
 SELECT * FROM openrails.invoices
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
-  AND period_from = $4 AND period_to = $5
+WHERE tenant_id = $1 AND tenant_subject_id = $2
+  AND period_from = $3 AND period_to = $4
 LIMIT 1;
 
 -- name: InsertInvoice :exec
 INSERT INTO openrails.invoices (
-    id, tenant_id, tenant_subject_id, credit_type_id, currency,
+    id, tenant_id, tenant_subject_id, currency,
     period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid,
     closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE(sqlc.arg(line_items), '[]'::jsonb), COALESCE(sqlc.arg(money_movements), '{}'::jsonb), $15, $16, $17, $18);
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE(sqlc.arg(line_items), '[]'::jsonb), COALESCE(sqlc.arg(money_movements), '{}'::jsonb), $14, $15, $16, $17);
 
 -- name: ListInvoicesByPayer :many
 SELECT * FROM openrails.invoices
@@ -30,10 +30,9 @@ WHERE tenant_id = $1 AND tenant_subject_id = $2 AND id = $3
 LIMIT 1;
 
 -- name: ListCreditAccountPairs :many
--- Every known (payer, credit_type) account in the tenant (= has a balance
--- row), for the due-invoice sweep.
-SELECT b.tenant_subject_id, ct.name AS credit_type_name
-FROM openrails.credit_balances b
-JOIN openrails.credit_types ct ON ct.id = b.credit_type_id
-WHERE b.tenant_id = $1
-GROUP BY b.tenant_subject_id, ct.name;
+-- Every known payer in the tenant (= has a money balance row), for the
+-- due-invoice sweep. One money ledger now: no credit_type dimension.
+SELECT tenant_subject_id
+FROM openrails.money_balances
+WHERE tenant_id = $1
+GROUP BY tenant_subject_id;

@@ -20,7 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -45,7 +45,7 @@ type NMIWebhookService struct {
 	EventLogService              *analytics.EventLogService
 	SubscriptionService          *subscriptions.SubscriptionService
 	PaymentService               *payments.PaymentService
-	CreditsService               *credits.CreditsService
+	MoneyService                 *money.MoneyService
 	DeduplicationService         *DeduplicationService
 	NotificationService          *subscriptions.NotificationService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
@@ -907,12 +907,12 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			return fmt.Errorf("failed to activate subscription: %w", err)
 		}
 
-		if s.CreditsService != nil && s.SubscriptionService != nil {
+		if s.MoneyService != nil && s.SubscriptionService != nil {
 			updated, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, nmiSubID)
 			if err != nil {
 				log.WithContext(ctx).WithError(err).Warn("failed to load subscription for initial credit grants (NMI)")
 			} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
-				if err := s.CreditsService.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+				if err := s.MoneyService.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 					SubscriptionID: updated.ID,
 					PeriodEnd:      updated.CurrentPeriodEndsAt.UTC(),
 					Cadence:        models.CreditGrantCadenceOnce,
@@ -966,12 +966,12 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			return fmt.Errorf("failed to renew subscription: %w", err)
 		}
 
-		if s.CreditsService != nil && s.SubscriptionService != nil {
+		if s.MoneyService != nil && s.SubscriptionService != nil {
 			updated, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, nmiSubID)
 			if err != nil {
 				log.WithContext(ctx).WithError(err).Warn("failed to load subscription for renewal credit grants (NMI)")
 			} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
-				if err := s.CreditsService.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+				if err := s.MoneyService.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 					SubscriptionID: updated.ID,
 					PeriodEnd:      updated.CurrentPeriodEndsAt.UTC(),
 					Cadence:        models.CreditGrantCadencePerRenewal,

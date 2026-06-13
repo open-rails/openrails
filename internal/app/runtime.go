@@ -24,9 +24,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
@@ -85,8 +85,7 @@ type Runtime struct {
 	EntitlementService       *entitlements.EntitlementService
 	FeatureService           *entitlements.FeatureService
 	ProductAccessService     *productaccess.Service
-	CreditsService           *credits.CreditsService
-	CreditTypeService        *credits.CreditTypeService
+	MoneyService             *money.MoneyService
 	ProcessorCustomerService *payments.ProcessorCustomerService
 	Tenancy                  *tenancy.Service
 

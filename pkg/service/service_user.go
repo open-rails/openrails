@@ -21,7 +21,6 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
 	"github.com/riverqueue/river"
 )
@@ -777,89 +776,67 @@ func (s *Service) MarkNotificationRead(ctx context.Context, userID string, notif
 
 // -------------------------------- Credits (User-facing) --------------------------------
 
-// GetCredits returns all credit balances for a user.
-// Note: This queries the database directly since there's no CreditsService.GetAllBalances method.
+// moneyBalanceUnit is the implicit unit metadata for the universal µ$ wallet
+// (#472): money has no credit_type dimension, so the legacy CreditBalance shape
+// carries this fixed descriptor.
+const (
+	moneyBalanceType        = "usd_micro"
+	moneyBalanceDisplayName = "USD"
+	moneyBalanceUnit        = "usd_micro"
+	moneyBalanceDecimals    = 6
+)
+
+// GetCredits returns the user's single money balance (#472: one universal µ$
+// wallet, no credit_type dimension).
 func (s *Service) GetCredits(ctx context.Context, userID string) ([]CreditBalance, error) {
-	database, err := s.requireDB()
-	if err != nil {
-		return nil, err
-	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
 	}
 
-	// Balance rows are keyed by tenant_subject_id — the user's own personal
-	// tenant-subject UUID for self-service identities. (The bun-era query
-	// joined on a nonexistent credit_balances.user_id column and errored.)
-	payerID := identity.TenantSubjectIDFromString(userID).UUID()
-	rows, err := database.Gen(ctx).ListActiveCreditTypesWithBalance(ctx, payerID)
+	bal, err := s.moneyService().GetBalance(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get credits: %w", err)
 	}
-
-	result := make([]CreditBalance, 0, len(rows))
-	for _, row := range rows {
-		result = append(result, CreditBalance{
-			Type:          row.Name,
-			DisplayName:   row.DisplayName,
-			Unit:          row.Unit,
-			DecimalPlaces: int(row.DecimalPlaces),
-			Balance:       derefInt64(row.Balance),
-			HeldBalance:   derefInt64(row.HeldBalance),
-		})
-	}
-
-	return result, nil
+	return []CreditBalance{{
+		Type:          moneyBalanceType,
+		DisplayName:   moneyBalanceDisplayName,
+		Unit:          moneyBalanceUnit,
+		DecimalPlaces: moneyBalanceDecimals,
+		Balance:       bal.Balance,
+		HeldBalance:   bal.HeldBalance,
+	}}, nil
 }
 
-func derefInt64(v *int64) int64 {
-	if v == nil {
-		return 0
-	}
-	return *v
-}
-
-// GetCreditsByType returns a specific credit balance for a user.
-func (s *Service) GetCreditsByType(ctx context.Context, userID, creditType string) (*CreditBalance, error) {
+// GetCreditsByType returns the user's money balance (#472: the type argument is
+// vestigial — money is the only unit).
+func (s *Service) GetCreditsByType(ctx context.Context, userID, _ string) (*CreditBalance, error) {
 	userID = strings.TrimSpace(userID)
-	creditType = strings.TrimSpace(creditType)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
 	}
-	if creditType == "" {
-		return nil, fmt.Errorf("credit_type required")
-	}
 
-	bal, err := s.creditsService().GetBalance(ctx, userID, creditType)
+	bal, err := s.moneyService().GetBalance(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get credit balance: %w", err)
 	}
 
-	ct, err := s.creditsService().GetCreditTypeByName(ctx, creditType)
-	if err != nil {
-		return nil, fmt.Errorf("credit type not found")
-	}
-
 	return &CreditBalance{
-		Type:          creditType,
-		DisplayName:   ct.DisplayName,
-		Unit:          ct.Unit,
-		DecimalPlaces: ct.DecimalPlaces,
+		Type:          moneyBalanceType,
+		DisplayName:   moneyBalanceDisplayName,
+		Unit:          moneyBalanceUnit,
+		DecimalPlaces: moneyBalanceDecimals,
 		Balance:       bal.Balance,
 		HeldBalance:   bal.HeldBalance,
 	}, nil
 }
 
-// GetCreditTransactions returns credit transactions for a user.
-func (s *Service) GetCreditTransactions(ctx context.Context, userID, creditType string, opts GetCreditTransactionsOptions) (*PaginatedResult[CreditTransaction], error) {
+// GetCreditTransactions returns money transactions for a user (#472: the type
+// argument is vestigial — money is the only unit).
+func (s *Service) GetCreditTransactions(ctx context.Context, userID, _ string, opts GetCreditTransactionsOptions) (*PaginatedResult[CreditTransaction], error) {
 	userID = strings.TrimSpace(userID)
-	creditType = strings.TrimSpace(creditType)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
-	}
-	if creditType == "" {
-		return nil, fmt.Errorf("credit_type required")
 	}
 
 	limit := opts.Limit
@@ -871,7 +848,7 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, creditType 
 		offset = 0
 	}
 
-	transactions, total, err := s.creditsService().GetTransactions(ctx, userID, creditType, limit, offset)
+	transactions, total, err := s.moneyService().GetTransactions(ctx, userID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("get credit transactions: %w", err)
 	}

@@ -153,17 +153,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	credits.PUT("/account-settings", creditsWrite, wrap(httphandlers.ServiceSetCreditAccountSettings))
 	credits.GET("/account-settings", creditsRead, wrap(httphandlers.ServiceGetCreditAccountSettings))
 	credits.GET("/transactions", creditsRead, wrap(httphandlers.ServiceListTenantSubjectCreditTransactions))
-
-	// Credit-type definition writes are catalog-definition operations: gate them
-	// behind the explicit catalog-write permission (issue #222 — catalog/definition
-	// writes available to service tokens only under an explicit permission). Reads use the
-	// coarse credits:read capability.
-	creditTypes := group.Group("/credit-types")
-	creditTypes.POST("", ginmw.RequireServiceTokenPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceCreateCreditType))
-	creditTypes.GET("", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceListCreditTypes))
-	creditTypes.PATCH("/:name", ginmw.RequireServiceTokenPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceUpdateCreditType))
-	creditTypes.POST("/:name/deactivate", ginmw.RequireServiceTokenPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceDeactivateCreditType))
-	creditTypes.POST("/:name/activate", ginmw.RequireServiceTokenPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceActivateCreditType))
+	// #472: credit-type definition CRUD removed — money has no credit_type dimension.
 }
 
 // RegisterSelfServiceRoutes mounts the browser-direct SELF-SERVICE billing

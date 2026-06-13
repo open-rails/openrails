@@ -9,25 +9,24 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
-// Prepaid credit windows (#335): one bulk reservation a host admits requests
+// Prepaid money windows (#335): one bulk reservation a host admits requests
 // against locally, settled in cross-payer batches, refilled async, with the
 // remainder released at close/expiry. Window errors are re-exported so HTTP
 // handlers and embedded hosts match on the facade, not the internal package.
 var (
-	ErrWindowNotFound = credits.ErrWindowNotFound
-	ErrWindowNotOpen  = credits.ErrWindowNotOpen
-	ErrWindowExceeded = credits.ErrWindowExceeded
+	ErrWindowNotFound = money.ErrWindowNotFound
+	ErrWindowNotOpen  = money.ErrWindowNotOpen
+	ErrWindowExceeded = money.ErrWindowExceeded
 )
 
 // OpenWindowRequest opens a prepaid window for one payer.
 type OpenWindowRequest struct {
 	TenantSubjectID identity.TenantSubjectID
 	Actor           string
-	CreditType      string
 	Amount          int64
 	TTL             time.Duration
 }
@@ -57,10 +56,6 @@ func (s *Service) OpenWindow(ctx context.Context, req OpenWindowRequest) (*Credi
 	if req.TenantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
-	req.CreditType = strings.TrimSpace(req.CreditType)
-	if req.CreditType == "" {
-		return nil, fmt.Errorf("credit_type required")
-	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
 	}
@@ -68,12 +63,11 @@ func (s *Service) OpenWindow(ctx context.Context, req OpenWindowRequest) (*Credi
 	if ttl <= 0 {
 		ttl = defaultWindowTTL
 	}
-	w, err := s.creditsService().OpenWindow(ctx, credits.OpenWindowParams{
-		Payer:      req.TenantSubjectID,
-		Actor:      strings.TrimSpace(req.Actor),
-		CreditType: req.CreditType,
-		Amount:     req.Amount,
-		ExpiresAt:  s.now().Add(ttl).UTC(),
+	w, err := s.moneyService().OpenWindow(ctx, money.OpenWindowParams{
+		Payer:     req.TenantSubjectID,
+		Actor:     strings.TrimSpace(req.Actor),
+		Amount:    req.Amount,
+		ExpiresAt: s.now().Add(ttl).UTC(),
 	})
 	if err != nil {
 		return nil, err
@@ -93,8 +87,8 @@ type WindowSettleItemInput struct {
 	Metadata  map[string]any
 }
 
-// WindowSettleItemResult mirrors credits.WindowSettleResult on the facade.
-type WindowSettleItemResult = credits.WindowSettleResult
+// WindowSettleItemResult mirrors money.WindowSettleResult on the facade.
+type WindowSettleItemResult = money.WindowSettleResult
 
 // SettleWindowItems settles a cross-payer batch of actuals. Per-item isolation:
 // each item commits or fails alone; idempotent replays return OK. The returned
@@ -103,9 +97,9 @@ func (s *Service) SettleWindowItems(ctx context.Context, items []WindowSettleIte
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
-	in := make([]credits.WindowSettleItem, 0, len(items))
+	in := make([]money.WindowSettleItem, 0, len(items))
 	for _, it := range items {
-		in = append(in, credits.WindowSettleItem{
+		in = append(in, money.WindowSettleItem{
 			WindowID:  it.WindowID,
 			RequestID: strings.TrimSpace(it.RequestID),
 			Amount:    it.Amount,
@@ -115,7 +109,7 @@ func (s *Service) SettleWindowItems(ctx context.Context, items []WindowSettleIte
 			Metadata:  it.Metadata,
 		})
 	}
-	return s.creditsService().SettleWindowItems(ctx, in)
+	return s.moneyService().SettleWindowItems(ctx, in)
 }
 
 // RefillWindow extends an open window: amount > 0 reserves more funds (same
@@ -128,7 +122,7 @@ func (s *Service) RefillWindow(ctx context.Context, windowID uuid.UUID, amount i
 	if ttl > 0 {
 		extendTo = s.now().Add(ttl).UTC()
 	}
-	w, err := s.creditsService().RefillWindow(ctx, windowID, amount, extendTo)
+	w, err := s.moneyService().RefillWindow(ctx, windowID, amount, extendTo)
 	if err != nil {
 		return nil, err
 	}
@@ -141,14 +135,14 @@ func (s *Service) CloseWindow(ctx context.Context, windowID uuid.UUID) (*CreditW
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
-	w, err := s.creditsService().CloseWindow(ctx, windowID)
+	w, err := s.moneyService().CloseWindow(ctx, windowID)
 	if err != nil {
 		return nil, err
 	}
 	return windowToDTO(w), nil
 }
 
-func windowToDTO(w *models.CreditWindow) *CreditWindowDTO {
+func windowToDTO(w *models.MoneyWindow) *CreditWindowDTO {
 	return &CreditWindowDTO{
 		WindowID:        w.ID,
 		TenantSubjectID: w.TenantSubjectID,

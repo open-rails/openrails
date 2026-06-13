@@ -21,7 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -67,7 +67,7 @@ type WebhookDispatcher struct {
 	NMIClients                   map[string]*nmi.NMIClient
 	PurchaseRegistrar            stripePurchaseRegistrar
 	CheckoutSessionService       webhookCheckoutSessionStore
-	CreditsService               *credits.CreditsService
+	MoneyService                 *money.MoneyService
 }
 
 // webhookRegistry resolves WebhookHandlers by processor. The dispatcher is fully
@@ -124,7 +124,7 @@ func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		PaymentService:               d.PaymentService,
 		DeduplicationService:         d.DeduplicationService,
 		CheckoutSessionService:       d.CheckoutSessionService,
-		CreditsService:               d.CreditsService,
+		MoneyService:                 d.MoneyService,
 	}
 	return service.HandleCCBillWebhook(ctx)
 }
@@ -157,7 +157,7 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 		EventLogService:              d.EventLogService,
 		SubscriptionService:          d.SubscriptionService,
 		PaymentService:               d.PaymentService,
-		CreditsService:               d.CreditsService,
+		MoneyService:                 d.MoneyService,
 		DeduplicationService:         d.DeduplicationService,
 		NotificationService:          d.NotificationService,
 		SubscriptionLifecycleService: d.SubscriptionLifecycleService,
@@ -183,7 +183,7 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		PurchaseRegistrar:            d.PurchaseRegistrar,
 		PaymentService:               d.PaymentService,
 		EventLogService:              d.EventLogService,
-		CreditsService:               d.CreditsService,
+		MoneyService:                 d.MoneyService,
 		DeduplicationService:         d.DeduplicationService,
 		ProcessorCustomerService:     d.ProcessorCustomerService,
 		CheckoutSessionService:       d.CheckoutSessionService,

@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -21,7 +21,6 @@ import (
 type serviceWithdrawRequest struct {
 	TenantSubjectID string     `json:"tenant_subject_id"`
 	Actor           string     `json:"actor" binding:"required"`
-	CreditType      string     `json:"credit_type" binding:"required"`
 	Amount          int64      `json:"amount" binding:"required"`
 	Source          string     `json:"source" binding:"required"`
 	SourceID        *uuid.UUID `json:"source_id" binding:"required"`
@@ -30,7 +29,6 @@ type serviceWithdrawRequest struct {
 type serviceDepositRequest struct {
 	TenantSubjectID string     `json:"tenant_subject_id"`
 	Actor           string     `json:"actor" binding:"required"`
-	CreditType      string     `json:"credit_type" binding:"required"`
 	Amount          int64      `json:"amount" binding:"required"`
 	Source          string     `json:"source" binding:"required"`
 	SourceID        *uuid.UUID `json:"source_id" binding:"required"`
@@ -41,7 +39,6 @@ type serviceDepositRequest struct {
 type serviceHoldRequest struct {
 	TenantSubjectID string `json:"tenant_subject_id"`
 	Actor           string `json:"actor" binding:"required"`
-	CreditType      string `json:"credit_type" binding:"required"`
 	Amount          int64  `json:"amount" binding:"required"`
 	Source          string `json:"source" binding:"required"`
 	SourceID        string `json:"source_id" binding:"required"`
@@ -109,7 +106,6 @@ func requireServiceTenantSubjectScope(r *httprequest.Request, tenantSubject bill
 type serviceAuthorizeRequest struct {
 	TenantSubjectID string `json:"tenant_subject_id"`
 	Actor           string `json:"actor"`
-	CreditType      string `json:"credit_type" binding:"required"`
 	EstimateMicros  int64  `json:"estimate_micros"`
 	RequestID       string `json:"request_id" binding:"required"`
 	ExpiresAt       *int64 `json:"expires_at"`
@@ -177,7 +173,6 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 	out, err := svc.AuthorizeAndHold(r.Request.Context(), billingservice.AuthorizeAndHoldRequest{
 		TenantSubjectID: *tenantSubject,
 		Actor:           req.Actor,
-		CreditType:      req.CreditType,
 		EstimateMicros:  req.EstimateMicros,
 		RequestID:       req.RequestID,
 		ExpiresAt:       expiresAt,
@@ -304,7 +299,7 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 	if creditType == "" {
 		creditType = "api_credits"
 	}
-	in := credits.AccountSettingsInput{
+	in := money.AccountSettingsInput{
 		BillingMode:              req.BillingMode,
 		MaxSpendPerDayMicros:     req.MaxSpendPerDayMicros,
 		MaxSpendPerMonthMicros:   req.MaxSpendPerMonthMicros,
@@ -525,7 +520,6 @@ func ServiceDepositCredits(r *httprequest.Request) {
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
 		TenantSubjectID: tenantSubjectID,
 		Actor:           req.Actor,
-		CreditType:      req.CreditType,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -568,7 +562,6 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 	trx, err := svc.WithdrawCredits(r.Request.Context(), billingservice.WithdrawCreditsRequest{
 		TenantSubjectID: tenantSubjectID,
 		Actor:           req.Actor,
-		CreditType:      req.CreditType,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -613,7 +606,6 @@ func ServiceHoldCredits(r *httprequest.Request) {
 	hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
 		TenantSubjectID: tenantSubjectID,
 		Actor:           req.Actor,
-		CreditType:      req.CreditType,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -694,39 +686,36 @@ func ServiceGetActorCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "actor required")
 		return
 	}
-	creditType := strings.TrimSpace(r.Request.URL.Query().Get("type"))
-	if creditType == "" {
-		creditType = "api_credits"
-	}
 	tenantSubjectID, err := parseServiceTenantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
+	// #472: one universal µ$ wallet, no credit_type dimension.
 	var balance int64
 	var heldBalance int64
 	if tenantSubjectID != nil {
 		if !requireServiceTenantSubjectScope(r, *tenantSubjectID) {
 			return
 		}
-		bal, err := r.State.CreditsService.GetBalanceForTenantSubject(r.Request.Context(), *tenantSubjectID, creditType)
+		bal, err := r.State.MoneyService.GetBalanceForTenantSubject(r.Request.Context(), *tenantSubjectID)
 		if err == nil {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance
 		}
 	} else {
-		bal, err := r.State.CreditsService.GetBalance(r.Request.Context(), actorID, creditType)
+		bal, err := r.State.MoneyService.GetBalance(r.Request.Context(), actorID)
 		if err == nil {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance
 		}
 	}
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "credit type not found")
+		r.ErrorJSON(http.StatusNotFound, "balance not found")
 		return
 	}
 	r.SuccessJSON(map[string]any{
-		"type":         creditType,
+		"type":         "usd_micro",
 		"balance":      balance,
 		"held_balance": heldBalance,
 	})
@@ -736,11 +725,6 @@ func ServiceLookupCreditTransaction(r *httprequest.Request) {
 	actorID := strings.TrimSpace(r.Request.URL.Query().Get("actor"))
 	if actorID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "actor required")
-		return
-	}
-	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
-	if creditType == "" {
-		r.ErrorJSON(http.StatusBadRequest, "credit_type required")
 		return
 	}
 	source := strings.TrimSpace(r.Request.URL.Query().Get("source"))
@@ -758,7 +742,7 @@ func ServiceLookupCreditTransaction(r *httprequest.Request) {
 		transactionType = "hold"
 	}
 
-	trx, err := r.State.CreditsService.GetTransactionBySource(r.Request.Context(), actorID, creditType, transactionType, source, sourceID)
+	trx, err := r.State.MoneyService.GetTransactionBySource(r.Request.Context(), actorID, transactionType, source, sourceID)
 	if err != nil {
 		if repo.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "not found")

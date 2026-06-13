@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -116,7 +116,6 @@ func transactionFromService(t *billingservice.CreditTransaction) *openrails.Cred
 		ID:              t.ID,
 		TenantSubjectID: t.TenantSubjectID,
 		Actor:           t.Actor,
-		CreditTypeID:    t.CreditTypeID,
 		Amount:          t.Amount,
 		BalanceAfter:    t.BalanceAfter,
 		TransactionType: t.TransactionType,
@@ -130,17 +129,6 @@ func transactionFromService(t *billingservice.CreditTransaction) *openrails.Cred
 		CreatedAt:       t.CreatedAt,
 		UpdatedAt:       t.UpdatedAt,
 	}
-}
-
-// normalizeCreditType mirrors the root package's client-side defaulting for
-// GetCreditAccount/SetCreditAccountSettings/ListCreditTransactions: an empty
-// credit type means the built-in "usd_micro" micro-dollar ledger.
-func normalizeCreditType(creditType string) string {
-	creditType = strings.TrimSpace(creditType)
-	if creditType == "" {
-		return "usd_micro"
-	}
-	return creditType
 }
 
 // --- Client implementation -------------------------------------------------
@@ -291,7 +279,6 @@ func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCredits
 	hold, err := c.svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
 		TenantSubjectID: &payer,
 		Actor:           req.Actor,
-		CreditType:      req.CreditType,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -365,7 +352,6 @@ func (c *localClient) WithdrawCredits(ctx context.Context, req openrails.Withdra
 	trx, err := c.svc.WithdrawCredits(ctx, billingservice.WithdrawCreditsRequest{
 		TenantSubjectID: &payer,
 		Actor:           req.Actor,
-		CreditType:      req.CreditType,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -408,7 +394,6 @@ func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositC
 	trx, err := c.svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
 		TenantSubjectID: &payer,
 		Actor:           req.Actor,
-		CreditType:      req.CreditType,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -493,7 +478,7 @@ func (c *localClient) GetCreditAccount(ctx context.Context, payerTenantID, credi
 	if err != nil {
 		return nil, err
 	}
-	snap, err := c.svc.GetCreditAccount(ctx, payer, normalizeCreditType(creditType))
+	snap, err := c.svc.GetCreditAccount(ctx, payer, creditType)
 	if err != nil {
 		return nil, invalidErr(err.Error())
 	}
@@ -516,8 +501,8 @@ func (c *localClient) SetCreditAccountSettings(ctx context.Context, payerTenantI
 	if err != nil {
 		return nil, err
 	}
-	ct := normalizeCreditType(creditType)
-	settings := credits.AccountSettingsInput{
+	ct := strings.TrimSpace(creditType)
+	settings := money.AccountSettingsInput{
 		BillingMode:              in.BillingMode,
 		MaxSpendPerDayMicros:     in.MaxSpendPerDayMicros,
 		MaxSpendPerMonthMicros:   in.MaxSpendPerMonthMicros,
@@ -567,7 +552,7 @@ func (c *localClient) ListCreditTransactions(ctx context.Context, payerTenantID,
 	if err != nil {
 		return nil, err
 	}
-	items, total, err := c.svc.GetTenantSubjectCreditTransactions(ctx, payer, normalizeCreditType(creditType), limit, 0)
+	items, total, err := c.svc.GetTenantSubjectCreditTransactions(ctx, payer, strings.TrimSpace(creditType), limit, 0)
 	if err != nil {
 		return nil, invalidErr(err.Error())
 	}
@@ -826,7 +811,6 @@ func (c *localClient) OpenWindow(ctx context.Context, req openrails.OpenWindowRe
 	w, serr := c.svc.OpenWindow(ctx, billingservice.OpenWindowRequest{
 		TenantSubjectID: payer,
 		Actor:           req.Actor,
-		CreditType:      req.CreditType,
 		Amount:          req.AmountMicros,
 		TTL:             time.Duration(req.TTLSeconds) * time.Second,
 	})

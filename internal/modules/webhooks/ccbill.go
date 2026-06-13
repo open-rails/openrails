@@ -16,8 +16,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -48,7 +48,7 @@ type CCBillWebhookService struct {
 	PaymentService               *payments.PaymentService
 	DeduplicationService         *DeduplicationService
 	CheckoutSessionService       webhookCheckoutSessionStore
-	CreditsService               *credits.CreditsService
+	MoneyService                 *money.MoneyService
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -564,7 +564,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 		return fmt.Errorf("failed to create membership: %w", err)
 	}
 
-	if s.CreditsService != nil {
+	if s.MoneyService != nil {
 		periodEnd := time.Time{}
 		if paidTermEnd != nil {
 			periodEnd = paidTermEnd.UTC()
@@ -572,7 +572,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 			periodEnd = subscription.CurrentPeriodEndsAt.UTC()
 		}
 		if !periodEnd.IsZero() {
-			if err := s.CreditsService.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+			if err := s.MoneyService.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 				SubscriptionID: subscription.ID,
 				PeriodEnd:      periodEnd,
 				Cadence:        models.CreditGrantCadenceOnce,
@@ -2383,7 +2383,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	// Note: grace window cleanup happens inside RenewMembership (before pushing the next paid window)
 	// to avoid the grace tail interfering with scheduling.
 
-	if s.CreditsService != nil {
+	if s.MoneyService != nil {
 		periodEnd := time.Time{}
 		if paidTermEnd != nil {
 			periodEnd = paidTermEnd.UTC()
@@ -2391,7 +2391,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 			periodEnd = subscription.CurrentPeriodEndsAt.UTC()
 		}
 		if !periodEnd.IsZero() {
-			if err := s.CreditsService.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+			if err := s.MoneyService.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 				SubscriptionID: subscription.ID,
 				PeriodEnd:      periodEnd,
 				Cadence:        models.CreditGrantCadencePerRenewal,

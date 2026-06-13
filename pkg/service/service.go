@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,7 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
@@ -27,8 +28,8 @@ func New(rt *app.Runtime) (*Service, error) {
 	if rt == nil {
 		return nil, fmt.Errorf("billing service: runtime is nil")
 	}
-	if rt.CreditsService == nil {
-		return nil, fmt.Errorf("billing service: credits service unavailable")
+	if rt.MoneyService == nil {
+		return nil, fmt.Errorf("billing service: money service unavailable")
 	}
 	if rt.EntitlementService == nil {
 		return nil, fmt.Errorf("billing service: entitlement service unavailable")
@@ -43,13 +44,16 @@ func (s *Service) now() time.Time {
 	return time.Now()
 }
 
-var ErrInsufficientCredits = credits.ErrInsufficientCredits
-var ErrCreditTypeInactive = credits.ErrCreditTypeInactive
+var ErrInsufficientCredits = money.ErrInsufficientCredits
+
+// ErrCreditTypeInactive is retained as a facade sentinel (#472): money has a
+// single implicit unit, so it is never returned anymore, but the public error
+// surface (and its handler/embed consumers) is kept stable.
+var ErrCreditTypeInactive = errors.New("credit_type_inactive")
 
 type HoldCreditsRequest struct {
 	TenantSubjectID *identity.TenantSubjectID
 	Actor           string
-	CreditType      string
 	Amount          int64
 	Source          string
 	SourceID        string
@@ -71,7 +75,6 @@ type CreditHold struct {
 
 func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*CreditHold, error) {
 	req.Actor = strings.TrimSpace(req.Actor)
-	req.CreditType = strings.TrimSpace(req.CreditType)
 	req.Source = strings.TrimSpace(req.Source)
 	req.SourceID = strings.TrimSpace(req.SourceID)
 	if req.TenantSubjectID == nil || req.TenantSubjectID.IsZero() {
@@ -79,9 +82,6 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 	}
 	if req.Actor == "" {
 		return nil, fmt.Errorf("actor required")
-	}
-	if req.CreditType == "" {
-		return nil, fmt.Errorf("credit_type required")
 	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
@@ -96,7 +96,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 		return nil, fmt.Errorf("expires_at required")
 	}
 
-	hold, err := s.creditsService().Hold(ctx, req.TenantSubjectID, req.Actor, req.CreditType, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
+	hold, err := s.moneyService().Hold(ctx, req.TenantSubjectID, req.Actor, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +151,6 @@ type CreditTransaction struct {
 	ID              uuid.UUID
 	TenantSubjectID uuid.UUID
 	Actor           string
-	CreditTypeID    uuid.UUID
 	Amount          int64
 	BalanceAfter    *int64
 	TransactionType string
@@ -169,7 +168,6 @@ type CreditTransaction struct {
 type WithdrawCreditsRequest struct {
 	TenantSubjectID *identity.TenantSubjectID
 	Actor           string
-	CreditType      string
 	Amount          int64
 	Source          string
 	SourceID        *uuid.UUID
@@ -177,16 +175,12 @@ type WithdrawCreditsRequest struct {
 
 func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error) {
 	req.Actor = strings.TrimSpace(req.Actor)
-	req.CreditType = strings.TrimSpace(req.CreditType)
 	req.Source = strings.TrimSpace(req.Source)
 	if req.TenantSubjectID == nil || req.TenantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if req.Actor == "" {
 		return nil, fmt.Errorf("actor required")
-	}
-	if req.CreditType == "" {
-		return nil, fmt.Errorf("credit_type required")
 	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
@@ -197,10 +191,9 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	if req.SourceID == nil || *req.SourceID == uuid.Nil {
 		return nil, fmt.Errorf("source_id required")
 	}
-	trx, err := s.creditsService().Withdraw(ctx, credits.CreditWithdrawParams{
+	trx, err := s.moneyService().Withdraw(ctx, money.WithdrawParams{
 		TenantSubjectID: req.TenantSubjectID,
 		Actor:           req.Actor,
-		CreditType:      req.CreditType,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -212,7 +205,6 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 		ID:              trx.ID,
 		TenantSubjectID: trx.TenantSubjectID,
 		Actor:           trx.Actor,
-		CreditTypeID:    trx.CreditTypeID,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
 		TransactionType: trx.TransactionType,
@@ -231,7 +223,6 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 type DepositCreditsRequest struct {
 	TenantSubjectID *identity.TenantSubjectID
 	Actor           string
-	CreditType      string
 	Amount          int64
 	Source          string
 	SourceID        *uuid.UUID
@@ -241,16 +232,12 @@ type DepositCreditsRequest struct {
 
 func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
 	req.Actor = strings.TrimSpace(req.Actor)
-	req.CreditType = strings.TrimSpace(req.CreditType)
 	req.Source = strings.TrimSpace(req.Source)
 	if req.TenantSubjectID == nil || req.TenantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if req.Actor == "" {
 		return nil, fmt.Errorf("actor required")
-	}
-	if req.CreditType == "" {
-		return nil, fmt.Errorf("credit_type required")
 	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
@@ -261,10 +248,9 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	if req.SourceID == nil || *req.SourceID == uuid.Nil {
 		return nil, fmt.Errorf("source_id required")
 	}
-	trx, err := s.creditsService().Deposit(ctx, credits.CreditDepositParams{
+	trx, err := s.moneyService().Deposit(ctx, money.DepositParams{
 		TenantSubjectID: req.TenantSubjectID,
 		Actor:           req.Actor,
-		CreditType:      req.CreditType,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -278,7 +264,6 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 		ID:              trx.ID,
 		TenantSubjectID: trx.TenantSubjectID,
 		Actor:           trx.Actor,
-		CreditTypeID:    trx.CreditTypeID,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
 		TransactionType: trx.TransactionType,
@@ -301,7 +286,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
 	}
-	trx, err := s.creditsService().CaptureHold(ctx, req.HoldID, req.Amount)
+	trx, err := s.moneyService().CaptureHold(ctx, req.HoldID, req.Amount)
 	if err != nil {
 		return nil, err
 	}
@@ -317,18 +302,17 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 			sourceID = strings.TrimSpace(*trx.SourceID)
 		}
 		captureTxnID := trx.ID
-		if uerr := s.creditsService().InsertCaptureUsageEvent(ctx, credits.CaptureUsageEventParams{
-			TenantSubjectID:     trx.TenantSubjectID,
-			Actor:               trx.Actor,
-			CreditTypeID:        trx.CreditTypeID,
-			EventType:           req.EventType,
-			Resource:            strings.TrimSpace(req.Resource),
-			Amount:              req.Amount,
-			Dimensions:          req.Dimensions,
-			Metadata:            req.Metadata,
-			Source:              source,
-			SourceID:            sourceID,
-			CreditTransactionID: &captureTxnID,
+		if uerr := s.moneyService().InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
+			TenantSubjectID:    trx.TenantSubjectID,
+			Actor:              trx.Actor,
+			EventType:          req.EventType,
+			Resource:           strings.TrimSpace(req.Resource),
+			Amount:             req.Amount,
+			Dimensions:         req.Dimensions,
+			Metadata:           req.Metadata,
+			Source:             source,
+			SourceID:           sourceID,
+			MoneyTransactionID: &captureTxnID,
 		}); uerr != nil {
 			// Analytics is best-effort: a usage_event failure must NOT fail the
 			// capture (the money is already captured).
@@ -339,7 +323,6 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 		ID:              trx.ID,
 		TenantSubjectID: trx.TenantSubjectID,
 		Actor:           trx.Actor,
-		CreditTypeID:    trx.CreditTypeID,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
 		TransactionType: trx.TransactionType,
@@ -378,7 +361,7 @@ func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollup
 	if req.TenantSubjectID == nil || req.TenantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
-	rows, err := s.creditsService().ServiceUsageRollup(ctx, *req.TenantSubjectID, req.From, req.To, req.GroupBy)
+	rows, err := s.moneyService().ServiceUsageRollup(ctx, *req.TenantSubjectID, req.From, req.To, req.GroupBy)
 	if err != nil {
 		return nil, err
 	}
@@ -399,7 +382,7 @@ type ResourceRevenueDailyRow struct {
 // attribution column) across all payers in the tenant over [from, to) — powers
 // tensorhub endpoint revenue analytics (#410).
 func (s *Service) ResourceRevenueDaily(ctx context.Context, resource string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
-	rows, err := s.creditsService().ResourceRevenueDaily(ctx, resource, from, to)
+	rows, err := s.moneyService().ResourceRevenueDaily(ctx, resource, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +397,7 @@ func (s *Service) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
 	if holdID == uuid.Nil {
 		return fmt.Errorf("hold_id required")
 	}
-	return s.creditsService().ReleaseHold(ctx, holdID)
+	return s.moneyService().ReleaseHold(ctx, holdID)
 }
 
 func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {

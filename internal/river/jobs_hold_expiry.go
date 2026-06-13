@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -68,9 +68,9 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 		err := w.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			q := gen.New(tx)
 
-			// Find expired active holds (stored as credit_transactions rows with transaction_type='hold')
+			// Find expired active holds (stored as money_transactions rows with transaction_type='hold')
 			batchSize32, _ := safecast.Convert[int32](batchSize)
-			holds, err := q.ListExpiredActiveHoldsForUpdate(ctx, gen.ListExpiredActiveHoldsForUpdateParams{
+			holds, err := q.ListExpiredActiveMoneyHoldsForUpdate(ctx, gen.ListExpiredActiveMoneyHoldsForUpdateParams{
 				Now: now, BatchSize: batchSize32,
 			})
 			if err != nil {
@@ -83,13 +83,12 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 
 			// Group holds by the BALANCE KEY to batch balance updates. The unified
 			// lifecycle balance row (issue #221/#223) is keyed by
-			// (tenant_id, tenant_subject_id, credit_type_id) — actor is ACTOR attribution
-			// only and is NOT part of the balance identity, so releasing held_balance
-			// must target the payer's row, not the actor's.
+			// (tenant_id, tenant_subject_id) — actor is ACTOR attribution only and is
+			// NOT part of the balance identity, so releasing held_balance must target
+			// the payer's row, not the actor's.
 			type key struct {
 				TenantID        uuid.UUID
 				TenantSubjectID uuid.UUID
-				CreditTypeID    uuid.UUID
 			}
 			releasedTotals := make(map[key]int64)
 
@@ -98,11 +97,11 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 				if hold.AuthorizedAmount == nil || *hold.AuthorizedAmount <= 0 {
 					continue
 				}
-				k := key{TenantID: hold.TenantID, TenantSubjectID: hold.TenantSubjectID, CreditTypeID: hold.CreditTypeID}
+				k := key{TenantID: hold.TenantID, TenantSubjectID: hold.TenantSubjectID}
 				releasedTotals[k] += *hold.AuthorizedAmount
 
 				// Mark hold as expired
-				if err := q.ExpireCreditHold(ctx, gen.ExpireCreditHoldParams{ID: hold.ID, UpdatedAt: now}); err != nil {
+				if err := q.ExpireMoneyHold(ctx, gen.ExpireMoneyHoldParams{ID: hold.ID, UpdatedAt: now}); err != nil {
 					return err
 				}
 			}
@@ -113,22 +112,22 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 					continue
 				}
 
-				bal, err := q.LockCreditBalance(ctx, gen.LockCreditBalanceParams{
-					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, CreditTypeID: k.CreditTypeID,
+				bal, err := q.LockMoneyBalance(ctx, gen.LockMoneyBalanceParams{
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID,
 				})
 				if err != nil {
 					return err
 				}
 
-				// Reduce held_balance - credits become available again
+				// Reduce held_balance - funds become available again
 				newHeldBalance := bal.HeldBalance - amount
 				if newHeldBalance < 0 {
 					// Shouldn't happen, but be safe
 					newHeldBalance = 0
 				}
 
-				if err := q.SetCreditHeldBalance(ctx, gen.SetCreditHeldBalanceParams{
-					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, CreditTypeID: k.CreditTypeID,
+				if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID,
 					HeldBalance: newHeldBalance, UpdatedAt: now,
 				}); err != nil {
 					return err
@@ -137,9 +136,8 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 				logger.WithFields(log.Fields{
 					"tenant_id":         k.TenantID,
 					"tenant_subject_id": k.TenantSubjectID,
-					"credit_type_id":    k.CreditTypeID,
 					"amount":            amount,
-				}).Debug("released expired hold credits")
+				}).Debug("released expired hold funds")
 			}
 			return nil
 		})
@@ -162,12 +160,12 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 		logger.WithField("total_expired", totalExpired).Info("completed hold expiry job")
 	}
 
-	// Credit windows (#335) expire on the same sweep: release each open,
+	// Money windows (#335) expire on the same sweep: release each open,
 	// past-expiry window's unsettled remainder and mark it expired.
-	creditsSvc := credits.NewCreditsService(w.DB, clock)
-	expiredWindows, err := creditsSvc.ExpireWindows(ctx, batchSize)
+	moneySvc := money.NewMoneyService(w.DB, clock)
+	expiredWindows, err := moneySvc.ExpireWindows(ctx, batchSize)
 	if err != nil {
-		return fmt.Errorf("expire credit windows: %w", err)
+		return fmt.Errorf("expire money windows: %w", err)
 	}
 	if expiredWindows > 0 {
 		logger.WithField("expired_windows", expiredWindows).Info("expired credit windows")

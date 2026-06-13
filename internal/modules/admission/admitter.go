@@ -9,7 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/budgets"
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -26,14 +26,14 @@ const DefaultTier = "free"
 
 type Admitter struct {
 	limiter   *ratelimit.Limiter
-	credits   *credits.CreditsService
+	money     *money.MoneyService
 	policies  *TierPolicyStore
 	blocklist *abuse.BlocklistService // optional; nil disables blocklist checks
 	budgets   *budgets.Service        // optional; nil disables fixed money-budget windows (#304, #337)
 }
 
-func NewAdmitter(limiter *ratelimit.Limiter, creditsSvc *credits.CreditsService, policies *TierPolicyStore, blocklist *abuse.BlocklistService, budgetSvc *budgets.Service) *Admitter {
-	return &Admitter{limiter: limiter, credits: creditsSvc, policies: policies, blocklist: blocklist, budgets: budgetSvc}
+func NewAdmitter(limiter *ratelimit.Limiter, moneySvc *money.MoneyService, policies *TierPolicyStore, blocklist *abuse.BlocklistService, budgetSvc *budgets.Service) *Admitter {
+	return &Admitter{limiter: limiter, money: moneySvc, policies: policies, blocklist: blocklist, budgets: budgetSvc}
 }
 
 // BlockCheck is one (kind,value) tested against the payment blocklist (#300),
@@ -54,8 +54,7 @@ type AdmitRequest struct {
 	// {"request":1,"token":150}.
 	Amounts map[string]int64
 
-	// Money axis (skipped when EstimateMicros == 0).
-	CreditType     string
+	// Money axis (skipped when EstimateMicros == 0). Money is always micro-dollars.
 	EstimateMicros int64
 	Source         string    // idempotency namespace (e.g. "usage")
 	SourceID       string    // idempotency id (e.g. request id)
@@ -73,8 +72,8 @@ type AdmitDecision struct {
 	BlockedUnit string // throughput: the window unit that blocked
 	DenyCode    string // money: the ledger deny code
 	RetryAfter  time.Duration
-	Windows     []ratelimit.WindowInfo    // for x-ratelimit-* headers
-	Hold        *models.CreditTransaction // the placed money hold when allowed
+	Windows     []ratelimit.WindowInfo   // for x-ratelimit-* headers
+	Hold        *models.MoneyTransaction // the placed money hold when allowed
 
 	// BudgetReservationID is the money-budget reservation placed when
 	// allowed (#304); BudgetWindows is the per-window state for introspection.
@@ -98,8 +97,8 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	}
 
 	// Suspension (#299): a past_due/suspended account is denied all spend.
-	if req.CreditType != "" {
-		suspended, err := a.credits.IsSuspended(ctx, req.TenantSubjectID, req.CreditType)
+	if req.EstimateMicros > 0 {
+		suspended, err := a.money.IsSuspended(ctx, req.TenantSubjectID)
 		if err != nil {
 			return AdmitDecision{}, err
 		}
@@ -110,8 +109,8 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 
 	// PM-on-file gate (#299): a credit-line (arrears) account must have a verified
 	// payment method before it may spend on credit.
-	if req.CreditType != "" {
-		needV, err := a.credits.ArrearsRequiresVerification(ctx, req.TenantSubjectID, req.CreditType)
+	if req.EstimateMicros > 0 {
+		needV, err := a.money.ArrearsRequiresVerification(ctx, req.TenantSubjectID)
 		if err != nil {
 			return AdmitDecision{}, err
 		}
@@ -124,8 +123,8 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// spend) > lowest default (#300 new-account low default).
 	tier := req.Tier
 	if tier == "" {
-		if req.CreditType != "" {
-			if t, terr := a.credits.GetTier(ctx, req.TenantSubjectID, req.CreditType); terr == nil && t != "" {
+		if req.EstimateMicros > 0 {
+			if t, terr := a.money.GetTier(ctx, req.TenantSubjectID); terr == nil && t != "" {
 				tier = t
 			}
 		}
@@ -191,10 +190,9 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 
 	// --- money axis (reserve the estimate via the existing ledger gate) ---
 	if req.EstimateMicros > 0 {
-		res, err := a.credits.AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
+		res, err := a.money.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
 			Payer:          req.TenantSubjectID,
 			Actor:          req.Actor,
-			CreditType:     req.CreditType,
 			EstimateMicros: req.EstimateMicros,
 			Source:         req.Source,
 			SourceID:       req.SourceID,

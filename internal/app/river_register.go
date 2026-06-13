@@ -142,31 +142,31 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// no Alerter yet, so they log-and-skip until the processor/notification wiring
 	// lands; the reconcile worker runs fully (alert-only).
 	if err := river.AddWorkerSafely(workers, &riverjobs.LowBalanceAlertWorker{
-		Credits: r.CreditsService,
+		Money: r.MoneyService,
 	}); err != nil {
 		return fmt.Errorf("add low-balance alert worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.AutoTopupWorker{
-		Credits: r.CreditsService,
-		Config:  r.Config,
+		Money:  r.MoneyService,
+		Config: r.Config,
 	}); err != nil {
 		return fmt.Errorf("add auto-topup worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.ArrearsChargeWorker{
-		Credits: r.CreditsService,
-		Config:  r.Config,
+		Money:  r.MoneyService,
+		Config: r.Config,
 	}); err != nil {
 		return fmt.Errorf("add arrears charge worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CreditReconcileWorker{
-		Credits: r.CreditsService,
-		Clock:   clock,
+		Money: r.MoneyService,
+		Clock: clock,
 	}); err != nil {
 		return fmt.Errorf("add credit reconcile worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.InvoiceFinalizeWorker{
-		Credits: r.CreditsService,
-		Clock:   clock,
+		Money: r.MoneyService,
+		Clock: clock,
 	}); err != nil {
 		return fmt.Errorf("add invoice finalize worker: %w", err)
 	}
