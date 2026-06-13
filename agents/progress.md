@@ -67,12 +67,25 @@ credit_* side, and update callers.
 - Promo DOLLARS expiry → keep money_blocks (FIFO) for granted/promo dollars.
 
 ## Tasks
-- [ ] Stage 1: money_* schema in consolidated 001 (additive, green)
-- [ ] Stage 2: MoneyService + queries + unit tests
-- [ ] Stage 3: money writers cutover
-- [ ] Stage 4: readers + facade + self-account + admission
-- [ ] Stage 5: slim CreditsService; drop money columns from credit_*
-- [ ] Stage 6: integration parity + full green
+- [x] Stages 1–5 (DONE, commit 84aa490e): ONE money ledger over money_* (µ$); credit_type
+      dimension + the 7 credit_* tables + credit_type machinery DELETED; all callers on
+      MoneyService; build + vet + non-integration tests green.
+
+### Revised remaining stages (2026-06-13b — multi-currency + product grants)
+Three orthogonal concepts (Paul): (1) CURRENCIES = system-fixed registry, code→minor-unit
+scale (USD/USDC/EUR=6dp, JPY=4dp, SOL=9dp lamports), FX-convertible; (2) the money ledger is
+currency-aware; (3) CUSTOM CREDITS = tenant-defined, no fixed FX (gold-coins, non-µ$ api-credits)
+— deferred to #473. Tensorhub "API credits" = USD money (no custom credit). Products grant
+balances ({unit, amount}) alongside entitlements; non-1:1 = price≠grant.
+- [ ] A. Currency dimension: add `currency text NOT NULL DEFAULT 'USD'` (+ CHECK in the known set)
+      to money_balances/transactions/blocks/windows/accounts/spend_limits; include currency in the
+      uniques; Go currency registry (code→decimals/kind); thread currency (default USD) through the
+      money queries + MoneyService; USDC funding → USDC balance, SOL → lamports. FX = later.
+- [ ] B. Product balance grants: grants_spec on products ({unit, amount}); deposit-on-purchase for
+      one-off + subscription (generalize the existing credits_spec/GrantSubscriptionCredits), in the
+      grant's currency, alongside entitlements.
+- [ ] C. Integration parity: update money/*_integration_test.go + admission/river integration tests
+      to the money API + currency; full integration suite green (minus the 8 pre-existing-on-master).
 
 ---
 
