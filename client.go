@@ -258,6 +258,11 @@ type AdmitRequest struct {
 	RequestID      string           `json:"request_id"`
 	Source         string           `json:"source,omitempty"`
 	ExpiresAt      *int64           `json:"expires_at,omitempty"`
+	// Roles are the immutable role UUIDs the actor holds (#473). Each role with a
+	// matching (subject, role) budget-scope policy gates this request's spend in
+	// the same admit verdict. The host reads them from the delegated
+	// JWT/permission set. Empty = no role-scoped budget applies.
+	Roles []uuid.UUID `json:"roles,omitempty"`
 	// TenantThroughput is the per-TENANT fixed-window throughput policy OpenRails
 	// should enforce on this invoke (#404).
 	TenantThroughput []AdmitThroughputWindow `json:"tenant_throughput,omitempty"`

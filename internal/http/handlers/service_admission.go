@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -23,6 +24,9 @@ type serviceAdmitRequest struct {
 	Source          string                           `json:"source"`
 	ExpiresAt       *int64                           `json:"expires_at"`
 	BlockChecks     []billingservice.AdmitBlockCheck `json:"block_checks"`
+	// Roles are the actor's immutable role UUIDs (#473) — each (subject, role)
+	// budget-scope policy gates this request's spend.
+	Roles []uuid.UUID `json:"roles"`
 	// #404: per-tenant fixed-window throughput the host wants OpenRails to enforce.
 	TenantThroughput []billingservice.AdmitThroughputWindow `json:"tenant_throughput"`
 }
@@ -101,6 +105,7 @@ func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.Tenant
 		EstimateMicros:   req.EstimateMicros,
 		Source:           req.Source,
 		SourceID:         req.RequestID,
+		Roles:            req.Roles,
 		BlockChecks:      req.BlockChecks,
 		TenantThroughput: req.TenantThroughput,
 	}

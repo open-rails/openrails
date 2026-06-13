@@ -181,6 +181,7 @@ func admitInputFromSDK(req openrails.AdmitRequest, payer identity.TenantSubjectI
 		EstimateMicros:  req.EstimateMicros,
 		Source:          req.Source,
 		SourceID:        req.RequestID,
+		Roles:           req.Roles,
 	}
 	if req.ExpiresAt != nil {
 		in.ExpiresAtUnix = *req.ExpiresAt
