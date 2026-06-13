@@ -436,6 +436,112 @@ type BillingLinkedWallet struct {
 	UpdatedAt            time.Time
 }
 
+// Per-(tenant, tenant subject) money spend policy + money-in config. amounts are micro-dollars (µ$ = 1e-6 USD). Tensorhub SETS these; OpenRails STORES + ENFORCES them.
+type BillingMoneyAccount struct {
+	ID                        uuid.UUID
+	TenantID                  uuid.UUID
+	TenantSubjectID           uuid.UUID
+	BillingMode               string
+	MaxSpendPerDayMicros      *int64
+	MaxSpendPerMonthMicros    *int64
+	MaxOutstandingOwedMicros  *int64
+	LowBalanceThresholdMicros *int64
+	AutoTopupEnabled          bool
+	AutoTopupAmountCents      *int64
+	AutoTopupPaymentMethodID  *uuid.UUID
+	DefaultCreditExpiryDays   *int32
+	HardStopOnBreach          bool
+	AlertThresholdPct         int32
+	OutstandingOwedMicros     int64
+	LastAlertAt               *time.Time
+	LastTopupAt               *time.Time
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	// True once the account has a verified payment method (set after a successful $1 auth-and-void verification charge — issue #299). The charge itself is a separate slice.
+	VerifiedPaymentMethod bool
+	VerifiedAt            *time.Time
+	// When set, the account is suspended (issue #299). Admission-deny-on-suspended wiring is a separate slice.
+	SuspendedAt   *time.Time
+	SuspendReason *string
+	Tier          *string
+}
+
+// amounts are micro-dollars (µ$ = 1e-6 USD).
+type BillingMoneyBalance struct {
+	ID              uuid.UUID
+	Balance         int64
+	HeldBalance     int64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+}
+
+// amounts are micro-dollars (µ$ = 1e-6 USD).
+type BillingMoneyBlock struct {
+	ID                  uuid.UUID
+	OriginalAmount      int64
+	RemainingAmount     int64
+	ExpiresAt           *time.Time
+	SourceTransactionID *uuid.UUID
+	CreatedAt           time.Time
+	TenantID            uuid.UUID
+	TenantSubjectID     uuid.UUID
+}
+
+// Optional per-actor money spend caps for a tenant subject. amounts are micro-dollars (µ$ = 1e-6 USD). actor is a caller-supplied opaque principal string.
+type BillingMoneySpendLimit struct {
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+	// Caller-supplied principal string whose spend is capped by this row. Opaque to OpenRails.
+	Actor                  string
+	MaxSpendPerDayMicros   *int64
+	MaxSpendPerMonthMicros *int64
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+}
+
+// amounts are micro-dollars (µ$ = 1e-6 USD).
+type BillingMoneyTransaction struct {
+	ID uuid.UUID
+	// Caller-supplied principal string (e.g. a username slug) that caused this charge. Opaque to OpenRails; used as the per-actor spend-cap grouping key and as attribution.
+	Actor string
+	// Caller-supplied free-form string for what the charge was for (charge-A was for resource-B). Opaque to OpenRails; nullable.
+	Resource *string
+	// Optional caller-supplied long-tail attribution. Opaque to OpenRails; joins use source/source_id, never these.
+	Metadata         []byte
+	Amount           int64
+	BalanceAfter     *int64
+	TransactionType  string
+	Source           string
+	SourceID         *string
+	ExpiresAt        *time.Time
+	Description      *string
+	Status           string
+	AuthorizedAmount *int64
+	CapturedAmount   *int64
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	TenantID         uuid.UUID
+	TenantSubjectID  uuid.UUID
+}
+
+// Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. amounts are micro-dollars (µ$ = 1e-6 USD).
+type BillingMoneyWindow struct {
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+	// Total reserved for this window (open + refills). Reflected in money_balances.held_balance while status=open.
+	HeldAmount int64
+	// Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.
+	SettledAmount int64
+	Status        string
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 // Queue for user notifications related to billing and subscriptions
 type BillingNotificationQueue struct {
 	ID              uuid.UUID
