@@ -105,20 +105,22 @@ func CORSHTTP(allowedOrigins []string) HTTPMiddleware {
 	}
 }
 
-// ResolveTenantHTTP is the net/http analogue of ResolveTenant. It pins the single
-// default tenant onto the request context BEFORE any tenant-owned DB access, so
-// TenantDBConnMW pins the connection to the correct tenant (issue #223/#227).
-// Multi-tenant resolution is the standalone/public-engine concern; the embedded
-// surface is single-tenant by construction.
-func ResolveTenantHTTP() HTTPMiddleware {
+// ResolveTenantHTTP is the net/http analogue of ResolveTenant. It pins the
+// engine's CONSTRUCTION-TIME tenant (`configured`) onto the request context
+// BEFORE any tenant-owned DB access, so TenantDBConnMW pins the connection to
+// the correct tenant (issue #223/#227). An OpenRails engine is bound to a single
+// tenant at construction — there is NO default tenant (#336).
+//
+// If `configured` is zero, NOTHING is pinned: downstream tenant.Require fails,
+// so a missing tenant is a hard error rather than a silent default.
+func ResolveTenantHTTP(configured tenant.ID) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// TODO(#336): the "default tenant" was removed (tenant.DefaultID no longer
-			// exists). This resolver is the SOURCE of the tenant — it must pin the
-			// host's configured single tenant id onto the context (threaded in from
-			// config at the composition root), not a silent default. A missing tenant
-			// must become an error, never a fallback.
-			ctx := tenant.WithID(r.Context(), tenant.DefaultID)
+			if configured.IsZero() {
+				next.ServeHTTP(w, r)
+				return
+			}
+			ctx := tenant.WithID(r.Context(), configured)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

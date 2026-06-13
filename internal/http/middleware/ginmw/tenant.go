@@ -5,45 +5,25 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// ResolveTenant resolves the tenant / billing namespace for the request and
-// attaches it to the request context BEFORE authorization and before any
-// tenant-owned DB access (issue #223).
+// ResolveTenant pins the engine's CONSTRUCTION-TIME tenant onto the request
+// context BEFORE authorization and before any tenant-owned DB access (#223,
+// #336). An OpenRails engine/client is bound to a single tenant at construction
+// (configured for both standalone and embedded — there is NO default tenant),
+// so `configured` is that id.
 //
-// First increment: this resolves to the single default tenant, which is the
-// correct behaviour for self-hosted / single-tenant deployments and keeps
-// existing single-tenant routes working through the same code path. Multi-tenant
-// resolution from host / path / JWT / service token / admin route is layered in by #222
-// (tenant-scoped public routes & service tokens) at the marked extension point below; the
-// rest of the stack already reads the tenant from context via
-// tenant.Require, so only this resolver needs to change.
-func ResolveTenant() gin.HandlerFunc {
+// If `configured` is zero, NOTHING is pinned: downstream tenant.Require then
+// fails, so a missing tenant is a hard error rather than a silent default.
+// Per-request multi-tenant resolution (host/path/token, #222), when added,
+// layers on top by pinning the resolved tenant instead.
+func ResolveTenant(configured tenant.ID) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := resolveTenantID(c)
-
-		// Attach to the request context so repositories/services downstream
-		// (which call tenant.Require) are tenant-scoped.
-		ctx := tenant.WithID(c.Request.Context(), id)
+		if configured.IsZero() {
+			c.Next()
+			return
+		}
+		ctx := tenant.WithID(c.Request.Context(), configured)
 		c.Request = c.Request.WithContext(ctx)
-
-		// Also expose on the gin context for handlers/middleware that read it
-		// directly (e.g. future authorization that must bind to the tenant).
-		c.Set("openrails.tenant_id", id)
-
+		c.Set("openrails.tenant_id", configured)
 		c.Next()
 	}
-}
-
-// resolveTenantID determines the tenant for a request.
-//
-// Extension point for #222: inspect host (subdomain), path prefix
-// (/t/:tenant/...), the service token's owning tenant, or a delegated browser token's
-// `tenant` claim, look the slug up in openrails.tenants, and return that id.
-// Until then every request maps to the single default tenant.
-func resolveTenantID(_ *gin.Context) tenant.ID {
-	// TODO(#336): the "default tenant" was removed (tenant.DefaultID no longer
-	// exists). This resolver is the SOURCE of the tenant — it cannot tenant.Require
-	// from context because nothing upstream has resolved one yet. It must resolve
-	// the host's configured single tenant id (or the #222 host/path/token lookup)
-	// and return it; a missing tenant must become an error, never a silent default.
-	return tenant.DefaultID
 }

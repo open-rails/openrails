@@ -15,30 +15,28 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// SeedDefaultTenantSolanaSecret bridges a SINGLE-TENANT install that configures
-// its Solana signing key via global config into the per-tenant secret store the
-// recurring Solana services read (issue #253). The Submitter/signer always reads
-// solana/private_key from the tenant secret store; a global-config-only install
-// would otherwise have an EMPTY default-tenant store and could not sign without a
-// manual secret write.
+// SeedConfiguredTenantSolanaSecret bridges a SINGLE-TENANT install that
+// configures its Solana signing key via global config into the per-tenant
+// secret store the recurring Solana services read (issue #253). The
+// Submitter/signer always reads solana/private_key from the tenant secret store;
+// a global-config-only install would otherwise have an EMPTY store for its
+// tenant and could not sign without a manual secret write.
 //
-// It is idempotent and safe to call on every boot:
+// tenantID is the engine's configured tenant (#336 — there is no default
+// tenant). It is idempotent and safe to call on every boot:
 //
-//   - configKey empty                         -> no-op (Solana not configured this way).
-//   - default-tenant secret already present   -> no-op (NEVER overwrites; a manual
-//     or rotated key wins over global config).
-//   - default-tenant secret absent            -> seed it from configKey and log once.
+//   - tenantID zero          -> no-op (no configured tenant to seed for).
+//   - configKey empty        -> no-op (Solana not configured via global config).
+//   - secret already present -> no-op (NEVER overwrites a manual/rotated key).
+//   - secret absent          -> seed it from configKey and log once.
 //
 // A backend error (store unavailable) is returned so the caller can fail boot
 // loudly rather than start a signer that will never resolve a key.
-func SeedDefaultTenantSolanaSecret(ctx context.Context, store tenancy.TenantSecretStore, configKey string) error {
-	// TODO(#336): this bridge hardcoded tenant.DefaultID, which no longer exists.
-	// There is no tenant on ctx at this boot-time seed call (caller passes
-	// context.Background()), so the host's configured single tenant id must now be
-	// threaded in explicitly (e.g. a new tenantID parameter wired from config at the
-	// composition root) and forwarded to SeedTenantSolanaSecret. Cannot be resolved
-	// from context here.
-	return SeedTenantSolanaSecret(ctx, store, tenant.DefaultID, configKey)
+func SeedConfiguredTenantSolanaSecret(ctx context.Context, store tenancy.TenantSecretStore, tenantID tenant.ID, configKey string) error {
+	if tenantID.IsZero() {
+		return nil
+	}
+	return SeedTenantSolanaSecret(ctx, store, tenantID, configKey)
 }
 
 func SeedTenantSolanaSecret(ctx context.Context, store tenancy.TenantSecretStore, tenantID tenant.ID, configKey string) error {
