@@ -7,7 +7,108 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 472
+next_id: 473
+
+---
+
+# #472: full rate-limit dimension support (OpenAI-shaped) — per-(payer × endpoint-release) throughput limit VALUES + batch-queue (weighted, release-on-completion) reservation
+
+OpenAI publishes rate limits across several dimensions (e.g. gpt-5.5: TPM, images/min, videos/min,
+requests/min, + a batch queue limit; gpt-realtime-2: RPM + TPM). OpenRails is the general throughput
+engine (#298) and should express ALL of these. UNIT NOTE: OpenAI keys its tables per *model*; OUR
+rate-limit unit is the **endpoint-release**, NOT the model — an endpoint has many releases, and a
+release contains multiple models + functions inside it. So never call this "per-model"; it's
+per-(payer × endpoint-release). Most dimensions already work; two pieces don't.
+
+## Already supported (confirm — no build)
+- Arbitrary-unit fixed windows: `ratelimit.Limit{Unit, Window, Max}` + `Policy.Windows`, atomic Lua,
+  whichever-window-first deny (`internal/modules/ratelimit/limiter.go`). So RPM/RPD, TPM/TPD,
+  images/min (IPM), videos/min (VPM), gpu-second/min are ALL expressible today — `video` is just
+  another unit string; "per minute" = `Window: time.Minute`.
+- Per-(tenant, subject, actor, resource) counter namespacing — `resource` = the endpoint-release
+  (`internal/modules/admission/admitter.go:148`).
+- Concurrency cap (count-based in-flight): `AcquireConcurrency/ReleaseConcurrency/ConcurrencyCount`
+  (`internal/modules/ratelimit/concurrency.go`).
+- Per-window post-check state for `x-ratelimit-*` headers (`ratelimit.WindowInfo`).
+
+## Gaps to build
+
+### G1 — throughput rate-limits scoped per (PAYER × ENDPOINT-RELEASE), with per-release limit VALUES
+Owner steer (Paul): the rate-limit unit is **(payer × endpoint-release)** — NOT per invoker, per
+function, or per model. (An endpoint has many releases; a release holds models+functions; the
+RELEASE is the unit.) Concretely:
+- **KEY**: throughput counters key on **(payer, endpoint-release)** only. Today the admitter bucket
+  is `tenant:subject:actor:resource` (`internal/modules/admission/admitter.go:148`) — it includes
+  `actor` (the invoker), which over-subdivides. Drop `actor` from the THROUGHPUT key so a payer's
+  limit AGGREGATES across all its invokers; `resource` = the endpoint-release (the host's `releaseID`),
+  NOT model or function. **WHY payer, not invoker:** per-invoker throughput is BYPASSABLE — a payer
+  can register an unlimited number of invokers/accounts to multiply its limit, so a capacity limit
+  MUST be payer-scoped to be abuse-resistant. MONEY can stay per-invoker (#475) because money is real
+  and cannot be duplicated infinitely (the per-payer money cap is the true backstop). This change is
+  the throughput axis only.
+- **VALUES**: limits are per-release, not one tier-global list. `ThroughputPolicy.Windows` is
+  currently a single global list (`internal/db/models/tier_policy.go`); add per-release window values
+  (a `map[release][]ThroughputWindow`, or a default list + per-release overrides).
+- **SOURCE**: since throughput is now payer×release (not the invoker's tier), the limits come from a
+  payer/release-level policy, not the invoker's `tier_policy`. OPEN (decide in build): keep a default
+  + per-release override, or move throughput limits onto a dedicated (payer, release) policy table.
+  `EntitledResources` gating unchanged.
+- **IDENTITY CONVENTION** — the throughput KEY and all persisted records use the immutable UUID
+  (payer = tenant_subject uuid; release = endpoint-release uuid / `releaseID`), NEVER a tenant-slug
+  or endpoint NAME. Today the admit resource is `tenant/endpointName` (`admitter.go:148`) — confirm
+  the host passes the release uuid, not a mutable name; a slug/name key lets a rename reset counters
+  or a recycled name inherit another payer's limits. Public API shapes may use slugs, resolved to
+  uuid before the admit. (Builds on the fleet uuid-canonical work; matches tensorhub #475/#476.)
+
+### G2 — batch queue limit = weighted, release-on-completion reservation over arbitrary units
+OpenAI's batch queue limit: "tokens from pending batch jobs count against your queue limit; once a
+job completes, its tokens no longer count." This is NOT a time-window (the fixed-window limiter is
+increment-only and time-resets) — it's a RESERVATION POOL: hold N units while a job is pending,
+RELEASE N on completion; deny when the in-flight sum would exceed the cap. It is the concurrency
+primitive GENERALIZED from count (weight 1) to weighted (N units), with the same acquire/release
+lifecycle as a money hold (Reserve→Capture/Release) but denominated in throughput units.
+
+**Concrete tensorhub instance (owner steer, Paul):** tensorhub serves flex/batch (async, long-lived)
+requests, so the analogue is "limit how many FLEX/BATCH requests may be IN QUEUE against a single
+endpoint-release at once" — i.e. a cap on in-flight flex/batch requests per **(payer, endpoint-release)**,
+scoped to the flex/batch availability tier only (fast/standard requests are not queue-capped this
+way). That instance is COUNT-based (weight 1) — it's exactly the existing concurrency primitive, just
+keyed per (payer, endpoint-release) + availability-tier-filtered + acquire-on-enqueue/release-on-
+complete. The weighted (token-denominated) pool above is the GENERAL engine capability for OpenAI
+token-queue parity; tensorhub itself only needs the count form. Same payer-not-invoker rationale from
+G1 applies: key the queue cap on the payer, never the invoker.
+
+## Tasks
+- [ ] G1 — throughput key = (payer, endpoint-release): drop `actor`/invoker (and any function/model
+      sub-key) from the throughput bucket so limits AGGREGATE per payer per release; add per-release
+      limit VALUES (`map[release][]ThroughputWindow` or default + per-release overrides); decide
+      config home (default + per-release override vs a dedicated (payer,release) policy table);
+      `SetTierPolicy`/policy load/RLS updated. Test: two releases, different RPM, one payer; counters
+      independent per release and SHARED across the payer's invokers.
+- [ ] G2a — weighted reservation primitive `AcquireUnits(key, amount, max, ttl)` / `ReleaseUnits(key, amount)`
+      in `internal/modules/ratelimit` (generalize concurrency to a unit weight; TTL auto-releases a
+      crashed caller's hold; reuse the existing Lua acquire/decrement with an amount arg).
+- [ ] G2b — `QueueLimit{Unit, Max}` axis on the policy (a pool cap, NO time window), keyed per
+      **(payer, endpoint-release)** (same scoping/rationale as G1 — never per invoker); admission
+      ACQUIRES the units on admit (enqueue) and returns `BlockedBy:"queue"` + the blocking unit +
+      retry hint on breach. tensorhub's instance is the COUNT form (`Unit:"request"`, weight 1)
+      filtered to the flex/batch availability tier; the weighted form (G2a) covers token pools.
+- [ ] G2c — wire release into the existing Capture/Release settlement so a completed/failed job frees
+      its queued units (idempotent on request_id; same lifecycle as the credit hold).
+- [ ] Confirm-no-op — document that TPM/RPM/IPM/VPM/RPD/TPD + concurrency are already supported via
+      arbitrary-unit windows; add `video` to the documented unit examples.
+- [ ] VERIFY — per-release differing windows; payer-aggregation (two invokers of one payer share the
+      (payer,endpoint-release) counter, invoker not in the key); queue-limit hold-and-release (pending
+      sum capped, completion frees, crash TTL-releases); whichever-first across window + queue + money
+      axes; x-ratelimit/queue header state.
+
+## Related
+#298 (throughput engine + admission spine), #304/#337 (budget windows), #306 (tenant→owner level —
+separate), #305 (fast-path — separate); tensorhub #475 (consumes ONLY the $ budget axis today;
+per-release windows + queue limits are for when a host wants OpenAI-style per-unit limits), tensorhub
+#476 (per-payer scheduler fairness — these throughput caps are its secondary hard ceiling). Reference:
+OpenAI rate-limit tables (gpt-5.5: TPM/IPM/VPM/RPM + batch queue; gpt-realtime-2: RPM/TPM) — but our
+unit is the endpoint-release, not the model.
 
 ---
 
