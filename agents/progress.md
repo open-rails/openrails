@@ -354,7 +354,6 @@ Cross-referencing the two distinguishes 'dunning tried and failed' (local retry 
 - [ ] Optional: River-scheduled advisory run + alerting on new findings — REJECTED per decision 3 (manual-only; no recurring runs)
 - [x] Tests with mocked fetchers per provider — phase 2: table-driven unit suite across the whole taxonomy (fake fetchers/store/writer: identity stability, auto-resolve, breaker abort, intent annotation, capability gating, ambiguous identity, enforce idempotency, advisory-never-writes, dismissed-stays-dismissed) + integration suite (-tags=integration: seeded PG, advisory persists, enforce converges + admin queue holds PS-1/PS-8, rerun stable, ack lifecycle); also fixed internal/dbtest createExternalTestDatabase silently aliasing the admin/dev DB (pgx ConnString() returns the ORIGINAL dsn), which had bricked the external-DB integration path
 - [x] Stuck-intent finding type (PS-10, the #358 tie-in): every run flags non-terminal intents past hardcoded thresholds (pending/failed_retryable >24h; in_flight/unknown_needs_verify >2h), provider-independent (reads only the local ledger, ignores --provider filters); mode/kill-switch-parked intents are informational (the wait is by design), everything else admin-queued; subject_key=intent id, cross-provider auto-resolve on recovery; fix never touches intent rows; rendered in run summary + `reconcile report`; migration 012 extends the findings-type CHECK (2026-06-11)
-- [ ] Runbook doc for the doujins cutover reconcile
 
 ---
 
@@ -1024,6 +1023,8 @@ The base resolvers (#1) and boot seed (#2) need a tenant when there's no per-req
 
 ### CONFIRMED DESIGN (owner, 2026-06-13): tenant-bound at construction, no default, identical embedded/remote
 The OpenRails engine/client is bound to a SINGLE tenant at construction (e.g. doujins/hentai0 construct theirs with tenant='doujins'). Same interface for embedded and remote — remote↔embedded is "mostly a config change". Multiple tenants = multiple clients (one per tenant). No default tenant in either mode; a missing tenant must hard-fail (insert with no tenant fails 100% — that exposes the error, by design). So the construction-time tenant is the resolver's source; per-request multi-tenant resolution (#222) would layer on top later.
+
+PUBLIC API = SLUG ONLY (owner, 2026-06-13): the tenant is always a tenant-SLUG (string) in the library API, config, and HTTP request/response. The tenant UUID is an INTERNAL detail — resolve slug→uuid once at the boundary (gen.GetTenantBySlug) and uuid→slug on the way out. Never expose a tenant uuid publicly. So `config.Config.Tenant` and `embed.Options.Tenant` are SLUGS; internal middleware/seed take the resolved tenant.ID.
 
 ### DONE on branch (commit 65edd8c7) — resolver/seed mechanism
 - `ginmw.ResolveTenant(configured)` + `middleware.ResolveTenantHTTP(configured)`: pin the configured construction tenant; if zero, pin NOTHING → downstream `tenant.Require` errors (no silent default).
