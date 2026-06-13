@@ -316,3 +316,134 @@ func ServiceSetTierPolicy(r *httprequest.Request) {
 	}
 	r.SuccessJSONMessage("ok")
 }
+
+// budgetScopeWindow is one fixed money-budget window in a budget-scope policy
+// request/response (#473) — same shape as billingservice.BudgetScopeWindowInput.
+type budgetScopeWindow struct {
+	Key           string `json:"key"`
+	WindowSeconds int64  `json:"window_seconds"`
+	LimitMicros   int64  `json:"limit_micros"`
+	Cadence       string `json:"cadence,omitempty"`
+}
+
+func budgetScopeWindowInputs(ws []budgetScopeWindow) []billingservice.BudgetScopeWindowInput {
+	out := make([]billingservice.BudgetScopeWindowInput, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, billingservice.BudgetScopeWindowInput{
+			Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence,
+		})
+	}
+	return out
+}
+
+type serviceSubjectBudgetPolicyRequest struct {
+	TenantSubjectID string              `json:"tenant_subject_id"`
+	Scope           string              `json:"scope"`
+	RoleID          string              `json:"role_id"`
+	Windows         []budgetScopeWindow `json:"windows"`
+}
+
+// ServiceSetSubjectBudgetPolicy upserts a SUBJECT-owned hierarchical
+// budget-scope policy (#473): a self cap (scope=subject) or a (subject, role)
+// pool (scope=role; role_id is the role uuid). The owner is forced to "subject"
+// by the service facade. Operator service token, credits:write.
+func ServiceSetSubjectBudgetPolicy(r *httprequest.Request) {
+	var req serviceSubjectBudgetPolicyRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	payer, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		return
+	}
+	if !requireServiceTenantSubjectScope(r, *payer) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	if err := svc.SetSubjectBudgetPolicy(r.Request.Context(), *payer, billingservice.BudgetScopePolicyInput{
+		Scope:    req.Scope,
+		ScopeKey: req.RoleID,
+		Windows:  budgetScopeWindowInputs(req.Windows),
+	}); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "set subject budget policy failed")
+		return
+	}
+	r.SuccessJSONMessage("ok")
+}
+
+type servicePlatformBudgetPolicyRequest struct {
+	TenantSubjectID string              `json:"tenant_subject_id"`
+	Scope           string              `json:"scope"`
+	Windows         []budgetScopeWindow `json:"windows"`
+}
+
+// ServiceSetPlatformBudgetPolicy upserts a PLATFORM-owned budget cap (#473): the
+// platform->payer cap (scope=subject). The owner is forced to "platform" by the
+// service facade. Platform-admin gated at the route (openrails:admin); a
+// subject's own policy surface can never reach it.
+func ServiceSetPlatformBudgetPolicy(r *httprequest.Request) {
+	var req servicePlatformBudgetPolicyRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	payer, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		return
+	}
+	if !requireServiceTenantSubjectScope(r, *payer) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	if err := svc.SetPlatformBudgetPolicy(r.Request.Context(), *payer, billingservice.BudgetScopePolicyInput{
+		Scope:   req.Scope,
+		Windows: budgetScopeWindowInputs(req.Windows),
+	}); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "set platform budget policy failed")
+		return
+	}
+	r.SuccessJSONMessage("ok")
+}
+
+// ServiceGetSubjectBudgetPolicies returns ONLY the subject-owned budget-scope
+// policies (#473) for host reconciliation — platform-owned caps are invisible.
+// tenant_subject_id is a query param; the tenant is pinned from the service
+// token. Operator service token, credits:read.
+func ServiceGetSubjectBudgetPolicies(r *httprequest.Request) {
+	payer, err := parseServiceTenantSubjectID(r.Query("tenant_subject_id"))
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		return
+	}
+	if !requireServiceTenantSubjectScope(r, *payer) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	policies, err := svc.SubjectBudgetPolicies(r.Request.Context(), *payer)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "subject budget policies lookup failed")
+		return
+	}
+	out := make([]map[string]any, 0, len(policies))
+	for _, p := range policies {
+		ws := make([]budgetScopeWindow, 0, len(p.Windows))
+		for _, w := range p.Windows {
+			ws = append(ws, budgetScopeWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence})
+		}
+		out = append(out, map[string]any{"scope": p.Scope, "role_id": p.ScopeKey, "windows": ws})
+	}
+	r.SuccessJSON(map[string]any{"policies": out})
+}

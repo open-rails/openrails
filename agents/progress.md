@@ -83,6 +83,17 @@ return the blocking window + retry hint). On settle, capture/release ALL reserve
 - [x] VERIFY: platform cap denies even when role+invoker are under; role pool shared across two users
       of the same role; invoker cap independent; over-subscription (Σ caps > balance) still floored by
       balance; subject cannot raise the platform cap; whichever-first blocking-window reporting. — DONE: internal/modules/admission/admission_scopes_integration_test.go (4 tests, all PASS): platform-cap-denies, role-pool-shared, invoker-independent, over-subscription-composes. Subject-cannot-raise-platform is enforced by owner-forced write paths (SetSubjectBudgetPolicy can never write owner=platform).
+- [x] Expose budget-policy management on the UNIFIED `openrails.Client` so hosts (tensorhub) that
+      talk only through the unified client can push role/subject/platform budget policies (previously
+      only `SetTierPolicy` was exposed). — DONE: `Client.SetSubjectBudgetPolicy`/`SetPlatformBudgetPolicy`/`SubjectBudgetPolicies`
+      + SDK DTOs (`SubjectBudgetPolicyInput`/`PlatformBudgetPolicyInput`/`SubjectBudgetPolicy`/`BudgetScopeWindow`,
+      `role_id`->facade `ScopeKey`) in client.go, mirroring `SetTierPolicy` across all 3 transports:
+      remote HTTP (`PUT/GET /v1/service/budget-policies/{subject,platform}` in remote.go), embedded
+      adapter (embed/client.go transcribing the handlers), and HTTP handlers/routes
+      (`ServiceSetSubjectBudgetPolicy`/`ServiceSetPlatformBudgetPolicy`/`ServiceGetSubjectBudgetPolicies`;
+      subject=credits:write/read, platform=openrails:admin gated). Dual-transport round-trip added to the
+      embed conformance test (self + role + platform write, subject-only read-back; platform cap stays
+      invisible) — PASS. v0.24.0.
 
 ## Open decisions
 - **Multiple roles per user:** enforce ALL of the user's role-budget windows (conservative,

@@ -79,6 +79,19 @@ type Client interface {
 	// SetTierPolicy upserts a per-payer tier policy (#298): throughput windows +
 	// entitled resources + fixed money-budget windows.
 	SetTierPolicy(ctx context.Context, tenantSubjectID string, in TierPolicyInput) error
+	// SetSubjectBudgetPolicy upserts a SUBJECT-owned hierarchical budget-scope
+	// policy (#473): the subject's self cap (scope=subject) or a (subject, role)
+	// pool (scope=role, RoleID = the role uuid). The owner is forced to "subject"
+	// — this path can never write or loosen a platform-owned cap.
+	SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in SubjectBudgetPolicyInput) error
+	// SetPlatformBudgetPolicy upserts a PLATFORM-owned budget cap (#473): the
+	// platform->payer cap (scope=subject). Owner is forced to "platform".
+	// Platform-admin-authorized on the HTTP transport; a direct call when embedded.
+	SetPlatformBudgetPolicy(ctx context.Context, tenantSubjectID string, in PlatformBudgetPolicyInput) error
+	// SubjectBudgetPolicies reads back ONLY the subject-owned budget-scope policies
+	// (#473) for the host to reconcile — platform-owned caps are deliberately
+	// invisible here.
+	SubjectBudgetPolicies(ctx context.Context, tenantSubjectID string) ([]SubjectBudgetPolicy, error)
 	// ResourceRevenueDaily returns per-day revenue for a resource across all
 	// payers in the tenant (#410).
 	ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error)
@@ -406,6 +419,45 @@ type TierPolicyInput struct {
 	Windows           []TierThroughputWindow `json:"windows"`
 	EntitledResources []string               `json:"entitled_resources"`
 	BudgetWindows     []BudgetWindowInput    `json:"budget_windows"`
+}
+
+// BudgetScopeWindow is one fixed money-budget window in a hierarchical
+// budget-scope policy (#473) — same shape as BudgetWindowInput
+// (pkg/service.BudgetScopeWindowInput on the wire).
+type BudgetScopeWindow struct {
+	Key           string `json:"key"`
+	WindowSeconds int64  `json:"window_seconds"`
+	LimitMicros   int64  `json:"limit_micros"`
+	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
+	Cadence string `json:"cadence,omitempty"`
+}
+
+// SubjectBudgetPolicyInput configures a SUBJECT-owned hierarchical budget-scope
+// policy via PUT /v1/service/budget-policies/subject (#473). Scope is
+// "subject" (the subject's self cap) or "role" (a (subject, role) pool); RoleID
+// is the role uuid when scope=role, empty otherwise. The owner is fixed to
+// "subject" server-side (pkg/service.BudgetScopePolicyInput on the wire;
+// tenant_subject_id travels alongside it).
+type SubjectBudgetPolicyInput struct {
+	Scope   string              `json:"scope"`
+	RoleID  string              `json:"role_id,omitempty"`
+	Windows []BudgetScopeWindow `json:"windows"`
+}
+
+// PlatformBudgetPolicyInput configures a PLATFORM-owned budget cap via
+// PUT /v1/service/budget-policies/platform (#473): the platform->payer cap
+// (scope=subject). The owner is fixed to "platform" server-side.
+type PlatformBudgetPolicyInput struct {
+	Scope   string              `json:"scope"`
+	Windows []BudgetScopeWindow `json:"windows"`
+}
+
+// SubjectBudgetPolicy is one subject-owned budget-scope policy returned by
+// SubjectBudgetPolicies (#473) — the read-back shape for host reconciliation.
+type SubjectBudgetPolicy struct {
+	Scope   string              `json:"scope"`
+	RoleID  string              `json:"role_id,omitempty"`
+	Windows []BudgetScopeWindow `json:"windows"`
 }
 
 // ResourceRevenueDailyRow is one day's revenue (micros) for a resource.

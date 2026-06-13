@@ -688,6 +688,73 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 	return nil
 }
 
+func budgetScopeWindowInputs(ws []openrails.BudgetScopeWindow) []billingservice.BudgetScopeWindowInput {
+	out := make([]billingservice.BudgetScopeWindowInput, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, billingservice.BudgetScopeWindowInput{
+			Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence,
+		})
+	}
+	return out
+}
+
+// SetSubjectBudgetPolicy transcribes handlers.ServiceSetSubjectBudgetPolicy
+// (service_admission.go, #473). role_id maps onto the facade's ScopeKey.
+func (c *localClient) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in openrails.SubjectBudgetPolicyInput) error {
+	payer, err := parseTenantSubject(tenantSubjectID, "tenant_subject_id required")
+	if err != nil {
+		return err
+	}
+	if err := c.svc.SetSubjectBudgetPolicy(ctx, payer, billingservice.BudgetScopePolicyInput{
+		Scope:    in.Scope,
+		ScopeKey: in.RoleID,
+		Windows:  budgetScopeWindowInputs(in.Windows),
+	}); err != nil {
+		return internalErr("set subject budget policy failed")
+	}
+	return nil
+}
+
+// SetPlatformBudgetPolicy transcribes handlers.ServiceSetPlatformBudgetPolicy
+// (service_admission.go, #473). The platform-admin route gate is not transcribed
+// — embedded hosts are the principal (the direct call is operator-trusted).
+func (c *localClient) SetPlatformBudgetPolicy(ctx context.Context, tenantSubjectID string, in openrails.PlatformBudgetPolicyInput) error {
+	payer, err := parseTenantSubject(tenantSubjectID, "tenant_subject_id required")
+	if err != nil {
+		return err
+	}
+	if err := c.svc.SetPlatformBudgetPolicy(ctx, payer, billingservice.BudgetScopePolicyInput{
+		Scope:   in.Scope,
+		Windows: budgetScopeWindowInputs(in.Windows),
+	}); err != nil {
+		return internalErr("set platform budget policy failed")
+	}
+	return nil
+}
+
+// SubjectBudgetPolicies transcribes handlers.ServiceGetSubjectBudgetPolicies
+// (service_admission.go, #473): subject-owned policies only; ScopeKey maps back
+// onto role_id.
+func (c *localClient) SubjectBudgetPolicies(ctx context.Context, tenantSubjectID string) ([]openrails.SubjectBudgetPolicy, error) {
+	payer, err := parseTenantSubject(tenantSubjectID, "tenant_subject_id required")
+	if err != nil {
+		return nil, err
+	}
+	policies, err := c.svc.SubjectBudgetPolicies(ctx, payer)
+	if err != nil {
+		return nil, internalErr("subject budget policies lookup failed")
+	}
+	out := make([]openrails.SubjectBudgetPolicy, 0, len(policies))
+	for _, p := range policies {
+		ws := make([]openrails.BudgetScopeWindow, 0, len(p.Windows))
+		for _, w := range p.Windows {
+			ws = append(ws, openrails.BudgetScopeWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence})
+		}
+		out = append(out, openrails.SubjectBudgetPolicy{Scope: p.Scope, RoleID: p.ScopeKey, Windows: ws})
+	}
+	return out, nil
+}
+
 func wireEntitlementRecords(recs []billingservice.EntitlementRecord) []openrails.EntitlementRecord {
 	out := make([]openrails.EntitlementRecord, 0, len(recs))
 	for _, e := range recs {
