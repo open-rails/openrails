@@ -10,7 +10,10 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
@@ -305,6 +308,9 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 	if err != nil {
 		return nil, err
 	}
+	// #473: settle ALL composed budget-scope reservations for this request to
+	// "captured" by the hold's (payer, source, source_id) coords.
+	s.captureBudgetScopes(ctx, trx, req.Amount)
 	// #311: append an analytics usage_event linked to this capture (no second
 	// debit) so OpenRails is the source of truth for platform usage/revenue.
 	if strings.TrimSpace(req.EventType) != "" {
@@ -414,7 +420,63 @@ func (s *Service) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
 	if holdID == uuid.Nil {
 		return fmt.Errorf("hold_id required")
 	}
-	return s.creditsService().ReleaseHold(ctx, holdID)
+	trx, err := s.creditsService().ReleaseHold(ctx, holdID)
+	if err != nil {
+		return err
+	}
+	// #473: free ALL composed budget-scope reservations for this request (every
+	// scope reserved under the hold's (payer, source, source_id)). Idempotent.
+	s.releaseBudgetScopes(ctx, trx)
+	return nil
+}
+
+// releaseBudgetScopes settles every budget-scope reservation for a released
+// hold to "released" by its (payer, source, source_id) coords (#473). Budget
+// settlement is best-effort: the credit hold is already released, so a budget
+// settle failure must not fail the release (a stale active budget row self-heals
+// at its reservation TTL).
+func (s *Service) releaseBudgetScopes(ctx context.Context, trx *models.CreditTransaction) {
+	if trx == nil || trx.SourceID == nil || strings.TrimSpace(*trx.SourceID) == "" {
+		return
+	}
+	payer := identity.TenantSubjectID(trx.TenantSubjectID)
+	bsvc := budgets.NewService(s.rt.DB)
+	if err := bsvc.ReleaseByCoords(ctx, payer, trx.Source, *trx.SourceID); err != nil {
+		log.Warnf("service release: budget scope release failed (hold %s released): %v", trx.ID, err)
+	}
+	s.releaseQueueUnits(ctx, trx)
+}
+
+// releaseQueueUnits frees any batch/queue reservation units this request held
+// (#472 G2c) by its (source, source_id) coords — a completed OR failed job frees
+// its queued units. Best-effort + idempotent (no-op when no queue hold exists).
+func (s *Service) releaseQueueUnits(ctx context.Context, trx *models.CreditTransaction) {
+	if trx == nil || trx.SourceID == nil || strings.TrimSpace(*trx.SourceID) == "" {
+		return
+	}
+	if s.rt.RedisClient == nil {
+		return
+	}
+	lim := ratelimit.NewLimiter(s.rt.RedisClient)
+	if err := lim.ReleaseQueueByRequest(ctx, trx.Source, *trx.SourceID); err != nil {
+		log.Warnf("service settle: queue unit release failed (hold %s): %v", trx.ID, err)
+	}
+}
+
+// captureBudgetScopes settles every budget-scope reservation for a captured
+// hold to "captured" with the captured amount by its (payer, source, source_id)
+// coords (#473). Best-effort, mirroring releaseBudgetScopes.
+func (s *Service) captureBudgetScopes(ctx context.Context, trx *models.CreditTransaction, capturedMicros int64) {
+	if trx == nil || trx.SourceID == nil || strings.TrimSpace(*trx.SourceID) == "" {
+		return
+	}
+	payer := identity.TenantSubjectID(trx.TenantSubjectID)
+	bsvc := budgets.NewService(s.rt.DB)
+	if err := bsvc.CaptureByCoords(ctx, payer, trx.Source, *trx.SourceID, capturedMicros); err != nil {
+		log.Warnf("service capture: budget scope capture failed (hold %s captured): %v", trx.ID, err)
+	}
+	// A completed (captured) job also frees its queued units (#472 G2c).
+	s.releaseQueueUnits(ctx, trx)
 }
 
 func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {

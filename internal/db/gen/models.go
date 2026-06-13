@@ -172,6 +172,21 @@ type BillingAdminGrant struct {
 }
 
 // Rolling-window money-budget reservations (issue #304). One row per in-flight/settled charge against an actor's passed-in windows; used/reserved/remaining are windowed SUM() over created_at. Idempotent on (tenant, tenant subject, actor, source, source_id).
+type BillingBudgetPolicy struct {
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+	Scope           string
+	// platform (set by us; subject cannot edit/see) | subject (the subject's own cap). The write-authz split.
+	Owner string
+	// Immutable scope discriminator: role uuid (scope=role) or actor string (scope=actor); empty for scope=subject. Never a slug/name.
+	ScopeKey      string
+	Windows       []byte
+	PolicyVersion int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type BillingBudgetReservation struct {
 	ID       uuid.UUID
 	TenantID uuid.UUID

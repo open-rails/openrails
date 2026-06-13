@@ -26,13 +26,17 @@ type AdmitInput struct {
 	Actor           string
 	Tier            string
 	Resource        string
-	Amounts         map[string]int64
-	CreditType      string
-	EstimateMicros  int64
-	Source          string
-	SourceID        string
-	ExpiresAtUnix   int64
-	BlockChecks     []AdmitBlockCheck
+	// Roles are the immutable role UUIDs the actor holds (#473). Each role with a
+	// matching (subject, role) budget policy gates this request's spend. The host
+	// reads them from the delegated JWT/permission set.
+	Roles          []uuid.UUID
+	Amounts        map[string]int64
+	CreditType     string
+	EstimateMicros int64
+	Source         string
+	SourceID       string
+	ExpiresAtUnix  int64
+	BlockChecks    []AdmitBlockCheck
 	// TenantThroughput is the host's per-TENANT fixed-window throughput policy
 	// (#404). When set, OpenRails enforces these tenant-scoped windows on the
 	// invoke path BEFORE the per-actor policy + any hold, so the host (tensorhub)
@@ -105,7 +109,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	store := admission.NewTierPolicyStore(s.rt.DB)
 	bl := abuse.NewBlocklistService(s.rt.DB)
 	bsvc := budgets.NewService(s.rt.DB)
-	adm := admission.NewAdmitter(lim, s.creditsService(), store, bl, bsvc)
+	adm := admission.NewAdmitter(lim, s.creditsService(), store, bl, bsvc).
+		WithBudgetScopes(admission.NewBudgetPolicyStore(s.rt.DB))
 
 	// #404: tenant-scoped throughput. The host passes its per-tenant RPM/RPD
 	// windows; OpenRails enforces them on the invoke path BEFORE the per-actor
@@ -163,6 +168,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		Actor:           in.Actor,
 		Tier:            in.Tier,
 		Resource:        in.Resource,
+		Roles:           in.Roles,
 		Amounts:         in.Amounts,
 		CreditType:      in.CreditType,
 		EstimateMicros:  in.EstimateMicros,
@@ -294,6 +300,91 @@ func (s *Service) BudgetCheck(ctx context.Context, payer identity.TenantSubjectI
 	return out, nil
 }
 
+// BudgetScopeWindowInput is one fixed money-budget window for a budget-scope
+// policy (#473): same shape as TierBudgetWindowInput.
+type BudgetScopeWindowInput struct {
+	Key           string `json:"key"`
+	WindowSeconds int64  `json:"window_seconds"`
+	LimitMicros   int64  `json:"limit_micros"`
+	Cadence       string `json:"cadence,omitempty"`
+}
+
+// BudgetScopePolicyInput configures one hierarchical budget-scope policy (#473).
+// Scope is "subject" | "role" | "actor"; ScopeKey is the role uuid (scope=role)
+// or actor string (scope=actor), empty for scope=subject.
+type BudgetScopePolicyInput struct {
+	Scope    string                   `json:"scope"`
+	ScopeKey string                   `json:"scope_key,omitempty"`
+	Windows  []BudgetScopeWindowInput `json:"windows"`
+}
+
+func budgetScopeWindowModels(ws []BudgetScopeWindowInput) []models.BudgetWindowPolicy {
+	out := make([]models.BudgetWindowPolicy, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, models.BudgetWindowPolicy{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence})
+	}
+	return out
+}
+
+// SetSubjectBudgetPolicy upserts a SUBJECT-owned budget-scope policy (#473): the
+// subject's self (subject) cap, a (subject, role) pool, or a (subject, actor)
+// cap. The owner is forced to "subject" — this path can NEVER write a
+// platform-owned cap, so a subject cannot create/loosen one.
+func (s *Service) SetSubjectBudgetPolicy(ctx context.Context, payer identity.TenantSubjectID, in BudgetScopePolicyInput) error {
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return fmt.Errorf("payer required")
+	}
+	return admission.NewBudgetPolicyStore(s.rt.DB).Upsert(ctx, payer, admission.BudgetScopePolicy{
+		Scope: in.Scope, Owner: "subject", ScopeKey: in.ScopeKey,
+		Windows: budgetScopeWindowModels(in.Windows),
+	})
+}
+
+// SetPlatformBudgetPolicy upserts a PLATFORM-owned budget cap (#473) — the
+// platform->payer cap (level 1; tensorhub #475 scope B). Callable ONLY from a
+// platform-admin path (the caller enforces operator authz before invoking this);
+// the subject's own policy surface can never reach it, and the subject's
+// SubjectBudgetPolicies read does not expose it.
+func (s *Service) SetPlatformBudgetPolicy(ctx context.Context, payer identity.TenantSubjectID, in BudgetScopePolicyInput) error {
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return fmt.Errorf("payer required")
+	}
+	return admission.NewBudgetPolicyStore(s.rt.DB).Upsert(ctx, payer, admission.BudgetScopePolicy{
+		Scope: in.Scope, Owner: "platform", ScopeKey: in.ScopeKey,
+		Windows: budgetScopeWindowModels(in.Windows),
+	})
+}
+
+// SubjectBudgetPolicies returns ONLY the subject-owned budget-scope policies
+// (#473) — platform-owned caps are deliberately invisible to the subject.
+func (s *Service) SubjectBudgetPolicies(ctx context.Context, payer identity.TenantSubjectID) ([]BudgetScopePolicyInput, error) {
+	if s == nil || s.rt == nil {
+		return nil, fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
+	}
+	rows, err := admission.NewBudgetPolicyStore(s.rt.DB).LoadByOwner(ctx, payer, "subject")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BudgetScopePolicyInput, 0, len(rows))
+	for _, r := range rows {
+		w := make([]BudgetScopeWindowInput, 0, len(r.Windows))
+		for _, ww := range r.Windows {
+			w = append(w, BudgetScopeWindowInput{Key: ww.Key, WindowSeconds: ww.WindowSeconds, LimitMicros: ww.LimitMicros, Cadence: ww.Cadence})
+		}
+		out = append(out, BudgetScopePolicyInput{Scope: r.Scope, ScopeKey: r.ScopeKey, Windows: w})
+	}
+	return out, nil
+}
+
 // TierWindowInput / TierBudgetWindowInput / TierPolicyInput configure a tier's
 // policy via the admin endpoint (#298: tier admin API).
 type TierWindowInput struct {
@@ -308,11 +399,24 @@ type TierBudgetWindowInput struct {
 	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
 	Cadence string `json:"cadence,omitempty"`
 }
+
+// TierQueueLimitInput is one batch/queue reservation-pool cap (#472 G2): at most
+// Max units of Unit in-flight per (payer, endpoint-release). No time window.
+type TierQueueLimitInput struct {
+	Unit string `json:"unit"`
+	Max  int64  `json:"max"`
+}
 type TierPolicyInput struct {
 	Tier              string                  `json:"tier"`
 	Windows           []TierWindowInput       `json:"windows"`
 	EntitledResources []string                `json:"entitled_resources"`
 	BudgetWindows     []TierBudgetWindowInput `json:"budget_windows"`
+	// ReleaseWindows holds per-(endpoint-release) throughput window VALUES (#472
+	// G1): map key = release uuid, value = that release's window list. Absent
+	// releases fall back to Windows.
+	ReleaseWindows map[string][]TierWindowInput `json:"release_windows,omitempty"`
+	// QueueLimits are the batch/queue reservation-pool caps (#472 G2).
+	QueueLimits []TierQueueLimitInput `json:"queue_limits,omitempty"`
 }
 
 // SetTierPolicy upserts a per-payer tier policy (throughput + entitled endpoints
@@ -333,6 +437,19 @@ func (s *Service) SetTierPolicy(ctx context.Context, payer identity.TenantSubjec
 	}
 	for _, b := range in.BudgetWindows {
 		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros, Cadence: b.Cadence})
+	}
+	if len(in.ReleaseWindows) > 0 {
+		pol.ReleaseWindows = make(map[string][]models.ThroughputWindow, len(in.ReleaseWindows))
+		for rel, ws := range in.ReleaseWindows {
+			out := make([]models.ThroughputWindow, 0, len(ws))
+			for _, w := range ws {
+				out = append(out, models.ThroughputWindow{Unit: w.Unit, WindowSeconds: w.WindowSeconds, Max: w.Max})
+			}
+			pol.ReleaseWindows[rel] = out
+		}
+	}
+	for _, q := range in.QueueLimits {
+		pol.QueueLimits = append(pol.QueueLimits, models.QueueLimitPolicy{Unit: q.Unit, Max: q.Max})
 	}
 	return admission.NewTierPolicyStore(s.rt.DB).UpsertTierPolicyFull(ctx, payer, in.Tier, pol)
 }

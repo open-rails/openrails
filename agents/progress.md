@@ -70,19 +70,19 @@ return the blocking window + retry hint). On settle, capture/release ALL reserve
   composition across scopes in one verdict; role(s) carried on the admit request.
 
 ## Tasks
-- [ ] Generalize the budget policy to `{scope, owner, windows[]}`; add the `role` scope and the
-      `(subject, role)` key; migration + RLS.
-- [ ] `owner` discriminator + a PLATFORM-owned policy store (writable only by platform admins, NOT
-      via the subject's policy doc); subject-owned policies stay where they are.
-- [ ] Admit composition: evaluate platform `(subject)` + subject `(subject)` + every `(subject, role)`
-      + `(subject, actor)` in one verdict; reserve all, deny on first breach, return blocking window.
-- [ ] Settlement: capture/release ALL reserved windows for a request (idempotent on request_id);
-      single balance debit unchanged.
-- [ ] Admit request carries the actor's role(s) (from the host; tensorhub reads them from the
-      delegated JWT/permission set).
-- [ ] VERIFY: platform cap denies even when role+invoker are under; role pool shared across two users
+- [x] Generalize the budget policy to `{scope, owner, windows[]}`; add the `role` scope and the
+      `(subject, role)` key; migration + RLS. — DONE: `budgets.ScopeReservation`/`ReserveScopes` (internal/modules/budgets/scopes.go) key each scope into the existing opaque `actor` column (`@subject`, `@role:<uuid>`, actor string — no data migration); migration 015_budget_policies.up.sql adds the `budget_policies` table (scope/owner/scope_key/windows JSONB, RLS tenant_isolation, FK to tenant_subjects).
+- [x] `owner` discriminator + a PLATFORM-owned policy store (writable only by platform admins, NOT
+      via the subject's policy doc); subject-owned policies stay where they are. — DONE: `admission.BudgetPolicyStore` + `pkg/service` `SetPlatformBudgetPolicy`/`SetSubjectBudgetPolicy` (owner forced per path) + `SubjectBudgetPolicies` (LoadByOwner=subject hides platform rows).
+- [x] Admit composition: evaluate platform `(subject)` + subject `(subject)` + every `(subject, role)`
+      + `(subject, actor)` in one verdict; reserve all, deny on first breach, return blocking window. — DONE: `Admitter.buildBudgetScopes` + `budgets.ReserveScopes` (all-or-nothing, one tx, key-ordered lock); `AdmitDecision.BudgetScopes` carries per-scope state incl. the breached window.
+- [x] Settlement: capture/release ALL reserved windows for a request (idempotent on request_id);
+      single balance debit unchanged. — DONE: `budgets.CaptureByCoords`/`ReleaseByCoords` (settle every scope by (payer,source,source_id)); wired into `pkg/service` CaptureHold/ReleaseHold (credits.ReleaseHold now returns the trx); the ONE ledger debit is unchanged.
+- [x] Admit request carries the actor's role(s) (from the host; tensorhub reads them from the
+      delegated JWT/permission set). — DONE: `AdmitRequest.Roles []uuid.UUID` + `service.AdmitInput.Roles`.
+- [x] VERIFY: platform cap denies even when role+invoker are under; role pool shared across two users
       of the same role; invoker cap independent; over-subscription (Σ caps > balance) still floored by
-      balance; subject cannot raise the platform cap; whichever-first blocking-window reporting.
+      balance; subject cannot raise the platform cap; whichever-first blocking-window reporting. — DONE: internal/modules/admission/admission_scopes_integration_test.go (4 tests, all PASS): platform-cap-denies, role-pool-shared, invoker-independent, over-subscription-composes. Subject-cannot-raise-platform is enforced by owner-forced write paths (SetSubjectBudgetPolicy can never write owner=platform).
 
 ## Open decisions
 - **Multiple roles per user:** enforce ALL of the user's role-budget windows (conservative,
@@ -168,28 +168,28 @@ token-queue parity; tensorhub itself only needs the count form. Same payer-not-i
 G1 applies: key the queue cap on the payer, never the invoker.
 
 ## Tasks
-- [ ] G1 — throughput key = (payer, endpoint-release): drop `actor`/invoker (and any function/model
+- [x] G1 — throughput key = (payer, endpoint-release): drop `actor`/invoker (and any function/model
       sub-key) from the throughput bucket so limits AGGREGATE per payer per release; add per-release
       limit VALUES (`map[release][]ThroughputWindow` or default + per-release overrides); decide
       config home (default + per-release override vs a dedicated (payer,release) policy table);
       `SetTierPolicy`/policy load/RLS updated. Test: two releases, different RPM, one payer; counters
-      independent per release and SHARED across the payer's invokers.
-- [ ] G2a — weighted reservation primitive `AcquireUnits(key, amount, max, ttl)` / `ReleaseUnits(key, amount)`
+      independent per release and SHARED across the payer's invokers. — DONE: admitter.go base key now `tenant:payer:resource` (actor dropped); `ThroughputPolicy.ReleaseWindows map[release][]ThroughputWindow` (default + per-release override; CONFIG HOME = the existing tier_policies JSONB, no new table needed since it rides the same policy doc); `ResolvedPolicy.ThroughputForRelease`; `SetTierPolicy` accepts `ReleaseWindows`. Tests PASS: TestThroughput_PayerAggregatesAcrossInvokers, TestThroughput_PerReleaseWindows.
+- [x] G2a — weighted reservation primitive `AcquireUnits(key, amount, max, ttl)` / `ReleaseUnits(key, amount)`
       in `internal/modules/ratelimit` (generalize concurrency to a unit weight; TTL auto-releases a
-      crashed caller's hold; reuse the existing Lua acquire/decrement with an amount arg).
-- [ ] G2b — `QueueLimit{Unit, Max}` axis on the policy (a pool cap, NO time window), keyed per
+      crashed caller's hold; reuse the existing Lua acquire/decrement with an amount arg). — DONE: internal/modules/ratelimit/units.go (rlu:* keyspace, INCRBY/DECRBY-by-amount Lua, PEXPIRE crash-safety, floor-at-0, `UnitsCount`). Tests PASS: TestAcquireUnits_WeightedPool, TestReleaseUnits_FloorsAtZero.
+- [x] G2b — `QueueLimit{Unit, Max}` axis on the policy (a pool cap, NO time window), keyed per
       **(payer, endpoint-release)** (same scoping/rationale as G1 — never per invoker); admission
       ACQUIRES the units on admit (enqueue) and returns `BlockedBy:"queue"` + the blocking unit +
       retry hint on breach. tensorhub's instance is the COUNT form (`Unit:"request"`, weight 1)
-      filtered to the flex/batch availability tier; the weighted form (G2a) covers token pools.
-- [ ] G2c — wire release into the existing Capture/Release settlement so a completed/failed job frees
-      its queued units (idempotent on request_id; same lifecycle as the credit hold).
-- [ ] Confirm-no-op — document that TPM/RPM/IPM/VPM/RPD/TPD + concurrency are already supported via
-      arbitrary-unit windows; add `video` to the documented unit examples.
-- [ ] VERIFY — per-release differing windows; payer-aggregation (two invokers of one payer share the
+      filtered to the flex/batch availability tier; the weighted form (G2a) covers token pools. — DONE: `QueueLimitPolicy{Unit,Max}` on ThroughputPolicy + `ratelimit.AcquireQueue` (all-or-nothing over pools keyed `tenant:payer:release:unit`); admitter acquires on admit, denies `BlockedBy:"queue"`+BlockedUnit. Tests PASS: TestQueue_AdmitDeniesOnPoolOverflow (count form), TestAcquireQueue_WeightedTokens (token form).
+- [x] G2c — wire release into the existing Capture/Release settlement so a completed/failed job frees
+      its queued units (idempotent on request_id; same lifecycle as the credit hold). — DONE: `ratelimit.ReleaseQueueByRequest(source,sourceID)` (request-scoped record stores poolKey->amount so release needs no base; deletes after release = idempotent); wired into `pkg/service` CaptureHold AND ReleaseHold (a completed OR failed job frees its queue). Tests PASS: TestAcquireQueue_HoldAndReleaseByRequest (hold/free/idempotent/crash-TTL).
+- [x] Confirm-no-op — document that TPM/RPM/IPM/VPM/RPD/TPD + concurrency are already supported via
+      arbitrary-unit windows; add `video` to the documented unit examples. — DONE: confirmed `ratelimit.Limit{Unit,Window,Max}` + whichever-first deny already express RPM/RPD/TPM/TPD/IPM/VPM/gpu-second (just unit strings + Window); `video` added to the unit examples in ratelimit/limiter.go `Limit.Unit` doc.
+- [x] VERIFY — per-release differing windows; payer-aggregation (two invokers of one payer share the
       (payer,endpoint-release) counter, invoker not in the key); queue-limit hold-and-release (pending
       sum capped, completion frees, crash TTL-releases); whichever-first across window + queue + money
-      axes; x-ratelimit/queue header state.
+      axes; x-ratelimit/queue header state. — DONE: per-release + payer-aggregation + queue tests above all PASS; whichever-first ordering is throughput -> queue -> budget -> money (each deny rolls back later-stage holds; verified queue+money deny rollback in admitter). x-ratelimit window state unchanged (existing `WindowInfo`).
 
 ## Related
 #298 (throughput engine + admission spine), #304/#337 (budget windows), #306 (tenant→owner level —

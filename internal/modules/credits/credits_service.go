@@ -677,11 +677,15 @@ func (s *CreditsService) CaptureHold(ctx context.Context, holdID uuid.UUID, actu
 	return hold, nil
 }
 
-func (s *CreditsService) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
+// ReleaseHold frees an active hold and returns the released transaction (the
+// caller uses its (payer, source, source_id) coords to settle any composed
+// budget reservations — #473).
+func (s *CreditsService) ReleaseHold(ctx context.Context, holdID uuid.UUID) (*models.CreditTransaction, error) {
 	if s == nil || s.db == nil {
-		return fmt.Errorf("credits service not initialized")
+		return nil, fmt.Errorf("credits service not initialized")
 	}
-	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	var released *models.CreditTransaction
+	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		row, gerr := q.GetCreditTransactionForUpdate(ctx, holdID)
 		if gerr != nil {
@@ -711,8 +715,22 @@ func (s *CreditsService) ReleaseHold(ctx context.Context, holdID uuid.UUID) erro
 		}); err != nil {
 			return err
 		}
-		return q.ReleaseCreditHold(ctx, gen.ReleaseCreditHoldParams{ID: row.ID, UpdatedAt: now})
+		if err := q.ReleaseCreditHold(ctx, gen.ReleaseCreditHoldParams{ID: row.ID, UpdatedAt: now}); err != nil {
+			return err
+		}
+		h, merr := creditTransactionFromGen(row)
+		if merr != nil {
+			return merr
+		}
+		h.Status = "released"
+		h.UpdatedAt = now
+		released = h
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return released, nil
 }
 
 func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, actorID string, creditTypeID uuid.UUID, amount int64) (int64, error) {
