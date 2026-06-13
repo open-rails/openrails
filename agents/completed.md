@@ -8941,3 +8941,160 @@ Consequences:
 - [x] FailMembership + DunningWorker consume the schedule (retry scheduling, terminal check, derived staleness window)
 - [x] Tests: tier table (1d/7d/30d/365d + boundary cases), window derivation, integration regression (existing window tests adapted to derived windows)
 ---
+
+# #335: Batch admission: prepaid credit windows (bulk hold + batched settle) so callers stop paying an HTTP hop per request
+
+**Completed:** yes (2026-06-10/11)
+**Validated:** git `435d15c0 done(#335)`, `8c085949 feat(#335/#338)`; all 6 tasks done; OpenWindow/SettleWindowItems/RefillWindow/CloseWindow/AdmitBatch on the unified Client (both transports), conformance-covered; validated live under kill-test traffic.
+
+Tensorhub's hot path pays ~30-40ms per request for the synchronous /v1/service/admit hop. Replaced per-request holds with a PREPAID WINDOW the caller admits against locally: one bulk hold worth ~N requests, batched cross-payer settlement of actuals, async refill; cold payers use a conflating batch-admit endpoint. NO optimistic approval — a window is a real hold; server enforces sum(settles) <= window held. SDK fold (#338/tensorhub #468 parity) landed both transports + dual-transport conformance.
+
+---
+
+# #336: Multi-tenant writers don't stamp tenant_id — rows land under the DEFAULT tenant on delegated self-checkout
+
+**Completed:** OBSOLETE / SUPERSEDED (2026-06-13)
+**Validated:** resolved by the default-tenant removal (#336 scope-expansion landed on origin/master): `pkg/tenant` no longer has `DefaultID`/`FromContextOrDefault` (replaced by `tenant.Require` + `ErrNoTenant`), migrations consolidated to one schema with the default-tenant row removed (`9f9d543e #336: consolidate PG migrations ... remove the default tenant end-to-end`), GUC-derived tenant_id default with no `…0001` fallback, configured-tenant wiring (slug→id), worker/test-suite tenant pins. Confirmed on origin/master (HEAD): `grep` shows `func Require` present, `DefaultID`/`FromContextOrDefault` gone.
+
+The original premise ("rows take the static default-tenant column default") is moot: there is no default tenant; tenant_id is required and stamped (GUC unset → NULL → NOT NULL error, by design). The full end-to-end refactor (migration + ~110 call sites + seed + RLS + worker GUC + test harness) merged. (Original tracking text retained in git history.)
+
+---
+
+# #347: SDK: fold entitlements read into openrails.Client (ListActiveEntitlements)
+
+**Completed:** yes (2026-06-11; v0.16.0)
+**Validated:** git `8d9d7472 feat(#347)`, closed out in `111c2634 track(#354)`; both tasks `[x]`; doujins (a0a6ea02) + hentai0 (8ede7df1) pin v0.16.0 with no replace directives. (Later collapsed to batch-only by #354.)
+
+Added `ListActiveEntitlements(ctx, issuer, subject, at)` to the unified Client on both transports (remote + embedded) with dual-transport conformance, so sibling hosts enrich access tokens with entitlement claims at mint time through the SDK instead of hand-rolled HTTP/direct SQL.
+
+---
+
+# #349: config.FlexiblePort is int16 — ports above 32767 overflow negative
+
+**Completed:** yes (2026-06-11)
+**Validated:** git `a1fd46c8 fix(config): FlexiblePort int16 -> int with 1-65535 validation (#349)`; both tasks `[x]`; doujins dropped the freeLocalPortBelow32768 workaround (a0a6ea02).
+
+FlexiblePort widened to plain int; UnmarshalText parses 32-bit + enforces 1-65535; Validate range-checks integer-typed yaml values that bypass UnmarshalText. Unit tests cover 44553/65535/trim/empty + 65536/0/-1/non-numeric + the Validate path.
+
+---
+
+# #354: batch-first service reads — ListActiveEntitlements batch + batch convention
+
+**Completed:** yes (2026-06-11)
+**Validated:** git `1823cc77 feat!(#354): entitlements read is always batch — one route, one client method`, `48d197ed`, closed out `3917ef05 track(#354): consumer integrations closed out via #356`; all tasks `[x]` incl. authkit v0.21.0 BatchEntitlementsProvider + all four consumers adapted via #356.
+
+Entitlements read collapsed to batch-only (owner decision: no separate single/batch — single = array of one): `POST .../by-external-subject/entitlements` body `{issuer, subjects[], at?}`, response keyed by subject, cap 500 + dedupe, one `ANY($1)` query; SDK `ListActiveEntitlements(issuer, subjects[], at) map[subject][]Record` on both transports + conformance. Convention going forward: new list-consumable reads are batch-first.
+
+---
+
+# #356: release v0.17.0 (batch-only entitlements) + adapt all four consumers
+
+**Completed:** yes (2026-06-11; v0.17.0/v0.17.1)
+**Validated:** git `cc4e0220 track(#356): v0.17.0/v0.17.1 released; all four consumers adapted`; all tasks `[x]`; consumer commits doujins cc83bafe, hentai0 52d9af11, cozy-art 220a6702, tensorhub 77cf648.
+
+Executed the consumer half of #354: merged batch-354, tagged v0.17.0; v0.17.1 exports `openrails.SelfIssuer`. Doujins/hentai0/cozy-art/tensorhub all bumped + adapted (cozy-art's dead user_id SQL provider deleted).
+
+---
+
+# #360: solana-token-pricing-degrade-not-die
+
+**Completed:** yes — code done & merged (2026-06-11); residual: live doujins redeploy + an optional NMI/CCBill missing-credential degrade follow-up
+**Validated:** git `aeb35347 solana pricing: per-token degradation, never a fatal boot (#360)`; 7 code tasks `[x]`, unit suites green. Remaining `[ ]` items are an operational redeploy and an explicitly-separate follow-up.
+
+Incident: doujins replicas crash-looped at boot on `solana token USD1 missing pyth price feed` (defaults injected post-Validate; #352 made any non-default token a fatal boot error). Fix: mainnet-only pricing policy + stablecoin registry (mint→peg) + ClassifySolanaTokenPricing (feed→feed, USD-peg registry w/o feed→$1 parity+warn, else disable-token); devnet parity wrapper; verified live USD1/USDG Pyth feed ids added to DefaultPythPriceFeeds. In all cases the container boots.
+
+---
+
+# #361: delegated-tokens-slug-only-tenant-identity (→ issuer-only)
+
+**Completed:** yes (2026-06-11/12; authkit v0.23.0, openrails v0.20.0)
+**Validated:** git `ee9d1b77 feat!(#361): issuer-only delegated tokens — authkit v0.23.0, no tenant claims`, `9f24155d track: ...#361 host cleanups verified on doujins/hentai0 masters`; all tasks `[x]`; doujins f4faf69c + hentai0 4cca9a53 grep-zero for *_BILLING_TENANT_ID; tensorhub + cozy-art moved to issuer-pinned resolution.
+
+Delegated tokens carry NO tenant claims at all — the validated `iss` IS the tenant identity (resolved from the issuer registry). authkit v0.23.0 hard cut (removed DelegatedAccessParams/Principal.Tenant, verifier rejects `tenant`/`tenant_id`, IssuerOptions.TenantSlug = registry data never compared to claims). Slug renames are transparent to in-flight tokens. Hosts mint slug-only (config slug only, never a claim); all BILLING_TENANT_ID plumbing deleted across hosts. (Open question on per-issuer vs #259 shared payable-subject keying noted in history; not a blocker.)
+
+---
+
+# #365: intent-account-fingerprint-guard: park pending intents when provider credentials point at a different account
+
+**Completed:** yes (2026-06-12)
+**Validated:** git `a67cc3f5 billing safety + silence ownership: account guard (#365)...`, `9f24155d track: #365-#368 complete (shipped v0.20.0)`; all tasks `[x]`; unit tests + docs green.
+
+Stamp an account fingerprint on every intent at enqueue; compare at execute AND verify; PARK (never fail) on mismatch. NMI fingerprint = merchant identity from query.php report_type=profile (rotation-safe, lazily cached per key); stripe = account id from GET /v1/account (cached per key); solana exempt; NULL = grandfathered. Migration 013 + sqlc; `billing intents refingerprint` escape hatch; fingerprint surfaced in CLI + GET /v1/admin/intents.
+
+---
+
+# #366: materialize the migration backlog under mode=limited
+
+**Completed:** yes (2026-06-12)
+**Validated:** git `a67cc3f5 ...limited-mode materialize (#366)...`, `9f24155d track: #365-#368 complete (shipped v0.20.0)`; tasks done (the DeferDelete-under-park verify tail rides on existing #344 deferred-delete coverage); integration tests green vs real PG.
+
+Under mode=limited + dunning_mode=on, the dunning worker now MATERIALIZES the backlog instead of demoting to dry_run_only: window-expired subs apply local cancel+downgrade now (respecting DISABLE_ENTITLEMENT_EXPIRATION) + schedule deferred-delete intents; in-window charges enqueue as parked system-origin intents (no claim — preserves last_retry_at forensics). readonly unchanged. Staleness re-derived at execution (ExpiresAt bounds claiming; CheckRelevance re-checks). Interplays with #365 (parked-with-changed-account on a cutover).
+
+---
+
+# #367: subscription liveness sync — scheduled provider-truth convergence for SILENT lapsed subscriptions
+
+**Completed:** yes (2026-06-12; v0.20.0)
+**Validated:** git `a67cc3f5 ...liveness sync (#367)...`, `9f24155d track: #365-#368 complete (shipped v0.20.0)`; all tasks `[x]`; 9 outcome-class integration tests green incl. months-stale-never-charges.
+
+SubscriptionLivenessWorker (4h, RunOnStart, skip-readonly) detects active subs with period_end < now-slack and no payment for the period, probes the provider (NMI query.php / Stripe GET subscription+invoice), and converges: charged→RenewMembership repair (backfill, never double-charge); declined→FailMembership+#359 schedule (dunning owns it); no-attempt-alive→adopt remote period (no access granted without a charge); absent/terminal→cancel+revoke. Never charges itself. CCBill/Solana excluded (have their own pull mechanisms). #367 is #368's resolver.
+
+---
+
+# #368: renewal grace windows — silence at period end extends access briefly instead of cutting it
+
+**Completed:** yes (2026-06-12; v0.20.0, 48h cap)
+**Validated:** git `a67cc3f5 ...renewal grace (#368)...`, `9f24155d track: #365-#368 complete (shipped v0.20.0)`; all tasks `[x]`; integration tests green (no-gap property, revocation per resolution class, #367 charged-repair interplay).
+
+On create/renew/reactivate (NMI-backed + Stripe), pre-append a trailing `grace` entitlement window [period_end, period_end + graceSlack] (graceSlack = min(48h, half-cycle); daily=12h) so there's never an access gap. Paid windows stay truthful (end_at = period end). Grace is revoked the moment truth arrives (renewal success / confirmed dead) and deleted on deliberate user cancel; months-stale imports get no resurrection grace. GraceSlack is a named constant, not a config knob.
+
+---
+
+# #471: Rename migration app key + default schema `billing` -> `openrails`
+
+**Completed:** yes (openrails v0.22.0; 2026-06-12)
+**Validated:** git `6195e1cd #471: rename app billing->openrails + make Postgres schema configurable`, `c69588fe track(#471): complete — openrails v0.22.0 tagged; hosts renamed+bumped`; openrails tasks `[x]` (app-key + execution-time schema rewrite + tests, tagged v0.22.0); hosts renamed (doujins/hentai0/tensorhub/cozy-art, left uncommitted for owner review per the record).
+
+HARD CUT (greenfield, no data migration): app/tracking key `billing`→`openrails` (const config.MigratekitApp, PG+CH); default schema `openrails`, made truly configurable via an execution-time qualifier rewrite (`openrails.`→`<schema>.`) across runtime DBTX/tx + migration DDL — not search_path (embedded shares the host pool). Rebranded River job kinds + gin ctx keys + Stripe lookup_key prefix. Deliberately kept `billing` for cobra cmd dir, health service name, QueueBilling, pg_dump headers.
+
+---
+
+# #472: full rate-limit dimension support (OpenAI-shaped) — per-(payer × endpoint-release) throughput VALUES + batch-queue reservation
+
+**Completed:** yes (2026-06; v0.24.0)
+**Validated:** git `9ac91447 #472: mark stages B/C done`, `488ef935 #472 D+E`, `46fa069f #472: mark D/E done — substantively complete`; all tasks `[x]` with passing tests named inline (TestThroughput_PayerAggregatesAcrossInvokers, TestQueue_AdmitDeniesOnPoolOverflow, etc.). NOTE: F (usdc per-currency runtime wiring) tracked as a small future bullet under #474.
+
+Throughput key dropped `actor`/invoker → aggregates per (payer, endpoint-release); per-release limit VALUES (ThroughputPolicy.ReleaseWindows, config home = existing tier_policies JSONB). Weighted reservation primitive AcquireUnits/ReleaseUnits + QueueLimit pool axis (no time window) keyed per (payer, release), acquire-on-admit / release-on-settle (idempotent on request_id). TPM/RPM/IPM/VPM/RPD/TPD + concurrency already expressible via arbitrary-unit windows (confirm-no-op; `video` added to docs). Whichever-first ordering: throughput→queue→budget→money.
+
+---
+
+# #473: hierarchical money budget scopes — platform→payer caps + payer→role/invoker caps, composed in one admit verdict
+
+**Completed:** yes (v0.24.0)
+**Validated:** git `974085ed track(#473): thread actor Roles through the unified admit SDK`, `a54939b3 track(#473): expose SetSubjectBudgetPolicy/SetPlatformBudgetPolicy on the unified client`; all 7 tasks `[x]` with passing integration tests (admission_scopes_integration_test.go: 4 tests). Deferred-vs-#474 note in `46fa069f`.
+
+Generalized budget policy to {scope, owner, windows[]}: scope ∈ {subject|actor|role}, owner ∈ {platform|subject} (platform-owned policies writable only by platform admins, invisible to the subject). Admit composes platform(subject) + subject(subject) + every (subject,role) + (subject,actor) in one all-or-nothing reserve; deny on first breach with the blocking window; settle captures/releases all reserved windows (one ledger debit). Roles carried on the admit request (UUIDs). Budgets are gates not wallets; balance is the hard floor. Exposed on the unified Client across all 3 transports (v0.24.0). Migration 015_budget_policies + RLS.
+
+---
+
+# #474: Decouple money (fractional USD) from the credit ledger — ONE currency-aware money ledger
+
+**Completed:** yes (merged into master 2026-06-13)
+**Validated:** git `46325318 #474: post-merge integration-test parity (money ledger × merged budget-scopes)` (origin/master HEAD); the work was authored as "#472" before an id collision, renumbered #474. Remaining items (F: usdc_funding→USDC balance + per-currency FinalizeInvoice; enforce the billing-vs-credit invariant in code) are small/future bullets, not blockers.
+
+Collapsed the ~7k-line credit ledger into ONE currency-aware money ledger (µ$): `usd_micro` is no longer a tenant credit type; deleted the credit_type dimension + 7 credit_* tables + custom-credit registry; CreditsService→MoneyService. Every money_* table has a `currency` column (system registry USD/USDC/EUR/JPY/SOL); unqualified unit = built-in currency, qualified `tenant/name` = future custom credit (#475). Product grants deposit into expiring money_blocks (idempotent). INVARIANT documented: billing is external-currency-only; custom credits are consume-only (never the unit of a charge/invoice/owed).
+
+---
+
+# #219: Require prepared/parameterized SQL; migrate from Bun to sqlc
+
+**Completed:** yes — Bun fully removed; the SQL migration shipped as #334 (already in completed.md)
+**Validated:** no `uptrace/bun` in go.mod or go.sum and zero `uptrace/bun` imports in internal/ or pkg/ (grep, HEAD); #334 ("Eliminate bun: migrate all SQL to sqlc on pgx/v5") is already archived in completed.md. Runtime DB access is sqlc-generated (parameterized by construction), satisfying the SQL-safety rule.
+
+The benchmark-then-migrate plan's terminal goal — all queries off Bun and onto sqlc/pgx, Bun removed from runtime deps — is achieved. The exhaustive per-query benchmark wishlist was subsumed by the actual #334 cutover; remaining benchmarking would be net-new speculative work, not a gap in the migration.
+
+---
+
+## Pruned (over-engineered / not needed)
+
+(none this pass — every remaining open issue was either genuinely actionable or verified merged; nothing met the clearly-speculative bar for removal.)
