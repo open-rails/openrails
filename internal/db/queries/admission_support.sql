@@ -23,6 +23,23 @@ UPDATE openrails.budget_reservations
 SET status = 'released'
 WHERE id = $1 AND status = 'active';
 
+-- name: CaptureBudgetReservationsByCoords :execrows
+-- Settle ALL scopes reserved under one request (#473): every active budget
+-- reservation for (tenant, subject, source, source_id) -> captured. Idempotent
+-- (already-settled rows are skipped by the status filter).
+UPDATE openrails.budget_reservations
+SET status = 'captured', captured_micros = sqlc.arg(captured_micros)::bigint
+WHERE tenant_id = $1 AND tenant_subject_id = $2
+  AND source = $3 AND source_id = $4 AND status = 'active';
+
+-- name: ReleaseBudgetReservationsByCoords :execrows
+-- Free ALL scopes reserved under one request (#473): every active budget
+-- reservation for (tenant, subject, source, source_id) -> released. Idempotent.
+UPDATE openrails.budget_reservations
+SET status = 'released'
+WHERE tenant_id = $1 AND tenant_subject_id = $2
+  AND source = $3 AND source_id = $4 AND status = 'active';
+
 -- name: AggregateBudgetWindow :one
 -- One fixed window's state since window_start (#337): used = captured sums,
 -- reserved = active sums.
@@ -90,3 +107,31 @@ ON CONFLICT (tenant_id, tenant_subject_id, tier) DO UPDATE SET
 SELECT * FROM openrails.tier_policies
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND tier = $3
 LIMIT 1;
+
+-- name: UpsertBudgetPolicy :exec
+-- Hierarchical money-budget policy upsert (#473). The owner discriminator is the
+-- write-authz split (platform vs subject); the caller (service layer) enforces
+-- that a subject path may only write owner='subject' rows.
+INSERT INTO openrails.budget_policies (
+    id, tenant_id, tenant_subject_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (tenant_id, tenant_subject_id, scope, owner, scope_key) DO UPDATE SET
+    windows = EXCLUDED.windows,
+    updated_at = EXCLUDED.updated_at;
+
+-- name: DeleteBudgetPolicy :execrows
+DELETE FROM openrails.budget_policies
+WHERE tenant_id = $1 AND tenant_subject_id = $2
+  AND scope = $3 AND owner = $4 AND scope_key = $5;
+
+-- name: ListBudgetPolicies :many
+-- ALL budget policies for a subject regardless of owner (the admit path reads
+-- every scope to compose the verdict).
+SELECT * FROM openrails.budget_policies
+WHERE tenant_id = $1 AND tenant_subject_id = $2;
+
+-- name: ListBudgetPoliciesByOwner :many
+-- Budget policies for a subject filtered by owner (the subject-facing read must
+-- NOT expose platform-owned rows).
+SELECT * FROM openrails.budget_policies
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND owner = $3;

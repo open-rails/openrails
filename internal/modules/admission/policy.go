@@ -34,9 +34,26 @@ func NewTierPolicyStore(database *db.DB) *TierPolicyStore { return &TierPolicySt
 // ResolvedPolicy is a tier's enforceable policy: throughput windows, entitled
 // resources (empty = all allowed), and fixed money-budget windows (#304, #337).
 type ResolvedPolicy struct {
-	Throughput        ratelimit.Policy
+	// Throughput is the DEFAULT throughput window list (used when a release has
+	// no per-release override).
+	Throughput ratelimit.Policy
+	// ReleaseThroughput holds per-(endpoint-release) throughput window VALUES
+	// (#472 G1); keyed by the release uuid. ThroughputForRelease resolves a
+	// release to its windows (override > default).
+	ReleaseThroughput map[string]ratelimit.Policy
+	// QueueLimits are the batch/queue reservation-pool caps (#472 G2).
+	QueueLimits       []models.QueueLimitPolicy
 	EntitledResources []string
 	BudgetWindows     []budgets.BudgetWindow
+}
+
+// ThroughputForRelease returns the throughput policy for an endpoint-release:
+// its per-release override when present, else the tier-global default (#472 G1).
+func (p ResolvedPolicy) ThroughputForRelease(release string) ratelimit.Policy {
+	if rp, ok := p.ReleaseThroughput[release]; ok {
+		return rp
+	}
+	return p.Throughput
 }
 
 // UpsertTierPolicy sets the throughput windows for (payer, tier).
@@ -119,11 +136,160 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Tena
 	if !found {
 		return ResolvedPolicy{}, nil
 	}
+	var releaseTP map[string]ratelimit.Policy
+	if len(row.Policy.ReleaseWindows) > 0 {
+		releaseTP = make(map[string]ratelimit.Policy, len(row.Policy.ReleaseWindows))
+		for rel, ws := range row.Policy.ReleaseWindows {
+			releaseTP[rel] = toRatelimitPolicy(models.ThroughputPolicy{Windows: ws})
+		}
+	}
 	return ResolvedPolicy{
 		Throughput:        toRatelimitPolicy(row.Policy),
+		ReleaseThroughput: releaseTP,
+		QueueLimits:       row.Policy.QueueLimits,
 		EntitledResources: row.Policy.EntitledResources,
 		BudgetWindows:     toBudgetWindows(row.Policy.BudgetWindows),
 	}, nil
+}
+
+// BudgetPolicyStore reads/writes hierarchical money-budget policies (#473) —
+// {scope, owner, windows[]} rows in openrails.budget_policies. The OWNER
+// discriminator is the write-authz split: SetSubjectBudgetPolicy may only write
+// owner='subject' rows; SetPlatformBudgetPolicy writes owner='platform' rows
+// (callable only from a platform-admin path); a subject's read MUST NOT expose
+// platform-owned rows. The admit path (LoadAll) reads ALL owners to compose.
+type BudgetPolicyStore struct {
+	db *db.DB
+}
+
+func NewBudgetPolicyStore(database *db.DB) *BudgetPolicyStore {
+	return &BudgetPolicyStore{db: database}
+}
+
+// BudgetScopePolicy is one stored scope policy: {scope, owner, scopeKey,
+// windows[]}. scopeKey is the immutable role uuid (scope=role) / actor string
+// (scope=actor) / "" (scope=subject).
+type BudgetScopePolicy struct {
+	Scope    string
+	Owner    string
+	ScopeKey string
+	Windows  []models.BudgetWindowPolicy
+}
+
+func budgetPolicyFromGen(r gen.BillingBudgetPolicy) (BudgetScopePolicy, error) {
+	p := BudgetScopePolicy{Scope: r.Scope, Owner: r.Owner, ScopeKey: r.ScopeKey}
+	if len(r.Windows) > 0 {
+		if err := json.Unmarshal(r.Windows, &p.Windows); err != nil {
+			return BudgetScopePolicy{}, fmt.Errorf("admission: decode budget policy windows: %w", err)
+		}
+	}
+	return p, nil
+}
+
+// LoadAll returns every budget-scope policy for a subject regardless of owner
+// (the admit path composes all of them). Returns nil when none exist.
+func (s *BudgetPolicyStore) LoadAll(ctx context.Context, payer identity.TenantSubjectID) ([]BudgetScopePolicy, error) {
+	tid, terr := tenant.Require(ctx) // #336/#474: no default tenant
+	if terr != nil {
+		return nil, terr
+	}
+	tenantID := tid.UUID()
+	var out []BudgetScopePolicy
+	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		rows, e := s.db.Gen(ctx).ListBudgetPolicies(ctx, gen.ListBudgetPoliciesParams{
+			TenantID: tenantID, TenantSubjectID: payer.UUID(),
+		})
+		if e != nil {
+			return e
+		}
+		for _, r := range rows {
+			p, derr := budgetPolicyFromGen(r)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, p)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// LoadByOwner returns a subject's budget-scope policies for one owner only — the
+// subject-facing read uses owner="subject" so platform-owned caps are invisible.
+func (s *BudgetPolicyStore) LoadByOwner(ctx context.Context, payer identity.TenantSubjectID, owner string) ([]BudgetScopePolicy, error) {
+	tid, terr := tenant.Require(ctx) // #336/#474: no default tenant
+	if terr != nil {
+		return nil, terr
+	}
+	tenantID := tid.UUID()
+	var out []BudgetScopePolicy
+	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		rows, e := s.db.Gen(ctx).ListBudgetPoliciesByOwner(ctx, gen.ListBudgetPoliciesByOwnerParams{
+			TenantID: tenantID, TenantSubjectID: payer.UUID(), Owner: owner,
+		})
+		if e != nil {
+			return e
+		}
+		for _, r := range rows {
+			p, derr := budgetPolicyFromGen(r)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, p)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// Upsert writes one budget-scope policy. owner MUST be supplied by the caller's
+// authz path (SetSubjectBudgetPolicy / SetPlatformBudgetPolicy at the service
+// layer); this method does not itself decide authz.
+func (s *BudgetPolicyStore) Upsert(ctx context.Context, payer identity.TenantSubjectID, p BudgetScopePolicy) error {
+	tid, terr := tenant.Require(ctx) // #336/#474: no default tenant
+	if terr != nil {
+		return terr
+	}
+	tenantID := tid.UUID()
+	now := time.Now().UTC()
+	windowsJSON, err := json.Marshal(p.Windows)
+	if err != nil {
+		return fmt.Errorf("admission: encode budget policy windows: %w", err)
+	}
+	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
+			return err
+		}
+		return s.db.Gen(ctx).UpsertBudgetPolicy(ctx, gen.UpsertBudgetPolicyParams{
+			ID:              uuidutil.NewV7(),
+			TenantID:        tenantID,
+			TenantSubjectID: payer.UUID(),
+			Scope:           p.Scope,
+			Owner:           p.Owner,
+			ScopeKey:        p.ScopeKey,
+			Windows:         windowsJSON,
+			PolicyVersion:   1,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		})
+	})
+}
+
+// Delete removes one budget-scope policy (owner-qualified so a subject path
+// cannot delete a platform-owned row).
+func (s *BudgetPolicyStore) Delete(ctx context.Context, payer identity.TenantSubjectID, scope, owner, scopeKey string) error {
+	tid, terr := tenant.Require(ctx) // #336/#474: no default tenant
+	if terr != nil {
+		return terr
+	}
+	tenantID := tid.UUID()
+	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		_, err := s.db.Gen(ctx).DeleteBudgetPolicy(ctx, gen.DeleteBudgetPolicyParams{
+			TenantID: tenantID, TenantSubjectID: payer.UUID(),
+			Scope: scope, Owner: owner, ScopeKey: scopeKey,
+		})
+		return err
+	})
 }
 
 func toBudgetWindows(ws []models.BudgetWindowPolicy) []budgets.BudgetWindow {

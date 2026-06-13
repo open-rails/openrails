@@ -116,6 +116,14 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	group.POST("/budget/check", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceBudgetCheck))
 	// Tier policy admin (#298): configure a tier's throughput + entitled endpoints + money budgets.
 	group.PUT("/tier-policies", creditsWrite, wrap(httphandlers.ServiceSetTierPolicy))
+	// Hierarchical budget-scope policies (#473). Subject-owned caps (self +
+	// (subject, role) pools) are written/read with the same operator credits
+	// gates as tier policies. The PLATFORM-owned payer cap is operator-admin
+	// gated (openrails:admin) — a subject's own surface can never reach it.
+	budgetPolicies := group.Group("/budget-policies")
+	budgetPolicies.PUT("/subject", creditsWrite, wrap(httphandlers.ServiceSetSubjectBudgetPolicy))
+	budgetPolicies.GET("/subject", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetSubjectBudgetPolicies))
+	budgetPolicies.PUT("/platform", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), wrap(httphandlers.ServiceSetPlatformBudgetPolicy))
 
 	// Prepaid credit windows (#335): open reserves a bulk hold the host admits
 	// against locally; settle flushes cross-payer batches of actuals (idempotent

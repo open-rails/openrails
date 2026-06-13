@@ -7,108 +7,263 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 473
+next_id: 476
 
 ---
 
-# #472: Decouple money (fractional USD) from the custom-credit ledger
+# #474: Decouple money (fractional USD) from the credit ledger — ONE currency-aware money ledger
 
-**Priority:** high (architecture/correctness; supersedes the `usd_micro` provisioning follow-up from #336).
-**Status:** in progress (2026-06-13).
+**Status:** DONE (merged into master 2026-06-13). NOTE: the commit messages reference "#472" —
+this work was authored as #472 before discovering a concurrent line of work had already taken
+#472 (rate-limits) / #473 (budget-scopes) on master; renumbered to #474 here. Content unchanged.
 
-## Decision (2026-06-13, Paul)
-`usd_micro` must NOT be a tenant-defined `credit_types` row. Two distinct concepts were conflated:
-- **Money (fractional USD)** — the universal dollar unit: micro-dollars (µ$ = 1e-6 USD; 1¢ = 10,000 µ$). Identical for every tenant; nobody defines it. (Stripe settles in integer *cents*; µ$ gives 4 dp below a cent so per-call usage accrues without rounding, then reconciles to cents at the gateway boundary.)
-- **Custom credits** — tenant-defined units (api-credits, tokens) a tenant bills in. Tenant-scoped `credit_types`.
+**What shipped** (`internal/modules/money`, `money_*` tables):
+- `usd_micro` is no longer a tenant-defined `credit_types` row. Collapsed the ~7k-line credit
+  ledger into ONE money ledger (µ$); deleted the `credit_type` dimension + the 7 `credit_*`
+  ledger tables + the custom-credit-type registry. `CreditsService`→`MoneyService`. Net: less code.
+- **Currency-aware:** every `money_*` table has a `currency` column (system registry: USD/USDC/EUR=6dp,
+  JPY=4dp, SOL=9dp). Default USD; seam ready for USDC/EUR/JPY/SOL. FX = future.
+- **Unit namespace:** unqualified (`usd`) = built-in currency; qualified (`tenant/name`) = future
+  custom credit (#475). One `currency` column hosts both.
+- **Product grants:** products grant credit/currency balances alongside entitlements —
+  grant = {unit (default usd), amount, expiry_days (default 365, 0=never)}; one-off + subscription
+  deposit into expiring `money_blocks`; idempotent.
+- Fixes surfaced en route: hold/credit-expiry workers now thread `currency` in the balance key;
+  `InsertTimelineWindow` stamps the resolved tenant; `FinalizeDueInvoices` implemented; seed_data tenant_id.
 
-Chosen model: **PHYSICAL SEPARATION**. Money gets its own first-class tables/ledger (µ$, no `credit_type_id`); `credit_types`/`credit_*` serve ONLY custom credits. Run-from-empty (no data migration); schema folds into the consolidated `001_schema.up.sql` (#336).
+**INVARIANT (document + eventually enforce):** billing (subscriptions, invoices, arrears/owed,
+auto-topup, payment-method charges) is EXTERNAL-CURRENCY-ONLY (USD/EUR/USDC/SOL). Custom credits
+(#475) are a consume-only internal balance: acquired by purchase (paid in real currency) or grant,
+then spent — NEVER the unit of a charge/invoice/owed. Ledger primitives (balance/hold/capture/
+release/transactions/blocks/spend-limits/windows) are unit-generic; the billing layer
+(`money_accounts` owed/billing_mode/auto-topup, invoices, arrears, charges) is external-currency-only.
 
-## Target money-domain schema (µ$, tenant-scoped, RLS, tenant_id NOT NULL, no credit_type_id)
-- `money_accounts`      ← from credit_account_settings (billing_mode prepaid/arrears, caps, auto_topup, outstanding_owed_micros, verified PM, suspension); unique(tenant_id, tenant_subject_id)
-- `money_balances`      ← from credit_balances (balance_micros, held_micros); unique(tenant_id, tenant_subject_id)
-- `money_transactions`  ← from credit_transactions (deposit/withdrawal/hold/capture/release; idempotency on source/source_id; status; expires_at)
-- `money_blocks`        ← from credit_blocks (expiring promo/grant dollars, FIFO)
-- `money_windows`       ← from credit_windows (prepaid bulk reservations)
-- `money_spend_limits`  ← from credit_spend_limits (per-actor µ$ caps)
-- `invoices`            ← drop credit_type_id; denominate µ$ directly (already money)
-- `budget_reservations` / `budget_window_state` ← already µ$ (no credit_type_id); leave — they ARE money
-- `usage_events`        ← keep as the metering record; link to exactly one of money_transaction_id / credit_transaction_id
+**Remaining (small / future):**
+- [ ] F. usdc_funding deposit → USDC balance; per-currency FinalizeInvoice (multi-currency runtime wiring).
+- [ ] Enforce the billing-vs-credit invariant in code (reject billing ops on a non-currency unit;
+      reject custom-credit codes in invoice/owed/charge paths).
 
-`credit_types` reverts to custom-only (no usd_micro; the global seed is already gone).
+---
 
-## REVISED 2026-06-13 (Paul: "make it as simple as possible, minimize code")
-ONE ledger = money. usd_micro is the only unit in real use; custom credits are unbuilt.
-So instead of two parallel ledgers: retarget the existing ~7k-line ledger to the money_*
-tables, DELETE the credit_type dimension, and DELETE the now-redundant credit_* ledger
-tables + credit_types + GetCreditTypeByName + credit_type_service (they only ever held
-usd_micro). Net: less code than today. Custom credits = FUTURE issue, rebuilt on the money
-ledger shape when a tenant actually defines one. `invoices`/`usage_events` drop credit_type_id.
-The Stage-2a money_*.sql + gen already exist; the work is to retarget the module to them,
-rename credits→money / CreditsService→MoneyService, drop credit_type everywhere, delete the
-credit_* side, and update callers.
+# #475: Tenant-defined custom credits (api-credits, gold-coins) — consume-only, no FX
 
-## Service split (original two-ledger sketch — superseded by the REVISED note above)
-- **MoneyService (new):** the dollar wallet — deposit (payment/refund), withdraw, hold/capture/release, prepaid windows, account settings, owed/arrears, invoices, suspension, auto-topup. µ$, no unit param.
-- **CreditsService (slimmed):** custom credits only — GetCreditTypeByName + balances/transactions/holds/windows/spend-limits/usage for tenant-defined types.
-- Today's money-centric files (money_in.go, invoice.go, arrears.go, suspension.go, spend_policy owed/topup) move to MoneyService.
+**Status:** planned (not started). Was referenced as "#473" before the id collision; it's #475.
 
-## Public API (#336 carry-over): slug in/out, uuid internal; money ops are unit-less µ$.
+Custom credits are tenant-defined consumable units (api-credits, in-game gold) with NO fixed dollar
+exchange ratio (buy 100 for $10 OR 1000 for $80). They are NEVER billed in (see the #474 invariant) —
+acquired by purchase (paid in a real currency, any ratio) or product grant, then SPENT on usage.
+Tensorhub's "API credits" are NOT custom credits — they are USD money (#474). Reuse the money LEDGER
+primitives as-is; do NOT give custom credits a `money_accounts`/invoice/owed row.
 
-## Stages (each lands GREEN)
-1. **Schema** — add money_* tables to consolidated 001 (additive; no gen/Go yet); verify apply on fresh PG + structural diff. No behavior change.
-2. **MoneyService** over money_* mirroring today's dollar paths; queries + sqlc + unit tests.
-3. **Money writers cutover** — payments deposit/refund, prepaid, arrears settle, invoices, auto-topup onto MoneyService.
-4. **Readers + service facade + self-account HTTP + admission money path** onto MoneyService.
-5. **Slim CreditsService** to custom-only; drop money columns/tables from the credit_* side.
-6. **Integration parity** — money wallet behaves as before; custom-credit path intact; full suite green.
+Design notes:
+- Unit namespace: qualified `tenant-slug/name` (e.g. `tensorhub/api-credit`) = custom credit;
+  unqualified (`usd`) = built-in currency (#474). One `currency`/`unit` column hosts both.
+- Tasks: (1) a per-tenant custom-credit-type registry (define/list/activate); (2) allow the money
+  ledger's `currency` column to hold qualified codes + validate (tenant-owned); (3) product grants
+  may target a custom-credit unit; (4) the admission/spend path consumes custom credits;
+  (5) ENFORCE the invariant — billing/invoice/owed/charge paths reject non-currency (qualified) units.
+- Keep it minimal; build only when a tenant actually needs a non-dollar unit.
 
-## Open sub-decisions
-- usage_events: single table with nullable money_transaction_id + credit_transaction_id (exactly one set) vs split → propose single table.
-- Promo DOLLARS expiry → keep money_blocks (FIFO) for granted/promo dollars.
+---
+
+# #473: hierarchical money budget scopes — platform→payer caps (us) + payer→role/invoker caps (the tenant), composed in ONE admit verdict over ONE balance
+
+The money axis (payer-protection, tensorhub #475) has a HIERARCHY of limits set by TWO different
+authorities. This issue makes the OpenRails budgets engine express all of them, evaluate them
+together in one admit, and keep them editable only by their rightful owner.
+
+## Terminology (OpenRails vs tensorhub vocab)
+- **tenant** = the host platform (= tensorhub). Top RLS isolation.
+- **subject** (tenant_subject / payer) = the billing principal that holds the credit balance — a
+  tensorhub TENANT like cozy-art, or a native user (#437). "payer" below = subject.
+- **actor** = the invoker that made the request (a delegated-user like PaulFidika; for a native-user
+  payer, actor == subject).
+- **role** = a subject-defined grouping with a granted spend budget, assigned to the subject's users.
+
+## The hierarchy (who caps whom)
+1. **Platform → payer** (set by US / the tenant=tensorhub): cap each payer's TOTAL spend. Protects
+   us + the payer from unpayable debt (arrears exposure; tensorhub #475 scope B / problem #3). Keyed
+   on `(subject)`, OWNER = platform.
+2. **Payer → role** (set by the SUBJECT, e.g. cozy-art): a shared budget pool for all users holding a
+   role. Keyed on `(subject, role)`, OWNER = subject. NEW scope.
+3. **Payer → invoker** (set by the SUBJECT): per-delegated-user cap by plan. Keyed on `(subject, actor)`,
+   OWNER = subject. ALREADY EXISTS.
+(A subject may also self-cap its own total: `(subject)`, OWNER = subject — distinct from the
+platform's `(subject)` cap.)
+
+## Design — generalized scope + owner, composed
+Model a budget policy as **{scope, owner, windows[]}**:
+- `scope` ∈ { `subject` | `actor` | `role` } (extensible). The window's effective key is the
+  subject uuid, plus the actor uuid or role uuid for those scopes.
+- `owner` ∈ { `platform` | `subject` } — determines WHO may write it and that the subject can
+  neither see nor loosen a platform-owned window.
+- `windows[]` = the fixed-interval windows (5h/1w/30d, #401) with LimitMicros + cadence.
+
+**Admit evaluation (composition):** for a request `(subject, actor, roles[])` gather every matching
+budget window — platform `(subject)`, subject `(subject)`, each `(subject, role)` the actor holds,
+`(subject, actor)` — RESERVE against ALL of them, and DENY if ANY would breach (whichever-first,
+return the blocking window + retry hint). On settle, capture/release ALL reserved windows.
+
+**Key invariants:**
+- Budgets are GATES, not wallets. A `(subject, role)` cap of $100/wk does NOT give the role its own
+  $100 — it means users with that role may collectively spend ≤ $100/wk OF THE SUBJECT'S BALANCE.
+  Sub-budgets MAY over-subscribe (Σ caps > balance); the payer BALANCE is the hard floor.
+- ONE balance debit per request (the subject's), regardless of how many windows gate it. Windows
+  track reserved/used independently; they do not each debit.
+- The subject CANNOT edit or loosen a platform-owned window (enforced by owner + a separate write
+  path / authz; not exposed in the subject's policy doc).
+- Identity: all window keys are immutable UUIDs (subject, actor, role), never slug/username (#475/#476
+  convention).
+
+## What exists / what's new
+- EXISTS: `(subject, actor)` budget windows + reserve/capture/release lifecycle (#304/#337); fixed
+  cadence (#401). #306 already lists the "tenant→owner limit level" (= platform→payer, level 1) and a
+  tensorhub→OpenRails policy-ownership migration as future bullets — this issue SUBSUMES and details
+  those, and adds the role scope.
+- NEW: the `role` scope key `(subject, role)`; the `owner` (platform|subject) discriminator + a
+  platform-writable policy store separate from the subject's editable policy; multi-window admit
+  composition across scopes in one verdict; role(s) carried on the admit request.
 
 ## Tasks
-- [x] Stages 1–5 (DONE, commit 84aa490e): ONE money ledger over money_* (µ$); credit_type
-      dimension + the 7 credit_* tables + credit_type machinery DELETED; all callers on
-      MoneyService; build + vet + non-integration tests green.
+- [x] Generalize the budget policy to `{scope, owner, windows[]}`; add the `role` scope and the
+      `(subject, role)` key; migration + RLS. — DONE: `budgets.ScopeReservation`/`ReserveScopes` (internal/modules/budgets/scopes.go) key each scope into the existing opaque `actor` column (`@subject`, `@role:<uuid>`, actor string — no data migration); migration 015_budget_policies.up.sql adds the `budget_policies` table (scope/owner/scope_key/windows JSONB, RLS tenant_isolation, FK to tenant_subjects).
+- [x] `owner` discriminator + a PLATFORM-owned policy store (writable only by platform admins, NOT
+      via the subject's policy doc); subject-owned policies stay where they are. — DONE: `admission.BudgetPolicyStore` + `pkg/service` `SetPlatformBudgetPolicy`/`SetSubjectBudgetPolicy` (owner forced per path) + `SubjectBudgetPolicies` (LoadByOwner=subject hides platform rows).
+- [x] Admit composition: evaluate platform `(subject)` + subject `(subject)` + every `(subject, role)`
+      + `(subject, actor)` in one verdict; reserve all, deny on first breach, return blocking window. — DONE: `Admitter.buildBudgetScopes` + `budgets.ReserveScopes` (all-or-nothing, one tx, key-ordered lock); `AdmitDecision.BudgetScopes` carries per-scope state incl. the breached window.
+- [x] Settlement: capture/release ALL reserved windows for a request (idempotent on request_id);
+      single balance debit unchanged. — DONE: `budgets.CaptureByCoords`/`ReleaseByCoords` (settle every scope by (payer,source,source_id)); wired into `pkg/service` CaptureHold/ReleaseHold (credits.ReleaseHold now returns the trx); the ONE ledger debit is unchanged.
+- [x] Admit request carries the actor's role(s) (from the host; tensorhub reads them from the
+      delegated JWT/permission set). — DONE: `AdmitRequest.Roles []uuid.UUID` + `service.AdmitInput.Roles`.
+- [x] VERIFY: platform cap denies even when role+invoker are under; role pool shared across two users
+      of the same role; invoker cap independent; over-subscription (Σ caps > balance) still floored by
+      balance; subject cannot raise the platform cap; whichever-first blocking-window reporting. — DONE: internal/modules/admission/admission_scopes_integration_test.go (4 tests, all PASS): platform-cap-denies, role-pool-shared, invoker-independent, over-subscription-composes. Subject-cannot-raise-platform is enforced by owner-forced write paths (SetSubjectBudgetPolicy can never write owner=platform).
+- [x] Expose budget-policy management on the UNIFIED `openrails.Client` so hosts (tensorhub) that
+      talk only through the unified client can push role/subject/platform budget policies (previously
+      only `SetTierPolicy` was exposed). — DONE: `Client.SetSubjectBudgetPolicy`/`SetPlatformBudgetPolicy`/`SubjectBudgetPolicies`
+      + SDK DTOs (`SubjectBudgetPolicyInput`/`PlatformBudgetPolicyInput`/`SubjectBudgetPolicy`/`BudgetScopeWindow`,
+      `role_id`->facade `ScopeKey`) in client.go, mirroring `SetTierPolicy` across all 3 transports:
+      remote HTTP (`PUT/GET /v1/service/budget-policies/{subject,platform}` in remote.go), embedded
+      adapter (embed/client.go transcribing the handlers), and HTTP handlers/routes
+      (`ServiceSetSubjectBudgetPolicy`/`ServiceSetPlatformBudgetPolicy`/`ServiceGetSubjectBudgetPolicies`;
+      subject=credits:write/read, platform=openrails:admin gated). Dual-transport round-trip added to the
+      embed conformance test (self + role + platform write, subject-only read-back; platform cap stays
+      invisible) — PASS. v0.24.0.
 
-### Revised remaining stages (2026-06-13b — multi-currency + product grants)
-Three orthogonal concepts (Paul): (1) CURRENCIES = system-fixed registry, code→minor-unit
-scale (USD/USDC/EUR=6dp, JPY=4dp, SOL=9dp lamports), FX-convertible; (2) the money ledger is
-currency-aware; (3) CUSTOM CREDITS = tenant-defined, no fixed FX (gold-coins, non-µ$ api-credits)
-— deferred to #473. Tensorhub "API credits" = USD money (no custom credit). Products grant
-balances ({unit, amount}) alongside entitlements; non-1:1 = price≠grant.
-- [x] A. Currency dimension (commit f94b9af2): currency column on all money_* (uniques include it);
-      Go currency registry (USD/USDC/EUR=6dp, JPY=4dp, SOL=9dp); MoneyService threads currency
-      (default USD). Seam ready for USDC/EUR/JPY/SOL; FX = later.
-      UNIT NAMESPACE (Paul): unqualified code (`usd`,`jpy`) = built-in currency; qualified
-      `tenant-slug/name` (`tensorhub/api-credit`) = per-tenant custom credit (#473). One `currency`
-      column hosts both.
-- [ ] B. Product benefits = ONE "what you get" section (alongside entitlements): credit/currency
-      grants. A grant = {unit (currency code; default 'usd'), amount (minor units), expiry_days
-      (default 365; null = never)}. On purchase (one-off AND subscription) deposit each grant as a
-      money_block in the grant's currency with expires_at = now + expiry_days (money_blocks already
-      carry expires_at). Generalize the existing products.credits_spec/GrantSubscriptionCredits to
-      one-off + currency + configurable expiry; keep entitlements as the other benefit.
-- [x] B. (commit aa093213) Product credit/currency grants: CreditGrantSpec gains unit (default usd)
-      + expiry_days (default 365, 0=never); one-off purchases + subscriptions deposit grants into
-      expiring money_blocks (idempotent); entitlements unchanged. Currency codes validated.
-- [x] C. (commit aa093213) Integration parity: money/*_integration_test.go + admission/river/tests
-      on the money ledger + currency; obsolete credit-type tests deleted. PLUS production fix:
-      hold-expiry + credit-expiry workers now thread the row's currency into the balance key
-      (were querying currency='' and missing the USD row); affected tests un-skipped, passing.
+## Open decisions
+- **Multiple roles per user:** enforce ALL of the user's role-budget windows (conservative,
+  whichever-first) vs a single governing role. RECOMMEND enforce-all; revisit if surprising.
+- **Level-1 timing:** the platform→payer cap is mooted today by prepaid-only (balance is the cap);
+  build the scope/owner machinery now, wire the actual platform cap when arrears ships (#475 scope B).
+- **Policy store shape:** extend `tier_policies` JSONB with scope/owner, or a dedicated
+  `budget_policies` table keyed (subject, scope, key, owner). Lean dedicated table for the
+  platform-vs-subject write-authz split.
 
-### Remaining loose ends
-- [x] D. (commit 488ef935) tests/seed_data.go stamps tenant_id (+ pinned tenant ctx in the dunning/
-      clock tests); also fixed a real #336 bug — repo InsertTimelineWindow stamped tenant_id from a
-      zero model (RLS-bypass role let it land NULL); now stamps the resolved tenant.
-- [x] E. (commit 488ef935) ListMoneyAccountPairs query + real FinalizeDueInvoices (enumerate payers,
-      finalize each); test restored.
-- [ ] F. (future) usdc_funding deposit → USDC balance; FinalizeInvoice per-currency. Multi-currency
-      wiring — the seam (currency column + registry) is in; today USD-only in practice.
+## Related
+tensorhub #475 (payer-protection — the consumer; scope A = roles/invoker, scope B = platform cap),
+#476 (capacity, separate axis), #437 (billing principal = subject), #306 (supersedes its tenant→owner
++ policy-ownership bullets), #304/#337/#401 (budgets engine + fixed windows).
 
-**#472 SUBSTANTIVELY COMPLETE** (one money ledger, currency-aware, product grants, integration parity;
-build + vet + non-integration tests green; key integration suites green). Deferred: F (multi-currency
-runtime wiring) and #473 (tenant-defined custom credits, qualified `tenant/name` unit codes).
+---
+
+# #472: full rate-limit dimension support (OpenAI-shaped) — per-(payer × endpoint-release) throughput limit VALUES + batch-queue (weighted, release-on-completion) reservation
+
+OpenAI publishes rate limits across several dimensions (e.g. gpt-5.5: TPM, images/min, videos/min,
+requests/min, + a batch queue limit; gpt-realtime-2: RPM + TPM). OpenRails is the general throughput
+engine (#298) and should express ALL of these. UNIT NOTE: OpenAI keys its tables per *model*; OUR
+rate-limit unit is the **endpoint-release**, NOT the model — an endpoint has many releases, and a
+release contains multiple models + functions inside it. So never call this "per-model"; it's
+per-(payer × endpoint-release). Most dimensions already work; two pieces don't.
+
+## Already supported (confirm — no build)
+- Arbitrary-unit fixed windows: `ratelimit.Limit{Unit, Window, Max}` + `Policy.Windows`, atomic Lua,
+  whichever-window-first deny (`internal/modules/ratelimit/limiter.go`). So RPM/RPD, TPM/TPD,
+  images/min (IPM), videos/min (VPM), gpu-second/min are ALL expressible today — `video` is just
+  another unit string; "per minute" = `Window: time.Minute`.
+- Per-(tenant, subject, actor, resource) counter namespacing — `resource` = the endpoint-release
+  (`internal/modules/admission/admitter.go:148`).
+- Concurrency cap (count-based in-flight): `AcquireConcurrency/ReleaseConcurrency/ConcurrencyCount`
+  (`internal/modules/ratelimit/concurrency.go`).
+- Per-window post-check state for `x-ratelimit-*` headers (`ratelimit.WindowInfo`).
+
+## Gaps to build
+
+### G1 — throughput rate-limits scoped per (PAYER × ENDPOINT-RELEASE), with per-release limit VALUES
+Owner steer (Paul): the rate-limit unit is **(payer × endpoint-release)** — NOT per invoker, per
+function, or per model. (An endpoint has many releases; a release holds models+functions; the
+RELEASE is the unit.) Concretely:
+- **KEY**: throughput counters key on **(payer, endpoint-release)** only. Today the admitter bucket
+  is `tenant:subject:actor:resource` (`internal/modules/admission/admitter.go:148`) — it includes
+  `actor` (the invoker), which over-subdivides. Drop `actor` from the THROUGHPUT key so a payer's
+  limit AGGREGATES across all its invokers; `resource` = the endpoint-release (the host's `releaseID`),
+  NOT model or function. **WHY payer, not invoker:** per-invoker throughput is BYPASSABLE — a payer
+  can register an unlimited number of invokers/accounts to multiply its limit, so a capacity limit
+  MUST be payer-scoped to be abuse-resistant. MONEY can stay per-invoker (#475) because money is real
+  and cannot be duplicated infinitely (the per-payer money cap is the true backstop). This change is
+  the throughput axis only.
+- **VALUES**: limits are per-release, not one tier-global list. `ThroughputPolicy.Windows` is
+  currently a single global list (`internal/db/models/tier_policy.go`); add per-release window values
+  (a `map[release][]ThroughputWindow`, or a default list + per-release overrides).
+- **SOURCE**: since throughput is now payer×release (not the invoker's tier), the limits come from a
+  payer/release-level policy, not the invoker's `tier_policy`. OPEN (decide in build): keep a default
+  + per-release override, or move throughput limits onto a dedicated (payer, release) policy table.
+  `EntitledResources` gating unchanged.
+- **IDENTITY CONVENTION** — the throughput KEY and all persisted records use the immutable UUID
+  (payer = tenant_subject uuid; release = endpoint-release uuid / `releaseID`), NEVER a tenant-slug
+  or endpoint NAME. Today the admit resource is `tenant/endpointName` (`admitter.go:148`) — confirm
+  the host passes the release uuid, not a mutable name; a slug/name key lets a rename reset counters
+  or a recycled name inherit another payer's limits. Public API shapes may use slugs, resolved to
+  uuid before the admit. (Builds on the fleet uuid-canonical work; matches tensorhub #475/#476.)
+
+### G2 — batch queue limit = weighted, release-on-completion reservation over arbitrary units
+OpenAI's batch queue limit: "tokens from pending batch jobs count against your queue limit; once a
+job completes, its tokens no longer count." This is NOT a time-window (the fixed-window limiter is
+increment-only and time-resets) — it's a RESERVATION POOL: hold N units while a job is pending,
+RELEASE N on completion; deny when the in-flight sum would exceed the cap. It is the concurrency
+primitive GENERALIZED from count (weight 1) to weighted (N units), with the same acquire/release
+lifecycle as a money hold (Reserve→Capture/Release) but denominated in throughput units.
+
+**Concrete tensorhub instance (owner steer, Paul):** tensorhub serves flex/batch (async, long-lived)
+requests, so the analogue is "limit how many FLEX/BATCH requests may be IN QUEUE against a single
+endpoint-release at once" — i.e. a cap on in-flight flex/batch requests per **(payer, endpoint-release)**,
+scoped to the flex/batch availability tier only (fast/standard requests are not queue-capped this
+way). That instance is COUNT-based (weight 1) — it's exactly the existing concurrency primitive, just
+keyed per (payer, endpoint-release) + availability-tier-filtered + acquire-on-enqueue/release-on-
+complete. The weighted (token-denominated) pool above is the GENERAL engine capability for OpenAI
+token-queue parity; tensorhub itself only needs the count form. Same payer-not-invoker rationale from
+G1 applies: key the queue cap on the payer, never the invoker.
+
+## Tasks
+- [x] G1 — throughput key = (payer, endpoint-release): drop `actor`/invoker (and any function/model
+      sub-key) from the throughput bucket so limits AGGREGATE per payer per release; add per-release
+      limit VALUES (`map[release][]ThroughputWindow` or default + per-release overrides); decide
+      config home (default + per-release override vs a dedicated (payer,release) policy table);
+      `SetTierPolicy`/policy load/RLS updated. Test: two releases, different RPM, one payer; counters
+      independent per release and SHARED across the payer's invokers. — DONE: admitter.go base key now `tenant:payer:resource` (actor dropped); `ThroughputPolicy.ReleaseWindows map[release][]ThroughputWindow` (default + per-release override; CONFIG HOME = the existing tier_policies JSONB, no new table needed since it rides the same policy doc); `ResolvedPolicy.ThroughputForRelease`; `SetTierPolicy` accepts `ReleaseWindows`. Tests PASS: TestThroughput_PayerAggregatesAcrossInvokers, TestThroughput_PerReleaseWindows.
+- [x] G2a — weighted reservation primitive `AcquireUnits(key, amount, max, ttl)` / `ReleaseUnits(key, amount)`
+      in `internal/modules/ratelimit` (generalize concurrency to a unit weight; TTL auto-releases a
+      crashed caller's hold; reuse the existing Lua acquire/decrement with an amount arg). — DONE: internal/modules/ratelimit/units.go (rlu:* keyspace, INCRBY/DECRBY-by-amount Lua, PEXPIRE crash-safety, floor-at-0, `UnitsCount`). Tests PASS: TestAcquireUnits_WeightedPool, TestReleaseUnits_FloorsAtZero.
+- [x] G2b — `QueueLimit{Unit, Max}` axis on the policy (a pool cap, NO time window), keyed per
+      **(payer, endpoint-release)** (same scoping/rationale as G1 — never per invoker); admission
+      ACQUIRES the units on admit (enqueue) and returns `BlockedBy:"queue"` + the blocking unit +
+      retry hint on breach. tensorhub's instance is the COUNT form (`Unit:"request"`, weight 1)
+      filtered to the flex/batch availability tier; the weighted form (G2a) covers token pools. — DONE: `QueueLimitPolicy{Unit,Max}` on ThroughputPolicy + `ratelimit.AcquireQueue` (all-or-nothing over pools keyed `tenant:payer:release:unit`); admitter acquires on admit, denies `BlockedBy:"queue"`+BlockedUnit. Tests PASS: TestQueue_AdmitDeniesOnPoolOverflow (count form), TestAcquireQueue_WeightedTokens (token form).
+- [x] G2c — wire release into the existing Capture/Release settlement so a completed/failed job frees
+      its queued units (idempotent on request_id; same lifecycle as the credit hold). — DONE: `ratelimit.ReleaseQueueByRequest(source,sourceID)` (request-scoped record stores poolKey->amount so release needs no base; deletes after release = idempotent); wired into `pkg/service` CaptureHold AND ReleaseHold (a completed OR failed job frees its queue). Tests PASS: TestAcquireQueue_HoldAndReleaseByRequest (hold/free/idempotent/crash-TTL).
+- [x] Confirm-no-op — document that TPM/RPM/IPM/VPM/RPD/TPD + concurrency are already supported via
+      arbitrary-unit windows; add `video` to the documented unit examples. — DONE: confirmed `ratelimit.Limit{Unit,Window,Max}` + whichever-first deny already express RPM/RPD/TPM/TPD/IPM/VPM/gpu-second (just unit strings + Window); `video` added to the unit examples in ratelimit/limiter.go `Limit.Unit` doc.
+- [x] VERIFY — per-release differing windows; payer-aggregation (two invokers of one payer share the
+      (payer,endpoint-release) counter, invoker not in the key); queue-limit hold-and-release (pending
+      sum capped, completion frees, crash TTL-releases); whichever-first across window + queue + money
+      axes; x-ratelimit/queue header state. — DONE: per-release + payer-aggregation + queue tests above all PASS; whichever-first ordering is throughput -> queue -> budget -> money (each deny rolls back later-stage holds; verified queue+money deny rollback in admitter). x-ratelimit window state unchanged (existing `WindowInfo`).
+
+## Related
+#298 (throughput engine + admission spine), #304/#337 (budget windows), #306 (tenant→owner level —
+separate), #305 (fast-path — separate); tensorhub #475 (consumes ONLY the $ budget axis today;
+per-release windows + queue limits are for when a host wants OpenAI-style per-unit limits), tensorhub
+#476 (per-payer scheduler fairness — these throughput caps are its secondary hard ceiling). Reference:
+OpenAI rate-limit tables (gpt-5.5: TPM/IPM/VPM/RPM + batch queue; gpt-realtime-2: RPM/TPM) — but our
+unit is the endpoint-release, not the model.
 
 ---
 
@@ -350,114 +505,6 @@ Plan and implement OpenRails-owned USDC funding sessions for host apps that need
 
 ---
 
-# #107: processor-reconcile (was: processor-sync)
-
-**Completed:** no
-**Status:** redesigned 2026-06-10 per Paul: all configured providers (stripe, nmi/mobius, ccbill, solana) where possible; advisory + enforce modes; remote system is source of truth and is NEVER mutated (admin action queue for cancels/refunds); doubles as empty-instance bootstrap/restore. PHASE 1 (provider fetchers + normalized snapshot model, internal/reconcile) implemented 2026-06-11. PHASE 2 implemented 2026-06-11 per the phase-2 design decisions: migration 008 (reconciliation_runs + reconciliation_findings with stable identity + RLS), diff engine PS-1..PS-9 (engine.go/diff.go/findings.go), enforce appliers (local writes only, idempotent), dunning forensics in the run summary, CLI (`billing reconcile check|fix|report`) + admin API (POST/GET /v1/admin/reconcile/runs, findings list + ack/dismiss); unit + integration suites green; live read-only advisory smoke verified against the NMI sandbox (58 subs -> 58 PS-1, 4 PS-8, 46 PS-4) and the Stripe test account (13 subs -> 11 PS-1; 2 terminal subs correctly skipped). TAILS CLOSED 2026-06-11: (1) ClickHouse third evidence source wired into the forensics (reconcile/history.go + analytics.DunningHistoryService; per-sub timelines tagged provider|local|history, "last dunning action per ANY source" aggregate, graceful degradation note when CH absent/unreachable — query + scan contract live-validated read-only against the dev ClickHouse); (2) PS-1 materialization (bootstrap mode v1.1): `billing reconcile fix --materialize` / admin POST `materialize:true` (enforce-only, explicit opt-in) auto-creates local subs when identity (single vault/email match) AND plan (catalog provider_links) both resolve unambiguously — which also closes the provider_links plan-mapping tail; (3) docs/operations.md verified+refreshed against the implementation; README Documentation section links it. Remaining tail: doujins-cutover runbook doc (operations.md's cutover-posture section covers the levers; a step-by-step cutover sequence is still open). CCBill remains NOT live-validated (DataLink creds still absent).
-
-Reconcile local OpenRails billing state against the payment processors as the source of truth, for ALL configured providers where the provider exposes the data: Stripe, NMI/Mobius, CCBill, Solana. Two modes: advisory (report only) and enforce (converge local state to the processor's declared state). The tool NEVER mutates the remote processor — remote actions (cancel, refund) are queued for an admin.
-
-## Metadata
-
-- Category: tooling/feature
-- Status: planned (design refreshed 2026-06-10; supersedes the earlier billing-cli processor-sync design — that CLI-first shape is NOT binding)
-- Passes: false
-
-## Driving scenario (doujins legacy cutover)
-
-Plan: (1) legacy-migrate doujins user billing data into OpenRails (#343), (2) connect to CCBill + NMI with production credentials, (3) pull processor batch data as the source of truth and reconcile. Suspected drift on the legacy machine:
-
-1. Manual NMI dunning has not run in months.
-2. Subscriptions failed to renew but users were never downgraded — they kept premium entitlements, the local subscription was never killed, and NMI keeps retrying the charge monthly.
-3. Users with duplicate/overlapping subscriptions (same user signed up twice).
-4. (worth checking, probably absent) users being charged without holding premium entitlement.
-
-The same machinery doubles as disaster recovery: restore a (near-)empty OpenRails instance by materializing local records from processor data (bootstrap), then converging.
-
-## Two reconciliation modes
-
-1. **advisory** — fetch remote state, diff, persist + report findings. No writes to billing state.
-2. **enforce** — assert the processor as source of truth and converge LOCAL state on the spot: adopt subscription status/periods, revoke entitlements of users without active subscriptions, grant entitlements to paying users missing them, backfill missing payment records. Findings that require REMOTE action (cancel a duplicate subscription, issue a refund) are NOT executed — they land in an admin action queue with a recommended action.
-
-Hard constraint: read-only against every processor. No cancels, refunds, or vault edits, ever; those are deliberate admin actions taken by a human.
-
-## Providers + data sources (fetch where possible)
-
-- **Stripe**: full API — subscriptions, invoices/charges, refunds, disputes, customers. Richest source; supports every check incl. chargebacks.
-- **NMI/Mobius**: Query API (query.php; client plumbing exists: NMIClient.sendQueryRequest/QueryURL) — report_type=recurring for subscription state, transaction search by date range, customer_vault for stored payment methods.
-- **CCBill**: DataLink batch exports (DataLinkClient.FetchActiveMembers exists but covers ACTIVEMEMBERS only — add expired/cancellation/transaction/chargeback exports).
-- **Solana**: on-chain subscriptions-program state IS the source of truth — read Plan + subscription accounts via internal/integrations/solana (respect the read-lag rules: *AtSlot/ReadUntilConsistent), payment history via signature scans. No refunds/chargebacks on-chain.
-
-Each fetcher declares capabilities (subscriptions / transactions / refunds / chargebacks / vault) and the diff engine only runs the checks that provider can answer.
-
-## Architecture
-
-- `internal/reconcile` package, sibling of `internal/audit` (audit = internal DB consistency; reconcile = local vs processor).
-- `ProcessorFetcher` interface per provider → normalized `RemoteSnapshot` (subscriptions, transactions, vault entries) + capability flags.
-- Diff engine emits **findings persisted to DB** (`reconciliation_runs`, `reconciliation_findings`) with lifecycle `open → auto_fixed | admin_pending → resolved/dismissed`. The admin action queue is simply the findings with `requires_admin=true`. Persistence (not one-shot CLI output) is what makes the advisory report queryable and the admin queue workable.
-- Identity + plan matching: `processor_subscription_id` first; for processor-only records (PS-1 / bootstrap) fall back to email/username/merchant-defined fields; catalog provider_links (#329) map processor plan ids → local prices.
-- Surfaces: admin API (`POST /admin/v1/reconcile/runs` {mode, processors[], since/until, scope: user|subscription}, `GET .../runs/{id}`, findings list + ack/dismiss) plus a thin CLI wrapper over the same engine; optional scheduled advisory run via River with alerting on new findings.
-- Tenant-scoped: a run executes under one tenant; processor credentials resolve from that tenant's processor config.
-
-## Discrepancy taxonomy
-
-- PS-1 processor subscription missing locally — CRITICAL — bootstrap-create when identity+plan resolvable, else admin investigate
-- PS-2 local active/past_due, processor cancelled/expired — HIGH — enforce: cancel locally + revoke entitlement (legacy suspicion 2)
-- PS-3 status mismatch — MEDIUM — enforce: adopt processor status + period timestamps
-- PS-4 processor charge with no local payment — HIGH — enforce: backfill payment record + grant entitlement (legacy suspicion 4)
-- PS-5 refund at processor not recorded locally — HIGH — enforce: record refund; entitlement-revocation recommendation → admin queue
-- PS-6 chargeback at processor, subscription still active — CRITICAL — enforce: terminate + revoke
-- PS-7 vault/payment-method mismatch — MEDIUM — enforce: adopt processor record
-- PS-8 duplicate/overlapping active subscriptions for one subject — HIGH — advisory + admin queue (cancel+refund at the processor is a human decision; legacy suspicion 3)
-- PS-9 entitlement ↔ subscription mismatch, either direction — HIGH — enforce: grant/revoke on the spot
-
-## Out of scope
-
-- Mutating any processor (by design, forever — admins do that by hand).
-- The legacy doujins data import itself — issue #343; this tool then corrects whatever the import got wrong.
-- Dunning: OpenRails' River dunning worker already exists (ListDueDunningSubscriptions); once legacy subscriptions are imported and converged, dunning resumes naturally. The legacy machine's dead dunning is evidence to find, not a thing to build here.
-
-## Phase-2 design decisions (Paul, 2026-06-11)
-
-1. FINDING IDENTITY: Option B — stable identity keyed (tenant, provider, finding_type, subject_key); re-runs update the open finding (last_seen_at, occurrence_count); findings that stop appearing auto-resolve ("vanished on its own" is signal).
-2. ENFORCE: one-shot — fetch+diff+apply in a single run; idempotent appliers; the admin queue IS the review step for risky items. No apply-a-reviewed-plan mechanism.
-3. SCHEDULING: NO recurring reconcile runs — manual actions only (CLI/admin API). The always-on nightly advisory idea is REJECTED.
-4. BOOTSTRAP: the word means the CATALOG direction (existing bootstrap apply: local catalog -> ensure provider entries, idempotent). NEW: extras in the provider are ignorable-but-logged by default; an explicit --exhaustive flag archives provider-side products+prices NOT in the local catalog (archive, never delete: existing subscriptions continue billing; new purchases blocked). Filed as its own issue (#356, class-1 machinery). #107's provider->local subscription materialization ships as PS-1 admin-pending in v1.
-5. CLASS-3 INTENT ANNOTATION (accepted): findings carry local intent evidence (e.g. DeletionScheduledAt marker present -> "recorded delete never executed; boot rescan replays it") so the admin queue holds only genuine unknowns.
-6. NMI ABSENCE CIRCUIT BREAKER: on NMI, PS-2 is detected by absence from the recurring report (it has no status field); the engine must refuse to treat absence as truth when the remote active set is implausibly small vs local (abort run + alert), mirroring CCBillReconcileWorker's guard.
-
-## Dunning forensics (advisory report section)
-
-Beyond discrepancies, the advisory run must answer: did manual dunning ever run, when did it stop, and did attempts fail? For every subscription that is past_due locally or cancelled/expired at the processor, line up two timelines:
-
-1. **Processor charge-attempt timeline** — NMI transaction search including DECLINED transactions per subscription (NMI's own monthly rebill attempts show up here even if our system did nothing); Stripe invoice payment attempts; CCBill rebill/expire transactions.
-2. **Local dunning state** — last_retry_at / retry_attempts / next_retry_at on the subscription row (imported from legacy by #343).
-
-DECISION (Paul 2026-06-11): forensics are GENERIC openrails functionality, never tenant-specific. THIRD evidence source added: openrails' own ClickHouse payment/subscription events — which, for migrated tenants, include the imported legacy rebill-attempt history (doujins #387 handlers normalize users_logs/vault_logs into these events). This covers deep history the provider APIs cannot return (NMI's query window won't serve years-old declines; the migrated events will). RULING SHARPENED (Paul, same day): "migrate legacy should move over all the data we need to answer this question, but the question should be figured out by openrails, not doujins." There is NO doujins-side report of any kind — doujins moves data, openrails answers questions. The in-flight doujins report agent's output will NOT be committed.
-
-Cross-referencing the two distinguishes 'dunning tried and failed' (local retry fields advancing, processor declines recorded) from 'dunning never ran' (processor shows months of declines, local retry fields frozen/null). Aggregate output: when the dunning worker last took any action, count of subscriptions with zero attempts vs attempted-but-exhausted, decline reasons histogram. This evidence is attached to the corresponding PS-2/PS-3 findings.
-
-**Tasks:**
-- DESIGN: refreshed 2026-06-10 (all providers, advisory+enforce, remote read-only, persisted findings + admin queue)
-- [x] internal/reconcile: ProcessorFetcher interface + normalized RemoteSnapshot with capability flags — phase 1 landed 2026-06-11 (reconcile.go: RemoteSnapshot/RemoteSubscription/RemoteTransaction/RemoteVaultEntry + Capabilities + FetchParams; amounts in amount_cents, raw payloads preserved per record)
-- [x] NMI fetcher: typed Query API calls (report_type=recurring, transaction search by date range, customer_vault) — reconcile/nmi.go over the existing query.php client (read-only by construction); XML shapes + status inference verified live against the Mobius sandbox (58 subs, 47 txns, 94 vault entries); NMI exposes no chargebacks (capability false) and no subscription_id on transactions (order_id kept in raw)
-- [x] CCBill fetcher: extend DataLink beyond ACTIVEMEMBERS (expired/cancellation/transaction/chargeback exports) — ccbill.FetchTransactionExport (REBILL/CANCELLATION/EXPIRE/REFUND/CHARGEBACK over MST-clock date ranges) + reconcile/ccbill.go normalization; NOT live-validated (no DataLink credentials available), per-type CSV columns follow the long-standing legacy integrations and raw rows are preserved verbatim
-- [x] Stripe fetcher: subscriptions, charges/invoices, refunds, disputes — reconcile/stripe.go, raw GETs through stripeapi.ReadOnlyClient with cursor pagination; vault from expanded default_payment_method; verified live against the cozy-art test account (13 subs, 19 charges, 12 vault entries)
-- [x] Solana fetcher: on-chain subscription accounts + payment signature scan (respect *AtSlot/ReadUntilConsistent read-lag rules) — reconcile/solana.go, minimal by design: caller-supplied local sub refs -> subscription PDA existence + DecodePlanAccount + signature listing (SignatureInfo gained BlockTime); bulk point-in-time reads use plain GetAccountData (read-lag gating only applies to post-tx reads)
-- [x] Identity + plan matching: processor_subscription_id first, email/username/merchant-defined fallback — phase 2 (diff.go correlator: psid -> NMI order_id breadcrumb `rebill-<subID>-<unix>`/bare-uuid -> vault/customer id -> email; ZERO or MULTIPLE candidates = admin_pending, never guess); provider_links plan mapping landed 2026-06-11 with --materialize (buildPlanIndex over prices.processors jsonb: plan_id/price_id keys under the provider's local processor names; exactly one matching billable price resolves, zero/multiple blocks)
-- [x] Diff engine producing PS-1..PS-9 findings; migrations for reconciliation_runs + reconciliation_findings (lifecycle: open -> auto_fixed | admin_pending -> resolved/dismissed) — phase 2: migration 008 (stable identity UNIQUE(tenant,provider,finding_type,subject_key), RLS like neighbors), upsert-by-identity (re-runs update; dismissed stays dismissed), auto_vanished on disappearance (txn-window types PS-4/5/6 only when the run's window re-covered the transaction); capability-gated checks; NMI absence circuit breaker (remote live < 10% of local live when local >= 10 -> abort provider run, decision 6); DeletionScheduledAt intent annotation keeps recorded-delete drift out of the admin queue (decision 5)
-- [x] Advisory mode: run + persisted, queryable report (counts by type/severity, per-user detail) — phase 2: zero local writes (proven by test), summary jsonb per provider, `billing reconcile check` + report rendering (table/json)
-- [x] Dunning forensics: per-subscription processor charge-attempt timeline (incl. declines) cross-referenced with local retry fields; aggregate report (when dunning last ran, never-attempted vs attempted-and-failed, decline reasons) — phase 2: forensics.go, persisted in the run summary + rendered in report output; ClickHouse third evidence source WIRED 2026-06-11: HistoryEventSource (reconcile/history.go) over analytics.DunningHistoryService (payment_events + subscription_events, tenant-scoped, correlated by local subscription uuid then processor_subscription_id), merged per-sub timeline entries tagged provider|local|history, history failures count as decline evidence for never_attempted classification, aggregates gain last provider/history attempt + "last dunning action per ANY source"; CH unconfigured/unreachable -> history_source note in the report, NEVER a run error (unit-tested incl. the degradation path; SQL + scan types live-validated read-only against dev ClickHouse)
-- [x] Enforce mode: local-only convergence appliers (subscription status/periods, entitlement grant/revoke, payment backfill) — phase 2: appliers.go, idempotent (rerun proven a write no-op), local writes only so it works under mode=readonly; PS-2 cancel(cancel_type=expired)+revoke, PS-3 adopt status/periods (never resurrects locally-cancelled subs), PS-4 backfill ON CONFLICT(tenant,processor,transaction_id)+current-period grant, PS-5 refund record/mark, PS-7 vault adopt, PS-9 grant/revoke SUBSCRIPTION-sourced only (admin grants + grace untouched; IsEntitlementExpirationDisabled -> logged skip); PS-1/PS-6/PS-8 never auto-applied
-- [x] Admin action queue: requires_admin findings with recommended remote action (e.g. cancel duplicate + refund); ack/dismiss endpoints — phase 2: findings with requires_admin=true + status=admin_pending, recommended_action text, POST /v1/admin/reconcile/findings/:id/{ack,dismiss} {notes}
-- [x] Bootstrap mode: materialize local records from a RemoteSnapshot into an empty instance (disaster recovery) — v1.1 shipped 2026-06-11 as an EXPLICIT OPT-IN: `billing reconcile fix --materialize` + `materialize:true` on the admin POST (enforce-only; advisory+materialize is rejected). PS-1 auto-creates ONLY when identity resolves to a single subject (vault id -> payment method, or unique email match; zero/multiple = admin_pending with the blocker documented in remote_evidence.materialize_blocked) AND the plan maps to exactly one billable price via provider_links; created sub adopts remote status/periods (past_due without a period end stays blocked: chk constraint), snapshots the product entitlements/credits specs (ReconcileMaterializeSubscription, idempotent via NOT EXISTS on processor_subscription_id), backfills the snapshot's latest successful charge, grants entitlements via the normal subscription-sourced path; finding resolves enforced with materialization evidence. Without the flag PS-1 behavior is byte-for-byte unchanged. Unit suite (6 cases) + integration test (resolvable + unresolvable PS-1 under RLS, no-flag run unchanged, idempotent re-run) green
-- [x] Admin API endpoints (POST /admin/v1/reconcile/runs, GET runs/{id}, findings list/ack) + thin CLI wrapper — phase 2: synchronous POST /v1/admin/reconcile/runs {mode, providers, since, until} -> run+summary+findings, GET runs / runs/:id / findings?status=&provider=&type=&admin_queue=, ack/dismiss; CLI `billing reconcile check|fix|report [--provider --since --until --tenant --format table|json]` over the same engine (cmd/billing/reconcile.go)
-- [ ] Optional: River-scheduled advisory run + alerting on new findings — REJECTED per decision 3 (manual-only; no recurring runs)
-- [x] Tests with mocked fetchers per provider — phase 2: table-driven unit suite across the whole taxonomy (fake fetchers/store/writer: identity stability, auto-resolve, breaker abort, intent annotation, capability gating, ambiguous identity, enforce idempotency, advisory-never-writes, dismissed-stays-dismissed) + integration suite (-tags=integration: seeded PG, advisory persists, enforce converges + admin queue holds PS-1/PS-8, rerun stable, ack lifecycle); also fixed internal/dbtest createExternalTestDatabase silently aliasing the admin/dev DB (pgx ConnString() returns the ORIGINAL dsn), which had bricked the external-DB integration path
-- [x] Stuck-intent finding type (PS-10, the #358 tie-in): every run flags non-terminal intents past hardcoded thresholds (pending/failed_retryable >24h; in_flight/unknown_needs_verify >2h), provider-independent (reads only the local ledger, ignores --provider filters); mode/kill-switch-parked intents are informational (the wait is by design), everything else admin-queued; subject_key=intent id, cross-provider auto-resolve on recovery; fix never touches intent rows; rendered in run summary + `reconcile report`; migration 012 extends the findings-type CHECK (2026-06-11)
-- [ ] Runbook doc for the doujins cutover reconcile
-
----
 
 # #108: admin-user-search
 
@@ -955,73 +1002,6 @@ NOTE: the admin-METRICS tests' 'Table test_analytics.daily_metrics does not exis
 
 ---
 
-# #334: Eliminate bun: migrate all SQL to sqlc on pgx/v5, unify query patterns, remove unsafe Sprintf SQL
-
-**Completed:** yes
-**Status:**  || BURST REGRESSION 2026-06-10 (Claude, from tensorhub #447 kill-tests): Phase 0 twin-pinning (WithTenantConn acquires bun + pgx conns per request, 2f6e6c3) collapses under a 64-concurrent admit burst: goroutine dump showed hold-bun-wait-pgx + 112 queued for bun, parked 3-4min (client aborts don't propagate through haproxy, ctx never cancels) -> permanent wedge; ~30/150 admits succeed (= pool size), rest time out, tensorhub fails closed. 5ea47b4 bounds both acquires at 4s so the server RECOVERS, but throughput under burst is still ~15-22/150 — two sequential pool acquisitions per request starve cross-pool. e2e is pinned to e2cd5cf (pre-Phase-0) until admits hold burst. Suggested fix: single acquisition (pgx-only once call sites convert), or acquire the pgx twin lazily on first sqlc call site instead of per-request. || BURST REGRESSION FIXED 2026-06-10 (Claude): root cause was Phase-0 serving bun through stdlib.OpenDBFromPool on the SAME pgxpool as the sqlc side — each request then held a bun conn while waiting for a pgx conn from the same 30-slot pool (hold-and-wait deadlock). Fix (two halves): (1) SEPARATE pools — bun now has its own database/sql pool via stdlib.OpenDB (pgxpool.ParseConfig so pool_* DSN params stay legal); requests queue on the first pool BEFORE holding anything, so cross-pool starvation is impossible by construction; transitional cost is a 2x30 combined ceiling, removed with the bun side in Phase 2. (2) LAZY pgx twin — WithTenantConn no longer acquires the pgx conn eagerly; a lazyTenantPgxConn in ctx satisfies gen.DBTX and acquires+pins on the request's FIRST sqlc call site (4s bounded), so unconverted request paths cost zero extra connections. Regression tests added (burst_integration_test.go): 64 concurrent mixed bun+pgx requests against a pool_max_conns=5 pgx pool drain in ~68ms (was: permanent wedge); 16 bun-only requests against a 2-conn pgx pool all pass (twin never acquired). Both RLS suites still green (lazy pin sets/resets the GUC identically). e2e can be unpinned from e2cd5cf for re-verification. || 2026-06-10: Phase 1 modules/credits CONVERTED (14 source files incl. the #335 windows.go merged mid-flight): ~70 new queries (credit_ledger/credit_account_settings/usage_events/invoices + credit_windows), per-module genmap, all tx blocks on TenantTx/RunInTx(pgx); WithTenantConn now no-ops on pgx-tx-scoped DBs; dbtest.OpenAppDB gives integration tests the dual-handle DB converted paths need. Suites: unit green; credits integration green except TestChargeOutstanding_Threshold/MonthEndSweep/TestRunAutoTopups_ChargesAndDeposits — verified PRE-EXISTING on base 529f067 (stash-test), the #335-noted denomination fallout, separate fix. db RLS+burst integration green. || 2026-06-10: Phase 1 entitlements/budgets/productaccess/abuse/admission CONVERTED (timeline queries + exported repo timeline helpers; admission_support.sql for budgets/blocklist/tier policies; productaccess withTx -> TenantTx). Integration: entitlements/budgets/abuse/productaccess green; admission TestAdmit_EndpointGating+TestAdmit_BudgetDeny fail PRE-EXISTING on base (stash-verified, same denomination fallout). || 2026-06-10: Phase 1 webhooks/subscriptions/checkout/payments CONVERTED: all 15 tx blocks (ccbill 9, lifecycle 6) -> TenantTx + NewWithPgxTx; nmi chargeback match, cleanup superseded-stamp, processor_customers, stripe_card -> gen queries. CROSS-CUTTING FIX: repo.IsNotFound(err) (matches pgx+sql ErrNoRows) swept across 26 files — sql.ErrNoRows checks against converted repos were silently broken since the repo-layer conversion. Also notification_queue.data NULL-vs-omitted insert bug fixed (COALESCE '{}'). webhooks/subscriptions/checkout/payments integration suites green. || 2026-06-10: river jobs (hold/credit expiry sweeps on RunInTx+SKIP LOCKED, dunning incl. manual-rebill claim tx, cleanup, catalog drift, subscription manage) + handlers (entitlements raw SQL, admin operations lists, admin refund tx, GetMyCredits) CONVERTED. Sprintf SQL in tenancy/delete.go KILLED: per-table generated count/purge queries (tenant_lifecycle.sql) + compile-time dispatch. LATENT BUG fixed: GetMyCredits joined nonexistent credit_balances.user_id (endpoint 500ed); now joins tenant_subject_id. river/http/tenancy/pkg-service integration suites green. || 2026-06-10: audit CONVERTED (39 queries, 25 checks; interface now *gen.Queries). LATENT BUG: AG-1/3/4 referenced nonexistent admin_grants columns (entitlement/granted_at/expires_at/revoked_at) — any audit run with the admin_grant category failed at runtime; AG-1/AG-4 adapted to real schema (expiry = created_at + duration_days), AG-3 removed (no revocation column). pkg/service catalog_drift + GetCredits + admin grant insert converted (GetCredits had the same nonexistent-user_id-join bug as GetMyCredits). Dynamic list endpoints task was already satisfied by the repo-layer narg/CASE-WHEN pattern — marked done. ALL production bun query sites are now converted; remaining bun usage: models tags, db dual-pin plumbing, dbtest helper, 32 test fixture files (Phase 2). || 2026-06-10 HANDOFF (session end): Phase 2 task 'test fixtures/dbtest off bun' is CODE-COMPLETE — all 32 bun-importing test files converted (4 parallel agents; fixtures now use gen.New(dbi.Pool()) or parameterized pool.Exec raw SQL; dbtest gained OpenAppDB/EnsureTenantSubjectIDPgx/SharedPGXPool). vet -tags=integration clean repo-wide. VERIFIED green post-conversion: internal/db+repo+crypto, webhooks, river, credits-unit. NOT yet re-verified post-conversion: credits integration (agent edits done, suite was still running), pkg/service + abuse/admission/budgets/checkout/entitlements/productaccess/subscriptions integration (converting agent was stopped after finishing edits, before running suites). Only test files still importing bun: internal/db/rls_integration_test.go + tenant_rls_integration_test.go (deliberate bun-side RLS tests, deleted with the bun plumbing). REMAINING Phase 2: (1) run the unverified integration suites (expect pre-existing failures only: admission TestAdmit_EndpointGating/TestAdmit_BudgetDeny + credits TestChargeOutstanding_Threshold/MonthEndSweep/TestRunAutoTopups_ChargesAndDeposits — all stash-verified pre-existing denomination fallout, see #335); (2) strip bun tags from internal/db/models (24 files), delete ModelRegistry/RegisterModels; (3) remove dual-pin + bun pool from internal/db (db.go newBunSideDB/NewWithSQLDB/NewWithBun/NewWithTx/Q/RunInTenantTx/BeginTenantTx/tenant_guc.go, repo/tenant_subject_bun.go, dbtest bun EnsureTenantSubjectID, the 2 bun-side RLS test files; rework burst_integration_test.go for single-pool world; Q(ctx) callers: grep '\.Q(ctx)' — should be none left in prod), delete db.QualifiedTable Sprintf helper, fix internal/app validateDatabase (needs *sql.DB for migratekit — derive via stdlib.OpenDB(pool config) or pass DSN) + internal/migrate/migrator.go (same pattern); (4) drop uptrace/bun+pgdriver+pgdialect+bundebug from go.mod, go mod tidy; (5) full verification: go build/vet ./..., unit + integration suites, task sqlc-check, update README/docs, mark issue #334 tasks complete. CONVENTIONS: sqlc regen = export SQLC_DATABASE_URL=$(bash scripts/sqlc-vet-db.sh 2>/dev/null | tail -1) && go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate && ...vet. repo.IsNotFound(err) for not-found checks (matches both drivers). Branch sqlc-migration, pushed to origin. || 2026-06-10: BUN REMOVED. Models de-tagged (registry deleted; Processor type moved to processor.go). internal/db is single-pool pgx-only: Q/GetDB/RunInTenantTx/BeginTenantTx/SetTenantGUC/NewWithBun/NewWithSQLDB/NewWithTx/QualifiedTable deleted; WithTenantConn pins ONE lazy GUC conn; RLS posture checks on the pool; bun-side RLS tests replaced by posture test (enforcement lives in pgx twin); burst test reworked for single-pool. *sql.DB override dropped from embedded/bootstrap/app options (PGXPool is the embedded path). Migrator + validateDatabase open short-lived database/sql handles over pgx stdlib. tests/ e2e suite (21 files) converted off bun. go.mod: uptrace/* fully gone — authkit tagged v0.17.0 (bun-free) and bumped, so not even an indirect edge remains. README documents the sqlc workflow. Verified: build+vet (unit+integration tags) clean; sqlc generate+vet green, no gen diff; ALL unit suites green; ALL integration suites green except pre-existing (5x denomination #335, controlplane TestBootstrap_SeedsPermissionCatalog — fails on base 529f067, admin_* e2e family #333). e2e suite final gate in flight. || 2026-06-10 DONE: bun fully removed (zero uptrace entries in go.mod/go.sum; authkit bumped to v0.17.0 to clear the last indirect edge). Final verification: build+vet clean (unit+integration tags); sqlc generate+vet green, no gen diff; ALL unit suites green; ALL package integration suites green except documented pre-existing (#335 denomination x5, controlplane bootstrap — fails on base, admission x2). e2e suite: 21 failures, ALL verified pre-existing (16 admin_* = #333; 5 tier/lifecycle verified failing identically on origin/master, filed as #340). e2e fixes landed during verification: price/product status defaults in raw seed inserts (bun omitted zero-value columns), deterministic River-readiness wait in suite boot (bun-era double-init masked an init race), TestMain pins time.Local=UTC (pgx returns timestamptz in local zone). ISSUE COMPLETE.
-
-Replace every bun query, model, and driver in openrails with sqlc-generated, type-safe code over pgx/v5, eliminating github.com/uptrace/bun entirely and unifying the repo's three coexisting query styles (bun builder, bun NewRaw, fmt.Sprintf-assembled SQL) into one: raw SQL files compiled by sqlc, vetted against a real database.
-
-## Metadata
-
-- Category: refactor
-- Status: planned
-- Prior art: authkit issue #64 (same migration, completed 2026-06; copy its conventions — sqlc v1.31.1 pinned via `go run`, generate+vet paired, queries/*.sql layout, type overrides, annotated raw-pgx escape hatches)
-
-## Why
-
-- Three query styles coexist: ~311 bun builder call sites (NewSelect/NewInsert/NewUpdate/NewDelete), ~50 bun NewRaw sites (mostly internal/audit), and fmt.Sprintf-interpolated SQL (internal/tenancy/delete.go builds `billing.%s` from a table-name list — identifier interpolation, the exact pattern sqlc exists to kill).
-- Two Postgres drivers coexist: bun's pgdriver (main DB pool) and pgx/v5 (River, platform audit, crypto DEK store, tenancy secrets, controlplane). sqlc on pgx/v5 lets us unify on one driver and eventually one pool.
-- bun models silently tolerate schema drift; sqlc generate+vet catches nonexistent columns/tables at CI time (caught a real latent bug in authkit).
-
-## Survey (2026-06-10)
-
-- 68 non-test .go files import bun; 31 internal test files + 4 pkg/service integration tests do too. NO non-test code under pkg/, cmd/, or go-client/ imports bun — the public API surface is clean, this is an internal-only migration.
-- 30 bun models in internal/db/models, ALL hardcoded to the `billing.` schema (DB_SCHEMA configurability is effectively River/bootstrap-only) → sqlc compiles against the billing schema directly.
-- 25 repo files in internal/db/repo; heavy module usage in credits, webhooks (ccbill.go alone has 11 RunInTx blocks), subscriptions, entitlements, budgets, productaccess; river jobs; audit checks.
-- 22 RunInTx/BeginTx transaction sites.
-- One cross-schema query: internal/db/repo/profile.go reads profiles.users (authkit schema, applied via migratekit WithSchema("profiles")).
-- Migrations already on migratekit v1.0.0 (bootstrap creates `billing` schema; migrations/postgres has the DDL sqlc needs). ClickHouse (3 migrations, usage events) is OUT OF SCOPE — sqlc doesn't support ClickHouse.
-
-## Architecture decisions
-
-1. **Layout** (standard sqlc, mirroring authkit): hand-written SQL in `internal/db/queries/*.sql` (one file per domain), generated code in `internal/db/gen` (package `gen` — `internal/db` itself stays the hand-written pool/RLS wrapper). sqlc.yaml at repo root; schema input = migrations/bootstrap + migrations/postgres + a small `profiles`-schema shim DDL (declares just the profiles.users columns we query; authkit's migrations are unqualified and can't be compiled into a foreign schema directly).
-2. **Engine**: postgresql, sql_package pgx/v5. Type overrides: uuid → github.com/google/uuid.UUID (models already use it everywhere; include nullable form), timestamptz/timestamp → time.Time, jsonb → []byte. emit_pointers_for_null_types. Expect the same nullability-inference fights as authkit (outer ::casts force non-null; CASE WHEN ... NULL forces nullable; sqlc.arg/sqlc.narg for param naming).
-3. **Tooling**: sqlc v1.31.1 pinned via `go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1` in Taskfile (no go.mod tool dependency). `task sqlc` = generate + vet (db-prepare rule against a real DB, SQLC_DATABASE_URL); `task sqlc-check` adds `git diff --exit-code -- internal/db/gen`. New CI job in ci.yaml: postgres:18 service, apply bootstrap + migrations + profiles shim, run task sqlc-check.
-4. **RLS is the crux and must not regress.** Today DB.Q(ctx) returns a pinned bun.Conn carrying the `app.tenant_id` GUC (fail-closed RLS, migration 050, issue #227). Target: WithTenantConn pins a *pgxpool.Conn with the GUC set (reset on release so pooled conns never leak a tenant), Q(ctx) returns a gen.DBTX (satisfied by *pgxpool.Pool, *pgxpool.Conn, pgx.Tx), and a tx helper replaces RunInTx while preserving the SET LOCAL GUC behavior in tenant_guc.go. The existing RLS integration tests (rls_integration_test.go, tenant_rls_integration_test.go, repo/rls_realtable_integration_test.go) are the acceptance gate.
-5. **Incremental conversion, dual-pin during transition.** bun and pgx pools coexist (they already do). During the transition WithTenantConn pins BOTH a bun.Conn and a pgx conn, each with the GUC set, so converted and unconverted call sites are both RLS-scoped within one request. Convert domain-by-domain with tests green after each; a single transaction never mixes drivers (convert whole tx blocks atomically). Drop the bun pin and pool last.
-6. **Models become plain domain structs.** sqlc generates its own row types; the existing models double as JSON API types in handlers, so repos map gen rows ↔ models at the boundary (handler/JSON contracts don't churn). At the end, strip bun struct tags + delete ModelRegistry/RegisterModels. Models that turn out to be pure DB artifacts can be deleted in favor of gen types.
-7. **Dynamic queries**: list endpoints driven by pkg/query options + filter structs (e.g. PaymentFilters: optional filters + runtime sort column/order) are sqlc's weak spot. Rule: sqlc.narg()-based static queries where the shape allows; truly runtime-assembled SQL (dynamic ORDER BY) keeps an ANNOTATED raw-pgx escape hatch (authkit AdminListUsers precedent — comment explains why it can't be sqlc). Escape hatches must use parameter binding for all values; identifiers only from compile-time allowlists.
-8. **bundebug replacement**: a pgx QueryTracer logging via logrus behind the same verbosity toggle.
-
-## Out of scope
-
-- ClickHouse queries/migrations (sqlc has no ClickHouse support).
-- River internals (riverpgxv5 already on pgx; untouched).
-- Any pkg/ or go-client/ API changes (none needed — bun never leaked into the public surface).
-- migrations content changes (DDL stays as-is; sqlc only reads it).
-
-**Tasks:**
-- [x] Phase 0 — sqlc.yaml at repo root: engine postgresql, sql_package pgx/v5, queries internal/db/queries, out internal/db/gen (package gen), schema = migrations/bootstrap + migrations/postgres + new profiles-schema shim DDL for the profiles.users cross-schema query; type overrides (uuid->google/uuid.UUID incl. nullable, timestamptz/timestamp->time.Time, jsonb->[]byte), emit_pointers_for_null_types; prove with 2-3 pilot queries that generate+vet pass
-- [x] Phase 0 — Taskfile: `task sqlc` (generate + vet via `go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1`, SQLC_DATABASE_URL defaulting to the local dev DB) and `task sqlc-check` (adds git diff --exit-code -- internal/db/gen)
-- [x] Phase 0 — CI: new sqlc job in .github/workflows/ci.yaml — postgres:18 service, apply bootstrap + openrails migrations + profiles shim, run task sqlc-check
-- [x] Phase 0 — driver unification groundwork in internal/db: open a pgx/v5 pool alongside bun.DB (dual handles during transition), port pool tuning (30/10/1h/15m), replace bundebug with a pgx QueryTracer on logrus behind the same toggle
-- [x] Phase 0 — RLS plumbing on pgx: WithTenantConn dual-pins bun.Conn + *pgxpool.Conn with app.tenant_id GUC (reset both on release); Q(ctx) gains a pgx-side accessor returning gen.DBTX; tx helper replacing RunInTx that preserves the SET LOCAL GUC behavior of tenant_guc.go; all existing RLS integration tests green on the pgx path (fail-closed verified)
-- [x] Phase 1 — convert internal/db/repo core: tenant_subject, payment, payment_method, subscription, checkout_session, price, product, profile (+ their integration tests); build + tests green
-- [x] Phase 1 — convert internal/db/repo rest: entitlement, entitlement_feature, entitlement_grace, entitlement_timeline, credit_type, admin_grant, notification_queue, linked_wallet, solana_subscription, usdc_funding_session, product_access_grant; build + tests green
-- [ ] Phase 1 — convert internal/modules/credits (money_in, authorize, unified_spend, arrears, credits_service + tests); whole tx blocks move atomically to the pgx tx helper
-- [ ] Phase 1 — convert internal/modules/webhooks (ccbill.go's 11 RunInTx blocks, nmi, stripe), subscriptions/lifecycle_service, checkout/purchase_service (+ tests)
-- [ ] Phase 1 — convert internal/modules entitlements, budgets, productaccess, abuse, admission (+ tests)
-- [ ] Phase 1 — convert internal/river jobs (dunning, credit_expiry, hold_expiry, catalog_reconciliation), internal/http/handlers (admin_payments tx, entitlements raw SQL), internal/app/build_runtime, services/health/postgres_checker, crypto/dek_store_db, internal/tenancy (+ tests)
-- [ ] Phase 1 — convert internal/audit: all ~40 NewRaw consistency checks become sqlc queries (they are static SQL; vet now guards them against schema drift)
-- [ ] Phase 1 — kill unsafe SQL: tenancy/delete.go fmt.Sprintf(`billing.%s`) count/delete loops -> static generated per-table queries (the table list is compile-time); then re-grep the whole repo for Sprintf/concat-into-SQL and fix any stragglers
-- [ ] Phase 1 — dynamic list endpoints (pkg/query + filter structs, e.g. PaymentFilters): sqlc.narg() static queries where feasible; remaining runtime-assembled SQL gets annotated raw-pgx escape hatches (values always bound, identifiers from compile-time allowlists); document the escape-hatch rule
-- [ ] Phase 2 — convert remaining test fixtures/helpers off bun (31 internal + 4 pkg/service test files) and switch internal/dbtest harness to hand out the pgx pool
-- [ ] Phase 2 — strip bun tags from internal/db/models (keep plain structs where they serve JSON contracts; delete pure-DB ones in favor of gen types); delete ModelRegistry/RegisterModels; repos map gen rows <-> models at the boundary
-- [ ] Phase 2 — remove dual-pin and the bun pool from internal/db (Q returns pgx DBTX only); drop uptrace/bun, pgdialect, pgdriver, bundebug from go.mod; go mod tidy; `grep -r uptrace/bun` returns nothing
-- [ ] Phase 2 — full verification: go build ./... + go vet ./... clean, unit + integration (-tags=integration) suites green, task sqlc-check green in CI; update README/docs that mention bun
-
----
 
 # #336: Multi-tenant writers don't stamp tenant_id: checkout_sessions / subscriptions / payments / entitlements rows land under the DEFAULT tenant on delegated self-checkout
 
@@ -1123,12 +1103,25 @@ The base resolvers (#1) and boot seed (#2) need a tenant when there's no per-req
 - **Base HTTP resolver:** when it cannot resolve a tenant, do NOT default — leave it UNRESOLVED so downstream `tenant.Require` errors (a request with no tenant is a 4xx). Embedded/single-tenant hosts that want a per-instance tenant supply it via a CONFIGURED tenant (the embedded host already knows its slug, e.g. doujins='doujins') threaded into the resolver — this is `embed.Options.Tenant` / a standalone `config` tenant. NOT a default.
 - **Boot seed / CLIs:** take the configured/explicit tenant; error if absent.
 
-### Remaining tasks (branch)
-- [ ] Decide + implement the configured-tenant mechanism (embed.Options.Tenant + standalone config) and fix the 3 production build blockers (http_base, ginmw/tenant, solana/recurring/wiring) + cmd/billing bootstrap/reconcile.
-- [ ] Worker fix: expose tenant_id on `ListDueDunningSubscriptions` (models.Subscription has no TenantID) + RunInTenantConn(sub.TenantID) in the dunning loop (sqlc regen).
-- [ ] ~43 test files: convert to dbtest.TestTenantID / WithTestTenant; set the GUC where they insert directly.
-- [ ] RLS integration test (delegated self-checkout under a non-default tenant asserts every written row's tenant_id) + full suite green.
-- [ ] Land migration 014's no-fallback form (replaces the interim committed version) as part of the green change.
+### CONFIRMED DESIGN (owner, 2026-06-13): tenant-bound at construction, no default, identical embedded/remote
+The OpenRails engine/client is bound to a SINGLE tenant at construction (e.g. doujins/hentai0 construct theirs with tenant='doujins'). Same interface for embedded and remote — remote↔embedded is "mostly a config change". Multiple tenants = multiple clients (one per tenant). No default tenant in either mode; a missing tenant must hard-fail (insert with no tenant fails 100% — that exposes the error, by design). So the construction-time tenant is the resolver's source; per-request multi-tenant resolution (#222) would layer on top later.
+
+PUBLIC API = SLUG ONLY (owner, 2026-06-13): the tenant is always a tenant-SLUG (string) in the library API, config, and HTTP request/response. The tenant UUID is an INTERNAL detail — resolve slug→uuid once at the boundary (gen.GetTenantBySlug) and uuid→slug on the way out. Never expose a tenant uuid publicly. So `config.Config.Tenant` and `embed.Options.Tenant` are SLUGS; internal middleware/seed take the resolved tenant.ID.
+
+### DONE on branch (commit 65edd8c7) — resolver/seed mechanism
+- `ginmw.ResolveTenant(configured)` + `middleware.ResolveTenantHTTP(configured)`: pin the configured construction tenant; if zero, pin NOTHING → downstream `tenant.Require` errors (no silent default).
+- `recurring.SeedConfiguredTenantSolanaSecret(tenantID)`: seeds the global-config Solana key under the configured tenant; no-op if zero.
+(Branch does NOT compile yet — callers still use old signatures; this is the next step.)
+
+### Remaining (branch wip/336-remove-default-tenant), in order
+- [ ] Add the construction tenant source: `embedded.Options.Tenant tenant.ID` (+ `embed.Options.Tenant`) for embedded; a `config` tenant slug for standalone, resolved slug→id at bootstrap via `GetTenantBySlug` (profiles.sql) / tenancy lifecycle resolver; resolve once and FAIL boot if the configured slug doesn't exist.
+- [ ] Wire the resolved id into the 4 callers: server.go:458 `ResolveTenant(id)`, embedhttp.go:136 + gin/self.go:80 `ResolveTenantHTTP(id)`, server.go:274 `SeedConfiguredTenantSolanaSecret(id, …)`. Plus cmd/billing bootstrap/reconcile already require an explicit tenant.
+- [ ] Remote client: bind its tenant at construction too (parity with embedded), so doujins/hentai0 set tenant='doujins' once.
+- [ ] `go build ./...` green on the branch.
+- [ ] Worker fix: expose tenant_id on `ListDueDunningSubscriptions` (models.Subscription has no TenantID → add to query/model, sqlc regen) + RunInTenantConn(sub.TenantID) in the dunning loop.
+- [ ] Test harness (tests/testcontainer_suite.go): set `suite.Config` construction tenant = dbtest.TestTenantID (already seeded via dbtest.EnsureTestTenant) so the standalone server the suite builds pins it — this makes MOST of the ~43 test files pass without per-test changes (they relied on the default; now they ride the construction tenant). Only tests asserting a specific tenant or using >1 tenant need edits.
+- [ ] RLS integration test: a non-default tenant's self-checkout stamps tenant_id on checkout_sessions/subscriptions/payments/payment_methods/entitlements; assert under the openrails_app role.
+- [ ] Full suite green; then merge branch to master (migration 014's no-fallback form replaces the interim committed version).
 
 ---
 
@@ -1235,28 +1228,6 @@ Also boot the cutover with `FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIO
 - [x] Doujins follow-up: drop the freeLocalPortBelow32768 workaround once a release carries the fix — done in doujins a0a6ea02 (harness builds the openrails binary from the sibling checkout, which carries the fix; v0.16.0 tag includes it)
 
 ---
-# #352: config knob diet round 2: pyth.* hardcoded, solana rpc_endpoint removed
-
-**Completed:** yes
-**Status:** DONE 2026-06-11 (Paul: "max price age, max confidence bps, price feeds, etc. could all be hardcoded"; "if we have a helius api key we don't really need rpc_endpoint"). Removed: the ENTIRE `pyth.*` block (hermes_url/max_price_age/max_confidence_bps/price_feeds — now protocol constants via DefaultPyth*; validation previously FORCED operators to write a block that equaled the defaults) and `processors.solana.rpc_endpoint` (helius_api_key is the one RPC knob: key set -> Helius primary + public fallback chain; no key -> public chain). Token symbols now validate against the hardcoded feed map ("token X has no built-in pyth price feed"). The /solana runtime-config endpoint's RPCURL is now always empty — no knob to serve, and the server-side Helius key must never reach a browser; wallets bring their own RPC. Suite no longer needs a Pyth block to boot (verified: build/vet clean, unit suites green incl. handlers/solana/pyth, integration boot smoke green). Solana processor surface is now: helius_api_key, recipient_wallet, tokens (defaults per network), solana_pay_recurring_subscriptions, private_key.
-
-**Tasks:**
-- [x] Hardcode pyth.* as constants; drop PythConfig/applyPythDefaults/validation requirement
-- [x] Remove rpc_endpoint (config field, SolanaConfig, all client construction sites, RPCURL response)
-- [x] Sweep config.example.yaml + .env.example + test fixtures
-
----
-# #353: config knob diet round 3: captcha hardcoded to credentials-only; rate-limit merge contract pinned
-
-**Completed:** yes
-**Status:** DONE 2026-06-11 (Paul: "we can just hardcode all of the captcha configuration; rate-limit should be configurable with reasonable defaults that config can override"). ROUND 2 same day (Paul: "I don't think captcha has enabled/disabled; it should be used selectively as needed"): the `enabled` knob is gone too — credentials ARE the enablement signal (CaptchaConfig.IsEnabled() = both keys set; half a pair fails validation; the system was already selective: extreme-escalation-only, challenged buckets only). CaptchaConfig is now {provider, site_key, secret_key} — action ("billing_challenge"), provider verify/script URLs (recaptcha keeps ?render=<site_key>), 15m challenge TTL, 3x extreme multiplier, 0.5 min score, and the challenged buckets {checkout, payment-methods, subscriptions} are constants behind the existing Effective* helpers (call sites unchanged). The captcha verifier gained an in-package verifyURLOverride test seam (the config override used to double as the test hook). validateCaptcha shrank to provider/site_key/secret_key. rate_limits.* KEPT as-is by design: per-endpoint buckets (subscribe 10/min, checkout 5, webhook 100, payment 20, default 60) overridable per-key; the partial-override-keeps-other-defaults merge behavior is now pinned by TestRateLimitsPartialOverrideKeepsDefaults.
-
-**Tasks:**
-- [x] Trim CaptchaConfig to enabled/provider/site_key/secret_key; constants behind Effective*
-- [x] Verifier test seam; migrate captcha/ratelimit/http tests off removed fields
-- [x] Pin rate-limit partial-override merge with a test; sweep config.example.yaml
-
----
 
 # #354: batch-first service reads — ListActiveEntitlementsBatch + batch convention for list-shaped consumers
 
@@ -1302,45 +1273,6 @@ The driving case: admin dashboards listing N users fan out N HTTP calls today. d
 - [x] hentai0 52d9af11: same adaptation + bumps; build/vet/tests green
 - [x] cozy-art 220a6702 (branch rebuild): cozy-art is an EMBEDDED host — provider rewritten over Billing.Client().ListActiveEntitlements with openrails.SelfIssuer (no service JWTs needed); dead user_id SQL deleted; openrails v0.14.0 -> v0.17.1 (test_mode hard-cut mapped onto the mode dial), authkit v0.19.0 -> v0.21.0; build/vet/tests green. Deploy smoke check advised: one known-entitled user keeps premium
 - [x] tensorhub 77cf648: openrails -> v0.17.1, ZERO code changes (narrow local interfaces; entitlements not consumed); build/vet/tests green
-# #357: bootstrap apply: log provider-side catalog extras; --exhaustive archives them
-
-**Completed:** yes (2026-06-11)
-**Status:** done (2026-06-11). Implemented in pkg/service/catalog_extras.go (DetectCatalogExtras + ArchiveCatalogExtras; pure compute + injected listers, catalog_drift.go style) and wired into cmd/billing/bootstrap_apply.go: every `bootstrap apply` (incl. the startup re-apply) lists Stripe products/prices + NMI recurring plans not in the local catalog and logs them classified openrails-marked vs foreign (read-only, every mode). `--exhaustive` archives OWNED extras only: Stripe -> active=false; NMI -> manual_action_required (VERDICT after docs check: NMI has NO plan-archive primitive, plan deletion is irreversible and documented-unsafe while subscribers exist — "ensure no customers are using the plan before proceeding" — and plan edits propagate live to subscribers, so delete-as-archive rejected; log + manual); CCBill -> note only (no read API); Solana -> note only (the program HAS updatePlan status=sunset = exact archive semantics, but plans are PDAs with no enumeration API so account extras are unobservable; BuildUpdatePlan unwired). Foreign objects never touched. `--exhaustive` refuses up front under mode=limited/readonly. Live read-only smoke vs the cozy-art Stripe test account: 19 products / 34 prices listed, marker classification correct. #358 phase D can later route these archive writes through the intent ledger.
-
-**Tasks:**
-- [x] Extras detection + logging in the default apply path (all providers with read APIs)
-- [x] --exhaustive: archive semantics per provider (stripe active=false; NMI verified-archive; ccbill pending action; solana investigated)
-- [x] Ownership-marker guard; mode interplay (refuse/defer under limited/readonly with clear message)
-- [x] Tests + docs
----
-# #359: cadence-relative dunning: schedule derived from billing cycle; dunning_window_days knob deleted
-
-**Completed:** yes (2026-06-11)
-**Status:** done, including the 2026-06-11 progressive-monthly revision. API (internal/modules/subscriptions/dunning.go): DunningRetryOffsets(cycleDays) []offset + DunningMaxFailures + DunningNextRetryIn(cycleDays, failures) + DunningWindow(cycleDays) — replacing DunningInterval/MaxDunningFailures; feature_flags.dunning_window_days + DefaultDunningWindowDays + both GetDunningWindow accessors DELETED. Schedules: <4d -> none (first failure terminal, window 0); 4-27d -> +1d,+2d (3 failures total, window 3d); >=28d -> +2d,+5d,+9d,+13d (5 failures total, window 14d, capped; unknown cycle -> monthly + warn). Slack = 1 day past the last offset. Boundary justification vs the principle: the weekly tier's 3d window forces the 0-retry cutoff up to <4d (a 2-3d sub retried daily would still be dunning when the next period is due), and the monthly tier's 14d window forces its start up to 28d (covers 4-weekly billing; span 13d ~ 46% of cycle) — the sketched 2d/10d boundaries would have the window outlast the cycle. FailMembership schedules each retry at the schedule's gap relative to now (late worker never schedules into the past); solana crank next_pull aligns via the same gaps; CCBill's 72h grace cap kept as a local webhooks const (processor-driven dunning, outside this spec). Verified: unit tier-table + gap + window<cycle sweep; integration TestDunningWorker* fully green incl. new 7d derived-window, 1d immediate-terminal (worker + FailMembership-first-failure) and weekly 3-failure FailMembership cases; NMI state-machine/deferred-delete/time-dependent regressions green.
-
-## The policy (Paul's anchors, verbatim)
-
-- 1-MONTH cadence (the common case) — REVISED by Paul 2026-06-11 to a 14-day PROGRESSIVE schedule: 5 total attempts = the initial failure + 4 retries at +2d, +5d, +9d, +13d (June 1 fail -> June 3, 6, 10, 14), then terminal. Progressive spacing (2,3,4,4-day gaps) front-loads retries where transient declines clear; span matches Stripe's recommended 2-week window. NOTE: the schedule function therefore returns a list of retry OFFSETS, not (count, fixed-interval); the derived staleness window = initial failure + last offset + slack (~14d).
-- 1-WEEK cadence: 2 retries, one day apart, then downgrade + delete.
-- 1-YEAR cadence: same as monthly — 5 retries / 3 days is "as generous as we want to get" (cap).
-- 1-DAY cadence: NO dunning — first failure is terminal.
-
-## Design
-
-`dunningSchedule(billingCycleDays) -> (maxRetries int, interval time.Duration)` in internal/modules/subscriptions (replacing the package-level DunningInterval/MaxDunningFailures constants). Guiding principle for boundaries between the anchors: the total retry span must stay WELL within one billing cycle (a week sub must not still be dunning when the next week is due). Suggested tiers (implementer documents the final boundaries against the principle): cycle < 2d -> 0 retries; 2d..~9d -> 2 retries @ 1d; >= ~10d -> 5 retries @ 3d (capped — never more generous than monthly).
-
-Consequences:
-- `feature_flags.dunning_window_days` + DefaultDunningWindowDays DELETED (knob diet). The staleness window (#344, "never charge a months-old failure") is now DERIVED: window = period_end + (maxRetries x interval) + small slack; older -> terminal cancel without charge, exactly as today but cadence-aware. A 1-day sub's window is zero (any missed rebill is immediately terminal).
-- FailMembership's retry scheduling consults the subscription's price cycle (price loadable via PriceID inside the existing tx) for next_retry_at and the max-retries terminal check.
-- DunningWorker's window check derives from the same function.
-- dunning_mode (on/dry_run_only/off) is UNCHANGED — it dials whether dunning runs, not its shape.
-- README + config.example.yaml: dunning_window_days rows removed; document the cadence table.
-
-**Tasks:**
-- [x] dunningSchedule(cycleDays) + delete the constants and the dunning_window_days knob (config, accessors, validation, docs, env example)
-- [x] FailMembership + DunningWorker consume the schedule (retry scheduling, terminal check, derived staleness window)
-- [x] Tests: tier table (1d/7d/30d/365d + boundary cases), window derivation, integration regression (existing window tests adapted to derived windows)
----
 
 # #360: solana-token-pricing-degrade-not-die
 

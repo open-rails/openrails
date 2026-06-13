@@ -218,7 +218,8 @@ func TestReserveRelease_RestoresFullBalance(t *testing.T) {
 	hold, err := svc.Hold(ctx, nil, userID, money.DefaultCurrency, 300, "api", "req-rr-1", time.Now().Add(time.Hour).UTC())
 	require.NoError(t, err)
 
-	require.NoError(t, svc.ReleaseHold(ctx, hold.ID))
+	_, relErr := svc.ReleaseHold(ctx, hold.ID)
+	require.NoError(t, relErr)
 
 	bal, err := svc.GetBalance(ctx, userID)
 	require.NoError(t, err)

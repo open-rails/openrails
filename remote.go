@@ -374,6 +374,40 @@ func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in T
 	return c.do(ctx, http.MethodPut, "/v1/service/tier-policies", body, nil)
 }
 
+// SetSubjectBudgetPolicy implements Client (handler ServiceSetSubjectBudgetPolicy, #473).
+func (c *remote) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in SubjectBudgetPolicyInput) error {
+	body := map[string]any{
+		"tenant_subject_id": strings.TrimSpace(tenantSubjectID),
+		"scope":             in.Scope,
+		"role_id":           in.RoleID,
+		"windows":           in.Windows,
+	}
+	return c.do(ctx, http.MethodPut, "/v1/service/budget-policies/subject", body, nil)
+}
+
+// SetPlatformBudgetPolicy implements Client (handler ServiceSetPlatformBudgetPolicy, #473).
+func (c *remote) SetPlatformBudgetPolicy(ctx context.Context, tenantSubjectID string, in PlatformBudgetPolicyInput) error {
+	body := map[string]any{
+		"tenant_subject_id": strings.TrimSpace(tenantSubjectID),
+		"scope":             in.Scope,
+		"windows":           in.Windows,
+	}
+	return c.do(ctx, http.MethodPut, "/v1/service/budget-policies/platform", body, nil)
+}
+
+// SubjectBudgetPolicies implements Client (handler ServiceGetSubjectBudgetPolicies, #473).
+func (c *remote) SubjectBudgetPolicies(ctx context.Context, tenantSubjectID string) ([]SubjectBudgetPolicy, error) {
+	q := url.Values{}
+	q.Set("tenant_subject_id", strings.TrimSpace(tenantSubjectID))
+	var resp struct {
+		Policies []SubjectBudgetPolicy `json:"policies"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/service/budget-policies/subject?"+q.Encode(), nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Policies, nil
+}
+
 // OpenWindow implements Client (handler ServiceOpenCreditWindow, #335).
 func (c *remote) OpenWindow(ctx context.Context, req OpenWindowRequest) (*CreditWindow, error) {
 	if req.CreditType == "" {

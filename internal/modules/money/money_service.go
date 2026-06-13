@@ -654,11 +654,15 @@ func (s *MoneyService) CaptureHold(ctx context.Context, holdID uuid.UUID, actual
 	return hold, nil
 }
 
-func (s *MoneyService) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
+// ReleaseHold frees an active hold and returns the released transaction (the
+// caller uses its (payer, source, source_id) coords to settle any composed
+// budget reservations — #473).
+func (s *MoneyService) ReleaseHold(ctx context.Context, holdID uuid.UUID) (*models.MoneyTransaction, error) {
 	if s == nil || s.db == nil {
-		return fmt.Errorf("money service not initialized")
+		return nil, fmt.Errorf("money service not initialized")
 	}
-	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	var released *models.MoneyTransaction
+	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		row, gerr := q.GetMoneyTransactionForUpdate(ctx, holdID)
 		if gerr != nil {
@@ -693,8 +697,22 @@ func (s *MoneyService) ReleaseHold(ctx context.Context, holdID uuid.UUID) error 
 		}); err != nil {
 			return err
 		}
-		return q.ReleaseMoneyHold(ctx, gen.ReleaseMoneyHoldParams{ID: row.ID, UpdatedAt: now})
+		if err := q.ReleaseMoneyHold(ctx, gen.ReleaseMoneyHoldParams{ID: row.ID, UpdatedAt: now}); err != nil {
+			return err
+		}
+		h, merr := moneyTransactionFromGen(row)
+		if merr != nil {
+			return merr
+		}
+		h.Status = "released"
+		h.UpdatedAt = now
+		released = h
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return released, nil
 }
 
 func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, actorID, currency string, amount int64) (int64, error) {

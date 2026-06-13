@@ -163,6 +163,39 @@ type obsWindow struct {
 	Remaining int64
 }
 
+type obsBudgetPolicyWindow struct {
+	Key           string
+	WindowSeconds int64
+	LimitMicros   int64
+	Cadence       string
+}
+
+type obsBudgetPolicy struct {
+	Scope   string
+	RoleID  string
+	Windows []obsBudgetPolicyWindow
+}
+
+func observeBudgetPolicies(ps []openrails.SubjectBudgetPolicy) []obsBudgetPolicy {
+	out := make([]obsBudgetPolicy, 0, len(ps))
+	for _, p := range ps {
+		o := obsBudgetPolicy{Scope: p.Scope, RoleID: p.RoleID}
+		for _, w := range p.Windows {
+			o.Windows = append(o.Windows, obsBudgetPolicyWindow{
+				Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence,
+			})
+		}
+		out = append(out, o)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Scope != out[j].Scope {
+			return out[i].Scope < out[j].Scope
+		}
+		return out[i].RoleID < out[j].RoleID
+	})
+	return out
+}
+
 type obsAdmit struct {
 	Allowed              bool
 	BlockedBy            string
@@ -218,6 +251,9 @@ type scriptResult struct {
 
 	BudgetCheck  []obsBudget
 	BudgetStatus []obsBudget
+
+	// Hierarchical budget-scope policies on the unified client (#473).
+	SubjectBudgetPolicies []obsBudgetPolicy
 
 	SettingsAccount obsAccount
 
@@ -738,6 +774,41 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	}
 	_, err = c.ListActiveEntitlements(ctx, env.issuer, overCap, time.Time{})
 	r.ErrEntitlementsOverCap = observeErr(t, env.side+" entitlements over cap", err)
+
+	// 21) Hierarchical budget-scope policies on the unified client (#473): write a
+	// subject self cap + a (subject, role) pool + a platform cap through all three
+	// new methods, then read back ONLY the subject-owned ones (the platform cap
+	// stays invisible to the subject surface). Runs LAST so the stored caps never
+	// gate the admit steps above. role uuid is per-side -> normalized to compare.
+	roleID := uuid.New().String()
+	require.NoError(t, c.SetSubjectBudgetPolicy(ctx, payerID, openrails.SubjectBudgetPolicyInput{
+		Scope: "subject",
+		Windows: []openrails.BudgetScopeWindow{
+			{Key: "subj-daily", WindowSeconds: 86400, LimitMicros: 50_000, Cadence: "fixed"},
+		},
+	}), "%s set-subject-budget-policy (self)", env.side)
+	require.NoError(t, c.SetSubjectBudgetPolicy(ctx, payerID, openrails.SubjectBudgetPolicyInput{
+		Scope:  "role",
+		RoleID: roleID,
+		Windows: []openrails.BudgetScopeWindow{
+			{Key: "role-hourly", WindowSeconds: 3600, LimitMicros: 20_000, Cadence: "session"},
+		},
+	}), "%s set-subject-budget-policy (role)", env.side)
+	require.NoError(t, c.SetPlatformBudgetPolicy(ctx, payerID, openrails.PlatformBudgetPolicyInput{
+		Scope: "subject",
+		Windows: []openrails.BudgetScopeWindow{
+			{Key: "plat-monthly", WindowSeconds: 2592000, LimitMicros: 1_000_000, Cadence: "fixed"},
+		},
+	}), "%s set-platform-budget-policy", env.side)
+	pols, err := c.SubjectBudgetPolicies(ctx, payerID)
+	require.NoError(t, err, "%s subject-budget-policies", env.side)
+	for i := range pols {
+		if pols[i].Scope == "role" {
+			pols[i].RoleID = "ROLE" // role uuid is per-side; normalize
+		}
+	}
+	r.SubjectBudgetPolicies = observeBudgetPolicies(pols)
+	require.Len(t, r.SubjectBudgetPolicies, 2, "%s subject-budget-policies: platform cap must stay invisible", env.side)
 
 	return r
 }
