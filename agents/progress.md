@@ -1002,8 +1002,32 @@ OPEN DESIGN QUESTION for the owner: genuinely platform-global tables (`platform_
 WORKER-FIX FINDING (2026-06-13): the dunning worker loop holds `models.Subscription`, which has NO TenantID field (the gen type used deeper, `genSub`, does). So pinning the worker's tenant requires exposing tenant_id on `ListDueDunningSubscriptions` (query + model) or resolving it via tenant_subject_id — i.e., a small query/model change + sqlc regen, not a one-liner. Folded into the refactor above.
 
 ## Status of work (2026-06-13)
-- DONE + committed: migration 014 (GUC-derived default WITH interim `…0001` fallback) — fixes the HTTP self-checkout repro (the conn is already GUC-pinned by TenantDBConnMW). Validated set/unset/empty behavior.
-- NOT done (the scope-expansion refactor above): remove default tenant + strict-required (no fallback) + worker GUC + 114-site conversion + seed/RLS scrub + RLS integration test. This is the remaining bulk of #336 and is a dedicated focused effort (single coupled change, full-suite verified).
+- DONE + committed (master): migration 014 (GUC-derived default WITH interim `…0001` fallback) — fixed the HTTP self-checkout repro.
+- IN PROGRESS on branch `wip/336-remove-default-tenant` (NOT on master; does not yet compile): the full removal.
+
+### Refactor executed (branch) — ~110 mechanical call sites converted (5 parallel agents)
+`pkg/tenant`: removed `DefaultID`/`DefaultSlug`/`IsDefault`/`FromContextOrDefault`; added `Require(ctx) (ID, error)` + `ErrNoTenant`. Migration 014 rewritten: GUC-derived `tenant_id` default with NO fallback on all 40 tenant_id-owner tables (GUC unset → NULL → NOT NULL error; validated). Seed default-tenant row removed (002_seed). dbtest gained `TestTenantID`/`EnsureTestTenant`/`WithTestTenant` (no default tenant in tests).
+- credits: 44 sites; db+db/repo: 34; checkout/analytics/vault/abuse/admission/budgets: 20; http/pkg-service/reconcile: 9; controlplane/cmd/billingauth/tenancy/embed: DefaultID/Slug removed. All propagate the missing-tenant error in each function's existing style; zero `…0001` reintroduced.
+
+### THE DEFICIENCIES THE DEFAULT TENANT WAS HIDING (the point of removal)
+Removing the default tenant surfaced that the deployment-level tenant RESOLVERS silently defaulted — i.e. multi-tenant resolution was never actually required:
+1. **`internal/http/middleware/http_base.go` `ResolveTenantHTTP`** and **`ginmw/tenant.go` `resolveTenantID`** — the BASE request middleware pinned `tenant.DefaultID` whenever it couldn't resolve a tenant. So every request lacking downstream (delegated/token) resolution silently ran as the default tenant. (doujins is saved only because its delegated-auth middleware overrides with the real tenant downstream.)
+2. **`internal/modules/solana/recurring/wiring.go` `SeedDefaultTenantSolanaSecret`** — boot-time secret seed hardcoded the default tenant (no request ctx).
+3. **`cmd/billing/main.go` standalone startup bootstrap** — passed no tenant slug, relied on the default fallback (now errors).
+4. **`cmd/billing/reconcile.go`** — `--tenant` empty → default; now required.
+5. control-plane bootstrap/service-token + `--org` mints — empty value silently meant the default tenant; now required.
+
+### DESIGN DECISION NEEDED (gates completion) — the "configured tenant", i.e. the owner's earlier "pin the tenant at construction, like DB.Schema"
+The base resolvers (#1) and boot seed (#2) need a tenant when there's no per-request resolution. Two correct behaviors, owner to confirm the split:
+- **Base HTTP resolver:** when it cannot resolve a tenant, do NOT default — leave it UNRESOLVED so downstream `tenant.Require` errors (a request with no tenant is a 4xx). Embedded/single-tenant hosts that want a per-instance tenant supply it via a CONFIGURED tenant (the embedded host already knows its slug, e.g. doujins='doujins') threaded into the resolver — this is `embed.Options.Tenant` / a standalone `config` tenant. NOT a default.
+- **Boot seed / CLIs:** take the configured/explicit tenant; error if absent.
+
+### Remaining tasks (branch)
+- [ ] Decide + implement the configured-tenant mechanism (embed.Options.Tenant + standalone config) and fix the 3 production build blockers (http_base, ginmw/tenant, solana/recurring/wiring) + cmd/billing bootstrap/reconcile.
+- [ ] Worker fix: expose tenant_id on `ListDueDunningSubscriptions` (models.Subscription has no TenantID) + RunInTenantConn(sub.TenantID) in the dunning loop (sqlc regen).
+- [ ] ~43 test files: convert to dbtest.TestTenantID / WithTestTenant; set the GUC where they insert directly.
+- [ ] RLS integration test (delegated self-checkout under a non-default tenant asserts every written row's tenant_id) + full suite green.
+- [ ] Land migration 014's no-fallback form (replaces the interim committed version) as part of the green change.
 
 ---
 
