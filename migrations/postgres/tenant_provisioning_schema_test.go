@@ -12,9 +12,9 @@ func TestConsolidatedSchemaIncludesTenantProvisioningState(t *testing.T) {
 		"billing_tier text",
 		"webhook_host text",
 		"webhook_path text",
-		"CREATE TABLE billing.tenant_secrets",
-		"CREATE TABLE billing.tenant_credential_audit",
-		"CREATE TABLE billing.tenant_exports",
+		"CREATE TABLE openrails.tenant_secrets",
+		"CREATE TABLE openrails.tenant_credential_audit",
+		"CREATE TABLE openrails.tenant_exports",
 		"uq_tenants_webhook_host",
 	} {
 		if !strings.Contains(c, want) {
@@ -29,7 +29,7 @@ func TestConsolidatedSchemaOmitsProvisioningTransitionDDL(t *testing.T) {
 	for _, forbidden := range []string{
 		"ADD COLUMN IF NOT EXISTS billing_tier",
 		"ADD COLUMN IF NOT EXISTS webhook_host",
-		"DROP TABLE billing.tenants",
+		"DROP TABLE openrails.tenants",
 		"DROP COLUMN",
 		"ALTER COLUMN status",
 	} {

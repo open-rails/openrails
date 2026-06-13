@@ -120,7 +120,7 @@ func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) 
 
 	// Dedicated connection: pg_advisory_lock is session-scoped, so the lock
 	// must be taken and released on the same conn, held for the whole apply.
-	conn, err := cp.Pool().Acquire(ctx)
+	conn, err := cp.Pool().Raw().Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire bootstrap lock connection: %w", err)
 	}
@@ -321,7 +321,7 @@ func contextForBootstrapCatalog(ctx context.Context, a *app.App, catalogName str
 		return nil, fmt.Errorf("catalog %q declares a tenant name but the control plane is not attached", catalogName)
 	}
 	var id string
-	if err := cp.Pool().QueryRow(ctx, `SELECT id::text FROM billing.tenants WHERE lower(slug) = lower($1)`, slug).Scan(&id); err != nil {
+	if err := cp.Pool().QueryRow(ctx, `SELECT id::text FROM openrails.tenants WHERE lower(slug) = lower($1)`, slug).Scan(&id); err != nil {
 		return nil, fmt.Errorf("resolve catalog tenant %q: %w", slug, err)
 	}
 	tid, err := tenant.ParseID(id)

@@ -20,7 +20,7 @@ import (
 
 // --- Low-balance alerts (#240) ---
 
-const KindLowBalanceAlert = "billing.low_balance_alert"
+const KindLowBalanceAlert = "openrails.low_balance_alert"
 
 type LowBalanceAlertArgs struct{}
 
@@ -57,7 +57,7 @@ func (w LowBalanceAlertWorker) Work(ctx context.Context, _ *river.Job[LowBalance
 
 // --- Prepaid auto-top-up (#239) ---
 
-const KindAutoTopup = "billing.auto_topup"
+const KindAutoTopup = "openrails.auto_topup"
 
 type AutoTopupArgs struct{}
 
@@ -99,7 +99,7 @@ func (w AutoTopupWorker) Work(ctx context.Context, _ *river.Job[AutoTopupArgs]) 
 
 // --- Arrears collection (#241) ---
 
-const KindArrearsCharge = "billing.arrears_charge"
+const KindArrearsCharge = "openrails.arrears_charge"
 
 // Arrears collection cadence (#241/#301). The HOURLY job collects balances at or
 // above ArrearsHourlyThresholdMicros (collect big balances promptly); the MONTHLY
@@ -152,7 +152,7 @@ func (w ArrearsChargeWorker) Work(ctx context.Context, job *river.Job[ArrearsCha
 
 // --- Monthly itemized invoices (#303) ---
 
-const KindInvoiceFinalize = "billing.invoice_finalize"
+const KindInvoiceFinalize = "openrails.invoice_finalize"
 
 type InvoiceFinalizeArgs struct{}
 
@@ -193,7 +193,7 @@ func (w InvoiceFinalizeWorker) Work(ctx context.Context, _ *river.Job[InvoiceFin
 
 // --- Ledger reconciliation (#243) ---
 
-const KindCreditReconcile = "billing.credit_reconcile"
+const KindCreditReconcile = "openrails.credit_reconcile"
 
 type CreditReconcileArgs struct{}
 

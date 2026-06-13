@@ -56,7 +56,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	// openrails_app login + a tenant directory row for this test tenant.
 	for _, stmt := range []string{
 		`ALTER ROLE openrails_app WITH LOGIN PASSWORD 'app_pw'`,
-		`INSERT INTO billing.tenants (id, slug, name) VALUES
+		`INSERT INTO openrails.tenants (id, slug, name) VALUES
 		   ('` + tenantID + `','tenant-azh-` + tenantID[:8] + `','AZH')
 		 ON CONFLICT (id) DO NOTHING`,
 	} {
@@ -76,10 +76,10 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 			where string
 			arg   any
 		}{
-			{"billing.credit_transactions", "tenant_subject_id = $1", payerID},
-			{"billing.credit_balances", "tenant_subject_id = $1", payerID},
-			{"billing.credit_types", "id = $1", ctID},
-			{"billing.tenants", "id = $1", tenantID},
+			{"openrails.credit_transactions", "tenant_subject_id = $1", payerID},
+			{"openrails.credit_balances", "tenant_subject_id = $1", payerID},
+			{"openrails.credit_types", "id = $1", ctID},
+			{"openrails.tenants", "id = $1", tenantID},
 		} {
 			_, _ = super.Pool().Exec(ctx, "DELETE FROM "+q.tbl+" WHERE "+q.where, q.arg)
 		}
@@ -88,11 +88,11 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	// Seed credit type + a funded balance (1000 cents) as super (bypasses RLS),
 	// scoped to the test tenant.
 	_, err = super.Pool().Exec(ctx,
-		`INSERT INTO billing.credit_types (id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at)
+		`INSERT INTO openrails.credit_types (id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at)
 		 VALUES ($1,$2,$3,'AZH','cents',2,true,$4)`, ctID, tenantID, ctName, now)
 	require.NoError(t, err)
 	_, err = super.Pool().Exec(ctx,
-		`INSERT INTO billing.credit_balances
+		`INSERT INTO openrails.credit_balances
 		   (id, tenant_id, tenant_subject_id, actor, credit_type_id, balance, held_balance, created_at, updated_at)
 		 VALUES ($1,$2,$3,$4,$5,1000,0,$6,$7)`,
 		uuid.New(), tenantID, payerID, payerID.String(), ctID, now, now)

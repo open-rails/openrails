@@ -13,7 +13,7 @@ import (
 )
 
 const countNotificationsByTenantSubjectEventSince = `-- name: CountNotificationsByTenantSubjectEventSince :one
-SELECT count(*) FROM billing.notification_queue nq
+SELECT count(*) FROM openrails.notification_queue nq
 WHERE nq.tenant_subject_id = $1
   AND nq.event_type = $2
   AND nq.created_at >= $3
@@ -33,7 +33,7 @@ func (q *Queries) CountNotificationsByTenantSubjectEventSince(ctx context.Contex
 }
 
 const countNotificationsFiltered = `-- name: CountNotificationsFiltered :one
-SELECT count(*) FROM billing.notification_queue nq
+SELECT count(*) FROM openrails.notification_queue nq
 WHERE ($1::uuid IS NULL OR nq.tenant_subject_id = $1::uuid)
   AND ($2::text IS NULL OR nq.event_type = $2::text)
   AND ($3::boolean IS NULL OR nq.seen = $3::boolean)
@@ -53,7 +53,7 @@ func (q *Queries) CountNotificationsFiltered(ctx context.Context, arg CountNotif
 }
 
 const countRepairAlerts = `-- name: CountRepairAlerts :one
-SELECT count(*) FROM billing.notification_queue nq
+SELECT count(*) FROM openrails.notification_queue nq
 WHERE nq.tenant_subject_id = $1
   AND nq.event_type = $2
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
@@ -75,7 +75,7 @@ func (q *Queries) CountRepairAlerts(ctx context.Context, arg CountRepairAlertsPa
 
 const createNotification = `-- name: CreateNotification :execrows
 
-INSERT INTO billing.notification_queue (
+INSERT INTO openrails.notification_queue (
     id, tenant_subject_id, event_type, data, seen, created_at
 ) VALUES (
     $1, $2, $3, COALESCE($5, '{}'::jsonb), $4,
@@ -92,7 +92,7 @@ type CreateNotificationParams struct {
 	CreatedAt       time.Time
 }
 
-// billing.notification_queue.
+// openrails.notification_queue.
 func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotificationParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createNotification,
 		arg.ID,
@@ -109,7 +109,7 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 }
 
 const deleteNotification = `-- name: DeleteNotification :execrows
-DELETE FROM billing.notification_queue WHERE id = $1
+DELETE FROM openrails.notification_queue WHERE id = $1
 `
 
 func (q *Queries) DeleteNotification(ctx context.Context, id uuid.UUID) (int64, error) {
@@ -121,7 +121,7 @@ func (q *Queries) DeleteNotification(ctx context.Context, id uuid.UUID) (int64, 
 }
 
 const deleteNotificationsBefore = `-- name: DeleteNotificationsBefore :execrows
-DELETE FROM billing.notification_queue
+DELETE FROM openrails.notification_queue
 WHERE created_at < $1::timestamptz
 `
 
@@ -134,7 +134,7 @@ func (q *Queries) DeleteNotificationsBefore(ctx context.Context, cutoff time.Tim
 }
 
 const deleteSeenNotificationsBefore = `-- name: DeleteSeenNotificationsBefore :execrows
-DELETE FROM billing.notification_queue
+DELETE FROM openrails.notification_queue
 WHERE seen = true AND created_at < $1::timestamptz
 `
 
@@ -147,7 +147,7 @@ func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, cutoff time
 }
 
 const getNotificationByID = `-- name: GetNotificationByID :one
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM billing.notification_queue WHERE id = $1
+SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue WHERE id = $1
 `
 
 func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (BillingNotificationQueue, error) {
@@ -166,7 +166,7 @@ func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (Billin
 }
 
 const listNotificationsByEventType = `-- name: ListNotificationsByEventType :many
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM billing.notification_queue nq
+SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue nq
 WHERE nq.event_type = $1
 ORDER BY nq.created_at DESC
 `
@@ -200,7 +200,7 @@ func (q *Queries) ListNotificationsByEventType(ctx context.Context, eventType st
 }
 
 const listNotificationsByTenantSubject = `-- name: ListNotificationsByTenantSubject :many
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM billing.notification_queue nq
+SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue nq
 WHERE nq.tenant_subject_id = $1
 ORDER BY nq.created_at DESC
 `
@@ -234,7 +234,7 @@ func (q *Queries) ListNotificationsByTenantSubject(ctx context.Context, tenantSu
 }
 
 const listNotificationsFiltered = `-- name: ListNotificationsFiltered :many
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM billing.notification_queue nq
+SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue nq
 WHERE ($1::uuid IS NULL OR nq.tenant_subject_id = $1::uuid)
   AND ($2::text IS NULL OR nq.event_type = $2::text)
   AND ($3::boolean IS NULL OR nq.seen = $3::boolean)
@@ -285,7 +285,7 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 }
 
 const listPendingDigestForTenantSubject = `-- name: ListPendingDigestForTenantSubject :many
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM billing.notification_queue nq
+SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue nq
 WHERE nq.tenant_subject_id = $1
   AND nq.event_type = $2
   AND nq.created_at >= $3
@@ -334,7 +334,7 @@ func (q *Queries) ListPendingDigestForTenantSubject(ctx context.Context, arg Lis
 }
 
 const listRepairAlerts = `-- name: ListRepairAlerts :many
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM billing.notification_queue nq
+SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue nq
 WHERE nq.tenant_subject_id = $1
   AND nq.event_type = $2
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
@@ -386,7 +386,7 @@ func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsPara
 }
 
 const listTenantSubjectsWithPendingDigest = `-- name: ListTenantSubjectsWithPendingDigest :many
-SELECT DISTINCT nq.tenant_subject_id::text FROM billing.notification_queue nq
+SELECT DISTINCT nq.tenant_subject_id::text FROM openrails.notification_queue nq
 WHERE nq.event_type = $1
   AND nq.created_at >= $2
 `
@@ -417,7 +417,7 @@ func (q *Queries) ListTenantSubjectsWithPendingDigest(ctx context.Context, arg L
 }
 
 const listUnseenNotificationsByTenantSubject = `-- name: ListUnseenNotificationsByTenantSubject :many
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM billing.notification_queue nq
+SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue nq
 WHERE nq.tenant_subject_id = $1 AND nq.seen = false
 ORDER BY nq.created_at DESC
 `
@@ -451,7 +451,7 @@ func (q *Queries) ListUnseenNotificationsByTenantSubject(ctx context.Context, te
 }
 
 const markNotificationSeen = `-- name: MarkNotificationSeen :execrows
-UPDATE billing.notification_queue SET seen = true WHERE id = $1
+UPDATE openrails.notification_queue SET seen = true WHERE id = $1
 `
 
 func (q *Queries) MarkNotificationSeen(ctx context.Context, id uuid.UUID) (int64, error) {
@@ -463,7 +463,7 @@ func (q *Queries) MarkNotificationSeen(ctx context.Context, id uuid.UUID) (int64
 }
 
 const updateNotification = `-- name: UpdateNotification :execrows
-UPDATE billing.notification_queue SET
+UPDATE openrails.notification_queue SET
     tenant_subject_id = $2,
     event_type = $3,
     data = $5,

@@ -73,12 +73,12 @@ func (suite *TestContainerSuite) InsertNotification(ctx context.Context, n *mode
 	require.NoError(suite.t, dbrepo.NewNotificationQueueRepo(suite.App.Runtime.DB).Create(ctx, n), "Failed to insert notification")
 }
 
-// insertCreditBlock inserts a credit lot (billing.credit_blocks). The caller
+// insertCreditBlock inserts a credit lot (openrails.credit_blocks). The caller
 // must set TenantID and TenantSubjectID.
 func (suite *TestContainerSuite) insertCreditBlock(ctx context.Context, b *models.CreditBlock) {
 	suite.t.Helper()
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO billing.credit_blocks (
+		INSERT INTO openrails.credit_blocks (
 			id, tenant_id, tenant_subject_id, credit_type_id, original_amount,
 			remaining_amount, expires_at, source_transaction_id, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -128,13 +128,13 @@ func (suite *TestContainerSuite) GetAdminGrant(ctx context.Context, id uuid.UUID
 const entitlementCols = `id, tenant_id, tenant_subject_id, entitlement, start_at, end_at,
 	source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at`
 
-// QueryEntitlements runs a SELECT over billing.entitlements with the given
+// QueryEntitlements runs a SELECT over openrails.entitlements with the given
 // tail (WHERE/ORDER BY/LIMIT, $1 placeholders). NOTE: no implicit
 // soft-delete filter — add "deleted_at IS NULL" where bun's Model select
 // previously implied it.
 func (suite *TestContainerSuite) QueryEntitlements(ctx context.Context, tail string, args ...any) []models.Entitlement {
 	suite.t.Helper()
-	rows, err := suite.Pool.Query(ctx, "SELECT "+entitlementCols+" FROM billing.entitlements "+tail, args...)
+	rows, err := suite.Pool.Query(ctx, "SELECT "+entitlementCols+" FROM openrails.entitlements "+tail, args...)
 	require.NoError(suite.t, err, "Failed to query entitlements")
 	defer rows.Close()
 
@@ -176,7 +176,7 @@ func (suite *TestContainerSuite) GetSubscriptionByProcessorID(processorSubID str
 
 	var id uuid.UUID
 	err := suite.Pool.QueryRow(ctx,
-		"SELECT id FROM billing.subscriptions WHERE processor_subscription_id = $1 LIMIT 1",
+		"SELECT id FROM openrails.subscriptions WHERE processor_subscription_id = $1 LIMIT 1",
 		processorSubID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil

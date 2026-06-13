@@ -441,10 +441,10 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 			},
 		}
 	}
-	pdaActiveArchived := solanago.NewWallet().PublicKey().String()  // archived price, plan still active -> EXTRA
-	pdaSunsetArchived := solanago.NewWallet().PublicKey().String()  // archived price, plan already sunset -> converged
-	pdaAbsentArchived := solanago.NewWallet().PublicKey().String()  // archived price, plan gone -> nothing to do
-	pdaActiveLive := solanago.NewWallet().PublicKey().String()      // ACTIVE price -> in the live catalog, never an extra
+	pdaActiveArchived := solanago.NewWallet().PublicKey().String() // archived price, plan still active -> EXTRA
+	pdaSunsetArchived := solanago.NewWallet().PublicKey().String() // archived price, plan already sunset -> converged
+	pdaAbsentArchived := solanago.NewWallet().PublicKey().String() // archived price, plan gone -> nothing to do
+	pdaActiveLive := solanago.NewWallet().PublicKey().String()     // ACTIVE price -> in the live catalog, never an extra
 
 	snap := buildSnapshotFromRows([]*models.Product{product}, []*models.Price{
 		mkPrice(pdaActiveArchived, models.CatalogStatusArchived),

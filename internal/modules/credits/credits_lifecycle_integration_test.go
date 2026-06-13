@@ -94,14 +94,14 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 		"SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='billing' AND table_name='credit_transactions' AND column_name='authorized_amount')").
 		Scan(&hasLifecycle))
 	if !hasLifecycle {
-		t.Skip("billing.credit_transactions missing authorized_amount; run migrations before integration tests")
+		t.Skip("openrails.credit_transactions missing authorized_amount; run migrations before integration tests")
 	}
 	var hasBlocks bool
 	require.NoError(t, pool.QueryRow(ctx,
 		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_blocks')").
 		Scan(&hasBlocks))
 	if !hasBlocks {
-		t.Skip("billing.credit_blocks not found; run migrations before integration tests")
+		t.Skip("openrails.credit_blocks not found; run migrations before integration tests")
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -121,10 +121,10 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE credit_type_id = $1", creditTypeID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE credit_type_id = $1", creditTypeID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE credit_type_id = $1", creditTypeID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", creditTypeID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_blocks WHERE credit_type_id = $1", creditTypeID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_transactions WHERE credit_type_id = $1", creditTypeID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_balances WHERE credit_type_id = $1", creditTypeID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_types WHERE id = $1", creditTypeID)
 	})
 
 	creditsSvc := credits.NewCreditsService(dbi)
@@ -160,7 +160,7 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 
 	holdAfterRelease := new(models.CreditTransaction)
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT transaction_type, status FROM billing.credit_transactions WHERE id = $1", hold1.ID).
+		"SELECT transaction_type, status FROM openrails.credit_transactions WHERE id = $1", hold1.ID).
 		Scan(&holdAfterRelease.TransactionType, &holdAfterRelease.Status))
 	require.Equal(t, "hold", holdAfterRelease.TransactionType)
 	require.Equal(t, "released", holdAfterRelease.Status)
@@ -201,7 +201,7 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 
 	holdAfterExpire := new(models.CreditTransaction)
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT status FROM billing.credit_transactions WHERE id = $1", hold4.ID).
+		"SELECT status FROM openrails.credit_transactions WHERE id = $1", hold4.ID).
 		Scan(&holdAfterExpire.Status))
 	require.Equal(t, "expired", holdAfterExpire.Status)
 

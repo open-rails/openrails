@@ -13,7 +13,7 @@ import (
 )
 
 const bindSolanaCheckoutSession = `-- name: BindSolanaCheckoutSession :execrows
-UPDATE billing.checkout_sessions SET
+UPDATE openrails.checkout_sessions SET
     reference = $2,
     processor_state = $3,
     updated_at = $4
@@ -48,7 +48,7 @@ func (q *Queries) BindSolanaCheckoutSession(ctx context.Context, arg BindSolanaC
 
 const createCheckoutSession = `-- name: CreateCheckoutSession :execrows
 
-INSERT INTO billing.checkout_sessions (
+INSERT INTO openrails.checkout_sessions (
     id, tenant_subject_id, price_id, mode, processor, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
     subscription_id, metadata, processor_fields, processor_state,
@@ -87,7 +87,7 @@ type CreateCheckoutSessionParams struct {
 	UpdatedAt       time.Time
 }
 
-// billing.checkout_sessions.
+// openrails.checkout_sessions.
 func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutSessionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createCheckoutSession,
 		arg.ID,
@@ -117,7 +117,7 @@ func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutS
 }
 
 const expireCheckoutSessions = `-- name: ExpireCheckoutSessions :execrows
-UPDATE billing.checkout_sessions
+UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = $1
 WHERE expires_at IS NOT NULL AND expires_at < $1::timestamptz
   AND status IN ('created', 'requires_action')
@@ -132,7 +132,7 @@ func (q *Queries) ExpireCheckoutSessions(ctx context.Context, now time.Time) (in
 }
 
 const getCheckoutSessionByID = `-- name: GetCheckoutSessionByID :one
-SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.checkout_sessions WHERE id = $1
+SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.checkout_sessions WHERE id = $1
 `
 
 func (q *Queries) GetCheckoutSessionByID(ctx context.Context, id uuid.UUID) (BillingCheckoutSession, error) {
@@ -164,7 +164,7 @@ func (q *Queries) GetCheckoutSessionByID(ctx context.Context, id uuid.UUID) (Bil
 }
 
 const getCheckoutSessionByReference = `-- name: GetCheckoutSessionByReference :one
-SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.checkout_sessions cs
+SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.checkout_sessions cs
 WHERE cs.reference = $1
 LIMIT 1
 `
@@ -198,7 +198,7 @@ func (q *Queries) GetCheckoutSessionByReference(ctx context.Context, reference *
 }
 
 const getLatestOpenCheckoutSession = `-- name: GetLatestOpenCheckoutSession :one
-SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.checkout_sessions cs
+SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.checkout_sessions cs
 WHERE cs.tenant_subject_id = $1
   AND cs.price_id = $2
   AND cs.processor = $3
@@ -249,7 +249,7 @@ func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLates
 }
 
 const updateCheckoutSession = `-- name: UpdateCheckoutSession :execrows
-UPDATE billing.checkout_sessions SET
+UPDATE openrails.checkout_sessions SET
     tenant_subject_id = $2,
     price_id = $3,
     mode = $4,

@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	KindWebhookProcess = "billing.webhook_process"
+	KindWebhookProcess = "openrails.webhook_process"
 	// QueueWebhooks could be separated later; for now reuse billing queue.
 	QueueWebhooks = QueueBilling
 )

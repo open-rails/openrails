@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// SelfIssuer keys billing.tenant_subjects rows for self-service identities whose
+// SelfIssuer keys openrails.tenant_subjects rows for self-service identities whose
 // external subject IS a UUID (the same value the credits/self-service hot path
 // uses directly as the payable tenant_subject_id). For these the row id equals the
 // subject UUID, so commerce and credit rows reference one payable subject (#317).
@@ -32,7 +32,7 @@ func errNonUUIDSubject(userID string) error {
 	return fmt.Errorf("tenant subject %q is not a UUID: payable identities are UUID-only (#364)", userID)
 }
 
-// EnsureTenantSubjectID materializes (or refreshes) the billing.tenant_subjects
+// EnsureTenantSubjectID materializes (or refreshes) the openrails.tenant_subjects
 // row for a UUID subject and returns its id — which IS the subject UUID itself
 // (#317). A non-UUID userID is rejected with an error (#364). An empty userID
 // returns the zero id without touching the database (documented no-op for
@@ -80,7 +80,7 @@ func ResolveTenantSubjectID(userID string) (uuid.UUID, error) {
 	return uid, nil
 }
 
-// ensureTenantSubjectRow makes sure a billing.tenant_subjects row exists for an
+// ensureTenantSubjectRow makes sure a openrails.tenant_subjects row exists for an
 // already-resolved payable tenant subject id, which the commerce repo Create
 // methods call just before insert so the FK target exists (#317). For a
 // self-service subject the id IS the subject UUID, so the row is materialized as

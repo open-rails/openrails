@@ -48,10 +48,10 @@ func TestConsolidatedSchemaCreatesTenantsAndSeedDefaults(t *testing.T) {
 	schema := loadSchema001(t)
 	seed := loadSeed002(t)
 
-	if !strings.Contains(schema, "CREATE TABLE billing.tenants") {
-		t.Error("001 schema must create billing.tenants")
+	if !strings.Contains(schema, "CREATE TABLE openrails.tenants") {
+		t.Error("001 schema must create openrails.tenants")
 	}
-	if strings.Contains(schema, "INSERT INTO billing.tenants") {
+	if strings.Contains(schema, "INSERT INTO openrails.tenants") {
 		t.Error("001 schema must not contain seed rows")
 	}
 	for _, want := range []string{
@@ -72,11 +72,11 @@ func TestConsolidatedSchemaTenantIDColumns(t *testing.T) {
 		t.Error("consolidated schema must not contain tenant_id backfill logic")
 	}
 	for _, tbl := range tenantOwnedTables {
-		wantTable := "CREATE TABLE billing." + tbl
+		wantTable := "CREATE TABLE openrails." + tbl
 		if !strings.Contains(c, wantTable) {
 			t.Errorf("001 schema missing tenant-owned table %q", tbl)
 		}
-		if !strings.Contains(c, "CREATE POLICY tenant_isolation ON billing."+tbl) {
+		if !strings.Contains(c, "CREATE POLICY tenant_isolation ON openrails."+tbl) {
 			t.Errorf("001 schema missing tenant_isolation policy for %q", tbl)
 		}
 	}

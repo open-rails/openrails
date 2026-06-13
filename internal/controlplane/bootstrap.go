@@ -252,7 +252,7 @@ func anyLiveServiceToken(toks []authcore.ServiceToken) bool {
 }
 
 // recordAuthKitTenantOnDefaultTenant writes the default tenant's AuthKit org
-// id/slug onto the default tenant directory row (billing.tenants). billing.* is
+// id/slug onto the default tenant directory row (openrails.tenants). openrails.* is
 // OpenRails-owned control-plane state, so this is a direct, idempotent UPDATE —
 // not AuthKit SQL.
 func (c *ControlPlane) recordAuthKitTenantOnDefaultTenant(ctx context.Context, tenantID tenant.ID, authKitTenantID, authKitTenantSlug string) error {
@@ -260,7 +260,7 @@ func (c *ControlPlane) recordAuthKitTenantOnDefaultTenant(ctx context.Context, t
 		return errors.New("controlplane: pgx pool unavailable for tenant directory update")
 	}
 	_, err := c.pool.Exec(ctx, `
-		UPDATE billing.tenants
+		UPDATE openrails.tenants
 		   SET authkit_tenant_id   = $2,
 		       authkit_tenant_slug = $3,
 		       updated_at       = current_timestamp

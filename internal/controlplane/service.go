@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 )
 
 // ControlPlane is OpenRails' in-process AuthKit control plane (issue #224). It
@@ -27,7 +28,10 @@ import (
 type ControlPlane struct {
 	cfg     *config.Config
 	authSvc *authhttp.Service
-	pool    *pgxpool.Pool
+	// pool is the schema-aware wrapper used for OpenRails' own control-plane
+	// queries (openrails.* tables). AuthKit's own profiles.* queries go through
+	// authSvc, which holds the raw pool (#471).
+	pool *db.Pool
 
 	// delegatedVerifier validates browser-direct delegated access tokens for the
 	// self-service surface (issue #222 browser tier). It is built from the same
@@ -157,7 +161,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 	cp2 := &ControlPlane{
 		cfg:                cfg,
 		authSvc:            authSvc,
-		pool:               pool,
+		pool:               db.WrapPool(pool, cfg.DB.SchemaName()),
 		delegatedVerifier:  delegatedVerifier,
 		issuer:             issuer,
 		delegatedAudiences: append([]string(nil), expected...),
@@ -193,11 +197,13 @@ func (c *ControlPlane) AuthService() *authhttp.Service {
 	return c.authSvc
 }
 
-// Pool returns the control plane's pgx pool (the pool holding the billing.*
-// control-plane schema). Used by the tenancy lifecycle/secret-store service
-// (issue #225), which owns the same OpenRails-owned control-plane state. nil when
+// Pool returns the control plane's schema-aware pgx pool (the pool holding the
+// openrails.* control-plane schema). Used by the tenancy lifecycle/secret-store
+// service (issue #225), which owns the same OpenRails-owned control-plane state.
+// SQL run on it is schema-rewritten to the configured schema (#471); call
+// Pool().Raw() for the underlying pool when an API needs it verbatim. nil when
 // the control plane is disabled.
-func (c *ControlPlane) Pool() *pgxpool.Pool {
+func (c *ControlPlane) Pool() *db.Pool {
 	if c == nil {
 		return nil
 	}

@@ -158,7 +158,7 @@ type StripeCardSubscriptionLinker interface {
 	Update(ctx context.Context, subscription *models.Subscription) error
 }
 
-// UpsertStripeCardForCustomer upserts a billing.payment_methods row for the
+// UpsertStripeCardForCustomer upserts a openrails.payment_methods row for the
 // customer's card and links it as the active subscription's payment method, so
 // the /account "current card" reads purely from the DB.
 //

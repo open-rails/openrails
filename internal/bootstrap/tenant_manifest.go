@@ -182,14 +182,14 @@ func AnyTenantProvisioned(ctx context.Context, cp *controlplane.ControlPlane, sl
 		return false, nil
 	}
 	var exists bool
-	err := cp.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing.tenants WHERE slug = ANY($1) AND deleted_at IS NULL)`, norm).Scan(&exists)
+	err := cp.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM openrails.tenants WHERE slug = ANY($1) AND deleted_at IS NULL)`, norm).Scan(&exists)
 	return exists, err
 }
 
 func tenantIDForSlug(ctx context.Context, cp *controlplane.ControlPlane, slug string) (tenant.ID, error) {
 	var id string
 	err := cp.Pool().QueryRow(ctx, `
-		SELECT id::text FROM billing.tenants
+		SELECT id::text FROM openrails.tenants
 		 WHERE slug = $1 AND status = 'active' AND deleted_at IS NULL
 		 LIMIT 1
 	`, strings.ToLower(strings.TrimSpace(slug))).Scan(&id)

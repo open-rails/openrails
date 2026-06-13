@@ -99,10 +99,10 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -141,7 +141,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	var graceStartAt time.Time
 	var graceEndAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT start_at, end_at FROM billing.entitlements
+		`SELECT start_at, end_at FROM openrails.entitlements
 		 WHERE tenant_subject_id = $1 AND entitlement = $2
 		   AND source_type = $3
 		   AND source_id = $4
@@ -270,10 +270,10 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -310,7 +310,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 
 	var gotRevokedAt, gotDeletedAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT revoked_at, deleted_at FROM billing.entitlements WHERE id = $1",
+		"SELECT revoked_at, deleted_at FROM openrails.entitlements WHERE id = $1",
 		graceActiveID).Scan(&gotRevokedAt, &gotDeletedAt))
 	require.NotNil(t, gotRevokedAt)
 	require.Nil(t, gotDeletedAt)
@@ -319,7 +319,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	// soft-deleted rows without any opt-in.
 	var gotFutureDeletedAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT deleted_at FROM billing.entitlements WHERE id = $1",
+		"SELECT deleted_at FROM openrails.entitlements WHERE id = $1",
 		graceFutureID).Scan(&gotFutureDeletedAt))
 	require.NotNil(t, gotFutureDeletedAt)
 }

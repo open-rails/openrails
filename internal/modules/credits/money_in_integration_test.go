@@ -31,7 +31,7 @@ func moneyInEnv(t *testing.T) (*credits.CreditsService, *pgxpool.Pool, identity.
 		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_account_settings')").
 		Scan(&hasSettings))
 	if !hasSettings {
-		t.Skip("billing.credit_account_settings missing; run migration 043")
+		t.Skip("openrails.credit_account_settings missing; run migration 043")
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -46,12 +46,12 @@ func moneyInEnv(t *testing.T) (*credits.CreditsService, *pgxpool.Pool, identity.
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_spend_limits WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_account_settings WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_spend_limits WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_account_settings WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_blocks WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_transactions WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_balances WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_types WHERE id = $1", ctID)
 	})
 	return credits.NewCreditsService(dbi), pool, payer, ctName, ctx
 }
@@ -82,7 +82,7 @@ func latestBlock(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payerID 
 	t.Helper()
 	b := new(models.CreditBlock)
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT expires_at FROM billing.credit_blocks WHERE tenant_subject_id = $1 ORDER BY created_at DESC LIMIT 1",
+		"SELECT expires_at FROM openrails.credit_blocks WHERE tenant_subject_id = $1 ORDER BY created_at DESC LIMIT 1",
 		payerID).Scan(&b.ExpiresAt))
 	return b
 }

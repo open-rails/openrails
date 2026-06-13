@@ -131,7 +131,7 @@ type CaptureHoldRequest struct {
 	Amount int64
 
 	// Usage analytics (#311): when EventType is set, the capture ALSO appends a
-	// billing.usage_events row linked to the capture transaction (no second
+	// openrails.usage_events row linked to the capture transaction (no second
 	// debit), so the platform's /budget-usage + revenue analytics can be served
 	// from OpenRails. EventType is the metered event kind; Resource is the
 	// caller-supplied what-was-it-for string; Metadata carries long-tail string

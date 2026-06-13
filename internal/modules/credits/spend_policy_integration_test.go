@@ -32,7 +32,7 @@ func spendTestEnv(t *testing.T) (*credits.CreditsService, *pgxpool.Pool, identit
 		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_account_settings')").
 		Scan(&hasSettings))
 	if !hasSettings {
-		t.Skip("billing.credit_account_settings missing; run migration 043 before integration tests")
+		t.Skip("openrails.credit_account_settings missing; run migration 043 before integration tests")
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -49,12 +49,12 @@ func spendTestEnv(t *testing.T) (*credits.CreditsService, *pgxpool.Pool, identit
 	payerID := payer.UUID()
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_spend_limits WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_account_settings WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_spend_limits WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_account_settings WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_blocks WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_transactions WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_balances WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_types WHERE id = $1", ctID)
 	})
 
 	svc := credits.NewCreditsService(dbi)

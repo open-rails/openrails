@@ -13,7 +13,7 @@ import (
 func TestRecordUsage_DebitsAndAggregates(t *testing.T) {
 	svc, pool, payer, ct, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
@@ -54,7 +54,7 @@ func TestRecordUsage_DebitsAndAggregates(t *testing.T) {
 func TestRecordUsage_Idempotent(t *testing.T) {
 	svc, pool, payer, ct, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
@@ -81,7 +81,7 @@ func TestRecordUsage_Idempotent(t *testing.T) {
 func TestRecordUsage_ZeroCostNoDebit(t *testing.T) {
 	svc, pool, payer, ct, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{

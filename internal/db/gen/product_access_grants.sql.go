@@ -14,7 +14,7 @@ import (
 
 const createProductAccessGrant = `-- name: CreateProductAccessGrant :one
 
-INSERT INTO billing.product_access_grants (
+INSERT INTO openrails.product_access_grants (
     id, tenant_id, tenant_subject_id, product_id, source_type, source_id,
     payment_id, status, starts_at, ends_at, revoked_at, revoke_reason,
     created_at, updated_at
@@ -51,7 +51,7 @@ type CreateProductAccessGrantParams struct {
 	UpdatedAt       time.Time
 }
 
-// billing.product_access_grants (issue #250).
+// openrails.product_access_grants (issue #250).
 func (q *Queries) CreateProductAccessGrant(ctx context.Context, arg CreateProductAccessGrantParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, createProductAccessGrant,
 		arg.TenantSubjectID,
@@ -75,7 +75,7 @@ func (q *Queries) CreateProductAccessGrant(ctx context.Context, arg CreateProduc
 }
 
 const getProductAccessGrantByID = `-- name: GetProductAccessGrantByID :one
-SELECT id, tenant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, tenant_subject_id FROM billing.product_access_grants pag
+SELECT id, tenant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, tenant_subject_id FROM openrails.product_access_grants pag
 WHERE pag.tenant_id = $1 AND pag.id = $2
 `
 
@@ -107,7 +107,7 @@ func (q *Queries) GetProductAccessGrantByID(ctx context.Context, arg GetProductA
 }
 
 const getProductAccessGrantBySource = `-- name: GetProductAccessGrantBySource :one
-SELECT id, tenant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, tenant_subject_id FROM billing.product_access_grants pag
+SELECT id, tenant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, tenant_subject_id FROM openrails.product_access_grants pag
 WHERE pag.tenant_id = $1
   AND pag.tenant_subject_id = $2
   AND pag.product_id = $3
@@ -151,7 +151,7 @@ func (q *Queries) GetProductAccessGrantBySource(ctx context.Context, arg GetProd
 
 const hasActiveProductAccess = `-- name: HasActiveProductAccess :one
 SELECT EXISTS (
-    SELECT 1 FROM billing.product_access_grants pag
+    SELECT 1 FROM openrails.product_access_grants pag
     WHERE pag.tenant_id = $1
       AND pag.tenant_subject_id = $2
       AND pag.product_id = $3
@@ -182,7 +182,7 @@ func (q *Queries) HasActiveProductAccess(ctx context.Context, arg HasActiveProdu
 }
 
 const listActiveProductAccessGrantsByTenantSubject = `-- name: ListActiveProductAccessGrantsByTenantSubject :many
-SELECT id, tenant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, tenant_subject_id FROM billing.product_access_grants pag
+SELECT id, tenant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, tenant_subject_id FROM openrails.product_access_grants pag
 WHERE pag.tenant_id = $1
   AND pag.tenant_subject_id = $2
   AND pag.status = 'active'
@@ -234,7 +234,7 @@ func (q *Queries) ListActiveProductAccessGrantsByTenantSubject(ctx context.Conte
 }
 
 const listProductAccessGrantsByTenantSubject = `-- name: ListProductAccessGrantsByTenantSubject :many
-SELECT id, tenant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, tenant_subject_id FROM billing.product_access_grants pag
+SELECT id, tenant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, tenant_subject_id FROM openrails.product_access_grants pag
 WHERE pag.tenant_id = $1
   AND pag.tenant_subject_id = $2
 ORDER BY pag.created_at DESC
@@ -281,7 +281,7 @@ func (q *Queries) ListProductAccessGrantsByTenantSubject(ctx context.Context, ar
 }
 
 const revokeProductAccessGrantByID = `-- name: RevokeProductAccessGrantByID :execrows
-UPDATE billing.product_access_grants pag SET
+UPDATE openrails.product_access_grants pag SET
     status = 'revoked',
     revoked_at = $3::timestamptz,
     revoke_reason = $4,
@@ -314,7 +314,7 @@ func (q *Queries) RevokeProductAccessGrantByID(ctx context.Context, arg RevokePr
 }
 
 const revokeProductAccessGrantsByPayment = `-- name: RevokeProductAccessGrantsByPayment :execrows
-UPDATE billing.product_access_grants pag SET
+UPDATE openrails.product_access_grants pag SET
     status = 'revoked',
     revoked_at = $3::timestamptz,
     revoke_reason = $4,

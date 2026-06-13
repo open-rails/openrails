@@ -87,7 +87,7 @@ func TestAdminPermissionRequired(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rr := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rr)
-			c.Set("billing.user_context", tc.uc)
+			c.Set("openrails.user_context", tc.uc)
 			c.Request = httptest.NewRequest(http.MethodGet, "/admin/test", nil)
 
 			AdminPermissionRequired(tc.checker, permAdmin)(c)

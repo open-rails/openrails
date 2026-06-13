@@ -23,7 +23,7 @@ import (
 // TypeSolanaSunsetPlan flips an on-chain Subscriptions-program plan to
 // status=sunset via update_plan (#357/#358 phase D) — the program's exact
 // archive semantics: new subscribe calls are rejected ("Plan is in sunset
-// status") while existing subscriptions keep billing. Produced by the
+// status") while existing subscriptions keep openrails. Produced by the
 // `bootstrap apply --exhaustive` sweep for plans whose local price is no
 // longer purchasable.
 const TypeSolanaSunsetPlan = "solana_sunset_plan"
@@ -103,8 +103,10 @@ func NewSolanaSunsetPlanHandler(d *db.DB, plans *recurring.PlanService, rpc *sol
 	return h
 }
 
-func (h *SolanaSunsetPlanHandler) Type() string                         { return TypeSolanaSunsetPlan }
-func (h *SolanaSunsetPlanHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
+func (h *SolanaSunsetPlanHandler) Type() string { return TypeSolanaSunsetPlan }
+func (h *SolanaSunsetPlanHandler) Backoff(attempts int32) time.Duration {
+	return h.Policy.Delay(attempts)
+}
 
 // CheckRelevance: superseded when a purchasable local price references the
 // plan PDA again — sunsetting a plan the catalog actively sells would be

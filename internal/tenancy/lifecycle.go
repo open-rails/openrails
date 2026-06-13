@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/db"
 
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -24,7 +24,7 @@ type TenantProvisioner interface {
 	EnsureAuthKitTenant(ctx context.Context, tenantSlug string) (authKitTenantID string, err error)
 }
 
-// TenantStatus mirrors billing.tenants.status.
+// TenantStatus mirrors openrails.tenants.status.
 type TenantStatus string
 
 const (
@@ -33,7 +33,7 @@ const (
 	StatusDeleted   TenantStatus = "deleted"
 )
 
-// Tenant is the directory view of a row in billing.tenants.
+// Tenant is the directory view of a row in openrails.tenants.
 type Tenant struct {
 	ID                tenant.ID
 	Slug              string
@@ -66,7 +66,7 @@ type ProvisionRequest struct {
 	WebhookPath string
 }
 
-// ErrTenantNotFound indicates no billing.tenants row matched.
+// ErrTenantNotFound indicates no openrails.tenants row matched.
 var ErrTenantNotFound = errors.New("tenancy: tenant not found")
 
 // ErrExportRequired is returned by Delete when no completed export exists for the
@@ -74,10 +74,10 @@ var ErrTenantNotFound = errors.New("tenancy: tenant not found")
 var ErrExportRequired = errors.New("tenancy: export required before delete")
 
 // Service is the tenant provisioning + lifecycle service (issue #225). It owns
-// the billing.tenants directory rows and per-tenant secrets, and delegates
+// the openrails.tenants directory rows and per-tenant secrets, and delegates
 // operator-tenant/service-token creation to the control plane via TenantProvisioner.
 type Service struct {
-	pool    *pgxpool.Pool
+	pool    *db.Pool
 	tenants TenantProvisioner // optional: nil disables AuthKit tenant linking (DB-only mode)
 	secrets TenantSecretStore
 }
@@ -85,7 +85,7 @@ type Service struct {
 // NewService builds the lifecycle service. pool is required (it owns the tenant
 // directory). tenants may be nil (provision then records no operator tenant). secrets
 // may be nil (credential management disabled).
-func NewService(pool *pgxpool.Pool, tenants TenantProvisioner, secrets TenantSecretStore) (*Service, error) {
+func NewService(pool *db.Pool, tenants TenantProvisioner, secrets TenantSecretStore) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("tenancy: pgx pool is required")
 	}
@@ -107,7 +107,7 @@ func (s *Service) Secrets() TenantSecretStore { return s.secrets }
 
 // Provision idempotently provisions a tenant (issue #225):
 //
-//  1. create/ensure the billing.tenants namespace row (resolve by slug),
+//  1. create/ensure the openrails.tenants namespace row (resolve by slug),
 //  2. create/link the operator AuthKit tenant via the control plane and record it,
 //  3. record routing (webhook host/path) + billing tier + region.
 //
@@ -132,7 +132,7 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Tenant,
 	// 1. Upsert the tenant directory row. ON CONFLICT(slug) DO NOTHING keeps the
 	//    existing row, then we re-read so provision is idempotent.
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO billing.tenants (slug, name, status, billing_tier, region, webhook_host, webhook_path, provisioned_at)
+		INSERT INTO openrails.tenants (slug, name, status, billing_tier, region, webhook_host, webhook_path, provisioned_at)
 		VALUES ($1, $2, 'active', NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), current_timestamp)
 		ON CONFLICT (slug) DO NOTHING
 	`, slug, name, strings.TrimSpace(req.BillingTier), strings.TrimSpace(req.Region),
@@ -153,7 +153,7 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Tenant,
 			return nil, fmt.Errorf("tenancy: ensure operator tenant %q: %w", operatorTenantSlug, oerr)
 		}
 		if _, uerr := s.pool.Exec(ctx, `
-			UPDATE billing.tenants
+			UPDATE openrails.tenants
 			   SET authkit_tenant_id = $2, authkit_tenant_slug = $3, updated_at = current_timestamp
 			 WHERE id = $1::uuid
 			   AND (authkit_tenant_id IS DISTINCT FROM $2 OR authkit_tenant_slug IS DISTINCT FROM $3)
@@ -167,7 +167,7 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Tenant,
 	// 3. Reconcile routing / tier / region for an already-existing row (provision
 	//    is idempotent AND patches routing on re-run).
 	if _, err := s.pool.Exec(ctx, `
-		UPDATE billing.tenants
+		UPDATE openrails.tenants
 		   SET billing_tier  = COALESCE(NULLIF($2,''), billing_tier),
 		       region        = COALESCE(NULLIF($3,''), region),
 		       webhook_host  = COALESCE(NULLIF($4,''), webhook_host),
@@ -201,7 +201,7 @@ func (s *Service) TierChange(ctx context.Context, id tenant.ID, tier string) err
 		return errors.New("tenancy: tier change requires a tier")
 	}
 	ct, err := s.pool.Exec(ctx, `
-		UPDATE billing.tenants SET billing_tier = $2, updated_at = current_timestamp
+		UPDATE openrails.tenants SET billing_tier = $2, updated_at = current_timestamp
 		 WHERE id = $1::uuid AND deleted_at IS NULL
 	`, id.String(), tier)
 	if err != nil {
@@ -221,7 +221,7 @@ func (s *Service) setStatus(ctx context.Context, id tenant.ID, status TenantStat
 		suspendedExpr = "NULL"
 	}
 	ct, err := s.pool.Exec(ctx, fmt.Sprintf(`
-		UPDATE billing.tenants
+		UPDATE openrails.tenants
 		   SET status = $2, suspended_at = %s, updated_at = current_timestamp
 		 WHERE id = $1::uuid AND deleted_at IS NULL
 	`, suspendedExpr), id.String(), string(status))
@@ -272,7 +272,7 @@ func (s *Service) SearchTenants(ctx context.Context, q string, limit int) ([]Ten
 	}
 	pattern := "%" + strings.ToLower(q) + "%"
 	rows, err := s.pool.Query(ctx, `SELECT `+tenantSelectCols+`
-		FROM billing.tenants
+		FROM openrails.tenants
 		WHERE deleted_at IS NULL
 		  AND (lower(slug) LIKE $1 OR lower(name) LIKE $1)
 		ORDER BY slug LIMIT $2`, pattern, limit)
@@ -327,12 +327,12 @@ func scanTenant(row pgx.Row) (*Tenant, error) {
 
 func (s *Service) tenantBySlug(ctx context.Context, slug string) (*Tenant, error) {
 	row := s.pool.QueryRow(ctx, `SELECT `+tenantSelectCols+`
-		FROM billing.tenants WHERE slug = $1 AND deleted_at IS NULL`, slug)
+		FROM openrails.tenants WHERE slug = $1 AND deleted_at IS NULL`, slug)
 	return scanTenant(row)
 }
 
 func (s *Service) tenantByID(ctx context.Context, id tenant.ID) (*Tenant, error) {
 	row := s.pool.QueryRow(ctx, `SELECT `+tenantSelectCols+`
-		FROM billing.tenants WHERE id = $1::uuid AND deleted_at IS NULL`, id.String())
+		FROM openrails.tenants WHERE id = $1::uuid AND deleted_at IS NULL`, id.String())
 	return scanTenant(row)
 }

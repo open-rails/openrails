@@ -51,7 +51,7 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 
 		migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 		require.NoError(t, err)
-		m := migratekit.NewPostgres(sqlDB, "billing")
+		m := migratekit.NewPostgres(sqlDB, config.MigratekitApp)
 		require.NoError(t, m.ApplyMigrations(ctx, migrations))
 
 		_, err = sqlDB.ExecContext(ctx, `ALTER ROLE openrails_app WITH LOGIN PASSWORD 'app_pw'`)
@@ -91,7 +91,7 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	require.NoError(t, err)
-	m := migratekit.NewPostgres(sqlDB, "billing")
+	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp)
 	require.NoError(t, m.ApplyMigrations(ctx, migrations))
 
 	// Production attaches LOGIN + a password to the app role out of band; do that
@@ -127,20 +127,20 @@ func seedTenantsAndEntitlements(t *testing.T, ctx context.Context, superDSN stri
 
 	for _, id := range []tenant.ID{tA, tB} {
 		_, err = pool.Exec(ctx, `
-			INSERT INTO billing.tenants (id, slug, name, status)
+			INSERT INTO openrails.tenants (id, slug, name, status)
 			VALUES ($1::uuid, $2, $2, 'active') ON CONFLICT (id) DO NOTHING
 		`, id.String(), "t-"+id.String()[:8])
 		require.NoError(t, err)
 		tenantSubjectID := uuid.New()
 		_, err = pool.Exec(ctx, `
-			INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject)
+			INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject)
 			VALUES ($1::uuid, $2::uuid, 'test', $3)
 			ON CONFLICT (id) DO NOTHING
 		`, tenantSubjectID.String(), id.String(), "user-"+id.String()[:8])
 		require.NoError(t, err)
 		// One entitlement row per tenant.
 		_, err = pool.Exec(ctx, `
-			INSERT INTO billing.entitlements
+			INSERT INTO openrails.entitlements
 				(tenant_id, tenant_subject_id, entitlement, start_at, source_id, source_type)
 			VALUES ($1::uuid, $2::uuid, 'premium', current_timestamp, gen_random_uuid(), 'admin')
 		`, id.String(), tenantSubjectID.String())
@@ -172,13 +172,13 @@ func TestRLS_AppRoleCannotSeeOtherTenantRows(t *testing.T) {
 	require.NoError(t, err)
 
 	var total int
-	require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements`).Scan(&total))
+	require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements`).Scan(&total))
 	require.Equal(t, 1, total, "RLS must restrict an un-predicated SELECT to the active tenant")
 
 	// Even explicitly asking for tenant B returns nothing under tenant A's GUC.
 	var leaked int
 	require.NoError(t, tx.QueryRow(ctx,
-		`SELECT count(*) FROM billing.entitlements WHERE tenant_id = $1::uuid`, tB.String(),
+		`SELECT count(*) FROM openrails.entitlements WHERE tenant_id = $1::uuid`, tB.String(),
 	).Scan(&leaked))
 	require.Equal(t, 0, leaked, "RLS must deny reading another tenant's rows even with an explicit predicate")
 }
@@ -204,7 +204,7 @@ func TestRLS_GUCScopesCorrectly(t *testing.T) {
 			require.NoError(t, err)
 		}
 		var n int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements`).Scan(&n))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements`).Scan(&n))
 		return n
 	}
 
@@ -229,7 +229,7 @@ func TestTenantTx_ScopesGUC(t *testing.T) {
 	ctxA := tenant.WithID(ctx, tA)
 	var n int
 	err = d.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements`).Scan(&n)
+		return tx.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements`).Scan(&n)
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, n, "TenantTx must scope the query to the context tenant")

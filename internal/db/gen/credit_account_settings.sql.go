@@ -13,7 +13,7 @@ import (
 )
 
 const addOutstandingOwed = `-- name: AddOutstandingOwed :exec
-UPDATE billing.credit_account_settings
+UPDATE openrails.credit_account_settings
 SET outstanding_owed_micros = outstanding_owed_micros + $4::bigint,
     updated_at = $5
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
@@ -40,7 +40,7 @@ func (q *Queries) AddOutstandingOwed(ctx context.Context, arg AddOutstandingOwed
 
 const getCreditAccountSettings = `-- name: GetCreditAccountSettings :one
 
-SELECT id, tenant_id, tenant_subject_id, credit_type_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier FROM billing.credit_account_settings
+SELECT id, tenant_id, tenant_subject_id, credit_type_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier FROM openrails.credit_account_settings
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
 LIMIT 1
 `
@@ -51,7 +51,7 @@ type GetCreditAccountSettingsParams struct {
 	CreditTypeID    uuid.UUID
 }
 
-// billing.credit_account_settings: per-(tenant, payer, credit_type) spend
+// openrails.credit_account_settings: per-(tenant, payer, credit_type) spend
 // policy + money-in state (#237/#239/#240/#241/#298/#299/#302).
 func (q *Queries) GetCreditAccountSettings(ctx context.Context, arg GetCreditAccountSettingsParams) (BillingCreditAccountSetting, error) {
 	row := q.db.QueryRow(ctx, getCreditAccountSettings, arg.TenantID, arg.TenantSubjectID, arg.CreditTypeID)
@@ -87,7 +87,7 @@ func (q *Queries) GetCreditAccountSettings(ctx context.Context, arg GetCreditAcc
 }
 
 const getCreditSpendLimit = `-- name: GetCreditSpendLimit :one
-SELECT id, tenant_id, tenant_subject_id, credit_type_id, actor, max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at FROM billing.credit_spend_limits
+SELECT id, tenant_id, tenant_subject_id, credit_type_id, actor, max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at FROM openrails.credit_spend_limits
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3 AND actor = $4
 LIMIT 1
 `
@@ -122,7 +122,7 @@ func (q *Queries) GetCreditSpendLimit(ctx context.Context, arg GetCreditSpendLim
 }
 
 const insertCreditAccountSettingsIfAbsent = `-- name: InsertCreditAccountSettingsIfAbsent :exec
-INSERT INTO billing.credit_account_settings (
+INSERT INTO openrails.credit_account_settings (
     id, tenant_id, tenant_subject_id, credit_type_id, billing_mode,
     hard_stop_on_breach, alert_threshold_pct, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, true, 80, $6, $6)
@@ -159,9 +159,9 @@ SELECT s.tenant_id, s.tenant_subject_id, s.credit_type_id,
        COALESCE(s.low_balance_threshold_micros, 0)::bigint AS threshold,
        s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id,
        s.last_alert_at, s.last_topup_at
-FROM billing.credit_account_settings s
-JOIN billing.credit_types ct ON ct.id = s.credit_type_id
-LEFT JOIN billing.credit_balances b
+FROM openrails.credit_account_settings s
+JOIN openrails.credit_types ct ON ct.id = s.credit_type_id
+LEFT JOIN openrails.credit_balances b
   ON b.tenant_id = s.tenant_id
  AND b.tenant_subject_id = s.tenant_subject_id
  AND b.credit_type_id = s.credit_type_id
@@ -222,8 +222,8 @@ const listChargeableArrearsAccounts = `-- name: ListChargeableArrearsAccounts :m
 SELECT s.tenant_id, s.tenant_subject_id, s.credit_type_id,
        ct.name AS credit_type_name,
        s.outstanding_owed_micros, s.auto_topup_payment_method_id
-FROM billing.credit_account_settings s
-JOIN billing.credit_types ct ON ct.id = s.credit_type_id
+FROM openrails.credit_account_settings s
+JOIN openrails.credit_types ct ON ct.id = s.credit_type_id
 WHERE s.tenant_id = $1
   AND s.billing_mode = 'arrears'
   AND s.outstanding_owed_micros > 0
@@ -275,7 +275,7 @@ func (q *Queries) ListChargeableArrearsAccounts(ctx context.Context, arg ListCha
 }
 
 const lockCreditAccountSettings = `-- name: LockCreditAccountSettings :one
-SELECT id, tenant_id, tenant_subject_id, credit_type_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier FROM billing.credit_account_settings
+SELECT id, tenant_id, tenant_subject_id, credit_type_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier FROM openrails.credit_account_settings
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
 FOR UPDATE
 `
@@ -320,7 +320,7 @@ func (q *Queries) LockCreditAccountSettings(ctx context.Context, arg LockCreditA
 }
 
 const reduceOutstandingOwedSnapshot = `-- name: ReduceOutstandingOwedSnapshot :execrows
-UPDATE billing.credit_account_settings
+UPDATE openrails.credit_account_settings
 SET outstanding_owed_micros = GREATEST(0, outstanding_owed_micros - $4::bigint),
     updated_at = $5
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
@@ -352,7 +352,7 @@ func (q *Queries) ReduceOutstandingOwedSnapshot(ctx context.Context, arg ReduceO
 }
 
 const resumeCreditAccount = `-- name: ResumeCreditAccount :exec
-UPDATE billing.credit_account_settings
+UPDATE openrails.credit_account_settings
 SET suspended_at = NULL, suspend_reason = NULL, updated_at = $4
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
 `
@@ -375,7 +375,7 @@ func (q *Queries) ResumeCreditAccount(ctx context.Context, arg ResumeCreditAccou
 }
 
 const setCreditAccountPaymentVerified = `-- name: SetCreditAccountPaymentVerified :exec
-UPDATE billing.credit_account_settings
+UPDATE openrails.credit_account_settings
 SET verified_payment_method = $4::boolean,
     verified_at = CASE WHEN $4::boolean THEN $5::timestamptz ELSE NULL END,
     updated_at = $5::timestamptz
@@ -402,7 +402,7 @@ func (q *Queries) SetCreditAccountPaymentVerified(ctx context.Context, arg SetCr
 }
 
 const setCreditAccountTier = `-- name: SetCreditAccountTier :exec
-UPDATE billing.credit_account_settings
+UPDATE openrails.credit_account_settings
 SET tier = $4::text, updated_at = $5
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
 `
@@ -427,7 +427,7 @@ func (q *Queries) SetCreditAccountTier(ctx context.Context, arg SetCreditAccount
 }
 
 const stampCreditAccountAlertAt = `-- name: StampCreditAccountAlertAt :exec
-UPDATE billing.credit_account_settings
+UPDATE openrails.credit_account_settings
 SET last_alert_at = $4, updated_at = $4
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
 `
@@ -450,7 +450,7 @@ func (q *Queries) StampCreditAccountAlertAt(ctx context.Context, arg StampCredit
 }
 
 const stampCreditAccountTopupAt = `-- name: StampCreditAccountTopupAt :exec
-UPDATE billing.credit_account_settings
+UPDATE openrails.credit_account_settings
 SET last_topup_at = $4, updated_at = $4
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
 `
@@ -473,7 +473,7 @@ func (q *Queries) StampCreditAccountTopupAt(ctx context.Context, arg StampCredit
 }
 
 const suspendCreditAccount = `-- name: SuspendCreditAccount :exec
-UPDATE billing.credit_account_settings
+UPDATE openrails.credit_account_settings
 SET suspended_at = $4::timestamptz,
     suspend_reason = $5,
     updated_at = $4::timestamptz
@@ -500,7 +500,7 @@ func (q *Queries) SuspendCreditAccount(ctx context.Context, arg SuspendCreditAcc
 }
 
 const upsertCreditAccountSettings = `-- name: UpsertCreditAccountSettings :exec
-INSERT INTO billing.credit_account_settings (
+INSERT INTO openrails.credit_account_settings (
     id, tenant_id, tenant_subject_id, credit_type_id, billing_mode,
     max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros,
     low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents,
@@ -566,7 +566,7 @@ func (q *Queries) UpsertCreditAccountSettings(ctx context.Context, arg UpsertCre
 }
 
 const upsertCreditSpendLimit = `-- name: UpsertCreditSpendLimit :exec
-INSERT INTO billing.credit_spend_limits (
+INSERT INTO openrails.credit_spend_limits (
     id, tenant_id, tenant_subject_id, credit_type_id, actor,
     max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)

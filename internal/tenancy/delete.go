@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// tenantOwnedTables are the billing.* tables that carry a tenant_id. Tenant
+// tenantOwnedTables are the openrails.* tables that carry a tenant_id. Tenant
 // deletion purges these rows for the target tenant. Kept in sync with the
 // consolidated schema's tenant-owned table set AND with
 // queries/tenant_lifecycle.sql + the dispatch switches below (#334: each table
@@ -105,7 +105,7 @@ func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 }
 
 // Export performs a tenant-scoped logical export and records a completed
-// billing.tenant_exports row (issue #225). The export here is a row-count
+// openrails.tenant_exports row (issue #225). The export here is a row-count
 // manifest plus a Vault-side secret-name enumeration (values are NEVER exported
 // in plaintext) — enough to satisfy export-before-delete and give a portability
 // manifest. A managed deployment can extend `location` to a real dump artifact.
@@ -148,7 +148,7 @@ func (s *Service) Export(ctx context.Context, id tenant.ID) (string, map[string]
 
 	var exportID string
 	err = s.pool.QueryRow(ctx, `
-		INSERT INTO billing.tenant_exports (tenant_id, status, row_counts, completed_at)
+		INSERT INTO openrails.tenant_exports (tenant_id, status, row_counts, completed_at)
 		VALUES ($1::uuid, 'completed', $2::jsonb, current_timestamp)
 		RETURNING id::text
 	`, id.String(), string(manifestJSON)).Scan(&exportID)
@@ -169,7 +169,7 @@ type DeleteOptions struct {
 //
 //   - requires Confirm (confirmation gate),
 //   - requires a completed export (export-before-delete enforced),
-//   - purges every tenant-owned billing.* row, the tenant's cached secrets, and
+//   - purges every tenant-owned openrails.* row, the tenant's cached secrets, and
 //     credential/audit/export bookkeeping, then tombstones the directory row
 //     (status='deleted', deleted_at set) inside ONE transaction.
 //
@@ -190,7 +190,7 @@ func (s *Service) Delete(ctx context.Context, id tenant.ID, opts DeleteOptions) 
 	// export-before-delete: require at least one completed export.
 	var exportCount int
 	if err := s.pool.QueryRow(ctx, `
-		SELECT count(*) FROM billing.tenant_exports
+		SELECT count(*) FROM openrails.tenant_exports
 		 WHERE tenant_id = $1::uuid AND status = 'completed'
 	`, id.String()).Scan(&exportCount); err != nil {
 		return fmt.Errorf("tenancy: check export-before-delete: %w", err)
@@ -221,17 +221,17 @@ func (s *Service) Delete(ctx context.Context, id tenant.ID, opts DeleteOptions) 
 	}
 
 	// Purge secret store rows + credential audit (DB-backed secret store lives in
-	// billing.tenant_secrets; the Vault-backed store is purged separately below).
-	if _, err := tx.Exec(ctx, `DELETE FROM billing.tenant_secrets WHERE tenant_id = $1::uuid`, id.String()); err != nil {
+	// openrails.tenant_secrets; the Vault-backed store is purged separately below).
+	if _, err := tx.Exec(ctx, `DELETE FROM openrails.tenant_secrets WHERE tenant_id = $1::uuid`, id.String()); err != nil {
 		return fmt.Errorf("tenancy: purge tenant secrets: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM billing.tenant_credential_audit WHERE tenant_id = $1::uuid`, id.String()); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM openrails.tenant_credential_audit WHERE tenant_id = $1::uuid`, id.String()); err != nil {
 		return fmt.Errorf("tenancy: purge credential audit: %w", err)
 	}
 
 	// Tombstone the directory row.
 	if _, err := tx.Exec(ctx, `
-		UPDATE billing.tenants
+		UPDATE openrails.tenants
 		   SET status = 'deleted', deleted_at = current_timestamp, updated_at = current_timestamp,
 		       webhook_host = NULL, webhook_path = NULL
 		 WHERE id = $1::uuid

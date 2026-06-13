@@ -50,7 +50,7 @@ type StripeReconcileReport = reconcile.Report
 //
 // This is the public entry point embedded hosts (e.g. cozy-art) call:
 //
-//	svc, _ := billing.Service()
+//	svc, _ := openrails.Service()
 //	report, err := svc.ReconcileStripe(ctx, service.StripeReconcileOptions{Apply: true})
 //
 // The host needs nothing beyond a configured Stripe secret key (read from the

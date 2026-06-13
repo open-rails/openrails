@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// This test proves end-to-end #227 RLS enforcement on a REAL billing.* table
+// This test proves end-to-end #227 RLS enforcement on a REAL openrails.* table
 // through a REAL repo: it runs the actual migrations (so 001_schema.up.sql applies
 // its policies + creates openrails_app), connects as openrails_app, and drives
 // ProductRepo.GetAll — a no-filter read — to show it returns ONLY the pinned
@@ -51,10 +51,10 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	require.NoError(t, err)
 	defer super.Close()
 	for _, stmt := range []string{
-		`INSERT INTO billing.tenants (id, slug, name) VALUES
+		`INSERT INTO openrails.tenants (id, slug, name) VALUES
 		   ('` + tenantA + `','tenant-` + suffix + `-a','A'), ('` + tenantB + `','tenant-` + suffix + `-b','B')
 		 ON CONFLICT (id) DO NOTHING`,
-		`INSERT INTO billing.products (id, tenant_id, slug, display_name) VALUES
+		`INSERT INTO openrails.products (id, tenant_id, slug, display_name) VALUES
 		   ('` + productA + `','` + tenantA + `','` + slugA + `','Product A'),
 		   ('` + productB + `','` + tenantB + `','` + slugB + `','Product B')
 		 ON CONFLICT (id) DO NOTHING`,

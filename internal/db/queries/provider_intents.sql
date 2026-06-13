@@ -20,7 +20,7 @@
 --                           their backoff/terminal state)
 -- Always RETURNs the canonical row for the key.
 -- name: EnqueueProviderIntent :one
-INSERT INTO billing.provider_intents (
+INSERT INTO openrails.provider_intents (
     tenant_id, provider, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
     expires_at, account_fingerprint
@@ -34,40 +34,40 @@ INSERT INTO billing.provider_intents (
 )
 ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET
     status = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN 'pending'
-        ELSE billing.provider_intents.status
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN 'pending'
+        ELSE openrails.provider_intents.status
     END,
     next_attempt_at = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.next_attempt_at
-        ELSE billing.provider_intents.next_attempt_at
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.next_attempt_at
+        ELSE openrails.provider_intents.next_attempt_at
     END,
     payload = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.payload
-        ELSE billing.provider_intents.payload
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.payload
+        ELSE openrails.provider_intents.payload
     END,
     account_fingerprint = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.account_fingerprint
-        ELSE billing.provider_intents.account_fingerprint
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.account_fingerprint
+        ELSE openrails.provider_intents.account_fingerprint
     END,
     origin = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin
-        ELSE billing.provider_intents.origin
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin
+        ELSE openrails.provider_intents.origin
     END,
     origin_reason = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin_reason
-        ELSE billing.provider_intents.origin_reason
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin_reason
+        ELSE openrails.provider_intents.origin_reason
     END,
     expires_at = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.expires_at
-        ELSE billing.provider_intents.expires_at
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.expires_at
+        ELSE openrails.provider_intents.expires_at
     END,
     attempts = CASE
-        WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN 0
-        ELSE billing.provider_intents.attempts
+        WHEN openrails.provider_intents.status IN ('superseded', 'expired') THEN 0
+        ELSE openrails.provider_intents.attempts
     END,
     last_failure_reason = CASE
-        WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN NULL
-        ELSE billing.provider_intents.last_failure_reason
+        WHEN openrails.provider_intents.status IN ('superseded', 'expired') THEN NULL
+        ELSE openrails.provider_intents.last_failure_reason
     END,
     updated_at = now()
 RETURNING *;
@@ -83,7 +83,7 @@ RETURNING *;
 -- ExpireOverdueProviderIntents.
 -- name: ClaimDueProviderIntents :many
 WITH due AS (
-    SELECT id FROM billing.provider_intents
+    SELECT id FROM openrails.provider_intents
     WHERE (
             (status IN ('pending', 'failed_retryable') AND next_attempt_at <= sqlc.arg(now)::timestamptz)
             OR (status = 'in_flight' AND claimed_until IS NOT NULL AND claimed_until <= sqlc.arg(now)::timestamptz)
@@ -93,7 +93,7 @@ WITH due AS (
     LIMIT sqlc.arg(batch_size)
     FOR UPDATE SKIP LOCKED
 )
-UPDATE billing.provider_intents pi
+UPDATE openrails.provider_intents pi
 SET status = 'in_flight',
     claimed_until = sqlc.arg(lease_until)::timestamptz,
     attempts = pi.attempts + 1,
@@ -109,7 +109,7 @@ RETURNING pi.*;
 -- honors the relevance window and existing leases; anything not claimable here
 -- is drained by the scheduled executor instead.
 -- name: ClaimProviderIntentByID :one
-UPDATE billing.provider_intents pi
+UPDATE openrails.provider_intents pi
 SET status = 'in_flight',
     claimed_until = sqlc.arg(lease_until)::timestamptz,
     attempts = pi.attempts + 1,
@@ -127,7 +127,7 @@ RETURNING pi.*;
 -- not bumped); the lease alone prevents double-verification.
 -- name: ClaimDueVerifyProviderIntents :many
 WITH due AS (
-    SELECT id FROM billing.provider_intents
+    SELECT id FROM openrails.provider_intents
     WHERE status = 'unknown_needs_verify'
       AND next_attempt_at <= sqlc.arg(now)::timestamptz
       AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz)
@@ -135,7 +135,7 @@ WITH due AS (
     LIMIT sqlc.arg(batch_size)
     FOR UPDATE SKIP LOCKED
 )
-UPDATE billing.provider_intents pi
+UPDATE openrails.provider_intents pi
 SET claimed_until = sqlc.arg(lease_until)::timestamptz,
     updated_at = now()
 FROM due
@@ -147,7 +147,7 @@ RETURNING pi.*;
 -- ============================================================================
 
 -- name: MarkProviderIntentSucceeded :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'succeeded',
     executed_at = sqlc.arg(now)::timestamptz,
     result_evidence = sqlc.narg(result_evidence),
@@ -157,7 +157,7 @@ SET status = 'succeeded',
 WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
 
 -- name: MarkProviderIntentFailedRetryable :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'failed_retryable',
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
@@ -168,7 +168,7 @@ WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
 -- Ambiguous outcome (or a verify that stayed inconclusive): park for the
 -- verifier, scheduled at next_attempt_at.
 -- name: MarkProviderIntentUnknown :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'unknown_needs_verify',
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
@@ -177,7 +177,7 @@ SET status = 'unknown_needs_verify',
 WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
 
 -- name: MarkProviderIntentFailedTerminal :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'failed_terminal',
     last_failure_reason = sqlc.arg(reason),
     result_evidence = sqlc.narg(result_evidence),
@@ -190,7 +190,7 @@ WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
 -- recorded and the claim's attempts bump undone — a park is not a failure and
 -- must not escalate backoff.
 -- name: ParkProviderIntent :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'pending',
     attempts = GREATEST(attempts - 1, 0),
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
@@ -200,7 +200,7 @@ SET status = 'pending',
 WHERE id = sqlc.arg(id) AND status = 'in_flight';
 
 -- name: MarkProviderIntentSuperseded :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'superseded',
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
@@ -216,7 +216,7 @@ WHERE id = sqlc.arg(id) AND status IN ('pending', 'in_flight', 'failed_retryable
 -- their executor: its per-type relevance check re-verifies before acting, so
 -- a racing supersede is advisory there.
 -- name: SupersedeProviderIntentsBySubject :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'superseded',
     last_failure_reason = sqlc.arg(reason),
     updated_at = now()
@@ -225,7 +225,7 @@ WHERE intent_type = sqlc.arg(intent_type)
   AND status IN ('pending', 'failed_retryable', 'unknown_needs_verify');
 
 -- name: ExpireOverdueProviderIntents :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
     claimed_until = NULL,
@@ -245,7 +245,7 @@ WHERE status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
 -- lease outliving hours means a dead executor). Read-only; runs tenant-scoped
 -- on the engine's tenant-pinned connection.
 -- name: ListStuckProviderIntents :many
-SELECT * FROM billing.provider_intents
+SELECT * FROM openrails.provider_intents
 WHERE (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(action_cutoff)::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= sqlc.arg(verify_cutoff)::timestamptz)
 ORDER BY created_at, id;
@@ -255,21 +255,21 @@ ORDER BY created_at, id;
 -- ============================================================================
 
 -- name: GetProviderIntent :one
-SELECT * FROM billing.provider_intents WHERE id = $1;
+SELECT * FROM openrails.provider_intents WHERE id = $1;
 
 -- name: GetProviderIntentByIdempotencyKey :one
-SELECT * FROM billing.provider_intents
+SELECT * FROM openrails.provider_intents
 WHERE tenant_id = sqlc.arg(tenant_id) AND idempotency_key = sqlc.arg(idempotency_key);
 
 -- name: CountProviderIntents :one
-SELECT count(*) FROM billing.provider_intents
+SELECT count(*) FROM openrails.provider_intents
 WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(provider)::text IS NULL OR provider = sqlc.narg(provider)::text)
   AND (sqlc.narg(intent_type)::text IS NULL OR intent_type = sqlc.narg(intent_type)::text)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid);
 
 -- name: ListProviderIntents :many
-SELECT * FROM billing.provider_intents
+SELECT * FROM openrails.provider_intents
 WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(provider)::text IS NULL OR provider = sqlc.narg(provider)::text)
   AND (sqlc.narg(intent_type)::text IS NULL OR intent_type = sqlc.narg(intent_type)::text)
@@ -283,7 +283,7 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 -- Only live statuses — succeeded/terminal/superseded/expired rows keep the
 -- fingerprint they executed (or died) under as evidence.
 -- name: RefingerprintProviderIntents :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET account_fingerprint = sqlc.arg(account_fingerprint),
     updated_at = now()
 WHERE provider = sqlc.arg(provider)

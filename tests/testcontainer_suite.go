@@ -425,7 +425,7 @@ func (suite *TestContainerSuite) initializeServer() {
 	// ensure the default tenant's AuthKit org exists with the operator role
 	// holding the full openrails:* catalog, so admin identities created by the
 	// test helpers carry LIVE openrails:admin authority. Idempotent; runs after
-	// migrations (profiles.* + billing.tenants exist).
+	// migrations (profiles.* + openrails.tenants exist).
 	_, err = embcp.RunBootstrap(suite.ctx, suite.App, controlplane.BootstrapOptions{
 		MintInitialServiceToken: false,
 	})
@@ -559,11 +559,11 @@ func (suite *TestContainerSuite) ResetDatabase() {
 
 	// List of tables to truncate (in dependency order)
 	tables := []string{
-		"billing.subscriptions",
-		"billing.payments",
-		"billing.payment_methods",
-		"billing.prices",
-		"billing.products",
+		"openrails.subscriptions",
+		"openrails.payments",
+		"openrails.payment_methods",
+		"openrails.prices",
+		"openrails.products",
 	}
 
 	for _, table := range tables {
@@ -684,7 +684,7 @@ func (suite *TestContainerSuite) WaitForJobCompletion(expectedJobs int, timeout 
 	for time.Now().Before(deadline) {
 		var count int
 		err := suite.Pool.QueryRow(suite.ctx,
-			"SELECT COUNT(*) FROM billing.river_job WHERE state = 'completed'").Scan(&count)
+			"SELECT COUNT(*) FROM openrails.river_job WHERE state = 'completed'").Scan(&count)
 		if err == nil && count >= expectedJobs {
 			return true
 		}
@@ -698,7 +698,7 @@ func (suite *TestContainerSuite) GetPendingJobCount() int {
 	suite.t.Helper()
 	var count int
 	err := suite.Pool.QueryRow(suite.ctx,
-		"SELECT COUNT(*) FROM billing.river_job WHERE state = 'available'").Scan(&count)
+		"SELECT COUNT(*) FROM openrails.river_job WHERE state = 'available'").Scan(&count)
 	if err != nil {
 		suite.t.Logf("Error getting pending job count: %v", err)
 		return 0
@@ -711,7 +711,7 @@ func (suite *TestContainerSuite) GetCompletedJobCount() int {
 	suite.t.Helper()
 	var count int
 	err := suite.Pool.QueryRow(suite.ctx,
-		"SELECT COUNT(*) FROM billing.river_job WHERE state = 'completed'").Scan(&count)
+		"SELECT COUNT(*) FROM openrails.river_job WHERE state = 'completed'").Scan(&count)
 	if err != nil {
 		suite.t.Logf("Error getting completed job count: %v", err)
 		return 0
@@ -722,7 +722,7 @@ func (suite *TestContainerSuite) GetCompletedJobCount() int {
 // ClearJobQueue removes all jobs from the River queue for clean test state.
 func (suite *TestContainerSuite) ClearJobQueue() {
 	suite.t.Helper()
-	_, err := suite.Pool.Exec(suite.ctx, "DELETE FROM billing.river_job")
+	_, err := suite.Pool.Exec(suite.ctx, "DELETE FROM openrails.river_job")
 	if err != nil {
 		suite.t.Logf("Error clearing job queue: %v", err)
 	}

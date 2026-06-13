@@ -80,7 +80,7 @@ func Attach(ctx context.Context, a *app.App, cfg *config.Config, injectedPool *p
 // Calling it without an attached control plane is a wiring error (#469: the
 // standalone always attaches one first).
 //
-// Call it AFTER migrations have run (so billing.tenants and profiles.* exist) and
+// Call it AFTER migrations have run (so openrails.tenants and profiles.* exist) and
 // at startup. Safe to re-run. This was App.RunControlPlaneBootstrap before #284.
 func RunBootstrap(ctx context.Context, a *app.App, opts controlplane.BootstrapOptions) (*controlplane.BootstrapResult, error) {
 	cp := Get(a)

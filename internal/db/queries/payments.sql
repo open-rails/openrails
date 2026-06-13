@@ -1,4 +1,4 @@
--- billing.payments — immutable payment event log.
+-- openrails.payments — immutable payment event log.
 --
 -- Insert semantics replicate the bun-era model tags: a zero value on a
 -- column with a default (status, currency, purchased_at, created_at) falls
@@ -7,7 +7,7 @@
 -- app (column default + RLS WITH CHECK own it).
 
 -- name: CreatePayment :execrows
-INSERT INTO billing.payments (
+INSERT INTO openrails.payments (
     id, price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
@@ -16,7 +16,7 @@ INSERT INTO billing.payments (
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
-    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'completed')::billing.purchase_status,
+    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'completed')::openrails.purchase_status,
     sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(discount_code), sqlc.narg(discount_reason),
     sqlc.narg(discount_metadata), sqlc.narg(entitlements_spec_snapshot),
@@ -27,7 +27,7 @@ INSERT INTO billing.payments (
 );
 
 -- name: CreatePaymentIfNotExists :execrows
-INSERT INTO billing.payments (
+INSERT INTO openrails.payments (
     id, price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
@@ -36,7 +36,7 @@ INSERT INTO billing.payments (
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
-    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'completed')::billing.purchase_status,
+    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'completed')::openrails.purchase_status,
     sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(discount_code), sqlc.narg(discount_reason),
     sqlc.narg(discount_metadata), sqlc.narg(entitlements_spec_snapshot),
@@ -48,62 +48,62 @@ INSERT INTO billing.payments (
 ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING;
 
 -- name: GetPaymentByID :one
-SELECT * FROM billing.payments WHERE id = $1;
+SELECT * FROM openrails.payments WHERE id = $1;
 
 -- name: GetPaymentWithPriceProduct :one
 SELECT sqlc.embed(purch), sqlc.embed(p), sqlc.embed(prod)
-FROM billing.payments purch
-JOIN billing.prices p ON p.id = purch.price_id
-JOIN billing.products prod ON prod.id = p.product_id
+FROM openrails.payments purch
+JOIN openrails.prices p ON p.id = purch.price_id
+JOIN openrails.products prod ON prod.id = p.product_id
 WHERE purch.id = $1;
 
 -- name: ListRefundsForPayment :many
-SELECT * FROM billing.payments
+SELECT * FROM openrails.payments
 WHERE refunded_payment_id = $1
 ORDER BY created_at DESC;
 
 -- name: ListPaymentsByTenantSubject :many
-SELECT * FROM billing.payments purch
+SELECT * FROM openrails.payments purch
 WHERE purch.tenant_subject_id = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC;
 
 -- name: GetPaymentByTransactionID :one
-SELECT * FROM billing.payments purch
+SELECT * FROM openrails.payments purch
 WHERE purch.processor = $1 AND purch.transaction_id = $2;
 
 -- name: ListPaymentsByPriceID :many
-SELECT * FROM billing.payments purch
+SELECT * FROM openrails.payments purch
 WHERE purch.price_id = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC;
 
 -- name: ListPaymentsByProcessor :many
-SELECT * FROM billing.payments purch
+SELECT * FROM openrails.payments purch
 WHERE purch.processor = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC;
 
 -- name: DeletePayment :execrows
-DELETE FROM billing.payments WHERE id = $1;
+DELETE FROM openrails.payments WHERE id = $1;
 
 -- name: ListRefundRowsForTotal :many
-SELECT amount, status FROM billing.payments
+SELECT amount, status FROM openrails.payments
 WHERE refunded_payment_id = $1;
 
 -- name: LinkRefundedPayment :execrows
-UPDATE billing.payments
+UPDATE openrails.payments
 SET refunded_payment_id = $2
 WHERE id = $1 AND refunded_payment_id IS NULL;
 
 -- name: GetRefundByAdminIdempotencyKey :one
-SELECT * FROM billing.payments purch
+SELECT * FROM openrails.payments purch
 WHERE purch.refunded_payment_id = $1
   AND purch.metadata ->> 'admin_refund_idempotency_key' = sqlc.arg(idem_key)::text
 LIMIT 1;
 
 -- name: CompleteRefundReservation :execrows
-UPDATE billing.payments
+UPDATE openrails.payments
 SET transaction_id = $2, status = 'completed', metadata = $3
 WHERE id = $1
   AND refunded_payment_id IS NOT NULL
@@ -111,12 +111,12 @@ WHERE id = $1
   AND status = 'pending';
 
 -- name: GetPaymentByMetadataValue :one
-SELECT * FROM billing.payments purch
+SELECT * FROM openrails.payments purch
 WHERE purch.metadata ->> sqlc.arg(key)::text = sqlc.arg(value)::text
 LIMIT 1;
 
 -- name: CompleteProviderAttempt :execrows
-UPDATE billing.payments
+UPDATE openrails.payments
 SET transaction_id = $2, status = 'completed', metadata = $3
 WHERE id = $1
   AND amount > 0
@@ -128,26 +128,26 @@ WHERE id = $1
 -- but its status must still reach a terminal state — leaving it 'pending'
 -- forever reads as a stuck payment.
 -- name: CompleteProviderAttemptInPlace :execrows
-UPDATE billing.payments
+UPDATE openrails.payments
 SET metadata = $2, status = 'completed'
 WHERE id = $1
   AND amount > 0
   AND status = 'pending';
 
 -- name: CountPaymentsByTenantSubject :one
-SELECT count(*) FROM billing.payments purch
+SELECT count(*) FROM openrails.payments purch
 WHERE purch.tenant_subject_id = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = '';
 
 -- name: ListPaymentsByTenantSubjectPaged :many
-SELECT * FROM billing.payments purch
+SELECT * FROM openrails.payments purch
 WHERE purch.tenant_subject_id = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: GetLatestPaymentByTenantSubjectProcessor :one
-SELECT * FROM billing.payments purch
+SELECT * FROM openrails.payments purch
 WHERE purch.tenant_subject_id = $1
   AND purch.processor = $2
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
@@ -155,13 +155,13 @@ ORDER BY purch.purchased_at DESC
 LIMIT 1;
 
 -- name: GetLatestPaymentBySubscriptionID :one
-SELECT * FROM billing.payments purch
+SELECT * FROM openrails.payments purch
 WHERE purch.subscription_id = $1
 ORDER BY purch.purchased_at DESC
 LIMIT 1;
 
 -- name: GetLatestChargeBySubscriptionID :one
-SELECT * FROM billing.payments purch
+SELECT * FROM openrails.payments purch
 WHERE purch.subscription_id = $1
   AND purch.amount > 0
   AND COALESCE(purch.status::text, 'completed') = 'completed'
@@ -173,16 +173,16 @@ SELECT
     count(*) FILTER (WHERE purch.amount > 0
         AND COALESCE(purch.status::text, 'completed') = 'completed')::bigint AS successful,
     count(*) FILTER (WHERE COALESCE(purch.status::text, 'completed') = 'failed')::bigint AS failed
-FROM billing.payments purch
+FROM openrails.payments purch
 WHERE purch.tenant_subject_id = $1
   AND purch.processor = $2
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = '';
 
 -- name: MarkPaymentFailed :exec
-UPDATE billing.payments SET status = 'failed' WHERE id = $1;
+UPDATE openrails.payments SET status = 'failed' WHERE id = $1;
 
 -- name: CountPaymentsFiltered :one
-SELECT count(*) FROM billing.payments purch
+SELECT count(*) FROM openrails.payments purch
 WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
   AND (sqlc.narg(tenant_subject_id)::uuid IS NULL OR purch.tenant_subject_id = sqlc.narg(tenant_subject_id)::uuid)
   AND (sqlc.narg(price_id)::uuid IS NULL OR purch.price_id = sqlc.narg(price_id)::uuid)
@@ -198,7 +198,7 @@ WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 -- name: ListPaymentsFiltered :many
 -- Sorting is static SQL over a validated (sort_by, sort_desc) pair via the
 -- CASE pattern — no identifier interpolation (#334 escape-hatch rule).
-SELECT * FROM billing.payments purch
+SELECT * FROM openrails.payments purch
 WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
   AND (sqlc.narg(tenant_subject_id)::uuid IS NULL OR purch.tenant_subject_id = sqlc.narg(tenant_subject_id)::uuid)
   AND (sqlc.narg(price_id)::uuid IS NULL OR purch.price_id = sqlc.narg(price_id)::uuid)
@@ -220,7 +220,7 @@ ORDER BY
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: ListPaymentsByIDs :many
-SELECT * FROM billing.payments WHERE id = ANY(sqlc.arg(ids)::uuid[]);
+SELECT * FROM openrails.payments WHERE id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- name: MatchChargebackPayments :many
 -- NMI chargeback reconciliation (webhooks/nmi.go): candidate subscription
@@ -235,9 +235,9 @@ SELECT p.id AS payment_id,
        p.currency AS currency,
        p.purchased_at AS purchased_at,
        COALESCE(pm.last_four, '')::text AS card_last4
-FROM billing.payments p
-JOIN billing.subscriptions sub ON sub.id = p.subscription_id
-LEFT JOIN billing.payment_methods pm ON pm.id = sub.payment_method_id
+FROM openrails.payments p
+JOIN openrails.subscriptions sub ON sub.id = p.subscription_id
+LEFT JOIN openrails.payment_methods pm ON pm.id = sub.payment_method_id
 WHERE p.subscription_id IS NOT NULL
   AND p.processor = sqlc.arg(processor)
   AND sub.processor::text = p.processor::text
@@ -252,7 +252,7 @@ LIMIT 2;
 
 -- name: SnapshotPaymentCards :exec
 -- Backfill a card snapshot onto Stripe payments that still lack one.
-UPDATE billing.payments
+UPDATE openrails.payments
 SET card_brand = sqlc.arg(card_brand)::text,
     card_last4 = sqlc.arg(card_last4)::text
 WHERE processor = 'stripe'
@@ -260,13 +260,13 @@ WHERE processor = 'stripe'
   AND card_last4 IS NULL;
 
 -- name: MergeStripePaymentMetadata :exec
-UPDATE billing.payments
+UPDATE openrails.payments
 SET metadata = COALESCE(metadata, '{}'::jsonb) || sqlc.arg(patch)::jsonb
 WHERE processor = 'stripe'
   AND transaction_id = sqlc.arg(transaction_id);
 
 -- name: GetStripeAliasCardSnapshot :one
-SELECT card_brand, card_last4 FROM billing.payments
+SELECT card_brand, card_last4 FROM openrails.payments
 WHERE processor = 'stripe'
   AND transaction_id = ANY(sqlc.arg(transaction_ids)::text[])
   AND card_last4 IS NOT NULL

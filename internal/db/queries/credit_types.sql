@@ -1,7 +1,7 @@
--- billing.credit_types.
+-- openrails.credit_types.
 
 -- name: CreateCreditType :execrows
-INSERT INTO billing.credit_types (
+INSERT INTO openrails.credit_types (
     id, name, display_name, unit, decimal_places, is_active, created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
@@ -9,18 +9,18 @@ INSERT INTO billing.credit_types (
 );
 
 -- name: GetCreditTypeByID :one
-SELECT * FROM billing.credit_types WHERE id = $1;
+SELECT * FROM openrails.credit_types WHERE id = $1;
 
 -- name: GetCreditTypeByName :one
-SELECT * FROM billing.credit_types WHERE name = $1 LIMIT 1;
+SELECT * FROM openrails.credit_types WHERE name = $1 LIMIT 1;
 
 -- name: ListCreditTypes :many
-SELECT * FROM billing.credit_types ct
+SELECT * FROM openrails.credit_types ct
 WHERE (NOT sqlc.arg(active_only)::boolean OR ct.is_active = true)
 ORDER BY ct.created_at ASC;
 
 -- name: UpdateCreditType :execrows
-UPDATE billing.credit_types SET
+UPDATE openrails.credit_types SET
     name = $2,
     display_name = $3,
     unit = $4,

@@ -167,7 +167,7 @@ type BillingAdminGrant struct {
 	CreatedAt    time.Time
 	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 }
 
@@ -175,7 +175,7 @@ type BillingAdminGrant struct {
 type BillingBudgetReservation struct {
 	ID       uuid.UUID
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 	// Caller-supplied principal string whose rolling money-budget windows are capped. Opaque to OpenRails.
 	Actor          string
@@ -243,7 +243,7 @@ type BillingCheckoutSession struct {
 	UpdatedAt       time.Time
 	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 }
 
@@ -251,7 +251,7 @@ type BillingCheckoutSession struct {
 type BillingCreditAccountSetting struct {
 	ID       uuid.UUID
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID           uuid.UUID
 	CreditTypeID              uuid.UUID
 	BillingMode               string
@@ -288,7 +288,7 @@ type BillingCreditBalance struct {
 	UpdatedAt    time.Time
 	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 }
 
@@ -302,7 +302,7 @@ type BillingCreditBlock struct {
 	CreatedAt           time.Time
 	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 }
 
@@ -310,7 +310,7 @@ type BillingCreditBlock struct {
 type BillingCreditSpendLimit struct {
 	ID       uuid.UUID
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 	CreditTypeID    uuid.UUID
 	// Caller-supplied principal string whose spend is capped by this row. Opaque to OpenRails.
@@ -344,7 +344,7 @@ type BillingCreditTransaction struct {
 	UpdatedAt        time.Time
 	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 }
 
@@ -365,7 +365,7 @@ type BillingCreditWindow struct {
 	ID uuid.UUID
 	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 	CreditTypeID    uuid.UUID
 	// Total reserved for this window (open + refills). Reflected in credit_balances.held_balance while status=open.
@@ -397,7 +397,7 @@ type BillingEntitlement struct {
 	TenantSubjectID uuid.UUID
 }
 
-// Stripe-shaped first-class entitlement feature definitions (issue #245). lookup_key is the stable value carried in AuthKit JWT entitlements and host-app checks. The internal billing.entitlements window ledger remains the source of truth for active access.
+// Stripe-shaped first-class entitlement feature definitions (issue #245). lookup_key is the stable value carried in AuthKit JWT entitlements and host-app checks. The internal openrails.entitlements window ledger remains the source of truth for active access.
 type BillingEntitlementFeature struct {
 	ID        uuid.UUID
 	TenantID  uuid.UUID
@@ -409,11 +409,11 @@ type BillingEntitlementFeature struct {
 	UpdatedAt time.Time
 }
 
-// Monthly itemized statements (issue #303). Line items rolled up from billing.usage_events; money movements from the credit ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.
+// Monthly itemized statements (issue #303). Line items rolled up from openrails.usage_events; money movements from the credit ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.
 type BillingInvoice struct {
 	ID       uuid.UUID
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 	CreditTypeID    uuid.UUID
 	Currency        string
@@ -456,7 +456,7 @@ type BillingNotificationQueue struct {
 	CreatedAt time.Time
 	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 }
 
@@ -485,7 +485,7 @@ type BillingPayment struct {
 	CardLast4                *string
 	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 }
 
@@ -493,7 +493,7 @@ type BillingPayment struct {
 type BillingPaymentBlocklist struct {
 	ID       uuid.UUID
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID *uuid.UUID
 	Kind            string
 	Value           string
@@ -519,7 +519,7 @@ type BillingPaymentMethod struct {
 	UpdatedAt            time.Time
 	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 }
 
@@ -580,7 +580,7 @@ type BillingProcessorCustomer struct {
 	UpdatedAt  time.Time
 	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 }
 
@@ -619,7 +619,7 @@ type BillingProductAccessGrant struct {
 	RevokeReason *string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
-	// OpenRails payable tenant subject for this row (#317). Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 }
 
@@ -765,12 +765,12 @@ type BillingSubscription struct {
 	GatewayResponse          []byte
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
-	// Denormalized from billing.products.tier_group (kept in sync by trigger trg_subscriptions_set_tier_group). Backs uq_subscriptions_user_tier_group_active, which enforces one active/pending subscription per (user, tier group).
+	// Denormalized from openrails.products.tier_group (kept in sync by trigger trg_subscriptions_set_tier_group). Backs uq_subscriptions_user_tier_group_active, which enforces one active/pending subscription per (user, tier group).
 	TierGroup           *string
 	DeletionScheduledAt *time.Time
 	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 }
 
@@ -873,7 +873,7 @@ type BillingTenantSubject struct {
 type BillingTierPolicy struct {
 	ID       uuid.UUID
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 	Tier            string
 	Policy          []byte
@@ -886,7 +886,7 @@ type BillingTierPolicy struct {
 type BillingUsageEvent struct {
 	ID       uuid.UUID
 	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 	// Caller-supplied principal string (e.g. a username slug) that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.
 	Actor string

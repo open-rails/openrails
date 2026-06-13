@@ -41,7 +41,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_blocks')").
 		Scan(&exists))
 	if !exists {
-		t.Skip("billing.credit_blocks not found; run migrations before integration tests")
+		t.Skip("openrails.credit_blocks not found; run migrations before integration tests")
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -172,15 +172,15 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", paymentMethodID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", creditTypeID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_balances WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_types WHERE id = $1", creditTypeID)
 	})
 
 	// Stub NMI direct post endpoint for AttemptManualRebill.
@@ -216,7 +216,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM billing.credit_transactions
+		`SELECT count(*) FROM openrails.credit_transactions
 		 WHERE tenant_subject_id = $1 AND credit_type_id = $2
 		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'`,
 		tenantSubjectID, creditTypeID).Scan(&depositCount))
@@ -297,7 +297,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		`{"subscription_id":%q,"period_end":%q,"processor":"mobius","order_reference":%q,"attempt":0}`,
 		subID, periodEnd.Format(time.RFC3339), orderRef)
 	_, err = pool.Exec(ctx, `
-		INSERT INTO billing.provider_intents
+		INSERT INTO openrails.provider_intents
 		  (provider, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence)
 		VALUES ('mobius', $1, $2, $3, $4, 'succeeded', 'system', now(), $5)`,
 		intents.TypeManualRebill, subID, payloadJSON,
@@ -306,12 +306,12 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.provider_intents WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", paymentMethodID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	// Gateway that REFUSES sales: any charge attempt fails the test premise.
@@ -357,7 +357,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 
 	var paymentCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM billing.payments WHERE subscription_id = $1 AND transaction_id = $2",
+		"SELECT count(*) FROM openrails.payments WHERE subscription_id = $1 AND transaction_id = $2",
 		subID, durableTxn).Scan(&paymentCount))
 	assert.Equal(t, 1, paymentCount, "repair persisted the durable charge")
 }

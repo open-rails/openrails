@@ -10,7 +10,7 @@ import (
 
 // NOTE (schema drift, found during the sqlc migration): the bun-era AG checks
 // referenced admin_grants.entitlement / granted_at / expires_at / revoked_at,
-// none of which exist in billing.admin_grants (it has price_id, granted_by,
+// none of which exist in openrails.admin_grants (it has price_id, granted_by,
 // reason, duration_days, created_at). The old AG-1/AG-3/AG-4 SQL could never
 // have executed. AG-1 and AG-4 are adapted to the real schema (grant expiry is
 // derived from created_at + duration_days); AG-3 (grant-level revocation) has

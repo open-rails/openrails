@@ -1,15 +1,15 @@
--- billing.usage_events: append-only metered usage (#289), idempotent on
+-- openrails.usage_events: append-only metered usage (#289), idempotent on
 -- (tenant, payer, event_type, source, source_id).
 
 -- name: InsertUsageEvent :exec
-INSERT INTO billing.usage_events (
+INSERT INTO openrails.usage_events (
     id, tenant_id, tenant_subject_id, actor, resource, credit_type_id,
     event_type, dimensions, amount, source, source_id,
     credit_transaction_id, metadata, occurred_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $9, $10, $11, $12, $13, $14, $15);
 
 -- name: InsertUsageEventIfAbsent :exec
-INSERT INTO billing.usage_events (
+INSERT INTO openrails.usage_events (
     id, tenant_id, tenant_subject_id, actor, resource, credit_type_id,
     event_type, dimensions, amount, source, source_id,
     credit_transaction_id, metadata, occurred_at, created_at
@@ -17,7 +17,7 @@ INSERT INTO billing.usage_events (
 ON CONFLICT (tenant_id, tenant_subject_id, event_type, source, source_id) DO NOTHING;
 
 -- name: GetUsageEventByCoords :one
-SELECT * FROM billing.usage_events
+SELECT * FROM openrails.usage_events
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND event_type = $3
   AND source = $4 AND source_id = $5
 LIMIT 1;
@@ -27,7 +27,7 @@ LIMIT 1;
 SELECT event_type,
        COALESCE(SUM(amount), 0)::bigint AS total_amount,
        COUNT(*)::bigint AS event_count
-FROM billing.usage_events
+FROM openrails.usage_events
 WHERE tenant_id = $1 AND tenant_subject_id = $2
   AND (sqlc.narg(credit_type_id)::uuid IS NULL OR credit_type_id = sqlc.narg(credit_type_id)::uuid)
   AND occurred_at >= sqlc.arg(from_at)::timestamptz
@@ -39,7 +39,7 @@ GROUP BY event_type;
 SELECT ue.event_type,
        d.key::text AS key,
        COALESCE(SUM((d.value)::bigint), 0)::bigint AS total
-FROM billing.usage_events ue
+FROM openrails.usage_events ue
 CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d
 WHERE ue.tenant_id = $1 AND ue.tenant_subject_id = $2
   AND (sqlc.narg(credit_type_id)::uuid IS NULL OR ue.credit_type_id = sqlc.narg(credit_type_id)::uuid)
@@ -59,7 +59,7 @@ SELECT COALESCE(CASE sqlc.arg(group_by)::text
        END, '')::text AS key,
        COUNT(*)::bigint AS event_count,
        COALESCE(SUM(ue.amount), 0)::bigint AS total_amount
-FROM billing.usage_events ue
+FROM openrails.usage_events ue
 WHERE ue.tenant_id = $1 AND ue.tenant_subject_id = $2
   AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
   AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
@@ -73,7 +73,7 @@ ORDER BY total_amount DESC;
 -- rename as a 10x revenue under-report.
 SELECT to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')::text AS date,
        COALESCE(SUM(ue.amount), 0)::bigint AS amount_micros
-FROM billing.usage_events ue
+FROM openrails.usage_events ue
 WHERE ue.tenant_id = $1 AND ue.resource = $2
   AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
   AND ue.occurred_at < sqlc.arg(to_at)::timestamptz

@@ -30,7 +30,7 @@ import (
 
 const (
 	QueueBilling = "billing"
-	KindDunning  = "billing.dunning"
+	KindDunning  = "openrails.dunning"
 
 	dunningAttemptLease = 15 * time.Minute
 )

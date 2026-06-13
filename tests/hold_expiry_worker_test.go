@@ -30,7 +30,7 @@ func (suite *TestContainerSuite) createTestCreditType(name string) *models.Credi
 		CreatedAt:     now,
 	}
 	_, err := suite.Pool.Exec(context.Background(), `
-		INSERT INTO billing.credit_types (id, name, display_name, unit, decimal_places, is_active, created_at)
+		INSERT INTO openrails.credit_types (id, name, display_name, unit, decimal_places, is_active, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		ct.ID, ct.Name, ct.DisplayName, ct.Unit, ct.DecimalPlaces, ct.IsActive, ct.CreatedAt)
 	if err != nil {
@@ -54,7 +54,7 @@ func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTy
 		UpdatedAt:       now,
 	}
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO billing.credit_balances (id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at)
+		INSERT INTO openrails.credit_balances (id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		bal.ID, bal.TenantSubjectID, bal.CreditTypeID, bal.Balance, bal.HeldBalance, bal.CreatedAt, bal.UpdatedAt)
 	if err != nil {
@@ -64,7 +64,7 @@ func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTy
 }
 
 // createTestCreditHold creates a credit hold for testing.
-// Holds are stored as billing.credit_transactions rows with transaction_type='hold'.
+// Holds are stored as openrails.credit_transactions rows with transaction_type='hold'.
 func (suite *TestContainerSuite) createTestCreditHold(userID string, creditTypeID uuid.UUID, amount int64, status string, expiresAt time.Time) *models.CreditTransaction {
 	ctx := context.Background()
 	now := suite.GetClock().Now()
@@ -90,7 +90,7 @@ func (suite *TestContainerSuite) createTestCreditHold(userID string, creditTypeI
 		UpdatedAt:       now,
 	}
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO billing.credit_transactions (
+		INSERT INTO openrails.credit_transactions (
 			id, tenant_subject_id, actor, credit_type_id, amount, balance_after,
 			transaction_type, status, authorized_amount, captured_amount,
 			source, source_id, expires_at, description, created_at, updated_at
@@ -124,7 +124,7 @@ func scanCreditTransaction(row interface{ Scan(...any) error }) (*models.CreditT
 // getCreditHold retrieves a credit hold by ID
 func (suite *TestContainerSuite) getCreditHold(id uuid.UUID) *models.CreditTransaction {
 	row := suite.Pool.QueryRow(context.Background(),
-		"SELECT "+creditTransactionCols+" FROM billing.credit_transactions WHERE id = $1", id)
+		"SELECT "+creditTransactionCols+" FROM openrails.credit_transactions WHERE id = $1", id)
 	hold, err := scanCreditTransaction(row)
 	if err != nil {
 		panic(err)
@@ -137,7 +137,7 @@ func (suite *TestContainerSuite) getCreditBalance(id uuid.UUID) *models.CreditBa
 	bal := new(models.CreditBalance)
 	err := suite.Pool.QueryRow(context.Background(), `
 		SELECT id, tenant_id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at
-		FROM billing.credit_balances WHERE id = $1`, id).
+		FROM openrails.credit_balances WHERE id = $1`, id).
 		Scan(&bal.ID, &bal.TenantID, &bal.TenantSubjectID, &bal.CreditTypeID,
 			&bal.Balance, &bal.HeldBalance, &bal.CreatedAt, &bal.UpdatedAt)
 	if err != nil {

@@ -147,7 +147,7 @@ func (s *Service) applyLatestAudit(ctx context.Context, id tenant.ID, st *Tenant
 	var created time.Time
 	err := s.pool.QueryRow(ctx, `
 		SELECT action, COALESCE(actor,''), COALESCE(detail,''), created_at
-		  FROM billing.tenant_credential_audit
+		  FROM openrails.tenant_credential_audit
 		 WHERE tenant_id = $1::uuid AND name = $2
 		 ORDER BY created_at DESC
 		 LIMIT 1

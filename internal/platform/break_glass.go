@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/db"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -49,17 +49,17 @@ func (g BreakGlassGrant) Active(now time.Time) bool {
 
 // BreakGlass is the time-boxed break-glass elevation service (issue #226). Every
 // grant requires a justification and an expiry, is persisted to
-// billing.platform_break_glass, mirrored into the platform audit log, and emits
+// openrails.platform_break_glass, mirrored into the platform audit log, and emits
 // a structured ALERT event (real paging is infra). It is gated upstream by the
 // platform-superadmin permission.
 type BreakGlass struct {
-	pool  *pgxpool.Pool
+	pool  *db.Pool
 	audit *AuditLog
 	now   func() time.Time
 }
 
 // NewBreakGlass builds the break-glass service. pool and audit are required.
-func NewBreakGlass(pool *pgxpool.Pool, audit *AuditLog) (*BreakGlass, error) {
+func NewBreakGlass(pool *db.Pool, audit *AuditLog) (*BreakGlass, error) {
 	if pool == nil {
 		return nil, errors.New("platform: break-glass requires a pgx pool")
 	}
@@ -116,7 +116,7 @@ func (b *BreakGlass) Grant(ctx context.Context, req GrantRequest) (*BreakGlassGr
 	var g BreakGlassGrant
 	var target string
 	err := b.pool.QueryRow(ctx, `
-		INSERT INTO billing.platform_break_glass
+		INSERT INTO openrails.platform_break_glass
 			(actor_user_id, target_tenant_id, justification, granted_at, expires_at)
 		VALUES ($1, $2::uuid, $3, $4, $5)
 		RETURNING id::text, actor_user_id, COALESCE(target_tenant_id::text,''),
@@ -166,7 +166,7 @@ func (b *BreakGlass) Revoke(ctx context.Context, id, actorUserID, actorTenant st
 		return ErrBreakGlassNotFound
 	}
 	ct, err := b.pool.Exec(ctx, `
-		UPDATE billing.platform_break_glass
+		UPDATE openrails.platform_break_glass
 		   SET revoked_at = current_timestamp
 		 WHERE id = $1::uuid AND revoked_at IS NULL
 	`, id)
@@ -176,7 +176,7 @@ func (b *BreakGlass) Revoke(ctx context.Context, id, actorUserID, actorTenant st
 	if ct.RowsAffected() == 0 {
 		// Either it does not exist or it was already revoked; verify existence.
 		var exists bool
-		if e := b.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing.platform_break_glass WHERE id=$1::uuid)`, id).Scan(&exists); e != nil {
+		if e := b.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM openrails.platform_break_glass WHERE id=$1::uuid)`, id).Scan(&exists); e != nil {
 			return fmt.Errorf("platform: check break-glass existence: %w", e)
 		}
 		if !exists {
@@ -212,14 +212,14 @@ func (b *BreakGlass) IsActive(ctx context.Context, actorUserID string, targetTen
 	if targetTenant != nil {
 		err = b.pool.QueryRow(ctx, `
 			SELECT EXISTS(
-				SELECT 1 FROM billing.platform_break_glass
+				SELECT 1 FROM openrails.platform_break_glass
 				 WHERE actor_user_id = $1 AND revoked_at IS NULL AND expires_at > $2
 				   AND (target_tenant_id IS NULL OR target_tenant_id = $3::uuid)
 			)`, actor, now, targetTenant.String()).Scan(&exists)
 	} else {
 		err = b.pool.QueryRow(ctx, `
 			SELECT EXISTS(
-				SELECT 1 FROM billing.platform_break_glass
+				SELECT 1 FROM openrails.platform_break_glass
 				 WHERE actor_user_id = $1 AND revoked_at IS NULL AND expires_at > $2
 			)`, actor, now).Scan(&exists)
 	}
@@ -238,7 +238,7 @@ func (b *BreakGlass) ListActive(ctx context.Context) ([]BreakGlassGrant, error) 
 	rows, err := b.pool.Query(ctx, `
 		SELECT id::text, actor_user_id, COALESCE(target_tenant_id::text,''),
 		       justification, granted_at, expires_at, revoked_at
-		  FROM billing.platform_break_glass
+		  FROM openrails.platform_break_glass
 		 WHERE revoked_at IS NULL AND expires_at > $1
 		 ORDER BY granted_at DESC
 	`, now)

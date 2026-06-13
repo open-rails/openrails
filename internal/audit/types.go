@@ -169,7 +169,7 @@ func (c *Checker) registerAllChecks() {
 		// Admin grant checks (cross-table business logic)
 		// =====================================================================
 		// AG-3 (revoked admin grant with active entitlement) was removed during
-		// the sqlc migration: billing.admin_grants has no revoked_at column, so
+		// the sqlc migration: openrails.admin_grants has no revoked_at column, so
 		// the bun-era check could never have executed.
 		&CheckAdminGrantMissingEntitlements{},      // AG-1
 		&CheckOrphanAdminEntitlements{},            // AG-2

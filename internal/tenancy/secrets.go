@@ -1,9 +1,9 @@
 // Package tenancy implements tenant provisioning, lifecycle, per-tenant processor
 // credentials, and webhook routing for OpenRails' multi-tenant platform (issue
-// #225). It builds on the #223 tenant primitive (pkg/tenant + billing.tenants)
+// #225). It builds on the #223 tenant primitive (pkg/tenant + openrails.tenants)
 // and the #224 in-process AuthKit control plane (internal/controlplane): the
 // lifecycle service mints/links operator tenants and service tokens through control-plane core
-// calls and records tenant directory state directly in billing.* (OpenRails-owned
+// calls and records tenant directory state directly in openrails.* (OpenRails-owned
 // control-plane state).
 package tenancy
 
@@ -131,7 +131,7 @@ type Secret struct {
 // Two implementations ship:
 //
 //   - dbSecretStore / memSecretStore: build and run WITHOUT a live Vault (the
-//     dev / self-hosted default). DB-backed persists to billing.tenant_secrets.
+//     dev / self-hosted default). DB-backed persists to openrails.tenant_secrets.
 //   - vaultSecretStore: a documented adapter that resolves the SAME (tenant,
 //     name) addressing to a tenant-scoped Vault KV path. It is a stub today and
 //     is wired in managed deployments without any schema or caller change.

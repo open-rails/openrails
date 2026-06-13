@@ -27,7 +27,7 @@ func (c *ControlPlane) TouchTenantSubject(ctx context.Context, tenantID tenant.I
 	}
 	var id uuid.UUID
 	err := c.pool.QueryRow(ctx, `
-		INSERT INTO billing.tenant_subjects (tenant_id, issuer, subject)
+		INSERT INTO openrails.tenant_subjects (tenant_id, issuer, subject)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (tenant_id, issuer, subject) DO UPDATE
 		   SET last_seen_at = now()

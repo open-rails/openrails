@@ -532,7 +532,7 @@ func resolveChargeOwner(
 	return "", nil
 }
 
-// ensureChargePayment inserts a billing.payments row for a charge if one does
+// ensureChargePayment inserts a openrails.payments row for a charge if one does
 // not already exist for (stripe, transaction_id). Returns true when a new row
 // was created. The card snapshot is set on insert; SnapshotPaymentCard later
 // fills any sibling rows (e.g. matched by payment_intent).

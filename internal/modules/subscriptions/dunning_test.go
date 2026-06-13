@@ -54,7 +54,7 @@ func TestDunningRetryOffsets(t *testing.T) {
 		{"4d: first cycle with retries (window 3d fits inside the cycle)", 4, weekly, 3, 3 * day},
 
 		// Boundaries of the monthly tier: the 14d window must fit well inside
-		// the cycle; 28d covers 4-weekly "monthly" billing.
+		// the cycle; 28d covers 4-weekly "monthly" openrails.
 		{"27d: weekly tier (the monthly 14d window would not fit well)", 27, weekly, 3, 3 * day},
 		{"28d: monthly tier starts (4-weekly billing)", 28, monthly, 5, 14 * day},
 

@@ -1,12 +1,12 @@
--- billing.linked_wallets.
+-- openrails.linked_wallets.
 
 -- name: GetLinkedWalletByTenantSubjectAndChain :one
-SELECT * FROM billing.linked_wallets lw
+SELECT * FROM openrails.linked_wallets lw
 WHERE lw.tenant_subject_id = $1 AND lw.chain = $2
 LIMIT 1;
 
 -- name: UpsertLinkedWallet :one
-INSERT INTO billing.linked_wallets (
+INSERT INTO openrails.linked_wallets (
     id, tenant_id, tenant_subject_id, chain, address, verification_provider,
     verified_at, display_name, metadata, created_at, updated_at
 ) VALUES (
@@ -27,5 +27,5 @@ ON CONFLICT (tenant_id, tenant_subject_id, chain) DO UPDATE SET
 RETURNING *;
 
 -- name: DeleteLinkedWalletByTenantSubjectAndChain :execrows
-DELETE FROM billing.linked_wallets
+DELETE FROM openrails.linked_wallets
 WHERE tenant_subject_id = $1 AND chain = $2;

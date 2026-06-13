@@ -15,7 +15,7 @@ import (
 const claimDueProviderIntents = `-- name: ClaimDueProviderIntents :many
 
 WITH due AS (
-    SELECT id FROM billing.provider_intents
+    SELECT id FROM openrails.provider_intents
     WHERE (
             (status IN ('pending', 'failed_retryable') AND next_attempt_at <= $2::timestamptz)
             OR (status = 'in_flight' AND claimed_until IS NOT NULL AND claimed_until <= $2::timestamptz)
@@ -25,7 +25,7 @@ WITH due AS (
     LIMIT $3
     FOR UPDATE SKIP LOCKED
 )
-UPDATE billing.provider_intents pi
+UPDATE openrails.provider_intents pi
 SET status = 'in_flight',
     claimed_until = $1::timestamptz,
     attempts = pi.attempts + 1,
@@ -94,7 +94,7 @@ func (q *Queries) ClaimDueProviderIntents(ctx context.Context, arg ClaimDueProvi
 
 const claimDueVerifyProviderIntents = `-- name: ClaimDueVerifyProviderIntents :many
 WITH due AS (
-    SELECT id FROM billing.provider_intents
+    SELECT id FROM openrails.provider_intents
     WHERE status = 'unknown_needs_verify'
       AND next_attempt_at <= $2::timestamptz
       AND (claimed_until IS NULL OR claimed_until <= $2::timestamptz)
@@ -102,7 +102,7 @@ WITH due AS (
     LIMIT $3
     FOR UPDATE SKIP LOCKED
 )
-UPDATE billing.provider_intents pi
+UPDATE openrails.provider_intents pi
 SET claimed_until = $1::timestamptz,
     updated_at = now()
 FROM due
@@ -163,7 +163,7 @@ func (q *Queries) ClaimDueVerifyProviderIntents(ctx context.Context, arg ClaimDu
 }
 
 const claimProviderIntentByID = `-- name: ClaimProviderIntentByID :one
-UPDATE billing.provider_intents pi
+UPDATE openrails.provider_intents pi
 SET status = 'in_flight',
     claimed_until = $1::timestamptz,
     attempts = pi.attempts + 1,
@@ -220,7 +220,7 @@ func (q *Queries) ClaimProviderIntentByID(ctx context.Context, arg ClaimProvider
 }
 
 const countProviderIntents = `-- name: CountProviderIntents :one
-SELECT count(*) FROM billing.provider_intents
+SELECT count(*) FROM openrails.provider_intents
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR provider = $2::text)
   AND ($3::text IS NULL OR intent_type = $3::text)
@@ -249,7 +249,7 @@ func (q *Queries) CountProviderIntents(ctx context.Context, arg CountProviderInt
 const enqueueProviderIntent = `-- name: EnqueueProviderIntent :one
 
 
-INSERT INTO billing.provider_intents (
+INSERT INTO openrails.provider_intents (
     tenant_id, provider, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
     expires_at, account_fingerprint
@@ -263,40 +263,40 @@ INSERT INTO billing.provider_intents (
 )
 ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET
     status = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN 'pending'
-        ELSE billing.provider_intents.status
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN 'pending'
+        ELSE openrails.provider_intents.status
     END,
     next_attempt_at = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.next_attempt_at
-        ELSE billing.provider_intents.next_attempt_at
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.next_attempt_at
+        ELSE openrails.provider_intents.next_attempt_at
     END,
     payload = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.payload
-        ELSE billing.provider_intents.payload
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.payload
+        ELSE openrails.provider_intents.payload
     END,
     account_fingerprint = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.account_fingerprint
-        ELSE billing.provider_intents.account_fingerprint
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.account_fingerprint
+        ELSE openrails.provider_intents.account_fingerprint
     END,
     origin = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin
-        ELSE billing.provider_intents.origin
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin
+        ELSE openrails.provider_intents.origin
     END,
     origin_reason = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin_reason
-        ELSE billing.provider_intents.origin_reason
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin_reason
+        ELSE openrails.provider_intents.origin_reason
     END,
     expires_at = CASE
-        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.expires_at
-        ELSE billing.provider_intents.expires_at
+        WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.expires_at
+        ELSE openrails.provider_intents.expires_at
     END,
     attempts = CASE
-        WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN 0
-        ELSE billing.provider_intents.attempts
+        WHEN openrails.provider_intents.status IN ('superseded', 'expired') THEN 0
+        ELSE openrails.provider_intents.attempts
     END,
     last_failure_reason = CASE
-        WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN NULL
-        ELSE billing.provider_intents.last_failure_reason
+        WHEN openrails.provider_intents.status IN ('superseded', 'expired') THEN NULL
+        ELSE openrails.provider_intents.last_failure_reason
     END,
     updated_at = now()
 RETURNING id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint
@@ -384,7 +384,7 @@ func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProvider
 }
 
 const expireOverdueProviderIntents = `-- name: ExpireOverdueProviderIntents :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
     claimed_until = NULL,
@@ -404,7 +404,7 @@ func (q *Queries) ExpireOverdueProviderIntents(ctx context.Context, now time.Tim
 
 const getProviderIntent = `-- name: GetProviderIntent :one
 
-SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM billing.provider_intents WHERE id = $1
+SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM openrails.provider_intents WHERE id = $1
 `
 
 // ============================================================================
@@ -441,7 +441,7 @@ func (q *Queries) GetProviderIntent(ctx context.Context, id uuid.UUID) (BillingP
 }
 
 const getProviderIntentByIdempotencyKey = `-- name: GetProviderIntentByIdempotencyKey :one
-SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM billing.provider_intents
+SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM openrails.provider_intents
 WHERE tenant_id = $1 AND idempotency_key = $2
 `
 
@@ -481,7 +481,7 @@ func (q *Queries) GetProviderIntentByIdempotencyKey(ctx context.Context, arg Get
 }
 
 const listProviderIntents = `-- name: ListProviderIntents :many
-SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM billing.provider_intents
+SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM openrails.provider_intents
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR provider = $2::text)
   AND ($3::text IS NULL OR intent_type = $3::text)
@@ -551,7 +551,7 @@ func (q *Queries) ListProviderIntents(ctx context.Context, arg ListProviderInten
 
 const listStuckProviderIntents = `-- name: ListStuckProviderIntents :many
 
-SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM billing.provider_intents
+SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM openrails.provider_intents
 WHERE (status IN ('pending', 'failed_retryable') AND created_at <= $1::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $2::timestamptz)
 ORDER BY created_at, id
@@ -615,7 +615,7 @@ func (q *Queries) ListStuckProviderIntents(ctx context.Context, arg ListStuckPro
 }
 
 const markProviderIntentFailedRetryable = `-- name: MarkProviderIntentFailedRetryable :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'failed_retryable',
     next_attempt_at = $1::timestamptz,
     last_failure_reason = $2,
@@ -639,7 +639,7 @@ func (q *Queries) MarkProviderIntentFailedRetryable(ctx context.Context, arg Mar
 }
 
 const markProviderIntentFailedTerminal = `-- name: MarkProviderIntentFailedTerminal :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'failed_terminal',
     last_failure_reason = $1,
     result_evidence = $2,
@@ -664,7 +664,7 @@ func (q *Queries) MarkProviderIntentFailedTerminal(ctx context.Context, arg Mark
 
 const markProviderIntentSucceeded = `-- name: MarkProviderIntentSucceeded :execrows
 
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'succeeded',
     executed_at = $1::timestamptz,
     result_evidence = $2,
@@ -692,7 +692,7 @@ func (q *Queries) MarkProviderIntentSucceeded(ctx context.Context, arg MarkProvi
 }
 
 const markProviderIntentSuperseded = `-- name: MarkProviderIntentSuperseded :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'superseded',
     last_failure_reason = $1,
     claimed_until = NULL,
@@ -714,7 +714,7 @@ func (q *Queries) MarkProviderIntentSuperseded(ctx context.Context, arg MarkProv
 }
 
 const markProviderIntentUnknown = `-- name: MarkProviderIntentUnknown :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'unknown_needs_verify',
     next_attempt_at = $1::timestamptz,
     last_failure_reason = $2,
@@ -740,7 +740,7 @@ func (q *Queries) MarkProviderIntentUnknown(ctx context.Context, arg MarkProvide
 }
 
 const parkProviderIntent = `-- name: ParkProviderIntent :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'pending',
     attempts = GREATEST(attempts - 1, 0),
     next_attempt_at = $1::timestamptz,
@@ -769,7 +769,7 @@ func (q *Queries) ParkProviderIntent(ctx context.Context, arg ParkProviderIntent
 }
 
 const refingerprintProviderIntents = `-- name: RefingerprintProviderIntents :execrows
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET account_fingerprint = $1,
     updated_at = now()
 WHERE provider = $2
@@ -797,7 +797,7 @@ func (q *Queries) RefingerprintProviderIntents(ctx context.Context, arg Refinger
 
 const supersedeProviderIntentsBySubject = `-- name: SupersedeProviderIntentsBySubject :execrows
 
-UPDATE billing.provider_intents
+UPDATE openrails.provider_intents
 SET status = 'superseded',
     last_failure_reason = $1,
     updated_at = now()

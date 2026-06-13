@@ -41,7 +41,7 @@ const (
 // has access to a specific PRODUCT (issue #250). It answers "does this user own
 // product X?" and powers purchased-library views without walking payment history.
 //
-// It is DISTINCT from billing.entitlements (feature access). A product may carry
+// It is DISTINCT from openrails.entitlements (feature access). A product may carry
 // EntitlementsSpec and/or CreditsSpec AND produce a grant.
 type ProductAccessGrant struct {
 	ID uuid.UUID `json:"id"`
@@ -52,7 +52,7 @@ type ProductAccessGrant struct {
 
 	// TenantSubjectID is the OpenRails payable tenant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
-	// it before user_id is dropped. Join billing.tenant_subjects for issuer/subject.
+	// it before user_id is dropped. Join openrails.tenant_subjects for issuer/subject.
 	TenantSubjectID uuid.UUID `json:"tenant_subject_id,omitempty"`
 	ProductID       uuid.UUID `json:"product_id"`
 

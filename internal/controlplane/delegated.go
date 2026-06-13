@@ -22,7 +22,7 @@ import (
 // token's `openrails:self:*` permission grants.
 type ResolvedDelegated struct {
 	// Tenant is the resolved tenant's slug, sourced from the issuer registry
-	// (billing.tenants via the validated `iss`). Delegated tokens carry NO
+	// (openrails.tenants via the validated `iss`). Delegated tokens carry NO
 	// tenant claims (authkit v0.23.0 issuer-only profile); the slug is
 	// receiver-side directory data, identical to TenantSlug.
 	Tenant string

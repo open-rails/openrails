@@ -113,7 +113,7 @@ func TestLoad_RejectsRemovedControlPlaneEnabledKnob(t *testing.T) {
 auth:
   control_plane:
     enabled: `+val+`
-    issuer: "https://billing.example.com"
+    issuer: "https://openrails.example.com"
 `), 0o600))
 
 		_, err := Load(cfgPath)
@@ -644,10 +644,10 @@ func TestDBConfig_SchemaName(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{"empty defaults to billing", "", "billing"},
+		{"empty defaults to openrails", "", "openrails"},
 		{"explicit value preserved", "host_billing", "host_billing"},
 		{"trimmed", "  custom  ", "custom"},
-		{"lower-cased", "Billing", "billing"},
+		{"lower-cased", "Openrails", "openrails"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -655,13 +655,13 @@ func TestDBConfig_SchemaName(t *testing.T) {
 		})
 	}
 
-	t.Run("nil receiver defaults to billing", func(t *testing.T) {
+	t.Run("nil receiver defaults to openrails", func(t *testing.T) {
 		var c *DBConfig
-		assert.Equal(t, "billing", c.SchemaName())
+		assert.Equal(t, "openrails", c.SchemaName())
 	})
 
-	// The exported default constant is the historical schema.
-	assert.Equal(t, "billing", DefaultSchema)
+	// The exported default constant is the OpenRails schema (#471).
+	assert.Equal(t, "openrails", DefaultSchema)
 }
 
 // TestValidateSchema enforces that only safe SQL identifiers are accepted (#165).
@@ -677,12 +677,12 @@ func TestValidateSchema(t *testing.T) {
 }
 
 // TestLoad_DBSchemaEnv is the #165 regression test: DB_SCHEMA flows through config
-// load, is normalized, and (default) resolves to billing. A custom value is honored.
+// load, is normalized, and (default) resolves to openrails. A custom value is honored.
 func TestLoad_DBSchemaEnv(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
 		cfg, err := Load("nonexistent-config.yaml")
 		assert.NoError(t, err)
-		assert.Equal(t, "billing", cfg.DB.SchemaName())
+		assert.Equal(t, "openrails", cfg.DB.SchemaName())
 	})
 
 	t.Run("custom honored and normalized", func(t *testing.T) {

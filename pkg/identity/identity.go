@@ -1,5 +1,5 @@
 // Package identity provides explicit, mutually-distinct identity types for
-// OpenRails billing.
+// OpenRails openrails.
 package identity
 
 import (
@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// TenantSubjectID identifies a billing.tenant_subjects row: the OpenRails
+// TenantSubjectID identifies a openrails.tenant_subjects row: the OpenRails
 // payable subject whose balance, invoices, reservations, and entitlements are
 // recorded. It is distinct from any actor or operator identity so the compiler
 // rejects passing the wrong one.

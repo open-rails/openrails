@@ -46,13 +46,13 @@ func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid t
 	t.Helper()
 	require.NoError(t, appDB.TenantTx(tenant.WithID(ctx, tid), func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO billing.tenants (id, slug, name, status) VALUES ($1, $2, $2, 'active') ON CONFLICT (id) DO NOTHING`,
+			`INSERT INTO openrails.tenants (id, slug, name, status) VALUES ($1, $2, $2, 'active') ON CONFLICT (id) DO NOTHING`,
 			tid.UUID(), "t-"+tid.String()[:8],
 		); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx,
-			`INSERT INTO billing.products (id, tenant_id, slug, display_name) VALUES ($1, $2, $3, $3)`,
+			`INSERT INTO openrails.products (id, tenant_id, slug, display_name) VALUES ($1, $2, $3, $3)`,
 			productID, tid.UUID(), slug,
 		)
 		return err

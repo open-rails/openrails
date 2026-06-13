@@ -34,7 +34,7 @@ func authzEnv(t *testing.T) (*billingservice.Service, *credits.CreditsService, i
 		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_account_settings')",
 	).Scan(&ok))
 	if !ok {
-		t.Skip("billing.credit_account_settings missing; run migration 043")
+		t.Skip("openrails.credit_account_settings missing; run migration 043")
 	}
 
 	rt := &app.Runtime{
@@ -57,11 +57,11 @@ func authzEnv(t *testing.T) (*billingservice.Service, *credits.CreditsService, i
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_account_settings WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_account_settings WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_blocks WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_transactions WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_balances WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_types WHERE id = $1", ctID)
 	})
 	return svc, credits.NewCreditsService(dbi), payer, ctName, ctx
 }

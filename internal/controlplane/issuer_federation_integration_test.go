@@ -35,7 +35,7 @@ import (
 
 const fedSchemaDDL = `
 CREATE SCHEMA IF NOT EXISTS billing;
-CREATE TABLE IF NOT EXISTS billing.tenants (
+CREATE TABLE IF NOT EXISTS openrails.tenants (
     id               UUID PRIMARY KEY,
     slug             TEXT NOT NULL,
     name             TEXT NOT NULL,
@@ -46,9 +46,9 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at       TIMESTAMPTZ
 );
-CREATE TABLE IF NOT EXISTS billing.tenant_delegated_issuers (
+CREATE TABLE IF NOT EXISTS openrails.tenant_delegated_issuers (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id   UUID NOT NULL REFERENCES billing.tenants (id) ON DELETE CASCADE,
+    tenant_id   UUID NOT NULL REFERENCES openrails.tenants (id) ON DELETE CASCADE,
     issuer      TEXT NOT NULL,
     jwks_uri    TEXT NOT NULL,
     audiences   TEXT[] NOT NULL DEFAULT '{}',
@@ -57,9 +57,9 @@ CREATE TABLE IF NOT EXISTS billing.tenant_delegated_issuers (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     CONSTRAINT uq_fed_issuer UNIQUE (issuer)
 );
-CREATE TABLE IF NOT EXISTS billing.tenant_subjects (
+CREATE TABLE IF NOT EXISTS openrails.tenant_subjects (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id    UUID NOT NULL REFERENCES billing.tenants (id) ON DELETE CASCADE,
+    tenant_id    UUID NOT NULL REFERENCES openrails.tenants (id) ON DELETE CASCADE,
     issuer       TEXT NOT NULL,
     subject      TEXT NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -95,7 +95,7 @@ func newFedTestPool(t *testing.T) *pgxpool.Pool {
 		_, err = pool.Exec(ctx, fedSchemaDDL)
 		require.NoError(t, err)
 		_, err = pool.Exec(ctx, `
-			INSERT INTO billing.tenants (id, slug, name, authkit_tenant_slug) VALUES
+			INSERT INTO openrails.tenants (id, slug, name, authkit_tenant_slug) VALUES
 			  ($1, 'tenant-a', 'Tenant A', 'org-a'),
 			  ($2, 'tenant-b', 'Tenant B', 'org-b')
 			ON CONFLICT (id) DO NOTHING
@@ -125,7 +125,7 @@ func newFedTestPool(t *testing.T) *pgxpool.Pool {
 	_, err = pool.Exec(ctx, fedSchemaDDL)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-		INSERT INTO billing.tenants (id, slug, name, authkit_tenant_slug) VALUES
+		INSERT INTO openrails.tenants (id, slug, name, authkit_tenant_slug) VALUES
 		  ($1, 'tenant-a', 'Tenant A', 'org-a'),
 		  ($2, 'tenant-b', 'Tenant B', 'org-b')
 		ON CONFLICT (id) DO NOTHING
@@ -199,7 +199,7 @@ func mintFedWithAudience(t *testing.T, signer *jwtkit.RSASigner, issuer, sub str
 func registerIssuerRow(t *testing.T, pool *pgxpool.Pool, tid tenant.ID, issuer, jwksURI string, enabled bool) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO billing.tenant_delegated_issuers (tenant_id, issuer, jwks_uri, audiences, enabled)
+		INSERT INTO openrails.tenant_delegated_issuers (tenant_id, issuer, jwks_uri, audiences, enabled)
 		VALUES ($1, $2, $3, ARRAY['openrails'], $4)
 		ON CONFLICT (issuer) DO UPDATE SET jwks_uri = EXCLUDED.jwks_uri, audiences = EXCLUDED.audiences, enabled = EXCLUDED.enabled
 	`, tid.String(), issuer, jwksURI, enabled)
@@ -208,7 +208,7 @@ func registerIssuerRow(t *testing.T, pool *pgxpool.Pool, tid tenant.ID, issuer, 
 
 func truncateIssuers(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	_, err := pool.Exec(context.Background(), `TRUNCATE billing.tenant_delegated_issuers`)
+	_, err := pool.Exec(context.Background(), `TRUNCATE openrails.tenant_delegated_issuers`)
 	require.NoError(t, err)
 }
 
@@ -263,7 +263,7 @@ func TestTouchTenantSubjectIsIdempotentPerOIDCTuple(t *testing.T) {
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*)
-		  FROM billing.tenant_subjects
+		  FROM openrails.tenant_subjects
 		 WHERE tenant_id = $1
 		   AND subject = 'user-1'
 	`, fedTenantA.String()).Scan(&count))
@@ -310,7 +310,7 @@ func TestDelegatedTokenWithoutTenantIDResolvesEndToEnd(t *testing.T) {
 	var subjectID string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT id::text
-		  FROM billing.tenant_subjects
+		  FROM openrails.tenant_subjects
 		 WHERE tenant_id = $1 AND issuer = $2 AND subject = 'issuer-only-user'
 	`, fedTenantA.String(), iss).Scan(&subjectID))
 	require.Equal(t, subjectID, res.TenantSubjectID.String())
@@ -322,7 +322,7 @@ func TestDelegatedTokenWithoutTenantIDResolvesEndToEnd(t *testing.T) {
 
 // TestSlugRenameSemantics documents the #361 / authkit v0.23.0 rename behavior:
 // delegated tokens carry NO tenant claims, so a tenant slug rename in
-// billing.tenants is fully TRANSPARENT to in-flight tokens. The SAME token
+// openrails.tenants is fully TRANSPARENT to in-flight tokens. The SAME token
 // resolves to the SAME tenant uuid before the rename, after the rename, and
 // after the registry reload — only the reported slug changes.
 func TestSlugRenameSemantics(t *testing.T) {
@@ -344,10 +344,10 @@ func TestSlugRenameSemantics(t *testing.T) {
 
 	// Rename the tenant's slug (restore afterwards so a shared
 	// OPENRAILS_TEST_DB_DSN database is not left renamed for other tests).
-	_, err = pool.Exec(ctx, `UPDATE billing.tenants SET slug = 'tenant-a-renamed' WHERE id = $1`, fedTenantA.String())
+	_, err = pool.Exec(ctx, `UPDATE openrails.tenants SET slug = 'tenant-a-renamed' WHERE id = $1`, fedTenantA.String())
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `UPDATE billing.tenants SET slug = 'tenant-a' WHERE id = $1`, fedTenantA.String())
+		_, _ = pool.Exec(context.Background(), `UPDATE openrails.tenants SET slug = 'tenant-a' WHERE id = $1`, fedTenantA.String())
 	})
 
 	// The SAME token keeps resolving immediately after the rename — no reload
@@ -420,7 +420,7 @@ func TestFederatedServiceJWTs(t *testing.T) {
 		})
 	}
 
-	_, err = pool.Exec(ctx, `UPDATE billing.tenant_delegated_issuers SET enabled = FALSE WHERE issuer = $1`, issuer)
+	_, err = pool.Exec(ctx, `UPDATE openrails.tenant_delegated_issuers SET enabled = FALSE WHERE issuer = $1`, issuer)
 	require.NoError(t, err)
 	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
 	_, err = cp.ResolveServiceJWT(ctx, token)

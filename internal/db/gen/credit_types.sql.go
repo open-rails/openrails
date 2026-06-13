@@ -14,7 +14,7 @@ import (
 
 const createCreditType = `-- name: CreateCreditType :execrows
 
-INSERT INTO billing.credit_types (
+INSERT INTO openrails.credit_types (
     id, name, display_name, unit, decimal_places, is_active, created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
@@ -32,7 +32,7 @@ type CreateCreditTypeParams struct {
 	CreatedAt     time.Time
 }
 
-// billing.credit_types.
+// openrails.credit_types.
 func (q *Queries) CreateCreditType(ctx context.Context, arg CreateCreditTypeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createCreditType,
 		arg.ID,
@@ -50,7 +50,7 @@ func (q *Queries) CreateCreditType(ctx context.Context, arg CreateCreditTypePara
 }
 
 const getCreditTypeByID = `-- name: GetCreditTypeByID :one
-SELECT id, name, display_name, unit, decimal_places, is_active, created_at, tenant_id FROM billing.credit_types WHERE id = $1
+SELECT id, name, display_name, unit, decimal_places, is_active, created_at, tenant_id FROM openrails.credit_types WHERE id = $1
 `
 
 func (q *Queries) GetCreditTypeByID(ctx context.Context, id uuid.UUID) (BillingCreditType, error) {
@@ -70,7 +70,7 @@ func (q *Queries) GetCreditTypeByID(ctx context.Context, id uuid.UUID) (BillingC
 }
 
 const getCreditTypeByName = `-- name: GetCreditTypeByName :one
-SELECT id, name, display_name, unit, decimal_places, is_active, created_at, tenant_id FROM billing.credit_types WHERE name = $1 LIMIT 1
+SELECT id, name, display_name, unit, decimal_places, is_active, created_at, tenant_id FROM openrails.credit_types WHERE name = $1 LIMIT 1
 `
 
 func (q *Queries) GetCreditTypeByName(ctx context.Context, name string) (BillingCreditType, error) {
@@ -90,7 +90,7 @@ func (q *Queries) GetCreditTypeByName(ctx context.Context, name string) (Billing
 }
 
 const listCreditTypes = `-- name: ListCreditTypes :many
-SELECT id, name, display_name, unit, decimal_places, is_active, created_at, tenant_id FROM billing.credit_types ct
+SELECT id, name, display_name, unit, decimal_places, is_active, created_at, tenant_id FROM openrails.credit_types ct
 WHERE (NOT $1::boolean OR ct.is_active = true)
 ORDER BY ct.created_at ASC
 `
@@ -125,7 +125,7 @@ func (q *Queries) ListCreditTypes(ctx context.Context, activeOnly bool) ([]Billi
 }
 
 const updateCreditType = `-- name: UpdateCreditType :execrows
-UPDATE billing.credit_types SET
+UPDATE openrails.credit_types SET
     name = $2,
     display_name = $3,
     unit = $4,

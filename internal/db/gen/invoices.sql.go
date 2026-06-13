@@ -13,7 +13,7 @@ import (
 )
 
 const countInvoicesByPayer = `-- name: CountInvoicesByPayer :one
-SELECT count(*) FROM billing.invoices
+SELECT count(*) FROM openrails.invoices
 WHERE tenant_id = $1 AND tenant_subject_id = $2
 `
 
@@ -31,7 +31,7 @@ func (q *Queries) CountInvoicesByPayer(ctx context.Context, arg CountInvoicesByP
 
 const getInvoiceByPeriod = `-- name: GetInvoiceByPeriod :one
 
-SELECT id, tenant_id, tenant_subject_id, credit_type_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM billing.invoices
+SELECT id, tenant_id, tenant_subject_id, credit_type_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM openrails.invoices
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
   AND period_from = $4 AND period_to = $5
 LIMIT 1
@@ -45,7 +45,7 @@ type GetInvoiceByPeriodParams struct {
 	PeriodTo        time.Time
 }
 
-// billing.invoices: monthly itemized statements (#303), immutable once
+// openrails.invoices: monthly itemized statements (#303), immutable once
 // finalized; one per (tenant, payer, credit_type, period).
 func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriodParams) (BillingInvoice, error) {
 	row := q.db.QueryRow(ctx, getInvoiceByPeriod,
@@ -80,7 +80,7 @@ func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriod
 }
 
 const getInvoiceForPayer = `-- name: GetInvoiceForPayer :one
-SELECT id, tenant_id, tenant_subject_id, credit_type_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM billing.invoices
+SELECT id, tenant_id, tenant_subject_id, credit_type_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM openrails.invoices
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND id = $3
 LIMIT 1
 `
@@ -118,7 +118,7 @@ func (q *Queries) GetInvoiceForPayer(ctx context.Context, arg GetInvoiceForPayer
 }
 
 const insertInvoice = `-- name: InsertInvoice :exec
-INSERT INTO billing.invoices (
+INSERT INTO openrails.invoices (
     id, tenant_id, tenant_subject_id, credit_type_id, currency,
     period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid,
     closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at
@@ -172,8 +172,8 @@ func (q *Queries) InsertInvoice(ctx context.Context, arg InsertInvoiceParams) er
 
 const listCreditAccountPairs = `-- name: ListCreditAccountPairs :many
 SELECT b.tenant_subject_id, ct.name AS credit_type_name
-FROM billing.credit_balances b
-JOIN billing.credit_types ct ON ct.id = b.credit_type_id
+FROM openrails.credit_balances b
+JOIN openrails.credit_types ct ON ct.id = b.credit_type_id
 WHERE b.tenant_id = $1
 GROUP BY b.tenant_subject_id, ct.name
 `
@@ -206,7 +206,7 @@ func (q *Queries) ListCreditAccountPairs(ctx context.Context, tenantID uuid.UUID
 }
 
 const listInvoicesByPayer = `-- name: ListInvoicesByPayer :many
-SELECT id, tenant_id, tenant_subject_id, credit_type_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM billing.invoices
+SELECT id, tenant_id, tenant_subject_id, credit_type_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM openrails.invoices
 WHERE tenant_id = $1 AND tenant_subject_id = $2
 ORDER BY period_from DESC
 LIMIT $3::int OFFSET $4::int

@@ -13,7 +13,7 @@ import (
 )
 
 const countActiveProducts = `-- name: CountActiveProducts :one
-SELECT count(*) FROM billing.products WHERE status = 'active'
+SELECT count(*) FROM openrails.products WHERE status = 'active'
 `
 
 func (q *Queries) CountActiveProducts(ctx context.Context) (int64, error) {
@@ -24,7 +24,7 @@ func (q *Queries) CountActiveProducts(ctx context.Context) (int64, error) {
 }
 
 const countAllProducts = `-- name: CountAllProducts :one
-SELECT count(*) FROM billing.products
+SELECT count(*) FROM openrails.products
 `
 
 func (q *Queries) CountAllProducts(ctx context.Context) (int64, error) {
@@ -36,7 +36,7 @@ func (q *Queries) CountAllProducts(ctx context.Context) (int64, error) {
 
 const createProduct = `-- name: CreateProduct :execrows
 
-INSERT INTO billing.products (
+INSERT INTO openrails.products (
     id, tenant_id, slug, display_name, description, entitlements_spec,
     credits_spec, tier_group, tier_rank, status, created_at, updated_at
 ) VALUES (
@@ -67,7 +67,7 @@ type CreateProductParams struct {
 	UpdatedAt        time.Time
 }
 
-// billing.products.
+// openrails.products.
 func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createProduct,
 		arg.ID,
@@ -90,7 +90,7 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (i
 }
 
 const deleteProduct = `-- name: DeleteProduct :execrows
-DELETE FROM billing.products WHERE id = $1
+DELETE FROM openrails.products WHERE id = $1
 `
 
 func (q *Queries) DeleteProduct(ctx context.Context, id uuid.UUID) (int64, error) {
@@ -102,7 +102,7 @@ func (q *Queries) DeleteProduct(ctx context.Context, id uuid.UUID) (int64, error
 }
 
 const getProductByID = `-- name: GetProductByID :one
-SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM billing.products WHERE id = $1
+SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM openrails.products WHERE id = $1
 `
 
 func (q *Queries) GetProductByID(ctx context.Context, id uuid.UUID) (BillingProduct, error) {
@@ -126,7 +126,7 @@ func (q *Queries) GetProductByID(ctx context.Context, id uuid.UUID) (BillingProd
 }
 
 const getProductBySlug = `-- name: GetProductBySlug :one
-SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM billing.products WHERE slug = $1
+SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM openrails.products WHERE slug = $1
 `
 
 func (q *Queries) GetProductBySlug(ctx context.Context, slug string) (BillingProduct, error) {
@@ -150,7 +150,7 @@ func (q *Queries) GetProductBySlug(ctx context.Context, slug string) (BillingPro
 }
 
 const listActiveProducts = `-- name: ListActiveProducts :many
-SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM billing.products WHERE status = 'active'
+SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM openrails.products WHERE status = 'active'
 `
 
 func (q *Queries) ListActiveProducts(ctx context.Context) ([]BillingProduct, error) {
@@ -187,7 +187,7 @@ func (q *Queries) ListActiveProducts(ctx context.Context) ([]BillingProduct, err
 }
 
 const listActiveProductsPaged = `-- name: ListActiveProductsPaged :many
-SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM billing.products
+SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM openrails.products
 WHERE status = 'active'
 ORDER BY created_at DESC
 LIMIT NULLIF($2::int, 0) OFFSET $1::int
@@ -232,7 +232,7 @@ func (q *Queries) ListActiveProductsPaged(ctx context.Context, arg ListActivePro
 }
 
 const listAllProducts = `-- name: ListAllProducts :many
-SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM billing.products
+SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM openrails.products
 `
 
 func (q *Queries) ListAllProducts(ctx context.Context) ([]BillingProduct, error) {
@@ -269,7 +269,7 @@ func (q *Queries) ListAllProducts(ctx context.Context) ([]BillingProduct, error)
 }
 
 const listAllProductsPaged = `-- name: ListAllProductsPaged :many
-SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM billing.products
+SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM openrails.products
 ORDER BY created_at DESC
 LIMIT NULLIF($2::int, 0) OFFSET $1::int
 `
@@ -313,7 +313,7 @@ func (q *Queries) ListAllProductsPaged(ctx context.Context, arg ListAllProductsP
 }
 
 const listProductsByIDs = `-- name: ListProductsByIDs :many
-SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM billing.products WHERE id = ANY($1::uuid[])
+SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM openrails.products WHERE id = ANY($1::uuid[])
 `
 
 func (q *Queries) ListProductsByIDs(ctx context.Context, ids []uuid.UUID) ([]BillingProduct, error) {
@@ -350,7 +350,7 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, ids []uuid.UUID) ([]Bil
 }
 
 const updateProduct = `-- name: UpdateProduct :execrows
-UPDATE billing.products SET
+UPDATE openrails.products SET
     slug = $2,
     display_name = $3,
     description = $6,

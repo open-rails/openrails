@@ -1,7 +1,7 @@
--- billing.notification_queue.
+-- openrails.notification_queue.
 
 -- name: CreateNotification :execrows
-INSERT INTO billing.notification_queue (
+INSERT INTO openrails.notification_queue (
     id, tenant_subject_id, event_type, data, seen, created_at
 ) VALUES (
     $1, $2, $3, COALESCE(sqlc.narg(data), '{}'::jsonb), $4,
@@ -9,36 +9,36 @@ INSERT INTO billing.notification_queue (
 );
 
 -- name: GetNotificationByID :one
-SELECT * FROM billing.notification_queue WHERE id = $1;
+SELECT * FROM openrails.notification_queue WHERE id = $1;
 
 -- name: ListNotificationsByTenantSubject :many
-SELECT * FROM billing.notification_queue nq
+SELECT * FROM openrails.notification_queue nq
 WHERE nq.tenant_subject_id = $1
 ORDER BY nq.created_at DESC;
 
 -- name: ListUnseenNotificationsByTenantSubject :many
-SELECT * FROM billing.notification_queue nq
+SELECT * FROM openrails.notification_queue nq
 WHERE nq.tenant_subject_id = $1 AND nq.seen = false
 ORDER BY nq.created_at DESC;
 
 -- name: ListNotificationsByEventType :many
-SELECT * FROM billing.notification_queue nq
+SELECT * FROM openrails.notification_queue nq
 WHERE nq.event_type = $1
 ORDER BY nq.created_at DESC;
 
 -- name: CountNotificationsByTenantSubjectEventSince :one
-SELECT count(*) FROM billing.notification_queue nq
+SELECT count(*) FROM openrails.notification_queue nq
 WHERE nq.tenant_subject_id = $1
   AND nq.event_type = $2
   AND nq.created_at >= $3;
 
 -- name: ListTenantSubjectsWithPendingDigest :many
-SELECT DISTINCT nq.tenant_subject_id::text FROM billing.notification_queue nq
+SELECT DISTINCT nq.tenant_subject_id::text FROM openrails.notification_queue nq
 WHERE nq.event_type = $1
   AND nq.created_at >= $2;
 
 -- name: ListPendingDigestForTenantSubject :many
-SELECT * FROM billing.notification_queue nq
+SELECT * FROM openrails.notification_queue nq
 WHERE nq.tenant_subject_id = $1
   AND nq.event_type = $2
   AND nq.created_at >= $3
@@ -46,10 +46,10 @@ ORDER BY nq.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0);
 
 -- name: MarkNotificationSeen :execrows
-UPDATE billing.notification_queue SET seen = true WHERE id = $1;
+UPDATE openrails.notification_queue SET seen = true WHERE id = $1;
 
 -- name: UpdateNotification :execrows
-UPDATE billing.notification_queue SET
+UPDATE openrails.notification_queue SET
     tenant_subject_id = $2,
     event_type = $3,
     data = sqlc.narg(data),
@@ -57,16 +57,16 @@ UPDATE billing.notification_queue SET
 WHERE id = $1;
 
 -- name: DeleteNotification :execrows
-DELETE FROM billing.notification_queue WHERE id = $1;
+DELETE FROM openrails.notification_queue WHERE id = $1;
 
 -- name: CountNotificationsFiltered :one
-SELECT count(*) FROM billing.notification_queue nq
+SELECT count(*) FROM openrails.notification_queue nq
 WHERE (sqlc.narg(tenant_subject_id)::uuid IS NULL OR nq.tenant_subject_id = sqlc.narg(tenant_subject_id)::uuid)
   AND (sqlc.narg(event_type)::text IS NULL OR nq.event_type = sqlc.narg(event_type)::text)
   AND (sqlc.narg(seen)::boolean IS NULL OR nq.seen = sqlc.narg(seen)::boolean);
 
 -- name: ListNotificationsFiltered :many
-SELECT * FROM billing.notification_queue nq
+SELECT * FROM openrails.notification_queue nq
 WHERE (sqlc.narg(tenant_subject_id)::uuid IS NULL OR nq.tenant_subject_id = sqlc.narg(tenant_subject_id)::uuid)
   AND (sqlc.narg(event_type)::text IS NULL OR nq.event_type = sqlc.narg(event_type)::text)
   AND (sqlc.narg(seen)::boolean IS NULL OR nq.seen = sqlc.narg(seen)::boolean)
@@ -74,22 +74,22 @@ ORDER BY nq.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
 -- name: DeleteSeenNotificationsBefore :execrows
-DELETE FROM billing.notification_queue
+DELETE FROM openrails.notification_queue
 WHERE seen = true AND created_at < sqlc.arg(cutoff)::timestamptz;
 
 -- name: DeleteNotificationsBefore :execrows
-DELETE FROM billing.notification_queue
+DELETE FROM openrails.notification_queue
 WHERE created_at < sqlc.arg(cutoff)::timestamptz;
 
 -- name: CountRepairAlerts :one
-SELECT count(*) FROM billing.notification_queue nq
+SELECT count(*) FROM openrails.notification_queue nq
 WHERE nq.tenant_subject_id = $1
   AND nq.event_type = $2
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
   AND (sqlc.narg(seen)::boolean IS NULL OR nq.seen = sqlc.narg(seen)::boolean);
 
 -- name: ListRepairAlerts :many
-SELECT * FROM billing.notification_queue nq
+SELECT * FROM openrails.notification_queue nq
 WHERE nq.tenant_subject_id = $1
   AND nq.event_type = $2
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'

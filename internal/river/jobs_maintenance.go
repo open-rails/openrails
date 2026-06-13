@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	KindIdempotencyCleanup = "billing.idempotency_cleanup"
-	KindCCBillReconcile    = "billing.ccbill_reconcile"
+	KindIdempotencyCleanup = "openrails.idempotency_cleanup"
+	KindCCBillReconcile    = "openrails.ccbill_reconcile"
 )
 
 type IdempotencyCleanupArgs struct{}

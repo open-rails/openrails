@@ -12,7 +12,7 @@
 SET lock_timeout = '10s';
 SET statement_timeout = '300s';
 
-CREATE TABLE billing.credit_windows (
+CREATE TABLE openrails.credit_windows (
     id uuid DEFAULT uuidv7() NOT NULL,
     tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
     tenant_subject_id uuid CONSTRAINT credit_windows_tenant_subject_id_not_null NOT NULL,
@@ -29,32 +29,32 @@ CREATE TABLE billing.credit_windows (
     CONSTRAINT credit_windows_settled_within_held_chk CHECK (((settled_amount >= 0) AND (settled_amount <= held_amount)))
 );
 
-ALTER TABLE ONLY billing.credit_windows FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.credit_windows FORCE ROW LEVEL SECURITY;
 
-ALTER TABLE ONLY billing.credit_windows
-    ADD CONSTRAINT credit_windows_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES billing.tenant_subjects(id);
+ALTER TABLE ONLY openrails.credit_windows
+    ADD CONSTRAINT credit_windows_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
 
-ALTER TABLE ONLY billing.credit_windows
-    ADD CONSTRAINT credit_windows_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES billing.credit_types(id);
+ALTER TABLE ONLY openrails.credit_windows
+    ADD CONSTRAINT credit_windows_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id);
 
-COMMENT ON TABLE billing.credit_windows IS 'Prepaid credit windows (issue #335): one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry.';
+COMMENT ON TABLE openrails.credit_windows IS 'Prepaid credit windows (issue #335): one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry.';
 
-COMMENT ON COLUMN billing.credit_windows.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
+COMMENT ON COLUMN openrails.credit_windows.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
 
-COMMENT ON COLUMN billing.credit_windows.tenant_subject_id IS 'OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.';
+COMMENT ON COLUMN openrails.credit_windows.tenant_subject_id IS 'OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
 
-COMMENT ON COLUMN billing.credit_windows.held_amount IS 'Total reserved for this window (open + refills). Reflected in credit_balances.held_balance while status=open.';
+COMMENT ON COLUMN openrails.credit_windows.held_amount IS 'Total reserved for this window (open + refills). Reflected in credit_balances.held_balance while status=open.';
 
-COMMENT ON COLUMN billing.credit_windows.settled_amount IS 'Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.';
+COMMENT ON COLUMN openrails.credit_windows.settled_amount IS 'Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.';
 
-CREATE INDEX idx_credit_windows_subject_status ON billing.credit_windows USING btree (tenant_subject_id, status);
+CREATE INDEX idx_credit_windows_subject_status ON openrails.credit_windows USING btree (tenant_subject_id, status);
 
-CREATE INDEX idx_credit_windows_open_expires ON billing.credit_windows USING btree (expires_at) WHERE (status = 'open'::text);
+CREATE INDEX idx_credit_windows_open_expires ON openrails.credit_windows USING btree (expires_at) WHERE (status = 'open'::text);
 
-CREATE INDEX idx_credit_windows_tenant_id ON billing.credit_windows USING btree (tenant_id);
+CREATE INDEX idx_credit_windows_tenant_id ON openrails.credit_windows USING btree (tenant_id);
 
-ALTER TABLE billing.credit_windows ENABLE ROW LEVEL SECURITY;
+ALTER TABLE openrails.credit_windows ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY tenant_isolation ON billing.credit_windows USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY tenant_isolation ON openrails.credit_windows USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE billing.credit_windows TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_windows TO openrails_app;

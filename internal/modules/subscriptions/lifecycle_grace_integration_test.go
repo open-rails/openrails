@@ -67,12 +67,12 @@ func newGraceTestFixture(t *testing.T, billingDays int32) *graceTestFixture {
 
 	f := &graceTestFixture{dbi: dbi, pool: pool, q: q, lifecycle: lifecycle, productID: productID, priceID: priceID, userID: userID}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE source_id IN (SELECT id FROM billing.subscriptions WHERE product_id = $1)", productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE price_id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.notification_queue WHERE tenant_subject_id IN (SELECT id FROM billing.tenant_subjects WHERE id::text = $1)", userID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE product_id = $1", productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE source_id IN (SELECT id FROM openrails.subscriptions WHERE product_id = $1)", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE tenant_subject_id IN (SELECT id FROM openrails.tenant_subjects WHERE id::text = $1)", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE product_id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 	return f
 }
@@ -89,7 +89,7 @@ func (f *graceTestFixture) windows(t *testing.T, subID uuid.UUID, sourceType str
 	t.Helper()
 	rows, err := f.pool.Query(context.Background(),
 		`SELECT start_at, end_at, source_type, revoked_at, deleted_at
-		 FROM billing.entitlements WHERE source_id = $1 AND source_type = $2 ORDER BY start_at`, subID, sourceType)
+		 FROM openrails.entitlements WHERE source_id = $1 AND source_type = $2 ORDER BY start_at`, subID, sourceType)
 	require.NoError(t, err)
 	defer rows.Close()
 	var out []entWindow
@@ -267,6 +267,6 @@ func TestGraceWindow_StalePeriodGetsNoResurrectionGrace(t *testing.T) {
 	assert.Empty(t, f.windows(t, sub.ID, "grace"), "a stale renewal mints no grace")
 
 	var periodEnd time.Time
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT current_period_ends_at FROM billing.subscriptions WHERE id = $1`, sub.ID).Scan(&periodEnd))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT current_period_ends_at FROM openrails.subscriptions WHERE id = $1`, sub.ID).Scan(&periodEnd))
 	assert.WithinDuration(t, staleEnd.Add(30*24*time.Hour), periodEnd, 2*time.Second, "stale renewal still advances the period one cycle")
 }

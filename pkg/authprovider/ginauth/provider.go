@@ -16,7 +16,7 @@ import (
 //
 // The middleware must set the user context in the Gin context using:
 //
-//	c.Set("billing.user_context", billingauth.UserContext{...})
+//	c.Set("openrails.user_context", billingauth.UserContext{...})
 //	c.Request = c.Request.WithContext(billingauth.SetUserContext(ctx, uc))
 //
 // Handlers then retrieve user context via ginauth.UserContextFromGin(c).
@@ -32,7 +32,7 @@ import (
 //	    return func(c *gin.Context) {
 //	        // Validate auth, extract user info
 //	        uc := billingauth.UserContext{UserID: "...", Email: "..."}
-//	        c.Set("billing.user_context", uc)
+//	        c.Set("openrails.user_context", uc)
 //	        c.Request = c.Request.WithContext(billingauth.SetUserContext(c.Request.Context(), uc))
 //	        c.Next()
 //	    }

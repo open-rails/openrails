@@ -33,7 +33,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_blocks')").
 		Scan(&exists))
 	if !exists {
-		t.Skip("billing.credit_blocks not found; run migrations before integration tests")
+		t.Skip("openrails.credit_blocks not found; run migrations before integration tests")
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -107,14 +107,14 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", creditTypeID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_balances WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_types WHERE id = $1", creditTypeID)
 	})
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -154,7 +154,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM billing.credit_transactions
+		`SELECT count(*) FROM openrails.credit_transactions
 		 WHERE tenant_subject_id = $1 AND credit_type_id = $2
 		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'`,
 		tenantSubjectID, creditTypeID).Scan(&depositCount))

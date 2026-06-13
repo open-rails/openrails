@@ -13,7 +13,7 @@ import (
 const getProbeVerdict = `-- name: GetProbeVerdict :one
 
 SELECT verdict, checked_at
-FROM billing.probe_verdicts
+FROM openrails.probe_verdicts
 WHERE provider = $1 AND key_hash = $2
 `
 
@@ -27,7 +27,7 @@ type GetProbeVerdictRow struct {
 	CheckedAt time.Time
 }
 
-// #348 probe-cooldown cache. billing.probe_verdicts is RLS-exempt (global,
+// #348 probe-cooldown cache. openrails.probe_verdicts is RLS-exempt (global,
 // instance-level credential state) so these statements work on an ordinary
 // non-tenant-pinned boot connection.
 func (q *Queries) GetProbeVerdict(ctx context.Context, arg GetProbeVerdictParams) (GetProbeVerdictRow, error) {
@@ -38,7 +38,7 @@ func (q *Queries) GetProbeVerdict(ctx context.Context, arg GetProbeVerdictParams
 }
 
 const upsertProbeVerdict = `-- name: UpsertProbeVerdict :exec
-INSERT INTO billing.probe_verdicts (provider, key_hash, verdict, checked_at)
+INSERT INTO openrails.probe_verdicts (provider, key_hash, verdict, checked_at)
 VALUES ($1, $2, $3, now())
 ON CONFLICT (provider, key_hash) DO UPDATE SET
     verdict = EXCLUDED.verdict,

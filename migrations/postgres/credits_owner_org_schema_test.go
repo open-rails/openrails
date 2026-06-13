@@ -51,14 +51,14 @@ func TestConsolidatedSchemaUsesTenantSubjectCreditModel(t *testing.T) {
 
 	// Balance/state tables are payer-keyed: no actor column.
 	for _, table := range []string{"credit_blocks", "credit_balances"} {
-		start := strings.Index(c, "CREATE TABLE billing."+table+" (")
+		start := strings.Index(c, "CREATE TABLE openrails."+table+" (")
 		if start < 0 {
 			t.Fatalf("001 schema missing table %s", table)
 		}
 		body := c[start:]
 		body = body[:strings.Index(body, ");")]
 		if strings.Contains(body, "actor") {
-			t.Errorf("billing.%s must not carry an actor column (payer-keyed, #332)", table)
+			t.Errorf("openrails.%s must not carry an actor column (payer-keyed, #332)", table)
 		}
 	}
 }

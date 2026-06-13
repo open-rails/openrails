@@ -30,7 +30,7 @@ import (
 
 const platformSchemaDDL = `
 CREATE SCHEMA IF NOT EXISTS billing;
-CREATE TABLE IF NOT EXISTS billing.tenants (
+CREATE TABLE IF NOT EXISTS openrails.tenants (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug         TEXT NOT NULL UNIQUE,
     name         TEXT NOT NULL,
@@ -42,21 +42,21 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     suspended_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ
 );
-CREATE TABLE IF NOT EXISTS billing.subscriptions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID, status TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS billing.payments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID, amount BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'completed');
-CREATE TABLE IF NOT EXISTS billing.platform_audit (
+CREATE TABLE IF NOT EXISTS openrails.subscriptions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID, status TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS openrails.payments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID, amount BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'completed');
+CREATE TABLE IF NOT EXISTS openrails.platform_audit (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), actor_user_id TEXT NOT NULL, actor_tenant TEXT,
     action TEXT NOT NULL, target_tenant_id UUID, reason TEXT,
     before_state JSONB, after_state JSONB, detail JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
 );
-CREATE TABLE IF NOT EXISTS billing.platform_break_glass (
+CREATE TABLE IF NOT EXISTS openrails.platform_break_glass (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), actor_user_id TEXT NOT NULL, target_tenant_id UUID,
     justification TEXT NOT NULL, granted_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ,
     CONSTRAINT chk_break_glass_window CHECK (expires_at > granted_at)
 );
-INSERT INTO billing.tenants (slug, name, status, billing_tier) VALUES ('acme','Acme','active','pro') ON CONFLICT DO NOTHING;
+INSERT INTO openrails.tenants (slug, name, status, billing_tier) VALUES ('acme','Acme','active','pro') ON CONFLICT DO NOTHING;
 `
 
 func newPlatformTestPool(t *testing.T) *pgxpool.Pool {
@@ -139,7 +139,7 @@ func doReq(t *testing.T, s *Server, checker authpolicy.PlatformSuperadminChecker
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	e.Use(func(c *gin.Context) { c.Set("billing.user_context", uc); c.Next() })
+	e.Use(func(c *gin.Context) { c.Set("openrails.user_context", uc); c.Next() })
 	g := e.Group(StandaloneV1Prefix + PlatformPrefix)
 	g.Use(policyginmw.PlatformSuperadminRequired(checker))
 	g.GET("/tenants", s.platformListTenantsHandler())
@@ -184,7 +184,7 @@ func TestPlatformAPI_GateAndAudit(t *testing.T) {
 
 	var searchCount int
 	require.NoError(t, pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.platform_audit WHERE action = $1 AND reason = 'acme'`,
+		`SELECT count(*) FROM openrails.platform_audit WHERE action = $1 AND reason = 'acme'`,
 		platform.ActionTenantSearch).Scan(&searchCount))
 	require.Equal(t, 1, searchCount, "cross-tenant search must write an audit row")
 
@@ -204,6 +204,6 @@ func TestPlatformAPI_GateAndAudit(t *testing.T) {
 
 	var grantCount int
 	require.NoError(t, pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.platform_break_glass WHERE actor_user_id='platform-admin'`).Scan(&grantCount))
+		`SELECT count(*) FROM openrails.platform_break_glass WHERE actor_user_id='platform-admin'`).Scan(&grantCount))
 	require.Equal(t, 1, grantCount, "break-glass grant must be persisted")
 }

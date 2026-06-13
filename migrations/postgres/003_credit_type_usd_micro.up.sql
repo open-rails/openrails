@@ -9,6 +9,6 @@
 SET lock_timeout = '10s';
 SET statement_timeout = '300s';
 
-INSERT INTO billing.credit_types (name, display_name, unit, decimal_places, is_active)
+INSERT INTO openrails.credit_types (name, display_name, unit, decimal_places, is_active)
 VALUES ('usd_micro', 'US dollars (micro)', 'usd', 6, true)
 ON CONFLICT (name) DO NOTHING;

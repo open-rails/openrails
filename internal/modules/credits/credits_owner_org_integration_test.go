@@ -73,7 +73,7 @@ func startOwnerTenantPostgres(t *testing.T) (*db.DB, string, context.Context) {
 
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	require.NoError(t, err)
-	m := migratekit.NewPostgres(sqlDB, "billing")
+	m := migratekit.NewPostgres(sqlDB, "openrails")
 	require.NoError(t, m.ApplyMigrations(ctx, migrations))
 
 	dbi := dbtest.OpenAppDB(t, dsn)
@@ -105,21 +105,21 @@ func TestSchema_EnforcesNotNullTenantAndPayer(t *testing.T) {
 
 	// tenant_subject_id has no default: an insert that leaves it unset must be rejected.
 	_, err = pool.Exec(ctx,
-		`INSERT INTO billing.credit_balances (id, credit_type_id, balance, held_balance)
+		`INSERT INTO openrails.credit_balances (id, credit_type_id, balance, held_balance)
 		 VALUES ($1, $2, 0, 0)`,
 		uuid.New(), creditTypeID)
 	require.Error(t, err, "insert with NULL tenant_subject_id must violate NOT NULL")
 
 	// tenant_id is NOT NULL but defaulted; an explicit NULL must still be rejected.
 	_, err = pool.Exec(ctx,
-		`INSERT INTO billing.credit_balances (id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
+		`INSERT INTO openrails.credit_balances (id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
 		 VALUES ($1, $2, $3, NULL, 0, 0)`,
 		uuid.New(), creditTypeID, payer)
 	require.Error(t, err, "insert with explicit NULL tenant_id must violate NOT NULL")
 
 	// A fully-specified payer+tenant row inserts cleanly.
 	_, err = pool.Exec(ctx,
-		`INSERT INTO billing.credit_balances (id, credit_type_id, tenant_subject_id, balance, held_balance)
+		`INSERT INTO openrails.credit_balances (id, credit_type_id, tenant_subject_id, balance, held_balance)
 		 VALUES ($1, $2, $3, 0, 0)`,
 		uuid.New(), creditTypeID, payer)
 	require.NoError(t, err, "payer+tenant-defaulted insert must succeed")
@@ -150,14 +150,14 @@ func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
 
 	// First row in the default tenant.
 	_, err = pool.Exec(ctx,
-		`INSERT INTO billing.credit_balances (id, credit_type_id, tenant_subject_id, balance, held_balance)
+		`INSERT INTO openrails.credit_balances (id, credit_type_id, tenant_subject_id, balance, held_balance)
 		 VALUES ($1, $2, $3, 0, 0)`,
 		uuid.New(), creditTypeID, payer)
 	require.NoError(t, err)
 
 	// Duplicate (tenant, payer, credit_type) -> unique violation.
 	_, err = pool.Exec(ctx,
-		`INSERT INTO billing.credit_balances (id, credit_type_id, tenant_subject_id, balance, held_balance)
+		`INSERT INTO openrails.credit_balances (id, credit_type_id, tenant_subject_id, balance, held_balance)
 		 VALUES ($1, $2, $3, 0, 0)`,
 		uuid.New(), creditTypeID, payer)
 	require.Error(t, err, "duplicate (tenant, payer, credit_type) must violate uniqueness")
@@ -165,11 +165,11 @@ func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
 	// Same payer + credit_type in a DIFFERENT tenant -> allowed.
 	otherTenant := uuid.New()
 	_, err = pool.Exec(ctx,
-		`INSERT INTO billing.tenants (id, slug, name, status) VALUES ($1, $2, 'Other', 'active')`,
+		`INSERT INTO openrails.tenants (id, slug, name, status) VALUES ($1, $2, 'Other', 'active')`,
 		otherTenant, "other_"+uuid.NewString())
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO billing.credit_balances (id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
+		`INSERT INTO openrails.credit_balances (id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
 		 VALUES ($1, $2, $3, $4, 0, 0)`,
 		uuid.New(), creditTypeID, payer, otherTenant)
 	require.NoError(t, err, "same payer in a different tenant must NOT collide")

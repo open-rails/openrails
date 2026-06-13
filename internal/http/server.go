@@ -70,13 +70,13 @@ type Server struct {
 	captchaStore           *captcha.ChallengeStore
 
 	// tenancy is the tenant provisioning + lifecycle + per-tenant secret service
-	// (issue #225). It reuses the control plane's pgx pool (the billing.*
+	// (issue #225). It reuses the control plane's pgx pool (the openrails.*
 	// control-plane DB) and operator-tenant provisioner, and is always built
 	// (#469: the control plane is mandatory on this surface).
 	tenancy *tenancy.Service
 
 	// Platform superadmin layer (issue #226), DISTINCT from per-tenant operator
-	// admin, sharing the billing.* control-plane pool. platformAudit records
+	// admin, sharing the openrails.* control-plane pool. platformAudit records
 	// every cross-tenant superadmin mutation; platformBreakGlass manages
 	// time-boxed elevation; platformMetrics aggregates platform-wide tenant
 	// metrics. The /v1/platform/* surface itself is mounted only when a
@@ -175,7 +175,7 @@ func New(deps Dependencies) (*Server, error) {
 	deps.Runtime.AdminChecker = deps.ControlPlane
 
 	// Build the tenant provisioning/lifecycle/secret service (issue #225). It
-	// reuses the control plane's pgx pool (the OpenRails-owned billing.*
+	// reuses the control plane's pgx pool (the OpenRails-owned openrails.*
 	// control-plane DB) and operator-tenant provisioner. The DB-backed secret
 	// store is the self-hosted default and needs no live Vault; a managed
 	// deployment swaps in the Vault-backed store with the same addressing.

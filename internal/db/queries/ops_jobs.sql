@@ -1,30 +1,30 @@
 -- Operational job state: catalog drift events (reconciliation). Manual rebill
--- attempts were folded into billing.provider_intents (#358 phase C).
+-- attempts were folded into openrails.provider_intents (#358 phase C).
 
 -- name: ListOpenCatalogDriftEvents :many
-SELECT * FROM billing.catalog_drift_events
+SELECT * FROM openrails.catalog_drift_events
 WHERE resolved_at IS NULL;
 
 -- name: InsertCatalogDriftEvent :exec
-INSERT INTO billing.catalog_drift_events (
+INSERT INTO openrails.catalog_drift_events (
     id, provider, kind, openrails_resource_type, openrails_resource_id,
     external_resource_id, field, openrails_value, external_value, detected_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
 -- name: ResolveCatalogDriftEvent :exec
-UPDATE billing.catalog_drift_events
+UPDATE openrails.catalog_drift_events
 SET resolved_at = $2
 WHERE id = $1 AND resolved_at IS NULL;
 
 -- name: CountOpenCatalogDriftFiltered :one
-SELECT count(*) FROM billing.catalog_drift_events
+SELECT count(*) FROM openrails.catalog_drift_events
 WHERE resolved_at IS NULL
   AND (sqlc.narg(provider)::text IS NULL OR provider = sqlc.narg(provider)::text)
   AND (sqlc.narg(kind)::text IS NULL OR kind = sqlc.narg(kind)::text)
   AND (sqlc.narg(resource_type)::text IS NULL OR openrails_resource_type = sqlc.narg(resource_type)::text);
 
 -- name: ListOpenCatalogDriftFiltered :many
-SELECT * FROM billing.catalog_drift_events
+SELECT * FROM openrails.catalog_drift_events
 WHERE resolved_at IS NULL
   AND (sqlc.narg(provider)::text IS NULL OR provider = sqlc.narg(provider)::text)
   AND (sqlc.narg(kind)::text IS NULL OR kind = sqlc.narg(kind)::text)
@@ -33,7 +33,7 @@ ORDER BY detected_at DESC
 LIMIT $1::int OFFSET $2::int;
 
 -- name: ResolveCatalogDriftForResource :execrows
-UPDATE billing.catalog_drift_events
+UPDATE openrails.catalog_drift_events
 SET resolved_at = $1
 WHERE resolved_at IS NULL
   AND openrails_resource_type = $2
@@ -41,6 +41,6 @@ WHERE resolved_at IS NULL
 
 -- name: CountOpenCatalogDriftByKind :many
 SELECT provider, kind, count(*)::bigint AS n
-FROM billing.catalog_drift_events
+FROM openrails.catalog_drift_events
 WHERE resolved_at IS NULL
 GROUP BY provider, kind;

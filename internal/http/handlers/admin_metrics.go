@@ -27,7 +27,7 @@ import (
 // calls the *CrossTenant methods once that control-plane surface exists.
 //
 // ClickHouse is OPTIONAL and DERIVED: Postgres is the system of record. A
-// ClickHouse outage degrades these dashboards but never blocks billing.
+// ClickHouse outage degrades these dashboards but never blocks openrails.
 
 func GetAdminMetricsSummary(r *httprequest.Request) {
 	rng, err := parseMetricsRange(r, 30)

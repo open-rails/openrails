@@ -1,8 +1,8 @@
--- billing.subscriptions. tier_group is set by the
+-- openrails.subscriptions. tier_group is set by the
 -- trg_subscriptions_set_tier_group trigger — never written by the app.
 
 -- name: CreateSubscription :execrows
-INSERT INTO billing.subscriptions (
+INSERT INTO openrails.subscriptions (
     id, tenant_subject_id, product_id, price_id, scheduled_price_id,
     entitlements_spec_snapshot, credits_spec_snapshot, status, started_at,
     ended_at, current_period_starts_at, current_period_ends_at, processor,
@@ -13,7 +13,7 @@ INSERT INTO billing.subscriptions (
 ) VALUES (
     $1, $2, $3, $4, sqlc.narg(scheduled_price_id),
     sqlc.narg(entitlements_spec_snapshot), sqlc.narg(credits_spec_snapshot),
-    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending')::billing.subscription_status,
+    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending')::openrails.subscription_status,
     sqlc.arg(started_at),
     sqlc.narg(ended_at), sqlc.narg(current_period_starts_at), sqlc.narg(current_period_ends_at),
     sqlc.arg(processor), sqlc.arg(processor_subscription_id),
@@ -28,12 +28,12 @@ INSERT INTO billing.subscriptions (
 -- name: UpdateSubscriptionAt :execrows
 -- Full-column update (the bun version listed every column explicitly so nil
 -- pointers CLEAR fields like cancelled_at on reactivation).
-UPDATE billing.subscriptions SET
+UPDATE openrails.subscriptions SET
     price_id = $2,
     product_id = $3,
     entitlements_spec_snapshot = sqlc.narg(entitlements_spec_snapshot),
     credits_spec_snapshot = sqlc.narg(credits_spec_snapshot),
-    status = sqlc.arg(status)::billing.subscription_status,
+    status = sqlc.arg(status)::openrails.subscription_status,
     started_at = sqlc.arg(started_at),
     ended_at = sqlc.narg(ended_at),
     current_period_starts_at = sqlc.narg(current_period_starts_at),
@@ -56,28 +56,28 @@ UPDATE billing.subscriptions SET
 WHERE id = $1;
 
 -- name: DeleteSubscription :execrows
-DELETE FROM billing.subscriptions WHERE id = $1;
+DELETE FROM openrails.subscriptions WHERE id = $1;
 
 -- name: GetSubscriptionByID :one
-SELECT * FROM billing.subscriptions WHERE id = $1;
+SELECT * FROM openrails.subscriptions WHERE id = $1;
 
 -- name: ListSubscriptionsByIDs :many
-SELECT * FROM billing.subscriptions WHERE id = ANY(sqlc.arg(ids)::uuid[]);
+SELECT * FROM openrails.subscriptions WHERE id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- name: GetLatestSubscriptionByTenantSubject :one
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.tenant_subject_id = $1
 ORDER BY sub.created_at DESC
 LIMIT 1;
 
 -- name: GetSubscriptionByTenantSubjectAndPrice :one
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.tenant_subject_id = $1 AND sub.price_id = $2
 LIMIT 1;
 
 -- name: GetLifecycleSubscriptionByTenantSubjectAndProduct :one
 -- NULLS FIRST prioritizes indefinite subscriptions.
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.tenant_subject_id = $1
   AND sub.product_id = $2
   AND sub.status IN ('active', 'pending', 'past_due')
@@ -85,7 +85,7 @@ ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1;
 
 -- name: GetActiveSubscriptionByTenantSubjectAt :one
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.tenant_subject_id = $1
   AND sub.status = 'active'
   AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > sqlc.arg(now)::timestamptz)
@@ -93,42 +93,42 @@ ORDER BY sub.created_at DESC
 LIMIT 1;
 
 -- name: GetSubscriptionByProcessorSubID :one
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.processor = $1 AND sub.processor_subscription_id = $2
 LIMIT 1;
 
 -- name: GetSubscriptionByProcessorMetadataValue :one
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.processor = $1
   AND sub.gateway_response ->> sqlc.arg(key)::text = sqlc.arg(value)::text
 LIMIT 1;
 
 -- name: ListActiveSubscriptionsByTenantSubject :many
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.tenant_subject_id = $1 AND sub.status = 'active'
 ORDER BY sub.created_at DESC;
 
 -- name: ListSubscriptionsByTenantSubjectProcessor :many
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.tenant_subject_id = $1 AND sub.processor = $2
 ORDER BY sub.created_at DESC;
 
 -- name: ListActiveSubscriptionsByProcessor :many
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.processor = $1 AND sub.status = 'active';
 
 -- name: CountSubscriptionsByTenantSubject :one
-SELECT count(*) FROM billing.subscriptions sub
+SELECT count(*) FROM openrails.subscriptions sub
 WHERE sub.tenant_subject_id = $1;
 
 -- name: ListSubscriptionsByTenantSubjectPaged :many
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.tenant_subject_id = $1
 ORDER BY sub.created_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountSubscriptionsFiltered :one
-SELECT count(*) FROM billing.subscriptions sub
+SELECT count(*) FROM openrails.subscriptions sub
 WHERE (sqlc.narg(tenant_subject_id)::uuid IS NULL OR sub.tenant_subject_id = sqlc.narg(tenant_subject_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
@@ -140,7 +140,7 @@ WHERE (sqlc.narg(tenant_subject_id)::uuid IS NULL OR sub.tenant_subject_id = sql
   AND (sqlc.narg(expires_before)::timestamptz IS NULL OR sub.current_period_ends_at <= sqlc.narg(expires_before)::timestamptz);
 
 -- name: ListSubscriptionsFiltered :many
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE (sqlc.narg(tenant_subject_id)::uuid IS NULL OR sub.tenant_subject_id = sqlc.narg(tenant_subject_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
@@ -160,8 +160,8 @@ ORDER BY
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
 -- name: GetLifecycleSubscriptionByTenantSubjectAndTierGroup :one
-SELECT sub.* FROM billing.subscriptions sub
-JOIN billing.products prod ON prod.id = sub.product_id
+SELECT sub.* FROM openrails.subscriptions sub
+JOIN openrails.products prod ON prod.id = sub.product_id
 WHERE sub.tenant_subject_id = $1
   AND sub.status IN ('active', 'pending', 'past_due')
   AND prod.tier_group = $2
@@ -169,13 +169,13 @@ ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1;
 
 -- name: ListSubscriptionsByPaymentMethodIDs :many
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.payment_method_id = ANY(sqlc.arg(payment_method_ids)::uuid[]);
 
 -- name: MarkCancelledSubscriptionsSuperseded :execrows
 -- Preserve cancelled subscriptions for refund/chargeback correlation while
 -- stamping them superseded by the new activation (gateway_response patch).
-UPDATE billing.subscriptions
+UPDATE openrails.subscriptions
 SET gateway_response = CASE WHEN jsonb_typeof(gateway_response) = 'object'
         THEN gateway_response || jsonb_build_object('superseded_at', current_timestamp, 'superseded_by_subscription_id', sqlc.narg(superseded_by)::text)
         ELSE jsonb_build_object('previous_gateway_response', gateway_response, 'superseded_at', current_timestamp, 'superseded_by_subscription_id', sqlc.narg(superseded_by)::text)
@@ -188,7 +188,7 @@ WHERE tenant_subject_id = $1
 
 -- name: ListDueDunningSubscriptions :many
 -- Dunning: past_due NMI-backed subscriptions whose next retry is due.
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.processor = ANY(sqlc.arg(processors)::text[])
   AND sub.status = 'past_due'
   AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz;
@@ -196,7 +196,7 @@ WHERE sub.processor = ANY(sqlc.arg(processors)::text[])
 -- name: ClaimDunningAttempt :execrows
 -- Lease-style claim: pushes next_retry_at out so concurrent dunning runs
 -- cannot double-charge; only claims a still-due past_due row.
-UPDATE billing.subscriptions
+UPDATE openrails.subscriptions
 SET next_retry_at = sqlc.arg(lease_until)::timestamptz,
     last_retry_at = sqlc.arg(claimed_at)::timestamptz,
     updated_at = sqlc.arg(claimed_at)::timestamptz
@@ -209,7 +209,7 @@ WHERE id = $1
 -- deletion_scheduled_at marker — their deferred processor-side delete never
 -- finalized (the deletion kill switch skipped it, or the job was lost). The
 -- worker-startup rescan re-enqueues these via the deferred-delete scheduler.
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.status = 'cancelled'
   AND sub.deletion_scheduled_at IS NOT NULL;
 
@@ -221,20 +221,20 @@ WHERE sub.status = 'cancelled'
 -- cohort is dunning's, excluded here), and no payment recorded at/after the
 -- period end. Re-derived every pass, so an unreachable provider needs no
 -- durable read-queue: unchanged state simply reappears next cycle.
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.processor = ANY(sqlc.arg(processors)::text[])
   AND sub.status = 'active'
   AND sub.current_period_ends_at IS NOT NULL
   AND sub.current_period_ends_at <= sqlc.arg(cutoff)::timestamptz
   AND NOT EXISTS (
-    SELECT 1 FROM billing.payments p
+    SELECT 1 FROM openrails.payments p
     WHERE p.subscription_id = sub.id
       AND p.status = 'completed'
       AND p.purchased_at >= sub.current_period_ends_at
   );
 
 -- name: GetLatestResumableCancelledSubscription :one
-SELECT * FROM billing.subscriptions sub
+SELECT * FROM openrails.subscriptions sub
 WHERE sub.tenant_subject_id = $1
   AND sub.status = 'cancelled'
   AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > sqlc.arg(now)::timestamptz)

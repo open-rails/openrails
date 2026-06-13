@@ -26,7 +26,7 @@ const (
 	// KindSolanaCrank is the recurring Solana pull ("cranking") job (#256). It is
 	// the Solana analog of the NMI DunningWorker: each run charges every due
 	// subscription.
-	KindSolanaCrank = "billing.solana_crank"
+	KindSolanaCrank = "openrails.solana_crank"
 
 	solanaCrankBatchSize = 200
 )

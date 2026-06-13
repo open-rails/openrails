@@ -355,7 +355,7 @@ type scriptEnv struct {
 	side       string
 	from, to   time.Time
 	// issuer/subject are the payer's EXTERNAL identity (its
-	// billing.tenant_subjects row) for the entitlements steps.
+	// openrails.tenant_subjects row) for the entitlements steps.
 	issuer  string
 	subject string
 }
@@ -815,13 +815,13 @@ func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
 		id := uuid.New()
 		subject := side + "-" + id.String()
 		_, err := pool.Exec(ctx, `
-			INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject, created_at, last_seen_at)
+			INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject, created_at, last_seen_at)
 			VALUES ($1, $2, $3, $4, now(), now())`,
 			id, tenant.DefaultID.UUID(), issuer, subject)
 		require.NoError(t, err)
 		// One active entitlement row for the entitlements steps.
 		_, err = pool.Exec(ctx, `
-			INSERT INTO billing.entitlements (id, tenant_id, tenant_subject_id, entitlement, start_at, source_id, source_type)
+			INSERT INTO openrails.entitlements (id, tenant_id, tenant_subject_id, entitlement, start_at, source_id, source_type)
 			VALUES ($1, $2, $3, 'premium', now() - interval '1 hour', $4, 'admin')`,
 			uuid.New(), tenant.DefaultID.UUID(), id, uuid.New())
 		require.NoError(t, err)

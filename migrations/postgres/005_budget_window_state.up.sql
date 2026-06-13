@@ -18,7 +18,7 @@
 -- serialization point).
 --
 
-CREATE TABLE billing.budget_window_state (
+CREATE TABLE openrails.budget_window_state (
     id uuid DEFAULT uuidv7() NOT NULL,
     tenant_id uuid NOT NULL,
     tenant_subject_id uuid CONSTRAINT budget_window_state_tenant_subject_id_not_null NOT NULL,
@@ -36,22 +36,22 @@ CREATE TABLE billing.budget_window_state (
     CONSTRAINT budget_window_state_uniq UNIQUE (tenant_id, tenant_subject_id, actor, window_key)
 );
 
-ALTER TABLE ONLY billing.budget_window_state
-    ADD CONSTRAINT budget_window_state_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES billing.tenant_subjects(id);
+ALTER TABLE ONLY openrails.budget_window_state
+    ADD CONSTRAINT budget_window_state_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
 
-COMMENT ON TABLE billing.budget_window_state IS 'Per-(tenant, tenant subject, actor, window_key) fixed-window anchor (#337). session: window_start rewritten on reopen; fixed: window_start derived from anchor. Locked FOR UPDATE in Reserve as the boundary-rollover serialization point.';
-COMMENT ON COLUMN billing.budget_window_state.anchor IS 'First-ever window open for this (subject, actor, window_key); fixed-cadence boundaries are anchor + k*window_seconds.';
-COMMENT ON COLUMN billing.budget_window_state.window_start IS 'Start of the most recently OPENED window. Authoritative for session cadence; for fixed cadence the current start is derived from anchor at read time.';
+COMMENT ON TABLE openrails.budget_window_state IS 'Per-(tenant, tenant subject, actor, window_key) fixed-window anchor (#337). session: window_start rewritten on reopen; fixed: window_start derived from anchor. Locked FOR UPDATE in Reserve as the boundary-rollover serialization point.';
+COMMENT ON COLUMN openrails.budget_window_state.anchor IS 'First-ever window open for this (subject, actor, window_key); fixed-cadence boundaries are anchor + k*window_seconds.';
+COMMENT ON COLUMN openrails.budget_window_state.window_start IS 'Start of the most recently OPENED window. Authoritative for session cadence; for fixed cadence the current start is derived from anchor at read time.';
 
-ALTER TABLE billing.budget_window_state ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ONLY billing.budget_window_state FORCE ROW LEVEL SECURITY;
+ALTER TABLE openrails.budget_window_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.budget_window_state FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY tenant_isolation ON billing.budget_window_state USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY tenant_isolation ON openrails.budget_window_state USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE billing.budget_window_state TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.budget_window_state TO openrails_app;
 
 -- Aggregation support: Reserve/Check sum reservations since window_start for
 -- one (tenant, subject, actor); the rolling engine relied on the same shape.
 CREATE INDEX IF NOT EXISTS budget_reservations_window_agg_idx
-    ON billing.budget_reservations (tenant_id, tenant_subject_id, actor, created_at)
+    ON openrails.budget_reservations (tenant_id, tenant_subject_id, actor, created_at)
     WHERE status IN ('active', 'captured');

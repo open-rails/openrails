@@ -17,7 +17,7 @@ const (
 	// canonical OpenRails tenant UUID strings.
 	ResourceKindTenant = "openrails.tenant"
 	// ResourceKindTenantSubject scopes a service token to one OpenRails payable subject.
-	// Resource IDs are canonical billing.tenant_subjects UUID strings.
+	// Resource IDs are canonical openrails.tenant_subjects UUID strings.
 	ResourceKindTenantSubject = "openrails.tenant_subject"
 )
 
@@ -102,7 +102,7 @@ func (c *ControlPlane) TenantScope(ctx context.Context, ref string) (tenant.ID, 
 	)
 	err := c.pool.QueryRow(ctx, `
 		SELECT id::text, slug, status
-		  FROM billing.tenants
+		  FROM openrails.tenants
 		 WHERE (id::text = $1 OR lower(slug) = lower($1))
 		   AND deleted_at IS NULL
 		 LIMIT 1
@@ -146,7 +146,7 @@ func (c *ControlPlane) LooksLikeServiceToken(token string) bool {
 //     expiry, revocation, tenant-deleted) — returns authcore.ErrAccessTokenExpired /
 //     ErrAccessTokenRevoked / ErrInvalidAccessToken on those conditions,
 //   - maps the owning AuthKit tenant -> OpenRails tenant (#223) via the
-//     billing.tenants directory, keyed exclusively on the IMMUTABLE AuthKit
+//     openrails.tenants directory, keyed exclusively on the IMMUTABLE AuthKit
 //     tenant uuid (authkit_tenant_id); a credential or directory row without
 //     the uuid fails verification (see tenantForAuthKitTenant).
 //
@@ -185,7 +185,7 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 }
 
 // ErrServiceTokenTenantUnresolved indicates the service token's owning AuthKit tenant is not mapped to
-// any OpenRails tenant (no billing.tenants row, or the tenant is suspended/
+// any OpenRails tenant (no openrails.tenants row, or the tenant is suspended/
 // deleted). Treated as an authorization failure: the service token cannot act on any
 // tenant surface.
 var ErrServiceTokenTenantUnresolved = errors.New("controlplane: service token owning tenant maps to no active tenant")
@@ -230,7 +230,7 @@ func hasAnyResourceKind(resources []authcore.ServiceTokenResource, kind string) 
 }
 
 // tenantForAuthKitTenant maps a credential's owning AuthKit tenant to its
-// OpenRails tenant via the billing.tenants directory. The operator tenant
+// OpenRails tenant via the openrails.tenants directory. The operator tenant
 // administers the default tenant; future AuthKit tenants map to their own
 // tenant rows. Suspended/deleted tenants are rejected.
 //
@@ -254,7 +254,7 @@ func (c *ControlPlane) tenantForAuthKitTenant(ctx context.Context, authKitTenant
 	return tid, slug, err
 }
 
-// tenantDirectoryRow runs one billing.tenants directory lookup with the given
+// tenantDirectoryRow runs one openrails.tenants directory lookup with the given
 // WHERE predicate (which must reference exactly one $1 argument). It returns
 // pgx.ErrNoRows untouched so callers can decide whether a fallback applies;
 // an inactive (suspended) tenant is rejected with ErrServiceTokenTenantUnresolved
@@ -267,7 +267,7 @@ func (c *ControlPlane) tenantDirectoryRow(ctx context.Context, where, arg string
 	)
 	err := c.pool.QueryRow(ctx, `
 		SELECT id::text, slug, status
-		  FROM billing.tenants
+		  FROM openrails.tenants
 		 WHERE `+where+`
 		   AND deleted_at IS NULL
 		 LIMIT 1

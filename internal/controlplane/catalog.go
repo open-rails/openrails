@@ -301,7 +301,7 @@ func OperatorRolePermissions() []string {
 // superadmin role: ONLY PermPlatformSuperadmin (issue #226). The platform role
 // is deliberately narrow — it is the cross-tenant admin gate, not a grab-bag of
 // per-tenant capabilities. Per-tenant mutations a superadmin performs go through
-// the control plane and are audited in billing.platform_audit.
+// the control plane and are audited in openrails.platform_audit.
 func PlatformRolePermissions() []string {
 	return []string{PermPlatformSuperadmin}
 }

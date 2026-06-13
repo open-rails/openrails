@@ -21,7 +21,7 @@ import (
 // tenant-scoped ClickHouse daily_metrics rollup. It must NEVER be consulted for
 // a money / entitlement / authorization decision — those are always derived
 // from Postgres. ClickHouse is OPTIONAL: when unconfigured/unavailable these
-// queries fail soft at the handler layer, never blocking billing.
+// queries fail soft at the handler layer, never blocking openrails.
 //
 // TENANT SCOPING (issue #232): every query in this service is filtered by the
 // tenant id resolved from the request context (tenant.FromContextOrDefault), so

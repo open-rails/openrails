@@ -49,7 +49,7 @@ type DunningHistoryEvent struct {
 	Table     string
 	EventType string
 	Processor string
-	// SubscriptionID is the LOCAL billing.subscriptions uuid when the writer
+	// SubscriptionID is the LOCAL openrails.subscriptions uuid when the writer
 	// knew it (imported legacy events carry the migrated subscription's id).
 	SubscriptionID          *uuid.UUID
 	ProcessorSubscriptionID *string

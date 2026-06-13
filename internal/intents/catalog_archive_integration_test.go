@@ -61,7 +61,7 @@ func (fx *archiveFixture) enqueueArchive(t *testing.T, objectID string, dueAt ti
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = fx.db.Pool().Exec(context.Background(),
-			"DELETE FROM billing.provider_intents WHERE id = $1", row.ID)
+			"DELETE FROM openrails.provider_intents WHERE id = $1", row.ID)
 	})
 	return row.ID
 }
@@ -79,7 +79,7 @@ func (fx *archiveFixture) intent(t *testing.T, id uuid.UUID) (status string, rea
 func (fx *archiveFixture) makeDue(t *testing.T, id uuid.UUID) {
 	t.Helper()
 	_, err := fx.db.Pool().Exec(context.Background(),
-		"UPDATE billing.provider_intents SET next_attempt_at = now() WHERE id = $1", id)
+		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", id)
 	require.NoError(t, err)
 }
 
@@ -140,7 +140,7 @@ func TestArchiveIntentSynchronousEnqueueAndExecute(t *testing.T) {
 	require.NoError(t, err, "a parked archive is not an error")
 	t.Cleanup(func() {
 		_, _ = fx.db.Pool().Exec(context.Background(),
-			"DELETE FROM billing.provider_intents WHERE id = $1", row.ID)
+			"DELETE FROM openrails.provider_intents WHERE id = $1", row.ID)
 	})
 	assert.Equal(t, StatusPending, row.Status)
 	require.NotNil(t, row.LastFailureReason)
@@ -170,16 +170,16 @@ func TestArchiveIntentRelevanceSupersedesWhenObjectJoinsCatalog(t *testing.T) {
 	// Link the remote price to a fresh local row (it "joins" the catalog).
 	productID := uuid.New()
 	priceID := uuid.New()
-	_, err := fx.db.Pool().Exec(ctx, `INSERT INTO billing.products (id, slug, display_name) VALUES ($1, $2, $2)`,
+	_, err := fx.db.Pool().Exec(ctx, `INSERT INTO openrails.products (id, slug, display_name) VALUES ($1, $2, $2)`,
 		productID, "join-prod-"+uuid.NewString()[:8])
 	require.NoError(t, err)
-	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO billing.prices (id, product_id, amount, currency, billing_cycle_days, processors)
+	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, processors)
 	      VALUES ($1, $2, 900, 'usd', 30, $3)`, priceID, productID,
 		[]byte(`{"stripe": {"price_id": "`+objectID+`"}}`))
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = fx.db.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = fx.db.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = fx.db.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = fx.db.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	_, err = fx.runnerWith(fullModeConfig()).RunExecuteOnce(ctx)

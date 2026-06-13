@@ -32,7 +32,7 @@ import (
 const tenantManifestSchemaDDL = `
 CREATE SCHEMA IF NOT EXISTS billing;
 
-CREATE TABLE IF NOT EXISTS billing.tenants (
+CREATE TABLE IF NOT EXISTS openrails.tenants (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug                TEXT NOT NULL UNIQUE,
     name                TEXT NOT NULL,
@@ -52,9 +52,9 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     deleted_at          TIMESTAMPTZ
 );
 
-CREATE TABLE IF NOT EXISTS billing.tenant_delegated_issuers (
+CREATE TABLE IF NOT EXISTS openrails.tenant_delegated_issuers (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id   UUID NOT NULL REFERENCES billing.tenants (id) ON DELETE CASCADE,
+    tenant_id   UUID NOT NULL REFERENCES openrails.tenants (id) ON DELETE CASCADE,
     issuer      TEXT NOT NULL,
     jwks_uri    TEXT NOT NULL,
     audiences   TEXT[] NOT NULL DEFAULT '{}',
@@ -74,7 +74,7 @@ func TestReconcileTenantManifestEnsuresTenantsAndIssuers(t *testing.T) {
 	var tenantID, billingTier, region, webhookPath, authkitTenantSlug string
 	require.NoError(t, pool.QueryRow(ctx, `
 			SELECT id::text, billing_tier, region, webhook_path, authkit_tenant_slug
-		  FROM billing.tenants
+		  FROM openrails.tenants
 		 WHERE slug = 'cozy-art'
 	`).Scan(&tenantID, &billingTier, &region, &webhookPath, &authkitTenantSlug))
 	require.Equal(t, "starter", billingTier)
@@ -90,7 +90,7 @@ func TestReconcileTenantManifestEnsuresTenantsAndIssuers(t *testing.T) {
 
 	require.NoError(t, pool.QueryRow(ctx, `
 			SELECT billing_tier, region, webhook_path
-		  FROM billing.tenants
+		  FROM openrails.tenants
 		 WHERE slug = 'cozy-art'
 	`).Scan(&billingTier, &region, &webhookPath))
 	require.Equal(t, "pro", billingTier)
@@ -300,7 +300,7 @@ func assertIssuerRow(t *testing.T, pool *pgxpool.Pool, issuer, jwksURI string, a
 	)
 	require.NoError(t, pool.QueryRow(context.Background(), `
 		SELECT jwks_uri, audiences, enabled
-		  FROM billing.tenant_delegated_issuers
+		  FROM openrails.tenant_delegated_issuers
 		 WHERE issuer = $1
 	`, issuer).Scan(&gotJWKS, &gotAudiences, &gotEnabled))
 	require.Equal(t, jwksURI, gotJWKS)

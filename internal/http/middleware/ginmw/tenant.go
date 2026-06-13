@@ -27,7 +27,7 @@ func ResolveTenant() gin.HandlerFunc {
 
 		// Also expose on the gin context for handlers/middleware that read it
 		// directly (e.g. future authorization that must bind to the tenant).
-		c.Set("billing.tenant_id", id)
+		c.Set("openrails.tenant_id", id)
 
 		c.Next()
 	}
@@ -37,7 +37,7 @@ func ResolveTenant() gin.HandlerFunc {
 //
 // Extension point for #222: inspect host (subdomain), path prefix
 // (/t/:tenant/...), the service token's owning tenant, or a delegated browser token's
-// `tenant` claim, look the slug up in billing.tenants, and return that id.
+// `tenant` claim, look the slug up in openrails.tenants, and return that id.
 // Until then every request maps to the single default tenant.
 func resolveTenantID(_ *gin.Context) tenant.ID {
 	return tenant.DefaultID

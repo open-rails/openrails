@@ -12,7 +12,7 @@ import (
 )
 
 const ensureTenantSubjectRow = `-- name: EnsureTenantSubjectRow :exec
-INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject)
+INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT DO NOTHING
 `
@@ -36,7 +36,7 @@ func (q *Queries) EnsureTenantSubjectRow(ctx context.Context, arg EnsureTenantSu
 }
 
 const upsertFederatedTenantSubject = `-- name: UpsertFederatedTenantSubject :one
-INSERT INTO billing.tenant_subjects (tenant_id, issuer, subject)
+INSERT INTO openrails.tenant_subjects (tenant_id, issuer, subject)
 VALUES ($1, $2, $3)
 ON CONFLICT (tenant_id, issuer, subject) DO UPDATE SET last_seen_at = now()
 RETURNING id
@@ -59,7 +59,7 @@ func (q *Queries) UpsertFederatedTenantSubject(ctx context.Context, arg UpsertFe
 
 const upsertSelfTenantSubject = `-- name: UpsertSelfTenantSubject :one
 
-INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject)
+INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (id) DO UPDATE SET last_seen_at = now()
 RETURNING id
@@ -72,7 +72,7 @@ type UpsertSelfTenantSubjectParams struct {
 	Subject  string
 }
 
-// billing.tenant_subjects: payable-subject resolution (#317).
+// openrails.tenant_subjects: payable-subject resolution (#317).
 // Self-service identities are their own UUID: materialize the row WITH
 // id = the subject UUID and return it unchanged (refreshing last_seen_at).
 func (q *Queries) UpsertSelfTenantSubject(ctx context.Context, arg UpsertSelfTenantSubjectParams) (uuid.UUID, error) {

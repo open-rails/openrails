@@ -43,14 +43,17 @@ func (d *DB) Qx(ctx context.Context) gen.DBTX {
 	if d == nil {
 		return errDBTX{fmt.Errorf("db: Qx on nil DB")}
 	}
+	// d.pgtx is created via pgxBegin / Pool.Begin, which already return a
+	// schema-rewriting tx, so it is returned as-is (no double wrap). The pool and
+	// the lazy tenant connection are raw handles, so wrap them here (#471).
 	if d.pgtx != nil {
 		return d.pgtx
 	}
 	if lc, ok := ctx.Value(tenantPgxConnKey{}).(*lazyTenantPgxConn); ok {
-		return lc
+		return d.rw.wrapDBTX(lc)
 	}
 	if d.pool != nil {
-		return d.pool
+		return d.rw.wrapDBTX(d.pool)
 	}
 	return errDBTX{fmt.Errorf("db: no pgx handle available on this DB")}
 }
@@ -72,6 +75,9 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 	if d == nil {
 		return nil, fmt.Errorf("db: transaction on nil DB")
 	}
+	// Every branch wraps the returned tx so hand-written SQL run on it inside the
+	// RunInTx/TenantTx callback is schema-rewritten (#471). d.pgtx is already a
+	// schema-rewriting tx; its nested Begin re-wraps idempotently.
 	if d.pgtx != nil {
 		// Nested: pgx models nesting as savepoints via tx.Begin.
 		return d.pgtx.Begin(ctx)
@@ -83,10 +89,18 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 		if err != nil {
 			return nil, err
 		}
-		return conn.Begin(ctx)
+		tx, err := conn.Begin(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return d.rw.wrapTx(tx), nil
 	}
 	if d.pool != nil {
-		return d.pool.Begin(ctx)
+		tx, err := d.pool.Begin(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return d.rw.wrapTx(tx), nil
 	}
 	return nil, fmt.Errorf("db: no pgx handle available to begin transaction (issue #334)")
 }

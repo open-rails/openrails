@@ -1,8 +1,8 @@
--- billing.entitlements. The model is bun-soft-delete (deleted_at): every
+-- openrails.entitlements. The model is bun-soft-delete (deleted_at): every
 -- read filters deleted_at IS NULL explicitly here (bun added it implicitly).
 
 -- name: CreateEntitlement :one
-INSERT INTO billing.entitlements (
+INSERT INTO openrails.entitlements (
     id, tenant_id, tenant_subject_id, entitlement, start_at, end_at,
     source_id, source_type, revoked_at, revoke_reason, created_at, updated_at
 ) VALUES (
@@ -19,7 +19,7 @@ RETURNING id;
 
 -- name: EntitlementExistsActive :one
 SELECT EXISTS (
-    SELECT 1 FROM billing.entitlements ent
+    SELECT 1 FROM openrails.entitlements ent
     WHERE ent.tenant_id = $1
       AND ent.tenant_subject_id = $2
       AND ent.entitlement = $3
@@ -31,7 +31,7 @@ SELECT EXISTS (
 
 -- name: EntitlementHasActiveIndefinite :one
 SELECT EXISTS (
-    SELECT 1 FROM billing.entitlements ent
+    SELECT 1 FROM openrails.entitlements ent
     WHERE ent.tenant_id = $1
       AND ent.tenant_subject_id = $2
       AND ent.entitlement = $3
@@ -41,7 +41,7 @@ SELECT EXISTS (
 );
 
 -- name: GetLatestActiveEntitlement :one
-SELECT * FROM billing.entitlements ent
+SELECT * FROM openrails.entitlements ent
 WHERE ent.tenant_id = $1
   AND ent.tenant_subject_id = $2
   AND ent.entitlement = $3
@@ -51,7 +51,7 @@ ORDER BY ent.start_at DESC
 LIMIT 1;
 
 -- name: GetLatestFiniteActiveEntitlement :one
-SELECT * FROM billing.entitlements ent
+SELECT * FROM openrails.entitlements ent
 WHERE ent.tenant_id = $1
   AND ent.tenant_subject_id = $2
   AND ent.entitlement = $3
@@ -65,7 +65,7 @@ LIMIT 1;
 
 -- name: ListActiveEntitlementNames :many
 -- No tenant_id predicate: matches the bun-era user-keyed variant exactly.
-SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
+SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.start_at <= sqlc.arg(at)::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
@@ -73,7 +73,7 @@ WHERE ent.tenant_subject_id = $1
   AND ent.deleted_at IS NULL;
 
 -- name: ListActiveEntitlementNamesTenant :many
-SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
+SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
 WHERE ent.tenant_id = $1
   AND ent.tenant_subject_id = $2
   AND ent.start_at <= sqlc.arg(at)::timestamptz
@@ -82,7 +82,7 @@ WHERE ent.tenant_id = $1
   AND ent.deleted_at IS NULL;
 
 -- name: ListActiveEntitlementRecords :many
-SELECT * FROM billing.entitlements ent
+SELECT * FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -91,7 +91,7 @@ WHERE ent.tenant_subject_id = $1
 ORDER BY ent.start_at ASC;
 
 -- name: ListActiveEntitlementRecordsTenant :many
-SELECT * FROM billing.entitlements ent
+SELECT * FROM openrails.entitlements ent
 WHERE ent.tenant_id = $1
   AND ent.tenant_subject_id = $2
   AND ent.revoked_at IS NULL
@@ -101,14 +101,14 @@ WHERE ent.tenant_id = $1
 ORDER BY ent.start_at ASC;
 
 -- name: ListDistinctEntitlementNamesBySource :many
-SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
+SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
 WHERE ent.source_type = $1
   AND ent.source_id = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL;
 
 -- name: CountInvalidEndBySubscription :one
-SELECT count(*) FROM billing.entitlements ent
+SELECT count(*) FROM openrails.entitlements ent
 WHERE ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
@@ -117,7 +117,7 @@ WHERE ent.source_type = 'subscription'
   AND ent.start_at >= sqlc.arg(end_at)::timestamptz;
 
 -- name: EndActiveEntitlementsBySubscription :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     end_at = sqlc.arg(end_at)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz,
     revoked_at = CASE WHEN sqlc.arg(set_revoked)::boolean THEN sqlc.arg(now)::timestamptz ELSE ent.revoked_at END,
@@ -129,7 +129,7 @@ WHERE ent.source_type = 'subscription'
   AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(end_at)::timestamptz);
 
 -- name: ListExtendableSubscriptionEntitlements :many
-SELECT * FROM billing.entitlements ent
+SELECT * FROM openrails.entitlements ent
 WHERE ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
@@ -138,7 +138,7 @@ WHERE ent.source_type = 'subscription'
 FOR UPDATE;
 
 -- name: UpdateEntitlementEndAtIfMatch :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     end_at = sqlc.arg(new_end_at)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.id = $1
@@ -147,7 +147,7 @@ WHERE ent.id = $1
   AND ent.end_at = sqlc.arg(old_end_at)::timestamptz;
 
 -- name: ResumeEntitlementsBySubscription :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     end_at = NULL,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.source_type = 'subscription'
@@ -158,7 +158,7 @@ WHERE ent.source_type = 'subscription'
   AND ent.end_at > sqlc.arg(now)::timestamptz;
 
 -- name: SoftDeleteFutureOneOffEntitlements :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.source_type = 'one_off'
@@ -168,7 +168,7 @@ WHERE ent.source_type = 'one_off'
   AND ent.start_at >= sqlc.arg(end_at)::timestamptz;
 
 -- name: RevokeActiveOneOffEntitlements :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     end_at = sqlc.arg(end_at)::timestamptz,
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.narg(revoke_reason),
@@ -182,7 +182,7 @@ WHERE ent.source_type = 'one_off'
 
 -- name: EntitlementExistsBySource :one
 SELECT EXISTS (
-    SELECT 1 FROM billing.entitlements ent
+    SELECT 1 FROM openrails.entitlements ent
     WHERE ent.source_type = $1
       AND ent.source_id = $2
       AND ent.entitlement = $3
@@ -191,19 +191,19 @@ SELECT EXISTS (
 );
 
 -- name: ListEntitlementsByTenantSubject :many
-SELECT * FROM billing.entitlements ent
+SELECT * FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.deleted_at IS NULL
 ORDER BY ent.start_at DESC;
 
 -- name: GetEntitlementByID :one
-SELECT * FROM billing.entitlements ent
+SELECT * FROM openrails.entitlements ent
 WHERE ent.id = $1
   AND ent.deleted_at IS NULL
 LIMIT 1;
 
 -- name: RevokeEntitlementByID :execrows
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.arg(revoke_reason)::text,
     updated_at = sqlc.arg(now)::timestamptz
@@ -212,7 +212,7 @@ WHERE ent.id = $1
   AND ent.deleted_at IS NULL;
 
 -- name: RevokeEntitlementBySubscriptionAndName :execrows
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     revoked_at = sqlc.arg(revoke_at)::timestamptz,
     revoke_reason = sqlc.arg(revoke_reason)::text,
     end_at = sqlc.arg(revoke_at)::timestamptz,
@@ -224,7 +224,7 @@ WHERE ent.source_type = 'subscription'
   AND ent.deleted_at IS NULL;
 
 -- name: SoftDeleteGraceBySubscription :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.source_type = 'grace'
@@ -233,7 +233,7 @@ WHERE ent.source_type = 'grace'
   AND ent.deleted_at IS NULL;
 
 -- name: ListActiveGraceWindowsForUpdate :many
-SELECT * FROM billing.entitlements ent
+SELECT * FROM openrails.entitlements ent
 WHERE ent.source_type = 'grace'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
@@ -243,7 +243,7 @@ WHERE ent.source_type = 'grace'
 FOR UPDATE;
 
 -- name: SoftDeleteFutureGraceBySubscription :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.source_type = 'grace'
@@ -258,7 +258,7 @@ WHERE ent.source_type = 'grace'
 SELECT pg_advisory_xact_lock(sqlc.arg(key)::bigint);
 
 -- name: ShiftEntitlementTimelineWindows :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     start_at = ent.start_at + (sqlc.arg(delta_seconds)::bigint * interval '1 second'),
     end_at = CASE WHEN ent.end_at IS NULL THEN NULL
              ELSE ent.end_at + (sqlc.arg(delta_seconds)::bigint * interval '1 second') END,
@@ -271,7 +271,7 @@ WHERE ent.tenant_subject_id = $1
   AND NOT (ent.id = ANY(sqlc.arg(exclude_ids)::uuid[]));
 
 -- name: SetEntitlementEndAt :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     end_at = sqlc.narg(end_at),
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.id = $1
@@ -279,7 +279,7 @@ WHERE ent.id = $1
   AND ent.deleted_at IS NULL;
 
 -- name: SoftDeleteLaterEntitlementWindows :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.tenant_subject_id = $1
@@ -290,7 +290,7 @@ WHERE ent.tenant_subject_id = $1
   AND ent.id <> sqlc.arg(exclude_id)::uuid;
 
 -- name: RevokeEntitlementWindowNow :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     end_at = sqlc.arg(end_at)::timestamptz,
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.narg(revoke_reason),
@@ -306,7 +306,7 @@ WHERE ent.id = $1
 
 -- name: TimelineHasIndefinite :one
 SELECT EXISTS (
-    SELECT 1 FROM billing.entitlements ent
+    SELECT 1 FROM openrails.entitlements ent
     WHERE ent.tenant_subject_id = $1
       AND ent.entitlement = $2
       AND ent.revoked_at IS NULL
@@ -315,7 +315,7 @@ SELECT EXISTS (
 );
 
 -- name: GetTimelineIndefinite :one
-SELECT * FROM billing.entitlements ent
+SELECT * FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -326,7 +326,7 @@ LIMIT 1;
 
 -- name: GetTimelineTailEnd :one
 -- The latest finite end on the timeline (the tail a new window starts after).
-SELECT ent.end_at FROM billing.entitlements ent
+SELECT ent.end_at FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -337,7 +337,7 @@ LIMIT 1;
 
 -- name: GetTimelineCoveringWindow :one
 -- The window covering instant `at` (for already-covered EndAt requests).
-SELECT * FROM billing.entitlements ent
+SELECT * FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -349,14 +349,14 @@ LIMIT 1;
 
 -- name: AttachEntitlementTenantSubject :exec
 -- Backfill the payable subject onto a legacy row that predates #317.
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     tenant_subject_id = $2,
     updated_at = $3
 WHERE ent.id = $1
   AND ent.tenant_subject_id IS NULL;
 
 -- name: SoftDeleteEntitlementByID :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.id = $1
@@ -366,7 +366,7 @@ WHERE ent.id = $1
 -- name: RevokeActiveTimelineWindows :exec
 -- Revoke every currently-active window on the timeline, optionally filtered
 -- to one source (NULL filter = any).
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.arg(revoke_reason)::text,
     updated_at = sqlc.arg(now)::timestamptz
@@ -382,7 +382,7 @@ WHERE ent.tenant_subject_id = $1
 -- name: SoftDeleteFutureTimelineWindows :exec
 -- Soft-delete every future scheduled window on the timeline, optionally
 -- filtered to one source (NULL filter = any).
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.tenant_subject_id = $1
@@ -398,8 +398,8 @@ WHERE ent.tenant_subject_id = $1
 -- (tenant, issuer) in ONE query — the list-shaped consumers' answer to N
 -- per-subject round trips. Subjects with no active rows simply do not appear;
 -- the handler/SDK reconstruct empty entries per requested subject.
-SELECT ts.subject AS external_subject, ent.* FROM billing.entitlements ent
-JOIN billing.tenant_subjects ts ON ts.id = ent.tenant_subject_id
+SELECT ts.subject AS external_subject, ent.* FROM openrails.entitlements ent
+JOIN openrails.tenant_subjects ts ON ts.id = ent.tenant_subject_id
 WHERE ts.tenant_id = sqlc.arg(tenant_id)
   AND ts.issuer = sqlc.arg(issuer)
   AND ts.subject = ANY(sqlc.arg(subjects)::text[])

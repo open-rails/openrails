@@ -99,11 +99,11 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	}
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", sub.ID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pm.ID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", sub.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	// Move time to paid end and mark a failure (puts subscription into past_due and schedules next_retry_at).
@@ -186,9 +186,9 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", sub.ID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pm.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", sub.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm.ID)
 	})
 
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))

@@ -108,11 +108,11 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO billing.products (id, slug, display_name) VALUES ($1, $2, $2)`,
+	exec(`INSERT INTO openrails.products (id, slug, display_name) VALUES ($1, $2, $2)`,
 		productID, "intent-prod-"+suffix)
-	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, billing_cycle_days)
+	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days)
 	      VALUES ($1, $2, 999, 'usd', 30)`, priceID, productID)
-	exec(`INSERT INTO billing.subscriptions
+	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, processor, processor_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
 	         cancelled_at, cancel_type, deletion_scheduled_at, tenant_subject_id)
@@ -122,10 +122,10 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 		deletionScheduledAt.UTC(), fx.userID)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.provider_intents WHERE subscription_id = $1", fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 	return fx
 }
@@ -235,7 +235,7 @@ func TestAmbiguousOutcomeRoutesThroughVerifier(t *testing.T) {
 	// the intent due now and run the verifier.
 	fake.present.Store(false)
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE billing.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 
 	stats, err := fx.runner(client, fullModeConfig()).RunVerifyOnce(context.Background())
@@ -262,7 +262,7 @@ func TestVerifierStillPresentReturnsToExecutor(t *testing.T) {
 	require.Equal(t, StatusUnknownNeedsVerify, fx.intent(t, row.ID).Status)
 
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE billing.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.runner(client, fullModeConfig()).RunVerifyOnce(context.Background())
 	require.NoError(t, err)
@@ -275,7 +275,7 @@ func TestVerifierStillPresentReturnsToExecutor(t *testing.T) {
 	// Gateway recovers; pull the backoff in and re-run the executor.
 	fake.deleteStatus.Store(0)
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE billing.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 	require.NoError(t, err)
@@ -306,7 +306,7 @@ func TestKillSwitchParksPending(t *testing.T) {
 	// Switch lifts -> queue drains on the next due pass.
 	client.SubscriptionDeletesDisabled = false
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE billing.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 	require.NoError(t, err)
@@ -342,7 +342,7 @@ func TestLimitedModeOriginGating(t *testing.T) {
 
 		// Mode lifts to full -> drains.
 		_, err = fx.db.Pool().Exec(context.Background(),
-			"UPDATE billing.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+			"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 		require.NoError(t, err)
 		_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 		require.NoError(t, err)
@@ -405,7 +405,7 @@ func TestExecutorRelevanceSupersedesResumedSubscription(t *testing.T) {
 
 	// Simulate the resume that missed its advisory supersede.
 	_, err := fx.db.Pool().Exec(context.Background(),
-		`UPDATE billing.subscriptions
+		`UPDATE openrails.subscriptions
 		 SET status = 'active', cancelled_at = NULL, cancel_type = NULL, deletion_scheduled_at = NULL
 		 WHERE id = $1`, fx.subID)
 	require.NoError(t, err)
@@ -433,7 +433,7 @@ func TestIdempotentEnqueue(t *testing.T) {
 
 	var count int
 	require.NoError(t, fx.db.Pool().QueryRow(context.Background(),
-		"SELECT count(*) FROM billing.provider_intents WHERE subscription_id = $1", fx.subID).Scan(&count))
+		"SELECT count(*) FROM openrails.provider_intents WHERE subscription_id = $1", fx.subID).Scan(&count))
 	assert.Equal(t, 1, count)
 }
 
@@ -495,7 +495,7 @@ func TestClaimLeaseReclaim(t *testing.T) {
 
 	// Simulate a crashed executor: claimed long ago, lease elapsed.
 	_, err := fx.db.Pool().Exec(context.Background(),
-		`UPDATE billing.provider_intents
+		`UPDATE openrails.provider_intents
 		 SET status = 'in_flight', claimed_until = now() - interval '1 minute', attempts = 1
 		 WHERE id = $1`, row.ID)
 	require.NoError(t, err)

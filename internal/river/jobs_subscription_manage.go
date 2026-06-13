@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	KindSubscriptionCancel = "billing.subscription_cancel"
-	KindSubscriptionResume = "billing.subscription_resume"
+	KindSubscriptionCancel = "openrails.subscription_cancel"
+	KindSubscriptionResume = "openrails.subscription_resume"
 )
 
 type CancelSubscriptionArgs struct {

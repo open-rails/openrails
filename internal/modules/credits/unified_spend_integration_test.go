@@ -90,7 +90,7 @@ func TestSpendCredits_Idempotent(t *testing.T) {
 func TestRecordUsage_ArrearsDrawsThenAccrues(t *testing.T) {
 	svc, pool, payer, ct, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: strptr(credits.BillingModeArrears)})
 	require.NoError(t, err)

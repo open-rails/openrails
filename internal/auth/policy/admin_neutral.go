@@ -14,7 +14,7 @@ import (
 // both transports: it checks r.Get (gin-side stash) and the request context
 // (net/http-side, set by billingauth.SetUserContext).
 func userContext(r *request.Request) (billingauth.UserContext, bool) {
-	if v, ok := r.Get("billing.user_context"); ok {
+	if v, ok := r.Get("openrails.user_context"); ok {
 		if uc, ok := v.(billingauth.UserContext); ok {
 			return uc, true
 		}

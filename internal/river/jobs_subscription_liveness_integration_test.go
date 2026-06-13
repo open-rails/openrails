@@ -105,13 +105,13 @@ func newLivenessFixture(t *testing.T, processor models.Processor, periodEndAgo t
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE source_id = $1", f.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE subscription_id = $1", f.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.provider_intents WHERE subscription_id = $1", f.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", f.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", f.paymentMethodID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", f.priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", f.productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE source_id = $1", f.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", f.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", f.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", f.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", f.paymentMethodID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", f.priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", f.productID)
 	})
 
 	// Fake NMI: query.php answers come from the fixture fields; ANY hit on a
@@ -164,7 +164,7 @@ func (f *livenessFixture) run(t *testing.T) {
 func (f *livenessFixture) subRow(t *testing.T) (status string, periodEnd *time.Time, retryAttempts *int32, nextRetryAt *time.Time) {
 	t.Helper()
 	require.NoError(t, f.pool.QueryRow(context.Background(),
-		`SELECT status, current_period_ends_at, retry_attempts, next_retry_at FROM billing.subscriptions WHERE id = $1`, f.subID).
+		`SELECT status, current_period_ends_at, retry_attempts, next_retry_at FROM openrails.subscriptions WHERE id = $1`, f.subID).
 		Scan(&status, &periodEnd, &retryAttempts, &nextRetryAt))
 	return
 }
@@ -198,16 +198,16 @@ func TestLivenessWorker_ChargedRepair(t *testing.T) {
 
 	var paymentCount int
 	require.NoError(t, f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.payments WHERE subscription_id = $1 AND transaction_id = $2`, f.subID, txnID).Scan(&paymentCount))
+		`SELECT count(*) FROM openrails.payments WHERE subscription_id = $1 AND transaction_id = $2`, f.subID, txnID).Scan(&paymentCount))
 	assert.Equal(t, 1, paymentCount, "verified charge must be backfilled as a payment")
 
 	// Entitlements: a paid window for the repaired period plus the #368
 	// trailing grace window starting exactly at the new paid end.
 	var paidWindows, graceWindows int
 	require.NoError(t, f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.entitlements WHERE source_id = $1 AND source_type = 'subscription' AND revoked_at IS NULL AND deleted_at IS NULL`, f.subID).Scan(&paidWindows))
+		`SELECT count(*) FROM openrails.entitlements WHERE source_id = $1 AND source_type = 'subscription' AND revoked_at IS NULL AND deleted_at IS NULL`, f.subID).Scan(&paidWindows))
 	require.NoError(t, f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.entitlements WHERE source_id = $1 AND source_type = 'grace' AND revoked_at IS NULL AND deleted_at IS NULL`, f.subID).Scan(&graceWindows))
+		`SELECT count(*) FROM openrails.entitlements WHERE source_id = $1 AND source_type = 'grace' AND revoked_at IS NULL AND deleted_at IS NULL`, f.subID).Scan(&graceWindows))
 	assert.Equal(t, 1, paidWindows, "repair grants the paid window")
 	assert.Equal(t, 1, graceWindows, "repair pre-appends the next renewal grace window (#368)")
 
@@ -215,7 +215,7 @@ func TestLivenessWorker_ChargedRepair(t *testing.T) {
 	// longer returns the sub — exactly-once repair.
 	f.run(t)
 	require.NoError(t, f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.payments WHERE subscription_id = $1`, f.subID).Scan(&paymentCount))
+		`SELECT count(*) FROM openrails.payments WHERE subscription_id = $1`, f.subID).Scan(&paymentCount))
 	assert.Equal(t, 1, paymentCount, "a second pass must not duplicate the payment")
 
 	assert.Zero(t, f.directPostHits.Load(), "the liveness worker must never send a provider mutation")
@@ -271,12 +271,12 @@ func TestLivenessWorker_MisalignmentAdoptsPeriodWithoutAccess(t *testing.T) {
 
 	var entCount int
 	require.NoError(t, f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.entitlements WHERE source_id = $1`, f.subID).Scan(&entCount))
+		`SELECT count(*) FROM openrails.entitlements WHERE source_id = $1`, f.subID).Scan(&entCount))
 	assert.Zero(t, entCount, "period adoption must never grant access")
 
 	var paymentCount int
 	require.NoError(t, f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.payments WHERE subscription_id = $1`, f.subID).Scan(&paymentCount))
+		`SELECT count(*) FROM openrails.payments WHERE subscription_id = $1`, f.subID).Scan(&paymentCount))
 	assert.Zero(t, paymentCount)
 	assert.Zero(t, f.directPostHits.Load(), "the liveness worker must never send a provider mutation")
 }
@@ -292,9 +292,9 @@ func TestLivenessWorker_RemoteAbsentCancelsAndRevokes(t *testing.T) {
 	// Give the user a lingering entitlement window from the subscription so
 	// the revocation is observable.
 	var tenantSubjectID uuid.UUID
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT tenant_subject_id FROM billing.subscriptions WHERE id = $1`, f.subID).Scan(&tenantSubjectID))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT tenant_subject_id FROM openrails.subscriptions WHERE id = $1`, f.subID).Scan(&tenantSubjectID))
 	_, err := f.pool.Exec(ctx,
-		`INSERT INTO billing.entitlements (id, entitlement, start_at, end_at, source_id, source_type, tenant_subject_id)
+		`INSERT INTO openrails.entitlements (id, entitlement, start_at, end_at, source_id, source_type, tenant_subject_id)
 		 VALUES ($1, 'premium', now() - interval '40 days', now() + interval '10 days', $2, 'subscription', $3)`,
 		uuid.New(), f.subID, tenantSubjectID)
 	require.NoError(t, err)
@@ -306,12 +306,12 @@ func TestLivenessWorker_RemoteAbsentCancelsAndRevokes(t *testing.T) {
 
 	var liveEnts int
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT count(*) FROM billing.entitlements WHERE source_id = $1 AND revoked_at IS NULL AND deleted_at IS NULL AND (end_at IS NULL OR end_at > now())`, f.subID).Scan(&liveEnts))
+		`SELECT count(*) FROM openrails.entitlements WHERE source_id = $1 AND revoked_at IS NULL AND deleted_at IS NULL AND (end_at IS NULL OR end_at > now())`, f.subID).Scan(&liveEnts))
 	assert.Zero(t, liveEnts, "entitlements must be revoked with the cancellation")
 
 	var intentCount int
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT count(*) FROM billing.provider_intents WHERE subscription_id = $1`, f.subID).Scan(&intentCount))
+		`SELECT count(*) FROM openrails.provider_intents WHERE subscription_id = $1`, f.subID).Scan(&intentCount))
 	assert.Zero(t, intentCount, "remote-absent needs no delete intent — the remote sub is already gone")
 	assert.Zero(t, f.directPostHits.Load(), "the liveness worker must never send a provider mutation")
 }
@@ -343,7 +343,7 @@ func TestLivenessWorker_UnreachableProviderLeavesStateUntouched(t *testing.T) {
 	assert.Equal(t, string(models.StatusActive), statusFinal)
 	var paymentCount int
 	require.NoError(t, f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.payments WHERE subscription_id = $1 AND transaction_id = $2`, f.subID, txnID).Scan(&paymentCount))
+		`SELECT count(*) FROM openrails.payments WHERE subscription_id = $1 AND transaction_id = $2`, f.subID, txnID).Scan(&paymentCount))
 	assert.Equal(t, 1, paymentCount)
 	assert.Zero(t, f.directPostHits.Load())
 }
@@ -372,7 +372,7 @@ func TestLivenessWorker_MonthsStaleNeverCharges(t *testing.T) {
 
 	var paymentCount int
 	require.NoError(t, f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.payments WHERE subscription_id = $1`, f.subID).Scan(&paymentCount))
+		`SELECT count(*) FROM openrails.payments WHERE subscription_id = $1`, f.subID).Scan(&paymentCount))
 	assert.Zero(t, paymentCount)
 }
 
@@ -409,7 +409,7 @@ func TestLivenessWorker_StripeChargedRepair(t *testing.T) {
 
 	var paymentCount int
 	require.NoError(t, f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.payments WHERE subscription_id = $1`, f.subID).Scan(&paymentCount))
+		`SELECT count(*) FROM openrails.payments WHERE subscription_id = $1`, f.subID).Scan(&paymentCount))
 	assert.Equal(t, 1, paymentCount)
 }
 
@@ -438,6 +438,6 @@ func TestLivenessWorker_ReadonlyModeSkips(t *testing.T) {
 	assert.Equal(t, string(models.StatusActive), status, "readonly mode must not converge state")
 	var paymentCount int
 	require.NoError(t, f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.payments WHERE subscription_id = $1`, f.subID).Scan(&paymentCount))
+		`SELECT count(*) FROM openrails.payments WHERE subscription_id = $1`, f.subID).Scan(&paymentCount))
 	assert.Zero(t, paymentCount)
 }

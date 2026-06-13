@@ -1,7 +1,7 @@
--- billing.product_access_grants (issue #250).
+-- openrails.product_access_grants (issue #250).
 
 -- name: CreateProductAccessGrant :one
-INSERT INTO billing.product_access_grants (
+INSERT INTO openrails.product_access_grants (
     id, tenant_id, tenant_subject_id, product_id, source_type, source_id,
     payment_id, status, starts_at, ends_at, revoked_at, revoke_reason,
     created_at, updated_at
@@ -21,7 +21,7 @@ INSERT INTO billing.product_access_grants (
 RETURNING id;
 
 -- name: GetProductAccessGrantBySource :one
-SELECT * FROM billing.product_access_grants pag
+SELECT * FROM openrails.product_access_grants pag
 WHERE pag.tenant_id = $1
   AND pag.tenant_subject_id = $2
   AND pag.product_id = $3
@@ -30,7 +30,7 @@ LIMIT 1;
 
 -- name: HasActiveProductAccess :one
 SELECT EXISTS (
-    SELECT 1 FROM billing.product_access_grants pag
+    SELECT 1 FROM openrails.product_access_grants pag
     WHERE pag.tenant_id = $1
       AND pag.tenant_subject_id = $2
       AND pag.product_id = $3
@@ -41,7 +41,7 @@ SELECT EXISTS (
 );
 
 -- name: ListActiveProductAccessGrantsByTenantSubject :many
-SELECT * FROM billing.product_access_grants pag
+SELECT * FROM openrails.product_access_grants pag
 WHERE pag.tenant_id = $1
   AND pag.tenant_subject_id = $2
   AND pag.status = 'active'
@@ -51,17 +51,17 @@ WHERE pag.tenant_id = $1
 ORDER BY pag.created_at DESC;
 
 -- name: ListProductAccessGrantsByTenantSubject :many
-SELECT * FROM billing.product_access_grants pag
+SELECT * FROM openrails.product_access_grants pag
 WHERE pag.tenant_id = $1
   AND pag.tenant_subject_id = $2
 ORDER BY pag.created_at DESC;
 
 -- name: GetProductAccessGrantByID :one
-SELECT * FROM billing.product_access_grants pag
+SELECT * FROM openrails.product_access_grants pag
 WHERE pag.tenant_id = $1 AND pag.id = $2;
 
 -- name: RevokeProductAccessGrantByID :execrows
-UPDATE billing.product_access_grants pag SET
+UPDATE openrails.product_access_grants pag SET
     status = 'revoked',
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.arg(reason),
@@ -73,7 +73,7 @@ WHERE pag.tenant_id = $1
   AND pag.revoked_at IS NULL;
 
 -- name: RevokeProductAccessGrantsByPayment :execrows
-UPDATE billing.product_access_grants pag SET
+UPDATE openrails.product_access_grants pag SET
     status = 'revoked',
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.arg(reason),

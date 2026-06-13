@@ -15,7 +15,7 @@ import (
 const aggregateBudgetWindow = `-- name: AggregateBudgetWindow :one
 SELECT COALESCE(SUM(captured_micros) FILTER (WHERE status = 'captured'), 0)::bigint AS used,
        COALESCE(SUM(amount_micros) FILTER (WHERE status = 'active'), 0)::bigint AS reserved
-FROM billing.budget_reservations
+FROM openrails.budget_reservations
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND actor = $3
   AND created_at >= $4::timestamptz
   AND status IN ('active','captured')
@@ -48,7 +48,7 @@ func (q *Queries) AggregateBudgetWindow(ctx context.Context, arg AggregateBudget
 }
 
 const captureBudgetReservation = `-- name: CaptureBudgetReservation :execrows
-UPDATE billing.budget_reservations
+UPDATE openrails.budget_reservations
 SET status = 'captured', captured_micros = $2
 WHERE id = $1 AND status = 'active'
 `
@@ -67,7 +67,7 @@ func (q *Queries) CaptureBudgetReservation(ctx context.Context, arg CaptureBudge
 }
 
 const deletePaymentBlock = `-- name: DeletePaymentBlock :exec
-DELETE FROM billing.payment_blocklist
+DELETE FROM openrails.payment_blocklist
 WHERE tenant_id = $1 AND kind = $2 AND value = $3
 `
 
@@ -84,7 +84,7 @@ func (q *Queries) DeletePaymentBlock(ctx context.Context, arg DeletePaymentBlock
 
 const getBudgetReservationByCoords = `-- name: GetBudgetReservationByCoords :one
 
-SELECT id, tenant_id, tenant_subject_id, actor, amount_micros, captured_micros, status, source, source_id, created_at, expires_at FROM billing.budget_reservations
+SELECT id, tenant_id, tenant_subject_id, actor, amount_micros, captured_micros, status, source, source_id, created_at, expires_at FROM openrails.budget_reservations
 WHERE tenant_id = $1 AND tenant_subject_id = $2
   AND actor = $3 AND source = $4 AND source_id = $5
 LIMIT 1
@@ -126,7 +126,7 @@ func (q *Queries) GetBudgetReservationByCoords(ctx context.Context, arg GetBudge
 }
 
 const getBudgetWindowState = `-- name: GetBudgetWindowState :one
-SELECT id, tenant_id, tenant_subject_id, actor, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM billing.budget_window_state bws
+SELECT id, tenant_id, tenant_subject_id, actor, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM openrails.budget_window_state bws
 WHERE bws.tenant_id = $1 AND bws.tenant_subject_id = $2
   AND bws.actor = $3 AND bws.window_key = $4
 LIMIT 1
@@ -164,7 +164,7 @@ func (q *Queries) GetBudgetWindowState(ctx context.Context, arg GetBudgetWindowS
 }
 
 const getBudgetWindowStateForUpdate = `-- name: GetBudgetWindowStateForUpdate :one
-SELECT id, tenant_id, tenant_subject_id, actor, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM billing.budget_window_state bws
+SELECT id, tenant_id, tenant_subject_id, actor, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM openrails.budget_window_state bws
 WHERE bws.tenant_id = $1 AND bws.tenant_subject_id = $2
   AND bws.actor = $3 AND bws.window_key = $4
 FOR UPDATE
@@ -204,7 +204,7 @@ func (q *Queries) GetBudgetWindowStateForUpdate(ctx context.Context, arg GetBudg
 }
 
 const getTierPolicy = `-- name: GetTierPolicy :one
-SELECT id, tenant_id, tenant_subject_id, tier, policy, policy_version, created_at, updated_at FROM billing.tier_policies
+SELECT id, tenant_id, tenant_subject_id, tier, policy, policy_version, created_at, updated_at FROM openrails.tier_policies
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND tier = $3
 LIMIT 1
 `
@@ -232,7 +232,7 @@ func (q *Queries) GetTierPolicy(ctx context.Context, arg GetTierPolicyParams) (B
 }
 
 const insertBudgetReservation = `-- name: InsertBudgetReservation :exec
-INSERT INTO billing.budget_reservations (
+INSERT INTO openrails.budget_reservations (
     id, tenant_id, tenant_subject_id, actor,
     amount_micros, status, source, source_id, expires_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -268,7 +268,7 @@ func (q *Queries) InsertBudgetReservation(ctx context.Context, arg InsertBudgetR
 }
 
 const insertBudgetWindowStateIfAbsent = `-- name: InsertBudgetWindowStateIfAbsent :exec
-INSERT INTO billing.budget_window_state (
+INSERT INTO openrails.budget_window_state (
     id, tenant_id, tenant_subject_id, actor, window_key,
     cadence, window_seconds, anchor, window_start, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -308,7 +308,7 @@ func (q *Queries) InsertBudgetWindowStateIfAbsent(ctx context.Context, arg Inser
 }
 
 const insertPaymentBlockIfAbsent = `-- name: InsertPaymentBlockIfAbsent :exec
-INSERT INTO billing.payment_blocklist (
+INSERT INTO openrails.payment_blocklist (
     id, tenant_id, tenant_subject_id, kind, value, reason, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (tenant_id, kind, value) DO NOTHING
@@ -339,7 +339,7 @@ func (q *Queries) InsertPaymentBlockIfAbsent(ctx context.Context, arg InsertPaym
 
 const paymentBlockExists = `-- name: PaymentBlockExists :one
 SELECT EXISTS (
-    SELECT 1 FROM billing.payment_blocklist
+    SELECT 1 FROM openrails.payment_blocklist
     WHERE tenant_id = $1 AND kind = $2 AND value = $3
 )
 `
@@ -358,7 +358,7 @@ func (q *Queries) PaymentBlockExists(ctx context.Context, arg PaymentBlockExists
 }
 
 const releaseBudgetReservation = `-- name: ReleaseBudgetReservation :execrows
-UPDATE billing.budget_reservations
+UPDATE openrails.budget_reservations
 SET status = 'released'
 WHERE id = $1 AND status = 'active'
 `
@@ -372,7 +372,7 @@ func (q *Queries) ReleaseBudgetReservation(ctx context.Context, id uuid.UUID) (i
 }
 
 const reopenBudgetWindowState = `-- name: ReopenBudgetWindowState :exec
-UPDATE billing.budget_window_state
+UPDATE openrails.budget_window_state
 SET window_start = $2, cadence = $3, window_seconds = $4, updated_at = $5
 WHERE id = $1
 `
@@ -399,7 +399,7 @@ func (q *Queries) ReopenBudgetWindowState(ctx context.Context, arg ReopenBudgetW
 }
 
 const upsertTierPolicy = `-- name: UpsertTierPolicy :exec
-INSERT INTO billing.tier_policies (
+INSERT INTO openrails.tier_policies (
     id, tenant_id, tenant_subject_id, tier, policy, policy_version, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (tenant_id, tenant_subject_id, tier) DO UPDATE SET

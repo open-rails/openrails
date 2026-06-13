@@ -21,14 +21,14 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// schemaDDL stands up the minimal billing.* schema the tenancy service touches:
+// schemaDDL stands up the minimal openrails.* schema the tenancy service touches:
 // the tenant directory (with #225 columns), one representative tenant-owned table
 // (entitlements) so export/delete have rows to purge, and the #225 control-plane
 // tables. It mirrors migrations 039 + 041 for the columns under test.
 const schemaDDL = `
 CREATE SCHEMA IF NOT EXISTS billing;
 
-CREATE TABLE IF NOT EXISTS billing.tenants (
+CREATE TABLE IF NOT EXISTS openrails.tenants (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug             TEXT NOT NULL UNIQUE,
     name             TEXT NOT NULL,
@@ -47,24 +47,24 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     suspended_at     TIMESTAMPTZ,
     deleted_at       TIMESTAMPTZ
 );
-INSERT INTO billing.tenants (id, slug, name)
+INSERT INTO openrails.tenants (id, slug, name)
 VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default')
 ON CONFLICT (id) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS billing.entitlements (
+CREATE TABLE IF NOT EXISTS openrails.entitlements (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id         UUID,
     tenant_subject_id UUID
 );
 
-CREATE TABLE IF NOT EXISTS billing.tenant_subjects (
+CREATE TABLE IF NOT EXISTS openrails.tenant_subjects (
     id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
     issuer    TEXT NOT NULL,
     subject   TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS billing.tenant_secrets (
+CREATE TABLE IF NOT EXISTS openrails.tenant_secrets (
     tenant_id  UUID NOT NULL,
     name       TEXT NOT NULL,
     value      TEXT NOT NULL,
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS billing.tenant_secrets (
     PRIMARY KEY (tenant_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS billing.tenant_credential_audit (
+CREATE TABLE IF NOT EXISTS openrails.tenant_credential_audit (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id  UUID NOT NULL,
     name       TEXT NOT NULL,
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS billing.tenant_credential_audit (
     created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
 );
 
-CREATE TABLE IF NOT EXISTS billing.tenant_exports (
+CREATE TABLE IF NOT EXISTS openrails.tenant_exports (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id    UUID NOT NULL,
     status       TEXT NOT NULL DEFAULT 'completed',
@@ -189,7 +189,7 @@ func TestProvision_Idempotent(t *testing.T) {
 	require.Equal(t, first.ID, second.ID)
 
 	var count int
-	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM billing.tenants WHERE slug='acme'`).Scan(&count))
+	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.tenants WHERE slug='acme'`).Scan(&count))
 	require.Equal(t, 1, count, "provision must not create a duplicate tenant row")
 	require.GreaterOrEqual(t, tenants.calls, 2, "org provisioner called on each provision")
 }
@@ -235,11 +235,11 @@ func TestDelete_RequiresExport(t *testing.T) {
 	// Seed a tenant-owned row + a secret so the purge has something to remove.
 	_, err = svc.pool.Exec(ctx, `
 		WITH subject AS (
-			INSERT INTO billing.tenant_subjects (tenant_id, issuer, subject)
+			INSERT INTO openrails.tenant_subjects (tenant_id, issuer, subject)
 			VALUES ($1::uuid, 'test', 'u1')
 			RETURNING id
 		)
-		INSERT INTO billing.entitlements (tenant_id, tenant_subject_id)
+		INSERT INTO openrails.entitlements (tenant_id, tenant_subject_id)
 		SELECT $1::uuid, id FROM subject
 	`, tn.ID.String())
 	require.NoError(t, err)
@@ -262,7 +262,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 	require.NoError(t, svc.Delete(ctx, tn.ID, DeleteOptions{Confirm: true}))
 
 	var entCount int
-	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements WHERE tenant_id=$1::uuid`, tn.ID.String()).Scan(&entCount))
+	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements WHERE tenant_id=$1::uuid`, tn.ID.String()).Scan(&entCount))
 	require.Equal(t, 0, entCount, "delete must purge tenant-owned rows")
 
 	// The directory row is tombstoned (no longer resolvable as active).
@@ -297,7 +297,7 @@ func TestCredentialRotation_WritesAudit(t *testing.T) {
 	// Audit rows recorded for both put and rotate.
 	var auditCount int
 	require.NoError(t, svc.pool.QueryRow(ctx,
-		`SELECT count(*) FROM billing.tenant_credential_audit WHERE tenant_id=$1::uuid`,
+		`SELECT count(*) FROM openrails.tenant_credential_audit WHERE tenant_id=$1::uuid`,
 		tn.ID.String()).Scan(&auditCount))
 	require.GreaterOrEqual(t, auditCount, 2)
 

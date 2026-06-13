@@ -27,12 +27,24 @@ Make OpenRails identify itself as `openrails` everywhere a name is exposed, inst
 
 **Host follow-up (separate, after the openrails tag):** bump the pin in doujins + hentai0; flip their migratekit source key `billing`->`openrails`; update the `billing` schema name in their river-billing provisioning + the `010_openrails_embed_control_plane_cleanup` migration's `billing.tenants` reference + the embed config schema + any `billing.*` references in host code; run the shared-dev-DB `ALTER SCHEMA` + tracker `UPDATE` once.
 
+**Decision (2026-06-12):** HARD CUT, no data migration (greenfield per migrations-squash). Schema made
+genuinely configurable via an execution-time rewrite (NOT search_path — embedded shares the host pool):
+SQL is authored against default `openrails.`, and when `db.schema` differs the qualifier is rewritten
+`openrails.`->`<schema>.` just before execution. Runtime: rewriting `gen.DBTX` (DB.Qx), wrapped `pgx.Tx`
+(RunInTx/TenantTx + Pool.Begin), and a `db.Pool` wrapper for the control-plane pool (consumers retyped
+`*pgxpool.Pool`->`*db.Pool`, authcore/River keep `.Raw()`). Migrations: whole-word rewrite in
+`rewriteMigrationsSchema` (relocates qualifiers AND bare `CREATE/ON/IN SCHEMA openrails`, leaves
+`openrails_app` role + prose). App key is a fixed const `config.MigratekitApp="openrails"` (PG + CH).
+Also rebranded the `billing.`-prefixed River job kinds + gin context keys + Stripe lookup_key prefix.
+DELIBERATELY KEPT as `billing` (out of schema/app-key scope): cobra cmd `Use`/`cmd/billing` dir, health
+`{"service":"billing"}`, River queue name `QueueBilling`, pg_dump `Schema: billing` header comments.
+
 **Tasks:**
-- [ ] openrails: rename app key `billing`->`openrails` (all ~5 hard-coded spots, PG + CH)
-- [ ] openrails: default schema -> `openrails` (schema-template or rewrite the qualified DDL; runtime queries too)
-- [ ] openrails: ship the `ALTER SCHEMA` + tracker-`UPDATE` upgrade migration (PG + CH); fail-safe sequencing
-- [ ] openrails: build/vet/test (incl. integration) green; tag a release
-- [ ] hosts (doujins #389 / hentai0 #169 follow-up): pin bump + source-key + schema-name + cleanup-migration ref + shared-DB data migration
+- [x] openrails: rename app key `billing`->`openrails` (PG NewPostgres + ValidatePostgres + CH App, via `config.MigratekitApp`)
+- [x] openrails: default schema -> `openrails`, made truly configurable via execution-time rewrite (runtime queries + migration DDL)
+- [x] ~~ship the `ALTER SCHEMA` upgrade migration~~ — N/A, hard cut / greenfield (no data migration)
+- [x] openrails: build/vet/test green (added schema-rewrite unit tests in internal/db + internal/migrate); **tag a release — Paul (no autonomous commits)**
+- [ ] hosts (doujins #389 / hentai0 #169 / tensorhub / cozy-art): BLOCKED on the openrails tag — pin bump + source-key->`openrails` + schema-name->`openrails` (or drop, default) + their `billing.*` cross-schema SQL -> `openrails.*` + cozy-art `create schema billing`/restore-list. Must land atomically with the pin bump (renaming host SQL against an old pin that still builds `billing` breaks it).
 
 ---
 

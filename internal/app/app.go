@@ -121,7 +121,7 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 
 	var dbOverride *db.DB
 	if opts != nil && opts.PGXPool != nil {
-		dbo, err := db.NewWithPGXPool(opts.PGXPool)
+		dbo, err := db.NewWithPGXPool(opts.PGXPool, cfg.DB.SchemaName())
 		if err != nil {
 			return nil, fmt.Errorf("use pgx pool: %w", err)
 		}

@@ -325,7 +325,7 @@ func (s *StripeWebhookService) handlePaymentMethodAttached(ctx context.Context, 
 	return s.recordStripeCardForCustomer(ctx, pm.Customer, pm.ID, pm.ID, card)
 }
 
-// recordStripeCardForCustomer upserts a billing.payment_methods row for the
+// recordStripeCardForCustomer upserts a openrails.payment_methods row for the
 // customer's card and links it as the active subscription's payment method. It
 // delegates to payments.UpsertStripeCardForCustomer so the webhook path and the
 // reconcile backfill share one implementation.
@@ -1634,7 +1634,7 @@ func stripeInvoiceIsProration(inv stripeInvoice) bool {
 	return strings.EqualFold(strings.TrimSpace(inv.BillingReason), "subscription_update")
 }
 
-// stripeInvoicePaymentAlreadyRecorded reports whether a completed billing.payments
+// stripeInvoicePaymentAlreadyRecorded reports whether a completed openrails.payments
 // row already exists for this Stripe invoice under any of its known
 // transaction-id keys (charge, payment_intent, invoice id) or via the
 // stripe_invoice_id metadata that the reconcile backfill and invoice_payment

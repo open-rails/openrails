@@ -15,7 +15,7 @@
 -- with the single-tenant default, RLS tenant_isolation policy on the
 -- app.tenant_id GUC, FORCE ROW LEVEL SECURITY.
 
-CREATE TABLE billing.reconciliation_runs (
+CREATE TABLE openrails.reconciliation_runs (
     id uuid DEFAULT uuidv7() NOT NULL,
     tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
     mode text NOT NULL,
@@ -32,12 +32,12 @@ CREATE TABLE billing.reconciliation_runs (
     CONSTRAINT chk_reconciliation_runs_status CHECK ((status = ANY (ARRAY['running'::text, 'completed'::text, 'failed'::text])))
 );
 
-ALTER TABLE ONLY billing.reconciliation_runs FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.reconciliation_runs FORCE ROW LEVEL SECURITY;
 
-COMMENT ON TABLE billing.reconciliation_runs IS 'One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment processors. Summary jsonb carries per-provider counts and the dunning-forensics report.';
-COMMENT ON COLUMN billing.reconciliation_runs.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
+COMMENT ON TABLE openrails.reconciliation_runs IS 'One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment processors. Summary jsonb carries per-provider counts and the dunning-forensics report.';
+COMMENT ON COLUMN openrails.reconciliation_runs.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
 
-CREATE TABLE billing.reconciliation_findings (
+CREATE TABLE openrails.reconciliation_findings (
     id uuid DEFAULT uuidv7() NOT NULL,
     tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
     provider text NOT NULL,
@@ -69,32 +69,32 @@ CREATE TABLE billing.reconciliation_findings (
     CONSTRAINT chk_reconciliation_findings_resolved_fields CHECK (((resolved_at IS NULL) = (resolution IS NULL)))
 );
 
-ALTER TABLE ONLY billing.reconciliation_findings FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.reconciliation_findings FORCE ROW LEVEL SECURITY;
 
-COMMENT ON TABLE billing.reconciliation_findings IS 'Durable local-vs-processor drift ledger (#107 PS-1..PS-9). Stable identity per (tenant, provider, finding_type, subject_key): re-runs update, disappearance auto-resolves as auto_vanished. requires_admin = true rows are the admin action queue.';
-COMMENT ON COLUMN billing.reconciliation_findings.subject_key IS 'Stable identity of the drifted subject within (provider, finding_type): processor subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.';
-COMMENT ON COLUMN billing.reconciliation_findings.intent_evidence IS 'Class-3 local-intent annotation (design decision 5): e.g. DeletionScheduledAt marker present => "recorded delete never executed; boot rescan replays it" — keeps the admin queue to genuine unknowns.';
-COMMENT ON COLUMN billing.reconciliation_findings.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
+COMMENT ON TABLE openrails.reconciliation_findings IS 'Durable local-vs-processor drift ledger (#107 PS-1..PS-9). Stable identity per (tenant, provider, finding_type, subject_key): re-runs update, disappearance auto-resolves as auto_vanished. requires_admin = true rows are the admin action queue.';
+COMMENT ON COLUMN openrails.reconciliation_findings.subject_key IS 'Stable identity of the drifted subject within (provider, finding_type): processor subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.';
+COMMENT ON COLUMN openrails.reconciliation_findings.intent_evidence IS 'Class-3 local-intent annotation (design decision 5): e.g. DeletionScheduledAt marker present => "recorded delete never executed; boot rescan replays it" — keeps the admin queue to genuine unknowns.';
+COMMENT ON COLUMN openrails.reconciliation_findings.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
 
-CREATE UNIQUE INDEX uq_reconciliation_findings_identity ON billing.reconciliation_findings USING btree (tenant_id, provider, finding_type, subject_key);
+CREATE UNIQUE INDEX uq_reconciliation_findings_identity ON openrails.reconciliation_findings USING btree (tenant_id, provider, finding_type, subject_key);
 
-CREATE INDEX idx_reconciliation_findings_tenant_id ON billing.reconciliation_findings USING btree (tenant_id);
+CREATE INDEX idx_reconciliation_findings_tenant_id ON openrails.reconciliation_findings USING btree (tenant_id);
 
-CREATE INDEX idx_reconciliation_findings_open ON billing.reconciliation_findings USING btree (provider, finding_type) WHERE (status = ANY (ARRAY['open'::text, 'admin_pending'::text]));
+CREATE INDEX idx_reconciliation_findings_open ON openrails.reconciliation_findings USING btree (provider, finding_type) WHERE (status = ANY (ARRAY['open'::text, 'admin_pending'::text]));
 
-CREATE INDEX idx_reconciliation_findings_admin_queue ON billing.reconciliation_findings USING btree (last_seen_at DESC) WHERE (requires_admin AND (status = 'admin_pending'::text));
+CREATE INDEX idx_reconciliation_findings_admin_queue ON openrails.reconciliation_findings USING btree (last_seen_at DESC) WHERE (requires_admin AND (status = 'admin_pending'::text));
 
-CREATE INDEX idx_reconciliation_runs_tenant_id ON billing.reconciliation_runs USING btree (tenant_id);
+CREATE INDEX idx_reconciliation_runs_tenant_id ON openrails.reconciliation_runs USING btree (tenant_id);
 
-CREATE INDEX idx_reconciliation_runs_started_at ON billing.reconciliation_runs USING btree (started_at DESC);
+CREATE INDEX idx_reconciliation_runs_started_at ON openrails.reconciliation_runs USING btree (started_at DESC);
 
-ALTER TABLE billing.reconciliation_runs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE billing.reconciliation_findings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE openrails.reconciliation_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE openrails.reconciliation_findings ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY tenant_isolation ON billing.reconciliation_runs USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY tenant_isolation ON openrails.reconciliation_runs USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
 
-CREATE POLICY tenant_isolation ON billing.reconciliation_findings USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY tenant_isolation ON openrails.reconciliation_findings USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE billing.reconciliation_runs TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.reconciliation_runs TO openrails_app;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE billing.reconciliation_findings TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.reconciliation_findings TO openrails_app;

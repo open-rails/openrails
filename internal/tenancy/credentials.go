@@ -96,7 +96,7 @@ func (s *Service) audit(ctx context.Context, id tenant.ID, name, action, actor, 
 		return
 	}
 	_, _ = s.pool.Exec(ctx, `
-		INSERT INTO billing.tenant_credential_audit (tenant_id, name, action, actor, detail)
+		INSERT INTO openrails.tenant_credential_audit (tenant_id, name, action, actor, detail)
 		VALUES ($1::uuid, $2, $3, NULLIF($4,''), NULLIF($5,''))
 	`, id.String(), name, action, strings.TrimSpace(actor), detail)
 }

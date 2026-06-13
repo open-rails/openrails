@@ -17,7 +17,7 @@ import (
 // FeatureService implements the Stripe-shaped entitlement-features layer (issue
 // #245): feature definitions, product-feature attachments, and the
 // active-entitlements read. It sits ON TOP of the temporal window ledger owned by
-// EntitlementService — the window ledger (billing.entitlements) stays the source
+// EntitlementService — the window ledger (openrails.entitlements) stays the source
 // of truth for active access; this service names features and resolves a user's
 // active windows into the Stripe-shaped active-entitlement view by joining the
 // window's entitlement string to the feature's lookup_key.

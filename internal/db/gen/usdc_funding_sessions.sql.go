@@ -14,7 +14,7 @@ import (
 
 const createUSDCFundingSession = `-- name: CreateUSDCFundingSession :exec
 
-INSERT INTO billing.usdc_funding_sessions (
+INSERT INTO openrails.usdc_funding_sessions (
     id, tenant_id, tenant_subject_id, checkout_session_id, provider,
     wallet_address, asset, network, requested_amount, provider_session_id,
     provider_url, status, return_url, idempotency_key, metadata,
@@ -54,7 +54,7 @@ type CreateUSDCFundingSessionParams struct {
 	UpdatedAt         time.Time
 }
 
-// billing.usdc_funding_sessions.
+// openrails.usdc_funding_sessions.
 func (q *Queries) CreateUSDCFundingSession(ctx context.Context, arg CreateUSDCFundingSessionParams) error {
 	_, err := q.db.Exec(ctx, createUSDCFundingSession,
 		arg.ID,
@@ -81,7 +81,7 @@ func (q *Queries) CreateUSDCFundingSession(ctx context.Context, arg CreateUSDCFu
 }
 
 const getUSDCFundingSessionByID = `-- name: GetUSDCFundingSessionByID :one
-SELECT id, tenant_id, tenant_subject_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency_key, metadata, last_checked_at, expires_at, created_at, updated_at FROM billing.usdc_funding_sessions ufs
+SELECT id, tenant_id, tenant_subject_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency_key, metadata, last_checked_at, expires_at, created_at, updated_at FROM openrails.usdc_funding_sessions ufs
 WHERE ufs.id = $1
 LIMIT 1
 `
@@ -114,7 +114,7 @@ func (q *Queries) GetUSDCFundingSessionByID(ctx context.Context, id uuid.UUID) (
 }
 
 const getUSDCFundingSessionByIDForTenantSubject = `-- name: GetUSDCFundingSessionByIDForTenantSubject :one
-SELECT id, tenant_id, tenant_subject_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency_key, metadata, last_checked_at, expires_at, created_at, updated_at FROM billing.usdc_funding_sessions ufs
+SELECT id, tenant_id, tenant_subject_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency_key, metadata, last_checked_at, expires_at, created_at, updated_at FROM openrails.usdc_funding_sessions ufs
 WHERE ufs.id = $1 AND ufs.tenant_subject_id = $2
 LIMIT 1
 `
@@ -152,7 +152,7 @@ func (q *Queries) GetUSDCFundingSessionByIDForTenantSubject(ctx context.Context,
 }
 
 const getUSDCFundingSessionByIdempotencyKey = `-- name: GetUSDCFundingSessionByIdempotencyKey :one
-SELECT id, tenant_id, tenant_subject_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency_key, metadata, last_checked_at, expires_at, created_at, updated_at FROM billing.usdc_funding_sessions ufs
+SELECT id, tenant_id, tenant_subject_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency_key, metadata, last_checked_at, expires_at, created_at, updated_at FROM openrails.usdc_funding_sessions ufs
 WHERE ufs.tenant_subject_id = $1 AND ufs.idempotency_key = $2
 LIMIT 1
 `
@@ -190,7 +190,7 @@ func (q *Queries) GetUSDCFundingSessionByIdempotencyKey(ctx context.Context, arg
 }
 
 const updateUSDCFundingSessionStatus = `-- name: UpdateUSDCFundingSessionStatus :exec
-UPDATE billing.usdc_funding_sessions SET
+UPDATE openrails.usdc_funding_sessions SET
     status = $2,
     last_checked_at = $3,
     metadata = $4,

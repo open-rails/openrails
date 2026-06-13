@@ -13,7 +13,7 @@ import (
 )
 
 const auditActiveSubscriptionEntitlementCount = `-- name: AuditActiveSubscriptionEntitlementCount :one
-SELECT count(*) FROM billing.entitlements ent
+SELECT count(*) FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.source_type = 'subscription'
@@ -51,8 +51,8 @@ SELECT
     sub.tenant_subject_id::text AS user_id,
     pm.id AS pm_id,
     pm.failure_reason::text AS failure_reason
-FROM billing.subscriptions sub
-JOIN billing.payment_methods pm ON sub.payment_method_id = pm.id
+FROM openrails.subscriptions sub
+JOIN openrails.payment_methods pm ON sub.payment_method_id = pm.id
 WHERE sub.status = 'active'
   AND pm.failure_reason IS NOT NULL
   AND pm.failure_reason != ''
@@ -97,7 +97,7 @@ func (q *Queries) AuditActiveSubscriptionFailedPaymentMethod(ctx context.Context
 const auditActiveSubscriptionPastPeriodEnd = `-- name: AuditActiveSubscriptionPastPeriodEnd :many
 
 SELECT id, tenant_subject_id::text AS user_id, current_period_ends_at::timestamptz AS current_period_ends_at
-FROM billing.subscriptions
+FROM openrails.subscriptions
 WHERE status = 'active'
   AND current_period_ends_at < NOW()
 `
@@ -141,9 +141,9 @@ SELECT
     prod.id AS product_id,
     prod.slug AS product_slug,
     prod.entitlements_spec
-FROM billing.subscriptions sub
-JOIN billing.prices price ON sub.price_id = price.id
-JOIN billing.products prod ON price.product_id = prod.id
+FROM openrails.subscriptions sub
+JOIN openrails.prices price ON sub.price_id = price.id
+JOIN openrails.products prod ON price.product_id = prod.id
 WHERE sub.status = 'active'
   AND ($1::uuid IS NULL OR sub.tenant_subject_id = $1::uuid)
   AND ($2::timestamptz IS NULL OR sub.created_at >= $2::timestamptz)
@@ -207,8 +207,8 @@ SELECT
     ag.reason,
     ag.duration_days,
     ag.created_at AS granted_at
-FROM billing.admin_grants ag
-LEFT JOIN billing.entitlements ent ON
+FROM openrails.admin_grants ag
+LEFT JOIN openrails.entitlements ent ON
     ag.tenant_subject_id = ent.tenant_subject_id
     AND ent.source_type = 'admin'
     AND ent.source_id = ag.id
@@ -231,7 +231,7 @@ type AuditAdminGrantMissingEntitlementsRow struct {
 //
 // NOTE (schema drift, found during the sqlc migration): the bun-era queries
 // referenced admin_grants.entitlement / granted_at / expires_at / revoked_at,
-// none of which exist in billing.admin_grants (it has price_id, granted_by,
+// none of which exist in openrails.admin_grants (it has price_id, granted_by,
 // reason, duration_days, created_at). The old AG-1/AG-3/AG-4 SQL could never
 // have executed. AG-1 and AG-4 are adapted to the real schema below (expiry
 // derived from created_at + duration_days); AG-3 (grant-level revocation) has
@@ -271,8 +271,8 @@ SELECT
     sub.ended_at::timestamptz AS ended_at,
     ent.id AS ent_id,
     ent.entitlement
-FROM billing.subscriptions sub
-INNER JOIN billing.entitlements ent ON ent.source_id = sub.id
+FROM openrails.subscriptions sub
+INNER JOIN openrails.entitlements ent ON ent.source_id = sub.id
 WHERE sub.status = 'cancelled'
   AND sub.ended_at IS NOT NULL
   AND ent.source_type = 'subscription'
@@ -318,7 +318,7 @@ func (q *Queries) AuditCancelledSubscriptionActiveEntitlements(ctx context.Conte
 
 const auditCancelledWithoutMetadata = `-- name: AuditCancelledWithoutMetadata :many
 SELECT id, tenant_subject_id::text AS user_id, cancelled_at, cancel_type, updated_at
-FROM billing.subscriptions
+FROM openrails.subscriptions
 WHERE status = 'cancelled'
   AND (cancelled_at IS NULL OR cancel_type IS NULL)
 `
@@ -367,9 +367,9 @@ WITH payment_products AS (
         purch.purchased_at,
         price.product_id,
         prod.slug AS product_slug
-    FROM billing.payments purch
-    JOIN billing.prices price ON purch.price_id = price.id
-    JOIN billing.products prod ON price.product_id = prod.id
+    FROM openrails.payments purch
+    JOIN openrails.prices price ON purch.price_id = price.id
+    JOIN openrails.products prod ON price.product_id = prod.id
     WHERE purch.amount > 0
       AND purch.refunded_payment_id IS NULL
 )
@@ -432,7 +432,7 @@ const auditEndedBeforeCancelled = `-- name: AuditEndedBeforeCancelled :many
 SELECT id, tenant_subject_id::text AS user_id,
        ended_at::timestamptz AS ended_at,
        cancelled_at::timestamptz AS cancelled_at
-FROM billing.subscriptions
+FROM openrails.subscriptions
 WHERE ended_at IS NOT NULL
   AND cancelled_at IS NOT NULL
   AND ended_at < cancelled_at
@@ -473,7 +473,7 @@ func (q *Queries) AuditEndedBeforeCancelled(ctx context.Context) ([]AuditEndedBe
 
 const auditEntitlementDistantFutureStart = `-- name: AuditEntitlementDistantFutureStart :many
 SELECT id, tenant_subject_id::text AS user_id, entitlement, start_at
-FROM billing.entitlements
+FROM openrails.entitlements
 WHERE start_at > NOW() + INTERVAL '1 year'
   AND deleted_at IS NULL
 `
@@ -518,8 +518,8 @@ SELECT
     ent.entitlement,
     ent.source_type,
     ent.source_id
-FROM billing.entitlements ent
-LEFT JOIN billing.payments purch ON ent.source_id = purch.id
+FROM openrails.entitlements ent
+LEFT JOIN openrails.payments purch ON ent.source_id = purch.id
 WHERE ent.source_type = 'one_off'
   AND ent.source_id IS NOT NULL
   AND ent.deleted_at IS NULL
@@ -568,8 +568,8 @@ SELECT
     ent.entitlement,
     ent.source_type,
     ent.source_id
-FROM billing.entitlements ent
-LEFT JOIN billing.subscriptions sub ON ent.source_id = sub.id
+FROM openrails.entitlements ent
+LEFT JOIN openrails.subscriptions sub ON ent.source_id = sub.id
 WHERE ent.source_type = 'subscription'
   AND ent.source_id IS NOT NULL
   AND ent.deleted_at IS NULL
@@ -618,8 +618,8 @@ SELECT
     ent.entitlement,
     ent.source_id,
     CASE WHEN sub.id IS NOT NULL THEN sub.tenant_subject_id::text END AS sub_user_id
-FROM billing.entitlements ent
-LEFT JOIN billing.subscriptions sub ON ent.source_id = sub.id
+FROM openrails.entitlements ent
+LEFT JOIN openrails.subscriptions sub ON ent.source_id = sub.id
 WHERE ent.source_type = 'subscription'
   AND ent.source_id IS NOT NULL
   AND ent.deleted_at IS NULL
@@ -668,8 +668,8 @@ SELECT
     ent.entitlement,
     ag.id AS grant_id,
     (ag.created_at + make_interval(days => ag.duration_days))::timestamptz AS expires_at
-FROM billing.entitlements ent
-JOIN billing.admin_grants ag ON ent.source_id = ag.id
+FROM openrails.entitlements ent
+JOIN openrails.admin_grants ag ON ent.source_id = ag.id
 WHERE ent.source_type = 'admin'
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -723,8 +723,8 @@ SELECT
     pm.expiry_date::text AS expiry_date,
     pm.last_four,
     pm.card_type
-FROM billing.subscriptions sub
-JOIN billing.payment_methods pm ON sub.payment_method_id = pm.id
+FROM openrails.subscriptions sub
+JOIN openrails.payment_methods pm ON sub.payment_method_id = pm.id
 WHERE sub.status = 'active'
   AND pm.expiry_date IS NOT NULL
   AND TO_DATE(pm.expiry_date, 'MM/YY') < DATE_TRUNC('month', NOW())
@@ -769,7 +769,7 @@ func (q *Queries) AuditExpiredCardActiveSubscription(ctx context.Context) ([]Aud
 
 const auditFutureDatedPayment = `-- name: AuditFutureDatedPayment :many
 SELECT id, tenant_subject_id::text AS user_id, purchased_at, amount
-FROM billing.payments
+FROM openrails.payments
 WHERE purchased_at > NOW() + INTERVAL '5 minutes'
 `
 
@@ -810,7 +810,7 @@ const auditInvalidPeriodDates = `-- name: AuditInvalidPeriodDates :many
 SELECT id, tenant_subject_id::text AS user_id,
        current_period_starts_at::timestamptz AS current_period_starts_at,
        current_period_ends_at::timestamptz AS current_period_ends_at
-FROM billing.subscriptions
+FROM openrails.subscriptions
 WHERE current_period_starts_at IS NOT NULL
   AND current_period_ends_at IS NOT NULL
   AND current_period_starts_at >= current_period_ends_at
@@ -851,7 +851,7 @@ func (q *Queries) AuditInvalidPeriodDates(ctx context.Context) ([]AuditInvalidPe
 
 const auditInvalidTimeWindow = `-- name: AuditInvalidTimeWindow :many
 SELECT id, tenant_subject_id::text AS user_id, entitlement, start_at, end_at::timestamptz AS end_at
-FROM billing.entitlements
+FROM openrails.entitlements
 WHERE end_at IS NOT NULL
   AND start_at >= end_at
   AND deleted_at IS NULL
@@ -898,7 +898,7 @@ SELECT
     tenant_subject_id::text AS user_id,
     COUNT(*)::int AS count,
     ARRAY_AGG(id ORDER BY created_at DESC)::uuid[] AS sub_ids
-FROM billing.subscriptions
+FROM openrails.subscriptions
 WHERE status = 'active'
 GROUP BY tenant_subject_id
 HAVING COUNT(*) > 1
@@ -940,7 +940,7 @@ SELECT
     entitlement,
     COUNT(*)::int AS count,
     ARRAY_AGG(id ORDER BY created_at DESC)::uuid[] AS ent_ids
-FROM billing.entitlements
+FROM openrails.entitlements
 WHERE end_at IS NULL
   AND revoked_at IS NULL
   AND deleted_at IS NULL
@@ -982,7 +982,7 @@ func (q *Queries) AuditMultipleIndefiniteEntitlements(ctx context.Context) ([]Au
 }
 
 const auditOneOffPaymentEntitlementCount = `-- name: AuditOneOffPaymentEntitlementCount :one
-SELECT count(*) FROM billing.entitlements ent
+SELECT count(*) FROM openrails.entitlements ent
 WHERE ent.source_type = 'one_off'
   AND ent.source_id = $1
   AND ent.deleted_at IS NULL
@@ -1007,9 +1007,9 @@ SELECT
     prod.id AS product_id,
     prod.slug AS product_slug,
     prod.entitlements_spec
-FROM billing.payments purch
-JOIN billing.prices price ON purch.price_id = price.id
-JOIN billing.products prod ON price.product_id = prod.id
+FROM openrails.payments purch
+JOIN openrails.prices price ON purch.price_id = price.id
+JOIN openrails.products prod ON price.product_id = prod.id
 WHERE purch.subscription_id IS NULL
   AND purch.amount > 0
   AND ($1::uuid IS NULL OR purch.tenant_subject_id = $1::uuid)
@@ -1069,8 +1069,8 @@ SELECT
     ent.tenant_subject_id::text AS user_id,
     ent.entitlement,
     ent.source_id
-FROM billing.entitlements ent
-LEFT JOIN billing.admin_grants ag ON ent.source_id = ag.id
+FROM openrails.entitlements ent
+LEFT JOIN openrails.admin_grants ag ON ent.source_id = ag.id
 WHERE ent.source_type = 'admin'
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -1118,8 +1118,8 @@ SELECT
     ent.source_id,
     CASE WHEN purch.id IS NOT NULL THEN true ELSE false END AS payment_exists,
     purch.amount AS payment_amount
-FROM billing.entitlements ent
-LEFT JOIN billing.payments purch ON ent.source_id = purch.id
+FROM openrails.entitlements ent
+LEFT JOIN openrails.payments purch ON ent.source_id = purch.id
 WHERE ent.source_type = 'one_off'
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -1166,8 +1166,8 @@ func (q *Queries) AuditOrphanOneOffEntitlements(ctx context.Context) ([]AuditOrp
 
 const auditOrphanPaymentMethodReference = `-- name: AuditOrphanPaymentMethodReference :many
 SELECT sub.id AS sub_id, sub.tenant_subject_id::text AS user_id, sub.payment_method_id::uuid AS payment_method_id
-FROM billing.subscriptions sub
-LEFT JOIN billing.payment_methods pm ON sub.payment_method_id = pm.id
+FROM openrails.subscriptions sub
+LEFT JOIN openrails.payment_methods pm ON sub.payment_method_id = pm.id
 WHERE sub.payment_method_id IS NOT NULL
   AND pm.id IS NULL
 `
@@ -1206,8 +1206,8 @@ SELECT
     ent.entitlement,
     ent.source_id,
     CASE WHEN sub.id IS NOT NULL THEN sub.status::text END AS sub_status
-FROM billing.entitlements ent
-LEFT JOIN billing.subscriptions sub ON ent.source_id = sub.id
+FROM openrails.entitlements ent
+LEFT JOIN openrails.subscriptions sub ON ent.source_id = sub.id
 WHERE ent.source_type = 'subscription'
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -1257,8 +1257,8 @@ SELECT
     sub.price_id::uuid AS price_id,
     CASE WHEN price.id IS NOT NULL THEN true ELSE false END AS price_exists,
     CASE WHEN price.id IS NOT NULL THEN (price.status = 'active') END AS price_active
-FROM billing.subscriptions sub
-LEFT JOIN billing.prices price ON sub.price_id = price.id
+FROM openrails.subscriptions sub
+LEFT JOIN openrails.prices price ON sub.price_id = price.id
 WHERE price.id IS NULL OR price.status <> 'active'
 `
 
@@ -1305,8 +1305,8 @@ SELECT
     sub.product_id,
     CASE WHEN prod.id IS NOT NULL THEN true ELSE false END AS prod_exists,
     CASE WHEN prod.id IS NOT NULL THEN (prod.status = 'active') END AS prod_active
-FROM billing.subscriptions sub
-LEFT JOIN billing.products prod ON sub.product_id = prod.id
+FROM openrails.subscriptions sub
+LEFT JOIN openrails.products prod ON sub.product_id = prod.id
 WHERE prod.id IS NULL OR prod.status <> 'active'
 `
 
@@ -1356,7 +1356,7 @@ WITH active_entitlements AS (
         entitlement,
         start_at,
         COALESCE(end_at, '9999-12-31'::timestamptz) AS end_at
-    FROM billing.entitlements
+    FROM openrails.entitlements
     WHERE revoked_at IS NULL
       AND deleted_at IS NULL
 )
@@ -1410,7 +1410,7 @@ func (q *Queries) AuditOverlappingEntitlementWindows(ctx context.Context) ([]Aud
 
 const auditPastDueWithoutRetry = `-- name: AuditPastDueWithoutRetry :many
 SELECT id, tenant_subject_id::text AS user_id, retry_attempts
-FROM billing.subscriptions
+FROM openrails.subscriptions
 WHERE status = 'past_due'
   AND next_retry_at IS NULL
   AND COALESCE(retry_attempts, 0) < 5
@@ -1448,8 +1448,8 @@ SELECT
     purch.id AS payment_id,
     purch.tenant_subject_id::text AS user_id,
     purch.subscription_id::uuid AS subscription_id
-FROM billing.payments purch
-LEFT JOIN billing.subscriptions sub ON purch.subscription_id = sub.id
+FROM openrails.payments purch
+LEFT JOIN openrails.subscriptions sub ON purch.subscription_id = sub.id
 WHERE purch.subscription_id IS NOT NULL
   AND sub.id IS NULL
 `
@@ -1487,8 +1487,8 @@ SELECT
     sub.tenant_subject_id::text AS user_id,
     sub.product_id AS sub_product_id,
     price.product_id AS price_product_id
-FROM billing.subscriptions sub
-JOIN billing.prices price ON sub.price_id = price.id
+FROM openrails.subscriptions sub
+JOIN openrails.prices price ON sub.price_id = price.id
 WHERE sub.product_id != price.product_id
 `
 
@@ -1532,8 +1532,8 @@ SELECT
     sub.processor AS sub_processor,
     pm.processor::text AS pm_processor,
     pm.id AS pm_id
-FROM billing.subscriptions sub
-JOIN billing.payment_methods pm ON sub.payment_method_id = pm.id
+FROM openrails.subscriptions sub
+JOIN openrails.payment_methods pm ON sub.payment_method_id = pm.id
 WHERE sub.processor != pm.processor
 `
 
@@ -1574,7 +1574,7 @@ func (q *Queries) AuditProcessorMismatch(ctx context.Context) ([]AuditProcessorM
 
 const auditReasonWithoutRevocation = `-- name: AuditReasonWithoutRevocation :many
 SELECT id, tenant_subject_id::text AS user_id, entitlement, revoke_reason::text AS revoke_reason
-FROM billing.entitlements
+FROM openrails.entitlements
 WHERE revoke_reason IS NOT NULL
   AND revoked_at IS NULL
   AND deleted_at IS NULL
@@ -1618,7 +1618,7 @@ WITH refund_totals AS (
     SELECT
         refunded_payment_id,
         SUM(ABS(amount)) AS total_refunded
-    FROM billing.payments
+    FROM openrails.payments
     WHERE refunded_payment_id IS NOT NULL
     GROUP BY refunded_payment_id
 )
@@ -1629,9 +1629,9 @@ SELECT
     COALESCE(rt.total_refunded, 0)::bigint AS refunded_amount,
     ent.id AS ent_id,
     ent.entitlement
-FROM billing.payments purch
+FROM openrails.payments purch
 LEFT JOIN refund_totals rt ON rt.refunded_payment_id = purch.id
-INNER JOIN billing.entitlements ent ON ent.source_id = purch.id
+INNER JOIN openrails.entitlements ent ON ent.source_id = purch.id
 WHERE purch.subscription_id IS NULL
   AND purch.amount > 0
   AND COALESCE(rt.total_refunded, 0) >= purch.amount
@@ -1681,7 +1681,7 @@ func (q *Queries) AuditRefundedPaymentActiveEntitlements(ctx context.Context) ([
 const auditRevokedWithoutReason = `-- name: AuditRevokedWithoutReason :many
 
 SELECT id, tenant_subject_id::text AS user_id, entitlement, revoked_at::timestamptz AS revoked_at
-FROM billing.entitlements
+FROM openrails.entitlements
 WHERE revoked_at IS NOT NULL
   AND revoke_reason IS NULL
   AND deleted_at IS NULL
@@ -1727,7 +1727,7 @@ const auditStalePastDueMaxRetries = `-- name: AuditStalePastDueMaxRetries :many
 SELECT id, tenant_subject_id::text AS user_id,
        retry_attempts::int AS retry_attempts,
        current_period_ends_at::timestamptz AS current_period_ends_at
-FROM billing.subscriptions
+FROM openrails.subscriptions
 WHERE status = 'past_due'
   AND retry_attempts >= 5
 `
@@ -1770,7 +1770,7 @@ const auditStalePendingSubscription = `-- name: AuditStalePendingSubscription :m
 SELECT id, tenant_subject_id::text AS user_id,
        current_period_starts_at::timestamptz AS current_period_starts_at,
        created_at
-FROM billing.subscriptions
+FROM openrails.subscriptions
 WHERE status = 'pending'
   AND current_period_starts_at IS NOT NULL
   AND current_period_starts_at <= NOW() - INTERVAL '24 hours'
@@ -1820,8 +1820,8 @@ SELECT
     ent.id AS ent_id,
     ent.entitlement,
     ent.end_at AS ent_end_at
-FROM billing.subscriptions sub
-INNER JOIN billing.entitlements ent ON ent.source_id = sub.id
+FROM openrails.subscriptions sub
+INNER JOIN openrails.entitlements ent ON ent.source_id = sub.id
 WHERE sub.status = 'cancelled'
   AND sub.cancelled_at IS NOT NULL
   AND sub.ended_at IS NULL

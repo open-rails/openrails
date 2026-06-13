@@ -65,7 +65,7 @@ func TestCaptchaStatusReportsUserChallenge(t *testing.T) {
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
 		uc := authprovider.UserContext{UserID: "user_1"}
-		c.Set("billing.user_context", uc)
+		c.Set("openrails.user_context", uc)
 		c.Request = c.Request.WithContext(authprovider.SetUserContext(c.Request.Context(), uc))
 		c.Next()
 	})

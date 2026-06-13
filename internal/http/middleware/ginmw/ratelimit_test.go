@@ -491,7 +491,7 @@ func testUserFromHeader() gin.HandlerFunc {
 
 func setTestUserContext(c *gin.Context, userID string) {
 	uc := authprovider.UserContext{UserID: userID}
-	c.Set("billing.user_context", uc)
+	c.Set("openrails.user_context", uc)
 	c.Request = c.Request.WithContext(authprovider.SetUserContext(c.Request.Context(), uc))
 }
 

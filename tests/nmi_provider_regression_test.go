@@ -191,6 +191,6 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	processorsJSON, err := json.Marshal(price.Processors)
 	require.NoError(t, err)
 	_, err = suite.Pool.Exec(context.Background(),
-		"UPDATE billing.prices SET processors = $1 WHERE id = $2", processorsJSON, price.ID)
+		"UPDATE openrails.prices SET processors = $1 WHERE id = $2", processorsJSON, price.ID)
 	require.NoError(t, err)
 }

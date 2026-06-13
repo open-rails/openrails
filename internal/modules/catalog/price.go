@@ -83,7 +83,7 @@ func (s *PriceService) Delete(ctx context.Context, id uuid.UUID) error {
 
 // Deactivate archives a price (status=archived) so it won't appear in product
 // listings and cannot be purchased by new customers. Existing subscriptions and
-// payments referencing this price are grandfathered and keep billing.
+// payments referencing this price are grandfathered and keep openrails.
 func (s *PriceService) Deactivate(ctx context.Context, id uuid.UUID) error {
 	return s.SetStatus(ctx, id, models.CatalogStatusArchived)
 }

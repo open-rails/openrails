@@ -182,7 +182,7 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 }
 
 // subscriptionCardJSON is the card on the subscription's current payment method,
-// served purely from the DB (the linked billing.payment_methods row). No Stripe
+// served purely from the DB (the linked openrails.payment_methods row). No Stripe
 // fetch.
 type subscriptionCardJSON struct {
 	Brand    string `json:"brand,omitempty"`

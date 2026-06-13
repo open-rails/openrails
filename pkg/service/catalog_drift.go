@@ -23,7 +23,7 @@ import (
 // This file implements an alert-only, pull-based drift + orphan detector for
 // BOTH the Stripe catalog and the NMI recurring-plan catalog. It NEVER mutates
 // Stripe, NMI, or the OpenRails catalog rows — it only records divergence into
-// billing.catalog_drift_events. Operators resolve drift via the existing
+// openrails.catalog_drift_events. Operators resolve drift via the existing
 // per-price reconcile action (POST /admin/catalog/prices/:id/reconcile from
 // issue #205), which auto-closes matching open drift events.
 //

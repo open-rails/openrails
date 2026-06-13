@@ -78,11 +78,11 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.provider_intents WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", paymentMethodID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	// Materialize must never send a provider MUTATION. The only NMI traffic
@@ -129,7 +129,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	var expiresAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT status, origin, intent_type, account_fingerprint, expires_at
-		 FROM billing.provider_intents WHERE subscription_id = $1`, subID).
+		 FROM openrails.provider_intents WHERE subscription_id = $1`, subID).
 		Scan(&status, &origin, &intentType, &fingerprint, &expiresAt))
 	assert.Equal(t, intents.StatusPending, status)
 	assert.Equal(t, string(intents.OriginSystem), origin)
@@ -143,7 +143,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	var subStatus string
 	var lastRetryAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, last_retry_at FROM billing.subscriptions WHERE id = $1`, subID).
+		`SELECT status, last_retry_at FROM openrails.subscriptions WHERE id = $1`, subID).
 		Scan(&subStatus, &lastRetryAt))
 	assert.Equal(t, string(models.StatusPastDue), subStatus)
 	assert.Nil(t, lastRetryAt, "materialize must not write last_retry_at (dunning forensics evidence)")
@@ -153,7 +153,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	var intentCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM billing.provider_intents WHERE subscription_id = $1`, subID).Scan(&intentCount))
+		`SELECT count(*) FROM openrails.provider_intents WHERE subscription_id = $1`, subID).Scan(&intentCount))
 	assert.Equal(t, 1, intentCount)
 }
 
@@ -199,10 +199,10 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.provider_intents WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	var nmiMutations atomic.Int64
@@ -241,6 +241,6 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 
 	var subStatus string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status FROM billing.subscriptions WHERE id = $1`, subID).Scan(&subStatus))
+		`SELECT status FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&subStatus))
 	assert.NotEqual(t, string(models.StatusPastDue), subStatus, "stale subscription must be cancelled, not left premium")
 }

@@ -122,7 +122,7 @@ func (s *Service) ActivateProduct(ctx context.Context, productID uuid.UUID) (*Ca
 }
 
 // DeactivateProduct archives a product (status=archived). Existing subscriptions
-// on its prices are grandfathered and keep billing.
+// on its prices are grandfathered and keep openrails.
 func (s *Service) DeactivateProduct(ctx context.Context, productID uuid.UUID) (*CatalogProduct, error) {
 	products, err := s.requireProductService()
 	if err != nil {

@@ -121,7 +121,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	})
 	countDueRetries := func() int {
 		return suite.Count(ctx, `
-			SELECT COUNT(*) FROM billing.subscriptions sub
+			SELECT COUNT(*) FROM openrails.subscriptions sub
 			WHERE sub.processor = $1
 			  AND sub.tenant_subject_id = $2
 			  AND sub.status = $3
@@ -203,7 +203,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	assert.Equal(t, "active", suite.getCreditHold(hold.ID).Status)
 	var remaining int64
 	require.NoError(t, suite.Pool.QueryRow(ctx,
-		"SELECT remaining_amount FROM billing.credit_blocks WHERE id = $1", block.ID).Scan(&remaining))
+		"SELECT remaining_amount FROM openrails.credit_blocks WHERE id = $1", block.ID).Scan(&remaining))
 	assert.Equal(t, int64(75), remaining)
 
 	mockClock.Advance(2 * time.Hour)
@@ -214,7 +214,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	assert.Equal(t, int64(0), updatedBalance.HeldBalance)
 	assert.Equal(t, int64(25), updatedBalance.Balance)
 	require.NoError(t, suite.Pool.QueryRow(ctx,
-		"SELECT remaining_amount FROM billing.credit_blocks WHERE id = $1", block.ID).Scan(&remaining))
+		"SELECT remaining_amount FROM openrails.credit_blocks WHERE id = $1", block.ID).Scan(&remaining))
 	assert.Equal(t, int64(0), remaining)
 }
 

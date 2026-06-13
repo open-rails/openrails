@@ -24,7 +24,7 @@ import (
 )
 
 // TierPolicyStore loads + stores per-payer, per-tier throughput policies
-// (billing.tier_policies). The money axis stays in credit_account_settings.
+// (openrails.tier_policies). The money axis stays in credit_account_settings.
 type TierPolicyStore struct {
 	db *db.DB
 }

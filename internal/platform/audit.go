@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/db"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// AuditRow is a read view of a billing.platform_audit row (list/inspect).
+// AuditRow is a read view of a openrails.platform_audit row (list/inspect).
 type AuditRow struct {
 	ID             string    `json:"id"`
 	ActorUserID    string    `json:"actor_user_id"`
@@ -32,7 +32,7 @@ type AuditRow struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-// Cross-tenant platform action names recorded in billing.platform_audit. Kept as
+// Cross-tenant platform action names recorded in openrails.platform_audit. Kept as
 // constants so callers and tests agree on the vocabulary.
 const (
 	ActionTenantList       = "platform.tenant.list"
@@ -61,14 +61,14 @@ type AuditEntry struct {
 }
 
 // AuditLog is the append-only cross-tenant platform audit log (issue #226). It
-// writes to billing.platform_audit, which lives OUTSIDE tenant-scoped data so a
+// writes to openrails.platform_audit, which lives OUTSIDE tenant-scoped data so a
 // record of a superadmin action survives the target tenant's deletion.
 type AuditLog struct {
-	pool *pgxpool.Pool
+	pool *db.Pool
 }
 
 // NewAuditLog builds the audit log over the control-plane pool (required).
-func NewAuditLog(pool *pgxpool.Pool) (*AuditLog, error) {
+func NewAuditLog(pool *db.Pool) (*AuditLog, error) {
 	if pool == nil {
 		return nil, errors.New("platform: audit log requires a pgx pool")
 	}
@@ -111,7 +111,7 @@ func (a *AuditLog) Record(ctx context.Context, e AuditEntry) (string, error) {
 
 	var id string
 	err = a.pool.QueryRow(ctx, `
-		INSERT INTO billing.platform_audit
+		INSERT INTO openrails.platform_audit
 			(actor_user_id, actor_tenant, action, target_tenant_id, reason, before_state, after_state, detail)
 		VALUES ($1, NULLIF($2,''), $3, $4::uuid, NULLIF($5,''), $6::jsonb, $7::jsonb, $8::jsonb)
 		RETURNING id::text
@@ -146,7 +146,7 @@ func (a *AuditLog) List(ctx context.Context, targetTenant *tenant.ID, limit int)
 		rows, err = a.pool.Query(ctx, `
 			SELECT id::text, actor_user_id, COALESCE(actor_tenant,''), action,
 			       COALESCE(target_tenant_id::text,''), COALESCE(reason,''), created_at
-			  FROM billing.platform_audit
+			  FROM openrails.platform_audit
 			 WHERE target_tenant_id = $1::uuid
 			 ORDER BY created_at DESC LIMIT $2
 		`, targetTenant.String(), limit)
@@ -154,7 +154,7 @@ func (a *AuditLog) List(ctx context.Context, targetTenant *tenant.ID, limit int)
 		rows, err = a.pool.Query(ctx, `
 			SELECT id::text, actor_user_id, COALESCE(actor_tenant,''), action,
 			       COALESCE(target_tenant_id::text,''), COALESCE(reason,''), created_at
-			  FROM billing.platform_audit
+			  FROM openrails.platform_audit
 			 ORDER BY created_at DESC LIMIT $1
 		`, limit)
 	}

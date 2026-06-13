@@ -1,5 +1,5 @@
 --
--- Backfill billing.tenants.authkit_tenant_id from the embedded AuthKit
+-- Backfill openrails.tenants.authkit_tenant_id from the embedded AuthKit
 -- directory (profiles.tenants) where it is derivable by slug.
 --
 -- The fleet is migrating to the IMMUTABLE AuthKit tenant uuid as the
@@ -22,7 +22,7 @@ BEGIN
     RETURN;
   END IF;
 
-  UPDATE billing.tenants AS bt
+  UPDATE openrails.tenants AS bt
      SET authkit_tenant_id = pt.id::text,
          updated_at        = current_timestamp
     FROM profiles.tenants AS pt
@@ -34,14 +34,14 @@ BEGIN
      -- uq_tenants_authkit_tenant_id: never link a uuid that another row
      -- already carries.
      AND NOT EXISTS (
-           SELECT 1 FROM billing.tenants x
+           SELECT 1 FROM openrails.tenants x
             WHERE x.authkit_tenant_id = pt.id::text
          )
      -- authkit_tenant_slug has no unique index: only backfill a slug that
      -- maps to exactly one un-linked row (ambiguous slugs stay NULL and keep
      -- resolving via the slug fallback).
      AND NOT EXISTS (
-           SELECT 1 FROM billing.tenants y
+           SELECT 1 FROM openrails.tenants y
             WHERE y.id <> bt.id
               AND y.authkit_tenant_id IS NULL
               AND y.deleted_at IS NULL

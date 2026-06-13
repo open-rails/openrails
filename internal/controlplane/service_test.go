@@ -23,7 +23,7 @@ func TestNew_RequiresPool(t *testing.T) {
 	cfg := &config.Config{Auth: &config.AuthConfig{
 		ExpectedAudience: "openrails-app",
 		ControlPlane: &config.ControlPlaneConfig{
-			Issuer: "https://billing.example.com",
+			Issuer: "https://openrails.example.com",
 		},
 	}}
 	if _, err := New(context.Background(), cfg, nil); err == nil {

@@ -9,6 +9,6 @@
 SET lock_timeout = '10s';
 SET statement_timeout = '300s';
 
-INSERT INTO billing.tenants (id, slug, name, status)
+INSERT INTO openrails.tenants (id, slug, name, status)
 VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default Tenant', 'active')
 ON CONFLICT (slug) DO NOTHING;

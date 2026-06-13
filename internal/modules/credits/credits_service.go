@@ -343,7 +343,7 @@ func (s *CreditsService) getCreditTypeByNameTx(ctx context.Context, q *gen.Queri
 	return creditTypeFromGen(row), nil
 }
 
-// ensureTenantSubject upserts the billing.tenant_subjects row for a self-service
+// ensureTenantSubject upserts the openrails.tenant_subjects row for a self-service
 // subject so the credit-write FKs added in migration 076 are satisfied on a
 // subject's FIRST credit operation (deposit/hold/usage). ON CONFLICT DO NOTHING.
 func ensureTenantSubject(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUID) error {

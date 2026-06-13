@@ -23,12 +23,12 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// minimalTenantsDDL creates just the billing.tenants directory row the control
+// minimalTenantsDDL creates just the openrails.tenants directory row the control
 // plane updates. OpenRails 001_schema.up.sql owns the full table in production; the
 // control-plane bootstrap only needs the default row to exist.
 const minimalTenantsDDL = `
 CREATE SCHEMA IF NOT EXISTS billing;
-CREATE TABLE IF NOT EXISTS billing.tenants (
+CREATE TABLE IF NOT EXISTS openrails.tenants (
     id               UUID PRIMARY KEY,
     slug             TEXT NOT NULL,
     name             TEXT NOT NULL,
@@ -39,13 +39,13 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at       TIMESTAMPTZ
 );
-INSERT INTO billing.tenants (id, slug, name)
+INSERT INTO openrails.tenants (id, slug, name)
 VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default')
 ON CONFLICT (id) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS billing.tenant_delegated_issuers (
+CREATE TABLE IF NOT EXISTS openrails.tenant_delegated_issuers (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id   UUID NOT NULL REFERENCES billing.tenants (id) ON DELETE CASCADE,
+    tenant_id   UUID NOT NULL REFERENCES openrails.tenants (id) ON DELETE CASCADE,
     issuer      TEXT NOT NULL,
     jwks_uri    TEXT NOT NULL,
     audiences   TEXT[] NOT NULL DEFAULT '{}',
@@ -90,7 +90,7 @@ func newBootstrapTestPool(t *testing.T) *pgxpool.Pool {
 
 func applyBootstrapTestSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	// Apply AuthKit profiles.* schema in filename order, then billing.tenants.
+	// Apply AuthKit profiles.* schema in filename order, then openrails.tenants.
 	entries, err := authpgmigrations.FS.ReadDir(".")
 	require.NoError(t, err)
 	names := make([]string, 0, len(entries))
@@ -115,7 +115,7 @@ func newTestControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 		Auth: &config.AuthConfig{
 			ExpectedAudience: "openrails-app",
 			ControlPlane: &config.ControlPlaneConfig{
-				Issuer:      "https://billing.test",
+				Issuer:      "https://openrails.test",
 				TokenPrefix: "openrails",
 			},
 		},
@@ -144,7 +144,7 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	// no separate "operator" tenant.
 	var authKitTenantSlug, authKitTenantID string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT authkit_tenant_slug, authkit_tenant_id FROM billing.tenants WHERE id = $1::uuid`,
+		`SELECT authkit_tenant_slug, authkit_tenant_id FROM openrails.tenants WHERE id = $1::uuid`,
 		tenant.DefaultID.String()).Scan(&authKitTenantSlug, &authKitTenantID))
 	require.Equal(t, tenant.DefaultSlug, authKitTenantSlug)
 	require.Equal(t, res1.BootstrapTenantID, authKitTenantID)
@@ -235,7 +235,7 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateTenant(t *testing.T) {
 		Auth: &config.AuthConfig{
 			ExpectedAudience: "openrails-app",
 			ControlPlane: &config.ControlPlaneConfig{
-				Issuer:             "https://billing.test",
+				Issuer:             "https://openrails.test",
 				TokenPrefix:        "openrails",
 				PlatformTenantSlug: "openrails-platform",
 			},
@@ -302,20 +302,20 @@ func TestDelegatedTenantResolution(t *testing.T) {
 
 	// A second, suspended tenant owned by a distinct AuthKit tenant (uuid+slug linked).
 	_, err := pool.Exec(ctx, `
-		INSERT INTO billing.tenants (id, slug, name, status, authkit_tenant_id, authkit_tenant_slug)
+		INSERT INTO openrails.tenants (id, slug, name, status, authkit_tenant_id, authkit_tenant_slug)
 		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'Acme', 'suspended', 'ak-acme-id', 'acme-org')
 		ON CONFLICT (id) DO NOTHING`)
 	require.NoError(t, err)
 	// A third, active tenant written BEFORE the uuid dual-write: slug only, NULL uuid.
 	_, err = pool.Exec(ctx, `
-		INSERT INTO billing.tenants (id, slug, name, status, authkit_tenant_slug)
+		INSERT INTO openrails.tenants (id, slug, name, status, authkit_tenant_slug)
 		VALUES ('00000000-0000-0000-0000-000000000003', 'beta', 'Beta', 'active', 'beta-org')
 		ON CONFLICT (id) DO NOTHING`)
 	require.NoError(t, err)
 	// Map the default tenant to an active AuthKit tenant (uuid + slug) so the
 	// happy path resolves.
 	_, err = pool.Exec(ctx, `
-		UPDATE billing.tenants
+		UPDATE openrails.tenants
 		   SET authkit_tenant_id = 'ak-default-id', authkit_tenant_slug = 'default-org', status = 'active'
 		 WHERE id = $1::uuid`, tenant.DefaultID.String())
 	require.NoError(t, err)

@@ -27,7 +27,7 @@ import (
 )
 
 // TypeManualRebill is the processor-side dunning charge (#358 phase C),
-// folding the retired billing.manual_rebill_attempts claim table into the
+// folding the retired openrails.manual_rebill_attempts claim table into the
 // ledger. One intent per (subscription, period end, attempt ordinal): the
 // dunning worker enqueues + executes it synchronously and drives lifecycle
 // (decline classification, FailMembership, the #359 retry schedule) off the

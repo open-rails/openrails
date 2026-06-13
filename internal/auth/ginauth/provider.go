@@ -71,7 +71,7 @@ func (p *authKitProvider) Required() gin.HandlerFunc {
 			return
 		}
 
-		c.Set("billing.user_context", uc)
+		c.Set("openrails.user_context", uc)
 		c.Request = c.Request.WithContext(billingauth.SetUserContext(c.Request.Context(), uc))
 		c.Next()
 	}
@@ -98,7 +98,7 @@ func (p *authKitProvider) Optional() gin.HandlerFunc {
 			return
 		}
 
-		c.Set("billing.user_context", uc)
+		c.Set("openrails.user_context", uc)
 		c.Request = c.Request.WithContext(billingauth.SetUserContext(c.Request.Context(), uc))
 		c.Next()
 	}

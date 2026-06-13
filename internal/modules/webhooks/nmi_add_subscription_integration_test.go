@@ -41,7 +41,7 @@ func TestHandleAddSubscription_ActivatesPendingWithSettledTransactionMetadata(t 
 	var paymentTenantSubjectID uuid.UUID
 	var paymentSubscriptionID *uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT tenant_subject_id, subscription_id FROM billing.payments WHERE transaction_id = $1",
+		"SELECT tenant_subject_id, subscription_id FROM openrails.payments WHERE transaction_id = $1",
 		ids.transactionID).Scan(&paymentTenantSubjectID, &paymentSubscriptionID))
 	require.Equal(t, ids.tenantSubjectID, paymentTenantSubjectID)
 	require.NotNil(t, paymentSubscriptionID)
@@ -50,7 +50,7 @@ func TestHandleAddSubscription_ActivatesPendingWithSettledTransactionMetadata(t 
 	var exists bool
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT EXISTS (
-			SELECT 1 FROM billing.entitlements
+			SELECT 1 FROM openrails.entitlements
 			WHERE tenant_subject_id = $1
 			  AND entitlement = $2
 			  AND source_type = $3
@@ -66,7 +66,7 @@ func TestHandleAddSubscription_ActivatesPendingWithSettledTransactionMetadata(t 
 	require.NoError(t, svc.handleTransactionSaleSuccess(ctx))
 	var count int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM billing.payments WHERE transaction_id = $1", ids.transactionID).Scan(&count))
+		"SELECT count(*) FROM openrails.payments WHERE transaction_id = $1", ids.transactionID).Scan(&count))
 	require.Equal(t, 1, count)
 }
 
@@ -97,7 +97,7 @@ func TestHandleTransactionSaleSuccess_AcksDuplicateInitialChargeOnActiveSubscrip
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM billing.payments WHERE transaction_id = $1", ids.transactionID).Scan(&count))
+		"SELECT count(*) FROM openrails.payments WHERE transaction_id = $1", ids.transactionID).Scan(&count))
 	require.Equal(t, 1, count)
 	gotSub, err := gen.New(pool).GetSubscriptionByID(ctx, ids.subscriptionID)
 	require.NoError(t, err)
@@ -131,7 +131,7 @@ func TestHandleAddSubscription_WithoutSettledTransactionMetadataStaysPending(t *
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM billing.payments WHERE transaction_id = $1", ids.transactionID).Scan(&count))
+		"SELECT count(*) FROM openrails.payments WHERE transaction_id = $1", ids.transactionID).Scan(&count))
 	require.Equal(t, 0, count)
 }
 
@@ -234,12 +234,12 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 
 	t.Cleanup(func() {
 		cctx := context.Background()
-		_, _ = pool.Exec(cctx, "DELETE FROM billing.notification_queue WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM billing.payments WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM billing.subscriptions WHERE id = $1", subscriptionID)
-		_, _ = pool.Exec(cctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(cctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.notification_queue WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subscriptionID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	body, err := json.Marshal(NMIRecurringEventBody{

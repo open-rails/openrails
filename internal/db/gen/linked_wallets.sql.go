@@ -13,7 +13,7 @@ import (
 )
 
 const deleteLinkedWalletByTenantSubjectAndChain = `-- name: DeleteLinkedWalletByTenantSubjectAndChain :execrows
-DELETE FROM billing.linked_wallets
+DELETE FROM openrails.linked_wallets
 WHERE tenant_subject_id = $1 AND chain = $2
 `
 
@@ -32,7 +32,7 @@ func (q *Queries) DeleteLinkedWalletByTenantSubjectAndChain(ctx context.Context,
 
 const getLinkedWalletByTenantSubjectAndChain = `-- name: GetLinkedWalletByTenantSubjectAndChain :one
 
-SELECT id, tenant_id, tenant_subject_id, chain, address, verification_provider, verified_at, display_name, metadata, created_at, updated_at FROM billing.linked_wallets lw
+SELECT id, tenant_id, tenant_subject_id, chain, address, verification_provider, verified_at, display_name, metadata, created_at, updated_at FROM openrails.linked_wallets lw
 WHERE lw.tenant_subject_id = $1 AND lw.chain = $2
 LIMIT 1
 `
@@ -42,7 +42,7 @@ type GetLinkedWalletByTenantSubjectAndChainParams struct {
 	Chain           string
 }
 
-// billing.linked_wallets.
+// openrails.linked_wallets.
 func (q *Queries) GetLinkedWalletByTenantSubjectAndChain(ctx context.Context, arg GetLinkedWalletByTenantSubjectAndChainParams) (BillingLinkedWallet, error) {
 	row := q.db.QueryRow(ctx, getLinkedWalletByTenantSubjectAndChain, arg.TenantSubjectID, arg.Chain)
 	var i BillingLinkedWallet
@@ -63,7 +63,7 @@ func (q *Queries) GetLinkedWalletByTenantSubjectAndChain(ctx context.Context, ar
 }
 
 const upsertLinkedWallet = `-- name: UpsertLinkedWallet :one
-INSERT INTO billing.linked_wallets (
+INSERT INTO openrails.linked_wallets (
     id, tenant_id, tenant_subject_id, chain, address, verification_provider,
     verified_at, display_name, metadata, created_at, updated_at
 ) VALUES (

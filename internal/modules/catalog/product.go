@@ -63,7 +63,7 @@ func (s *ProductService) GetBySlug(ctx context.Context, slug string) (*models.Pr
 
 // Deactivate archives a product (status=archived) so it won't appear in product
 // listings and cannot be purchased. Existing subscriptions referencing this
-// product's prices are grandfathered and keep billing.
+// product's prices are grandfathered and keep openrails.
 func (s *ProductService) Deactivate(ctx context.Context, id uuid.UUID) error {
 	return s.SetStatus(ctx, id, models.CatalogStatusArchived)
 }

@@ -2,7 +2,7 @@
 // durable, effectively-once outbox for ALL outbound provider mutations.
 //
 // Every action OpenRails wants to perform against an external payment provider
-// is enqueued as a billing.provider_intents row (idempotent per tenant on
+// is enqueued as a openrails.provider_intents row (idempotent per tenant on
 // idempotency_key). A scheduled executor (the Runner, driven by a River
 // worker) claims due intents under a SKIP LOCKED lease, checks per-type
 // relevance, gates execution on operating mode x origin, executes via the
@@ -27,7 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// Intent statuses (billing.provider_intents.status).
+// Intent statuses (openrails.provider_intents.status).
 const (
 	StatusPending            = "pending"
 	StatusInFlight           = "in_flight"
@@ -126,7 +126,7 @@ func SupersededBy(reason string) Relevance { return Relevance{Applicable: false,
 // Handler implements one intent type's semantics. Implementations must be
 // safe for concurrent use.
 type Handler interface {
-	// Type is the registry key (billing.provider_intents.intent_type).
+	// Type is the registry key (openrails.provider_intents.intent_type).
 	Type() string
 	// CheckRelevance reports whether the intent is still applicable. A
 	// returned error keeps the intent pending (re-checked on the next run);

@@ -198,7 +198,7 @@ func TestScheduledDowngrade(t *testing.T) {
 		// Set scheduled downgrade to Premium
 		sub.ScheduledPriceID = &premiumPriceID
 		_, err := suite.Pool.Exec(ctx,
-			"UPDATE billing.subscriptions SET scheduled_price_id = $1 WHERE id = $2",
+			"UPDATE openrails.subscriptions SET scheduled_price_id = $1 WHERE id = $2",
 			sub.ScheduledPriceID, sub.ID)
 		require.NoError(t, err, "Should update scheduled price")
 
@@ -238,7 +238,7 @@ func TestScheduledDowngrade(t *testing.T) {
 		// Set scheduled downgrade to Premium
 		sub.ScheduledPriceID = &premiumPriceID
 		_, err := suite.Pool.Exec(ctx,
-			"UPDATE billing.subscriptions SET scheduled_price_id = $1 WHERE id = $2",
+			"UPDATE openrails.subscriptions SET scheduled_price_id = $1 WHERE id = $2",
 			sub.ScheduledPriceID, sub.ID)
 		require.NoError(t, err, "Should update scheduled price")
 

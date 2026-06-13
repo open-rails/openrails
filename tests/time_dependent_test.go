@@ -453,7 +453,7 @@ func TestDunningRetrySchedule(t *testing.T) {
 	// Helper to count due subscriptions using the same query as DunningWorker
 	countDueSubscriptions := func(clock clockwork.Clock) int {
 		return suite.Count(ctx, `
-			SELECT COUNT(*) FROM billing.subscriptions sub
+			SELECT COUNT(*) FROM openrails.subscriptions sub
 			WHERE sub.processor = $1
 			  AND sub.status = $2
 			  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $3`,
@@ -1061,7 +1061,7 @@ func TestVaultTimestamps(t *testing.T) {
 
 		// Update the payment method
 		_, err := suite.Pool.Exec(ctx,
-			"UPDATE billing.payment_methods SET updated_at = $1 WHERE id = $2",
+			"UPDATE openrails.payment_methods SET updated_at = $1 WHERE id = $2",
 			mockClock.Now(), pm.ID)
 		require.NoError(t, err)
 

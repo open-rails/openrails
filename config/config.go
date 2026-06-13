@@ -222,11 +222,11 @@ func (c *BillingHotPathConfig) EffectiveFailPolicy() string {
 // EncryptionConfig configures per-tenant encryption-at-rest (issue #227). The
 // master key wraps each tenant's Data Encryption Key (envelope encryption); the
 // DEK encrypts sensitive at-rest field values (e.g. per-tenant processor
-// credentials in billing.tenant_secrets).
+// credentials in openrails.tenant_secrets).
 //
 // Self-hosted / dev: supply MasterKey (base64 of 32 raw bytes) via config or the
 // ENCRYPTION_MASTER_KEY env var. PRODUCTION: the master key should come from a
-// KMS (the wrapped DEKs in billing.tenant_deks stay in the DB; the master key
+// KMS (the wrapped DEKs in openrails.tenant_deks stay in the DB; the master key
 // that unwraps them never does). When MasterKey is empty, encryption is disabled
 // and values are stored in plaintext (back-compat with pre-#227 deployments).
 type EncryptionConfig struct {
@@ -280,12 +280,14 @@ type DBConfig struct {
 	Password string `koanf:"password"`
 	SSLMode  string `koanf:"sslmode"`
 
-	// Schema is the Postgres schema OpenRails owns (issue #165). It is used for
-	// OpenRails' own DDL/DML (billing tables) and, in STANDALONE mode, for the
-	// River job-queue tables as well — i.e. standalone River schema == DB.Schema.
+	// Schema is the Postgres schema OpenRails owns (issue #165, #471). It is used
+	// for OpenRails' own DDL/DML (the openrails tables) and, in STANDALONE mode,
+	// for the River job-queue tables as well — i.e. standalone River schema ==
+	// DB.Schema.
 	//
-	// Default: "billing" (zero-config; preserves historical behavior). Configure
-	// via config `db.schema` or env `DB_SCHEMA`.
+	// Default: "openrails" (zero-config). Configure via config `db.schema` or env
+	// `DB_SCHEMA`; OpenRails relocates ALL its tables (DDL + runtime queries) to
+	// the configured schema, in both standalone and embedded mode (#471).
 	//
 	// Embedded/library mode: the host controls where River tables live by injecting
 	// its own River client (embedded.SetRiverClient); that client owns its schema and
@@ -349,9 +351,20 @@ func (c *DBConfig) GetConnectionString() string {
 	return ""
 }
 
-// DefaultSchema is the Postgres schema OpenRails uses when none is configured.
-// It preserves historical (pre-#165) behavior where everything lived in `billing`.
-const DefaultSchema = "billing"
+// DefaultSchema is the Postgres schema OpenRails uses when none is configured
+// (#471 renamed it from the historical `billing`). It is also the canonical
+// schema OpenRails' SQL is authored against; when a host configures a different
+// schema, runtime queries and migration DDL are rewritten from this name to the
+// configured one (see internal/db schema rewriting).
+const DefaultSchema = "openrails"
+
+// MigratekitApp is the migratekit app/tracking key written to
+// public.migrations.app for OpenRails' own (non-River, non-AuthKit) migrations,
+// in both Postgres and ClickHouse. It is the "app name" #471 standardized to
+// "openrails" (from the historical "billing"). It is deliberately independent of
+// the (configurable) schema name — the embedded engine's boot validation greps
+// for this value, so hosts must keep it in lockstep.
+const MigratekitApp = "openrails"
 
 // schemaIdentRe restricts the OpenRails schema to a safe SQL identifier: it must
 // start with a letter or underscore and contain only letters, digits, and
@@ -359,11 +372,11 @@ const DefaultSchema = "billing"
 // build search_path / River schema names without quoting hazards.
 var schemaIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// SchemaName returns the effective OpenRails Postgres schema (issue #165),
-// applying the `billing` default and normalization (trim + lower-case). All
-// OpenRails code that needs the schema (migrator, River client construction)
-// MUST go through this accessor rather than reading DBConfig.Schema directly or
-// hardcoding "billing".
+// SchemaName returns the effective OpenRails Postgres schema (issue #165, #471),
+// applying the `openrails` default and normalization (trim + lower-case). All
+// OpenRails code that needs the schema (migrator, River client construction,
+// runtime query rewriting) MUST go through this accessor rather than reading
+// DBConfig.Schema directly or hardcoding "openrails".
 func (c *DBConfig) SchemaName() string {
 	if c == nil {
 		return DefaultSchema
@@ -693,7 +706,7 @@ type AuthConfig struct {
 // pkg/embedded/controlplane.Attach.
 type ControlPlaneConfig struct {
 	// Issuer is the AuthKit token issuer this OpenRails control plane signs as
-	// (e.g. "https://billing.mysite.com"). Required outside development; in
+	// (e.g. "https://openrails.mysite.com"). Required outside development; in
 	// development Load defaults it to api_url (or http://localhost:<port>).
 	Issuer string `koanf:"issuer,omitempty"`
 
@@ -1025,7 +1038,6 @@ func (c *CaptchaConfig) EffectiveChallengeBuckets() []string {
 	return []string{"checkout", "payment-methods", "subscriptions"}
 }
 
-
 // Validate validates the billing configuration
 func Validate(cfg *Config) error {
 	// Skip strict validation in development environments
@@ -1146,8 +1158,6 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 	}
 	return nil
 }
-
-
 
 // validateStripeKeyForTestEnv checks if the Stripe API key prefix matches the
 // test_env axis. If there's a mismatch, it logs a warning and clears the key to

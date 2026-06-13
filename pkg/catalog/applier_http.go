@@ -24,7 +24,7 @@ import (
 // interface as the in-process adapter, so plan/apply are mode-agnostic.
 //
 // BaseURL must include any API prefix the server mounts admin routes under, up
-// to but not including "/admin" — e.g. "https://billing.example.com/billing/v1".
+// to but not including "/admin" — e.g. "https://openrails.example.com/billing/v1".
 type HTTPApplier struct {
 	BaseURL string
 	Token   string

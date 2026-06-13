@@ -16,7 +16,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const KindHoldExpiry = "billing.hold_expiry"
+const KindHoldExpiry = "openrails.hold_expiry"
 
 type HoldExpiryArgs struct{}
 

@@ -167,7 +167,7 @@ func (r *SolanaSubscriptionRepo) ListActiveMerchantWallets(ctx context.Context) 
 
 // ListActiveWithSignature returns active subscriptions that have recorded at
 // least one confirmed pull (last_signature set) — the rows the reconciliation
-// worker cross-checks against billing.payments (#258). `limit` caps the batch
+// worker cross-checks against openrails.payments (#258). `limit` caps the batch
 // (0 = no limit).
 func (r *SolanaSubscriptionRepo) ListActiveWithSignature(ctx context.Context, limit int) ([]*models.SolanaSubscription, error) {
 	limit32, _ := safecast.Convert[int32](limit)

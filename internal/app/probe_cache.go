@@ -17,7 +17,7 @@ import (
 // #348 probe-cooldown cache. The NMI test-mode boot probe costs one declined
 // authorization per boot on a live account; a crash-looping supervisor pays it
 // on every restart and risks card-testing flags at the gateway. Verdicts are
-// therefore persisted (billing.probe_verdicts, migration 009 — RLS-exempt,
+// therefore persisted (openrails.probe_verdicts, migration 009 — RLS-exempt,
 // instance-level credential state) and consulted before probing:
 //
 //   - a 'live' verdict younger than probeVerdictCooldown refuses to boot FROM

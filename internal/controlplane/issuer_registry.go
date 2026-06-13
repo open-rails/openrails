@@ -49,8 +49,8 @@ func (c *ControlPlane) loadEnabledDelegatedIssuers(ctx context.Context) ([]Deleg
 	}
 	rows, err := c.pool.Query(ctx, `
 		SELECT i.issuer, i.jwks_uri, i.audiences, i.tenant_id::text, t.slug, i.enabled
-		  FROM billing.tenant_delegated_issuers i
-		  JOIN billing.tenants t ON t.id = i.tenant_id
+		  FROM openrails.tenant_delegated_issuers i
+		  JOIN openrails.tenants t ON t.id = i.tenant_id
 		 WHERE i.enabled
 		   AND cardinality(i.audiences) > 0
 		   AND t.status = 'active'
@@ -134,7 +134,7 @@ func (c *ControlPlane) reloadDelegatedIssuers(ctx context.Context) error {
 		c.delegatedVerifier.RemoveIssuer(iss.Issuer)
 		// No IssuerOptions.TenantSlug: it only populates the service-JWT
 		// principal's Tenant, which OpenRails never reads — ResolveServiceJWT and
-		// ResolveDelegated both resolve the tenant LIVE from billing.tenants via
+		// ResolveDelegated both resolve the tenant LIVE from openrails.tenants via
 		// tenantForIssuer, so a cached slug could only go stale between renames
 		// and reloads.
 		if err := c.delegatedVerifier.AddIssuer(iss.Issuer, iss.Audiences, authhttp.IssuerOptions{
@@ -180,8 +180,8 @@ func (c *ControlPlane) tenantForIssuer(ctx context.Context, issuer string) (tena
 	)
 	err := c.pool.QueryRow(ctx, `
 		SELECT t.id::text, t.slug
-		  FROM billing.tenant_delegated_issuers i
-		  JOIN billing.tenants t ON t.id = i.tenant_id
+		  FROM openrails.tenant_delegated_issuers i
+		  JOIN openrails.tenants t ON t.id = i.tenant_id
 		 WHERE i.issuer = $1
 		   AND i.enabled
 		   AND t.status = 'active'

@@ -195,7 +195,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add solana gas alert worker: %w", err)
 	}
 	// Solana ledger reconciliation (#258): cross-checks confirmed on-chain pulls
-	// against billing.payments and raises operator repair alerts on drift.
+	// against openrails.payments and raises operator repair alerts on drift.
 	if err := river.AddWorkerSafely(workers, &riverjobs.SolanaReconcileWorker{
 		DB:                  r.DB,
 		NotificationService: r.NotificationService,

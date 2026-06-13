@@ -51,11 +51,11 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	require.NoError(t, err)
 	defer super.Close()
 	_, err = super.Pool().Exec(ctx,
-		`INSERT INTO billing.tenants (id, slug, name) VALUES ($1, $2, 'CF') ON CONFLICT (id) DO NOTHING`,
+		`INSERT INTO openrails.tenants (id, slug, name) VALUES ($1, $2, 'CF') ON CONFLICT (id) DO NOTHING`,
 		tenantID, "tenant-cf-"+tenantID[:8])
 	require.NoError(t, err)
 	_, err = super.Pool().Exec(ctx,
-		`INSERT INTO billing.credit_types (id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at)
+		`INSERT INTO openrails.credit_types (id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at)
 		 VALUES ($1,$2,$3,'CF','cents',2,true,$4)`, ctID, tenantID, ctName, now)
 	require.NoError(t, err)
 	_, err = super.Pool().Exec(ctx,

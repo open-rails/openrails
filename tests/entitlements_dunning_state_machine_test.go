@@ -96,10 +96,10 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	suite.InsertEntitlement(ctx, paidEnt)
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	// (1) Subscription entitlement is active until paidEnd.
@@ -115,7 +115,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 
 	countGrace := func() int {
 		return suite.Count(ctx, `
-			SELECT COUNT(*) FROM billing.entitlements
+			SELECT COUNT(*) FROM openrails.entitlements
 			WHERE tenant_subject_id = $1 AND entitlement = $2
 			  AND source_type = $3 AND source_id = $4
 			  AND deleted_at IS NULL`,

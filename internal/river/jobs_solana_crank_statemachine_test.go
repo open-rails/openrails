@@ -125,12 +125,12 @@ func (l *fakeLifecycle) CancelMembership(_ context.Context, p *subscriptions.Can
 // ---- harness ---------------------------------------------------------------
 
 const (
-	smPeriodHours  = uint64(1)
+	smPeriodHours = uint64(1)
 	// smCycleDays pins the harness to the MONTHLY dunning tier (#359) so the
 	// recoverable-decline path exercises the progressive 5-failure schedule
 	// (+2d/+5d/+9d/+13d); the 1h on-chain period alone would otherwise
 	// resolve to the 0-retry tier.
-	smCycleDays = 30
+	smCycleDays    = 30
 	smAmountBase   = uint64(1_000_000) // 1 USDC (6 decimals)
 	smFiatAmount   = int64(100)        // $1.00
 	smFiatCurrency = "usd"

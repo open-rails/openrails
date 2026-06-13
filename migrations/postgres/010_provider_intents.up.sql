@@ -1,6 +1,6 @@
 -- #358 phase A: provider intent ledger.
 --
--- billing.provider_intents is the durable, effectively-once outbox for ALL
+-- openrails.provider_intents is the durable, effectively-once outbox for ALL
 -- outbound provider mutations. Every action OpenRails wants to perform against
 -- an external payment provider is recorded here first; a scheduled executor
 -- worker claims due intents (SKIP LOCKED lease), gates them on operating mode
@@ -31,7 +31,7 @@
 -- run on the privileged (no-GUC) pool and sweep cross-tenant, like the other
 -- River workers.
 
-CREATE TABLE billing.provider_intents (
+CREATE TABLE openrails.provider_intents (
     id uuid DEFAULT uuidv7() NOT NULL,
     tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
     provider text NOT NULL,
@@ -59,29 +59,29 @@ CREATE TABLE billing.provider_intents (
     CONSTRAINT chk_provider_intents_executed CHECK ((status <> 'succeeded'::text OR executed_at IS NOT NULL))
 );
 
-ALTER TABLE ONLY billing.provider_intents FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.provider_intents FORCE ROW LEVEL SECURITY;
 
-COMMENT ON TABLE billing.provider_intents IS 'Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.';
-COMMENT ON COLUMN billing.provider_intents.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-COMMENT ON COLUMN billing.provider_intents.provider IS 'Provider/processor key the mutation targets (e.g. ''mobius'' for an NMI-backed processor, ''stripe'').';
-COMMENT ON COLUMN billing.provider_intents.intent_type IS 'Registry key selecting the per-type semantics (executor, verifier, relevance, backoff): nmi_delete_subscription, and in later phases manual_rebill, refund, plan_archive, ...';
-COMMENT ON COLUMN billing.provider_intents.idempotency_key IS 'Deterministic identity of the logical intent within the tenant. Re-enqueues conflict here: a pending intent is refreshed, a superseded/expired one revived (relevance returned), anything else untouched — effectively-once per logical intent.';
-COMMENT ON COLUMN billing.provider_intents.claimed_until IS 'Single-executor lease (SKIP LOCKED claim). An in_flight row whose lease elapsed was orphaned by a crashed executor and becomes claimable again; per-type execute semantics (verify-then-execute, verifier-before-retry) make the reclaim safe.';
-COMMENT ON COLUMN billing.provider_intents.origin IS 'Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.';
-COMMENT ON COLUMN billing.provider_intents.last_failure_reason IS 'Why the most recent attempt did not succeed (mode parked, kill switch, provider down, declined...). Recorded on the intent, never surfaced as an error.';
-COMMENT ON COLUMN billing.provider_intents.expires_at IS 'End of the relevance window: past this instant the intent expires with a finding instead of firing stale (NULL = relevance governed solely by the type''s relevance check).';
-COMMENT ON COLUMN billing.provider_intents.result_evidence IS 'How the terminal status was established (e.g. {"verified_absent": true} for a delete confirmed by a provider read).';
+COMMENT ON TABLE openrails.provider_intents IS 'Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.';
+COMMENT ON COLUMN openrails.provider_intents.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
+COMMENT ON COLUMN openrails.provider_intents.provider IS 'Provider/processor key the mutation targets (e.g. ''mobius'' for an NMI-backed processor, ''stripe'').';
+COMMENT ON COLUMN openrails.provider_intents.intent_type IS 'Registry key selecting the per-type semantics (executor, verifier, relevance, backoff): nmi_delete_subscription, and in later phases manual_rebill, refund, plan_archive, ...';
+COMMENT ON COLUMN openrails.provider_intents.idempotency_key IS 'Deterministic identity of the logical intent within the tenant. Re-enqueues conflict here: a pending intent is refreshed, a superseded/expired one revived (relevance returned), anything else untouched — effectively-once per logical intent.';
+COMMENT ON COLUMN openrails.provider_intents.claimed_until IS 'Single-executor lease (SKIP LOCKED claim). An in_flight row whose lease elapsed was orphaned by a crashed executor and becomes claimable again; per-type execute semantics (verify-then-execute, verifier-before-retry) make the reclaim safe.';
+COMMENT ON COLUMN openrails.provider_intents.origin IS 'Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.';
+COMMENT ON COLUMN openrails.provider_intents.last_failure_reason IS 'Why the most recent attempt did not succeed (mode parked, kill switch, provider down, declined...). Recorded on the intent, never surfaced as an error.';
+COMMENT ON COLUMN openrails.provider_intents.expires_at IS 'End of the relevance window: past this instant the intent expires with a finding instead of firing stale (NULL = relevance governed solely by the type''s relevance check).';
+COMMENT ON COLUMN openrails.provider_intents.result_evidence IS 'How the terminal status was established (e.g. {"verified_absent": true} for a delete confirmed by a provider read).';
 
-CREATE UNIQUE INDEX uq_provider_intents_tenant_idempotency_key ON billing.provider_intents USING btree (tenant_id, idempotency_key);
+CREATE UNIQUE INDEX uq_provider_intents_tenant_idempotency_key ON openrails.provider_intents USING btree (tenant_id, idempotency_key);
 
-CREATE INDEX idx_provider_intents_tenant_id ON billing.provider_intents USING btree (tenant_id);
+CREATE INDEX idx_provider_intents_tenant_id ON openrails.provider_intents USING btree (tenant_id);
 
-CREATE INDEX idx_provider_intents_due ON billing.provider_intents USING btree (next_attempt_at) WHERE (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text]));
+CREATE INDEX idx_provider_intents_due ON openrails.provider_intents USING btree (next_attempt_at) WHERE (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text]));
 
-CREATE INDEX idx_provider_intents_subscription ON billing.provider_intents USING btree (subscription_id) WHERE (subscription_id IS NOT NULL);
+CREATE INDEX idx_provider_intents_subscription ON openrails.provider_intents USING btree (subscription_id) WHERE (subscription_id IS NOT NULL);
 
-ALTER TABLE billing.provider_intents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE openrails.provider_intents ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY tenant_isolation ON billing.provider_intents USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY tenant_isolation ON openrails.provider_intents USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE billing.provider_intents TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.provider_intents TO openrails_app;

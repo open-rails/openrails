@@ -164,7 +164,7 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 		assert.True(t, completed, "Cleanup job should complete within timeout")
 	})
 
-	// NOTE: Wallet challenge cleanup was removed - wallet auth belongs in authkit, not billing.
+	// NOTE: Wallet challenge cleanup was removed - wallet auth belongs in authkit, not openrails.
 
 	t.Run("cleans up old seen notifications", func(t *testing.T) {
 		// Set up a mock clock 100 days in the future
@@ -192,7 +192,7 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify notification was deleted
-		count := suite.Count(ctx, "SELECT COUNT(*) FROM billing.notification_queue WHERE id = $1", notification.ID)
+		count := suite.Count(ctx, "SELECT COUNT(*) FROM openrails.notification_queue WHERE id = $1", notification.ID)
 		assert.Equal(t, 0, count, "Old seen notification should be deleted")
 	})
 
@@ -221,10 +221,10 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify recent notification was preserved
-		notifCount := suite.Count(ctx, "SELECT COUNT(*) FROM billing.notification_queue WHERE id = $1", notification.ID)
+		notifCount := suite.Count(ctx, "SELECT COUNT(*) FROM openrails.notification_queue WHERE id = $1", notification.ID)
 		assert.Equal(t, 1, notifCount, "Recent notification should be preserved")
 
 		// Clean up test data
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.notification_queue WHERE id = $1", notification.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE id = $1", notification.ID)
 	})
 }

@@ -85,14 +85,14 @@ func (c *ControlPlane) RegisterDelegatedIssuer(ctx context.Context, p RegisterDe
 	// which we surface as ErrIssuerOwnedByOtherTenant.
 	var id string
 	err := c.pool.QueryRow(ctx, `
-		INSERT INTO billing.tenant_delegated_issuers (tenant_id, issuer, jwks_uri, audiences, enabled)
+		INSERT INTO openrails.tenant_delegated_issuers (tenant_id, issuer, jwks_uri, audiences, enabled)
 		VALUES ($1, $2, $3, $4, TRUE)
 		ON CONFLICT (issuer) DO UPDATE
 		   SET jwks_uri   = EXCLUDED.jwks_uri,
 		       audiences  = EXCLUDED.audiences,
 		       enabled    = TRUE,
 		       updated_at = current_timestamp
-		 WHERE billing.tenant_delegated_issuers.tenant_id = $1
+		 WHERE openrails.tenant_delegated_issuers.tenant_id = $1
 		RETURNING id::text
 	`, p.TenantID.String(), issuer, jwksURI, audiences).Scan(&id)
 	if err != nil {
@@ -124,7 +124,7 @@ func (c *ControlPlane) DisableDelegatedIssuer(ctx context.Context, tenantID tena
 	}
 
 	ct, err := c.pool.Exec(ctx, `
-		UPDATE billing.tenant_delegated_issuers
+		UPDATE openrails.tenant_delegated_issuers
 		   SET enabled = FALSE, updated_at = current_timestamp
 		 WHERE issuer = $1 AND tenant_id = $2
 	`, issuer, tenantID.String())
@@ -145,7 +145,7 @@ func (c *ControlPlane) ListDelegatedIssuers(ctx context.Context, tenantID tenant
 	}
 	rows, err := c.pool.Query(ctx, `
 		SELECT issuer, jwks_uri, audiences, enabled
-		  FROM billing.tenant_delegated_issuers
+		  FROM openrails.tenant_delegated_issuers
 		 WHERE tenant_id = $1
 		 ORDER BY issuer
 	`, tenantID.String())

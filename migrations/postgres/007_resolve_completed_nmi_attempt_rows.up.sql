@@ -4,7 +4,7 @@
 -- forever, reading as a stuck payment to anything inspecting payment status.
 -- CompleteProviderAttemptInPlace now also sets status = 'completed'; this
 -- backfills the rows resolved before that change.
-UPDATE billing.payments
+UPDATE openrails.payments
 SET status = 'completed'
 WHERE status = 'pending'
   AND transaction_id LIKE 'nmi\_sub\_attempt:%'

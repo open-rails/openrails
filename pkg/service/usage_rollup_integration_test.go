@@ -20,7 +20,7 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 
 	pool := testPool(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
 	ctType, err := cs.GetCreditTypeByName(ctx, ct)

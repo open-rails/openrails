@@ -13,7 +13,7 @@ import (
 )
 
 const addCreditWindowSettled = `-- name: AddCreditWindowSettled :exec
-UPDATE billing.credit_windows
+UPDATE openrails.credit_windows
 SET settled_amount = settled_amount + $3::bigint, updated_at = $2
 WHERE id = $1
 `
@@ -30,7 +30,7 @@ func (q *Queries) AddCreditWindowSettled(ctx context.Context, arg AddCreditWindo
 }
 
 const captureCreditHold = `-- name: CaptureCreditHold :exec
-UPDATE billing.credit_transactions
+UPDATE openrails.credit_transactions
 SET status = 'captured', captured_amount = $2, amount = $3, balance_after = $4, updated_at = $5
 WHERE id = $1
 `
@@ -55,7 +55,7 @@ func (q *Queries) CaptureCreditHold(ctx context.Context, arg CaptureCreditHoldPa
 }
 
 const countCreditSpendByCoords = `-- name: CountCreditSpendByCoords :one
-SELECT count(*) FROM billing.credit_transactions
+SELECT count(*) FROM openrails.credit_transactions
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
   AND transaction_type IN ('withdrawal', 'owed_accrual')
   AND source = $4 AND source_id = $5
@@ -85,7 +85,7 @@ func (q *Queries) CountCreditSpendByCoords(ctx context.Context, arg CountCreditS
 }
 
 const countCreditTransactionsByPayer = `-- name: CountCreditTransactionsByPayer :one
-SELECT count(*) FROM billing.credit_transactions
+SELECT count(*) FROM openrails.credit_transactions
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
 `
 
@@ -103,7 +103,7 @@ func (q *Queries) CountCreditTransactionsByPayer(ctx context.Context, arg CountC
 }
 
 const expireCreditHold = `-- name: ExpireCreditHold :exec
-UPDATE billing.credit_transactions
+UPDATE openrails.credit_transactions
 SET status = 'expired', updated_at = $2
 WHERE id = $1
 `
@@ -120,7 +120,7 @@ func (q *Queries) ExpireCreditHold(ctx context.Context, arg ExpireCreditHoldPara
 
 const getCreditBalance = `-- name: GetCreditBalance :one
 
-SELECT id, credit_type_id, balance, held_balance, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.credit_balances
+SELECT id, credit_type_id, balance, held_balance, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.credit_balances
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
 LIMIT 1
 `
@@ -149,7 +149,7 @@ func (q *Queries) GetCreditBalance(ctx context.Context, arg GetCreditBalancePara
 }
 
 const getCreditTransactionByCoords = `-- name: GetCreditTransactionByCoords :one
-SELECT id, actor, resource, metadata, credit_type_id, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.credit_transactions
+SELECT id, actor, resource, metadata, credit_type_id, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.credit_transactions
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
   AND transaction_type = $4 AND source = $5 AND source_id = $6
 LIMIT 1
@@ -201,7 +201,7 @@ func (q *Queries) GetCreditTransactionByCoords(ctx context.Context, arg GetCredi
 }
 
 const getCreditTransactionForUpdate = `-- name: GetCreditTransactionForUpdate :one
-SELECT id, actor, resource, metadata, credit_type_id, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.credit_transactions WHERE id = $1 FOR UPDATE
+SELECT id, actor, resource, metadata, credit_type_id, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.credit_transactions WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetCreditTransactionForUpdate(ctx context.Context, id uuid.UUID) (BillingCreditTransaction, error) {
@@ -232,7 +232,7 @@ func (q *Queries) GetCreditTransactionForUpdate(ctx context.Context, id uuid.UUI
 }
 
 const getCreditWindow = `-- name: GetCreditWindow :one
-SELECT id, tenant_id, tenant_subject_id, credit_type_id, held_amount, settled_amount, status, expires_at, created_at, updated_at FROM billing.credit_windows WHERE id = $1 LIMIT 1
+SELECT id, tenant_id, tenant_subject_id, credit_type_id, held_amount, settled_amount, status, expires_at, created_at, updated_at FROM openrails.credit_windows WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetCreditWindow(ctx context.Context, id uuid.UUID) (BillingCreditWindow, error) {
@@ -254,7 +254,7 @@ func (q *Queries) GetCreditWindow(ctx context.Context, id uuid.UUID) (BillingCre
 }
 
 const getCreditWindowForUpdate = `-- name: GetCreditWindowForUpdate :one
-SELECT id, tenant_id, tenant_subject_id, credit_type_id, held_amount, settled_amount, status, expires_at, created_at, updated_at FROM billing.credit_windows WHERE id = $1 FOR UPDATE
+SELECT id, tenant_id, tenant_subject_id, credit_type_id, held_amount, settled_amount, status, expires_at, created_at, updated_at FROM openrails.credit_windows WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetCreditWindowForUpdate(ctx context.Context, id uuid.UUID) (BillingCreditWindow, error) {
@@ -276,7 +276,7 @@ func (q *Queries) GetCreditWindowForUpdate(ctx context.Context, id uuid.UUID) (B
 }
 
 const insertCreditBalanceIfAbsent = `-- name: InsertCreditBalanceIfAbsent :exec
-INSERT INTO billing.credit_balances (
+INSERT INTO openrails.credit_balances (
     id, tenant_id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, 0, 0, $5, $5)
 ON CONFLICT (tenant_id, tenant_subject_id, credit_type_id) DO NOTHING
@@ -304,7 +304,7 @@ func (q *Queries) InsertCreditBalanceIfAbsent(ctx context.Context, arg InsertCre
 }
 
 const insertCreditBlock = `-- name: InsertCreditBlock :exec
-INSERT INTO billing.credit_blocks (
+INSERT INTO openrails.credit_blocks (
     id, tenant_id, tenant_subject_id, credit_type_id,
     original_amount, remaining_amount, expires_at, source_transaction_id, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -338,7 +338,7 @@ func (q *Queries) InsertCreditBlock(ctx context.Context, arg InsertCreditBlockPa
 }
 
 const insertCreditTransaction = `-- name: InsertCreditTransaction :exec
-INSERT INTO billing.credit_transactions (
+INSERT INTO openrails.credit_transactions (
     id, tenant_id, tenant_subject_id, actor, resource, metadata, credit_type_id,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
@@ -394,7 +394,7 @@ func (q *Queries) InsertCreditTransaction(ctx context.Context, arg InsertCreditT
 }
 
 const insertCreditTransactionIfAbsent = `-- name: InsertCreditTransactionIfAbsent :exec
-INSERT INTO billing.credit_transactions (
+INSERT INTO openrails.credit_transactions (
     id, tenant_id, tenant_subject_id, actor, resource, metadata, credit_type_id,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
@@ -452,7 +452,7 @@ func (q *Queries) InsertCreditTransactionIfAbsent(ctx context.Context, arg Inser
 
 const insertCreditWindow = `-- name: InsertCreditWindow :exec
 
-INSERT INTO billing.credit_windows (
+INSERT INTO openrails.credit_windows (
     id, tenant_id, tenant_subject_id, credit_type_id,
     held_amount, settled_amount, status, expires_at, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -471,7 +471,7 @@ type InsertCreditWindowParams struct {
 	UpdatedAt       time.Time
 }
 
-// billing.credit_windows: prepaid bulk reservations (#335).
+// openrails.credit_windows: prepaid bulk reservations (#335).
 func (q *Queries) InsertCreditWindow(ctx context.Context, arg InsertCreditWindowParams) error {
 	_, err := q.db.Exec(ctx, insertCreditWindow,
 		arg.ID,
@@ -491,8 +491,8 @@ func (q *Queries) InsertCreditWindow(ctx context.Context, arg InsertCreditWindow
 const listActiveCreditTypesWithBalance = `-- name: ListActiveCreditTypesWithBalance :many
 SELECT ct.id AS credit_type_id, ct.name, ct.display_name, ct.unit, ct.decimal_places,
        ucb.balance, ucb.held_balance
-FROM billing.credit_types ct
-LEFT JOIN billing.credit_balances ucb
+FROM openrails.credit_types ct
+LEFT JOIN openrails.credit_balances ucb
   ON ucb.credit_type_id = ct.id
  AND ucb.tenant_subject_id = $1::uuid
 WHERE ct.is_active = true
@@ -542,7 +542,7 @@ func (q *Queries) ListActiveCreditTypesWithBalance(ctx context.Context, tenantSu
 
 const listBalanceAnomalies = `-- name: ListBalanceAnomalies :many
 SELECT b.tenant_id, b.tenant_subject_id, b.credit_type_id, b.balance, b.held_balance
-FROM billing.credit_balances b
+FROM openrails.credit_balances b
 WHERE b.tenant_id = $1
   AND (b.balance < 0 OR b.held_balance < 0 OR b.held_balance > b.balance)
 `
@@ -582,7 +582,7 @@ func (q *Queries) ListBalanceAnomalies(ctx context.Context, tenantID uuid.UUID) 
 }
 
 const listCreditTransactionsByPayer = `-- name: ListCreditTransactionsByPayer :many
-SELECT id, actor, resource, metadata, credit_type_id, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.credit_transactions
+SELECT id, actor, resource, metadata, credit_type_id, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.credit_transactions
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
 ORDER BY created_at DESC
 LIMIT $4::int OFFSET $5::int
@@ -643,7 +643,7 @@ func (q *Queries) ListCreditTransactionsByPayer(ctx context.Context, arg ListCre
 }
 
 const listExpiredActiveHoldsForUpdate = `-- name: ListExpiredActiveHoldsForUpdate :many
-SELECT id, actor, resource, metadata, credit_type_id, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.credit_transactions
+SELECT id, actor, resource, metadata, credit_type_id, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.credit_transactions
 WHERE transaction_type = 'hold' AND status = 'active'
   AND expires_at IS NOT NULL AND expires_at <= $1::timestamptz
 ORDER BY expires_at ASC
@@ -698,7 +698,7 @@ func (q *Queries) ListExpiredActiveHoldsForUpdate(ctx context.Context, arg ListE
 }
 
 const listExpiredCreditBlocksForUpdate = `-- name: ListExpiredCreditBlocksForUpdate :many
-SELECT id, credit_type_id, original_amount, remaining_amount, expires_at, source_transaction_id, created_at, tenant_id, tenant_subject_id FROM billing.credit_blocks
+SELECT id, credit_type_id, original_amount, remaining_amount, expires_at, source_transaction_id, created_at, tenant_id, tenant_subject_id FROM openrails.credit_blocks
 WHERE remaining_amount > 0
   AND expires_at IS NOT NULL AND expires_at <= $1::timestamptz
 ORDER BY expires_at ASC
@@ -743,7 +743,7 @@ func (q *Queries) ListExpiredCreditBlocksForUpdate(ctx context.Context, arg List
 }
 
 const listExpiredOpenCreditWindowsForUpdate = `-- name: ListExpiredOpenCreditWindowsForUpdate :many
-SELECT id, tenant_id, tenant_subject_id, credit_type_id, held_amount, settled_amount, status, expires_at, created_at, updated_at FROM billing.credit_windows
+SELECT id, tenant_id, tenant_subject_id, credit_type_id, held_amount, settled_amount, status, expires_at, created_at, updated_at FROM openrails.credit_windows
 WHERE status = 'open' AND expires_at <= $1::timestamptz
 ORDER BY expires_at ASC
 LIMIT $2::int
@@ -792,15 +792,15 @@ const listHeldBalanceDrift = `-- name: ListHeldBalanceDrift :many
 SELECT b.tenant_id, b.tenant_subject_id, b.credit_type_id,
        b.held_balance AS stored,
        COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0))
-                 FROM billing.credit_transactions t
+                 FROM openrails.credit_transactions t
                  WHERE t.tenant_id = b.tenant_id
                    AND t.tenant_subject_id = b.tenant_subject_id
                    AND t.credit_type_id = b.credit_type_id
                    AND t.transaction_type = 'hold' AND t.status = 'active'), 0)::bigint AS computed
-FROM billing.credit_balances b
+FROM openrails.credit_balances b
 WHERE b.tenant_id = $1
   AND b.held_balance <> COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0))
-                 FROM billing.credit_transactions t
+                 FROM openrails.credit_transactions t
                  WHERE t.tenant_id = b.tenant_id
                    AND t.tenant_subject_id = b.tenant_subject_id
                    AND t.credit_type_id = b.credit_type_id
@@ -844,7 +844,7 @@ func (q *Queries) ListHeldBalanceDrift(ctx context.Context, tenantID uuid.UUID) 
 }
 
 const listOrphanedExpiredHolds = `-- name: ListOrphanedExpiredHolds :many
-SELECT id, actor, resource, metadata, credit_type_id, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.credit_transactions
+SELECT id, actor, resource, metadata, credit_type_id, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.credit_transactions
 WHERE tenant_id = $1 AND transaction_type = 'hold' AND status = 'active'
   AND expires_at IS NOT NULL AND expires_at <= $2::timestamptz
 ORDER BY expires_at ASC
@@ -896,7 +896,7 @@ func (q *Queries) ListOrphanedExpiredHolds(ctx context.Context, arg ListOrphaned
 }
 
 const listSpendableCreditBlocksForUpdate = `-- name: ListSpendableCreditBlocksForUpdate :many
-SELECT id, credit_type_id, original_amount, remaining_amount, expires_at, source_transaction_id, created_at, tenant_id, tenant_subject_id FROM billing.credit_blocks
+SELECT id, credit_type_id, original_amount, remaining_amount, expires_at, source_transaction_id, created_at, tenant_id, tenant_subject_id FROM openrails.credit_blocks
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
   AND remaining_amount > 0
   AND (expires_at IS NULL OR expires_at > $4::timestamptz)
@@ -948,7 +948,7 @@ func (q *Queries) ListSpendableCreditBlocksForUpdate(ctx context.Context, arg Li
 }
 
 const lockCreditBalance = `-- name: LockCreditBalance :one
-SELECT id, credit_type_id, balance, held_balance, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.credit_balances
+SELECT id, credit_type_id, balance, held_balance, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.credit_balances
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
 FOR UPDATE
 `
@@ -976,7 +976,7 @@ func (q *Queries) LockCreditBalance(ctx context.Context, arg LockCreditBalancePa
 }
 
 const releaseCreditHold = `-- name: ReleaseCreditHold :exec
-UPDATE billing.credit_transactions
+UPDATE openrails.credit_transactions
 SET status = 'released', updated_at = $2
 WHERE id = $1
 `
@@ -992,7 +992,7 @@ func (q *Queries) ReleaseCreditHold(ctx context.Context, arg ReleaseCreditHoldPa
 }
 
 const setCreditBalance = `-- name: SetCreditBalance :exec
-UPDATE billing.credit_balances
+UPDATE openrails.credit_balances
 SET balance = $4, updated_at = $5
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
 `
@@ -1017,7 +1017,7 @@ func (q *Queries) SetCreditBalance(ctx context.Context, arg SetCreditBalancePara
 }
 
 const setCreditBlockRemaining = `-- name: SetCreditBlockRemaining :exec
-UPDATE billing.credit_blocks SET remaining_amount = $2 WHERE id = $1
+UPDATE openrails.credit_blocks SET remaining_amount = $2 WHERE id = $1
 `
 
 type SetCreditBlockRemainingParams struct {
@@ -1031,7 +1031,7 @@ func (q *Queries) SetCreditBlockRemaining(ctx context.Context, arg SetCreditBloc
 }
 
 const setCreditHeldBalance = `-- name: SetCreditHeldBalance :exec
-UPDATE billing.credit_balances
+UPDATE openrails.credit_balances
 SET held_balance = $4, updated_at = $5
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
 `
@@ -1056,7 +1056,7 @@ func (q *Queries) SetCreditHeldBalance(ctx context.Context, arg SetCreditHeldBal
 }
 
 const setCreditWindowStatus = `-- name: SetCreditWindowStatus :exec
-UPDATE billing.credit_windows
+UPDATE openrails.credit_windows
 SET status = $2, updated_at = $3
 WHERE id = $1
 `
@@ -1074,7 +1074,7 @@ func (q *Queries) SetCreditWindowStatus(ctx context.Context, arg SetCreditWindow
 
 const sumActiveHoldAuthorizations = `-- name: SumActiveHoldAuthorizations :one
 SELECT COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)::bigint
-FROM billing.credit_transactions
+FROM openrails.credit_transactions
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
   AND transaction_type = 'hold' AND status = 'active'
 `
@@ -1094,7 +1094,7 @@ func (q *Queries) SumActiveHoldAuthorizations(ctx context.Context, arg SumActive
 
 const sumCreditDeposits = `-- name: SumCreditDeposits :one
 SELECT COALESCE(SUM(amount), 0)::bigint
-FROM billing.credit_transactions
+FROM openrails.credit_transactions
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
   AND transaction_type = 'deposit'
 `
@@ -1114,7 +1114,7 @@ func (q *Queries) SumCreditDeposits(ctx context.Context, arg SumCreditDepositsPa
 
 const sumMoneyMovementsInPeriod = `-- name: SumMoneyMovementsInPeriod :many
 SELECT transaction_type, COALESCE(SUM(amount), 0)::bigint AS total
-FROM billing.credit_transactions
+FROM openrails.credit_transactions
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
   AND created_at >= $4::timestamptz
   AND created_at < $5::timestamptz
@@ -1168,7 +1168,7 @@ SELECT COALESCE(SUM(
         WHEN transaction_type = 'hold' AND status = 'active' THEN COALESCE(authorized_amount, 0)
         ELSE 0
     END), 0)::bigint
-FROM billing.credit_transactions
+FROM openrails.credit_transactions
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND credit_type_id = $3
   AND created_at >= $4::timestamptz
   AND ($5::text = '' OR actor = $5::text)
@@ -1199,7 +1199,7 @@ func (q *Queries) SumSpentInWindow(ctx context.Context, arg SumSpentInWindowPara
 }
 
 const updateCreditWindowReservation = `-- name: UpdateCreditWindowReservation :exec
-UPDATE billing.credit_windows
+UPDATE openrails.credit_windows
 SET held_amount = $2, expires_at = $3, updated_at = $4
 WHERE id = $1
 `

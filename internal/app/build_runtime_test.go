@@ -31,13 +31,13 @@ func TestCreateCCBillDataLinkClientPropagatesTestEnv(t *testing.T) {
 
 // TestStandaloneRiverSchemaTracksDBSchema verifies the issue #165 standalone rule:
 // the schema OpenRails hands to its self-constructed River client is exactly the
-// configured OpenRails Postgres schema (db.schema), defaulting to `billing`.
+// configured OpenRails Postgres schema (db.schema), defaulting to `openrails`.
 func TestStandaloneRiverSchemaTracksDBSchema(t *testing.T) {
 	t.Parallel()
 
-	t.Run("default is billing", func(t *testing.T) {
+	t.Run("default is openrails", func(t *testing.T) {
 		cfg := config.GetDefaultBillingConfig()
-		require.Equal(t, "billing", standaloneRiverSchema(cfg))
+		require.Equal(t, "openrails", standaloneRiverSchema(cfg))
 		// Standalone River schema == OpenRails DB schema.
 		require.Equal(t, cfg.DB.SchemaName(), standaloneRiverSchema(cfg))
 	})
@@ -50,8 +50,8 @@ func TestStandaloneRiverSchemaTracksDBSchema(t *testing.T) {
 	})
 
 	t.Run("nil db falls back to default", func(t *testing.T) {
-		require.Equal(t, "billing", standaloneRiverSchema(&config.Config{}))
-		require.Equal(t, "billing", standaloneRiverSchema(nil))
+		require.Equal(t, "openrails", standaloneRiverSchema(&config.Config{}))
+		require.Equal(t, "openrails", standaloneRiverSchema(nil))
 	})
 }
 

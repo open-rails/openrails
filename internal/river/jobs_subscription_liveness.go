@@ -22,7 +22,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const KindSubscriptionLiveness = "billing.subscription_liveness"
+const KindSubscriptionLiveness = "openrails.subscription_liveness"
 
 // livenessOutcome classifies what a liveness pass did with one subscription.
 type livenessOutcome int

@@ -77,7 +77,7 @@ func (p *Product) IsBillable() bool { return p.Status != CatalogStatusDraft }
 // CreditsSpec defines bundled credit grants for a product (e.g., promo credits on signup,
 // or a recurring monthly stipend on renewals).
 //
-// Keys are credit type names (billing.credit_types.name). Amounts are stored as BIGINT in the
+// Keys are credit type names (openrails.credit_types.name). Amounts are stored as BIGINT in the
 // credit type's base units (unit-agnostic), not USD cents.
 type CreditsSpec map[string]CreditGrantSpec
 

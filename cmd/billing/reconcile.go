@@ -114,8 +114,8 @@ func resolveReconcileTenant(ctx context.Context, application *app.App, slug stri
 		return tid, nil
 	}
 	var id string
-	if err := application.Runtime.DB.Pool().
-		QueryRow(ctx, `SELECT id::text FROM billing.tenants WHERE lower(slug) = lower($1)`, slug).
+	if err := application.Runtime.DB.DataPool().
+		QueryRow(ctx, `SELECT id::text FROM openrails.tenants WHERE lower(slug) = lower($1)`, slug).
 		Scan(&id); err != nil {
 		return tenant.ID{}, fmt.Errorf("resolve tenant %q: %w", slug, err)
 	}

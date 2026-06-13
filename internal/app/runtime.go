@@ -19,13 +19,13 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
@@ -310,7 +310,7 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 }
 
 // AddBillingWorkersTo adds billing's River workers to the provided worker registry.
-// This is used by embedded hosts who want to share their River client with billing.
+// This is used by embedded hosts who want to share their River client with openrails.
 func (r *Runtime) AddBillingWorkersTo(ctx context.Context, workers *river.Workers) error {
 	if r == nil {
 		return fmt.Errorf("runtime is nil")

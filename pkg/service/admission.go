@@ -261,7 +261,7 @@ type BudgetCheckWindowInput struct {
 // against CALLER-SUPPLIED windows WITHOUT reserving. Unlike BudgetStatus it does
 // NOT read an OpenRails tier policy — the host (tensorhub) owns the platform
 // budget policy and passes the windows; OpenRails owns the spend actuals
-// (billing.budget_reservations). Powers the tensorhub delegated budget-window
+// (openrails.budget_reservations). Powers the tensorhub delegated budget-window
 // display (#410) so it no longer reads tensorhub-local money tables.
 func (s *Service) BudgetCheck(ctx context.Context, payer identity.TenantSubjectID, actor string, windows []BudgetCheckWindowInput, requestedMicros int64) ([]AdmitBudgetWindowDTO, error) {
 	if s == nil || s.rt == nil {

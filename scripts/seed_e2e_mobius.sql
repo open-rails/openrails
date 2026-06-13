@@ -18,7 +18,7 @@ BEGIN
 END $$;
 
 -- Create product (idempotent by slug)
-INSERT INTO billing.products (slug, display_name, description, tier_group, tier_rank, status)
+INSERT INTO openrails.products (slug, display_name, description, tier_group, tier_rank, status)
 VALUES ('e2e_mobius', 'E2E Mobius Plan', 'Local E2E product for Mobius/NMI sandbox', 'e2e', 1, 'active')
 ON CONFLICT (slug) DO UPDATE
 SET display_name = EXCLUDED.display_name,
@@ -31,9 +31,9 @@ SET display_name = EXCLUDED.display_name,
 -- Create recurring price (idempotent by financial-substance unique constraint).
 -- There is no price slug: a price's identity is (product, amount, currency, cycle).
 WITH p AS (
-  SELECT id AS product_id FROM billing.products WHERE slug = 'e2e_mobius'
+  SELECT id AS product_id FROM openrails.products WHERE slug = 'e2e_mobius'
 )
-INSERT INTO billing.prices (product_id, amount, currency, billing_cycle_days, processors, status)
+INSERT INTO openrails.prices (product_id, amount, currency, billing_cycle_days, processors, status)
 SELECT
   p.product_id,
   :mobius_recurring_amount,
@@ -51,9 +51,9 @@ SET processors = EXCLUDED.processors,
 -- OpenRails checkout. PostgreSQL UNIQUE constraints treat NULL billing cycles as
 -- distinct, so do this as UPDATE-or-INSERT instead of ON CONFLICT.
 WITH p AS (
-  SELECT id AS product_id FROM billing.products WHERE slug = 'e2e_mobius'
+  SELECT id AS product_id FROM openrails.products WHERE slug = 'e2e_mobius'
 ), updated AS (
-  UPDATE billing.prices price
+  UPDATE openrails.prices price
   SET processors = jsonb_build_object('mobius', jsonb_build_object('provider', 'mobius')),
       status = 'active',
       updated_at = current_timestamp
@@ -64,7 +64,7 @@ WITH p AS (
     AND price.billing_cycle_days IS NULL
   RETURNING price.id
 )
-INSERT INTO billing.prices (product_id, amount, currency, billing_cycle_days, processors, status)
+INSERT INTO openrails.prices (product_id, amount, currency, billing_cycle_days, processors, status)
 SELECT
   p.product_id,
   :mobius_one_off_amount,
@@ -76,14 +76,14 @@ FROM p
 WHERE NOT EXISTS (SELECT 1 FROM updated);
 
 -- Output IDs for copy/paste.
-SELECT 'product_id' AS key, id::text AS value FROM billing.products WHERE slug='e2e_mobius'
+SELECT 'product_id' AS key, id::text AS value FROM openrails.products WHERE slug='e2e_mobius'
 UNION ALL
 SELECT 'recurring_price_id' AS key, id::text AS value
-FROM billing.prices
-WHERE product_id = (SELECT id FROM billing.products WHERE slug='e2e_mobius')
+FROM openrails.prices
+WHERE product_id = (SELECT id FROM openrails.products WHERE slug='e2e_mobius')
   AND amount = :mobius_recurring_amount AND currency='usd' AND billing_cycle_days=1
 UNION ALL
 SELECT 'one_off_price_id' AS key, id::text AS value
-FROM billing.prices
-WHERE product_id = (SELECT id FROM billing.products WHERE slug='e2e_mobius')
+FROM openrails.prices
+WHERE product_id = (SELECT id FROM openrails.products WHERE slug='e2e_mobius')
   AND amount = :mobius_one_off_amount AND currency='usd' AND billing_cycle_days IS NULL;

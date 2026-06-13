@@ -147,12 +147,12 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.payments WHERE id = $1", payment.ID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.admin_grants WHERE id = $1", adminGrant.ID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.payments WHERE id = $1", payment.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.admin_grants WHERE id = $1", adminGrant.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	// Immediately after purchase (still inside base paid window), both entitlements are active.
@@ -215,7 +215,7 @@ func TestEntitlementSoftDeleteExcludedFromIsEntitled(t *testing.T) {
 
 	// Soft-delete the row (the bun-era model used a soft_delete tag; emulate it
 	// by setting deleted_at directly).
-	_, err = suite.Pool.Exec(ctx, "UPDATE billing.entitlements SET deleted_at = now() WHERE id = $1", ent.ID)
+	_, err = suite.Pool.Exec(ctx, "UPDATE openrails.entitlements SET deleted_at = now() WHERE id = $1", ent.ID)
 	require.NoError(t, err)
 
 	ok, err = r.IsEntitled(ctx, userID, entName, now)

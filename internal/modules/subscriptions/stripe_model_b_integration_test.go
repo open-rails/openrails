@@ -310,7 +310,7 @@ func TestStripeModelBUpgrade_Integration(t *testing.T) {
 	require.True(t, periodEndAfter.After(periodEndBefore.Add(-time.Hour)),
 		"new period end should not be earlier than the pre-upgrade one")
 
-	// Cleanup: cancel the subscription so it stops billing. Test-mode objects
+	// Cleanup: cancel the subscription so it stops openrails. Test-mode objects
 	// (product/prices/customer) are harmless and left for inspection.
 	stripeForm(t, key, http.MethodDelete, "/v1/subscriptions/"+sub.ID, nil, nil)
 	t.Logf("cleaned up: canceled subscription %s (test-mode product/prices/customer left for inspection)", sub.ID)

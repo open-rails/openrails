@@ -56,7 +56,7 @@ func TestReconcile_HeldBalanceDriftAndRepair(t *testing.T) {
 
 	// Corrupt the stored held_balance.
 	_, err = pool.Exec(ctx,
-		"UPDATE billing.credit_balances SET held_balance = $1 WHERE tenant_subject_id = $2",
+		"UPDATE openrails.credit_balances SET held_balance = $1 WHERE tenant_subject_id = $2",
 		999, payer.UUID())
 	require.NoError(t, err)
 
@@ -82,7 +82,7 @@ func TestReconcile_BalanceAnomaly(t *testing.T) {
 	require.NoError(t, err)
 	// held > balance.
 	_, err = pool.Exec(ctx,
-		"UPDATE billing.credit_balances SET held_balance = $1 WHERE tenant_subject_id = $2",
+		"UPDATE openrails.credit_balances SET held_balance = $1 WHERE tenant_subject_id = $2",
 		500, payer.UUID())
 	require.NoError(t, err)
 
@@ -95,11 +95,11 @@ func TestReconcile_BalanceAnomaly(t *testing.T) {
 func resetCreditLedger(t *testing.T, pool *pgxpool.Pool, ctx context.Context) {
 	t.Helper()
 	for _, table := range []string{
-		"billing.credit_spend_limits",
-		"billing.credit_account_settings",
-		"billing.credit_blocks",
-		"billing.credit_transactions",
-		"billing.credit_balances",
+		"openrails.credit_spend_limits",
+		"openrails.credit_account_settings",
+		"openrails.credit_blocks",
+		"openrails.credit_transactions",
+		"openrails.credit_balances",
 	} {
 		_, err := pool.Exec(ctx, "DELETE FROM "+table)
 		require.NoError(t, err, "reset %s", table)

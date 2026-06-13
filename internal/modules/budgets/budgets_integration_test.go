@@ -32,15 +32,15 @@ func budgetEnv(t *testing.T) (*budgets.Service, *clockwork.FakeClock, *pgxpool.P
 		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='budget_window_state')").
 		Scan(&hasTable))
 	if !hasTable {
-		t.Skip("billing.budget_window_state missing; run migration 005")
+		t.Skip("openrails.budget_window_state missing; run migration 005")
 	}
 
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	actor := "actor_" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.budget_reservations WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.budget_window_state WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_reservations WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_window_state WHERE tenant_subject_id = $1", payerID)
 	})
 
 	// Fixed wall clock so window math is deterministic; advance it to cross

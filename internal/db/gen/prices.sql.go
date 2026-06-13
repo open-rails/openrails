@@ -13,7 +13,7 @@ import (
 )
 
 const countPricesFiltered = `-- name: CountPricesFiltered :one
-SELECT count(*) FROM billing.prices price
+SELECT count(*) FROM openrails.prices price
 WHERE (NOT $1::boolean OR price.status = 'active')
   AND (NOT $2::boolean OR price.status <> 'active')
   AND ($3::text IS NULL OR price.status = $3::text)
@@ -50,7 +50,7 @@ func (q *Queries) CountPricesFiltered(ctx context.Context, arg CountPricesFilter
 
 const createPrice = `-- name: CreatePrice :execrows
 
-INSERT INTO billing.prices (
+INSERT INTO openrails.prices (
     id, tenant_id, product_id, status, amount, currency,
     billing_cycle_days, processors, created_at, updated_at
 ) VALUES (
@@ -79,7 +79,7 @@ type CreatePriceParams struct {
 	UpdatedAt        time.Time
 }
 
-// billing.prices.
+// openrails.prices.
 func (q *Queries) CreatePrice(ctx context.Context, arg CreatePriceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createPrice,
 		arg.ID,
@@ -100,7 +100,7 @@ func (q *Queries) CreatePrice(ctx context.Context, arg CreatePriceParams) (int64
 }
 
 const deletePrice = `-- name: DeletePrice :execrows
-DELETE FROM billing.prices WHERE id = $1
+DELETE FROM openrails.prices WHERE id = $1
 `
 
 func (q *Queries) DeletePrice(ctx context.Context, id uuid.UUID) (int64, error) {
@@ -112,7 +112,7 @@ func (q *Queries) DeletePrice(ctx context.Context, id uuid.UUID) (int64, error) 
 }
 
 const getPriceByID = `-- name: GetPriceByID :one
-SELECT id, product_id, amount, currency, billing_cycle_days, processors, status, created_at, updated_at, tenant_id FROM billing.prices WHERE id = $1
+SELECT id, product_id, amount, currency, billing_cycle_days, processors, status, created_at, updated_at, tenant_id FROM openrails.prices WHERE id = $1
 `
 
 func (q *Queries) GetPriceByID(ctx context.Context, id uuid.UUID) (BillingPrice, error) {
@@ -134,7 +134,7 @@ func (q *Queries) GetPriceByID(ctx context.Context, id uuid.UUID) (BillingPrice,
 }
 
 const getPriceByNMIPlan = `-- name: GetPriceByNMIPlan :one
-SELECT id, product_id, amount, currency, billing_cycle_days, processors, status, created_at, updated_at, tenant_id FROM billing.prices price
+SELECT id, product_id, amount, currency, billing_cycle_days, processors, status, created_at, updated_at, tenant_id FROM openrails.prices price
 WHERE price.status <> 'draft'
   AND (price.processors -> $1::text ->> 'plan_id' = $2::text
        OR ($3::boolean
@@ -170,8 +170,8 @@ func (q *Queries) GetPriceByNMIPlan(ctx context.Context, arg GetPriceByNMIPlanPa
 
 const getPriceWithProductByCCBillPriceID = `-- name: GetPriceWithProductByCCBillPriceID :one
 SELECT price.id, price.product_id, price.amount, price.currency, price.billing_cycle_days, price.processors, price.status, price.created_at, price.updated_at, price.tenant_id, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.tenant_id
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
+FROM openrails.prices price
+JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.processors -> 'ccbill' ->> 'flex_id' = $1::text
   AND price.status <> 'draft'
 LIMIT 1
@@ -214,8 +214,8 @@ func (q *Queries) GetPriceWithProductByCCBillPriceID(ctx context.Context, flexID
 
 const getPriceWithProductByStripePriceID = `-- name: GetPriceWithProductByStripePriceID :one
 SELECT price.id, price.product_id, price.amount, price.currency, price.billing_cycle_days, price.processors, price.status, price.created_at, price.updated_at, price.tenant_id, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.tenant_id
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
+FROM openrails.prices price
+JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.processors -> 'stripe' ->> 'price_id' = $1::text
   AND price.status <> 'draft'
 LIMIT 1
@@ -257,7 +257,7 @@ func (q *Queries) GetPriceWithProductByStripePriceID(ctx context.Context, stripe
 }
 
 const listActivePricesByProduct = `-- name: ListActivePricesByProduct :many
-SELECT id, product_id, amount, currency, billing_cycle_days, processors, status, created_at, updated_at, tenant_id FROM billing.prices price
+SELECT id, product_id, amount, currency, billing_cycle_days, processors, status, created_at, updated_at, tenant_id FROM openrails.prices price
 WHERE price.product_id = $1 AND price.status = 'active'
 `
 
@@ -293,7 +293,7 @@ func (q *Queries) ListActivePricesByProduct(ctx context.Context, productID uuid.
 }
 
 const listActivePricesByProductOrdered = `-- name: ListActivePricesByProductOrdered :many
-SELECT id, product_id, amount, currency, billing_cycle_days, processors, status, created_at, updated_at, tenant_id FROM billing.prices price
+SELECT id, product_id, amount, currency, billing_cycle_days, processors, status, created_at, updated_at, tenant_id FROM openrails.prices price
 WHERE price.product_id = $1 AND price.status = 'active'
 ORDER BY price.amount ASC
 `
@@ -331,8 +331,8 @@ func (q *Queries) ListActivePricesByProductOrdered(ctx context.Context, productI
 
 const listAllActivePricesWithProduct = `-- name: ListAllActivePricesWithProduct :many
 SELECT price.id, price.product_id, price.amount, price.currency, price.billing_cycle_days, price.processors, price.status, price.created_at, price.updated_at, price.tenant_id, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.tenant_id
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
+FROM openrails.prices price
+JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.status = 'active'
 ORDER BY price.amount ASC
 `
@@ -387,8 +387,8 @@ func (q *Queries) ListAllActivePricesWithProduct(ctx context.Context) ([]ListAll
 
 const listAllPricesWithProduct = `-- name: ListAllPricesWithProduct :many
 SELECT price.id, price.product_id, price.amount, price.currency, price.billing_cycle_days, price.processors, price.status, price.created_at, price.updated_at, price.tenant_id, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.tenant_id
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
+FROM openrails.prices price
+JOIN openrails.products prod ON prod.id = price.product_id
 ORDER BY price.amount ASC
 `
 
@@ -441,7 +441,7 @@ func (q *Queries) ListAllPricesWithProduct(ctx context.Context) ([]ListAllPrices
 }
 
 const listPricesByIDs = `-- name: ListPricesByIDs :many
-SELECT id, product_id, amount, currency, billing_cycle_days, processors, status, created_at, updated_at, tenant_id FROM billing.prices WHERE id = ANY($1::uuid[])
+SELECT id, product_id, amount, currency, billing_cycle_days, processors, status, created_at, updated_at, tenant_id FROM openrails.prices WHERE id = ANY($1::uuid[])
 `
 
 func (q *Queries) ListPricesByIDs(ctx context.Context, ids []uuid.UUID) ([]BillingPrice, error) {
@@ -477,8 +477,8 @@ func (q *Queries) ListPricesByIDs(ctx context.Context, ids []uuid.UUID) ([]Billi
 
 const listPricesFiltered = `-- name: ListPricesFiltered :many
 SELECT price.id, price.product_id, price.amount, price.currency, price.billing_cycle_days, price.processors, price.status, price.created_at, price.updated_at, price.tenant_id, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.tenant_id
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
+FROM openrails.prices price
+JOIN openrails.products prod ON prod.id = price.product_id
 WHERE (NOT $1::boolean OR price.status = 'active')
   AND (NOT $2::boolean OR price.status <> 'active')
   AND ($3::text IS NULL OR price.status = $3::text)
@@ -562,8 +562,8 @@ func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFiltered
 
 const listPricesWithProductByIDs = `-- name: ListPricesWithProductByIDs :many
 SELECT price.id, price.product_id, price.amount, price.currency, price.billing_cycle_days, price.processors, price.status, price.created_at, price.updated_at, price.tenant_id, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.tenant_id
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
+FROM openrails.prices price
+JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.id = ANY($1::uuid[])
 `
 
@@ -616,7 +616,7 @@ func (q *Queries) ListPricesWithProductByIDs(ctx context.Context, ids []uuid.UUI
 }
 
 const updatePrice = `-- name: UpdatePrice :execrows
-UPDATE billing.prices SET
+UPDATE openrails.prices SET
     product_id = $2,
     status = $3,
     amount = $4,

@@ -30,7 +30,7 @@ import (
 )
 
 // Valid blocklist identifier kinds. Mirrors the CHECK constraint on
-// billing.payment_blocklist.kind (migration 067).
+// openrails.payment_blocklist.kind (migration 067).
 const (
 	KindCardFingerprint   = "card_fingerprint"
 	KindProcessorCustomer = "processor_customer"

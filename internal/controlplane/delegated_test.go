@@ -25,7 +25,7 @@ import (
 // middleware tests).
 
 const (
-	testDelegatedIssuer  = "https://billing.test.example"
+	testDelegatedIssuer  = "https://openrails.test.example"
 	testDelegatedKID     = "test-kid-1"
 	canonicalAudience    = "openrails"
 	testDelegatedSubject = "end-user-42"

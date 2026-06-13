@@ -149,7 +149,7 @@ func NewConfirmTierChangeService(rpcClient tierChangeConfirmRPC, lifecycle tierC
 // Confirm verifies the atomic tier-change transaction landed + succeeded on-chain
 // and mirrors it into the DB. Returns an error (and does NOT mutate the DB) if
 // the signature never confirms or confirmed with an on-chain failure — the chain
-// is the source of truth, so an unproven switch must not touch billing.
+// is the source of truth, so an unproven switch must not touch openrails.
 func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierChangeInput) (*ConfirmTierChangeResult, error) {
 	if in.OldSubscriptionID == uuid.Nil {
 		return nil, fmt.Errorf("recurring: old subscription id is required")

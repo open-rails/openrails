@@ -31,7 +31,7 @@ func blocklistEnv(t *testing.T) (*abuse.BlocklistService, *pgxpool.Pool, context
 		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='payment_blocklist')",
 	).Scan(&hasTable))
 	if !hasTable {
-		t.Skip("billing.payment_blocklist missing; run migration 067")
+		t.Skip("openrails.payment_blocklist missing; run migration 067")
 	}
 
 	return abuse.NewBlocklistService(dbi), pool, ctx
@@ -46,7 +46,7 @@ func TestBlocklist_TenantWideAddIsBlockedRemove(t *testing.T) {
 	other := "fp_" + uuid.NewString()
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
-			"DELETE FROM billing.payment_blocklist WHERE value IN ($1, $2)", value, other)
+			"DELETE FROM openrails.payment_blocklist WHERE value IN ($1, $2)", value, other)
 	})
 
 	// Not blocked before adding.
@@ -85,7 +85,7 @@ func TestBlocklist_OwnerScopedAddIsBlocked(t *testing.T) {
 	value := "cust_" + uuid.NewString()
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
-			"DELETE FROM billing.payment_blocklist WHERE value = $1", value)
+			"DELETE FROM openrails.payment_blocklist WHERE value = $1", value)
 	})
 
 	owner := identity.TenantSubjectIDFromString(uuid.NewString())
@@ -106,7 +106,7 @@ func TestBlocklist_OwnerScopedAddIsBlocked(t *testing.T) {
 	// Verify the stored row actually carries the owner scope.
 	var storedOwner *uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT tenant_subject_id FROM billing.payment_blocklist WHERE kind = $1 AND value = $2 LIMIT 1",
+		"SELECT tenant_subject_id FROM openrails.payment_blocklist WHERE kind = $1 AND value = $2 LIMIT 1",
 		abuse.KindProcessorCustomer, value,
 	).Scan(&storedOwner))
 	require.NotNil(t, storedOwner)
@@ -125,7 +125,7 @@ func TestBlocklist_AddIsIdempotent(t *testing.T) {
 	value := "ip_" + uuid.NewString()
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
-			"DELETE FROM billing.payment_blocklist WHERE value = $1", value)
+			"DELETE FROM openrails.payment_blocklist WHERE value = $1", value)
 	})
 
 	require.NoError(t, svc.Add(ctx, nil, abuse.KindIP, value, "abuse"))
@@ -133,7 +133,7 @@ func TestBlocklist_AddIsIdempotent(t *testing.T) {
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM billing.payment_blocklist WHERE kind = $1 AND value = $2",
+		"SELECT count(*) FROM openrails.payment_blocklist WHERE kind = $1 AND value = $2",
 		abuse.KindIP, value,
 	).Scan(&count))
 	require.Equal(t, 1, count)

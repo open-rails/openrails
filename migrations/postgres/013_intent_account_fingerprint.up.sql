@@ -9,8 +9,8 @@
 -- NULL = enqueued before #365 (or fingerprint unresolvable at enqueue):
 -- grandfathered, executes without the check.
 
-ALTER TABLE billing.provider_intents
+ALTER TABLE openrails.provider_intents
     ADD COLUMN account_fingerprint text;
 
-COMMENT ON COLUMN billing.provider_intents.account_fingerprint IS
+COMMENT ON COLUMN openrails.provider_intents.account_fingerprint IS
     'Fingerprint of the provider account the intent was enqueued against (#365). NULL = pre-guard or unresolvable: executes ungated. Mismatch with the current credentials parks the intent.';

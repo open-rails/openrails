@@ -16,7 +16,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const KindCreditExpiry = "billing.credit_expiry"
+const KindCreditExpiry = "openrails.credit_expiry"
 
 type CreditExpiryArgs struct{}
 

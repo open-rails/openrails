@@ -477,7 +477,7 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 	defer func() { _ = sqlDB.Close() }()
 
 	if err := migratekit.ValidatePostgresMigrations(context.Background(), sqlDB,
-		migratekit.MigrationSource{App: "billing", FS: postgresmigrations.FS},
+		migratekit.MigrationSource{App: config.MigratekitApp, FS: postgresmigrations.FS},
 	); err != nil {
 		log.WithError(err).Fatal("Postgres migrations validation failed")
 		return err
@@ -494,7 +494,7 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 				Database:   cfg.ClickHouse.Database,
 				Username:   cfg.ClickHouse.Username,
 				Password:   cfg.ClickHouse.Password,
-				App:        "billing",
+				App:        config.MigratekitApp,
 				Cluster:    cfg.ClickHouse.Cluster,
 				PostgresDB: sqlDB,
 			},
@@ -554,7 +554,7 @@ func createNMIClients(cfg *config.Config, database *db.DB) (map[string]*nmi.NMIC
 	// inconclusive and only warn.
 	//
 	// Probe-cooldown cache (#348 tail): conclusive verdicts persist in
-	// billing.probe_verdicts keyed by sha256(security key). A fresh 'live'
+	// openrails.probe_verdicts keyed by sha256(security key). A fresh 'live'
 	// verdict refuses the boot from cache (a crash-looping supervisor stops
 	// paying one declined auth per restart); a fresh 'simulated' verdict skips
 	// the probe. A rotated key or a stale verdict always re-probes, and cache

@@ -25,7 +25,7 @@ const (
 	stuckVerifyAge = 2 * time.Hour
 )
 
-// StuckIntent is the slice of a billing.provider_intents row the PS-10
+// StuckIntent is the slice of a openrails.provider_intents row the PS-10
 // detector consumes.
 type StuckIntent struct {
 	ID                uuid.UUID

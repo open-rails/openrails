@@ -96,7 +96,7 @@ func ServiceTokenRequired(resolver ServiceTokenResolver) gin.HandlerFunc {
 		// OVERRIDES the default single-tenant resolution from ResolveTenant.
 		ctx := tenant.WithID(c.Request.Context(), resolved.TenantID)
 		c.Request = c.Request.WithContext(ctx)
-		c.Set("billing.tenant_id", resolved.TenantID)
+		c.Set("openrails.tenant_id", resolved.TenantID)
 		c.Set(ServiceTokenContextKey, resolved)
 		c.Set(ServiceTokenAuthKitTenantSlugContextKey, resolved.AuthKitTenantSlug)
 

@@ -12,7 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const KindCleanupExpiredData = "billing.cleanup_expired_data"
+const KindCleanupExpiredData = "openrails.cleanup_expired_data"
 
 // CleanupConfig defines retention periods for various data types
 type CleanupConfig struct {

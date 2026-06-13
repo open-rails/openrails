@@ -16,7 +16,7 @@ const aggregateUsageDimensions = `-- name: AggregateUsageDimensions :many
 SELECT ue.event_type,
        d.key::text AS key,
        COALESCE(SUM((d.value)::bigint), 0)::bigint AS total
-FROM billing.usage_events ue
+FROM openrails.usage_events ue
 CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d
 WHERE ue.tenant_id = $1 AND ue.tenant_subject_id = $2
   AND ($3::uuid IS NULL OR ue.credit_type_id = $3::uuid)
@@ -70,7 +70,7 @@ const aggregateUsageTotals = `-- name: AggregateUsageTotals :many
 SELECT event_type,
        COALESCE(SUM(amount), 0)::bigint AS total_amount,
        COUNT(*)::bigint AS event_count
-FROM billing.usage_events
+FROM openrails.usage_events
 WHERE tenant_id = $1 AND tenant_subject_id = $2
   AND ($3::uuid IS NULL OR credit_type_id = $3::uuid)
   AND occurred_at >= $4::timestamptz
@@ -120,7 +120,7 @@ func (q *Queries) AggregateUsageTotals(ctx context.Context, arg AggregateUsageTo
 }
 
 const getUsageEventByCoords = `-- name: GetUsageEventByCoords :one
-SELECT id, tenant_id, tenant_subject_id, actor, resource, credit_type_id, event_type, dimensions, amount, source, source_id, credit_transaction_id, metadata, occurred_at, created_at FROM billing.usage_events
+SELECT id, tenant_id, tenant_subject_id, actor, resource, credit_type_id, event_type, dimensions, amount, source, source_id, credit_transaction_id, metadata, occurred_at, created_at FROM openrails.usage_events
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND event_type = $3
   AND source = $4 AND source_id = $5
 LIMIT 1
@@ -165,7 +165,7 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 
 const insertUsageEvent = `-- name: InsertUsageEvent :exec
 
-INSERT INTO billing.usage_events (
+INSERT INTO openrails.usage_events (
     id, tenant_id, tenant_subject_id, actor, resource, credit_type_id,
     event_type, dimensions, amount, source, source_id,
     credit_transaction_id, metadata, occurred_at, created_at
@@ -190,7 +190,7 @@ type InsertUsageEventParams struct {
 	CreatedAt           time.Time
 }
 
-// billing.usage_events: append-only metered usage (#289), idempotent on
+// openrails.usage_events: append-only metered usage (#289), idempotent on
 // (tenant, payer, event_type, source, source_id).
 func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventParams) error {
 	_, err := q.db.Exec(ctx, insertUsageEvent,
@@ -214,7 +214,7 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 }
 
 const insertUsageEventIfAbsent = `-- name: InsertUsageEventIfAbsent :exec
-INSERT INTO billing.usage_events (
+INSERT INTO openrails.usage_events (
     id, tenant_id, tenant_subject_id, actor, resource, credit_type_id,
     event_type, dimensions, amount, source, source_id,
     credit_transaction_id, metadata, occurred_at, created_at
@@ -264,7 +264,7 @@ func (q *Queries) InsertUsageEventIfAbsent(ctx context.Context, arg InsertUsageE
 const resourceRevenueDaily = `-- name: ResourceRevenueDaily :many
 SELECT to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')::text AS date,
        COALESCE(SUM(ue.amount), 0)::bigint AS amount_micros
-FROM billing.usage_events ue
+FROM openrails.usage_events ue
 WHERE ue.tenant_id = $1 AND ue.resource = $2
   AND ue.occurred_at >= $3::timestamptz
   AND ue.occurred_at < $4::timestamptz
@@ -322,7 +322,7 @@ SELECT COALESCE(CASE $3::text
        END, '')::text AS key,
        COUNT(*)::bigint AS event_count,
        COALESCE(SUM(ue.amount), 0)::bigint AS total_amount
-FROM billing.usage_events ue
+FROM openrails.usage_events ue
 WHERE ue.tenant_id = $1 AND ue.tenant_subject_id = $2
   AND ue.occurred_at >= $4::timestamptz
   AND ue.occurred_at < $5::timestamptz

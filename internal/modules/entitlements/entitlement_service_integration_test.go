@@ -56,7 +56,7 @@ func TestPushNewEntitlement_CoveredFiniteGrantReturnsExistingWindow(t *testing.T
 
 	var count int
 	require.NoError(t, dbi.Pool().QueryRow(ctx,
-		`SELECT count(*) FROM billing.entitlements
+		`SELECT count(*) FROM openrails.entitlements
 		 WHERE tenant_subject_id = $1 AND entitlement = $2
 		   AND revoked_at IS NULL AND deleted_at IS NULL`,
 		tenantSubjectID, entName,

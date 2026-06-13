@@ -19,7 +19,7 @@ import (
 
 // FinalizeInvoice builds and finalizes the monthly itemized invoice for
 // (payer, credit_type) over [from, to) (issue #303). Line items are rolled up
-// from billing.usage_events; money movements + totals from the credit ledger;
+// from openrails.usage_events; money movements + totals from the credit ledger;
 // both snapshotted on the immutable finalized invoice. Idempotent: re-finalizing
 // the same period returns the existing invoice.
 //

@@ -24,7 +24,7 @@ const (
 	// way. Enforce: adopt the processor's status + period timestamps.
 	FindingStatusMismatch FindingType = "PS-3"
 	// FindingChargeMissingLocal (PS-4): a successful processor charge has no
-	// local payment record. Enforce: backfill billing.payments (+ entitlements
+	// local payment record. Enforce: backfill openrails.payments (+ entitlements
 	// when the charge's subscription period is current).
 	FindingChargeMissingLocal FindingType = "PS-4"
 	// FindingRefundUnrecorded (PS-5): a processor refund is not recorded
@@ -178,7 +178,7 @@ type CancelLocalAction struct {
 // AdoptStatusAction adopts the processor's status/periods (PS-3).
 type AdoptStatusAction struct {
 	SubscriptionID uuid.UUID
-	Status         string // billing.subscription_status value
+	Status         string // openrails.subscription_status value
 	PeriodStartsAt *time.Time
 	PeriodEndsAt   *time.Time
 }

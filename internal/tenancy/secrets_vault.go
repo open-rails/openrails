@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/db"
 
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -43,11 +43,11 @@ type TenantSlugResolver interface {
 }
 
 type dbTenantSlugResolver struct {
-	pool *pgxpool.Pool
+	pool *db.Pool
 }
 
-// NewDBTenantSlugResolver resolves tenant slugs from billing.tenants.
-func NewDBTenantSlugResolver(pool *pgxpool.Pool) TenantSlugResolver {
+// NewDBTenantSlugResolver resolves tenant slugs from openrails.tenants.
+func NewDBTenantSlugResolver(pool *db.Pool) TenantSlugResolver {
 	return dbTenantSlugResolver{pool: pool}
 }
 
@@ -60,7 +60,7 @@ func (r dbTenantSlugResolver) TenantSlug(ctx context.Context, tenantID tenant.ID
 	}
 	var slug string
 	err := r.pool.QueryRow(ctx, `
-		SELECT slug FROM billing.tenants
+		SELECT slug FROM openrails.tenants
 		 WHERE id = $1::uuid AND deleted_at IS NULL
 	`, tenantID.String()).Scan(&slug)
 	if err != nil {

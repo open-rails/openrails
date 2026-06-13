@@ -24,6 +24,11 @@ type DB struct {
 	// ownsPool: NewDB created the pool and Close() must close it; pools
 	// injected by embedded hosts (NewWithPGXPool) stay open.
 	ownsPool bool
+
+	// rw rewrites the canonical `openrails.` schema qualifier to the configured
+	// schema (#471). Inactive (identity) for the default schema, so the common
+	// path is a no-op. Inherited by tx-scoped wrappers.
+	rw schemaRewriter
 }
 
 const (
@@ -50,7 +55,7 @@ func NewDB(cfg *config.DBConfig) (_ *DB, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{pool: pool, ownsPool: true}, nil
+	return &DB{pool: pool, ownsPool: true, rw: newSchemaRewriter(cfg.SchemaName())}, nil
 }
 
 // newTunedPGXPool parses the connection string, applies the pool tuning,
@@ -135,12 +140,25 @@ func pingWithRetry(ctx context.Context, ping func(context.Context) error, label 
 }
 
 // NewWithPGXPool wraps a host-supplied pgx pool (the embedded-host path). The
-// host keeps ownership of its pool; Close() is a no-op for it.
-func NewWithPGXPool(pool *pgxpool.Pool) (*DB, error) {
+// host keeps ownership of its pool; Close() is a no-op for it. schema is the
+// OpenRails Postgres schema (config.DBConfig.SchemaName()); when it differs from
+// the default, runtime queries are rewritten to it (#471) — essential here
+// because OpenRails shares the host's pool and cannot repoint its search_path.
+func NewWithPGXPool(pool *pgxpool.Pool, schema string) (*DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("pgx pool is nil")
 	}
-	return &DB{pool: pool}, nil
+	return &DB{pool: pool, rw: newSchemaRewriter(schema)}, nil
+}
+
+// DataPool returns a schema-aware wrapper over the base pool for the rare
+// hand-written queries that run directly on the pool (admin/CLI tools, the audit
+// checker) instead of through the sqlc Querier. nil when this DB has no pool.
+func (d *DB) DataPool() *Pool {
+	if d == nil || d.pool == nil {
+		return nil
+	}
+	return &Pool{raw: d.pool, rw: d.rw}
 }
 
 // Pool exposes the pgx pool (nil for tx-scoped wrappers).
@@ -165,5 +183,5 @@ func NewWithPgxTx(tx pgx.Tx) *DB {
 }
 
 func (d *DB) NewWithPgxTx(tx pgx.Tx) *DB {
-	return &DB{pgtx: tx}
+	return &DB{pgtx: tx, rw: d.rw}
 }

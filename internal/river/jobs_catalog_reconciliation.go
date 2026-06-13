@@ -24,7 +24,7 @@ import (
 // KindCatalogReconciliationPull is the River kind for the alert-only catalog
 // reconciliation loop (issue #209). It pulls the full Stripe catalog AND the
 // NMI recurring-plan catalog, diffs them against the OpenRails DB, and records
-// drift + orphan events in billing.catalog_drift_events. It NEVER mutates
+// drift + orphan events in openrails.catalog_drift_events. It NEVER mutates
 // Stripe, NMI, or the catalog rows.
 //
 // CCBill is intentionally NOT reconciled here: CCBill has no catalog-list API,
@@ -34,7 +34,7 @@ import (
 // This worker mirrors the logic in pkg/service.RunCatalogReconciliation, but
 // lives in the river package because pkg/service imports internal/river (so the
 // worker cannot import back into pkg/service).
-const KindCatalogReconciliationPull = "billing.catalog_reconciliation_pull"
+const KindCatalogReconciliationPull = "openrails.catalog_reconciliation_pull"
 
 type CatalogReconciliationPullArgs struct{}
 

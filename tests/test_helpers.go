@@ -148,7 +148,7 @@ func freeTestPort(t *testing.T) int {
 // (#364) and the auth boundary rejects anything else.
 func setupTestServerWithAuth(t *testing.T) (*server.Server, string) {
 	srv := setupTestServer(t)
-	token := getTestIssuer().CreateToken("b1111111-1111-4111-8111-111111111111", "test@billing.openrails.com")
+	token := getTestIssuer().CreateToken("b1111111-1111-4111-8111-111111111111", "test@openrails.openrails.com")
 	return srv, token
 }
 
@@ -168,7 +168,7 @@ func setupTestSuiteWithAuth(t *testing.T) (*TestContainerSuite, string, string) 
 // This is the same as setupTestServerWithAuth since all tokens use RS256.
 func setupTestServerWithRSAuth(t *testing.T) (*server.Server, string) {
 	srv := setupTestServer(t)
-	token := getTestIssuer().CreateToken("b2222222-2222-4222-8222-222222222222", "rs256@billing.openrails.com")
+	token := getTestIssuer().CreateToken("b2222222-2222-4222-8222-222222222222", "rs256@openrails.openrails.com")
 	return srv, token
 }
 

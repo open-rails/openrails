@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	KindProviderIntentExecute = "billing.provider_intent_execute"
-	KindProviderIntentVerify  = "billing.provider_intent_verify"
+	KindProviderIntentExecute = "openrails.provider_intent_execute"
+	KindProviderIntentVerify  = "openrails.provider_intent_verify"
 )
 
 // ProviderIntentExecuteArgs triggers one executor pass over the provider

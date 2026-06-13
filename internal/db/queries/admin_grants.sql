@@ -1,8 +1,8 @@
--- billing.admin_grants.
+-- openrails.admin_grants.
 
 -- name: CreateAdminGrant :one
 -- RETURNING id matches bun's pk write-back for the uuidv7() default.
-INSERT INTO billing.admin_grants (
+INSERT INTO openrails.admin_grants (
     id, tenant_subject_id, price_id, granted_by, reason, payment_id,
     duration_days, created_at
 ) VALUES (
@@ -14,22 +14,22 @@ INSERT INTO billing.admin_grants (
 RETURNING id;
 
 -- name: GetAdminGrantByID :one
-SELECT * FROM billing.admin_grants WHERE id = $1;
+SELECT * FROM openrails.admin_grants WHERE id = $1;
 
 -- name: CountAdminGrantsByTenantSubject :one
-SELECT count(*) FROM billing.admin_grants ag WHERE ag.tenant_subject_id = $1;
+SELECT count(*) FROM openrails.admin_grants ag WHERE ag.tenant_subject_id = $1;
 
 -- name: ListAdminGrantsByTenantSubject :many
-SELECT * FROM billing.admin_grants ag
+SELECT * FROM openrails.admin_grants ag
 WHERE ag.tenant_subject_id = $1
 ORDER BY ag.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountAdminGrantsByGrantedBy :one
-SELECT count(*) FROM billing.admin_grants ag WHERE ag.granted_by = $1;
+SELECT count(*) FROM openrails.admin_grants ag WHERE ag.granted_by = $1;
 
 -- name: ListAdminGrantsByGrantedBy :many
-SELECT * FROM billing.admin_grants ag
+SELECT * FROM openrails.admin_grants ag
 WHERE ag.granted_by = $1
 ORDER BY ag.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;

@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/db"
 )
 
 // TenantMetric is the per-tenant aggregate row in the platform metrics view.
@@ -36,11 +36,11 @@ type PlatformMetrics struct {
 // (issue #226). It computes tenant count, and per-tenant active subscriptions,
 // revenue, and webhook-failure counts.
 type Metrics struct {
-	pool *pgxpool.Pool
+	pool *db.Pool
 }
 
 // NewMetrics builds the metrics aggregator over the control-plane pool.
-func NewMetrics(pool *pgxpool.Pool) (*Metrics, error) {
+func NewMetrics(pool *db.Pool) (*Metrics, error) {
 	if pool == nil {
 		return nil, errors.New("platform: metrics requires a pgx pool")
 	}
@@ -48,8 +48,8 @@ func NewMetrics(pool *pgxpool.Pool) (*Metrics, error) {
 }
 
 // Compute returns the platform-wide metrics aggregate. It LEFT JOINs the tenant
-// directory against per-tenant aggregates of billing.subscriptions and
-// billing.payments (both carry tenant_id from the consolidated schema), so a tenant with
+// directory against per-tenant aggregates of openrails.subscriptions and
+// openrails.payments (both carry tenant_id from the consolidated schema), so a tenant with
 // no activity still appears with zeroes.
 //
 // NOTE on webhook failures: OpenRails does not keep a Postgres webhook-event
@@ -71,18 +71,18 @@ func (m *Metrics) Compute(ctx context.Context) (*PlatformMetrics, error) {
 		       COALESCE(s.active_subs, 0)        AS active_subs,
 		       COALESCE(p.revenue_minor, 0)      AS revenue_minor,
 		       COALESCE(s.failed_subs, 0)        AS webhook_failures
-		  FROM billing.tenants t
+		  FROM openrails.tenants t
 		  LEFT JOIN (
 		      SELECT tenant_id,
 		             count(*) FILTER (WHERE status = 'active') AS active_subs,
 		             count(*) FILTER (WHERE status = 'failed') AS failed_subs
-		        FROM billing.subscriptions
+		        FROM openrails.subscriptions
 		       GROUP BY tenant_id
 		  ) s ON s.tenant_id = t.id
 		  LEFT JOIN (
 		      SELECT tenant_id,
 		             COALESCE(sum(amount), 0) AS revenue_minor
-		        FROM billing.payments
+		        FROM openrails.payments
 		       WHERE status = 'completed'
 		       GROUP BY tenant_id
 		  ) p ON p.tenant_id = t.id

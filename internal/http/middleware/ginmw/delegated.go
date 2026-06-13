@@ -21,7 +21,7 @@ import (
 // browser tier).
 const (
 	// DelegatedContextKey holds the *controlplane.ResolvedDelegated for the request.
-	DelegatedContextKey = "billing.delegated"
+	DelegatedContextKey = "openrails.delegated"
 )
 
 // DelegatedResolver validates a presented browser-direct delegated access token
@@ -110,8 +110,8 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 		}
 		ctx = authprovider.SetUserContext(ctx, uc)
 		c.Request = c.Request.WithContext(ctx)
-		c.Set("billing.user_context", uc)
-		c.Set("billing.tenant_id", resolved.TenantID)
+		c.Set("openrails.user_context", uc)
+		c.Set("openrails.tenant_id", resolved.TenantID)
 		c.Set(DelegatedContextKey, resolved)
 
 		c.Next()
@@ -168,8 +168,8 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.Ha
 		}
 		ctx = authprovider.SetUserContext(ctx, uc)
 		c.Request = c.Request.WithContext(ctx)
-		c.Set("billing.user_context", uc)
-		c.Set("billing.tenant_id", resolved.TenantID)
+		c.Set("openrails.user_context", uc)
+		c.Set("openrails.tenant_id", resolved.TenantID)
 		c.Set(DelegatedContextKey, resolved)
 
 		c.Next()

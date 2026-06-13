@@ -32,7 +32,7 @@ func runPlatformGate(t *testing.T, checker policy.PlatformSuperadminChecker, uc 
 	t.Helper()
 	rr := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rr)
-	c.Set("billing.user_context", uc)
+	c.Set("openrails.user_context", uc)
 	c.Request = httptest.NewRequest(http.MethodGet, "/platform/tenants", nil)
 	PlatformSuperadminRequired(checker)(c)
 	if !c.IsAborted() {

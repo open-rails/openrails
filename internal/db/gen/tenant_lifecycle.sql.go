@@ -12,7 +12,7 @@ import (
 )
 
 const countTenantRowsAdminGrants = `-- name: CountTenantRowsAdminGrants :one
-SELECT count(*) FROM billing.admin_grants WHERE tenant_id = $1
+SELECT count(*) FROM openrails.admin_grants WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsAdminGrants(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -23,7 +23,7 @@ func (q *Queries) CountTenantRowsAdminGrants(ctx context.Context, tenantID uuid.
 }
 
 const countTenantRowsCatalogDriftEvents = `-- name: CountTenantRowsCatalogDriftEvents :one
-SELECT count(*) FROM billing.catalog_drift_events WHERE tenant_id = $1
+SELECT count(*) FROM openrails.catalog_drift_events WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsCatalogDriftEvents(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -34,7 +34,7 @@ func (q *Queries) CountTenantRowsCatalogDriftEvents(ctx context.Context, tenantI
 }
 
 const countTenantRowsCheckoutSessions = `-- name: CountTenantRowsCheckoutSessions :one
-SELECT count(*) FROM billing.checkout_sessions WHERE tenant_id = $1
+SELECT count(*) FROM openrails.checkout_sessions WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsCheckoutSessions(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -45,7 +45,7 @@ func (q *Queries) CountTenantRowsCheckoutSessions(ctx context.Context, tenantID 
 }
 
 const countTenantRowsCreditBalances = `-- name: CountTenantRowsCreditBalances :one
-SELECT count(*) FROM billing.credit_balances WHERE tenant_id = $1
+SELECT count(*) FROM openrails.credit_balances WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsCreditBalances(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -56,7 +56,7 @@ func (q *Queries) CountTenantRowsCreditBalances(ctx context.Context, tenantID uu
 }
 
 const countTenantRowsCreditBlocks = `-- name: CountTenantRowsCreditBlocks :one
-SELECT count(*) FROM billing.credit_blocks WHERE tenant_id = $1
+SELECT count(*) FROM openrails.credit_blocks WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsCreditBlocks(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -67,7 +67,7 @@ func (q *Queries) CountTenantRowsCreditBlocks(ctx context.Context, tenantID uuid
 }
 
 const countTenantRowsCreditTransactions = `-- name: CountTenantRowsCreditTransactions :one
-SELECT count(*) FROM billing.credit_transactions WHERE tenant_id = $1
+SELECT count(*) FROM openrails.credit_transactions WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsCreditTransactions(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -78,7 +78,7 @@ func (q *Queries) CountTenantRowsCreditTransactions(ctx context.Context, tenantI
 }
 
 const countTenantRowsCreditTypes = `-- name: CountTenantRowsCreditTypes :one
-SELECT count(*) FROM billing.credit_types WHERE tenant_id = $1
+SELECT count(*) FROM openrails.credit_types WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsCreditTypes(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -89,7 +89,7 @@ func (q *Queries) CountTenantRowsCreditTypes(ctx context.Context, tenantID uuid.
 }
 
 const countTenantRowsEntitlements = `-- name: CountTenantRowsEntitlements :one
-SELECT count(*) FROM billing.entitlements WHERE tenant_id = $1
+SELECT count(*) FROM openrails.entitlements WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsEntitlements(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -100,7 +100,7 @@ func (q *Queries) CountTenantRowsEntitlements(ctx context.Context, tenantID uuid
 }
 
 const countTenantRowsNotificationQueue = `-- name: CountTenantRowsNotificationQueue :one
-SELECT count(*) FROM billing.notification_queue WHERE tenant_id = $1
+SELECT count(*) FROM openrails.notification_queue WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsNotificationQueue(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -111,7 +111,7 @@ func (q *Queries) CountTenantRowsNotificationQueue(ctx context.Context, tenantID
 }
 
 const countTenantRowsPaymentMethods = `-- name: CountTenantRowsPaymentMethods :one
-SELECT count(*) FROM billing.payment_methods WHERE tenant_id = $1
+SELECT count(*) FROM openrails.payment_methods WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsPaymentMethods(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -122,7 +122,7 @@ func (q *Queries) CountTenantRowsPaymentMethods(ctx context.Context, tenantID uu
 }
 
 const countTenantRowsPayments = `-- name: CountTenantRowsPayments :one
-SELECT count(*) FROM billing.payments WHERE tenant_id = $1
+SELECT count(*) FROM openrails.payments WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsPayments(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -133,7 +133,7 @@ func (q *Queries) CountTenantRowsPayments(ctx context.Context, tenantID uuid.UUI
 }
 
 const countTenantRowsPrices = `-- name: CountTenantRowsPrices :one
-SELECT count(*) FROM billing.prices WHERE tenant_id = $1
+SELECT count(*) FROM openrails.prices WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsPrices(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -144,7 +144,7 @@ func (q *Queries) CountTenantRowsPrices(ctx context.Context, tenantID uuid.UUID)
 }
 
 const countTenantRowsProcessorCustomers = `-- name: CountTenantRowsProcessorCustomers :one
-SELECT count(*) FROM billing.processor_customers WHERE tenant_id = $1
+SELECT count(*) FROM openrails.processor_customers WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsProcessorCustomers(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -156,12 +156,12 @@ func (q *Queries) CountTenantRowsProcessorCustomers(ctx context.Context, tenantI
 
 const countTenantRowsProducts = `-- name: CountTenantRowsProducts :one
 
-SELECT count(*) FROM billing.products WHERE tenant_id = $1
+SELECT count(*) FROM openrails.products WHERE tenant_id = $1
 `
 
 // Tenant lifecycle (#225): per-table purge/count queries for tenant
 // export + gated delete. One static query per tenant-owned table — the
-// generated replacement for the bun-era fmt.Sprintf(`billing.%s`)
+// generated replacement for the bun-era fmt.Sprintf(`openrails.%s`)
 // identifier interpolation (#334's 'unsafe SQL' kill target).
 func (q *Queries) CountTenantRowsProducts(ctx context.Context, tenantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countTenantRowsProducts, tenantID)
@@ -171,7 +171,7 @@ func (q *Queries) CountTenantRowsProducts(ctx context.Context, tenantID uuid.UUI
 }
 
 const countTenantRowsProviderIntents = `-- name: CountTenantRowsProviderIntents :one
-SELECT count(*) FROM billing.provider_intents WHERE tenant_id = $1
+SELECT count(*) FROM openrails.provider_intents WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsProviderIntents(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -182,7 +182,7 @@ func (q *Queries) CountTenantRowsProviderIntents(ctx context.Context, tenantID u
 }
 
 const countTenantRowsSubscriptions = `-- name: CountTenantRowsSubscriptions :one
-SELECT count(*) FROM billing.subscriptions WHERE tenant_id = $1
+SELECT count(*) FROM openrails.subscriptions WHERE tenant_id = $1
 `
 
 func (q *Queries) CountTenantRowsSubscriptions(ctx context.Context, tenantID uuid.UUID) (int64, error) {
@@ -193,7 +193,7 @@ func (q *Queries) CountTenantRowsSubscriptions(ctx context.Context, tenantID uui
 }
 
 const purgeTenantRowsAdminGrants = `-- name: PurgeTenantRowsAdminGrants :exec
-DELETE FROM billing.admin_grants WHERE tenant_id = $1
+DELETE FROM openrails.admin_grants WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsAdminGrants(ctx context.Context, tenantID uuid.UUID) error {
@@ -202,7 +202,7 @@ func (q *Queries) PurgeTenantRowsAdminGrants(ctx context.Context, tenantID uuid.
 }
 
 const purgeTenantRowsCatalogDriftEvents = `-- name: PurgeTenantRowsCatalogDriftEvents :exec
-DELETE FROM billing.catalog_drift_events WHERE tenant_id = $1
+DELETE FROM openrails.catalog_drift_events WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsCatalogDriftEvents(ctx context.Context, tenantID uuid.UUID) error {
@@ -211,7 +211,7 @@ func (q *Queries) PurgeTenantRowsCatalogDriftEvents(ctx context.Context, tenantI
 }
 
 const purgeTenantRowsCheckoutSessions = `-- name: PurgeTenantRowsCheckoutSessions :exec
-DELETE FROM billing.checkout_sessions WHERE tenant_id = $1
+DELETE FROM openrails.checkout_sessions WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsCheckoutSessions(ctx context.Context, tenantID uuid.UUID) error {
@@ -220,7 +220,7 @@ func (q *Queries) PurgeTenantRowsCheckoutSessions(ctx context.Context, tenantID 
 }
 
 const purgeTenantRowsCreditBalances = `-- name: PurgeTenantRowsCreditBalances :exec
-DELETE FROM billing.credit_balances WHERE tenant_id = $1
+DELETE FROM openrails.credit_balances WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsCreditBalances(ctx context.Context, tenantID uuid.UUID) error {
@@ -229,7 +229,7 @@ func (q *Queries) PurgeTenantRowsCreditBalances(ctx context.Context, tenantID uu
 }
 
 const purgeTenantRowsCreditBlocks = `-- name: PurgeTenantRowsCreditBlocks :exec
-DELETE FROM billing.credit_blocks WHERE tenant_id = $1
+DELETE FROM openrails.credit_blocks WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsCreditBlocks(ctx context.Context, tenantID uuid.UUID) error {
@@ -238,7 +238,7 @@ func (q *Queries) PurgeTenantRowsCreditBlocks(ctx context.Context, tenantID uuid
 }
 
 const purgeTenantRowsCreditTransactions = `-- name: PurgeTenantRowsCreditTransactions :exec
-DELETE FROM billing.credit_transactions WHERE tenant_id = $1
+DELETE FROM openrails.credit_transactions WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsCreditTransactions(ctx context.Context, tenantID uuid.UUID) error {
@@ -247,7 +247,7 @@ func (q *Queries) PurgeTenantRowsCreditTransactions(ctx context.Context, tenantI
 }
 
 const purgeTenantRowsCreditTypes = `-- name: PurgeTenantRowsCreditTypes :exec
-DELETE FROM billing.credit_types WHERE tenant_id = $1
+DELETE FROM openrails.credit_types WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsCreditTypes(ctx context.Context, tenantID uuid.UUID) error {
@@ -256,7 +256,7 @@ func (q *Queries) PurgeTenantRowsCreditTypes(ctx context.Context, tenantID uuid.
 }
 
 const purgeTenantRowsEntitlements = `-- name: PurgeTenantRowsEntitlements :exec
-DELETE FROM billing.entitlements WHERE tenant_id = $1
+DELETE FROM openrails.entitlements WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsEntitlements(ctx context.Context, tenantID uuid.UUID) error {
@@ -265,7 +265,7 @@ func (q *Queries) PurgeTenantRowsEntitlements(ctx context.Context, tenantID uuid
 }
 
 const purgeTenantRowsNotificationQueue = `-- name: PurgeTenantRowsNotificationQueue :exec
-DELETE FROM billing.notification_queue WHERE tenant_id = $1
+DELETE FROM openrails.notification_queue WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsNotificationQueue(ctx context.Context, tenantID uuid.UUID) error {
@@ -274,7 +274,7 @@ func (q *Queries) PurgeTenantRowsNotificationQueue(ctx context.Context, tenantID
 }
 
 const purgeTenantRowsPaymentMethods = `-- name: PurgeTenantRowsPaymentMethods :exec
-DELETE FROM billing.payment_methods WHERE tenant_id = $1
+DELETE FROM openrails.payment_methods WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsPaymentMethods(ctx context.Context, tenantID uuid.UUID) error {
@@ -283,7 +283,7 @@ func (q *Queries) PurgeTenantRowsPaymentMethods(ctx context.Context, tenantID uu
 }
 
 const purgeTenantRowsPayments = `-- name: PurgeTenantRowsPayments :exec
-DELETE FROM billing.payments WHERE tenant_id = $1
+DELETE FROM openrails.payments WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsPayments(ctx context.Context, tenantID uuid.UUID) error {
@@ -292,7 +292,7 @@ func (q *Queries) PurgeTenantRowsPayments(ctx context.Context, tenantID uuid.UUI
 }
 
 const purgeTenantRowsPrices = `-- name: PurgeTenantRowsPrices :exec
-DELETE FROM billing.prices WHERE tenant_id = $1
+DELETE FROM openrails.prices WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsPrices(ctx context.Context, tenantID uuid.UUID) error {
@@ -301,7 +301,7 @@ func (q *Queries) PurgeTenantRowsPrices(ctx context.Context, tenantID uuid.UUID)
 }
 
 const purgeTenantRowsProcessorCustomers = `-- name: PurgeTenantRowsProcessorCustomers :exec
-DELETE FROM billing.processor_customers WHERE tenant_id = $1
+DELETE FROM openrails.processor_customers WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsProcessorCustomers(ctx context.Context, tenantID uuid.UUID) error {
@@ -310,7 +310,7 @@ func (q *Queries) PurgeTenantRowsProcessorCustomers(ctx context.Context, tenantI
 }
 
 const purgeTenantRowsProducts = `-- name: PurgeTenantRowsProducts :exec
-DELETE FROM billing.products WHERE tenant_id = $1
+DELETE FROM openrails.products WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsProducts(ctx context.Context, tenantID uuid.UUID) error {
@@ -319,7 +319,7 @@ func (q *Queries) PurgeTenantRowsProducts(ctx context.Context, tenantID uuid.UUI
 }
 
 const purgeTenantRowsProviderIntents = `-- name: PurgeTenantRowsProviderIntents :exec
-DELETE FROM billing.provider_intents WHERE tenant_id = $1
+DELETE FROM openrails.provider_intents WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsProviderIntents(ctx context.Context, tenantID uuid.UUID) error {
@@ -328,7 +328,7 @@ func (q *Queries) PurgeTenantRowsProviderIntents(ctx context.Context, tenantID u
 }
 
 const purgeTenantRowsSubscriptions = `-- name: PurgeTenantRowsSubscriptions :exec
-DELETE FROM billing.subscriptions WHERE tenant_id = $1
+DELETE FROM openrails.subscriptions WHERE tenant_id = $1
 `
 
 func (q *Queries) PurgeTenantRowsSubscriptions(ctx context.Context, tenantID uuid.UUID) error {

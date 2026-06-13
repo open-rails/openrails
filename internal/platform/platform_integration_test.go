@@ -20,13 +20,13 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// schemaDDL stands up the minimal billing.* schema the platform layer touches:
+// schemaDDL stands up the minimal openrails.* schema the platform layer touches:
 // the tenant directory, the two #226 control-plane tables, and representative
 // subscriptions/payments tables (with tenant_id) so metrics can aggregate.
 const schemaDDL = `
 CREATE SCHEMA IF NOT EXISTS billing;
 
-CREATE TABLE IF NOT EXISTS billing.tenants (
+CREATE TABLE IF NOT EXISTS openrails.tenants (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug         TEXT NOT NULL UNIQUE,
     name         TEXT NOT NULL,
@@ -37,20 +37,20 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     deleted_at   TIMESTAMPTZ
 );
 
-CREATE TABLE IF NOT EXISTS billing.subscriptions (
+CREATE TABLE IF NOT EXISTS openrails.subscriptions (
     id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID,
     status    TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS billing.payments (
+CREATE TABLE IF NOT EXISTS openrails.payments (
     id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID,
     amount    BIGINT NOT NULL,
     status    TEXT NOT NULL DEFAULT 'completed'
 );
 
-CREATE TABLE IF NOT EXISTS billing.platform_audit (
+CREATE TABLE IF NOT EXISTS openrails.platform_audit (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_user_id    TEXT NOT NULL,
     actor_tenant        TEXT,
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS billing.platform_audit (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
 );
 
-CREATE TABLE IF NOT EXISTS billing.platform_break_glass (
+CREATE TABLE IF NOT EXISTS openrails.platform_break_glass (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_user_id    TEXT NOT NULL,
     target_tenant_id UUID,
@@ -140,7 +140,7 @@ func seedTenant(t *testing.T, pool *pgxpool.Pool, slug, status, tier string) ten
 	t.Helper()
 	var idStr string
 	err := pool.QueryRow(context.Background(), `
-		INSERT INTO billing.tenants (slug, name, status, billing_tier)
+		INSERT INTO openrails.tenants (slug, name, status, billing_tier)
 		VALUES ($1, $1, $2, NULLIF($3,'')) RETURNING id::text
 	`, slug, status, tier).Scan(&idStr)
 	require.NoError(t, err)
@@ -195,7 +195,7 @@ func TestAuditLog_RecordAndList(t *testing.T) {
 	// before_state / after_state persisted.
 	var before, after string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT before_state::text, after_state::text FROM billing.platform_audit WHERE id=$1::uuid`, id).
+		`SELECT before_state::text, after_state::text FROM openrails.platform_audit WHERE id=$1::uuid`, id).
 		Scan(&before, &after))
 	require.Contains(t, before, "active")
 	require.Contains(t, after, "suspended")
@@ -253,7 +253,7 @@ func TestBreakGlass_GrantExpiresAuditsAndAlerts(t *testing.T) {
 	// Expiry: a grant whose expiry is in the past is not active. Force the whole
 	// window into the past (granted_at too, to keep expires_at > granted_at).
 	_, err = pool.Exec(ctx, `
-		UPDATE billing.platform_break_glass
+		UPDATE openrails.platform_break_glass
 		   SET granted_at = current_timestamp - interval '2 hours',
 		       expires_at = current_timestamp - interval '1 minute'
 		 WHERE id=$1::uuid`, grant.ID)
@@ -303,11 +303,11 @@ func TestMetrics_AggregatesAcrossTenants(t *testing.T) {
 		_, err := pool.Exec(ctx, q, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO billing.subscriptions (tenant_id, status) VALUES ($1::uuid,'active'),($1::uuid,'active'),($1::uuid,'failed')`, acme.String())
-	exec(`INSERT INTO billing.payments (tenant_id, amount, status) VALUES ($1::uuid,500,'completed'),($1::uuid,1500,'completed'),($1::uuid,999,'refunded')`, acme.String())
+	exec(`INSERT INTO openrails.subscriptions (tenant_id, status) VALUES ($1::uuid,'active'),($1::uuid,'active'),($1::uuid,'failed')`, acme.String())
+	exec(`INSERT INTO openrails.payments (tenant_id, amount, status) VALUES ($1::uuid,500,'completed'),($1::uuid,1500,'completed'),($1::uuid,999,'refunded')`, acme.String())
 	// globex: 1 active sub, 1 completed payment (300).
-	exec(`INSERT INTO billing.subscriptions (tenant_id, status) VALUES ($1::uuid,'active')`, globex.String())
-	exec(`INSERT INTO billing.payments (tenant_id, amount, status) VALUES ($1::uuid,300,'completed')`, globex.String())
+	exec(`INSERT INTO openrails.subscriptions (tenant_id, status) VALUES ($1::uuid,'active')`, globex.String())
+	exec(`INSERT INTO openrails.payments (tenant_id, amount, status) VALUES ($1::uuid,300,'completed')`, globex.String())
 
 	metrics, err := NewMetrics(pool)
 	require.NoError(t, err)

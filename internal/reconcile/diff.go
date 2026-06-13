@@ -927,7 +927,7 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 	default:
 		f.LocalEvidence = localSubEvidence(sub)
 		f.LocalEvidence["correlated_via"] = how
-		f.RecommendedAction = "enforce backfills the missing billing.payments row (deduped on processor+transaction_id)"
+		f.RecommendedAction = "enforce backfills the missing openrails.payments row (deduped on processor+transaction_id)"
 		subID := sub.ID
 		action := &BackfillPaymentAction{
 			Processor:       sub.Processor,

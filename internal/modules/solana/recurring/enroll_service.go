@@ -91,7 +91,7 @@ type EnrollInput struct {
 // exists on-chain — which, because the subscribe bundle is ATOMIC ([subscribe +
 // transfer(first period)] both land or both revert), proves the first period was
 // already pulled in that same tx (#286) — then creates the membership and
-// persists the billing.solana_subscriptions row. There is NO separate first
+// persists the openrails.solana_subscriptions row. There is NO separate first
 // crank: the first pull happened inside the atomic subscribe tx. Idempotent (the
 // lifecycle CreateMembership upserts on the processor subscription id).
 func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (*models.Subscription, error) {

@@ -33,7 +33,7 @@ package tests
 // deposit, hold, capture, release, get-credits, transaction lookup -- because
 // that is the standalone server-to-server contract gen-orchestrator / Tensorhub
 // actually use. Ledger correctness (rows, statuses, balances, conservation) is
-// then asserted directly against the billing.credit_transactions /
+// then asserted directly against the openrails.credit_transactions /
 // credit_balances tables. We fall back to the in-process facade only where
 // no public route exists; every scenario below has one, so all flow over HTTP.
 
@@ -86,7 +86,7 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 		CreatedAt:     time.Now().UTC(),
 	}
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO billing.credit_types (id, name, display_name, unit, decimal_places, is_active, created_at)
+		INSERT INTO openrails.credit_types (id, name, display_name, unit, decimal_places, is_active, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		ct.ID, ct.Name, ct.DisplayName, ct.Unit, ct.DecimalPlaces, ct.IsActive, ct.CreatedAt)
 	require.NoError(t, err)
@@ -215,7 +215,7 @@ func (h *billingE2EHarness) ledgerRows(userID string) []models.CreditTransaction
 	h.t.Helper()
 	owner := personalOwnerID(userID)
 	pgRows, err := h.suite.Pool.Query(context.Background(),
-		"SELECT "+creditTransactionCols+" FROM billing.credit_transactions WHERE tenant_subject_id = $1 AND credit_type_id = $2 ORDER BY created_at ASC",
+		"SELECT "+creditTransactionCols+" FROM openrails.credit_transactions WHERE tenant_subject_id = $1 AND credit_type_id = $2 ORDER BY created_at ASC",
 		owner, h.creditTyID)
 	require.NoError(h.t, err)
 	defer pgRows.Close()
@@ -236,7 +236,7 @@ func (h *billingE2EHarness) rawBalanceRow(userID string) *models.CreditBalance {
 	bal := new(models.CreditBalance)
 	err := h.suite.Pool.QueryRow(context.Background(), `
 		SELECT id, tenant_id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at
-		FROM billing.credit_balances
+		FROM openrails.credit_balances
 		WHERE tenant_subject_id = $1 AND credit_type_id = $2
 		LIMIT 1`, owner, h.creditTyID).
 		Scan(&bal.ID, &bal.TenantID, &bal.TenantSubjectID, &bal.CreditTypeID,

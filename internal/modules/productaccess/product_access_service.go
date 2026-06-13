@@ -1,6 +1,6 @@
 // Package productaccess implements durable, application-facing product
 // ownership/access grants (issue #250). It is DISTINCT from feature entitlements
-// (billing.entitlements): a product access grant answers "does this user own
+// (openrails.entitlements): a product access grant answers "does this user own
 // product X?" and powers purchased-library views, while entitlements model
 // feature windows ("premium", "api_access"). A product may carry EntitlementsSpec
 // and/or CreditsSpec AND produce a grant.

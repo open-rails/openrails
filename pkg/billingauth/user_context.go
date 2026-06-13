@@ -1,5 +1,5 @@
 // Package billingauth is the framework-neutral identity & auth boundary for
-// embedded OpenRails billing. It depends only on the standard library plus
+// embedded OpenRails openrails. It depends only on the standard library plus
 // github.com/google/uuid — no gin, no AuthKit — so a host application can
 // import it without pulling in HTTP frameworks or auth libraries it does not
 // use.

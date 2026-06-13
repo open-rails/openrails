@@ -72,7 +72,7 @@ func GetAdminRepairAlerts(r *httprequest.Request) {
 }
 
 // manualRebillStatusFilters maps the endpoint's legacy status vocabulary
-// (from the retired billing.manual_rebill_attempts table) onto provider
+// (from the retired openrails.manual_rebill_attempts table) onto provider
 // intent ledger statuses (#358 phase C).
 var manualRebillStatusFilters = map[string]string{
 	"pending":                        intents.StatusPending,

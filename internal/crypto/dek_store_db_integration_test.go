@@ -64,7 +64,7 @@ func startCryptoPostgres(t *testing.T) (*pgxpool.Pool, context.Context) {
 	require.NoError(t, err)
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	require.NoError(t, err)
-	require.NoError(t, migratekit.NewPostgres(sqlDB, "billing").ApplyMigrations(ctx, migrations))
+	require.NoError(t, migratekit.NewPostgres(sqlDB, "openrails").ApplyMigrations(ctx, migrations))
 
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
@@ -93,7 +93,7 @@ func TestDBDEKStore_LazyCreateReuseAndRoundTrip(t *testing.T) {
 
 	// No DEK row before first use.
 	var before int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.tenant_deks WHERE tenant_id=$1::uuid`, tA.String()).Scan(&before))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.tenant_deks WHERE tenant_id=$1::uuid`, tA.String()).Scan(&before))
 	require.Equal(t, 0, before)
 
 	ct, err := enc.Encrypt(ctx, tA, []byte("sk_live_db"))
@@ -101,7 +101,7 @@ func TestDBDEKStore_LazyCreateReuseAndRoundTrip(t *testing.T) {
 
 	// Exactly one wrapped DEK row created lazily.
 	var after int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.tenant_deks WHERE tenant_id=$1::uuid`, tA.String()).Scan(&after))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.tenant_deks WHERE tenant_id=$1::uuid`, tA.String()).Scan(&after))
 	require.Equal(t, 1, after)
 
 	// Round-trip with a FRESH encryptor (cold cache) over the same store+master
@@ -115,7 +115,7 @@ func TestDBDEKStore_LazyCreateReuseAndRoundTrip(t *testing.T) {
 	// Re-encrypting reuses the SAME DEK row (no second row).
 	_, err = enc.Encrypt(ctx, tA, []byte("again"))
 	require.NoError(t, err)
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.tenant_deks WHERE tenant_id=$1::uuid`, tA.String()).Scan(&after))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.tenant_deks WHERE tenant_id=$1::uuid`, tA.String()).Scan(&after))
 	require.Equal(t, 1, after, "DEK must be reused, not recreated")
 }
 

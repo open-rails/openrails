@@ -13,7 +13,7 @@ import (
 )
 
 const ackReconciliationFinding = `-- name: AckReconciliationFinding :execrows
-UPDATE billing.reconciliation_findings
+UPDATE openrails.reconciliation_findings
 SET status = 'resolved',
     resolution = 'admin_ack',
     notes = $1,
@@ -36,7 +36,7 @@ func (q *Queries) AckReconciliationFinding(ctx context.Context, arg AckReconcili
 }
 
 const autoResolveVanishedReconciliationFindings = `-- name: AutoResolveVanishedReconciliationFindings :execrows
-UPDATE billing.reconciliation_findings
+UPDATE openrails.reconciliation_findings
 SET status = 'resolved',
     resolution = 'auto_vanished',
     resolved_at = now(),
@@ -64,7 +64,7 @@ func (q *Queries) AutoResolveVanishedReconciliationFindings(ctx context.Context,
 }
 
 const autoResolveVanishedReconciliationFindingsAllProviders = `-- name: AutoResolveVanishedReconciliationFindingsAllProviders :execrows
-UPDATE billing.reconciliation_findings
+UPDATE openrails.reconciliation_findings
 SET status = 'resolved',
     resolution = 'auto_vanished',
     resolved_at = now(),
@@ -95,7 +95,7 @@ func (q *Queries) AutoResolveVanishedReconciliationFindingsAllProviders(ctx cont
 const createReconciliationRun = `-- name: CreateReconciliationRun :one
 
 
-INSERT INTO billing.reconciliation_runs (
+INSERT INTO openrails.reconciliation_runs (
     tenant_id, mode, providers, window_since, window_until, started_at, status
 ) VALUES (
     $1, $2, $3,
@@ -145,7 +145,7 @@ func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconci
 }
 
 const dismissReconciliationFinding = `-- name: DismissReconciliationFinding :execrows
-UPDATE billing.reconciliation_findings
+UPDATE openrails.reconciliation_findings
 SET status = 'dismissed',
     resolution = 'dismissed',
     notes = $1,
@@ -168,7 +168,7 @@ func (q *Queries) DismissReconciliationFinding(ctx context.Context, arg DismissR
 }
 
 const finishReconciliationRun = `-- name: FinishReconciliationRun :execrows
-UPDATE billing.reconciliation_runs
+UPDATE openrails.reconciliation_runs
 SET status = $1,
     summary = $2,
     error = $3,
@@ -197,7 +197,7 @@ func (q *Queries) FinishReconciliationRun(ctx context.Context, arg FinishReconci
 }
 
 const getLatestReconciliationRun = `-- name: GetLatestReconciliationRun :one
-SELECT id, tenant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM billing.reconciliation_runs
+SELECT id, tenant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
 ORDER BY started_at DESC
 LIMIT 1
 `
@@ -222,7 +222,7 @@ func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (BillingReconc
 }
 
 const getReconciliationFinding = `-- name: GetReconciliationFinding :one
-SELECT id, tenant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM billing.reconciliation_findings WHERE id = $1
+SELECT id, tenant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings WHERE id = $1
 `
 
 func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (BillingReconciliationFinding, error) {
@@ -257,7 +257,7 @@ func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (B
 }
 
 const getReconciliationRun = `-- name: GetReconciliationRun :one
-SELECT id, tenant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM billing.reconciliation_runs WHERE id = $1
+SELECT id, tenant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs WHERE id = $1
 `
 
 func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (BillingReconciliationRun, error) {
@@ -280,7 +280,7 @@ func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (Billi
 }
 
 const listOpenReconciliationFindingsByProvider = `-- name: ListOpenReconciliationFindingsByProvider :many
-SELECT id, tenant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM billing.reconciliation_findings
+SELECT id, tenant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings
 WHERE provider = $1 AND status IN ('open', 'admin_pending')
 ORDER BY finding_type, subject_key
 `
@@ -330,7 +330,7 @@ func (q *Queries) ListOpenReconciliationFindingsByProvider(ctx context.Context, 
 }
 
 const listReconciliationFindings = `-- name: ListReconciliationFindings :many
-SELECT id, tenant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM billing.reconciliation_findings
+SELECT id, tenant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR provider = $2::text)
   AND ($3::text IS NULL OR finding_type = $3::text)
@@ -400,7 +400,7 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 }
 
 const listReconciliationRuns = `-- name: ListReconciliationRuns :many
-SELECT id, tenant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM billing.reconciliation_runs
+SELECT id, tenant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $1
 `
@@ -443,7 +443,7 @@ func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconcilia
 }
 
 const markReconciliationFindingAutoFixed = `-- name: MarkReconciliationFindingAutoFixed :execrows
-UPDATE billing.reconciliation_findings
+UPDATE openrails.reconciliation_findings
 SET status = 'auto_fixed',
     resolution = 'enforced',
     resolution_evidence = $1,
@@ -466,7 +466,7 @@ func (q *Queries) MarkReconciliationFindingAutoFixed(ctx context.Context, arg Ma
 }
 
 const markReconciliationFindingVanished = `-- name: MarkReconciliationFindingVanished :execrows
-UPDATE billing.reconciliation_findings
+UPDATE openrails.reconciliation_findings
 SET status = 'resolved',
     resolution = 'auto_vanished',
     resolved_at = now(),
@@ -483,7 +483,7 @@ func (q *Queries) MarkReconciliationFindingVanished(ctx context.Context, id uuid
 }
 
 const reconcileAdoptPaymentMethod = `-- name: ReconcileAdoptPaymentMethod :execrows
-UPDATE billing.payment_methods
+UPDATE openrails.payment_methods
 SET last_four = COALESCE(NULLIF($1::text, ''), last_four),
     expiry_date = COALESCE(NULLIF($2::text, ''), expiry_date),
     updated_at = now()
@@ -508,14 +508,14 @@ func (q *Queries) ReconcileAdoptPaymentMethod(ctx context.Context, arg Reconcile
 }
 
 const reconcileAdoptSubscriptionStatus = `-- name: ReconcileAdoptSubscriptionStatus :execrows
-UPDATE billing.subscriptions
-SET status = $1::billing.subscription_status,
+UPDATE openrails.subscriptions
+SET status = $1::openrails.subscription_status,
     current_period_starts_at = COALESCE($2::timestamptz, current_period_starts_at),
     current_period_ends_at = COALESCE($3::timestamptz, current_period_ends_at),
     updated_at = now()
 WHERE id = $4
   AND status <> 'cancelled'
-  AND (status <> $1::billing.subscription_status
+  AND (status <> $1::openrails.subscription_status
        OR current_period_ends_at IS DISTINCT FROM COALESCE($3::timestamptz, current_period_ends_at))
 `
 
@@ -544,11 +544,11 @@ func (q *Queries) ReconcileAdoptSubscriptionStatus(ctx context.Context, arg Reco
 }
 
 const reconcileBackfillPayment = `-- name: ReconcileBackfillPayment :execrows
-INSERT INTO billing.payments (
+INSERT INTO openrails.payments (
     price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, metadata, purchased_at, tenant_subject_id
 ) VALUES (
-    $1, $2::billing.processor_type,
+    $1, $2::openrails.processor_type,
     $3, $4, $4,
     COALESCE(NULLIF($5::text, ''), 'usd'),
     'completed', $6, $7,
@@ -592,7 +592,7 @@ func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBac
 
 const reconcileCancelSubscriptionLocal = `-- name: ReconcileCancelSubscriptionLocal :execrows
 
-UPDATE billing.subscriptions
+UPDATE openrails.subscriptions
 SET status = 'cancelled',
     cancelled_at = COALESCE(cancelled_at, $1::timestamptz),
     cancel_type = COALESCE(cancel_type, $2::text),
@@ -633,7 +633,7 @@ func (q *Queries) ReconcileCancelSubscriptionLocal(ctx context.Context, arg Reco
 }
 
 const reconcileGrantSubscriptionEntitlement = `-- name: ReconcileGrantSubscriptionEntitlement :execrows
-INSERT INTO billing.entitlements (
+INSERT INTO openrails.entitlements (
     tenant_id, tenant_subject_id, entitlement, start_at, end_at,
     source_id, source_type
 )
@@ -641,7 +641,7 @@ SELECT $1, $2, $3,
        $4::timestamptz, $5::timestamptz,
        $6, 'subscription'
 WHERE NOT EXISTS (
-    SELECT 1 FROM billing.entitlements ent
+    SELECT 1 FROM openrails.entitlements ent
     WHERE ent.tenant_subject_id = $2
       AND ent.entitlement = $3
       AND ent.source_type = 'subscription'
@@ -684,7 +684,7 @@ func (q *Queries) ReconcileGrantSubscriptionEntitlement(ctx context.Context, arg
 const reconcileListPaymentMethodsByProcessors = `-- name: ReconcileListPaymentMethodsByProcessors :many
 SELECT id, tenant_subject_id, processor, vault_id, last_four, card_type,
        expiry_date
-FROM billing.payment_methods
+FROM openrails.payment_methods
 WHERE processor = ANY ($1::text[])
 `
 
@@ -729,7 +729,7 @@ func (q *Queries) ReconcileListPaymentMethodsByProcessors(ctx context.Context, p
 const reconcileListPaymentsByTransactionIDs = `-- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, tenant_subject_id, processor, transaction_id, amount, status,
        subscription_id, refunded_payment_id, purchased_at
-FROM billing.payments
+FROM openrails.payments
 WHERE processor::text = ANY ($1::text[])
   AND transaction_id = ANY ($2::text[])
 `
@@ -783,7 +783,7 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 
 const reconcileListPricesWithProcessors = `-- name: ReconcileListPricesWithProcessors :many
 SELECT id, product_id, amount, currency, billing_cycle_days, status, processors
-FROM billing.prices
+FROM openrails.prices
 WHERE processors IS NOT NULL
   AND status <> 'draft'
 `
@@ -832,7 +832,7 @@ func (q *Queries) ReconcileListPricesWithProcessors(ctx context.Context) ([]Reco
 
 const reconcileListSolanaSubscriptionRefs = `-- name: ReconcileListSolanaSubscriptionRefs :many
 SELECT subscription_pda, plan_pda, subscriber_wallet
-FROM billing.solana_subscriptions
+FROM openrails.solana_subscriptions
 `
 
 type ReconcileListSolanaSubscriptionRefsRow struct {
@@ -864,8 +864,8 @@ func (q *Queries) ReconcileListSolanaSubscriptionRefs(ctx context.Context) ([]Re
 const reconcileListSubscriptionEntitlements = `-- name: ReconcileListSubscriptionEntitlements :many
 SELECT ent.id, ent.tenant_subject_id, ent.entitlement, ent.source_id,
        ent.start_at, ent.end_at
-FROM billing.entitlements ent
-JOIN billing.subscriptions sub ON sub.id = ent.source_id
+FROM openrails.entitlements ent
+JOIN openrails.subscriptions sub ON sub.id = ent.source_id
 WHERE sub.processor = ANY ($1::text[])
   AND ent.source_type = 'subscription'
   AND ent.revoked_at IS NULL
@@ -919,7 +919,7 @@ SELECT id, tenant_subject_id, price_id, product_id, status, processor,
        cancelled_at, cancel_type, deletion_scheduled_at, tier_group,
        last_retry_at, retry_attempts, next_retry_at,
        entitlements_spec_snapshot
-FROM billing.subscriptions
+FROM openrails.subscriptions
 WHERE processor = ANY ($1::text[])
 `
 
@@ -993,7 +993,7 @@ func (q *Queries) ReconcileListSubscriptionsByProcessors(ctx context.Context, pr
 }
 
 const reconcileMarkPaymentRefunded = `-- name: ReconcileMarkPaymentRefunded :execrows
-UPDATE billing.payments
+UPDATE openrails.payments
 SET status = 'refunded'
 WHERE id = $1 AND status <> 'refunded'
 `
@@ -1007,23 +1007,23 @@ func (q *Queries) ReconcileMarkPaymentRefunded(ctx context.Context, id uuid.UUID
 }
 
 const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscription :many
-INSERT INTO billing.subscriptions (
+INSERT INTO openrails.subscriptions (
     price_id, product_id, status, processor, processor_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
     entitlements_spec_snapshot, credits_spec_snapshot, tenant_subject_id
 )
-SELECT pr.id, pr.product_id, $1::billing.subscription_status,
+SELECT pr.id, pr.product_id, $1::openrails.subscription_status,
        $2, $3,
        $4,
        $5::timestamptz,
        $6::timestamptz,
        COALESCE($7::timestamptz, now()),
        p.entitlements_spec, p.credits_spec, $8
-FROM billing.prices pr
-JOIN billing.products p ON p.id = pr.product_id
+FROM openrails.prices pr
+JOIN openrails.products p ON p.id = pr.product_id
 WHERE pr.id = $9
   AND NOT EXISTS (
-      SELECT 1 FROM billing.subscriptions s
+      SELECT 1 FROM openrails.subscriptions s
       WHERE s.processor_subscription_id = $3
         AND s.processor = ANY ($10::text[])
   )
@@ -1087,12 +1087,12 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 }
 
 const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
-INSERT INTO billing.payments (
+INSERT INTO openrails.payments (
     price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
     tenant_subject_id
 ) VALUES (
-    $1, $2::billing.processor_type,
+    $1, $2::openrails.processor_type,
     $3, $4, $4,
     COALESCE(NULLIF($5::text, ''), 'usd'),
     'completed', $6, $7,
@@ -1138,7 +1138,7 @@ func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecord
 }
 
 const reconcileRevokeSubscriptionEntitlements = `-- name: ReconcileRevokeSubscriptionEntitlements :execrows
-UPDATE billing.entitlements
+UPDATE openrails.entitlements
 SET revoked_at = $1::timestamptz,
     revoke_reason = $2::text,
     updated_at = now()
@@ -1168,7 +1168,7 @@ func (q *Queries) ReconcileRevokeSubscriptionEntitlements(ctx context.Context, a
 
 const upsertReconciliationFinding = `-- name: UpsertReconciliationFinding :one
 
-INSERT INTO billing.reconciliation_findings (
+INSERT INTO openrails.reconciliation_findings (
     tenant_id, provider, finding_type, subject_key, severity, status,
     requires_admin, recommended_action, local_evidence, remote_evidence,
     intent_evidence, first_seen_run, last_seen_run
@@ -1182,7 +1182,7 @@ INSERT INTO billing.reconciliation_findings (
 ON CONFLICT (tenant_id, provider, finding_type, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
     status = CASE
-        WHEN billing.reconciliation_findings.status = 'dismissed' THEN 'dismissed'
+        WHEN openrails.reconciliation_findings.status = 'dismissed' THEN 'dismissed'
         ELSE EXCLUDED.status
     END,
     requires_admin = EXCLUDED.requires_admin,
@@ -1191,20 +1191,20 @@ ON CONFLICT (tenant_id, provider, finding_type, subject_key) DO UPDATE SET
     remote_evidence = EXCLUDED.remote_evidence,
     intent_evidence = EXCLUDED.intent_evidence,
     resolution_evidence = CASE
-        WHEN billing.reconciliation_findings.status = 'dismissed' THEN billing.reconciliation_findings.resolution_evidence
+        WHEN openrails.reconciliation_findings.status = 'dismissed' THEN openrails.reconciliation_findings.resolution_evidence
         ELSE NULL
     END,
     resolved_at = CASE
-        WHEN billing.reconciliation_findings.status = 'dismissed' THEN billing.reconciliation_findings.resolved_at
+        WHEN openrails.reconciliation_findings.status = 'dismissed' THEN openrails.reconciliation_findings.resolved_at
         ELSE NULL
     END,
     resolution = CASE
-        WHEN billing.reconciliation_findings.status = 'dismissed' THEN billing.reconciliation_findings.resolution
+        WHEN openrails.reconciliation_findings.status = 'dismissed' THEN openrails.reconciliation_findings.resolution
         ELSE NULL
     END,
     last_seen_run = EXCLUDED.last_seen_run,
     last_seen_at = now(),
-    occurrence_count = billing.reconciliation_findings.occurrence_count + 1,
+    occurrence_count = openrails.reconciliation_findings.occurrence_count + 1,
     updated_at = now()
 RETURNING id, tenant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at
 `

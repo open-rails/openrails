@@ -112,14 +112,14 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO billing.products (id, slug, display_name) VALUES ($1, $2, $2)`,
+	exec(`INSERT INTO openrails.products (id, slug, display_name) VALUES ($1, $2, $2)`,
 		productID, "rebill-prod-"+suffix)
-	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, billing_cycle_days)
+	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days)
 	      VALUES ($1, $2, 999, 'usd', 30)`, priceID, productID)
-	exec(`INSERT INTO billing.payment_methods (id, tenant_subject_id, processor, vault_id, billing_id, initial_transaction_id)
+	exec(`INSERT INTO openrails.payment_methods (id, tenant_subject_id, processor, vault_id, billing_id, initial_transaction_id)
 	      VALUES ($1, $2, 'mobius', $3, $4, $5)`,
 		paymentMethodID, userID, "vault-"+suffix, "bill-"+suffix, "txn-init-"+suffix)
-	exec(`INSERT INTO billing.subscriptions
+	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, processor, processor_subscription_id, payment_method_id,
 	         current_period_starts_at, current_period_ends_at, started_at, next_retry_at, retry_attempts, tenant_subject_id)
 	      VALUES ($1, $2, $3, 'past_due', 'mobius', $4, $5, $6, $7, $6, $8, 1, $9)`,
@@ -127,14 +127,14 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 		fx.periodEnd.Add(-30*24*time.Hour), fx.periodEnd, now.Add(-30*time.Second), userID)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.provider_intents WHERE subscription_id = $1", fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.notification_queue WHERE tenant_subject_id = $1", userID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE subscription_id = $1", fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", userID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", paymentMethodID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE tenant_subject_id = $1", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 	return fx
 }
@@ -204,7 +204,7 @@ func TestManualRebillSynchronousSuccessRenewsLifecycle(t *testing.T) {
 
 	var paymentCount int
 	require.NoError(t, fx.db.Pool().QueryRow(context.Background(),
-		"SELECT count(*) FROM billing.payments WHERE subscription_id = $1 AND transaction_id = $2",
+		"SELECT count(*) FROM openrails.payments WHERE subscription_id = $1 AND transaction_id = $2",
 		fx.subID, fake.txnID).Scan(&paymentCount))
 	assert.Equal(t, 1, paymentCount, "renewal persisted the charge")
 }
@@ -225,7 +225,7 @@ func TestManualRebillSystemOriginParksUnderLimitedThenDrains(t *testing.T) {
 	assert.Equal(t, "past_due", string(fx.subscription(t).Status))
 
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE billing.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 	require.NoError(t, err)
@@ -252,7 +252,7 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 	// The charge actually landed at NMI.
 	fake.charged.Store(true)
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE billing.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
 	require.NoError(t, err)
@@ -297,11 +297,11 @@ func TestManualRebillRecoveredSubscriptionSupersedes(t *testing.T) {
 
 	// The subscription recovers while the intent waits for full mode.
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE billing.subscriptions SET status = 'active', next_retry_at = NULL WHERE id = $1", fx.subID)
+		"UPDATE openrails.subscriptions SET status = 'active', next_retry_at = NULL WHERE id = $1", fx.subID)
 	require.NoError(t, err)
 
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE billing.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 	require.NoError(t, err)

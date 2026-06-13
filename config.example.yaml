@@ -253,7 +253,7 @@ auth:
 # =============================================================================
 # Per-tenant envelope encryption. The master key wraps each tenant's Data
 # Encryption Key (DEK); the DEK encrypts sensitive at-rest values (e.g. per-tenant
-# processor credentials in billing.tenant_secrets). The wrapped DEKs live in the
+# processor credentials in openrails.tenant_secrets). The wrapped DEKs live in the
 # DB; the master key NEVER does.
 #
 # Self-hosted/dev: set ENCRYPTION_MASTER_KEY (base64 of 32 random bytes).

@@ -13,7 +13,7 @@ import (
 
 const getTenantBySlug = `-- name: GetTenantBySlug :one
 SELECT id, slug, name, status
-FROM billing.tenants
+FROM openrails.tenants
 WHERE slug = $1 AND deleted_at IS NULL
 `
 

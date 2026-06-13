@@ -122,7 +122,7 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 		slug string
 	}{{pagTenantA, "tenant-a"}, {pagTenantB, "tenant-b"}} {
 		_, err = superPool.Exec(ctx,
-			`INSERT INTO billing.tenants (id, slug, name, status) VALUES ($1, $2, $3, 'active') ON CONFLICT (slug) DO NOTHING`,
+			`INSERT INTO openrails.tenants (id, slug, name, status) VALUES ($1, $2, $3, 'active') ON CONFLICT (slug) DO NOTHING`,
 			tt.id.UUID(), tt.slug, tt.slug,
 		)
 		require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 			tenantID = pagTenantB.UUID()
 		}
 		_, err = superPool.Exec(ctx,
-			`INSERT INTO billing.products (id, tenant_id, slug, display_name, status) VALUES ($1, $2, $3, 'P', 'active')`,
+			`INSERT INTO openrails.products (id, tenant_id, slug, display_name, status) VALUES ($1, $2, $3, 'P', 'active')`,
 			p.id, tenantID, p.slug,
 		)
 		require.NoError(t, err)

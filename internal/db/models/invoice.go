@@ -8,7 +8,7 @@ import (
 
 // Invoice is a monthly itemized statement for a customer (issue #303): the
 // human-readable record of what was billed in a period, for prepaid and arrears
-// alike. Line items + money movements are rolled up from billing.usage_events
+// alike. Line items + money movements are rolled up from openrails.usage_events
 // and the credit ledger, snapshotted at finalize for immutability.
 type Invoice struct {
 	ID              uuid.UUID `json:"id"`

@@ -32,7 +32,7 @@ func windowEnv(t *testing.T, depositMicros int64) (context.Context, *pgxpool.Poo
 		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_windows')").
 		Scan(&hasWindows))
 	if !hasWindows {
-		t.Skip("billing.credit_windows not found; run migrations before integration tests")
+		t.Skip("openrails.credit_windows not found; run migrations before integration tests")
 	}
 
 	svc := credits.NewCreditsService(dbi)
@@ -48,12 +48,12 @@ func windowEnv(t *testing.T, depositMicros int64) (context.Context, *pgxpool.Poo
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE credit_type_id = $1", ctID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_windows WHERE credit_type_id = $1", ctID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE credit_type_id = $1", ctID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE credit_type_id = $1", ctID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE credit_type_id = $1", ctID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE credit_type_id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_windows WHERE credit_type_id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_blocks WHERE credit_type_id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_transactions WHERE credit_type_id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_balances WHERE credit_type_id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_types WHERE id = $1", ctID)
 	})
 
 	if depositMicros > 0 {
@@ -113,7 +113,7 @@ func TestCreditWindows_Lifecycle(t *testing.T) {
 	// Usage attribution rode along with req_1.
 	var usageCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM billing.usage_events WHERE source = 'window_settle' AND source_id = 'req_1'").
+		"SELECT count(*) FROM openrails.usage_events WHERE source = 'window_settle' AND source_id = 'req_1'").
 		Scan(&usageCount))
 	require.Equal(t, 1, usageCount)
 

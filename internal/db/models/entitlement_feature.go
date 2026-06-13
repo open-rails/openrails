@@ -8,7 +8,7 @@ import (
 
 // EntitlementFeature is a Stripe-shaped first-class feature definition (issue
 // #245). It sits ON TOP of OpenRails' temporal entitlement-window ledger
-// (billing.entitlements) — the window ledger remains the source of truth for
+// (openrails.entitlements) — the window ledger remains the source of truth for
 // active access; this row just names a feature and pins its stable LookupKey.
 //
 // LookupKey is the value carried in AuthKit JWT entitlements and host-app

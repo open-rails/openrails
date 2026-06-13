@@ -38,7 +38,7 @@ type WebhookResolver interface {
 	ResolveByHost(ctx context.Context, host string) (WebhookRoute, error)
 }
 
-// ResolveBySlug implements WebhookResolver against the billing.tenants directory.
+// ResolveBySlug implements WebhookResolver against the openrails.tenants directory.
 func (s *Service) ResolveBySlug(ctx context.Context, slug string) (WebhookRoute, error) {
 	slug = normalizeSlug(slug)
 	if slug == "" {
@@ -46,7 +46,7 @@ func (s *Service) ResolveBySlug(ctx context.Context, slug string) (WebhookRoute,
 	}
 	var idStr, status string
 	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, status FROM billing.tenants
+		SELECT id::text, status FROM openrails.tenants
 		 WHERE slug = $1 AND deleted_at IS NULL
 	`, slug).Scan(&idStr, &status)
 	return s.routeFromScan(idStr, slug, status, err)
@@ -66,7 +66,7 @@ func (s *Service) ResolveByHost(ctx context.Context, host string) (WebhookRoute,
 	}
 	var idStr, slug, status string
 	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, slug, status FROM billing.tenants
+		SELECT id::text, slug, status FROM openrails.tenants
 		 WHERE lower(webhook_host) = $1 AND deleted_at IS NULL
 		 LIMIT 1
 	`, host).Scan(&idStr, &slug, &status)

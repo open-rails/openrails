@@ -16,7 +16,7 @@ const (
 	// fee-payer / auto-top-up system — just an alert so ops keeps the wallet
 	// funded. A pull that fails for lack of SOL is operational (retry), never
 	// subscriber dunning.
-	KindSolanaGasAlert = "billing.solana_gas_alert"
+	KindSolanaGasAlert = "openrails.solana_gas_alert"
 
 	// defaultGasAlertThresholdLamports ~0.05 SOL. Each crank costs ~5000 lamports,
 	// so this is ~10k cranks of runway.

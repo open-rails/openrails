@@ -1,7 +1,7 @@
--- billing.checkout_sessions.
+-- openrails.checkout_sessions.
 
 -- name: CreateCheckoutSession :execrows
-INSERT INTO billing.checkout_sessions (
+INSERT INTO openrails.checkout_sessions (
     id, tenant_subject_id, price_id, mode, processor, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
     subscription_id, metadata, processor_fields, processor_state,
@@ -18,10 +18,10 @@ INSERT INTO billing.checkout_sessions (
 );
 
 -- name: GetCheckoutSessionByID :one
-SELECT * FROM billing.checkout_sessions WHERE id = $1;
+SELECT * FROM openrails.checkout_sessions WHERE id = $1;
 
 -- name: UpdateCheckoutSession :execrows
-UPDATE billing.checkout_sessions SET
+UPDATE openrails.checkout_sessions SET
     tenant_subject_id = $2,
     price_id = $3,
     mode = $4,
@@ -42,7 +42,7 @@ UPDATE billing.checkout_sessions SET
 WHERE id = $1;
 
 -- name: BindSolanaCheckoutSession :execrows
-UPDATE billing.checkout_sessions SET
+UPDATE openrails.checkout_sessions SET
     reference = sqlc.arg(reference),
     processor_state = sqlc.arg(processor_state),
     updated_at = sqlc.arg(updated_at)
@@ -53,12 +53,12 @@ WHERE id = $1
   AND (COALESCE(processor_state ->> 'payer', '') = '' OR processor_state ->> 'payer' = sqlc.arg(payer)::text);
 
 -- name: GetCheckoutSessionByReference :one
-SELECT * FROM billing.checkout_sessions cs
+SELECT * FROM openrails.checkout_sessions cs
 WHERE cs.reference = $1
 LIMIT 1;
 
 -- name: GetLatestOpenCheckoutSession :one
-SELECT * FROM billing.checkout_sessions cs
+SELECT * FROM openrails.checkout_sessions cs
 WHERE cs.tenant_subject_id = $1
   AND cs.price_id = $2
   AND cs.processor = $3
@@ -68,7 +68,7 @@ ORDER BY cs.created_at DESC
 LIMIT 1;
 
 -- name: ExpireCheckoutSessions :execrows
-UPDATE billing.checkout_sessions
+UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = sqlc.arg(now)
 WHERE expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
   AND status IN ('created', 'requires_action');

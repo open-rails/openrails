@@ -25,7 +25,7 @@ func (q *Queries) AcquireEntitlementTimelineLock(ctx context.Context, key int64)
 }
 
 const attachEntitlementTenantSubject = `-- name: AttachEntitlementTenantSubject :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     tenant_subject_id = $2,
     updated_at = $3
 WHERE ent.id = $1
@@ -45,7 +45,7 @@ func (q *Queries) AttachEntitlementTenantSubject(ctx context.Context, arg Attach
 }
 
 const countInvalidEndBySubscription = `-- name: CountInvalidEndBySubscription :one
-SELECT count(*) FROM billing.entitlements ent
+SELECT count(*) FROM openrails.entitlements ent
 WHERE ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
@@ -68,7 +68,7 @@ func (q *Queries) CountInvalidEndBySubscription(ctx context.Context, arg CountIn
 
 const createEntitlement = `-- name: CreateEntitlement :one
 
-INSERT INTO billing.entitlements (
+INSERT INTO openrails.entitlements (
     id, tenant_id, tenant_subject_id, entitlement, start_at, end_at,
     source_id, source_type, revoked_at, revoke_reason, created_at, updated_at
 ) VALUES (
@@ -99,7 +99,7 @@ type CreateEntitlementParams struct {
 	UpdatedAt       time.Time
 }
 
-// billing.entitlements. The model is bun-soft-delete (deleted_at): every
+// openrails.entitlements. The model is bun-soft-delete (deleted_at): every
 // read filters deleted_at IS NULL explicitly here (bun added it implicitly).
 func (q *Queries) CreateEntitlement(ctx context.Context, arg CreateEntitlementParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, createEntitlement,
@@ -122,7 +122,7 @@ func (q *Queries) CreateEntitlement(ctx context.Context, arg CreateEntitlementPa
 }
 
 const endActiveEntitlementsBySubscription = `-- name: EndActiveEntitlementsBySubscription :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     end_at = $2::timestamptz,
     updated_at = $3::timestamptz,
     revoked_at = CASE WHEN $4::boolean THEN $3::timestamptz ELSE ent.revoked_at END,
@@ -155,7 +155,7 @@ func (q *Queries) EndActiveEntitlementsBySubscription(ctx context.Context, arg E
 
 const entitlementExistsActive = `-- name: EntitlementExistsActive :one
 SELECT EXISTS (
-    SELECT 1 FROM billing.entitlements ent
+    SELECT 1 FROM openrails.entitlements ent
     WHERE ent.tenant_id = $1
       AND ent.tenant_subject_id = $2
       AND ent.entitlement = $3
@@ -187,7 +187,7 @@ func (q *Queries) EntitlementExistsActive(ctx context.Context, arg EntitlementEx
 
 const entitlementExistsBySource = `-- name: EntitlementExistsBySource :one
 SELECT EXISTS (
-    SELECT 1 FROM billing.entitlements ent
+    SELECT 1 FROM openrails.entitlements ent
     WHERE ent.source_type = $1
       AND ent.source_id = $2
       AND ent.entitlement = $3
@@ -211,7 +211,7 @@ func (q *Queries) EntitlementExistsBySource(ctx context.Context, arg Entitlement
 
 const entitlementHasActiveIndefinite = `-- name: EntitlementHasActiveIndefinite :one
 SELECT EXISTS (
-    SELECT 1 FROM billing.entitlements ent
+    SELECT 1 FROM openrails.entitlements ent
     WHERE ent.tenant_id = $1
       AND ent.tenant_subject_id = $2
       AND ent.entitlement = $3
@@ -241,7 +241,7 @@ func (q *Queries) EntitlementHasActiveIndefinite(ctx context.Context, arg Entitl
 }
 
 const getEntitlementByID = `-- name: GetEntitlementByID :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
 WHERE ent.id = $1
   AND ent.deleted_at IS NULL
 LIMIT 1
@@ -270,7 +270,7 @@ func (q *Queries) GetEntitlementByID(ctx context.Context, id uuid.UUID) (Billing
 }
 
 const getLatestActiveEntitlement = `-- name: GetLatestActiveEntitlement :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
 WHERE ent.tenant_id = $1
   AND ent.tenant_subject_id = $2
   AND ent.entitlement = $3
@@ -309,7 +309,7 @@ func (q *Queries) GetLatestActiveEntitlement(ctx context.Context, arg GetLatestA
 }
 
 const getLatestFiniteActiveEntitlement = `-- name: GetLatestFiniteActiveEntitlement :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
 WHERE ent.tenant_id = $1
   AND ent.tenant_subject_id = $2
   AND ent.entitlement = $3
@@ -357,7 +357,7 @@ func (q *Queries) GetLatestFiniteActiveEntitlement(ctx context.Context, arg GetL
 }
 
 const getTimelineCoveringWindow = `-- name: GetTimelineCoveringWindow :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -398,7 +398,7 @@ func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimeline
 }
 
 const getTimelineIndefinite = `-- name: GetTimelineIndefinite :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -436,7 +436,7 @@ func (q *Queries) GetTimelineIndefinite(ctx context.Context, arg GetTimelineInde
 }
 
 const getTimelineTailEnd = `-- name: GetTimelineTailEnd :one
-SELECT ent.end_at FROM billing.entitlements ent
+SELECT ent.end_at FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -460,7 +460,7 @@ func (q *Queries) GetTimelineTailEnd(ctx context.Context, arg GetTimelineTailEnd
 }
 
 const listActiveEntitlementNames = `-- name: ListActiveEntitlementNames :many
-SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
+SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.start_at <= $2::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > $2::timestamptz)
@@ -495,7 +495,7 @@ func (q *Queries) ListActiveEntitlementNames(ctx context.Context, arg ListActive
 }
 
 const listActiveEntitlementNamesTenant = `-- name: ListActiveEntitlementNamesTenant :many
-SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
+SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
 WHERE ent.tenant_id = $1
   AND ent.tenant_subject_id = $2
   AND ent.start_at <= $3::timestamptz
@@ -531,7 +531,7 @@ func (q *Queries) ListActiveEntitlementNamesTenant(ctx context.Context, arg List
 }
 
 const listActiveEntitlementRecords = `-- name: ListActiveEntitlementRecords :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -581,8 +581,8 @@ func (q *Queries) ListActiveEntitlementRecords(ctx context.Context, arg ListActi
 }
 
 const listActiveEntitlementRecordsByExternalSubjects = `-- name: ListActiveEntitlementRecordsByExternalSubjects :many
-SELECT ts.subject AS external_subject, ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.period, ent.tenant_id, ent.tenant_subject_id FROM billing.entitlements ent
-JOIN billing.tenant_subjects ts ON ts.id = ent.tenant_subject_id
+SELECT ts.subject AS external_subject, ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.period, ent.tenant_id, ent.tenant_subject_id FROM openrails.entitlements ent
+JOIN openrails.tenant_subjects ts ON ts.id = ent.tenant_subject_id
 WHERE ts.tenant_id = $1
   AND ts.issuer = $2
   AND ts.subject = ANY($3::text[])
@@ -665,7 +665,7 @@ func (q *Queries) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Con
 }
 
 const listActiveEntitlementRecordsTenant = `-- name: ListActiveEntitlementRecordsTenant :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
 WHERE ent.tenant_id = $1
   AND ent.tenant_subject_id = $2
   AND ent.revoked_at IS NULL
@@ -717,7 +717,7 @@ func (q *Queries) ListActiveEntitlementRecordsTenant(ctx context.Context, arg Li
 }
 
 const listActiveGraceWindowsForUpdate = `-- name: ListActiveGraceWindowsForUpdate :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
 WHERE ent.source_type = 'grace'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
@@ -768,7 +768,7 @@ func (q *Queries) ListActiveGraceWindowsForUpdate(ctx context.Context, arg ListA
 }
 
 const listDistinctEntitlementNamesBySource = `-- name: ListDistinctEntitlementNamesBySource :many
-SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
+SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
 WHERE ent.source_type = $1
   AND ent.source_id = $2
   AND ent.revoked_at IS NULL
@@ -801,7 +801,7 @@ func (q *Queries) ListDistinctEntitlementNamesBySource(ctx context.Context, arg 
 }
 
 const listEntitlementsByTenantSubject = `-- name: ListEntitlementsByTenantSubject :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
 WHERE ent.tenant_subject_id = $1
   AND ent.deleted_at IS NULL
 ORDER BY ent.start_at DESC
@@ -843,7 +843,7 @@ func (q *Queries) ListEntitlementsByTenantSubject(ctx context.Context, tenantSub
 }
 
 const listExtendableSubscriptionEntitlements = `-- name: ListExtendableSubscriptionEntitlements :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
 WHERE ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
@@ -893,7 +893,7 @@ func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, ar
 }
 
 const resumeEntitlementsBySubscription = `-- name: ResumeEntitlementsBySubscription :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     end_at = NULL,
     updated_at = $2::timestamptz
 WHERE ent.source_type = 'subscription'
@@ -915,7 +915,7 @@ func (q *Queries) ResumeEntitlementsBySubscription(ctx context.Context, arg Resu
 }
 
 const revokeActiveOneOffEntitlements = `-- name: RevokeActiveOneOffEntitlements :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     end_at = $2::timestamptz,
     revoked_at = $3::timestamptz,
     revoke_reason = $4,
@@ -946,7 +946,7 @@ func (q *Queries) RevokeActiveOneOffEntitlements(ctx context.Context, arg Revoke
 }
 
 const revokeActiveTimelineWindows = `-- name: RevokeActiveTimelineWindows :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     revoked_at = $3::timestamptz,
     revoke_reason = $4::text,
     updated_at = $3::timestamptz
@@ -984,7 +984,7 @@ func (q *Queries) RevokeActiveTimelineWindows(ctx context.Context, arg RevokeAct
 }
 
 const revokeEntitlementByID = `-- name: RevokeEntitlementByID :execrows
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     revoked_at = $2::timestamptz,
     revoke_reason = $3::text,
     updated_at = $2::timestamptz
@@ -1008,7 +1008,7 @@ func (q *Queries) RevokeEntitlementByID(ctx context.Context, arg RevokeEntitleme
 }
 
 const revokeEntitlementBySubscriptionAndName = `-- name: RevokeEntitlementBySubscriptionAndName :execrows
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     revoked_at = $3::timestamptz,
     revoke_reason = $4::text,
     end_at = $3::timestamptz,
@@ -1041,7 +1041,7 @@ func (q *Queries) RevokeEntitlementBySubscriptionAndName(ctx context.Context, ar
 }
 
 const revokeEntitlementWindowNow = `-- name: RevokeEntitlementWindowNow :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     end_at = $2::timestamptz,
     revoked_at = $3::timestamptz,
     revoke_reason = $4,
@@ -1069,7 +1069,7 @@ func (q *Queries) RevokeEntitlementWindowNow(ctx context.Context, arg RevokeEnti
 }
 
 const setEntitlementEndAt = `-- name: SetEntitlementEndAt :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     end_at = $2,
     updated_at = $3::timestamptz
 WHERE ent.id = $1
@@ -1089,7 +1089,7 @@ func (q *Queries) SetEntitlementEndAt(ctx context.Context, arg SetEntitlementEnd
 }
 
 const shiftEntitlementTimelineWindows = `-- name: ShiftEntitlementTimelineWindows :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     start_at = ent.start_at + ($3::bigint * interval '1 second'),
     end_at = CASE WHEN ent.end_at IS NULL THEN NULL
              ELSE ent.end_at + ($3::bigint * interval '1 second') END,
@@ -1124,7 +1124,7 @@ func (q *Queries) ShiftEntitlementTimelineWindows(ctx context.Context, arg Shift
 }
 
 const softDeleteEntitlementByID = `-- name: SoftDeleteEntitlementByID :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     deleted_at = $2::timestamptz,
     updated_at = $2::timestamptz
 WHERE ent.id = $1
@@ -1143,7 +1143,7 @@ func (q *Queries) SoftDeleteEntitlementByID(ctx context.Context, arg SoftDeleteE
 }
 
 const softDeleteFutureGraceBySubscription = `-- name: SoftDeleteFutureGraceBySubscription :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     deleted_at = $2::timestamptz,
     updated_at = $2::timestamptz
 WHERE ent.source_type = 'grace'
@@ -1164,7 +1164,7 @@ func (q *Queries) SoftDeleteFutureGraceBySubscription(ctx context.Context, arg S
 }
 
 const softDeleteFutureOneOffEntitlements = `-- name: SoftDeleteFutureOneOffEntitlements :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     deleted_at = $2::timestamptz,
     updated_at = $2::timestamptz
 WHERE ent.source_type = 'one_off'
@@ -1186,7 +1186,7 @@ func (q *Queries) SoftDeleteFutureOneOffEntitlements(ctx context.Context, arg So
 }
 
 const softDeleteFutureTimelineWindows = `-- name: SoftDeleteFutureTimelineWindows :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     deleted_at = $3::timestamptz,
     updated_at = $3::timestamptz
 WHERE ent.tenant_subject_id = $1
@@ -1220,7 +1220,7 @@ func (q *Queries) SoftDeleteFutureTimelineWindows(ctx context.Context, arg SoftD
 }
 
 const softDeleteGraceBySubscription = `-- name: SoftDeleteGraceBySubscription :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     deleted_at = $2::timestamptz,
     updated_at = $2::timestamptz
 WHERE ent.source_type = 'grace'
@@ -1240,7 +1240,7 @@ func (q *Queries) SoftDeleteGraceBySubscription(ctx context.Context, arg SoftDel
 }
 
 const softDeleteLaterEntitlementWindows = `-- name: SoftDeleteLaterEntitlementWindows :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     deleted_at = $3::timestamptz,
     updated_at = $3::timestamptz
 WHERE ent.tenant_subject_id = $1
@@ -1273,7 +1273,7 @@ func (q *Queries) SoftDeleteLaterEntitlementWindows(ctx context.Context, arg Sof
 const timelineHasIndefinite = `-- name: TimelineHasIndefinite :one
 
 SELECT EXISTS (
-    SELECT 1 FROM billing.entitlements ent
+    SELECT 1 FROM openrails.entitlements ent
     WHERE ent.tenant_subject_id = $1
       AND ent.entitlement = $2
       AND ent.revoked_at IS NULL
@@ -1299,7 +1299,7 @@ func (q *Queries) TimelineHasIndefinite(ctx context.Context, arg TimelineHasInde
 }
 
 const updateEntitlementEndAtIfMatch = `-- name: UpdateEntitlementEndAtIfMatch :exec
-UPDATE billing.entitlements ent SET
+UPDATE openrails.entitlements ent SET
     end_at = $2::timestamptz,
     updated_at = $3::timestamptz
 WHERE ent.id = $1

@@ -29,7 +29,7 @@ func localProcessorNames(p Provider) []string {
 	}
 }
 
-// LocalSubscription is the slice of billing.subscriptions the diff engine
+// LocalSubscription is the slice of openrails.subscriptions the diff engine
 // consumes.
 type LocalSubscription struct {
 	ID                      uuid.UUID
@@ -67,7 +67,7 @@ func (s *LocalSubscription) IsLive() bool {
 	return false
 }
 
-// LocalPayment is the slice of billing.payments the diff engine consumes.
+// LocalPayment is the slice of openrails.payments the diff engine consumes.
 type LocalPayment struct {
 	ID                uuid.UUID
 	TenantSubjectID   uuid.UUID
@@ -90,7 +90,7 @@ type LocalEntitlement struct {
 	EndAt           *time.Time
 }
 
-// LocalPaymentMethod is the slice of billing.payment_methods the diff engine
+// LocalPaymentMethod is the slice of openrails.payment_methods the diff engine
 // consumes.
 type LocalPaymentMethod struct {
 	ID              uuid.UUID
@@ -102,7 +102,7 @@ type LocalPaymentMethod struct {
 	ExpiryDate      string
 }
 
-// LocalPrice is the slice of billing.prices the PS-1 materializer consumes:
+// LocalPrice is the slice of openrails.prices the PS-1 materializer consumes:
 // the catalog provider_links (processors jsonb) map remote plan ids onto
 // local prices.
 type LocalPrice struct {
@@ -290,7 +290,7 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 	return out, nil
 }
 
-// SolanaSubscriptionSourceFromDB adapts billing.solana_subscriptions into the
+// SolanaSubscriptionSourceFromDB adapts openrails.solana_subscriptions into the
 // SolanaFetcher's subscription source (one-line phase-2 wiring promised by
 // the phase-1 design).
 func SolanaSubscriptionSourceFromDB(d *db.DB) SolanaSubscriptionSource {

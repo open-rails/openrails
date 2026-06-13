@@ -58,10 +58,10 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	insertProductAndPrice(ctx, t, pool, product, price)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	fakeClock := clockwork.NewFakeClockAt(now)
@@ -88,7 +88,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 
 	var firstEndAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT end_at FROM billing.entitlements
+		`SELECT end_at FROM openrails.entitlements
 		 WHERE tenant_subject_id = $1 AND entitlement = $2 AND source_id = $3
 		   AND revoked_at IS NULL AND deleted_at IS NULL
 		 LIMIT 1`,
@@ -124,7 +124,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	}
 	var ents []entRow
 	rows, err := pool.Query(ctx,
-		`SELECT entitlement, end_at FROM billing.entitlements
+		`SELECT entitlement, end_at FROM openrails.entitlements
 		 WHERE tenant_subject_id = $1 AND revoked_at IS NULL AND deleted_at IS NULL
 		 ORDER BY entitlement ASC`,
 		tenantSubjectID)
@@ -186,10 +186,10 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 	insertProductAndPrice(ctx, t, pool, product, price)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	fakeClock := clockwork.NewFakeClockAt(now)

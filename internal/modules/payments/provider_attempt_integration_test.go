@@ -58,9 +58,9 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 
 	t.Cleanup(func() {
 		cctx := context.Background()
-		_, _ = pool.Exec(cctx, "DELETE FROM billing.payments WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(cctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	reserve := func(orderID string) *models.Payment {

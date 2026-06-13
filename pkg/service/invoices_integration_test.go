@@ -24,8 +24,8 @@ func TestListInvoices_Statement(t *testing.T) {
 	// rows but not these.
 	pool := testPool(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{

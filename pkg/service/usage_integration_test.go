@@ -24,7 +24,7 @@ func TestGetUsage_Breakdown(t *testing.T) {
 	// writes, scoped by payer.
 	pool := testPool(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{
@@ -82,7 +82,7 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 
 	pool := testPool(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{
@@ -137,21 +137,21 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 
 	var usageEventCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM billing.usage_events WHERE tenant_subject_id = $1 AND event_type = $2",
+		"SELECT count(*) FROM openrails.usage_events WHERE tenant_subject_id = $1 AND event_type = $2",
 		payer.UUID(), "endpoint.capture",
 	).Scan(&usageEventCount))
 	require.Equal(t, 2, usageEventCount, "duplicate usage source_id is idempotent")
 
 	var captureCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM billing.credit_transactions WHERE tenant_subject_id = $1 AND transaction_type = $2 AND status = $3",
+		"SELECT count(*) FROM openrails.credit_transactions WHERE tenant_subject_id = $1 AND transaction_type = $2 AND status = $3",
 		payer.UUID(), "hold", "captured",
 	).Scan(&captureCount))
 	require.Equal(t, 3, captureCount)
 
 	var ledgerCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM billing.credit_transactions WHERE tenant_subject_id = $1",
+		"SELECT count(*) FROM openrails.credit_transactions WHERE tenant_subject_id = $1",
 		payer.UUID(),
 	).Scan(&ledgerCount))
 	require.Equal(t, 4, ledgerCount, "usage analytics must not create extra ledger debits")

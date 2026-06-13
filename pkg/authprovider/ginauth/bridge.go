@@ -12,7 +12,7 @@ import (
 
 // ginUserContextKey is the gin-context key under which the authenticated
 // UserContext is stored; it MUST match UserContextFromGin.
-const ginUserContextKey = "billing.user_context"
+const ginUserContextKey = "openrails.user_context"
 
 // ProviderFromAuthenticator adapts a framework-neutral billingauth.Authenticator
 // into the gin Provider OpenRails mounts on its CURRENT gin routes. This is the

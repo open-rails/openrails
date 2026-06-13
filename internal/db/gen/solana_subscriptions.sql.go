@@ -13,7 +13,7 @@ import (
 )
 
 const advanceSolanaSubscriptionAfterPull = `-- name: AdvanceSolanaSubscriptionAfterPull :exec
-UPDATE billing.solana_subscriptions SET
+UPDATE openrails.solana_subscriptions SET
     last_pulled_period_start = $2,
     last_signature = $3,
     next_pull_at = $4,
@@ -41,7 +41,7 @@ func (q *Queries) AdvanceSolanaSubscriptionAfterPull(ctx context.Context, arg Ad
 }
 
 const getSolanaSubscriptionByPDA = `-- name: GetSolanaSubscriptionByPDA :one
-SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions WHERE subscription_pda = $1
+SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions WHERE subscription_pda = $1
 `
 
 func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, subscriptionPda string) (BillingSolanaSubscription, error) {
@@ -69,7 +69,7 @@ func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, subscriptionPd
 }
 
 const getSolanaSubscriptionBySubscriptionID = `-- name: GetSolanaSubscriptionBySubscriptionID :one
-SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions WHERE subscription_id = $1
+SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions WHERE subscription_id = $1
 `
 
 func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (BillingSolanaSubscription, error) {
@@ -98,7 +98,7 @@ func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, sub
 
 const listActiveSolanaMerchantWallets = `-- name: ListActiveSolanaMerchantWallets :many
 SELECT DISTINCT tenant_id, merchant_address
-FROM billing.solana_subscriptions
+FROM openrails.solana_subscriptions
 WHERE status = 'active'
 `
 
@@ -128,7 +128,7 @@ func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context) ([]ListAc
 }
 
 const listActiveSolanaSubscriptionsWithSignature = `-- name: ListActiveSolanaSubscriptionsWithSignature :many
-SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions
+SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions
 WHERE status = 'active'
   AND last_signature IS NOT NULL
   AND last_signature <> ''
@@ -174,7 +174,7 @@ func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context
 }
 
 const listDueSolanaSubscriptions = `-- name: ListDueSolanaSubscriptions :many
-SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions
+SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions
 WHERE status = 'active' AND next_pull_at <= $1::timestamptz
 ORDER BY tenant_id ASC, next_pull_at ASC
 LIMIT NULLIF($2::int, 0)
@@ -223,7 +223,7 @@ func (q *Queries) ListDueSolanaSubscriptions(ctx context.Context, arg ListDueSol
 }
 
 const setSolanaSubscriptionNextPullAt = `-- name: SetSolanaSubscriptionNextPullAt :exec
-UPDATE billing.solana_subscriptions SET
+UPDATE openrails.solana_subscriptions SET
     next_pull_at = $2,
     updated_at = $3
 WHERE id = $1
@@ -241,7 +241,7 @@ func (q *Queries) SetSolanaSubscriptionNextPullAt(ctx context.Context, arg SetSo
 }
 
 const setSolanaSubscriptionStatus = `-- name: SetSolanaSubscriptionStatus :exec
-UPDATE billing.solana_subscriptions SET
+UPDATE openrails.solana_subscriptions SET
     status = $2,
     updated_at = $3
 WHERE id = $1
@@ -260,7 +260,7 @@ func (q *Queries) SetSolanaSubscriptionStatus(ctx context.Context, arg SetSolana
 
 const upsertSolanaSubscription = `-- name: UpsertSolanaSubscription :exec
 
-INSERT INTO billing.solana_subscriptions (
+INSERT INTO openrails.solana_subscriptions (
     id, tenant_id, subscription_id, subscriber_wallet, authority_pda,
     subscription_pda, plan_pda, merchant_address, mint,
     plan_created_at_fingerprint, last_pulled_period_start, last_signature,
@@ -300,7 +300,7 @@ type UpsertSolanaSubscriptionParams struct {
 	LastSignature            *string
 }
 
-// billing.solana_subscriptions — on-chain recurring subscription state (#255).
+// openrails.solana_subscriptions — on-chain recurring subscription state (#255).
 func (q *Queries) UpsertSolanaSubscription(ctx context.Context, arg UpsertSolanaSubscriptionParams) error {
 	_, err := q.db.Exec(ctx, upsertSolanaSubscription,
 		arg.ID,

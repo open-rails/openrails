@@ -14,7 +14,7 @@ const (
 )
 
 // SolanaSubscription is the per-subscriber on-chain state for a recurring Solana
-// subscription (issue #255). It links 1:1 to a billing.subscriptions row (the
+// subscription (issue #255). It links 1:1 to a openrails.subscriptions row (the
 // canonical lifecycle record) and holds ONLY public on-chain data — never a
 // private key. The hourly pull worker (#256) queries due rows by
 // (tenant_id, next_pull_at).

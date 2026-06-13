@@ -14,7 +14,7 @@ import (
 
 const createEntitlementFeature = `-- name: CreateEntitlementFeature :one
 
-INSERT INTO billing.entitlement_features (
+INSERT INTO openrails.entitlement_features (
     id, tenant_id, lookup_key, name, active, metadata, created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
@@ -38,7 +38,7 @@ type CreateEntitlementFeatureParams struct {
 	UpdatedAt time.Time
 }
 
-// billing.entitlement_features + billing.product_entitlement_features (#245).
+// openrails.entitlement_features + openrails.product_entitlement_features (#245).
 func (q *Queries) CreateEntitlementFeature(ctx context.Context, arg CreateEntitlementFeatureParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, createEntitlementFeature,
 		arg.LookupKey,
@@ -56,7 +56,7 @@ func (q *Queries) CreateEntitlementFeature(ctx context.Context, arg CreateEntitl
 }
 
 const createProductEntitlementFeature = `-- name: CreateProductEntitlementFeature :one
-INSERT INTO billing.product_entitlement_features (
+INSERT INTO openrails.product_entitlement_features (
     id, tenant_id, product_id, entitlement_feature_id, duration_days,
     metadata, created_at, updated_at
 ) VALUES (
@@ -98,7 +98,7 @@ func (q *Queries) CreateProductEntitlementFeature(ctx context.Context, arg Creat
 }
 
 const deleteProductEntitlementFeature = `-- name: DeleteProductEntitlementFeature :execrows
-DELETE FROM billing.product_entitlement_features pef
+DELETE FROM openrails.product_entitlement_features pef
 WHERE pef.id = $1 AND pef.tenant_id = $2
 `
 
@@ -116,7 +116,7 @@ func (q *Queries) DeleteProductEntitlementFeature(ctx context.Context, arg Delet
 }
 
 const getEntitlementFeatureByID = `-- name: GetEntitlementFeatureByID :one
-SELECT id, tenant_id, lookup_key, name, active, metadata, created_at, updated_at FROM billing.entitlement_features ef
+SELECT id, tenant_id, lookup_key, name, active, metadata, created_at, updated_at FROM openrails.entitlement_features ef
 WHERE ef.id = $1 AND ef.tenant_id = $2
 `
 
@@ -142,7 +142,7 @@ func (q *Queries) GetEntitlementFeatureByID(ctx context.Context, arg GetEntitlem
 }
 
 const getEntitlementFeatureByLookupKey = `-- name: GetEntitlementFeatureByLookupKey :one
-SELECT id, tenant_id, lookup_key, name, active, metadata, created_at, updated_at FROM billing.entitlement_features ef
+SELECT id, tenant_id, lookup_key, name, active, metadata, created_at, updated_at FROM openrails.entitlement_features ef
 WHERE ef.lookup_key = $1 AND ef.tenant_id = $2
 `
 
@@ -168,7 +168,7 @@ func (q *Queries) GetEntitlementFeatureByLookupKey(ctx context.Context, arg GetE
 }
 
 const getProductEntitlementFeatureByID = `-- name: GetProductEntitlementFeatureByID :one
-SELECT id, tenant_id, product_id, entitlement_feature_id, duration_days, metadata, created_at, updated_at FROM billing.product_entitlement_features pef
+SELECT id, tenant_id, product_id, entitlement_feature_id, duration_days, metadata, created_at, updated_at FROM openrails.product_entitlement_features pef
 WHERE pef.id = $1 AND pef.tenant_id = $2
 `
 
@@ -194,7 +194,7 @@ func (q *Queries) GetProductEntitlementFeatureByID(ctx context.Context, arg GetP
 }
 
 const listEntitlementFeatures = `-- name: ListEntitlementFeatures :many
-SELECT id, tenant_id, lookup_key, name, active, metadata, created_at, updated_at FROM billing.entitlement_features ef
+SELECT id, tenant_id, lookup_key, name, active, metadata, created_at, updated_at FROM openrails.entitlement_features ef
 WHERE ef.tenant_id = $1
 ORDER BY ef.created_at DESC
 `
@@ -229,7 +229,7 @@ func (q *Queries) ListEntitlementFeatures(ctx context.Context, tenantID uuid.UUI
 }
 
 const listEntitlementFeaturesByLookupKeys = `-- name: ListEntitlementFeaturesByLookupKeys :many
-SELECT id, tenant_id, lookup_key, name, active, metadata, created_at, updated_at FROM billing.entitlement_features ef
+SELECT id, tenant_id, lookup_key, name, active, metadata, created_at, updated_at FROM openrails.entitlement_features ef
 WHERE ef.tenant_id = $1
   AND ef.lookup_key = ANY($2::text[])
 `
@@ -270,8 +270,8 @@ func (q *Queries) ListEntitlementFeaturesByLookupKeys(ctx context.Context, arg L
 
 const listProductEntitlementFeatures = `-- name: ListProductEntitlementFeatures :many
 SELECT pef.id, pef.tenant_id, pef.product_id, pef.entitlement_feature_id, pef.duration_days, pef.metadata, pef.created_at, pef.updated_at, ef.id, ef.tenant_id, ef.lookup_key, ef.name, ef.active, ef.metadata, ef.created_at, ef.updated_at
-FROM billing.product_entitlement_features pef
-JOIN billing.entitlement_features ef ON ef.id = pef.entitlement_feature_id
+FROM openrails.product_entitlement_features pef
+JOIN openrails.entitlement_features ef ON ef.id = pef.entitlement_feature_id
 WHERE pef.product_id = $1 AND pef.tenant_id = $2
 ORDER BY pef.created_at ASC
 `
@@ -324,7 +324,7 @@ func (q *Queries) ListProductEntitlementFeatures(ctx context.Context, arg ListPr
 }
 
 const updateEntitlementFeature = `-- name: UpdateEntitlementFeature :execrows
-UPDATE billing.entitlement_features ef SET
+UPDATE openrails.entitlement_features ef SET
     name = $2,
     active = $3,
     metadata = $4,

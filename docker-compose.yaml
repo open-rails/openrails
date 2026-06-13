@@ -37,8 +37,8 @@ services:
     networks:
       - local-openrails
     healthcheck:
-      # Verify bootstrap completed by checking the billing schema exists (schema name is kept for now).
-      test: ["CMD-SHELL", "pg_isready -U admin -d openrails_db -h localhost && psql -U admin -d openrails_db -tAc \"SELECT 1 FROM pg_namespace WHERE nspname='billing'\" | grep -q 1"]
+      # Verify bootstrap completed by checking the OpenRails schema exists (#471: default schema is `openrails`).
+      test: ["CMD-SHELL", "pg_isready -U admin -d openrails_db -h localhost && psql -U admin -d openrails_db -tAc \"SELECT 1 FROM pg_namespace WHERE nspname='openrails'\" | grep -q 1"]
       interval: 5s
       timeout: 5s
       start_period: 90s

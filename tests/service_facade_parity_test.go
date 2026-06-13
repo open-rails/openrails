@@ -83,7 +83,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		CreatedAt:     time.Now().UTC(),
 	}
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO billing.credit_types (id, name, display_name, unit, decimal_places, is_active, created_at)
+		INSERT INTO openrails.credit_types (id, name, display_name, unit, decimal_places, is_active, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		ct.ID, ct.Name, ct.DisplayName, ct.Unit, ct.DecimalPlaces, ct.IsActive, ct.CreatedAt)
 	require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		UpdatedAt:       time.Now().UTC(),
 	}
 	_, err = suite.Pool.Exec(ctx, `
-		INSERT INTO billing.credit_balances (id, tenant_id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at)
+		INSERT INTO openrails.credit_balances (id, tenant_id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		ucb.ID, ucb.TenantID, ucb.TenantSubjectID, ucb.CreditTypeID, ucb.Balance, ucb.HeldBalance, ucb.CreatedAt, ucb.UpdatedAt)
 	require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	suite.InsertEntitlement(ctx, ent)
 	legacyOnlyTenantSubjectID := uuid.New()
 	_, err = suite.Pool.Exec(ctx, `
-		INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject, created_at, last_seen_at)
+		INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject, created_at, last_seen_at)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
 		legacyOnlyTenantSubjectID, tenant.DefaultID.UUID(),
 		"service-facade-parity-other", userID+"-other",

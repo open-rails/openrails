@@ -21,13 +21,13 @@
 // admission/tier-policy integration is left to the caller.
 //
 // State:
-//   - billing.budget_reservations (one row per in-flight or settled charge):
+//   - openrails.budget_reservations (one row per in-flight or settled charge):
 //     Reserve -> "active" (counts against `reserved` by amount_micros),
 //     Capture -> "captured" (counts against `used` by captured_micros),
 //     Release -> "released" (counts against neither).
 //     A reservation counts against a window iff created_at >= that window's
 //     current window_start.
-//   - billing.budget_window_state (one row per tenant/subject/actor/window
+//   - openrails.budget_window_state (one row per tenant/subject/actor/window
 //     key, migration 005): the window anchor. Reserve locks it FOR UPDATE so
 //     concurrent reserves around a boundary serialize; the rolling engine had
 //     no such serialization point.

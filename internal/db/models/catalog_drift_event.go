@@ -20,7 +20,7 @@ const (
 	CatalogDriftProviderSolana CatalogDriftProvider = "solana"
 )
 
-// CatalogDriftKind classifies a row in billing.catalog_drift_events. The
+// CatalogDriftKind classifies a row in openrails.catalog_drift_events. The
 // orphan/missing kinds are provider-scoped; field_drift is shared and
 // disambiguated by the Provider column.
 //

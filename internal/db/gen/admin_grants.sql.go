@@ -13,7 +13,7 @@ import (
 )
 
 const countAdminGrantsByGrantedBy = `-- name: CountAdminGrantsByGrantedBy :one
-SELECT count(*) FROM billing.admin_grants ag WHERE ag.granted_by = $1
+SELECT count(*) FROM openrails.admin_grants ag WHERE ag.granted_by = $1
 `
 
 func (q *Queries) CountAdminGrantsByGrantedBy(ctx context.Context, grantedBy string) (int64, error) {
@@ -24,7 +24,7 @@ func (q *Queries) CountAdminGrantsByGrantedBy(ctx context.Context, grantedBy str
 }
 
 const countAdminGrantsByTenantSubject = `-- name: CountAdminGrantsByTenantSubject :one
-SELECT count(*) FROM billing.admin_grants ag WHERE ag.tenant_subject_id = $1
+SELECT count(*) FROM openrails.admin_grants ag WHERE ag.tenant_subject_id = $1
 `
 
 func (q *Queries) CountAdminGrantsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) (int64, error) {
@@ -36,7 +36,7 @@ func (q *Queries) CountAdminGrantsByTenantSubject(ctx context.Context, tenantSub
 
 const createAdminGrant = `-- name: CreateAdminGrant :one
 
-INSERT INTO billing.admin_grants (
+INSERT INTO openrails.admin_grants (
     id, tenant_subject_id, price_id, granted_by, reason, payment_id,
     duration_days, created_at
 ) VALUES (
@@ -59,7 +59,7 @@ type CreateAdminGrantParams struct {
 	CreatedAt       time.Time
 }
 
-// billing.admin_grants.
+// openrails.admin_grants.
 // RETURNING id matches bun's pk write-back for the uuidv7() default.
 func (q *Queries) CreateAdminGrant(ctx context.Context, arg CreateAdminGrantParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, createAdminGrant,
@@ -78,7 +78,7 @@ func (q *Queries) CreateAdminGrant(ctx context.Context, arg CreateAdminGrantPara
 }
 
 const getAdminGrantByID = `-- name: GetAdminGrantByID :one
-SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, tenant_id, tenant_subject_id FROM billing.admin_grants WHERE id = $1
+SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, tenant_id, tenant_subject_id FROM openrails.admin_grants WHERE id = $1
 `
 
 func (q *Queries) GetAdminGrantByID(ctx context.Context, id uuid.UUID) (BillingAdminGrant, error) {
@@ -99,7 +99,7 @@ func (q *Queries) GetAdminGrantByID(ctx context.Context, id uuid.UUID) (BillingA
 }
 
 const listAdminGrantsByGrantedBy = `-- name: ListAdminGrantsByGrantedBy :many
-SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, tenant_id, tenant_subject_id FROM billing.admin_grants ag
+SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, tenant_id, tenant_subject_id FROM openrails.admin_grants ag
 WHERE ag.granted_by = $1
 ORDER BY ag.created_at DESC
 LIMIT NULLIF($3::int, 0) OFFSET $2::int
@@ -142,7 +142,7 @@ func (q *Queries) ListAdminGrantsByGrantedBy(ctx context.Context, arg ListAdminG
 }
 
 const listAdminGrantsByTenantSubject = `-- name: ListAdminGrantsByTenantSubject :many
-SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, tenant_id, tenant_subject_id FROM billing.admin_grants ag
+SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, tenant_id, tenant_subject_id FROM openrails.admin_grants ag
 WHERE ag.tenant_subject_id = $1
 ORDER BY ag.created_at DESC
 LIMIT NULLIF($3::int, 0) OFFSET $2::int

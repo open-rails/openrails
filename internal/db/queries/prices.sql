@@ -1,7 +1,7 @@
--- billing.prices.
+-- openrails.prices.
 
 -- name: CreatePrice :execrows
-INSERT INTO billing.prices (
+INSERT INTO openrails.prices (
     id, tenant_id, product_id, status, amount, currency,
     billing_cycle_days, processors, created_at, updated_at
 ) VALUES (
@@ -17,41 +17,41 @@ INSERT INTO billing.prices (
 );
 
 -- name: GetPriceByID :one
-SELECT * FROM billing.prices WHERE id = $1;
+SELECT * FROM openrails.prices WHERE id = $1;
 
 -- name: ListPricesByIDs :many
-SELECT * FROM billing.prices WHERE id = ANY(sqlc.arg(ids)::uuid[]);
+SELECT * FROM openrails.prices WHERE id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- name: ListPricesWithProductByIDs :many
 SELECT sqlc.embed(price), sqlc.embed(prod)
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
+FROM openrails.prices price
+JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- name: ListActivePricesByProduct :many
-SELECT * FROM billing.prices price
+SELECT * FROM openrails.prices price
 WHERE price.product_id = $1 AND price.status = 'active';
 
 -- name: ListActivePricesByProductOrdered :many
-SELECT * FROM billing.prices price
+SELECT * FROM openrails.prices price
 WHERE price.product_id = $1 AND price.status = 'active'
 ORDER BY price.amount ASC;
 
 -- name: ListAllActivePricesWithProduct :many
 SELECT sqlc.embed(price), sqlc.embed(prod)
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
+FROM openrails.prices price
+JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.status = 'active'
 ORDER BY price.amount ASC;
 
 -- name: ListAllPricesWithProduct :many
 SELECT sqlc.embed(price), sqlc.embed(prod)
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
+FROM openrails.prices price
+JOIN openrails.products prod ON prod.id = price.product_id
 ORDER BY price.amount ASC;
 
 -- name: CountPricesFiltered :one
-SELECT count(*) FROM billing.prices price
+SELECT count(*) FROM openrails.prices price
 WHERE (NOT sqlc.arg(only_active)::boolean OR price.status = 'active')
   AND (NOT sqlc.arg(only_inactive)::boolean OR price.status <> 'active')
   AND (sqlc.narg(status)::text IS NULL OR price.status = sqlc.narg(status)::text)
@@ -62,8 +62,8 @@ WHERE (NOT sqlc.arg(only_active)::boolean OR price.status = 'active')
 
 -- name: ListPricesFiltered :many
 SELECT sqlc.embed(price), sqlc.embed(prod)
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
+FROM openrails.prices price
+JOIN openrails.products prod ON prod.id = price.product_id
 WHERE (NOT sqlc.arg(only_active)::boolean OR price.status = 'active')
   AND (NOT sqlc.arg(only_inactive)::boolean OR price.status <> 'active')
   AND (sqlc.narg(status)::text IS NULL OR price.status = sqlc.narg(status)::text)
@@ -77,7 +77,7 @@ LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 -- name: GetPriceByNMIPlan :one
 -- include_nmi_fallback replicates the bun-era behavior: for non-"nmi"
 -- providers the legacy "nmi" key is also consulted.
-SELECT * FROM billing.prices price
+SELECT * FROM openrails.prices price
 WHERE price.status <> 'draft'
   AND (price.processors -> sqlc.arg(provider)::text ->> 'plan_id' = sqlc.arg(plan_id)::text
        OR (sqlc.arg(include_nmi_fallback)::boolean
@@ -86,22 +86,22 @@ LIMIT 1;
 
 -- name: GetPriceWithProductByCCBillPriceID :one
 SELECT sqlc.embed(price), sqlc.embed(prod)
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
+FROM openrails.prices price
+JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.processors -> 'ccbill' ->> 'flex_id' = sqlc.arg(flex_id)::text
   AND price.status <> 'draft'
 LIMIT 1;
 
 -- name: GetPriceWithProductByStripePriceID :one
 SELECT sqlc.embed(price), sqlc.embed(prod)
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
+FROM openrails.prices price
+JOIN openrails.products prod ON prod.id = price.product_id
 WHERE price.processors -> 'stripe' ->> 'price_id' = sqlc.arg(stripe_price_id)::text
   AND price.status <> 'draft'
 LIMIT 1;
 
 -- name: UpdatePrice :execrows
-UPDATE billing.prices SET
+UPDATE openrails.prices SET
     product_id = $2,
     status = $3,
     amount = $4,
@@ -112,4 +112,4 @@ UPDATE billing.prices SET
 WHERE id = $1;
 
 -- name: DeletePrice :execrows
-DELETE FROM billing.prices WHERE id = $1;
+DELETE FROM openrails.prices WHERE id = $1;

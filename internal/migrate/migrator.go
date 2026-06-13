@@ -71,39 +71,72 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("river migrations failed: %w", err)
 	}
 
-	// ---------- 3. Billing Migrations (OpenRails schema) ----------
-	log.Infof("Running Billing migrations (schema %q)...", schema)
+	// ---------- 3. OpenRails Migrations (OpenRails schema) ----------
+	log.Infof("Running OpenRails migrations (schema %q)...", schema)
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	if err != nil {
-		return fmt.Errorf("billing: load migrations: %w", err)
+		return fmt.Errorf("openrails: load migrations: %w", err)
 	}
 
-	// "billing" here is migratekit's app/tracking key (public.migrations.app), not
-	// the schema. WithSchema sets a search_path so unqualified DDL lands in the
-	// configured schema; note OpenRails' billing migration SQL is itself
-	// schema-qualified to `billing.*`, so relocating billing tables fully also
-	// requires schema-templating those files (out of scope for #165, which makes
-	// the schema explicit/configurable and relocates the River tables).
-	m := migratekit.NewPostgres(sqlDB, "billing").WithSchema(schema)
+	// The migration DDL is authored schema-qualified to the default schema
+	// (config.DefaultSchema, "openrails"). When a host configures a different
+	// schema, relocate every qualifier before applying — search_path alone can't
+	// move hard-qualified DDL (#471).
+	migrations = rewriteMigrationsSchema(migrations, schema)
+
+	// config.MigratekitApp is migratekit's app/tracking key
+	// (public.migrations.app), independent of the schema (#471 renamed it from
+	// "billing").
+	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(schema)
 	// ApplyMigrations now calls Setup() automatically within the lock
 	if err := m.ApplyMigrations(ctx, migrations); err != nil {
-		return fmt.Errorf("billing: apply migrations: %w", err)
+		return fmt.Errorf("openrails: apply migrations: %w", err)
 	}
-	log.Info("✓ Billing migrations completed successfully")
+	log.Info("✓ OpenRails migrations completed successfully")
 	return nil
 }
 
+// schemaWordRe matches the default schema name (config.DefaultSchema) as a whole
+// word. The trailing \b means it does NOT match the unprivileged role name
+// `openrails_app` (the underscore is a word character, so there is no boundary),
+// while it DOES match both the `openrails.<table>` qualifier (the dot is a
+// boundary) and bare schema-DDL references (`CREATE SCHEMA openrails`,
+// `GRANT ... ON SCHEMA openrails`, `ALTER DEFAULT PRIVILEGES IN SCHEMA openrails`).
+var schemaWordRe = regexp.MustCompile(`\b` + regexp.QuoteMeta(config.DefaultSchema) + `\b`)
+
+// rewriteMigrationsSchema relocates every reference to the default schema in the
+// migration DDL to the configured schema — both the hard-qualified
+// `openrails.<table>` prefixes and the bare schema-name references in CREATE
+// SCHEMA / GRANT ... ON SCHEMA / ALTER DEFAULT PRIVILEGES IN SCHEMA. It is a
+// no-op when the schema is empty or already the default, so the common path pays
+// nothing and runs the SQL verbatim. schema is a pre-validated SQL identifier
+// (config.validateSchema), so the substitution can't inject anything unsafe.
+//
+// Prose/comments in the DDL say "OpenRails" (capitalized) or "billing-namespace"
+// (the domain noun), neither of which the lowercase whole-word match touches.
+func rewriteMigrationsSchema(migrations []migratekit.Migration, schema string) []migratekit.Migration {
+	if schema == "" || schema == config.DefaultSchema {
+		return migrations
+	}
+	out := make([]migratekit.Migration, len(migrations))
+	for i, mig := range migrations {
+		mig.Content = schemaWordRe.ReplaceAllString(mig.Content, schema)
+		out[i] = mig
+	}
+	return out
+}
+
 // ensurePostgresBootstrap creates the OpenRails schema (configurable via
-// db.schema, default `billing` — #165), shared extensions, and the migration
-// tracking table. schema is a pre-validated SQL identifier (config.validateSchema),
-// so it is safe to interpolate. CREATE SCHEMA IF NOT EXISTS is a no-op when the
-// host already owns the schema.
+// db.schema, default `openrails` — #165/#471), shared extensions, and the
+// migration tracking table. schema is a pre-validated SQL identifier
+// (config.validateSchema), so it is safe to interpolate. CREATE SCHEMA IF NOT
+// EXISTS is a no-op when the host already owns the schema.
 func ensurePostgresBootstrap(ctx context.Context, db *sql.DB, schema string) error {
 	if db == nil {
 		return fmt.Errorf("missing sql db")
 	}
 	if schema == "" {
-		schema = "billing"
+		schema = config.DefaultSchema
 	}
 	_, err := db.ExecContext(ctx, fmt.Sprintf(`
 		CREATE SCHEMA IF NOT EXISTS %s;
@@ -242,7 +275,7 @@ func runClickHouseMigrations(ctx context.Context, sqlDB *sql.DB, cfg *config.Cli
 		Database:   chDB,
 		Username:   cfg.Username,
 		Password:   cfg.Password,
-		App:        "billing",
+		App:        config.MigratekitApp,
 		Cluster:    chCluster,
 		PostgresDB: sqlDB,
 	})

@@ -34,7 +34,7 @@ var (
 // spend caps + invoices see them) idempotency-keyed on
 // (source='window_settle', source_id=request_id) — the same dedup shape as
 // capture's request_id key. Open/refill rows are zero-amount audit records of
-// the reservation event (live reservation state is on billing.credit_windows).
+// the reservation event (live reservation state is on openrails.credit_windows).
 const (
 	windowOpenSource   = "window"
 	windowSettleSource = "window_settle"

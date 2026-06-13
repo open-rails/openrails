@@ -21,7 +21,7 @@ type HistoryEvent struct {
 	Table     string
 	EventType string
 	Processor string
-	// SubscriptionID is the local billing.subscriptions uuid when known.
+	// SubscriptionID is the local openrails.subscriptions uuid when known.
 	SubscriptionID *uuid.UUID
 	// ProcessorSubscriptionID correlates when no local id was stamped.
 	ProcessorSubscriptionID string

@@ -38,8 +38,8 @@ func newTestService(t *testing.T, now time.Time) (*Service, context.Context, uui
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.product_access_grants WHERE product_id = $1", productID)
-		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.product_access_grants WHERE product_id = $1", productID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	return NewService(dbi, clockwork.NewFakeClockAt(now)), ctx, productID

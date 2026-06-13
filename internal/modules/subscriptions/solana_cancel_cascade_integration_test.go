@@ -20,7 +20,7 @@ import (
 )
 
 // TestCancelMembership_CascadesToSolanaCranker proves #264: cancelling a Solana
-// membership flips the linked billing.solana_subscriptions row to cancelled so
+// membership flips the linked openrails.solana_subscriptions row to cancelled so
 // the hourly cranker's ListDue (status = active filter) no longer returns it,
 // which stops billing because OpenRails is the only puller.
 func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
@@ -61,10 +61,10 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 	require.NoError(t, solRepo.Upsert(ctx, solRow))
 
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.solana_subscriptions WHERE subscription_id = $1", subID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.solana_subscriptions WHERE subscription_id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	// Sanity: ListDue returns it before cancellation.
@@ -110,9 +110,9 @@ func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
 	insertCatalogAndSub(ctx, t, dbi, now, billingDays, productID, priceID, subID, userID, now, now.Add(30*24*time.Hour))
 
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	lifecycle := newLifecycleForTest(dbi)
@@ -125,7 +125,7 @@ func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
 
 	var subStatus string
 	require.NoError(t, dbi.Pool().QueryRow(ctx,
-		"SELECT status FROM billing.subscriptions WHERE id = $1", subID,
+		"SELECT status FROM openrails.subscriptions WHERE id = $1", subID,
 	).Scan(&subStatus))
 	require.Equal(t, string(models.StatusCancelled), subStatus)
 }
