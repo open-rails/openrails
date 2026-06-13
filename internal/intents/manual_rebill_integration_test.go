@@ -111,19 +111,20 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO openrails.products (id, slug, display_name) VALUES ($1, $2, $2)`,
-		productID, "rebill-prod-"+suffix)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days)
-	      VALUES ($1, $2, 999, 'usd', 30)`, priceID, productID)
-	exec(`INSERT INTO openrails.payment_methods (id, tenant_subject_id, processor, vault_id, billing_id, initial_transaction_id)
-	      VALUES ($1, $2, 'mobius', $3, $4, $5)`,
-		paymentMethodID, userID, "vault-"+suffix, "bill-"+suffix, "txn-init-"+suffix)
+	tenantID := dbtest.TestTenantID.UUID()
+	exec(`INSERT INTO openrails.products (id, slug, display_name, tenant_id) VALUES ($1, $2, $2, $3)`,
+		productID, "rebill-prod-"+suffix, tenantID)
+	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, tenant_id)
+	      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, tenantID)
+	exec(`INSERT INTO openrails.payment_methods (id, tenant_subject_id, processor, vault_id, billing_id, initial_transaction_id, tenant_id)
+	      VALUES ($1, $2, 'mobius', $3, $4, $5, $6)`,
+		paymentMethodID, userID, "vault-"+suffix, "bill-"+suffix, "txn-init-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, processor, processor_subscription_id, payment_method_id,
-	         current_period_starts_at, current_period_ends_at, started_at, next_retry_at, retry_attempts, tenant_subject_id)
-	      VALUES ($1, $2, $3, 'past_due', 'mobius', $4, $5, $6, $7, $6, $8, 1, $9)`,
+	         current_period_starts_at, current_period_ends_at, started_at, next_retry_at, retry_attempts, tenant_subject_id, tenant_id)
+	      VALUES ($1, $2, $3, 'past_due', 'mobius', $4, $5, $6, $7, $6, $8, 1, $9, $10)`,
 		fx.subID, priceID, productID, "psid-"+suffix, paymentMethodID,
-		fx.periodEnd.Add(-30*24*time.Hour), fx.periodEnd, now.Add(-30*time.Second), userID)
+		fx.periodEnd.Add(-30*24*time.Hour), fx.periodEnd, now.Add(-30*time.Second), userID, tenantID)
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", fx.subID)

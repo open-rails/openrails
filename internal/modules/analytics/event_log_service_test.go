@@ -31,7 +31,7 @@ func TestLogPaymentEventSpoolsWithDefaultsWhenClickHouseDown(t *testing.T) {
 		clock: clockwork.NewFakeClockAt(now),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(dbtest.WithTestTenant(context.Background()), 50*time.Millisecond)
 	defer cancel()
 	if err := svc.LogPaymentEvent(ctx, PaymentEventData{
 		UserID:    "user-1",

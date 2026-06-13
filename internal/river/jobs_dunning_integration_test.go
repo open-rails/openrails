@@ -298,11 +298,11 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		subID, periodEnd.Format(time.RFC3339), orderRef)
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.provider_intents
-		  (provider, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence)
-		VALUES ('mobius', $1, $2, $3, $4, 'succeeded', 'system', now(), $5)`,
+		  (provider, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence, tenant_id)
+		VALUES ('mobius', $1, $2, $3, $4, 'succeeded', 'system', now(), $5, $6)`,
 		intents.TypeManualRebill, subID, payloadJSON,
 		intents.ManualRebillIdempotencyKey(subID, periodEnd, "mobius", orderRef, 0),
-		fmt.Sprintf(`{"transaction_id": %q}`, durableTxn))
+		fmt.Sprintf(`{"transaction_id": %q}`, durableTxn), dbtest.TestTenantID.UUID())
 	require.NoError(t, err)
 
 	t.Cleanup(func() {

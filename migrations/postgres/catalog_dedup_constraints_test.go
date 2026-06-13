@@ -49,7 +49,7 @@ func TestCatalogDedupConstraints(t *testing.T) {
 
 	for _, want := range []string{
 		// Product identity = slug.
-		"add constraint products_slug_key unique (slug)",
+		"constraint products_slug_key unique (slug)",
 		// Price identity = financial substance (the provider/content de-dup key).
 		"constraint unique_prices_product_amount_cycle",
 		"unique (product_id, amount, currency, billing_cycle_days)",

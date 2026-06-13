@@ -83,9 +83,9 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		CreatedAt:     time.Now().UTC(),
 	}
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.credit_types (id, name, display_name, unit, decimal_places, is_active, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		ct.ID, ct.Name, ct.DisplayName, ct.Unit, ct.DecimalPlaces, ct.IsActive, ct.CreatedAt)
+		INSERT INTO openrails.credit_types (id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		ct.ID, dbtest.TestTenantID.UUID(), ct.Name, ct.DisplayName, ct.Unit, ct.DecimalPlaces, ct.IsActive, ct.CreatedAt)
 	require.NoError(t, err)
 
 	ucb := &models.CreditBalance{

@@ -9,7 +9,7 @@ func TestConsolidatedSchemaEnablesRLSAndAppRole(t *testing.T) {
 	c := loadSchema001(t)
 	for _, want := range []string{
 		"CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS",
-		"GRANT USAGE ON SCHEMA billing TO openrails_app",
+		"GRANT USAGE ON SCHEMA openrails TO openrails_app",
 		"ENABLE ROW LEVEL SECURITY",
 		"FORCE ROW LEVEL SECURITY",
 		"CREATE POLICY tenant_isolation",

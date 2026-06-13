@@ -117,12 +117,13 @@ func TestSchema_EnforcesNotNullTenantAndPayer(t *testing.T) {
 		uuid.New(), creditTypeID, payer)
 	require.Error(t, err, "insert with explicit NULL tenant_id must violate NOT NULL")
 
-	// A fully-specified payer+tenant row inserts cleanly.
+	// A fully-specified payer+tenant row inserts cleanly. tenant_id must match the
+	// tenant_subject's tenant (seeded by seedTenantSubject: 0…0001).
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.credit_balances (id, credit_type_id, tenant_subject_id, balance, held_balance)
-		 VALUES ($1, $2, $3, 0, 0)`,
-		uuid.New(), creditTypeID, payer)
-	require.NoError(t, err, "payer+tenant-defaulted insert must succeed")
+		`INSERT INTO openrails.credit_balances (id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
+		 VALUES ($1, $2, $3, $4, 0, 0)`,
+		uuid.New(), creditTypeID, payer, uuid.MustParse("00000000-0000-0000-0000-000000000001"))
+	require.NoError(t, err, "fully-specified payer+tenant insert must succeed")
 }
 
 // TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness proves the HARDCUT
@@ -148,18 +149,18 @@ func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
 	payer := uuid.New()
 	seedTenantSubject(t, ctx, pool, payer)
 
-	// First row in the default tenant.
+	// First row in the tenant_subject's tenant (seeded by seedTenantSubject: 0…0001).
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.credit_balances (id, credit_type_id, tenant_subject_id, balance, held_balance)
-		 VALUES ($1, $2, $3, 0, 0)`,
-		uuid.New(), creditTypeID, payer)
+		`INSERT INTO openrails.credit_balances (id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
+		 VALUES ($1, $2, $3, $4, 0, 0)`,
+		uuid.New(), creditTypeID, payer, uuid.MustParse("00000000-0000-0000-0000-000000000001"))
 	require.NoError(t, err)
 
-	// Duplicate (tenant, payer, credit_type) -> unique violation.
+	// Duplicate (tenant, payer, credit_type) -> unique violation. Same tenant as above.
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.credit_balances (id, credit_type_id, tenant_subject_id, balance, held_balance)
-		 VALUES ($1, $2, $3, 0, 0)`,
-		uuid.New(), creditTypeID, payer)
+		`INSERT INTO openrails.credit_balances (id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
+		 VALUES ($1, $2, $3, $4, 0, 0)`,
+		uuid.New(), creditTypeID, payer, uuid.MustParse("00000000-0000-0000-0000-000000000001"))
 	require.Error(t, err, "duplicate (tenant, payer, credit_type) must violate uniqueness")
 
 	// Same payer + credit_type in a DIFFERENT tenant -> allowed.

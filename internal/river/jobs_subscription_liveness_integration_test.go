@@ -294,9 +294,9 @@ func TestLivenessWorker_RemoteAbsentCancelsAndRevokes(t *testing.T) {
 	var tenantSubjectID uuid.UUID
 	require.NoError(t, f.pool.QueryRow(ctx, `SELECT tenant_subject_id FROM openrails.subscriptions WHERE id = $1`, f.subID).Scan(&tenantSubjectID))
 	_, err := f.pool.Exec(ctx,
-		`INSERT INTO openrails.entitlements (id, entitlement, start_at, end_at, source_id, source_type, tenant_subject_id)
-		 VALUES ($1, 'premium', now() - interval '40 days', now() + interval '10 days', $2, 'subscription', $3)`,
-		uuid.New(), f.subID, tenantSubjectID)
+		`INSERT INTO openrails.entitlements (id, entitlement, start_at, end_at, source_id, source_type, tenant_subject_id, tenant_id)
+		 VALUES ($1, 'premium', now() - interval '40 days', now() + interval '10 days', $2, 'subscription', $3, $4)`,
+		uuid.New(), f.subID, tenantSubjectID, dbtest.TestTenantID.UUID())
 	require.NoError(t, err)
 
 	f.run(t)

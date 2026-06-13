@@ -107,18 +107,19 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO openrails.products (id, slug, display_name) VALUES ($1, $2, $2)`,
-		productID, "intent-prod-"+suffix)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days)
-	      VALUES ($1, $2, 999, 'usd', 30)`, priceID, productID)
+	tenantID := dbtest.TestTenantID.UUID()
+	exec(`INSERT INTO openrails.products (id, slug, display_name, tenant_id) VALUES ($1, $2, $2, $3)`,
+		productID, "intent-prod-"+suffix, tenantID)
+	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, tenant_id)
+	      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, processor, processor_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
-	         cancelled_at, cancel_type, deletion_scheduled_at, tenant_subject_id)
-	      VALUES ($1, $2, $3, 'cancelled', 'mobius', $4, $5, $6, $5, $7, 'user', $8, $9)`,
+	         cancelled_at, cancel_type, deletion_scheduled_at, tenant_subject_id, tenant_id)
+	      VALUES ($1, $2, $3, 'cancelled', 'mobius', $4, $5, $6, $5, $7, 'user', $8, $9, $10)`,
 		fx.subID, priceID, productID, fx.psid,
 		now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), now,
-		deletionScheduledAt.UTC(), fx.userID)
+		deletionScheduledAt.UTC(), fx.userID, tenantID)
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", fx.subID)

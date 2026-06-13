@@ -109,13 +109,14 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO openrails.products (id, slug, display_name) VALUES ($1, $2, $2)`,
-		productID, "refund-prod-"+suffix)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency) VALUES ($1, $2, 1000, 'usd')`,
-		priceID, productID)
-	exec(`INSERT INTO openrails.payments (id, price_id, processor, transaction_id, amount, list_amount, currency, status, tenant_subject_id)
-	      VALUES ($1, $2, 'mobius', $3, 1000, 1000, 'usd', 'completed', $4)`,
-		fx.paymentID, priceID, fx.originalTxn, userID)
+	tenantID := dbtest.TestTenantID.UUID()
+	exec(`INSERT INTO openrails.products (id, slug, display_name, tenant_id) VALUES ($1, $2, $2, $3)`,
+		productID, "refund-prod-"+suffix, tenantID)
+	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, tenant_id) VALUES ($1, $2, 1000, 'usd', $3)`,
+		priceID, productID, tenantID)
+	exec(`INSERT INTO openrails.payments (id, price_id, processor, transaction_id, amount, list_amount, currency, status, tenant_subject_id, tenant_id)
+	      VALUES ($1, $2, 'mobius', $3, 1000, 1000, 'usd', 'completed', $4, $5)`,
+		fx.paymentID, priceID, fx.originalTxn, userID, tenantID)
 
 	reservation, err := payments.NewPaymentService(dbi).ReserveRefund(ctx, fx.paymentID,
 		"admin_refund_reservation:"+fx.paymentID.String(), amountCents,

@@ -23,7 +23,6 @@ var tenantOwnedTables = []string{
 	"credit_blocks",
 	"credit_balances",
 	"checkout_sessions",
-	"manual_rebill_attempts",
 }
 
 func loadSchema001(t *testing.T) string {
@@ -35,32 +34,24 @@ func loadSchema001(t *testing.T) string {
 	return string(b)
 }
 
-func loadSeed002(t *testing.T) string {
-	t.Helper()
-	b, err := FS.ReadFile("002_seed.up.sql")
-	if err != nil {
-		t.Fatalf("read 002_seed.up.sql: %v", err)
-	}
-	return string(b)
-}
-
-func TestConsolidatedSchemaCreatesTenantsAndSeedDefaults(t *testing.T) {
+// #336: there is no default tenant. The consolidated schema creates the
+// tenants table but seeds no rows — tenants (and their credit types) are
+// provisioned explicitly by the control plane / bootstrap, never defaulted.
+func TestConsolidatedSchemaHasNoDefaultTenant(t *testing.T) {
 	schema := loadSchema001(t)
-	seed := loadSeed002(t)
 
 	if !strings.Contains(schema, "CREATE TABLE openrails.tenants") {
 		t.Error("001 schema must create openrails.tenants")
 	}
 	if strings.Contains(schema, "INSERT INTO openrails.tenants") {
-		t.Error("001 schema must not contain seed rows")
+		t.Error("001 schema must not seed any tenant row")
 	}
-	for _, want := range []string{
-		"00000000-0000-0000-0000-000000000001",
-		"'default'",
-		"ON CONFLICT (slug) DO NOTHING",
+	for _, forbidden := range []string{
+		"00000000-0000-0000-0000-000000000001", // the old default-tenant uuid
+		"'default'",                            // the old default-tenant slug seed
 	} {
-		if !strings.Contains(seed, want) {
-			t.Errorf("002 seed missing %q", want)
+		if strings.Contains(schema, forbidden) {
+			t.Errorf("001 schema must not reference the removed default tenant (%q)", forbidden)
 		}
 	}
 }

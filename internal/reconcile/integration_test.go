@@ -83,25 +83,25 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		// entitlements_tenant_subject_no_overlap exclusion constraint forbids
 		// overlapping windows of one entitlement for one subject.
 		entName := fmt.Sprintf("premium-%d", i)
-		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec)
-		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null))`,
-			productID, fmt.Sprintf("reconcile-prod-%d-%s", i, suffix), fmt.Sprintf("reconcile-tier-%d-%s", i, suffix), entName)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days)
-		      VALUES ($1, $2, 999, 'usd', 30)`, priceID, productID)
+		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, tenant_id)
+		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
+			productID, fmt.Sprintf("reconcile-prod-%d-%s", i, suffix), fmt.Sprintf("reconcile-tier-%d-%s", i, suffix), entName, dbtest.TestTenantID.UUID())
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, tenant_id)
+		      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, dbtest.TestTenantID.UUID())
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, processor, processor_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
-		         entitlements_spec_snapshot, tenant_subject_id)
-		      VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, jsonb_build_object($8::text, null), $7)`,
+		         entitlements_spec_snapshot, tenant_subject_id, tenant_id)
+		      VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, jsonb_build_object($8::text, null), $7, $9)`,
 			subID, priceID, productID, fmt.Sprintf("it-%d-%s", i, suffix),
-			periodStart, periodEnd, s.subjectID, entName)
+			periodStart, periodEnd, s.subjectID, entName, dbtest.TestTenantID.UUID())
 		entID := uuid.New()
 		if subID == s.subDead {
 			entID = s.entDeadID
 		}
-		exec(`INSERT INTO openrails.entitlements (id, tenant_subject_id, entitlement, start_at, end_at, source_id, source_type)
-		      VALUES ($1, $2, $3, $4, $5, $6, 'subscription')`,
-			entID, s.subjectID, entName, periodStart, periodEnd, subID)
+		exec(`INSERT INTO openrails.entitlements (id, tenant_subject_id, entitlement, start_at, end_at, source_id, source_type, tenant_id)
+		      VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7)`,
+			entID, s.subjectID, entName, periodStart, periodEnd, subID, dbtest.TestTenantID.UUID())
 	}
 	return s
 }
@@ -352,15 +352,15 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		}
 		// Catalog: product with an entitlements spec + a price whose
 		// provider_links blob carries the NMI plan id.
-		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec)
-		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null))`,
-			productID, "mat-prod-"+suffix, "mat-tier-"+suffix, entName)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, processors)
-		      VALUES ($1, $2, 1499, 'usd', 30, jsonb_build_object('nmi', jsonb_build_object('plan_id', $3::text)))`,
-			priceID, productID, planID)
+		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, tenant_id)
+		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
+			productID, "mat-prod-"+suffix, "mat-tier-"+suffix, entName, dbtest.TestTenantID.UUID())
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, processors, tenant_id)
+		      VALUES ($1, $2, 1499, 'usd', 30, jsonb_build_object('nmi', jsonb_build_object('plan_id', $3::text)), $4)`,
+			priceID, productID, planID, dbtest.TestTenantID.UUID())
 		// Identity anchor: a stored payment method holding the remote vault id.
-		exec(`INSERT INTO openrails.payment_methods (id, tenant_subject_id, processor, vault_id, initial_transaction_id, last_four, expiry_date)
-		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029')`, pmID, subjectIDHolder, vaultID, suffix)
+		exec(`INSERT INTO openrails.payment_methods (id, tenant_subject_id, processor, vault_id, initial_transaction_id, last_four, expiry_date, tenant_id)
+		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029', $5)`, pmID, subjectIDHolder, vaultID, suffix, dbtest.TestTenantID.UUID())
 		return nil
 	}))
 	subjectID := subjectIDHolder
@@ -540,10 +540,10 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx,
 				`INSERT INTO openrails.provider_intents
 				   (id, provider, intent_type, subscription_id, idempotency_key,
-				    status, attempts, next_attempt_at, origin, last_failure_reason, created_at)
-				 VALUES ($1, 'mobius', 'nmi_delete_subscription', $2, $3, $4, 2, now(), 'system', $5, now() - make_interval(mins => $6))`,
+				    status, attempts, next_attempt_at, origin, last_failure_reason, created_at, tenant_id)
+				 VALUES ($1, 'mobius', 'nmi_delete_subscription', $2, $3, $4, 2, now(), 'system', $5, now() - make_interval(mins => $6), $7)`,
 				id, subscriptionID, fmt.Sprintf("stuck-%s-%s", id.String()[:8], suffix),
-				status, reason, int(age.Minutes()))
+				status, reason, int(age.Minutes()), dbtest.TestTenantID.UUID())
 			require.NoError(t, err)
 		}
 		failure := "nmi error: connection refused"

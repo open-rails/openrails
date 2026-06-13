@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -30,9 +31,9 @@ func (suite *TestContainerSuite) createTestCreditType(name string) *models.Credi
 		CreatedAt:     now,
 	}
 	_, err := suite.Pool.Exec(context.Background(), `
-		INSERT INTO openrails.credit_types (id, name, display_name, unit, decimal_places, is_active, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		ct.ID, ct.Name, ct.DisplayName, ct.Unit, ct.DecimalPlaces, ct.IsActive, ct.CreatedAt)
+		INSERT INTO openrails.credit_types (id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		ct.ID, dbtest.TestTenantID.UUID(), ct.Name, ct.DisplayName, ct.Unit, ct.DecimalPlaces, ct.IsActive, ct.CreatedAt)
 	if err != nil {
 		panic(err)
 	}
@@ -54,9 +55,9 @@ func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTy
 		UpdatedAt:       now,
 	}
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.credit_balances (id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		bal.ID, bal.TenantSubjectID, bal.CreditTypeID, bal.Balance, bal.HeldBalance, bal.CreatedAt, bal.UpdatedAt)
+		INSERT INTO openrails.credit_balances (id, tenant_id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		bal.ID, dbtest.TestTenantID.UUID(), bal.TenantSubjectID, bal.CreditTypeID, bal.Balance, bal.HeldBalance, bal.CreatedAt, bal.UpdatedAt)
 	if err != nil {
 		panic(err)
 	}
@@ -91,11 +92,11 @@ func (suite *TestContainerSuite) createTestCreditHold(userID string, creditTypeI
 	}
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.credit_transactions (
-			id, tenant_subject_id, actor, credit_type_id, amount, balance_after,
+			id, tenant_id, tenant_subject_id, actor, credit_type_id, amount, balance_after,
 			transaction_type, status, authorized_amount, captured_amount,
 			source, source_id, expires_at, description, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-		hold.ID, hold.TenantSubjectID, hold.Actor, hold.CreditTypeID, hold.Amount, hold.BalanceAfter,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		hold.ID, dbtest.TestTenantID.UUID(), hold.TenantSubjectID, hold.Actor, hold.CreditTypeID, hold.Amount, hold.BalanceAfter,
 		hold.TransactionType, hold.Status, hold.Authorized, hold.Captured,
 		hold.Source, hold.SourceID, hold.ExpiresAt, hold.Description, hold.CreatedAt, hold.UpdatedAt)
 	if err != nil {
