@@ -1580,6 +1580,225 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.platform_break_glass TO ope
 COMMENT ON TABLE openrails.platform_break_glass IS 'Time-boxed break-glass elevation grants (issue #226). Each grant carries a written justification and an expiry, and is mirrored into platform_audit. CROSS-TENANT control-plane state.';
 
 -- =============================================================================
+-- money_transactions
+-- =============================================================================
+
+CREATE TABLE openrails.money_transactions (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    actor text CONSTRAINT money_transactions_actor_not_null NOT NULL,
+    resource text,
+    metadata jsonb,
+    amount bigint NOT NULL,
+    balance_after bigint,
+    transaction_type text NOT NULL,
+    source text NOT NULL,
+    source_id text,
+    expires_at timestamp with time zone,
+    description text,
+    status text DEFAULT 'posted'::text NOT NULL,
+    authorized_amount bigint,
+    captured_amount bigint,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT money_transactions_tenant_subject_id_not_null NOT NULL,
+    CONSTRAINT money_transactions_pkey PRIMARY KEY (id),
+    CONSTRAINT money_transactions_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.money_transactions FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_money_holds_active_expires ON openrails.money_transactions USING btree (expires_at) WHERE ((transaction_type = 'hold'::text) AND (status = 'active'::text));
+CREATE INDEX idx_money_transactions_payer ON openrails.money_transactions USING btree (tenant_id, tenant_subject_id, created_at DESC);
+CREATE INDEX idx_money_transactions_payer_actor ON openrails.money_transactions USING btree (tenant_id, tenant_subject_id, actor, created_at DESC);
+CREATE INDEX idx_money_transactions_tenant_id ON openrails.money_transactions USING btree (tenant_id);
+CREATE UNIQUE INDEX uniq_money_deposit_idem_payer ON openrails.money_transactions USING btree (tenant_id, tenant_subject_id, source, source_id) WHERE ((transaction_type = 'deposit'::text) AND (source_id IS NOT NULL));
+CREATE UNIQUE INDEX uniq_money_hold_idem_payer ON openrails.money_transactions USING btree (tenant_id, tenant_subject_id, source, source_id) WHERE (transaction_type = 'hold'::text);
+CREATE UNIQUE INDEX uniq_money_withdrawal_idem_payer ON openrails.money_transactions USING btree (tenant_id, tenant_subject_id, source, source_id) WHERE ((transaction_type = 'withdrawal'::text) AND (source_id IS NOT NULL));
+
+ALTER TABLE openrails.money_transactions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.money_transactions USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_transactions TO openrails_app;
+
+COMMENT ON TABLE openrails.money_transactions IS 'amounts are micro-dollars (µ$ = 1e-6 USD).';
+COMMENT ON COLUMN openrails.money_transactions.metadata IS 'Optional caller-supplied long-tail attribution. Opaque to OpenRails; joins use source/source_id, never these.';
+COMMENT ON COLUMN openrails.money_transactions.actor IS 'Caller-supplied principal string (e.g. a username slug) that caused this charge. Opaque to OpenRails; used as the per-actor spend-cap grouping key and as attribution.';
+COMMENT ON COLUMN openrails.money_transactions.resource IS 'Caller-supplied free-form string for what the charge was for (charge-A was for resource-B). Opaque to OpenRails; nullable.';
+
+-- =============================================================================
+-- money_blocks
+-- =============================================================================
+
+CREATE TABLE openrails.money_blocks (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    original_amount bigint NOT NULL,
+    remaining_amount bigint NOT NULL,
+    expires_at timestamp with time zone,
+    source_transaction_id uuid,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT money_blocks_tenant_subject_id_not_null NOT NULL,
+    CONSTRAINT money_blocks_pkey PRIMARY KEY (id),
+    CONSTRAINT money_blocks_source_transaction_id_fkey FOREIGN KEY (source_transaction_id) REFERENCES openrails.money_transactions(id),
+    CONSTRAINT money_blocks_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.money_blocks FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_money_blocks_payer ON openrails.money_blocks USING btree (tenant_id, tenant_subject_id, expires_at);
+CREATE INDEX idx_money_blocks_tenant_id ON openrails.money_blocks USING btree (tenant_id);
+
+ALTER TABLE openrails.money_blocks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.money_blocks USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_blocks TO openrails_app;
+
+COMMENT ON TABLE openrails.money_blocks IS 'amounts are micro-dollars (µ$ = 1e-6 USD).';
+
+-- =============================================================================
+-- money_balances
+-- =============================================================================
+
+CREATE TABLE openrails.money_balances (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    balance bigint DEFAULT 0 NOT NULL,
+    held_balance bigint DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT money_balances_tenant_subject_id_not_null NOT NULL,
+    CONSTRAINT money_balances_pkey PRIMARY KEY (id),
+    CONSTRAINT money_balances_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.money_balances FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_money_balances_tenant_id ON openrails.money_balances USING btree (tenant_id);
+CREATE UNIQUE INDEX uq_money_balances_payer ON openrails.money_balances USING btree (tenant_id, tenant_subject_id);
+
+ALTER TABLE openrails.money_balances ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.money_balances USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_balances TO openrails_app;
+
+COMMENT ON TABLE openrails.money_balances IS 'amounts are micro-dollars (µ$ = 1e-6 USD).';
+
+-- =============================================================================
+-- money_accounts
+-- =============================================================================
+
+CREATE TABLE openrails.money_accounts (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT money_accounts_tenant_subject_id_not_null NOT NULL,
+    billing_mode text DEFAULT 'prepaid'::text NOT NULL,
+    max_spend_per_day_micros bigint,
+    max_spend_per_month_micros bigint,
+    max_outstanding_owed_micros bigint,
+    low_balance_threshold_micros bigint,
+    auto_topup_enabled boolean DEFAULT false NOT NULL,
+    auto_topup_amount_cents bigint,
+    auto_topup_payment_method_id uuid,
+    default_credit_expiry_days integer,
+    hard_stop_on_breach boolean DEFAULT true NOT NULL,
+    alert_threshold_pct integer DEFAULT 80 NOT NULL,
+    outstanding_owed_micros bigint DEFAULT 0 NOT NULL,
+    last_alert_at timestamp with time zone,
+    last_topup_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    verified_payment_method boolean DEFAULT false NOT NULL,
+    verified_at timestamp with time zone,
+    suspended_at timestamp with time zone,
+    suspend_reason text,
+    tier text,
+    CONSTRAINT money_accounts_pkey PRIMARY KEY (id),
+    CONSTRAINT money_accounts_alert_pct_chk CHECK (((alert_threshold_pct >= 0) AND (alert_threshold_pct <= 100))),
+    CONSTRAINT money_accounts_billing_mode_chk CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text]))),
+    CONSTRAINT money_accounts_owed_nonneg_chk CHECK ((outstanding_owed_micros >= 0)),
+    CONSTRAINT money_accounts_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.money_accounts FORCE ROW LEVEL SECURITY;
+
+CREATE UNIQUE INDEX uq_money_accounts_payer ON openrails.money_accounts USING btree (tenant_id, tenant_subject_id);
+
+ALTER TABLE openrails.money_accounts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.money_accounts USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_accounts TO openrails_app;
+
+COMMENT ON TABLE openrails.money_accounts IS 'Per-(tenant, tenant subject) money spend policy + money-in config. amounts are micro-dollars (µ$ = 1e-6 USD). Tensorhub SETS these; OpenRails STORES + ENFORCES them.';
+COMMENT ON COLUMN openrails.money_accounts.verified_payment_method IS 'True once the account has a verified payment method (set after a successful $1 auth-and-void verification charge — issue #299). The charge itself is a separate slice.';
+COMMENT ON COLUMN openrails.money_accounts.suspended_at IS 'When set, the account is suspended (issue #299). Admission-deny-on-suspended wiring is a separate slice.';
+
+-- =============================================================================
+-- money_spend_limits
+-- =============================================================================
+
+CREATE TABLE openrails.money_spend_limits (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT money_spend_limits_tenant_subject_id_not_null NOT NULL,
+    actor text CONSTRAINT money_spend_limits_actor_not_null NOT NULL,
+    max_spend_per_day_micros bigint,
+    max_spend_per_month_micros bigint,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT money_spend_limits_pkey PRIMARY KEY (id),
+    CONSTRAINT money_spend_limits_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.money_spend_limits FORCE ROW LEVEL SECURITY;
+
+CREATE UNIQUE INDEX uq_money_spend_limits_payer_actor ON openrails.money_spend_limits USING btree (tenant_id, tenant_subject_id, actor);
+
+ALTER TABLE openrails.money_spend_limits ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.money_spend_limits USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_spend_limits TO openrails_app;
+
+COMMENT ON TABLE openrails.money_spend_limits IS 'Optional per-actor money spend caps for a tenant subject. amounts are micro-dollars (µ$ = 1e-6 USD). actor is a caller-supplied opaque principal string.';
+COMMENT ON COLUMN openrails.money_spend_limits.actor IS 'Caller-supplied principal string whose spend is capped by this row. Opaque to OpenRails.';
+
+-- =============================================================================
+-- money_windows
+-- =============================================================================
+
+CREATE TABLE openrails.money_windows (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT money_windows_tenant_subject_id_not_null NOT NULL,
+    held_amount bigint NOT NULL,
+    settled_amount bigint DEFAULT 0 NOT NULL,
+    status text DEFAULT 'open'::text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT money_windows_pkey PRIMARY KEY (id),
+    CONSTRAINT money_windows_status_chk CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text, 'expired'::text]))),
+    CONSTRAINT money_windows_held_nonneg_chk CHECK ((held_amount >= 0)),
+    CONSTRAINT money_windows_settled_within_held_chk CHECK (((settled_amount >= 0) AND (settled_amount <= held_amount))),
+    CONSTRAINT money_windows_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.money_windows FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_money_windows_subject_status ON openrails.money_windows USING btree (tenant_subject_id, status);
+CREATE INDEX idx_money_windows_open_expires ON openrails.money_windows USING btree (expires_at) WHERE (status = 'open'::text);
+CREATE INDEX idx_money_windows_tenant_id ON openrails.money_windows USING btree (tenant_id);
+
+ALTER TABLE openrails.money_windows ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.money_windows USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_windows TO openrails_app;
+
+COMMENT ON TABLE openrails.money_windows IS 'Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. amounts are micro-dollars (µ$ = 1e-6 USD).';
+COMMENT ON COLUMN openrails.money_windows.held_amount IS 'Total reserved for this window (open + refills). Reflected in money_balances.held_balance while status=open.';
+COMMENT ON COLUMN openrails.money_windows.settled_amount IS 'Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.';
+
+-- =============================================================================
 -- Schema-level grants and default privileges
 -- =============================================================================
 
