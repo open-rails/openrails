@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 491
+next_id: 492
 
 ---
 
@@ -800,6 +800,78 @@ Also boot the cutover with `FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIO
 - [ ] Boot with FEATURE_FLAGS_DUNNING_MODE=dry_run_only (+ optionally DISABLE_ENTITLEMENT_EXPIRATION=true) BEFORE first start with imported data; flip to on only after enforce-mode convergence
 - [ ] Run #107 advisory against NMI + CCBill; review the drift report
 - [ ] Run #107 enforce; work the admin action queue (duplicate subscriptions -> manual cancel+refund)
+
+---
+
+# #491: Split CUSTOMER (payer / money account) from ACTOR (invoker / delegated-user) — delegated-users hold no money
+
+**Completed:** no
+
+Today `customer` (the renamed merchant_subject, #486) is keyed `UNIQUE(merchant_id, issuer, subject)` —
+one row PER DELEGATED-USER — AND owns the money: `money_accounts` (balance, tier, spend-caps),
+`processor_customers` (Stripe cus_*/payment methods), credit-line (#489), tier_schedules (#476). That
+conflates two different things:
+
+- The PAYER: the account that actually holds money / a payment method / a balance — we have a real
+  financial relationship with it. FEDERATED: this is the TENANT (e.g. cozy-art). EMBEDDED: it's the
+  host's end-user (doujins end-users buy their own credits via the host's processor).
+- The ACTOR (invoker): the individual performing an action. FEDERATED: a DELEGATED-USER — ephemeral, NO
+  payment method, NO balance, NO money relationship with us; we know it only via (issuer, subject).
+
+The RUNTIME layer already distinguishes these (#487 caps the PAYER's active held-$; #488 has per-payer
+TIER budgets + per-ACTOR "invokers aren't trusted" FLAT budgets), but the IDENTITY/data model does NOT:
+`internal/modules/admission` types the payer as `identity.CustomerID`, and `actor` exists only as an
+ephemeral Redis budget-scope STRING (budgets scope=actor), not a first-class identity. This issue
+promotes the split to the identity model.
+
+TERMINOLOGY (decided): **customer = the PAYER** (money account, merchant-scoped, NEVER delegated).
+**actor** (a.k.a. invoker) = the doer (can be a delegated-user, a native user, or the tenant itself).
+
+CHAIN (federated): delegated-user(actor) -> issuer(remote_app) -> tenant -> merchant -> customer(payer).
+An issuer has MANY actors; ALL of an issuer's actors resolve to the SAME customer — the tenant's single
+payer account (depends on authkit#77: issuer owned by exactly one tenant). So tenant(1) <-> merchant(1)
+<-> customer(1, the payer); customer(1) -> actors(many).
+
+EMBEDDED degenerate case (doujins): the end-user genuinely holds money, so end-user = customer(payer) =
+actor (1:1); MANY customers per merchant (one per end-user), one actor each. Unifying rule: actor->customer
+is many:1 (federated) or 1:1 (embedded). "One customer per merchant" is FEDERATED-ONLY — embedded keeps
+per-end-user customers because the end-user holds money. CONFIRM this nuance with the owner.
+
+WHAT THE ACTOR TRACKS (and ONLY this):
+1. spend ATTRIBUTION — how much of the payer's money this actor spent, when, on what (payer visibility).
+2. abuse caps — per-actor concurrent-capacity cap + per-actor wasted-money budget (#488 per-invoker flat),
+   so one bad delegated-user can't burn the payer's whole rate-limit / wasted-money budget or make the
+   payer look bad. Rate-limit the actor FIRST (protects the payer).
+NO trust-tier — tiers are cumulative-spend/age based (#476); a delegated-user spends none of its own money
+and is ephemeral, so a tier is meaningless for it. Tiers stay PAYER-level.
+
+WHAT STAYS ON CUSTOMER (payer): money_accounts, processor_customers (payment methods), tier +
+tier_schedules (#476), credit-line (#489), money-denominated spend-caps, #487 max_concurrent_held /
+max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
+
+**Tasks:**
+- [ ] Promote `actor` to a first-class identity: table keyed (customer_id FK, issuer, subject) holding
+      spend-attribution + per-actor abuse counters. NO money_account, NO tier.
+- [ ] Federated resolution: a delegated request (issuer, subject) resolves to an ACTOR whose customer_id =
+      the issuer's tenant's single payer account — STOP materializing a money_account per delegated-user.
+- [ ] Re-key/confirm money_accounts, processor_customers, tier_schedules, credit-line on customer(payer)
+      only; migrate any per-delegated-user money_accounts created under the old model.
+- [ ] Embedded path: subject -> customer(payer) directly; actor == customer (self); keep per-end-user
+      customers.
+- [ ] Move #488 per-invoker flat wasted-budget + a per-actor concurrent-capacity cap onto the actor
+      identity (persist attribution; abuse counters may stay in Redis but keyed by the real actor id).
+- [ ] SDK + wire: distinguish payer (customer) from actor on Admit/charge; surface per-actor spend
+      attribution to the payer.
+- [ ] Fold in `merchantForIssuer` simplification once authkit#77 lands: issuer -> remote_app.tenant_id ->
+      merchant (owner_tenant_id) — replace the membership-walk / slug convention.
+- [ ] Tests: federated many-actors-one-payer (spend attributed per actor, money debited from the ONE
+      payer, per-actor abuse cap trips before the payer's); embedded actor==customer 1:1; a delegated-user
+      has no tier and no money_account.
+
+**Related**
+#486 (merchant_subject->customer rename this builds on), #487/#488 (payer-vs-actor runtime caps this
+formalizes at the identity layer), #476 (tier-schedule stays payer-level), #489 (credit-line stays
+payer-level), #75 (escape-hatch per-delegated-user attributes drive per-actor limits). DEPENDS: authkit#77.
 
 ---
 
