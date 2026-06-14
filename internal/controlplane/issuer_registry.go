@@ -28,6 +28,14 @@ func (c *ControlPlane) loadRemoteApplications(ctx context.Context) error {
 	return c.delegatedVerifier.LoadRemoteApplications(ctx, c.Core(), c.delegatedAudiences)
 }
 
+// ReloadRemoteApplications re-syncs the verifier's in-memory issuer registry with
+// AuthKit's remote_application store, picking up newly registered/disabled
+// principals (the verifier also lazy-loads any single issuer on first use, so
+// this is for deterministic reloads — e.g. after an inbound registration).
+func (c *ControlPlane) ReloadRemoteApplications(ctx context.Context) error {
+	return c.loadRemoteApplications(ctx)
+}
+
 // merchantForIssuer resolves the OpenRails MERCHANT a VALIDATED token issuer may
 // act on (#481). The chain is role-based, never identity: validated `iss` ->
 // AuthKit remote_application -> the tenant(s) it controls (its tenant

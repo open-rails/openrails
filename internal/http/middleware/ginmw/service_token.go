@@ -41,6 +41,17 @@ type ServiceJWTResolver interface {
 	ResolveServiceJWT(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
 }
 
+// RemoteApplicationResolver validates a JWKS-principal SELF-token (#76/#484): a
+// remote_application acting AS ITSELF, granted STORED tenant-role/permissions —
+// a SECOND programmatic credential type alongside service tokens. The control
+// plane implements it. ResolveRemoteApplication returns the SAME
+// *ResolvedServiceToken shape, so the existing #481 role-based merchant authz
+// runs unchanged; controlplane.ErrNotRemoteApplicationToken signals a JWT that
+// verified but is not a remote_application self-token (fall through / reject).
+type RemoteApplicationResolver interface {
+	ResolveRemoteApplication(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
+}
+
 // ServiceTokenRequired authenticates a tenant-scoped public route with an OpenRails-issued
 // tenant service token (issue #222). It REPLACES the retired private/mTLS/api-key service
 // surface: machine/server callers (HostApps/Tensorhub reserving credits,
@@ -105,8 +116,23 @@ func ServiceTokenRequired(resolver ServiceTokenResolver) gin.HandlerFunc {
 }
 
 func resolveServiceCredential(ctx context.Context, resolver ServiceTokenResolver, token string) (*controlplane.ResolvedServiceToken, error) {
+	// Shared-secret service token: this deployment's brand prefix marks it.
 	if resolver.LooksLikeServiceToken(token) {
 		return resolver.ResolveServiceToken(ctx, token)
+	}
+	// Programmatic JWT credential (#484): a JWKS-principal SELF-token is a second
+	// accepted credential type alongside service tokens. Try remote-application
+	// verification first for a JWT-shaped bearer; a JWT that verifies but is not a
+	// remote_application self-token falls through to the service-JWT path.
+	if raResolver, ok := resolver.(RemoteApplicationResolver); ok && controlplane.LooksLikeJWT(token) {
+		resolved, err := raResolver.ResolveRemoteApplication(ctx, token)
+		if err == nil {
+			return resolved, nil
+		}
+		if !errors.Is(err, controlplane.ErrNotRemoteApplicationToken) {
+			return nil, err
+		}
+		// Not a remote_application self-token: fall through to service-JWT.
 	}
 	if jwtResolver, ok := resolver.(ServiceJWTResolver); ok {
 		return jwtResolver.ResolveServiceJWT(ctx, token)

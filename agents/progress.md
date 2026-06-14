@@ -85,10 +85,20 @@ service tokens (resolved through authkit) + #481 role-based merchant authz on `o
 - authkit #76 (the verifier auth-method + assignable-authority surface).
 
 **Tasks:**
-- [ ] After authkit #76: accept JWKS-principal self-tokens on the standalone control-plane auth path, alongside
+- [x] After authkit #76: accept JWKS-principal self-tokens on the standalone control-plane auth path, alongside
       service tokens; resolve the caller's stored perms/role and run the existing #481 role-based merchant authz.
-- [ ] Tests: a JWKS-principal caller with a role on a merchant's owner_tenant can administer that merchant;
-      self-claimed perms not honored.
+      (authkit bumped v0.27.0->v0.28.0. New `ControlPlane.ResolveRemoteApplication` (internal/controlplane/
+      remote_application.go) verifies a `remote-application-access+jwt` self-token via the existing delegated
+      Verifier, detects `Claims.IsRemoteApplication()`, and resolves the merchant by the principal's STORED
+      tenant role -> owner_tenant_id, returning the SAME `*ResolvedServiceToken` shape so #481 authz runs
+      unchanged. Wired as a second accepted credential in `ginmw.resolveServiceCredential` (new
+      `RemoteApplicationResolver` iface): service-token path unchanged; JWT-shaped bearers try the remote-app
+      path, falling through to service-JWT when not a remote_application self-token.)
+- [x] Tests: a JWKS-principal caller with a role on a merchant's owner_tenant can administer that merchant;
+      self-claimed perms not honored. (embed/remote_application_integration_test.go via StartStandalone +
+      harness.RegisterRemoteApplication: authorized principal (operator role on owner_tenant) deposits+reads;
+      principal without a role is denied 403; service-token auth still works. Authority is STORED only — the
+      verifier ignores token self-claims.)
 
 ---
 

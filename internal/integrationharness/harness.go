@@ -103,6 +103,13 @@ type Surface struct {
 	// trusting-resolver-accepted token.
 	Token string
 
+	// h/app are the standalone surface's harness + booted app, used by
+	// RegisterRemoteApplication to exercise the #484 JWKS-principal credential
+	// through the SAME real control plane the server authenticates against. Nil for
+	// the embedded host.
+	h   *Harness
+	app *app.App
+
 	currency string
 }
 
@@ -289,8 +296,73 @@ func (h *Harness) StartStandalone(currency string) *Surface {
 		Name:     "standalone",
 		BaseURL:  srv.URL,
 		Token:    token,
+		h:        h,
+		app:      app,
 		currency: currency,
 	}
+}
+
+// RemoteAppCaller is a JWKS principal (remote_application, #76/#484) provisioned
+// against the standalone surface's real control plane: its registered slug/issuer
+// and a freshly minted remote-application-access+jwt SELF-token. Present it as a
+// Bearer credential to the /v1/service/* surface to drive the #484 path.
+type RemoteAppCaller struct {
+	Slug   string
+	Issuer string
+	// Token is a minted self-token (typ=remote-application-access+jwt) signed by
+	// the principal's own key. Authority is STORED (assigned role/perms), never
+	// self-claimed.
+	Token string
+}
+
+// RegisterRemoteApplication provisions a JWKS principal (#484) on the standalone
+// surface's REAL control plane and returns a minted self-token. It stands up a
+// test JWKS issuer for the principal, registers the remote_application (jwks
+// mode), assigns it role (when non-empty) on ownerTenantSlug — the tenant that
+// owns the test merchant — and signs a self-token with the principal's own key.
+//
+// With OperatorRole on the merchant's owner_tenant, the principal can administer
+// the merchant via the existing #481 role-based authz. Pass role="" to provision
+// a principal with NO authority (the deny case).
+func (s *Surface) RegisterRemoteApplication(slug, ownerTenantSlug, role string) RemoteAppCaller {
+	h := s.h
+	require.NotNil(h.t, s.app, "RegisterRemoteApplication requires the standalone surface")
+	cp := embcp.Get(s.app)
+	require.NotNil(h.t, cp, "control plane attached")
+	core := cp.Core()
+	require.NotNil(h.t, core, "authkit core")
+
+	// The principal's own signing key + JWKS endpoint (its credential, #74 jwks mode).
+	issuer := authtesting.NewTestIssuerWithAudience("openrails-app")
+	h.t.Cleanup(issuer.Close)
+
+	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
+		Slug:      slug,
+		Issuer:    issuer.URL(),
+		JWKSURI:   issuer.URL() + "/.well-known/jwks.json",
+		Mode:      authcore.RemoteAppModeJWKS,
+		Audiences: []string{"openrails-app"},
+		Enabled:   true,
+	})
+	require.NoError(h.t, err, "register remote_application")
+
+	if role != "" {
+		require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ownerTenantSlug, ra.ID, role),
+			"assign role on owner tenant")
+	}
+
+	// Pick up the new issuer in the verifier's in-memory registry (it also
+	// lazy-loads on first use, but reload makes the test deterministic).
+	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
+
+	token, err := authcore.MintRemoteApplicationAccessToken(h.ctx, issuer.Signer(), authcore.RemoteApplicationAccessParams{
+		Issuer:    issuer.URL(),
+		Audiences: []string{"openrails-app"},
+		TTL:       time.Hour,
+	})
+	require.NoError(h.t, err, "mint remote_application self-token")
+
+	return RemoteAppCaller{Slug: slug, Issuer: issuer.URL(), Token: token}
 }
 
 // mintFreshServiceToken mints a new real admin service token through AuthKit core,
