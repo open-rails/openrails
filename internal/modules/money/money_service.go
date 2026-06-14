@@ -421,6 +421,24 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		return nil, err
 	}
 
+	// AUTO-graduation (#476): cumulative_paid just changed, so recompute + persist
+	// the payer's tier from the stored tier_schedule, in-band with the deposit.
+	// Only the trust-signal currency (DefaultCurrency) graduates; a no-op when no
+	// schedule exists or the tier is an admin override. Best-effort within the
+	// tx: a schedule lookup error fails the deposit (consistency), but no schedule
+	// is the common path and costs one indexed read.
+	if cur == DefaultCurrency {
+		cumPaid, perr := q.SumMoneyDeposits(ctx, gen.SumMoneyDepositsParams{
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: DefaultCurrency,
+		})
+		if perr != nil {
+			return nil, perr
+		}
+		if err := s.autoGraduateTierTx(ctx, q, tenantID, payer, cumPaid, now); err != nil {
+			return nil, err
+		}
+	}
+
 	return trx, nil
 }
 

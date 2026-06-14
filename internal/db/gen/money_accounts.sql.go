@@ -38,8 +38,38 @@ func (q *Queries) AddMoneyOutstandingOwed(ctx context.Context, arg AddMoneyOutst
 	return err
 }
 
+const autoGraduateMoneyAccountTier = `-- name: AutoGraduateMoneyAccountTier :exec
+UPDATE openrails.money_accounts
+SET tier = $3::text, tier_source = 'auto', updated_at = $4
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $5
+  AND tier_source <> 'admin'
+`
+
+type AutoGraduateMoneyAccountTierParams struct {
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+	Tier            string
+	Now             time.Time
+	Currency        string
+}
+
+// Auto-graduation write (#476): set tier_source='auto' and the new tier ONLY
+// when the current source is not 'admin' (an admin override always wins). The
+// caller computes the monotonic target tier; this guards against clobbering an
+// admin override at the DB level so a race cannot.
+func (q *Queries) AutoGraduateMoneyAccountTier(ctx context.Context, arg AutoGraduateMoneyAccountTierParams) error {
+	_, err := q.db.Exec(ctx, autoGraduateMoneyAccountTier,
+		arg.TenantID,
+		arg.TenantSubjectID,
+		arg.Tier,
+		arg.Now,
+		arg.Currency,
+	)
+	return err
+}
+
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
-SELECT id, tenant_id, tenant_subject_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency FROM openrails.money_accounts
+SELECT id, tenant_id, tenant_subject_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source FROM openrails.money_accounts
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -79,6 +109,7 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.SuspendReason,
 		&i.Tier,
 		&i.Currency,
+		&i.TierSource,
 	)
 	return i, err
 }
@@ -303,7 +334,7 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, tenantID uuid.UUID)
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT id, tenant_id, tenant_subject_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency FROM openrails.money_accounts
+SELECT id, tenant_id, tenant_subject_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source FROM openrails.money_accounts
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -343,6 +374,7 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.SuspendReason,
 		&i.Tier,
 		&i.Currency,
+		&i.TierSource,
 	)
 	return i, err
 }
@@ -431,23 +463,27 @@ func (q *Queries) SetMoneyAccountPaymentVerified(ctx context.Context, arg SetMon
 
 const setMoneyAccountTier = `-- name: SetMoneyAccountTier :exec
 UPDATE openrails.money_accounts
-SET tier = $3::text, updated_at = $4
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $5
+SET tier = $3::text, tier_source = $4::text, updated_at = $5
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $6
 `
 
 type SetMoneyAccountTierParams struct {
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
 	Tier            string
+	TierSource      string
 	Now             time.Time
 	Currency        string
 }
 
+// Sets the tier AND its source (#476). 'admin' = an explicit override that
+// auto-graduation must not overwrite; 'auto' = schedule-driven.
 func (q *Queries) SetMoneyAccountTier(ctx context.Context, arg SetMoneyAccountTierParams) error {
 	_, err := q.db.Exec(ctx, setMoneyAccountTier,
 		arg.TenantID,
 		arg.TenantSubjectID,
 		arg.Tier,
+		arg.TierSource,
 		arg.Now,
 		arg.Currency,
 	)

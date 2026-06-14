@@ -315,6 +315,45 @@ func ServiceSetTierPolicy(r *httprequest.Request) {
 	r.SuccessJSONMessage("ok")
 }
 
+type serviceTierScheduleRequest struct {
+	TenantSubjectID string                            `json:"tenant_subject_id"`
+	Schedule        []billingservice.TierScheduleRung `json:"schedule"`
+}
+
+// ServiceSetTierSchedule persists the tenant's tier SCHEDULE (#476): the host
+// declares the ladder ONCE and OpenRails AUTO-maintains each payer's tier from
+// cumulative spend. An EMPTY tenant_subject_id sets the tenant-wide default
+// schedule (the common case); a non-empty one sets a per-subject override
+// (scope-checked). owner=platform. Operator service token, credits:write.
+func ServiceSetTierSchedule(r *httprequest.Request) {
+	var req serviceTierScheduleRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	var payer billingidentity.TenantSubjectID
+	if strings.TrimSpace(req.TenantSubjectID) != "" {
+		p, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+		if err != nil || p == nil {
+			r.ErrorJSON(http.StatusBadRequest, "invalid tenant_subject_id")
+			return
+		}
+		if !requireServiceTenantSubjectScope(r, *p) {
+			return
+		}
+		payer = *p
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	if err := svc.SetTierSchedule(r.Request.Context(), payer, req.Schedule); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "set tier schedule failed")
+		return
+	}
+	r.SuccessJSONMessage("ok")
+}
+
 // budgetScopeWindow is one fixed money-budget window in a budget-scope policy
 // request/response (#473) — same shape as billingservice.BudgetScopeWindowInput.
 type budgetScopeWindow struct {

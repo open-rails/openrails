@@ -97,9 +97,21 @@ SET suspended_at = NULL, suspend_reason = NULL, updated_at = $3
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: SetMoneyAccountTier :exec
+-- Sets the tier AND its source (#476). 'admin' = an explicit override that
+-- auto-graduation must not overwrite; 'auto' = schedule-driven.
 UPDATE openrails.money_accounts
-SET tier = sqlc.arg(tier)::text, updated_at = sqlc.arg(now)
+SET tier = sqlc.arg(tier)::text, tier_source = sqlc.arg(tier_source)::text, updated_at = sqlc.arg(now)
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency);
+
+-- name: AutoGraduateMoneyAccountTier :exec
+-- Auto-graduation write (#476): set tier_source='auto' and the new tier ONLY
+-- when the current source is not 'admin' (an admin override always wins). The
+-- caller computes the monotonic target tier; this guards against clobbering an
+-- admin override at the DB level so a race cannot.
+UPDATE openrails.money_accounts
+SET tier = sqlc.arg(tier)::text, tier_source = 'auto', updated_at = sqlc.arg(now)
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency)
+  AND tier_source <> 'admin';
 
 -- name: ListBelowThresholdMoneyAccounts :many
 -- Money-in workers (#239/#240): accounts whose available balance

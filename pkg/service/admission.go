@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/budgets"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
 )
@@ -450,4 +451,27 @@ func (s *Service) SetTierPolicy(ctx context.Context, payer identity.TenantSubjec
 		pol.QueueLimits = append(pol.QueueLimits, models.QueueLimitPolicy{Unit: q.Unit, Max: q.Max})
 	}
 	return admission.NewTierPolicyStore(s.rt.DB).UpsertTierPolicyFull(ctx, payer, in.Tier, pol)
+}
+
+// TierScheduleRung is one rung of a persisted tier ladder (#476): a payer reaches
+// Tier once its cumulative paid spend is at least MinCumulativePaidMicros.
+type TierScheduleRung struct {
+	Tier                    string `json:"tier"`
+	MinCumulativePaidMicros int64  `json:"min_cumulative_paid_micros"`
+}
+
+// SetTierSchedule persists the tenant's tier SCHEDULE (#476): the host declares
+// the ladder ONCE and OpenRails then AUTO-maintains each payer's tier from
+// cumulative spend (no host cranking). A zero payer sets the tenant-wide default
+// schedule; a non-zero payer sets a per-subject override. owner=platform.
+func (s *Service) SetTierSchedule(ctx context.Context, payer identity.TenantSubjectID, schedule []TierScheduleRung) error {
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	moneySvc := money.NewMoneyService(s.rt.DB)
+	rungs := make([]money.TierThreshold, 0, len(schedule))
+	for _, r := range schedule {
+		rungs = append(rungs, money.TierThreshold{Tier: r.Tier, MinPaidMicros: r.MinCumulativePaidMicros})
+	}
+	return moneySvc.SetTierSchedule(ctx, payer, rungs)
 }

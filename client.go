@@ -82,6 +82,13 @@ type Client interface {
 	// SetTierPolicy upserts a per-payer tier policy (#298): throughput windows +
 	// entitled resources + fixed money-budget windows.
 	SetTierPolicy(ctx context.Context, tenantSubjectID string, in TierPolicyInput) error
+	// SetTierSchedule persists the tenant's tier SCHEDULE once (#476): the ordered
+	// ladder [{tier, min_cumulative_paid_micros}]. OpenRails then AUTO-maintains
+	// each payer's tier from cumulative spend — the host never cranks graduation.
+	// An EMPTY tenantSubjectID sets the tenant-wide default schedule (the common
+	// case); a non-empty one sets a per-subject override. owner=platform (the
+	// subject cannot see/loosen it).
+	SetTierSchedule(ctx context.Context, tenantSubjectID string, schedule []TierScheduleRung) error
 	// SetSubjectBudgetPolicy upserts a SUBJECT-owned hierarchical budget-scope
 	// policy (#473): the subject's self cap (scope=subject) or a (subject, role)
 	// pool (scope=role, RoleID = the role uuid). The owner is forced to "subject"
@@ -426,6 +433,15 @@ type TierPolicyInput struct {
 	Windows           []TierThroughputWindow `json:"windows"`
 	EntitledResources []string               `json:"entitled_resources"`
 	BudgetWindows     []BudgetWindowInput    `json:"budget_windows"`
+}
+
+// TierScheduleRung is one rung of the persisted tier ladder set via
+// PUT /v1/service/tier-schedules (#476): a payer reaches Tier once its
+// cumulative paid spend is at least MinCumulativePaidMicros. Order ascending by
+// MinCumulativePaidMicros (the server sorts defensively regardless).
+type TierScheduleRung struct {
+	Tier                    string `json:"tier"`
+	MinCumulativePaidMicros int64  `json:"min_cumulative_paid_micros"`
 }
 
 // BudgetScopeWindow is one fixed money-budget window in a hierarchical

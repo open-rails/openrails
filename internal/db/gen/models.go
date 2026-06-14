@@ -361,6 +361,8 @@ type OpenrailsMoneyAccount struct {
 	Tier          *string
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
 	Currency string
+	// auto = tier maintained by the tier_schedule auto-graduation (#476); admin = explicit override that auto-graduation must not overwrite.
+	TierSource string
 }
 
 // amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
@@ -862,6 +864,21 @@ type OpenrailsTierPolicy struct {
 	Tier            string
 	Policy          []byte
 	PolicyVersion   int64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// Persisted tier ladder (#476): rungs[{tier,min_cumulative_paid_micros}] declared once per tenant (or per tenant-subject override). OpenRails auto-maintains money_accounts.tier from cumulative_paid vs this schedule on the deposit path; admin tier override (tier_source=admin) still wins.
+type OpenrailsTierSchedule struct {
+	ID       uuid.UUID
+	TenantID uuid.UUID
+	// NULL = tenant-wide default schedule; non-NULL = per-subject override taking precedence for that subject.
+	TenantSubjectID *uuid.UUID
+	// platform (set by us; subject cannot edit/see) | subject. Mirrors the #473 budget-policy owner split.
+	Owner string
+	// Ordered JSONB array of {tier, min_cumulative_paid_micros}; a payer's tier = highest rung whose min_cumulative_paid_micros <= cumulative_paid.
+	Rungs           []byte
+	ScheduleVersion int64
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }

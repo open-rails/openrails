@@ -263,6 +263,40 @@ func (q *Queries) GetBudgetWindowStateForUpdate(ctx context.Context, arg GetBudg
 	return i, err
 }
 
+const getEffectiveTierSchedule = `-- name: GetEffectiveTierSchedule :one
+SELECT id, tenant_id, tenant_subject_id, owner, rungs, schedule_version, created_at, updated_at FROM openrails.tier_schedules
+WHERE tenant_id = $1 AND owner = $2
+  AND (tenant_subject_id = $3 OR tenant_subject_id IS NULL)
+ORDER BY (tenant_subject_id IS NOT NULL) DESC
+LIMIT 1
+`
+
+type GetEffectiveTierScheduleParams struct {
+	TenantID        uuid.UUID
+	Owner           string
+	TenantSubjectID *uuid.UUID
+}
+
+// The effective schedule for a (tenant, subject): the subject's own override if
+// present, else the tenant-wide default (tenant_subject_id IS NULL). owner is
+// the read filter (auto-graduation reads owner='platform'). Subject-specific
+// rows sort first so LIMIT 1 picks the override.
+func (q *Queries) GetEffectiveTierSchedule(ctx context.Context, arg GetEffectiveTierScheduleParams) (OpenrailsTierSchedule, error) {
+	row := q.db.QueryRow(ctx, getEffectiveTierSchedule, arg.TenantID, arg.Owner, arg.TenantSubjectID)
+	var i OpenrailsTierSchedule
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.TenantSubjectID,
+		&i.Owner,
+		&i.Rungs,
+		&i.ScheduleVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getTierPolicy = `-- name: GetTierPolicy :one
 SELECT id, tenant_id, tenant_subject_id, tier, policy, policy_version, created_at, updated_at FROM openrails.tier_policies
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND tier = $3
@@ -643,6 +677,74 @@ func (q *Queries) UpsertTierPolicy(ctx context.Context, arg UpsertTierPolicyPara
 		arg.Tier,
 		arg.Policy,
 		arg.PolicyVersion,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertTierScheduleDefault = `-- name: UpsertTierScheduleDefault :exec
+INSERT INTO openrails.tier_schedules (
+    id, tenant_id, tenant_subject_id, owner, rungs, schedule_version, created_at, updated_at
+) VALUES ($1, $2, NULL, $3, $4, 1, $5, $6)
+ON CONFLICT (tenant_id, owner) WHERE (tenant_subject_id IS NULL) DO UPDATE SET
+    rungs = EXCLUDED.rungs,
+    schedule_version = openrails.tier_schedules.schedule_version + 1,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertTierScheduleDefaultParams struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	Owner     string
+	Rungs     []byte
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// Tenant-wide tier schedule upsert (#476): tenant_subject_id IS NULL is the
+// tenant's default ladder. owner is supplied by the caller's authz path.
+func (q *Queries) UpsertTierScheduleDefault(ctx context.Context, arg UpsertTierScheduleDefaultParams) error {
+	_, err := q.db.Exec(ctx, upsertTierScheduleDefault,
+		arg.ID,
+		arg.TenantID,
+		arg.Owner,
+		arg.Rungs,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertTierScheduleSubject = `-- name: UpsertTierScheduleSubject :exec
+INSERT INTO openrails.tier_schedules (
+    id, tenant_id, tenant_subject_id, owner, rungs, schedule_version, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, 1, $6, $7)
+ON CONFLICT (tenant_id, tenant_subject_id, owner) WHERE (tenant_subject_id IS NOT NULL) DO UPDATE SET
+    rungs = EXCLUDED.rungs,
+    schedule_version = openrails.tier_schedules.schedule_version + 1,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertTierScheduleSubjectParams struct {
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	TenantSubjectID *uuid.UUID
+	Owner           string
+	Rungs           []byte
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// Per-subject tier schedule override upsert (#476): takes precedence over the
+// tenant-wide default for that subject.
+func (q *Queries) UpsertTierScheduleSubject(ctx context.Context, arg UpsertTierScheduleSubjectParams) error {
+	_, err := q.db.Exec(ctx, upsertTierScheduleSubject,
+		arg.ID,
+		arg.TenantID,
+		arg.TenantSubjectID,
+		arg.Owner,
+		arg.Rungs,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)

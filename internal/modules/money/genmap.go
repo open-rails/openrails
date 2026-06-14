@@ -99,6 +99,7 @@ func settingsFromGen(r gen.OpenrailsMoneyAccount) *models.MoneyAccount {
 		SuspendedAt:              r.SuspendedAt,
 		SuspendReason:            r.SuspendReason,
 		Tier:                     r.Tier,
+		TierSource:               r.TierSource,
 		CreatedAt:                r.CreatedAt,
 		UpdatedAt:                r.UpdatedAt,
 	}

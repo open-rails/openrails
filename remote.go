@@ -372,6 +372,15 @@ func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in T
 	return c.do(ctx, http.MethodPut, "/v1/service/tier-policies", body, nil)
 }
 
+// SetTierSchedule implements Client (handler ServiceSetTierSchedule, #476).
+func (c *remote) SetTierSchedule(ctx context.Context, tenantSubjectID string, schedule []TierScheduleRung) error {
+	body := map[string]any{
+		"tenant_subject_id": strings.TrimSpace(tenantSubjectID),
+		"schedule":          schedule,
+	}
+	return c.do(ctx, http.MethodPut, "/v1/service/tier-schedules", body, nil)
+}
+
 // SetSubjectBudgetPolicy implements Client (handler ServiceSetSubjectBudgetPolicy, #473).
 func (c *remote) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in SubjectBudgetPolicyInput) error {
 	body := map[string]any{

@@ -98,6 +98,9 @@ type MoneyAccount struct {
 	SuspendedAt           *time.Time `json:"suspended_at,omitempty"`
 	SuspendReason         *string    `json:"suspend_reason,omitempty"`
 	Tier                  *string    `json:"tier,omitempty"`
+	// TierSource is "auto" (schedule-driven graduation, #476) or "admin" (an
+	// explicit override that auto-graduation must not overwrite).
+	TierSource string `json:"tier_source,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

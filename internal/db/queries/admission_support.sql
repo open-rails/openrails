@@ -135,3 +135,36 @@ WHERE tenant_id = $1 AND tenant_subject_id = $2;
 -- NOT expose platform-owned rows).
 SELECT * FROM openrails.budget_policies
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND owner = $3;
+
+-- name: UpsertTierScheduleDefault :exec
+-- Tenant-wide tier schedule upsert (#476): tenant_subject_id IS NULL is the
+-- tenant's default ladder. owner is supplied by the caller's authz path.
+INSERT INTO openrails.tier_schedules (
+    id, tenant_id, tenant_subject_id, owner, rungs, schedule_version, created_at, updated_at
+) VALUES ($1, $2, NULL, $3, $4, 1, $5, $6)
+ON CONFLICT (tenant_id, owner) WHERE (tenant_subject_id IS NULL) DO UPDATE SET
+    rungs = EXCLUDED.rungs,
+    schedule_version = openrails.tier_schedules.schedule_version + 1,
+    updated_at = EXCLUDED.updated_at;
+
+-- name: UpsertTierScheduleSubject :exec
+-- Per-subject tier schedule override upsert (#476): takes precedence over the
+-- tenant-wide default for that subject.
+INSERT INTO openrails.tier_schedules (
+    id, tenant_id, tenant_subject_id, owner, rungs, schedule_version, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, 1, $6, $7)
+ON CONFLICT (tenant_id, tenant_subject_id, owner) WHERE (tenant_subject_id IS NOT NULL) DO UPDATE SET
+    rungs = EXCLUDED.rungs,
+    schedule_version = openrails.tier_schedules.schedule_version + 1,
+    updated_at = EXCLUDED.updated_at;
+
+-- name: GetEffectiveTierSchedule :one
+-- The effective schedule for a (tenant, subject): the subject's own override if
+-- present, else the tenant-wide default (tenant_subject_id IS NULL). owner is
+-- the read filter (auto-graduation reads owner='platform'). Subject-specific
+-- rows sort first so LIMIT 1 picks the override.
+SELECT * FROM openrails.tier_schedules
+WHERE tenant_id = $1 AND owner = $2
+  AND (tenant_subject_id = $3 OR tenant_subject_id IS NULL)
+ORDER BY (tenant_subject_id IS NOT NULL) DESC
+LIMIT 1;

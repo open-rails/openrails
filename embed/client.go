@@ -661,6 +661,30 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 	return nil
 }
 
+// SetTierSchedule transcribes handlers.ServiceSetTierSchedule
+// (service_admission.go, #476). An empty tenant_subject_id is the tenant-wide
+// default schedule (zero payer); a non-empty one is a per-subject override.
+func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID string, schedule []openrails.TierScheduleRung) error {
+	var payer identity.TenantSubjectID
+	if strings.TrimSpace(tenantSubjectID) != "" {
+		var err error
+		payer, err = parseTenantSubject(tenantSubjectID, "invalid tenant_subject_id")
+		if err != nil {
+			return err
+		}
+	}
+	rungs := make([]billingservice.TierScheduleRung, 0, len(schedule))
+	for _, r := range schedule {
+		rungs = append(rungs, billingservice.TierScheduleRung{
+			Tier: r.Tier, MinCumulativePaidMicros: r.MinCumulativePaidMicros,
+		})
+	}
+	if err := c.svc.SetTierSchedule(ctx, payer, rungs); err != nil {
+		return internalErr("set tier schedule failed")
+	}
+	return nil
+}
+
 func budgetScopeWindowInputs(ws []openrails.BudgetScopeWindow) []billingservice.BudgetScopeWindowInput {
 	out := make([]billingservice.BudgetScopeWindowInput, 0, len(ws))
 	for _, w := range ws {

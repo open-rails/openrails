@@ -64,14 +64,25 @@ exists for the tenant, OpenRails owns graduation and host `GraduateTier` calls b
 Manual admin tier override (explicit tier on account settings) still wins over the schedule (#298).
 
 ## Tasks
-- [ ] `tier_schedules` table (tenant-scoped, owner=platform) + migration + RLS.
-- [ ] `SetTierSchedule` on the unified client (HTTP route + embedded adapter), mirroring `SetTierPolicy`.
-- [ ] Auto-graduation: recompute+persist `account_settings.tier` from `cumulative_paid` vs the stored
-      schedule on the deposit/settlement path (eventful); monotonic; admin-override still wins.
-- [ ] `GetTier`/`Admit` read the auto-maintained tier; deprecate/short-circuit host-cranked `GraduateTier`
-      when a schedule exists.
-- [ ] VERIFY: set a schedule once → make deposits crossing thresholds → tier rises automatically with
-      NO host call; admin override sticks; `Admit` enforces the new tier's limits; multi-tenant isolation.
+- [x] `tier_schedules` table (tenant-scoped, owner=platform) + migration + RLS. (migration 016; tenant-wide
+      default = tenant_subject_id NULL, optional per-subject override; rungs jsonb [{tier,min_cumulative_paid_micros}].
+      Also added money_accounts.tier_source ('auto'|'admin') to distinguish auto-graduation from an admin override.)
+- [x] `SetTierSchedule` on the unified client (HTTP route + embedded adapter), mirroring `SetTierPolicy`.
+      (client.go interface + TierScheduleRung; remote.go PUT /v1/service/tier-schedules; embed/client.go local
+      adapter; pkg/service.SetTierSchedule; handler ServiceSetTierSchedule + ginroutes route; money.SetTierSchedule/
+      GetTierSchedule store. Empty tenant_subject_id = tenant-wide default.)
+- [x] Auto-graduation: recompute+persist `money_accounts.tier` from `cumulative_paid` vs the stored schedule
+      on the DEPOSIT path (eventful — money_service.depositTx after the deposit posts, in-band in the same tx);
+      monotonic (rungThreshold guard never regresses); admin-override wins (AutoGraduateMoneyAccountTier guards
+      tier_source<>'admin' at the DB level + an in-code check). DefaultCurrency only.
+- [x] `GetTier`/`Admit` read the auto-maintained tier (unchanged — admitter falls back to money.GetTier which
+      reads money_accounts.tier; auto-graduation now keeps it current). Host-cranked `GraduateTier` short-circuits
+      to a no-op returning the auto-maintained tier when a schedule exists (kept compiling for schedule-less hosts);
+      added SetTierOverride for the explicit admin override.
+- [x] VERIFY: integration tests (internal/modules/money/tier_schedule_integration_test.go) — set a schedule once →
+      deposits crossing thresholds auto-raise the tier with NO host call; GraduateTier no-ops; admin override sticks
+      across further deposits; multi-tenant isolation (tenant A's schedule does not graduate tenant B's payer).
+      Existing TestGraduateTier (schedule-less legacy path) still passes.
 
 ## Related
 #298 (host-cranked `GraduateTier` this supersedes), #473 (budget-policy owner=platform store pattern to
