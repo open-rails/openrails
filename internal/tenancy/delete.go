@@ -22,7 +22,7 @@ var tenantOwnedTables = []string{
 	"notification_queue", "processor_customers",
 	"checkout_sessions", "provider_intents",
 	// money ledger: blocks reference transactions, so purge blocks first (FK-safe).
-	"money_accounts", "money_balances", "money_blocks", "money_transactions",
+	"money_settings", "money_balances", "money_blocks", "money_transactions",
 	"money_windows", "money_spend_limits",
 }
 
@@ -53,7 +53,7 @@ func countTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.CountMerchantRowsCheckoutSessions(ctx, id)
 	case "provider_intents":
 		return q.CountMerchantRowsProviderIntents(ctx, id)
-	case "money_accounts":
+	case "money_settings":
 		return q.CountMerchantRowsMoneyAccounts(ctx, id)
 	case "money_balances":
 		return q.CountMerchantRowsMoneyBalances(ctx, id)
@@ -97,7 +97,7 @@ func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.PurgeMerchantRowsCheckoutSessions(ctx, id)
 	case "provider_intents":
 		return q.PurgeMerchantRowsProviderIntents(ctx, id)
-	case "money_accounts":
+	case "money_settings":
 		return q.PurgeMerchantRowsMoneyAccounts(ctx, id)
 	case "money_balances":
 		return q.PurgeMerchantRowsMoneyBalances(ctx, id)

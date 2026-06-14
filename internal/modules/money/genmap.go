@@ -69,7 +69,7 @@ func moneyTransactionFromGen(r gen.OpenrailsMoneyTransaction) (*models.MoneyTran
 	return m, nil
 }
 
-func settingsFromGen(r gen.OpenrailsMoneyAccount) *models.MoneyAccount {
+func settingsFromGen(r gen.OpenrailsMoneySetting) *models.MoneyAccount {
 	var expiry *int
 	if r.DefaultCreditExpiryDays != nil {
 		v := int(*r.DefaultCreditExpiryDays)

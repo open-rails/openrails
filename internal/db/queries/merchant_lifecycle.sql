@@ -76,10 +76,10 @@ SELECT count(*) FROM openrails.provider_intents WHERE merchant_id = $1;
 DELETE FROM openrails.provider_intents WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsMoneyAccounts :one
-SELECT count(*) FROM openrails.money_accounts WHERE merchant_id = $1;
+SELECT count(*) FROM openrails.money_settings WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsMoneyAccounts :exec
-DELETE FROM openrails.money_accounts WHERE merchant_id = $1;
+DELETE FROM openrails.money_settings WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsMoneyBalances :one
 SELECT count(*) FROM openrails.money_balances WHERE merchant_id = $1;

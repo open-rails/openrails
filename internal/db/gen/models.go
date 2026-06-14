@@ -421,8 +421,35 @@ type OpenrailsMerchantSecret struct {
 	UpdatedAt  time.Time
 }
 
+// amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
+type OpenrailsMoneyBalance struct {
+	ID          uuid.UUID
+	Balance     int64
+	HeldBalance int64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
+	Currency string
+}
+
+// amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
+type OpenrailsMoneyBlock struct {
+	ID                  uuid.UUID
+	OriginalAmount      int64
+	RemainingAmount     int64
+	ExpiresAt           *time.Time
+	SourceTransactionID *uuid.UUID
+	CreatedAt           time.Time
+	MerchantID          uuid.UUID
+	CustomerID          uuid.UUID
+	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
+	Currency string
+}
+
 // Per-(tenant, tenant subject, currency) money spend policy + money-in config. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD). Tensorhub SETS these; OpenRails STORES + ENFORCES them.
-type OpenrailsMoneyAccount struct {
+type OpenrailsMoneySetting struct {
 	ID                        uuid.UUID
 	MerchantID                uuid.UUID
 	CustomerID                uuid.UUID
@@ -455,33 +482,6 @@ type OpenrailsMoneyAccount struct {
 	TierSource string
 	// Admin-set per-account arrears credit line (#489): under billing_mode=arrears the balance may go negative up to this amount; AdmitHold denies insufficient_credit when a new hold would exceed it. 0 = off (prepaid/existing-arrears behavior unchanged). NOT self-serve.
 	CreditLimitMicros int64
-}
-
-// amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
-type OpenrailsMoneyBalance struct {
-	ID          uuid.UUID
-	Balance     int64
-	HeldBalance int64
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
-	Currency string
-}
-
-// amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
-type OpenrailsMoneyBlock struct {
-	ID                  uuid.UUID
-	OriginalAmount      int64
-	RemainingAmount     int64
-	ExpiresAt           *time.Time
-	SourceTransactionID *uuid.UUID
-	CreatedAt           time.Time
-	MerchantID          uuid.UUID
-	CustomerID          uuid.UUID
-	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
-	Currency string
 }
 
 // Optional per-(actor, currency) money spend caps for a tenant subject. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD). actor is a caller-supplied opaque principal string.

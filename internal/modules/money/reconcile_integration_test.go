@@ -96,7 +96,7 @@ func resetMoneyLedger(t *testing.T, pool *pgxpool.Pool, ctx context.Context) {
 	t.Helper()
 	for _, table := range []string{
 		"openrails.money_spend_limits",
-		"openrails.money_accounts",
+		"openrails.money_settings",
 		"openrails.money_blocks",
 		"openrails.money_transactions",
 		"openrails.money_balances",

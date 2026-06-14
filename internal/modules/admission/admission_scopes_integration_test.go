@@ -42,7 +42,7 @@ func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, 
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.tier_policies WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_reservations WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_window_state WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_accounts WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE customer_id = $1", payerID)
 	})

@@ -13,7 +13,7 @@ import (
 )
 
 const addMoneyOutstandingOwed = `-- name: AddMoneyOutstandingOwed :exec
-UPDATE openrails.money_accounts
+UPDATE openrails.money_settings
 SET outstanding_owed_micros = outstanding_owed_micros + $3::bigint,
     updated_at = $4
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
@@ -39,7 +39,7 @@ func (q *Queries) AddMoneyOutstandingOwed(ctx context.Context, arg AddMoneyOutst
 }
 
 const autoGraduateMoneyAccountTier = `-- name: AutoGraduateMoneyAccountTier :exec
-UPDATE openrails.money_accounts
+UPDATE openrails.money_settings
 SET tier = $3::text, tier_source = 'auto', updated_at = $4
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
   AND tier_source <> 'admin'
@@ -69,7 +69,7 @@ func (q *Queries) AutoGraduateMoneyAccountTier(ctx context.Context, arg AutoGrad
 }
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
-SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source, credit_limit_micros FROM openrails.money_accounts
+SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source, credit_limit_micros FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -80,9 +80,9 @@ type GetMoneyAccountSettingsParams struct {
 	Currency   string
 }
 
-func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccountSettingsParams) (OpenrailsMoneyAccount, error) {
+func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccountSettingsParams) (OpenrailsMoneySetting, error) {
 	row := q.db.QueryRow(ctx, getMoneyAccountSettings, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var i OpenrailsMoneyAccount
+	var i OpenrailsMoneySetting
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -151,7 +151,7 @@ func (q *Queries) GetMoneySpendLimit(ctx context.Context, arg GetMoneySpendLimit
 }
 
 const insertMoneyAccountSettingsIfAbsent = `-- name: InsertMoneyAccountSettingsIfAbsent :exec
-INSERT INTO openrails.money_accounts (
+INSERT INTO openrails.money_settings (
     id, merchant_id, customer_id, currency, billing_mode,
     hard_stop_on_breach, alert_threshold_pct, created_at, updated_at
 ) VALUES ($1, $2, $3, $5, $4, true, 80, $6, $6)
@@ -187,7 +187,7 @@ SELECT s.merchant_id, s.customer_id, s.currency,
        COALESCE(s.low_balance_threshold_micros, 0)::bigint AS threshold,
        s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id,
        s.last_alert_at, s.last_topup_at
-FROM openrails.money_accounts s
+FROM openrails.money_settings s
 LEFT JOIN openrails.money_balances b
   ON b.merchant_id = s.merchant_id
  AND b.customer_id = s.customer_id
@@ -246,7 +246,7 @@ func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, merchantI
 const listChargeableArrearsMoneyAccounts = `-- name: ListChargeableArrearsMoneyAccounts :many
 SELECT s.merchant_id, s.customer_id, s.currency,
        s.outstanding_owed_micros, s.auto_topup_payment_method_id
-FROM openrails.money_accounts s
+FROM openrails.money_settings s
 WHERE s.merchant_id = $1
   AND s.billing_mode = 'arrears'
   AND s.outstanding_owed_micros > 0
@@ -308,11 +308,11 @@ type ListMoneyAccountPairsRow struct {
 	Currency   string
 }
 
-// openrails.money_accounts: per-(tenant, payer, currency) spend policy + money-in
+// openrails.money_settings: per-(tenant, payer, currency) spend policy + money-in
 // state (#237/#239/#240/#241/#298/#299/#302). amounts are the currency's minor unit
 // (default µ$). currency is a system code; the Go registry is authority.
 // Distinct (payer, currency) pairs to finalize invoices for (#472). Sourced from
-// money_balances — the row every payer with money activity has (a money_accounts
+// money_balances — the row every payer with money activity has (a money_settings
 // row only exists once spend settings are configured).
 func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUID) ([]ListMoneyAccountPairsRow, error) {
 	rows, err := q.db.Query(ctx, listMoneyAccountPairs, merchantID)
@@ -335,7 +335,7 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUI
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source, credit_limit_micros FROM openrails.money_accounts
+SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source, credit_limit_micros FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -346,9 +346,9 @@ type LockMoneyAccountSettingsParams struct {
 	Currency   string
 }
 
-func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAccountSettingsParams) (OpenrailsMoneyAccount, error) {
+func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAccountSettingsParams) (OpenrailsMoneySetting, error) {
 	row := q.db.QueryRow(ctx, lockMoneyAccountSettings, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var i OpenrailsMoneyAccount
+	var i OpenrailsMoneySetting
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -382,7 +382,7 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 }
 
 const reduceMoneyOutstandingOwedSnapshot = `-- name: ReduceMoneyOutstandingOwedSnapshot :execrows
-UPDATE openrails.money_accounts
+UPDATE openrails.money_settings
 SET outstanding_owed_micros = GREATEST(0, outstanding_owed_micros - $3::bigint),
     updated_at = $4
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
@@ -414,7 +414,7 @@ func (q *Queries) ReduceMoneyOutstandingOwedSnapshot(ctx context.Context, arg Re
 }
 
 const resumeMoneyAccount = `-- name: ResumeMoneyAccount :exec
-UPDATE openrails.money_accounts
+UPDATE openrails.money_settings
 SET suspended_at = NULL, suspend_reason = NULL, updated_at = $3
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $4
 `
@@ -437,7 +437,7 @@ func (q *Queries) ResumeMoneyAccount(ctx context.Context, arg ResumeMoneyAccount
 }
 
 const setMoneyAccountCreditLimit = `-- name: SetMoneyAccountCreditLimit :exec
-UPDATE openrails.money_accounts
+UPDATE openrails.money_settings
 SET credit_limit_micros = $3::bigint, updated_at = $4
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
 `
@@ -465,7 +465,7 @@ func (q *Queries) SetMoneyAccountCreditLimit(ctx context.Context, arg SetMoneyAc
 }
 
 const setMoneyAccountPaymentVerified = `-- name: SetMoneyAccountPaymentVerified :exec
-UPDATE openrails.money_accounts
+UPDATE openrails.money_settings
 SET verified_payment_method = $3::boolean,
     verified_at = CASE WHEN $3::boolean THEN $4::timestamptz ELSE NULL END,
     updated_at = $4::timestamptz
@@ -492,7 +492,7 @@ func (q *Queries) SetMoneyAccountPaymentVerified(ctx context.Context, arg SetMon
 }
 
 const setMoneyAccountTier = `-- name: SetMoneyAccountTier :exec
-UPDATE openrails.money_accounts
+UPDATE openrails.money_settings
 SET tier = $3::text, tier_source = $4::text, updated_at = $5
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $6
 `
@@ -521,7 +521,7 @@ func (q *Queries) SetMoneyAccountTier(ctx context.Context, arg SetMoneyAccountTi
 }
 
 const stampMoneyAccountAlertAt = `-- name: StampMoneyAccountAlertAt :exec
-UPDATE openrails.money_accounts
+UPDATE openrails.money_settings
 SET last_alert_at = $3, updated_at = $3
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $4
 `
@@ -544,7 +544,7 @@ func (q *Queries) StampMoneyAccountAlertAt(ctx context.Context, arg StampMoneyAc
 }
 
 const stampMoneyAccountTopupAt = `-- name: StampMoneyAccountTopupAt :exec
-UPDATE openrails.money_accounts
+UPDATE openrails.money_settings
 SET last_topup_at = $3, updated_at = $3
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $4
 `
@@ -567,7 +567,7 @@ func (q *Queries) StampMoneyAccountTopupAt(ctx context.Context, arg StampMoneyAc
 }
 
 const suspendMoneyAccount = `-- name: SuspendMoneyAccount :exec
-UPDATE openrails.money_accounts
+UPDATE openrails.money_settings
 SET suspended_at = $3::timestamptz,
     suspend_reason = $4,
     updated_at = $3::timestamptz
@@ -594,7 +594,7 @@ func (q *Queries) SuspendMoneyAccount(ctx context.Context, arg SuspendMoneyAccou
 }
 
 const upsertMoneyAccountSettings = `-- name: UpsertMoneyAccountSettings :exec
-INSERT INTO openrails.money_accounts (
+INSERT INTO openrails.money_settings (
     id, merchant_id, customer_id, currency, billing_mode,
     max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros,
     low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents,
