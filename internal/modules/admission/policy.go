@@ -187,8 +187,8 @@ func NewBudgetPolicyStore(database *db.DB) *BudgetPolicyStore {
 }
 
 // BudgetScopePolicy is one stored scope policy: {scope, owner, scopeKey,
-// windows[]}. scopeKey is the immutable role uuid (scope=role) / actor string
-// (scope=actor) / "" (scope=subject).
+// windows[]}. scopeKey is the immutable role uuid (scope=role) / invoker string
+// (scope=invoker) / "" (scope=subject).
 type BudgetScopePolicy struct {
 	Scope    string
 	Owner    string
@@ -284,7 +284,7 @@ func (s *BudgetPolicyStore) Upsert(ctx context.Context, payer identity.CustomerI
 			ID:            uuidutil.NewV7(),
 			MerchantID:    tenantID,
 			CustomerID:    payer.UUID(),
-			Scope:         p.Scope,
+			Scope:         budgets.NormalizeScope(p.Scope), // #491: store canonical invoker
 			Owner:         p.Owner,
 			ScopeKey:      p.ScopeKey,
 			Windows:       windowsJSON,
@@ -306,7 +306,7 @@ func (s *BudgetPolicyStore) Delete(ctx context.Context, payer identity.CustomerI
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		_, err := s.db.Gen(ctx).DeleteBudgetPolicy(ctx, gen.DeleteBudgetPolicyParams{
 			MerchantID: tenantID, CustomerID: payer.UUID(),
-			Scope: scope, Owner: owner, ScopeKey: scopeKey,
+			Scope: budgets.NormalizeScope(scope), Owner: owner, ScopeKey: scopeKey,
 		})
 		return err
 	})

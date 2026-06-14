@@ -365,7 +365,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 			budgetScopeStatuses = statuses
 			budgetWindows = flattenScopeWindows(statuses)
 			for _, st := range statuses {
-				if st.Scope == budgets.ScopeActor && st.Reserved != uuid.Nil {
+				if st.Scope == budgets.ScopeInvoker && st.Reserved != uuid.Nil {
 					budgetResID = st.Reserved
 				}
 			}
@@ -457,9 +457,9 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 func (a *Admitter) buildBudgetScopes(ctx context.Context, req AdmitRequest, pol ResolvedPolicy) ([]budgets.ScopeReservation, error) {
 	var scopes []budgets.ScopeReservation
 
-	// (subject, actor) — the tier-policy windows; preserves the existing path.
+	// (subject, invoker) — the tier-policy windows; preserves the existing path.
 	if len(pol.BudgetWindows) > 0 {
-		sc, err := budgets.MakeScopeReservation(budgets.ScopeActor, "subject", req.Actor, uuid.Nil, pol.BudgetWindows)
+		sc, err := budgets.MakeScopeReservation(budgets.ScopeInvoker, "subject", req.Actor, uuid.Nil, pol.BudgetWindows)
 		if err != nil {
 			return nil, err
 		}
@@ -483,7 +483,7 @@ func (a *Admitter) buildBudgetScopes(ctx context.Context, req AdmitRequest, pol 
 		if len(windows) == 0 {
 			continue
 		}
-		switch p.Scope {
+		switch budgets.NormalizeScope(p.Scope) {
 		case budgets.ScopeSubject:
 			sc, err := budgets.MakeScopeReservation(budgets.ScopeSubject, p.Owner, "", uuid.Nil, windows)
 			if err != nil {
@@ -493,19 +493,19 @@ func (a *Admitter) buildBudgetScopes(ctx context.Context, req AdmitRequest, pol 
 		case budgets.ScopeRole:
 			rid, perr := uuid.Parse(p.ScopeKey)
 			if perr != nil || !roleSet[rid] {
-				continue // not a role this actor holds (or a malformed key)
+				continue // not a role this invoker holds (or a malformed key)
 			}
 			sc, err := budgets.MakeScopeReservation(budgets.ScopeRole, p.Owner, "", rid, windows)
 			if err != nil {
 				return nil, err
 			}
 			scopes = append(scopes, sc)
-		case budgets.ScopeActor:
-			// A stored (subject,actor) override applies only to the matching actor.
+		case budgets.ScopeInvoker:
+			// A stored (subject,invoker) override applies only to the matching invoker.
 			if p.ScopeKey != req.Actor {
 				continue
 			}
-			sc, err := budgets.MakeScopeReservation(budgets.ScopeActor, p.Owner, req.Actor, uuid.Nil, windows)
+			sc, err := budgets.MakeScopeReservation(budgets.ScopeInvoker, p.Owner, req.Actor, uuid.Nil, windows)
 			if err != nil {
 				return nil, err
 			}

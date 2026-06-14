@@ -167,7 +167,7 @@ type OpenrailsBudgetPolicy struct {
 	Scope      string
 	// platform (set by us; subject cannot edit/see) | subject (the subject's own cap). The write-authz split.
 	Owner string
-	// Immutable scope discriminator: role uuid (scope=role) or actor string (scope=actor); empty for scope=subject. Never a slug/name.
+	// Immutable scope discriminator: role uuid (scope=role) or invoker string (scope=invoker); empty for scope=subject. Never a slug/name.
 	ScopeKey      string
 	Windows       []byte
 	PolicyVersion int64

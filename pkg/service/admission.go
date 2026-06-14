@@ -332,8 +332,9 @@ type BudgetScopeWindowInput struct {
 }
 
 // BudgetScopePolicyInput configures one hierarchical budget-scope policy (#473).
-// Scope is "subject" | "role" | "actor"; ScopeKey is the role uuid (scope=role)
-// or actor string (scope=actor), empty for scope=subject.
+// Scope is "subject" | "role" | "invoker" ("actor" still accepted, #491);
+// ScopeKey is the role uuid (scope=role) or invoker string (scope=invoker),
+// empty for scope=subject.
 type BudgetScopePolicyInput struct {
 	Scope    string                   `json:"scope"`
 	ScopeKey string                   `json:"scope_key,omitempty"`

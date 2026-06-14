@@ -24,11 +24,11 @@ import (
 //
 // Each scope yields a distinct, immutable KEY string that is stored verbatim in
 // the budget_reservations / budget_window_state `actor` column (an opaque text
-// key the engine never interprets). Existing (subject, actor) windows keep the
-// bare actor string as their key, so this is backward compatible and needs no
-// data migration:
+// key the engine never interprets — the column name predates the invoker
+// rename, #491). Existing (subject, invoker) windows keep the bare invoker
+// string as their key, so this is backward compatible:
 //
-//	ScopeActor   -> the actor string (UNCHANGED; the pre-#473 path)
+//	ScopeInvoker -> the invoker string (the per-end-user attribution key)
 //	ScopeSubject -> "@subject"                  (payer total, one per subject)
 //	ScopeRole    -> "@role:<role-uuid>"         (shared pool for a role)
 //
@@ -37,22 +37,38 @@ import (
 // (never a slug/name — #475/#476 convention).
 const (
 	ScopeSubject = "subject"
-	ScopeActor   = "actor"
+	// ScopeInvoker is the canonical per-invoker (per-end-user) abuse-attribution
+	// scope (#491; renamed from "actor"). Scoped (merchant, customer, invoker).
+	ScopeInvoker = "invoker"
 	ScopeRole    = "role"
+
+	// ScopeActor is the pre-#491 stored/wire value, still accepted on input and
+	// normalized to ScopeInvoker. Deprecated: use ScopeInvoker.
+	ScopeActor = "actor"
 )
 
-// scopeKey derives the immutable reservation key for a scope. For the actor
-// scope the key is the caller-supplied actor string (preserving pre-#473 rows);
-// for subject/role it is a reserved, collision-resistant "@"-prefixed form so a
-// real actor string can never alias a subject/role bucket.
-func scopeKey(scope, actor string, roleID uuid.UUID) (string, error) {
-	switch scope {
-	case ScopeActor:
-		actor = strings.TrimSpace(actor)
-		if actor == "" {
-			return "", fmt.Errorf("actor scope requires an actor")
+// NormalizeScope maps the deprecated "actor" scope value to the canonical
+// "invoker" (#491), passing every other value through unchanged. Applied on
+// writes/reads so old wire/stored values keep working transiently.
+func NormalizeScope(scope string) string {
+	if strings.TrimSpace(scope) == ScopeActor {
+		return ScopeInvoker
+	}
+	return scope
+}
+
+// scopeKey derives the immutable reservation key for a scope. For the invoker
+// scope the key is the caller-supplied invoker string (preserving pre-#473
+// rows); for subject/role it is a reserved, collision-resistant "@"-prefixed
+// form so a real invoker string can never alias a subject/role bucket.
+func scopeKey(scope, invoker string, roleID uuid.UUID) (string, error) {
+	switch NormalizeScope(scope) {
+	case ScopeInvoker:
+		invoker = strings.TrimSpace(invoker)
+		if invoker == "" {
+			return "", fmt.Errorf("invoker scope requires an invoker")
 		}
-		return actor, nil
+		return invoker, nil
 	case ScopeSubject:
 		return "@subject", nil
 	case ScopeRole:
@@ -61,7 +77,7 @@ func scopeKey(scope, actor string, roleID uuid.UUID) (string, error) {
 		}
 		return "@role:" + roleID.String(), nil
 	default:
-		return "", fmt.Errorf("unknown budget scope %q (want subject|actor|role)", scope)
+		return "", fmt.Errorf("unknown budget scope %q (want subject|invoker|role)", scope)
 	}
 }
 
@@ -69,7 +85,7 @@ func scopeKey(scope, actor string, roleID uuid.UUID) (string, error) {
 // admit. Key is the pre-derived reservation key (via scopeKey); Windows are the
 // fixed-interval windows for that scope.
 type ScopeReservation struct {
-	// Scope is "subject" | "actor" | "role" (informational; carried back on the
+	// Scope is "subject" | "invoker" | "role" (informational; carried back on the
 	// blocking ScopeStatus so the caller can report which authority blocked).
 	Scope string
 	// Owner is "platform" | "subject" (informational; lets the caller surface
@@ -91,13 +107,14 @@ type ScopeStatus struct {
 }
 
 // MakeScopeReservation builds a ScopeReservation, deriving the immutable key
-// from (scope, actor, roleID). Empty windows yield a no-op scope (skipped).
-func MakeScopeReservation(scope, owner, actor string, roleID uuid.UUID, windows []BudgetWindow) (ScopeReservation, error) {
-	key, err := scopeKey(scope, actor, roleID)
+// from (scope, invoker, roleID). Empty windows yield a no-op scope (skipped).
+// The stored Scope is normalized to the canonical value (#491).
+func MakeScopeReservation(scope, owner, invoker string, roleID uuid.UUID, windows []BudgetWindow) (ScopeReservation, error) {
+	key, err := scopeKey(scope, invoker, roleID)
 	if err != nil {
 		return ScopeReservation{}, err
 	}
-	return ScopeReservation{Scope: scope, Owner: owner, Key: key, Windows: windows}, nil
+	return ScopeReservation{Scope: NormalizeScope(scope), Owner: owner, Key: key, Windows: windows}, nil
 }
 
 // ReserveScopes composes the multi-scope admit verdict (#473): in ONE
