@@ -88,7 +88,7 @@ func (r *recordingDeferredDeleteScheduler) WithTx(pgx.Tx) subscriptions.Deferred
 // enqueued, due at max(now, deletion_scheduled_at). Idempotent via the intent
 // idempotency_key.
 func TestMarkerConversionSweepEnqueuesIntents(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	products := suite.SeedProducts()
@@ -149,7 +149,7 @@ func TestMarkerConversionSweepEnqueuesIntents(t *testing.T) {
 // cancelled AND a deferred remote-delete intent is enqueued on the ledger
 // (#358), so NMI stops retrying the dead subscription.
 func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	products := suite.SeedProducts()
@@ -214,7 +214,7 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 // persisted in the same transaction as the cancellation, and the scheduler is
 // invoked exactly once after commit with the subscription's user and ~now.
 func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 	rt := suite.App.Runtime
 
@@ -263,7 +263,7 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 // NO proactive provider action — no deferred delete is scheduled and no marker
 // is set (the remote subscription is left for reconciliation).
 func TestFailMembershipLimitedModeLeavesRemoteSubscription(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 	rt := suite.App.Runtime
 
@@ -313,7 +313,7 @@ func TestFailMembershipLimitedModeLeavesRemoteSubscription(t *testing.T) {
 // delete through the shared deferred scheduler (no inline delete), so window
 // expiry persists the durable marker and schedules exactly one delete.
 func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
@@ -361,7 +361,7 @@ func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
 // open undo window enqueues a USER-origin intent due at deleteAt (period end
 // minus the safety margin), and the resume worker supersedes it.
 func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 	rt := suite.App.Runtime
 

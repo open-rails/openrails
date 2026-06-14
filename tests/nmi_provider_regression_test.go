@@ -90,7 +90,7 @@ func TestCheckoutSupportsConfiguredSecondaryNMIProvider(t *testing.T) {
 }
 
 func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	products := suite.SeedProducts()
 	price := products[0].Prices[0]
 	priceID := price.ID

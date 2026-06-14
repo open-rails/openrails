@@ -20,7 +20,7 @@ import (
 )
 
 func TestCCBillDunningGraceEntitlements(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	// Ensure catalog + profile mapping exists for webhook resolution.
@@ -123,7 +123,7 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 }
 
 func TestCCBillCancellationKeepsAccessUntilPaidTermEnd(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	_ = suite.SeedProducts()

@@ -23,7 +23,7 @@ import (
 
 // TestTierGroupDetection tests that the checkout service correctly detects tier groups
 func TestTierGroupDetection(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	// Seed tiered products (Premium, Premium+, Premium Ultimate)
@@ -113,7 +113,7 @@ func TestTierGroupDetection(t *testing.T) {
 
 // TestTierProrationCalculation tests that proration is calculated correctly for tier upgrades
 func TestTierProrationCalculation(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	// Seed tiered products
 	tieredProducts := suite.SeedTieredProducts()
@@ -165,7 +165,7 @@ func TestTierProrationCalculation(t *testing.T) {
 
 // TestScheduledDowngrade tests that downgrades are scheduled and applied at renewal
 func TestScheduledDowngrade(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	// Seed tiered products
@@ -269,7 +269,7 @@ func TestScheduledDowngrade(t *testing.T) {
 
 // TestEntitlementChangesOnTierChange tests that entitlements are correctly updated
 func TestEntitlementChangesOnTierChange(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	// Seed tiered products

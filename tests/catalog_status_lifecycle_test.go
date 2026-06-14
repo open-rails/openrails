@@ -18,7 +18,7 @@ import (
 // survives create -> get -> list through the public service facade, and that
 // the default on create is "active".
 func TestCatalogStatus_RoundTripsThroughFacade(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := dbtest.WithTestTenant(context.Background())
 
 	svc, err := billingservice.New(suite.App.Runtime)
@@ -49,7 +49,7 @@ func TestCatalogStatus_RoundTripsThroughFacade(t *testing.T) {
 // a historical plan with existing subscribers can be created directly as
 // archived (no purchasable gap), and the price round-trips with that status.
 func TestCatalogStatus_CreateAsArchivedInOneStep(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := dbtest.WithTestTenant(context.Background())
 
 	svc, err := billingservice.New(suite.App.Runtime)
@@ -80,7 +80,7 @@ func TestCatalogStatus_CreateAsArchivedInOneStep(t *testing.T) {
 // TestCatalogStatus_DraftHiddenAndNotPurchasable verifies a draft price/product
 // is hidden from the public (non-admin) catalog and is not purchasable.
 func TestCatalogStatus_DraftHiddenAndNotPurchasable(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := dbtest.WithTestTenant(context.Background())
 
 	svc, err := billingservice.New(suite.App.Runtime)

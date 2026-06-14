@@ -64,7 +64,7 @@ func (s stubServiceTokenResolver) resolved() (*controlplane.ResolvedServiceToken
 }
 
 func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	// In-process facade calls require the tenant pinned in context (the raw
 	// Service has no default tenant; the HTTP path below pins it via middleware).
 	ctx := dbtest.WithTestTenant(context.Background())

@@ -184,7 +184,7 @@ func TestCCBillChargeback_DedupesDuplicateDelivery(t *testing.T) {
 func seedCCBillActiveSubscriptionWithEntitlement(t *testing.T) (*TestContainerSuite, string, string, uuid.UUID, time.Time) {
 	t.Helper()
 
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	products := suite.SeedProducts()

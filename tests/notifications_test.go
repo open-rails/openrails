@@ -18,7 +18,7 @@ import (
 
 // TestNotificationsRequiresAuth tests that notification endpoints require authentication
 func TestNotificationsRequiresAuth(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	t.Run("GET notifications returns 401 without auth token", func(t *testing.T) {
 		w := httptest.NewRecorder()

@@ -20,7 +20,7 @@ import (
 
 // TestPaymentMethodsRequiresAuth tests that payment methods endpoints require authentication
 func TestPaymentMethodsRequiresAuth(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	t.Run("LIST returns 401 without auth token", func(t *testing.T) {
 		w := httptest.NewRecorder()

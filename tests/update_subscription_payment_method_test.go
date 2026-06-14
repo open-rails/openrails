@@ -19,7 +19,7 @@ import (
 
 // TestUpdateSubscriptionPaymentMethodRequiresAuth tests that the endpoint requires authentication
 func TestUpdateSubscriptionPaymentMethodRequiresAuth(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	t.Run("returns 401 without auth token", func(t *testing.T) {
 		subscriptionID := uuid.New().String()

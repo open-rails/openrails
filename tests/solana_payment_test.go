@@ -16,7 +16,7 @@ import (
 
 // TestSolanaTokensNoAuth tests that /v1/solana/tokens doesn't require auth
 func TestSolanaTokensNoAuth(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	t.Run("returns supported tokens without auth", func(t *testing.T) {
 		w := httptest.NewRecorder()
