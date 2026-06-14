@@ -27,6 +27,7 @@ var (
 type OpenWindowRequest struct {
 	TenantSubjectID identity.TenantSubjectID
 	Actor           string
+	Currency        string // "" => DefaultCurrency (#476)
 	Amount          int64
 	TTL             time.Duration
 }
@@ -66,6 +67,7 @@ func (s *Service) OpenWindow(ctx context.Context, req OpenWindowRequest) (*Credi
 	w, err := s.moneyService().OpenWindow(ctx, money.OpenWindowParams{
 		Payer:     req.TenantSubjectID,
 		Actor:     strings.TrimSpace(req.Actor),
+		Currency:  req.Currency,
 		Amount:    req.Amount,
 		ExpiresAt: s.now().Add(ttl).UTC(),
 	})

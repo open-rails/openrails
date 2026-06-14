@@ -32,18 +32,18 @@ import (
 // and is trusted for its own tenant, exactly like a tenant-wide service token.
 type localClient struct {
 	svc *billingservice.Service
-	// creditType is the default credit_type applied to Admit/Authorize/Balance
-	// when the request leaves it empty — the client-side counterpart of
-	// openrails.WithCreditType on the remote.
-	creditType string
+	// currency is the default currency applied to Authorize/Balance/window
+	// requests when the request leaves it empty — the client-side counterpart of
+	// openrails.WithCurrency on the remote (#476).
+	currency string
 }
 
 // ClientOption configures Runtime.Client.
 type ClientOption func(*localClient)
 
-// WithCreditType mirrors openrails.WithCreditType for the embedded client.
-func WithCreditType(creditType string) ClientOption {
-	return func(c *localClient) { c.creditType = strings.TrimSpace(creditType) }
+// WithCurrency mirrors openrails.WithCurrency for the embedded client (#476).
+func WithCurrency(currency string) ClientOption {
+	return func(c *localClient) { c.currency = strings.TrimSpace(currency) }
 }
 
 // --- shared transcription helpers -----------------------------------------
@@ -137,9 +137,6 @@ func transactionFromService(t *billingservice.CreditTransaction) *openrails.Cred
 // (service_admission.go). All verdict outcomes — allowed, throughput (429),
 // money (402), gated (403) — return (resp, nil), like the remote client.
 func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*openrails.AdmitResponse, error) {
-	if req.CreditType == "" {
-		req.CreditType = c.creditType
-	}
 	if req.EstimateMicros < 0 {
 		return nil, invalidErr("estimate_micros must be >= 0")
 	}
@@ -165,7 +162,6 @@ func admitInputFromSDK(req openrails.AdmitRequest, payer identity.TenantSubjectI
 		Tier:            req.Tier,
 		Resource:        req.Resource,
 		Amounts:         req.Amounts,
-		CreditType:      req.CreditType,
 		EstimateMicros:  req.EstimateMicros,
 		Source:          req.Source,
 		SourceID:        req.RequestID,
@@ -205,13 +201,10 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 
 // Authorize transcribes handlers.ServiceAuthorizeCredits (service_credits.go).
 func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequest) (*openrails.AuthorizeResponse, error) {
-	if req.CreditType == "" {
-		req.CreditType = c.creditType
+	if req.Currency == "" {
+		req.Currency = c.currency
 	}
-	// gin binding: credit_type + request_id are `binding:"required"`.
-	if strings.TrimSpace(req.CreditType) == "" {
-		return nil, bindRequiredErr("CreditType")
-	}
+	// gin binding: request_id is `binding:"required"`. Currency is optional (#476).
 	if strings.TrimSpace(req.RequestID) == "" {
 		return nil, bindRequiredErr("RequestID")
 	}
@@ -229,7 +222,7 @@ func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequ
 	out, err := c.svc.AuthorizeAndHold(ctx, billingservice.AuthorizeAndHoldRequest{
 		TenantSubjectID: payer,
 		Actor:           req.Actor,
-		CreditType:      req.CreditType,
+		Currency:        req.Currency,
 		EstimateMicros:  req.EstimateMicros,
 		RequestID:       req.RequestID,
 		ExpiresAt:       expiresAt,
@@ -259,13 +252,11 @@ func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequ
 
 // HoldCredits transcribes handlers.ServiceHoldCredits (service_credits.go).
 func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCreditsRequest) (*openrails.CreditHold, error) {
-	// gin binding (in struct field order): actor, credit_type, amount, source,
-	// source_id, expires_at are all `binding:"required"`.
+	// gin binding (in struct field order): actor, amount, source, source_id,
+	// expires_at are all `binding:"required"`. Currency is optional (#476).
 	switch {
 	case strings.TrimSpace(req.Actor) == "":
 		return nil, bindRequiredErr("Actor")
-	case strings.TrimSpace(req.CreditType) == "":
-		return nil, bindRequiredErr("CreditType")
 	case req.Amount == 0:
 		return nil, bindRequiredErr("Amount")
 	case strings.TrimSpace(req.Source) == "":
@@ -280,6 +271,7 @@ func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCredits
 	hold, err := c.svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
 		TenantSubjectID: &payer,
 		Actor:           req.Actor,
+		Currency:        req.Currency,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -334,11 +326,10 @@ func (c *localClient) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
 // WithdrawCredits transcribes handlers.ServiceWithdrawCredits
 // (service_credits.go).
 func (c *localClient) WithdrawCredits(ctx context.Context, req openrails.WithdrawCreditsRequest) (*openrails.CreditTransaction, error) {
+	// Currency is optional (#476).
 	switch {
 	case strings.TrimSpace(req.Actor) == "":
 		return nil, bindRequiredErr("Actor")
-	case strings.TrimSpace(req.CreditType) == "":
-		return nil, bindRequiredErr("CreditType")
 	case req.Amount == 0:
 		return nil, bindRequiredErr("Amount")
 	case strings.TrimSpace(req.Source) == "":
@@ -353,6 +344,7 @@ func (c *localClient) WithdrawCredits(ctx context.Context, req openrails.Withdra
 	trx, err := c.svc.WithdrawCredits(ctx, billingservice.WithdrawCreditsRequest{
 		TenantSubjectID: &payer,
 		Actor:           req.Actor,
+		Currency:        req.Currency,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -366,11 +358,10 @@ func (c *localClient) WithdrawCredits(ctx context.Context, req openrails.Withdra
 // DepositCredits transcribes handlers.ServiceDepositCredits
 // (service_credits.go).
 func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositCreditsRequest) (*openrails.CreditTransaction, error) {
+	// Currency is optional (#476).
 	switch {
 	case strings.TrimSpace(req.Actor) == "":
 		return nil, bindRequiredErr("Actor")
-	case strings.TrimSpace(req.CreditType) == "":
-		return nil, bindRequiredErr("CreditType")
 	case req.Amount == 0:
 		return nil, bindRequiredErr("Amount")
 	case strings.TrimSpace(req.Source) == "":
@@ -395,6 +386,7 @@ func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositC
 	trx, err := c.svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
 		TenantSubjectID: &payer,
 		Actor:           req.Actor,
+		Currency:        req.Currency,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -448,18 +440,14 @@ func (c *localClient) Release(ctx context.Context, reservationID string) error {
 }
 
 // Balance transcribes handlers.ServiceGetCreditsBalance (service_credits.go):
-// the handler defaults an absent credit_type to "api_credits"; the remote
-// client sends its WithCreditType default when set, mirrored here.
+// an absent currency defaults to "USD" (#476); the remote client sends its
+// WithCurrency default when set, mirrored here.
 func (c *localClient) Balance(ctx context.Context, payerTenantID string) (*openrails.BalanceResponse, error) {
-	creditType := c.creditType
-	if creditType == "" {
-		creditType = "api_credits"
-	}
 	payer, err := parseTenantSubject(payerTenantID, "invalid tenant_subject_id")
 	if err != nil {
 		return nil, err
 	}
-	snap, err := c.svc.GetCreditAccount(ctx, payer, creditType)
+	snap, err := c.svc.GetCreditAccount(ctx, payer, c.currency)
 	if err != nil {
 		return nil, invalidErr(err.Error())
 	}
@@ -473,19 +461,19 @@ func (c *localClient) Balance(ctx context.Context, payerTenantID string) (*openr
 }
 
 // GetCreditAccount transcribes handlers.ServiceGetCreditsBalance
-// (service_credits.go) with the remote client's "usd_micro" normalization.
-func (c *localClient) GetCreditAccount(ctx context.Context, payerTenantID, creditType string) (*openrails.CreditAccount, error) {
+// (service_credits.go) with the remote client's "USD" normalization (#476).
+func (c *localClient) GetCreditAccount(ctx context.Context, payerTenantID, currency string) (*openrails.CreditAccount, error) {
 	payer, err := parseTenantSubject(payerTenantID, "invalid tenant_subject_id")
 	if err != nil {
 		return nil, err
 	}
-	snap, err := c.svc.GetCreditAccount(ctx, payer, creditType)
+	snap, err := c.svc.GetCreditAccount(ctx, payer, currency)
 	if err != nil {
 		return nil, invalidErr(err.Error())
 	}
 	return &openrails.CreditAccount{
 		PayerTenantID:         snap.TenantSubjectID.String(),
-		CreditType:            snap.CreditType,
+		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
 		BalanceMicros:         snap.BalanceMicros,
 		HeldMicros:            snap.HeldMicros,
@@ -497,12 +485,12 @@ func (c *localClient) GetCreditAccount(ctx context.Context, payerTenantID, credi
 // SetCreditAccountSettings transcribes handlers.ServiceSetCreditAccountSettings
 // (service_credits.go) and then — like the remote client — re-reads the account
 // snapshot via the balance path.
-func (c *localClient) SetCreditAccountSettings(ctx context.Context, payerTenantID, creditType string, in openrails.AccountSettingsInput) (*openrails.CreditAccount, error) {
+func (c *localClient) SetCreditAccountSettings(ctx context.Context, payerTenantID, currency string, in openrails.AccountSettingsInput) (*openrails.CreditAccount, error) {
 	payer, err := parseTenantSubject(payerTenantID, "tenant_subject_id required")
 	if err != nil {
 		return nil, err
 	}
-	ct := strings.TrimSpace(creditType)
+	ct := strings.TrimSpace(currency)
 	settings := money.AccountSettingsInput{
 		BillingMode:              in.BillingMode,
 		MaxSpendPerDayMicros:     in.MaxSpendPerDayMicros,
@@ -529,7 +517,7 @@ func (c *localClient) SetCreditAccountSettings(ctx context.Context, payerTenantI
 	if _, err := c.svc.GetCreditAccountSettings(ctx, payer, ct); err != nil {
 		return nil, invalidErr(err.Error())
 	}
-	return c.GetCreditAccount(ctx, payerTenantID, creditType)
+	return c.GetCreditAccount(ctx, payerTenantID, currency)
 }
 
 // serviceTxn mirrors the handler's serviceTxnResponse wire shape
@@ -548,12 +536,12 @@ type serviceTxn struct {
 // ListCreditTransactions transcribes
 // handlers.ServiceListTenantSubjectCreditTransactions (service_credits.go),
 // producing the same {"transactions":[...],"total":N} JSON the wire carries.
-func (c *localClient) ListCreditTransactions(ctx context.Context, payerTenantID, creditType string, limit int) (json.RawMessage, error) {
+func (c *localClient) ListCreditTransactions(ctx context.Context, payerTenantID, currency string, limit int) (json.RawMessage, error) {
 	payer, err := parseTenantSubject(payerTenantID, "tenant_subject_id required")
 	if err != nil {
 		return nil, err
 	}
-	items, total, err := c.svc.GetTenantSubjectCreditTransactions(ctx, payer, strings.TrimSpace(creditType), limit, 0)
+	items, total, err := c.svc.GetTenantSubjectCreditTransactions(ctx, payer, strings.TrimSpace(currency), limit, 0)
 	if err != nil {
 		return nil, invalidErr(err.Error())
 	}
@@ -862,13 +850,10 @@ func mapWindowErr(err error, fallback string) error {
 // OpenWindow transcribes handlers.ServiceOpenCreditWindow
 // (service_credit_window.go, #335).
 func (c *localClient) OpenWindow(ctx context.Context, req openrails.OpenWindowRequest) (*openrails.CreditWindow, error) {
-	if req.CreditType == "" {
-		req.CreditType = c.creditType
+	if req.Currency == "" {
+		req.Currency = c.currency
 	}
-	// gin binding: credit_type + amount are `binding:"required"`.
-	if strings.TrimSpace(req.CreditType) == "" {
-		return nil, bindRequiredErr("CreditType")
-	}
+	// gin binding: amount is `binding:"required"`. Currency is optional (#476).
 	if req.AmountMicros == 0 {
 		return nil, bindRequiredErr("Amount")
 	}
@@ -879,6 +864,7 @@ func (c *localClient) OpenWindow(ctx context.Context, req openrails.OpenWindowRe
 	w, serr := c.svc.OpenWindow(ctx, billingservice.OpenWindowRequest{
 		TenantSubjectID: payer,
 		Actor:           req.Actor,
+		Currency:        req.Currency,
 		Amount:          req.AmountMicros,
 		TTL:             time.Duration(req.TTLSeconds) * time.Second,
 	})
@@ -974,9 +960,6 @@ func (c *localClient) AdmitBatch(ctx context.Context, items []openrails.AdmitReq
 	}
 	out := make([]openrails.AdmitBatchVerdict, len(items))
 	for i, item := range items {
-		if item.CreditType == "" {
-			item.CreditType = c.creditType
-		}
 		if item.EstimateMicros < 0 {
 			out[i] = openrails.AdmitBatchVerdict{Status: http.StatusBadRequest, Error: "estimate_micros must be >= 0"}
 			continue

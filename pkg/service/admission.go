@@ -31,7 +31,6 @@ type AdmitInput struct {
 	// reads them from the delegated JWT/permission set.
 	Roles          []uuid.UUID
 	Amounts        map[string]int64
-	CreditType     string
 	EstimateMicros int64
 	Source         string
 	SourceID       string

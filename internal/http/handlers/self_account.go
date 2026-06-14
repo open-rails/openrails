@@ -91,7 +91,7 @@ func GetMyCreditAccount(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(selfAccountResponse{
-		Type:                  snap.CreditType,
+		Type:                  snap.Currency,
 		BillingMode:           snap.BillingMode,
 		BalanceMicros:         snap.BalanceMicros,
 		HeldMicros:            snap.HeldMicros,

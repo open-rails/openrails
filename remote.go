@@ -18,9 +18,9 @@ import (
 // (#338). It talks to a standalone OpenRails over the service-token /
 // service-JWT-authenticated /v1/service/* routes.
 type remote struct {
-	baseURL    string
-	creditType string
-	client     *http.Client
+	baseURL  string
+	currency string
+	client   *http.Client
 	timeout    time.Duration
 	// tokenFn mints the per-call Bearer (e.g. a host-signed AuthKit service JWT,
 	// #411, or an OpenRails-issued service token). It is the SOLE credential; a
@@ -38,10 +38,11 @@ func WithHTTPClient(hc *http.Client) RemoteOption {
 	return func(r *remote) { r.client = hc }
 }
 
-// WithCreditType sets the default credit_type applied to Admit/Authorize/
-// Balance when the request leaves it empty.
-func WithCreditType(creditType string) RemoteOption {
-	return func(r *remote) { r.creditType = strings.TrimSpace(creditType) }
+// WithCurrency sets the default currency applied to Authorize/Balance/window
+// requests when the request leaves it empty (#476). Empty itself defaults to
+// "USD" server-side.
+func WithCurrency(currency string) RemoteOption {
+	return func(r *remote) { r.currency = strings.TrimSpace(currency) }
 }
 
 // WithTokenProvider supplies the per-call Bearer minting function. REQUIRED for
@@ -96,9 +97,6 @@ func (c *remote) bearer(ctx context.Context) (string, error) {
 // with a nil error — matching the embedded transport, where a deny is
 // (Allowed=false, nil). Handler: ServiceAdmit (service_admission.go).
 func (c *remote) Admit(ctx context.Context, req AdmitRequest) (*AdmitResponse, error) {
-	if req.CreditType == "" {
-		req.CreditType = c.creditType
-	}
 	status, raw, err := c.doRaw(ctx, http.MethodPost, "/v1/service/admit", req)
 	if err != nil {
 		return nil, err
@@ -119,8 +117,8 @@ func (c *remote) Admit(ctx context.Context, req AdmitRequest) (*AdmitResponse, e
 
 // Authorize implements Client (handler ServiceAuthorizeCredits).
 func (c *remote) Authorize(ctx context.Context, req AuthorizeRequest) (*AuthorizeResponse, error) {
-	if req.CreditType == "" {
-		req.CreditType = c.creditType
+	if req.Currency == "" {
+		req.Currency = c.currency
 	}
 	var out AuthorizeResponse
 	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/authorize", req, &out); err != nil {
@@ -135,7 +133,7 @@ func (c *remote) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cred
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/hold", map[string]any{
 		"tenant_subject_id": payerTenantIDString(req.PayerTenantID),
 		"actor":             req.Actor,
-		"credit_type":       req.CreditType,
+		"currency":          req.Currency,
 		"amount":            req.Amount,
 		"source":            req.Source,
 		"source_id":         req.SourceID,
@@ -172,7 +170,7 @@ func (c *remote) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/withdraw", map[string]any{
 		"tenant_subject_id": payerTenantIDString(req.PayerTenantID),
 		"actor":             req.Actor,
-		"credit_type":       req.CreditType,
+		"currency":          req.Currency,
 		"amount":            req.Amount,
 		"source":            req.Source,
 		"source_id":         sourceID,
@@ -192,7 +190,7 @@ func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 	body := map[string]any{
 		"tenant_subject_id": payerTenantIDString(req.PayerTenantID),
 		"actor":             req.Actor,
-		"credit_type":       req.CreditType,
+		"currency":          req.Currency,
 		"amount":            req.Amount,
 		"source":            req.Source,
 		"source_id":         sourceID,
@@ -253,8 +251,8 @@ func (c *remote) Release(ctx context.Context, reservationID string) error {
 func (c *remote) Balance(ctx context.Context, payerTenantID string) (*BalanceResponse, error) {
 	q := url.Values{}
 	q.Set("tenant_subject_id", strings.TrimSpace(payerTenantID))
-	if c.creditType != "" {
-		q.Set("credit_type", c.creditType)
+	if c.currency != "" {
+		q.Set("currency", c.currency)
 	}
 	var out BalanceResponse
 	if err := c.do(ctx, http.MethodGet, "/v1/service/credits/balance?"+q.Encode(), nil, &out); err != nil {
@@ -264,10 +262,10 @@ func (c *remote) Balance(ctx context.Context, payerTenantID string) (*BalanceRes
 }
 
 // GetCreditAccount implements Client (handler ServiceGetCreditsBalance).
-func (c *remote) GetCreditAccount(ctx context.Context, payerTenantID, creditType string) (*CreditAccount, error) {
+func (c *remote) GetCreditAccount(ctx context.Context, payerTenantID, currency string) (*CreditAccount, error) {
 	q := url.Values{}
 	q.Set("tenant_subject_id", strings.TrimSpace(payerTenantID))
-	q.Set("credit_type", normalizeCreditType(creditType))
+	q.Set("currency", normalizeCurrency(currency))
 	var out CreditAccount
 	if err := c.do(ctx, http.MethodGet, "/v1/service/credits/balance?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
@@ -277,25 +275,25 @@ func (c *remote) GetCreditAccount(ctx context.Context, payerTenantID, creditType
 
 // SetCreditAccountSettings implements Client (handler
 // ServiceSetCreditAccountSettings), then re-reads the account snapshot.
-func (c *remote) SetCreditAccountSettings(ctx context.Context, payerTenantID, creditType string, in AccountSettingsInput) (*CreditAccount, error) {
+func (c *remote) SetCreditAccountSettings(ctx context.Context, payerTenantID, currency string, in AccountSettingsInput) (*CreditAccount, error) {
 	body := map[string]any{
 		"tenant_subject_id": strings.TrimSpace(payerTenantID),
-		"credit_type":       normalizeCreditType(creditType),
+		"currency":          normalizeCurrency(currency),
 	}
 	addAccountSettingFields(body, in)
 	if err := c.do(ctx, http.MethodPut, "/v1/service/credits/account-settings", body, nil); err != nil {
 		return nil, err
 	}
-	return c.GetCreditAccount(ctx, payerTenantID, creditType)
+	return c.GetCreditAccount(ctx, payerTenantID, currency)
 }
 
 // ListCreditTransactions implements Client (handler
 // ServiceListTenantSubjectCreditTransactions) and passes the canonical JSON
 // through.
-func (c *remote) ListCreditTransactions(ctx context.Context, payerTenantID, creditType string, limit int) (json.RawMessage, error) {
+func (c *remote) ListCreditTransactions(ctx context.Context, payerTenantID, currency string, limit int) (json.RawMessage, error) {
 	q := url.Values{}
 	q.Set("tenant_subject_id", strings.TrimSpace(payerTenantID))
-	q.Set("credit_type", normalizeCreditType(creditType))
+	q.Set("currency", normalizeCurrency(currency))
 	if limit > 0 {
 		q.Set("limit", fmt.Sprintf("%d", limit))
 	}
@@ -410,8 +408,8 @@ func (c *remote) SubjectBudgetPolicies(ctx context.Context, tenantSubjectID stri
 
 // OpenWindow implements Client (handler ServiceOpenCreditWindow, #335).
 func (c *remote) OpenWindow(ctx context.Context, req OpenWindowRequest) (*CreditWindow, error) {
-	if req.CreditType == "" {
-		req.CreditType = c.creditType
+	if req.Currency == "" {
+		req.Currency = c.currency
 	}
 	var out CreditWindow
 	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/windows", req, &out); err != nil {
@@ -454,19 +452,10 @@ func (c *remote) CloseWindow(ctx context.Context, windowID uuid.UUID) (*CreditWi
 // itself answers 200 with positional per-item verdicts; batch-level validation
 // (empty / oversized) is the server's, so both transports reject identically.
 func (c *remote) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error) {
-	// Default credit types on a copy — the caller's slice is never mutated
-	// (matching the embedded transport).
-	send := make([]AdmitRequest, len(items))
-	copy(send, items)
-	for i := range send {
-		if send[i].CreditType == "" {
-			send[i].CreditType = c.creditType
-		}
-	}
 	var out struct {
 		Items []AdmitBatchVerdict `json:"items"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/service/admit/batch", map[string]any{"items": send}, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/service/admit/batch", map[string]any{"items": items}, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -542,12 +531,15 @@ func addAccountSettingFields(body map[string]any, in AccountSettingsInput) {
 	}
 }
 
-func normalizeCreditType(creditType string) string {
-	creditType = strings.TrimSpace(creditType)
-	if creditType == "" {
-		return "usd_micro" // the built-in micro-dollar ledger unit (migration 003)
+// normalizeCurrency defaults an empty currency to "USD" (the money ledger's
+// DefaultCurrency, #476); a non-empty value passes through unchanged so #475
+// qualified custom-credit codes survive (the ledger validates them).
+func normalizeCurrency(currency string) string {
+	currency = strings.TrimSpace(currency)
+	if currency == "" {
+		return "USD"
 	}
-	return creditType
+	return currency
 }
 
 func payerTenantIDString(payer *PayerTenantID) string {

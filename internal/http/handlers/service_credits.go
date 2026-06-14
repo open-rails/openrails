@@ -202,7 +202,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 // GET /v1/service/credits/balance (issue #235/#247).
 type serviceBalanceResponse struct {
 	TenantSubjectID       uuid.UUID `json:"tenant_subject_id"`
-	CreditType            string    `json:"credit_type"`
+	Currency              string    `json:"currency"`
 	BillingMode           string    `json:"billing_mode"`
 	BalanceMicros         int64     `json:"balance_micros"`
 	HeldMicros            int64     `json:"held_micros"`
@@ -214,12 +214,9 @@ type serviceBalanceResponse struct {
 // #235/#247): available = balance - held, plus outstanding owed + billing mode.
 // Tenant-bound by the service token (RLS); tenant subject supplied via ?tenant_subject_id=.
 func ServiceGetCreditsBalance(r *httprequest.Request) {
-	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
-	if creditType == "" {
-		creditType = strings.TrimSpace(r.Request.URL.Query().Get("type"))
-	}
-	if creditType == "" {
-		creditType = "api_credits"
+	currency := strings.TrimSpace(r.Request.URL.Query().Get("currency"))
+	if currency == "" {
+		currency = money.DefaultCurrency
 	}
 	tenantSubject, err := parseServiceTenantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
 	if err != nil {
@@ -238,14 +235,14 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	snap, err := svc.GetCreditAccount(r.Request.Context(), *tenantSubject, creditType)
+	snap, err := svc.GetCreditAccount(r.Request.Context(), *tenantSubject, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 	r.SuccessJSON(serviceBalanceResponse{
 		TenantSubjectID:       snap.TenantSubjectID,
-		CreditType:            snap.CreditType,
+		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
 		BalanceMicros:         snap.BalanceMicros,
 		HeldMicros:            snap.HeldMicros,
@@ -261,10 +258,10 @@ func serviceQueryTenantSubject(r *httprequest.Request) (*identity.TenantSubjectI
 
 // serviceAccountSettingsRequest is the PUT body for configuring a tenant subject's credit
 // billing account (issue #242). All settings are optional pointers (only the
-// supplied fields are changed); tenant_subject_id + credit_type identify the account.
+// supplied fields are changed); tenant_subject_id + currency identify the account.
 type serviceAccountSettingsRequest struct {
 	TenantSubjectID          string  `json:"tenant_subject_id"`
-	CreditType               string  `json:"credit_type"`
+	Currency                 string  `json:"currency"`
 	BillingMode              *string `json:"billing_mode"` // "prepaid" | "arrears"
 	MaxSpendPerDayMicros     *int64  `json:"max_spend_per_day_micros"`
 	MaxSpendPerMonthMicros   *int64  `json:"max_spend_per_month_micros"`
@@ -295,9 +292,9 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 	if !requireServiceTenantSubjectScope(r, *tenantSubject) {
 		return
 	}
-	creditType := strings.TrimSpace(req.CreditType)
-	if creditType == "" {
-		creditType = "api_credits"
+	currency := strings.TrimSpace(req.Currency)
+	if currency == "" {
+		currency = money.DefaultCurrency
 	}
 	in := money.AccountSettingsInput{
 		BillingMode:              req.BillingMode,
@@ -321,11 +318,11 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	if err := svc.SetCreditAccountSettings(r.Request.Context(), *tenantSubject, creditType, in); err != nil {
+	if err := svc.SetCreditAccountSettings(r.Request.Context(), *tenantSubject, currency, in); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), *tenantSubject, creditType)
+	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), *tenantSubject, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -336,9 +333,9 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 // ServiceGetCreditAccountSettings (GET /v1/service/credits/account-settings)
 // reads a tenant subject's current billing-account settings (issue #242).
 func ServiceGetCreditAccountSettings(r *httprequest.Request) {
-	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
-	if creditType == "" {
-		creditType = "api_credits"
+	currency := strings.TrimSpace(r.Request.URL.Query().Get("currency"))
+	if currency == "" {
+		currency = money.DefaultCurrency
 	}
 	tenantSubject, err := serviceQueryTenantSubject(r)
 	if err != nil || tenantSubject == nil {
@@ -353,7 +350,7 @@ func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), *tenantSubject, creditType)
+	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), *tenantSubject, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -363,11 +360,11 @@ func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 
 // ServiceListTenantSubjectCreditTransactions (GET /v1/service/credits/transactions)
 // lists a tenant subject's credit transactions (usage history) for the billing-account
-// admin surface (issue #242). Query: tenant_subject_id, credit_type, limit, offset.
+// admin surface (issue #242). Query: tenant_subject_id, currency, limit, offset.
 func ServiceListTenantSubjectCreditTransactions(r *httprequest.Request) {
-	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
-	if creditType == "" {
-		creditType = "api_credits"
+	currency := strings.TrimSpace(r.Request.URL.Query().Get("currency"))
+	if currency == "" {
+		currency = money.DefaultCurrency
 	}
 	tenantSubject, err := serviceQueryTenantSubject(r)
 	if err != nil || tenantSubject == nil {
@@ -384,7 +381,7 @@ func ServiceListTenantSubjectCreditTransactions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	items, total, err := svc.GetTenantSubjectCreditTransactions(r.Request.Context(), *tenantSubject, creditType, limit, offset)
+	items, total, err := svc.GetTenantSubjectCreditTransactions(r.Request.Context(), *tenantSubject, currency, limit, offset)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return

@@ -57,6 +57,7 @@ var ErrCreditTypeInactive = errors.New("credit_type_inactive")
 type HoldCreditsRequest struct {
 	TenantSubjectID *identity.TenantSubjectID
 	Actor           string
+	Currency        string // "" => DefaultCurrency (#476)
 	Amount          int64
 	Source          string
 	SourceID        string
@@ -99,7 +100,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 		return nil, fmt.Errorf("expires_at required")
 	}
 
-	hold, err := s.moneyService().Hold(ctx, req.TenantSubjectID, req.Actor, money.DefaultCurrency, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
+	hold, err := s.moneyService().Hold(ctx, req.TenantSubjectID, req.Actor, req.Currency, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +172,7 @@ type CreditTransaction struct {
 type WithdrawCreditsRequest struct {
 	TenantSubjectID *identity.TenantSubjectID
 	Actor           string
+	Currency        string // "" => DefaultCurrency (#476)
 	Amount          int64
 	Source          string
 	SourceID        *uuid.UUID
@@ -197,6 +199,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	trx, err := s.moneyService().Withdraw(ctx, money.WithdrawParams{
 		TenantSubjectID: req.TenantSubjectID,
 		Actor:           req.Actor,
+		Currency:        req.Currency,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -226,6 +229,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 type DepositCreditsRequest struct {
 	TenantSubjectID *identity.TenantSubjectID
 	Actor           string
+	Currency        string // "" => DefaultCurrency (#476)
 	Amount          int64
 	Source          string
 	SourceID        *uuid.UUID
@@ -254,6 +258,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	trx, err := s.moneyService().Deposit(ctx, money.DepositParams{
 		TenantSubjectID: req.TenantSubjectID,
 		Actor:           req.Actor,
+		Currency:        req.Currency,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,

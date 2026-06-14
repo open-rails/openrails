@@ -19,9 +19,10 @@ import (
 type serviceOpenWindowRequest struct {
 	TenantSubjectID string `json:"tenant_subject_id"`
 	Actor           string `json:"actor"`
-	CreditType      string `json:"credit_type" binding:"required"`
-	Amount          int64  `json:"amount" binding:"required"`
-	TTLSeconds      int64  `json:"ttl_seconds"`
+	// Currency is optional; empty defaults to "USD" server-side (#476).
+	Currency   string `json:"currency"`
+	Amount     int64  `json:"amount" binding:"required"`
+	TTLSeconds int64  `json:"ttl_seconds"`
 }
 
 // ServiceOpenCreditWindow opens a prepaid window: a REAL hold — funds leave the
@@ -48,6 +49,7 @@ func ServiceOpenCreditWindow(r *httprequest.Request) {
 	w, err := svc.OpenWindow(r.Request.Context(), billingservice.OpenWindowRequest{
 		TenantSubjectID: *payer,
 		Actor:           req.Actor,
+		Currency:        req.Currency,
 		Amount:          req.Amount,
 		TTL:             time.Duration(req.TTLSeconds) * time.Second,
 	})

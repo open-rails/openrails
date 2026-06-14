@@ -59,14 +59,17 @@ type Client interface {
 	Release(ctx context.Context, reservationID string) error
 	// Balance returns the payer's balance snapshot.
 	Balance(ctx context.Context, payerTenantID string) (*BalanceResponse, error)
-	// GetCreditAccount reads a payer's balance + policy snapshot.
-	GetCreditAccount(ctx context.Context, payerTenantID, creditType string) (*CreditAccount, error)
+	// GetCreditAccount reads a payer's balance + policy snapshot. currency is
+	// optional (empty defaults to "USD", #476).
+	GetCreditAccount(ctx context.Context, payerTenantID, currency string) (*CreditAccount, error)
 	// SetCreditAccountSettings upserts a payer's billing account settings and
-	// returns the refreshed account snapshot.
-	SetCreditAccountSettings(ctx context.Context, payerTenantID, creditType string, in AccountSettingsInput) (*CreditAccount, error)
+	// returns the refreshed account snapshot. currency is optional (empty
+	// defaults to "USD", #476).
+	SetCreditAccountSettings(ctx context.Context, payerTenantID, currency string, in AccountSettingsInput) (*CreditAccount, error)
 	// ListCreditTransactions reads a payer's transaction history and passes the
-	// canonical JSON through ({"transactions":[...],"total":N}).
-	ListCreditTransactions(ctx context.Context, payerTenantID, creditType string, limit int) (json.RawMessage, error)
+	// canonical JSON through ({"transactions":[...],"total":N}). currency is
+	// optional (empty defaults to "USD", #476).
+	ListCreditTransactions(ctx context.Context, payerTenantID, currency string, limit int) (json.RawMessage, error)
 	// UsageRollup returns grouped spend over [from, to). groupBy is
 	// resource|actor|function|tier.
 	UsageRollup(ctx context.Context, payerTenantID string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
@@ -146,9 +149,11 @@ func (id PayerTenantID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 // atomic authorize+hold: OpenRails checks the payer's balance and, if allowed,
 // places a hold for EstimateMicros in a single idempotent call keyed on RequestID.
 type AuthorizeRequest struct {
-	PayerTenantID  string `json:"tenant_subject_id"`
-	Actor          string `json:"actor"`
-	CreditType     string `json:"credit_type,omitempty"`
+	PayerTenantID string `json:"tenant_subject_id"`
+	Actor         string `json:"actor"`
+	// Currency is the ledger unit; empty defaults to "USD" (#476). A free string
+	// so #475 qualified custom-credit unit codes ride the same field.
+	Currency       string `json:"currency,omitempty"`
 	EstimateMicros int64  `json:"estimate_micros"`
 	RequestID      string `json:"request_id"`
 	// ExpiresAt (unix seconds) bounds the placed hold; nil applies the engine's
@@ -174,11 +179,12 @@ type AuthorizeResponse struct {
 type HoldCreditsRequest struct {
 	PayerTenantID *PayerTenantID
 	Actor         string
-	CreditType    string
-	Amount        int64
-	Source        string
-	SourceID      string
-	ExpiresAt     time.Time
+	// Currency is the ledger unit; empty defaults to "USD" (#476).
+	Currency  string
+	Amount    int64
+	Source    string
+	SourceID  string
+	ExpiresAt time.Time
 }
 
 // CreditHold is the reservation returned by a successful hold. Field names
@@ -207,24 +213,26 @@ type CaptureHoldRequest struct {
 type WithdrawCreditsRequest struct {
 	PayerTenantID *PayerTenantID
 	Actor         string
-	CreditType    string
-	Amount        int64
-	Source        string
-	SourceID      *uuid.UUID
+	// Currency is the ledger unit; empty defaults to "USD" (#476).
+	Currency string
+	Amount   int64
+	Source   string
+	SourceID *uuid.UUID
 }
 
 // DepositCreditsRequest mints a credit block for a payer (admin funding,
-// promotions, money-in settlement). Amount is in the credit type's ledger
-// unit (micro-dollars for "usd_micro").
+// promotions, money-in settlement). Amount is in the currency's ledger unit
+// (micro-dollars for "USD").
 type DepositCreditsRequest struct {
 	PayerTenantID *PayerTenantID
 	Actor         string
-	CreditType    string
-	Amount        int64
-	Source        string
-	SourceID      *uuid.UUID
-	ExpiresAt     *time.Time
-	Description   string
+	// Currency is the ledger unit; empty defaults to "USD" (#476).
+	Currency    string
+	Amount      int64
+	Source      string
+	SourceID    *uuid.UUID
+	ExpiresAt   *time.Time
+	Description string
 }
 
 // CreditTransaction is the ledger row returned by capture/withdraw/deposit.
@@ -266,7 +274,6 @@ type AdmitRequest struct {
 	Tier           string           `json:"tier,omitempty"`
 	Resource       string           `json:"resource,omitempty"`
 	Amounts        map[string]int64 `json:"amounts,omitempty"`
-	CreditType     string           `json:"credit_type,omitempty"`
 	EstimateMicros int64            `json:"estimate_micros"`
 	RequestID      string           `json:"request_id"`
 	Source         string           `json:"source,omitempty"`
@@ -344,7 +351,7 @@ type BalanceResponse struct {
 // CreditAccount is the OpenRails service balance/policy snapshot.
 type CreditAccount struct {
 	PayerTenantID         string `json:"tenant_subject_id"`
-	CreditType            string `json:"credit_type"`
+	Currency              string `json:"currency"`
 	BillingMode           string `json:"billing_mode"`
 	BalanceMicros         int64  `json:"balance_micros"`
 	HeldMicros            int64  `json:"held_micros"`
@@ -492,9 +499,10 @@ type EntitlementRecord struct {
 type OpenWindowRequest struct {
 	PayerTenantID string `json:"tenant_subject_id"`
 	Actor         string `json:"actor"`
-	CreditType    string `json:"credit_type,omitempty"`
-	AmountMicros  int64  `json:"amount"`
-	TTLSeconds    int64  `json:"ttl_seconds,omitempty"`
+	// Currency is the ledger unit; empty defaults to "USD" (#476).
+	Currency     string `json:"currency,omitempty"`
+	AmountMicros int64  `json:"amount"`
+	TTLSeconds   int64  `json:"ttl_seconds,omitempty"`
 }
 
 // CreditWindow is the window snapshot returned by open/refill/close

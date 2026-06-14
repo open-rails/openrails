@@ -25,8 +25,8 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 	scopedOutPayer := uuid.NewString()
 
 	items := []serviceAdmitRequest{
-		{TenantSubjectID: allowedPayer, Actor: "user:a", CreditType: "usd_micro", EstimateMicros: 100, RequestID: "r1"},
-		{TenantSubjectID: brokePayer, Actor: "user:b", CreditType: "usd_micro", EstimateMicros: 100, RequestID: "r2"},
+		{TenantSubjectID: allowedPayer, Actor: "user:a", EstimateMicros: 100, RequestID: "r1"},
+		{TenantSubjectID: brokePayer, Actor: "user:b", EstimateMicros: 100, RequestID: "r2"},
 		{TenantSubjectID: "not-a-uuid", Actor: "user:c", RequestID: "r3"},
 		{TenantSubjectID: throttledPayer, Actor: "user:d", RequestID: "r4"},
 		{TenantSubjectID: erroringPayer, Actor: "user:e", RequestID: "r5"},

@@ -17,7 +17,7 @@ import (
 // account, served by the authorize/balance route (issue #235).
 type CreditAccountSnapshot struct {
 	TenantSubjectID       uuid.UUID `json:"tenant_subject_id"`
-	CreditType            string    `json:"credit_type"`
+	Currency              string    `json:"currency"`
 	BillingMode           string    `json:"billing_mode"`
 	BalanceMicros         int64     `json:"balance_micros"`
 	HeldMicros            int64     `json:"held_micros"`
@@ -26,12 +26,11 @@ type CreditAccountSnapshot struct {
 }
 
 // GetCreditAccount returns the balance + policy snapshot for an tenant subject.
-func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*CreditAccountSnapshot, error) {
-	// #472: money is unit-less; creditType is vestigial and only echoed back on
-	// the snapshot. An empty value defaults to the implicit µ$ unit.
-	creditType = strings.TrimSpace(creditType)
-	if creditType == "" {
-		creditType = moneyBalanceType
+func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSubjectID, currency string) (*CreditAccountSnapshot, error) {
+	// #476: the currency is echoed back on the snapshot; empty defaults to "USD".
+	currency = strings.TrimSpace(currency)
+	if currency == "" {
+		currency = money.DefaultCurrency
 	}
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
@@ -52,7 +51,7 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSub
 		}
 		snap = &CreditAccountSnapshot{
 			TenantSubjectID:       payer.UUID(),
-			CreditType:            creditType,
+			Currency:              currency,
 			BillingMode:           settings.BillingMode,
 			BalanceMicros:         bal.Balance,
 			HeldMicros:            bal.HeldBalance,
@@ -292,9 +291,8 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 type AuthorizeAndHoldRequest struct {
 	TenantSubjectID identity.TenantSubjectID
 	Actor           string
-	// CreditType is accepted for wire compatibility but ignored — money is the
-	// only unit (#472).
-	CreditType     string // TODO(#472): drop once all callers stop sending it
+	// Currency is the ledger unit; empty defaults to "USD" (#476).
+	Currency       string
 	EstimateMicros int64
 	RequestID      string
 	// ExpiresAt bounds the placed hold; when zero a default TTL is applied.
@@ -349,6 +347,7 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 	out, err := s.moneyService().AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
 		Payer:          req.TenantSubjectID,
 		Actor:          strings.TrimSpace(req.Actor),
+		Currency:       req.Currency,
 		EstimateMicros: req.EstimateMicros,
 		Source:         authorizeHoldSource,
 		SourceID:       req.RequestID,

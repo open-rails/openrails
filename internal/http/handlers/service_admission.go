@@ -18,7 +18,6 @@ type serviceAdmitRequest struct {
 	Tier            string                           `json:"tier"`
 	Resource        string                           `json:"resource"`
 	Amounts         map[string]int64                 `json:"amounts"`
-	CreditType      string                           `json:"credit_type"`
 	EstimateMicros  int64                            `json:"estimate_micros"`
 	RequestID       string                           `json:"request_id"`
 	Source          string                           `json:"source"`
@@ -101,7 +100,6 @@ func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.Tenant
 		Tier:             req.Tier,
 		Resource:         req.Resource,
 		Amounts:          req.Amounts,
-		CreditType:       req.CreditType,
 		EstimateMicros:   req.EstimateMicros,
 		Source:           req.Source,
 		SourceID:         req.RequestID,

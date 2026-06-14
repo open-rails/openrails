@@ -36,10 +36,10 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/embedded"
 )
 
@@ -226,7 +226,7 @@ func observeAdmit(res *openrails.AdmitResponse) obsAdmit {
 }
 
 type obsAccount struct {
-	CreditType            string
+	Currency              string
 	BillingMode           string
 	BalanceMicros         int64
 	HeldMicros            int64
@@ -383,10 +383,10 @@ func observeBatchVerdicts(verdicts []openrails.AdmitBatchVerdict) []obsBatchVerd
 }
 
 type scriptEnv struct {
-	payer      uuid.UUID
-	actor      string
-	creditType string
-	resource   string // per-side: ResourceRevenueDaily is cross-payer within the tenant
+	payer    uuid.UUID
+	actor    string
+	currency string
+	resource string // per-side: ResourceRevenueDaily is cross-payer within the tenant
 	side       string
 	from, to   time.Time
 	// issuer/subject are the payer's EXTERNAL identity (its
@@ -408,7 +408,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	dep, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		PayerTenantID: &pid,
 		Actor:         env.actor,
-		CreditType:    env.creditType,
+		Currency:      env.currency,
 		Amount:        1_000_000,
 		Source:        "conformance",
 		SourceID:      &depositSrc,
@@ -421,7 +421,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	hold, err := c.HoldCredits(ctx, openrails.HoldCreditsRequest{
 		PayerTenantID: &pid,
 		Actor:         env.actor,
-		CreditType:    env.creditType,
+		Currency:      env.currency,
 		Amount:        10_000,
 		Source:        "conformance",
 		SourceID:      "hold-1",
@@ -441,7 +441,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	wd, err := c.WithdrawCredits(ctx, openrails.WithdrawCreditsRequest{
 		PayerTenantID: &pid,
 		Actor:         env.actor,
-		CreditType:    env.creditType,
+		Currency:      env.currency,
 		Amount:        5_000,
 		Source:        "conformance",
 		SourceID:      &withdrawSrc,
@@ -469,7 +469,6 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		Tier:           "conf",
 		Resource:       env.resource,
 		Amounts:        map[string]int64{"request": 1},
-		CreditType:     env.creditType,
 		EstimateMicros: 5_000,
 		RequestID:      env.side + "-admit-1",
 		Source:         "admit",
@@ -493,7 +492,6 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		Tier:           "conf",
 		Resource:       env.resource,
 		Amounts:        map[string]int64{"request": 1},
-		CreditType:     env.creditType,
 		EstimateMicros: 6_000,
 		RequestID:      env.side + "-admit-2",
 		Source:         "admit",
@@ -512,7 +510,6 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		Tier:           "conf",
 		Resource:       env.resource,
 		Amounts:        map[string]int64{"request": 1},
-		CreditType:     env.creditType,
 		EstimateMicros: 100,
 		RequestID:      env.side + "-admit-3",
 		Source:         "admit",
@@ -546,7 +543,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.NoError(t, err, "%s balance", env.side)
 	r.Balance = *bal
 
-	acct, err := c.GetCreditAccount(ctx, payerID, env.creditType)
+	acct, err := c.GetCreditAccount(ctx, payerID, env.currency)
 	require.NoError(t, err, "%s get-credit-account", env.side)
 	r.Account = observeAccount(acct, payerID)
 
@@ -554,7 +551,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	mode := "prepaid"
 	maxDay := int64(100_000_000)
 	alert := 50
-	setAcct, err := c.SetCreditAccountSettings(ctx, payerID, env.creditType, openrails.AccountSettingsInput{
+	setAcct, err := c.SetCreditAccountSettings(ctx, payerID, env.currency, openrails.AccountSettingsInput{
 		BillingMode:          &mode,
 		MaxSpendPerDayMicros: &maxDay,
 		AlertThresholdPct:    &alert,
@@ -573,7 +570,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	r.Usage = rows
 
 	// 14) Transaction history passthrough JSON.
-	rawTxns, err := c.ListCreditTransactions(ctx, payerID, env.creditType, 50)
+	rawTxns, err := c.ListCreditTransactions(ctx, payerID, env.currency, 50)
 	require.NoError(t, err, "%s list-transactions", env.side)
 	var decoded struct {
 		Transactions []struct {
@@ -631,7 +628,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	_, err = c.HoldCredits(ctx, openrails.HoldCreditsRequest{
 		PayerTenantID: &pid,
 		Actor:         env.actor,
-		CreditType:    env.creditType,
+		Currency:      env.currency,
 		Amount:        10_000_000_000,
 		Source:        "conformance",
 		SourceID:      "hold-too-big",
@@ -642,7 +639,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	_, err = c.WithdrawCredits(ctx, openrails.WithdrawCreditsRequest{
 		PayerTenantID: &pid,
 		Actor:         env.actor,
-		CreditType:    env.creditType,
+		Currency:      env.currency,
 		Amount:        1,
 		Source:        "conformance",
 		SourceID:      nil, // binding-required on the wire
@@ -653,7 +650,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	_, err = c.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		PayerTenantID: &pid,
 		Actor:         env.actor,
-		CreditType:    "conformance_missing_credit_type",
+		Currency:      "conformance_missing_currency",
 		Amount:        1,
 		Source:        "conformance",
 		SourceID:      &badSrc,
@@ -669,7 +666,6 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	_, err = c.Admit(ctx, openrails.AdmitRequest{
 		PayerTenantID:  payerID,
 		Actor:          env.actor,
-		CreditType:     env.creditType,
 		EstimateMicros: -1,
 		RequestID:      env.side + "-admit-neg",
 	})
@@ -681,7 +677,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	win, err := c.OpenWindow(ctx, openrails.OpenWindowRequest{
 		PayerTenantID: payerID,
 		Actor:         env.actor,
-		CreditType:    env.creditType,
+		Currency:      env.currency,
 		AmountMicros:  50_000,
 		TTLSeconds:    600,
 	})
@@ -724,9 +720,9 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// isolation, the batch call itself succeeds.
 	verdicts, err := c.AdmitBatch(ctx, []openrails.AdmitRequest{
 		{PayerTenantID: payerID, Actor: env.actor, EstimateMicros: 1_000, RequestID: env.side + "-batch-1", Source: "admit"},
-		{PayerTenantID: payerID, Actor: env.actor, CreditType: env.creditType, EstimateMicros: 10_000_000_000, RequestID: env.side + "-batch-2"},
-		{PayerTenantID: "not-a-uuid", Actor: env.actor, CreditType: env.creditType, EstimateMicros: 1, RequestID: env.side + "-batch-3"},
-		{PayerTenantID: payerID, Actor: env.actor, CreditType: env.creditType, EstimateMicros: -1, RequestID: env.side + "-batch-4"},
+		{PayerTenantID: payerID, Actor: env.actor, EstimateMicros: 10_000_000_000, RequestID: env.side + "-batch-2"},
+		{PayerTenantID: "not-a-uuid", Actor: env.actor, EstimateMicros: 1, RequestID: env.side + "-batch-3"},
+		{PayerTenantID: payerID, Actor: env.actor, EstimateMicros: -1, RequestID: env.side + "-batch-4"},
 	})
 	require.NoError(t, err, "%s admit-batch", env.side)
 	require.Len(t, verdicts, 4, "%s admit-batch verdicts are positional", env.side)
@@ -736,11 +732,11 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 
 	// 19) Window/batch error parity.
 	_, err = c.OpenWindow(ctx, openrails.OpenWindowRequest{
-		PayerTenantID: payerID, Actor: env.actor, CreditType: env.creditType, AmountMicros: 10_000_000_000,
+		PayerTenantID: payerID, Actor: env.actor, Currency: env.currency, AmountMicros: 10_000_000_000,
 	})
 	r.ErrWindowOpenInsufficient = observeErr(t, env.side+" open-window insufficient", err)
 	_, err = c.OpenWindow(ctx, openrails.OpenWindowRequest{
-		PayerTenantID: payerID, Actor: env.actor, CreditType: env.creditType,
+		PayerTenantID: payerID, Actor: env.actor, Currency: env.currency,
 	})
 	r.ErrWindowOpenNoAmount = observeErr(t, env.side+" open-window without amount", err)
 	_, err = c.RefillWindow(ctx, unknownWindow, 0, 0)
@@ -815,7 +811,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 
 func observeAccount(a *openrails.CreditAccount, payerID string) obsAccount {
 	return obsAccount{
-		CreditType:            a.CreditType,
+		Currency:              a.Currency,
 		BillingMode:           a.BillingMode,
 		BalanceMicros:         a.BalanceMicros,
 		HeldMicros:            a.HeldMicros,
@@ -864,20 +860,15 @@ func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 
-	// Shared fixtures: one credit type, two payers (state must not collide).
-	creditType := "conf_credits_" + uuid.NewString()[:8]
-	ctID := uuid.New()
-	_, err = gen.New(pool).CreateCreditType(ctx, gen.CreateCreditTypeParams{
-		ID: ctID, Name: creditType, DisplayName: "Conformance Credits",
-		Unit: "USD", DecimalPlaces: 2, IsActive: true, CreatedAt: time.Now().UTC(),
-	})
-	require.NoError(t, err)
+	// Shared fixtures: two payers (state must not collide). Currency is the
+	// built-in default after the #476 decouple (money validates the unit).
+	currency := money.DefaultCurrency
 
-	// Both clients carry the same default credit type (Balance keys off it).
-	local := rt.Client(embed.WithCreditType(creditType))
+	// Both clients carry the same default currency (Balance keys off it).
+	local := rt.Client(embed.WithCurrency(currency))
 	remote := openrails.NewRemote(srv.URL,
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return conformanceToken, nil }),
-		openrails.WithCreditType(creditType),
+		openrails.WithCurrency(currency),
 		openrails.WithTimeout(30*time.Second),
 	)
 
@@ -905,12 +896,12 @@ func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
 	to := time.Now().Add(time.Hour).UTC()
 
 	resLocal := runScript(t, ctx, local, scriptEnv{
-		payer: payerLocal, actor: "user:conf", creditType: creditType,
+		payer: payerLocal, actor: "user:conf", currency: currency,
 		resource: "ep-local", side: "local", from: from, to: to,
 		issuer: issuer, subject: subjectLocal,
 	})
 	resRemote := runScript(t, ctx, remote, scriptEnv{
-		payer: payerRemote, actor: "user:conf", creditType: creditType,
+		payer: payerRemote, actor: "user:conf", currency: currency,
 		resource: "ep-remote", side: "remote", from: from, to: to,
 		issuer: issuer, subject: subjectRemote,
 	})
