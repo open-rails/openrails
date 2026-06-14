@@ -831,14 +831,20 @@ STRUCTURE (corrected): the MERCHANT is OpenRails's OWN multi-company billing/iso
 OpenRails server/DB hosts MANY merchants (companies). It is NOT a hop between tenant and customer, and is
 NOT resolved from an AuthKit token (merchants.owner_tenant_id is ownership/admin only — the schema comment
 says it is "never used to resolve a merchant from a token"). The customer is merchant-scoped
-(merchant:customer). Within a merchant: customer = the PAYER, linked 1:1 to an AuthKit TENANT; actor = the
+(merchant:customer). Within a merchant: customer = the PAYER, an OPAQUE (issuer, subject) row — OpenRails
+does NOT store a tenant link (the subject "may represent a human, company, tenant, service"); actor = the
 invoker (delegated-user) under that customer.
 
-  merchant(1) -> customers(many);   customer(1) <-> tenant(1);   customer(1) -> actors(many)
+  merchant(1) -> customers(many);   customer(1) -> actors(many)
+
+A customer does NOT need a tenant: an EMBEDDED payer is a native human with no org/tenant at all; a
+FEDERATED payer merely CORRESPONDS to an AuthKit tenant (its subject = the tenant id, resolved via
+issuer -> tenant, authkit#77) but that is NOT a stored FK. The only NEW relationship to model is
+actor -> payer-customer (FK), not customer -> tenant.
 
 FEDERATED resolution of a delegated request: issuer -> merchant (issuer registry) selects the billing
-NAMESPACE; issuer -> tenant (authkit#77) -> customer selects the PAYER within it; subject -> actor. An
-issuer has MANY actors, ALL resolving to the SAME customer (the tenant's single payer account).
+NAMESPACE; the PAYER customer is the (issuer, subject) row whose subject = the issuer's tenant id
+(authkit#77); subject -> actor. An issuer has MANY actors, ALL resolving to the SAME payer customer.
 
 EMBEDDED degenerate case (doujins): the end-user genuinely holds money, so end-user = customer(payer) =
 actor (1:1); MANY customers per merchant (one per end-user), one actor each. Unifying rule: actor->customer
@@ -870,10 +876,9 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       identity (persist attribution; abuse counters may stay in Redis but keyed by the real actor id).
 - [ ] SDK + wire: distinguish payer (customer) from actor on Admit/charge; surface per-actor spend
       attribution to the payer.
-- [ ] Resolution (authkit#77): issuer -> merchant comes from the ISSUER REGISTRY (the billing namespace);
-      issuer -> tenant -> customer selects the PAYER within it (NOT issuer->tenant->merchant). Decide how
-      customer<->tenant is keyed: derive via issuer->tenant with the payer customer keyed (merchant_id,
-      tenant) — one per tenant — vs an explicit customer.tenant_id. OPEN.
+- [ ] Resolution (authkit#77): issuer -> merchant from the ISSUER REGISTRY (billing namespace); the PAYER
+      customer is the (issuer, subject) row whose subject = the issuer's tenant id (federated) or the
+      end-user (embedded). customer stays OPAQUE — NO tenant_id column. Model actor -> payer-customer (FK).
 - [ ] Tests: federated many-actors-one-payer (spend attributed per actor, money debited from the ONE
       payer, per-actor abuse cap trips before the payer's); embedded actor==customer 1:1; a delegated-user
       has no tier and no money_account.
