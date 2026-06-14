@@ -843,15 +843,19 @@ the issuer registry. owner_tenant_id stays ownership/admin-only. Within a mercha
     money_transactions (ledger), money_accounts (policy/config + tier), processor_customers (Stripe cus_*),
     payment_methods. NO issuer, NO subject, NO tenant. It is an ACCOUNT, not a person; a balance has no
     issuer.
-  actor = the AUTHENTICATED identity (merchant_id, issuer, subject) that DRAWS ON a customer's balance,
-    via a customer_id FK. (issuer, subject) is AUTH metadata and lives ONLY here.
+  actor (invoker) = a MERCHANT-SUPPLIED, OPAQUE label for the end-user that triggered a charge — NOT
+    authenticated by OpenRails (exactly money_spend_limits.actor today: "a caller-supplied opaque principal
+    string"). DRAWS ON a customer's balance via a customer_id FK; used ONLY for spend-attribution +
+    per-actor abuse caps. NO money, NO tier. End-users NEVER present a token to OpenRails.
 
   merchant(1) -> customers(many);   customer(1) -> actors(many);   actor -> customer (FK)
 
-This finishes the de-conflation at the identity layer: AUTH identity on the actor, MONEY on the customer.
-The ISSUER is whoever AUTHENTICATED the actor — the HOST in embedded (it proves its own users), a
-remote_app/JWKS for a federated delegated-user or a tenant self-token. Every request has an actor with an
-(issuer, subject); the customer it bills is just an account id.
+This finishes the de-conflation: MONEY on the customer, ATTRIBUTION/abuse on the (unbilled) invoker. The
+AUTHENTICATED token subject (delegated_sub, or a merchant self-token) is ALWAYS a CUSTOMER (has a balance)
+or the merchant itself — NEVER an unbilled end-user. End-users have no balance and never present a token to
+OpenRails; the merchant reports them as the actor label on charges. TERMINOLOGY collision to avoid: authkit
+comments delegated_sub as "the actor", but in BILLING terms that authenticated subject is a CUSTOMER —
+#491's actor is the unbilled end-user label, so call it the INVOKER in code.
 
 A customer is a payer/balance scoped to a merchant, ASSERTED by the merchant. STANDALONE-individual
 (doujins): each end-user is BOTH payer (customer) and invoker (actor) — actor -> customer 1:1; the end-user's
@@ -882,9 +886,10 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       (id, merchant_id) + money. The (issuer, subject) auth key moves to the actor. Migrate existing
       customers rows (the federated ones collapse to one payer per issuer; embedded ones become per-user
       balances).
-- [ ] Promote `actor` to a first-class identity: table keyed (merchant_id, issuer, subject) with a
-      customer_id FK, holding spend-attribution + per-actor abuse counters. NO money_account, NO tier.
-      SEED: money_spend_limits already has an opaque `actor` STRING — fold it into the real actor row.
+- [ ] Track the `actor` (invoker) as a MERCHANT-SUPPLIED opaque label scoped under a customer:
+      (merchant_id, customer_id, actor_string), holding spend-attribution + per-actor abuse counters. NOT
+      authenticated, NOT (issuer, subject). SEED: money_spend_limits already has exactly this opaque `actor`
+      string — build on it. NO money, NO tier.
 - [ ] Federated resolution: a delegated request (issuer, subject) resolves to an ACTOR whose customer_id =
       the issuer's single designated payer balance (issuer registry) — STOP materializing a money_account
       per delegated-user.
@@ -900,13 +905,12 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       identity (persist attribution; abuse counters may stay in Redis but keyed by the real actor id).
 - [ ] SDK + wire: distinguish payer (customer) from actor on Admit/charge; surface per-actor spend
       attribution to the payer.
-- [ ] TOKEN SHAPE (authkit + openrails): today a delegated token carries ONE subject — delegated_sub =
-      the ACTOR (per authkit http/claims.go). When actor == customer (e.g. cozy-art reads its OWN balance)
-      one field suffices. When they DIFFER (a cozy-art end-user generates, billed to cozy-art's balance) the
-      MERCHANT must assert BOTH in the token: customer (payer) + actor. OpenRails is federation-agnostic (no
-      stored actor->customer map), so it must come from the token. Add a first-class `customer`/`payer` claim
-      alongside delegated_sub (PREFERRED — billing-load-bearing; permissions/spend target the customer) — vs
-      riding it in the #75 attributes escape hatch (works but app-opaque). authkit: mint + Claims + verifier.
+- [ ] NO customer-claim-in-token needed (corrected): the authenticated token subject (delegated_sub, or a
+      merchant self-token) is ALWAYS a CUSTOMER or the merchant — never an unbilled end-user. The invoker
+      (actor) arrives as a MERCHANT-SUPPLIED opaque request field on Admit/charge (= money_spend_limits.actor)
+      for attribution + abuse only. PATHS: PROXY = merchant self-token + customer + actor request fields (the
+      charge path); DIRECT = a delegated token whose delegated_sub IS a customer doing self-service (read own
+      balance), no separate actor.
 - [ ] DROP money_balances (it is a read-cache roll-up): derive available = SUM(unexpired
       money_blocks.remaining_amount) and held = SUM(active-hold authorized_amount in money_transactions).
       Move the FOR UPDATE spend mutex (today LockMoneyBalance) onto the CUSTOMER row (now the account) or a
