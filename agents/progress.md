@@ -832,9 +832,11 @@ OpenRails server/DB hosts MANY merchants (companies). It is NOT a hop between te
 NOT resolved from an AuthKit token (merchants.owner_tenant_id is ownership/admin only — the schema comment
 says it is "never used to resolve a merchant from a token"). Within a merchant:
 
-  customer = the PAYER = a BALANCE / money account — a PURE billing entity: (id, merchant_id) + money
-    (money_accounts, tier, payment methods, credit-line). NO issuer, NO subject, NO tenant. It is an
-    ACCOUNT, not a person. A balance does not have an issuer.
+  customer = the PAYER = a BALANCE / money account — a PURE billing entity: (id, merchant_id). ALL the
+    money state already FKs to customers(id): money_balances (balance + held), money_blocks (credit lots),
+    money_transactions (ledger), money_accounts (policy/config + tier), processor_customers (Stripe cus_*),
+    payment_methods. NO issuer, NO subject, NO tenant. It is an ACCOUNT, not a person; a balance has no
+    issuer.
   actor = the AUTHENTICATED identity (merchant_id, issuer, subject) that DRAWS ON a customer's balance,
     via a customer_id FK. (issuer, subject) is AUTH metadata and lives ONLY here.
 
@@ -874,6 +876,7 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       balances).
 - [ ] Promote `actor` to a first-class identity: table keyed (merchant_id, issuer, subject) with a
       customer_id FK, holding spend-attribution + per-actor abuse counters. NO money_account, NO tier.
+      SEED: money_spend_limits already has an opaque `actor` STRING — fold it into the real actor row.
 - [ ] Federated resolution: a delegated request (issuer, subject) resolves to an ACTOR whose customer_id =
       the issuer's single designated payer balance (issuer registry) — STOP materializing a money_account
       per delegated-user.
