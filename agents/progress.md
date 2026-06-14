@@ -7,7 +7,54 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 485
+next_id: 486
+
+---
+
+# #485: Integration tests must run the REAL stack — no stubbed AuthKit; a no-auth host harness for embedded + the real standalone server for remote
+
+Design (Paul, 2026-06-14): the embed conformance test today builds ONE in-process engine and serves its
+`/v1/service/*` routes on httptest with a `stubResolver` standing in for AuthKit (`conformance_integration_test.go:52-67`).
+That's wrong for an *integration* test: the standalone server's production auth (control plane → AuthKit `core`
+service-token resolution, #481 role-based merchant authz, #74 remote_application, #76 JWKS principal) is never
+exercised. Move both sides to REAL setups.
+
+## A. Embedded integration — a real no-auth HOST harness (≈ doujins, minus auth)
+A minimal embedding-host test fixture that uses OpenRails exactly as `doujins/internal/billing/openrailsembed`
+does: build the engine via `embed.New` (host-owns-auth), supply a TRUSTING authenticator (accepts every HTTP
+request, injects the bound merchant + the request's subject, verifies NOTHING — fine for tests), and mount the
+EMBEDDED HTTP surface (`rt.Handler(...)`). Drive real HTTP against it. This is "doujins with a no-op authenticator,"
+so it tests the real embedded host integration, not in-test `embed.New` + direct facade calls.
+
+## B. Standalone integration — boot the REAL server + REAL AuthKit (as in production)
+Start the actual standalone server (`cmd/billing`, the real router + control plane) against a test Postgres with
+BOTH OpenRails migrations AND AuthKit `profiles.*` migrations (authkit/migrations/postgres 001–006) applied.
+Provision via the REAL control-plane bootstrap (`cmd/billing/bootstrap_apply.go`) + mint a REAL service token /
+operator JWT (`mint_operator_jwt.go`) through real AuthKit `core` — NO stub. The remote client authenticates with
+that real token, resolved by the real `ServiceTokenRequired` → control-plane `ResolveServiceToken` → AuthKit. This
+validates the production auth path (service tokens, #481 owner_tenant role authz; later #76 JWKS principal via #484).
+
+## C. Parity preserved across the REAL surfaces
+Run the existing conformance operation script against BOTH real surfaces (embedded-host HTTP from A vs standalone
+HTTP from B) and assert observable parity — same value as today, but real-vs-real with NO stub. DELETE `stubResolver`.
+
+## Basis that already exists
+- `tests/unified_billing_e2e_test.go` (real standalone e2e harness), `cmd/billing` (+ `bootstrap_apply.go`,
+  `mint_operator_jwt.go`), and the control-plane integration tests (`internal/controlplane/bootstrap_integration_test.go`,
+  `service_token_test.go`) that already wire real AuthKit `core`. `doujins/internal/billing/openrailsembed` is the
+  shape reference for the A harness. ("No wire mocks of sibling services" — use real AuthKit `core` in-process, the
+  way standalone OpenRails consumes it; NOT the dev-server HTTP API, which OpenRails never calls.)
+
+## Note
+Heavier/slower than the one-engine stub, but it's a true integration test of the production standalone server (the
+explicit requirement). Keep any fast adapter-level unit coverage where it exists; this is the integration layer.
+
+**Tasks:**
+- [ ] A: no-auth embedding-host harness (mirrors openrailsembed; trusting authenticator; mounts the embedded HTTP surface).
+- [ ] B: standalone harness — boot real `cmd/billing` + real AuthKit `core`; apply OpenRails + AuthKit (001–006) migrations;
+      provision tenant + mint a real service token via the real control plane; client auths with it (no stub).
+- [ ] C: re-point the conformance parity script to A (embedded-real) vs B (standalone-real); delete `stubResolver`.
+- [ ] CI: ensure Docker/testcontainers + both migration sets are available; document the harness.
 
 ---
 
