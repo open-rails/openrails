@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/stretchr/testify/require"
 )
@@ -15,10 +15,10 @@ import (
 // TestGetUsage_Breakdown proves the facade method backing GET /v1/self/usage
 // returns the per-event_type rollup (summed amount, event count, summed
 // dimensions) for a seeded payer over a window (issue #289). It mirrors the
-// credits-package usage rollup test but exercises the public service facade the
+// money-package usage rollup test but exercises the public service facade the
 // HTTP handler calls.
 func TestGetUsage_Breakdown(t *testing.T) {
-	svc, cs, payer, ct, ctx := authzEnv(t)
+	svc, ms, payer, ctx := authzEnv(t)
 
 	// Separate pool used only to clean up the usage_events rows this test
 	// writes, scoped by payer.
@@ -27,25 +27,25 @@ func TestGetUsage_Breakdown(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
-	_, err := cs.Deposit(ctx, credits.CreditDepositParams{
-		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed",
+	_, err := ms.Deposit(ctx, money.DepositParams{
+		TenantSubjectID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
-	_, err = cs.RecordUsage(ctx, credits.RecordUsageParams{
-		Payer: &payer, Actor: "user:a", CreditType: ct, EventType: "gpt-4o",
+	_, err = ms.RecordUsage(ctx, money.RecordUsageParams{
+		Payer: &payer, Actor: "user:a", Currency: money.DefaultCurrency, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 100, "output_tokens": 50},
 		Amount:     5_000, Source: "req", SourceID: "u1",
 	})
 	require.NoError(t, err)
-	_, err = cs.RecordUsage(ctx, credits.RecordUsageParams{
-		Payer: &payer, Actor: "user:a", CreditType: ct, EventType: "gpt-4o",
+	_, err = ms.RecordUsage(ctx, money.RecordUsageParams{
+		Payer: &payer, Actor: "user:a", Currency: money.DefaultCurrency, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 60, "output_tokens": 30},
 		Amount:     3_000, Source: "req", SourceID: "u2",
 	})
 	require.NoError(t, err)
-	_, err = cs.RecordUsage(ctx, credits.RecordUsageParams{
-		Payer: &payer, Actor: "user:a", CreditType: ct, EventType: "embeddings",
+	_, err = ms.RecordUsage(ctx, money.RecordUsageParams{
+		Payer: &payer, Actor: "user:a", Currency: money.DefaultCurrency, EventType: "embeddings",
 		Dimensions: map[string]int64{"input_tokens": 200},
 		Amount:     1_000, Source: "req", SourceID: "u3",
 	})
@@ -78,17 +78,17 @@ func TestGetUsage_Breakdown(t *testing.T) {
 }
 
 func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
-	svc, cs, payer, ct, ctx := authzEnv(t)
+	svc, ms, payer, ctx := authzEnv(t)
 
 	pool := testPool(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
-	_, err := cs.Deposit(ctx, credits.CreditDepositParams{
+	_, err := ms.Deposit(ctx, money.DepositParams{
 		TenantSubjectID: &payer,
 		Actor:           payer.UUID().String(),
-		CreditType:      ct,
+		Currency:        money.DefaultCurrency,
 		Amount:          10_000,
 		Source:          "seed",
 	})
@@ -99,7 +99,6 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 		hold, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
 			TenantSubjectID: &payer,
 			Actor:           actor,
-			CreditType:      ct,
 			Amount:          amount,
 			Source:          "hold",
 			SourceID:        holdSource,
@@ -131,7 +130,7 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 		"availability_tier": "batch",
 	})
 
-	account, err := svc.GetCreditAccount(ctx, payer, ct)
+	account, err := svc.GetCreditAccount(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(4_000), account.BalanceMicros, "three captures debit exactly their captured amounts")
 
@@ -144,14 +143,14 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 
 	var captureCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.credit_transactions WHERE tenant_subject_id = $1 AND transaction_type = $2 AND status = $3",
+		"SELECT count(*) FROM openrails.money_transactions WHERE tenant_subject_id = $1 AND transaction_type = $2 AND status = $3",
 		payer.UUID(), "hold", "captured",
 	).Scan(&captureCount))
 	require.Equal(t, 3, captureCount)
 
 	var ledgerCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.credit_transactions WHERE tenant_subject_id = $1",
+		"SELECT count(*) FROM openrails.money_transactions WHERE tenant_subject_id = $1",
 		payer.UUID(),
 	).Scan(&ledgerCount))
 	require.Equal(t, 4, ledgerCount, "usage analytics must not create extra ledger debits")

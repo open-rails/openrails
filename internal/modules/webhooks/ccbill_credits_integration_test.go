@@ -13,8 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/require"
@@ -30,17 +30,17 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	var exists bool
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_blocks')").
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='money_blocks')").
 		Scan(&exists))
 	if !exists {
-		t.Skip("openrails.credit_blocks not found; run migrations before integration tests")
+		t.Skip("openrails.money_blocks not found; run migrations before integration tests")
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
 	billingDays := int32(30)
 
-	creditTypeName := "test_credits_" + uuid.New().String()
-	creditTypeID := uuid.New()
+	// The grant spec key is just a label now (#472: money has no credit_type).
+	grantLabel := "test_credits_" + uuid.New().String()
 	productID := uuid.New()
 	priceID := uuid.New()
 	subID := uuid.New()
@@ -48,19 +48,9 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 
-	_, err := q.CreateCreditType(ctx, gen.CreateCreditTypeParams{
-		ID:            creditTypeID,
-		Name:          creditTypeName,
-		DisplayName:   "Test Credits",
-		Unit:          "units",
-		DecimalPlaces: 0,
-		IsActive:      true,
-		CreatedAt:     now,
-	})
-	require.NoError(t, err)
-
+	// Unit "USD" so the grant deposits into the USD money balance.
 	creditsSpecJSON, err := json.Marshal(models.CreditsSpec{
-		creditTypeName: {Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
+		grantLabel: {Unit: "USD", Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
 	})
 	require.NoError(t, err)
 	description := "Test"
@@ -107,14 +97,13 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_balances WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE tenant_subject_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_types WHERE id = $1", creditTypeID)
 	})
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -124,7 +113,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
-	creditsSvc := credits.NewCreditsService(dbi)
+	moneySvc := money.NewMoneyService(dbi)
 
 	nextRenewal := now.Add(30 * 24 * time.Hour).Format("2006-01-02")
 	ts := now.Format("2006-01-02 15:04:05")
@@ -147,16 +136,16 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		DB:                           dbi,
 		SubscriptionService:          subSvc,
 		SubscriptionLifecycleService: lifecycle,
-		CreditsService:               creditsSvc,
+		MoneyService:                 moneySvc,
 	}
 
 	require.NoError(t, svc.handleRenewalSuccess(ctx))
 
 	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.credit_transactions
-		 WHERE tenant_subject_id = $1 AND credit_type_id = $2
+		`SELECT count(*) FROM openrails.money_transactions
+		 WHERE tenant_subject_id = $1 AND currency = 'USD'
 		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'`,
-		tenantSubjectID, creditTypeID).Scan(&depositCount))
+		tenantSubjectID).Scan(&depositCount))
 	require.Equal(t, 1, depositCount)
 }

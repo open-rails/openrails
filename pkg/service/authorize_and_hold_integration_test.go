@@ -19,8 +19,8 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/migrate"
-	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -65,8 +65,6 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
-	ctName := "azh_" + uuid.NewString()
-	ctID := uuid.New()
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 
@@ -76,26 +74,21 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 			where string
 			arg   any
 		}{
-			{"openrails.credit_transactions", "tenant_subject_id = $1", payerID},
-			{"openrails.credit_balances", "tenant_subject_id = $1", payerID},
-			{"openrails.credit_types", "id = $1", ctID},
+			{"openrails.money_transactions", "tenant_subject_id = $1", payerID},
+			{"openrails.money_balances", "tenant_subject_id = $1", payerID},
 			{"openrails.tenants", "id = $1", tenantID},
 		} {
 			_, _ = super.Pool().Exec(ctx, "DELETE FROM "+q.tbl+" WHERE "+q.where, q.arg)
 		}
 	})
 
-	// Seed credit type + a funded balance (1000 cents) as super (bypasses RLS),
-	// scoped to the test tenant.
+	// Seed a funded USD balance (1000 cents) as super (bypasses RLS), scoped to the
+	// test tenant. Money is unit-less — one balance per currency (#472).
 	_, err = super.Pool().Exec(ctx,
-		`INSERT INTO openrails.credit_types (id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at)
-		 VALUES ($1,$2,$3,'AZH','cents',2,true,$4)`, ctID, tenantID, ctName, now)
-	require.NoError(t, err)
-	_, err = super.Pool().Exec(ctx,
-		`INSERT INTO openrails.credit_balances
-		   (id, tenant_id, tenant_subject_id, actor, credit_type_id, balance, held_balance, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,1000,0,$6,$7)`,
-		uuid.New(), tenantID, payerID, payerID.String(), ctID, now, now)
+		`INSERT INTO openrails.money_balances
+		   (id, tenant_id, tenant_subject_id, currency, balance, held_balance, created_at, updated_at)
+		 VALUES ($1,$2,$3,'USD',1000,0,$4,$5)`,
+		uuid.New(), tenantID, payerID, now, now)
 	require.NoError(t, err)
 
 	// Billing service as the unprivileged openrails_app role (RLS ENFORCES).
@@ -110,7 +103,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 
 	rt := &app.Runtime{
 		DB:                 appDB,
-		CreditsService:     credits.NewCreditsService(appDB),
+		MoneyService:       money.NewMoneyService(appDB),
 		EntitlementService: entitlements.NewEntitlementService(appDB),
 		Clock:              clockwork.NewRealClock(),
 	}
@@ -122,7 +115,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 
 	// (1) Authorize WITHIN balance => allowed + hold placed + available reduced.
 	res, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-		TenantSubjectID: payer, Actor: "serviceToken:k1", CreditType: ctName, EstimateMicros: 600,
+		TenantSubjectID: payer, Actor: "serviceToken:k1", EstimateMicros: 600,
 		RequestID: "req-1", ExpiresAt: exp,
 	})
 	require.NoError(t, err)
@@ -130,14 +123,14 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	require.NotNil(t, res.ReservationID)
 	require.Equal(t, int64(1000), res.AvailableMicros, "snapshot is pre-hold available")
 
-	snap, err := svc.GetCreditAccount(tctx, payer, ctName)
+	snap, err := svc.GetCreditAccount(tctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(600), snap.HeldMicros)
 	require.Equal(t, int64(400), snap.AvailableMicros)
 
 	// (2) Authorize OVER remaining balance => denied, NO new hold.
 	deny, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-		TenantSubjectID: payer, Actor: "serviceToken:k1", CreditType: ctName, EstimateMicros: 700,
+		TenantSubjectID: payer, Actor: "serviceToken:k1", EstimateMicros: 700,
 		RequestID: "req-2", ExpiresAt: exp,
 	})
 	require.NoError(t, err)
@@ -145,7 +138,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	require.Equal(t, billingservice.DenyInsufficientBalance, deny.DenyCode)
 	require.Nil(t, deny.ReservationID)
 
-	snap2, err := svc.GetCreditAccount(tctx, payer, ctName)
+	snap2, err := svc.GetCreditAccount(tctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(600), snap2.HeldMicros, "denied authorize must not change held")
 
@@ -159,7 +152,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			results[i], errs[i] = svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-				TenantSubjectID: payer, Actor: "serviceToken:k1", CreditType: ctName, EstimateMicros: 300,
+				TenantSubjectID: payer, Actor: "serviceToken:k1", EstimateMicros: 300,
 				RequestID: "req-conc-" + string(rune('a'+i)), ExpiresAt: exp,
 			})
 		}(i)
@@ -176,7 +169,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	require.Equal(t, 1, allowed, "exactly one concurrent authorize may pass on the same balance (atomicity)")
 
 	// Final held = 600 + 300 (the one winner) = 900; available = 100.
-	final, err := svc.GetCreditAccount(tctx, payer, ctName)
+	final, err := svc.GetCreditAccount(tctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(900), final.HeldMicros)
 	require.Equal(t, int64(100), final.AvailableMicros)
