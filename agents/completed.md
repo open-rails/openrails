@@ -9125,3 +9125,394 @@ item: the `subscription_type_id` (CCBill) config field on ProcessorConfig + CCBi
 ToCCBillConfig copy, the tenant-secret populate line, and the config.example.yaml entry — declared
 + populated but never read. Left the LIVE inbound CCBill webhook field `SubscriptionTypeID` intact.
 Validated: build + vet + non-integration tests green.
+
+---
+
+# #486: Rename the payable identity `merchant_subject` → `customer` (HARD CUT — table + columns + SDK + wire)
+
+Design (Paul, 2026-06-14): `merchant_subject` is abstract; the payable identity is a **customer** (NMI/Stripe's
+own word). It stays MERCHANT-SCOPED (implicit, enforced by `merchant_id` + FORCE RLS) — the same human/card at
+two merchants is two `customer` rows (NMI vault + Stripe Customer are both per-merchant/account; confirmed for
+all rails). Hierarchy reads: **merchant → customer → processor_customer** (the customer's per-processor object;
+`processor_customers` KEEPS its name). HARD CUT, no compat (pre-launch).
+
+## Scope (OpenRails — one breaking change; tag bundled with #484 as v0.28.0)
+- **Migration 019** (idempotent/transactional, lock+statement timeouts): `openrails.merchant_subjects` →
+  `openrails.customers`; the `merchant_subject_id` FK column → `customer_id` on EVERY referencing table
+  (`payment_methods`, `subscriptions`, `payments`, `checkout_sessions`, `usdc_funding_sessions`,
+  `entitlement_grants`, `processor_customers`, …); rename its constraints/indexes
+  (`uq_merchant_subjects_*`→`uq_customers_*`, `*_merchant_subject_fk`→`*_customer_fk`). Keep `UNIQUE(merchant_id,
+  issuer, subject)` + FORCE RLS (scoping stays implicit). `processor_customers` table name unchanged.
+- **sqlc**: regen; `MerchantSubjectID`→`CustomerID`; `GetMerchantSubject…`→`GetCustomer…`.
+- **Go SDK** (public `openrails` pkg): type `PayerTenantID` → `CustomerID` (drops the doubly-stale Payer+Tenant);
+  `payerString`/`payer*` helpers → `customer*`; request/response fields `PayerTenantID`/`MerchantSubjectID` →
+  `CustomerID`.
+- **Wire JSON (HARD CUT)**: `tenant_subject_id` → `customer_id` on every `/v1/service/*` + `/v1/self/*`
+  body/query. No alias.
+- **identity pkg**: `identity.MerchantSubjectID` → `identity.CustomerID`.
+- Tests + `internal/integrationharness` updated (`RegisterRemoteApplication`/etc. that reference the subject).
+
+## Non-goals / notes
+- `processor_customers` stays (now reads customer→processor_customer). `merchant`/`owner_tenant_id` unchanged.
+- Cross-merchant "global customer" (Shop Pay) is explicitly OUT (NMI vault + Stripe Customer are per-merchant);
+  the only cross-merchant link is the `(issuer, subject)` tuple in the host's auth, not an OpenRails entity.
+
+## Consumers (separate per-app issues — bump to v0.28.0, rename refs)
+doujins #409, hentai0 #171, tensorhub #486, cozy-art #148.
+
+**Tasks:**
+- [x] Migration 019: `merchant_subjects`→`customers`, `merchant_subject_id`→`customer_id` (all FK tables) +
+      constraint/index renames; verify it converges to a clean fresh-install baseline + is idempotent.
+      (001 baseline + 015–017 also re-declared `customer`, per the repo's squash-baseline convention; 018
+      left historical. processor_customers' OWN `customer_id` text col disambiguated to `processor_customer_id`
+      to make room for the FK — added as step 2a in 019.)
+- [x] sqlc regen; Go fields/methods `MerchantSubjectID`/`GetMerchantSubject…` → `CustomerID`/`GetCustomer…`.
+- [x] SDK type `PayerTenantID`→`CustomerID` + `customer*` helpers; request/response fields renamed.
+- [x] Wire JSON `tenant_subject_id`→`customer_id` (hard cut, all routes); `/v1/service/tenant-subjects/*` path → `/customers/*`.
+- [x] `identity.MerchantSubjectID`→`identity.CustomerID`; internal refs + comments.
+- [x] Tests + harness updated; `go build`/`vet`/`test ./...` + `-tags=integration ./embed/...` green.
+
+
+---
+
+# #485: Integration tests must run the REAL stack — no stubbed AuthKit; a no-auth host harness for embedded + the real standalone server for remote
+
+Design (Paul, 2026-06-14): the embed conformance test today builds ONE in-process engine and serves its
+`/v1/service/*` routes on httptest with a `stubResolver` standing in for AuthKit (`conformance_integration_test.go:52-67`).
+That's wrong for an *integration* test: the standalone server's production auth (control plane → AuthKit `core`
+service-token resolution, #481 role-based merchant authz, #74 remote_application, #76 JWKS principal) is never
+exercised. Move both sides to REAL setups.
+
+## A. Embedded integration — a real no-auth HOST harness (≈ doujins, minus auth)
+A minimal embedding-host test fixture that uses OpenRails exactly as `doujins/internal/billing/openrailsembed`
+does: build the engine via `embed.New` (host-owns-auth), supply a TRUSTING authenticator (accepts every HTTP
+request, injects the bound merchant + the request's subject, verifies NOTHING — fine for tests), and mount the
+EMBEDDED HTTP surface (`rt.Handler(...)`). Drive real HTTP against it. This is "doujins with a no-op authenticator,"
+so it tests the real embedded host integration, not in-test `embed.New` + direct facade calls.
+
+## B. Standalone integration — boot the REAL server + REAL AuthKit (as in production)
+Start the actual standalone server (`cmd/billing`, the real router + control plane) against a test Postgres with
+BOTH OpenRails migrations AND AuthKit `profiles.*` migrations (authkit/migrations/postgres 001–006) applied.
+Provision via the REAL control-plane bootstrap (`cmd/billing/bootstrap_apply.go`) + mint a REAL service token /
+operator JWT (`mint_operator_jwt.go`) through real AuthKit `core` — NO stub. The remote client authenticates with
+that real token, resolved by the real `ServiceTokenRequired` → control-plane `ResolveServiceToken` → AuthKit. This
+validates the production auth path (service tokens, #481 owner_tenant role authz; later #76 JWKS principal via #484).
+
+## C. Parity preserved across the REAL surfaces
+Run the existing conformance operation script against BOTH real surfaces (embedded-host HTTP from A vs standalone
+HTTP from B) and assert observable parity — same value as today, but real-vs-real with NO stub. DELETE `stubResolver`.
+
+## Basis that already exists
+- `tests/unified_billing_e2e_test.go` (real standalone e2e harness), `cmd/billing` (+ `bootstrap_apply.go`,
+  `mint_operator_jwt.go`), and the control-plane integration tests (`internal/controlplane/bootstrap_integration_test.go`,
+  `service_token_test.go`) that already wire real AuthKit `core`. `doujins/internal/billing/openrailsembed` is the
+  shape reference for the A harness. ("No wire mocks of sibling services" — use real AuthKit `core` in-process, the
+  way standalone OpenRails consumes it; NOT the dev-server HTTP API, which OpenRails never calls.)
+
+## Note
+Heavier/slower than the one-engine stub, but it's a true integration test of the production standalone server (the
+explicit requirement). Keep any fast adapter-level unit coverage where it exists; this is the integration layer.
+
+**Tasks:**
+- [x] A: no-auth embedding-host harness (mirrors openrailsembed; trusting authenticator; mounts the embedded HTTP surface).
+      `internal/integrationharness.Harness.StartEmbeddedHost` — `embed.New` (host-owns-auth) over the shared migrated
+      Postgres + Redis, serving the real embedded `/v1/service/*` on httptest behind the REAL `ServiceTokenRequired`
+      middleware wired to a `trustingResolver` (accepts every token, pins the bound merchant, verifies nothing).
+- [x] B: standalone harness — boot the real standalone server (`ginboot.NewServer` → `internal/http`, the cmd/billing
+      run-server graph) + real AuthKit `core`; OpenRails + AuthKit `profiles.*` migrations applied by
+      `migrate.RunPostgres` (migratekit over `authkit/migrations/postgres`, via `dbtest`); provision via the REAL
+      control-plane bootstrap (`RunBootstrap` links `owner_tenant_id` + mints a real admin service token through
+      AuthKit core); the client auths with that real token resolved by `ServiceTokenRequired` → `ResolveServiceToken`
+      → AuthKit core (#481). No stub. `Harness.StartStandalone`.
+- [x] C: re-pointed the conformance parity script to A (embedded-real) vs B (standalone-real); `stubResolver` DELETED.
+      `embed/conformance_integration_test.go` now drives `openrails.NewRemote` against BOTH harness surfaces and asserts
+      `require.Equal`. The un-stubbed standalone path surfaced NO real parity bug.
+- [x] CI: harness uses Docker/testcontainers (shared Postgres via `dbtest`, Redis testcontainer); both migration sets
+      are applied by the shared migrator. Package doc on `internal/integrationharness` documents the two-server API.
+
+
+---
+
+# #484: Accept JWKS-principal programmatic auth in the standalone control plane (stored role/perms) — blocked on authkit #76
+
+Design (Paul, 2026-06-14): authkit #76 adds a second programmatic-access credential type — a **JWKS principal**
+(a remote_application presenting a SELF-SIGNED token whose subject is itself) granted STORED permissions/role,
+parallel to shared-secret service tokens. Standalone OpenRails authenticates programmatic callers today via
+service tokens (resolved through authkit) + #481 role-based merchant authz on `owner_tenant_id`.
+
+## What changes (after authkit #76 lands)
+- The control-plane auth path ALSO accepts a JWKS-principal self-token (verify via authkit → the principal's
+  STORED perms/role) as a programmatic credential, alongside service tokens. A JWKS principal holding a role on
+  a merchant's `owner_tenant_id` can administer that merchant — the #481 model already keys authz on roles, so
+  this is mostly wiring the new caller type into the existing role-based authorization.
+
+## Blocked on
+- authkit #76 (the verifier auth-method + assignable-authority surface).
+
+**Tasks:**
+- [x] After authkit #76: accept JWKS-principal self-tokens on the standalone control-plane auth path, alongside
+      service tokens; resolve the caller's stored perms/role and run the existing #481 role-based merchant authz.
+      (authkit bumped v0.27.0->v0.28.0. New `ControlPlane.ResolveRemoteApplication` (internal/controlplane/
+      remote_application.go) verifies a `remote-application-access+jwt` self-token via the existing delegated
+      Verifier, detects `Claims.IsRemoteApplication()`, and resolves the merchant by the principal's STORED
+      tenant role -> owner_tenant_id, returning the SAME `*ResolvedServiceToken` shape so #481 authz runs
+      unchanged. Wired as a second accepted credential in `ginmw.resolveServiceCredential` (new
+      `RemoteApplicationResolver` iface): service-token path unchanged; JWT-shaped bearers try the remote-app
+      path, falling through to service-JWT when not a remote_application self-token.)
+- [x] Tests: a JWKS-principal caller with a role on a merchant's owner_tenant can administer that merchant;
+      self-claimed perms not honored. (embed/remote_application_integration_test.go via StartStandalone +
+      harness.RegisterRemoteApplication: authorized principal (operator role on owner_tenant) deposits+reads;
+      principal without a role is denied 403; service-token auth still works. Authority is STORED only — the
+      verifier ignores token self-claims.)
+
+
+---
+
+# #483: Deposit currency-validation parity — remote accepts an unknown currency that local rejects
+
+Found 2026-06-14 while greening the embed conformance integration test (was un-runnable since the #336 regression,
+so this never surfaced). A `DepositCredits` with an unknown currency (`"conformance_missing_currency"`) is
+REJECTED by the embedded/local client path but ACCEPTED by the remote HTTP path — both ultimately call the same
+`pkg/service Service.DepositCredits`, so the divergence is in how the HTTP deposit handler binds/defaults/forwards
+the `currency` field vs the local adapter (a #407/#476 money-decouple artifact; "currency optional" per #476).
+UNRELATED to the tenant→merchant rename (#480) — deposit/window/transaction/balance/usage parity is otherwise
+green local-vs-remote.
+
+Currently carved out in `embed/conformance_integration_test.go` (the unknown-currency probe is exercised on both
+paths but not asserted) so the suite is green; remove the carve-out when fixed.
+
+**Tasks:**
+- [x] Trace why the remote deposit handler does not reject an unknown currency (binding/default/normalizeCurrency)
+      while the local adapter does; decide the canonical behavior (reject unknown per "money validates the unit").
+      ROOT CAUSE: `serviceDepositRequest` had no `Currency` field, so the wire `currency` was dropped → service saw
+      "" → defaulted to USD → accepted. Local adapter forwarded `req.Currency` → service rejected. Canonical: reject
+      unknown (service `depositTx`→`validateUnit`→`ValidateCurrency` already does); empty still defaults.
+- [x] Make embedded + remote deposit currency validation identical; re-assert the conformance probe (remove the
+      #483 carve-out). Added `Currency` to the handler request + forward it; both transports now map unknown-currency
+      to a 400 (ErrInvalid). Carve-out removed; ErrDepositBadType re-asserted.
+
+
+---
+
+# #482: Rename `admin_grants` → `entitlement_grants` (disambiguate from authorization "grants")
+
+Design (Paul, 2026-06-13): `openrails.admin_grants` records admin-initiated ENTITLEMENT freebies — comps,
+contest winners, partnerships, manual payments (grants a `price_id`/product → a `tenant_subject`; see the table
+comment line ~700). The bare word "grants" reads as an AUTHORIZATION grant and already misled an agent into
+treating it as an operator→merchant admin mechanism (it is not). Rename to make the billing intent obvious; it
+sits naturally beside `entitlements`/`entitlement_features`.
+
+Name: **`entitlement_grants`** (covers all four reasons; unambiguously billing). Alt: `comp_grants` (too narrow
+— it's not only comps). Avoid keeping bare "grants".
+
+Mechanical, no logic change. Fold into the #480 tenant→merchant rename pass (`tenant_id`→`merchant_id`,
+`tenant_subject_id`→`merchant_subject_id` happen there anyway).
+
+**Tasks:**
+- [x] Migration: `ALTER TABLE openrails.admin_grants RENAME TO entitlement_grants` (+ rename its
+      constraints/indexes/grants); update the table/column comments. (migration 018, dynamic + guarded;
+      001 baseline updated; constraint/index names re-prefixed admin_grants->entitlement_grants.)
+- [x] sqlc-gen type + queries + all Go refs renamed (`AdminGrant*` → `EntitlementGrant*`).
+      (queries/entitlement_grants.sql; gen regenerated, no drift.)
+- [x] Confirm no external consumer references the old table name (it's internal billing state).
+
+
+---
+
+# #480: Rename tenant→MERCHANT (a dumb billing bucket); embedded = ZERO auth (host owns all of it); register a merchant from config (supersedes #478, realizes #473)
+
+Design (Paul, 2026-06-13): the OpenRails "tenant" is a BILLING LABEL, not an identity — it answers "whose books
+does this row go on?", never "who are you / what may you do." Auth is 100% AuthKit's job. So:
+- **Rename `tenant` → `merchant`** across OpenRails (specific + billing-flavored; matches NMI's own word; each
+  merchant maps 1:1 to a Stripe connected `account`/NMI merchant account — see the existing `stripe_account_id`).
+  A merchant carries ONLY billing/money-rail state and NO auth columns. The merchant OWNS all processor config:
+  `stripe_account_id` + Stripe webhook secrets, NMI security keys + webhook callbacks (`webhook_host`/`webhook_path`),
+  CCBill accounts, Solana wallets/config — i.e. `merchant_secrets`/`merchant_deks` (was `tenant_secrets`/`tenant_deks`),
+  `payment_methods`, `processor_customers`, `linked_wallets`, `solana_subscriptions` all key on `merchant_id`.
+  The ONLY things that LEAVE the merchant are the AUTH bits currently conflated onto `tenants`: `authkit_tenant_id`
+  (→ #481) and the JWKS/issuer registry `tenant_delegated_issuers` (→ AuthKit, #74). Rails stay; identity goes.
+- **Embedded mode runs NO AuthKit and stores ZERO auth state.** The host authenticates everyone (its own AuthKit
+  / own logic) and hands OpenRails a trusted `(merchant, subject)` via the host-plugged authenticator
+  (`DelegatedAuthenticator`/host authenticator). OpenRails verifies nothing → the JWKS/issuer registry
+  (`tenant_delegated_issuers`) is an AUTH concern and is DROPPED from OpenRails (lives host-side in embedded;
+  AuthKit-side in standalone — #74/#481).
+- The merchant row must NOT be "seeded" as a random uuid; it's REGISTERED from config at boot, idempotently.
+
+## What changes
+1. **Rename pass** (mechanical, no logic change): `openrails.tenants`→`merchants`, `tenant_subjects`→
+   `merchant_subjects`, `tenant.ID`/`tenant.Require`→`merchant.*`, GUC `app.tenant_id`→`app.merchant_id`, sqlc
+   types + ~all refs. (Do this first; #481 builds on it.)
+2. **`merchant_subjects` = thin payable-identity reference** `(merchant_id, issuer, subject)` — a LABEL to hang
+   charges on, NOT verified by OpenRails. The host/AuthKit already proved the subject.
+3. **`db.RegisterMerchant(ctx, qx, {slug, name, processor refs})`** — billing-only, config-driven, idempotent
+   (ON CONFLICT). Replaces ALL THREE seeds: `db.EnsureTenantBySlug` (#478), doujins `Seed()`, control-plane
+   org-minting. `embed.New` calls it after migrations; resolves the bound `merchant.ID` from the row.
+4. **Drop `openrails.tenant_delegated_issuers`** (JWKS = auth, not billing). Embedded: host authenticator does
+   verification. Standalone: AuthKit `remote_application` holds JWKS (#74/#481).
+5. **Canonical merchant uuid = `openrails.merchants.id`** (#473), self-owned uuidv7 — never an AuthKit uuid.
+6. **#478 superseded.**
+
+## Non-goals
+- Standalone AuthKit wiring + `authkit_tenant_id` teardown → #481. AuthKit org/remote_application split → #74.
+
+**Tasks:**
+- [x] Rename pass tenant→merchant (tables, GUC `app.tenant_id`→`app.merchant_id`, `merchant` pkg, sqlc, refs).
+      Migration 018 (idempotent, dynamic): `tenants`→`merchants`, `tenant_subjects`→`merchant_subjects`,
+      tenant_{deks,secrets,exports,credential_audit}→merchant_*, all tenant_id/tenant_subject_id columns,
+      RLS tenant_isolation→merchant_isolation, constraint/index names; 001 baseline kept in sync; verified an
+      existing DB migrates to the exact fresh-baseline shape (cols/indexes/constraints identical).
+- [x] Drop `tenant_delegated_issuers` table + its code; embedded verifies nothing (host-plugged authenticator).
+      Standalone JWKS = AuthKit remote_application (loadRemoteApplications + verifier.WithService); the OpenRails
+      issuer registry (issuer_registry/issuer_admin + routes + manifest reconciliation) is removed.
+- [x] `db.RegisterMerchant({slug, name, processor refs})` idempotent (ON CONFLICT); called in `embed.New` after
+      migrations; resolves bound `merchant.ID` from the row. `EnsureTenantBySlug` + seed two-step deleted.
+- [x] `embed.Options` carries the billing-only bound slug; RegisterMerchant is billing-only (no issuer/JWKS).
+- [x] Kept `ResolveMerchantSlug`'s unprovisioned error for standalone; integration test (embed) registers a
+      FRESH slug + is idempotent on a second `New` (passes against a real migrated DB).
+- [x] Fixed the embed conformance test (merchant resource/owner-tenant fields; RegisterServiceRoutes arity).
+- [ ] Docs: embedding guide note (deferred — no code-blocking doc; behavior covered by tests/comments).
+
+
+---
+
+# #481: Standalone — AuthKit owns identity/authz; the TENANT (org) is the ownership hub; merchant gets an explicit owner-tenant link + role-based admin; kill the `authkit_tenant_id` identity-equation + org-per-merchant minting
+
+Design (Paul, 2026-06-13). Standalone OpenRails embeds AuthKit for ALL identity/authorization, and the **tenant
+(org) is the ownership hub**. The provisioning model:
+1. user registers (AuthKit native `user`).
+2. user creates a **tenant (org)** — user is auto-`owner` (the one predefined minimum role; standalone may
+   define additional roles + permissions).
+3. user creates a **remote_application** controlling that tenant (external JWKS peer; AuthKit #74).
+4. user creates a **merchant** linked to that tenant (a billing bucket; #480).
+
+A user's role on the tenant is what authorizes them to administer that tenant's remote_applications and
+merchants. ONE tenant → MANY merchants/remote_applications. There is NO bespoke OpenRails grant table
+(`admin_grants` is unrelated — it records comp/free product grants, not authz).
+
+## What changes (the actual fix)
+1. **Kill the identity-equation.** Today `authkit_tenant_id` fuses billing with auth: service-token auth
+   resolves the merchant 1:1 as "the org that owns your token" (`controlplane/service_token.go:243
+   tenantForAuthKitTenant`, `WHERE authkit_tenant_id = $1`), and provisioning AUTO-MINTS an org per merchant
+   (`tenancy/lifecycle.go:151 EnsureAuthKitTenant` → `UPDATE ... SET authkit_tenant_id`). Both go.
+2. **Explicit owner-tenant link instead.** A merchant carries a nullable **`owner_tenant_id`** (the org that
+   owns it) — user-created in step 4, NULL in embedded (no AuthKit). This is the ONE permitted billing→auth
+   reference, and it is OWNERSHIP (who administers), not IDENTITY (the merchant is never "equal to" the org;
+   one org owns many merchants). It is never used to resolve a merchant from a token.
+3. **Authorization is role-based on the owning tenant.** Admin (human managing merchant/catalog/config): a role
+   on the merchant's `owner_tenant_id` (owner minimum; custom roles/permissions allowed). Runtime (a
+   remote_application's delegated token billing a merchant): the remote_application controls the tenant that
+   owns the merchant. Verification (JWKS) is AuthKit's `remote_application` (#74); OpenRails holds no issuer
+   registry (dropped in #480).
+4. **Provisioning = explicit user flow**, not auto-minting. Remove `EnsureAuthKitTenant`/
+   `recordAuthKitTenantBySlug` org-per-merchant creation; merchant via #480 `RegisterMerchant`,
+   remote_application via AuthKit #74, both linked to the user's tenant.
+
+## Depends on / relates
+- #480 (merchant rename + JWKS removed). AuthKit #74 (tenant/org + roles, remote_application owns issuer/JWKS).
+- App-specific escape hatch is AuthKit #75 (token `attributes` + consumer-stored mapping; OpenRails adds nothing).
+
+## Non-goals
+- Embedded path (no AuthKit, `owner_tenant_id` NULL) → #480.
+
+**Tasks:**
+- [x] Added nullable `merchants.owner_tenant_id` (ownership FK to the AuthKit org); migration 018 drops
+      `authkit_tenant_id`/`authkit_tenant_slug` + their index (001 baseline in sync).
+- [x] Replaced `tenantForAuthKitTenant` (`WHERE authkit_tenant_id = $1`) with role-based authz:
+      `merchantForOwnerTenant` (`WHERE owner_tenant_id = $1`) + `AuthorizeMerchant` (request NAMES the merchant;
+      check caller's owning tenant owns it). Caller identity + JWKS come from AuthKit (remote_application). The
+      delegated/service-JWT paths resolve merchant via `merchantForIssuer` (iss→remote_application→its tenant
+      memberships→owner_tenant_id→merchant).
+- [x] Removed org-per-merchant minting: `EnsureAuthKitTenant` + `TenantProvisioner` deleted from tenancy;
+      `recordAuthKitTenantBySlug`→`recordOwnerTenantBySlug` (records owner_tenant_id only). Provisioning takes an
+      EXPLICIT `OwnerTenantID` (never auto-minted; embedded leaves it NULL).
+- [x] Audited/cleaned the Go refs (`controlplane/service_token.go`, `service_jwt.go`, `delegated.go`,
+      `issuer_registry.go`, `bootstrap.go`, `tenancy/lifecycle.go`, `ginmw/service_token.go`,
+      `http/routes_tenant_admin.go`, `bootstrap/tenant_manifest.go`).
+- [x] Tests: standalone authz via owner-tenant role (`TestMerchantForOwnerTenant` incl. a tenant owning TWO
+      merchants + AuthorizeMerchant), `TestProvision_Idempotent` (merchant with no auto-minted org + unowned
+      embedded path), `TestBootstrap_Idempotent` (owner_tenant_id recorded). All pass vs a real migrated DB.
+
+
+---
+
+# #478: embed.New auto-ensures the bound tenant; clear unprovisioned-tenant error (not panic)
+
+The no-default-tenant change (#336) left embedded boot broken: a host binds the engine to a tenant
+SLUG via `embed.New(... Options{Tenant: "x"} ...)`, but nothing created that tenant row, so tenant
+resolution PANICKED at handler build (`embedhttp: resolve configured tenant ... no rows in result
+set`; same in `pkg/embedded/gin/self.go`).
+
+Fix (MODE-AWARE):
+- EMBEDDED (`embed.New`): after `migrate.RunPostgres`, idempotently ensure the bound tenant exists
+  (`db.EnsureTenantBySlug` → `INSERT ... ON CONFLICT (slug) DO NOTHING`, schema-rewrite-aware via the
+  engine's `DB.Qx`). The host owns the embed + DB, so auto-create is safe + idempotent.
+- STANDALONE/REMOTE: do NOT auto-create. `db.ResolveTenantSlug` now maps a no-rows result to a CLEAR
+  error — "configured tenant slug %q is not provisioned — create the tenant and register its JWKS via
+  the control plane". The two former `panic(...)` sites (embedhttp.NewHTTPHandler, gin self handler)
+  return a fail-closed 500 handler carrying that message instead of panicking. (standalone server.go
+  already fails boot on the error.)
+
+**Tasks:**
+- [x] `db.EnsureTenantBySlug` (sqlc `EnsureTenantBySlug` :exec) + call in `embed.New` after migrations.
+- [x] `db.ResolveTenantSlug` returns the actionable unprovisioned-tenant error on `pgx.ErrNoRows`.
+- [x] Replace the embedhttp + gin self-handler panics with fail-closed error handlers.
+- [x] Integration test: embed.New on a FRESH slug boots (no panic), row exists, handler builds, second
+      New is an idempotent no-op (embed/tenant_ensure_integration_test.go).
+
+
+> Superseded by #480 (embedded merchant self-registration).
+
+---
+
+# #475: Tenant-defined custom credits (api-credits, gold-coins) — consume-only, no FX
+
+**Status:** DONE (wip/475-custom-credits). Was referenced as "#473" before the id collision; it's #475.
+
+**Done (minimal):**
+- [x] Registry: `openrails.custom_credit_types(id, tenant_id, name, decimals, active, created_at, updated_at)`
+  in migrations/postgres/001_schema.up.sql — RLS tenant_isolation, tenant_id NOT NULL (#336), UNIQUE
+  (tenant_id, name), decimals CHECK [0,18]. sqlc queries (define/list/get/set-active) in
+  internal/db/queries/custom_credit_types.sql; gen regenerated.
+- [x] Qualified unit codes + resolution: internal/modules/money/custom_credit.go — `IsQualifiedUnit`,
+  `ResolveUnit(ctx, code) (decimals, builtin, err)` (unqualified → built-in registry; `slug/name` →
+  ctx-tenant-owned + active custom type), `normalizeUnit` (preserves qualified codes, no uppercasing),
+  `FormatAmount(minor, decimals)`, registry CRUD methods, and `RequireBillingCurrency` (NEW here — see
+  the F-merge note below).
+- [x] Ledger consumption: deposit/withdraw/hold/balance + the grant path (validateCreditGrantSpec → now a
+  method using validateUnit) accept resolved qualified custom units (money_service.go, subscription_credits.go).
+- [x] Invariant: billing paths reject qualified units via RequireBillingCurrency — AccrueOwed (owed/arrears)
+  + getAccountSettings (account-settings/auto-topup). FinalizeInvoice has no currency param (USD-only) so
+  it's already currency-safe.
+- [x] Presentation: FormatAmount pure helper (100 @ 2dp → "1.00").
+- [x] Tests: custom_credit_test.go (unit) green in default suite; custom_credit_integration_test.go
+  (define gold dp=2, deposit 500 + spend 150 → 350, owed rejected, format) PASSES under -tags=integration
+  against a real migrated DB.
+
+**Merge note (#474 overlap, resolved):** `RequireBillingCurrency` now lives once in currency.go (master's #474
+home); it rejects qualified custom units (wrapping ErrBillingUnitRequired), else ValidateCurrency.
+
+Custom credits are tenant-defined consumable units (api-credits, in-game gold) with NO fixed dollar
+exchange ratio (buy 100 for $10 OR 1000 for $80). They are NEVER billed in (see the #474 invariant) —
+acquired by purchase (paid in a real currency, any ratio) or product grant, then SPENT on usage.
+Tensorhub's "API credits" are NOT custom credits — they are USD money (#474). Reuse the money LEDGER
+primitives as-is; do NOT give custom credits a `money_accounts`/invoice/owed row.
+
+Design notes:
+- Unit namespace: qualified `tenant-slug/name` (e.g. `tensorhub/api-credit`) = custom credit;
+  unqualified (`usd`) = built-in currency (#474). One `currency`/`unit` column hosts both.
+- DEFINITION model (like Sui custom coins): a custom credit type is just `{name, decimals}` — the
+  tenant picks a name + a decimal precision. `decimals` separates PRESENTATION (what the user/admin
+  sees) from internal STORAGE: amounts are ALWAYS stored as integer minor units, and the UI divides
+  by 10^decimals for display. Examples: tickets → decimals=0; gold coins → decimals=2. This is exactly
+  how the built-in currencies already work — micro-USD is "USD with decimals=6" — so the SAME storage
+  model + currency registry shape covers both; built-ins are {USD/USDC/EUR=6, JPY=4, SOL=9}, custom
+  types carry their tenant-chosen decimals in the per-tenant registry.
+- Tasks: (1) a per-tenant custom-credit-type registry storing `{tenant, name, decimals, active}`
+  (define/list/activate); (2) allow the money ledger's `currency` column to hold qualified codes +
+  resolve their decimals from the registry (tenant-owned); (3) product grants may target a
+  custom-credit unit; (4) the admission/spend path consumes custom credits; (5) presentation: format
+  stored integer minor units → display via the unit's decimals (built-in or custom) at the API/admin
+  boundary; (6) ENFORCE the invariant — billing/invoice/owed/charge paths reject non-currency
+  (qualified) units.
+- Keep it minimal; build only when a tenant actually needs a non-dollar unit.
+
