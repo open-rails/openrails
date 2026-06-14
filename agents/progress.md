@@ -79,6 +79,22 @@ cheap one.
 tensorhub #486 (reports the failures + defines the $ amounts); openrails #487 (per-tier bad_spend budget lives in the
 tier policy).
 
+## Outcome
+LANDED. NOTE: the spec's "existing event-COUNT AbuseWindows / LimitEvents / abuse_rate_limited / /abuse-usage" did
+NOT literally exist in this repo — what existed was the Redis fixed-window limiter + count-based card-failure velocity
+guards. Built the $-valued wasted-spend windows ON THAT proven infra (no new store): new ratelimit value-window
+primitives (AddWindowValue/WindowValue — DECOUPLED record vs read, vs throughput's Check which folds them) + a new
+`abuse.WastedSpendGuard` tracking per-PAYER + per-ACTOR wasted $ in multi-window Redis. Host API
+`ReportWastedSpend(payer, actor, micros, reason)` accrues into both subjects. Per-PAYER budget = tier policy JSONB
+`bad_spend_windows` (graduated by tier); per-ACTOR = flat config default `DefaultActorWastedWindows` ($5/15m + $20/5h).
+Admit denies `abuse_rate_limited` (payer over) / `failure_rate_limited` (actor over), BlockedBy="abuse" → 429.
+New `/abuse-usage` read (wasted $, not counts). SDK/wire: ReportWastedSpend + AbuseUsage added to the Client interface
+(client/remote/embed) + pkg/service + 2 HTTP handlers + routes. Migration 021 = JSONB-contract COMMENT. Tests: 2 new
+integration tests (payer-over → abuse_rate_limited; actor-over → failure_rate_limited + per-actor isolation); admission
++ abuse + ratelimit integration suites green; build + sqlc vet OK.
+GOTCHA fixed: a helper file named `*_windows.go` is silently treated by Go as a Windows-GOOS build constraint
+(excluded from the build); renamed to `valuewindow.go`.
+
 ---
 
 # #489: Per-tenant arrears credit-line (admin-set credit limit; negative-balance-up-to-limit)

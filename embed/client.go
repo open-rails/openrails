@@ -712,6 +712,11 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 			Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros, Cadence: b.Cadence,
 		})
 	}
+	for _, b := range in.BadSpendWindows {
+		pol.BadSpendWindows = append(pol.BadSpendWindows, billingservice.TierBudgetWindowInput{
+			Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros, Cadence: b.Cadence,
+		})
+	}
 	for _, q := range in.QueueLimits {
 		pol.QueueLimits = append(pol.QueueLimits, billingservice.TierQueueLimitInput{
 			Unit: q.Unit, Max: q.Max,
@@ -760,6 +765,47 @@ func (c *localClient) GetTier(ctx context.Context, tenantSubjectID string) (stri
 		return "", internalErr("tier lookup failed")
 	}
 	return tier, nil
+}
+
+// ReportWastedSpend transcribes handlers.ServiceReportWastedSpend (#488).
+func (c *localClient) ReportWastedSpend(ctx context.Context, tenantSubjectID, actor string, micros int64, reason string) error {
+	ctx = c.ensureTenant(ctx)
+	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
+	if err != nil {
+		return err
+	}
+	if err := c.svc.ReportWastedSpend(ctx, payer, actor, micros, reason); err != nil {
+		return internalErr("report wasted spend failed")
+	}
+	return nil
+}
+
+// AbuseUsage transcribes handlers.ServiceAbuseUsage (#488).
+func (c *localClient) AbuseUsage(ctx context.Context, tenantSubjectID, actor, tier string) (*openrails.AbuseUsageResponse, error) {
+	ctx = c.ensureTenant(ctx)
+	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
+	if err != nil {
+		return nil, err
+	}
+	pw, aw, uerr := c.svc.AbuseUsage(ctx, payer, actor, tier)
+	if uerr != nil {
+		return nil, internalErr("abuse usage lookup failed")
+	}
+	return &openrails.AbuseUsageResponse{
+		PayerWindows: abuseUsageWindows(pw),
+		ActorWindows: abuseUsageWindows(aw),
+	}, nil
+}
+
+func abuseUsageWindows(ws []billingservice.AbuseUsageWindow) []openrails.AbuseUsageWindow {
+	out := make([]openrails.AbuseUsageWindow, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, openrails.AbuseUsageWindow{
+			Key: w.Key, Window: w.Window, UsedMicros: w.UsedMicros,
+			LimitMicros: w.LimitMicros, OverBudget: w.OverBudget,
+		})
+	}
+	return out
 }
 
 func budgetScopeWindowInputs(ws []openrails.BudgetScopeWindow) []billingservice.BudgetScopeWindowInput {

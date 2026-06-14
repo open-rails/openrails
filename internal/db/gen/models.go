@@ -858,7 +858,7 @@ type OpenrailsTierPolicy struct {
 	// NULL = tenant-wide default tier policy (#477 platform capacity ladder, declared once); non-NULL = per-subject override taking precedence for that subject.
 	CustomerID *uuid.UUID
 	Tier       string
-	// JSONB tier policy: throughput windows, release_windows, queue_limits, entitled_resources, budget_windows, and (#487) max_concurrent_held_micros (cap on the payer's active un-settled hold $ sum) + max_single_charge_micros (per-charge ceiling). All generic + $-denominated.
+	// JSONB tier policy: throughput windows, release_windows, queue_limits, entitled_resources, budget_windows, (#487) max_concurrent_held_micros + max_single_charge_micros, and (#488) bad_spend_windows (per-payer $-valued wasted/failed-spend budget windows; admit denies abuse_rate_limited when over). All generic + $-denominated.
 	Policy        []byte
 	PolicyVersion int64
 	CreatedAt     time.Time

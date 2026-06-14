@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // AdmitBlockCheck is one (kind,value) tested against the payment blocklist.
@@ -126,7 +127,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	bl := abuse.NewBlocklistService(s.rt.DB)
 	bsvc := budgets.NewService(s.rt.DB)
 	adm := admission.NewAdmitter(lim, s.moneyService(), store, bl, bsvc).
-		WithBudgetScopes(admission.NewBudgetPolicyStore(s.rt.DB))
+		WithBudgetScopes(admission.NewBudgetPolicyStore(s.rt.DB)).
+		WithWastedSpend(abuse.NewWastedSpendGuard(lim), DefaultActorWastedWindows())
 
 	// #404: tenant-scoped throughput. The host passes its per-tenant RPM/RPD
 	// windows; OpenRails enforces them on the invoke path BEFORE the per-actor
@@ -442,6 +444,137 @@ type TierPolicyInput struct {
 	// active (un-settled) hold $ sum, and a per-charge ceiling.
 	MaxConcurrentHeldMicros int64 `json:"max_concurrent_held_micros,omitempty"`
 	MaxSingleChargeMicros   int64 `json:"max_single_charge_micros,omitempty"`
+	// BadSpendWindows are the #488 per-PAYER $-valued wasted-spend budget windows
+	// for this tier: at most LimitMicros of host-reported wasted $ per window;
+	// admit denies abuse_rate_limited when over.
+	BadSpendWindows []TierBudgetWindowInput `json:"bad_spend_windows,omitempty"`
+}
+
+// DefaultActorWastedWindows is the FLAT per-actor wasted-spend budget default
+// (#488): invokers aren't trusted (an account mints unlimited invokers), so the
+// per-actor budget is a fixed backstop rather than tier-graduated. $5 / 15 min
+// and $20 / 5 h (1 USD = 1_000_000 micros). Generic; a host can tune later.
+func DefaultActorWastedWindows() []abuse.WastedWindow {
+	return []abuse.WastedWindow{
+		{Key: "burst", Window: 15 * time.Minute, LimitMicros: 5_000_000},
+		{Key: "sustained", Window: 5 * time.Hour, LimitMicros: 20_000_000},
+	}
+}
+
+// payerWastedWindows resolves the PAYER's wasted-spend budget windows from the
+// tier policy's bad_spend windows (#488) at the payer's current tier.
+func (s *Service) payerWastedWindows(ctx context.Context, payer identity.CustomerID, tier string) ([]abuse.WastedWindow, error) {
+	if tier == "" {
+		if t, err := s.GetTier(ctx, payer); err == nil && t != "" {
+			tier = t
+		} else {
+			tier = admission.DefaultTier
+		}
+	}
+	pol, err := admission.NewTierPolicyStore(s.rt.DB).GetTierPolicy(ctx, payer, tier)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]abuse.WastedWindow, 0, len(pol.BadSpendWindows))
+	for _, w := range pol.BadSpendWindows {
+		if w.WindowSeconds <= 0 {
+			continue
+		}
+		out = append(out, abuse.WastedWindow{Key: w.Key, Window: time.Duration(w.WindowSeconds) * time.Second, LimitMicros: w.LimitMicros})
+	}
+	return out, nil
+}
+
+// ReportWastedSpend records host-reported WASTED $ (#488): an attempt that FAILED
+// and cost the platform money (a hold released without capture, a content-filter
+// reject, an out-of-band failure). It accrues into BOTH the payer's per-tier
+// bad_spend windows and the actor's flat windows; a later Admit denies when
+// either is over budget. micros<=0 is a no-op (cheap rejects ≈ $0 aren't
+// reported). reason is for the caller's own audit; OpenRails stays generic.
+func (s *Service) ReportWastedSpend(ctx context.Context, payer identity.CustomerID, actor string, micros int64, reason string) error {
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	if s.rt.RedisClient == nil {
+		return fmt.Errorf("wasted-spend tracking unavailable: redis not configured")
+	}
+	if payer.IsZero() {
+		return fmt.Errorf("payer required")
+	}
+	if micros <= 0 {
+		return nil
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	lim := ratelimit.NewLimiter(s.rt.RedisClient)
+	guard := abuse.NewWastedSpendGuard(lim)
+	payerWindows, err := s.payerWastedWindows(ctx, payer, "")
+	if err != nil {
+		return err
+	}
+	return guard.Record(ctx, tid.UUID().String(), payer.UUID().String(), actor, micros, payerWindows, DefaultActorWastedWindows())
+}
+
+// AbuseUsageWindow is one wasted-spend window's running $ total for /abuse-usage.
+type AbuseUsageWindow struct {
+	Key         string `json:"key"`
+	Window      string `json:"window"`
+	UsedMicros  int64  `json:"used_micros"`
+	LimitMicros int64  `json:"limit_micros"`
+	OverBudget  bool   `json:"over_budget"`
+}
+
+// AbuseUsage returns the payer's and actor's running wasted-$ totals + budgets
+// (#488 introspection) for a host's /abuse-usage view — wasted $, not just
+// counts. actor "" omits the actor windows.
+func (s *Service) AbuseUsage(ctx context.Context, payer identity.CustomerID, actor, tier string) (payerWindows, actorWindows []AbuseUsageWindow, err error) {
+	if s == nil || s.rt == nil {
+		return nil, nil, fmt.Errorf("service not initialized")
+	}
+	if s.rt.RedisClient == nil {
+		return nil, nil, fmt.Errorf("wasted-spend tracking unavailable: redis not configured")
+	}
+	if payer.IsZero() {
+		return nil, nil, fmt.Errorf("payer required")
+	}
+	tid, terr := merchant.Require(ctx)
+	if terr != nil {
+		return nil, nil, terr
+	}
+	tenant := tid.UUID().String()
+	guard := abuse.NewWastedSpendGuard(ratelimit.NewLimiter(s.rt.RedisClient))
+
+	pw, err := s.payerWastedWindows(ctx, payer, tier)
+	if err != nil {
+		return nil, nil, err
+	}
+	pUsage, err := guard.Usage(ctx, guard.PayerBase(tenant, payer.UUID().String()), pw)
+	if err != nil {
+		return nil, nil, err
+	}
+	payerWindows = toAbuseUsageWindows(pUsage)
+
+	if actor != "" {
+		aUsage, err := guard.Usage(ctx, guard.ActorBase(tenant, actor), DefaultActorWastedWindows())
+		if err != nil {
+			return nil, nil, err
+		}
+		actorWindows = toAbuseUsageWindows(aUsage)
+	}
+	return payerWindows, actorWindows, nil
+}
+
+func toAbuseUsageWindows(ws []abuse.WindowUsage) []AbuseUsageWindow {
+	out := make([]AbuseUsageWindow, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, AbuseUsageWindow{
+			Key: w.Key, Window: w.Window, UsedMicros: w.UsedMicros,
+			LimitMicros: w.LimitMicros, OverBudget: w.OverBudget,
+		})
+	}
+	return out
 }
 
 // SetTierPolicy upserts a per-payer tier policy (throughput + entitled endpoints
@@ -466,6 +599,9 @@ func (s *Service) SetTierPolicy(ctx context.Context, payer identity.CustomerID, 
 	}
 	for _, b := range in.BudgetWindows {
 		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros, Cadence: b.Cadence})
+	}
+	for _, b := range in.BadSpendWindows {
+		pol.BadSpendWindows = append(pol.BadSpendWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros, Cadence: b.Cadence})
 	}
 	if len(in.ReleaseWindows) > 0 {
 		pol.ReleaseWindows = make(map[string][]models.ThroughputWindow, len(in.ReleaseWindows))

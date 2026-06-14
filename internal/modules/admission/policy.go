@@ -49,6 +49,9 @@ type ResolvedPolicy struct {
 	// $-denominated per-tier admit limits (0 = uncapped).
 	MaxConcurrentHeldMicros int64
 	MaxSingleChargeMicros   int64
+	// BadSpendWindows are the #488 per-PAYER $-valued wasted-spend budget windows
+	// for this tier (deny abuse_rate_limited at admit when over).
+	BadSpendWindows []models.BudgetWindowPolicy
 }
 
 // ThroughputForRelease returns the throughput policy for an endpoint-release:
@@ -165,6 +168,7 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Cust
 		BudgetWindows:           toBudgetWindows(row.Policy.BudgetWindows),
 		MaxConcurrentHeldMicros: row.Policy.MaxConcurrentHeldMicros,
 		MaxSingleChargeMicros:   row.Policy.MaxSingleChargeMicros,
+		BadSpendWindows:         row.Policy.BadSpendWindows,
 	}, nil
 }
 

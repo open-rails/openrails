@@ -79,7 +79,7 @@ func ServiceAdmit(r *httprequest.Request) {
 		return
 	}
 	switch res.BlockedBy {
-	case "throughput":
+	case "throughput", "abuse":
 		if res.RetryAfterSeconds > 0 {
 			r.SetHeader("Retry-After", strconv.FormatInt(res.RetryAfterSeconds, 10))
 		}
@@ -120,7 +120,7 @@ func admitVerdictStatus(res *billingservice.AdmitResult) int {
 		return http.StatusOK
 	}
 	switch res.BlockedBy {
-	case "throughput":
+	case "throughput", "abuse":
 		return http.StatusTooManyRequests
 	case "money":
 		return http.StatusPaymentRequired
@@ -271,6 +271,72 @@ func ServiceGetTier(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(map[string]any{"tier": tier})
+}
+
+type serviceReportWastedSpendRequest struct {
+	CustomerID string `json:"customer_id"`
+	Actor      string `json:"actor"`
+	Micros     int64  `json:"micros"`
+	Reason     string `json:"reason"`
+}
+
+// ServiceReportWastedSpend records host-reported WASTED $ (#488): a failed
+// attempt that cost the platform money. Accrues into the payer's per-tier
+// bad_spend windows + the actor's flat windows; a later Admit denies when either
+// is over budget. Operator service token, credits:write.
+func ServiceReportWastedSpend(r *httprequest.Request) {
+	var req serviceReportWastedSpendRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	if req.Micros < 0 {
+		r.ErrorJSON(http.StatusBadRequest, "micros must be >= 0")
+		return
+	}
+	payer, err := parseServiceCustomerID(req.CustomerID)
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
+		return
+	}
+	if !requireServiceCustomerScope(r, *payer) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	if err := svc.ReportWastedSpend(r.Request.Context(), *payer, strings.TrimSpace(req.Actor), req.Micros, req.Reason); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "report wasted spend failed")
+		return
+	}
+	r.SuccessJSONMessage("ok")
+}
+
+// ServiceAbuseUsage returns the payer's + actor's running WASTED-$ totals +
+// budgets (#488 introspection). customer_id + optional actor + tier are query
+// params; the tenant is pinned from the service token. Operator service token,
+// credits:read.
+func ServiceAbuseUsage(r *httprequest.Request) {
+	payer, err := parseServiceCustomerID(r.Query("customer_id"))
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
+		return
+	}
+	if !requireServiceCustomerScope(r, *payer) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	pw, aw, err := svc.AbuseUsage(r.Request.Context(), *payer, r.Query("actor"), r.Query("tier"))
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "abuse usage lookup failed")
+		return
+	}
+	r.JSON(http.StatusOK, map[string]any{"payer_windows": pw, "actor_windows": aw})
 }
 
 type serviceBudgetCheckRequest struct {

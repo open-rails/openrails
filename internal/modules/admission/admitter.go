@@ -34,6 +34,14 @@ const (
 	DenyConcurrentHeldCap = "concurrent_held_cap_exceeded"
 )
 
+// Wasted-spend deny codes (#488). Reuses the generic abuse/failure rate-limit
+// vocabulary: the PAYER over its tier bad_spend budget is abuse_rate_limited;
+// the ACTOR (invoker) over its flat budget is failure_rate_limited.
+const (
+	DenyAbuseRateLimited   = "abuse_rate_limited"
+	DenyFailureRateLimited = "failure_rate_limited"
+)
+
 type Admitter struct {
 	limiter      *ratelimit.Limiter
 	money        *money.MoneyService
@@ -41,6 +49,12 @@ type Admitter struct {
 	blocklist    *abuse.BlocklistService // optional; nil disables blocklist checks
 	budgets      *budgets.Service        // optional; nil disables fixed money-budget windows (#304, #337)
 	budgetScopes *BudgetPolicyStore      // optional; nil disables hierarchical budget scopes (#473)
+
+	// wasted is the optional $-valued wasted-spend guard (#488); nil disables the
+	// wasted-spend admit gate. actorWastedWindows is the FLAT per-actor budget
+	// default (invokers aren't trusted, so their budget isn't tier-graduated).
+	wasted             *abuse.WastedSpendGuard
+	actorWastedWindows []abuse.WastedWindow
 }
 
 func NewAdmitter(limiter *ratelimit.Limiter, moneySvc *money.MoneyService, policies *TierPolicyStore, blocklist *abuse.BlocklistService, budgetSvc *budgets.Service) *Admitter {
@@ -53,6 +67,17 @@ func NewAdmitter(limiter *ratelimit.Limiter, moneySvc *money.MoneyService, polic
 // verdict. Nil store leaves only the pre-#473 (subject,actor) tier-policy path.
 func (a *Admitter) WithBudgetScopes(store *BudgetPolicyStore) *Admitter {
 	a.budgetScopes = store
+	return a
+}
+
+// WithWastedSpend enables the $-valued wasted-spend admit gate (#488): deny when
+// the PAYER is over its per-tier bad_spend budget (abuse_rate_limited) or the
+// ACTOR is over the flat per-actor wasted budget (failure_rate_limited).
+// actorWindows is the flat per-actor default; the payer windows come from the
+// resolved tier policy. Nil guard leaves the gate off.
+func (a *Admitter) WithWastedSpend(guard *abuse.WastedSpendGuard, actorWindows []abuse.WastedWindow) *Admitter {
+	a.wasted = guard
+	a.actorWastedWindows = actorWindows
 	return a
 }
 
@@ -226,6 +251,33 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		return AdmitDecision{}, err
 	}
 	tenantID := tid.UUID()
+
+	// --- wasted-spend $ budgets (#488): deny when the PAYER is over its per-tier
+	// bad_spend budget (abuse_rate_limited) or the ACTOR is over the flat per-actor
+	// wasted budget (failure_rate_limited). Cheap Redis reads; a denied request
+	// places no hold. The host reports the wasted $ out-of-band via
+	// ReportWastedSpend. ---
+	if a.wasted != nil && a.wasted.Enabled() {
+		if pw := toWastedWindows(pol.BadSpendWindows); len(pw) > 0 {
+			over, _, werr := a.wasted.PayerOverBudget(ctx, tenantID.String(), req.CustomerID.UUID().String(), pw)
+			if werr != nil {
+				return AdmitDecision{}, werr
+			}
+			if over {
+				return AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: DenyAbuseRateLimited, ResolvedTier: tier}, nil
+			}
+		}
+		if req.Actor != "" && len(a.actorWastedWindows) > 0 {
+			over, _, werr := a.wasted.ActorOverBudget(ctx, tenantID.String(), req.Actor, a.actorWastedWindows)
+			if werr != nil {
+				return AdmitDecision{}, werr
+			}
+			if over {
+				return AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: DenyFailureRateLimited, ResolvedTier: tier}, nil
+			}
+		}
+	}
+
 	base := fmt.Sprintf("%s:%s:%s", tenantID, req.CustomerID.UUID(), req.Resource)
 	// Per-release throughput VALUES (#472 G1): a release-specific window list
 	// overrides the tier-global default so two releases under one payer can carry
@@ -506,6 +558,24 @@ func retryAfter(d ratelimit.Decision) time.Duration {
 		}
 	}
 	return 0
+}
+
+// toWastedWindows maps the tier policy's $-budget windows to the wasted-spend
+// guard's window shape (#488). Window seconds → duration; the budget key is the
+// window unit so each window is its own Redis counter.
+func toWastedWindows(ws []models.BudgetWindowPolicy) []abuse.WastedWindow {
+	out := make([]abuse.WastedWindow, 0, len(ws))
+	for _, w := range ws {
+		if w.WindowSeconds <= 0 {
+			continue
+		}
+		out = append(out, abuse.WastedWindow{
+			Key:         w.Key,
+			Window:      time.Duration(w.WindowSeconds) * time.Second,
+			LimitMicros: w.LimitMicros,
+		})
+	}
+	return out
 }
 
 func contains(xs []string, v string) bool {

@@ -376,6 +376,9 @@ func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in T
 	if in.MaxSingleChargeMicros != 0 {
 		body["max_single_charge_micros"] = in.MaxSingleChargeMicros
 	}
+	if len(in.BadSpendWindows) > 0 {
+		body["bad_spend_windows"] = in.BadSpendWindows
+	}
 	return c.do(ctx, http.MethodPut, "/v1/service/tier-policies", body, nil)
 }
 
@@ -399,6 +402,34 @@ func (c *remote) GetTier(ctx context.Context, tenantSubjectID string) (string, e
 		return "", err
 	}
 	return resp.Tier, nil
+}
+
+// ReportWastedSpend implements Client (handler ServiceReportWastedSpend, #488).
+func (c *remote) ReportWastedSpend(ctx context.Context, tenantSubjectID, actor string, micros int64, reason string) error {
+	body := map[string]any{
+		"customer_id": strings.TrimSpace(tenantSubjectID),
+		"actor":       actor,
+		"micros":      micros,
+		"reason":      reason,
+	}
+	return c.do(ctx, http.MethodPost, "/v1/service/wasted-spend", body, nil)
+}
+
+// AbuseUsage implements Client (handler ServiceAbuseUsage, #488).
+func (c *remote) AbuseUsage(ctx context.Context, tenantSubjectID, actor, tier string) (*AbuseUsageResponse, error) {
+	q := url.Values{}
+	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
+	if actor != "" {
+		q.Set("actor", actor)
+	}
+	if tier != "" {
+		q.Set("tier", tier)
+	}
+	var out AbuseUsageResponse
+	if err := c.do(ctx, http.MethodGet, "/v1/service/abuse-usage?"+q.Encode(), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // SetSubjectBudgetPolicy implements Client (handler ServiceSetSubjectBudgetPolicy, #473).

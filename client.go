@@ -96,6 +96,17 @@ type Client interface {
 	// uses to drive its OWN per-tier capacity (e.g. tensorhub's scheduler in-flight
 	// concurrency cap) without re-deriving the ladder or cranking graduation.
 	GetTier(ctx context.Context, tenantSubjectID string) (string, error)
+	// ReportWastedSpend records host-reported WASTED $ (#488): an attempt that
+	// FAILED and cost the platform money (a hold released without capture, a
+	// content-filter reject, an out-of-band failure). It accrues into the payer's
+	// per-tier bad_spend windows AND the actor's flat windows; a later Admit denies
+	// (abuse_rate_limited / failure_rate_limited) when either is over budget.
+	// micros<=0 is a no-op (cheap rejects ≈ $0 aren't reported).
+	ReportWastedSpend(ctx context.Context, tenantSubjectID, actor string, micros int64, reason string) error
+	// AbuseUsage returns the payer's and actor's running WASTED-$ totals + budgets
+	// (#488 introspection) — wasted $, not just counts. Empty actor omits the actor
+	// windows; empty tier resolves the payer's current tier.
+	AbuseUsage(ctx context.Context, tenantSubjectID, actor, tier string) (*AbuseUsageResponse, error)
 	// SetSubjectBudgetPolicy upserts a SUBJECT-owned hierarchical budget-scope
 	// policy (#473): the subject's self cap (scope=subject) or a (subject, role)
 	// pool (scope=role, RoleID = the role uuid). The owner is forced to "subject"
@@ -472,6 +483,25 @@ type TierPolicyInput struct {
 	// per-charge ceiling (an over-limit estimate is rejected at admit).
 	MaxConcurrentHeldMicros int64 `json:"max_concurrent_held_micros,omitempty"`
 	MaxSingleChargeMicros   int64 `json:"max_single_charge_micros,omitempty"`
+	// BadSpendWindows are the #488 per-PAYER $-valued wasted-spend budget windows
+	// for this tier: at most LimitMicros of host-reported wasted $ per window;
+	// admit denies abuse_rate_limited when over.
+	BadSpendWindows []BudgetWindowInput `json:"bad_spend_windows,omitempty"`
+}
+
+// AbuseUsageWindow is one wasted-spend window's running $ total (#488).
+type AbuseUsageWindow struct {
+	Key         string `json:"key"`
+	Window      string `json:"window"`
+	UsedMicros  int64  `json:"used_micros"`
+	LimitMicros int64  `json:"limit_micros"`
+	OverBudget  bool   `json:"over_budget"`
+}
+
+// AbuseUsageResponse is the running wasted-$ totals for a payer + actor (#488).
+type AbuseUsageResponse struct {
+	PayerWindows []AbuseUsageWindow `json:"payer_windows"`
+	ActorWindows []AbuseUsageWindow `json:"actor_windows,omitempty"`
 }
 
 // TierScheduleRung is one rung of the persisted tier ladder set via

@@ -115,6 +115,12 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// Graduated-tier READ (#477): the payer's current auto-maintained tier, for a
 	// host that drives its OWN per-tier capacity (e.g. tensorhub's scheduler cap).
 	group.GET("/tier", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetTier))
+	// Wasted-spend report (#488): the host reports a FAILED attempt that cost it $
+	// (a refunded hold, a content-filter reject). Accrues into the payer's per-tier
+	// bad_spend windows + the actor's flat windows; admit denies when over.
+	group.POST("/wasted-spend", creditsWrite, wrap(httphandlers.ServiceReportWastedSpend))
+	// Wasted-spend usage READ (#488): the payer's + actor's running wasted-$ totals.
+	group.GET("/abuse-usage", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceAbuseUsage))
 	// Hierarchical budget-scope policies (#473). Subject-owned caps (self +
 	// (subject, role) pools) are written/read with the same operator credits
 	// gates as tier policies. The PLATFORM-owned payer cap is operator-admin

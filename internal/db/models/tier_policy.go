@@ -62,6 +62,14 @@ type ThroughputPolicy struct {
 	// whose EstimateMicros exceeds it is rejected ("single_charge_cap_exceeded").
 	// 0 = uncapped. Generic runaway guard.
 	MaxSingleChargeMicros int64 `json:"max_single_charge_micros,omitempty"`
+
+	// BadSpendWindows are $-VALUED wasted/failed-spend budget windows for this tier
+	// (#488): at most LimitMicros of host-reported wasted $ per WindowSeconds for
+	// the PAYER. Enforced at admit (deny "abuse_rate_limited" when over). Generic —
+	// every platform has failed work that costs money; the host reports the $ via
+	// ReportWastedSpend. Per-PAYER budget graduated by tier; the per-ACTOR budget is
+	// a flat config default (not stored here).
+	BadSpendWindows []BudgetWindowPolicy `json:"bad_spend_windows,omitempty"`
 }
 
 // QueueLimitPolicy is one batch/queue reservation-pool cap (#472 G2): at most
