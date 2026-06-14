@@ -227,8 +227,8 @@ func TestDelete_RequiresExport(t *testing.T) {
 	// Seed a tenant-owned row + a secret so the purge has something to remove.
 	_, err = svc.pool.Exec(ctx, `
 		WITH subject AS (
-			INSERT INTO openrails.customers (merchant_id, issuer, subject)
-			VALUES ($1::uuid, 'test', 'u1')
+			INSERT INTO openrails.customers (merchant_id)
+			VALUES ($1::uuid)
 			RETURNING id
 		)
 		INSERT INTO openrails.entitlements (merchant_id, customer_id)

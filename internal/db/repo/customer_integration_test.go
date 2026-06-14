@@ -22,9 +22,9 @@ func TestEnsureCustomerID_UUIDReusesExistingPayableID(t *testing.T) {
 	userID := uuid.New()
 	createdAt := time.Now().UTC().Add(-time.Hour)
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id, issuer, subject, created_at, last_seen_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		userID, tenantID, "http://doujins:2052", userID.String(), createdAt, createdAt,
+		`INSERT INTO openrails.customers (id, merchant_id, created_at, last_seen_at)
+		 VALUES ($1, $2, $3, $4)`,
+		userID, tenantID, createdAt, createdAt,
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -35,12 +35,12 @@ func TestEnsureCustomerID_UUIDReusesExistingPayableID(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, userID, resolved)
 
-	var issuer string
+	// EnsureCustomerID reuses the existing payable row (id = subject UUID) and
+	// refreshes last_seen_at (#491: customers is a pure balance keyed by id).
 	var lastSeenAt time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT issuer, last_seen_at FROM openrails.customers WHERE id = $1`, userID,
-	).Scan(&issuer, &lastSeenAt))
-	require.Equal(t, "http://doujins:2052", issuer)
+		`SELECT last_seen_at FROM openrails.customers WHERE id = $1`, userID,
+	).Scan(&lastSeenAt))
 	require.True(t, lastSeenAt.After(createdAt))
 }
 

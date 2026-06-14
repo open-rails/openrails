@@ -11,78 +11,44 @@ import (
 	"github.com/google/uuid"
 )
 
+const ensureCustomer = `-- name: EnsureCustomer :one
+
+INSERT INTO openrails.customers (id, merchant_id)
+VALUES ($1, $2)
+ON CONFLICT (id) DO UPDATE SET last_seen_at = now()
+RETURNING id
+`
+
+type EnsureCustomerParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// openrails.customers: payable balance account (#491). A customer is a PURE
+// balance keyed by its UUID id (#364); the caller/merchant supplies the id.
+// Materialize (or refresh) the customers row for a payable UUID id under a
+// merchant. The caller supplies id (the payable UUID). ON CONFLICT refreshes
+// last_seen_at so concurrent first-touch is safe.
+func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, ensureCustomer, arg.ID, arg.MerchantID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const ensureCustomerRow = `-- name: EnsureCustomerRow :exec
-INSERT INTO openrails.customers (id, merchant_id, issuer, subject)
-VALUES ($1, $2, $3, $4)
+INSERT INTO openrails.customers (id, merchant_id)
+VALUES ($1, $2)
 ON CONFLICT DO NOTHING
 `
 
 type EnsureCustomerRowParams struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	Issuer     string
-	Subject    string
 }
 
 // FK-target materialization before commerce inserts; no-op when present.
 func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowParams) error {
-	_, err := q.db.Exec(ctx, ensureCustomerRow,
-		arg.ID,
-		arg.MerchantID,
-		arg.Issuer,
-		arg.Subject,
-	)
+	_, err := q.db.Exec(ctx, ensureCustomerRow, arg.ID, arg.MerchantID)
 	return err
-}
-
-const upsertFederatedCustomer = `-- name: UpsertFederatedCustomer :one
-INSERT INTO openrails.customers (merchant_id, issuer, subject)
-VALUES ($1, $2, $3)
-ON CONFLICT (merchant_id, issuer, subject) DO UPDATE SET last_seen_at = now()
-RETURNING id
-`
-
-type UpsertFederatedCustomerParams struct {
-	MerchantID uuid.UUID
-	Issuer     string
-	Subject    string
-}
-
-// Federated (delegated/tenant-issued) external subject: keyed by
-// (tenant, issuer, subject) with a generated id.
-func (q *Queries) UpsertFederatedCustomer(ctx context.Context, arg UpsertFederatedCustomerParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, upsertFederatedCustomer, arg.MerchantID, arg.Issuer, arg.Subject)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
-const upsertSelfCustomer = `-- name: UpsertSelfCustomer :one
-
-INSERT INTO openrails.customers (id, merchant_id, issuer, subject)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (id) DO UPDATE SET last_seen_at = now()
-RETURNING id
-`
-
-type UpsertSelfCustomerParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Issuer     string
-	Subject    string
-}
-
-// openrails.customers: payable-subject resolution (#317).
-// Self-service identities are their own UUID: materialize the row WITH
-// id = the subject UUID and return it unchanged (refreshing last_seen_at).
-func (q *Queries) UpsertSelfCustomer(ctx context.Context, arg UpsertSelfCustomerParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, upsertSelfCustomer,
-		arg.ID,
-		arg.MerchantID,
-		arg.Issuer,
-		arg.Subject,
-	)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
 }

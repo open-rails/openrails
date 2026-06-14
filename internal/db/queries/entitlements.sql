@@ -392,19 +392,17 @@ WHERE ent.customer_id = $1
   AND (sqlc.narg(source_type)::text IS NULL OR ent.source_type = sqlc.narg(source_type)::text)
   AND (sqlc.narg(source_id)::uuid IS NULL OR ent.source_id = sqlc.narg(source_id)::uuid);
 
--- name: ListActiveEntitlementRecordsByExternalSubjects :many
--- Batch read (#354): active entitlement rows for MANY external subjects of one
--- (tenant, issuer) in ONE query — the list-shaped consumers' answer to N
--- per-subject round trips. Subjects with no active rows simply do not appear;
--- the handler/SDK reconstruct empty entries per requested subject.
-SELECT ts.subject AS external_subject, ent.* FROM openrails.entitlements ent
-JOIN openrails.customers ts ON ts.id = ent.customer_id
-WHERE ts.merchant_id = sqlc.arg(merchant_id)
-  AND ts.issuer = sqlc.arg(issuer)
-  AND ts.subject = ANY(sqlc.arg(subjects)::text[])
-  AND ent.merchant_id = sqlc.arg(merchant_id)
+-- name: ListActiveEntitlementRecordsByCustomerIDs :many
+-- Batch read (#354/#491): active entitlement rows for MANY payable customer ids
+-- of one merchant in ONE query — the list-shaped consumers' answer to N
+-- per-customer round trips. customers is UUID-only (#491): the caller derives the
+-- customer ids (FederatedCustomerID / the subject UUID) and maps results back.
+-- Customers with no active rows simply do not appear.
+SELECT ent.* FROM openrails.entitlements ent
+WHERE ent.merchant_id = sqlc.arg(merchant_id)
+  AND ent.customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
   AND ent.start_at <= sqlc.arg(at)::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
-ORDER BY ts.subject, ent.start_at ASC;
+ORDER BY ent.customer_id, ent.start_at ASC;

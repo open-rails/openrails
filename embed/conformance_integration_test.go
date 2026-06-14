@@ -35,6 +35,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // --- normalized observations ------------------------------------------------
@@ -810,12 +811,15 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 
 	const issuer = "conformance"
 	newPayer := func(side string) (uuid.UUID, string) {
-		id := uuid.New()
-		subject := side + "-" + id.String()
+		subject := side + "-" + uuid.New().String()
+		// customers is UUID-only (#491): the external (issuer, subject) maps to a
+		// deterministic customer id, so seed the row at that id for the
+		// external-subject entitlements lookup to resolve.
+		id := identity.FederatedCustomerID(dbtest.TestTenantID.UUID(), issuer, subject).UUID()
 		_, err := pool.Exec(ctx, `
-			INSERT INTO openrails.customers (id, merchant_id, issuer, subject, created_at, last_seen_at)
-			VALUES ($1, $2, $3, $4, now(), now())`,
-			id, dbtest.TestTenantID.UUID(), issuer, subject)
+			INSERT INTO openrails.customers (id, merchant_id, created_at, last_seen_at)
+			VALUES ($1, $2, now(), now())`,
+			id, dbtest.TestTenantID.UUID())
 		require.NoError(t, err)
 		// One active entitlement row for the entitlements steps.
 		_, err = pool.Exec(ctx, `

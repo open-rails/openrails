@@ -175,11 +175,9 @@ func TestEntitlementRepo_CustomerQueries(t *testing.T) {
 
 	dbtest.EnsureTestTenant(ctx, t, pool)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id, issuer, subject) VALUES ($1, $2, $3, $4)`,
+		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
 		tenantSubjectID,
 		dbtest.TestTenantID.UUID(),
-		"https://issuer.example",
-		"subject-"+tenantSubjectID.String(),
 	)
 	require.NoError(t, err)
 

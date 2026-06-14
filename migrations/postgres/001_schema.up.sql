@@ -116,12 +116,9 @@ COMMENT ON COLUMN openrails.merchants.webhook_host IS 'Optional host an ingress 
 CREATE TABLE openrails.customers (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
-    issuer text NOT NULL,
-    subject text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT customers_pkey PRIMARY KEY (id),
-    CONSTRAINT uq_customers_issuer_subject UNIQUE (merchant_id, issuer, subject),
     CONSTRAINT customers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id)
 );
 
@@ -129,9 +126,7 @@ CREATE INDEX idx_customers_merchant ON openrails.customers USING btree (merchant
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.customers TO openrails_app;
 
-COMMENT ON TABLE openrails.customers IS 'OpenRails payable identity — a thin LABEL to hang charges on, NOT verified by OpenRails (the host/AuthKit already proved the subject). One row per OIDC-style subject under a merchant; billing tables reference this row.';
-COMMENT ON COLUMN openrails.customers.issuer IS 'OIDC issuer that asserted the subject.';
-COMMENT ON COLUMN openrails.customers.subject IS 'OIDC subject asserted by issuer. May represent a human, company, tenant, service, or chained delegated principal.';
+COMMENT ON TABLE openrails.customers IS 'OpenRails payable identity — a PURE balance account keyed by its UUID id (#491). (id, merchant_id): id is the payable UUID (#364); merchant_id scopes it for RLS. NOT verified by OpenRails (the merchant asserts it). All money_* tables FK customers(id).';
 
 -- =============================================================================
 -- merchant_deks

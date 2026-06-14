@@ -310,9 +310,9 @@ func (s *MoneyService) Deposit(ctx context.Context, params DepositParams) (*mode
 	return trx, nil
 }
 
-// ensureCustomer upserts the openrails.customers row for a self-service
-// subject so the money-write FKs added in migration 076 are satisfied on a
-// subject's FIRST money operation (deposit/hold/usage). ON CONFLICT DO NOTHING.
+// ensureCustomer upserts the openrails.customers row for a payable customer id
+// so the money-write FKs are satisfied on a customer's FIRST money operation
+// (deposit/hold/usage). customers is UUID-only (#491). ON CONFLICT DO NOTHING.
 func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUID) error {
 	if tsid == uuid.Nil {
 		return nil
@@ -325,7 +325,7 @@ func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUI
 		tenantID = tid.UUID()
 	}
 	return q.EnsureCustomerRow(ctx, gen.EnsureCustomerRowParams{
-		ID: tsid, MerchantID: tenantID, Issuer: "openrails:self", Subject: tsid.String(),
+		ID: tsid, MerchantID: tenantID,
 	})
 }
 

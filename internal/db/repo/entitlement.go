@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -209,18 +210,31 @@ func (r *EntitlementRepo) ListActiveRecordsByCustomer(ctx context.Context, tenan
 	return entitlementsFromGen(rows), nil
 }
 
-// ListActiveRecordsByExternalSubjects (#354): one query, grouped by subject;
-// subjects with no active rows are absent from the map.
+// ListActiveRecordsByExternalSubjects (#354/#491): one query, grouped by the
+// caller-supplied subject; subjects with no active rows are absent from the map.
+// customers is UUID-only (#491): each (issuer, subject) maps to a deterministic
+// FederatedCustomerID, so we derive the ids, query by id, and map results back
+// to the original subject string.
 func (r *EntitlementRepo) ListActiveRecordsByExternalSubjects(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListActiveEntitlementRecordsByExternalSubjects(ctx, gen.ListActiveEntitlementRecordsByExternalSubjectsParams{
-		MerchantID: tid.UUID(),
-		Issuer:     issuer,
-		Subjects:   subjects,
-		At:         at,
+	merchantID := tid.UUID()
+	subjectByCustomerID := make(map[uuid.UUID]string, len(subjects))
+	customerIDs := make([]uuid.UUID, 0, len(subjects))
+	for _, subj := range subjects {
+		cid := identity.FederatedCustomerID(merchantID, issuer, subj).UUID()
+		if _, dup := subjectByCustomerID[cid]; dup {
+			continue
+		}
+		subjectByCustomerID[cid] = subj
+		customerIDs = append(customerIDs, cid)
+	}
+	rows, err := r.db.Gen(ctx).ListActiveEntitlementRecordsByCustomerIDs(ctx, gen.ListActiveEntitlementRecordsByCustomerIDsParams{
+		MerchantID:  merchantID,
+		CustomerIds: customerIDs,
+		At:          at,
 	})
 	if err != nil {
 		return nil, err
@@ -246,7 +260,8 @@ func (r *EntitlementRepo) ListActiveRecordsByExternalSubjects(ctx context.Contex
 			rr := models.EntitlementRevokeReason(*row.RevokeReason)
 			m.RevokeReason = &rr
 		}
-		out[row.ExternalSubject] = append(out[row.ExternalSubject], m)
+		subj := subjectByCustomerID[row.CustomerID]
+		out[subj] = append(out[subj], m)
 	}
 	return out, nil
 }

@@ -26,14 +26,12 @@ func EnsureCustomerIDPgx(ctx context.Context, t testing.TB, qx gen.DBTX, userID 
 	require.NoError(t, err, "test user id must be a UUID (#364): %q", userID)
 
 	// No default tenant (#336): materialize the canonical test tenant first so
-	// the customers FK resolves, then pin the subject under it.
+	// the customers FK resolves, then pin the customer under it.
 	EnsureTestTenant(ctx, t, qx)
-	id, err := gen.New(qx).UpsertSelfCustomer(ctx, gen.UpsertSelfCustomerParams{
-		ID:       uid,
+	id, err := gen.New(qx).EnsureCustomer(ctx, gen.EnsureCustomerParams{
+		ID:         uid,
 		MerchantID: TestTenantID.UUID(),
-		Issuer:   "openrails:self",
-		Subject:  uid.String(),
 	})
-	require.NoError(t, err, "ensure tenant subject")
+	require.NoError(t, err, "ensure customer")
 	return id
 }

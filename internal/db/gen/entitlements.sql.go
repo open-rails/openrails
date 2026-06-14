@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const acquireEntitlementTimelineLock = `-- name: AcquireEntitlementTimelineLock :exec
@@ -579,65 +578,38 @@ func (q *Queries) ListActiveEntitlementRecords(ctx context.Context, arg ListActi
 	return items, nil
 }
 
-const listActiveEntitlementRecordsByExternalSubjects = `-- name: ListActiveEntitlementRecordsByExternalSubjects :many
-SELECT ts.subject AS external_subject, ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.period, ent.merchant_id, ent.customer_id FROM openrails.entitlements ent
-JOIN openrails.customers ts ON ts.id = ent.customer_id
-WHERE ts.merchant_id = $1
-  AND ts.issuer = $2
-  AND ts.subject = ANY($3::text[])
-  AND ent.merchant_id = $1
+const listActiveEntitlementRecordsByCustomerIDs = `-- name: ListActiveEntitlementRecordsByCustomerIDs :many
+SELECT ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.period, ent.merchant_id, ent.customer_id FROM openrails.entitlements ent
+WHERE ent.merchant_id = $1
+  AND ent.customer_id = ANY($2::uuid[])
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at <= $4::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $4::timestamptz)
-ORDER BY ts.subject, ent.start_at ASC
+  AND ent.start_at <= $3::timestamptz
+  AND (ent.end_at IS NULL OR ent.end_at > $3::timestamptz)
+ORDER BY ent.customer_id, ent.start_at ASC
 `
 
-type ListActiveEntitlementRecordsByExternalSubjectsParams struct {
-	MerchantID uuid.UUID
-	Issuer     string
-	Subjects   []string
-	At         time.Time
+type ListActiveEntitlementRecordsByCustomerIDsParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
+	At          time.Time
 }
 
-type ListActiveEntitlementRecordsByExternalSubjectsRow struct {
-	ExternalSubject string
-	ID              uuid.UUID
-	Entitlement     string
-	StartAt         time.Time
-	EndAt           *time.Time
-	SourceID        uuid.UUID
-	SourceType      string
-	RevokedAt       *time.Time
-	RevokeReason    *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	DeletedAt       *time.Time
-	Period          pgtype.Range[pgtype.Timestamptz]
-	MerchantID      uuid.UUID
-	CustomerID      uuid.UUID
-}
-
-// Batch read (#354): active entitlement rows for MANY external subjects of one
-// (tenant, issuer) in ONE query — the list-shaped consumers' answer to N
-// per-subject round trips. Subjects with no active rows simply do not appear;
-// the handler/SDK reconstruct empty entries per requested subject.
-func (q *Queries) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Context, arg ListActiveEntitlementRecordsByExternalSubjectsParams) ([]ListActiveEntitlementRecordsByExternalSubjectsRow, error) {
-	rows, err := q.db.Query(ctx, listActiveEntitlementRecordsByExternalSubjects,
-		arg.MerchantID,
-		arg.Issuer,
-		arg.Subjects,
-		arg.At,
-	)
+// Batch read (#354/#491): active entitlement rows for MANY payable customer ids
+// of one merchant in ONE query — the list-shaped consumers' answer to N
+// per-customer round trips. customers is UUID-only (#491): the caller derives the
+// customer ids (FederatedCustomerID / the subject UUID) and maps results back.
+// Customers with no active rows simply do not appear.
+func (q *Queries) ListActiveEntitlementRecordsByCustomerIDs(ctx context.Context, arg ListActiveEntitlementRecordsByCustomerIDsParams) ([]OpenrailsEntitlement, error) {
+	rows, err := q.db.Query(ctx, listActiveEntitlementRecordsByCustomerIDs, arg.MerchantID, arg.CustomerIds, arg.At)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListActiveEntitlementRecordsByExternalSubjectsRow
+	var items []OpenrailsEntitlement
 	for rows.Next() {
-		var i ListActiveEntitlementRecordsByExternalSubjectsRow
+		var i OpenrailsEntitlement
 		if err := rows.Scan(
-			&i.ExternalSubject,
 			&i.ID,
 			&i.Entitlement,
 			&i.StartAt,

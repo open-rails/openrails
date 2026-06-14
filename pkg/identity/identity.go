@@ -33,6 +33,20 @@ func (a Actor) String() string { return string(a) }
 // IsZero reports whether the actor id is empty.
 func (a Actor) IsZero() bool { return strings.TrimSpace(string(a)) == "" }
 
+// federatedNamespace is the fixed UUIDv5 namespace for deriving a customer id
+// from a federated (merchant, issuer, subject) triple (#491). Fixed forever:
+// changing it would re-key every federated payer.
+var federatedNamespace = uuid.MustParse("a3f1e2c4-0b6d-5a47-9c8e-2f1b3d4e5a60")
+
+// FederatedCustomerID derives the deterministic payable customer id for a
+// federated (issuer, subject) pair under a merchant (#491). customers is now
+// UUID-only (no (issuer, subject) lookup column); the same triple always maps to
+// the same UUID, so federated resolution stays idempotent without a lookup.
+func FederatedCustomerID(merchantID uuid.UUID, issuer, subject string) CustomerID {
+	name := merchantID.String() + "\x00" + strings.TrimSpace(issuer) + "\x00" + strings.TrimSpace(subject)
+	return CustomerID(uuid.NewSHA1(federatedNamespace, []byte(name)))
+}
+
 // CustomerIDFromString parses s as a customer id. Empty or non-UUID
 // input yields the zero CustomerID, which callers must reject.
 func CustomerIDFromString(s string) CustomerID {

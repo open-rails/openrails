@@ -259,14 +259,10 @@ type OpenrailsCustomCreditType struct {
 	UpdatedAt time.Time
 }
 
-// OpenRails payable identity — a thin LABEL to hang charges on, NOT verified by OpenRails (the host/AuthKit already proved the subject). One row per OIDC-style subject under a merchant; billing tables reference this row.
+// OpenRails payable identity — a PURE balance account keyed by its UUID id (#491). (id, merchant_id): id is the payable UUID (#364); merchant_id scopes it for RLS. NOT verified by OpenRails (the merchant asserts it). All money_* tables FK customers(id).
 type OpenrailsCustomer struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// OIDC issuer that asserted the subject.
-	Issuer string
-	// OIDC subject asserted by issuer. May represent a human, company, tenant, service, or chained delegated principal.
-	Subject    string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 }

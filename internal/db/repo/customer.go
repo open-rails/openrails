@@ -11,12 +11,6 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// SelfIssuer keys openrails.customers rows for self-service identities whose
-// external subject IS a UUID (the same value the credits/self-service hot path
-// uses directly as the payable customer_id). For these the row id equals the
-// subject UUID, so commerce and credit rows reference one payable subject (#317).
-const SelfIssuer = "openrails:self"
-
 // SystemCustomerID is the well-known payable subject that owns
 // platform-initiated rows with no human principal (e.g. ledger repair alerts).
 // It is a fixed, documented constant — deliberately NOT uuid.Nil, which stays
@@ -59,11 +53,9 @@ func EnsureCustomerID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, user
 		}
 		tenantID = tid.UUID()
 	}
-	return gen.New(qx).UpsertSelfCustomer(ctx, gen.UpsertSelfCustomerParams{
-		ID:       uid,
+	return gen.New(qx).EnsureCustomer(ctx, gen.EnsureCustomerParams{
+		ID:         uid,
 		MerchantID: tenantID,
-		Issuer:   SelfIssuer,
-		Subject:  uid.String(),
 	})
 }
 
@@ -85,12 +77,11 @@ func ResolveCustomerID(userID string) (uuid.UUID, error) {
 }
 
 // ensureCustomerRow makes sure a openrails.customers row exists for an
-// already-resolved payable tenant subject id, which the commerce repo Create
-// methods call just before insert so the FK target exists (#317). For a
-// self-service subject the id IS the subject UUID, so the row is materialized as
-// (id, tenant, 'openrails:self', id::text); a federated subject already has its
-// row and the ON CONFLICT makes this a no-op. A zero id is a no-op (the caller
-// must set model.CustomerID before Create).
+// already-resolved payable customer id, which the commerce repo Create methods
+// call just before insert so the FK target exists (#317). customers is UUID-only
+// (#491): the row is materialized as (id, merchant_id); the ON CONFLICT makes a
+// repeat a no-op. A zero id is a no-op (the caller must set model.CustomerID
+// before Create).
 func ensureCustomerRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsid uuid.UUID) error {
 	if tsid == uuid.Nil {
 		return nil
@@ -103,9 +94,7 @@ func ensureCustomerRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsi
 		tenantID = tid.UUID()
 	}
 	return gen.New(qx).EnsureCustomerRow(ctx, gen.EnsureCustomerRowParams{
-		ID:       tsid,
+		ID:         tsid,
 		MerchantID: tenantID,
-		Issuer:   SelfIssuer,
-		Subject:  tsid.String(),
 	})
 }
