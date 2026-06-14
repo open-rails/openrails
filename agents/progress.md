@@ -7,7 +7,31 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 484
+next_id: 485
+
+---
+
+# #484: Accept JWKS-principal programmatic auth in the standalone control plane (stored role/perms) — blocked on authkit #76
+
+Design (Paul, 2026-06-14): authkit #76 adds a second programmatic-access credential type — a **JWKS principal**
+(a remote_application presenting a SELF-SIGNED token whose subject is itself) granted STORED permissions/role,
+parallel to shared-secret service tokens. Standalone OpenRails authenticates programmatic callers today via
+service tokens (resolved through authkit) + #481 role-based merchant authz on `owner_tenant_id`.
+
+## What changes (after authkit #76 lands)
+- The control-plane auth path ALSO accepts a JWKS-principal self-token (verify via authkit → the principal's
+  STORED perms/role) as a programmatic credential, alongside service tokens. A JWKS principal holding a role on
+  a merchant's `owner_tenant_id` can administer that merchant — the #481 model already keys authz on roles, so
+  this is mostly wiring the new caller type into the existing role-based authorization.
+
+## Blocked on
+- authkit #76 (the verifier auth-method + assignable-authority surface).
+
+**Tasks:**
+- [ ] After authkit #76: accept JWKS-principal self-tokens on the standalone control-plane auth path, alongside
+      service tokens; resolve the caller's stored perms/role and run the existing #481 role-based merchant authz.
+- [ ] Tests: a JWKS-principal caller with a role on a merchant's owner_tenant can administer that merchant;
+      self-claimed perms not honored.
 
 ---
 
