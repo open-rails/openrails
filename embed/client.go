@@ -427,6 +427,10 @@ func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositC
 		if errors.Is(err, billingservice.ErrCreditTypeInactive) {
 			return nil, invalidErr("credit_type_inactive")
 		}
+		// #483: an unknown/invalid currency is a 400 (parity with the remote handler).
+		if errors.Is(err, money.ErrBillingUnitRequired) || strings.Contains(err.Error(), "unknown currency") {
+			return nil, invalidErr(err.Error())
+		}
 		return nil, internalErr("deposit failed")
 	}
 	return transactionFromService(trx), nil

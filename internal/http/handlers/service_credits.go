@@ -29,6 +29,7 @@ type serviceWithdrawRequest struct {
 type serviceDepositRequest struct {
 	MerchantSubjectID string     `json:"tenant_subject_id"`
 	Actor           string     `json:"actor" binding:"required"`
+	Currency        string     `json:"currency"` // "" => DefaultCurrency (#476); #483: must forward so unknown units reject like local
 	Amount          int64      `json:"amount" binding:"required"`
 	Source          string     `json:"source" binding:"required"`
 	SourceID        *uuid.UUID `json:"source_id" binding:"required"`
@@ -517,6 +518,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
 		MerchantSubjectID: tenantSubjectID,
 		Actor:           req.Actor,
+		Currency:        req.Currency,
 		Amount:          req.Amount,
 		Source:          req.Source,
 		SourceID:        req.SourceID,
@@ -526,6 +528,11 @@ func ServiceDepositCredits(r *httprequest.Request) {
 	if err != nil {
 		if err == billingservice.ErrCreditTypeInactive {
 			r.ErrorJSON(http.StatusBadRequest, "credit_type_inactive")
+			return
+		}
+		// #483: an unknown/invalid currency is a client error (parity with local), not a 500.
+		if errors.Is(err, money.ErrBillingUnitRequired) || strings.Contains(err.Error(), "unknown currency") {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
 		}
 		r.ErrorJSON(http.StatusInternalServerError, "deposit failed")

@@ -25,10 +25,14 @@ Currently carved out in `embed/conformance_integration_test.go` (the unknown-cur
 paths but not asserted) so the suite is green; remove the carve-out when fixed.
 
 **Tasks:**
-- [ ] Trace why the remote deposit handler does not reject an unknown currency (binding/default/normalizeCurrency)
+- [x] Trace why the remote deposit handler does not reject an unknown currency (binding/default/normalizeCurrency)
       while the local adapter does; decide the canonical behavior (reject unknown per "money validates the unit").
-- [ ] Make embedded + remote deposit currency validation identical; re-assert the conformance probe (remove the
-      #483 carve-out).
+      ROOT CAUSE: `serviceDepositRequest` had no `Currency` field, so the wire `currency` was dropped → service saw
+      "" → defaulted to USD → accepted. Local adapter forwarded `req.Currency` → service rejected. Canonical: reject
+      unknown (service `depositTx`→`validateUnit`→`ValidateCurrency` already does); empty still defaults.
+- [x] Make embedded + remote deposit currency validation identical; re-assert the conformance probe (remove the
+      #483 carve-out). Added `Currency` to the handler request + forward it; both transports now map unknown-currency
+      to a 400 (ErrInvalid). Carve-out removed; ErrDepositBadType re-asserted.
 
 ---
 
