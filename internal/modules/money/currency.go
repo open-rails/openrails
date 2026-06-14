@@ -56,8 +56,8 @@ func CurrencyScale(c string) (int, bool) {
 // only, so a qualified custom-credit code (tenant/name, #475) is REJECTED here.
 // Ledger primitives (Deposit/Withdraw/Hold) keep using the looser ValidateCurrency.
 func RequireBillingCurrency(code string) error {
-	if strings.Contains(code, "/") {
-		return fmt.Errorf("money: custom-credit unit %q not allowed in billing (#474 invariant)", code)
+	if IsQualifiedUnit(code) {
+		return fmt.Errorf("%w: %q", ErrBillingUnitRequired, code)
 	}
 	return ValidateCurrency(code)
 }

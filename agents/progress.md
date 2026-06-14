@@ -109,7 +109,30 @@ handles validation — do not hard-restrict here). BREAKING SDK rename: host app
 
 # #475: Tenant-defined custom credits (api-credits, gold-coins) — consume-only, no FX
 
-**Status:** planned (not started). Was referenced as "#473" before the id collision; it's #475.
+**Status:** DONE (wip/475-custom-credits). Was referenced as "#473" before the id collision; it's #475.
+
+**Done (minimal):**
+- [x] Registry: `openrails.custom_credit_types(id, tenant_id, name, decimals, active, created_at, updated_at)`
+  in migrations/postgres/001_schema.up.sql — RLS tenant_isolation, tenant_id NOT NULL (#336), UNIQUE
+  (tenant_id, name), decimals CHECK [0,18]. sqlc queries (define/list/get/set-active) in
+  internal/db/queries/custom_credit_types.sql; gen regenerated.
+- [x] Qualified unit codes + resolution: internal/modules/money/custom_credit.go — `IsQualifiedUnit`,
+  `ResolveUnit(ctx, code) (decimals, builtin, err)` (unqualified → built-in registry; `slug/name` →
+  ctx-tenant-owned + active custom type), `normalizeUnit` (preserves qualified codes, no uppercasing),
+  `FormatAmount(minor, decimals)`, registry CRUD methods, and `RequireBillingCurrency` (NEW here — see
+  the F-merge note below).
+- [x] Ledger consumption: deposit/withdraw/hold/balance + the grant path (validateCreditGrantSpec → now a
+  method using validateUnit) accept resolved qualified custom units (money_service.go, subscription_credits.go).
+- [x] Invariant: billing paths reject qualified units via RequireBillingCurrency — AccrueOwed (owed/arrears)
+  + getAccountSettings (account-settings/auto-topup). FinalizeInvoice has no currency param (USD-only) so
+  it's already currency-safe.
+- [x] Presentation: FormatAmount pure helper (100 @ 2dp → "1.00").
+- [x] Tests: custom_credit_test.go (unit) green in default suite; custom_credit_integration_test.go
+  (define gold dp=2, deposit 500 + spend 150 → 350, owed rejected, format) PASSES under -tags=integration
+  against a real migrated DB.
+
+**Merge note (#474 overlap, resolved):** `RequireBillingCurrency` now lives once in currency.go (master's #474
+home); it rejects qualified custom units (wrapping ErrBillingUnitRequired), else ValidateCurrency.
 
 Custom credits are tenant-defined consumable units (api-credits, in-game gold) with NO fixed dollar
 exchange ratio (buy 100 for $10 OR 1000 for $80). They are NEVER billed in (see the #474 invariant) —

@@ -167,7 +167,9 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Te
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	cur := normalizeCurrency(currency)
-	if err := ValidateCurrency(cur); err != nil {
+	// Account settings / owed / auto-topup are billing-layer (#475 invariant):
+	// custom credit units are never billed in.
+	if err := RequireBillingCurrency(cur); err != nil {
 		return nil, err
 	}
 	tid, err := tenant.Require(ctx)

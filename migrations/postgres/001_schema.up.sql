@@ -1557,6 +1557,39 @@ COMMENT ON COLUMN openrails.money_windows.held_amount IS 'Total reserved for thi
 COMMENT ON COLUMN openrails.money_windows.settled_amount IS 'Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.';
 
 -- =============================================================================
+-- custom_credit_types (#475)
+-- Per-tenant consumable units (api-credits, gold-coins): tenant-defined, no FX,
+-- never billed in. The money ledger's `currency` column references one of these
+-- via the qualified code `tenant-slug/name`. decimals separates presentation
+-- from integer minor-unit storage (Sui-style): tickets=0, gold=2, micro-usd=6.
+-- =============================================================================
+
+CREATE TABLE openrails.custom_credit_types (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    name text NOT NULL,
+    decimals integer DEFAULT 0 NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT custom_credit_types_pkey PRIMARY KEY (id),
+    CONSTRAINT custom_credit_types_tenant_name_key UNIQUE (tenant_id, name),
+    CONSTRAINT custom_credit_types_decimals_check CHECK ((decimals >= 0) AND (decimals <= 18))
+);
+
+ALTER TABLE ONLY openrails.custom_credit_types FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_custom_credit_types_tenant_id ON openrails.custom_credit_types USING btree (tenant_id);
+
+ALTER TABLE openrails.custom_credit_types ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.custom_credit_types USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.custom_credit_types TO openrails_app;
+
+COMMENT ON TABLE openrails.custom_credit_types IS 'Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name.';
+COMMENT ON COLUMN openrails.custom_credit_types.decimals IS 'Minor-unit scale for presentation (10^decimals minor units per major unit). Storage is always integer minor units.';
+
+-- =============================================================================
 -- Schema-level grants and default privileges
 -- =============================================================================
 

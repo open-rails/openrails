@@ -1,6 +1,7 @@
 package money
 
 import (
+	"context"
 	"testing"
 
 	"github.com/open-rails/openrails/internal/db/models"
@@ -28,9 +29,11 @@ func TestValidateCreditGrantSpec(t *testing.T) {
 		{"bad expiry_days", "api_credits", models.CreditGrantSpec{Amount: 1, ExpiryDays: ptrInt(-1)}, true},
 		{"bad cadence", "api_credits", models.CreditGrantSpec{Amount: 1, Cadence: "monthly"}, true},
 	}
+	// Unqualified built-in units never touch the DB, so a nil-db service suffices.
+	s := &MoneyService{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateCreditGrantSpec(tt.ctype, tt.spec)
+			err := s.validateCreditGrantSpec(context.Background(), tt.ctype, tt.spec)
 			if tt.wantErr && err == nil {
 				t.Fatalf("expected error")
 			}

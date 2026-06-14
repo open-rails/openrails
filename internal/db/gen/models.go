@@ -265,6 +265,18 @@ type OpenrailsCheckoutSession struct {
 	TenantSubjectID uuid.UUID
 }
 
+// Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name.
+type OpenrailsCustomCreditType struct {
+	ID       uuid.UUID
+	TenantID uuid.UUID
+	Name     string
+	// Minor-unit scale for presentation (10^decimals minor units per major unit). Storage is always integer minor units.
+	Decimals  int32
+	Active    bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type OpenrailsEntitlement struct {
 	ID           uuid.UUID
 	Entitlement  string

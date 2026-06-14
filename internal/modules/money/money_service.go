@@ -99,8 +99,8 @@ func (s *MoneyService) GetBalanceForTenantSubject(ctx context.Context, payer ide
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	cur := normalizeCurrency(currency)
-	if err := ValidateCurrency(cur); err != nil {
+	cur := normalizeUnit(currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
 		return nil, err
 	}
 	tid, err := tenant.Require(ctx)
@@ -150,8 +150,8 @@ func (s *MoneyService) GetTransactionsByTenantSubject(ctx context.Context, payer
 	if payer.IsZero() {
 		return nil, 0, fmt.Errorf("payer required")
 	}
-	cur := normalizeCurrency(currency)
-	if err := ValidateCurrency(cur); err != nil {
+	cur := normalizeUnit(currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
 		return nil, 0, err
 	}
 	tid, err := tenant.Require(ctx)
@@ -239,8 +239,8 @@ func (s *MoneyService) GetTransactionBySource(ctx context.Context, actorID strin
 	if err != nil {
 		return nil, err
 	}
-	cur := normalizeCurrency(currency)
-	if err := ValidateCurrency(cur); err != nil {
+	cur := normalizeUnit(currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
 		return nil, err
 	}
 	row, err := s.db.Gen(ctx).GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
@@ -331,8 +331,8 @@ func ensureTenantSubject(ctx context.Context, q *gen.Queries, tenantID, tsid uui
 
 func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params DepositParams) (*models.MoneyTransaction, error) {
 	now := s.now()
-	cur := normalizeCurrency(params.Currency)
-	if err := ValidateCurrency(cur); err != nil {
+	cur := normalizeUnit(params.Currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
 		return nil, err
 	}
 	tid, err := tenant.Require(ctx)
@@ -513,8 +513,8 @@ func (s *MoneyService) Hold(ctx context.Context, payer *identity.TenantSubjectID
 	if amount <= 0 {
 		return nil, fmt.Errorf("amount must be positive")
 	}
-	cur := normalizeCurrency(currency)
-	if err := ValidateCurrency(cur); err != nil {
+	cur := normalizeUnit(currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
 		return nil, err
 	}
 
@@ -735,7 +735,7 @@ func (s *MoneyService) ReleaseHold(ctx context.Context, holdID uuid.UUID) (*mode
 
 func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, actorID, currency string, amount int64) (int64, error) {
 	now := s.now()
-	cur := normalizeCurrency(currency)
+	cur := normalizeUnit(currency)
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return 0, err
@@ -796,7 +796,7 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 // targets that constraint to avoid a duplicate-key error on concurrent
 // first-touch, after which the row is re-selected FOR UPDATE.
 func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, actorID, currency string) (*models.MoneyBalance, error) {
-	cur := normalizeCurrency(currency)
+	cur := normalizeUnit(currency)
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -829,8 +829,8 @@ func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer id
 
 func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params WithdrawParams) (*models.MoneyTransaction, error) {
 	now := s.now()
-	cur := normalizeCurrency(params.Currency)
-	if err := ValidateCurrency(cur); err != nil {
+	cur := normalizeUnit(params.Currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
 		return nil, err
 	}
 	tid, err := tenant.Require(ctx)
