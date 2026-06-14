@@ -35,7 +35,8 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.TenantSubj
 		return nil, fmt.Errorf("amount must be positive")
 	}
 	cur := normalizeCurrency(currency)
-	if err := ValidateCurrency(cur); err != nil {
+	// Owed/arrears is billing-layer (#475 invariant): custom credits are never billed in.
+	if err := RequireBillingCurrency(cur); err != nil {
 		return nil, err
 	}
 	source = strings.TrimSpace(source)

@@ -23,16 +23,17 @@ type GrantSubscriptionCreditsParams struct {
 
 // validateCreditGrantSpec validates one credit/currency grant spec (#472). The
 // grant key is just a label; a non-empty key scopes per-grant idempotency. Unit
-// defaults to usd and must be a known built-in currency. expiry_days==0 means
-// never-expire (only an explicit negative is invalid).
-func validateCreditGrantSpec(grantKey string, spec models.CreditGrantSpec) error {
+// defaults to usd; it must be a built-in currency OR an active qualified custom
+// credit unit (#475). expiry_days==0 means never-expire (only an explicit
+// negative is invalid).
+func (s *MoneyService) validateCreditGrantSpec(ctx context.Context, grantKey string, spec models.CreditGrantSpec) error {
 	if strings.TrimSpace(grantKey) == "" {
 		return fmt.Errorf("grant key is empty")
 	}
 	if spec.Amount <= 0 {
 		return fmt.Errorf("invalid credits_spec: %s amount must be > 0", grantKey)
 	}
-	if err := ValidateCurrency(spec.UnitOrDefault()); err != nil {
+	if err := s.validateUnit(ctx, spec.UnitOrDefault()); err != nil {
 		return fmt.Errorf("invalid credits_spec: %s %w", grantKey, err)
 	}
 	if spec.ExpiryDays != nil && *spec.ExpiryDays < 0 {
@@ -112,7 +113,7 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 
 		for label, spec := range creditsSpec {
 			label = strings.TrimSpace(label)
-			if err := validateCreditGrantSpec(label, spec); err != nil {
+			if err := s.validateCreditGrantSpec(ctx, label, spec); err != nil {
 				return err
 			}
 
@@ -193,7 +194,7 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 		now := s.now()
 		for label, spec := range params.Spec {
 			label = strings.TrimSpace(label)
-			if err := validateCreditGrantSpec(label, spec); err != nil {
+			if err := s.validateCreditGrantSpec(ctx, label, spec); err != nil {
 				return err
 			}
 			grantKey := fmt.Sprintf("openrails:purchase_credit_grant:%s:%s", params.PaymentID, label)

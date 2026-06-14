@@ -177,7 +177,7 @@ type BillingAdminGrant struct {
 	TenantSubjectID uuid.UUID
 }
 
-// Rolling-window money-budget reservations (issue #304). One row per in-flight/settled charge against an actor's passed-in windows; used/reserved/remaining are windowed SUM() over created_at. Idempotent on (tenant, tenant subject, actor, source, source_id).
+// Hierarchical money-budget policies (#473): {scope, owner, windows[]} composed in one admit verdict over the one payer balance. owner=platform rows are writable only via the platform path (the subject cannot see/loosen them); owner=subject rows are the subject's own caps.
 type BillingBudgetPolicy struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
@@ -193,6 +193,7 @@ type BillingBudgetPolicy struct {
 	UpdatedAt     time.Time
 }
 
+// Rolling-window money-budget reservations (issue #304). One row per in-flight/settled charge against an actor's passed-in windows; used/reserved/remaining are windowed SUM() over created_at. Idempotent on (tenant, tenant subject, actor, source, source_id).
 type BillingBudgetReservation struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
@@ -262,6 +263,18 @@ type BillingCheckoutSession struct {
 	UpdatedAt       time.Time
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
+}
+
+// Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name.
+type BillingCustomCreditType struct {
+	ID       uuid.UUID
+	TenantID uuid.UUID
+	Name     string
+	// Minor-unit scale for presentation (10^decimals minor units per major unit). Storage is always integer minor units.
+	Decimals  int32
+	Active    bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type BillingEntitlement struct {
