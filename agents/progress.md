@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 477
+next_id: 478
 
 ---
 
@@ -52,6 +52,21 @@ Manual admin tier override (explicit tier on account settings) still wins over t
 mirror), #472 (per-tier throughput/queue limits resolved by the tier). CONSUMER: tensorhub #477
 (declares the schedule + per-tier capacity limits once, reads the auto-maintained tier for its
 scheduler cap).
+
+---
+
+# #477: Finish money/credit decouple at the SDK boundary — CreditType → Currency
+
+**Status:** in progress.
+
+The public client request/response types still carry `CreditType` — vestigial/USD-only after #474's
+internal decouple (the internal money service already speaks `currency`). Rename the consumer-facing
+field `CreditType` → `Currency` (Go field) with wire tag `credit_type` → `currency`, make it OPTIONAL
+(empty → "USD" via the money currency normalizer), and drop the "CreditType required" validations so
+the consumer surface matches the decoupled money ledger. `Currency` is a free string so #475's
+qualified `tenant/name` custom-credit unit codes ride the same field (ledger ResolveUnit/validateUnit
+handles validation — do not hard-restrict here). BREAKING SDK rename: host apps need a follow-up
+`CreditType:`→`Currency:` edit. References #474 (done, internal decouple) + #475 (custom credits).
 
 ---
 
