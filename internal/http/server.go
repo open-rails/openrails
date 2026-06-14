@@ -28,7 +28,7 @@ import (
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type Dependencies struct {
@@ -89,10 +89,10 @@ type Server struct {
 
 	// configuredTenant is the construction-time tenant this engine is bound to
 	// (#336), resolved ONCE at boot from cfg.Tenant (a SLUG) → internal
-	// tenant.ID. Zero when no tenant is configured (tenant-owned operations
+	// merchant.ID. Zero when no tenant is configured (tenant-owned operations
 	// then hard-fail downstream by design — there is no default tenant). The
 	// gin tenant-resolution middleware and the Solana-secret seed pin it.
-	configuredTenant tenant.ID
+	configuredTenant merchant.ID
 
 	// publicHandler is the single "full surface" HTTP handler. It includes
 	// health + debug (dev only) + user + admin + webhook routes AND the
@@ -179,12 +179,12 @@ func New(deps Dependencies) (*Server, error) {
 	}
 
 	// Resolve the construction-time tenant SLUG (cfg.Tenant) → internal
-	// tenant.ID exactly once at boot (#336). An empty slug yields the zero id
+	// merchant.ID exactly once at boot (#336). An empty slug yields the zero id
 	// (no tenant pinned; tenant-owned ops hard-fail downstream by design — no
 	// default tenant); a non-empty-but-unknown slug fails boot.
 	{
 		ctx := context.Background()
-		configured, terr := db.ResolveTenantSlug(ctx, deps.Runtime.DB.Qx(ctx), deps.Config.Tenant)
+		configured, terr := db.ResolveMerchantSlug(ctx, deps.Runtime.DB.Qx(ctx), deps.Config.Tenant)
 		if terr != nil {
 			return nil, fmt.Errorf("resolve configured tenant: %w", terr)
 		}
@@ -271,7 +271,7 @@ func New(deps Dependencies) (*Server, error) {
 		}
 		secretStore = tenancy.NewCachedSecretStore(secretStore, secretCacheTTL)
 
-		tsvc, terr := tenancy.NewService(deps.ControlPlane.Pool(), deps.ControlPlane, secretStore)
+		tsvc, terr := tenancy.NewService(deps.ControlPlane.Pool(), secretStore)
 		if terr != nil {
 			return nil, fmt.Errorf("build tenancy service: %w", terr)
 		}

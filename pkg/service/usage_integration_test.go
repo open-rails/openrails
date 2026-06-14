@@ -28,7 +28,7 @@ func TestGetUsage_Breakdown(t *testing.T) {
 	})
 
 	_, err := ms.Deposit(ctx, money.DepositParams{
-		TenantSubjectID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "seed",
+		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
@@ -86,7 +86,7 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 	})
 
 	_, err := ms.Deposit(ctx, money.DepositParams{
-		TenantSubjectID: &payer,
+		MerchantSubjectID: &payer,
 		Actor:           payer.UUID().String(),
 		Currency:        money.DefaultCurrency,
 		Amount:          10_000,
@@ -97,7 +97,7 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 	capture := func(amount int64, holdSource, usageSourceID, actor, resource string, metadata map[string]any) {
 		t.Helper()
 		hold, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
-			TenantSubjectID: &payer,
+			MerchantSubjectID: &payer,
 			Actor:           actor,
 			Amount:          amount,
 			Source:          "hold",
@@ -158,7 +158,7 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 	assertRollup := func(groupBy string, want map[string]int64) {
 		t.Helper()
 		rows, err := svc.ServiceUsageRollup(ctx, billingservice.ServiceUsageRollupRequest{
-			TenantSubjectID: &payer,
+			MerchantSubjectID: &payer,
 			From:            time.Now().Add(-time.Hour),
 			To:              time.Now().Add(time.Hour),
 			GroupBy:         groupBy,

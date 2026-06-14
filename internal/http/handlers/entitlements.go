@@ -23,7 +23,7 @@ import (
 
 type ServiceEntitlementRecord struct {
 	ID              string     `json:"id"`
-	TenantSubjectID string     `json:"tenant_subject_id,omitempty"`
+	MerchantSubjectID string     `json:"tenant_subject_id,omitempty"`
 	Entitlement     string     `json:"entitlement"`
 	StartAt         time.Time  `json:"start_at"`
 	EndAt           *time.Time `json:"end_at,omitempty"`
@@ -49,8 +49,8 @@ type grantEntitlementRequest struct {
 	Days        *int   `json:"days,omitempty"`
 }
 
-func ServiceGetTenantSubjectEntitlements(r *httprequest.Request) {
-	tenantSubject, err := parseServiceTenantSubjectID(r.Param("tenant_subject_id"))
+func ServiceGetMerchantSubjectEntitlements(r *httprequest.Request) {
+	tenantSubject, err := parseServiceMerchantSubjectID(r.Param("tenant_subject_id"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -78,7 +78,7 @@ func ServiceGetTenantSubjectEntitlements(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	entitlements, err := svc.ListActiveEntitlementRecordsForTenantSubject(r.Request.Context(), *tenantSubject, queryTime)
+	entitlements, err := svc.ListActiveEntitlementRecordsForMerchantSubject(r.Request.Context(), *tenantSubject, queryTime)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
 		return
@@ -153,7 +153,7 @@ func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
 		if len(records) == 0 {
 			continue
 		}
-		if !requireServiceTenantSubjectScope(r, identity.TenantSubjectID(records[0].TenantSubjectID)) {
+		if !requireServiceMerchantSubjectScope(r, identity.MerchantSubjectID(records[0].MerchantSubjectID)) {
 			return
 		}
 	}
@@ -223,7 +223,7 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "days must be > 0 (or omit for indefinite)")
 		return
 	}
-	tenantSubjectID, err := tenantSubjectForAdminGrantTarget(r, path.UserID)
+	tenantSubjectID, err := tenantSubjectForEntitlementGrantTarget(r, path.UserID)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve target tenant subject")
 		return
@@ -232,17 +232,17 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 	if r.State.Clock != nil {
 		now = r.State.Clock.Now()
 	}
-	adminGrant := &models.AdminGrant{ID: uuidutil.NewV7(), TenantSubjectID: tenantSubjectID, GrantedBy: adminUser.ID, Reason: "admin_entitlement", DurationDays: req.Days, CreatedAt: now}
-	if err := repo.NewAdminGrantRepo(r.State.DB).Create(r.Request.Context(), adminGrant); err != nil {
+	adminGrant := &models.EntitlementGrant{ID: uuidutil.NewV7(), MerchantSubjectID: tenantSubjectID, GrantedBy: adminUser.ID, Reason: "admin_entitlement", DurationDays: req.Days, CreatedAt: now}
+	if err := repo.NewEntitlementGrantRepo(r.State.DB).Create(r.Request.Context(), adminGrant); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to create admin grant source record")
 		return
 	}
 	var ent *models.Entitlement
 	if req.Days != nil {
 		d := time.Duration(*req.Days) * 24 * time.Hour
-		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, TenantSubjectID: tenantSubjectID, Entitlement: req.Entitlement, Duration: &d, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
+		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, MerchantSubjectID: tenantSubjectID, Entitlement: req.Entitlement, Duration: &d, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
 	} else {
-		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, TenantSubjectID: tenantSubjectID, Entitlement: req.Entitlement, Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
+		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, MerchantSubjectID: tenantSubjectID, Entitlement: req.Entitlement, Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
 	}
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
@@ -251,7 +251,7 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, ent)
 }
 
-func tenantSubjectForAdminGrantTarget(r *httprequest.Request, subject string) (uuid.UUID, error) {
+func tenantSubjectForEntitlementGrantTarget(r *httprequest.Request, subject string) (uuid.UUID, error) {
 	value, ok := r.Get(ginmw.DelegatedContextKey)
 	if !ok {
 		// Non-delegated (org-admin JWT) caller: the target is a self-service
@@ -260,7 +260,7 @@ func tenantSubjectForAdminGrantTarget(r *httprequest.Request, subject string) (u
 		// tenant_subject_id (UUID-only, #364). Returning uuid.Nil here would
 		// make the admin_grants insert violate its tenant_subject FK and 500
 		// every non-delegated admin grant.
-		return repo.EnsureTenantSubjectID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, subject)
+		return repo.EnsureMerchantSubjectID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, subject)
 	}
 	resolved, ok := value.(*controlplane.ResolvedDelegated)
 	if !ok || resolved == nil {
@@ -268,11 +268,11 @@ func tenantSubjectForAdminGrantTarget(r *httprequest.Request, subject string) (u
 	}
 	issuer := strings.TrimSpace(resolved.Issuer)
 	subject = strings.TrimSpace(subject)
-	if resolved.TenantID.IsZero() || issuer == "" || subject == "" {
-		return uuid.Nil, controlplane.ErrTenantSubjectInvalid
+	if resolved.MerchantID.IsZero() || issuer == "" || subject == "" {
+		return uuid.Nil, controlplane.ErrMerchantSubjectInvalid
 	}
-	return r.State.DB.Gen(r.Request.Context()).UpsertFederatedTenantSubject(r.Request.Context(), gen.UpsertFederatedTenantSubjectParams{
-		TenantID: resolved.TenantID.UUID(),
+	return r.State.DB.Gen(r.Request.Context()).UpsertFederatedMerchantSubject(r.Request.Context(), gen.UpsertFederatedMerchantSubjectParams{
+		MerchantID: resolved.MerchantID.UUID(),
 		Issuer:   issuer,
 		Subject:  subject,
 	})
@@ -299,7 +299,7 @@ func RevokeAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "entitlement not found")
 		return
 	}
-	if ent.TenantSubjectID.String() != path.UserID {
+	if ent.MerchantSubjectID.String() != path.UserID {
 		r.ErrorJSON(http.StatusNotFound, "entitlement not found for this user")
 		return
 	}
@@ -313,7 +313,7 @@ func RevokeAdminEntitlement(r *httprequest.Request) {
 func serviceEntitlementRecordsFromModels(entitlements []models.Entitlement) []ServiceEntitlementRecord {
 	result := make([]ServiceEntitlementRecord, 0, len(entitlements))
 	for _, e := range entitlements {
-		rec := ServiceEntitlementRecord{ID: e.ID.String(), TenantSubjectID: e.TenantSubjectID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: string(e.SourceType), CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+		rec := ServiceEntitlementRecord{ID: e.ID.String(), MerchantSubjectID: e.MerchantSubjectID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: string(e.SourceType), CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 		if e.EndAt != nil {
 			rec.EndAt = e.EndAt
 		}
@@ -336,7 +336,7 @@ func serviceEntitlementRecordsFromModels(entitlements []models.Entitlement) []Se
 func serviceEntitlementRecordsFromService(entitlements []billingservice.EntitlementRecord) []ServiceEntitlementRecord {
 	result := make([]ServiceEntitlementRecord, 0, len(entitlements))
 	for _, e := range entitlements {
-		rec := ServiceEntitlementRecord{ID: e.ID.String(), TenantSubjectID: e.TenantSubjectID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+		rec := ServiceEntitlementRecord{ID: e.ID.String(), MerchantSubjectID: e.MerchantSubjectID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 		if e.EndAt != nil {
 			rec.EndAt = e.EndAt
 		}

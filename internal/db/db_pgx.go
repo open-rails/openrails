@@ -12,11 +12,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/tracelog"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/sirupsen/logrus"
 )
 
-// TenantGUC is the Postgres run-time configuration parameter (GUC) that carries
+// MerchantGUC is the Postgres run-time configuration parameter (GUC) that carries
 // the active tenant id for Row Level Security. Migration 050 enables RLS on every
 // tenant-owned table with a policy of the form
 //
@@ -26,7 +26,7 @@ import (
 // transaction that forgot to set it sees NOTHING (fail-closed). For RLS to
 // actually enforce, the application must connect as a non-superuser,
 // non-BYPASSRLS role (openrails_app, created by 001_schema.up.sql).
-const TenantGUC = "app.tenant_id"
+const MerchantGUC = "app.merchant_id"
 
 // Qx returns the queryable handle that sqlc-generated queries
 // (and the rare annotated raw-pgx escape hatch) MUST run on so the
@@ -127,7 +127,7 @@ func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx
 // tenant-owned writes go through this (or run on a connection pinned by
 // WithTenantConn).
 func (d *DB) TenantTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	id, err := tenant.Require(ctx)
+	id, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func (d *DB) TenantTx(ctx context.Context, fn func(ctx context.Context, tx pgx.T
 // already-open pgx transaction — for callbacks that already received a
 // pgx.Tx.
 func SetTenantGUCPgx(ctx context.Context, tx pgx.Tx) error {
-	id, err := tenant.Require(ctx)
+	id, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
@@ -159,15 +159,15 @@ func SetTenantGUCPgx(ctx context.Context, tx pgx.Tx) error {
 // setTenantLocalGUCPgx sets the tenant GUC transaction-locally
 // (set_config is_local=true) so it reverts when the tx ends and can never
 // leak onto a pooled connection.
-func setTenantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id tenant.ID) error {
+func setTenantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	if id.IsZero() {
-		return fmt.Errorf("db: cannot set %s GUC for a zero tenant id", TenantGUC)
+		return fmt.Errorf("db: cannot set %s GUC for a zero tenant id", MerchantGUC)
 	}
 	var out string
 	if err := tx.QueryRow(ctx,
-		"SELECT set_config($1, $2, TRUE)", TenantGUC, id.String(),
+		"SELECT set_config($1, $2, TRUE)", MerchantGUC, id.String(),
 	).Scan(&out); err != nil {
-		return fmt.Errorf("db: set %s GUC: %w", TenantGUC, err)
+		return fmt.Errorf("db: set %s GUC: %w", MerchantGUC, err)
 	}
 	return nil
 }
@@ -208,9 +208,9 @@ func (l *lazyTenantPgxConn) get(ctx context.Context) (*pgxpool.Conn, error) {
 	}
 	var out string
 	if err := conn.QueryRow(ctx,
-		"SELECT set_config($1, $2, FALSE)", TenantGUC, l.tenantID).Scan(&out); err != nil {
+		"SELECT set_config($1, $2, FALSE)", MerchantGUC, l.tenantID).Scan(&out); err != nil {
 		conn.Release()
-		return nil, fmt.Errorf("db: set %s on pgx tenant connection: %w", TenantGUC, err)
+		return nil, fmt.Errorf("db: set %s on pgx tenant connection: %w", MerchantGUC, err)
 	}
 	l.conn = conn
 	return l.conn, nil
@@ -226,7 +226,7 @@ func (l *lazyTenantPgxConn) release() {
 	}
 	// Background context so release works even after request cancellation.
 	_, _ = l.conn.Exec(context.Background(),
-		"SELECT set_config($1, '', FALSE)", TenantGUC)
+		"SELECT set_config($1, '', FALSE)", MerchantGUC)
 	l.conn.Release()
 	l.conn = nil
 }

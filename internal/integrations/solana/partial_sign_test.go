@@ -8,13 +8,13 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/programs/system"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
 type partialSignSecrets struct{ key string }
 
-func (m partialSignSecrets) GetSecret(context.Context, tenant.ID, string) (string, error) {
+func (m partialSignSecrets) GetSecret(context.Context, merchant.ID, string) (string, error) {
 	return m.key, nil
 }
 

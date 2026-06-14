@@ -142,7 +142,7 @@ type MaterializeSubscriptionAction struct {
 	// "stripe"), so the new row joins the same roster future reconciles load.
 	Processor               string
 	ProcessorSubscriptionID string
-	TenantSubjectID         uuid.UUID
+	MerchantSubjectID         uuid.UUID
 	PriceID                 uuid.UUID
 	ProductID               uuid.UUID
 	Status                  string // active | past_due (PS-1 only fires for live remote subs)
@@ -194,7 +194,7 @@ type BackfillPaymentAction struct {
 	PurchasedAt     time.Time
 	PriceID         uuid.UUID
 	SubscriptionID  *uuid.UUID
-	TenantSubjectID uuid.UUID
+	MerchantSubjectID uuid.UUID
 	Metadata        map[string]any
 	// Grant, when non-nil, grants entitlements for the current period after
 	// the backfill (charge covers a period that is still running).
@@ -212,7 +212,7 @@ type RecordRefundAction struct {
 	PriceID           uuid.UUID
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
-	TenantSubjectID   uuid.UUID
+	MerchantSubjectID   uuid.UUID
 	Metadata          map[string]any
 	// MarkRefundedOnly skips inserting a refund row and only flips the
 	// original payment's status to refunded — used when the refund shares the
@@ -233,7 +233,7 @@ type AdoptVaultAction struct {
 // (PS-9 grant direction / PS-4 current-period grant).
 type GrantEntitlementsAction struct {
 	SubscriptionID  uuid.UUID
-	TenantSubjectID uuid.UUID
+	MerchantSubjectID uuid.UUID
 	Entitlements    []string
 	StartAt         time.Time
 	EndAt           *time.Time

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // DefaultSignerCacheTTL is the in-process cache lifetime for a resolved tenant
@@ -53,7 +53,7 @@ func NewKeypairSigner(secrets TenantSecretGetter, ttl time.Duration) Signer {
 
 // load resolves and caches the tenant's private key. Cache hits avoid the
 // secret-store round-trip; misses fetch, parse, and cache with a ttl expiry.
-func (k *keypairSigner) load(ctx context.Context, tenantID tenant.ID) (solanago.PrivateKey, error) {
+func (k *keypairSigner) load(ctx context.Context, tenantID merchant.ID) (solanago.PrivateKey, error) {
 	if k.secrets == nil {
 		return nil, fmt.Errorf("solana: keypair signer has no secret store")
 	}
@@ -87,7 +87,7 @@ func (k *keypairSigner) load(ctx context.Context, tenantID tenant.ID) (solanago.
 	return key, nil
 }
 
-func (k *keypairSigner) PublicKey(ctx context.Context, tenantID tenant.ID) (solanago.PublicKey, error) {
+func (k *keypairSigner) PublicKey(ctx context.Context, tenantID merchant.ID) (solanago.PublicKey, error) {
 	key, err := k.load(ctx, tenantID)
 	if err != nil {
 		return solanago.PublicKey{}, err
@@ -95,7 +95,7 @@ func (k *keypairSigner) PublicKey(ctx context.Context, tenantID tenant.ID) (sola
 	return key.PublicKey(), nil
 }
 
-func (k *keypairSigner) SignMessage(ctx context.Context, tenantID tenant.ID, message []byte) (solanago.Signature, error) {
+func (k *keypairSigner) SignMessage(ctx context.Context, tenantID merchant.ID, message []byte) (solanago.Signature, error) {
 	if len(message) == 0 {
 		return solanago.Signature{}, fmt.Errorf("solana: cannot sign empty message")
 	}

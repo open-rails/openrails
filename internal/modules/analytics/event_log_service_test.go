@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/spool"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func TestLogPaymentEventSpoolsWithDefaultsWhenClickHouseDown(t *testing.T) {
@@ -92,8 +92,8 @@ func TestLogPaymentEventStampsResolvedTenant(t *testing.T) {
 	}
 
 	event := readOnlySpooledPayment(t, sp)
-	if event.TenantID != dbtest.TestTenantID.String() {
-		t.Fatalf("tenant_id = %q, want %q", event.TenantID, dbtest.TestTenantID.String())
+	if event.MerchantID != dbtest.TestTenantID.String() {
+		t.Fatalf("tenant_id = %q, want %q", event.MerchantID, dbtest.TestTenantID.String())
 	}
 }
 
@@ -110,16 +110,16 @@ func TestLogPaymentEventCarriesResolvedTenant(t *testing.T) {
 		clock:  clockwork.NewFakeClockAt(time.Date(2026, 5, 12, 10, 30, 0, 0, time.UTC)),
 	}
 
-	tenantID := tenant.ID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
-	ctx, cancel := context.WithTimeout(tenant.WithID(context.Background(), tenantID), 50*time.Millisecond)
+	tenantID := merchant.ID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
+	ctx, cancel := context.WithTimeout(merchant.WithID(context.Background(), tenantID), 50*time.Millisecond)
 	defer cancel()
 	if err := svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "user-1", EventType: PaymentEventChargeSuccess, Processor: "test"}); err != nil {
 		t.Fatalf("log payment event: %v", err)
 	}
 
 	event := readOnlySpooledPayment(t, sp)
-	if event.TenantID != tenantID.String() {
-		t.Fatalf("tenant_id = %q, want %q", event.TenantID, tenantID.String())
+	if event.MerchantID != tenantID.String() {
+		t.Fatalf("tenant_id = %q, want %q", event.MerchantID, tenantID.String())
 	}
 }
 
@@ -156,8 +156,8 @@ func TestLogSubscriptionEventStampsTenant(t *testing.T) {
 	if err := json.Unmarshal(rec.Data, &event); err != nil {
 		t.Fatalf("unmarshal event: %v", err)
 	}
-	if event.TenantID != dbtest.TestTenantID.String() {
-		t.Fatalf("tenant_id = %q, want %q", event.TenantID, dbtest.TestTenantID.String())
+	if event.MerchantID != dbtest.TestTenantID.String() {
+		t.Fatalf("tenant_id = %q, want %q", event.MerchantID, dbtest.TestTenantID.String())
 	}
 }
 

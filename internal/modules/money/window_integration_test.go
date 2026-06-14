@@ -19,7 +19,7 @@ import (
 
 // windowEnv provisions a migrated DB + money service + one funded payer. Money
 // has no credit_type dimension (#472); the returned currency is always USD.
-func windowEnv(t *testing.T, depositMicros int64) (context.Context, *pgxpool.Pool, *money.MoneyService, identity.TenantSubjectID, string) {
+func windowEnv(t *testing.T, depositMicros int64) (context.Context, *pgxpool.Pool, *money.MoneyService, identity.MerchantSubjectID, string) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -31,20 +31,20 @@ func windowEnv(t *testing.T, depositMicros int64) (context.Context, *pgxpool.Poo
 
 	svc := money.NewMoneyService(dbi)
 
-	payer := identity.TenantSubjectIDFromString(uuid.NewString())
+	payer := identity.MerchantSubjectIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_windows WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_windows WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", payerID)
 	})
 
 	if depositMicros > 0 {
 		_, err := svc.Deposit(ctx, money.DepositParams{
-			TenantSubjectID: &payer,
+			MerchantSubjectID: &payer,
 			Actor:           payer.UUID().String(),
 			Amount:          depositMicros,
 			Source:          "test_deposit",
@@ -54,9 +54,9 @@ func windowEnv(t *testing.T, depositMicros int64) (context.Context, *pgxpool.Poo
 	return ctx, pool, svc, payer, money.DefaultCurrency
 }
 
-func requireBalance(t *testing.T, ctx context.Context, svc *money.MoneyService, payer identity.TenantSubjectID, currency string, balance, held int64) {
+func requireBalance(t *testing.T, ctx context.Context, svc *money.MoneyService, payer identity.MerchantSubjectID, currency string, balance, held int64) {
 	t.Helper()
-	bal, err := svc.GetBalanceForTenantSubject(ctx, payer, currency)
+	bal, err := svc.GetBalanceForMerchantSubject(ctx, payer, currency)
 	require.NoError(t, err)
 	require.Equal(t, balance, bal.Balance, "balance")
 	require.Equal(t, held, bal.HeldBalance, "held_balance")
@@ -173,7 +173,7 @@ func TestCreditWindows_OpenInsufficientFunds(t *testing.T) {
 	require.ErrorIs(t, err, money.ErrInsufficientCredits)
 
 	// A $0 payer cannot open a window at all.
-	broke := identity.TenantSubjectIDFromString(uuid.NewString())
+	broke := identity.MerchantSubjectIDFromString(uuid.NewString())
 	_, err = svc.OpenWindow(ctx, money.OpenWindowParams{
 		Payer: broke, Actor: "user:broke", Amount: 1,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
@@ -251,17 +251,17 @@ func TestCreditWindows_ExpiryReleasesRemainder(t *testing.T) {
 func TestCreditWindows_CrossPayerSettleBatch(t *testing.T) {
 	ctx, pool, svc, payerA, cur := windowEnv(t, 1000)
 
-	payerB := identity.TenantSubjectIDFromString(uuid.NewString())
+	payerB := identity.MerchantSubjectIDFromString(uuid.NewString())
 	t.Cleanup(func() {
 		pid := payerB.UUID()
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", pid)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_windows WHERE tenant_subject_id = $1", pid)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE tenant_subject_id = $1", pid)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE tenant_subject_id = $1", pid)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE tenant_subject_id = $1", pid)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE merchant_subject_id = $1", pid)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_windows WHERE merchant_subject_id = $1", pid)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE merchant_subject_id = $1", pid)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", pid)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", pid)
 	})
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		TenantSubjectID: &payerB,
+		MerchantSubjectID: &payerB,
 		Actor:           payerB.UUID().String(),
 		Amount:          400,
 		Source:          "test_deposit",

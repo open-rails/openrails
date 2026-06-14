@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // This test proves end-to-end #227 RLS enforcement on a REAL openrails.* table
@@ -51,10 +51,10 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	require.NoError(t, err)
 	defer super.Close()
 	for _, stmt := range []string{
-		`INSERT INTO openrails.tenants (id, slug, name) VALUES
+		`INSERT INTO openrails.merchants (id, slug, name) VALUES
 		   ('` + tenantA + `','tenant-` + suffix + `-a','A'), ('` + tenantB + `','tenant-` + suffix + `-b','B')
 		 ON CONFLICT (id) DO NOTHING`,
-		`INSERT INTO openrails.products (id, tenant_id, slug, display_name) VALUES
+		`INSERT INTO openrails.products (id, merchant_id, slug, display_name) VALUES
 		   ('` + productA + `','` + tenantA + `','` + slugA + `','Product A'),
 		   ('` + productB + `','` + tenantB + `','` + slugB + `','Product B')
 		 ON CONFLICT (id) DO NOTHING`,
@@ -80,7 +80,7 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 
 	// (2) Pinned to tenant A: the real repo's no-filter GetAll returns ONLY
 	// tenant A's product — Postgres enforced it, not a WHERE clause in the repo.
-	ctxA := tenant.WithID(ctx, mustTID(tenantA))
+	ctxA := merchant.WithID(ctx, mustTID(tenantA))
 	connA, releaseA, err := app.WithTenantConn(ctxA)
 	require.NoError(t, err)
 	gotA, err := repo.GetAll(connA)
@@ -90,7 +90,7 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	releaseA()
 
 	// (3) Pinned to tenant B: sees only tenant B's product. No cross-tenant bleed.
-	ctxB := tenant.WithID(ctx, mustTID(tenantB))
+	ctxB := merchant.WithID(ctx, mustTID(tenantB))
 	connB, releaseB, err := app.WithTenantConn(ctxB)
 	require.NoError(t, err)
 	gotB, err := repo.GetAll(connB)
@@ -100,8 +100,8 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	releaseB()
 }
 
-func mustTID(s string) tenant.ID {
-	id, err := tenant.ParseID(s)
+func mustTID(s string) merchant.ID {
+	id, err := merchant.ParseID(s)
 	if err != nil {
 		panic(err)
 	}

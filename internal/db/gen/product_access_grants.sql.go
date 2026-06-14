@@ -15,7 +15,7 @@ import (
 const createProductAccessGrant = `-- name: CreateProductAccessGrant :one
 
 INSERT INTO openrails.product_access_grants (
-    id, tenant_id, tenant_subject_id, product_id, source_type, source_id,
+    id, merchant_id, merchant_subject_id, product_id, source_type, source_id,
     payment_id, status, starts_at, ends_at, revoked_at, revoke_reason,
     created_at, updated_at
 ) VALUES (
@@ -34,30 +34,30 @@ RETURNING id
 `
 
 type CreateProductAccessGrantParams struct {
-	TenantSubjectID uuid.UUID
-	ProductID       uuid.UUID
-	SourceType      string
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	SourceID        string
-	PaymentID       *uuid.UUID
-	Status          string
-	StartsAt        time.Time
-	EndsAt          *time.Time
-	RevokedAt       *time.Time
-	RevokeReason    *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	MerchantSubjectID uuid.UUID
+	ProductID         uuid.UUID
+	SourceType        string
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	SourceID          string
+	PaymentID         *uuid.UUID
+	Status            string
+	StartsAt          time.Time
+	EndsAt            *time.Time
+	RevokedAt         *time.Time
+	RevokeReason      *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // openrails.product_access_grants (issue #250).
 func (q *Queries) CreateProductAccessGrant(ctx context.Context, arg CreateProductAccessGrantParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, createProductAccessGrant,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.ProductID,
 		arg.SourceType,
 		arg.ID,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.SourceID,
 		arg.PaymentID,
 		arg.Status,
@@ -74,21 +74,21 @@ func (q *Queries) CreateProductAccessGrant(ctx context.Context, arg CreateProduc
 }
 
 const getProductAccessGrantByID = `-- name: GetProductAccessGrantByID :one
-SELECT id, tenant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, tenant_subject_id FROM openrails.product_access_grants pag
-WHERE pag.tenant_id = $1 AND pag.id = $2
+SELECT id, merchant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, merchant_subject_id FROM openrails.product_access_grants pag
+WHERE pag.merchant_id = $1 AND pag.id = $2
 `
 
 type GetProductAccessGrantByIDParams struct {
-	TenantID uuid.UUID
-	ID       uuid.UUID
+	MerchantID uuid.UUID
+	ID         uuid.UUID
 }
 
 func (q *Queries) GetProductAccessGrantByID(ctx context.Context, arg GetProductAccessGrantByIDParams) (OpenrailsProductAccessGrant, error) {
-	row := q.db.QueryRow(ctx, getProductAccessGrantByID, arg.TenantID, arg.ID)
+	row := q.db.QueryRow(ctx, getProductAccessGrantByID, arg.MerchantID, arg.ID)
 	var i OpenrailsProductAccessGrant
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.ProductID,
 		&i.SourceType,
 		&i.SourceID,
@@ -100,38 +100,38 @@ func (q *Queries) GetProductAccessGrantByID(ctx context.Context, arg GetProductA
 		&i.RevokeReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantSubjectID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
 const getProductAccessGrantBySource = `-- name: GetProductAccessGrantBySource :one
-SELECT id, tenant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, tenant_subject_id FROM openrails.product_access_grants pag
-WHERE pag.tenant_id = $1
-  AND pag.tenant_subject_id = $2
+SELECT id, merchant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, merchant_subject_id FROM openrails.product_access_grants pag
+WHERE pag.merchant_id = $1
+  AND pag.merchant_subject_id = $2
   AND pag.product_id = $3
   AND pag.source_id = $4
 LIMIT 1
 `
 
 type GetProductAccessGrantBySourceParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	ProductID       uuid.UUID
-	SourceID        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	ProductID         uuid.UUID
+	SourceID          string
 }
 
 func (q *Queries) GetProductAccessGrantBySource(ctx context.Context, arg GetProductAccessGrantBySourceParams) (OpenrailsProductAccessGrant, error) {
 	row := q.db.QueryRow(ctx, getProductAccessGrantBySource,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.ProductID,
 		arg.SourceID,
 	)
 	var i OpenrailsProductAccessGrant
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.ProductID,
 		&i.SourceType,
 		&i.SourceID,
@@ -143,7 +143,7 @@ func (q *Queries) GetProductAccessGrantBySource(ctx context.Context, arg GetProd
 		&i.RevokeReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantSubjectID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
@@ -151,8 +151,8 @@ func (q *Queries) GetProductAccessGrantBySource(ctx context.Context, arg GetProd
 const hasActiveProductAccess = `-- name: HasActiveProductAccess :one
 SELECT EXISTS (
     SELECT 1 FROM openrails.product_access_grants pag
-    WHERE pag.tenant_id = $1
-      AND pag.tenant_subject_id = $2
+    WHERE pag.merchant_id = $1
+      AND pag.merchant_subject_id = $2
       AND pag.product_id = $3
       AND pag.status = 'active'
       AND pag.revoked_at IS NULL
@@ -162,16 +162,16 @@ SELECT EXISTS (
 `
 
 type HasActiveProductAccessParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	ProductID       uuid.UUID
-	At              time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	ProductID         uuid.UUID
+	At                time.Time
 }
 
 func (q *Queries) HasActiveProductAccess(ctx context.Context, arg HasActiveProductAccessParams) (bool, error) {
 	row := q.db.QueryRow(ctx, hasActiveProductAccess,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.ProductID,
 		arg.At,
 	)
@@ -180,10 +180,10 @@ func (q *Queries) HasActiveProductAccess(ctx context.Context, arg HasActiveProdu
 	return exists, err
 }
 
-const listActiveProductAccessGrantsByTenantSubject = `-- name: ListActiveProductAccessGrantsByTenantSubject :many
-SELECT id, tenant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, tenant_subject_id FROM openrails.product_access_grants pag
-WHERE pag.tenant_id = $1
-  AND pag.tenant_subject_id = $2
+const listActiveProductAccessGrantsByMerchantSubject = `-- name: ListActiveProductAccessGrantsByMerchantSubject :many
+SELECT id, merchant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, merchant_subject_id FROM openrails.product_access_grants pag
+WHERE pag.merchant_id = $1
+  AND pag.merchant_subject_id = $2
   AND pag.status = 'active'
   AND pag.revoked_at IS NULL
   AND pag.starts_at <= $3::timestamptz
@@ -191,14 +191,14 @@ WHERE pag.tenant_id = $1
 ORDER BY pag.created_at DESC
 `
 
-type ListActiveProductAccessGrantsByTenantSubjectParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	At              time.Time
+type ListActiveProductAccessGrantsByMerchantSubjectParams struct {
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	At                time.Time
 }
 
-func (q *Queries) ListActiveProductAccessGrantsByTenantSubject(ctx context.Context, arg ListActiveProductAccessGrantsByTenantSubjectParams) ([]OpenrailsProductAccessGrant, error) {
-	rows, err := q.db.Query(ctx, listActiveProductAccessGrantsByTenantSubject, arg.TenantID, arg.TenantSubjectID, arg.At)
+func (q *Queries) ListActiveProductAccessGrantsByMerchantSubject(ctx context.Context, arg ListActiveProductAccessGrantsByMerchantSubjectParams) ([]OpenrailsProductAccessGrant, error) {
+	rows, err := q.db.Query(ctx, listActiveProductAccessGrantsByMerchantSubject, arg.MerchantID, arg.MerchantSubjectID, arg.At)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +208,7 @@ func (q *Queries) ListActiveProductAccessGrantsByTenantSubject(ctx context.Conte
 		var i OpenrailsProductAccessGrant
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantID,
+			&i.MerchantID,
 			&i.ProductID,
 			&i.SourceType,
 			&i.SourceID,
@@ -220,7 +220,7 @@ func (q *Queries) ListActiveProductAccessGrantsByTenantSubject(ctx context.Conte
 			&i.RevokeReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantSubjectID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -232,20 +232,20 @@ func (q *Queries) ListActiveProductAccessGrantsByTenantSubject(ctx context.Conte
 	return items, nil
 }
 
-const listProductAccessGrantsByTenantSubject = `-- name: ListProductAccessGrantsByTenantSubject :many
-SELECT id, tenant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, tenant_subject_id FROM openrails.product_access_grants pag
-WHERE pag.tenant_id = $1
-  AND pag.tenant_subject_id = $2
+const listProductAccessGrantsByMerchantSubject = `-- name: ListProductAccessGrantsByMerchantSubject :many
+SELECT id, merchant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, merchant_subject_id FROM openrails.product_access_grants pag
+WHERE pag.merchant_id = $1
+  AND pag.merchant_subject_id = $2
 ORDER BY pag.created_at DESC
 `
 
-type ListProductAccessGrantsByTenantSubjectParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+type ListProductAccessGrantsByMerchantSubjectParams struct {
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 }
 
-func (q *Queries) ListProductAccessGrantsByTenantSubject(ctx context.Context, arg ListProductAccessGrantsByTenantSubjectParams) ([]OpenrailsProductAccessGrant, error) {
-	rows, err := q.db.Query(ctx, listProductAccessGrantsByTenantSubject, arg.TenantID, arg.TenantSubjectID)
+func (q *Queries) ListProductAccessGrantsByMerchantSubject(ctx context.Context, arg ListProductAccessGrantsByMerchantSubjectParams) ([]OpenrailsProductAccessGrant, error) {
+	rows, err := q.db.Query(ctx, listProductAccessGrantsByMerchantSubject, arg.MerchantID, arg.MerchantSubjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +255,7 @@ func (q *Queries) ListProductAccessGrantsByTenantSubject(ctx context.Context, ar
 		var i OpenrailsProductAccessGrant
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantID,
+			&i.MerchantID,
 			&i.ProductID,
 			&i.SourceType,
 			&i.SourceID,
@@ -267,7 +267,7 @@ func (q *Queries) ListProductAccessGrantsByTenantSubject(ctx context.Context, ar
 			&i.RevokeReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantSubjectID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -286,22 +286,22 @@ UPDATE openrails.product_access_grants pag SET
     revoke_reason = $4,
     ends_at = $3::timestamptz,
     updated_at = $3::timestamptz
-WHERE pag.tenant_id = $1
+WHERE pag.merchant_id = $1
   AND pag.id = $2
   AND pag.status = 'active'
   AND pag.revoked_at IS NULL
 `
 
 type RevokeProductAccessGrantByIDParams struct {
-	TenantID uuid.UUID
-	ID       uuid.UUID
-	Now      time.Time
-	Reason   *string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	Now        time.Time
+	Reason     *string
 }
 
 func (q *Queries) RevokeProductAccessGrantByID(ctx context.Context, arg RevokeProductAccessGrantByIDParams) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeProductAccessGrantByID,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.ID,
 		arg.Now,
 		arg.Reason,
@@ -319,22 +319,22 @@ UPDATE openrails.product_access_grants pag SET
     revoke_reason = $4,
     ends_at = $3::timestamptz,
     updated_at = $3::timestamptz
-WHERE pag.tenant_id = $1
+WHERE pag.merchant_id = $1
   AND pag.payment_id = $2
   AND pag.status = 'active'
   AND pag.revoked_at IS NULL
 `
 
 type RevokeProductAccessGrantsByPaymentParams struct {
-	TenantID  uuid.UUID
-	PaymentID *uuid.UUID
-	Now       time.Time
-	Reason    *string
+	MerchantID uuid.UUID
+	PaymentID  *uuid.UUID
+	Now        time.Time
+	Reason     *string
 }
 
 func (q *Queries) RevokeProductAccessGrantsByPayment(ctx context.Context, arg RevokeProductAccessGrantsByPaymentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeProductAccessGrantsByPayment,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.PaymentID,
 		arg.Now,
 		arg.Reason,

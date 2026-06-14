@@ -12,11 +12,11 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type tenantSecretGetter interface {
-	Get(ctx context.Context, tenantID tenant.ID, name string) (tenancy.Secret, error)
+	Get(ctx context.Context, tenantID merchant.ID, name string) (tenancy.Secret, error)
 }
 
 // SetTenantSecretStore wires the dynamic OpenRails tenant-secret store into the
@@ -36,7 +36,7 @@ func (s *CheckoutService) tenantSecret(ctx context.Context, name string) (string
 	if s == nil || s.TenantSecrets == nil {
 		return "", false, nil
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return "", false, err
 	}

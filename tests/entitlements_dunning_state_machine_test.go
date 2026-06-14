@@ -70,7 +70,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 
 	suite.InsertSubscription(ctx, &models.Subscription{
 		ID:                      subID,
-		TenantSubjectID:         suite.ensureTenantSubject(ctx, userID),
+		MerchantSubjectID:         suite.ensureMerchantSubject(ctx, userID),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -85,7 +85,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 
 	paidEnt := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
+		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
 		Entitlement:     "premium",
 		StartAt:         periodStart,
 		EndAt:           &paidEnd,
@@ -97,7 +97,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	suite.InsertEntitlement(ctx, paidEnt)
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1", suite.ensureMerchantSubject(ctx, userID))
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -117,20 +117,20 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	countGrace := func() int {
 		return suite.Count(ctx, `
 			SELECT COUNT(*) FROM openrails.entitlements
-			WHERE tenant_subject_id = $1 AND entitlement = $2
+			WHERE merchant_subject_id = $1 AND entitlement = $2
 			  AND source_type = $3 AND source_id = $4
 			  AND deleted_at IS NULL`,
-			suite.ensureTenantSubject(ctx, userID), "premium",
+			suite.ensureMerchantSubject(ctx, userID), "premium",
 			string(models.EntitlementSourceGrace), subID)
 	}
 	latestGraceEnd := func() time.Time {
 		ents := suite.QueryEntitlements(ctx, `
-			WHERE tenant_subject_id = $1 AND entitlement = $2
+			WHERE merchant_subject_id = $1 AND entitlement = $2
 			  AND source_type = $3 AND source_id = $4
 			  AND deleted_at IS NULL
 			ORDER BY end_at DESC
 			LIMIT 1`,
-			suite.ensureTenantSubject(ctx, userID), "premium",
+			suite.ensureMerchantSubject(ctx, userID), "premium",
 			string(models.EntitlementSourceGrace), subID)
 		require.Len(t, ents, 1)
 		require.NotNil(t, ents[0].EndAt)
@@ -226,10 +226,10 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	// The single active grace window should be revoked by renewal success.
 	// (No deleted_at filter: this is the bun WhereAllWithDeleted read.)
 	graceRows := suite.QueryEntitlements(ctx, `
-		WHERE tenant_subject_id = $1 AND entitlement = $2
+		WHERE merchant_subject_id = $1 AND entitlement = $2
 		  AND source_type = $3 AND source_id = $4
 		ORDER BY start_at ASC`,
-		suite.ensureTenantSubject(ctx, userID), "premium",
+		suite.ensureMerchantSubject(ctx, userID), "premium",
 		string(models.EntitlementSourceGrace), subID)
 	require.Len(t, graceRows, 1)
 	require.NotNil(t, graceRows[0].RevokedAt, "active grace window should be revoked")
@@ -242,12 +242,12 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		23, 59, 59, 0, time.UTC,
 	)
 	paidWindows := suite.QueryEntitlements(ctx, `
-		WHERE tenant_subject_id = $1 AND entitlement = $2
+		WHERE merchant_subject_id = $1 AND entitlement = $2
 		  AND source_type = $3 AND source_id = $4
 		  AND revoked_at IS NULL
 		  AND deleted_at IS NULL
 		ORDER BY start_at ASC`,
-		suite.ensureTenantSubject(ctx, userID), "premium",
+		suite.ensureMerchantSubject(ctx, userID), "premium",
 		string(models.EntitlementSourceSubscription), subID)
 	require.GreaterOrEqual(t, len(paidWindows), 2)
 

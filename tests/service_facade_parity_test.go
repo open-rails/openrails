@@ -55,9 +55,9 @@ func (s stubServiceTokenResolver) ResolveServiceJWT(_ context.Context, token str
 
 func (s stubServiceTokenResolver) resolved() (*controlplane.ResolvedServiceToken, error) {
 	return &controlplane.ResolvedServiceToken{
-		AuthKitTenantSlug: "operator",
-		TenantID:          dbtest.TestTenantID,
-		TenantSlug:        dbtest.TestTenantSlug,
+		OwnerTenantSlug: "operator",
+		MerchantID:          dbtest.TestTenantID,
+		MerchantSlug:        dbtest.TestTenantSlug,
 		Permissions:       s.permissions,
 		Resources:         s.resources,
 	}, nil
@@ -70,16 +70,16 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	ctx := dbtest.WithTestTenant(context.Background())
 
 	userID := uuid.NewString()
-	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
-	tenantSubject := identity.TenantSubjectID(tenantSubjectID)
+	tenantSubjectID := suite.ensureMerchantSubject(ctx, userID)
+	tenantSubject := identity.MerchantSubjectID(tenantSubjectID)
 	// credit_type is accepted-and-ignored on the wire; money needs no type row.
 	creditTypeName := "svc_test_credits_" + uuid.NewString()
 
 	// Seed a starting money balance (USD).
 	ucb := &models.MoneyBalance{
 		ID:              uuid.New(),
-		TenantID:        dbtest.TestTenantID.UUID(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantID:        dbtest.TestTenantID.UUID(),
+		MerchantSubjectID: tenantSubjectID,
 		Currency:        "USD",
 		Balance:         10_000,
 		HeldBalance:     0,
@@ -87,9 +87,9 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		UpdatedAt:       time.Now().UTC(),
 	}
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.money_balances (id, tenant_id, tenant_subject_id, currency, balance, held_balance, created_at, updated_at)
+		INSERT INTO openrails.money_balances (id, merchant_id, merchant_subject_id, currency, balance, held_balance, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		ucb.ID, ucb.TenantID, ucb.TenantSubjectID, ucb.Currency, ucb.Balance, ucb.HeldBalance, ucb.CreatedAt, ucb.UpdatedAt)
+		ucb.ID, ucb.MerchantID, ucb.MerchantSubjectID, ucb.Currency, ucb.Balance, ucb.HeldBalance, ucb.CreatedAt, ucb.UpdatedAt)
 	require.NoError(t, err)
 
 	// Seed an entitlement. source_id is NOT NULL (the originating
@@ -97,8 +97,8 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	entSourceID := uuid.New()
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantID:        dbtest.TestTenantID.UUID(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantID:        dbtest.TestTenantID.UUID(),
+		MerchantSubjectID: tenantSubjectID,
 		Entitlement:     "premium-1",
 		StartAt:         time.Now().Add(-1 * time.Hour).UTC(),
 		EndAt:           nil,
@@ -108,18 +108,18 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		UpdatedAt:       time.Now().UTC(),
 	}
 	suite.InsertEntitlement(ctx, ent)
-	legacyOnlyTenantSubjectID := uuid.New()
+	legacyOnlyMerchantSubjectID := uuid.New()
 	_, err = suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject, created_at, last_seen_at)
+		INSERT INTO openrails.merchant_subjects (id, merchant_id, issuer, subject, created_at, last_seen_at)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
-		legacyOnlyTenantSubjectID, dbtest.TestTenantID.UUID(),
+		legacyOnlyMerchantSubjectID, dbtest.TestTenantID.UUID(),
 		"service-facade-parity-other", userID+"-other",
 		time.Now().UTC(), time.Now().UTC())
 	require.NoError(t, err)
 	legacyOnlyEnt := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantID:        dbtest.TestTenantID.UUID(),
-		TenantSubjectID: legacyOnlyTenantSubjectID,
+		MerchantID:        dbtest.TestTenantID.UUID(),
+		MerchantSubjectID: legacyOnlyMerchantSubjectID,
 		Entitlement:     "legacy-user-only",
 		StartAt:         time.Now().Add(-1 * time.Hour).UTC(),
 		EndAt:           nil,
@@ -149,11 +149,11 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 			controlplane.PermEntitlementsRead,
 		},
 		resources: []authcore.ServiceTokenResource{
-			controlplane.TenantResource(dbtest.TestTenantID),
-			controlplane.TenantSubjectResource(tenantSubjectID),
+			controlplane.MerchantResource(dbtest.TestTenantID),
+			controlplane.MerchantSubjectResource(tenantSubjectID),
 		},
 	}
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver), nil)
+	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver))
 
 	withServiceToken := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer openrails_st_testkeyid_testsecret")
@@ -161,7 +161,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 
 	// 1) Create hold via Service facade, release via service HTTP.
 	hold1, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
-		TenantSubjectID: &tenantSubject,
+		MerchantSubjectID: &tenantSubject,
 		Actor:           userID,
 		Amount:          123,
 		Source:          "svc_test",
@@ -179,7 +179,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 
 	// 2) Create hold via service HTTP, capture via Service facade.
 	bodyHold, _ := json.Marshal(map[string]any{
-		"tenant_subject_id": tenantSubjectID.String(),
+		"merchant_subject_id": tenantSubjectID.String(),
 		"actor":             userID,
 		"credit_type":       creditTypeName,
 		"amount":            456,
@@ -210,7 +210,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	ents, err := svc.ListActiveEntitlements(ctx, userID, time.Now().UTC())
 	require.NoError(t, err)
 	require.Contains(t, ents, "premium-1")
-	subjectEnts, err := svc.ListActiveEntitlementsForTenantSubject(ctx, tenantSubject, time.Now().UTC())
+	subjectEnts, err := svc.ListActiveEntitlementsForMerchantSubject(ctx, tenantSubject, time.Now().UTC())
 	require.NoError(t, err)
 	require.Contains(t, subjectEnts, "premium-1")
 
@@ -221,13 +221,13 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.Equal(t, http.StatusOK, wEnt.Code)
 	var entResp []struct {
 		ID              string `json:"id"`
-		TenantSubjectID string `json:"tenant_subject_id"`
+		MerchantSubjectID string `json:"merchant_subject_id"`
 		UserID          string `json:"user_id"`
 		Entitlement     string `json:"entitlement"`
 	}
 	require.NoError(t, json.Unmarshal(wEnt.Body.Bytes(), &entResp))
 	require.Len(t, entResp, 1)
-	require.Equal(t, tenantSubjectID.String(), entResp[0].TenantSubjectID)
+	require.Equal(t, tenantSubjectID.String(), entResp[0].MerchantSubjectID)
 	require.Empty(t, entResp[0].UserID)
 	require.Equal(t, "premium-1", entResp[0].Entitlement)
 	require.NotContains(t, wEnt.Body.String(), "legacy-user-only")
@@ -239,7 +239,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	jwtGroup := jwtRouter.Group("/v1/service")
 	jwtResolver := resolver
 	jwtResolver.serviceJWT = true
-	httproutes.RegisterServiceRoutes(jwtGroup, suite.App.Runtime, ginmw.ServiceTokenRequired(jwtResolver), nil)
+	httproutes.RegisterServiceRoutes(jwtGroup, suite.App.Runtime, ginmw.ServiceTokenRequired(jwtResolver))
 	withServiceJWT := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer eyJ.service.jwt")
 	}
@@ -251,18 +251,18 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.Equal(t, http.StatusOK, wJWTEnt.Code)
 	require.Contains(t, wJWTEnt.Body.String(), "premium-1")
 
-	reqJWTBalance := httptest.NewRequest(http.MethodGet, "/v1/service/credits/balance?tenant_subject_id="+tenantSubjectID.String()+"&credit_type="+creditTypeName, nil)
+	reqJWTBalance := httptest.NewRequest(http.MethodGet, "/v1/service/credits/balance?merchant_subject_id="+tenantSubjectID.String()+"&credit_type="+creditTypeName, nil)
 	withServiceJWT(reqJWTBalance)
 	wJWTBalance := httptest.NewRecorder()
 	jwtRouter.ServeHTTP(wJWTBalance, reqJWTBalance)
 	require.Equal(t, http.StatusOK, wJWTBalance.Code)
 	var balanceResp struct {
-		TenantSubjectID string `json:"tenant_subject_id"`
+		MerchantSubjectID string `json:"merchant_subject_id"`
 		BalanceMicros   int64  `json:"balance_micros"`
 		HeldMicros      int64  `json:"held_micros"`
 	}
 	require.NoError(t, json.Unmarshal(wJWTBalance.Body.Bytes(), &balanceResp))
-	require.Equal(t, tenantSubjectID.String(), balanceResp.TenantSubjectID)
+	require.Equal(t, tenantSubjectID.String(), balanceResp.MerchantSubjectID)
 	require.Equal(t, int64(9_889), balanceResp.BalanceMicros)
 	require.Equal(t, int64(0), balanceResp.HeldMicros)
 }

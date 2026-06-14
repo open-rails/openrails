@@ -30,7 +30,7 @@ import (
 
 const platformSchemaDDL = `
 CREATE SCHEMA IF NOT EXISTS billing;
-CREATE TABLE IF NOT EXISTS openrails.tenants (
+CREATE TABLE IF NOT EXISTS openrails.merchants (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug         TEXT NOT NULL UNIQUE,
     name         TEXT NOT NULL,
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS openrails.platform_break_glass (
     expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ,
     CONSTRAINT chk_break_glass_window CHECK (expires_at > granted_at)
 );
-INSERT INTO openrails.tenants (slug, name, status, billing_tier) VALUES ('acme','Acme','active','pro') ON CONFLICT DO NOTHING;
+INSERT INTO openrails.merchants (slug, name, status, billing_tier) VALUES ('acme','Acme','active','pro') ON CONFLICT DO NOTHING;
 `
 
 func newPlatformTestPool(t *testing.T) *pgxpool.Pool {
@@ -122,7 +122,7 @@ func (f fakeSuperadminChecker) HasPlatformSuperadmin(_ context.Context, userID s
 // newPlatformServer builds a minimal *Server with just the platform deps wired.
 func newPlatformServer(t *testing.T, pool *pgxpool.Pool) *Server {
 	t.Helper()
-	tsvc, err := tenancy.NewService(pool, nil, tenancy.NewMemorySecretStore())
+	tsvc, err := tenancy.NewService(pool, tenancy.NewMemorySecretStore())
 	require.NoError(t, err)
 	audit, err := platform.NewAuditLog(pool)
 	require.NoError(t, err)

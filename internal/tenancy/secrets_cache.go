@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // DefaultSecretCacheTTL is the in-process secret cache TTL used when a managed
@@ -64,7 +64,7 @@ func NewCachedSecretStore(inner TenantSecretStore, ttl time.Duration) TenantSecr
 	}
 }
 
-func (c *cachedSecretStore) Get(ctx context.Context, tenantID tenant.ID, name string) (Secret, error) {
+func (c *cachedSecretStore) Get(ctx context.Context, tenantID merchant.ID, name string) (Secret, error) {
 	key := cacheKey{tenant: tenantID.String(), name: name}
 
 	c.mu.Lock()
@@ -88,7 +88,7 @@ func (c *cachedSecretStore) Get(ctx context.Context, tenantID tenant.ID, name st
 	return sec, nil
 }
 
-func (c *cachedSecretStore) Put(ctx context.Context, tenantID tenant.ID, name, value string) (Secret, error) {
+func (c *cachedSecretStore) Put(ctx context.Context, tenantID merchant.ID, name, value string) (Secret, error) {
 	sec, err := c.inner.Put(ctx, tenantID, name, value)
 	if err != nil {
 		// Invalidate on failure too: we no longer know the authoritative value.
@@ -103,7 +103,7 @@ func (c *cachedSecretStore) Put(ctx context.Context, tenantID tenant.ID, name, v
 	return sec, nil
 }
 
-func (c *cachedSecretStore) Delete(ctx context.Context, tenantID tenant.ID, name string) error {
+func (c *cachedSecretStore) Delete(ctx context.Context, tenantID merchant.ID, name string) error {
 	err := c.inner.Delete(ctx, tenantID, name)
 	// Whether or not delete succeeded, drop the cached copy: on success it's gone,
 	// on failure we must not keep serving a value we tried to remove.
@@ -112,11 +112,11 @@ func (c *cachedSecretStore) Delete(ctx context.Context, tenantID tenant.ID, name
 }
 
 // List is not cached (enumeration is rare and used by export/audit paths).
-func (c *cachedSecretStore) List(ctx context.Context, tenantID tenant.ID) ([]string, error) {
+func (c *cachedSecretStore) List(ctx context.Context, tenantID merchant.ID) ([]string, error) {
 	return c.inner.List(ctx, tenantID)
 }
 
-func (c *cachedSecretStore) invalidate(tenantID tenant.ID, name string) {
+func (c *cachedSecretStore) invalidate(tenantID merchant.ID, name string) {
 	key := cacheKey{tenant: tenantID.String(), name: name}
 	c.mu.Lock()
 	delete(c.entries, key)

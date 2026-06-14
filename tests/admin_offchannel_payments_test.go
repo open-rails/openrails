@@ -55,7 +55,7 @@ func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
 
 	p := suite.GetPaymentByID(req.Context(), paymentID)
 
-	require.Equal(t, userID, p.TenantSubjectID.String())
+	require.Equal(t, userID, p.MerchantSubjectID.String())
 	require.Equal(t, lifetimePriceID, p.PriceID)
 	require.Equal(t, models.ProcessorManual, p.Processor)
 	require.Equal(t, int64(1500), p.Amount)

@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // tenantOwnedTables are the openrails.* tables that carry a tenant_id. Tenant
@@ -30,41 +30,41 @@ var tenantOwnedTables = []string{
 func countTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.UUID) (int64, error) {
 	switch table {
 	case "products":
-		return q.CountTenantRowsProducts(ctx, id)
+		return q.CountMerchantRowsProducts(ctx, id)
 	case "prices":
-		return q.CountTenantRowsPrices(ctx, id)
+		return q.CountMerchantRowsPrices(ctx, id)
 	case "catalog_drift_events":
-		return q.CountTenantRowsCatalogDriftEvents(ctx, id)
+		return q.CountMerchantRowsCatalogDriftEvents(ctx, id)
 	case "payment_methods":
-		return q.CountTenantRowsPaymentMethods(ctx, id)
+		return q.CountMerchantRowsPaymentMethods(ctx, id)
 	case "subscriptions":
-		return q.CountTenantRowsSubscriptions(ctx, id)
+		return q.CountMerchantRowsSubscriptions(ctx, id)
 	case "entitlements":
-		return q.CountTenantRowsEntitlements(ctx, id)
+		return q.CountMerchantRowsEntitlements(ctx, id)
 	case "payments":
-		return q.CountTenantRowsPayments(ctx, id)
+		return q.CountMerchantRowsPayments(ctx, id)
 	case "admin_grants":
-		return q.CountTenantRowsAdminGrants(ctx, id)
+		return q.CountMerchantRowsEntitlementGrants(ctx, id)
 	case "notification_queue":
-		return q.CountTenantRowsNotificationQueue(ctx, id)
+		return q.CountMerchantRowsNotificationQueue(ctx, id)
 	case "processor_customers":
-		return q.CountTenantRowsProcessorCustomers(ctx, id)
+		return q.CountMerchantRowsProcessorCustomers(ctx, id)
 	case "checkout_sessions":
-		return q.CountTenantRowsCheckoutSessions(ctx, id)
+		return q.CountMerchantRowsCheckoutSessions(ctx, id)
 	case "provider_intents":
-		return q.CountTenantRowsProviderIntents(ctx, id)
+		return q.CountMerchantRowsProviderIntents(ctx, id)
 	case "money_accounts":
-		return q.CountTenantRowsMoneyAccounts(ctx, id)
+		return q.CountMerchantRowsMoneyAccounts(ctx, id)
 	case "money_balances":
-		return q.CountTenantRowsMoneyBalances(ctx, id)
+		return q.CountMerchantRowsMoneyBalances(ctx, id)
 	case "money_blocks":
-		return q.CountTenantRowsMoneyBlocks(ctx, id)
+		return q.CountMerchantRowsMoneyBlocks(ctx, id)
 	case "money_transactions":
-		return q.CountTenantRowsMoneyTransactions(ctx, id)
+		return q.CountMerchantRowsMoneyTransactions(ctx, id)
 	case "money_windows":
-		return q.CountTenantRowsMoneyWindows(ctx, id)
+		return q.CountMerchantRowsMoneyWindows(ctx, id)
 	case "money_spend_limits":
-		return q.CountTenantRowsMoneySpendLimits(ctx, id)
+		return q.CountMerchantRowsMoneySpendLimits(ctx, id)
 	default:
 		return 0, fmt.Errorf("tenancy: no count query for table %q", table)
 	}
@@ -74,41 +74,41 @@ func countTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.UUID) error {
 	switch table {
 	case "products":
-		return q.PurgeTenantRowsProducts(ctx, id)
+		return q.PurgeMerchantRowsProducts(ctx, id)
 	case "prices":
-		return q.PurgeTenantRowsPrices(ctx, id)
+		return q.PurgeMerchantRowsPrices(ctx, id)
 	case "catalog_drift_events":
-		return q.PurgeTenantRowsCatalogDriftEvents(ctx, id)
+		return q.PurgeMerchantRowsCatalogDriftEvents(ctx, id)
 	case "payment_methods":
-		return q.PurgeTenantRowsPaymentMethods(ctx, id)
+		return q.PurgeMerchantRowsPaymentMethods(ctx, id)
 	case "subscriptions":
-		return q.PurgeTenantRowsSubscriptions(ctx, id)
+		return q.PurgeMerchantRowsSubscriptions(ctx, id)
 	case "entitlements":
-		return q.PurgeTenantRowsEntitlements(ctx, id)
+		return q.PurgeMerchantRowsEntitlements(ctx, id)
 	case "payments":
-		return q.PurgeTenantRowsPayments(ctx, id)
+		return q.PurgeMerchantRowsPayments(ctx, id)
 	case "admin_grants":
-		return q.PurgeTenantRowsAdminGrants(ctx, id)
+		return q.PurgeMerchantRowsEntitlementGrants(ctx, id)
 	case "notification_queue":
-		return q.PurgeTenantRowsNotificationQueue(ctx, id)
+		return q.PurgeMerchantRowsNotificationQueue(ctx, id)
 	case "processor_customers":
-		return q.PurgeTenantRowsProcessorCustomers(ctx, id)
+		return q.PurgeMerchantRowsProcessorCustomers(ctx, id)
 	case "checkout_sessions":
-		return q.PurgeTenantRowsCheckoutSessions(ctx, id)
+		return q.PurgeMerchantRowsCheckoutSessions(ctx, id)
 	case "provider_intents":
-		return q.PurgeTenantRowsProviderIntents(ctx, id)
+		return q.PurgeMerchantRowsProviderIntents(ctx, id)
 	case "money_accounts":
-		return q.PurgeTenantRowsMoneyAccounts(ctx, id)
+		return q.PurgeMerchantRowsMoneyAccounts(ctx, id)
 	case "money_balances":
-		return q.PurgeTenantRowsMoneyBalances(ctx, id)
+		return q.PurgeMerchantRowsMoneyBalances(ctx, id)
 	case "money_blocks":
-		return q.PurgeTenantRowsMoneyBlocks(ctx, id)
+		return q.PurgeMerchantRowsMoneyBlocks(ctx, id)
 	case "money_transactions":
-		return q.PurgeTenantRowsMoneyTransactions(ctx, id)
+		return q.PurgeMerchantRowsMoneyTransactions(ctx, id)
 	case "money_windows":
-		return q.PurgeTenantRowsMoneyWindows(ctx, id)
+		return q.PurgeMerchantRowsMoneyWindows(ctx, id)
 	case "money_spend_limits":
-		return q.PurgeTenantRowsMoneySpendLimits(ctx, id)
+		return q.PurgeMerchantRowsMoneySpendLimits(ctx, id)
 	default:
 		return fmt.Errorf("tenancy: no purge query for table %q", table)
 	}
@@ -121,7 +121,7 @@ func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 // manifest. A managed deployment can extend `location` to a real dump artifact.
 //
 // Returns the export id. Delete is gated on at least one completed export.
-func (s *Service) Export(ctx context.Context, id tenant.ID) (string, map[string]int, error) {
+func (s *Service) Export(ctx context.Context, id merchant.ID) (string, map[string]int, error) {
 	if _, err := s.tenantByID(ctx, id); err != nil {
 		return "", nil, err
 	}
@@ -185,7 +185,7 @@ type DeleteOptions struct {
 //
 // Re-running Delete on an already-deleted tenant returns ErrTenantNotFound (the
 // active-row lookup misses), so the purge itself is not re-run.
-func (s *Service) Delete(ctx context.Context, id tenant.ID, opts DeleteOptions) error {
+func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions) error {
 	if !opts.Confirm {
 		return errors.New("tenancy: delete requires confirmation")
 	}

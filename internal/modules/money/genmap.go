@@ -32,8 +32,8 @@ func toJSONBC[M ~map[string]V, V any](m M) ([]byte, error) {
 func moneyBalanceFromGen(r gen.OpenrailsMoneyBalance) *models.MoneyBalance {
 	return &models.MoneyBalance{
 		ID:              r.ID,
-		TenantID:        r.TenantID,
-		TenantSubjectID: r.TenantSubjectID,
+		MerchantID:        r.MerchantID,
+		MerchantSubjectID: r.MerchantSubjectID,
 		Currency:        r.Currency,
 		Balance:         r.Balance,
 		HeldBalance:     r.HeldBalance,
@@ -45,8 +45,8 @@ func moneyBalanceFromGen(r gen.OpenrailsMoneyBalance) *models.MoneyBalance {
 func moneyTransactionFromGen(r gen.OpenrailsMoneyTransaction) (*models.MoneyTransaction, error) {
 	m := &models.MoneyTransaction{
 		ID:              r.ID,
-		TenantID:        r.TenantID,
-		TenantSubjectID: r.TenantSubjectID,
+		MerchantID:        r.MerchantID,
+		MerchantSubjectID: r.MerchantSubjectID,
 		Currency:        r.Currency,
 		Actor:           r.Actor,
 		Resource:        r.Resource,
@@ -77,8 +77,8 @@ func settingsFromGen(r gen.OpenrailsMoneyAccount) *models.MoneyAccount {
 	}
 	return &models.MoneyAccount{
 		ID:                       r.ID,
-		TenantID:                 r.TenantID,
-		TenantSubjectID:          r.TenantSubjectID,
+		MerchantID:                 r.MerchantID,
+		MerchantSubjectID:          r.MerchantSubjectID,
 		Currency:                 r.Currency,
 		BillingMode:              r.BillingMode,
 		MaxSpendPerDayMicros:     r.MaxSpendPerDayMicros,
@@ -108,8 +108,8 @@ func settingsFromGen(r gen.OpenrailsMoneyAccount) *models.MoneyAccount {
 func spendLimitFromGen(r gen.OpenrailsMoneySpendLimit) *models.MoneySpendLimit {
 	return &models.MoneySpendLimit{
 		ID:                     r.ID,
-		TenantID:               r.TenantID,
-		TenantSubjectID:        r.TenantSubjectID,
+		MerchantID:               r.MerchantID,
+		MerchantSubjectID:        r.MerchantSubjectID,
 		Currency:               r.Currency,
 		Actor:                  r.Actor,
 		MaxSpendPerDayMicros:   r.MaxSpendPerDayMicros,
@@ -122,8 +122,8 @@ func spendLimitFromGen(r gen.OpenrailsMoneySpendLimit) *models.MoneySpendLimit {
 func usageEventFromGen(r gen.OpenrailsUsageEvent) (*models.UsageEvent, error) {
 	m := &models.UsageEvent{
 		ID:                 r.ID,
-		TenantID:           r.TenantID,
-		TenantSubjectID:    r.TenantSubjectID,
+		MerchantID:           r.MerchantID,
+		MerchantSubjectID:    r.MerchantSubjectID,
 		Actor:              r.Actor,
 		Resource:           r.Resource,
 		EventType:          r.EventType,
@@ -146,8 +146,8 @@ func usageEventFromGen(r gen.OpenrailsUsageEvent) (*models.UsageEvent, error) {
 func invoiceFromGen(r gen.OpenrailsInvoice) (*models.Invoice, error) {
 	m := &models.Invoice{
 		ID:              r.ID,
-		TenantID:        r.TenantID,
-		TenantSubjectID: r.TenantSubjectID,
+		MerchantID:        r.MerchantID,
+		MerchantSubjectID: r.MerchantSubjectID,
 		Currency:        r.Currency,
 		PeriodFrom:      r.PeriodFrom,
 		PeriodTo:        r.PeriodTo,

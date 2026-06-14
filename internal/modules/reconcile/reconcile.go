@@ -576,7 +576,7 @@ func ensureChargePayment(
 	now := paymentService.Clock().Now()
 	payment := &models.Payment{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		MerchantSubjectID: identity.MerchantSubjectIDFromString(userID).UUID(),
 		PriceID:         priceID,
 		Processor:       models.ProcessorStripe,
 		TransactionID:   txnID,

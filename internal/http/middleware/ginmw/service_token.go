@@ -12,15 +12,15 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Gin context keys for a resolved OpenRails-issued tenant service token (issue #222).
 const (
 	// ServiceTokenContextKey holds the *controlplane.ResolvedServiceToken for the request.
 	ServiceTokenContextKey = "openrails.service_token"
-	// ServiceTokenAuthKitTenantSlugContextKey holds the owning AuthKit tenant slug.
-	ServiceTokenAuthKitTenantSlugContextKey = "openrails.service_token_authkit_tenant_slug"
+	// ServiceTokenOwnerTenantSlugContextKey holds the owning AuthKit tenant slug.
+	ServiceTokenOwnerTenantSlugContextKey = "openrails.service_token_authkit_tenant_slug"
 )
 
 // ServiceTokenResolver validates a presented OpenRails-issued service token against live AuthKit +
@@ -75,9 +75,9 @@ func ServiceTokenRequired(resolver ServiceTokenResolver) gin.HandlerFunc {
 				response.UnauthorizedWithMessage(c, "service_token_expired")
 			case errors.Is(err, authcore.ErrAccessTokenRevoked):
 				response.UnauthorizedWithMessage(c, "service_token_revoked")
-			case errors.Is(err, controlplane.ErrServiceTokenTenantUnresolved):
+			case errors.Is(err, controlplane.ErrServiceTokenMerchantUnresolved):
 				// Owning AuthKit tenant maps to no active OpenRails tenant.
-				response.ForbiddenWithMessage(c, "service_token_tenant_unresolved")
+				response.ForbiddenWithMessage(c, "service_token_merchant_unresolved")
 			case errors.Is(err, controlplane.ErrServiceTokenScopeDenied):
 				response.ForbiddenWithMessage(c, "service_token_resource_scope_denied")
 			case errors.Is(err, authcore.ErrInvalidAccessToken):
@@ -94,11 +94,11 @@ func ServiceTokenRequired(resolver ServiceTokenResolver) gin.HandlerFunc {
 
 		// Pin the resolved tenant for tenant-owned DB access (issue #223). This
 		// OVERRIDES the default single-tenant resolution from ResolveTenant.
-		ctx := tenant.WithID(c.Request.Context(), resolved.TenantID)
+		ctx := merchant.WithID(c.Request.Context(), resolved.MerchantID)
 		c.Request = c.Request.WithContext(ctx)
-		c.Set("openrails.tenant_id", resolved.TenantID)
+		c.Set("openrails.tenant_id", resolved.MerchantID)
 		c.Set(ServiceTokenContextKey, resolved)
-		c.Set(ServiceTokenAuthKitTenantSlugContextKey, resolved.AuthKitTenantSlug)
+		c.Set(ServiceTokenOwnerTenantSlugContextKey, resolved.OwnerTenantSlug)
 
 		c.Next()
 	}
@@ -114,17 +114,17 @@ func resolveServiceCredential(ctx context.Context, resolver ServiceTokenResolver
 	return nil, authcore.ErrInvalidAccessToken
 }
 
-// RequireServiceTokenTenantSubjectScope gates a route on the resolved service token's payer resource
+// RequireServiceTokenMerchantSubjectScope gates a route on the resolved service token's payer resource
 // scope. It must run after ServiceTokenRequired; tenant-wide service tokens pass, payer-scoped service tokens
 // pass only for their exact tenant subject id.
-func RequireServiceTokenTenantSubjectScope(c *gin.Context, payer uuid.UUID) bool {
+func RequireServiceTokenMerchantSubjectScope(c *gin.Context, payer uuid.UUID) bool {
 	resolved, ok := ServiceTokenFromGin(c)
 	if !ok || resolved == nil {
 		response.UnauthorizedWithMessage(c, "service token required")
 		c.Abort()
 		return false
 	}
-	if !resolved.AllowsTenantSubject(payer) {
+	if !resolved.AllowsMerchantSubject(payer) {
 		response.ForbiddenWithMessage(c, "service_token_tenant_subject_scope_denied")
 		c.Abort()
 		return false

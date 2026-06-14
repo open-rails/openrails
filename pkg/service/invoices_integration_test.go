@@ -29,7 +29,7 @@ func TestListInvoices_Statement(t *testing.T) {
 	})
 
 	_, err := ms.Deposit(ctx, money.DepositParams{
-		TenantSubjectID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "purchase",
+		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "purchase",
 	})
 	require.NoError(t, err)
 

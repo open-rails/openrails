@@ -11,10 +11,10 @@ import (
 // rate-limit windows. Rolling money-budget windows (#304) extend this.
 type TierPolicy struct {
 	ID       uuid.UUID `json:"id"`
-	TenantID uuid.UUID `json:"tenant_id"`
-	// TenantSubjectID the policy belongs to. The all-zero uuid is the reserved sentinel
+	MerchantID uuid.UUID `json:"tenant_id"`
+	// MerchantSubjectID the policy belongs to. The all-zero uuid is the reserved sentinel
 	// for tenant-wide defaults; a real payer id scopes policy to that payer.
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	// Tier name (e.g. "free", "tier_1"); the policy applies to actors at this tier.
 	Tier string `json:"tier"`
 	// Policy is the throughput windows: {"windows":[{"unit","window_seconds","max"}]}.

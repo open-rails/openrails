@@ -17,7 +17,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // schemaDDL stands up the minimal openrails.* schema the platform layer touches:
@@ -26,7 +26,7 @@ import (
 const schemaDDL = `
 CREATE SCHEMA IF NOT EXISTS billing;
 
-CREATE TABLE IF NOT EXISTS openrails.tenants (
+CREATE TABLE IF NOT EXISTS openrails.merchants (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug         TEXT NOT NULL UNIQUE,
     name         TEXT NOT NULL,
@@ -136,15 +136,15 @@ func newExternalPlatformTestPool(t *testing.T, ctx context.Context, adminDSN str
 	return pool
 }
 
-func seedTenant(t *testing.T, pool *pgxpool.Pool, slug, status, tier string) tenant.ID {
+func seedTenant(t *testing.T, pool *pgxpool.Pool, slug, status, tier string) merchant.ID {
 	t.Helper()
 	var idStr string
 	err := pool.QueryRow(context.Background(), `
-		INSERT INTO openrails.tenants (slug, name, status, billing_tier)
+		INSERT INTO openrails.merchants (slug, name, status, billing_tier)
 		VALUES ($1, $1, $2, NULLIF($3,'')) RETURNING id::text
 	`, slug, status, tier).Scan(&idStr)
 	require.NoError(t, err)
-	id, err := tenant.ParseID(idStr)
+	id, err := merchant.ParseID(idStr)
 	require.NoError(t, err)
 	return id
 }

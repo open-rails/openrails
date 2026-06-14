@@ -663,14 +663,14 @@ func (s *CheckoutService) processNMISubscription(
 		}
 	}
 
-	payerTSID, err := payerTenantSubjectID(user.ID)
+	payerTSID, err := payerMerchantSubjectID(user.ID)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
 	attempt, err := s.PaymentService.ReserveProviderAttempt(ctx, &models.Payment{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: payerTSID,
+		MerchantSubjectID: payerTSID,
 		PriceID:         price.ID,
 		Processor:       models.Processor(provider),
 		TransactionID:   nmiSubscriptionAttemptTransactionID(orderID),
@@ -791,7 +791,7 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 		return nil, fmt.Errorf("load existing subscription: %w", err)
 	}
 
-	payerTSID, err := payerTenantSubjectID(user.ID)
+	payerTSID, err := payerMerchantSubjectID(user.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -802,7 +802,7 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 	}
 	subscription := &models.Subscription{
 		ID:                       subscriptionID,
-		TenantSubjectID:          payerTSID,
+		MerchantSubjectID:          payerTSID,
 		ProductID:                price.ProductID,
 		PriceID:                  price.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
@@ -901,7 +901,7 @@ func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, 
 		now := s.now().UTC()
 		payment := &models.Payment{
 			ID:                       uuidutil.NewV7(),
-			TenantSubjectID:          subscription.TenantSubjectID,
+			MerchantSubjectID:          subscription.MerchantSubjectID,
 			PriceID:                  price.ID,
 			SubscriptionID:           &subscription.ID,
 			Processor:                models.Processor(provider),
@@ -947,7 +947,7 @@ func (s *CheckoutService) grantImmediateNMISubscriptionEntitlements(ctx context.
 		endAt := subscription.CurrentPeriodEndsAt.UTC()
 		if _, err := s.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 			UserID:          userID,
-			TenantSubjectID: subscription.TenantSubjectID,
+			MerchantSubjectID: subscription.MerchantSubjectID,
 			Entitlement:     entitlementName,
 			NotBefore:       &notBefore,
 			EndAt:           &endAt,
@@ -1599,7 +1599,7 @@ func (s *CheckoutService) processUpgrade(
 
 	// Derive the payer before any money moves (#364): a zero id must never
 	// reach the subscription/payment writes below.
-	payerTSID, err := payerTenantSubjectID(user.ID)
+	payerTSID, err := payerMerchantSubjectID(user.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -1830,7 +1830,7 @@ func (s *CheckoutService) processUpgrade(
 
 	newSubscription := &models.Subscription{
 		ID:                       newSubscriptionID,
-		TenantSubjectID:          payerTSID,
+		MerchantSubjectID:          payerTSID,
 		ProductID:                newPrice.ProductID,
 		PriceID:                  newPrice.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec),
@@ -2254,7 +2254,7 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 		// Verify ownership: compare PARSED subject ids, not raw strings — the
 		// caller's id is a UUID (boundary-enforced, #364) but may differ in
 		// case/format from the canonical String() form.
-		if payer := identity.TenantSubjectIDFromString(user.ID); payer.IsZero() || existingSub.TenantSubjectID != payer.UUID() {
+		if payer := identity.MerchantSubjectIDFromString(user.ID); payer.IsZero() || existingSub.MerchantSubjectID != payer.UUID() {
 			return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "subscription not found"}
 		}
 	} else {
@@ -2349,7 +2349,7 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	var existingSub *models.Subscription
 	if req.SubscriptionID != uuid.Nil {
 		existingSub, err = s.SubscriptionService.GetByID(ctx, req.SubscriptionID)
-		if payer := identity.TenantSubjectIDFromString(user.ID); err != nil || payer.IsZero() || existingSub.TenantSubjectID != payer.UUID() {
+		if payer := identity.MerchantSubjectIDFromString(user.ID); err != nil || payer.IsZero() || existingSub.MerchantSubjectID != payer.UUID() {
 			return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "subscription not found"}
 		}
 	} else {

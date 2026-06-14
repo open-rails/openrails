@@ -10,18 +10,18 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/crypto"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // memDEKStore is an in-memory DEKStore for the encrypted-store unit tests.
 type memDEKStore struct{ data map[string][]byte }
 
-func (m *memDEKStore) GetWrappedDEK(_ context.Context, id tenant.ID) ([]byte, bool, error) {
+func (m *memDEKStore) GetWrappedDEK(_ context.Context, id merchant.ID) ([]byte, bool, error) {
 	w, ok := m.data[id.String()]
 	return w, ok, nil
 }
 
-func (m *memDEKStore) PutWrappedDEK(_ context.Context, id tenant.ID, wrapped []byte) ([]byte, error) {
+func (m *memDEKStore) PutWrappedDEK(_ context.Context, id merchant.ID, wrapped []byte) ([]byte, error) {
 	if existing, ok := m.data[id.String()]; ok {
 		return existing, nil
 	}
@@ -49,7 +49,7 @@ func TestEncryptedSecretStore_RoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEncryptedSecretStore: %v", err)
 	}
-	tA := tenant.ID(uuid.New())
+	tA := merchant.ID(uuid.New())
 
 	put, err := store.Put(ctx, tA, SecretStripeSecretKey, "sk_live_abc")
 	if err != nil {
@@ -80,7 +80,7 @@ func TestEncryptedSecretStore_RoundTrips(t *testing.T) {
 func TestEncryptedSecretStore_IdempotentRotation(t *testing.T) {
 	ctx := context.Background()
 	store, _ := NewEncryptedSecretStore(NewMemorySecretStore(), newEnc(t))
-	tA := tenant.ID(uuid.New())
+	tA := merchant.ID(uuid.New())
 
 	v1, _ := store.Put(ctx, tA, SecretStripeSecretKey, "sk_1")
 	v1again, _ := store.Put(ctx, tA, SecretStripeSecretKey, "sk_1")
@@ -98,8 +98,8 @@ func TestEncryptedSecretStore_CrossTenantIsolation(t *testing.T) {
 	inner := NewMemorySecretStore()
 	enc := newEnc(t)
 	store, _ := NewEncryptedSecretStore(inner, enc)
-	tA := tenant.ID(uuid.New())
-	tB := tenant.ID(uuid.New())
+	tA := merchant.ID(uuid.New())
+	tB := merchant.ID(uuid.New())
 
 	if _, err := store.Put(ctx, tA, SecretStripeSecretKey, "A-secret"); err != nil {
 		t.Fatalf("Put A: %v", err)

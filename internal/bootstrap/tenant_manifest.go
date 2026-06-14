@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 const tenantManifestAdvisoryLock = int64(734252042137424)
@@ -21,26 +20,16 @@ type TenantManifest struct {
 }
 
 type ManifestTenant struct {
-	Slug        string           `yaml:"slug"`
-	Name        string           `yaml:"name"`
-	BillingTier string           `yaml:"billing_tier"`
-	Region      string           `yaml:"region"`
-	WebhookHost string           `yaml:"webhook_host"`
-	WebhookPath string           `yaml:"webhook_path"`
-	Issuers     []ManifestIssuer `yaml:"issuers"`
+	Slug        string `yaml:"slug"`
+	Name        string `yaml:"name"`
+	BillingTier string `yaml:"billing_tier"`
+	Region      string `yaml:"region"`
+	WebhookHost string `yaml:"webhook_host"`
+	WebhookPath string `yaml:"webhook_path"`
+	// OwnerTenantID is the AuthKit org (tenant) uuid that owns this merchant
+	// (#481 ownership link). Optional.
+	OwnerTenantID string `yaml:"owner_tenant_id"`
 }
-
-type ManifestIssuer struct {
-	Issuer    string   `yaml:"issuer"`
-	JWKSURI   string   `yaml:"jwks_uri"`
-	Audiences []string `yaml:"audiences"`
-	Enabled   *bool    `yaml:"enabled"`
-}
-
-// defaultIssuerAudience is the JWT `aud` value accepted for a registered issuer
-// when the manifest declares none. Every Doujins-stack issuer mints tokens with
-// aud=openrails, so registration need not restate it per issuer.
-const defaultIssuerAudience = "openrails"
 
 type TenantManifestReconcileOptions struct{}
 
@@ -69,19 +58,20 @@ func ReconcileTenantManifestData(ctx context.Context, cfg *config.Config, cp *co
 		return nil
 	}
 
-	svc, err := tenancy.NewService(cp.Pool(), cp, nil)
+	svc, err := tenancy.NewService(cp.Pool(), nil)
 	if err != nil {
 		return err
 	}
 
 	for _, mt := range manifest.Tenants {
 		tn, err := svc.Provision(ctx, tenancy.ProvisionRequest{
-			Slug:        mt.Slug,
-			Name:        mt.Name,
-			BillingTier: mt.BillingTier,
-			Region:      mt.Region,
-			WebhookHost: mt.WebhookHost,
-			WebhookPath: mt.WebhookPath,
+			Slug:          mt.Slug,
+			Name:          mt.Name,
+			OwnerTenantID: mt.OwnerTenantID,
+			BillingTier:   mt.BillingTier,
+			Region:        mt.Region,
+			WebhookHost:   mt.WebhookHost,
+			WebhookPath:   mt.WebhookPath,
 		})
 		if err != nil {
 			return fmt.Errorf("tenant bootstrap: provision %q: %w", mt.Slug, err)
@@ -92,13 +82,8 @@ func ReconcileTenantManifestData(ctx context.Context, cfg *config.Config, cp *co
 		}).Info("tenant bootstrap: tenant ensured")
 	}
 
-	// Issuer registration is declarative and does not fetch the JWKS, so it
-	// succeeds even when the issuer's app is not running yet (the verifier fetches
-	// the JWKS lazily at token-verification time). A failure here is a genuine
-	// config/DB error, so surface it.
-	if ok := reconcileManifestIssuersOnce(ctx, cp, manifest); !ok {
-		return fmt.Errorf("tenant bootstrap: issuer registration failed")
-	}
+	// #480/#481: issuer/JWKS trust is AuthKit's remote_application registry (#74),
+	// not an OpenRails-owned table — the manifest no longer reconciles issuers.
 	return nil
 }
 
@@ -114,52 +99,6 @@ func unlockTenantManifestBootstrap(ctx context.Context, cp *controlplane.Control
 	if _, err := cp.Pool().Exec(ctx, `SELECT pg_advisory_unlock($1)`, tenantManifestAdvisoryLock); err != nil {
 		log.WithError(err).Warn("tenant bootstrap: release advisory lock failed")
 	}
-}
-
-// reconcileManifestIssuersOnce registers (or disables) every tenant's declared
-// issuers. Registration is declarative and does not probe the JWKS, so it does
-// not depend on the issuer's app being reachable. Returns false if any genuine
-// registration error occurred (invalid config, ownership conflict, DB error).
-func reconcileManifestIssuersOnce(ctx context.Context, cp *controlplane.ControlPlane, manifest *TenantManifest) bool {
-	allDone := true
-	for _, mt := range manifest.Tenants {
-		if len(mt.Issuers) == 0 {
-			continue
-		}
-		tid, err := tenantIDForSlug(ctx, cp, mt.Slug)
-		if err != nil {
-			log.WithError(err).WithField("tenant", mt.Slug).Warn("tenant bootstrap: issuer reconciliation waiting for tenant")
-			allDone = false
-			continue
-		}
-		for _, issuer := range mt.Issuers {
-			if issuer.Enabled != nil && !*issuer.Enabled {
-				if err := cp.DisableDelegatedIssuer(ctx, tid, issuer.Issuer); err != nil {
-					log.WithError(err).WithField("issuer", issuer.Issuer).Warn("tenant bootstrap: disable issuer failed")
-					allDone = false
-				}
-				continue
-			}
-			audiences := cleanStrings(issuer.Audiences)
-			if len(audiences) == 0 {
-				audiences = []string{defaultIssuerAudience}
-			}
-			err := cp.RegisterDelegatedIssuer(ctx, controlplane.RegisterDelegatedIssuerParams{
-				TenantID:  tid,
-				Issuer:    issuer.Issuer,
-				JWKSURI:   issuer.JWKSURI,
-				Audiences: audiences,
-			})
-			if err != nil {
-				log.WithError(err).WithFields(log.Fields{"tenant": mt.Slug, "issuer": issuer.Issuer, "jwks_uri": issuer.JWKSURI}).
-					Error("tenant bootstrap: issuer registration failed")
-				allDone = false
-				continue
-			}
-			log.WithFields(log.Fields{"tenant": mt.Slug, "issuer": issuer.Issuer}).Info("tenant bootstrap: issuer registered")
-		}
-	}
-	return allDone
 }
 
 // AnyTenantProvisioned reports whether any of the given tenant slugs is already
@@ -182,21 +121,8 @@ func AnyTenantProvisioned(ctx context.Context, cp *controlplane.ControlPlane, sl
 		return false, nil
 	}
 	var exists bool
-	err := cp.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM openrails.tenants WHERE slug = ANY($1) AND deleted_at IS NULL)`, norm).Scan(&exists)
+	err := cp.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM openrails.merchants WHERE slug = ANY($1) AND deleted_at IS NULL)`, norm).Scan(&exists)
 	return exists, err
-}
-
-func tenantIDForSlug(ctx context.Context, cp *controlplane.ControlPlane, slug string) (tenant.ID, error) {
-	var id string
-	err := cp.Pool().QueryRow(ctx, `
-		SELECT id::text FROM openrails.tenants
-		 WHERE slug = $1 AND status = 'active' AND deleted_at IS NULL
-		 LIMIT 1
-	`, strings.ToLower(strings.TrimSpace(slug))).Scan(&id)
-	if err != nil {
-		return tenant.ID{}, err
-	}
-	return tenant.ParseID(id)
 }
 
 func cleanStrings(in []string) []string {

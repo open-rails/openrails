@@ -16,9 +16,9 @@ import (
 type EntitlementFeature struct {
 	ID uuid.UUID `json:"id"`
 
-	// TenantID scopes this row to a tenant (issue #223/#227). Nullzero + DB
+	// MerchantID scopes this row to a tenant (issue #223/#227). Nullzero + DB
 	// default: inserts that leave it zero fall back to the default tenant.
-	TenantID uuid.UUID `json:"tenant_id"`
+	MerchantID uuid.UUID `json:"tenant_id"`
 
 	LookupKey string         `json:"lookup_key"`
 	Name      string         `json:"name"`
@@ -35,7 +35,7 @@ type EntitlementFeature struct {
 type ProductEntitlementFeature struct {
 	ID uuid.UUID `json:"id"`
 
-	TenantID uuid.UUID `json:"tenant_id"`
+	MerchantID uuid.UUID `json:"tenant_id"`
 
 	ProductID            uuid.UUID `json:"product_id"`
 	EntitlementFeatureID uuid.UUID `json:"entitlement_feature_id"`

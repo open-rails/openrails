@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,7 +42,7 @@ func (f *fakePaymentMethodStore) GetByUserID(_ context.Context, _ string) ([]*mo
 
 type vaultUnavailableSecretStore struct{}
 
-func (vaultUnavailableSecretStore) Get(context.Context, tenant.ID, string) (tenancy.Secret, error) {
+func (vaultUnavailableSecretStore) Get(context.Context, merchant.ID, string) (tenancy.Secret, error) {
 	return tenancy.Secret{}, tenancy.ErrSecretBackendUnavailable
 }
 
@@ -84,7 +84,7 @@ func TestApplyUpdatedCardMetadataClearsOmittedCardDetails(t *testing.T) {
 }
 
 func TestCreateVaultUsesTenantSecretMobiusKeyWithoutStaticClient(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	ctx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 	store := tenancy.NewMemorySecretStore()
 	_, err := store.Put(ctx, dbtest.TestTenantID, tenancy.SecretNMIMobiusProductionKey, "tenant-mobius-key")
 	require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestCreateVaultUsesTenantSecretMobiusKeyWithoutStaticClient(t *testing.T) {
 }
 
 func TestVaultFallsBackToStaticMobiusClientWhenTenantSecretMissing(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	ctx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 	svc := &VaultService{
 		Config: vaultTestConfig(true, "static-mobius-key"),
 	}
@@ -150,7 +150,7 @@ func TestVaultFallsBackToStaticMobiusClientWhenTenantSecretMissing(t *testing.T)
 }
 
 func TestVaultMissingTenantSecretAndNoStaticClientReturnsMissingClient(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	ctx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 	svc := &VaultService{
 		TenantSecrets: tenancy.NewMemorySecretStore(),
 	}
@@ -161,7 +161,7 @@ func TestVaultMissingTenantSecretAndNoStaticClientReturnsMissingClient(t *testin
 }
 
 func TestVaultFailsClosedWhenTenantSecretBackendUnavailable(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	ctx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 	svc := &VaultService{
 		TenantSecrets: vaultUnavailableSecretStore{},
 		Config:        vaultTestConfig(true, "static-mobius-key"),
@@ -173,8 +173,8 @@ func TestVaultFailsClosedWhenTenantSecretBackendUnavailable(t *testing.T) {
 }
 
 func TestVaultTenantSecretResolutionIsTenantScoped(t *testing.T) {
-	tenantA := tenant.ID(uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
-	tenantB := tenant.ID(uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+	tenantA := merchant.ID(uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+	tenantB := merchant.ID(uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
 	store := tenancy.NewMemorySecretStore()
 	_, err := store.Put(context.Background(), tenantA, tenancy.SecretNMIMobiusProductionKey, "tenant-a-key")
 	require.NoError(t, err)
@@ -186,9 +186,9 @@ func TestVaultTenantSecretResolutionIsTenantScoped(t *testing.T) {
 		Config:        vaultTestConfig(true, ""),
 	}
 
-	clientA, err := svc.resolveNMIClient(tenant.WithID(context.Background(), tenantA), "mobius")
+	clientA, err := svc.resolveNMIClient(merchant.WithID(context.Background(), tenantA), "mobius")
 	require.NoError(t, err)
-	clientB, err := svc.resolveNMIClient(tenant.WithID(context.Background(), tenantB), "mobius")
+	clientB, err := svc.resolveNMIClient(merchant.WithID(context.Background(), tenantB), "mobius")
 	require.NoError(t, err)
 	require.Equal(t, "tenant-a-key", clientA.SecurityKey)
 	require.Equal(t, "tenant-b-key", clientB.SecurityKey)

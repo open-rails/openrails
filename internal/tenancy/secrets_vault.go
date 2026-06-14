@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrVaultNotConfigured is returned by every vaultSecretStore operation until a
@@ -39,7 +39,7 @@ type VaultKV interface {
 // Vault paths use slugs so operator-written paths are deterministic and human
 // readable; DB/RLS/audit paths continue to use tenant ids.
 type TenantSlugResolver interface {
-	TenantSlug(ctx context.Context, tenantID tenant.ID) (string, error)
+	TenantSlug(ctx context.Context, tenantID merchant.ID) (string, error)
 }
 
 type dbTenantSlugResolver struct {
@@ -51,7 +51,7 @@ func NewDBTenantSlugResolver(pool *db.Pool) TenantSlugResolver {
 	return dbTenantSlugResolver{pool: pool}
 }
 
-func (r dbTenantSlugResolver) TenantSlug(ctx context.Context, tenantID tenant.ID) (string, error) {
+func (r dbTenantSlugResolver) TenantSlug(ctx context.Context, tenantID merchant.ID) (string, error) {
 	if r.pool == nil {
 		return "", fmt.Errorf("%w: tenant slug resolver has no database pool", ErrSecretBackendUnavailable)
 	}
@@ -108,7 +108,7 @@ func NewVaultSecretStore(mount string, client VaultKV, resolver TenantSlugResolv
 }
 
 // pathFor builds the tenant-scoped Vault path for a (tenant, name) pair.
-func (v *vaultSecretStore) pathFor(ctx context.Context, tenantID tenant.ID, name string) (string, error) {
+func (v *vaultSecretStore) pathFor(ctx context.Context, tenantID merchant.ID, name string) (string, error) {
 	if v.resolver == nil {
 		return "", fmt.Errorf("%w: vault-backed secret store requires a tenant slug resolver", ErrSecretBackendUnavailable)
 	}
@@ -119,7 +119,7 @@ func (v *vaultSecretStore) pathFor(ctx context.Context, tenantID tenant.ID, name
 	return path.Join(v.mount, "openrails", "tenants", slug, cleanSecretName(name)), nil
 }
 
-func (v *vaultSecretStore) Get(ctx context.Context, tenantID tenant.ID, name string) (Secret, error) {
+func (v *vaultSecretStore) Get(ctx context.Context, tenantID merchant.ID, name string) (Secret, error) {
 	if err := validateSecretRef(tenantID, name); err != nil {
 		return Secret{}, err
 	}
@@ -144,7 +144,7 @@ func (v *vaultSecretStore) Get(ctx context.Context, tenantID tenant.ID, name str
 	return Secret{Name: name, Value: val, Version: 1}, nil
 }
 
-func (v *vaultSecretStore) Put(ctx context.Context, tenantID tenant.ID, name, value string) (Secret, error) {
+func (v *vaultSecretStore) Put(ctx context.Context, tenantID merchant.ID, name, value string) (Secret, error) {
 	if err := validateSecretRef(tenantID, name); err != nil {
 		return Secret{}, err
 	}
@@ -161,7 +161,7 @@ func (v *vaultSecretStore) Put(ctx context.Context, tenantID tenant.ID, name, va
 	return Secret{Name: name, Value: value, Version: 1}, nil
 }
 
-func (v *vaultSecretStore) Delete(ctx context.Context, tenantID tenant.ID, name string) error {
+func (v *vaultSecretStore) Delete(ctx context.Context, tenantID merchant.ID, name string) error {
 	if err := validateSecretRef(tenantID, name); err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func (v *vaultSecretStore) Delete(ctx context.Context, tenantID tenant.ID, name 
 	return nil
 }
 
-func (v *vaultSecretStore) List(ctx context.Context, tenantID tenant.ID) ([]string, error) {
+func (v *vaultSecretStore) List(ctx context.Context, tenantID merchant.ID) ([]string, error) {
 	if tenantID.IsZero() {
 		return nil, validateSecretRef(tenantID, "x")
 	}

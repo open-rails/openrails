@@ -32,13 +32,13 @@ func RemoveCancelledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, 
 		exclude = &excludeID
 	}
 
-	tsid, err := repo.ResolveTenantSubjectID(userID)
+	tsid, err := repo.ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return 0, err
 	}
 
 	rows, err := dbb.Gen(ctx).MarkCancelledSubscriptionsSuperseded(ctx, gen.MarkCancelledSubscriptionsSupersededParams{
-		TenantSubjectID: tsid,
+		MerchantSubjectID: tsid,
 		ProductID:       productID,
 		SupersededBy:    supersededBy,
 		ExcludeID:       exclude,

@@ -33,11 +33,11 @@ func (s *Store) WithFingerprints(src FingerprintSource) *Store {
 	return s
 }
 
-// EnqueueParams describes one logical intent. TenantID is stamped explicitly;
+// EnqueueParams describes one logical intent. MerchantID is stamped explicitly;
 // IdempotencyKey makes the enqueue effectively-once (see the query's conflict
 // semantics: pending refreshed, superseded/expired revived, rest untouched).
 type EnqueueParams struct {
-	TenantID       uuid.UUID
+	MerchantID       uuid.UUID
 	Provider       string
 	IntentType     string
 	SubscriptionID *uuid.UUID
@@ -79,7 +79,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsProv
 		}
 	}
 	return s.db.Gen(ctx).EnqueueProviderIntent(ctx, gen.EnqueueProviderIntentParams{
-		TenantID:           p.TenantID,
+		MerchantID:           p.MerchantID,
 		Provider:           p.Provider,
 		IntentType:         p.IntentType,
 		SubscriptionID:     p.SubscriptionID,

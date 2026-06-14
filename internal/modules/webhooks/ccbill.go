@@ -651,7 +651,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 		paymentEventData := analytics.PaymentEventData{
 			EventID:        uuidutil.NewV7(),
 			SubscriptionID: &subscription.ID,
-			UserID:         subscription.TenantSubjectID.String(),
+			UserID:         subscription.MerchantSubjectID.String(),
 			EventType:      analytics.PaymentEventChargeSuccess,
 			Processor:      "ccbill",
 			Amount:         &billedAmount,
@@ -753,7 +753,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 		if s.NotificationService != nil && userID != "" {
 			notification := &models.NotificationQueue{
 				ID:              uuidutil.NewV7(),
-				TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+				MerchantSubjectID: identity.MerchantSubjectIDFromString(userID).UUID(),
 				EventType:       models.NotificationPaymentMethodFailed,
 			}
 			if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
@@ -910,7 +910,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		now := s.now().UTC()
 		payment := &models.Payment{
 			ID:              uuidutil.NewV7(),
-			TenantSubjectID: subscription.TenantSubjectID,
+			MerchantSubjectID: subscription.MerchantSubjectID,
 			PriceID:         newPrice.ID,
 			SubscriptionID:  &subscription.ID,
 			Processor:       models.ProcessorCCBill,
@@ -1007,7 +1007,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			paymentEventData := analytics.PaymentEventData{
 				EventID:        uuidutil.NewV7(),
 				SubscriptionID: &subscription.ID,
-				UserID:         subscription.TenantSubjectID.String(),
+				UserID:         subscription.MerchantSubjectID.String(),
 				EventType:      analytics.PaymentEventChargeSuccess,
 				Processor:      "ccbill",
 				Amount:         &billedAmount,
@@ -1027,7 +1027,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		if s.NotificationService != nil {
 			notification := &models.NotificationQueue{
 				ID:              uuidutil.NewV7(),
-				TenantSubjectID: subscription.TenantSubjectID,
+				MerchantSubjectID: subscription.MerchantSubjectID,
 				EventType:       models.NotificationPremiumRenewed, // Use renewed for upgrades
 			}
 			if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
@@ -1037,7 +1037,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":         subscription.ID,
-			"userID":                 subscription.TenantSubjectID.String(),
+			"userID":                 subscription.MerchantSubjectID.String(),
 			"oldPriceID":             oldPriceID,
 			"newPriceID":             newPrice.ID,
 			"billedAmount":           billedAmount,
@@ -1117,7 +1117,7 @@ func (s *CCBillWebhookService) updateEntitlementsForUpgrade(
 			st := models.EntitlementSourceSubscription
 			sid := subscription.ID
 			if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-				UserID:      subscription.TenantSubjectID.String(),
+				UserID:      subscription.MerchantSubjectID.String(),
 				Entitlement: oldEnt,
 				SourceType:  &st,
 				SourceID:    &sid,
@@ -1153,7 +1153,7 @@ func (s *CCBillWebhookService) updateEntitlementsForUpgrade(
 			if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
 				endAt := subscription.CurrentPeriodEndsAt.UTC()
 				params = entitlements.PushNewEntitlementParams{
-					UserID:      subscription.TenantSubjectID.String(),
+					UserID:      subscription.MerchantSubjectID.String(),
 					Entitlement: newEnt,
 					NotBefore:   &notBefore,
 					EndAt:       &endAt,
@@ -1162,7 +1162,7 @@ func (s *CCBillWebhookService) updateEntitlementsForUpgrade(
 				}
 			} else {
 				params = entitlements.PushNewEntitlementParams{
-					UserID:      subscription.TenantSubjectID.String(),
+					UserID:      subscription.MerchantSubjectID.String(),
 					Entitlement: newEnt,
 					NotBefore:   &notBefore,
 					Indefinite:  true,
@@ -1175,7 +1175,7 @@ func (s *CCBillWebhookService) updateEntitlementsForUpgrade(
 			} else {
 				log.WithContext(ctx).WithFields(log.Fields{
 					"subscription_id": subscription.ID,
-					"user_id":         subscription.TenantSubjectID.String(),
+					"user_id":         subscription.MerchantSubjectID.String(),
 					"entitlement":     newEnt,
 					"action":          "granted",
 				}).Info("Granted new entitlement during subscription tier change")
@@ -1253,7 +1253,7 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 		if s.NotificationService != nil && userID != "" {
 			notification := &models.NotificationQueue{
 				ID:              uuidutil.NewV7(),
-				TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+				MerchantSubjectID: identity.MerchantSubjectIDFromString(userID).UUID(),
 				EventType:       models.NotificationPaymentMethodFailed,
 			}
 			if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
@@ -1330,7 +1330,7 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 				"new_renewal_date":          sub.CurrentPeriodEndsAt,
 			}
 
-			uid1 := sub.TenantSubjectID.String()
+			uid1 := sub.MerchantSubjectID.String()
 			subscriptionEventData := analytics.SubscriptionEventData{
 				EventID:                 uuidutil.NewV7(),
 				SubscriptionID:          sub.ID,
@@ -1349,7 +1349,7 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":          sub.ID,
-			"userID":                  sub.TenantSubjectID.String(),
+			"userID":                  sub.MerchantSubjectID.String(),
 			"processorSubscriptionID": pSubscriptionID,
 			"newRenewalDate":          parsed,
 		}).Info("Updated subscription billing date successfully")
@@ -1412,7 +1412,7 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 				},
 			}
 
-			uid2 := sub.TenantSubjectID.String()
+			uid2 := sub.MerchantSubjectID.String()
 			subscriptionEventData := analytics.SubscriptionEventData{
 				EventID:                 uuidutil.NewV7(),
 				SubscriptionID:          sub.ID,
@@ -1431,7 +1431,7 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":          sub.ID,
-			"userID":                  sub.TenantSubjectID.String(),
+			"userID":                  sub.MerchantSubjectID.String(),
 			"processorSubscriptionID": pSubscriptionID,
 		}).Info("Processed customer data update successfully")
 
@@ -1521,7 +1521,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		subscriptionEventData := analytics.SubscriptionEventData{
 			EventID:                 uuidutil.NewV7(),
 			SubscriptionID:          sub.ID,
-			UserID:                  sub.TenantSubjectID.String(),
+			UserID:                  sub.MerchantSubjectID.String(),
 			EventType:               analytics.PaymentEventSubscriptionReactivated,
 			Status:                  string(sub.Status),
 			CancelType:              "",
@@ -1546,7 +1546,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 	if s.NotificationService != nil {
 		notification := &models.NotificationQueue{
 			ID:              uuidutil.NewV7(),
-			TenantSubjectID: sub.TenantSubjectID,
+			MerchantSubjectID: sub.MerchantSubjectID,
 			EventType:       models.NotificationPremiumStarted, // Use started for reactivations
 		}
 		if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
@@ -1556,7 +1556,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscriptionID":          sub.ID,
-		"userID":                  sub.TenantSubjectID.String(),
+		"userID":                  sub.MerchantSubjectID.String(),
 		"transactionID":           transactionID,
 		"processorSubscriptionID": pSubscriptionID,
 		"priceDescription":        priceStr,
@@ -1698,7 +1698,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 			sub.ClearRetrySchedule()
 
 			// End entitlements for this subscription immediately.
-			if err := entSvc.RevokeSourcesForSubscription(ctx, sub.TenantSubjectID.String(), sub.ID, models.EntitlementRevokeRefund, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+			if err := entSvc.RevokeSourcesForSubscription(ctx, sub.MerchantSubjectID.String(), sub.ID, models.EntitlementRevokeRefund, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
 				log.WithContext(ctx).WithError(err).Error("failed to revoke entitlements for refunded subscription")
 			}
 			if refundLedgerErr != nil {
@@ -1712,7 +1712,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 					Provider:          "ccbill",
 					Operation:         "refund_reversal",
 					TransactionID:     refundTransactionID,
-					UserID:            sub.TenantSubjectID.String(),
+					UserID:            sub.MerchantSubjectID.String(),
 					OriginalPaymentID: originalPaymentID,
 					SubscriptionID:    &subscriptionID,
 					Err:               refundLedgerErr,
@@ -1728,7 +1728,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 			if s.NotificationService != nil {
 				notification := &models.NotificationQueue{
 					ID:              uuidutil.NewV7(),
-					TenantSubjectID: sub.TenantSubjectID,
+					MerchantSubjectID: sub.MerchantSubjectID,
 					EventType:       models.NotificationPremiumEnded,
 					Data:            map[string]any{"reason": string(subscriptions.PremiumEndReasonRefund)},
 				}
@@ -1768,7 +1768,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 			paymentEventData := analytics.PaymentEventData{
 				EventID:        uuidutil.NewV7(),
 				SubscriptionID: &sub.ID,
-				UserID:         sub.TenantSubjectID.String(),
+				UserID:         sub.MerchantSubjectID.String(),
 				EventType:      analytics.PaymentEventRefund,
 				Processor:      "ccbill",
 				Amount:         &negativeAmount,
@@ -1786,7 +1786,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":         sub.ID,
-			"userID":                 sub.TenantSubjectID.String(),
+			"userID":                 sub.MerchantSubjectID.String(),
 			"refundAmount":           refundAmount,
 			"refundType":             "auto_detected",
 			"refundTransactionID":    refundTransactionID,
@@ -1890,7 +1890,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":        sub.ID,
-			"userID":                sub.TenantSubjectID.String(),
+			"userID":                sub.MerchantSubjectID.String(),
 			"voidAmount":            voidAmount,
 			"voidTransactionID":     voidTransactionID,
 			"originalTransactionID": voidTransactionID,
@@ -1945,7 +1945,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 			paymentEventData := analytics.PaymentEventData{
 				EventID:        uuidutil.NewV7(),
 				SubscriptionID: &sub.ID,
-				UserID:         sub.TenantSubjectID.String(),
+				UserID:         sub.MerchantSubjectID.String(),
 				EventType:      analytics.PaymentEventVoid,
 				Processor:      "ccbill",
 				Amount:         &negativeAmount,
@@ -1963,7 +1963,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":    sub.ID,
-			"userID":            sub.TenantSubjectID.String(),
+			"userID":            sub.MerchantSubjectID.String(),
 			"voidAmount":        voidAmount,
 			"voidTransactionID": voidTransactionID,
 		}).Info("Processed void successfully")
@@ -2144,7 +2144,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		}
 
 		// Immediately end entitlements for this subscription.
-		if err := entSvc.RevokeSourcesForSubscription(ctx, sub.TenantSubjectID.String(), sub.ID, models.EntitlementRevokeChargeback, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+		if err := entSvc.RevokeSourcesForSubscription(ctx, sub.MerchantSubjectID.String(), sub.ID, models.EntitlementRevokeChargeback, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
 			log.WithContext(ctx).WithError(err).Error("failed to revoke entitlements for chargebacked subscription")
 		}
 		if ledgerErr != nil {
@@ -2158,7 +2158,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 				Provider:          "ccbill",
 				Operation:         "chargeback_reversal",
 				TransactionID:     chargebackTransactionID,
-				UserID:            sub.TenantSubjectID.String(),
+				UserID:            sub.MerchantSubjectID.String(),
 				OriginalPaymentID: originalPaymentID,
 				SubscriptionID:    &subscriptionID,
 				Err:               ledgerErr,
@@ -2171,7 +2171,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		}
 
 		log.WithContext(ctx).WithFields(log.Fields{
-			"user_id":           sub.TenantSubjectID.String(),
+			"user_id":           sub.MerchantSubjectID.String(),
 			"chargeback_amount": chargebackAmount,
 			"dispute_id":        "unknown",
 		}).Warn("User account involved in chargeback - consider fraud review")
@@ -2203,7 +2203,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			paymentEventData := analytics.PaymentEventData{
 				EventID:        uuidutil.NewV7(),
 				SubscriptionID: &sub.ID,
-				UserID:         sub.TenantSubjectID.String(),
+				UserID:         sub.MerchantSubjectID.String(),
 				EventType:      analytics.PaymentEventChargeback,
 				Processor:      "ccbill",
 				Amount:         &negativeAmount,
@@ -2224,7 +2224,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			// User notification about account termination
 			userNotification := &models.NotificationQueue{
 				ID:              uuidutil.NewV7(),
-				TenantSubjectID: sub.TenantSubjectID,
+				MerchantSubjectID: sub.MerchantSubjectID,
 				EventType:       models.NotificationPremiumEnded,
 				Data:            map[string]any{"reason": string(subscriptions.PremiumEndReasonChargeback)},
 			}
@@ -2235,7 +2235,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":          sub.ID,
-			"userID":                  sub.TenantSubjectID.String(),
+			"userID":                  sub.MerchantSubjectID.String(),
 			"chargebackAmount":        chargebackAmount,
 			"chargebackTransactionID": chargebackTransactionID,
 			"chargebackReasonCode":    "unknown",
@@ -2357,7 +2357,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 				Provider:       string(models.ProcessorCCBill),
 				Operation:      "terminal_blocked_renewal_success",
 				TransactionID:  transactionID,
-				UserID:         prevSub.TenantSubjectID.String(),
+				UserID:         prevSub.MerchantSubjectID.String(),
 				SubscriptionID: &prevSub.ID,
 				Err:            err,
 				Metadata: map[string]any{
@@ -2428,7 +2428,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		paymentEventData := analytics.PaymentEventData{
 			EventID:        uuidutil.NewV7(),
 			SubscriptionID: &subscription.ID,
-			UserID:         subscription.TenantSubjectID.String(),
+			UserID:         subscription.MerchantSubjectID.String(),
 			EventType:      analytics.PaymentEventChargeSuccess,
 			Processor:      "ccbill",
 			Amount:         &billedAmount,
@@ -2447,7 +2447,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	// Log subscription recovery (past_due -> active) for analytics.
 	if s.EventLogService != nil && prevStatus == models.StatusPastDue {
 		statusActive := string(models.StatusActive)
-		uidStr := subscription.TenantSubjectID.String()
+		uidStr := subscription.MerchantSubjectID.String()
 		priceAmount := 0.0
 		priceCurrency := ""
 		billingCycleDays := uint32(0)
@@ -2494,7 +2494,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscriptionID": subscription.ID,
-		"userID":         subscription.TenantSubjectID.String(),
+		"userID":         subscription.MerchantSubjectID.String(),
 		"billedAmount":   billedAmount,
 		"transactionID":  transactionID,
 	}).Info("Processed subscription renewal successfully")
@@ -2615,7 +2615,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 					notBefore = paidTermEnd.UTC()
 				}
 				if _, err := entSvc.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-					UserID:      sub.TenantSubjectID.String(),
+					UserID:      sub.MerchantSubjectID.String(),
 					Entitlement: entName,
 					NotBefore:   &notBefore,
 					EndAt:       &endAt,
@@ -2671,7 +2671,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		paymentEventData := analytics.PaymentEventData{
 			EventID:        uuidutil.NewV7(),
 			SubscriptionID: &subscription.ID,
-			UserID:         subscription.TenantSubjectID.String(),
+			UserID:         subscription.MerchantSubjectID.String(),
 			EventType:      analytics.PaymentEventChargeFailure,
 			Processor:      "ccbill",
 			Currency:       failureCurrency,
@@ -2686,7 +2686,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		}
 
 		statusPastDue := string(models.StatusPastDue)
-		uidStr := subscription.TenantSubjectID.String()
+		uidStr := subscription.MerchantSubjectID.String()
 		priceAmount := 0.0
 		priceCurrency := ""
 		billingCycleDays := uint32(0)
@@ -2728,7 +2728,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 	if s.NotificationService != nil {
 		notification := &models.NotificationQueue{
 			ID:              uuidutil.NewV7(),
-			TenantSubjectID: subscription.TenantSubjectID,
+			MerchantSubjectID: subscription.MerchantSubjectID,
 			EventType:       models.NotificationPaymentMethodFailed,
 			Data: map[string]any{
 				"processor":                 string(models.ProcessorCCBill),
@@ -2749,7 +2749,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscriptionID":          subscription.ID,
-		"userID":                  subscription.TenantSubjectID.String(),
+		"userID":                  subscription.MerchantSubjectID.String(),
 		"processorSubscriptionID": ccBillSubID,
 		"failureCode":             data.FailureCode,
 		"failureReason":           data.FailureReason,
@@ -2813,7 +2813,7 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 			"is_failed_rebill":          data.Source == "failedRB",
 		}
 
-		uidStr := subscription.TenantSubjectID.String()
+		uidStr := subscription.MerchantSubjectID.String()
 		subscriptionEventData := analytics.SubscriptionEventData{
 			EventID:        uuidutil.NewV7(),
 			SubscriptionID: subscription.ID,
@@ -2845,7 +2845,7 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscriptionID":          subscription.ID,
-		"userID":                  subscription.TenantSubjectID.String(),
+		"userID":                  subscription.MerchantSubjectID.String(),
 		"processorSubscriptionID": ccBillSubID,
 		"cancelReason":            data.Reason,
 		"cancelSource":            data.Source,
@@ -2894,7 +2894,7 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 			"is_expiration":             true,
 		}
 
-		uidStr := subscription.TenantSubjectID.String()
+		uidStr := subscription.MerchantSubjectID.String()
 		subscriptionEventData := analytics.SubscriptionEventData{
 			EventID:        uuidutil.NewV7(),
 			SubscriptionID: subscription.ID,
@@ -2926,7 +2926,7 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscriptionID":          subscription.ID,
-		"userID":                  subscription.TenantSubjectID.String(),
+		"userID":                  subscription.MerchantSubjectID.String(),
 		"processorSubscriptionID": ccBillSubID,
 	}).Info("Expired subscription successfully")
 

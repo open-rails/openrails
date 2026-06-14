@@ -12,8 +12,8 @@ import (
 // and the credit ledger, snapshotted at finalize for immutability.
 type Invoice struct {
 	ID              uuid.UUID `json:"id"`
-	TenantID        uuid.UUID `json:"tenant_id"`
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	MerchantID        uuid.UUID `json:"tenant_id"`
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	Currency        string    `json:"currency"`
 
 	PeriodFrom time.Time `json:"period_from"`

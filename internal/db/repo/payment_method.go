@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type PaymentMethodRepo struct {
@@ -26,21 +26,21 @@ var (
 )
 
 func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod) error {
-	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, m.TenantSubjectID); err != nil {
+	if err := ensureMerchantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, m.MerchantSubjectID); err != nil {
 		return err
 	}
 	meta, err := toJSONB(m.Metadata)
 	if err != nil {
 		return err
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   m.ID,
-		TenantID:             tid.UUID(),
-		TenantSubjectID:      m.TenantSubjectID,
+		MerchantID:             tid.UUID(),
+		MerchantSubjectID:      m.MerchantSubjectID,
 		Processor:            string(m.Processor),
 		VaultID:              m.VaultID,
 		BillingID:            m.BillingID,
@@ -149,11 +149,11 @@ func (r *PaymentMethodRepo) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByTenantSubject(ctx, tsid)
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByMerchantSubject(ctx, tsid)
 	if err != nil {
 		return nil, err
 	}
@@ -161,19 +161,19 @@ func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*
 }
 
 func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*models.PaymentMethod, int64, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
 	q := r.db.Gen(ctx)
-	total, err := q.CountPaymentMethodsByTenantSubject(ctx, tsid)
+	total, err := q.CountPaymentMethodsByMerchantSubject(ctx, tsid)
 	if err != nil {
 		return nil, 0, err
 	}
 	limit32, _ := safecast.Convert[int32](limit)
 	offset32, _ := safecast.Convert[int32](offset)
-	rows, err := q.ListPaymentMethodsByTenantSubjectPaged(ctx, gen.ListPaymentMethodsByTenantSubjectPagedParams{
-		TenantSubjectID: tsid,
+	rows, err := q.ListPaymentMethodsByMerchantSubjectPaged(ctx, gen.ListPaymentMethodsByMerchantSubjectPagedParams{
+		MerchantSubjectID: tsid,
 		PageLimit:       limit32,
 		PageOffset:      offset32,
 	})
@@ -225,7 +225,7 @@ func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMe
 	}
 	rows, err := r.db.Gen(ctx).UpdatePaymentMethod(ctx, gen.UpdatePaymentMethodParams{
 		ID:                   method.ID,
-		TenantSubjectID:      method.TenantSubjectID,
+		MerchantSubjectID:      method.MerchantSubjectID,
 		Processor:            string(method.Processor),
 		VaultID:              method.VaultID,
 		BillingID:            method.BillingID,
@@ -257,12 +257,12 @@ func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.Paym
 
 // GetNMIBackedByUserID returns all payment methods for NMI-backed processors for a user
 func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByTenantSubjectProcessors(ctx, gen.ListPaymentMethodsByTenantSubjectProcessorsParams{
-		TenantSubjectID: tsid,
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByMerchantSubjectProcessors(ctx, gen.ListPaymentMethodsByMerchantSubjectProcessorsParams{
+		MerchantSubjectID: tsid,
 		Processors:      processors.GetNMIBackedProcessorsList(),
 	})
 	if err != nil {
@@ -272,13 +272,13 @@ func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID str
 }
 
 func (r *PaymentMethodRepo) ExistsForUser(ctx context.Context, id uuid.UUID, userID string) (bool, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return false, err
 	}
 	count, err := r.db.Gen(ctx).CountPaymentMethodForUser(ctx, gen.CountPaymentMethodForUserParams{
 		ID:              id,
-		TenantSubjectID: tsid,
+		MerchantSubjectID: tsid,
 	})
 	if err != nil {
 		return false, err

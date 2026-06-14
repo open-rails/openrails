@@ -3,10 +3,10 @@
 --
 -- Final structural state of the billing schema, hand-written in topological
 -- order (a table follows every table it FKs to, so FKs are inline named
--- table-constraints). No "default tenant": tenant_id is REQUIRED on every
+-- table-constraints). No "default tenant": merchant_id is REQUIRED on every
 -- tenant-scoped table — uuid NOT NULL with NO default. Writers must stamp
--- tenant_id explicitly; the RLS tenant_isolation policy enforces it against the
--- app.tenant_id GUC. No seed rows are created here: tenants and credit types
+-- merchant_id explicitly; the RLS merchant_isolation policy enforces it against the
+-- app.merchant_id GUC. No seed rows are created here: merchants and credit types
 -- (incl. usd_micro) are provisioned explicitly per-tenant, not seeded.
 -- =============================================================================
 
@@ -73,16 +73,15 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 -- =============================================================================
--- tenants
+-- merchants
 -- =============================================================================
 
-CREATE TABLE openrails.tenants (
+CREATE TABLE openrails.merchants (
     id uuid DEFAULT uuidv7() NOT NULL,
     slug text NOT NULL,
     name text NOT NULL,
     status text DEFAULT 'active'::text NOT NULL,
-    authkit_tenant_id text,
-    authkit_tenant_slug text,
+    owner_tenant_id text,
     plan text,
     region text,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -94,154 +93,125 @@ CREATE TABLE openrails.tenants (
     webhook_host text,
     webhook_path text,
     provisioned_at timestamp with time zone,
-    CONSTRAINT tenants_pkey PRIMARY KEY (id),
-    CONSTRAINT uq_tenants_slug UNIQUE (slug),
-    CONSTRAINT tenants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'suspended'::text, 'deleted'::text])))
+    CONSTRAINT merchants_pkey PRIMARY KEY (id),
+    CONSTRAINT uq_merchants_slug UNIQUE (slug),
+    CONSTRAINT merchants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'suspended'::text, 'deleted'::text])))
 );
 
-CREATE UNIQUE INDEX uq_tenants_authkit_tenant_id ON openrails.tenants USING btree (authkit_tenant_id) WHERE (authkit_tenant_id IS NOT NULL);
-CREATE UNIQUE INDEX uq_tenants_webhook_host ON openrails.tenants USING btree (lower(webhook_host)) WHERE (webhook_host IS NOT NULL);
+CREATE INDEX idx_merchants_owner_tenant_id ON openrails.merchants USING btree (owner_tenant_id) WHERE (owner_tenant_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_merchants_webhook_host ON openrails.merchants USING btree (lower(webhook_host)) WHERE (webhook_host IS NOT NULL);
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenants TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchants TO openrails_app;
 
-COMMENT ON TABLE openrails.tenants IS 'Tenant / billing-namespace directory. GLOBAL (control-plane) table, not tenant-scoped. Tenants are created explicitly; there is no default tenant.';
-COMMENT ON COLUMN openrails.tenants.slug IS 'Stable tenant slug used in tenant-scoped routes and resolution.';
-COMMENT ON COLUMN openrails.tenants.authkit_tenant_id IS 'OpenRails-owned AuthKit tenant id that operates this tenant (control plane). Nullable until org ownership is wired in #221/#222.';
-COMMENT ON COLUMN openrails.tenants.billing_tier IS 'The platform''s OWN billing tier for this tenant (eats own dogfood, issue #225). Distinct from plan (free-form hosting metadata).';
-COMMENT ON COLUMN openrails.tenants.webhook_host IS 'Optional host an ingress uses to route inbound webhooks to this tenant. OpenRails verifies the signature AFTER tenant resolution (router is not the trust boundary).';
+COMMENT ON TABLE openrails.merchants IS 'Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant.';
+COMMENT ON COLUMN openrails.merchants.slug IS 'Stable merchant slug used in merchant-scoped routes and resolution.';
+COMMENT ON COLUMN openrails.merchants.owner_tenant_id IS 'OWNERSHIP (not identity) FK to the AuthKit tenant (org) that owns/administers this merchant (#481). NULL in embedded (no AuthKit). One tenant owns MANY merchants; never used to resolve a merchant from a token.';
+COMMENT ON COLUMN openrails.merchants.billing_tier IS 'The platform''s OWN billing tier for this merchant (eats own dogfood, issue #225). Distinct from plan (free-form hosting metadata).';
+COMMENT ON COLUMN openrails.merchants.webhook_host IS 'Optional host an ingress uses to route inbound webhooks to this merchant. OpenRails verifies the signature AFTER merchant resolution (router is not the trust boundary).';
 
 -- =============================================================================
--- tenant_subjects
+-- merchant_subjects
 -- =============================================================================
 
-CREATE TABLE openrails.tenant_subjects (
+CREATE TABLE openrails.merchant_subjects (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     issuer text NOT NULL,
     subject text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT tenant_subjects_pkey PRIMARY KEY (id),
-    CONSTRAINT uq_tenant_subjects_issuer_subject UNIQUE (tenant_id, issuer, subject),
-    CONSTRAINT tenant_subjects_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES openrails.tenants(id)
+    CONSTRAINT merchant_subjects_pkey PRIMARY KEY (id),
+    CONSTRAINT uq_merchant_subjects_issuer_subject UNIQUE (merchant_id, issuer, subject),
+    CONSTRAINT merchant_subjects_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id)
 );
 
-CREATE INDEX idx_tenant_subjects_tenant ON openrails.tenant_subjects USING btree (tenant_id);
+CREATE INDEX idx_merchant_subjects_merchant ON openrails.merchant_subjects USING btree (merchant_id);
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_subjects TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_subjects TO openrails_app;
 
-COMMENT ON TABLE openrails.tenant_subjects IS 'OpenRails payable identity. One row per OIDC-style subject under an OpenRails tenant; billing tables reference this row.';
-COMMENT ON COLUMN openrails.tenant_subjects.issuer IS 'OIDC issuer that asserted the subject.';
-COMMENT ON COLUMN openrails.tenant_subjects.subject IS 'OIDC subject asserted by issuer. May represent a human, company, tenant, service, or chained delegated principal.';
-
--- =============================================================================
--- tenant_delegated_issuers
--- =============================================================================
-
-CREATE TABLE openrails.tenant_delegated_issuers (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    issuer text NOT NULL,
-    jwks_uri text NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    audiences text[] DEFAULT '{}'::text[] NOT NULL,
-    CONSTRAINT tenant_delegated_issuers_pkey PRIMARY KEY (id),
-    CONSTRAINT uq_tenant_delegated_issuers_issuer UNIQUE (issuer),
-    CONSTRAINT tenant_delegated_issuers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES openrails.tenants(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_tenant_delegated_issuers_enabled ON openrails.tenant_delegated_issuers USING btree (enabled) WHERE enabled;
-CREATE INDEX idx_tenant_delegated_issuers_tenant ON openrails.tenant_delegated_issuers USING btree (tenant_id);
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_delegated_issuers TO openrails_app;
-
-COMMENT ON TABLE openrails.tenant_delegated_issuers IS 'Federated delegated-token issuer registry (issue #259). Maps a globally-unique token issuer (iss) to the OpenRails tenant it speaks for and the JWKS URL its public keys are fetched from. MANY issuers -> ONE tenant (multiple host apps = distinct keys, one tenant, shared users). GLOBAL control-plane table, not tenant-scoped.';
-COMMENT ON COLUMN openrails.tenant_delegated_issuers.issuer IS 'Token iss value. GLOBALLY UNIQUE -> maps to exactly one tenant (no cross-tenant forgery).';
-COMMENT ON COLUMN openrails.tenant_delegated_issuers.jwks_uri IS 'The ONLY URL OpenRails fetches this issuer''s keys from (allowlist; token-supplied URLs never honored).';
-COMMENT ON COLUMN openrails.tenant_delegated_issuers.enabled IS 'Per-issuer kill-switch. Only enabled rows are loaded into the live verifier; disabling evicts without affecting sibling issuers of the same tenant.';
-COMMENT ON COLUMN openrails.tenant_delegated_issuers.audiences IS 'Accepted OIDC JWT aud values for this tenant issuer.';
+COMMENT ON TABLE openrails.merchant_subjects IS 'OpenRails payable identity — a thin LABEL to hang charges on, NOT verified by OpenRails (the host/AuthKit already proved the subject). One row per OIDC-style subject under a merchant; billing tables reference this row.';
+COMMENT ON COLUMN openrails.merchant_subjects.issuer IS 'OIDC issuer that asserted the subject.';
+COMMENT ON COLUMN openrails.merchant_subjects.subject IS 'OIDC subject asserted by issuer. May represent a human, company, tenant, service, or chained delegated principal.';
 
 -- =============================================================================
--- tenant_deks
+-- merchant_deks
 -- =============================================================================
 
-CREATE TABLE openrails.tenant_deks (
-    tenant_id uuid NOT NULL,
+CREATE TABLE openrails.merchant_deks (
+    merchant_id uuid NOT NULL,
     wrapped_dek bytea NOT NULL,
     key_version integer DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT pk_tenant_deks PRIMARY KEY (tenant_id)
+    CONSTRAINT pk_merchant_deks PRIMARY KEY (merchant_id)
 );
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_deks TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_deks TO openrails_app;
 
-COMMENT ON TABLE openrails.tenant_deks IS 'Wrapped per-tenant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = tenant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. GLOBAL control-plane table.';
-COMMENT ON COLUMN openrails.tenant_deks.wrapped_dek IS 'AES-256-GCM(master_key, tenant_dek): nonce(12) || ciphertext(32) || tag(16).';
+COMMENT ON TABLE openrails.merchant_deks IS 'Wrapped per-tenant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = tenant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. GLOBAL control-plane table.';
+COMMENT ON COLUMN openrails.merchant_deks.wrapped_dek IS 'AES-256-GCM(master_key, tenant_dek): nonce(12) || ciphertext(32) || tag(16).';
 
 -- =============================================================================
--- tenant_secrets
+-- merchant_secrets
 -- =============================================================================
 
-CREATE TABLE openrails.tenant_secrets (
-    tenant_id uuid NOT NULL,
+CREATE TABLE openrails.merchant_secrets (
+    merchant_id uuid NOT NULL,
     name text NOT NULL,
     value text NOT NULL,
     version integer DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT pk_tenant_secrets PRIMARY KEY (tenant_id, name)
+    CONSTRAINT pk_merchant_secrets PRIMARY KEY (merchant_id, name)
 );
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_secrets TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_secrets TO openrails_app;
 
-COMMENT ON TABLE openrails.tenant_secrets IS 'DB-backed per-tenant secret store (issue #225). Namespaced by (tenant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. GLOBAL control-plane table.';
+COMMENT ON TABLE openrails.merchant_secrets IS 'DB-backed per-tenant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. GLOBAL control-plane table.';
 
 -- =============================================================================
--- tenant_exports
+-- merchant_exports
 -- =============================================================================
 
-CREATE TABLE openrails.tenant_exports (
+CREATE TABLE openrails.merchant_exports (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     status text DEFAULT 'completed'::text NOT NULL,
     location text,
     row_counts jsonb,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     completed_at timestamp with time zone,
-    CONSTRAINT tenant_exports_pkey PRIMARY KEY (id),
-    CONSTRAINT tenant_exports_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'completed'::text, 'failed'::text])))
+    CONSTRAINT merchant_exports_pkey PRIMARY KEY (id),
+    CONSTRAINT merchant_exports_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'completed'::text, 'failed'::text])))
 );
 
-CREATE INDEX idx_tenant_exports_tenant ON openrails.tenant_exports USING btree (tenant_id, created_at DESC);
+CREATE INDEX idx_merchant_exports_merchant ON openrails.merchant_exports USING btree (merchant_id, created_at DESC);
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_exports TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_exports TO openrails_app;
 
-COMMENT ON TABLE openrails.tenant_exports IS 'Tenant logical-export bookkeeping (issue #225). Tenant deletion is gated on a completed export row (export-before-delete).';
+COMMENT ON TABLE openrails.merchant_exports IS 'Tenant logical-export bookkeeping (issue #225). Tenant deletion is gated on a completed export row (export-before-delete).';
 
 -- =============================================================================
--- tenant_credential_audit
+-- merchant_credential_audit
 -- =============================================================================
 
-CREATE TABLE openrails.tenant_credential_audit (
+CREATE TABLE openrails.merchant_credential_audit (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     name text NOT NULL,
     action text NOT NULL,
     actor text,
     detail text,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT tenant_credential_audit_pkey PRIMARY KEY (id),
-    CONSTRAINT tenant_credential_audit_action_check CHECK ((action = ANY (ARRAY['put'::text, 'rotate'::text, 'delete'::text, 'test'::text])))
+    CONSTRAINT merchant_credential_audit_pkey PRIMARY KEY (id),
+    CONSTRAINT merchant_credential_audit_action_check CHECK ((action = ANY (ARRAY['put'::text, 'rotate'::text, 'delete'::text, 'test'::text])))
 );
 
-CREATE INDEX idx_tenant_credential_audit_tenant ON openrails.tenant_credential_audit USING btree (tenant_id, created_at DESC);
+CREATE INDEX idx_merchant_credential_audit_merchant ON openrails.merchant_credential_audit USING btree (merchant_id, created_at DESC);
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_credential_audit TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_credential_audit TO openrails_app;
 
-COMMENT ON TABLE openrails.tenant_credential_audit IS 'Append-only audit log of per-tenant credential put/rotate/delete/test events (issue #225).';
+COMMENT ON TABLE openrails.merchant_credential_audit IS 'Append-only audit log of per-tenant credential put/rotate/delete/test events (issue #225).';
 
 -- =============================================================================
 -- products
@@ -259,7 +229,7 @@ CREATE TABLE openrails.products (
     status text DEFAULT 'active'::text NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     CONSTRAINT products_pkey PRIMARY KEY (id),
     CONSTRAINT products_slug_key UNIQUE (slug),
     CONSTRAINT products_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'archived'::text])))
@@ -269,11 +239,11 @@ ALTER TABLE ONLY openrails.products FORCE ROW LEVEL SECURITY;
 
 CREATE INDEX idx_products_slug ON openrails.products USING btree (slug);
 CREATE INDEX idx_products_status ON openrails.products USING btree (status);
-CREATE INDEX idx_products_tenant_id ON openrails.products USING btree (tenant_id);
+CREATE INDEX idx_products_merchant_id ON openrails.products USING btree (merchant_id);
 CREATE INDEX idx_products_tier_group ON openrails.products USING btree (tier_group) WHERE (tier_group IS NOT NULL);
 
 ALTER TABLE openrails.products ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.products USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.products USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.products TO openrails_app;
 
@@ -296,7 +266,7 @@ CREATE TABLE openrails.prices (
     status text DEFAULT 'active'::text NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     CONSTRAINT prices_pkey PRIMARY KEY (id),
     CONSTRAINT unique_prices_product_amount_cycle UNIQUE (product_id, amount, currency, billing_cycle_days),
     CONSTRAINT prices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'archived'::text]))),
@@ -308,10 +278,10 @@ ALTER TABLE ONLY openrails.prices FORCE ROW LEVEL SECURITY;
 CREATE INDEX idx_prices_processors ON openrails.prices USING gin (processors);
 CREATE INDEX idx_prices_product_id ON openrails.prices USING btree (product_id);
 CREATE INDEX idx_prices_status ON openrails.prices USING btree (status);
-CREATE INDEX idx_prices_tenant_id ON openrails.prices USING btree (tenant_id);
+CREATE INDEX idx_prices_merchant_id ON openrails.prices USING btree (merchant_id);
 
 ALTER TABLE openrails.prices ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.prices USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.prices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.prices TO openrails_app;
 
@@ -323,7 +293,7 @@ COMMENT ON TABLE openrails.prices IS 'Pricing tiers for products with processor-
 
 CREATE TABLE openrails.entitlement_features (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     lookup_key text NOT NULL,
     name text NOT NULL,
     active boolean DEFAULT true NOT NULL,
@@ -331,13 +301,13 @@ CREATE TABLE openrails.entitlement_features (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT entitlement_features_pkey PRIMARY KEY (id),
-    CONSTRAINT entitlement_features_tenant_lookup_key_key UNIQUE (tenant_id, lookup_key)
+    CONSTRAINT entitlement_features_merchant_lookup_key_key UNIQUE (merchant_id, lookup_key)
 );
 
 ALTER TABLE ONLY openrails.entitlement_features FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE openrails.entitlement_features ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.entitlement_features USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.entitlement_features USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.entitlement_features TO openrails_app;
 
@@ -349,7 +319,7 @@ COMMENT ON TABLE openrails.entitlement_features IS 'Stripe-shaped first-class en
 
 CREATE TABLE openrails.product_entitlement_features (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     product_id uuid NOT NULL,
     entitlement_feature_id uuid NOT NULL,
     duration_days integer,
@@ -357,18 +327,18 @@ CREATE TABLE openrails.product_entitlement_features (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT product_entitlement_features_pkey PRIMARY KEY (id),
-    CONSTRAINT product_entitlement_features_unique UNIQUE (tenant_id, product_id, entitlement_feature_id),
+    CONSTRAINT product_entitlement_features_unique UNIQUE (merchant_id, product_id, entitlement_feature_id),
     CONSTRAINT product_entitlement_features_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id) ON DELETE CASCADE,
     CONSTRAINT product_entitlement_features_entitlement_feature_id_fkey FOREIGN KEY (entitlement_feature_id) REFERENCES openrails.entitlement_features(id) ON DELETE CASCADE
 );
 
 ALTER TABLE ONLY openrails.product_entitlement_features FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_product_entitlement_features_feature ON openrails.product_entitlement_features USING btree (tenant_id, entitlement_feature_id);
-CREATE INDEX idx_product_entitlement_features_product ON openrails.product_entitlement_features USING btree (tenant_id, product_id);
+CREATE INDEX idx_product_entitlement_features_feature ON openrails.product_entitlement_features USING btree (merchant_id, entitlement_feature_id);
+CREATE INDEX idx_product_entitlement_features_product ON openrails.product_entitlement_features USING btree (merchant_id, product_id);
 
 ALTER TABLE openrails.product_entitlement_features ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.product_entitlement_features USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.product_entitlement_features USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.product_entitlement_features TO openrails_app;
 
@@ -391,23 +361,23 @@ CREATE TABLE openrails.payment_methods (
     metadata jsonb,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid NOT NULL,
     CONSTRAINT payment_methods_pkey PRIMARY KEY (id),
-    CONSTRAINT payment_methods_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT payment_methods_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.payment_methods FORCE ROW LEVEL SECURITY;
 
 CREATE INDEX idx_payment_methods_processor ON openrails.payment_methods USING btree (processor);
-CREATE INDEX idx_payment_methods_tenant_id ON openrails.payment_methods USING btree (tenant_id);
-CREATE INDEX idx_payment_methods_tenant_subject ON openrails.payment_methods USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
+CREATE INDEX idx_payment_methods_merchant_id ON openrails.payment_methods USING btree (merchant_id);
+CREATE INDEX idx_payment_methods_merchant_subject ON openrails.payment_methods USING btree (merchant_subject_id) WHERE (merchant_subject_id IS NOT NULL);
 CREATE INDEX idx_payment_methods_vault_id ON openrails.payment_methods USING btree (vault_id);
-CREATE UNIQUE INDEX uq_payment_methods_tenant_processor_vault ON openrails.payment_methods USING btree (tenant_id, processor, vault_id);
-CREATE UNIQUE INDEX uq_payment_methods_tenant_subject_vault ON openrails.payment_methods USING btree (tenant_id, tenant_subject_id, vault_id);
+CREATE UNIQUE INDEX uq_payment_methods_merchant_processor_vault ON openrails.payment_methods USING btree (merchant_id, processor, vault_id);
+CREATE UNIQUE INDEX uq_payment_methods_merchant_subject_vault ON openrails.payment_methods USING btree (merchant_id, merchant_subject_id, vault_id);
 
 ALTER TABLE openrails.payment_methods ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.payment_methods USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.payment_methods USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payment_methods TO openrails_app;
 
@@ -447,8 +417,8 @@ CREATE TABLE openrails.subscriptions (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     tier_group character varying(100),
     deletion_scheduled_at timestamp with time zone,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid NOT NULL,
     CONSTRAINT subscriptions_pkey PRIMARY KEY (id),
     CONSTRAINT chk_cancelled_has_timestamp CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancelled_at IS NOT NULL))),
     CONSTRAINT chk_cancelled_has_type CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancel_type IS NOT NULL))),
@@ -460,7 +430,7 @@ CREATE TABLE openrails.subscriptions (
     CONSTRAINT subscriptions_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id),
     CONSTRAINT subscriptions_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id),
     CONSTRAINT subscriptions_scheduled_price_id_fkey FOREIGN KEY (scheduled_price_id) REFERENCES openrails.prices(id),
-    CONSTRAINT subscriptions_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT subscriptions_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.subscriptions FORCE ROW LEVEL SECURITY;
@@ -476,14 +446,14 @@ CREATE INDEX idx_subscriptions_processor ON openrails.subscriptions USING btree 
 CREATE INDEX idx_subscriptions_processor_subscription ON openrails.subscriptions USING btree (processor, processor_subscription_id);
 CREATE INDEX idx_subscriptions_product_id ON openrails.subscriptions USING btree (product_id);
 CREATE INDEX idx_subscriptions_status ON openrails.subscriptions USING btree (status);
-CREATE INDEX idx_subscriptions_tenant_id ON openrails.subscriptions USING btree (tenant_id);
-CREATE INDEX idx_subscriptions_tenant_subject ON openrails.subscriptions USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
-CREATE UNIQUE INDEX uq_subscriptions_tenant_processor_subscription_id ON openrails.subscriptions USING btree (tenant_id, processor, processor_subscription_id) WHERE (processor_subscription_id <> ''::text);
-CREATE UNIQUE INDEX uq_subscriptions_tenant_subject_product_lifecycle ON openrails.subscriptions USING btree (tenant_id, tenant_subject_id, product_id) WHERE (status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status, 'past_due'::openrails.subscription_status]));
-CREATE UNIQUE INDEX uq_subscriptions_tenant_subject_tier_group_active ON openrails.subscriptions USING btree (tenant_subject_id, tier_group) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status])) AND (tier_group IS NOT NULL));
+CREATE INDEX idx_subscriptions_merchant_id ON openrails.subscriptions USING btree (merchant_id);
+CREATE INDEX idx_subscriptions_merchant_subject ON openrails.subscriptions USING btree (merchant_subject_id) WHERE (merchant_subject_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_subscriptions_merchant_processor_subscription_id ON openrails.subscriptions USING btree (merchant_id, processor, processor_subscription_id) WHERE (processor_subscription_id <> ''::text);
+CREATE UNIQUE INDEX uq_subscriptions_merchant_subject_product_lifecycle ON openrails.subscriptions USING btree (merchant_id, merchant_subject_id, product_id) WHERE (status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status, 'past_due'::openrails.subscription_status]));
+CREATE UNIQUE INDEX uq_subscriptions_merchant_subject_tier_group_active ON openrails.subscriptions USING btree (merchant_subject_id, tier_group) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status])) AND (tier_group IS NOT NULL));
 
 ALTER TABLE openrails.subscriptions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.subscriptions USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.subscriptions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.subscriptions TO openrails_app;
 
@@ -517,14 +487,14 @@ CREATE TABLE openrails.payments (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     card_brand text,
     card_last4 text,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid NOT NULL,
     CONSTRAINT payments_pkey PRIMARY KEY (id),
     CONSTRAINT chk_payment_not_future CHECK ((purchased_at <= (now() + '00:05:00'::interval))),
     CONSTRAINT payments_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id),
     CONSTRAINT payments_refunded_payment_id_fkey FOREIGN KEY (refunded_payment_id) REFERENCES openrails.payments(id),
     CONSTRAINT payments_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id) ON DELETE SET NULL,
-    CONSTRAINT payments_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT payments_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.payments FORCE ROW LEVEL SECURITY;
@@ -534,12 +504,12 @@ CREATE INDEX idx_payments_processor ON openrails.payments USING btree (processor
 CREATE INDEX idx_payments_purchased_at ON openrails.payments USING btree (purchased_at);
 CREATE INDEX idx_payments_refunded_payment_id ON openrails.payments USING btree (refunded_payment_id);
 CREATE INDEX idx_payments_subscription_id ON openrails.payments USING btree (subscription_id);
-CREATE INDEX idx_payments_tenant_id ON openrails.payments USING btree (tenant_id);
-CREATE INDEX idx_payments_tenant_subject ON openrails.payments USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
-CREATE UNIQUE INDEX uq_payments_tenant_processor_transaction ON openrails.payments USING btree (tenant_id, processor, transaction_id);
+CREATE INDEX idx_payments_merchant_id ON openrails.payments USING btree (merchant_id);
+CREATE INDEX idx_payments_merchant_subject ON openrails.payments USING btree (merchant_subject_id) WHERE (merchant_subject_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_payments_merchant_processor_transaction ON openrails.payments USING btree (merchant_id, processor, transaction_id);
 
 ALTER TABLE openrails.payments ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.payments USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.payments USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payments TO openrails_app;
 
@@ -569,14 +539,14 @@ CREATE TABLE openrails.checkout_sessions (
     idempotency_key text,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid NOT NULL,
     CONSTRAINT checkout_sessions_pkey PRIMARY KEY (id),
     CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text]))),
     CONSTRAINT checkout_sessions_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES openrails.payments(id),
     CONSTRAINT checkout_sessions_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id),
     CONSTRAINT checkout_sessions_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id),
-    CONSTRAINT checkout_sessions_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT checkout_sessions_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.checkout_sessions FORCE ROW LEVEL SECURITY;
@@ -584,11 +554,11 @@ ALTER TABLE ONLY openrails.checkout_sessions FORCE ROW LEVEL SECURITY;
 CREATE INDEX checkout_sessions_expires_at_idx ON openrails.checkout_sessions USING btree (expires_at);
 CREATE UNIQUE INDEX checkout_sessions_processor_reference_idx ON openrails.checkout_sessions USING btree (processor, reference) WHERE (reference IS NOT NULL);
 CREATE UNIQUE INDEX checkout_sessions_processor_transaction_id_idx ON openrails.checkout_sessions USING btree (processor, transaction_id) WHERE (transaction_id IS NOT NULL);
-CREATE INDEX idx_checkout_sessions_tenant_id ON openrails.checkout_sessions USING btree (tenant_id);
-CREATE INDEX idx_checkout_sessions_tenant_subject ON openrails.checkout_sessions USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
+CREATE INDEX idx_checkout_sessions_merchant_id ON openrails.checkout_sessions USING btree (merchant_id);
+CREATE INDEX idx_checkout_sessions_merchant_subject ON openrails.checkout_sessions USING btree (merchant_subject_id) WHERE (merchant_subject_id IS NOT NULL);
 
 ALTER TABLE openrails.checkout_sessions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.checkout_sessions USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.checkout_sessions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.checkout_sessions TO openrails_app;
 
@@ -598,8 +568,8 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.checkout_sessions TO openra
 
 CREATE TABLE openrails.usdc_funding_sessions (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid NOT NULL,
     checkout_session_id uuid,
     provider text NOT NULL,
     wallet_address text NOT NULL,
@@ -622,13 +592,13 @@ CREATE TABLE openrails.usdc_funding_sessions (
     CONSTRAINT usdc_funding_sessions_provider_valid CHECK ((provider = ANY (ARRAY['robinhood'::text, 'coinbase'::text]))),
     CONSTRAINT usdc_funding_sessions_status_valid CHECK ((status = ANY (ARRAY['created'::text, 'opened'::text, 'pending_provider'::text, 'pending_settlement'::text, 'funded'::text, 'failed'::text, 'expired'::text, 'cancelled'::text]))),
     CONSTRAINT usdc_funding_sessions_checkout_session_id_fkey FOREIGN KEY (checkout_session_id) REFERENCES openrails.checkout_sessions(id) ON DELETE SET NULL,
-    CONSTRAINT usdc_funding_sessions_tenant_subject_id_fkey FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id) ON DELETE CASCADE
+    CONSTRAINT usdc_funding_sessions_merchant_subject_id_fkey FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_usdc_funding_sessions_checkout ON openrails.usdc_funding_sessions USING btree (tenant_id, checkout_session_id) WHERE (checkout_session_id IS NOT NULL);
-CREATE UNIQUE INDEX idx_usdc_funding_sessions_idempotency ON openrails.usdc_funding_sessions USING btree (tenant_id, tenant_subject_id, idempotency_key) WHERE ((idempotency_key IS NOT NULL) AND (btrim(idempotency_key) <> ''::text));
+CREATE INDEX idx_usdc_funding_sessions_checkout ON openrails.usdc_funding_sessions USING btree (merchant_id, checkout_session_id) WHERE (checkout_session_id IS NOT NULL);
+CREATE UNIQUE INDEX idx_usdc_funding_sessions_idempotency ON openrails.usdc_funding_sessions USING btree (merchant_id, merchant_subject_id, idempotency_key) WHERE ((idempotency_key IS NOT NULL) AND (btrim(idempotency_key) <> ''::text));
 CREATE INDEX idx_usdc_funding_sessions_provider_session ON openrails.usdc_funding_sessions USING btree (provider, provider_session_id) WHERE (provider_session_id IS NOT NULL);
-CREATE INDEX idx_usdc_funding_sessions_tenant_subject ON openrails.usdc_funding_sessions USING btree (tenant_id, tenant_subject_id, created_at DESC);
+CREATE INDEX idx_usdc_funding_sessions_merchant_subject ON openrails.usdc_funding_sessions USING btree (merchant_id, merchant_subject_id, created_at DESC);
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.usdc_funding_sessions TO openrails_app;
 
@@ -640,7 +610,7 @@ COMMENT ON TABLE openrails.usdc_funding_sessions IS 'External Robinhood/Coinbase
 
 CREATE TABLE openrails.solana_subscriptions (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     subscription_id uuid NOT NULL,
     subscriber_wallet text NOT NULL,
     authority_pda text NOT NULL,
@@ -660,16 +630,16 @@ CREATE TABLE openrails.solana_subscriptions (
     CONSTRAINT solana_subscriptions_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_solana_subscriptions_due ON openrails.solana_subscriptions USING btree (tenant_id, next_pull_at) WHERE (status = 'active'::text);
+CREATE INDEX idx_solana_subscriptions_due ON openrails.solana_subscriptions USING btree (merchant_id, next_pull_at) WHERE (status = 'active'::text);
 CREATE INDEX idx_solana_subscriptions_subscription_id ON openrails.solana_subscriptions USING btree (subscription_id);
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.solana_subscriptions TO openrails_app;
 
 -- =============================================================================
--- admin_grants
+-- entitlement_grants
 -- =============================================================================
 
-CREATE TABLE openrails.admin_grants (
+CREATE TABLE openrails.entitlement_grants (
     id uuid DEFAULT uuidv7() NOT NULL,
     price_id uuid,
     granted_by text NOT NULL,
@@ -677,32 +647,32 @@ CREATE TABLE openrails.admin_grants (
     payment_id uuid,
     duration_days integer,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid NOT NULL,
     CONSTRAINT admin_grants_pkey PRIMARY KEY (id),
     CONSTRAINT admin_grants_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES openrails.payments(id),
     CONSTRAINT admin_grants_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id),
-    CONSTRAINT admin_grants_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT admin_grants_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
-ALTER TABLE ONLY openrails.admin_grants FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.entitlement_grants FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_admin_grants_granted_by ON openrails.admin_grants USING btree (granted_by);
-CREATE INDEX idx_admin_grants_payment_id ON openrails.admin_grants USING btree (payment_id) WHERE (payment_id IS NOT NULL);
-CREATE INDEX idx_admin_grants_tenant_id ON openrails.admin_grants USING btree (tenant_id);
-CREATE INDEX idx_admin_grants_tenant_subject ON openrails.admin_grants USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
+CREATE INDEX idx_admin_grants_granted_by ON openrails.entitlement_grants USING btree (granted_by);
+CREATE INDEX idx_admin_grants_payment_id ON openrails.entitlement_grants USING btree (payment_id) WHERE (payment_id IS NOT NULL);
+CREATE INDEX idx_admin_grants_merchant_id ON openrails.entitlement_grants USING btree (merchant_id);
+CREATE INDEX idx_admin_grants_merchant_subject ON openrails.entitlement_grants USING btree (merchant_subject_id) WHERE (merchant_subject_id IS NOT NULL);
 
-ALTER TABLE openrails.admin_grants ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.admin_grants USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+ALTER TABLE openrails.entitlement_grants ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.entitlement_grants USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.admin_grants TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.entitlement_grants TO openrails_app;
 
-COMMENT ON TABLE openrails.admin_grants IS 'Records admin-initiated product grants (comps, contest winners, manual payments, partnerships)';
-COMMENT ON COLUMN openrails.admin_grants.price_id IS 'Price/Product being granted - entitlements derived from Product.EntitlementsSpec';
-COMMENT ON COLUMN openrails.admin_grants.granted_by IS 'Admin user ID who made the grant';
-COMMENT ON COLUMN openrails.admin_grants.reason IS 'Reason for grant: comp, contest_winner, refund_compensation, partnership, manual_payment, etc.';
-COMMENT ON COLUMN openrails.admin_grants.payment_id IS 'Optional link to Payment record if money was received';
-COMMENT ON COLUMN openrails.admin_grants.duration_days IS 'Override entitlement duration (NULL=use Product spec, 0=indefinite, N=N days)';
+COMMENT ON TABLE openrails.entitlement_grants IS 'Records admin-initiated product grants (comps, contest winners, manual payments, partnerships)';
+COMMENT ON COLUMN openrails.entitlement_grants.price_id IS 'Price/Product being granted - entitlements derived from Product.EntitlementsSpec';
+COMMENT ON COLUMN openrails.entitlement_grants.granted_by IS 'Admin user ID who made the grant';
+COMMENT ON COLUMN openrails.entitlement_grants.reason IS 'Reason for grant: comp, contest_winner, refund_compensation, partnership, manual_payment, etc.';
+COMMENT ON COLUMN openrails.entitlement_grants.payment_id IS 'Optional link to Payment record if money was received';
+COMMENT ON COLUMN openrails.entitlement_grants.duration_days IS 'Override entitlement duration (NULL=use Product spec, 0=indefinite, N=N days)';
 
 -- =============================================================================
 -- product_access_grants
@@ -710,7 +680,7 @@ COMMENT ON COLUMN openrails.admin_grants.duration_days IS 'Override entitlement 
 
 CREATE TABLE openrails.product_access_grants (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     product_id uuid NOT NULL,
     source_type text NOT NULL,
     source_id text DEFAULT ''::text NOT NULL,
@@ -722,21 +692,21 @@ CREATE TABLE openrails.product_access_grants (
     revoke_reason text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    tenant_subject_id uuid NOT NULL,
+    merchant_subject_id uuid NOT NULL,
     CONSTRAINT product_access_grants_pkey PRIMARY KEY (id),
     CONSTRAINT product_access_grants_source_type_check CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'admin'::text]))),
     CONSTRAINT product_access_grants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'revoked'::text]))),
     CONSTRAINT product_access_grants_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id),
-    CONSTRAINT product_access_grants_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT product_access_grants_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.product_access_grants FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_product_access_grants_tenant_subject ON openrails.product_access_grants USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
+CREATE INDEX idx_product_access_grants_merchant_subject ON openrails.product_access_grants USING btree (merchant_subject_id) WHERE (merchant_subject_id IS NOT NULL);
 CREATE INDEX ix_product_access_grants_payment ON openrails.product_access_grants USING btree (payment_id) WHERE (payment_id IS NOT NULL);
 
 ALTER TABLE openrails.product_access_grants ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.product_access_grants USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.product_access_grants USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.product_access_grants TO openrails_app;
 
@@ -759,14 +729,14 @@ CREATE TABLE openrails.entitlements (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at timestamp with time zone,
     period tstzrange GENERATED ALWAYS AS (tstzrange(start_at, COALESCE(end_at, 'infinity'::timestamp with time zone), '[)'::text)) STORED,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid NOT NULL,
     CONSTRAINT entitlements_pkey PRIMARY KEY (id),
     CONSTRAINT chk_entitlements_source_type CHECK ((source_type = ANY (ARRAY['subscription'::text, 'one_off'::text, 'admin'::text, 'grace'::text]))),
     CONSTRAINT chk_revoke_fields_together CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
     CONSTRAINT chk_valid_time_window CHECK (((end_at IS NULL) OR (start_at < end_at))),
-    CONSTRAINT entitlements_tenant_subject_no_overlap EXCLUDE USING gist (tenant_id WITH =, tenant_subject_id WITH =, entitlement WITH =, period WITH &&) WHERE (((tenant_subject_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL))),
-    CONSTRAINT entitlements_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT entitlements_merchant_subject_no_overlap EXCLUDE USING gist (merchant_id WITH =, merchant_subject_id WITH =, entitlement WITH =, period WITH &&) WHERE (((merchant_subject_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL))),
+    CONSTRAINT entitlements_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.entitlements FORCE ROW LEVEL SECURITY;
@@ -776,16 +746,16 @@ CREATE INDEX idx_entitlements_live_by_id ON openrails.entitlements USING btree (
 CREATE INDEX idx_entitlements_one_off_source_live ON openrails.entitlements USING btree (source_id, entitlement) WHERE ((source_type = 'one_off'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_source ON openrails.entitlements USING btree (source_type, source_id) WHERE (source_id IS NOT NULL);
 CREATE INDEX idx_entitlements_subscription_source_live ON openrails.entitlements USING btree (source_id, entitlement, end_at) WHERE ((source_type = 'subscription'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
-CREATE INDEX idx_entitlements_tenant_id ON openrails.entitlements USING btree (tenant_id);
-CREATE INDEX idx_entitlements_tenant_subject_active_window ON openrails.entitlements USING btree (tenant_id, tenant_subject_id, entitlement, start_at, end_at) WHERE ((tenant_subject_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
-CREATE UNIQUE INDEX uq_entitlements_tenant_subject_active ON openrails.entitlements USING btree (tenant_id, tenant_subject_id, entitlement) WHERE ((tenant_subject_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL) AND (end_at IS NULL));
+CREATE INDEX idx_entitlements_merchant_id ON openrails.entitlements USING btree (merchant_id);
+CREATE INDEX idx_entitlements_merchant_subject_active_window ON openrails.entitlements USING btree (merchant_id, merchant_subject_id, entitlement, start_at, end_at) WHERE ((merchant_subject_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX uq_entitlements_merchant_subject_active ON openrails.entitlements USING btree (merchant_id, merchant_subject_id, entitlement) WHERE ((merchant_subject_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL) AND (end_at IS NULL));
 
 ALTER TABLE openrails.entitlements ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.entitlements USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.entitlements USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.entitlements TO openrails_app;
 
-COMMENT ON COLUMN openrails.entitlements.tenant_subject_id IS 'OpenRails payable tenant subject for this entitlement window.';
+COMMENT ON COLUMN openrails.entitlements.merchant_subject_id IS 'OpenRails payable tenant subject for this entitlement window.';
 
 -- =============================================================================
 -- invoices
@@ -793,8 +763,8 @@ COMMENT ON COLUMN openrails.entitlements.tenant_subject_id IS 'OpenRails payable
 
 CREATE TABLE openrails.invoices (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT invoices_tenant_subject_id_not_null NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid CONSTRAINT invoices_merchant_subject_id_not_null NOT NULL,
     currency text DEFAULT ''::text NOT NULL,
     period_from timestamp with time zone NOT NULL,
     period_to timestamp with time zone NOT NULL,
@@ -811,17 +781,17 @@ CREATE TABLE openrails.invoices (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT invoices_pkey PRIMARY KEY (id),
     CONSTRAINT invoices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'finalized'::text, 'voided'::text]))),
-    CONSTRAINT invoices_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT invoices_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.invoices FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_invoices_tenant_subject ON openrails.invoices USING btree (tenant_subject_id, period_from DESC);
-CREATE INDEX ix_invoices_payer ON openrails.invoices USING btree (tenant_id, tenant_subject_id, period_from DESC);
-CREATE UNIQUE INDEX uq_invoices_period ON openrails.invoices USING btree (tenant_id, tenant_subject_id, period_from, period_to);
+CREATE INDEX idx_invoices_merchant_subject ON openrails.invoices USING btree (merchant_subject_id, period_from DESC);
+CREATE INDEX ix_invoices_payer ON openrails.invoices USING btree (merchant_id, merchant_subject_id, period_from DESC);
+CREATE UNIQUE INDEX uq_invoices_period ON openrails.invoices USING btree (merchant_id, merchant_subject_id, period_from, period_to);
 
 ALTER TABLE openrails.invoices ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.invoices USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.invoices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoices TO openrails_app;
 
@@ -833,8 +803,8 @@ COMMENT ON TABLE openrails.invoices IS 'Monthly itemized statements (issue #303)
 
 CREATE TABLE openrails.linked_wallets (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid NOT NULL,
     chain text NOT NULL,
     address text NOT NULL,
     verification_provider text NOT NULL,
@@ -844,13 +814,13 @@ CREATE TABLE openrails.linked_wallets (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT linked_wallets_pkey PRIMARY KEY (id),
-    CONSTRAINT linked_wallets_unique_chain_address UNIQUE (tenant_id, chain, address),
-    CONSTRAINT linked_wallets_unique_subject_chain UNIQUE (tenant_id, tenant_subject_id, chain),
+    CONSTRAINT linked_wallets_unique_chain_address UNIQUE (merchant_id, chain, address),
+    CONSTRAINT linked_wallets_unique_subject_chain UNIQUE (merchant_id, merchant_subject_id, chain),
     CONSTRAINT linked_wallets_chain_address_nonempty CHECK (((btrim(chain) <> ''::text) AND (btrim(address) <> ''::text))),
-    CONSTRAINT linked_wallets_tenant_subject_id_fkey FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id) ON DELETE CASCADE
+    CONSTRAINT linked_wallets_merchant_subject_id_fkey FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_linked_wallets_tenant_subject ON openrails.linked_wallets USING btree (tenant_id, tenant_subject_id);
+CREATE INDEX idx_linked_wallets_merchant_subject ON openrails.linked_wallets USING btree (merchant_id, merchant_subject_id);
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.linked_wallets TO openrails_app;
 
@@ -866,10 +836,10 @@ CREATE TABLE openrails.notification_queue (
     data jsonb NOT NULL,
     seen boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid NOT NULL,
     CONSTRAINT notification_queue_pkey PRIMARY KEY (id),
-    CONSTRAINT notification_queue_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT notification_queue_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.notification_queue FORCE ROW LEVEL SECURITY;
@@ -877,11 +847,11 @@ ALTER TABLE ONLY openrails.notification_queue FORCE ROW LEVEL SECURITY;
 CREATE INDEX idx_notification_queue_created_at ON openrails.notification_queue USING btree (created_at);
 CREATE INDEX idx_notification_queue_event_type ON openrails.notification_queue USING btree (event_type);
 CREATE INDEX idx_notification_queue_seen ON openrails.notification_queue USING btree (seen);
-CREATE INDEX idx_notification_queue_tenant_id ON openrails.notification_queue USING btree (tenant_id);
-CREATE INDEX idx_notification_queue_tenant_subject ON openrails.notification_queue USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
+CREATE INDEX idx_notification_queue_merchant_id ON openrails.notification_queue USING btree (merchant_id);
+CREATE INDEX idx_notification_queue_merchant_subject ON openrails.notification_queue USING btree (merchant_subject_id) WHERE (merchant_subject_id IS NOT NULL);
 
 ALTER TABLE openrails.notification_queue ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.notification_queue USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.notification_queue USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.notification_queue TO openrails_app;
 
@@ -893,27 +863,27 @@ COMMENT ON TABLE openrails.notification_queue IS 'Queue for user notifications r
 
 CREATE TABLE openrails.payment_blocklist (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid,
     kind text NOT NULL,
     value text NOT NULL,
     reason text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT payment_blocklist_pkey PRIMARY KEY (id),
     CONSTRAINT payment_blocklist_kind_check CHECK ((kind = ANY (ARRAY['card_fingerprint'::text, 'processor_customer'::text, 'email'::text, 'ip'::text]))),
-    CONSTRAINT payment_blocklist_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT payment_blocklist_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.payment_blocklist FORCE ROW LEVEL SECURITY;
 
-CREATE UNIQUE INDEX uq_payment_blocklist ON openrails.payment_blocklist USING btree (tenant_id, kind, value);
+CREATE UNIQUE INDEX uq_payment_blocklist ON openrails.payment_blocklist USING btree (merchant_id, kind, value);
 
 ALTER TABLE openrails.payment_blocklist ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.payment_blocklist USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.payment_blocklist USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payment_blocklist TO openrails_app;
 
-COMMENT ON TABLE openrails.payment_blocklist IS 'Tenant-scoped blocklist of known-bad payment identifiers (issue #300). tenant_subject_id NULL = tenant-wide block; set = tenant-subject scoped. Checkout/admission deny wiring is a separate slice.';
+COMMENT ON TABLE openrails.payment_blocklist IS 'Tenant-scoped blocklist of known-bad payment identifiers (issue #300). merchant_subject_id NULL = tenant-wide block; set = tenant-subject scoped. Checkout/admission deny wiring is a separate slice.';
 
 -- =============================================================================
 -- processor_customers
@@ -925,21 +895,21 @@ CREATE TABLE openrails.processor_customers (
     customer_id text NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid NOT NULL,
     CONSTRAINT processor_customers_pkey PRIMARY KEY (id),
-    CONSTRAINT processor_customers_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT processor_customers_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.processor_customers FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_processor_customers_tenant_id ON openrails.processor_customers USING btree (tenant_id);
-CREATE INDEX idx_processor_customers_tenant_subject ON openrails.processor_customers USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
-CREATE UNIQUE INDEX uq_processor_customers_tenant_processor_customer ON openrails.processor_customers USING btree (tenant_id, processor, customer_id);
-CREATE UNIQUE INDEX uq_processor_customers_tenant_subject_processor ON openrails.processor_customers USING btree (tenant_id, tenant_subject_id, processor);
+CREATE INDEX idx_processor_customers_merchant_id ON openrails.processor_customers USING btree (merchant_id);
+CREATE INDEX idx_processor_customers_merchant_subject ON openrails.processor_customers USING btree (merchant_subject_id) WHERE (merchant_subject_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_processor_customers_merchant_processor_customer ON openrails.processor_customers USING btree (merchant_id, processor, customer_id);
+CREATE UNIQUE INDEX uq_processor_customers_merchant_subject_processor ON openrails.processor_customers USING btree (merchant_id, merchant_subject_id, processor);
 
 ALTER TABLE openrails.processor_customers ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.processor_customers USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.processor_customers USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.processor_customers TO openrails_app;
 
@@ -949,8 +919,8 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.processor_customers TO open
 
 CREATE TABLE openrails.budget_reservations (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT budget_reservations_tenant_subject_id_not_null NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid CONSTRAINT budget_reservations_merchant_subject_id_not_null NOT NULL,
     actor text CONSTRAINT budget_reservations_actor_not_null NOT NULL,
     amount_micros bigint NOT NULL,
     captured_micros bigint DEFAULT 0 NOT NULL,
@@ -961,17 +931,17 @@ CREATE TABLE openrails.budget_reservations (
     expires_at timestamp with time zone,
     CONSTRAINT budget_reservations_pkey PRIMARY KEY (id),
     CONSTRAINT budget_reservations_status_check CHECK ((status = ANY (ARRAY['active'::text, 'captured'::text, 'released'::text]))),
-    CONSTRAINT budget_reservations_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT budget_reservations_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.budget_reservations FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX budget_reservations_window_agg_idx ON openrails.budget_reservations USING btree (tenant_id, tenant_subject_id, actor, created_at) WHERE (status = ANY (ARRAY['active'::text, 'captured'::text]));
-CREATE INDEX ix_budget_reservations_window ON openrails.budget_reservations USING btree (tenant_id, tenant_subject_id, actor, created_at);
-CREATE UNIQUE INDEX uq_budget_reservations_idem ON openrails.budget_reservations USING btree (tenant_id, tenant_subject_id, actor, source, source_id);
+CREATE INDEX budget_reservations_window_agg_idx ON openrails.budget_reservations USING btree (merchant_id, merchant_subject_id, actor, created_at) WHERE (status = ANY (ARRAY['active'::text, 'captured'::text]));
+CREATE INDEX ix_budget_reservations_window ON openrails.budget_reservations USING btree (merchant_id, merchant_subject_id, actor, created_at);
+CREATE UNIQUE INDEX uq_budget_reservations_idem ON openrails.budget_reservations USING btree (merchant_id, merchant_subject_id, actor, source, source_id);
 
 ALTER TABLE openrails.budget_reservations ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.budget_reservations USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.budget_reservations USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.budget_reservations TO openrails_app;
 
@@ -984,8 +954,8 @@ COMMENT ON COLUMN openrails.budget_reservations.actor IS 'Caller-supplied princi
 
 CREATE TABLE openrails.budget_window_state (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT budget_window_state_tenant_subject_id_not_null NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid CONSTRAINT budget_window_state_merchant_subject_id_not_null NOT NULL,
     actor text CONSTRAINT budget_window_state_actor_not_null NOT NULL,
     window_key text CONSTRAINT budget_window_state_window_key_not_null NOT NULL,
     cadence text NOT NULL,
@@ -995,16 +965,16 @@ CREATE TABLE openrails.budget_window_state (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT budget_window_state_pkey PRIMARY KEY (id),
-    CONSTRAINT budget_window_state_uniq UNIQUE (tenant_id, tenant_subject_id, actor, window_key),
+    CONSTRAINT budget_window_state_uniq UNIQUE (merchant_id, merchant_subject_id, actor, window_key),
     CONSTRAINT budget_window_state_cadence_check CHECK ((cadence = ANY (ARRAY['session'::text, 'fixed'::text]))),
     CONSTRAINT budget_window_state_window_seconds_check CHECK ((window_seconds > 0)),
-    CONSTRAINT budget_window_state_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT budget_window_state_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.budget_window_state FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE openrails.budget_window_state ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.budget_window_state USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.budget_window_state USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.budget_window_state TO openrails_app;
 
@@ -1018,23 +988,23 @@ COMMENT ON COLUMN openrails.budget_window_state.window_start IS 'Start of the mo
 
 CREATE TABLE openrails.tier_policies (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT tier_policies_tenant_subject_id_not_null NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid CONSTRAINT tier_policies_merchant_subject_id_not_null NOT NULL,
     tier text NOT NULL,
     policy jsonb DEFAULT '{}'::jsonb NOT NULL,
     policy_version bigint DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT tier_policies_pkey PRIMARY KEY (id),
-    CONSTRAINT tier_policies_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT tier_policies_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.tier_policies FORCE ROW LEVEL SECURITY;
 
-CREATE UNIQUE INDEX uq_tier_policies ON openrails.tier_policies USING btree (tenant_id, tenant_subject_id, tier);
+CREATE UNIQUE INDEX uq_tier_policies ON openrails.tier_policies USING btree (merchant_id, merchant_subject_id, tier);
 
 ALTER TABLE openrails.tier_policies ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.tier_policies USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.tier_policies USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tier_policies TO openrails_app;
 
@@ -1046,8 +1016,8 @@ COMMENT ON TABLE openrails.tier_policies IS 'Per-tenant-subject tier throughput 
 
 CREATE TABLE openrails.usage_events (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT usage_events_tenant_subject_id_not_null NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid CONSTRAINT usage_events_merchant_subject_id_not_null NOT NULL,
     actor text CONSTRAINT usage_events_actor_not_null NOT NULL,
     resource text,
     event_type text NOT NULL,
@@ -1061,18 +1031,18 @@ CREATE TABLE openrails.usage_events (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT usage_events_pkey PRIMARY KEY (id),
     CONSTRAINT usage_events_amount_check CHECK ((amount >= 0)),
-    CONSTRAINT usage_events_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT usage_events_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.usage_events FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_usage_events_tenant_subject_time ON openrails.usage_events USING btree (tenant_subject_id, occurred_at);
-CREATE INDEX ix_usage_events_payer_time ON openrails.usage_events USING btree (tenant_id, tenant_subject_id, occurred_at);
-CREATE INDEX ix_usage_events_payer_type_time ON openrails.usage_events USING btree (tenant_id, tenant_subject_id, event_type, occurred_at);
-CREATE UNIQUE INDEX uq_usage_events_idem ON openrails.usage_events USING btree (tenant_id, tenant_subject_id, event_type, source, source_id);
+CREATE INDEX idx_usage_events_merchant_subject_time ON openrails.usage_events USING btree (merchant_subject_id, occurred_at);
+CREATE INDEX ix_usage_events_payer_time ON openrails.usage_events USING btree (merchant_id, merchant_subject_id, occurred_at);
+CREATE INDEX ix_usage_events_payer_type_time ON openrails.usage_events USING btree (merchant_id, merchant_subject_id, event_type, occurred_at);
+CREATE UNIQUE INDEX uq_usage_events_idem ON openrails.usage_events USING btree (merchant_id, merchant_subject_id, event_type, source, source_id);
 
 ALTER TABLE openrails.usage_events ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.usage_events USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.usage_events USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.usage_events TO openrails_app;
 
@@ -1096,7 +1066,7 @@ CREATE TABLE openrails.catalog_drift_events (
     external_value text,
     detected_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     resolved_at timestamp with time zone,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     CONSTRAINT catalog_drift_events_pkey PRIMARY KEY (id),
     CONSTRAINT catalog_drift_events_kind_check CHECK ((kind = ANY (ARRAY['orphan_in_stripe'::text, 'missing_in_stripe'::text, 'orphan_in_nmi'::text, 'missing_in_nmi'::text, 'field_drift'::text]))),
     CONSTRAINT catalog_drift_events_openrails_resource_type_check CHECK ((openrails_resource_type = ANY (ARRAY['product'::text, 'price'::text]))),
@@ -1106,11 +1076,11 @@ CREATE TABLE openrails.catalog_drift_events (
 ALTER TABLE ONLY openrails.catalog_drift_events FORCE ROW LEVEL SECURITY;
 
 CREATE INDEX idx_catalog_drift_events_open ON openrails.catalog_drift_events USING btree (detected_at DESC) WHERE (resolved_at IS NULL);
-CREATE INDEX idx_catalog_drift_events_tenant_id ON openrails.catalog_drift_events USING btree (tenant_id);
+CREATE INDEX idx_catalog_drift_events_merchant_id ON openrails.catalog_drift_events USING btree (merchant_id);
 CREATE UNIQUE INDEX uq_catalog_drift_open ON openrails.catalog_drift_events USING btree (provider, kind, openrails_resource_type, COALESCE(openrails_resource_id, ''::text), COALESCE(external_resource_id, ''::text), COALESCE(field, ''::text)) WHERE (resolved_at IS NULL);
 
 ALTER TABLE openrails.catalog_drift_events ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.catalog_drift_events USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.catalog_drift_events USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.catalog_drift_events TO openrails_app;
 
@@ -1122,7 +1092,7 @@ COMMENT ON TABLE openrails.catalog_drift_events IS 'Alert-only drift/orphan reco
 
 CREATE TABLE openrails.reconciliation_runs (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     mode text NOT NULL,
     providers text[] NOT NULL,
     window_since timestamp with time zone,
@@ -1139,11 +1109,11 @@ CREATE TABLE openrails.reconciliation_runs (
 
 ALTER TABLE ONLY openrails.reconciliation_runs FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_reconciliation_runs_tenant_id ON openrails.reconciliation_runs USING btree (tenant_id);
+CREATE INDEX idx_reconciliation_runs_merchant_id ON openrails.reconciliation_runs USING btree (merchant_id);
 CREATE INDEX idx_reconciliation_runs_started_at ON openrails.reconciliation_runs USING btree (started_at DESC);
 
 ALTER TABLE openrails.reconciliation_runs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.reconciliation_runs USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.reconciliation_runs USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.reconciliation_runs TO openrails_app;
 
@@ -1155,7 +1125,7 @@ COMMENT ON TABLE openrails.reconciliation_runs IS 'One row per manual reconcile 
 
 CREATE TABLE openrails.reconciliation_findings (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     provider text NOT NULL,
     finding_type text NOT NULL,
     subject_key text NOT NULL,
@@ -1187,13 +1157,13 @@ CREATE TABLE openrails.reconciliation_findings (
 
 ALTER TABLE ONLY openrails.reconciliation_findings FORCE ROW LEVEL SECURITY;
 
-CREATE UNIQUE INDEX uq_reconciliation_findings_identity ON openrails.reconciliation_findings USING btree (tenant_id, provider, finding_type, subject_key);
-CREATE INDEX idx_reconciliation_findings_tenant_id ON openrails.reconciliation_findings USING btree (tenant_id);
+CREATE UNIQUE INDEX uq_reconciliation_findings_identity ON openrails.reconciliation_findings USING btree (merchant_id, provider, finding_type, subject_key);
+CREATE INDEX idx_reconciliation_findings_merchant_id ON openrails.reconciliation_findings USING btree (merchant_id);
 CREATE INDEX idx_reconciliation_findings_open ON openrails.reconciliation_findings USING btree (provider, finding_type) WHERE (status = ANY (ARRAY['open'::text, 'admin_pending'::text]));
 CREATE INDEX idx_reconciliation_findings_admin_queue ON openrails.reconciliation_findings USING btree (last_seen_at DESC) WHERE (requires_admin AND (status = 'admin_pending'::text));
 
 ALTER TABLE openrails.reconciliation_findings ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.reconciliation_findings USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.reconciliation_findings USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.reconciliation_findings TO openrails_app;
 
@@ -1225,7 +1195,7 @@ COMMENT ON COLUMN openrails.probe_verdicts.key_hash IS 'sha256 hex of the provid
 
 CREATE TABLE openrails.provider_intents (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     provider text NOT NULL,
     intent_type text NOT NULL,
     subscription_id uuid,
@@ -1254,13 +1224,13 @@ CREATE TABLE openrails.provider_intents (
 
 ALTER TABLE ONLY openrails.provider_intents FORCE ROW LEVEL SECURITY;
 
-CREATE UNIQUE INDEX uq_provider_intents_tenant_idempotency_key ON openrails.provider_intents USING btree (tenant_id, idempotency_key);
-CREATE INDEX idx_provider_intents_tenant_id ON openrails.provider_intents USING btree (tenant_id);
+CREATE UNIQUE INDEX uq_provider_intents_merchant_idempotency_key ON openrails.provider_intents USING btree (merchant_id, idempotency_key);
+CREATE INDEX idx_provider_intents_merchant_id ON openrails.provider_intents USING btree (merchant_id);
 CREATE INDEX idx_provider_intents_due ON openrails.provider_intents USING btree (next_attempt_at) WHERE (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text]));
 CREATE INDEX idx_provider_intents_subscription ON openrails.provider_intents USING btree (subscription_id) WHERE (subscription_id IS NOT NULL);
 
 ALTER TABLE openrails.provider_intents ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.provider_intents USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.provider_intents USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.provider_intents TO openrails_app;
 
@@ -1284,7 +1254,7 @@ CREATE TABLE openrails.platform_audit (
     actor_user_id text NOT NULL,
     actor_tenant text,
     action text NOT NULL,
-    target_tenant_id uuid,
+    target_merchant_id uuid,
     reason text,
     before_state jsonb,
     after_state jsonb,
@@ -1295,7 +1265,7 @@ CREATE TABLE openrails.platform_audit (
 
 CREATE INDEX idx_platform_audit_action ON openrails.platform_audit USING btree (action, created_at DESC);
 CREATE INDEX idx_platform_audit_actor ON openrails.platform_audit USING btree (actor_user_id, created_at DESC);
-CREATE INDEX idx_platform_audit_target ON openrails.platform_audit USING btree (target_tenant_id, created_at DESC);
+CREATE INDEX idx_platform_audit_target ON openrails.platform_audit USING btree (target_merchant_id, created_at DESC);
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.platform_audit TO openrails_app;
 
@@ -1308,7 +1278,7 @@ COMMENT ON TABLE openrails.platform_audit IS 'Append-only cross-tenant platform 
 CREATE TABLE openrails.platform_break_glass (
     id uuid DEFAULT uuidv7() NOT NULL,
     actor_user_id text NOT NULL,
-    target_tenant_id uuid,
+    target_merchant_id uuid,
     justification text NOT NULL,
     granted_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     expires_at timestamp with time zone NOT NULL,
@@ -1346,25 +1316,25 @@ CREATE TABLE openrails.money_transactions (
     captured_amount bigint,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT money_transactions_tenant_subject_id_not_null NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid CONSTRAINT money_transactions_merchant_subject_id_not_null NOT NULL,
     currency text DEFAULT 'USD'::text NOT NULL,
     CONSTRAINT money_transactions_pkey PRIMARY KEY (id),
-    CONSTRAINT money_transactions_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT money_transactions_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.money_transactions FORCE ROW LEVEL SECURITY;
 
 CREATE INDEX idx_money_holds_active_expires ON openrails.money_transactions USING btree (expires_at) WHERE ((transaction_type = 'hold'::text) AND (status = 'active'::text));
-CREATE INDEX idx_money_transactions_payer ON openrails.money_transactions USING btree (tenant_id, tenant_subject_id, created_at DESC);
-CREATE INDEX idx_money_transactions_payer_actor ON openrails.money_transactions USING btree (tenant_id, tenant_subject_id, actor, created_at DESC);
-CREATE INDEX idx_money_transactions_tenant_id ON openrails.money_transactions USING btree (tenant_id);
-CREATE UNIQUE INDEX uniq_money_deposit_idem_payer ON openrails.money_transactions USING btree (tenant_id, tenant_subject_id, currency, source, source_id) WHERE ((transaction_type = 'deposit'::text) AND (source_id IS NOT NULL));
-CREATE UNIQUE INDEX uniq_money_hold_idem_payer ON openrails.money_transactions USING btree (tenant_id, tenant_subject_id, currency, source, source_id) WHERE (transaction_type = 'hold'::text);
-CREATE UNIQUE INDEX uniq_money_withdrawal_idem_payer ON openrails.money_transactions USING btree (tenant_id, tenant_subject_id, currency, source, source_id) WHERE ((transaction_type = 'withdrawal'::text) AND (source_id IS NOT NULL));
+CREATE INDEX idx_money_transactions_payer ON openrails.money_transactions USING btree (merchant_id, merchant_subject_id, created_at DESC);
+CREATE INDEX idx_money_transactions_payer_actor ON openrails.money_transactions USING btree (merchant_id, merchant_subject_id, actor, created_at DESC);
+CREATE INDEX idx_money_transactions_merchant_id ON openrails.money_transactions USING btree (merchant_id);
+CREATE UNIQUE INDEX uniq_money_deposit_idem_payer ON openrails.money_transactions USING btree (merchant_id, merchant_subject_id, currency, source, source_id) WHERE ((transaction_type = 'deposit'::text) AND (source_id IS NOT NULL));
+CREATE UNIQUE INDEX uniq_money_hold_idem_payer ON openrails.money_transactions USING btree (merchant_id, merchant_subject_id, currency, source, source_id) WHERE (transaction_type = 'hold'::text);
+CREATE UNIQUE INDEX uniq_money_withdrawal_idem_payer ON openrails.money_transactions USING btree (merchant_id, merchant_subject_id, currency, source, source_id) WHERE ((transaction_type = 'withdrawal'::text) AND (source_id IS NOT NULL));
 
 ALTER TABLE openrails.money_transactions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.money_transactions USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.money_transactions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_transactions TO openrails_app;
 
@@ -1385,21 +1355,21 @@ CREATE TABLE openrails.money_blocks (
     expires_at timestamp with time zone,
     source_transaction_id uuid,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT money_blocks_tenant_subject_id_not_null NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid CONSTRAINT money_blocks_merchant_subject_id_not_null NOT NULL,
     currency text DEFAULT 'USD'::text NOT NULL,
     CONSTRAINT money_blocks_pkey PRIMARY KEY (id),
     CONSTRAINT money_blocks_source_transaction_id_fkey FOREIGN KEY (source_transaction_id) REFERENCES openrails.money_transactions(id),
-    CONSTRAINT money_blocks_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT money_blocks_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.money_blocks FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_money_blocks_payer ON openrails.money_blocks USING btree (tenant_id, tenant_subject_id, expires_at);
-CREATE INDEX idx_money_blocks_tenant_id ON openrails.money_blocks USING btree (tenant_id);
+CREATE INDEX idx_money_blocks_payer ON openrails.money_blocks USING btree (merchant_id, merchant_subject_id, expires_at);
+CREATE INDEX idx_money_blocks_merchant_id ON openrails.money_blocks USING btree (merchant_id);
 
 ALTER TABLE openrails.money_blocks ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.money_blocks USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.money_blocks USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_blocks TO openrails_app;
 
@@ -1416,20 +1386,20 @@ CREATE TABLE openrails.money_balances (
     held_balance bigint DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT money_balances_tenant_subject_id_not_null NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid CONSTRAINT money_balances_merchant_subject_id_not_null NOT NULL,
     currency text DEFAULT 'USD'::text NOT NULL,
     CONSTRAINT money_balances_pkey PRIMARY KEY (id),
-    CONSTRAINT money_balances_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT money_balances_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.money_balances FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_money_balances_tenant_id ON openrails.money_balances USING btree (tenant_id);
-CREATE UNIQUE INDEX uq_money_balances_payer ON openrails.money_balances USING btree (tenant_id, tenant_subject_id, currency);
+CREATE INDEX idx_money_balances_merchant_id ON openrails.money_balances USING btree (merchant_id);
+CREATE UNIQUE INDEX uq_money_balances_payer ON openrails.money_balances USING btree (merchant_id, merchant_subject_id, currency);
 
 ALTER TABLE openrails.money_balances ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.money_balances USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.money_balances USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_balances TO openrails_app;
 
@@ -1442,8 +1412,8 @@ COMMENT ON COLUMN openrails.money_balances.currency IS 'System currency code (US
 
 CREATE TABLE openrails.money_accounts (
     id uuid NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT money_accounts_tenant_subject_id_not_null NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid CONSTRAINT money_accounts_merchant_subject_id_not_null NOT NULL,
     billing_mode text DEFAULT 'prepaid'::text NOT NULL,
     max_spend_per_day_micros bigint,
     max_spend_per_month_micros bigint,
@@ -1470,15 +1440,15 @@ CREATE TABLE openrails.money_accounts (
     CONSTRAINT money_accounts_alert_pct_chk CHECK (((alert_threshold_pct >= 0) AND (alert_threshold_pct <= 100))),
     CONSTRAINT money_accounts_billing_mode_chk CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text]))),
     CONSTRAINT money_accounts_owed_nonneg_chk CHECK ((outstanding_owed_micros >= 0)),
-    CONSTRAINT money_accounts_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT money_accounts_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.money_accounts FORCE ROW LEVEL SECURITY;
 
-CREATE UNIQUE INDEX uq_money_accounts_payer ON openrails.money_accounts USING btree (tenant_id, tenant_subject_id, currency);
+CREATE UNIQUE INDEX uq_money_accounts_payer ON openrails.money_accounts USING btree (merchant_id, merchant_subject_id, currency);
 
 ALTER TABLE openrails.money_accounts ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.money_accounts USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.money_accounts USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_accounts TO openrails_app;
 
@@ -1493,8 +1463,8 @@ COMMENT ON COLUMN openrails.money_accounts.suspended_at IS 'When set, the accoun
 
 CREATE TABLE openrails.money_spend_limits (
     id uuid NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT money_spend_limits_tenant_subject_id_not_null NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid CONSTRAINT money_spend_limits_merchant_subject_id_not_null NOT NULL,
     actor text CONSTRAINT money_spend_limits_actor_not_null NOT NULL,
     max_spend_per_day_micros bigint,
     max_spend_per_month_micros bigint,
@@ -1502,15 +1472,15 @@ CREATE TABLE openrails.money_spend_limits (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     currency text DEFAULT 'USD'::text NOT NULL,
     CONSTRAINT money_spend_limits_pkey PRIMARY KEY (id),
-    CONSTRAINT money_spend_limits_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT money_spend_limits_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.money_spend_limits FORCE ROW LEVEL SECURITY;
 
-CREATE UNIQUE INDEX uq_money_spend_limits_payer_actor ON openrails.money_spend_limits USING btree (tenant_id, tenant_subject_id, currency, actor);
+CREATE UNIQUE INDEX uq_money_spend_limits_payer_actor ON openrails.money_spend_limits USING btree (merchant_id, merchant_subject_id, currency, actor);
 
 ALTER TABLE openrails.money_spend_limits ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.money_spend_limits USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.money_spend_limits USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_spend_limits TO openrails_app;
 
@@ -1524,8 +1494,8 @@ COMMENT ON COLUMN openrails.money_spend_limits.actor IS 'Caller-supplied princip
 
 CREATE TABLE openrails.money_windows (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT money_windows_tenant_subject_id_not_null NOT NULL,
+    merchant_id uuid NOT NULL,
+    merchant_subject_id uuid CONSTRAINT money_windows_merchant_subject_id_not_null NOT NULL,
     held_amount bigint NOT NULL,
     settled_amount bigint DEFAULT 0 NOT NULL,
     status text DEFAULT 'open'::text NOT NULL,
@@ -1537,17 +1507,17 @@ CREATE TABLE openrails.money_windows (
     CONSTRAINT money_windows_status_chk CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text, 'expired'::text]))),
     CONSTRAINT money_windows_held_nonneg_chk CHECK ((held_amount >= 0)),
     CONSTRAINT money_windows_settled_within_held_chk CHECK (((settled_amount >= 0) AND (settled_amount <= held_amount))),
-    CONSTRAINT money_windows_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+    CONSTRAINT money_windows_merchant_subject_fk FOREIGN KEY (merchant_subject_id) REFERENCES openrails.merchant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.money_windows FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_money_windows_subject_status ON openrails.money_windows USING btree (tenant_subject_id, status);
+CREATE INDEX idx_money_windows_subject_status ON openrails.money_windows USING btree (merchant_subject_id, status);
 CREATE INDEX idx_money_windows_open_expires ON openrails.money_windows USING btree (expires_at) WHERE (status = 'open'::text);
-CREATE INDEX idx_money_windows_tenant_id ON openrails.money_windows USING btree (tenant_id);
+CREATE INDEX idx_money_windows_merchant_id ON openrails.money_windows USING btree (merchant_id);
 
 ALTER TABLE openrails.money_windows ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.money_windows USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.money_windows USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_windows TO openrails_app;
 
@@ -1566,23 +1536,23 @@ COMMENT ON COLUMN openrails.money_windows.settled_amount IS 'Sum of settled actu
 
 CREATE TABLE openrails.custom_credit_types (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
     name text NOT NULL,
     decimals integer DEFAULT 0 NOT NULL,
     active boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT custom_credit_types_pkey PRIMARY KEY (id),
-    CONSTRAINT custom_credit_types_tenant_name_key UNIQUE (tenant_id, name),
+    CONSTRAINT custom_credit_types_merchant_name_key UNIQUE (merchant_id, name),
     CONSTRAINT custom_credit_types_decimals_check CHECK ((decimals >= 0) AND (decimals <= 18))
 );
 
 ALTER TABLE ONLY openrails.custom_credit_types FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_custom_credit_types_tenant_id ON openrails.custom_credit_types USING btree (tenant_id);
+CREATE INDEX idx_custom_credit_types_merchant_id ON openrails.custom_credit_types USING btree (merchant_id);
 
 ALTER TABLE openrails.custom_credit_types ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON openrails.custom_credit_types USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.custom_credit_types USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.custom_credit_types TO openrails_app;
 

@@ -315,7 +315,7 @@ func (s *ConfirmTierChangeService) buildNewRow(oldRow *models.SolanaSubscription
 
 	return &models.SolanaSubscription{
 		SubscriptionID:           newSubID,
-		TenantID:                 oldRow.TenantID,
+		MerchantID:                 oldRow.MerchantID,
 		SubscriberWallet:         oldRow.SubscriberWallet,
 		AuthorityPDA:             oldRow.AuthorityPDA,
 		SubscriptionPDA:          newPDA,

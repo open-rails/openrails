@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrTenantRouteUnresolved indicates an inbound webhook could not be mapped to an
@@ -19,7 +19,7 @@ var ErrTenantRouteUnresolved = errors.New("tenancy: webhook host/slug maps to no
 // WebhookRoute is the resolved tenant for an inbound webhook, plus its routing
 // metadata.
 type WebhookRoute struct {
-	TenantID   tenant.ID
+	MerchantID   merchant.ID
 	TenantSlug string
 }
 
@@ -87,9 +87,9 @@ func (s *Service) routeFromScan(idStr, slug, status string, err error) (WebhookR
 	if TenantStatus(status) == StatusDeleted {
 		return WebhookRoute{}, ErrTenantRouteUnresolved
 	}
-	id, perr := tenant.ParseID(idStr)
+	id, perr := merchant.ParseID(idStr)
 	if perr != nil {
 		return WebhookRoute{}, perr
 	}
-	return WebhookRoute{TenantID: id, TenantSlug: slug}, nil
+	return WebhookRoute{MerchantID: id, TenantSlug: slug}, nil
 }

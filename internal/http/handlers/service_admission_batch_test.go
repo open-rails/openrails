@@ -25,20 +25,20 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 	scopedOutPayer := uuid.NewString()
 
 	items := []serviceAdmitRequest{
-		{TenantSubjectID: allowedPayer, Actor: "user:a", EstimateMicros: 100, RequestID: "r1"},
-		{TenantSubjectID: brokePayer, Actor: "user:b", EstimateMicros: 100, RequestID: "r2"},
-		{TenantSubjectID: "not-a-uuid", Actor: "user:c", RequestID: "r3"},
-		{TenantSubjectID: throttledPayer, Actor: "user:d", RequestID: "r4"},
-		{TenantSubjectID: erroringPayer, Actor: "user:e", RequestID: "r5"},
-		{TenantSubjectID: scopedOutPayer, Actor: "user:f", RequestID: "r6"},
-		{TenantSubjectID: allowedPayer, Actor: "user:g", EstimateMicros: -1, RequestID: "r7"},
+		{MerchantSubjectID: allowedPayer, Actor: "user:a", EstimateMicros: 100, RequestID: "r1"},
+		{MerchantSubjectID: brokePayer, Actor: "user:b", EstimateMicros: 100, RequestID: "r2"},
+		{MerchantSubjectID: "not-a-uuid", Actor: "user:c", RequestID: "r3"},
+		{MerchantSubjectID: throttledPayer, Actor: "user:d", RequestID: "r4"},
+		{MerchantSubjectID: erroringPayer, Actor: "user:e", RequestID: "r5"},
+		{MerchantSubjectID: scopedOutPayer, Actor: "user:f", RequestID: "r6"},
+		{MerchantSubjectID: allowedPayer, Actor: "user:g", EstimateMicros: -1, RequestID: "r7"},
 	}
 
-	allows := func(ts billingidentity.TenantSubjectID) bool {
+	allows := func(ts billingidentity.MerchantSubjectID) bool {
 		return ts.UUID().String() != scopedOutPayer
 	}
 	admit := func(_ context.Context, in billingservice.AdmitInput) (*billingservice.AdmitResult, error) {
-		switch in.TenantSubjectID.UUID().String() {
+		switch in.MerchantSubjectID.UUID().String() {
 		case allowedPayer:
 			return &billingservice.AdmitResult{Allowed: true, ReservationID: uuid.NewString()}, nil
 		case brokePayer:

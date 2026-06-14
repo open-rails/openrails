@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // dbSecretStore persists per-tenant secrets in openrails.tenant_secrets (migration
@@ -28,7 +28,7 @@ func NewDBSecretStore(pool *db.Pool) (TenantSecretStore, error) {
 	return &dbSecretStore{pool: pool}, nil
 }
 
-func (d *dbSecretStore) Get(ctx context.Context, tenantID tenant.ID, name string) (Secret, error) {
+func (d *dbSecretStore) Get(ctx context.Context, tenantID merchant.ID, name string) (Secret, error) {
 	if err := validateSecretRef(tenantID, name); err != nil {
 		return Secret{}, err
 	}
@@ -49,7 +49,7 @@ func (d *dbSecretStore) Get(ctx context.Context, tenantID tenant.ID, name string
 	return s, nil
 }
 
-func (d *dbSecretStore) Put(ctx context.Context, tenantID tenant.ID, name, value string) (Secret, error) {
+func (d *dbSecretStore) Put(ctx context.Context, tenantID merchant.ID, name, value string) (Secret, error) {
 	if err := validateSecretRef(tenantID, name); err != nil {
 		return Secret{}, err
 	}
@@ -73,7 +73,7 @@ func (d *dbSecretStore) Put(ctx context.Context, tenantID tenant.ID, name, value
 	return s, nil
 }
 
-func (d *dbSecretStore) Delete(ctx context.Context, tenantID tenant.ID, name string) error {
+func (d *dbSecretStore) Delete(ctx context.Context, tenantID merchant.ID, name string) error {
 	if err := validateSecretRef(tenantID, name); err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func (d *dbSecretStore) Delete(ctx context.Context, tenantID tenant.ID, name str
 	return nil
 }
 
-func (d *dbSecretStore) List(ctx context.Context, tenantID tenant.ID) ([]string, error) {
+func (d *dbSecretStore) List(ctx context.Context, tenantID merchant.ID) ([]string, error) {
 	if tenantID.IsZero() {
 		return nil, validateSecretRef(tenantID, "x")
 	}

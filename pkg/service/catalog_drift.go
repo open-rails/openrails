@@ -16,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Catalog reconciliation loop (issue #209).
@@ -760,7 +760,7 @@ func (s *Service) persistCatalogDrift(ctx context.Context, desired []models.Cata
 	if err != nil {
 		return 0, 0, err
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -793,7 +793,7 @@ func (s *Service) persistCatalogDrift(ctx context.Context, desired []models.Cata
 		}
 		if err := q.InsertCatalogDriftEvent(ctx, gen.InsertCatalogDriftEventParams{
 			ID:                    row.ID,
-			TenantID:              tid.UUID(),
+			MerchantID:              tid.UUID(),
 			Provider:              string(row.Provider),
 			Kind:                  string(row.Kind),
 			OpenrailsResourceType: string(row.OpenRailsResourceType),

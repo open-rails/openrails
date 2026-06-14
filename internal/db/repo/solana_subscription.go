@@ -25,7 +25,7 @@ func NewSolanaSubscriptionRepo(d *db.DB) *SolanaSubscriptionRepo {
 func solanaSubscriptionFromGen(s gen.OpenrailsSolanaSubscription) *models.SolanaSubscription {
 	return &models.SolanaSubscription{
 		ID:                       s.ID,
-		TenantID:                 s.TenantID,
+		MerchantID:                 s.MerchantID,
 		SubscriptionID:           s.SubscriptionID,
 		SubscriberWallet:         s.SubscriberWallet,
 		AuthorityPDA:             s.AuthorityPda,
@@ -63,7 +63,7 @@ func (r *SolanaSubscriptionRepo) Upsert(ctx context.Context, s *models.SolanaSub
 	}
 	return r.db.Gen(ctx).UpsertSolanaSubscription(ctx, gen.UpsertSolanaSubscriptionParams{
 		ID:                       s.ID,
-		TenantID:                 s.TenantID,
+		MerchantID:                 s.MerchantID,
 		SubscriptionID:           s.SubscriptionID,
 		SubscriberWallet:         s.SubscriberWallet,
 		AuthorityPda:             s.AuthorityPDA,
@@ -146,7 +146,7 @@ func (r *SolanaSubscriptionRepo) SetNextPullAt(ctx context.Context, id uuid.UUID
 
 // MerchantWallet is a distinct (tenant, cranker wallet) pair with active subs.
 type MerchantWallet struct {
-	TenantID        uuid.UUID
+	MerchantID        uuid.UUID
 	MerchantAddress string
 }
 
@@ -160,7 +160,7 @@ func (r *SolanaSubscriptionRepo) ListActiveMerchantWallets(ctx context.Context) 
 	}
 	out := make([]MerchantWallet, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, MerchantWallet{TenantID: row.TenantID, MerchantAddress: row.MerchantAddress})
+		out = append(out, MerchantWallet{MerchantID: row.MerchantID, MerchantAddress: row.MerchantAddress})
 	}
 	return out, nil
 }

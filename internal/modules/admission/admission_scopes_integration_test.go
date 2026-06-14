@@ -25,7 +25,7 @@ import (
 // plus the budget-policy store + tier-policy store, a fresh payer, and a
 // generously funded USD money balance so the money axis never blocks the
 // budget-scope tests. Money has no credit_type dimension (#472).
-func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, *admission.TierPolicyStore, identity.TenantSubjectID, context.Context) {
+func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, *admission.TierPolicyStore, identity.MerchantSubjectID, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -35,16 +35,16 @@ func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, 
 	dbtest.EnsureTestTenant(ctx, t, pool)
 	ctx = dbtest.WithTestTenant(ctx)
 
-	payer := identity.TenantSubjectIDFromString(uuid.NewString())
+	payer := identity.MerchantSubjectIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_policies WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.tier_policies WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_reservations WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_window_state WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_accounts WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_policies WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.tier_policies WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_reservations WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_window_state WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_accounts WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", payerID)
 	})
 
 	rc, err := tcredis.Run(ctx, "redis:7-alpine")
@@ -60,7 +60,7 @@ func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, 
 
 	cs := money.NewMoneyService(dbi)
 	// Fund the payer generously so money never blocks (budgets are the gate here).
-	_, err = cs.Deposit(ctx, money.DepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 1_000_000_000, Source: "seed"})
+	_, err = cs.Deposit(ctx, money.DepositParams{MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 1_000_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	tierStore := admission.NewTierPolicyStore(dbi)
@@ -71,9 +71,9 @@ func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, 
 	return adm, bpStore, tierStore, payer, ctx
 }
 
-func mustReq(payer identity.TenantSubjectID, actor, srcID string, roles []uuid.UUID, micros int64) admission.AdmitRequest {
+func mustReq(payer identity.MerchantSubjectID, actor, srcID string, roles []uuid.UUID, micros int64) admission.AdmitRequest {
 	return admission.AdmitRequest{
-		TenantSubjectID: payer, Actor: actor, Tier: "free", Resource: "gpt-4o",
+		MerchantSubjectID: payer, Actor: actor, Tier: "free", Resource: "gpt-4o",
 		Roles: roles, Amounts: map[string]int64{"request": 1},
 		EstimateMicros: micros, Source: "usage", SourceID: srcID, ExpiresAt: time.Now().Add(time.Hour),
 	}

@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // blockhashGetter is the minimal RPC surface BuildPartiallySignedTx needs.
@@ -29,7 +29,7 @@ type blockhashGetter interface {
 // feePayer is account index 0 and the wallet-side signer; cosigner must be one of
 // the transaction's required signers (else this errors rather than producing an
 // un-submittable tx).
-func BuildPartiallySignedTx(ctx context.Context, tenantID tenant.ID, cosigner Signer, rpc blockhashGetter, feePayer solanago.PublicKey, instructions []solanago.Instruction) (string, error) {
+func BuildPartiallySignedTx(ctx context.Context, tenantID merchant.ID, cosigner Signer, rpc blockhashGetter, feePayer solanago.PublicKey, instructions []solanago.Instruction) (string, error) {
 	if cosigner == nil {
 		return "", fmt.Errorf("solana: cosigner is required")
 	}

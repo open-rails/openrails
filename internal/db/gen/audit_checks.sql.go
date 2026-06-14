@@ -14,7 +14,7 @@ import (
 
 const auditActiveSubscriptionEntitlementCount = `-- name: AuditActiveSubscriptionEntitlementCount :one
 SELECT count(*) FROM openrails.entitlements ent
-WHERE ent.tenant_subject_id = $1
+WHERE ent.merchant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.source_type = 'subscription'
   AND ent.source_id = $3
@@ -24,17 +24,17 @@ WHERE ent.tenant_subject_id = $1
 `
 
 type AuditActiveSubscriptionEntitlementCountParams struct {
-	TenantSubjectID uuid.UUID
-	Entitlement     string
-	SourceID        uuid.UUID
-	Now             time.Time
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
+	SourceID          uuid.UUID
+	Now               time.Time
 }
 
 // S-E-1 (part 2): count currently-active entitlements granted by a
 // subscription (deleted_at filter was implicit via bun soft delete).
 func (q *Queries) AuditActiveSubscriptionEntitlementCount(ctx context.Context, arg AuditActiveSubscriptionEntitlementCountParams) (int64, error) {
 	row := q.db.QueryRow(ctx, auditActiveSubscriptionEntitlementCount,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.Entitlement,
 		arg.SourceID,
 		arg.Now,
@@ -48,7 +48,7 @@ const auditActiveSubscriptionFailedPaymentMethod = `-- name: AuditActiveSubscrip
 
 SELECT
     sub.id AS sub_id,
-    sub.tenant_subject_id::text AS user_id,
+    sub.merchant_subject_id::text AS user_id,
     pm.id AS pm_id,
     pm.failure_reason::text AS failure_reason
 FROM openrails.subscriptions sub
@@ -96,7 +96,7 @@ func (q *Queries) AuditActiveSubscriptionFailedPaymentMethod(ctx context.Context
 
 const auditActiveSubscriptionPastPeriodEnd = `-- name: AuditActiveSubscriptionPastPeriodEnd :many
 
-SELECT id, tenant_subject_id::text AS user_id, current_period_ends_at::timestamptz AS current_period_ends_at
+SELECT id, merchant_subject_id::text AS user_id, current_period_ends_at::timestamptz AS current_period_ends_at
 FROM openrails.subscriptions
 WHERE status = 'active'
   AND current_period_ends_at < NOW()
@@ -137,7 +137,7 @@ const auditActiveSubscriptionsWithSpec = `-- name: AuditActiveSubscriptionsWithS
 
 SELECT
     sub.id,
-    sub.tenant_subject_id,
+    sub.merchant_subject_id,
     prod.id AS product_id,
     prod.slug AS product_slug,
     prod.entitlements_spec
@@ -145,27 +145,27 @@ FROM openrails.subscriptions sub
 JOIN openrails.prices price ON sub.price_id = price.id
 JOIN openrails.products prod ON price.product_id = prod.id
 WHERE sub.status = 'active'
-  AND ($1::uuid IS NULL OR sub.tenant_subject_id = $1::uuid)
+  AND ($1::uuid IS NULL OR sub.merchant_subject_id = $1::uuid)
   AND ($2::timestamptz IS NULL OR sub.created_at >= $2::timestamptz)
 `
 
 type AuditActiveSubscriptionsWithSpecParams struct {
-	TenantSubjectID *uuid.UUID
-	Since           *time.Time
+	MerchantSubjectID *uuid.UUID
+	Since             *time.Time
 }
 
 type AuditActiveSubscriptionsWithSpecRow struct {
-	ID               uuid.UUID
-	TenantSubjectID  uuid.UUID
-	ProductID        uuid.UUID
-	ProductSlug      string
-	EntitlementsSpec []byte
+	ID                uuid.UUID
+	MerchantSubjectID uuid.UUID
+	ProductID         uuid.UUID
+	ProductSlug       string
+	EntitlementsSpec  []byte
 }
 
 // Audit consistency checks (internal/audit). One named query per check
 // query; SQL carried over essentially verbatim from the bun-era checks.
 // Options.UserID post-filtering stays in Go (matching the old behavior);
-// only S-E-1 / P-E-1 filter by tenant_subject_id in SQL because the bun
+// only S-E-1 / P-E-1 filter by merchant_subject_id in SQL because the bun
 // builder queries did.
 // ============================================================================
 // Subscription-entitlement checks
@@ -174,7 +174,7 @@ type AuditActiveSubscriptionsWithSpecRow struct {
 // side can walk product.entitlements_spec (bun loaded Price/Price.Product
 // relations; INNER JOIN matches the old "skip when relation is nil" logic).
 func (q *Queries) AuditActiveSubscriptionsWithSpec(ctx context.Context, arg AuditActiveSubscriptionsWithSpecParams) ([]AuditActiveSubscriptionsWithSpecRow, error) {
-	rows, err := q.db.Query(ctx, auditActiveSubscriptionsWithSpec, arg.TenantSubjectID, arg.Since)
+	rows, err := q.db.Query(ctx, auditActiveSubscriptionsWithSpec, arg.MerchantSubjectID, arg.Since)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,7 @@ func (q *Queries) AuditActiveSubscriptionsWithSpec(ctx context.Context, arg Audi
 		var i AuditActiveSubscriptionsWithSpecRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantSubjectID,
+			&i.MerchantSubjectID,
 			&i.ProductID,
 			&i.ProductSlug,
 			&i.EntitlementsSpec,
@@ -199,75 +199,10 @@ func (q *Queries) AuditActiveSubscriptionsWithSpec(ctx context.Context, arg Audi
 	return items, nil
 }
 
-const auditAdminGrantMissingEntitlements = `-- name: AuditAdminGrantMissingEntitlements :many
-
-SELECT
-    ag.id AS grant_id,
-    ag.tenant_subject_id::text AS user_id,
-    ag.reason,
-    ag.duration_days,
-    ag.created_at AS granted_at
-FROM openrails.admin_grants ag
-LEFT JOIN openrails.entitlements ent ON
-    ag.tenant_subject_id = ent.tenant_subject_id
-    AND ent.source_type = 'admin'
-    AND ent.source_id = ag.id
-    AND ent.deleted_at IS NULL
-WHERE (ag.duration_days IS NULL OR ag.duration_days = 0
-       OR ag.created_at + make_interval(days => ag.duration_days) > NOW())
-  AND ent.id IS NULL
-`
-
-type AuditAdminGrantMissingEntitlementsRow struct {
-	GrantID      uuid.UUID
-	UserID       string
-	Reason       string
-	DurationDays *int32
-	GrantedAt    time.Time
-}
-
-// ============================================================================
-// Admin grant checks
-//
-// NOTE (schema drift, found during the sqlc migration): the bun-era queries
-// referenced admin_grants.entitlement / granted_at / expires_at / revoked_at,
-// none of which exist in openrails.admin_grants (it has price_id, granted_by,
-// reason, duration_days, created_at). The old AG-1/AG-3/AG-4 SQL could never
-// have executed. AG-1 and AG-4 are adapted to the real schema below (expiry
-// derived from created_at + duration_days); AG-3 (grant-level revocation) has
-// no equivalent column and was removed.
-// ============================================================================
-// AG-1: active (non-expired) admin grant with no corresponding entitlement.
-func (q *Queries) AuditAdminGrantMissingEntitlements(ctx context.Context) ([]AuditAdminGrantMissingEntitlementsRow, error) {
-	rows, err := q.db.Query(ctx, auditAdminGrantMissingEntitlements)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuditAdminGrantMissingEntitlementsRow
-	for rows.Next() {
-		var i AuditAdminGrantMissingEntitlementsRow
-		if err := rows.Scan(
-			&i.GrantID,
-			&i.UserID,
-			&i.Reason,
-			&i.DurationDays,
-			&i.GrantedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const auditCancelledSubscriptionActiveEntitlements = `-- name: AuditCancelledSubscriptionActiveEntitlements :many
 SELECT
     sub.id AS sub_id,
-    sub.tenant_subject_id::text AS user_id,
+    sub.merchant_subject_id::text AS user_id,
     sub.ended_at::timestamptz AS ended_at,
     ent.id AS ent_id,
     ent.entitlement
@@ -317,7 +252,7 @@ func (q *Queries) AuditCancelledSubscriptionActiveEntitlements(ctx context.Conte
 }
 
 const auditCancelledWithoutMetadata = `-- name: AuditCancelledWithoutMetadata :many
-SELECT id, tenant_subject_id::text AS user_id, cancelled_at, cancel_type, updated_at
+SELECT id, merchant_subject_id::text AS user_id, cancelled_at, cancel_type, updated_at
 FROM openrails.subscriptions
 WHERE status = 'cancelled'
   AND (cancelled_at IS NULL OR cancel_type IS NULL)
@@ -362,7 +297,7 @@ const auditDuplicateChargesSamePeriod = `-- name: AuditDuplicateChargesSamePerio
 WITH payment_products AS (
     SELECT
         purch.id,
-        purch.tenant_subject_id,
+        purch.merchant_subject_id,
         purch.amount,
         purch.purchased_at,
         price.product_id,
@@ -374,7 +309,7 @@ WITH payment_products AS (
       AND purch.refunded_payment_id IS NULL
 )
 SELECT
-    tenant_subject_id::text AS user_id,
+    merchant_subject_id::text AS user_id,
     product_id,
     product_slug,
     COUNT(*)::int AS count,
@@ -383,7 +318,7 @@ SELECT
     MIN(purchased_at)::timestamptz AS first_date,
     MAX(purchased_at)::timestamptz AS last_date
 FROM payment_products
-GROUP BY tenant_subject_id, product_id, product_slug, DATE_TRUNC('month', purchased_at)
+GROUP BY merchant_subject_id, product_id, product_slug, DATE_TRUNC('month', purchased_at)
 HAVING COUNT(*) > 1
 `
 
@@ -429,7 +364,7 @@ func (q *Queries) AuditDuplicateChargesSamePeriod(ctx context.Context) ([]AuditD
 }
 
 const auditEndedBeforeCancelled = `-- name: AuditEndedBeforeCancelled :many
-SELECT id, tenant_subject_id::text AS user_id,
+SELECT id, merchant_subject_id::text AS user_id,
        ended_at::timestamptz AS ended_at,
        cancelled_at::timestamptz AS cancelled_at
 FROM openrails.subscriptions
@@ -472,7 +407,7 @@ func (q *Queries) AuditEndedBeforeCancelled(ctx context.Context) ([]AuditEndedBe
 }
 
 const auditEntitlementDistantFutureStart = `-- name: AuditEntitlementDistantFutureStart :many
-SELECT id, tenant_subject_id::text AS user_id, entitlement, start_at
+SELECT id, merchant_subject_id::text AS user_id, entitlement, start_at
 FROM openrails.entitlements
 WHERE start_at > NOW() + INTERVAL '1 year'
   AND deleted_at IS NULL
@@ -511,10 +446,75 @@ func (q *Queries) AuditEntitlementDistantFutureStart(ctx context.Context) ([]Aud
 	return items, nil
 }
 
+const auditEntitlementGrantMissingEntitlements = `-- name: AuditEntitlementGrantMissingEntitlements :many
+
+SELECT
+    ag.id AS grant_id,
+    ag.merchant_subject_id::text AS user_id,
+    ag.reason,
+    ag.duration_days,
+    ag.created_at AS granted_at
+FROM openrails.entitlement_grants ag
+LEFT JOIN openrails.entitlements ent ON
+    ag.merchant_subject_id = ent.merchant_subject_id
+    AND ent.source_type = 'admin'
+    AND ent.source_id = ag.id
+    AND ent.deleted_at IS NULL
+WHERE (ag.duration_days IS NULL OR ag.duration_days = 0
+       OR ag.created_at + make_interval(days => ag.duration_days) > NOW())
+  AND ent.id IS NULL
+`
+
+type AuditEntitlementGrantMissingEntitlementsRow struct {
+	GrantID      uuid.UUID
+	UserID       string
+	Reason       string
+	DurationDays *int32
+	GrantedAt    time.Time
+}
+
+// ============================================================================
+// Admin grant checks
+//
+// NOTE (schema drift, found during the sqlc migration): the bun-era queries
+// referenced entitlement_grants.entitlement / granted_at / expires_at / revoked_at,
+// none of which exist in openrails.entitlement_grants (it has price_id, granted_by,
+// reason, duration_days, created_at). The old AG-1/AG-3/AG-4 SQL could never
+// have executed. AG-1 and AG-4 are adapted to the real schema below (expiry
+// derived from created_at + duration_days); AG-3 (grant-level revocation) has
+// no equivalent column and was removed.
+// ============================================================================
+// AG-1: active (non-expired) admin grant with no corresponding entitlement.
+func (q *Queries) AuditEntitlementGrantMissingEntitlements(ctx context.Context) ([]AuditEntitlementGrantMissingEntitlementsRow, error) {
+	rows, err := q.db.Query(ctx, auditEntitlementGrantMissingEntitlements)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditEntitlementGrantMissingEntitlementsRow
+	for rows.Next() {
+		var i AuditEntitlementGrantMissingEntitlementsRow
+		if err := rows.Scan(
+			&i.GrantID,
+			&i.UserID,
+			&i.Reason,
+			&i.DurationDays,
+			&i.GrantedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const auditEntitlementOrphanPaymentSource = `-- name: AuditEntitlementOrphanPaymentSource :many
 SELECT
     ent.id AS ent_id,
-    ent.tenant_subject_id::text AS user_id,
+    ent.merchant_subject_id::text AS user_id,
     ent.entitlement,
     ent.source_type,
     ent.source_id
@@ -564,7 +564,7 @@ func (q *Queries) AuditEntitlementOrphanPaymentSource(ctx context.Context) ([]Au
 const auditEntitlementOrphanSubscriptionSource = `-- name: AuditEntitlementOrphanSubscriptionSource :many
 SELECT
     ent.id AS ent_id,
-    ent.tenant_subject_id::text AS user_id,
+    ent.merchant_subject_id::text AS user_id,
     ent.entitlement,
     ent.source_type,
     ent.source_id
@@ -614,16 +614,16 @@ func (q *Queries) AuditEntitlementOrphanSubscriptionSource(ctx context.Context) 
 const auditEntitlementSourceMismatch = `-- name: AuditEntitlementSourceMismatch :many
 SELECT
     ent.id AS ent_id,
-    ent.tenant_subject_id::text AS ent_user_id,
+    ent.merchant_subject_id::text AS ent_user_id,
     ent.entitlement,
     ent.source_id,
-    CASE WHEN sub.id IS NOT NULL THEN sub.tenant_subject_id::text END AS sub_user_id
+    CASE WHEN sub.id IS NOT NULL THEN sub.merchant_subject_id::text END AS sub_user_id
 FROM openrails.entitlements ent
 LEFT JOIN openrails.subscriptions sub ON ent.source_id = sub.id
 WHERE ent.source_type = 'subscription'
   AND ent.source_id IS NOT NULL
   AND ent.deleted_at IS NULL
-  AND (sub.id IS NULL OR sub.tenant_subject_id != ent.tenant_subject_id)
+  AND (sub.id IS NULL OR sub.merchant_subject_id != ent.merchant_subject_id)
 `
 
 type AuditEntitlementSourceMismatchRow struct {
@@ -661,64 +661,10 @@ func (q *Queries) AuditEntitlementSourceMismatch(ctx context.Context) ([]AuditEn
 	return items, nil
 }
 
-const auditExpiredAdminGrantActiveEntitlement = `-- name: AuditExpiredAdminGrantActiveEntitlement :many
-SELECT
-    ent.id AS ent_id,
-    ent.tenant_subject_id::text AS user_id,
-    ent.entitlement,
-    ag.id AS grant_id,
-    (ag.created_at + make_interval(days => ag.duration_days))::timestamptz AS expires_at
-FROM openrails.entitlements ent
-JOIN openrails.admin_grants ag ON ent.source_id = ag.id
-WHERE ent.source_type = 'admin'
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND (ent.end_at IS NULL OR ent.end_at > NOW())
-  AND ag.duration_days IS NOT NULL
-  AND ag.duration_days > 0
-  AND ag.created_at + make_interval(days => ag.duration_days) < NOW()
-`
-
-type AuditExpiredAdminGrantActiveEntitlementRow struct {
-	EntID       uuid.UUID
-	UserID      string
-	Entitlement string
-	GrantID     uuid.UUID
-	ExpiresAt   time.Time
-}
-
-// AG-4: grant expired (created_at + duration_days in the past) but the
-// entitlement it produced is still in effect.
-func (q *Queries) AuditExpiredAdminGrantActiveEntitlement(ctx context.Context) ([]AuditExpiredAdminGrantActiveEntitlementRow, error) {
-	rows, err := q.db.Query(ctx, auditExpiredAdminGrantActiveEntitlement)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuditExpiredAdminGrantActiveEntitlementRow
-	for rows.Next() {
-		var i AuditExpiredAdminGrantActiveEntitlementRow
-		if err := rows.Scan(
-			&i.EntID,
-			&i.UserID,
-			&i.Entitlement,
-			&i.GrantID,
-			&i.ExpiresAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const auditExpiredCardActiveSubscription = `-- name: AuditExpiredCardActiveSubscription :many
 SELECT
     sub.id AS sub_id,
-    sub.tenant_subject_id::text AS user_id,
+    sub.merchant_subject_id::text AS user_id,
     pm.id AS pm_id,
     pm.expiry_date::text AS expiry_date,
     pm.last_four,
@@ -767,8 +713,62 @@ func (q *Queries) AuditExpiredCardActiveSubscription(ctx context.Context) ([]Aud
 	return items, nil
 }
 
+const auditExpiredEntitlementGrantActiveEntitlement = `-- name: AuditExpiredEntitlementGrantActiveEntitlement :many
+SELECT
+    ent.id AS ent_id,
+    ent.merchant_subject_id::text AS user_id,
+    ent.entitlement,
+    ag.id AS grant_id,
+    (ag.created_at + make_interval(days => ag.duration_days))::timestamptz AS expires_at
+FROM openrails.entitlements ent
+JOIN openrails.entitlement_grants ag ON ent.source_id = ag.id
+WHERE ent.source_type = 'admin'
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND (ent.end_at IS NULL OR ent.end_at > NOW())
+  AND ag.duration_days IS NOT NULL
+  AND ag.duration_days > 0
+  AND ag.created_at + make_interval(days => ag.duration_days) < NOW()
+`
+
+type AuditExpiredEntitlementGrantActiveEntitlementRow struct {
+	EntID       uuid.UUID
+	UserID      string
+	Entitlement string
+	GrantID     uuid.UUID
+	ExpiresAt   time.Time
+}
+
+// AG-4: grant expired (created_at + duration_days in the past) but the
+// entitlement it produced is still in effect.
+func (q *Queries) AuditExpiredEntitlementGrantActiveEntitlement(ctx context.Context) ([]AuditExpiredEntitlementGrantActiveEntitlementRow, error) {
+	rows, err := q.db.Query(ctx, auditExpiredEntitlementGrantActiveEntitlement)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditExpiredEntitlementGrantActiveEntitlementRow
+	for rows.Next() {
+		var i AuditExpiredEntitlementGrantActiveEntitlementRow
+		if err := rows.Scan(
+			&i.EntID,
+			&i.UserID,
+			&i.Entitlement,
+			&i.GrantID,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const auditFutureDatedPayment = `-- name: AuditFutureDatedPayment :many
-SELECT id, tenant_subject_id::text AS user_id, purchased_at, amount
+SELECT id, merchant_subject_id::text AS user_id, purchased_at, amount
 FROM openrails.payments
 WHERE purchased_at > NOW() + INTERVAL '5 minutes'
 `
@@ -807,7 +807,7 @@ func (q *Queries) AuditFutureDatedPayment(ctx context.Context) ([]AuditFutureDat
 }
 
 const auditInvalidPeriodDates = `-- name: AuditInvalidPeriodDates :many
-SELECT id, tenant_subject_id::text AS user_id,
+SELECT id, merchant_subject_id::text AS user_id,
        current_period_starts_at::timestamptz AS current_period_starts_at,
        current_period_ends_at::timestamptz AS current_period_ends_at
 FROM openrails.subscriptions
@@ -850,7 +850,7 @@ func (q *Queries) AuditInvalidPeriodDates(ctx context.Context) ([]AuditInvalidPe
 }
 
 const auditInvalidTimeWindow = `-- name: AuditInvalidTimeWindow :many
-SELECT id, tenant_subject_id::text AS user_id, entitlement, start_at, end_at::timestamptz AS end_at
+SELECT id, merchant_subject_id::text AS user_id, entitlement, start_at, end_at::timestamptz AS end_at
 FROM openrails.entitlements
 WHERE end_at IS NOT NULL
   AND start_at >= end_at
@@ -895,12 +895,12 @@ func (q *Queries) AuditInvalidTimeWindow(ctx context.Context) ([]AuditInvalidTim
 const auditMultipleActiveSubscriptions = `-- name: AuditMultipleActiveSubscriptions :many
 
 SELECT
-    tenant_subject_id::text AS user_id,
+    merchant_subject_id::text AS user_id,
     COUNT(*)::int AS count,
     ARRAY_AGG(id ORDER BY created_at DESC)::uuid[] AS sub_ids
 FROM openrails.subscriptions
 WHERE status = 'active'
-GROUP BY tenant_subject_id
+GROUP BY merchant_subject_id
 HAVING COUNT(*) > 1
 `
 
@@ -936,7 +936,7 @@ func (q *Queries) AuditMultipleActiveSubscriptions(ctx context.Context) ([]Audit
 
 const auditMultipleIndefiniteEntitlements = `-- name: AuditMultipleIndefiniteEntitlements :many
 SELECT
-    tenant_subject_id::text AS user_id,
+    merchant_subject_id::text AS user_id,
     entitlement,
     COUNT(*)::int AS count,
     ARRAY_AGG(id ORDER BY created_at DESC)::uuid[] AS ent_ids
@@ -944,7 +944,7 @@ FROM openrails.entitlements
 WHERE end_at IS NULL
   AND revoked_at IS NULL
   AND deleted_at IS NULL
-GROUP BY tenant_subject_id, entitlement
+GROUP BY merchant_subject_id, entitlement
 HAVING COUNT(*) > 1
 `
 
@@ -1001,7 +1001,7 @@ const auditOneOffPaymentsWithSpec = `-- name: AuditOneOffPaymentsWithSpec :many
 
 SELECT
     purch.id,
-    purch.tenant_subject_id,
+    purch.merchant_subject_id,
     purch.amount,
     purch.purchased_at,
     prod.id AS product_id,
@@ -1012,23 +1012,23 @@ JOIN openrails.prices price ON purch.price_id = price.id
 JOIN openrails.products prod ON price.product_id = prod.id
 WHERE purch.subscription_id IS NULL
   AND purch.amount > 0
-  AND ($1::uuid IS NULL OR purch.tenant_subject_id = $1::uuid)
+  AND ($1::uuid IS NULL OR purch.merchant_subject_id = $1::uuid)
   AND ($2::timestamptz IS NULL OR purch.created_at >= $2::timestamptz)
 `
 
 type AuditOneOffPaymentsWithSpecParams struct {
-	TenantSubjectID *uuid.UUID
-	Since           *time.Time
+	MerchantSubjectID *uuid.UUID
+	Since             *time.Time
 }
 
 type AuditOneOffPaymentsWithSpecRow struct {
-	ID               uuid.UUID
-	TenantSubjectID  uuid.UUID
-	Amount           int64
-	PurchasedAt      time.Time
-	ProductID        uuid.UUID
-	ProductSlug      string
-	EntitlementsSpec []byte
+	ID                uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Amount            int64
+	PurchasedAt       time.Time
+	ProductID         uuid.UUID
+	ProductSlug       string
+	EntitlementsSpec  []byte
 }
 
 // ============================================================================
@@ -1036,7 +1036,7 @@ type AuditOneOffPaymentsWithSpecRow struct {
 // ============================================================================
 // P-E-1 (part 1): one-off payments joined with price+product.
 func (q *Queries) AuditOneOffPaymentsWithSpec(ctx context.Context, arg AuditOneOffPaymentsWithSpecParams) ([]AuditOneOffPaymentsWithSpecRow, error) {
-	rows, err := q.db.Query(ctx, auditOneOffPaymentsWithSpec, arg.TenantSubjectID, arg.Since)
+	rows, err := q.db.Query(ctx, auditOneOffPaymentsWithSpec, arg.MerchantSubjectID, arg.Since)
 	if err != nil {
 		return nil, err
 	}
@@ -1046,7 +1046,7 @@ func (q *Queries) AuditOneOffPaymentsWithSpec(ctx context.Context, arg AuditOneO
 		var i AuditOneOffPaymentsWithSpecRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantSubjectID,
+			&i.MerchantSubjectID,
 			&i.Amount,
 			&i.PurchasedAt,
 			&i.ProductID,
@@ -1066,11 +1066,11 @@ func (q *Queries) AuditOneOffPaymentsWithSpec(ctx context.Context, arg AuditOneO
 const auditOrphanAdminEntitlements = `-- name: AuditOrphanAdminEntitlements :many
 SELECT
     ent.id AS ent_id,
-    ent.tenant_subject_id::text AS user_id,
+    ent.merchant_subject_id::text AS user_id,
     ent.entitlement,
     ent.source_id
 FROM openrails.entitlements ent
-LEFT JOIN openrails.admin_grants ag ON ent.source_id = ag.id
+LEFT JOIN openrails.entitlement_grants ag ON ent.source_id = ag.id
 WHERE ent.source_type = 'admin'
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -1113,7 +1113,7 @@ func (q *Queries) AuditOrphanAdminEntitlements(ctx context.Context) ([]AuditOrph
 const auditOrphanOneOffEntitlements = `-- name: AuditOrphanOneOffEntitlements :many
 SELECT
     ent.id AS ent_id,
-    ent.tenant_subject_id::text AS user_id,
+    ent.merchant_subject_id::text AS user_id,
     ent.entitlement,
     ent.source_id,
     CASE WHEN purch.id IS NOT NULL THEN true ELSE false END AS payment_exists,
@@ -1165,7 +1165,7 @@ func (q *Queries) AuditOrphanOneOffEntitlements(ctx context.Context) ([]AuditOrp
 }
 
 const auditOrphanPaymentMethodReference = `-- name: AuditOrphanPaymentMethodReference :many
-SELECT sub.id AS sub_id, sub.tenant_subject_id::text AS user_id, sub.payment_method_id::uuid AS payment_method_id
+SELECT sub.id AS sub_id, sub.merchant_subject_id::text AS user_id, sub.payment_method_id::uuid AS payment_method_id
 FROM openrails.subscriptions sub
 LEFT JOIN openrails.payment_methods pm ON sub.payment_method_id = pm.id
 WHERE sub.payment_method_id IS NOT NULL
@@ -1202,7 +1202,7 @@ func (q *Queries) AuditOrphanPaymentMethodReference(ctx context.Context) ([]Audi
 const auditOrphanSubscriptionEntitlements = `-- name: AuditOrphanSubscriptionEntitlements :many
 SELECT
     ent.id AS entitlement_id,
-    ent.tenant_subject_id::text AS user_id,
+    ent.merchant_subject_id::text AS user_id,
     ent.entitlement,
     ent.source_id,
     CASE WHEN sub.id IS NOT NULL THEN sub.status::text END AS sub_status
@@ -1253,7 +1253,7 @@ func (q *Queries) AuditOrphanSubscriptionEntitlements(ctx context.Context) ([]Au
 const auditOrphanSubscriptionPrice = `-- name: AuditOrphanSubscriptionPrice :many
 SELECT
     sub.id AS sub_id,
-    sub.tenant_subject_id::text AS user_id,
+    sub.merchant_subject_id::text AS user_id,
     sub.price_id::uuid AS price_id,
     CASE WHEN price.id IS NOT NULL THEN true ELSE false END AS price_exists,
     CASE WHEN price.id IS NOT NULL THEN (price.status = 'active') END AS price_active
@@ -1301,7 +1301,7 @@ const auditOrphanSubscriptionProduct = `-- name: AuditOrphanSubscriptionProduct 
 
 SELECT
     sub.id AS sub_id,
-    sub.tenant_subject_id::text AS user_id,
+    sub.merchant_subject_id::text AS user_id,
     sub.product_id,
     CASE WHEN prod.id IS NOT NULL THEN true ELSE false END AS prod_exists,
     CASE WHEN prod.id IS NOT NULL THEN (prod.status = 'active') END AS prod_active
@@ -1352,7 +1352,7 @@ const auditOverlappingEntitlementWindows = `-- name: AuditOverlappingEntitlement
 WITH active_entitlements AS (
     SELECT
         id,
-        tenant_subject_id,
+        merchant_subject_id,
         entitlement,
         start_at,
         COALESCE(end_at, '9999-12-31'::timestamptz) AS end_at
@@ -1361,18 +1361,18 @@ WITH active_entitlements AS (
       AND deleted_at IS NULL
 )
 SELECT
-    e1.tenant_subject_id::text AS user_id,
+    e1.merchant_subject_id::text AS user_id,
     e1.entitlement,
     (COUNT(DISTINCT e1.id) + COUNT(DISTINCT e2.id))::int AS count,
     (ARRAY_AGG(DISTINCT e1.id) || ARRAY_AGG(DISTINCT e2.id))::uuid[] AS ent_ids
 FROM active_entitlements e1
 JOIN active_entitlements e2 ON
-    e1.tenant_subject_id = e2.tenant_subject_id
+    e1.merchant_subject_id = e2.merchant_subject_id
     AND e1.entitlement = e2.entitlement
     AND e1.id < e2.id
     AND e1.start_at < e2.end_at
     AND e2.start_at < e1.end_at
-GROUP BY e1.tenant_subject_id, e1.entitlement
+GROUP BY e1.merchant_subject_id, e1.entitlement
 `
 
 type AuditOverlappingEntitlementWindowsRow struct {
@@ -1409,7 +1409,7 @@ func (q *Queries) AuditOverlappingEntitlementWindows(ctx context.Context) ([]Aud
 }
 
 const auditPastDueWithoutRetry = `-- name: AuditPastDueWithoutRetry :many
-SELECT id, tenant_subject_id::text AS user_id, retry_attempts
+SELECT id, merchant_subject_id::text AS user_id, retry_attempts
 FROM openrails.subscriptions
 WHERE status = 'past_due'
   AND next_retry_at IS NULL
@@ -1446,7 +1446,7 @@ func (q *Queries) AuditPastDueWithoutRetry(ctx context.Context) ([]AuditPastDueW
 const auditPaymentOrphanSubscription = `-- name: AuditPaymentOrphanSubscription :many
 SELECT
     purch.id AS payment_id,
-    purch.tenant_subject_id::text AS user_id,
+    purch.merchant_subject_id::text AS user_id,
     purch.subscription_id::uuid AS subscription_id
 FROM openrails.payments purch
 LEFT JOIN openrails.subscriptions sub ON purch.subscription_id = sub.id
@@ -1484,7 +1484,7 @@ func (q *Queries) AuditPaymentOrphanSubscription(ctx context.Context) ([]AuditPa
 const auditPriceProductMismatch = `-- name: AuditPriceProductMismatch :many
 SELECT
     sub.id AS sub_id,
-    sub.tenant_subject_id::text AS user_id,
+    sub.merchant_subject_id::text AS user_id,
     sub.product_id AS sub_product_id,
     price.product_id AS price_product_id
 FROM openrails.subscriptions sub
@@ -1528,7 +1528,7 @@ func (q *Queries) AuditPriceProductMismatch(ctx context.Context) ([]AuditPricePr
 const auditProcessorMismatch = `-- name: AuditProcessorMismatch :many
 SELECT
     sub.id AS sub_id,
-    sub.tenant_subject_id::text AS user_id,
+    sub.merchant_subject_id::text AS user_id,
     sub.processor AS sub_processor,
     pm.processor::text AS pm_processor,
     pm.id AS pm_id
@@ -1573,7 +1573,7 @@ func (q *Queries) AuditProcessorMismatch(ctx context.Context) ([]AuditProcessorM
 }
 
 const auditReasonWithoutRevocation = `-- name: AuditReasonWithoutRevocation :many
-SELECT id, tenant_subject_id::text AS user_id, entitlement, revoke_reason::text AS revoke_reason
+SELECT id, merchant_subject_id::text AS user_id, entitlement, revoke_reason::text AS revoke_reason
 FROM openrails.entitlements
 WHERE revoke_reason IS NOT NULL
   AND revoked_at IS NULL
@@ -1624,7 +1624,7 @@ WITH refund_totals AS (
 )
 SELECT
     purch.id AS payment_id,
-    purch.tenant_subject_id::text AS user_id,
+    purch.merchant_subject_id::text AS user_id,
     purch.amount AS original_amount,
     COALESCE(rt.total_refunded, 0)::bigint AS refunded_amount,
     ent.id AS ent_id,
@@ -1680,7 +1680,7 @@ func (q *Queries) AuditRefundedPaymentActiveEntitlements(ctx context.Context) ([
 
 const auditRevokedWithoutReason = `-- name: AuditRevokedWithoutReason :many
 
-SELECT id, tenant_subject_id::text AS user_id, entitlement, revoked_at::timestamptz AS revoked_at
+SELECT id, merchant_subject_id::text AS user_id, entitlement, revoked_at::timestamptz AS revoked_at
 FROM openrails.entitlements
 WHERE revoked_at IS NOT NULL
   AND revoke_reason IS NULL
@@ -1724,7 +1724,7 @@ func (q *Queries) AuditRevokedWithoutReason(ctx context.Context) ([]AuditRevoked
 }
 
 const auditStalePastDueMaxRetries = `-- name: AuditStalePastDueMaxRetries :many
-SELECT id, tenant_subject_id::text AS user_id,
+SELECT id, merchant_subject_id::text AS user_id,
        retry_attempts::int AS retry_attempts,
        current_period_ends_at::timestamptz AS current_period_ends_at
 FROM openrails.subscriptions
@@ -1767,7 +1767,7 @@ func (q *Queries) AuditStalePastDueMaxRetries(ctx context.Context) ([]AuditStale
 
 const auditStalePendingSubscription = `-- name: AuditStalePendingSubscription :many
 
-SELECT id, tenant_subject_id::text AS user_id,
+SELECT id, merchant_subject_id::text AS user_id,
        current_period_starts_at::timestamptz AS current_period_starts_at,
        created_at
 FROM openrails.subscriptions
@@ -1815,7 +1815,7 @@ func (q *Queries) AuditStalePendingSubscription(ctx context.Context) ([]AuditSta
 const auditWrongEntitlementEndDate = `-- name: AuditWrongEntitlementEndDate :many
 SELECT
     sub.id AS sub_id,
-    sub.tenant_subject_id::text AS user_id,
+    sub.merchant_subject_id::text AS user_id,
     sub.current_period_ends_at::timestamptz AS period_ends_at,
     ent.id AS ent_id,
     ent.entitlement,

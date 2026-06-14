@@ -20,7 +20,7 @@ const (
 	PrefixUSDCFunding     = "ufs_"
 	PrefixUser            = "usr_"
 	PrefixEvent           = "evt_"
-	PrefixAdminGrant      = "ag_"
+	PrefixEntitlementGrant      = "ag_"
 )
 
 // FormatProductID formats a UUID as a product ID (prod_xxx)
@@ -74,9 +74,9 @@ func FormatEventID(id uuid.UUID) string {
 	return PrefixEvent + id.String()
 }
 
-// FormatAdminGrantID formats a UUID as an admin grant ID (ag_xxx)
-func FormatAdminGrantID(id uuid.UUID) string {
-	return PrefixAdminGrant + id.String()
+// FormatEntitlementGrantID formats a UUID as an admin grant ID (ag_xxx)
+func FormatEntitlementGrantID(id uuid.UUID) string {
+	return PrefixEntitlementGrant + id.String()
 }
 
 // ParseProductID parses a prefixed product ID and returns the UUID

@@ -18,12 +18,12 @@ type CreditType struct {
 
 type CreditBalance struct {
 	ID uuid.UUID `json:"id"`
-	// TenantID scopes this row to a tenant / billing namespace (issue #223).
-	TenantID uuid.UUID `json:"tenant_id"`
-	// TenantSubjectID is the tenant subject that OWNS this balance / is billed (issue #221,
+	// MerchantID scopes this row to a tenant / billing namespace (issue #223).
+	MerchantID uuid.UUID `json:"tenant_id"`
+	// MerchantSubjectID is the tenant subject that OWNS this balance / is billed (issue #221,
 	// payer/billing payer). Nullable during the additive rollout; defaults to the
-	// actor's deterministic personal tenant-subject id. See pkg/identity.TenantSubjectID.
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	// actor's deterministic personal tenant-subject id. See pkg/identity.MerchantSubjectID.
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	CreditTypeID    uuid.UUID `json:"credit_type_id"`
 	Balance         int64     `json:"balance"`
 	HeldBalance     int64     `json:"held_balance"`
@@ -33,11 +33,11 @@ type CreditBalance struct {
 
 type CreditTransaction struct {
 	ID uuid.UUID `json:"id"`
-	// TenantID scopes this row to a tenant / billing namespace (issue #223).
-	TenantID uuid.UUID `json:"tenant_id"`
-	// TenantSubjectID is the tenant subject that OWNS / is billed for this transaction (issue
-	// #221, payer/billing payer). See pkg/identity.TenantSubjectID.
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	// MerchantID scopes this row to a tenant / billing namespace (issue #223).
+	MerchantID uuid.UUID `json:"tenant_id"`
+	// MerchantSubjectID is the tenant subject that OWNS / is billed for this transaction (issue
+	// #221, payer/billing payer). See pkg/identity.MerchantSubjectID.
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	// Actor is the caller-supplied principal string that caused this charge
 	// (opaque to OpenRails; also the per-actor spend-cap grouping key).
 	Actor string `json:"actor"`
@@ -63,10 +63,10 @@ type CreditTransaction struct {
 
 type CreditBlock struct {
 	ID uuid.UUID `json:"id"`
-	// TenantID scopes this row to a tenant / billing namespace (issue #223).
-	TenantID uuid.UUID `json:"tenant_id"`
-	// TenantSubjectID is the tenant subject that OWNS this block of credits (issue #221).
-	TenantSubjectID     uuid.UUID  `json:"tenant_subject_id"`
+	// MerchantID scopes this row to a tenant / billing namespace (issue #223).
+	MerchantID uuid.UUID `json:"tenant_id"`
+	// MerchantSubjectID is the tenant subject that OWNS this block of credits (issue #221).
+	MerchantSubjectID     uuid.UUID  `json:"tenant_subject_id"`
 	CreditTypeID        uuid.UUID  `json:"credit_type_id"`
 	OriginalAmount      int64      `json:"original_amount"`
 	RemainingAmount     int64      `json:"remaining_amount"`
@@ -81,10 +81,10 @@ type CreditBlock struct {
 // close/expiry releases the unsettled remainder. First-class — NOT a reused hold.
 type CreditWindow struct {
 	ID uuid.UUID `json:"id"`
-	// TenantID scopes this row to a tenant / billing namespace (issue #223).
-	TenantID uuid.UUID `json:"tenant_id"`
-	// TenantSubjectID is the payer whose funds this window reserves (issue #221).
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	// MerchantID scopes this row to a tenant / billing namespace (issue #223).
+	MerchantID uuid.UUID `json:"tenant_id"`
+	// MerchantSubjectID is the payer whose funds this window reserves (issue #221).
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	CreditTypeID    uuid.UUID `json:"credit_type_id"`
 	// HeldAmount is the total reserved (open + refills); mirrored in held_balance
 	// while the window is open.

@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // startFeatureRLSPostgres boots Postgres, applies all billing migrations
@@ -42,17 +42,17 @@ func startFeatureRLSPostgres(t *testing.T) (appDB *db.DB, ctx context.Context) {
 
 // seedTenantAndProduct inserts a tenant + one product (super-owned would bypass
 // RLS, but here we run everything as the app role inside the correct tenant tx).
-func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid tenant.ID, productID uuid.UUID, slug string) {
+func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid merchant.ID, productID uuid.UUID, slug string) {
 	t.Helper()
-	require.NoError(t, appDB.TenantTx(tenant.WithID(ctx, tid), func(ctx context.Context, tx pgx.Tx) error {
+	require.NoError(t, appDB.TenantTx(merchant.WithID(ctx, tid), func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO openrails.tenants (id, slug, name, status) VALUES ($1, $2, $2, 'active') ON CONFLICT (id) DO NOTHING`,
+			`INSERT INTO openrails.merchants (id, slug, name, status) VALUES ($1, $2, $2, 'active') ON CONFLICT (id) DO NOTHING`,
 			tid.UUID(), "t-"+tid.String()[:8],
 		); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.products (id, tenant_id, slug, display_name) VALUES ($1, $2, $3, $3)`,
+			`INSERT INTO openrails.products (id, merchant_id, slug, display_name) VALUES ($1, $2, $3, $3)`,
 			productID, tid.UUID(), slug,
 		)
 		return err
@@ -65,16 +65,16 @@ func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid t
 func TestEntitlementFeatureRepo_TenantIsolation(t *testing.T) {
 	appDB, ctx := startFeatureRLSPostgres(t)
 
-	tA := tenant.ID(uuid.New())
-	tB := tenant.ID(uuid.New())
+	tA := merchant.ID(uuid.New())
+	tB := merchant.ID(uuid.New())
 	productA := uuid.New()
 	productB := uuid.New()
 	suffix := uuid.NewString()[:8]
 	seedTenantAndProduct(t, ctx, appDB, tA, productA, "prod-a-"+suffix)
 	seedTenantAndProduct(t, ctx, appDB, tB, productB, "prod-b-"+suffix)
 
-	ctxA := tenant.WithID(ctx, tA)
-	ctxB := tenant.WithID(ctx, tB)
+	ctxA := merchant.WithID(ctx, tA)
+	ctxB := merchant.WithID(ctx, tB)
 
 	// (1) Create a feature in tenant A.
 	var featureA *models.EntitlementFeature
@@ -83,7 +83,7 @@ func TestEntitlementFeatureRepo_TenantIsolation(t *testing.T) {
 		return NewEntitlementFeatureRepo(db.NewWithPgxTx(tx)).CreateFeature(ctx, featureA)
 	}))
 	require.NotEqual(t, uuid.UUID{}, featureA.ID)
-	require.Equal(t, tA.UUID(), featureA.TenantID)
+	require.Equal(t, tA.UUID(), featureA.MerchantID)
 
 	// (2) Tenant A lists exactly its one feature; tenant B sees none.
 	require.NoError(t, appDB.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {

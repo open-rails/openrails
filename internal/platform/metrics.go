@@ -11,7 +11,7 @@ import (
 
 // TenantMetric is the per-tenant aggregate row in the platform metrics view.
 type TenantMetric struct {
-	TenantID        string `json:"tenant_id"`
+	MerchantID        string `json:"tenant_id"`
 	Slug            string `json:"slug"`
 	Name            string `json:"name"`
 	Status          string `json:"status"`
@@ -119,7 +119,7 @@ func scanTenantMetrics(rows pgx.Rows) ([]TenantMetric, error) {
 	var out []TenantMetric
 	for rows.Next() {
 		var tm TenantMetric
-		if err := rows.Scan(&tm.TenantID, &tm.Slug, &tm.Name, &tm.Status,
+		if err := rows.Scan(&tm.MerchantID, &tm.Slug, &tm.Name, &tm.Status,
 			&tm.BillingTier, &tm.ActiveSubs, &tm.RevenueMinor, &tm.WebhookFailures); err != nil {
 			return nil, err
 		}

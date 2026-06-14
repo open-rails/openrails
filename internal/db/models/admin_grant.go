@@ -6,15 +6,15 @@ import (
 	"github.com/google/uuid"
 )
 
-// AdminGrant represents an admin-initiated product grant to a user.
+// EntitlementGrant represents an admin-initiated product grant to a user.
 // This is used for comps, contest winners, manual payments (PayPal/cash), partnerships, etc.
 // The admin picks a Price/Product, and the system derives entitlements from Product.EntitlementsSpec.
-type AdminGrant struct {
+type EntitlementGrant struct {
 	ID uuid.UUID `json:"id"`
-	// TenantSubjectID is the OpenRails payable tenant subject for this row (#317).
+	// MerchantSubjectID is the OpenRails payable tenant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
 	// it before user_id is dropped. Join openrails.tenant_subjects for issuer/subject.
-	TenantSubjectID uuid.UUID  `json:"tenant_subject_id,omitempty"`
+	MerchantSubjectID uuid.UUID  `json:"tenant_subject_id,omitempty"`
 	PriceID         *uuid.UUID `json:"price_id,omitempty"` // Optional: Price/Product being granted
 	GrantedBy       string     `json:"granted_by"`         // Admin user ID who made the grant
 

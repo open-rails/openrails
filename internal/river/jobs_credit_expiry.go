@@ -74,8 +74,8 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			// HARDCUT (#221/#223): money rows are payer+tenant-scoped. Expiry rolls up
 			// per (tenant, payer).
 			type key struct {
-				TenantID        uuid.UUID
-				TenantSubjectID uuid.UUID
+				MerchantID        uuid.UUID
+				MerchantSubjectID uuid.UUID
 				Currency        string
 			}
 			expiredTotals := make(map[key]int64)
@@ -84,8 +84,8 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 					continue
 				}
 				k := key{
-					TenantID:        blocks[i].TenantID,
-					TenantSubjectID: blocks[i].TenantSubjectID,
+					MerchantID:        blocks[i].MerchantID,
+					MerchantSubjectID: blocks[i].MerchantSubjectID,
 					Currency:        blocks[i].Currency,
 				}
 				expiredTotals[k] += blocks[i].RemainingAmount
@@ -101,7 +101,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 					continue
 				}
 				balKey := gen.LockMoneyBalanceParams{
-					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, Currency: k.Currency,
+					MerchantID: k.MerchantID, MerchantSubjectID: k.MerchantSubjectID, Currency: k.Currency,
 				}
 				bal, err := q.LockMoneyBalance(ctx, balKey)
 				if err != nil && !errorsIsNoRows(err) {
@@ -109,7 +109,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 				}
 				if errorsIsNoRows(err) {
 					if err := q.InsertMoneyBalanceIfAbsent(ctx, gen.InsertMoneyBalanceIfAbsentParams{
-						ID: uuidutil.NewV7(), TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, Currency: k.Currency,
+						ID: uuidutil.NewV7(), MerchantID: k.MerchantID, MerchantSubjectID: k.MerchantSubjectID, Currency: k.Currency,
 						Now: now,
 					}); err != nil {
 						return err
@@ -126,7 +126,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 				}
 
 				if err := q.SetMoneyBalance(ctx, gen.SetMoneyBalanceParams{
-					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, Currency: k.Currency,
+					MerchantID: k.MerchantID, MerchantSubjectID: k.MerchantSubjectID, Currency: k.Currency,
 					Balance: newBalance, UpdatedAt: now,
 				}); err != nil {
 					return err
@@ -134,11 +134,11 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 
 				if err := q.InsertMoneyTransaction(ctx, gen.InsertMoneyTransactionParams{
 					ID:              uuidutil.NewV7(),
-					TenantID:        k.TenantID,
-					TenantSubjectID: k.TenantSubjectID,
+					MerchantID:        k.MerchantID,
+					MerchantSubjectID: k.MerchantSubjectID,
 					Currency:        k.Currency,
 					// System event: no caller actor; payer-derived per money_in convention.
-					Actor:           k.TenantSubjectID.String(),
+					Actor:           k.MerchantSubjectID.String(),
 					Amount:          -amount,
 					BalanceAfter:    &newBalance,
 					TransactionType: "expiry",

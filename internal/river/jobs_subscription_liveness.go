@@ -18,7 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -183,7 +183,7 @@ func (w *SubscriptionLivenessWorker) Work(ctx context.Context, job *river.Job[Su
 		// #336: pin the subscription's tenant so the lifecycle convergence
 		// writes (renew/fail/adopt) carry the app.tenant_id GUC.
 		outcome := livenessOutcomeUnreachable
-		if err := w.DB.RunInTenantConn(tenant.WithID(ctx, tenant.ID(cohort[i].TenantID)), func(tctx context.Context) error {
+		if err := w.DB.RunInTenantConn(merchant.WithID(ctx, merchant.ID(cohort[i].MerchantID)), func(tctx context.Context) error {
 			outcome = w.processSubscription(tctx, &cohort[i], deps)
 			return nil
 		}); err != nil {

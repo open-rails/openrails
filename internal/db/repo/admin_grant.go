@@ -8,21 +8,21 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-type AdminGrantRepo struct {
+type EntitlementGrantRepo struct {
 	db *db.DB
 }
 
-func NewAdminGrantRepo(db *db.DB) *AdminGrantRepo {
-	return &AdminGrantRepo{db: db}
+func NewEntitlementGrantRepo(db *db.DB) *EntitlementGrantRepo {
+	return &EntitlementGrantRepo{db: db}
 }
 
-func adminGrantFromGen(g gen.OpenrailsAdminGrant) *models.AdminGrant {
-	return &models.AdminGrant{
+func adminGrantFromGen(g gen.OpenrailsEntitlementGrant) *models.EntitlementGrant {
+	return &models.EntitlementGrant{
 		ID:              g.ID,
-		TenantSubjectID: g.TenantSubjectID,
+		MerchantSubjectID: g.MerchantSubjectID,
 		PriceID:         g.PriceID,
 		GrantedBy:       g.GrantedBy,
 		Reason:          g.Reason,
@@ -32,8 +32,8 @@ func adminGrantFromGen(g gen.OpenrailsAdminGrant) *models.AdminGrant {
 	}
 }
 
-// attachAdminGrantRelations loads the Price and Payment relations.
-func (r *AdminGrantRepo) attachAdminGrantRelations(ctx context.Context, grants []*models.AdminGrant) error {
+// attachEntitlementGrantRelations loads the Price and Payment relations.
+func (r *EntitlementGrantRepo) attachEntitlementGrantRelations(ctx context.Context, grants []*models.EntitlementGrant) error {
 	if len(grants) == 0 {
 		return nil
 	}
@@ -92,18 +92,18 @@ func (r *AdminGrantRepo) attachAdminGrantRelations(ctx context.Context, grants [
 }
 
 // Create inserts a new admin grant record
-func (r *AdminGrantRepo) Create(ctx context.Context, grant *models.AdminGrant) error {
-	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, grant.TenantSubjectID); err != nil {
+func (r *EntitlementGrantRepo) Create(ctx context.Context, grant *models.EntitlementGrant) error {
+	if err := ensureMerchantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, grant.MerchantSubjectID); err != nil {
 		return err
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	id, err := r.db.Gen(ctx).CreateAdminGrant(ctx, gen.CreateAdminGrantParams{
+	id, err := r.db.Gen(ctx).CreateEntitlementGrant(ctx, gen.CreateEntitlementGrantParams{
 		ID:              grant.ID,
-		TenantID:        tid.UUID(),
-		TenantSubjectID: grant.TenantSubjectID,
+		MerchantID:        tid.UUID(),
+		MerchantSubjectID: grant.MerchantSubjectID,
 		PriceID:         grant.PriceID,
 		GrantedBy:       grant.GrantedBy,
 		Reason:          grant.Reason,
@@ -119,33 +119,33 @@ func (r *AdminGrantRepo) Create(ctx context.Context, grant *models.AdminGrant) e
 }
 
 // GetByID retrieves an admin grant by ID
-func (r *AdminGrantRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.AdminGrant, error) {
-	row, err := r.db.Gen(ctx).GetAdminGrantByID(ctx, id)
+func (r *EntitlementGrantRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.EntitlementGrant, error) {
+	row, err := r.db.Gen(ctx).GetEntitlementGrantByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	grant := adminGrantFromGen(row)
-	if err := r.attachAdminGrantRelations(ctx, []*models.AdminGrant{grant}); err != nil {
+	if err := r.attachEntitlementGrantRelations(ctx, []*models.EntitlementGrant{grant}); err != nil {
 		return nil, err
 	}
 	return grant, nil
 }
 
 // ListByUserID retrieves all admin grants for a user
-func (r *AdminGrantRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]models.AdminGrant, int, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+func (r *EntitlementGrantRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]models.EntitlementGrant, int, error) {
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
 	q := r.db.Gen(ctx)
-	total, err := q.CountAdminGrantsByTenantSubject(ctx, tsid)
+	total, err := q.CountEntitlementGrantsByMerchantSubject(ctx, tsid)
 	if err != nil {
 		return nil, 0, err
 	}
 	limit32, _ := safecast.Convert[int32](limit)
 	offset32, _ := safecast.Convert[int32](offset)
-	rows, err := q.ListAdminGrantsByTenantSubject(ctx, gen.ListAdminGrantsByTenantSubjectParams{
-		TenantSubjectID: tsid,
+	rows, err := q.ListEntitlementGrantsByMerchantSubject(ctx, gen.ListEntitlementGrantsByMerchantSubjectParams{
+		MerchantSubjectID: tsid,
 		PageLimit:       limit32,
 		PageOffset:      offset32,
 	})
@@ -156,15 +156,15 @@ func (r *AdminGrantRepo) ListByUserID(ctx context.Context, userID string, limit,
 }
 
 // ListByGrantedBy retrieves all admin grants made by a specific admin
-func (r *AdminGrantRepo) ListByGrantedBy(ctx context.Context, grantedBy string, limit, offset int) ([]models.AdminGrant, int, error) {
+func (r *EntitlementGrantRepo) ListByGrantedBy(ctx context.Context, grantedBy string, limit, offset int) ([]models.EntitlementGrant, int, error) {
 	q := r.db.Gen(ctx)
-	total, err := q.CountAdminGrantsByGrantedBy(ctx, grantedBy)
+	total, err := q.CountEntitlementGrantsByGrantedBy(ctx, grantedBy)
 	if err != nil {
 		return nil, 0, err
 	}
 	limit32, _ := safecast.Convert[int32](limit)
 	offset32, _ := safecast.Convert[int32](offset)
-	rows, err := q.ListAdminGrantsByGrantedBy(ctx, gen.ListAdminGrantsByGrantedByParams{
+	rows, err := q.ListEntitlementGrantsByGrantedBy(ctx, gen.ListEntitlementGrantsByGrantedByParams{
 		GrantedBy:  grantedBy,
 		PageLimit:  limit32,
 		PageOffset: offset32,
@@ -175,15 +175,15 @@ func (r *AdminGrantRepo) ListByGrantedBy(ctx context.Context, grantedBy string, 
 	return r.grantsWithRelations(ctx, rows, int(total))
 }
 
-func (r *AdminGrantRepo) grantsWithRelations(ctx context.Context, rows []gen.OpenrailsAdminGrant, total int) ([]models.AdminGrant, int, error) {
-	grants := make([]*models.AdminGrant, 0, len(rows))
+func (r *EntitlementGrantRepo) grantsWithRelations(ctx context.Context, rows []gen.OpenrailsEntitlementGrant, total int) ([]models.EntitlementGrant, int, error) {
+	grants := make([]*models.EntitlementGrant, 0, len(rows))
 	for _, row := range rows {
 		grants = append(grants, adminGrantFromGen(row))
 	}
-	if err := r.attachAdminGrantRelations(ctx, grants); err != nil {
+	if err := r.attachEntitlementGrantRelations(ctx, grants); err != nil {
 		return nil, 0, err
 	}
-	out := make([]models.AdminGrant, 0, len(grants))
+	out := make([]models.EntitlementGrant, 0, len(grants))
 	for _, g := range grants {
 		out = append(out, *g)
 	}

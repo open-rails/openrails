@@ -12,10 +12,10 @@ func TestConsolidatedSchemaEnablesRLSAndAppRole(t *testing.T) {
 		"GRANT USAGE ON SCHEMA openrails TO openrails_app",
 		"ENABLE ROW LEVEL SECURITY",
 		"FORCE ROW LEVEL SECURITY",
-		"CREATE POLICY tenant_isolation",
-		"current_setting('app.tenant_id'::text, true)",
+		"CREATE POLICY merchant_isolation",
+		"current_setting('app.merchant_id'::text, true)",
 		"WITH CHECK",
-		"CREATE TABLE openrails.tenant_deks",
+		"CREATE TABLE openrails.merchant_deks",
 		"wrapped_dek bytea NOT NULL",
 	} {
 		if !strings.Contains(c, want) {
@@ -38,7 +38,7 @@ func TestConsolidatedSchemaCoversTenantOwnedRLSTables(t *testing.T) {
 		"budget_reservations",
 	)
 	for _, tbl := range tables {
-		if !strings.Contains(c, "CREATE POLICY tenant_isolation ON openrails."+tbl) {
+		if !strings.Contains(c, "CREATE POLICY merchant_isolation ON openrails."+tbl) {
 			t.Errorf("001 schema missing RLS policy for %q", tbl)
 		}
 	}

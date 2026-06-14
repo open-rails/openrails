@@ -64,7 +64,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 
 	suite.InsertSubscription(ctx, &models.Subscription{
 		ID:                      subID,
-		TenantSubjectID:         suite.ensureTenantSubject(ctx, userID),
+		MerchantSubjectID:         suite.ensureMerchantSubject(ctx, userID),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -114,14 +114,14 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	// Admin manual grant: extra +5 days, should schedule after subscription end too.
-	adminGrant := &models.AdminGrant{
+	adminGrant := &models.EntitlementGrant{
 		ID:              uuid.New(),
-		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
+		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
 		GrantedBy:       "admin",
 		Reason:          "test",
 		CreatedAt:       clock.Now().UTC(),
 	}
-	suite.InsertAdminGrant(ctx, adminGrant)
+	suite.InsertEntitlementGrant(ctx, adminGrant)
 
 	d := 5 * 24 * time.Hour
 	_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
@@ -147,9 +147,9 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1", suite.ensureMerchantSubject(ctx, userID))
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.payments WHERE id = $1", payment.ID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.admin_grants WHERE id = $1", adminGrant.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlement_grants WHERE id = $1", adminGrant.ID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -193,7 +193,7 @@ func TestEntitlementSoftDeleteExcludedFromIsEntitled(t *testing.T) {
 	// Insert an entitlement window that is currently active.
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
+		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
 		Entitlement:     entName,
 		StartAt:         now.Add(-1 * time.Hour),
 		EndAt:           nil, // active indefinitely

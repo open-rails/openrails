@@ -31,7 +31,7 @@ func (s stubSelfAuthenticator) AuthenticateDelegated(context.Context, *http.Requ
 
 func selfPrincipal(perms ...string) *billingauth.DelegatedPrincipal {
 	return &billingauth.DelegatedPrincipal{
-		TenantID:    dbtest.TestTenantID.String(),
+		MerchantID:    dbtest.TestTenantID.String(),
 		TenantSlug:  dbtest.TestTenantSlug,
 		SubjectID:   "0d4cdb35-9f3f-4a16-bb83-90a8aa20a2c1",
 		Actor:       "platform:host",

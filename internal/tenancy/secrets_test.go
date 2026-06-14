@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func TestMemSecretStore_RoundTripPerTenant(t *testing.T) {
@@ -14,7 +14,7 @@ func TestMemSecretStore_RoundTripPerTenant(t *testing.T) {
 	store := NewMemorySecretStore()
 
 	a := dbtest.TestTenantID
-	b, err := tenant.ParseID("22222222-2222-2222-2222-222222222222")
+	b, err := merchant.ParseID("22222222-2222-2222-2222-222222222222")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,10 +99,10 @@ func TestMemSecretStore_DeleteAndList(t *testing.T) {
 func TestMemSecretStore_ZeroTenantRejected(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemorySecretStore()
-	if _, err := store.Get(ctx, tenant.ID{}, SecretStripeSecretKey); err == nil {
+	if _, err := store.Get(ctx, merchant.ID{}, SecretStripeSecretKey); err == nil {
 		t.Fatal("get with zero tenant should error")
 	}
-	if _, err := store.Put(ctx, tenant.ID{}, SecretStripeSecretKey, "x"); err == nil {
+	if _, err := store.Put(ctx, merchant.ID{}, SecretStripeSecretKey, "x"); err == nil {
 		t.Fatal("put with zero tenant should error")
 	}
 }
@@ -194,7 +194,7 @@ func newFakeVaultKV() *fakeVaultKV { return &fakeVaultKV{data: map[string]map[st
 
 type staticTenantSlugResolver map[string]string
 
-func (s staticTenantSlugResolver) TenantSlug(_ context.Context, id tenant.ID) (string, error) {
+func (s staticTenantSlugResolver) TenantSlug(_ context.Context, id merchant.ID) (string, error) {
 	return s[id.String()], nil
 }
 

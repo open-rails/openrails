@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // TierThreshold is one rung of the trust ladder: an account reaches Tier once its
@@ -41,8 +41,8 @@ func tierForCumulative(paid int64, ladder []TierThreshold) string {
 
 // CumulativePaidMicros is the total a payer has PAID in (sum of deposit
 // transactions) — the trust signal that graduates the tier.
-func (s *MoneyService) CumulativePaidMicros(ctx context.Context, payer identity.TenantSubjectID) (int64, error) {
-	tid, err := tenant.Require(ctx)
+func (s *MoneyService) CumulativePaidMicros(ctx context.Context, payer identity.MerchantSubjectID) (int64, error) {
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -51,7 +51,7 @@ func (s *MoneyService) CumulativePaidMicros(ctx context.Context, payer identity.
 	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
 		total, e = s.db.Gen(ctx).SumMoneyDeposits(ctx, gen.SumMoneyDepositsParams{
-			TenantID: tenantID, TenantSubjectID: payer.UUID(), Currency: DefaultCurrency,
+			MerchantID: tenantID, MerchantSubjectID: payer.UUID(), Currency: DefaultCurrency,
 		})
 		return e
 	})
@@ -59,7 +59,7 @@ func (s *MoneyService) CumulativePaidMicros(ctx context.Context, payer identity.
 }
 
 // GetTier returns the account's graduated tier ("" if none).
-func (s *MoneyService) GetTier(ctx context.Context, payer identity.TenantSubjectID) (string, error) {
+func (s *MoneyService) GetTier(ctx context.Context, payer identity.MerchantSubjectID) (string, error) {
 	settings, err := s.GetAccountSettings(ctx, payer)
 	if err != nil {
 		return "", err
@@ -78,7 +78,7 @@ func (s *MoneyService) GetTier(ctx context.Context, payer identity.TenantSubject
 // this becomes a NO-OP that returns the current auto-maintained tier — the host
 // no longer needs to crank it. With no schedule, it keeps the legacy behavior so
 // existing hosts keep working.
-func (s *MoneyService) GraduateTier(ctx context.Context, payer identity.TenantSubjectID, ladder []TierThreshold) (string, error) {
+func (s *MoneyService) GraduateTier(ctx context.Context, payer identity.MerchantSubjectID, ladder []TierThreshold) (string, error) {
 	if s == nil || s.db == nil {
 		return "", fmt.Errorf("money service not initialized")
 	}
@@ -95,7 +95,7 @@ func (s *MoneyService) GraduateTier(ctx context.Context, payer identity.TenantSu
 	}
 	tier := tierForCumulative(paid, ladder)
 
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -110,7 +110,7 @@ func (s *MoneyService) GraduateTier(ctx context.Context, payer identity.TenantSu
 		// Legacy host-cranked path writes tier_source='auto' (it is not an admin
 		// override; a later schedule + auto-graduation may revise it).
 		return q.SetMoneyAccountTier(ctx, gen.SetMoneyAccountTierParams{
-			TenantID: tenantID, TenantSubjectID: payer.UUID(), Currency: DefaultCurrency,
+			MerchantID: tenantID, MerchantSubjectID: payer.UUID(), Currency: DefaultCurrency,
 			Tier: tier, TierSource: "auto", Now: now,
 		})
 	})
@@ -124,11 +124,11 @@ func (s *MoneyService) GraduateTier(ctx context.Context, payer identity.TenantSu
 // tier_source='admin' so auto-graduation will never overwrite it — the admin
 // override always wins over the schedule. An empty tier clears the override back
 // to schedule-driven ('auto') so the next deposit re-derives the tier.
-func (s *MoneyService) SetTierOverride(ctx context.Context, payer identity.TenantSubjectID, tier string) error {
+func (s *MoneyService) SetTierOverride(ctx context.Context, payer identity.MerchantSubjectID, tier string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (s *MoneyService) SetTierOverride(ctx context.Context, payer identity.Tenan
 			return err
 		}
 		return q.SetMoneyAccountTier(ctx, gen.SetMoneyAccountTierParams{
-			TenantID: tenantID, TenantSubjectID: payer.UUID(), Currency: DefaultCurrency,
+			MerchantID: tenantID, MerchantSubjectID: payer.UUID(), Currency: DefaultCurrency,
 			Tier: tier, TierSource: source, Now: now,
 		})
 	})
@@ -155,11 +155,11 @@ func (s *MoneyService) SetTierOverride(ctx context.Context, payer identity.Tenan
 // A nil/empty payer writes the tenant-wide default schedule; a non-zero payer
 // writes a per-subject override. owner is forced to 'platform' (set by us; the
 // subject cannot see/loosen it — the #473 owner pattern).
-func (s *MoneyService) SetTierSchedule(ctx context.Context, payer identity.TenantSubjectID, schedule []TierThreshold) error {
+func (s *MoneyService) SetTierSchedule(ctx context.Context, payer identity.MerchantSubjectID, schedule []TierThreshold) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
@@ -173,17 +173,17 @@ func (s *MoneyService) SetTierSchedule(ctx context.Context, payer identity.Tenan
 		q := s.db.Gen(ctx)
 		if payer.IsZero() {
 			return q.UpsertTierScheduleDefault(ctx, gen.UpsertTierScheduleDefaultParams{
-				ID: uuidutil.NewV7(), TenantID: tenantID, Owner: "platform",
+				ID: uuidutil.NewV7(), MerchantID: tenantID, Owner: "platform",
 				Rungs: rungsJSON, CreatedAt: now, UpdatedAt: now,
 			})
 		}
 		// A per-subject override needs the tenant_subjects FK satisfied.
-		if err := ensureTenantSubject(ctx, q, tenantID, payer.UUID()); err != nil {
+		if err := ensureMerchantSubject(ctx, q, tenantID, payer.UUID()); err != nil {
 			return err
 		}
 		ts := payer.UUID()
 		return q.UpsertTierScheduleSubject(ctx, gen.UpsertTierScheduleSubjectParams{
-			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: &ts, Owner: "platform",
+			ID: uuidutil.NewV7(), MerchantID: tenantID, MerchantSubjectID: &ts, Owner: "platform",
 			Rungs: rungsJSON, CreatedAt: now, UpdatedAt: now,
 		})
 	})
@@ -192,11 +192,11 @@ func (s *MoneyService) SetTierSchedule(ctx context.Context, payer identity.Tenan
 // GetTierSchedule returns the EFFECTIVE platform-owned schedule for a payer (the
 // subject's override if present, else the tenant-wide default), or nil when none
 // is set. A zero payer reads the tenant-wide default directly.
-func (s *MoneyService) GetTierSchedule(ctx context.Context, payer identity.TenantSubjectID) ([]TierThreshold, error) {
+func (s *MoneyService) GetTierSchedule(ctx context.Context, payer identity.MerchantSubjectID) ([]TierThreshold, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +205,7 @@ func (s *MoneyService) GetTierSchedule(ctx context.Context, payer identity.Tenan
 	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		// nil subject → only the tenant-wide default row matches (#476).
 		row, e := s.db.Gen(ctx).GetEffectiveTierSchedule(ctx, gen.GetEffectiveTierScheduleParams{
-			TenantID: tenantID, Owner: "platform", TenantSubjectID: subjectPtr(payer),
+			MerchantID: tenantID, Owner: "platform", MerchantSubjectID: subjectPtr(payer),
 		})
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil
@@ -229,7 +229,7 @@ func (s *MoneyService) GetTierSchedule(ctx context.Context, payer identity.Tenan
 // never regresses), and a no-op when no schedule exists or the current tier is an
 // admin override (the DB UPDATE itself guards tier_source<>'admin'). `cumPaid` is
 // the post-event cumulative; passing it avoids a re-query.
-func (s *MoneyService) autoGraduateTierTx(ctx context.Context, q *gen.Queries, tenantID uuid.UUID, payer identity.TenantSubjectID, cumPaid int64, now time.Time) error {
+func (s *MoneyService) autoGraduateTierTx(ctx context.Context, q *gen.Queries, tenantID uuid.UUID, payer identity.MerchantSubjectID, cumPaid int64, now time.Time) error {
 	sched, err := s.tierScheduleTx(ctx, q, tenantID, payer)
 	if err != nil || len(sched) == 0 {
 		return err
@@ -262,14 +262,14 @@ func (s *MoneyService) autoGraduateTierTx(ctx context.Context, q *gen.Queries, t
 		}
 	}
 	return q.AutoGraduateMoneyAccountTier(ctx, gen.AutoGraduateMoneyAccountTierParams{
-		TenantID: tenantID, TenantSubjectID: payer.UUID(), Currency: DefaultCurrency,
+		MerchantID: tenantID, MerchantSubjectID: payer.UUID(), Currency: DefaultCurrency,
 		Tier: target, Now: now,
 	})
 }
 
 // subjectPtr maps a payer to the nullable tenant_subject_id param: nil for a
 // zero payer (matches only the tenant-wide default schedule), else a pointer.
-func subjectPtr(payer identity.TenantSubjectID) *uuid.UUID {
+func subjectPtr(payer identity.MerchantSubjectID) *uuid.UUID {
 	if payer.IsZero() {
 		return nil
 	}
@@ -291,9 +291,9 @@ func rungThreshold(sched []TierThreshold, tier string) int64 {
 
 // tierScheduleTx reads the effective platform schedule inside an open tx (the
 // connection already carries the tenant GUC, so no RunInTenantConn wrap).
-func (s *MoneyService) tierScheduleTx(ctx context.Context, q *gen.Queries, tenantID uuid.UUID, payer identity.TenantSubjectID) ([]TierThreshold, error) {
+func (s *MoneyService) tierScheduleTx(ctx context.Context, q *gen.Queries, tenantID uuid.UUID, payer identity.MerchantSubjectID) ([]TierThreshold, error) {
 	row, e := q.GetEffectiveTierSchedule(ctx, gen.GetEffectiveTierScheduleParams{
-		TenantID: tenantID, Owner: "platform", TenantSubjectID: subjectPtr(payer),
+		MerchantID: tenantID, Owner: "platform", MerchantSubjectID: subjectPtr(payer),
 	})
 	if errors.Is(e, pgx.ErrNoRows) {
 		return nil, nil
@@ -312,9 +312,9 @@ func (s *MoneyService) tierScheduleTx(ctx context.Context, q *gen.Queries, tenan
 
 // accountSettingsTx reads the money_accounts row inside an open tx (nil when the
 // account has no settings row yet).
-func (s *MoneyService) accountSettingsTx(ctx context.Context, q *gen.Queries, tenantID uuid.UUID, payer identity.TenantSubjectID) (*models.MoneyAccount, error) {
+func (s *MoneyService) accountSettingsTx(ctx context.Context, q *gen.Queries, tenantID uuid.UUID, payer identity.MerchantSubjectID) (*models.MoneyAccount, error) {
 	row, e := q.GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{
-		TenantID: tenantID, TenantSubjectID: payer.UUID(), Currency: DefaultCurrency,
+		MerchantID: tenantID, MerchantSubjectID: payer.UUID(), Currency: DefaultCurrency,
 	})
 	if errors.Is(e, pgx.ErrNoRows) {
 		return nil, nil

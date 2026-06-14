@@ -91,7 +91,7 @@ func TestDevnetFailurePaths(t *testing.T) {
 		h := publishUSDCPlan(ctx, t, planSvc, amount, 720)
 		before, _ := rc.GetTokenBalanceForMint(ctx, merchant.PublicKey(), usdc)
 		res, perr := prepSvc.Prepare(ctx, PrepareSubscribeInput{
-			TenantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(),
+			MerchantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(),
 			PlanID: h.PlanID, MintSymbol: "USDC", AmountBaseUnits: amount, PeriodHours: 720, PlanCreatedAt: h.CreatedAt,
 		})
 		// First-timer flow needs init first; the pre-flight rejects at the subscribe step.
@@ -99,7 +99,7 @@ func TestDevnetFailurePaths(t *testing.T) {
 			require.NoError(t, perr)
 			signAndSendBase64(ctx, t, rc, raw, sub, res.Transactions)
 			_, perr = prepSvc.Prepare(ctx, PrepareSubscribeInput{
-				TenantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(),
+				MerchantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(),
 				PlanID: h.PlanID, MintSymbol: "USDC", AmountBaseUnits: amount, PeriodHours: 720, PlanCreatedAt: h.CreatedAt,
 			})
 		}

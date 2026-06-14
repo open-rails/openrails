@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/internal/crypto"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // encryptedSecretStore wraps any TenantSecretStore and transparently
@@ -37,7 +37,7 @@ func NewEncryptedSecretStore(inner TenantSecretStore, enc *crypto.Encryptor) (Te
 	return &encryptedSecretStore{inner: inner, enc: enc}, nil
 }
 
-func (e *encryptedSecretStore) Get(ctx context.Context, tenantID tenant.ID, name string) (Secret, error) {
+func (e *encryptedSecretStore) Get(ctx context.Context, tenantID merchant.ID, name string) (Secret, error) {
 	s, err := e.inner.Get(ctx, tenantID, name)
 	if err != nil {
 		return Secret{}, err
@@ -50,7 +50,7 @@ func (e *encryptedSecretStore) Get(ctx context.Context, tenantID tenant.ID, name
 	return s, nil
 }
 
-func (e *encryptedSecretStore) Put(ctx context.Context, tenantID tenant.ID, name, value string) (Secret, error) {
+func (e *encryptedSecretStore) Put(ctx context.Context, tenantID merchant.ID, name, value string) (Secret, error) {
 	// Preserve the store's idempotent-rotation semantics at the PLAINTEXT level:
 	// ciphertext is non-deterministic (random nonce), so we must compare decrypted
 	// values, not ciphertext. If the plaintext is unchanged, return the existing
@@ -77,11 +77,11 @@ func (e *encryptedSecretStore) Put(ctx context.Context, tenantID tenant.ID, name
 	return stored, nil
 }
 
-func (e *encryptedSecretStore) Delete(ctx context.Context, tenantID tenant.ID, name string) error {
+func (e *encryptedSecretStore) Delete(ctx context.Context, tenantID merchant.ID, name string) error {
 	return e.inner.Delete(ctx, tenantID, name)
 }
 
-func (e *encryptedSecretStore) List(ctx context.Context, tenantID tenant.ID) ([]string, error) {
+func (e *encryptedSecretStore) List(ctx context.Context, tenantID merchant.ID) ([]string, error) {
 	// Names are stored in the clear; no decryption needed.
 	return e.inner.List(ctx, tenantID)
 }

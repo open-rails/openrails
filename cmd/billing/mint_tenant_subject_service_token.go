@@ -17,7 +17,7 @@ import (
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
-func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
+func mintMerchantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	ctx := context.Background()
 
@@ -55,7 +55,7 @@ func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("read tenant flag: %w", err)
 	}
-	tenantID, tenantSlug, tenantResource, err := cp.TenantScope(ctx, tenantRef)
+	tenantID, tenantSlug, tenantResource, err := cp.MerchantScope(ctx, tenantRef)
 	if err != nil {
 		return fmt.Errorf("resolve tenant %q: %w", tenantRef, err)
 	}
@@ -91,7 +91,7 @@ func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 
 	resources := []authcore.ServiceTokenResource{
 		tenantResource,
-		controlplane.TenantSubjectResource(tenantSubjectID),
+		controlplane.MerchantSubjectResource(tenantSubjectID),
 	}
 	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, bootstrapTenant, authcore.ServiceTokenMintOptions{
 		Name:        name,

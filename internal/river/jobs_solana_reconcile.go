@@ -107,7 +107,7 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 			Metadata: map[string]any{
 				"subscription_pda": row.SubscriptionPDA,
 				"merchant_address": row.MerchantAddress,
-				"tenant_id":        row.TenantID.String(),
+				"tenant_id":        row.MerchantID.String(),
 			},
 		}); alertErr != nil {
 			log.WithContext(ctx).WithError(alertErr).WithField("signature", sig).

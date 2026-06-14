@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 	billingservice "github.com/open-rails/openrails/pkg/service"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type bootstrapApplyOptions struct {
@@ -324,9 +324,9 @@ func contextForBootstrapCatalog(ctx context.Context, a *app.App, catalogName str
 	if err := cp.Pool().QueryRow(ctx, `SELECT id::text FROM openrails.tenants WHERE lower(slug) = lower($1)`, slug).Scan(&id); err != nil {
 		return nil, fmt.Errorf("resolve catalog tenant %q: %w", slug, err)
 	}
-	tid, err := tenant.ParseID(id)
+	tid, err := merchant.ParseID(id)
 	if err != nil {
 		return nil, fmt.Errorf("parse catalog tenant %q id: %w", slug, err)
 	}
-	return tenant.WithID(ctx, tid), nil
+	return merchant.WithID(ctx, tid), nil
 }

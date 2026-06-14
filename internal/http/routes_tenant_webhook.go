@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // TenantWebhookPrefix is the tenant-scoped webhook surface (issue #225). An
@@ -57,7 +57,7 @@ func (s *Server) tenantWebhookHandler() gin.HandlerFunc {
 
 		// Pin the resolved tenant onto the context so downstream tenant-owned DB
 		// access is correctly scoped.
-		ctx = tenant.WithID(ctx, route.TenantID)
+		ctx = merchant.WithID(ctx, route.MerchantID)
 
 		// Only Stripe is tenant-credential-routed in this increment. Other
 		// providers (CCBill IP-gated, NMI per-client) are not per-tenant secret
@@ -68,7 +68,7 @@ func (s *Server) tenantWebhookHandler() gin.HandlerFunc {
 		}
 
 		// 2. Load THIS tenant's signing secret(s) AFTER resolution.
-		creds, err := s.tenancy.LoadStripeCredentials(ctx, route.TenantID)
+		creds, err := s.tenancy.LoadStripeCredentials(ctx, route.MerchantID)
 		if err != nil {
 			log.WithError(err).Error("tenant webhook: load tenant credentials failed")
 			// Distinguish a transient secret-backend outage (Vault unreachable/sealed)

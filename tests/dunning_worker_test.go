@@ -505,7 +505,7 @@ func TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites(t *testing.T)
 	entEnd := time.Now().Add(30 * 24 * time.Hour).UTC()
 	suite.InsertEntitlement(dbtest.WithTestTenant(ctx), &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: suite.ensureTenantSubject(ctx, expiredUser),
+		MerchantSubjectID: suite.ensureMerchantSubject(ctx, expiredUser),
 		Entitlement:     "premium",
 		StartAt:         entStart,
 		EndAt:           &entEnd,

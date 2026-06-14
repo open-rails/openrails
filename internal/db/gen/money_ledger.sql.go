@@ -56,25 +56,25 @@ func (q *Queries) CaptureMoneyHold(ctx context.Context, arg CaptureMoneyHoldPara
 
 const countMoneySpendByCoords = `-- name: CountMoneySpendByCoords :one
 SELECT count(*) FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $5
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $5
   AND transaction_type IN ('withdrawal', 'owed_accrual')
   AND source = $3 AND source_id = $4
 `
 
 type CountMoneySpendByCoordsParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Source          string
-	SourceID        *string
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Source            string
+	SourceID          *string
+	Currency          string
 }
 
 // Unified-spend idempotency (#302): a withdrawal OR an owed accrual with these
 // coordinates means the spend already happened.
 func (q *Queries) CountMoneySpendByCoords(ctx context.Context, arg CountMoneySpendByCoordsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countMoneySpendByCoords,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Source,
 		arg.SourceID,
 		arg.Currency,
@@ -86,17 +86,17 @@ func (q *Queries) CountMoneySpendByCoords(ctx context.Context, arg CountMoneySpe
 
 const countMoneyTransactionsByPayer = `-- name: CountMoneyTransactionsByPayer :one
 SELECT count(*) FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $3
 `
 
 type CountMoneyTransactionsByPayerParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
 }
 
 func (q *Queries) CountMoneyTransactionsByPayer(ctx context.Context, arg CountMoneyTransactionsByPayerParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countMoneyTransactionsByPayer, arg.TenantID, arg.TenantSubjectID, arg.Currency)
+	row := q.db.QueryRow(ctx, countMoneyTransactionsByPayer, arg.MerchantID, arg.MerchantSubjectID, arg.Currency)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -120,22 +120,22 @@ func (q *Queries) ExpireMoneyHold(ctx context.Context, arg ExpireMoneyHoldParams
 
 const getMoneyBalance = `-- name: GetMoneyBalance :one
 
-SELECT id, balance, held_balance, created_at, updated_at, tenant_id, tenant_subject_id, currency FROM openrails.money_balances
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
+SELECT id, balance, held_balance, created_at, updated_at, merchant_id, merchant_subject_id, currency FROM openrails.money_balances
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $3
 LIMIT 1
 `
 
 type GetMoneyBalanceParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
 }
 
 // The money ledger (modules/money): balances, FIFO blocks, transactions.
 // amounts are integers in the row currency's minor unit (default µ$ = 1e-6 USD).
 // currency is a system code (USD/USDC/EUR/JPY/SOL); the Go registry is authority.
 func (q *Queries) GetMoneyBalance(ctx context.Context, arg GetMoneyBalanceParams) (OpenrailsMoneyBalance, error) {
-	row := q.db.QueryRow(ctx, getMoneyBalance, arg.TenantID, arg.TenantSubjectID, arg.Currency)
+	row := q.db.QueryRow(ctx, getMoneyBalance, arg.MerchantID, arg.MerchantSubjectID, arg.Currency)
 	var i OpenrailsMoneyBalance
 	err := row.Scan(
 		&i.ID,
@@ -143,35 +143,35 @@ func (q *Queries) GetMoneyBalance(ctx context.Context, arg GetMoneyBalanceParams
 		&i.HeldBalance,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.Currency,
 	)
 	return i, err
 }
 
 const getMoneyTransactionByCoords = `-- name: GetMoneyTransactionByCoords :one
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id, currency FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $6
+SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, merchant_subject_id, currency FROM openrails.money_transactions
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $6
   AND transaction_type = $3 AND source = $4 AND source_id = $5
 LIMIT 1
 `
 
 type GetMoneyTransactionByCoordsParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	TransactionType string
-	Source          string
-	SourceID        *string
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	TransactionType   string
+	Source            string
+	SourceID          *string
+	Currency          string
 }
 
 // (tenant, payer, currency, transaction_type, source, source_id) is the
 // idempotency key for deposits / withdrawals / holds.
 func (q *Queries) GetMoneyTransactionByCoords(ctx context.Context, arg GetMoneyTransactionByCoordsParams) (OpenrailsMoneyTransaction, error) {
 	row := q.db.QueryRow(ctx, getMoneyTransactionByCoords,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.TransactionType,
 		arg.Source,
 		arg.SourceID,
@@ -195,15 +195,15 @@ func (q *Queries) GetMoneyTransactionByCoords(ctx context.Context, arg GetMoneyT
 		&i.CapturedAmount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.Currency,
 	)
 	return i, err
 }
 
 const getMoneyTransactionForUpdate = `-- name: GetMoneyTransactionForUpdate :one
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id, currency FROM openrails.money_transactions WHERE id = $1 FOR UPDATE
+SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, merchant_subject_id, currency FROM openrails.money_transactions WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetMoneyTransactionForUpdate(ctx context.Context, id uuid.UUID) (OpenrailsMoneyTransaction, error) {
@@ -226,15 +226,15 @@ func (q *Queries) GetMoneyTransactionForUpdate(ctx context.Context, id uuid.UUID
 		&i.CapturedAmount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.Currency,
 	)
 	return i, err
 }
 
 const getMoneyWindow = `-- name: GetMoneyWindow :one
-SELECT id, tenant_id, tenant_subject_id, held_amount, settled_amount, status, expires_at, created_at, updated_at, currency FROM openrails.money_windows WHERE id = $1 LIMIT 1
+SELECT id, merchant_id, merchant_subject_id, held_amount, settled_amount, status, expires_at, created_at, updated_at, currency FROM openrails.money_windows WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetMoneyWindow(ctx context.Context, id uuid.UUID) (OpenrailsMoneyWindow, error) {
@@ -242,8 +242,8 @@ func (q *Queries) GetMoneyWindow(ctx context.Context, id uuid.UUID) (OpenrailsMo
 	var i OpenrailsMoneyWindow
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.HeldAmount,
 		&i.SettledAmount,
 		&i.Status,
@@ -256,7 +256,7 @@ func (q *Queries) GetMoneyWindow(ctx context.Context, id uuid.UUID) (OpenrailsMo
 }
 
 const getMoneyWindowForUpdate = `-- name: GetMoneyWindowForUpdate :one
-SELECT id, tenant_id, tenant_subject_id, held_amount, settled_amount, status, expires_at, created_at, updated_at, currency FROM openrails.money_windows WHERE id = $1 FOR UPDATE
+SELECT id, merchant_id, merchant_subject_id, held_amount, settled_amount, status, expires_at, created_at, updated_at, currency FROM openrails.money_windows WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetMoneyWindowForUpdate(ctx context.Context, id uuid.UUID) (OpenrailsMoneyWindow, error) {
@@ -264,8 +264,8 @@ func (q *Queries) GetMoneyWindowForUpdate(ctx context.Context, id uuid.UUID) (Op
 	var i OpenrailsMoneyWindow
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.HeldAmount,
 		&i.SettledAmount,
 		&i.Status,
@@ -279,17 +279,17 @@ func (q *Queries) GetMoneyWindowForUpdate(ctx context.Context, id uuid.UUID) (Op
 
 const insertMoneyBalanceIfAbsent = `-- name: InsertMoneyBalanceIfAbsent :exec
 INSERT INTO openrails.money_balances (
-    id, tenant_id, tenant_subject_id, currency, balance, held_balance, created_at, updated_at
+    id, merchant_id, merchant_subject_id, currency, balance, held_balance, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, 0, 0, $5, $5)
-ON CONFLICT (tenant_id, tenant_subject_id, currency) DO NOTHING
+ON CONFLICT (merchant_id, merchant_subject_id, currency) DO NOTHING
 `
 
 type InsertMoneyBalanceIfAbsentParams struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
-	Now             time.Time
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
+	Now               time.Time
 }
 
 // First-touch materialization; ON CONFLICT DO NOTHING targets the
@@ -297,8 +297,8 @@ type InsertMoneyBalanceIfAbsentParams struct {
 func (q *Queries) InsertMoneyBalanceIfAbsent(ctx context.Context, arg InsertMoneyBalanceIfAbsentParams) error {
 	_, err := q.db.Exec(ctx, insertMoneyBalanceIfAbsent,
 		arg.ID,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Currency,
 		arg.Now,
 	)
@@ -307,15 +307,15 @@ func (q *Queries) InsertMoneyBalanceIfAbsent(ctx context.Context, arg InsertMone
 
 const insertMoneyBlock = `-- name: InsertMoneyBlock :exec
 INSERT INTO openrails.money_blocks (
-    id, tenant_id, tenant_subject_id, currency,
+    id, merchant_id, merchant_subject_id, currency,
     original_amount, remaining_amount, expires_at, source_transaction_id, created_at
 ) VALUES ($1, $2, $3, $9, $4, $5, $6, $7, $8)
 `
 
 type InsertMoneyBlockParams struct {
 	ID                  uuid.UUID
-	TenantID            uuid.UUID
-	TenantSubjectID     uuid.UUID
+	MerchantID          uuid.UUID
+	MerchantSubjectID   uuid.UUID
 	OriginalAmount      int64
 	RemainingAmount     int64
 	ExpiresAt           *time.Time
@@ -327,8 +327,8 @@ type InsertMoneyBlockParams struct {
 func (q *Queries) InsertMoneyBlock(ctx context.Context, arg InsertMoneyBlockParams) error {
 	_, err := q.db.Exec(ctx, insertMoneyBlock,
 		arg.ID,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.OriginalAmount,
 		arg.RemainingAmount,
 		arg.ExpiresAt,
@@ -341,7 +341,7 @@ func (q *Queries) InsertMoneyBlock(ctx context.Context, arg InsertMoneyBlockPara
 
 const insertMoneyTransaction = `-- name: InsertMoneyTransaction :exec
 INSERT INTO openrails.money_transactions (
-    id, tenant_id, tenant_subject_id, currency, actor, resource, metadata,
+    id, merchant_id, merchant_subject_id, currency, actor, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
     expires_at, description, created_at, updated_at
@@ -349,32 +349,32 @@ INSERT INTO openrails.money_transactions (
 `
 
 type InsertMoneyTransactionParams struct {
-	ID               uuid.UUID
-	TenantID         uuid.UUID
-	TenantSubjectID  uuid.UUID
-	Actor            string
-	Resource         *string
-	Metadata         []byte
-	Amount           int64
-	BalanceAfter     *int64
-	TransactionType  string
-	Status           string
-	AuthorizedAmount *int64
-	CapturedAmount   *int64
-	Source           string
-	SourceID         *string
-	ExpiresAt        *time.Time
-	Description      *string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	Currency         string
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Actor             string
+	Resource          *string
+	Metadata          []byte
+	Amount            int64
+	BalanceAfter      *int64
+	TransactionType   string
+	Status            string
+	AuthorizedAmount  *int64
+	CapturedAmount    *int64
+	Source            string
+	SourceID          *string
+	ExpiresAt         *time.Time
+	Description       *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Currency          string
 }
 
 func (q *Queries) InsertMoneyTransaction(ctx context.Context, arg InsertMoneyTransactionParams) error {
 	_, err := q.db.Exec(ctx, insertMoneyTransaction,
 		arg.ID,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Actor,
 		arg.Resource,
 		arg.Metadata,
@@ -397,7 +397,7 @@ func (q *Queries) InsertMoneyTransaction(ctx context.Context, arg InsertMoneyTra
 
 const insertMoneyTransactionIfAbsent = `-- name: InsertMoneyTransactionIfAbsent :exec
 INSERT INTO openrails.money_transactions (
-    id, tenant_id, tenant_subject_id, currency, actor, resource, metadata,
+    id, merchant_id, merchant_subject_id, currency, actor, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
     expires_at, description, created_at, updated_at
@@ -406,32 +406,32 @@ ON CONFLICT DO NOTHING
 `
 
 type InsertMoneyTransactionIfAbsentParams struct {
-	ID               uuid.UUID
-	TenantID         uuid.UUID
-	TenantSubjectID  uuid.UUID
-	Actor            string
-	Resource         *string
-	Metadata         []byte
-	Amount           int64
-	BalanceAfter     *int64
-	TransactionType  string
-	Status           string
-	AuthorizedAmount *int64
-	CapturedAmount   *int64
-	Source           string
-	SourceID         *string
-	ExpiresAt        *time.Time
-	Description      *string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	Currency         string
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Actor             string
+	Resource          *string
+	Metadata          []byte
+	Amount            int64
+	BalanceAfter      *int64
+	TransactionType   string
+	Status            string
+	AuthorizedAmount  *int64
+	CapturedAmount    *int64
+	Source            string
+	SourceID          *string
+	ExpiresAt         *time.Time
+	Description       *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Currency          string
 }
 
 func (q *Queries) InsertMoneyTransactionIfAbsent(ctx context.Context, arg InsertMoneyTransactionIfAbsentParams) error {
 	_, err := q.db.Exec(ctx, insertMoneyTransactionIfAbsent,
 		arg.ID,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Actor,
 		arg.Resource,
 		arg.Metadata,
@@ -455,30 +455,30 @@ func (q *Queries) InsertMoneyTransactionIfAbsent(ctx context.Context, arg Insert
 const insertMoneyWindow = `-- name: InsertMoneyWindow :exec
 
 INSERT INTO openrails.money_windows (
-    id, tenant_id, tenant_subject_id, currency,
+    id, merchant_id, merchant_subject_id, currency,
     held_amount, settled_amount, status, expires_at, created_at, updated_at
 ) VALUES ($1, $2, $3, $10, $4, $5, $6, $7, $8, $9)
 `
 
 type InsertMoneyWindowParams struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	HeldAmount      int64
-	SettledAmount   int64
-	Status          string
-	ExpiresAt       time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	Currency        string
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	HeldAmount        int64
+	SettledAmount     int64
+	Status            string
+	ExpiresAt         time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Currency          string
 }
 
 // openrails.money_windows: prepaid bulk reservations (#335).
 func (q *Queries) InsertMoneyWindow(ctx context.Context, arg InsertMoneyWindowParams) error {
 	_, err := q.db.Exec(ctx, insertMoneyWindow,
 		arg.ID,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.HeldAmount,
 		arg.SettledAmount,
 		arg.Status,
@@ -491,7 +491,7 @@ func (q *Queries) InsertMoneyWindow(ctx context.Context, arg InsertMoneyWindowPa
 }
 
 const listExpiredActiveMoneyHoldsForUpdate = `-- name: ListExpiredActiveMoneyHoldsForUpdate :many
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id, currency FROM openrails.money_transactions
+SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, merchant_subject_id, currency FROM openrails.money_transactions
 WHERE transaction_type = 'hold' AND status = 'active'
   AND expires_at IS NOT NULL AND expires_at <= $1::timestamptz
 ORDER BY expires_at ASC
@@ -531,8 +531,8 @@ func (q *Queries) ListExpiredActiveMoneyHoldsForUpdate(ctx context.Context, arg 
 			&i.CapturedAmount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 			&i.Currency,
 		); err != nil {
 			return nil, err
@@ -546,7 +546,7 @@ func (q *Queries) ListExpiredActiveMoneyHoldsForUpdate(ctx context.Context, arg 
 }
 
 const listExpiredMoneyBlocksForUpdate = `-- name: ListExpiredMoneyBlocksForUpdate :many
-SELECT id, original_amount, remaining_amount, expires_at, source_transaction_id, created_at, tenant_id, tenant_subject_id, currency FROM openrails.money_blocks
+SELECT id, original_amount, remaining_amount, expires_at, source_transaction_id, created_at, merchant_id, merchant_subject_id, currency FROM openrails.money_blocks
 WHERE remaining_amount > 0
   AND expires_at IS NOT NULL AND expires_at <= $1::timestamptz
 ORDER BY expires_at ASC
@@ -576,8 +576,8 @@ func (q *Queries) ListExpiredMoneyBlocksForUpdate(ctx context.Context, arg ListE
 			&i.ExpiresAt,
 			&i.SourceTransactionID,
 			&i.CreatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 			&i.Currency,
 		); err != nil {
 			return nil, err
@@ -591,7 +591,7 @@ func (q *Queries) ListExpiredMoneyBlocksForUpdate(ctx context.Context, arg ListE
 }
 
 const listExpiredOpenMoneyWindowsForUpdate = `-- name: ListExpiredOpenMoneyWindowsForUpdate :many
-SELECT id, tenant_id, tenant_subject_id, held_amount, settled_amount, status, expires_at, created_at, updated_at, currency FROM openrails.money_windows
+SELECT id, merchant_id, merchant_subject_id, held_amount, settled_amount, status, expires_at, created_at, updated_at, currency FROM openrails.money_windows
 WHERE status = 'open' AND expires_at <= $1::timestamptz
 ORDER BY expires_at ASC
 LIMIT $2::int
@@ -616,8 +616,8 @@ func (q *Queries) ListExpiredOpenMoneyWindowsForUpdate(ctx context.Context, arg 
 		var i OpenrailsMoneyWindow
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 			&i.HeldAmount,
 			&i.SettledAmount,
 			&i.Status,
@@ -637,22 +637,22 @@ func (q *Queries) ListExpiredOpenMoneyWindowsForUpdate(ctx context.Context, arg 
 }
 
 const listMoneyBalanceAnomalies = `-- name: ListMoneyBalanceAnomalies :many
-SELECT b.tenant_id, b.tenant_subject_id, b.currency, b.balance, b.held_balance
+SELECT b.merchant_id, b.merchant_subject_id, b.currency, b.balance, b.held_balance
 FROM openrails.money_balances b
-WHERE b.tenant_id = $1
+WHERE b.merchant_id = $1
   AND (b.balance < 0 OR b.held_balance < 0 OR b.held_balance > b.balance)
 `
 
 type ListMoneyBalanceAnomaliesRow struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
-	Balance         int64
-	HeldBalance     int64
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
+	Balance           int64
+	HeldBalance       int64
 }
 
-func (q *Queries) ListMoneyBalanceAnomalies(ctx context.Context, tenantID uuid.UUID) ([]ListMoneyBalanceAnomaliesRow, error) {
-	rows, err := q.db.Query(ctx, listMoneyBalanceAnomalies, tenantID)
+func (q *Queries) ListMoneyBalanceAnomalies(ctx context.Context, merchantID uuid.UUID) ([]ListMoneyBalanceAnomaliesRow, error) {
+	rows, err := q.db.Query(ctx, listMoneyBalanceAnomalies, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -661,8 +661,8 @@ func (q *Queries) ListMoneyBalanceAnomalies(ctx context.Context, tenantID uuid.U
 	for rows.Next() {
 		var i ListMoneyBalanceAnomaliesRow
 		if err := rows.Scan(
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 			&i.Currency,
 			&i.Balance,
 			&i.HeldBalance,
@@ -678,36 +678,36 @@ func (q *Queries) ListMoneyBalanceAnomalies(ctx context.Context, tenantID uuid.U
 }
 
 const listMoneyHeldBalanceDrift = `-- name: ListMoneyHeldBalanceDrift :many
-SELECT b.tenant_id, b.tenant_subject_id, b.currency,
+SELECT b.merchant_id, b.merchant_subject_id, b.currency,
        b.held_balance AS stored,
        COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0))
                  FROM openrails.money_transactions t
-                 WHERE t.tenant_id = b.tenant_id
-                   AND t.tenant_subject_id = b.tenant_subject_id
+                 WHERE t.merchant_id = b.merchant_id
+                   AND t.merchant_subject_id = b.merchant_subject_id
                    AND t.currency = b.currency
                    AND t.transaction_type = 'hold' AND t.status = 'active'), 0)::bigint AS computed
 FROM openrails.money_balances b
-WHERE b.tenant_id = $1
+WHERE b.merchant_id = $1
   AND b.held_balance <> COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0))
                  FROM openrails.money_transactions t
-                 WHERE t.tenant_id = b.tenant_id
-                   AND t.tenant_subject_id = b.tenant_subject_id
+                 WHERE t.merchant_id = b.merchant_id
+                   AND t.merchant_subject_id = b.merchant_subject_id
                    AND t.currency = b.currency
                    AND t.transaction_type = 'hold' AND t.status = 'active'), 0)
 `
 
 type ListMoneyHeldBalanceDriftRow struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
-	Stored          int64
-	Computed        int64
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
+	Stored            int64
+	Computed          int64
 }
 
 // Balance rows whose stored held_balance disagrees with the sum of their
 // currently-active holds (reconciliation, alert-only).
-func (q *Queries) ListMoneyHeldBalanceDrift(ctx context.Context, tenantID uuid.UUID) ([]ListMoneyHeldBalanceDriftRow, error) {
-	rows, err := q.db.Query(ctx, listMoneyHeldBalanceDrift, tenantID)
+func (q *Queries) ListMoneyHeldBalanceDrift(ctx context.Context, merchantID uuid.UUID) ([]ListMoneyHeldBalanceDriftRow, error) {
+	rows, err := q.db.Query(ctx, listMoneyHeldBalanceDrift, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -716,8 +716,8 @@ func (q *Queries) ListMoneyHeldBalanceDrift(ctx context.Context, tenantID uuid.U
 	for rows.Next() {
 		var i ListMoneyHeldBalanceDriftRow
 		if err := rows.Scan(
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 			&i.Currency,
 			&i.Stored,
 			&i.Computed,
@@ -733,24 +733,24 @@ func (q *Queries) ListMoneyHeldBalanceDrift(ctx context.Context, tenantID uuid.U
 }
 
 const listMoneyTransactionsByPayer = `-- name: ListMoneyTransactionsByPayer :many
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id, currency FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $5
+SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, merchant_subject_id, currency FROM openrails.money_transactions
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $5
 ORDER BY created_at DESC
 LIMIT $3::int OFFSET $4::int
 `
 
 type ListMoneyTransactionsByPayerParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Column3         int32
-	Column4         int32
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Column3           int32
+	Column4           int32
+	Currency          string
 }
 
 func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMoneyTransactionsByPayerParams) ([]OpenrailsMoneyTransaction, error) {
 	rows, err := q.db.Query(ctx, listMoneyTransactionsByPayer,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Column3,
 		arg.Column4,
 		arg.Currency,
@@ -779,8 +779,8 @@ func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMone
 			&i.CapturedAmount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 			&i.Currency,
 		); err != nil {
 			return nil, err
@@ -794,19 +794,19 @@ func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMone
 }
 
 const listOrphanedExpiredMoneyHolds = `-- name: ListOrphanedExpiredMoneyHolds :many
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id, currency FROM openrails.money_transactions
-WHERE tenant_id = $1 AND transaction_type = 'hold' AND status = 'active'
+SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, merchant_subject_id, currency FROM openrails.money_transactions
+WHERE merchant_id = $1 AND transaction_type = 'hold' AND status = 'active'
   AND expires_at IS NOT NULL AND expires_at <= $2::timestamptz
 ORDER BY expires_at ASC
 `
 
 type ListOrphanedExpiredMoneyHoldsParams struct {
-	TenantID uuid.UUID
-	Now      time.Time
+	MerchantID uuid.UUID
+	Now        time.Time
 }
 
 func (q *Queries) ListOrphanedExpiredMoneyHolds(ctx context.Context, arg ListOrphanedExpiredMoneyHoldsParams) ([]OpenrailsMoneyTransaction, error) {
-	rows, err := q.db.Query(ctx, listOrphanedExpiredMoneyHolds, arg.TenantID, arg.Now)
+	rows, err := q.db.Query(ctx, listOrphanedExpiredMoneyHolds, arg.MerchantID, arg.Now)
 	if err != nil {
 		return nil, err
 	}
@@ -831,8 +831,8 @@ func (q *Queries) ListOrphanedExpiredMoneyHolds(ctx context.Context, arg ListOrp
 			&i.CapturedAmount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 			&i.Currency,
 		); err != nil {
 			return nil, err
@@ -846,8 +846,8 @@ func (q *Queries) ListOrphanedExpiredMoneyHolds(ctx context.Context, arg ListOrp
 }
 
 const listSpendableMoneyBlocksForUpdate = `-- name: ListSpendableMoneyBlocksForUpdate :many
-SELECT id, original_amount, remaining_amount, expires_at, source_transaction_id, created_at, tenant_id, tenant_subject_id, currency FROM openrails.money_blocks
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
+SELECT id, original_amount, remaining_amount, expires_at, source_transaction_id, created_at, merchant_id, merchant_subject_id, currency FROM openrails.money_blocks
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $3
   AND remaining_amount > 0
   AND (expires_at IS NULL OR expires_at > $4::timestamptz)
 ORDER BY expires_at ASC NULLS LAST, created_at ASC
@@ -855,17 +855,17 @@ FOR UPDATE
 `
 
 type ListSpendableMoneyBlocksForUpdateParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
-	Now             time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
+	Now               time.Time
 }
 
 // FIFO draw order: soonest-expiring first, then oldest.
 func (q *Queries) ListSpendableMoneyBlocksForUpdate(ctx context.Context, arg ListSpendableMoneyBlocksForUpdateParams) ([]OpenrailsMoneyBlock, error) {
 	rows, err := q.db.Query(ctx, listSpendableMoneyBlocksForUpdate,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Currency,
 		arg.Now,
 	)
@@ -883,8 +883,8 @@ func (q *Queries) ListSpendableMoneyBlocksForUpdate(ctx context.Context, arg Lis
 			&i.ExpiresAt,
 			&i.SourceTransactionID,
 			&i.CreatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 			&i.Currency,
 		); err != nil {
 			return nil, err
@@ -898,19 +898,19 @@ func (q *Queries) ListSpendableMoneyBlocksForUpdate(ctx context.Context, arg Lis
 }
 
 const lockMoneyBalance = `-- name: LockMoneyBalance :one
-SELECT id, balance, held_balance, created_at, updated_at, tenant_id, tenant_subject_id, currency FROM openrails.money_balances
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
+SELECT id, balance, held_balance, created_at, updated_at, merchant_id, merchant_subject_id, currency FROM openrails.money_balances
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $3
 FOR UPDATE
 `
 
 type LockMoneyBalanceParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
 }
 
 func (q *Queries) LockMoneyBalance(ctx context.Context, arg LockMoneyBalanceParams) (OpenrailsMoneyBalance, error) {
-	row := q.db.QueryRow(ctx, lockMoneyBalance, arg.TenantID, arg.TenantSubjectID, arg.Currency)
+	row := q.db.QueryRow(ctx, lockMoneyBalance, arg.MerchantID, arg.MerchantSubjectID, arg.Currency)
 	var i OpenrailsMoneyBalance
 	err := row.Scan(
 		&i.ID,
@@ -918,8 +918,8 @@ func (q *Queries) LockMoneyBalance(ctx context.Context, arg LockMoneyBalancePara
 		&i.HeldBalance,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.Currency,
 	)
 	return i, err
@@ -944,21 +944,21 @@ func (q *Queries) ReleaseMoneyHold(ctx context.Context, arg ReleaseMoneyHoldPara
 const setMoneyBalance = `-- name: SetMoneyBalance :exec
 UPDATE openrails.money_balances
 SET balance = $3, updated_at = $4
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $5
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $5
 `
 
 type SetMoneyBalanceParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Balance         int64
-	UpdatedAt       time.Time
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Balance           int64
+	UpdatedAt         time.Time
+	Currency          string
 }
 
 func (q *Queries) SetMoneyBalance(ctx context.Context, arg SetMoneyBalanceParams) error {
 	_, err := q.db.Exec(ctx, setMoneyBalance,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Balance,
 		arg.UpdatedAt,
 		arg.Currency,
@@ -983,21 +983,21 @@ func (q *Queries) SetMoneyBlockRemaining(ctx context.Context, arg SetMoneyBlockR
 const setMoneyHeldBalance = `-- name: SetMoneyHeldBalance :exec
 UPDATE openrails.money_balances
 SET held_balance = $3, updated_at = $4
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $5
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $5
 `
 
 type SetMoneyHeldBalanceParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	HeldBalance     int64
-	UpdatedAt       time.Time
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	HeldBalance       int64
+	UpdatedAt         time.Time
+	Currency          string
 }
 
 func (q *Queries) SetMoneyHeldBalance(ctx context.Context, arg SetMoneyHeldBalanceParams) error {
 	_, err := q.db.Exec(ctx, setMoneyHeldBalance,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.HeldBalance,
 		arg.UpdatedAt,
 		arg.Currency,
@@ -1025,18 +1025,18 @@ func (q *Queries) SetMoneyWindowStatus(ctx context.Context, arg SetMoneyWindowSt
 const sumActiveMoneyHoldAuthorizations = `-- name: SumActiveMoneyHoldAuthorizations :one
 SELECT COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)::bigint
 FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $3
   AND transaction_type = 'hold' AND status = 'active'
 `
 
 type SumActiveMoneyHoldAuthorizationsParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
 }
 
 func (q *Queries) SumActiveMoneyHoldAuthorizations(ctx context.Context, arg SumActiveMoneyHoldAuthorizationsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumActiveMoneyHoldAuthorizations, arg.TenantID, arg.TenantSubjectID, arg.Currency)
+	row := q.db.QueryRow(ctx, sumActiveMoneyHoldAuthorizations, arg.MerchantID, arg.MerchantSubjectID, arg.Currency)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -1045,18 +1045,18 @@ func (q *Queries) SumActiveMoneyHoldAuthorizations(ctx context.Context, arg SumA
 const sumMoneyDeposits = `-- name: SumMoneyDeposits :one
 SELECT COALESCE(SUM(amount), 0)::bigint
 FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $3
   AND transaction_type = 'deposit'
 `
 
 type SumMoneyDepositsParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
 }
 
 func (q *Queries) SumMoneyDeposits(ctx context.Context, arg SumMoneyDepositsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumMoneyDeposits, arg.TenantID, arg.TenantSubjectID, arg.Currency)
+	row := q.db.QueryRow(ctx, sumMoneyDeposits, arg.MerchantID, arg.MerchantSubjectID, arg.Currency)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -1065,18 +1065,18 @@ func (q *Queries) SumMoneyDeposits(ctx context.Context, arg SumMoneyDepositsPara
 const sumMoneyMovementsInPeriodByPayer = `-- name: SumMoneyMovementsInPeriodByPayer :many
 SELECT transaction_type, COALESCE(SUM(amount), 0)::bigint AS total
 FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $3
   AND created_at >= $4::timestamptz
   AND created_at < $5::timestamptz
 GROUP BY transaction_type
 `
 
 type SumMoneyMovementsInPeriodByPayerParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
-	PeriodFrom      time.Time
-	PeriodTo        time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
+	PeriodFrom        time.Time
+	PeriodTo          time.Time
 }
 
 type SumMoneyMovementsInPeriodByPayerRow struct {
@@ -1086,8 +1086,8 @@ type SumMoneyMovementsInPeriodByPayerRow struct {
 
 func (q *Queries) SumMoneyMovementsInPeriodByPayer(ctx context.Context, arg SumMoneyMovementsInPeriodByPayerParams) ([]SumMoneyMovementsInPeriodByPayerRow, error) {
 	rows, err := q.db.Query(ctx, sumMoneyMovementsInPeriodByPayer,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Currency,
 		arg.PeriodFrom,
 		arg.PeriodTo,
@@ -1119,17 +1119,17 @@ SELECT COALESCE(SUM(
         ELSE 0
     END), 0)::bigint
 FROM openrails.money_transactions
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $3
   AND created_at >= $4::timestamptz
   AND ($5::text = '' OR actor = $5::text)
 `
 
 type SumSpentInMoneyWindowParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
-	Since           time.Time
-	Actor           string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
+	Since             time.Time
+	Actor             string
 }
 
 // Spend counted against a rate cap since `since`: settled spend (withdrawals +
@@ -1137,8 +1137,8 @@ type SumSpentInMoneyWindowParams struct {
 // concurrent in-flight holds can't overshoot a cap. Empty actor = all actors.
 func (q *Queries) SumSpentInMoneyWindow(ctx context.Context, arg SumSpentInMoneyWindowParams) (int64, error) {
 	row := q.db.QueryRow(ctx, sumSpentInMoneyWindow,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Currency,
 		arg.Since,
 		arg.Actor,

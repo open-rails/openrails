@@ -10,38 +10,38 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-func TestResolvedServiceTokenAllowsTenantSubjectScopes(t *testing.T) {
+func TestResolvedServiceTokenAllowsMerchantSubjectScopes(t *testing.T) {
 	subject := uuid.New()
 	other := uuid.New()
 
 	tenantWide := &ResolvedServiceToken{
-		TenantID:  dbtest.TestTenantID,
-		Resources: []authcore.ServiceTokenResource{TenantResource(dbtest.TestTenantID)},
+		MerchantID:  dbtest.TestTenantID,
+		Resources: []authcore.ServiceTokenResource{MerchantResource(dbtest.TestTenantID)},
 	}
-	require.True(t, tenantWide.AllowsTenantSubject(subject))
+	require.True(t, tenantWide.AllowsMerchantSubject(subject))
 
 	subjectScoped := &ResolvedServiceToken{
-		TenantID: dbtest.TestTenantID,
+		MerchantID: dbtest.TestTenantID,
 		Resources: []authcore.ServiceTokenResource{
-			TenantResource(dbtest.TestTenantID),
-			TenantSubjectResource(subject),
+			MerchantResource(dbtest.TestTenantID),
+			MerchantSubjectResource(subject),
 		},
 	}
-	require.True(t, subjectScoped.AllowsTenantSubject(subject))
-	require.False(t, subjectScoped.AllowsTenantSubject(other))
+	require.True(t, subjectScoped.AllowsMerchantSubject(subject))
+	require.False(t, subjectScoped.AllowsMerchantSubject(other))
 }
 
 func TestValidateServiceTokenResourcesRequiresTenantAndKnownKinds(t *testing.T) {
 	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestTenantID, nil), ErrServiceTokenScopeDenied)
 	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
-		TenantSubjectResource(uuid.New()),
+		MerchantSubjectResource(uuid.New()),
 	}), ErrServiceTokenScopeDenied)
 	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
-		TenantResource(dbtest.TestTenantID),
+		MerchantResource(dbtest.TestTenantID),
 		{Kind: "openrails.unknown", ID: "x"},
 	}), ErrServiceTokenScopeDenied)
 	require.NoError(t, validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
-		TenantResource(dbtest.TestTenantID),
-		TenantSubjectResource(uuid.New()),
+		MerchantResource(dbtest.TestTenantID),
+		MerchantSubjectResource(uuid.New()),
 	}))
 }

@@ -13,7 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // solanaAdapter implements providerAdapter for the official Solana Subscriptions
@@ -84,7 +84,7 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		// Solana recurring not configured here: defer to a manual/late publish.
 		return nil, errPendingManualLink
 	}
-	tid, ok := tenant.FromContext(ctx)
+	tid, ok := merchant.FromContext(ctx)
 	if !ok {
 		return nil, fmt.Errorf("solana create-mode requires a tenant-scoped context")
 	}
@@ -110,7 +110,7 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	}
 
 	handle, err := plan.PublishPlan(ctx, recurring.PublishPlanInput{
-		TenantID:         tid,
+		MerchantID:         tid,
 		PlanID:           planID,
 		TokenSymbol:      symbol, // PublishPlan rejects non-allowlisted (non-stablecoin) tokens
 		AmountBaseUnits:  uint64(in.UnitAmount),
@@ -128,7 +128,7 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 // a decodable Plan account, and if so returns its processor-config map (attach).
 // Best-effort: any read/decode failure returns found=false so AutoCreate proceeds
 // to publish (a genuinely-occupied PDA then surfaces as a loud create_plan error).
-func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.PlanService, tid tenant.ID, planID uint64, symbol string) (map[string]string, bool) {
+func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.PlanService, tid merchant.ID, planID uint64, symbol string) (map[string]string, bool) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPC == nil {
 		return nil, false
 	}
@@ -218,7 +218,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 				return nil, fmt.Errorf("solana plan %q mint (%s) does not match catalog currency %s mint (%s)", pda, acct.Mint, symbol, mint)
 			}
 		}
-		if tid, ok := tenant.FromContext(ctx); ok {
+		if tid, ok := merchant.FromContext(ctx); ok {
 			if merchant, err := plan.MerchantAddress(ctx, tid); err == nil && !strings.EqualFold(acct.Owner.String(), merchant.String()) {
 				return nil, fmt.Errorf("solana plan %q merchant (%s) does not match this tenant's merchant (%s)", pda, acct.Owner, merchant)
 			}

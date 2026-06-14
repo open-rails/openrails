@@ -47,7 +47,7 @@ func TestControlPlane_TokenPrefix_NilSafe(t *testing.T) {
 
 func TestValidateServiceTokenResourcesRejectsLegacyPayableKinds(t *testing.T) {
 	legacyKinds := []string{
-		"tenant_subject_id",
+		"merchant_subject_id",
 		"payer_account_id",
 		"account_id",
 		"delegated_user_id",
@@ -59,7 +59,7 @@ func TestValidateServiceTokenResourcesRejectsLegacyPayableKinds(t *testing.T) {
 	for _, kind := range legacyKinds {
 		t.Run(kind, func(t *testing.T) {
 			err := validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
-				TenantResource(dbtest.TestTenantID),
+				MerchantResource(dbtest.TestTenantID),
 				{Kind: kind, ID: "legacy"},
 			})
 			if err != ErrServiceTokenScopeDenied {

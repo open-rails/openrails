@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // StripeCredentials are a tenant's processor credentials, loaded by tenant id at
@@ -21,7 +21,7 @@ type StripeCredentials struct {
 // (issue #225). A missing individual secret is not an error — it is returned as an
 // empty field — so a tenant that has only a webhook secret (or only an API key)
 // still loads. A nil secret store yields empty credentials.
-func (s *Service) LoadStripeCredentials(ctx context.Context, id tenant.ID) (StripeCredentials, error) {
+func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (StripeCredentials, error) {
 	var creds StripeCredentials
 	if s.secrets == nil {
 		return creds, nil
@@ -52,7 +52,7 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id tenant.ID) (Stri
 // PutCredential stores/rotates a single per-tenant credential and writes a
 // credential audit row (issue #225 rotation API + audit log). action is recorded
 // as the audit action (e.g. "put" or "rotate").
-func (s *Service) PutCredential(ctx context.Context, id tenant.ID, name, value, action, actor string) (Secret, error) {
+func (s *Service) PutCredential(ctx context.Context, id merchant.ID, name, value, action, actor string) (Secret, error) {
 	if s.secrets == nil {
 		return Secret{}, errors.New("tenancy: no secret store configured")
 	}
@@ -76,7 +76,7 @@ func (s *Service) PutCredential(ctx context.Context, id tenant.ID, name, value, 
 }
 
 // RotateCredential is PutCredential with action="rotate".
-func (s *Service) RotateCredential(ctx context.Context, id tenant.ID, name, value, actor string) (Secret, error) {
+func (s *Service) RotateCredential(ctx context.Context, id merchant.ID, name, value, actor string) (Secret, error) {
 	return s.PutCredential(ctx, id, name, value, "rotate", actor)
 }
 
@@ -84,14 +84,14 @@ func (s *Service) RotateCredential(ctx context.Context, id tenant.ID, name, valu
 // charging, by listing the account's balance via the Stripe API. tester is the
 // verification function (so this stays testable without a live Stripe); when nil,
 // a default real Stripe balance check is used. It records a "test" audit row.
-func (s *Service) TestStripeCredential(ctx context.Context, id tenant.ID, tester func(ctx context.Context, secretKey string) error) error {
+func (s *Service) TestStripeCredential(ctx context.Context, id merchant.ID, tester func(ctx context.Context, secretKey string) error) error {
 	return s.ValidateCredential(ctx, id, SecretStripeSecretKey, "", "", tester)
 }
 
 // audit best-effort appends a credential audit row. A failure to audit must not
 // fail the underlying operation, so errors are swallowed (the operation already
 // succeeded); a real deployment routes these to its log pipeline.
-func (s *Service) audit(ctx context.Context, id tenant.ID, name, action, actor, detail string) {
+func (s *Service) audit(ctx context.Context, id merchant.ID, name, action, actor, detail string) {
 	if s.pool == nil {
 		return
 	}

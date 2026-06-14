@@ -18,17 +18,17 @@ SELECT ue.event_type,
        COALESCE(SUM((d.value)::bigint), 0)::bigint AS total
 FROM openrails.usage_events ue
 CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d
-WHERE ue.tenant_id = $1 AND ue.tenant_subject_id = $2
+WHERE ue.merchant_id = $1 AND ue.merchant_subject_id = $2
   AND ue.occurred_at >= $3::timestamptz
   AND ue.occurred_at < $4::timestamptz
 GROUP BY ue.event_type, d.key
 `
 
 type AggregateUsageDimensionsParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	FromAt          time.Time
-	ToAt            time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	FromAt            time.Time
+	ToAt              time.Time
 }
 
 type AggregateUsageDimensionsRow struct {
@@ -40,8 +40,8 @@ type AggregateUsageDimensionsRow struct {
 // Summed per-dimension counts per event_type over [from, to).
 func (q *Queries) AggregateUsageDimensions(ctx context.Context, arg AggregateUsageDimensionsParams) ([]AggregateUsageDimensionsRow, error) {
 	rows, err := q.db.Query(ctx, aggregateUsageDimensions,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.FromAt,
 		arg.ToAt,
 	)
@@ -68,17 +68,17 @@ SELECT event_type,
        COALESCE(SUM(amount), 0)::bigint AS total_amount,
        COUNT(*)::bigint AS event_count
 FROM openrails.usage_events
-WHERE tenant_id = $1 AND tenant_subject_id = $2
+WHERE merchant_id = $1 AND merchant_subject_id = $2
   AND occurred_at >= $3::timestamptz
   AND occurred_at < $4::timestamptz
 GROUP BY event_type
 `
 
 type AggregateUsageTotalsParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	FromAt          time.Time
-	ToAt            time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	FromAt            time.Time
+	ToAt              time.Time
 }
 
 type AggregateUsageTotalsRow struct {
@@ -90,8 +90,8 @@ type AggregateUsageTotalsRow struct {
 // Per-event_type rollup over [from, to).
 func (q *Queries) AggregateUsageTotals(ctx context.Context, arg AggregateUsageTotalsParams) ([]AggregateUsageTotalsRow, error) {
 	rows, err := q.db.Query(ctx, aggregateUsageTotals,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.FromAt,
 		arg.ToAt,
 	)
@@ -114,24 +114,24 @@ func (q *Queries) AggregateUsageTotals(ctx context.Context, arg AggregateUsageTo
 }
 
 const getUsageEventByCoords = `-- name: GetUsageEventByCoords :one
-SELECT id, tenant_id, tenant_subject_id, actor, resource, event_type, dimensions, amount, source, source_id, money_transaction_id, metadata, occurred_at, created_at FROM openrails.usage_events
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND event_type = $3
+SELECT id, merchant_id, merchant_subject_id, actor, resource, event_type, dimensions, amount, source, source_id, money_transaction_id, metadata, occurred_at, created_at FROM openrails.usage_events
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND event_type = $3
   AND source = $4 AND source_id = $5
 LIMIT 1
 `
 
 type GetUsageEventByCoordsParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	EventType       string
-	Source          string
-	SourceID        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	EventType         string
+	Source            string
+	SourceID          string
 }
 
 func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventByCoordsParams) (OpenrailsUsageEvent, error) {
 	row := q.db.QueryRow(ctx, getUsageEventByCoords,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.EventType,
 		arg.Source,
 		arg.SourceID,
@@ -139,8 +139,8 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 	var i OpenrailsUsageEvent
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.Actor,
 		&i.Resource,
 		&i.EventType,
@@ -159,7 +159,7 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 const insertUsageEvent = `-- name: InsertUsageEvent :exec
 
 INSERT INTO openrails.usage_events (
-    id, tenant_id, tenant_subject_id, actor, resource,
+    id, merchant_id, merchant_subject_id, actor, resource,
     event_type, dimensions, amount, source, source_id,
     money_transaction_id, metadata, occurred_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
@@ -167,8 +167,8 @@ INSERT INTO openrails.usage_events (
 
 type InsertUsageEventParams struct {
 	ID                 uuid.UUID
-	TenantID           uuid.UUID
-	TenantSubjectID    uuid.UUID
+	MerchantID         uuid.UUID
+	MerchantSubjectID  uuid.UUID
 	Actor              string
 	Resource           *string
 	EventType          string
@@ -187,8 +187,8 @@ type InsertUsageEventParams struct {
 func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventParams) error {
 	_, err := q.db.Exec(ctx, insertUsageEvent,
 		arg.ID,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Actor,
 		arg.Resource,
 		arg.EventType,
@@ -206,17 +206,17 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 
 const insertUsageEventIfAbsent = `-- name: InsertUsageEventIfAbsent :exec
 INSERT INTO openrails.usage_events (
-    id, tenant_id, tenant_subject_id, actor, resource,
+    id, merchant_id, merchant_subject_id, actor, resource,
     event_type, dimensions, amount, source, source_id,
     money_transaction_id, metadata, occurred_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
-ON CONFLICT (tenant_id, tenant_subject_id, event_type, source, source_id) DO NOTHING
+ON CONFLICT (merchant_id, merchant_subject_id, event_type, source, source_id) DO NOTHING
 `
 
 type InsertUsageEventIfAbsentParams struct {
 	ID                 uuid.UUID
-	TenantID           uuid.UUID
-	TenantSubjectID    uuid.UUID
+	MerchantID         uuid.UUID
+	MerchantSubjectID  uuid.UUID
 	Actor              string
 	Resource           *string
 	EventType          string
@@ -233,8 +233,8 @@ type InsertUsageEventIfAbsentParams struct {
 func (q *Queries) InsertUsageEventIfAbsent(ctx context.Context, arg InsertUsageEventIfAbsentParams) error {
 	_, err := q.db.Exec(ctx, insertUsageEventIfAbsent,
 		arg.ID,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Actor,
 		arg.Resource,
 		arg.EventType,
@@ -254,7 +254,7 @@ const resourceRevenueDaily = `-- name: ResourceRevenueDaily :many
 SELECT to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')::text AS date,
        COALESCE(SUM(ue.amount), 0)::bigint AS amount_micros
 FROM openrails.usage_events ue
-WHERE ue.tenant_id = $1 AND ue.resource = $2
+WHERE ue.merchant_id = $1 AND ue.resource = $2
   AND ue.occurred_at >= $3::timestamptz
   AND ue.occurred_at < $4::timestamptz
 GROUP BY 1
@@ -262,10 +262,10 @@ ORDER BY 1
 `
 
 type ResourceRevenueDailyParams struct {
-	TenantID uuid.UUID
-	Resource *string
-	FromAt   time.Time
-	ToAt     time.Time
+	MerchantID uuid.UUID
+	Resource   *string
+	FromAt     time.Time
+	ToAt       time.Time
 }
 
 type ResourceRevenueDailyRow struct {
@@ -279,7 +279,7 @@ type ResourceRevenueDailyRow struct {
 // rename as a 10x revenue under-report.
 func (q *Queries) ResourceRevenueDaily(ctx context.Context, arg ResourceRevenueDailyParams) ([]ResourceRevenueDailyRow, error) {
 	rows, err := q.db.Query(ctx, resourceRevenueDaily,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.Resource,
 		arg.FromAt,
 		arg.ToAt,
@@ -312,7 +312,7 @@ SELECT COALESCE(CASE $3::text
        COUNT(*)::bigint AS event_count,
        COALESCE(SUM(ue.amount), 0)::bigint AS total_amount
 FROM openrails.usage_events ue
-WHERE ue.tenant_id = $1 AND ue.tenant_subject_id = $2
+WHERE ue.merchant_id = $1 AND ue.merchant_subject_id = $2
   AND ue.occurred_at >= $4::timestamptz
   AND ue.occurred_at < $5::timestamptz
 GROUP BY 1
@@ -320,11 +320,11 @@ ORDER BY total_amount DESC
 `
 
 type ServiceUsageRollupParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	GroupBy         string
-	FromAt          time.Time
-	ToAt            time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	GroupBy           string
+	FromAt            time.Time
+	ToAt              time.Time
 }
 
 type ServiceUsageRollupRow struct {
@@ -338,8 +338,8 @@ type ServiceUsageRollupRow struct {
 // under ” (the CASE yields NULL).
 func (q *Queries) ServiceUsageRollup(ctx context.Context, arg ServiceUsageRollupParams) ([]ServiceUsageRollupRow, error) {
 	rows, err := q.db.Query(ctx, serviceUsageRollup,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.GroupBy,
 		arg.FromAt,
 		arg.ToAt,

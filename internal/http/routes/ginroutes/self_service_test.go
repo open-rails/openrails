@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/tenancy"
-	tenantpkg "github.com/open-rails/openrails/pkg/tenant"
+	merchantpkg "github.com/open-rails/openrails/pkg/merchant"
 )
 
 // These tests pin the SELF-SERVICE route table (RegisterSelfServiceRoutes) for
@@ -34,7 +34,7 @@ import (
 // fixed ResolvedDelegated carrying the supplied permission set.
 type fakeDelegatedResolver struct {
 	permissions []string
-	tenantID    tenantpkg.ID
+	tenantID    merchantpkg.ID
 	err         error
 }
 
@@ -48,7 +48,7 @@ func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string) (*contr
 	}
 	return &controlplane.ResolvedDelegated{
 		Tenant:           "acme-org",
-		TenantID:         tenantID,
+		MerchantID:         tenantID,
 		TenantSlug:       "acme-org",
 		DelegatedSubject: "user-42",
 		Permissions:      f.permissions,
@@ -80,7 +80,7 @@ func newTenantAdminRouter(t *testing.T, perms []string) *gin.Engine {
 	return e
 }
 
-func newTenantAdminRouterWithRuntime(t *testing.T, perms []string, tenantID tenantpkg.ID, svc *tenancy.Service) *gin.Engine {
+func newTenantAdminRouterWithRuntime(t *testing.T, perms []string, tenantID merchantpkg.ID, svc *tenancy.Service) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
@@ -314,7 +314,7 @@ func TestTenantAdmin_SecretRoutesWriteOnlyRuntimeBehavior(t *testing.T) {
 	require.NoError(t, err)
 
 	tenantA := dbtest.TestTenantID
-	tenantB, err := tenantpkg.ParseID("22222222-2222-2222-2222-222222222222")
+	tenantB, err := merchantpkg.ParseID("22222222-2222-2222-2222-222222222222")
 	require.NoError(t, err)
 	perms := []string{
 		controlplane.PermTenantSecretsList,

@@ -19,7 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // KindCatalogReconciliationPull is the River kind for the alert-only catalog
@@ -470,7 +470,7 @@ func driftDedupeKeyJob(e models.CatalogDriftEvent) string {
 // persistCatalogDriftJob inserts new divergences and auto-resolves open rows
 // whose divergence is gone. Idempotent. Returns (inserted, resolved).
 func persistCatalogDriftJob(ctx context.Context, database *db.DB, desired []models.CatalogDriftEvent, now time.Time) (int, int, error) {
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -503,7 +503,7 @@ func persistCatalogDriftJob(ctx context.Context, database *db.DB, desired []mode
 		}
 		if err := q.InsertCatalogDriftEvent(ctx, gen.InsertCatalogDriftEventParams{
 			ID:                    row.ID,
-			TenantID:              tid.UUID(),
+			MerchantID:              tid.UUID(),
 			Provider:              string(row.Provider),
 			Kind:                  string(row.Kind),
 			OpenrailsResourceType: string(row.OpenRailsResourceType),

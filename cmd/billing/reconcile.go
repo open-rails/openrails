@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // newReconcileCmd wires the #107 processor-reconcile CLI:
@@ -99,28 +99,28 @@ func withReconcileApp(cmd *cobra.Command, tenantSlug string, fn func(ctx context
 	if err != nil {
 		return err
 	}
-	ctx := tenant.WithID(cmd.Context(), tid)
+	ctx := merchant.WithID(cmd.Context(), tid)
 	return application.Runtime.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
 		return fn(ctx, application)
 	})
 }
 
-func resolveReconcileTenant(ctx context.Context, application *app.App, slug string) (tenant.ID, error) {
+func resolveReconcileTenant(ctx context.Context, application *app.App, slug string) (merchant.ID, error) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
 		// No default tenant (#336): reconciliation must target a named tenant.
-		return tenant.ID{}, fmt.Errorf("--tenant is required (slug or id of the tenant to reconcile)")
+		return merchant.ID{}, fmt.Errorf("--tenant is required (slug or id of the tenant to reconcile)")
 	}
-	if tid, err := tenant.ParseID(slug); err == nil {
+	if tid, err := merchant.ParseID(slug); err == nil {
 		return tid, nil
 	}
 	var id string
 	if err := application.Runtime.DB.DataPool().
 		QueryRow(ctx, `SELECT id::text FROM openrails.tenants WHERE lower(slug) = lower($1)`, slug).
 		Scan(&id); err != nil {
-		return tenant.ID{}, fmt.Errorf("resolve tenant %q: %w", slug, err)
+		return merchant.ID{}, fmt.Errorf("resolve tenant %q: %w", slug, err)
 	}
-	return tenant.ParseID(id)
+	return merchant.ParseID(id)
 }
 
 func parseReconcileCLITime(s, name string) (time.Time, error) {

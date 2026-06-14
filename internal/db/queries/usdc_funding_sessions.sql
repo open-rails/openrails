@@ -2,13 +2,13 @@
 
 -- name: CreateUSDCFundingSession :exec
 INSERT INTO openrails.usdc_funding_sessions (
-    id, tenant_id, tenant_subject_id, checkout_session_id, provider,
+    id, merchant_id, merchant_subject_id, checkout_session_id, provider,
     wallet_address, asset, network, requested_amount, provider_session_id,
     provider_url, status, return_url, idempotency_key, metadata,
     last_checked_at, expires_at, created_at, updated_at
 ) VALUES (
     $1,
-    sqlc.arg(tenant_id)::uuid,
+    sqlc.arg(merchant_id)::uuid,
     $2, sqlc.narg(checkout_session_id), $3, $4, $5, $6, $7,
     sqlc.narg(provider_session_id), $8, $9, sqlc.narg(return_url),
     sqlc.narg(idempotency_key), sqlc.arg(metadata),
@@ -17,9 +17,9 @@ INSERT INTO openrails.usdc_funding_sessions (
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
 
--- name: GetUSDCFundingSessionByIDForTenantSubject :one
+-- name: GetUSDCFundingSessionByIDForMerchantSubject :one
 SELECT * FROM openrails.usdc_funding_sessions ufs
-WHERE ufs.id = $1 AND ufs.tenant_subject_id = $2
+WHERE ufs.id = $1 AND ufs.merchant_subject_id = $2
 LIMIT 1;
 
 -- name: GetUSDCFundingSessionByID :one
@@ -29,7 +29,7 @@ LIMIT 1;
 
 -- name: GetUSDCFundingSessionByIdempotencyKey :one
 SELECT * FROM openrails.usdc_funding_sessions ufs
-WHERE ufs.tenant_subject_id = $1 AND ufs.idempotency_key = $2
+WHERE ufs.merchant_subject_id = $1 AND ufs.idempotency_key = $2
 LIMIT 1;
 
 -- name: UpdateUSDCFundingSessionStatus :exec

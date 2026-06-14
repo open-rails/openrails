@@ -23,7 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/spool"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -40,7 +40,7 @@ import (
 //     admin DISPLAY metrics (see AdminMetricsService); it must never be wired
 //     into a credit/hold/entitlement/charge/authz decision path.
 //  2. Every ClickHouse event is tenant-scoped: it carries the resolved
-//     tenant_id (tenant.Require). Hosted multi-tenant analytics
+//     tenant_id (merchant.Require). Hosted multi-tenant analytics
 //     must never be written unscoped.
 //  3. ClickHouse is OPTIONAL: when unconfigured/unavailable, every Log* method
 //     is a no-op or spools-and-returns-nil — it never errors on the billing
@@ -121,7 +121,7 @@ func resolveTenantID(ctx context.Context, existing string) (string, error) {
 	if existing != "" {
 		return existing, nil
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -255,7 +255,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			if d.TenantID, err = resolveTenantID(ctx, d.TenantID); err != nil {
+			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
 				log.WithError(err).Warn("resolve tenant for subscription")
 				dead(p)
 				continue
@@ -275,7 +275,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			if d.TenantID, err = resolveTenantID(ctx, d.TenantID); err != nil {
+			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
 				log.WithError(err).Warn("resolve tenant for payment")
 				dead(p)
 				continue
@@ -298,7 +298,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			if d.TenantID, err = resolveTenantID(ctx, d.TenantID); err != nil {
+			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
 				log.WithError(err).Warn("resolve tenant for transaction")
 				dead(p)
 				continue
@@ -316,7 +316,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			}
 			transAsPayments = append(transAsPayments, PaymentEventData{
 				EventID:                d.EventID,
-				TenantID:               d.TenantID,
+				MerchantID:               d.MerchantID,
 				SubscriptionID:         d.SubscriptionID,
 				UserID:                 userID,
 				EventType:              d.EventType,
@@ -340,7 +340,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			if d.TenantID, err = resolveTenantID(ctx, d.TenantID); err != nil {
+			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
 				log.WithError(err).Warn("resolve tenant for acu")
 				dead(p)
 				continue
@@ -360,7 +360,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			if d.TenantID, err = resolveTenantID(ctx, d.TenantID); err != nil {
+			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
 				log.WithError(err).Warn("resolve tenant for chargeback")
 				dead(p)
 				continue
@@ -443,10 +443,10 @@ func (s *EventLogService) Close() error {
 // SubscriptionEventData represents data for subscription events
 type SubscriptionEventData struct {
 	EventID uuid.UUID `json:"event_id"`
-	// TenantID scopes this analytics event to a tenant / billing namespace
+	// MerchantID scopes this analytics event to a tenant / billing namespace
 	// (issue #232). It is populated from the request context at log time via
-	// tenant.Require; never write an unscoped hosted event.
-	TenantID                string     `json:"tenant_id"`
+	// merchant.Require; never write an unscoped hosted event.
+	MerchantID                string     `json:"tenant_id"`
 	SubscriptionID          uuid.UUID  `json:"subscription_id"`
 	UserID                  string     `json:"user_id"`
 	EventType               string     `json:"event_type"`
@@ -504,8 +504,8 @@ const (
 // PaymentEventData represents data for payment events
 type PaymentEventData struct {
 	EventID uuid.UUID `json:"event_id"`
-	// TenantID scopes this analytics event to a tenant / billing namespace (issue #232).
-	TenantID               string     `json:"tenant_id"`
+	// MerchantID scopes this analytics event to a tenant / billing namespace (issue #232).
+	MerchantID               string     `json:"tenant_id"`
 	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
 	UserID                 string     `json:"user_id"`
 	EventType              string     `json:"event_type"`
@@ -522,8 +522,8 @@ type PaymentEventData struct {
 // TransactionEventData represents data for transaction events
 type TransactionEventData struct {
 	EventID uuid.UUID `json:"event_id"`
-	// TenantID scopes this analytics event to a tenant / billing namespace (issue #232).
-	TenantID               string     `json:"tenant_id"`
+	// MerchantID scopes this analytics event to a tenant / billing namespace (issue #232).
+	MerchantID               string     `json:"tenant_id"`
 	TransactionID          string     `json:"transaction_id"`
 	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
 	UserID                 *string    `json:"user_id,omitempty"`
@@ -540,8 +540,8 @@ type TransactionEventData struct {
 // ACUEventData represents data for Automatic Card Updater events
 type ACUEventData struct {
 	EventID uuid.UUID `json:"event_id"`
-	// TenantID scopes this analytics event to a tenant / billing namespace (issue #232).
-	TenantID                string     `json:"tenant_id"`
+	// MerchantID scopes this analytics event to a tenant / billing namespace (issue #232).
+	MerchantID                string     `json:"tenant_id"`
 	SubscriptionID          *uuid.UUID `json:"subscription_id,omitempty"`
 	UserID                  *string    `json:"user_id,omitempty"`
 	EventType               string     `json:"event_type"`
@@ -558,8 +558,8 @@ type ACUEventData struct {
 // ChargebackEventData represents data for chargeback events
 type ChargebackEventData struct {
 	EventID uuid.UUID `json:"event_id"`
-	// TenantID scopes this analytics event to a tenant / billing namespace (issue #232).
-	TenantID               string     `json:"tenant_id"`
+	// MerchantID scopes this analytics event to a tenant / billing namespace (issue #232).
+	MerchantID               string     `json:"tenant_id"`
 	ChargebackID           string     `json:"chargeback_id"`
 	BatchID                string     `json:"batch_id"`
 	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
@@ -604,10 +604,10 @@ func (s *EventLogService) LogSubscriptionEvent(ctx context.Context, data Subscri
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	if resolved, err := resolveTenantID(ctx, data.TenantID); err != nil {
+	if resolved, err := resolveTenantID(ctx, data.MerchantID); err != nil {
 		return err
 	} else {
-		data.TenantID = resolved
+		data.MerchantID = resolved
 	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
@@ -650,10 +650,10 @@ func (s *EventLogService) LogPaymentEvent(ctx context.Context, data PaymentEvent
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	if resolved, err := resolveTenantID(ctx, data.TenantID); err != nil {
+	if resolved, err := resolveTenantID(ctx, data.MerchantID); err != nil {
 		return err
 	} else {
-		data.TenantID = resolved
+		data.MerchantID = resolved
 	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
@@ -700,10 +700,10 @@ func (s *EventLogService) LogTransactionEvent(ctx context.Context, data Transact
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	if resolved, err := resolveTenantID(ctx, data.TenantID); err != nil {
+	if resolved, err := resolveTenantID(ctx, data.MerchantID); err != nil {
 		return err
 	} else {
-		data.TenantID = resolved
+		data.MerchantID = resolved
 	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
@@ -744,7 +744,7 @@ func (s *EventLogService) LogTransactionEvent(ctx context.Context, data Transact
 
 	ped := PaymentEventData{
 		EventID:                data.EventID,
-		TenantID:               data.TenantID,
+		MerchantID:               data.MerchantID,
 		SubscriptionID:         data.SubscriptionID,
 		UserID:                 *data.UserID,
 		EventType:              paymentType,
@@ -768,10 +768,10 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	if resolved, err := resolveTenantID(ctx, data.TenantID); err != nil {
+	if resolved, err := resolveTenantID(ctx, data.MerchantID); err != nil {
 		return err
 	} else {
-		data.TenantID = resolved
+		data.MerchantID = resolved
 	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
@@ -793,7 +793,7 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 	if err == nil {
 		err = s.clickhouseConn.Exec(ctx, query,
 			data.EventID,
-			data.TenantID,
+			data.MerchantID,
 			data.SubscriptionID,
 			data.UserID,
 			data.EventType,
@@ -840,10 +840,10 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	if resolved, err := resolveTenantID(ctx, data.TenantID); err != nil {
+	if resolved, err := resolveTenantID(ctx, data.MerchantID); err != nil {
 		return err
 	} else {
-		data.TenantID = resolved
+		data.MerchantID = resolved
 	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
@@ -865,7 +865,7 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 	if err == nil {
 		err = s.clickhouseConn.Exec(ctx, query,
 			data.EventID,
-			data.TenantID,
+			data.MerchantID,
 			data.ChargebackID,
 			data.BatchID,
 			nullableUUID(data.SubscriptionID),
@@ -964,7 +964,7 @@ func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, 
 
 	return s.LogSubscriptionEvent(ctx, SubscriptionEventData{
 		SubscriptionID:          subscription.ID,
-		UserID:                  subscription.TenantSubjectID.String(),
+		UserID:                  subscription.MerchantSubjectID.String(),
 		EventType:               PaymentEventSubscriptionCancelled,
 		Status:                  string(subscription.Status),
 		CancelType:              cancelType,
@@ -1002,7 +1002,7 @@ func (s *EventLogService) LogLifecycleChargeSuccess(ctx context.Context, sub *mo
 	metadata["subscription_id"] = sub.ID.String()
 	return s.LogPaymentEvent(ctx, PaymentEventData{
 		SubscriptionID:         &sub.ID,
-		UserID:                 sub.TenantSubjectID.String(),
+		UserID:                 sub.MerchantSubjectID.String(),
 		EventType:              PaymentEventChargeSuccess,
 		Processor:              string(processor),
 		ProcessorTransactionID: txnID,
@@ -1087,7 +1087,7 @@ func (s *EventLogService) insertSubscription(ctx context.Context, data Subscript
     `
 	return s.clickhouseConn.Exec(ctx, query,
 		data.EventID,
-		data.TenantID,
+		data.MerchantID,
 		data.SubscriptionID,
 		data.UserID,
 		data.EventType,
@@ -1112,7 +1112,7 @@ func (s *EventLogService) insertSubscriptionBatch(ctx context.Context, rows []Su
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.TenantID, d.SubscriptionID, d.UserID, d.EventType, d.Status, d.CancelType, d.Processor, nullableString2(d.ProcessorSubscriptionID), nullableString2(d.ProcessorTransactionID), d.PriceAmount, d.PriceCurrency, d.BillingCycleDays, nullableUUID(d.ProductID), nullableUUID(d.PriceID), d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.MerchantID, d.SubscriptionID, d.UserID, d.EventType, d.Status, d.CancelType, d.Processor, nullableString2(d.ProcessorSubscriptionID), nullableString2(d.ProcessorTransactionID), d.PriceAmount, d.PriceCurrency, d.BillingCycleDays, nullableUUID(d.ProductID), nullableUUID(d.PriceID), d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}
@@ -1143,7 +1143,7 @@ func (s *EventLogService) insertPayment(ctx context.Context, data PaymentEventDa
     `
 	return s.clickhouseConn.Exec(ctx, query,
 		data.EventID,
-		data.TenantID,
+		data.MerchantID,
 		data.SubscriptionID,
 		data.UserID,
 		data.EventType,
@@ -1164,7 +1164,7 @@ func (s *EventLogService) insertPaymentBatch(ctx context.Context, rows []Payment
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.TenantID, d.SubscriptionID, d.UserID, d.EventType, d.Processor, d.ProcessorTransactionID, d.Amount, d.Currency, d.BillingInfo, d.WebhookSource, d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.MerchantID, d.SubscriptionID, d.UserID, d.EventType, d.Processor, d.ProcessorTransactionID, d.Amount, d.Currency, d.BillingInfo, d.WebhookSource, d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}
@@ -1177,7 +1177,7 @@ func (s *EventLogService) insertACUBatch(ctx context.Context, rows []ACUEventDat
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.TenantID, d.SubscriptionID, d.UserID, d.EventType, d.Processor, d.ProcessorSubscriptionID, d.CardInfo, d.UpdateStatus, d.RequiresAction, d.Reason, d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.MerchantID, d.SubscriptionID, d.UserID, d.EventType, d.Processor, d.ProcessorSubscriptionID, d.CardInfo, d.UpdateStatus, d.RequiresAction, d.Reason, d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}
@@ -1190,7 +1190,7 @@ func (s *EventLogService) insertChargebackBatch(ctx context.Context, rows []Char
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.TenantID, d.ChargebackID, d.BatchID, nullableUUID(d.SubscriptionID), nullableString2(d.UserID), d.EventType, d.Processor, nullableString2(d.ProcessorTransactionID), d.Amount, d.Currency, d.ChargebackType, d.Reason, d.Status, d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.MerchantID, d.ChargebackID, d.BatchID, nullableUUID(d.SubscriptionID), nullableString2(d.UserID), d.EventType, d.Processor, nullableString2(d.ProcessorTransactionID), d.Amount, d.Currency, d.ChargebackType, d.Reason, d.Status, d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}

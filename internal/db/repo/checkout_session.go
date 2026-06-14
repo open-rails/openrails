@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type CheckoutSessionRepo struct {
@@ -36,21 +36,21 @@ func checkoutSessionJSONB(s *models.CheckoutSession) (meta, fields, state []byte
 }
 
 func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.CheckoutSession) error {
-	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, session.TenantSubjectID); err != nil {
+	if err := ensureMerchantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, session.MerchantSubjectID); err != nil {
 		return err
 	}
 	meta, fields, state, err := checkoutSessionJSONB(session)
 	if err != nil {
 		return err
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
 	rows, err := r.db.Gen(ctx).CreateCheckoutSession(ctx, gen.CreateCheckoutSessionParams{
 		ID:              session.ID,
-		TenantID:        tid.UUID(),
-		TenantSubjectID: session.TenantSubjectID,
+		MerchantID:        tid.UUID(),
+		MerchantSubjectID: session.MerchantSubjectID,
 		PriceID:         session.PriceID,
 		Mode:            string(session.Mode),
 		Processor:       string(session.Processor),
@@ -93,7 +93,7 @@ func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.Checko
 	}
 	rows, err := r.db.Gen(ctx).UpdateCheckoutSession(ctx, gen.UpdateCheckoutSessionParams{
 		ID:              session.ID,
-		TenantSubjectID: session.TenantSubjectID,
+		MerchantSubjectID: session.MerchantSubjectID,
 		PriceID:         session.PriceID,
 		Mode:            string(session.Mode),
 		Processor:       string(session.Processor),
@@ -169,12 +169,12 @@ func (r *CheckoutSessionRepo) GetByReference(ctx context.Context, reference stri
 }
 
 func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceProcessor(ctx context.Context, userID string, priceID uuid.UUID, processor models.Processor) (*models.CheckoutSession, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
 	row, err := r.db.Gen(ctx).GetLatestOpenCheckoutSession(ctx, gen.GetLatestOpenCheckoutSessionParams{
-		TenantSubjectID: tsid,
+		MerchantSubjectID: tsid,
 		PriceID:         priceID,
 		Processor:       string(processor),
 		Now:             time.Now(),

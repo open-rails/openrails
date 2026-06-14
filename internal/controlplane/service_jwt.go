@@ -28,9 +28,10 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 		return nil, err
 	}
 
-	// The registered issuer resolves to exactly one tenant; that tenant is the
-	// token's authority anchor and its only reachable resource scope.
-	tid, tslug, err := c.tenantForIssuer(ctx, principal.Issuer)
+	// The validated issuer (remote_application) resolves, via the tenant it
+	// controls, to the merchant that tenant owns (#481). That merchant is the
+	// token's only reachable resource scope.
+	mid, mslug, err := c.merchantForIssuer(ctx, principal.Issuer)
 	if err != nil {
 		return nil, err
 	}
@@ -40,24 +41,24 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 		return nil, ErrServiceTokenScopeDenied
 	}
 
-	// Self-assigned resources, defaulting to the issuer's own tenant when the
-	// token declares none. The wall: every resource must belong to this tenant
-	// (validateServiceTokenResources rejects any cross-tenant or unknown-kind
+	// Self-assigned resources, defaulting to the resolved merchant when the token
+	// declares none. The wall: every resource must belong to this merchant
+	// (validateServiceTokenResources rejects any cross-merchant or unknown-kind
 	// resource).
 	resources := principal.Resources
 	if len(resources) == 0 {
-		resources = []authcore.ServiceTokenResource{TenantResource(tid)}
+		resources = []authcore.ServiceTokenResource{MerchantResource(mid)}
 	}
-	if err := validateServiceTokenResources(tid, resources); err != nil {
+	if err := validateServiceTokenResources(mid, resources); err != nil {
 		return nil, err
 	}
 
 	return &ResolvedServiceToken{
-		AuthKitTenantSlug: tslug,
-		TenantID:          tid,
-		TenantSlug:        tslug,
-		Permissions:       permissions,
-		Resources:         resources,
+		OwnerTenantSlug: mslug,
+		MerchantID:      mid,
+		MerchantSlug:    mslug,
+		Permissions:     permissions,
+		Resources:       resources,
 	}, nil
 }
 

@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // pgx-side twin of TestRLSEnforcement_Under_OpenRailsAppRole (#334): proves
@@ -49,7 +49,7 @@ func TestRLSEnforcement_PgxSide(t *testing.T) {
 	require.NoError(t, err)
 	// Seed through the pgx side (superuser bypasses RLS).
 	_, err = super.Qx(ctx).Exec(ctx, `
-		INSERT INTO openrails.rls_probe (id, tenant_id, val) VALUES
+		INSERT INTO openrails.rls_probe (id, merchant_id, val) VALUES
 		('00000000-0000-0000-0000-00000000000a', $1, 'a-row'),
 		('00000000-0000-0000-0000-00000000000b', $2, 'b-row')`,
 		rlsTenantA.String(), rlsTenantB.String())
@@ -63,7 +63,7 @@ func TestRLSEnforcement_PgxSide(t *testing.T) {
 
 	// (2) WithTenantConn pins a pgx connection with tenant A's GUC: every
 	// Qx(ctx) query on the returned ctx is scoped to tenant A.
-	ctxA := tenant.WithID(ctx, rlsTenantA)
+	ctxA := merchant.WithID(ctx, rlsTenantA)
 	pinnedCtx, release, err := app.WithTenantConn(ctxA)
 	require.NoError(t, err)
 	require.Equal(t, []string{"a-row"}, pgxProbeVals(pinnedCtx, t, app),
@@ -101,7 +101,7 @@ func TestRLSEnforcement_PgxSide(t *testing.T) {
 	// tenant B's id.
 	err = app.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
 		_, ierr := tx.Exec(ctx, `
-			INSERT INTO openrails.rls_probe (id, tenant_id, val)
+			INSERT INTO openrails.rls_probe (id, merchant_id, val)
 			VALUES ('00000000-0000-0000-0000-00000000000c', $1, 'cross')`,
 			rlsTenantB.String())
 		return ierr
@@ -109,7 +109,7 @@ func TestRLSEnforcement_PgxSide(t *testing.T) {
 	require.Error(t, err, "WITH CHECK must reject a cross-tenant insert on the pgx side")
 
 	// (7) Tenant B's row survived and is visible under tenant B's GUC.
-	ctxB := tenant.WithID(ctx, rlsTenantB)
+	ctxB := merchant.WithID(ctx, rlsTenantB)
 	require.NoError(t, app.TenantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
 		var n int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM openrails.rls_probe`).Scan(&n); err != nil {

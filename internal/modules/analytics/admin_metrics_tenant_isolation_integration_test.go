@@ -19,7 +19,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // TestAdminMetricsCrossTenantIsolation proves the issue #232 fix end to end:
@@ -94,8 +94,8 @@ func TestAdminMetricsCrossTenantIsolation(t *testing.T) {
 
 	createMinimalDailyMetrics(t, ctx, conn)
 
-	tenantA := tenant.ID(uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
-	tenantB := tenant.ID(uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+	tenantA := merchant.ID(uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+	tenantB := merchant.ID(uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
 
 	day := time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC)
 	// Tenant A: 1000 sub revenue, 2 new subs, processor "ccbill".
@@ -112,7 +112,7 @@ func TestAdminMetricsCrossTenantIsolation(t *testing.T) {
 	svc := &AdminMetricsService{cfg: &config.ClickHouseConfig{ClientAddr: clientAddr, Database: dbName, Username: dbUser, Password: dbPass}}
 
 	rng := MetricsDateRange{Start: day.Add(-24 * time.Hour), End: day.Add(48 * time.Hour)}
-	ctxA := tenant.WithID(ctx, tenantA)
+	ctxA := merchant.WithID(ctx, tenantA)
 
 	// --- Summary ---
 	summary, err := svc.GetSummary(ctxA, rng, "usd")
@@ -182,7 +182,7 @@ func TestAdminMetricsCrossTenantIsolation(t *testing.T) {
 	}
 
 	// --- Tenant B sees only its own data (symmetry) ---
-	ctxB := tenant.WithID(ctx, tenantB)
+	ctxB := merchant.WithID(ctx, tenantB)
 	summaryB, err := svc.GetSummary(ctxB, rng, "usd")
 	if err != nil {
 		t.Fatalf("GetSummary(B): %v", err)
@@ -269,7 +269,7 @@ type dailySeed struct {
 	processor          string
 }
 
-func seedDailyMetric(t *testing.T, ctx context.Context, conn driver.Conn, day time.Time, currency string, tenantID tenant.ID, s dailySeed) {
+func seedDailyMetric(t *testing.T, ctx context.Context, conn driver.Conn, day time.Time, currency string, tenantID merchant.ID, s dailySeed) {
 	t.Helper()
 	batch, err := conn.PrepareBatch(ctx, `INSERT INTO daily_metrics (
         snapshot_date, currency, tenant_id,

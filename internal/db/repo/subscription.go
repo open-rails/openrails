@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/query"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type SubscriptionFilters struct {
@@ -56,7 +56,7 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 	}
 	return gen.CreateSubscriptionParams{
 		ID:                       s.ID,
-		TenantSubjectID:          s.TenantSubjectID,
+		MerchantSubjectID:          s.MerchantSubjectID,
 		ProductID:                s.ProductID,
 		PriceID:                  priceID,
 		ScheduledPriceID:         s.ScheduledPriceID,
@@ -86,18 +86,18 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 }
 
 func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) error {
-	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, s.TenantSubjectID); err != nil {
+	if err := ensureMerchantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, s.MerchantSubjectID); err != nil {
 		return err
 	}
 	params, err := subscriptionInsertParams(s)
 	if err != nil {
 		return err
 	}
-	tid, terr := tenant.Require(ctx)
+	tid, terr := merchant.Require(ctx)
 	if terr != nil {
 		return terr
 	}
-	params.TenantID = tid.UUID()
+	params.MerchantID = tid.UUID()
 	rows, err := r.db.Gen(ctx).CreateSubscription(ctx, params)
 	if err != nil {
 		return err
@@ -314,11 +314,11 @@ func (r *SubscriptionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.S
 }
 
 func (r *SubscriptionRepo) GetLatestByUserID(ctx context.Context, userID string) (*models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetLatestSubscriptionByTenantSubject(ctx, tsid)
+	row, err := r.db.Gen(ctx).GetLatestSubscriptionByMerchantSubject(ctx, tsid)
 	if err != nil {
 		return nil, err
 	}
@@ -326,12 +326,12 @@ func (r *SubscriptionRepo) GetLatestByUserID(ctx context.Context, userID string)
 }
 
 func (r *SubscriptionRepo) GetByUserIDAndPriceID(ctx context.Context, userID string, priceID uuid.UUID) (*models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetSubscriptionByTenantSubjectAndPrice(ctx, gen.GetSubscriptionByTenantSubjectAndPriceParams{
-		TenantSubjectID: tsid,
+	row, err := r.db.Gen(ctx).GetSubscriptionByMerchantSubjectAndPrice(ctx, gen.GetSubscriptionByMerchantSubjectAndPriceParams{
+		MerchantSubjectID: tsid,
 		PriceID:         &priceID,
 	})
 	if err != nil {
@@ -343,12 +343,12 @@ func (r *SubscriptionRepo) GetByUserIDAndPriceID(ctx context.Context, userID str
 // GetActiveOrPendingByUserIDAndProductID finds any lifecycle-owning subscription for a user and product.
 // Returns the subscription with the latest period end date.
 func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetLifecycleSubscriptionByTenantSubjectAndProduct(ctx, gen.GetLifecycleSubscriptionByTenantSubjectAndProductParams{
-		TenantSubjectID: tsid,
+	row, err := r.db.Gen(ctx).GetLifecycleSubscriptionByMerchantSubjectAndProduct(ctx, gen.GetLifecycleSubscriptionByMerchantSubjectAndProductParams{
+		MerchantSubjectID: tsid,
 		ProductID:       productID,
 	})
 	if err != nil {
@@ -365,12 +365,12 @@ func (r *SubscriptionRepo) GetActiveSubscriptionAt(ctx context.Context, userID s
 	if now.IsZero() {
 		now = time.Now()
 	}
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetActiveSubscriptionByTenantSubjectAt(ctx, gen.GetActiveSubscriptionByTenantSubjectAtParams{
-		TenantSubjectID: tsid,
+	row, err := r.db.Gen(ctx).GetActiveSubscriptionByMerchantSubjectAt(ctx, gen.GetActiveSubscriptionByMerchantSubjectAtParams{
+		MerchantSubjectID: tsid,
 		Now:             now,
 	})
 	if err != nil {
@@ -404,11 +404,11 @@ func (r *SubscriptionRepo) GetByProcessorMetadataValue(ctx context.Context, proc
 }
 
 func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, userID string) ([]models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByTenantSubject(ctx, tsid)
+	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByMerchantSubject(ctx, tsid)
 	if err != nil {
 		return nil, err
 	}
@@ -420,12 +420,12 @@ func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, u
 }
 
 func (r *SubscriptionRepo) GetSubscriptionsByProcessorAndUserID(ctx context.Context, userID string, processor models.Processor) ([]models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListSubscriptionsByTenantSubjectProcessor(ctx, gen.ListSubscriptionsByTenantSubjectProcessorParams{
-		TenantSubjectID: tsid,
+	rows, err := r.db.Gen(ctx).ListSubscriptionsByMerchantSubjectProcessor(ctx, gen.ListSubscriptionsByMerchantSubjectProcessorParams{
+		MerchantSubjectID: tsid,
 		Processor:       string(processor),
 	})
 	if err != nil {
@@ -451,19 +451,19 @@ func (r *SubscriptionRepo) GetPaginatedByUserID(ctx context.Context, userID stri
 }
 
 func (r *SubscriptionRepo) GetSubscriptionsWithDetailsForUser(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
 	q := r.db.Gen(ctx)
-	total, err := q.CountSubscriptionsByTenantSubject(ctx, tsid)
+	total, err := q.CountSubscriptionsByMerchantSubject(ctx, tsid)
 	if err != nil {
 		return nil, 0, err
 	}
 	pageSize32, _ := safecast.Convert[int32](pageSize)
 	pageOffset32, _ := safecast.Convert[int32]((page - 1) * pageSize)
-	rows, err := q.ListSubscriptionsByTenantSubjectPaged(ctx, gen.ListSubscriptionsByTenantSubjectPagedParams{
-		TenantSubjectID: tsid,
+	rows, err := q.ListSubscriptionsByMerchantSubjectPaged(ctx, gen.ListSubscriptionsByMerchantSubjectPagedParams{
+		MerchantSubjectID: tsid,
 		PageLimit:       pageSize32,
 		PageOffset:      pageOffset32,
 	})
@@ -479,7 +479,7 @@ func (r *SubscriptionRepo) GetSubscriptionsWithDetailsForUser(ctx context.Contex
 
 func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.QueryOptions[SubscriptionFilters]) ([]*models.Subscription, int64, error) {
 	f := params.Filters
-	tsidResolved, err := ResolveTenantSubjectID(f.UserID)
+	tsidResolved, err := ResolveMerchantSubjectID(f.UserID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -501,7 +501,7 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 
 	q := r.db.Gen(ctx)
 	total, err := q.CountSubscriptionsFiltered(ctx, gen.CountSubscriptionsFilteredParams{
-		TenantSubjectID: tsid,
+		MerchantSubjectID: tsid,
 		Status:          status,
 		PriceID:         priceID,
 		Processor:       processor,
@@ -524,7 +524,7 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 	paramsLimit32, _ := safecast.Convert[int32](params.Limit)
 	paramsOffset32, _ := safecast.Convert[int32](params.Offset)
 	rows, err := q.ListSubscriptionsFiltered(ctx, gen.ListSubscriptionsFilteredParams{
-		TenantSubjectID: tsid,
+		MerchantSubjectID: tsid,
 		Status:          status,
 		PriceID:         priceID,
 		Processor:       processor,
@@ -552,12 +552,12 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 // where the product belongs to the specified tier group.
 // Returns the subscription with its Price and Product loaded.
 func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndTierGroup(ctx context.Context, userID string, tierGroup string) (*models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetLifecycleSubscriptionByTenantSubjectAndTierGroup(ctx, gen.GetLifecycleSubscriptionByTenantSubjectAndTierGroupParams{
-		TenantSubjectID: tsid,
+	row, err := r.db.Gen(ctx).GetLifecycleSubscriptionByMerchantSubjectAndTierGroup(ctx, gen.GetLifecycleSubscriptionByMerchantSubjectAndTierGroupParams{
+		MerchantSubjectID: tsid,
 		TierGroup:       &tierGroup,
 	})
 	if err != nil {
@@ -640,7 +640,7 @@ func (r *SubscriptionRepo) ListPendingDeletionScheduled(ctx context.Context) ([]
 // pgx.ErrNoRows.
 func (r *SubscriptionRepo) GetLatestResumableCancelled(ctx context.Context, tenantSubjectID uuid.UUID, now time.Time) (*models.Subscription, error) {
 	row, err := r.db.Gen(ctx).GetLatestResumableCancelledSubscription(ctx, gen.GetLatestResumableCancelledSubscriptionParams{
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		Now:             now,
 	})
 	if err != nil {

@@ -25,7 +25,7 @@ var (
 
 // OpenWindowRequest opens a prepaid window for one payer.
 type OpenWindowRequest struct {
-	TenantSubjectID identity.TenantSubjectID
+	MerchantSubjectID identity.MerchantSubjectID
 	Actor           string
 	Currency        string // "" => DefaultCurrency (#476)
 	Amount          int64
@@ -35,7 +35,7 @@ type OpenWindowRequest struct {
 // CreditWindowDTO is the public view of a window.
 type CreditWindowDTO struct {
 	WindowID        uuid.UUID `json:"window_id"`
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	HeldAmount      int64     `json:"held_amount"`
 	SettledAmount   int64     `json:"settled_amount"`
 	Status          string    `json:"status"`
@@ -54,7 +54,7 @@ func (s *Service) OpenWindow(ctx context.Context, req OpenWindowRequest) (*Credi
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
-	if req.TenantSubjectID.IsZero() {
+	if req.MerchantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if req.Amount <= 0 {
@@ -65,7 +65,7 @@ func (s *Service) OpenWindow(ctx context.Context, req OpenWindowRequest) (*Credi
 		ttl = defaultWindowTTL
 	}
 	w, err := s.moneyService().OpenWindow(ctx, money.OpenWindowParams{
-		Payer:     req.TenantSubjectID,
+		Payer:     req.MerchantSubjectID,
 		Actor:     strings.TrimSpace(req.Actor),
 		Currency:  req.Currency,
 		Amount:    req.Amount,
@@ -147,7 +147,7 @@ func (s *Service) CloseWindow(ctx context.Context, windowID uuid.UUID) (*CreditW
 func windowToDTO(w *models.MoneyWindow) *CreditWindowDTO {
 	return &CreditWindowDTO{
 		WindowID:        w.ID,
-		TenantSubjectID: w.TenantSubjectID,
+		MerchantSubjectID: w.MerchantSubjectID,
 		HeldAmount:      w.HeldAmount,
 		SettledAmount:   w.SettledAmount,
 		Status:          w.Status,

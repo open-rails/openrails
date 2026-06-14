@@ -19,16 +19,22 @@ SELECT id
 FROM profiles.users
 WHERE username = $1 AND deleted_at IS NULL;
 
--- name: GetTenantBySlug :one
+-- name: GetMerchantBySlug :one
 SELECT id, slug, name, status
-FROM openrails.tenants
+FROM openrails.merchants
 WHERE slug = $1 AND deleted_at IS NULL;
 
--- name: EnsureTenantBySlug :exec
--- Idempotently create the bound tenant row for an EMBEDDED host (#478): the host
--- owns the embed + DB, so auto-creating the configured tenant slug after
--- migrations is safe. A no-op when the slug already exists. Standalone/remote
--- never calls this — an unprovisioned slug there is a configuration error.
-INSERT INTO openrails.tenants (slug, name, status)
-VALUES ($1, $1, 'active')
-ON CONFLICT (slug) DO NOTHING;
+-- name: RegisterMerchant :one
+-- Register a merchant (billing bucket) from config, idempotently (#480). The
+-- merchant carries ONLY billing/rail state; NO auth. Used by embedded boot and
+-- standalone provisioning. Re-registering an existing slug refreshes the
+-- billing-only fields and returns the canonical (self-owned) merchant id.
+INSERT INTO openrails.merchants (slug, name, status, stripe_account_id, webhook_host, webhook_path)
+VALUES ($1, $2, 'active', sqlc.narg('stripe_account_id'), sqlc.narg('webhook_host'), sqlc.narg('webhook_path'))
+ON CONFLICT (slug) DO UPDATE SET
+    name = EXCLUDED.name,
+    stripe_account_id = COALESCE(EXCLUDED.stripe_account_id, openrails.merchants.stripe_account_id),
+    webhook_host = COALESCE(EXCLUDED.webhook_host, openrails.merchants.webhook_host),
+    webhook_path = COALESCE(EXCLUDED.webhook_path, openrails.merchants.webhook_path),
+    updated_at = now()
+RETURNING id;

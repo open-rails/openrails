@@ -98,10 +98,10 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	billingID := "bill_" + uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
 	paymentMethod := &models.PaymentMethod{
 		ID:                   paymentMethodID,
-		TenantSubjectID:      tenantSubjectID,
+		MerchantSubjectID:      tenantSubjectID,
 		Processor:            models.ProcessorMobius,
 		VaultID:              "vault_" + uuid.New().String(),
 		BillingID:            &billingID,
@@ -111,7 +111,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	}
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   paymentMethod.ID,
-		TenantSubjectID:      paymentMethod.TenantSubjectID,
+		MerchantSubjectID:      paymentMethod.MerchantSubjectID,
 		Processor:            string(paymentMethod.Processor),
 		VaultID:              paymentMethod.VaultID,
 		BillingID:            paymentMethod.BillingID,
@@ -127,7 +127,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	sub := &models.Subscription{
 		ID:                      subID,
-		TenantSubjectID:         tenantSubjectID,
+		MerchantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusPastDue,
@@ -145,8 +145,8 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	}
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      sub.ID,
-		TenantID:                dbtest.TestTenantID.UUID(),
-		TenantSubjectID:         sub.TenantSubjectID,
+		MerchantID:                dbtest.TestTenantID.UUID(),
+		MerchantSubjectID:         sub.MerchantSubjectID,
 		ProductID:               sub.ProductID,
 		PriceID:                 &priceID,
 		Status:                  string(sub.Status),
@@ -163,9 +163,9 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
@@ -207,7 +207,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM openrails.money_transactions
-		 WHERE tenant_subject_id = $1 AND currency = 'USD'
+		 WHERE merchant_subject_id = $1 AND currency = 'USD'
 		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'`,
 		tenantSubjectID).Scan(&depositCount))
 	require.Equal(t, 1, depositCount)
@@ -256,9 +256,9 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	require.NoError(t, err)
 
 	billingID := "bill_" + uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID: paymentMethodID, TenantSubjectID: tenantSubjectID, Processor: "mobius",
+		ID: paymentMethodID, MerchantSubjectID: tenantSubjectID, Processor: "mobius",
 		VaultID: "vault_" + uuid.New().String(), BillingID: &billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
 		CreatedAt:            now, UpdatedAt: now,
@@ -269,7 +269,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	nextRetry := now.Add(-30 * time.Second)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: subID, TenantID: dbtest.TestTenantID.UUID(), TenantSubjectID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
+		ID: subID, MerchantID: dbtest.TestTenantID.UUID(), MerchantSubjectID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Processor: "mobius",
 		ProcessorSubscriptionID: "sub_test_" + uuid.New().String(),
 		PaymentMethodID:         &paymentMethodID,
@@ -288,7 +288,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		subID, periodEnd.Format(time.RFC3339), orderRef)
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.provider_intents
-		  (provider, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence, tenant_id)
+		  (provider, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence, merchant_id)
 		VALUES ('mobius', $1, $2, $3, $4, 'succeeded', 'system', now(), $5, $6)`,
 		intents.TypeManualRebill, subID, payloadJSON,
 		intents.ManualRebillIdempotencyKey(subID, periodEnd, "mobius", orderRef, 0),

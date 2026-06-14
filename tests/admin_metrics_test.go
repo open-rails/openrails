@@ -61,7 +61,7 @@ func seedClickHouseDailyMetrics(t *testing.T, suite *TestContainerSuite, amount 
 	ctx, cancel := context.WithTimeout(suite.ctx, 5*time.Second)
 	defer cancel()
 	batch, err := conn.PrepareBatch(ctx, `INSERT INTO daily_metrics (
-        snapshot_date, currency, tenant_id,
+        snapshot_date, currency, merchant_id,
         subscription_revenue_cents, one_time_revenue_cents, refunds_cents, chargebacks_cents,
         total_revenue_cents, total_revenue_net_cents,
         payments_successful, payments_failed, avg_payment_amount_cents,

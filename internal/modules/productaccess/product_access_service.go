@@ -108,7 +108,7 @@ func (s *Service) GrantProductAccess(ctx context.Context, params GrantParams) (*
 			endsAt = &e
 		}
 		grant := &models.ProductAccessGrant{
-			TenantSubjectID: identity.TenantSubjectIDFromString(params.UserID).UUID(),
+			MerchantSubjectID: identity.MerchantSubjectIDFromString(params.UserID).UUID(),
 			ProductID:       params.ProductID,
 			SourceType:      params.SourceType,
 			SourceID:        params.SourceID,

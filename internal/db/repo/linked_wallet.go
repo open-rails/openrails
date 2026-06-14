@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 var ErrLinkedWalletNotFound = errors.New("linked wallet not found")
@@ -25,8 +25,8 @@ func NewLinkedWalletRepo(d *db.DB) *LinkedWalletRepo { return &LinkedWalletRepo{
 func linkedWalletFromGen(w gen.OpenrailsLinkedWallet) (*models.LinkedWallet, error) {
 	m := &models.LinkedWallet{
 		ID:                   w.ID,
-		TenantID:             w.TenantID,
-		TenantSubjectID:      w.TenantSubjectID,
+		MerchantID:             w.MerchantID,
+		MerchantSubjectID:      w.MerchantSubjectID,
 		Chain:                w.Chain,
 		Address:              w.Address,
 		VerificationProvider: w.VerificationProvider,
@@ -42,15 +42,15 @@ func linkedWalletFromGen(w gen.OpenrailsLinkedWallet) (*models.LinkedWallet, err
 }
 
 func (r *LinkedWalletRepo) GetByUserIDAndChain(ctx context.Context, userID, chain string) (*models.LinkedWallet, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
 	if tsid == uuid.Nil {
 		return nil, ErrLinkedWalletNotFound
 	}
-	row, err := r.db.Gen(ctx).GetLinkedWalletByTenantSubjectAndChain(ctx, gen.GetLinkedWalletByTenantSubjectAndChainParams{
-		TenantSubjectID: tsid,
+	row, err := r.db.Gen(ctx).GetLinkedWalletByMerchantSubjectAndChain(ctx, gen.GetLinkedWalletByMerchantSubjectAndChainParams{
+		MerchantSubjectID: tsid,
 		Chain:           strings.ToLower(strings.TrimSpace(chain)),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -63,16 +63,16 @@ func (r *LinkedWalletRepo) GetByUserIDAndChain(ctx context.Context, userID, chai
 }
 
 func (r *LinkedWalletRepo) UpsertForUserID(ctx context.Context, userID string, wallet *models.LinkedWallet) (*models.LinkedWallet, error) {
-	tsid, err := EnsureTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := EnsureMerchantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	wallet.TenantID = tid.UUID()
-	wallet.TenantSubjectID = tsid
+	wallet.MerchantID = tid.UUID()
+	wallet.MerchantSubjectID = tsid
 	wallet.Chain = strings.ToLower(strings.TrimSpace(wallet.Chain))
 	if wallet.Metadata == nil {
 		wallet.Metadata = map[string]any{}
@@ -83,8 +83,8 @@ func (r *LinkedWalletRepo) UpsertForUserID(ctx context.Context, userID string, w
 	}
 	row, err := r.db.Gen(ctx).UpsertLinkedWallet(ctx, gen.UpsertLinkedWalletParams{
 		ID:                   wallet.ID,
-		TenantID:             wallet.TenantID,
-		TenantSubjectID:      wallet.TenantSubjectID,
+		MerchantID:             wallet.MerchantID,
+		MerchantSubjectID:      wallet.MerchantSubjectID,
 		Chain:                wallet.Chain,
 		Address:              wallet.Address,
 		VerificationProvider: wallet.VerificationProvider,
@@ -106,15 +106,15 @@ func (r *LinkedWalletRepo) UpsertForUserID(ctx context.Context, userID string, w
 }
 
 func (r *LinkedWalletRepo) DeleteForUserIDAndChain(ctx context.Context, userID, chain string) error {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return err
 	}
 	if tsid == uuid.Nil {
 		return ErrLinkedWalletNotFound
 	}
-	rows, err := r.db.Gen(ctx).DeleteLinkedWalletByTenantSubjectAndChain(ctx, gen.DeleteLinkedWalletByTenantSubjectAndChainParams{
-		TenantSubjectID: tsid,
+	rows, err := r.db.Gen(ctx).DeleteLinkedWalletByMerchantSubjectAndChain(ctx, gen.DeleteLinkedWalletByMerchantSubjectAndChainParams{
+		MerchantSubjectID: tsid,
 		Chain:           strings.ToLower(strings.TrimSpace(chain)),
 	})
 	if err != nil {

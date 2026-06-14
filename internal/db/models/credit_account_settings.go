@@ -11,8 +11,8 @@ import (
 // stores and enforces them. NULL cap columns mean "no cap".
 type CreditAccountSettings struct {
 	ID              uuid.UUID `json:"id"`
-	TenantID        uuid.UUID `json:"tenant_id"`
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	MerchantID        uuid.UUID `json:"tenant_id"`
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	CreditTypeID    uuid.UUID `json:"credit_type_id"`
 
 	// Policy.
@@ -51,8 +51,8 @@ type CreditAccountSettings struct {
 // canonical forms: 'serviceToken:<key_id>', 'user:<user_id>', or '<issuer>:<sub>'.
 type CreditSpendLimit struct {
 	ID                     uuid.UUID `json:"id"`
-	TenantID               uuid.UUID `json:"tenant_id"`
-	TenantSubjectID        uuid.UUID `json:"tenant_subject_id"`
+	MerchantID               uuid.UUID `json:"tenant_id"`
+	MerchantSubjectID        uuid.UUID `json:"tenant_subject_id"`
 	CreditTypeID           uuid.UUID `json:"credit_type_id"`
 	Actor                  string    `json:"actor"`
 	MaxSpendPerDayMicros   *int64    `json:"max_spend_per_day_micros,omitempty"`

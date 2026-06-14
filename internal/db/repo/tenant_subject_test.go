@@ -8,24 +8,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ResolveTenantSubjectID is pure derivation (#364): a UUID subject IS its own
+// ResolveMerchantSubjectID is pure derivation (#364): a UUID subject IS its own
 // payable id, empty matches nothing, anything else is rejected.
-func TestResolveTenantSubjectID(t *testing.T) {
+func TestResolveMerchantSubjectID(t *testing.T) {
 	uid := uuid.New()
 
-	got, err := ResolveTenantSubjectID(uid.String())
+	got, err := ResolveMerchantSubjectID(uid.String())
 	require.NoError(t, err)
 	require.Equal(t, uid, got)
 
 	// Case-insensitive: uppercase form parses to the same id.
-	got, err = ResolveTenantSubjectID(" " + strings.ToUpper(uid.String()) + " ")
+	got, err = ResolveMerchantSubjectID(" " + strings.ToUpper(uid.String()) + " ")
 	require.NoError(t, err)
 	require.Equal(t, uid, got)
 
-	got, err = ResolveTenantSubjectID("")
+	got, err = ResolveMerchantSubjectID("")
 	require.NoError(t, err)
 	require.Equal(t, uuid.Nil, got)
 
-	_, err = ResolveTenantSubjectID("legacy-user-123")
+	_, err = ResolveMerchantSubjectID("legacy-user-123")
 	require.ErrorContains(t, err, "UUID-only")
 }

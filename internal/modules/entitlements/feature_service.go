@@ -195,7 +195,7 @@ func (s *FeatureService) ListProductFeatures(ctx context.Context, productID uuid
 // feature definition exists for the window's lookup_key.
 type ActiveEntitlement struct {
 	ID              uuid.UUID                    `json:"id"`
-	TenantSubjectID string                       `json:"tenant_subject_id"`
+	MerchantSubjectID string                       `json:"tenant_subject_id"`
 	LookupKey       string                       `json:"lookup_key"`
 	Feature         *models.EntitlementFeature   `json:"feature,omitempty"`
 	StartAt         time.Time                    `json:"start_at"`
@@ -252,7 +252,7 @@ func (s *FeatureService) GetActiveEntitlements(ctx context.Context, userID strin
 	for _, w := range windows {
 		ae := ActiveEntitlement{
 			ID:              w.ID,
-			TenantSubjectID: w.TenantSubjectID.String(),
+			MerchantSubjectID: w.MerchantSubjectID.String(),
 			LookupKey:       w.Entitlement,
 			Feature:         byKey[w.Entitlement],
 			StartAt:         w.StartAt,

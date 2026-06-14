@@ -12,21 +12,21 @@ import (
 	"github.com/google/uuid"
 )
 
-const countNotificationsByTenantSubjectEventSince = `-- name: CountNotificationsByTenantSubjectEventSince :one
+const countNotificationsByMerchantSubjectEventSince = `-- name: CountNotificationsByMerchantSubjectEventSince :one
 SELECT count(*) FROM openrails.notification_queue nq
-WHERE nq.tenant_subject_id = $1
+WHERE nq.merchant_subject_id = $1
   AND nq.event_type = $2
   AND nq.created_at >= $3
 `
 
-type CountNotificationsByTenantSubjectEventSinceParams struct {
-	TenantSubjectID uuid.UUID
-	EventType       string
-	CreatedAt       time.Time
+type CountNotificationsByMerchantSubjectEventSinceParams struct {
+	MerchantSubjectID uuid.UUID
+	EventType         string
+	CreatedAt         time.Time
 }
 
-func (q *Queries) CountNotificationsByTenantSubjectEventSince(ctx context.Context, arg CountNotificationsByTenantSubjectEventSinceParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countNotificationsByTenantSubjectEventSince, arg.TenantSubjectID, arg.EventType, arg.CreatedAt)
+func (q *Queries) CountNotificationsByMerchantSubjectEventSince(ctx context.Context, arg CountNotificationsByMerchantSubjectEventSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countNotificationsByMerchantSubjectEventSince, arg.MerchantSubjectID, arg.EventType, arg.CreatedAt)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -34,19 +34,19 @@ func (q *Queries) CountNotificationsByTenantSubjectEventSince(ctx context.Contex
 
 const countNotificationsFiltered = `-- name: CountNotificationsFiltered :one
 SELECT count(*) FROM openrails.notification_queue nq
-WHERE ($1::uuid IS NULL OR nq.tenant_subject_id = $1::uuid)
+WHERE ($1::uuid IS NULL OR nq.merchant_subject_id = $1::uuid)
   AND ($2::text IS NULL OR nq.event_type = $2::text)
   AND ($3::boolean IS NULL OR nq.seen = $3::boolean)
 `
 
 type CountNotificationsFilteredParams struct {
-	TenantSubjectID *uuid.UUID
-	EventType       *string
-	Seen            *bool
+	MerchantSubjectID *uuid.UUID
+	EventType         *string
+	Seen              *bool
 }
 
 func (q *Queries) CountNotificationsFiltered(ctx context.Context, arg CountNotificationsFilteredParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countNotificationsFiltered, arg.TenantSubjectID, arg.EventType, arg.Seen)
+	row := q.db.QueryRow(ctx, countNotificationsFiltered, arg.MerchantSubjectID, arg.EventType, arg.Seen)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -54,20 +54,20 @@ func (q *Queries) CountNotificationsFiltered(ctx context.Context, arg CountNotif
 
 const countRepairAlerts = `-- name: CountRepairAlerts :one
 SELECT count(*) FROM openrails.notification_queue nq
-WHERE nq.tenant_subject_id = $1
+WHERE nq.merchant_subject_id = $1
   AND nq.event_type = $2
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
   AND ($3::boolean IS NULL OR nq.seen = $3::boolean)
 `
 
 type CountRepairAlertsParams struct {
-	TenantSubjectID uuid.UUID
-	EventType       string
-	Seen            *bool
+	MerchantSubjectID uuid.UUID
+	EventType         string
+	Seen              *bool
 }
 
 func (q *Queries) CountRepairAlerts(ctx context.Context, arg CountRepairAlertsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countRepairAlerts, arg.TenantSubjectID, arg.EventType, arg.Seen)
+	row := q.db.QueryRow(ctx, countRepairAlerts, arg.MerchantSubjectID, arg.EventType, arg.Seen)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -76,7 +76,7 @@ func (q *Queries) CountRepairAlerts(ctx context.Context, arg CountRepairAlertsPa
 const createNotification = `-- name: CreateNotification :execrows
 
 INSERT INTO openrails.notification_queue (
-    id, tenant_id, tenant_subject_id, event_type, data, seen, created_at
+    id, merchant_id, merchant_subject_id, event_type, data, seen, created_at
 ) VALUES (
     $1, $5::uuid, $2, $3, COALESCE($6, '{}'::jsonb), $4,
     COALESCE(NULLIF($7::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
@@ -84,23 +84,23 @@ INSERT INTO openrails.notification_queue (
 `
 
 type CreateNotificationParams struct {
-	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
-	EventType       string
-	Seen            bool
-	TenantID        uuid.UUID
-	Data            []byte
-	CreatedAt       time.Time
+	ID                uuid.UUID
+	MerchantSubjectID uuid.UUID
+	EventType         string
+	Seen              bool
+	MerchantID        uuid.UUID
+	Data              []byte
+	CreatedAt         time.Time
 }
 
 // openrails.notification_queue.
 func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotificationParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createNotification,
 		arg.ID,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.EventType,
 		arg.Seen,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.Data,
 		arg.CreatedAt,
 	)
@@ -149,7 +149,7 @@ func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, cutoff time
 }
 
 const getNotificationByID = `-- name: GetNotificationByID :one
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue WHERE id = $1
+SELECT id, event_type, data, seen, created_at, merchant_id, merchant_subject_id FROM openrails.notification_queue WHERE id = $1
 `
 
 func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (OpenrailsNotificationQueue, error) {
@@ -161,14 +161,45 @@ func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (Openra
 		&i.Data,
 		&i.Seen,
 		&i.CreatedAt,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
+const listMerchantSubjectsWithPendingDigest = `-- name: ListMerchantSubjectsWithPendingDigest :many
+SELECT DISTINCT nq.merchant_subject_id::text FROM openrails.notification_queue nq
+WHERE nq.event_type = $1
+  AND nq.created_at >= $2
+`
+
+type ListMerchantSubjectsWithPendingDigestParams struct {
+	EventType string
+	CreatedAt time.Time
+}
+
+func (q *Queries) ListMerchantSubjectsWithPendingDigest(ctx context.Context, arg ListMerchantSubjectsWithPendingDigestParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listMerchantSubjectsWithPendingDigest, arg.EventType, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var nq_merchant_subject_id string
+		if err := rows.Scan(&nq_merchant_subject_id); err != nil {
+			return nil, err
+		}
+		items = append(items, nq_merchant_subject_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNotificationsByEventType = `-- name: ListNotificationsByEventType :many
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue nq
+SELECT id, event_type, data, seen, created_at, merchant_id, merchant_subject_id FROM openrails.notification_queue nq
 WHERE nq.event_type = $1
 ORDER BY nq.created_at DESC
 `
@@ -188,8 +219,8 @@ func (q *Queries) ListNotificationsByEventType(ctx context.Context, eventType st
 			&i.Data,
 			&i.Seen,
 			&i.CreatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -201,14 +232,14 @@ func (q *Queries) ListNotificationsByEventType(ctx context.Context, eventType st
 	return items, nil
 }
 
-const listNotificationsByTenantSubject = `-- name: ListNotificationsByTenantSubject :many
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue nq
-WHERE nq.tenant_subject_id = $1
+const listNotificationsByMerchantSubject = `-- name: ListNotificationsByMerchantSubject :many
+SELECT id, event_type, data, seen, created_at, merchant_id, merchant_subject_id FROM openrails.notification_queue nq
+WHERE nq.merchant_subject_id = $1
 ORDER BY nq.created_at DESC
 `
 
-func (q *Queries) ListNotificationsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]OpenrailsNotificationQueue, error) {
-	rows, err := q.db.Query(ctx, listNotificationsByTenantSubject, tenantSubjectID)
+func (q *Queries) ListNotificationsByMerchantSubject(ctx context.Context, merchantSubjectID uuid.UUID) ([]OpenrailsNotificationQueue, error) {
+	rows, err := q.db.Query(ctx, listNotificationsByMerchantSubject, merchantSubjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -222,8 +253,8 @@ func (q *Queries) ListNotificationsByTenantSubject(ctx context.Context, tenantSu
 			&i.Data,
 			&i.Seen,
 			&i.CreatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -236,8 +267,8 @@ func (q *Queries) ListNotificationsByTenantSubject(ctx context.Context, tenantSu
 }
 
 const listNotificationsFiltered = `-- name: ListNotificationsFiltered :many
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue nq
-WHERE ($1::uuid IS NULL OR nq.tenant_subject_id = $1::uuid)
+SELECT id, event_type, data, seen, created_at, merchant_id, merchant_subject_id FROM openrails.notification_queue nq
+WHERE ($1::uuid IS NULL OR nq.merchant_subject_id = $1::uuid)
   AND ($2::text IS NULL OR nq.event_type = $2::text)
   AND ($3::boolean IS NULL OR nq.seen = $3::boolean)
 ORDER BY nq.created_at DESC
@@ -245,16 +276,16 @@ LIMIT NULLIF($5::int, 0) OFFSET $4::int
 `
 
 type ListNotificationsFilteredParams struct {
-	TenantSubjectID *uuid.UUID
-	EventType       *string
-	Seen            *bool
-	PageOffset      int32
-	PageLimit       int32
+	MerchantSubjectID *uuid.UUID
+	EventType         *string
+	Seen              *bool
+	PageOffset        int32
+	PageLimit         int32
 }
 
 func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotificationsFilteredParams) ([]OpenrailsNotificationQueue, error) {
 	rows, err := q.db.Query(ctx, listNotificationsFiltered,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.EventType,
 		arg.Seen,
 		arg.PageOffset,
@@ -273,8 +304,8 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 			&i.Data,
 			&i.Seen,
 			&i.CreatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -286,25 +317,25 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 	return items, nil
 }
 
-const listPendingDigestForTenantSubject = `-- name: ListPendingDigestForTenantSubject :many
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue nq
-WHERE nq.tenant_subject_id = $1
+const listPendingDigestForMerchantSubject = `-- name: ListPendingDigestForMerchantSubject :many
+SELECT id, event_type, data, seen, created_at, merchant_id, merchant_subject_id FROM openrails.notification_queue nq
+WHERE nq.merchant_subject_id = $1
   AND nq.event_type = $2
   AND nq.created_at >= $3
 ORDER BY nq.created_at DESC
 LIMIT NULLIF($4::int, 0)
 `
 
-type ListPendingDigestForTenantSubjectParams struct {
-	TenantSubjectID uuid.UUID
-	EventType       string
-	CreatedAt       time.Time
-	PageLimit       int32
+type ListPendingDigestForMerchantSubjectParams struct {
+	MerchantSubjectID uuid.UUID
+	EventType         string
+	CreatedAt         time.Time
+	PageLimit         int32
 }
 
-func (q *Queries) ListPendingDigestForTenantSubject(ctx context.Context, arg ListPendingDigestForTenantSubjectParams) ([]OpenrailsNotificationQueue, error) {
-	rows, err := q.db.Query(ctx, listPendingDigestForTenantSubject,
-		arg.TenantSubjectID,
+func (q *Queries) ListPendingDigestForMerchantSubject(ctx context.Context, arg ListPendingDigestForMerchantSubjectParams) ([]OpenrailsNotificationQueue, error) {
+	rows, err := q.db.Query(ctx, listPendingDigestForMerchantSubject,
+		arg.MerchantSubjectID,
 		arg.EventType,
 		arg.CreatedAt,
 		arg.PageLimit,
@@ -322,8 +353,8 @@ func (q *Queries) ListPendingDigestForTenantSubject(ctx context.Context, arg Lis
 			&i.Data,
 			&i.Seen,
 			&i.CreatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -336,8 +367,8 @@ func (q *Queries) ListPendingDigestForTenantSubject(ctx context.Context, arg Lis
 }
 
 const listRepairAlerts = `-- name: ListRepairAlerts :many
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue nq
-WHERE nq.tenant_subject_id = $1
+SELECT id, event_type, data, seen, created_at, merchant_id, merchant_subject_id FROM openrails.notification_queue nq
+WHERE nq.merchant_subject_id = $1
   AND nq.event_type = $2
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
   AND ($5::boolean IS NULL OR nq.seen = $5::boolean)
@@ -346,16 +377,16 @@ LIMIT $3::int OFFSET $4::int
 `
 
 type ListRepairAlertsParams struct {
-	TenantSubjectID uuid.UUID
-	EventType       string
-	Column3         int32
-	Column4         int32
-	Seen            *bool
+	MerchantSubjectID uuid.UUID
+	EventType         string
+	Column3           int32
+	Column4           int32
+	Seen              *bool
 }
 
 func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsParams) ([]OpenrailsNotificationQueue, error) {
 	rows, err := q.db.Query(ctx, listRepairAlerts,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.EventType,
 		arg.Column3,
 		arg.Column4,
@@ -374,8 +405,8 @@ func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsPara
 			&i.Data,
 			&i.Seen,
 			&i.CreatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -387,45 +418,14 @@ func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsPara
 	return items, nil
 }
 
-const listTenantSubjectsWithPendingDigest = `-- name: ListTenantSubjectsWithPendingDigest :many
-SELECT DISTINCT nq.tenant_subject_id::text FROM openrails.notification_queue nq
-WHERE nq.event_type = $1
-  AND nq.created_at >= $2
-`
-
-type ListTenantSubjectsWithPendingDigestParams struct {
-	EventType string
-	CreatedAt time.Time
-}
-
-func (q *Queries) ListTenantSubjectsWithPendingDigest(ctx context.Context, arg ListTenantSubjectsWithPendingDigestParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listTenantSubjectsWithPendingDigest, arg.EventType, arg.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []string
-	for rows.Next() {
-		var nq_tenant_subject_id string
-		if err := rows.Scan(&nq_tenant_subject_id); err != nil {
-			return nil, err
-		}
-		items = append(items, nq_tenant_subject_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUnseenNotificationsByTenantSubject = `-- name: ListUnseenNotificationsByTenantSubject :many
-SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue nq
-WHERE nq.tenant_subject_id = $1 AND nq.seen = false
+const listUnseenNotificationsByMerchantSubject = `-- name: ListUnseenNotificationsByMerchantSubject :many
+SELECT id, event_type, data, seen, created_at, merchant_id, merchant_subject_id FROM openrails.notification_queue nq
+WHERE nq.merchant_subject_id = $1 AND nq.seen = false
 ORDER BY nq.created_at DESC
 `
 
-func (q *Queries) ListUnseenNotificationsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]OpenrailsNotificationQueue, error) {
-	rows, err := q.db.Query(ctx, listUnseenNotificationsByTenantSubject, tenantSubjectID)
+func (q *Queries) ListUnseenNotificationsByMerchantSubject(ctx context.Context, merchantSubjectID uuid.UUID) ([]OpenrailsNotificationQueue, error) {
+	rows, err := q.db.Query(ctx, listUnseenNotificationsByMerchantSubject, merchantSubjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -439,8 +439,8 @@ func (q *Queries) ListUnseenNotificationsByTenantSubject(ctx context.Context, te
 			&i.Data,
 			&i.Seen,
 			&i.CreatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -466,7 +466,7 @@ func (q *Queries) MarkNotificationSeen(ctx context.Context, id uuid.UUID) (int64
 
 const updateNotification = `-- name: UpdateNotification :execrows
 UPDATE openrails.notification_queue SET
-    tenant_subject_id = $2,
+    merchant_subject_id = $2,
     event_type = $3,
     data = $5,
     seen = $4
@@ -474,17 +474,17 @@ WHERE id = $1
 `
 
 type UpdateNotificationParams struct {
-	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
-	EventType       string
-	Seen            bool
-	Data            []byte
+	ID                uuid.UUID
+	MerchantSubjectID uuid.UUID
+	EventType         string
+	Seen              bool
+	Data              []byte
 }
 
 func (q *Queries) UpdateNotification(ctx context.Context, arg UpdateNotificationParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateNotification,
 		arg.ID,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.EventType,
 		arg.Seen,
 		arg.Data,

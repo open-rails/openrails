@@ -22,7 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // TestCreditFacade_RLS_Under_OpenRailsApp proves the RAW money facade paths
@@ -40,7 +40,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	require.NoError(t, migrate.RunPostgres(ctx, &config.Config{DB: &config.DBConfig{URL: superDSN}}))
 
 	tenantID := uuid.NewString()
-	payer := identity.TenantSubjectIDFromString(uuid.NewString())
+	payer := identity.MerchantSubjectIDFromString(uuid.NewString())
 	now := time.Now().UTC().Truncate(time.Second)
 
 	// Seed tenant as super (super bypasses RLS). Money needs no credit-type row (#472).
@@ -74,12 +74,12 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	svc, err := billingservice.New(rt)
 	require.NoError(t, err)
 
-	tctx := tenant.WithID(ctx, mustTenantID(t, tenantID))
+	tctx := merchant.WithID(ctx, mustTenantID(t, tenantID))
 
 	// Deposit 1000 — exercises BeginTenantTx under RLS.
 	depSrc := uuid.New()
 	_, err = svc.DepositCredits(tctx, billingservice.DepositCreditsRequest{
-		TenantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "test", SourceID: &depSrc,
+		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "test", SourceID: &depSrc,
 	})
 	require.NoError(t, err, "DepositCredits must work under openrails_app (GUC set)")
 
@@ -89,7 +89,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 
 	// Hold 600.
 	hold, err := svc.HoldCredits(tctx, billingservice.HoldCreditsRequest{
-		TenantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 600,
+		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 600,
 		Source: "test", SourceID: uuid.NewString(), ExpiresAt: now.Add(time.Hour),
 	})
 	require.NoError(t, err, "HoldCredits must work under openrails_app")
@@ -121,7 +121,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "arrears", settings.BillingMode, "settings read back the configured mode")
 
-	txns, total, err := svc.GetTenantSubjectCreditTransactions(tctx, payer, money.DefaultCurrency, 50, 0)
+	txns, total, err := svc.GetMerchantSubjectCreditTransactions(tctx, payer, money.DefaultCurrency, 50, 0)
 	require.NoError(t, err)
 	require.Greater(t, total, 0, "org has credit transactions (deposit/hold/capture)")
 	require.NotEmpty(t, txns)

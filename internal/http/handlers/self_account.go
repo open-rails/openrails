@@ -22,22 +22,22 @@ import (
 // tenant_subject_id parameter anywhere on this surface.
 //
 // The payer is resolved exactly like the rest of /v1/self
-// (identity.TenantSubjectIDFromString over the acting subject — see
+// (identity.MerchantSubjectIDFromString over the acting subject — see
 // GetMyUsage/GetMyInvoices), and every query runs RLS-scoped to the pinned
 // tenant.
 
 // selfAccountPayer resolves the acting payer from the delegated principal, or
 // writes the error response and returns false.
-func selfAccountPayer(r *httprequest.Request) (identity.TenantSubjectID, bool) {
+func selfAccountPayer(r *httprequest.Request) (identity.MerchantSubjectID, bool) {
 	user := r.GetUser()
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
-		return identity.TenantSubjectID(uuid.Nil), false
+		return identity.MerchantSubjectID(uuid.Nil), false
 	}
-	payer := identity.TenantSubjectIDFromString(user.ID)
+	payer := identity.MerchantSubjectIDFromString(user.ID)
 	if payer.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "payer could not be resolved from subject")
-		return identity.TenantSubjectID(uuid.Nil), false
+		return identity.MerchantSubjectID(uuid.Nil), false
 	}
 	return payer, true
 }
@@ -198,7 +198,7 @@ func GetMyAccountTransactions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	items, total, err := svc.GetTenantSubjectCreditTransactions(r.Request.Context(), payer, creditType, limit, offset)
+	items, total, err := svc.GetMerchantSubjectCreditTransactions(r.Request.Context(), payer, creditType, limit, offset)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -206,7 +206,7 @@ func GetMyAccountTransactions(r *httprequest.Request) {
 	out := make([]serviceTxnResponse, 0, len(items))
 	for _, t := range items {
 		out = append(out, serviceTxnResponse{
-			ID: t.ID, TenantSubjectID: t.TenantSubjectID, Actor: t.Actor, Amount: t.Amount,
+			ID: t.ID, MerchantSubjectID: t.MerchantSubjectID, Actor: t.Actor, Amount: t.Amount,
 			TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
 			CreatedAt: t.CreatedAt,
 		})

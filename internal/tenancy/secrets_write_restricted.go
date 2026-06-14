@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type writeRestrictedSecretStore struct {
@@ -35,11 +35,11 @@ func NewWriteRestrictedSecretStore(inner TenantSecretStore, reasons map[string]s
 	return &writeRestrictedSecretStore{inner: inner, reasons: clean}
 }
 
-func (s *writeRestrictedSecretStore) Get(ctx context.Context, tenantID tenant.ID, name string) (Secret, error) {
+func (s *writeRestrictedSecretStore) Get(ctx context.Context, tenantID merchant.ID, name string) (Secret, error) {
 	return s.inner.Get(ctx, tenantID, name)
 }
 
-func (s *writeRestrictedSecretStore) Put(ctx context.Context, tenantID tenant.ID, name, value string) (Secret, error) {
+func (s *writeRestrictedSecretStore) Put(ctx context.Context, tenantID merchant.ID, name, value string) (Secret, error) {
 	if reason, ok := s.reasons[strings.TrimSpace(name)]; ok {
 		if reason == "" {
 			reason = "write is restricted"
@@ -49,10 +49,10 @@ func (s *writeRestrictedSecretStore) Put(ctx context.Context, tenantID tenant.ID
 	return s.inner.Put(ctx, tenantID, name, value)
 }
 
-func (s *writeRestrictedSecretStore) Delete(ctx context.Context, tenantID tenant.ID, name string) error {
+func (s *writeRestrictedSecretStore) Delete(ctx context.Context, tenantID merchant.ID, name string) error {
 	return s.inner.Delete(ctx, tenantID, name)
 }
 
-func (s *writeRestrictedSecretStore) List(ctx context.Context, tenantID tenant.ID) ([]string, error) {
+func (s *writeRestrictedSecretStore) List(ctx context.Context, tenantID merchant.ID) ([]string, error) {
 	return s.inner.List(ctx, tenantID)
 }

@@ -95,7 +95,7 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 	fx := intentFixture{db: dbi, store: NewStore(dbi)}
 	fx.subID = uuid.New()
 	fx.psid = "psid-" + uuid.NewString()[:8]
-	fx.userID = dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, uuid.NewString())
+	fx.userID = dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, uuid.NewString())
 
 	productID := uuid.New()
 	priceID := uuid.New()
@@ -108,14 +108,14 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 		require.NoError(t, err)
 	}
 	tenantID := dbtest.TestTenantID.UUID()
-	exec(`INSERT INTO openrails.products (id, slug, display_name, tenant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "intent-prod-"+suffix, tenantID)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, tenant_id)
+	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id)
 	      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, processor, processor_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
-	         cancelled_at, cancel_type, deletion_scheduled_at, tenant_subject_id, tenant_id)
+	         cancelled_at, cancel_type, deletion_scheduled_at, merchant_subject_id, merchant_id)
 	      VALUES ($1, $2, $3, 'cancelled', 'mobius', $4, $5, $6, $5, $7, 'user', $8, $9, $10)`,
 		fx.subID, priceID, productID, fx.psid,
 		now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), now,
@@ -133,7 +133,7 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 func (fx intentFixture) enqueueDelete(t *testing.T, origin Origin, dueAt time.Time) gen.OpenrailsProviderIntent {
 	t.Helper()
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
-		TenantID:       dbtest.TestTenantID.UUID(),
+		MerchantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeNMIDeleteSubscription,
 		SubscriptionID: &fx.subID,
@@ -465,7 +465,7 @@ func TestRelevanceWindowExpiry(t *testing.T) {
 
 	expired := time.Now().Add(-time.Hour).UTC()
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
-		TenantID:       dbtest.TestTenantID.UUID(),
+		MerchantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeNMIDeleteSubscription,
 		SubscriptionID: &fx.subID,

@@ -7,9 +7,9 @@ WHERE resolved_at IS NULL;
 
 -- name: InsertCatalogDriftEvent :exec
 INSERT INTO openrails.catalog_drift_events (
-    id, tenant_id, provider, kind, openrails_resource_type, openrails_resource_id,
+    id, merchant_id, provider, kind, openrails_resource_type, openrails_resource_id,
     external_resource_id, field, openrails_value, external_value, detected_at
-) VALUES ($1, sqlc.arg(tenant_id)::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+) VALUES ($1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
 -- name: ResolveCatalogDriftEvent :exec
 UPDATE openrails.catalog_drift_events

@@ -1,22 +1,22 @@
 -- openrails.linked_wallets.
 
--- name: GetLinkedWalletByTenantSubjectAndChain :one
+-- name: GetLinkedWalletByMerchantSubjectAndChain :one
 SELECT * FROM openrails.linked_wallets lw
-WHERE lw.tenant_subject_id = $1 AND lw.chain = $2
+WHERE lw.merchant_subject_id = $1 AND lw.chain = $2
 LIMIT 1;
 
 -- name: UpsertLinkedWallet :one
 INSERT INTO openrails.linked_wallets (
-    id, tenant_id, tenant_subject_id, chain, address, verification_provider,
+    id, merchant_id, merchant_subject_id, chain, address, verification_provider,
     verified_at, display_name, metadata, created_at, updated_at
 ) VALUES (
     $1,
-    sqlc.arg(tenant_id)::uuid,
+    sqlc.arg(merchant_id)::uuid,
     $2, $3, $4, $5, $6, sqlc.narg(display_name), sqlc.arg(metadata),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
-ON CONFLICT (tenant_id, tenant_subject_id, chain) DO UPDATE SET
+ON CONFLICT (merchant_id, merchant_subject_id, chain) DO UPDATE SET
     address = EXCLUDED.address,
     verification_provider = EXCLUDED.verification_provider,
     verified_at = EXCLUDED.verified_at,
@@ -25,6 +25,6 @@ ON CONFLICT (tenant_id, tenant_subject_id, chain) DO UPDATE SET
     updated_at = now()
 RETURNING *;
 
--- name: DeleteLinkedWalletByTenantSubjectAndChain :execrows
+-- name: DeleteLinkedWalletByMerchantSubjectAndChain :execrows
 DELETE FROM openrails.linked_wallets
-WHERE tenant_subject_id = $1 AND chain = $2;
+WHERE merchant_subject_id = $1 AND chain = $2;

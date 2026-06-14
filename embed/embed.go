@@ -19,7 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/service"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Options configures the embedded runtime. It wraps pkg/embedded.Options
@@ -41,7 +41,7 @@ import (
 //				return nil, billingauth.ErrUnauthenticated
 //			}
 //			return &billingauth.DelegatedPrincipal{
-//				TenantID:    hostCfg.OpenRailsTenantID, // explicit per-deployment mapping to a real tenant
+//				MerchantID:    hostCfg.OpenRailsTenantID, // explicit per-deployment mapping to a real tenant
 //				SubjectID:   user.CanonicalID,
 //				Permissions: []string{"openrails:self:billing:read"},
 //			}, nil
@@ -92,7 +92,7 @@ type Runtime struct {
 	// equivalent surface with a plain context (the host IS the principal and is
 	// trusted for its own tenant); the standalone/gin surface still resolves the
 	// tenant from the request/credential instead. Zero when no tenant is bound.
-	tenantID tenant.ID
+	tenantID merchant.ID
 
 	workersCancel context.CancelFunc
 	workersDone   chan error
@@ -128,24 +128,21 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Idempotently ensure the bound tenant row exists (#478). A host binds the
-	// engine to a tenant SLUG (opts.Tenant), but nothing else creates that row;
-	// without it, tenant resolution (HTTP handler / self handler) would fail.
-	// The host owns the embed + DB, so auto-create is safe and idempotent. This
-	// runs after migrations (RunMigrations above) so the tenants table exists. A
-	// second New is a no-op (INSERT ... ON CONFLICT DO NOTHING).
-	var boundTenant tenant.ID
+	// Idempotently REGISTER the bound merchant (a billing bucket) from config
+	// (#480, supersedes #478). A host binds the engine to a merchant SLUG
+	// (opts.Tenant), but nothing else creates that row; without it, merchant
+	// resolution (HTTP handler / self handler) would fail. Embedded OpenRails runs
+	// NO AuthKit and stores ZERO auth — RegisterMerchant carries billing-only
+	// state (NO issuer/JWKS). The host owns the embed + DB, so registration is
+	// safe and idempotent. Runs after migrations so the merchants table exists; a
+	// second New is an idempotent no-op.
+	var boundTenant merchant.ID
 	if opts.Config.Tenant != "" {
 		if a := emb.App(); a != nil && a.Runtime != nil && a.Runtime.DB != nil {
 			ectx := ctx
-			if err := db.EnsureTenantBySlug(ectx, a.Runtime.DB.Qx(ectx), opts.Config.Tenant); err != nil {
-				_ = emb.Close(ctx)
-				return nil, fmt.Errorf("openrails embed: %w", err)
-			}
-			// Resolve the bound slug to its id once, so the Client adapter can pin
-			// it onto each call's context (the unified Client path has no HTTP
-			// middleware to resolve a tenant; the host is trusted for its own).
-			id, rerr := db.ResolveTenantSlug(ectx, a.Runtime.DB.Qx(ectx), opts.Config.Tenant)
+			id, rerr := db.RegisterMerchant(ectx, a.Runtime.DB.Qx(ectx), db.RegisterMerchantOptions{
+				Slug: opts.Config.Tenant,
+			})
 			if rerr != nil {
 				_ = emb.Close(ctx)
 				return nil, fmt.Errorf("openrails embed: %w", rerr)
@@ -185,7 +182,7 @@ func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
 }
 
 // Service exposes the underlying pkg/service facade for host code that wants
-// engine-native types (identity.TenantSubjectID etc.) instead of wire types.
+// engine-native types (identity.MerchantSubjectID etc.) instead of wire types.
 func (r *Runtime) Service() *service.Service { return r.svc }
 
 // Embedded exposes the underlying pkg/embedded app for advanced wiring

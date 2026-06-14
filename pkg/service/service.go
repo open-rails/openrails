@@ -55,7 +55,7 @@ var ErrInsufficientCredits = money.ErrInsufficientCredits
 var ErrCreditTypeInactive = errors.New("credit_type_inactive")
 
 type HoldCreditsRequest struct {
-	TenantSubjectID *identity.TenantSubjectID
+	MerchantSubjectID *identity.MerchantSubjectID
 	Actor           string
 	Currency        string // "" => DefaultCurrency (#476)
 	Amount          int64
@@ -81,7 +81,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 	req.Actor = strings.TrimSpace(req.Actor)
 	req.Source = strings.TrimSpace(req.Source)
 	req.SourceID = strings.TrimSpace(req.SourceID)
-	if req.TenantSubjectID == nil || req.TenantSubjectID.IsZero() {
+	if req.MerchantSubjectID == nil || req.MerchantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if req.Actor == "" {
@@ -100,7 +100,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 		return nil, fmt.Errorf("expires_at required")
 	}
 
-	hold, err := s.moneyService().Hold(ctx, req.TenantSubjectID, req.Actor, req.Currency, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
+	hold, err := s.moneyService().Hold(ctx, req.MerchantSubjectID, req.Actor, req.Currency, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ type CaptureHoldRequest struct {
 
 type CreditTransaction struct {
 	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
+	MerchantSubjectID uuid.UUID
 	Actor           string
 	Amount          int64
 	BalanceAfter    *int64
@@ -170,7 +170,7 @@ type CreditTransaction struct {
 }
 
 type WithdrawCreditsRequest struct {
-	TenantSubjectID *identity.TenantSubjectID
+	MerchantSubjectID *identity.MerchantSubjectID
 	Actor           string
 	Currency        string // "" => DefaultCurrency (#476)
 	Amount          int64
@@ -181,7 +181,7 @@ type WithdrawCreditsRequest struct {
 func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error) {
 	req.Actor = strings.TrimSpace(req.Actor)
 	req.Source = strings.TrimSpace(req.Source)
-	if req.TenantSubjectID == nil || req.TenantSubjectID.IsZero() {
+	if req.MerchantSubjectID == nil || req.MerchantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if req.Actor == "" {
@@ -197,7 +197,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 		return nil, fmt.Errorf("source_id required")
 	}
 	trx, err := s.moneyService().Withdraw(ctx, money.WithdrawParams{
-		TenantSubjectID: req.TenantSubjectID,
+		MerchantSubjectID: req.MerchantSubjectID,
 		Actor:           req.Actor,
 		Currency:        req.Currency,
 		Amount:          req.Amount,
@@ -209,7 +209,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		TenantSubjectID: trx.TenantSubjectID,
+		MerchantSubjectID: trx.MerchantSubjectID,
 		Actor:           trx.Actor,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
@@ -227,7 +227,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 }
 
 type DepositCreditsRequest struct {
-	TenantSubjectID *identity.TenantSubjectID
+	MerchantSubjectID *identity.MerchantSubjectID
 	Actor           string
 	Currency        string // "" => DefaultCurrency (#476)
 	Amount          int64
@@ -240,7 +240,7 @@ type DepositCreditsRequest struct {
 func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
 	req.Actor = strings.TrimSpace(req.Actor)
 	req.Source = strings.TrimSpace(req.Source)
-	if req.TenantSubjectID == nil || req.TenantSubjectID.IsZero() {
+	if req.MerchantSubjectID == nil || req.MerchantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if req.Actor == "" {
@@ -256,7 +256,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 		return nil, fmt.Errorf("source_id required")
 	}
 	trx, err := s.moneyService().Deposit(ctx, money.DepositParams{
-		TenantSubjectID: req.TenantSubjectID,
+		MerchantSubjectID: req.MerchantSubjectID,
 		Actor:           req.Actor,
 		Currency:        req.Currency,
 		Amount:          req.Amount,
@@ -270,7 +270,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		TenantSubjectID: trx.TenantSubjectID,
+		MerchantSubjectID: trx.MerchantSubjectID,
 		Actor:           trx.Actor,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
@@ -314,7 +314,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 		}
 		captureTxnID := trx.ID
 		if uerr := s.moneyService().InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
-			TenantSubjectID:    trx.TenantSubjectID,
+			MerchantSubjectID:    trx.MerchantSubjectID,
 			Actor:              trx.Actor,
 			EventType:          req.EventType,
 			Resource:           strings.TrimSpace(req.Resource),
@@ -332,7 +332,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		TenantSubjectID: trx.TenantSubjectID,
+		MerchantSubjectID: trx.MerchantSubjectID,
 		Actor:           trx.Actor,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
@@ -359,7 +359,7 @@ type ServiceUsageRollupRow struct {
 
 // ServiceUsageRollupRequest selects a payer + window + grouping dimension.
 type ServiceUsageRollupRequest struct {
-	TenantSubjectID *identity.TenantSubjectID
+	MerchantSubjectID *identity.MerchantSubjectID
 	From            time.Time
 	To              time.Time
 	GroupBy         string // endpoint | function | tier | user
@@ -369,10 +369,10 @@ type ServiceUsageRollupRequest struct {
 // window (#311) — the OpenRails-sourced data behind the platform's
 // /budget-usage + revenue analytics. Service-scoped (operator service token).
 func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollupRequest) ([]ServiceUsageRollupRow, error) {
-	if req.TenantSubjectID == nil || req.TenantSubjectID.IsZero() {
+	if req.MerchantSubjectID == nil || req.MerchantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
-	rows, err := s.moneyService().ServiceUsageRollup(ctx, *req.TenantSubjectID, req.From, req.To, req.GroupBy)
+	rows, err := s.moneyService().ServiceUsageRollup(ctx, *req.MerchantSubjectID, req.From, req.To, req.GroupBy)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +427,7 @@ func (s *Service) releaseBudgetScopes(ctx context.Context, trx *models.MoneyTran
 	if trx == nil || trx.SourceID == nil || strings.TrimSpace(*trx.SourceID) == "" {
 		return
 	}
-	payer := identity.TenantSubjectID(trx.TenantSubjectID)
+	payer := identity.MerchantSubjectID(trx.MerchantSubjectID)
 	bsvc := budgets.NewService(s.rt.DB)
 	if err := bsvc.ReleaseByCoords(ctx, payer, trx.Source, *trx.SourceID); err != nil {
 		log.Warnf("service release: budget scope release failed (hold %s released): %v", trx.ID, err)
@@ -458,7 +458,7 @@ func (s *Service) captureBudgetScopes(ctx context.Context, trx *models.MoneyTran
 	if trx == nil || trx.SourceID == nil || strings.TrimSpace(*trx.SourceID) == "" {
 		return
 	}
-	payer := identity.TenantSubjectID(trx.TenantSubjectID)
+	payer := identity.MerchantSubjectID(trx.MerchantSubjectID)
 	bsvc := budgets.NewService(s.rt.DB)
 	if err := bsvc.CaptureByCoords(ctx, payer, trx.Source, *trx.SourceID, capturedMicros); err != nil {
 		log.Warnf("service capture: budget scope capture failed (hold %s captured): %v", trx.ID, err)
@@ -478,17 +478,17 @@ func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at 
 	return s.entitlementService().ListActiveEntitlements(ctx, userID, at.UTC())
 }
 
-func (s *Service) ListActiveEntitlementsForTenantSubject(ctx context.Context, tenantSubjectID identity.TenantSubjectID, at time.Time) ([]string, error) {
+func (s *Service) ListActiveEntitlementsForMerchantSubject(ctx context.Context, tenantSubjectID identity.MerchantSubjectID, at time.Time) ([]string, error) {
 	if tenantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
-	return s.entitlementService().ListActiveEntitlementsByTenantSubject(ctx, tenantSubjectID.UUID(), at.UTC())
+	return s.entitlementService().ListActiveEntitlementsByMerchantSubject(ctx, tenantSubjectID.UUID(), at.UTC())
 }
 
-func (s *Service) IsTenantSubjectEntitled(ctx context.Context, tenantSubjectID identity.TenantSubjectID, entitlement string, at time.Time) (bool, error) {
+func (s *Service) IsMerchantSubjectEntitled(ctx context.Context, tenantSubjectID identity.MerchantSubjectID, entitlement string, at time.Time) (bool, error) {
 	if tenantSubjectID.IsZero() {
 		return false, fmt.Errorf("tenant_subject_id required")
 	}
@@ -499,10 +499,10 @@ func (s *Service) IsTenantSubjectEntitled(ctx context.Context, tenantSubjectID i
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
-	return s.entitlementService().IsTenantSubjectEntitled(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
+	return s.entitlementService().IsMerchantSubjectEntitled(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
 }
 
-func (s *Service) HasActiveIndefiniteEntitlementForTenantSubject(ctx context.Context, tenantSubjectID identity.TenantSubjectID, entitlement string, at time.Time) (bool, error) {
+func (s *Service) HasActiveIndefiniteEntitlementForMerchantSubject(ctx context.Context, tenantSubjectID identity.MerchantSubjectID, entitlement string, at time.Time) (bool, error) {
 	if tenantSubjectID.IsZero() {
 		return false, fmt.Errorf("tenant_subject_id required")
 	}
@@ -513,10 +513,10 @@ func (s *Service) HasActiveIndefiniteEntitlementForTenantSubject(ctx context.Con
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
-	return s.entitlementService().HasActiveIndefiniteByTenantSubject(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
+	return s.entitlementService().HasActiveIndefiniteByMerchantSubject(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
 }
 
-func (s *Service) LatestFiniteEntitlementWindowForTenantSubject(ctx context.Context, tenantSubjectID identity.TenantSubjectID, entitlement string, at time.Time) (*EntitlementRecord, error) {
+func (s *Service) LatestFiniteEntitlementWindowForMerchantSubject(ctx context.Context, tenantSubjectID identity.MerchantSubjectID, entitlement string, at time.Time) (*EntitlementRecord, error) {
 	if tenantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
@@ -527,7 +527,7 @@ func (s *Service) LatestFiniteEntitlementWindowForTenantSubject(ctx context.Cont
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
-	ent, err := s.entitlementService().LatestFiniteWindowByTenantSubject(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
+	ent, err := s.entitlementService().LatestFiniteWindowByMerchantSubject(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -537,7 +537,7 @@ func (s *Service) LatestFiniteEntitlementWindowForTenantSubject(ctx context.Cont
 
 type EntitlementRecord struct {
 	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
+	MerchantSubjectID uuid.UUID
 	UserID          string
 	Entitlement     string
 	StartAt         time.Time
@@ -571,8 +571,8 @@ func (s *Service) ListActiveEntitlementRecords(ctx context.Context, userID strin
 		}
 		out = append(out, EntitlementRecord{
 			ID:              e.ID,
-			TenantSubjectID: e.TenantSubjectID,
-			UserID:          e.TenantSubjectID.String(),
+			MerchantSubjectID: e.MerchantSubjectID,
+			UserID:          e.MerchantSubjectID.String(),
 			Entitlement:     e.Entitlement,
 			StartAt:         e.StartAt,
 			EndAt:           e.EndAt,
@@ -587,14 +587,14 @@ func (s *Service) ListActiveEntitlementRecords(ctx context.Context, userID strin
 	return out, nil
 }
 
-func (s *Service) ListActiveEntitlementRecordsForTenantSubject(ctx context.Context, tenantSubjectID identity.TenantSubjectID, at time.Time) ([]EntitlementRecord, error) {
+func (s *Service) ListActiveEntitlementRecordsForMerchantSubject(ctx context.Context, tenantSubjectID identity.MerchantSubjectID, at time.Time) ([]EntitlementRecord, error) {
 	if tenantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
-	records, err := s.entitlementService().ListActiveRecordsByTenantSubject(ctx, tenantSubjectID.UUID(), at.UTC())
+	records, err := s.entitlementService().ListActiveRecordsByMerchantSubject(ctx, tenantSubjectID.UUID(), at.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -607,8 +607,8 @@ func (s *Service) ListActiveEntitlementRecordsForTenantSubject(ctx context.Conte
 		}
 		out = append(out, EntitlementRecord{
 			ID:              e.ID,
-			TenantSubjectID: e.TenantSubjectID,
-			UserID:          e.TenantSubjectID.String(),
+			MerchantSubjectID: e.MerchantSubjectID,
+			UserID:          e.MerchantSubjectID.String(),
 			Entitlement:     e.Entitlement,
 			StartAt:         e.StartAt,
 			EndAt:           e.EndAt,
@@ -657,8 +657,8 @@ func (s *Service) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Con
 			}
 			rs = append(rs, EntitlementRecord{
 				ID:              e.ID,
-				TenantSubjectID: e.TenantSubjectID,
-				UserID:          e.TenantSubjectID.String(),
+				MerchantSubjectID: e.MerchantSubjectID,
+				UserID:          e.MerchantSubjectID.String(),
 				Entitlement:     e.Entitlement,
 				StartAt:         e.StartAt,
 				EndAt:           e.EndAt,

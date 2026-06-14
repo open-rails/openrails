@@ -21,37 +21,26 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// minimalTenantsDDL creates just the openrails.tenants directory table the control
-// plane updates. OpenRails 001_schema.up.sql owns the full table in production; the
-// control-plane bootstrap only needs the table (plus a row, seeded via
-// dbtest.EnsureTestTenant) to exist. slug is UNIQUE to match EnsureTestTenant's
-// ON CONFLICT (slug).
+// minimalTenantsDDL creates just the openrails.merchants directory table the
+// control plane updates (#480/#481). OpenRails 001_schema.up.sql owns the full
+// table in production; the control-plane bootstrap only needs the table (plus a
+// row, seeded via dbtest.EnsureTestTenant) to exist. slug is UNIQUE to match
+// EnsureTestTenant's ON CONFLICT (slug). owner_tenant_id is the #481 ownership
+// link (the AuthKit org that administers the merchant), NOT an identity-equation.
 const minimalTenantsDDL = `
-CREATE SCHEMA IF NOT EXISTS billing;
-CREATE TABLE IF NOT EXISTS openrails.tenants (
+CREATE SCHEMA IF NOT EXISTS openrails;
+CREATE TABLE IF NOT EXISTS openrails.merchants (
     id               UUID PRIMARY KEY,
     slug             TEXT NOT NULL UNIQUE,
     name             TEXT NOT NULL,
     status           TEXT NOT NULL DEFAULT 'active',
-    authkit_tenant_id   TEXT,
-    authkit_tenant_slug TEXT,
+    owner_tenant_id  TEXT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at       TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS openrails.tenant_delegated_issuers (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id   UUID NOT NULL REFERENCES openrails.tenants (id) ON DELETE CASCADE,
-    issuer      TEXT NOT NULL,
-    jwks_uri    TEXT NOT NULL,
-    audiences   TEXT[] NOT NULL DEFAULT '{}',
-    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    CONSTRAINT uq_bootstrap_delegated_issuer UNIQUE (issuer)
 );
 `
 
@@ -89,7 +78,7 @@ func newBootstrapTestPool(t *testing.T) *pgxpool.Pool {
 
 func applyBootstrapTestSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	// Apply AuthKit profiles.* schema in filename order, then openrails.tenants.
+	// Apply AuthKit profiles.* schema in filename order, then openrails.merchants.
 	entries, err := authpgmigrations.FS.ReadDir(".")
 	require.NoError(t, err)
 	names := make([]string, 0, len(entries))
@@ -140,14 +129,13 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.NotEmpty(t, res1.ServiceTokenSecret)
 	require.NotEmpty(t, res1.BootstrapTenantID)
 
-	// HARDCUT (#312): the default tenant's own AuthKit org is recorded — there is
-	// no separate "operator" tenant.
-	var authKitTenantSlug, authKitTenantID string
+	// #481: the owning AuthKit tenant (org) is recorded on the merchant via the
+	// owner_tenant_id OWNERSHIP link (not an identity-equation, not a slug column).
+	var ownerTenantID string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT authkit_tenant_slug, authkit_tenant_id FROM openrails.tenants WHERE id = $1::uuid`,
-		dbtest.TestTenantID.String()).Scan(&authKitTenantSlug, &authKitTenantID))
-	require.Equal(t, dbtest.TestTenantSlug, authKitTenantSlug)
-	require.Equal(t, res1.BootstrapTenantID, authKitTenantID)
+		`SELECT owner_tenant_id FROM openrails.merchants WHERE id = $1::uuid`,
+		dbtest.TestTenantID.String()).Scan(&ownerTenantID))
+	require.Equal(t, res1.BootstrapTenantID, ownerTenantID)
 
 	// The admin role holds the per-tenant catalog (full catalog EXCEPT the
 	// cross-tenant platform-superadmin permission, #226).
@@ -169,13 +157,13 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	serviceTokens, err := cp.Core().ListServiceTokens(ctx, dbtest.TestTenantSlug)
 	require.NoError(t, err)
 	require.Len(t, serviceTokens, 1, "exactly one admin service token after two bootstrap runs")
-	require.ElementsMatch(t, []string{ResourceKindTenant}, resourceKinds(serviceTokens[0].Resources))
-	require.Contains(t, resourceIDs(serviceTokens[0].Resources, ResourceKindTenant), dbtest.TestTenantID.String())
+	require.ElementsMatch(t, []string{ResourceKindMerchant}, resourceKinds(serviceTokens[0].Resources))
+	require.Contains(t, resourceIDs(serviceTokens[0].Resources, ResourceKindMerchant), dbtest.TestTenantID.String())
 
 	resolved, err := cp.ResolveServiceToken(ctx, res1.ServiceTokenSecret)
 	require.NoError(t, err)
-	require.Equal(t, dbtest.TestTenantID, resolved.TenantID)
-	require.Contains(t, resourceIDs(resolved.Resources, ResourceKindTenant), dbtest.TestTenantID.String())
+	require.Equal(t, dbtest.TestTenantID, resolved.MerchantID)
+	require.Contains(t, resourceIDs(resolved.Resources, ResourceKindMerchant), dbtest.TestTenantID.String())
 }
 
 func resourceKinds(resources []authcore.ServiceTokenResource) []string {
@@ -290,62 +278,61 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateTenant(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestDelegatedTenantResolution exercises the AuthKit-tenant -> OpenRails-tenant
-// mapping ResolveServiceToken relies on (tenantForAuthKitTenant): resolution
-// keys EXCLUSIVELY on the IMMUTABLE AuthKit tenant uuid (authkit_tenant_id) —
-// there is no slug fallback — and rejects credentials without a uuid, unlinked
-// directory rows, and unknown or suspended AuthKit tenants.
-func TestDelegatedTenantResolution(t *testing.T) {
+// TestMerchantForOwnerTenant exercises the #481 ROLE-BASED merchant resolution
+// merchantForOwnerTenant relies on: the merchant is resolved via the
+// owner_tenant_id OWNERSHIP link (the AuthKit org that administers it), NOT an
+// identity-equation. It covers the happy path, an unowned credential, an unknown
+// owner, a suspended merchant, and authorizing a SPECIFIC merchant when one
+// tenant owns TWO merchants.
+func TestMerchantForOwnerTenant(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
 	cp := newTestControlPlane(t, pool)
 
-	// A second, suspended tenant owned by a distinct AuthKit tenant (uuid+slug linked).
+	// The default test merchant is owned by AuthKit org "ak-default-id".
 	_, err := pool.Exec(ctx, `
-		INSERT INTO openrails.tenants (id, slug, name, status, authkit_tenant_id, authkit_tenant_slug)
-		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'Acme', 'suspended', 'ak-acme-id', 'acme-org')
-		ON CONFLICT (id) DO NOTHING`)
-	require.NoError(t, err)
-	// A third, active tenant written BEFORE the uuid dual-write: slug only, NULL uuid.
-	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.tenants (id, slug, name, status, authkit_tenant_slug)
-		VALUES ('00000000-0000-0000-0000-000000000003', 'beta', 'Beta', 'active', 'beta-org')
-		ON CONFLICT (id) DO NOTHING`)
-	require.NoError(t, err)
-	// Map the default tenant to an active AuthKit tenant (uuid + slug) so the
-	// happy path resolves.
-	_, err = pool.Exec(ctx, `
-		UPDATE openrails.tenants
-		   SET authkit_tenant_id = 'ak-default-id', authkit_tenant_slug = 'default-org', status = 'active'
+		UPDATE openrails.merchants
+		   SET owner_tenant_id = 'ak-default-id', status = 'active'
 		 WHERE id = $1::uuid`, dbtest.TestTenantID.String())
 	require.NoError(t, err)
-
-	// Immutable uuid -> its OpenRails tenant. The slug is irrelevant to
-	// resolution (presentation/audit only).
-	tid, slug, err := cp.tenantForAuthKitTenant(ctx, "ak-default-id")
+	// A SECOND merchant owned by the SAME tenant (#481: one tenant -> many merchants).
+	_, err = pool.Exec(ctx, `
+		INSERT INTO openrails.merchants (id, slug, name, status, owner_tenant_id)
+		VALUES ('00000000-0000-0000-0000-000000000004', 'second', 'Second', 'active', 'ak-default-id')
+		ON CONFLICT (id) DO NOTHING`)
 	require.NoError(t, err)
-	require.Equal(t, dbtest.TestTenantID, tid)
-	require.Equal(t, dbtest.TestTenantSlug, slug)
+	// A suspended merchant owned by a distinct tenant.
+	_, err = pool.Exec(ctx, `
+		INSERT INTO openrails.merchants (id, slug, name, status, owner_tenant_id)
+		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'Acme', 'suspended', 'ak-acme-id')
+		ON CONFLICT (id) DO NOTHING`)
+	require.NoError(t, err)
 
-	// Hard cut: a credential without a tenant uuid is rejected — there is no
-	// slug fallback, even when a slug-matching directory row exists.
-	_, _, err = cp.tenantForAuthKitTenant(ctx, "")
-	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
+	// Owning tenant -> a merchant it owns (role-based ownership; not identity).
+	mid, _, err := cp.merchantForOwnerTenant(ctx, "ak-default-id")
+	require.NoError(t, err)
+	require.False(t, mid.IsZero(), "owning tenant resolves to one of its merchants")
 
-	// Hard cut: a uuid that matches no LINKED directory row is rejected — an
-	// unlinked row (authkit_tenant_id IS NULL) is unreachable regardless of its
-	// slug.
-	_, _, err = cp.tenantForAuthKitTenant(ctx, "ak-beta-id")
-	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
+	// A credential with no owning tenant is rejected.
+	_, _, err = cp.merchantForOwnerTenant(ctx, "")
+	require.ErrorIs(t, err, ErrServiceTokenMerchantUnresolved)
 
-	// An unmapped uuid never reaches a row linked to a DIFFERENT AuthKit
-	// tenant (slug-reassignment confusion is structurally impossible).
-	_, _, err = cp.tenantForAuthKitTenant(ctx, "ak-other-id")
-	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
+	// An owner that owns no merchant is rejected.
+	_, _, err = cp.merchantForOwnerTenant(ctx, "ak-nobody-id")
+	require.ErrorIs(t, err, ErrServiceTokenMerchantUnresolved)
 
-	// Suspended tenant -> cross-tenant/unmapped rejection.
-	_, _, err = cp.tenantForAuthKitTenant(ctx, "ak-acme-id")
-	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
+	// A suspended merchant's owner resolves to no ACTIVE merchant.
+	_, _, err = cp.merchantForOwnerTenant(ctx, "ak-acme-id")
+	require.ErrorIs(t, err, ErrServiceTokenMerchantUnresolved)
+
+	// #481 role-based AuthorizeMerchant: the owning tenant may act on EITHER of its
+	// merchants when the request NAMES one (a tenant owning many merchants).
+	require.NoError(t, cp.AuthorizeMerchant(ctx, "ak-default-id", dbtest.TestTenantID))
+	second, perr := merchant.ParseID("00000000-0000-0000-0000-000000000004")
+	require.NoError(t, perr)
+	require.NoError(t, cp.AuthorizeMerchant(ctx, "ak-default-id", second))
+	// A different tenant may NOT act on a merchant it does not own.
+	require.ErrorIs(t, cp.AuthorizeMerchant(ctx, "ak-acme-id", dbtest.TestTenantID), ErrServiceTokenScopeDenied)
 
 	// The control plane built a delegated verifier (browser-tier prerequisite).
 	require.NotNil(t, cp.DelegatedVerifier())

@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ARCHITECTURAL BOUNDARY (issue #232 — Postgres is the system of record):
@@ -82,7 +82,7 @@ func (s *DunningHistoryService) ListDunningHistory(ctx context.Context, processo
 	}
 	defer func() { _ = conn.Close() }()
 
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -34,12 +34,12 @@ const (
 type Entitlement struct {
 	ID uuid.UUID `json:"id"`
 
-	// TenantID scopes this row to a tenant / billing namespace (issue #223).
+	// MerchantID scopes this row to a tenant / billing namespace (issue #223).
 	// Nullzero + DB default: inserts that leave it zero fall back to the
 	// default-tenant column default, so single-tenant code keeps working.
-	TenantID uuid.UUID `json:"tenant_id"`
+	MerchantID uuid.UUID `json:"tenant_id"`
 
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id,omitempty"`
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id,omitempty"`
 	Entitlement     string    `json:"entitlement"`
 
 	StartAt time.Time  `json:"start_at"`

@@ -14,7 +14,7 @@ import (
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // membershipCreator is the lifecycle surface enroll drives (satisfied by
@@ -65,7 +65,7 @@ func NewEnrollService(lifecycle membershipCreator, repo subscriptionStore, rpc a
 
 // EnrollInput describes a confirmed wallet enrollment to activate.
 type EnrollInput struct {
-	TenantID         tenant.ID
+	MerchantID         merchant.ID
 	UserID           string
 	UserEmail        string
 	PriceID          uuid.UUID
@@ -102,7 +102,7 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 		return nil, fmt.Errorf("recurring: invalid plan terms (amount/period)")
 	}
 
-	merchant, err := s.submitter.MerchantAddress(ctx, in.TenantID)
+	merchant, err := s.submitter.MerchantAddress(ctx, in.MerchantID)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: resolve merchant: %w", err)
 	}
@@ -202,7 +202,7 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 	}
 
 	row.SubscriptionID = sub.ID
-	row.TenantID = in.TenantID.UUID()
+	row.MerchantID = in.MerchantID.UUID()
 	row.NextPullAt = periodEnd
 	row.LastPulledPeriodStart = &now
 	row.LastSignature = &sig

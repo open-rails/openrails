@@ -175,7 +175,7 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 		userID := uuid.New().String()
 		notification := &models.NotificationQueue{
 			ID:              uuid.New(),
-			TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
+			MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
 			EventType:       models.NotificationSystemAlert,
 			Seen:            true, // Seen notifications have 90-day retention
 			CreatedAt:       mockClock.Now().Add(-95 * 24 * time.Hour),
@@ -204,7 +204,7 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 		userID := uuid.New().String()
 		notification := &models.NotificationQueue{
 			ID:              uuid.New(),
-			TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
+			MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
 			EventType:       models.NotificationSystemAlert,
 			Seen:            false,
 			CreatedAt:       mockClock.Now(),

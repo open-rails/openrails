@@ -161,16 +161,16 @@ func main() {
 	mintOperatorServiceTokenCmd.Flags().String("tenant", "", "OpenRails tenant slug or id (defaults to default)")
 	mintOperatorServiceTokenCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to full operator permissions")
 
-	mintTenantSubjectServiceTokenCmd := &cobra.Command{
+	mintMerchantSubjectServiceTokenCmd := &cobra.Command{
 		Use:   "mint-tenant-subject-service-token",
 		Short: "Mint an OpenRails tenant-subject-scoped service token and print the one-time token",
-		RunE:  mintTenantSubjectServiceToken,
+		RunE:  mintMerchantSubjectServiceToken,
 	}
-	mintTenantSubjectServiceTokenCmd.Flags().String("name", "", "service token display name")
-	mintTenantSubjectServiceTokenCmd.Flags().String("org", "", "Bootstrap authority slug for the legacy AuthKit --org bridge that owns the service token (defaults to config/operator)")
-	mintTenantSubjectServiceTokenCmd.Flags().String("tenant", "", "OpenRails tenant slug or id (defaults to default)")
-	mintTenantSubjectServiceTokenCmd.Flags().String("tenant-subject", "", "OpenRails tenant subject UUID to scope the service token to")
-	mintTenantSubjectServiceTokenCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to openrails:credits:spend")
+	mintMerchantSubjectServiceTokenCmd.Flags().String("name", "", "service token display name")
+	mintMerchantSubjectServiceTokenCmd.Flags().String("org", "", "Bootstrap authority slug for the legacy AuthKit --org bridge that owns the service token (defaults to config/operator)")
+	mintMerchantSubjectServiceTokenCmd.Flags().String("tenant", "", "OpenRails tenant slug or id (defaults to default)")
+	mintMerchantSubjectServiceTokenCmd.Flags().String("tenant-subject", "", "OpenRails tenant subject UUID to scope the service token to")
+	mintMerchantSubjectServiceTokenCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to openrails:credits:spend")
 
 	mintOperatorJWTCmd := &cobra.Command{
 		Use:   "mint-operator-jwt",
@@ -183,7 +183,7 @@ func main() {
 	mintOperatorJWTCmd.Flags().String("role", "", "Tenant role to assign (default openrails-operator)")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, newBootstrapCmd(), mintOperatorServiceTokenCmd, mintTenantSubjectServiceTokenCmd, mintOperatorJWTCmd, newCatalogCmd(), newReconcileCmd(), newIntentsCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, newBootstrapCmd(), mintOperatorServiceTokenCmd, mintMerchantSubjectServiceTokenCmd, mintOperatorJWTCmd, newCatalogCmd(), newReconcileCmd(), newIntentsCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		log.WithError(err).Fatal("Failed to execute command")

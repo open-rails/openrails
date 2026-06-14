@@ -503,8 +503,8 @@ type AdminUserProfile struct {
 	Entitlements  []EntitlementRecord
 }
 
-// AdminGrantEntitlementRequest specifies entitlement grant parameters.
-type AdminGrantEntitlementRequest struct {
+// EntitlementGrantEntitlementRequest specifies entitlement grant parameters.
+type EntitlementGrantEntitlementRequest struct {
 	UserID      string
 	Entitlement string
 	StartAt     *time.Time // nil = now

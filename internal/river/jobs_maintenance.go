@@ -130,13 +130,13 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 		localByProcessorID[processorSubID] = struct{}{}
 		if _, ok := remoteActive[processorSubID]; !ok {
 			missingRemote++
-			if err := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_missing_remote", &sub.ID, sub.TenantSubjectID.String(), processorSubID, nil, nil); err != nil {
+			if err := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_missing_remote", &sub.ID, sub.MerchantSubjectID.String(), processorSubID, nil, nil); err != nil {
 				log.WithContext(ctx).WithError(err).Warn("CCBillReconcile: failed to persist missing-remote repair alert")
 			}
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id":           sub.ID,
 				"processor_subscription_id": processorSubID,
-				"user_id":                   sub.TenantSubjectID.String(),
+				"user_id":                   sub.MerchantSubjectID.String(),
 			}).Warn("CCBillReconcile: local active subscription missing from DataLink active members; quarantine for manual review")
 		}
 	}
@@ -169,7 +169,7 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 		}
 		paidThrough, ok := ccbill.DataLinkPaidThrough(record, time.Now().UTC())
 		if !ok {
-			if alertErr := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_missing_paid_through", &existing.ID, existing.TenantSubjectID.String(), processorSubID, &record, nil); alertErr != nil {
+			if alertErr := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_missing_paid_through", &existing.ID, existing.MerchantSubjectID.String(), processorSubID, &record, nil); alertErr != nil {
 				log.WithContext(ctx).WithError(alertErr).Warn("CCBillReconcile: failed to persist missing-paid-through repair alert")
 			}
 			log.WithContext(ctx).WithFields(log.Fields{
@@ -186,7 +186,7 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 			CurrentPeriodEndsAt:     &paidThrough,
 		}); err != nil {
 			if subscriptions.IsTerminalTransitionBlocked(err) {
-				if alertErr := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_terminal_reactivation_blocked", &existing.ID, existing.TenantSubjectID.String(), processorSubID, &record, err); alertErr != nil {
+				if alertErr := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_terminal_reactivation_blocked", &existing.ID, existing.MerchantSubjectID.String(), processorSubID, &record, err); alertErr != nil {
 					log.WithContext(ctx).WithError(alertErr).Warn("CCBillReconcile: failed to persist terminal-blocked repair alert")
 				}
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{

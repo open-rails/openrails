@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // tenantPgxConnKey is the context key under which the request's tenant-scoped
@@ -42,7 +42,7 @@ func (d *DB) WithTenantConn(ctx context.Context) (context.Context, func(), error
 		return ctx, func() {}, nil
 	}
 
-	id, err := tenant.Require(ctx)
+	id, err := merchant.Require(ctx)
 	if err != nil {
 		return ctx, func() {}, fmt.Errorf("db: WithTenantConn requires a tenant in context: %w", err)
 	}

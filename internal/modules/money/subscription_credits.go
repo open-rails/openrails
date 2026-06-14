@@ -132,7 +132,7 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 			grantID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(grantKey))
 
 			if _, err := s.depositTx(ctx, q, DepositParams{
-				Actor:     sub.TenantSubjectID.String(),
+				Actor:     sub.MerchantSubjectID.String(),
 				Currency:  spec.UnitOrDefault(),
 				Amount:    spec.Amount,
 				Source:    strings.TrimSpace(params.Source),
@@ -162,7 +162,7 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 // (#472) — the other half of "what you get" alongside entitlements. Payer is the
 // payment owner's tenant subject; PaymentID scopes idempotency per (payment, label).
 type GrantPurchaseCreditsParams struct {
-	Payer     identity.TenantSubjectID
+	Payer     identity.MerchantSubjectID
 	PaymentID uuid.UUID
 	Spec      models.CreditsSpec
 	Source    string // deposit source label (e.g., "purchase")
@@ -200,7 +200,7 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 			grantKey := fmt.Sprintf("openrails:purchase_credit_grant:%s:%s", params.PaymentID, label)
 			grantID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(grantKey))
 			if _, err := s.depositTx(ctx, q, DepositParams{
-				TenantSubjectID: &payer,
+				MerchantSubjectID: &payer,
 				Actor:           payer.String(),
 				Currency:        spec.UnitOrDefault(),
 				Amount:          spec.Amount,

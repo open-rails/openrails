@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // CaptureUsageEventParams records an analytics usage_event linked to an EXISTING
@@ -21,7 +21,7 @@ import (
 // the service usage rollup (#311) so the tensorhub platform's /budget-usage +
 // revenue analytics can be served from OpenRails as the billing source of truth.
 type CaptureUsageEventParams struct {
-	TenantSubjectID uuid.UUID
+	MerchantSubjectID uuid.UUID
 	// Actor is the caller-supplied principal string attributable to this usage
 	// (opaque to OpenRails). Required.
 	Actor     string
@@ -60,17 +60,17 @@ func (s *MoneyService) InsertCaptureUsageEvent(ctx context.Context, p CaptureUsa
 	now := s.now()
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
-		tid, terr := tenant.Require(ctx)
+		tid, terr := merchant.Require(ctx)
 		if terr != nil {
 			return terr
 		}
-		if err := ensureTenantSubject(ctx, q, tid.UUID(), p.TenantSubjectID); err != nil {
+		if err := ensureMerchantSubject(ctx, q, tid.UUID(), p.MerchantSubjectID); err != nil {
 			return err
 		}
 		ev := &models.UsageEvent{
 			ID:                 uuidutil.NewV7(),
-			TenantID:           tid.UUID(),
-			TenantSubjectID:    p.TenantSubjectID,
+			MerchantID:           tid.UUID(),
+			MerchantSubjectID:    p.MerchantSubjectID,
 			Actor:              p.Actor,
 			Resource:           nilIfEmpty(p.Resource),
 			EventType:          p.EventType,
@@ -93,8 +93,8 @@ func (s *MoneyService) InsertCaptureUsageEvent(ctx context.Context, p CaptureUsa
 		}
 		return q.InsertUsageEventIfAbsent(ctx, gen.InsertUsageEventIfAbsentParams{
 			ID:                 ev.ID,
-			TenantID:           ev.TenantID,
-			TenantSubjectID:    ev.TenantSubjectID,
+			MerchantID:           ev.MerchantID,
+			MerchantSubjectID:    ev.MerchantSubjectID,
 			Actor:              ev.Actor,
 			Resource:           ev.Resource,
 			EventType:          ev.EventType,
@@ -132,7 +132,7 @@ var serviceUsageGroupKeys = map[string]bool{
 // ServiceUsageRollup returns per-dimension-VALUE spend for a tenant subject over
 // [from, to), grouped by group_by. Service-scoped (any payer), for the platform
 // usage/revenue surfaces — NOT the hot admission path.
-func (s *MoneyService) ServiceUsageRollup(ctx context.Context, payer identity.TenantSubjectID, from, to time.Time, groupBy string) ([]ServiceUsageRollupRow, error) {
+func (s *MoneyService) ServiceUsageRollup(ctx context.Context, payer identity.MerchantSubjectID, from, to time.Time, groupBy string) ([]ServiceUsageRollupRow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -145,13 +145,13 @@ func (s *MoneyService) ServiceUsageRollup(ctx context.Context, payer identity.Te
 	}
 	var out []ServiceUsageRollupRow
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		tid, terr := tenant.Require(ctx)
+		tid, terr := merchant.Require(ctx)
 		if terr != nil {
 			return terr
 		}
 		rows, err := s.db.Gen(ctx).ServiceUsageRollup(ctx, gen.ServiceUsageRollupParams{
-			TenantID:        tid.UUID(),
-			TenantSubjectID: payer.UUID(),
+			MerchantID:        tid.UUID(),
+			MerchantSubjectID: payer.UUID(),
 			GroupBy:         groupBy,
 			FromAt:          from.UTC(),
 			ToAt:            to.UTC(),
@@ -191,12 +191,12 @@ func (s *MoneyService) ResourceRevenueDaily(ctx context.Context, resource string
 	}
 	var out []ResourceRevenueDailyRow
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		tid, terr := tenant.Require(ctx)
+		tid, terr := merchant.Require(ctx)
 		if terr != nil {
 			return terr
 		}
 		rows, err := s.db.Gen(ctx).ResourceRevenueDaily(ctx, gen.ResourceRevenueDailyParams{
-			TenantID: tid.UUID(),
+			MerchantID: tid.UUID(),
 			Resource: &resource,
 			FromAt:   from.UTC(),
 			ToAt:     to.UTC(),

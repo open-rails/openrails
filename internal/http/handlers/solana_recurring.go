@@ -17,7 +17,7 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // publishSolanaPlanRequest is the admin body for publishing an on-chain recurring
@@ -49,13 +49,13 @@ func AdminPublishSolanaPlan(r *httprequest.Request) {
 		return
 	}
 
-	tenantID, err := tenant.Require(r.Request.Context())
+	tenantID, err := merchant.Require(r.Request.Context())
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "no tenant resolved on request")
 		return
 	}
 	handle, err := svc.PublishPlan(r.Request.Context(), recurring.PublishPlanInput{
-		TenantID:        tenantID,
+		MerchantID:        tenantID,
 		PlanID:          req.PlanID,
 		TokenSymbol:     req.TokenSymbol,
 		AmountBaseUnits: req.AmountBaseUnits,
@@ -155,13 +155,13 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 	if user.Email != nil {
 		email = *user.Email
 	}
-	tenantID, err := tenant.Require(r.Request.Context())
+	tenantID, err := merchant.Require(r.Request.Context())
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "no tenant resolved on request")
 		return
 	}
 	sub, err := svc.ConfirmEnrollment(r.Request.Context(), recurring.EnrollInput{
-		TenantID:         tenantID,
+		MerchantID:         tenantID,
 		UserID:           user.ID,
 		UserEmail:        email,
 		PriceID:          priceID,
@@ -229,7 +229,7 @@ func PrepareSolanaCancelTx(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
 		return
 	}
-	if sub.TenantSubjectID.String() != uc.UserID {
+	if sub.MerchantSubjectID.String() != uc.UserID {
 		r.ErrorJSON(http.StatusNotFound, "subscription not found")
 		return
 	}
@@ -308,7 +308,7 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
 		return
 	}
-	if sub.TenantSubjectID.String() != uc.UserID {
+	if sub.MerchantSubjectID.String() != uc.UserID {
 		r.ErrorJSON(http.StatusNotFound, "subscription not found")
 		return
 	}
@@ -382,7 +382,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		}
 		return nil, http.StatusInternalServerError, "failed to retrieve subscription"
 	}
-	if oldSub.TenantSubjectID.String() != uc.UserID {
+	if oldSub.MerchantSubjectID.String() != uc.UserID {
 		return nil, http.StatusNotFound, "subscription not found"
 	}
 	if oldSub.Processor != models.ProcessorSolana {
@@ -542,13 +542,13 @@ func PrepareSolanaTierChange(r *httprequest.Request) {
 		return
 	}
 
-	tenantID, err := tenant.Require(r.Request.Context())
+	tenantID, err := merchant.Require(r.Request.Context())
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "no tenant resolved on request")
 		return
 	}
 	res, err := svc.Prepare(r.Request.Context(), recurring.PrepareTierChangeInput{
-		TenantID:             tenantID,
+		MerchantID:             tenantID,
 		SubscriberWallet:     resolved.oldRow.SubscriberWallet,
 		MintSymbol:           resolved.newTerms.mintSymbol,
 		OldPlanPDA:           resolved.oldRow.PlanPDA,
@@ -604,13 +604,13 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 	// not trust a client-supplied PDA. PrepareTierChangeService returns it, but the
 	// confirm body only carries the signature + price; deriving it server-side from
 	// the canonical terms keeps the mirror authoritative.
-	tenantID, err := tenant.Require(r.Request.Context())
+	tenantID, err := merchant.Require(r.Request.Context())
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "no tenant resolved on request")
 		return
 	}
 	prep, err := r.State.SolanaPrepareTierChangeService.Prepare(r.Request.Context(), recurring.PrepareTierChangeInput{
-		TenantID:             tenantID,
+		MerchantID:             tenantID,
 		SubscriberWallet:     resolved.oldRow.SubscriberWallet,
 		MintSymbol:           resolved.newTerms.mintSymbol,
 		OldPlanPDA:           resolved.oldRow.PlanPDA,
@@ -649,7 +649,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 	result, err := svc.Confirm(r.Request.Context(), recurring.ConfirmTierChangeInput{
 		Signature:            req.Signature,
 		OldSubscriptionID:    subscriptionID,
-		UserID:               resolved.oldSub.TenantSubjectID.String(),
+		UserID:               resolved.oldSub.MerchantSubjectID.String(),
 		UserEmail:            email,
 		NewPriceID:           resolved.newPrice.ID,
 		NewSubscriptionPDA:   prep.NewSubscriptionPDA,

@@ -13,7 +13,7 @@ import (
 	policyginmw "github.com/open-rails/openrails/internal/auth/policy/ginmw"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // PlatformPrefix is the cross-tenant managed-hosting superadmin API (issue #226).
@@ -120,9 +120,9 @@ func (s *Server) platformMetricsHandler() gin.HandlerFunc {
 
 func (s *Server) platformAuditHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var target *tenant.ID
+		var target *merchant.ID
 		if raw := strings.TrimSpace(c.Query("tenant")); raw != "" {
-			id, err := tenant.ParseID(raw)
+			id, err := merchant.ParseID(raw)
 			if err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tenant id"})
 				return
@@ -154,9 +154,9 @@ func (s *Server) platformBreakGlassGrantHandler() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 			return
 		}
-		var target *tenant.ID
+		var target *merchant.ID
 		if strings.TrimSpace(body.TargetTenant) != "" {
-			id, perr := tenant.ParseID(strings.TrimSpace(body.TargetTenant))
+			id, perr := merchant.ParseID(strings.TrimSpace(body.TargetTenant))
 			if perr != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid target_tenant"})
 				return

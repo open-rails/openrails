@@ -15,7 +15,7 @@ import (
 const createUSDCFundingSession = `-- name: CreateUSDCFundingSession :exec
 
 INSERT INTO openrails.usdc_funding_sessions (
-    id, tenant_id, tenant_subject_id, checkout_session_id, provider,
+    id, merchant_id, merchant_subject_id, checkout_session_id, provider,
     wallet_address, asset, network, requested_amount, provider_session_id,
     provider_url, status, return_url, idempotency_key, metadata,
     last_checked_at, expires_at, created_at, updated_at
@@ -33,7 +33,7 @@ INSERT INTO openrails.usdc_funding_sessions (
 
 type CreateUSDCFundingSessionParams struct {
 	ID                uuid.UUID
-	TenantSubjectID   uuid.UUID
+	MerchantSubjectID uuid.UUID
 	Provider          string
 	WalletAddress     string
 	Asset             string
@@ -41,7 +41,7 @@ type CreateUSDCFundingSessionParams struct {
 	RequestedAmount   string
 	ProviderUrl       string
 	Status            string
-	TenantID          uuid.UUID
+	MerchantID        uuid.UUID
 	CheckoutSessionID *uuid.UUID
 	ProviderSessionID *string
 	ReturnUrl         *string
@@ -57,7 +57,7 @@ type CreateUSDCFundingSessionParams struct {
 func (q *Queries) CreateUSDCFundingSession(ctx context.Context, arg CreateUSDCFundingSessionParams) error {
 	_, err := q.db.Exec(ctx, createUSDCFundingSession,
 		arg.ID,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.Provider,
 		arg.WalletAddress,
 		arg.Asset,
@@ -65,7 +65,7 @@ func (q *Queries) CreateUSDCFundingSession(ctx context.Context, arg CreateUSDCFu
 		arg.RequestedAmount,
 		arg.ProviderUrl,
 		arg.Status,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.CheckoutSessionID,
 		arg.ProviderSessionID,
 		arg.ReturnUrl,
@@ -80,7 +80,7 @@ func (q *Queries) CreateUSDCFundingSession(ctx context.Context, arg CreateUSDCFu
 }
 
 const getUSDCFundingSessionByID = `-- name: GetUSDCFundingSessionByID :one
-SELECT id, tenant_id, tenant_subject_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency_key, metadata, last_checked_at, expires_at, created_at, updated_at FROM openrails.usdc_funding_sessions ufs
+SELECT id, merchant_id, merchant_subject_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency_key, metadata, last_checked_at, expires_at, created_at, updated_at FROM openrails.usdc_funding_sessions ufs
 WHERE ufs.id = $1
 LIMIT 1
 `
@@ -90,8 +90,8 @@ func (q *Queries) GetUSDCFundingSessionByID(ctx context.Context, id uuid.UUID) (
 	var i OpenrailsUsdcFundingSession
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.CheckoutSessionID,
 		&i.Provider,
 		&i.WalletAddress,
@@ -112,24 +112,24 @@ func (q *Queries) GetUSDCFundingSessionByID(ctx context.Context, id uuid.UUID) (
 	return i, err
 }
 
-const getUSDCFundingSessionByIDForTenantSubject = `-- name: GetUSDCFundingSessionByIDForTenantSubject :one
-SELECT id, tenant_id, tenant_subject_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency_key, metadata, last_checked_at, expires_at, created_at, updated_at FROM openrails.usdc_funding_sessions ufs
-WHERE ufs.id = $1 AND ufs.tenant_subject_id = $2
+const getUSDCFundingSessionByIDForMerchantSubject = `-- name: GetUSDCFundingSessionByIDForMerchantSubject :one
+SELECT id, merchant_id, merchant_subject_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency_key, metadata, last_checked_at, expires_at, created_at, updated_at FROM openrails.usdc_funding_sessions ufs
+WHERE ufs.id = $1 AND ufs.merchant_subject_id = $2
 LIMIT 1
 `
 
-type GetUSDCFundingSessionByIDForTenantSubjectParams struct {
-	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
+type GetUSDCFundingSessionByIDForMerchantSubjectParams struct {
+	ID                uuid.UUID
+	MerchantSubjectID uuid.UUID
 }
 
-func (q *Queries) GetUSDCFundingSessionByIDForTenantSubject(ctx context.Context, arg GetUSDCFundingSessionByIDForTenantSubjectParams) (OpenrailsUsdcFundingSession, error) {
-	row := q.db.QueryRow(ctx, getUSDCFundingSessionByIDForTenantSubject, arg.ID, arg.TenantSubjectID)
+func (q *Queries) GetUSDCFundingSessionByIDForMerchantSubject(ctx context.Context, arg GetUSDCFundingSessionByIDForMerchantSubjectParams) (OpenrailsUsdcFundingSession, error) {
+	row := q.db.QueryRow(ctx, getUSDCFundingSessionByIDForMerchantSubject, arg.ID, arg.MerchantSubjectID)
 	var i OpenrailsUsdcFundingSession
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.CheckoutSessionID,
 		&i.Provider,
 		&i.WalletAddress,
@@ -151,23 +151,23 @@ func (q *Queries) GetUSDCFundingSessionByIDForTenantSubject(ctx context.Context,
 }
 
 const getUSDCFundingSessionByIdempotencyKey = `-- name: GetUSDCFundingSessionByIdempotencyKey :one
-SELECT id, tenant_id, tenant_subject_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency_key, metadata, last_checked_at, expires_at, created_at, updated_at FROM openrails.usdc_funding_sessions ufs
-WHERE ufs.tenant_subject_id = $1 AND ufs.idempotency_key = $2
+SELECT id, merchant_id, merchant_subject_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency_key, metadata, last_checked_at, expires_at, created_at, updated_at FROM openrails.usdc_funding_sessions ufs
+WHERE ufs.merchant_subject_id = $1 AND ufs.idempotency_key = $2
 LIMIT 1
 `
 
 type GetUSDCFundingSessionByIdempotencyKeyParams struct {
-	TenantSubjectID uuid.UUID
-	IdempotencyKey  *string
+	MerchantSubjectID uuid.UUID
+	IdempotencyKey    *string
 }
 
 func (q *Queries) GetUSDCFundingSessionByIdempotencyKey(ctx context.Context, arg GetUSDCFundingSessionByIdempotencyKeyParams) (OpenrailsUsdcFundingSession, error) {
-	row := q.db.QueryRow(ctx, getUSDCFundingSessionByIdempotencyKey, arg.TenantSubjectID, arg.IdempotencyKey)
+	row := q.db.QueryRow(ctx, getUSDCFundingSessionByIdempotencyKey, arg.MerchantSubjectID, arg.IdempotencyKey)
 	var i OpenrailsUsdcFundingSession
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.CheckoutSessionID,
 		&i.Provider,
 		&i.WalletAddress,

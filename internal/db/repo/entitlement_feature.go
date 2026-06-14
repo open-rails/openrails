@@ -8,7 +8,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // EntitlementFeatureRepo persists Stripe-shaped feature definitions and product
@@ -16,7 +16,7 @@ import (
 //
 // Tenant isolation is enforced two ways, matching the existing entitlement repo
 // in this package: (1) every query filters explicitly on tenant_id from the
-// request context (tenant.Require), and (2) migration 062 puts FORCE
+// request context (merchant.Require), and (2) migration 062 puts FORCE
 // ROW LEVEL SECURITY on both tables so that — when the app connects as the
 // unprivileged openrails_app role inside a tenant-scoped transaction (the
 // app.tenant_id GUC set via TenantTx) — Postgres rejects any cross-tenant row
@@ -30,7 +30,7 @@ func NewEntitlementFeatureRepo(d *db.DB) *EntitlementFeatureRepo {
 }
 
 func (r *EntitlementFeatureRepo) tenantID(ctx context.Context) (uuid.UUID, error) {
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return uuid.UUID{}, err
 	}
@@ -40,7 +40,7 @@ func (r *EntitlementFeatureRepo) tenantID(ctx context.Context) (uuid.UUID, error
 func entitlementFeatureFromGen(f gen.OpenrailsEntitlementFeature) (*models.EntitlementFeature, error) {
 	m := &models.EntitlementFeature{
 		ID:        f.ID,
-		TenantID:  f.TenantID,
+		MerchantID:  f.MerchantID,
 		LookupKey: f.LookupKey,
 		Name:      f.Name,
 		Active:    f.Active,
@@ -56,7 +56,7 @@ func entitlementFeatureFromGen(f gen.OpenrailsEntitlementFeature) (*models.Entit
 func productEntitlementFeatureFromGen(p gen.OpenrailsProductEntitlementFeature) (*models.ProductEntitlementFeature, error) {
 	m := &models.ProductEntitlementFeature{
 		ID:                   p.ID,
-		TenantID:             p.TenantID,
+		MerchantID:             p.MerchantID,
 		ProductID:            p.ProductID,
 		EntitlementFeatureID: p.EntitlementFeatureID,
 		DurationDays:         derefIntPtr(p.DurationDays),
@@ -71,12 +71,12 @@ func productEntitlementFeatureFromGen(p gen.OpenrailsProductEntitlementFeature) 
 
 // CreateFeature inserts a new entitlement feature, stamping the request tenant.
 func (r *EntitlementFeatureRepo) CreateFeature(ctx context.Context, f *models.EntitlementFeature) error {
-	if (f.TenantID == uuid.UUID{}) {
+	if (f.MerchantID == uuid.UUID{}) {
 		tid, err := r.tenantID(ctx)
 		if err != nil {
 			return err
 		}
-		f.TenantID = tid
+		f.MerchantID = tid
 	}
 	meta, err := toJSONB(f.Metadata)
 	if err != nil {
@@ -84,7 +84,7 @@ func (r *EntitlementFeatureRepo) CreateFeature(ctx context.Context, f *models.En
 	}
 	id, err := r.db.Gen(ctx).CreateEntitlementFeature(ctx, gen.CreateEntitlementFeatureParams{
 		ID:        f.ID,
-		TenantID:  f.TenantID,
+		MerchantID:  f.MerchantID,
 		LookupKey: f.LookupKey,
 		Name:      f.Name,
 		Active:    f.Active,
@@ -115,7 +115,7 @@ func (r *EntitlementFeatureRepo) UpdateFeature(ctx context.Context, f *models.En
 		Active:    f.Active,
 		Metadata:  meta,
 		UpdatedAt: updateTimestamp(f.UpdatedAt),
-		TenantID:  tid,
+		MerchantID:  tid,
 	})
 	if err != nil {
 		return err
@@ -155,7 +155,7 @@ func (r *EntitlementFeatureRepo) GetFeatureByID(ctx context.Context, id uuid.UUI
 	}
 	row, err := r.db.Gen(ctx).GetEntitlementFeatureByID(ctx, gen.GetEntitlementFeatureByIDParams{
 		ID:       id,
-		TenantID: tid,
+		MerchantID: tid,
 	})
 	if err != nil {
 		return nil, err
@@ -171,7 +171,7 @@ func (r *EntitlementFeatureRepo) GetFeatureByLookupKey(ctx context.Context, look
 	}
 	row, err := r.db.Gen(ctx).GetEntitlementFeatureByLookupKey(ctx, gen.GetEntitlementFeatureByLookupKeyParams{
 		LookupKey: lookupKey,
-		TenantID:  tid,
+		MerchantID:  tid,
 	})
 	if err != nil {
 		return nil, err
@@ -191,7 +191,7 @@ func (r *EntitlementFeatureRepo) ListFeaturesByLookupKeys(ctx context.Context, k
 		return nil, err
 	}
 	rows, err := r.db.Gen(ctx).ListEntitlementFeaturesByLookupKeys(ctx, gen.ListEntitlementFeaturesByLookupKeysParams{
-		TenantID:   tid,
+		MerchantID:   tid,
 		LookupKeys: keys,
 	})
 	if err != nil {
@@ -209,12 +209,12 @@ func (r *EntitlementFeatureRepo) ListFeaturesByLookupKeys(ctx context.Context, k
 
 // AttachFeatureToProduct creates a product_feature attachment.
 func (r *EntitlementFeatureRepo) AttachFeatureToProduct(ctx context.Context, pef *models.ProductEntitlementFeature) error {
-	if (pef.TenantID == uuid.UUID{}) {
+	if (pef.MerchantID == uuid.UUID{}) {
 		tid, err := r.tenantID(ctx)
 		if err != nil {
 			return err
 		}
-		pef.TenantID = tid
+		pef.MerchantID = tid
 	}
 	// Same-tenant guard: Postgres FK checks BYPASS RLS, so without this an attacker
 	// who knows another tenant's feature UUID could attach it. Verify the feature is
@@ -228,7 +228,7 @@ func (r *EntitlementFeatureRepo) AttachFeatureToProduct(ctx context.Context, pef
 	}
 	id, err := r.db.Gen(ctx).CreateProductEntitlementFeature(ctx, gen.CreateProductEntitlementFeatureParams{
 		ID:                   pef.ID,
-		TenantID:             pef.TenantID,
+		MerchantID:             pef.MerchantID,
 		ProductID:            pef.ProductID,
 		EntitlementFeatureID: pef.EntitlementFeatureID,
 		DurationDays:         intPtrTo32(pef.DurationDays),
@@ -252,7 +252,7 @@ func (r *EntitlementFeatureRepo) DetachFeature(ctx context.Context, productFeatu
 	}
 	rows, err := r.db.Gen(ctx).DeleteProductEntitlementFeature(ctx, gen.DeleteProductEntitlementFeatureParams{
 		ID:       productFeatureID,
-		TenantID: tid,
+		MerchantID: tid,
 	})
 	if err != nil {
 		return err
@@ -272,7 +272,7 @@ func (r *EntitlementFeatureRepo) ListProductFeatures(ctx context.Context, produc
 	}
 	rows, err := r.db.Gen(ctx).ListProductEntitlementFeatures(ctx, gen.ListProductEntitlementFeaturesParams{
 		ProductID: productID,
-		TenantID:  tid,
+		MerchantID:  tid,
 	})
 	if err != nil {
 		return nil, err
@@ -301,7 +301,7 @@ func (r *EntitlementFeatureRepo) GetProductFeatureByID(ctx context.Context, id u
 	}
 	row, err := r.db.Gen(ctx).GetProductEntitlementFeatureByID(ctx, gen.GetProductEntitlementFeatureByIDParams{
 		ID:       id,
-		TenantID: tid,
+		MerchantID: tid,
 	})
 	if err != nil {
 		return nil, err

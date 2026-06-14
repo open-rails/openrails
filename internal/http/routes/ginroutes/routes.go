@@ -52,7 +52,7 @@ func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFu
 // oatMW must authenticate the service token (typically ginmw.ServiceTokenRequired); it pins the
 // resolved tenant + permissions onto the context that the per-route
 // RequireServiceTokenPermission gates and the handlers read.
-func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc, issuerAdmin DelegatedIssuerAdmin) {
+func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
@@ -64,17 +64,10 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 		group.Use(ginmw.TenantDBConn(rt.DB))
 	}
 
-	// FEDERATED issuer management (issue #259). The service token remains the ROOT
-	// tenant-management credential: a host backend authenticated by a service token holding
-	// PermAdmin for its tenant registers/rotates/disables the issuer + JWKS URL it
-	// self-signs aud=openrails browser tokens with. The tenant is bound from the
-	// service token (never the body), so a caller can only manage its OWN tenant's issuers.
-	if issuerAdmin != nil {
-		issuers := group.Group("/tenant/issuers")
-		issuers.POST("", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), registerDelegatedIssuerHandler(issuerAdmin))
-		issuers.GET("", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), listDelegatedIssuersHandler(issuerAdmin))
-		issuers.POST("/disable", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), disableDelegatedIssuerHandler(issuerAdmin))
-	}
+	// #480/#481: federated delegated-token issuers are no longer an OpenRails-owned
+	// registry (the tenant_delegated_issuers table was dropped). Standalone JWKS/
+	// issuer trust is AuthKit's remote_application registry (#74); register issuers
+	// via AuthKit, not an OpenRails route.
 
 	// Always batch (#354): one issuer, many subjects, one query; a single
 	// lookup is an array of one.
@@ -84,7 +77,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	)
 
 	tenantSubjects := group.Group("/tenant-subjects/:tenant_subject_id")
-	tenantSubjects.GET("/entitlements", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetTenantSubjectEntitlements))
+	tenantSubjects.GET("/entitlements", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetMerchantSubjectEntitlements))
 
 	users := group.Group("/users/:user_id")
 	users.GET("/product-access", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
@@ -166,7 +159,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	creditsRead := ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead)
 	credits.PUT("/account-settings", creditsWrite, wrap(httphandlers.ServiceSetCreditAccountSettings))
 	credits.GET("/account-settings", creditsRead, wrap(httphandlers.ServiceGetCreditAccountSettings))
-	credits.GET("/transactions", creditsRead, wrap(httphandlers.ServiceListTenantSubjectCreditTransactions))
+	credits.GET("/transactions", creditsRead, wrap(httphandlers.ServiceListMerchantSubjectCreditTransactions))
 	// #472: credit-type definition CRUD removed — money has no credit_type dimension.
 }
 
@@ -304,7 +297,7 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 // because:
 //   - the target user is the `:user_id` path param,
 //   - the acting admin is r.GetUser() == the token's `delegated_sub` (so audit
-//     fields like AdminGrant.GrantedBy record the acting admin),
+//     fields like EntitlementGrant.GrantedBy record the acting admin),
 //   - the tenant is pinned onto the request context by delegatedMW from the
 //     token's validated issuer, so every tenant-owned query is scoped to that
 //     tenant (RLS-enforced, #227). A `:user_id` belonging to another tenant is

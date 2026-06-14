@@ -16,7 +16,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func TestMain(m *testing.M) { dbtest.RunMain(m) }
@@ -57,7 +57,7 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		subDead:   uuid.New(),
 		entDeadID: uuid.New(),
 	}
-	s.subjectID = dbtest.EnsureTenantSubjectIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+	s.subjectID = dbtest.EnsureMerchantSubjectIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 
 	suffix := uuid.NewString()[:8]
 	now := time.Now().UTC()
@@ -83,15 +83,15 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		// entitlements_tenant_subject_no_overlap exclusion constraint forbids
 		// overlapping windows of one entitlement for one subject.
 		entName := fmt.Sprintf("premium-%d", i)
-		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, tenant_id)
+		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
 			productID, fmt.Sprintf("reconcile-prod-%d-%s", i, suffix), fmt.Sprintf("reconcile-tier-%d-%s", i, suffix), entName, dbtest.TestTenantID.UUID())
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, tenant_id)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id)
 		      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, dbtest.TestTenantID.UUID())
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, processor, processor_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
-		         entitlements_spec_snapshot, tenant_subject_id, tenant_id)
+		         entitlements_spec_snapshot, merchant_subject_id, merchant_id)
 		      VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, jsonb_build_object($8::text, null), $7, $9)`,
 			subID, priceID, productID, fmt.Sprintf("it-%d-%s", i, suffix),
 			periodStart, periodEnd, s.subjectID, entName, dbtest.TestTenantID.UUID())
@@ -99,7 +99,7 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		if subID == s.subDead {
 			entID = s.entDeadID
 		}
-		exec(`INSERT INTO openrails.entitlements (id, tenant_subject_id, entitlement, start_at, end_at, source_id, source_type, tenant_id)
+		exec(`INSERT INTO openrails.entitlements (id, merchant_subject_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 		      VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7)`,
 			entID, s.subjectID, entName, periodStart, periodEnd, subID, dbtest.TestTenantID.UUID())
 	}
@@ -144,7 +144,7 @@ func reconcileSnapshot(t *testing.T, ctx context.Context, appDB *db.DB, seeded s
 
 func TestReconcileEngineIntegration(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 
 	var seeded seededState
 	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
@@ -240,7 +240,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 		var amount int64
 		var subjectID uuid.UUID
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT amount, tenant_subject_id FROM openrails.payments WHERE processor = 'nmi' AND transaction_id LIKE 'itxn-%'`).
+			`SELECT amount, merchant_subject_id FROM openrails.payments WHERE processor = 'nmi' AND transaction_id LIKE 'itxn-%'`).
 			Scan(&amount, &subjectID))
 		assert.Equal(t, int64(999), amount)
 		assert.Equal(t, seeded.subjectID, subjectID)
@@ -331,7 +331,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 // unresolvable one stays admin_pending.
 func TestReconcileMaterializeIntegration(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 	store := &PGStore{DB: appDB}
 
 	suffix := uuid.NewString()[:8]
@@ -344,7 +344,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	entName := "premium-mat-" + suffix
 
 	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
-		subjectIDHolder = dbtest.EnsureTenantSubjectIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		subjectIDHolder = dbtest.EnsureMerchantSubjectIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 		exec := func(sql string, args ...any) {
 			t.Helper()
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
@@ -352,14 +352,14 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		}
 		// Catalog: product with an entitlements spec + a price whose
 		// provider_links blob carries the NMI plan id.
-		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, tenant_id)
+		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
 			productID, "mat-prod-"+suffix, "mat-tier-"+suffix, entName, dbtest.TestTenantID.UUID())
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, processors, tenant_id)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, processors, merchant_id)
 		      VALUES ($1, $2, 1499, 'usd', 30, jsonb_build_object('nmi', jsonb_build_object('plan_id', $3::text)), $4)`,
 			priceID, productID, planID, dbtest.TestTenantID.UUID())
 		// Identity anchor: a stored payment method holding the remote vault id.
-		exec(`INSERT INTO openrails.payment_methods (id, tenant_subject_id, processor, vault_id, initial_transaction_id, last_four, expiry_date, tenant_id)
+		exec(`INSERT INTO openrails.payment_methods (id, merchant_subject_id, processor, vault_id, initial_transaction_id, last_four, expiry_date, merchant_id)
 		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029', $5)`, pmID, subjectIDHolder, vaultID, suffix, dbtest.TestTenantID.UUID())
 		return nil
 	}))
@@ -446,7 +446,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		var gotSubject uuid.UUID
 		var gotPeriodEnd time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT id, status::text, processor, tenant_subject_id, current_period_ends_at
+			`SELECT id, status::text, processor, merchant_subject_id, current_period_ends_at
 			 FROM openrails.subscriptions WHERE processor_subscription_id = $1`, resolvablePSID).
 			Scan(&subID, &status, &processor, &gotSubject, &gotPeriodEnd))
 		assert.Equal(t, "active", status)
@@ -524,7 +524,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 // touches the intent rows, and a recovered intent's finding auto-resolves.
 func TestReconcileStuckIntentIntegration(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 	store := &PGStore{DB: appDB}
 
 	suffix := uuid.NewString()[:8]
@@ -540,7 +540,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx,
 				`INSERT INTO openrails.provider_intents
 				   (id, provider, intent_type, subscription_id, idempotency_key,
-				    status, attempts, next_attempt_at, origin, last_failure_reason, created_at, tenant_id)
+				    status, attempts, next_attempt_at, origin, last_failure_reason, created_at, merchant_id)
 				 VALUES ($1, 'mobius', 'nmi_delete_subscription', $2, $3, $4, 2, now(), 'system', $5, now() - make_interval(mins => $6), $7)`,
 				id, subscriptionID, fmt.Sprintf("stuck-%s-%s", id.String()[:8], suffix),
 				status, reason, int(age.Minutes()), dbtest.TestTenantID.UUID())
@@ -675,7 +675,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 // with its error instead of half-applying.
 func TestReconcileRunRecordsFailure(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 	store := &PGStore{DB: appDB}
 	eng := &Engine{
 		Fetchers: map[Provider]ProcessorFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, err: fmt.Errorf("query.php unreachable")}},

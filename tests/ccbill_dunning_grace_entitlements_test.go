@@ -56,7 +56,7 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 
 	sub := suite.GetSubscriptionByProcessorID(subID)
 	require.NotNil(t, sub)
-	require.Equal(t, userID, sub.TenantSubjectID.String())
+	require.Equal(t, userID, sub.MerchantSubjectID.String())
 	require.Equal(t, models.ProcessorCCBill, sub.Processor)
 
 	require.NotNil(t, sub.CurrentPeriodEndsAt)
@@ -212,14 +212,14 @@ func mustLoadJSONMap(t *testing.T, path string) map[string]any {
 func mustGetSubscriptionEntitlement(t *testing.T, suite *TestContainerSuite, ctx context.Context, userID string, subscriptionID uuid.UUID, entitlement string) *models.Entitlement {
 	t.Helper()
 	ents := suite.QueryEntitlements(ctx, `
-		WHERE tenant_subject_id = $1
+		WHERE merchant_subject_id = $1
 		  AND entitlement = $2
 		  AND source_type = $3
 		  AND source_id = $4
 		  AND deleted_at IS NULL
 		ORDER BY start_at DESC
 		LIMIT 1`,
-		suite.ensureTenantSubject(ctx, userID), entitlement,
+		suite.ensureMerchantSubject(ctx, userID), entitlement,
 		string(models.EntitlementSourceSubscription), subscriptionID)
 	require.Len(t, ents, 1, "expected a subscription entitlement window")
 	return &ents[0]

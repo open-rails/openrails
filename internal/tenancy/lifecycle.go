@@ -10,21 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// TenantProvisioner is the slice of the #224 control plane the lifecycle service
-// needs to create/link a tenant's operator AuthKit tenant and seed its role. The
-// concrete *controlplane.ControlPlane satisfies it (see the adapter in
-// internal/controlplane), and tests inject a fake so lifecycle logic is exercised
-// without a live AuthKit/DB.
-type TenantProvisioner interface {
-	// EnsureAuthKitTenant idempotently ensures an AuthKit tenant for the given slug
-	// exists with the OpenRails operator role + full catalog, returning its id.
-	EnsureAuthKitTenant(ctx context.Context, tenantSlug string) (authKitTenantID string, err error)
-}
-
-// TenantStatus mirrors openrails.tenants.status.
+// TenantStatus mirrors openrails.merchants.status.
 type TenantStatus string
 
 const (
@@ -33,30 +22,30 @@ const (
 	StatusDeleted   TenantStatus = "deleted"
 )
 
-// Tenant is the directory view of a row in openrails.tenants.
+// Tenant is the directory view of a row in openrails.merchants.
 type Tenant struct {
-	ID                tenant.ID
-	Slug              string
-	Name              string
-	Status            TenantStatus
-	AuthKitTenantID   string
-	AuthKitTenantSlug string
-	BillingTier       string
-	Region            string
-	WebhookHost       string
-	WebhookPath       string
-	SuspendedAt       *time.Time
+	ID            merchant.ID
+	Slug          string
+	Name          string
+	Status        TenantStatus
+	OwnerTenantID string // AuthKit org that owns/administers this merchant (#481); "" in embedded
+	BillingTier   string
+	Region        string
+	WebhookHost   string
+	WebhookPath   string
+	SuspendedAt   *time.Time
 }
 
 // ProvisionRequest parameterizes tenant provisioning.
 type ProvisionRequest struct {
 	// Slug is the stable tenant slug (used in routes and tenant resolution).
 	Slug string
-	// Name is the human-readable tenant name.
+	// Name is the human-readable merchant name.
 	Name string
-	// OperatorTenantSlug is the AuthKit tenant slug that operates this tenant. Defaults
-	// to "tenant-<slug>" when empty.
-	OperatorTenantSlug string
+	// OwnerTenantID is the AuthKit org (tenant) uuid that owns/administers this
+	// merchant (#481 ownership link, NOT identity). Optional; empty = unowned
+	// (embedded, or owner linked later). Never auto-minted.
+	OwnerTenantID string
 	// BillingTier is the platform's own billing tier for this tenant (dogfood).
 	BillingTier string
 	// Region is optional hosting metadata.
@@ -66,30 +55,30 @@ type ProvisionRequest struct {
 	WebhookPath string
 }
 
-// ErrTenantNotFound indicates no openrails.tenants row matched.
+// ErrTenantNotFound indicates no openrails.merchants row matched.
 var ErrTenantNotFound = errors.New("tenancy: tenant not found")
 
 // ErrExportRequired is returned by Delete when no completed export exists for the
 // tenant (export-before-delete is enforced).
 var ErrExportRequired = errors.New("tenancy: export required before delete")
 
-// Service is the tenant provisioning + lifecycle service (issue #225). It owns
-// the openrails.tenants directory rows and per-tenant secrets, and delegates
-// operator-tenant/service-token creation to the control plane via TenantProvisioner.
+// Service is the merchant provisioning + lifecycle service (issue #225). It owns
+// the openrails.merchants directory rows (billing buckets) and per-merchant
+// secrets. #481: it no longer auto-mints an AuthKit org per merchant — owner-tenant
+// ownership is set explicitly (the explicit register -> create-tenant ->
+// create-remote_application -> create-merchant flow), never auto-minted here.
 type Service struct {
 	pool    *db.Pool
-	tenants TenantProvisioner // optional: nil disables AuthKit tenant linking (DB-only mode)
 	secrets TenantSecretStore
 }
 
-// NewService builds the lifecycle service. pool is required (it owns the tenant
-// directory). tenants may be nil (provision then records no operator tenant). secrets
-// may be nil (credential management disabled).
-func NewService(pool *db.Pool, tenants TenantProvisioner, secrets TenantSecretStore) (*Service, error) {
+// NewService builds the lifecycle service. pool is required (it owns the merchant
+// directory). secrets may be nil (credential management disabled).
+func NewService(pool *db.Pool, secrets TenantSecretStore) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("tenancy: pgx pool is required")
 	}
-	return &Service{pool: pool, tenants: tenants, secrets: secrets}, nil
+	return &Service{pool: pool, secrets: secrets}, nil
 }
 
 // NewSecretManagementService builds a secret-management-only Service. It is for
@@ -107,7 +96,7 @@ func (s *Service) Secrets() TenantSecretStore { return s.secrets }
 
 // Provision idempotently provisions a tenant (issue #225):
 //
-//  1. create/ensure the openrails.tenants namespace row (resolve by slug),
+//  1. create/ensure the openrails.merchants namespace row (resolve by slug),
 //  2. create/link the operator AuthKit tenant via the control plane and record it,
 //  3. record routing (webhook host/path) + billing tier + region.
 //
@@ -124,21 +113,18 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Tenant,
 	if name == "" {
 		name = slug
 	}
-	operatorTenantSlug := normalizeSlug(req.OperatorTenantSlug)
-	if operatorTenantSlug == "" {
-		operatorTenantSlug = "tenant-" + slug
-	}
 
-	// 1. Upsert the tenant directory row. ON CONFLICT(slug) DO NOTHING keeps the
-	//    existing row, then we re-read so provision is idempotent.
+	// 1. Upsert the merchant directory row. ON CONFLICT(slug) DO NOTHING keeps the
+	//    existing row, then we re-read so provision is idempotent. #481: no AuthKit
+	//    org is auto-minted — the owner-tenant link is set explicitly elsewhere.
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO openrails.tenants (slug, name, status, billing_tier, region, webhook_host, webhook_path, provisioned_at)
-		VALUES ($1, $2, 'active', NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), current_timestamp)
+		INSERT INTO openrails.merchants (slug, name, status, owner_tenant_id, billing_tier, region, webhook_host, webhook_path, provisioned_at)
+		VALUES ($1, $2, 'active', NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), current_timestamp)
 		ON CONFLICT (slug) DO NOTHING
-	`, slug, name, strings.TrimSpace(req.BillingTier), strings.TrimSpace(req.Region),
+	`, slug, name, strings.TrimSpace(req.OwnerTenantID), strings.TrimSpace(req.BillingTier), strings.TrimSpace(req.Region),
 		strings.TrimSpace(req.WebhookHost), strings.TrimSpace(req.WebhookPath))
 	if err != nil {
-		return nil, fmt.Errorf("tenancy: insert tenant %q: %w", slug, err)
+		return nil, fmt.Errorf("tenancy: insert merchant %q: %w", slug, err)
 	}
 
 	t, err := s.tenantBySlug(ctx, slug)
@@ -146,28 +132,23 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Tenant,
 		return nil, err
 	}
 
-	// 2. Create/link the operator tenant and record it on the tenant row (idempotent).
-	if s.tenants != nil {
-		authKitTenantID, oerr := s.tenants.EnsureAuthKitTenant(ctx, operatorTenantSlug)
-		if oerr != nil {
-			return nil, fmt.Errorf("tenancy: ensure operator tenant %q: %w", operatorTenantSlug, oerr)
-		}
+	// 2. Record the explicit owner-tenant ownership link when supplied (#481): the
+	//    AuthKit org that administers this merchant. Idempotent; never auto-minted.
+	if owner := strings.TrimSpace(req.OwnerTenantID); owner != "" {
 		if _, uerr := s.pool.Exec(ctx, `
-			UPDATE openrails.tenants
-			   SET authkit_tenant_id = $2, authkit_tenant_slug = $3, updated_at = current_timestamp
-			 WHERE id = $1::uuid
-			   AND (authkit_tenant_id IS DISTINCT FROM $2 OR authkit_tenant_slug IS DISTINCT FROM $3)
-		`, t.ID.String(), authKitTenantID, operatorTenantSlug); uerr != nil {
-			return nil, fmt.Errorf("tenancy: record operator tenant on tenant: %w", uerr)
+			UPDATE openrails.merchants
+			   SET owner_tenant_id = $2, updated_at = current_timestamp
+			 WHERE id = $1::uuid AND owner_tenant_id IS DISTINCT FROM $2
+		`, t.ID.String(), owner); uerr != nil {
+			return nil, fmt.Errorf("tenancy: record owner tenant on merchant: %w", uerr)
 		}
-		t.AuthKitTenantID = authKitTenantID
-		t.AuthKitTenantSlug = operatorTenantSlug
+		t.OwnerTenantID = owner
 	}
 
 	// 3. Reconcile routing / tier / region for an already-existing row (provision
 	//    is idempotent AND patches routing on re-run).
 	if _, err := s.pool.Exec(ctx, `
-		UPDATE openrails.tenants
+		UPDATE openrails.merchants
 		   SET billing_tier  = COALESCE(NULLIF($2,''), billing_tier),
 		       region        = COALESCE(NULLIF($3,''), region),
 		       webhook_host  = COALESCE(NULLIF($4,''), webhook_host),
@@ -184,24 +165,24 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Tenant,
 
 // Suspend marks a tenant suspended: reads return maintenance and writes are
 // denied (enforced by IsWritable / the suspension middleware). Idempotent.
-func (s *Service) Suspend(ctx context.Context, id tenant.ID) error {
+func (s *Service) Suspend(ctx context.Context, id merchant.ID) error {
 	return s.setStatus(ctx, id, StatusSuspended, true)
 }
 
 // Resume clears suspension and returns the tenant to active. Idempotent.
-func (s *Service) Resume(ctx context.Context, id tenant.ID) error {
+func (s *Service) Resume(ctx context.Context, id merchant.ID) error {
 	return s.setStatus(ctx, id, StatusActive, false)
 }
 
 // TierChange upgrades/downgrades the platform's own billing tier for this tenant
 // (dogfood). Idempotent.
-func (s *Service) TierChange(ctx context.Context, id tenant.ID, tier string) error {
+func (s *Service) TierChange(ctx context.Context, id merchant.ID, tier string) error {
 	tier = strings.TrimSpace(tier)
 	if tier == "" {
 		return errors.New("tenancy: tier change requires a tier")
 	}
 	ct, err := s.pool.Exec(ctx, `
-		UPDATE openrails.tenants SET billing_tier = $2, updated_at = current_timestamp
+		UPDATE openrails.merchants SET billing_tier = $2, updated_at = current_timestamp
 		 WHERE id = $1::uuid AND deleted_at IS NULL
 	`, id.String(), tier)
 	if err != nil {
@@ -213,7 +194,7 @@ func (s *Service) TierChange(ctx context.Context, id tenant.ID, tier string) err
 	return nil
 }
 
-func (s *Service) setStatus(ctx context.Context, id tenant.ID, status TenantStatus, suspended bool) error {
+func (s *Service) setStatus(ctx context.Context, id merchant.ID, status TenantStatus, suspended bool) error {
 	var suspendedExpr string
 	if suspended {
 		suspendedExpr = "COALESCE(suspended_at, current_timestamp)"
@@ -221,7 +202,7 @@ func (s *Service) setStatus(ctx context.Context, id tenant.ID, status TenantStat
 		suspendedExpr = "NULL"
 	}
 	ct, err := s.pool.Exec(ctx, fmt.Sprintf(`
-		UPDATE openrails.tenants
+		UPDATE openrails.merchants
 		   SET status = $2, suspended_at = %s, updated_at = current_timestamp
 		 WHERE id = $1::uuid AND deleted_at IS NULL
 	`, suspendedExpr), id.String(), string(status))
@@ -237,7 +218,7 @@ func (s *Service) setStatus(ctx context.Context, id tenant.ID, status TenantStat
 // IsWritable reports whether the tenant currently accepts writes. Suspended or
 // deleted tenants are read-only; the default tenant and active tenants are
 // writable. A missing tenant is treated as not writable.
-func (s *Service) IsWritable(ctx context.Context, id tenant.ID) (bool, error) {
+func (s *Service) IsWritable(ctx context.Context, id merchant.ID) (bool, error) {
 	t, err := s.tenantByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, ErrTenantNotFound) {
@@ -249,7 +230,7 @@ func (s *Service) IsWritable(ctx context.Context, id tenant.ID) (bool, error) {
 }
 
 // Get returns the tenant directory row by id.
-func (s *Service) Get(ctx context.Context, id tenant.ID) (*Tenant, error) {
+func (s *Service) Get(ctx context.Context, id merchant.ID) (*Tenant, error) {
 	return s.tenantByID(ctx, id)
 }
 
@@ -272,7 +253,7 @@ func (s *Service) SearchTenants(ctx context.Context, q string, limit int) ([]Ten
 	}
 	pattern := "%" + strings.ToLower(q) + "%"
 	rows, err := s.pool.Query(ctx, `SELECT `+tenantSelectCols+`
-		FROM openrails.tenants
+		FROM openrails.merchants
 		WHERE deleted_at IS NULL
 		  AND (lower(slug) LIKE $1 OR lower(name) LIKE $1)
 		ORDER BY slug LIMIT $2`, pattern, limit)
@@ -296,7 +277,7 @@ func normalizeSlug(s string) string {
 }
 
 const tenantSelectCols = `id::text, slug, name, status,
-	COALESCE(authkit_tenant_id,''), COALESCE(authkit_tenant_slug,''),
+	COALESCE(owner_tenant_id,''),
 	COALESCE(billing_tier,''), COALESCE(region,''),
 	COALESCE(webhook_host,''), COALESCE(webhook_path,''), suspended_at`
 
@@ -308,14 +289,14 @@ func scanTenant(row pgx.Row) (*Tenant, error) {
 		suspendedAt *time.Time
 	)
 	if err := row.Scan(&idStr, &t.Slug, &t.Name, &status,
-		&t.AuthKitTenantID, &t.AuthKitTenantSlug, &t.BillingTier, &t.Region,
+		&t.OwnerTenantID, &t.BillingTier, &t.Region,
 		&t.WebhookHost, &t.WebhookPath, &suspendedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrTenantNotFound
 		}
 		return nil, err
 	}
-	id, err := tenant.ParseID(idStr)
+	id, err := merchant.ParseID(idStr)
 	if err != nil {
 		return nil, err
 	}
@@ -327,12 +308,12 @@ func scanTenant(row pgx.Row) (*Tenant, error) {
 
 func (s *Service) tenantBySlug(ctx context.Context, slug string) (*Tenant, error) {
 	row := s.pool.QueryRow(ctx, `SELECT `+tenantSelectCols+`
-		FROM openrails.tenants WHERE slug = $1 AND deleted_at IS NULL`, slug)
+		FROM openrails.merchants WHERE slug = $1 AND deleted_at IS NULL`, slug)
 	return scanTenant(row)
 }
 
-func (s *Service) tenantByID(ctx context.Context, id tenant.ID) (*Tenant, error) {
+func (s *Service) tenantByID(ctx context.Context, id merchant.ID) (*Tenant, error) {
 	row := s.pool.QueryRow(ctx, `SELECT `+tenantSelectCols+`
-		FROM openrails.tenants WHERE id = $1::uuid AND deleted_at IS NULL`, id.String())
+		FROM openrails.merchants WHERE id = $1::uuid AND deleted_at IS NULL`, id.String())
 	return scanTenant(row)
 }

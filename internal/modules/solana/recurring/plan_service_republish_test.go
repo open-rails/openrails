@@ -8,7 +8,7 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // fakePlanReader returns a fixed (data, err) for GetAccountData regardless of the
@@ -67,24 +67,24 @@ func devnetUSDCMint(t *testing.T) solanago.PublicKey {
 // MATCHING terms, PublishPlan returns the existing handle WITHOUT a second submit.
 func TestPublishPlanIdempotentRepublish(t *testing.T) {
 	merchantKey, _ := solanago.NewRandomPrivateKey()
-	merchant := merchantKey.PublicKey()
+	merchantPub := merchantKey.PublicKey()
 	mint := devnetUSDCMint(t)
 
 	const amount = uint64(10_000_000)
 	const periodHours = uint64(720)
 	const createdAt = int64(1_717_200_000)
 
-	planPDA, _, err := subscriptions.DerivePlanPDA(merchant, 7)
+	planPDA, _, err := subscriptions.DerivePlanPDA(merchantPub, 7)
 	if err != nil {
 		t.Fatalf("derive pda: %v", err)
 	}
 
-	sub := &fakeSubmitter{merchant: merchant}
-	reader := fakePlanReader{data: buildPlanBlob(merchant, mint, amount, periodHours, createdAt)}
+	sub := &fakeSubmitter{merchantPub: merchantPub}
+	reader := fakePlanReader{data: buildPlanBlob(merchantPub, mint, amount, periodHours, createdAt)}
 	svc := NewPlanServiceWithReader(sub, reader, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
-		TenantID:        tenant.ID{},
+		MerchantID:        merchant.ID{},
 		PlanID:          7,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: amount,
@@ -111,16 +111,16 @@ func TestPublishPlanIdempotentRepublish(t *testing.T) {
 // IMMUTABLE terms must be rejected (publish a new plan_id instead of mutating).
 func TestPublishPlanRepublishDifferingTermsRejected(t *testing.T) {
 	merchantKey, _ := solanago.NewRandomPrivateKey()
-	merchant := merchantKey.PublicKey()
+	merchantPub := merchantKey.PublicKey()
 	mint := devnetUSDCMint(t)
 
 	// On-chain plan has amount 5_000_000; the re-publish requests 10_000_000.
-	reader := fakePlanReader{data: buildPlanBlob(merchant, mint, 5_000_000, 720, 1_717_200_000)}
-	sub := &fakeSubmitter{merchant: merchant}
+	reader := fakePlanReader{data: buildPlanBlob(merchantPub, mint, 5_000_000, 720, 1_717_200_000)}
+	sub := &fakeSubmitter{merchantPub: merchantPub}
 	svc := NewPlanServiceWithReader(sub, reader, "devnet", testSolanaTokens())
 
 	_, err := svc.PublishPlan(context.Background(), PublishPlanInput{
-		TenantID:        tenant.ID{},
+		MerchantID:        merchant.ID{},
 		PlanID:          7,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 10_000_000,
@@ -141,14 +141,14 @@ func TestPublishPlanRepublishDifferingTermsRejected(t *testing.T) {
 // normal create_plan path runs (a submit happens and a fresh handle is returned).
 func TestPublishPlanAbsentPDAProceeds(t *testing.T) {
 	merchantKey, _ := solanago.NewRandomPrivateKey()
-	merchant := merchantKey.PublicKey()
+	merchantPub := merchantKey.PublicKey()
 
 	reader := fakePlanReader{data: nil} // PDA does not exist
-	sub := &fakeSubmitter{merchant: merchant}
+	sub := &fakeSubmitter{merchantPub: merchantPub}
 	svc := NewPlanServiceWithReader(sub, reader, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
-		TenantID:        tenant.ID{},
+		MerchantID:        merchant.ID{},
 		PlanID:          7,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 10_000_000,
@@ -168,8 +168,8 @@ func TestPublishPlanAbsentPDAProceeds(t *testing.T) {
 // TestPublishPlanPeriodBoundValidation: period_hours must be in (0, 8760].
 func TestPublishPlanPeriodBoundValidation(t *testing.T) {
 	merchantKey, _ := solanago.NewRandomPrivateKey()
-	merchant := merchantKey.PublicKey()
-	sub := &fakeSubmitter{merchant: merchant}
+	merchantPub := merchantKey.PublicKey()
+	sub := &fakeSubmitter{merchantPub: merchantPub}
 	svc := NewPlanService(sub, "devnet", testSolanaTokens())
 
 	for _, period := range []uint64{0, maxPeriodHours + 1} {
@@ -195,8 +195,8 @@ func TestPublishPlanPeriodBoundValidation(t *testing.T) {
 // period_hours must equal days*24.
 func TestPublishPlanBillingCycleConsistency(t *testing.T) {
 	merchantKey, _ := solanago.NewRandomPrivateKey()
-	merchant := merchantKey.PublicKey()
-	sub := &fakeSubmitter{merchant: merchant}
+	merchantPub := merchantKey.PublicKey()
+	sub := &fakeSubmitter{merchantPub: merchantPub}
 	svc := NewPlanService(sub, "devnet")
 
 	_, err := svc.PublishPlan(context.Background(), PublishPlanInput{

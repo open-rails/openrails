@@ -7,7 +7,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func TestSeedConfiguredTenantSolanaSecret_SeedsWhenAbsent(t *testing.T) {
@@ -28,7 +28,7 @@ func TestSeedConfiguredTenantSolanaSecret_SeedsWhenAbsent(t *testing.T) {
 
 func TestSeedTenantSolanaSecret_SeedsRequestedTenant(t *testing.T) {
 	store := tenancy.NewMemorySecretStore()
-	tenantID, err := tenant.ParseID("019e986d-145c-7a4d-ab33-e7e087f4ce0d")
+	tenantID, err := merchant.ParseID("019e986d-145c-7a4d-ab33-e7e087f4ce0d")
 	if err != nil {
 		t.Fatalf("parse tenant id: %v", err)
 	}

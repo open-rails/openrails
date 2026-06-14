@@ -1,4 +1,4 @@
-package tenant
+package merchant
 
 import (
 	"context"
@@ -20,12 +20,12 @@ func TestWithIDAndFromContext(t *testing.T) {
 	}
 }
 
-func TestFromContext_NoTenant(t *testing.T) {
+func TestFromContext_NoMerchant(t *testing.T) {
 	if _, ok := FromContext(context.Background()); ok {
 		t.Fatal("FromContext(empty) ok = true, want false")
 	}
 
-	// A zero-valued tenant id stored on the context must be treated as unset.
+	// A zero-valued merchant id stored on the context must be treated as unset.
 	ctx := WithID(context.Background(), ID{})
 	if _, ok := FromContext(ctx); ok {
 		t.Fatal("FromContext(zero id) ok = true, want false")
@@ -33,9 +33,9 @@ func TestFromContext_NoTenant(t *testing.T) {
 }
 
 func TestRequire(t *testing.T) {
-	// Missing tenant surfaces as ErrNoTenant, never a silent fallback.
-	if _, err := Require(context.Background()); err != ErrNoTenant {
-		t.Fatalf("Require(empty) err = %v, want ErrNoTenant", err)
+	// Missing merchant surfaces as ErrNoMerchant, never a silent fallback.
+	if _, err := Require(context.Background()); err != ErrNoMerchant {
+		t.Fatalf("Require(empty) err = %v, want ErrNoMerchant", err)
 	}
 
 	want := ID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))

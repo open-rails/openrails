@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // fakeDelegatedResolver is a programmable DelegatedResolver for the delegated
@@ -32,7 +32,7 @@ func newDelegatedTestRouter(resolver DelegatedResolver, perm string) *gin.Engine
 	r := gin.New()
 	r.GET("/self", DelegatedSelfRequired(resolver), RequireDelegatedPermission(perm), func(c *gin.Context) {
 		resolved, _ := DelegatedFromGin(c)
-		tid, _ := tenant.FromContext(c.Request.Context())
+		tid, _ := merchant.FromContext(c.Request.Context())
 		uc, _ := ginauth.UserContextFromGin(c)
 		c.JSON(http.StatusOK, gin.H{
 			"tenant":         tid.String(),
@@ -67,7 +67,7 @@ func TestDelegatedSelfRequired_SucceedsAndBindsActingUser(t *testing.T) {
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
 			Tenant:           "operator",
-			TenantID:         dbtest.TestTenantID,
+			MerchantID:         dbtest.TestTenantID,
 			TenantSlug:       dbtest.TestTenantSlug,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermSelfBillingRead},
@@ -91,7 +91,7 @@ func TestDelegatedSelfRequired_DeniesMissingPermission(t *testing.T) {
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
 			Tenant:           "operator",
-			TenantID:         dbtest.TestTenantID,
+			MerchantID:         dbtest.TestTenantID,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermSelfBillingRead}, // read only
 		},
@@ -110,7 +110,7 @@ func TestDelegatedSelfRequired_NoAdminOverride(t *testing.T) {
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
 			Tenant:           "operator",
-			TenantID:         dbtest.TestTenantID,
+			MerchantID:         dbtest.TestTenantID,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermAdmin},
 		},
@@ -156,7 +156,7 @@ func TestDelegatedSelfRequired_DeniesServiceTokenCredential(t *testing.T) {
 
 func TestDelegatedSelfRequired_DeniesCrossTenant(t *testing.T) {
 	// Token's tenant maps to no active tenant for this deployment.
-	resolver := fakeDelegatedResolver{err: controlplane.ErrServiceTokenTenantUnresolved}
+	resolver := fakeDelegatedResolver{err: controlplane.ErrServiceTokenMerchantUnresolved}
 	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)

@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/http/response"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type upsertTenantSecretRequest struct {
@@ -137,15 +137,15 @@ func tenantSecretDeleteHandler(rt *app.Runtime) gin.HandlerFunc {
 	}
 }
 
-func tenantSecretContext(c *gin.Context, rt *app.Runtime) (*tenancy.Service, tenant.ID, bool) {
+func tenantSecretContext(c *gin.Context, rt *app.Runtime) (*tenancy.Service, merchant.ID, bool) {
 	if rt == nil || rt.Tenancy == nil {
 		response.ServiceUnavailable(c, "tenant secrets not configured")
-		return nil, tenant.ID{}, false
+		return nil, merchant.ID{}, false
 	}
-	id, ok := tenant.FromContext(c.Request.Context())
+	id, ok := merchant.FromContext(c.Request.Context())
 	if !ok {
 		response.InternalError(c, "tenant context missing")
-		return nil, tenant.ID{}, false
+		return nil, merchant.ID{}, false
 	}
 	return rt.Tenancy, id, true
 }

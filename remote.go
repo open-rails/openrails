@@ -288,7 +288,7 @@ func (c *remote) SetCreditAccountSettings(ctx context.Context, payerTenantID, cu
 }
 
 // ListCreditTransactions implements Client (handler
-// ServiceListTenantSubjectCreditTransactions) and passes the canonical JSON
+// ServiceListMerchantSubjectCreditTransactions) and passes the canonical JSON
 // through.
 func (c *remote) ListCreditTransactions(ctx context.Context, payerTenantID, currency string, limit int) (json.RawMessage, error) {
 	q := url.Values{}

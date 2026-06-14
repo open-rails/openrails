@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 var ErrUSDCFundingSessionNotFound = errors.New("usdc funding session not found")
@@ -28,8 +28,8 @@ func NewUSDCFundingSessionRepo(d *db.DB) *USDCFundingSessionRepo {
 func usdcFundingSessionFromGen(s gen.OpenrailsUsdcFundingSession) (*models.USDCFundingSession, error) {
 	m := &models.USDCFundingSession{
 		ID:                s.ID,
-		TenantID:          s.TenantID,
-		TenantSubjectID:   s.TenantSubjectID,
+		MerchantID:          s.MerchantID,
+		MerchantSubjectID:   s.MerchantSubjectID,
 		CheckoutSessionID: s.CheckoutSessionID,
 		Provider:          s.Provider,
 		WalletAddress:     s.WalletAddress,
@@ -53,19 +53,19 @@ func usdcFundingSessionFromGen(s gen.OpenrailsUsdcFundingSession) (*models.USDCF
 }
 
 func (r *USDCFundingSessionRepo) CreateForUserID(ctx context.Context, userID string, session *models.USDCFundingSession) error {
-	tsid, err := EnsureTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := EnsureMerchantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return err
 	}
-	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, tsid); err != nil {
+	if err := ensureMerchantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, tsid); err != nil {
 		return err
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	session.TenantID = tid.UUID()
-	session.TenantSubjectID = tsid
+	session.MerchantID = tid.UUID()
+	session.MerchantSubjectID = tsid
 	if session.Metadata == nil {
 		session.Metadata = map[string]any{}
 	}
@@ -75,8 +75,8 @@ func (r *USDCFundingSessionRepo) CreateForUserID(ctx context.Context, userID str
 	}
 	return r.db.Gen(ctx).CreateUSDCFundingSession(ctx, gen.CreateUSDCFundingSessionParams{
 		ID:                session.ID,
-		TenantID:          session.TenantID,
-		TenantSubjectID:   session.TenantSubjectID,
+		MerchantID:          session.MerchantID,
+		MerchantSubjectID:   session.MerchantSubjectID,
 		CheckoutSessionID: session.CheckoutSessionID,
 		Provider:          session.Provider,
 		WalletAddress:     session.WalletAddress,
@@ -97,16 +97,16 @@ func (r *USDCFundingSessionRepo) CreateForUserID(ctx context.Context, userID str
 }
 
 func (r *USDCFundingSessionRepo) GetByIDForUserID(ctx context.Context, id uuid.UUID, userID string) (*models.USDCFundingSession, error) {
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
 	if tsid == uuid.Nil {
 		return nil, ErrUSDCFundingSessionNotFound
 	}
-	row, err := r.db.Gen(ctx).GetUSDCFundingSessionByIDForTenantSubject(ctx, gen.GetUSDCFundingSessionByIDForTenantSubjectParams{
+	row, err := r.db.Gen(ctx).GetUSDCFundingSessionByIDForMerchantSubject(ctx, gen.GetUSDCFundingSessionByIDForMerchantSubjectParams{
 		ID:              id,
-		TenantSubjectID: tsid,
+		MerchantSubjectID: tsid,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUSDCFundingSessionNotFound
@@ -133,7 +133,7 @@ func (r *USDCFundingSessionRepo) GetByIdempotencyKeyForUserID(ctx context.Contex
 	if key == "" {
 		return nil, ErrUSDCFundingSessionNotFound
 	}
-	tsid, err := ResolveTenantSubjectID(userID)
+	tsid, err := ResolveMerchantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func (r *USDCFundingSessionRepo) GetByIdempotencyKeyForUserID(ctx context.Contex
 		return nil, ErrUSDCFundingSessionNotFound
 	}
 	row, err := r.db.Gen(ctx).GetUSDCFundingSessionByIdempotencyKey(ctx, gen.GetUSDCFundingSessionByIdempotencyKeyParams{
-		TenantSubjectID: tsid,
+		MerchantSubjectID: tsid,
 		IdempotencyKey:  &key,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

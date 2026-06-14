@@ -20,12 +20,12 @@ import (
 // host-supplied principal; a principal with an empty/invalid tenant or
 // subject is rejected with 401 (fail closed).
 type DelegatedPrincipal struct {
-	// TenantID is the resolved OpenRails tenant id in UUID string form
+	// MerchantID is the resolved OpenRails tenant id in UUID string form
 	// (REQUIRED). The mapping from the host's credential to this tenant is
 	// per-deployment configuration owned by the host — explicit, never inferred.
 	// There is no default tenant to fall back to (#336): a deployment must
 	// resolve a real tenant id here.
-	TenantID string
+	MerchantID string
 
 	// TenantSlug is the tenant's display/audit slug (optional).
 	TenantSlug string
@@ -66,7 +66,7 @@ var ErrDelegatedPrincipalInvalid = errors.New("delegated principal requires an e
 // a non-empty tenant id and subject. (Tenant-id FORMAT and the permission
 // catalog are enforced by the adapting middleware, which owns those types.)
 func (p *DelegatedPrincipal) Validate() error {
-	if p == nil || strings.TrimSpace(p.TenantID) == "" || strings.TrimSpace(p.SubjectID) == "" {
+	if p == nil || strings.TrimSpace(p.MerchantID) == "" || strings.TrimSpace(p.SubjectID) == "" {
 		return ErrDelegatedPrincipalInvalid
 	}
 	return nil
@@ -97,7 +97,7 @@ type DelegatedAuthenticator interface {
 //				return nil, billingauth.ErrUnauthenticated
 //			}
 //			return &billingauth.DelegatedPrincipal{
-//				TenantID:    deploymentTenantID, // explicit per-deployment mapping
+//				MerchantID:    deploymentTenantID, // explicit per-deployment mapping
 //				SubjectID:   user.CanonicalID,
 //				Actor:       "https://auth.host.example",
 //				Permissions: []string{"openrails:self:billing:read"},

@@ -39,7 +39,7 @@ func toJSONB[M ~map[string]V, V any](m M) ([]byte, error) {
 func paymentFromGen(p gen.OpenrailsPayment) (*models.Payment, error) {
 	m := &models.Payment{
 		ID:                p.ID,
-		TenantSubjectID:   p.TenantSubjectID,
+		MerchantSubjectID:   p.MerchantSubjectID,
 		PriceID:           p.PriceID,
 		SubscriptionID:    p.SubscriptionID,
 		RefundedPaymentID: p.RefundedPaymentID,
@@ -86,7 +86,7 @@ func paymentsFromGen(rows []gen.OpenrailsPayment) ([]*models.Payment, error) {
 func priceFromGen(p gen.OpenrailsPrice) (*models.Price, error) {
 	m := &models.Price{
 		ID:               p.ID,
-		TenantID:         p.TenantID,
+		MerchantID:         p.MerchantID,
 		ProductID:        p.ProductID,
 		Status:           models.CatalogStatus(p.Status),
 		Amount:           p.Amount,
@@ -104,7 +104,7 @@ func priceFromGen(p gen.OpenrailsPrice) (*models.Price, error) {
 func productFromGen(p gen.OpenrailsProduct) (*models.Product, error) {
 	m := &models.Product{
 		ID:          p.ID,
-		TenantID:    p.TenantID,
+		MerchantID:    p.MerchantID,
 		Slug:        p.Slug,
 		DisplayName: p.DisplayName,
 		Description: derefStr(p.Description),
@@ -149,8 +149,8 @@ func derefUUID(u *uuid.UUID) uuid.UUID {
 func subscriptionFromGen(s gen.OpenrailsSubscription) (*models.Subscription, error) {
 	m := &models.Subscription{
 		ID:                      s.ID,
-		TenantID:                s.TenantID,
-		TenantSubjectID:         s.TenantSubjectID,
+		MerchantID:                s.MerchantID,
+		MerchantSubjectID:         s.MerchantSubjectID,
 		ProductID:               s.ProductID,
 		PriceID:                 derefUUID(s.PriceID),
 		ScheduledPriceID:        s.ScheduledPriceID,
@@ -202,7 +202,7 @@ func subscriptionsFromGen(rows []gen.OpenrailsSubscription) ([]*models.Subscript
 func paymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*models.PaymentMethod, error) {
 	m := &models.PaymentMethod{
 		ID:                   p.ID,
-		TenantSubjectID:      p.TenantSubjectID,
+		MerchantSubjectID:      p.MerchantSubjectID,
 		Processor:            models.Processor(p.Processor),
 		VaultID:              p.VaultID,
 		BillingID:            p.BillingID,
@@ -235,7 +235,7 @@ func paymentMethodsFromGen(rows []gen.OpenrailsPaymentMethod) ([]*models.Payment
 func checkoutSessionFromGen(c gen.OpenrailsCheckoutSession) (*models.CheckoutSession, error) {
 	m := &models.CheckoutSession{
 		ID:              c.ID,
-		TenantSubjectID: c.TenantSubjectID,
+		MerchantSubjectID: c.MerchantSubjectID,
 		PriceID:         c.PriceID,
 		Mode:            models.CheckoutSessionMode(c.Mode),
 		Processor:       models.Processor(c.Processor),
@@ -267,8 +267,8 @@ func entitlementFromGen(e gen.OpenrailsEntitlement) *models.Entitlement {
 	sourceID := e.SourceID
 	m := &models.Entitlement{
 		ID:              e.ID,
-		TenantID:        e.TenantID,
-		TenantSubjectID: e.TenantSubjectID,
+		MerchantID:        e.MerchantID,
+		MerchantSubjectID: e.MerchantSubjectID,
 		Entitlement:     e.Entitlement,
 		StartAt:         e.StartAt,
 		EndAt:           e.EndAt,

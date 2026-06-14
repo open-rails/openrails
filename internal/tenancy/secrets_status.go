@@ -9,12 +9,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ListSecretStatuses returns the registry plus configured/audit state for a
 // tenant. It never returns plaintext values.
-func (s *Service) ListSecretStatuses(ctx context.Context, id tenant.ID) ([]TenantSecretStatus, error) {
+func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]TenantSecretStatus, error) {
 	if id.IsZero() {
 		return nil, validateSecretRef(id, "x")
 	}
@@ -49,7 +49,7 @@ func (s *Service) ListSecretStatuses(ctx context.Context, id tenant.ID) ([]Tenan
 }
 
 // DeleteCredential deletes a tenant secret and writes a non-plaintext audit row.
-func (s *Service) DeleteCredential(ctx context.Context, id tenant.ID, name, actor string) error {
+func (s *Service) DeleteCredential(ctx context.Context, id merchant.ID, name, actor string) error {
 	if s.secrets == nil {
 		return errors.New("tenancy: no secret store configured")
 	}
@@ -66,7 +66,7 @@ func (s *Service) DeleteCredential(ctx context.Context, id tenant.ID, name, acto
 
 // ValidateCredential validates a supplied or stored credential value without
 // returning it. When value is empty, the current stored value is loaded.
-func (s *Service) ValidateCredential(ctx context.Context, id tenant.ID, name, value, actor string, stripeTester func(context.Context, string) error) error {
+func (s *Service) ValidateCredential(ctx context.Context, id merchant.ID, name, value, actor string, stripeTester func(context.Context, string) error) error {
 	name = cleanSecretName(name)
 	if _, ok := SecretDefinitionFor(name); !ok {
 		return fmt.Errorf("tenancy: unknown tenant secret %q", name)
@@ -139,7 +139,7 @@ func validationErrorCode(err error) string {
 	return code
 }
 
-func (s *Service) applyLatestAudit(ctx context.Context, id tenant.ID, st *TenantSecretStatus) {
+func (s *Service) applyLatestAudit(ctx context.Context, id merchant.ID, st *TenantSecretStatus) {
 	if s == nil || s.pool == nil || st == nil {
 		return
 	}

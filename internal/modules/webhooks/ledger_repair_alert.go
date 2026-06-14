@@ -77,14 +77,14 @@ func recordLedgerRepairAlert(ctx context.Context, notificationService *subscript
 		CreatedAt: now.UTC(),
 	}
 	// The alert is owned by the well-known system tenant subject
-	// (repo.SystemTenantSubjectID) — materialize its row through the normal
+	// (repo.SystemMerchantSubjectID) — materialize its row through the normal
 	// self-issuer path like any other UUID subject (#364).
 	if database != nil {
-		sysTSID, err := repo.EnsureTenantSubjectID(ctx, database.Qx(ctx), uuid.Nil, repo.SystemTenantSubjectID.String())
+		sysTSID, err := repo.EnsureMerchantSubjectID(ctx, database.Qx(ctx), uuid.Nil, repo.SystemMerchantSubjectID.String())
 		if err != nil {
 			return fmt.Errorf("resolve system tenant subject for ledger repair alert: %w", err)
 		}
-		notification.TenantSubjectID = sysTSID
+		notification.MerchantSubjectID = sysTSID
 	}
 	if err := notificationService.Create(ctx, notification); err != nil {
 		return fmt.Errorf("create ledger repair alert: %w", err)

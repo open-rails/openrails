@@ -26,7 +26,7 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
 	entName := "premium_timeline_test_" + uuid.New().String()
 	subID := uuid.New()
 	adminGrantID := uuid.New()
@@ -38,7 +38,7 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 	// Create a subscription-sourced entitlement window [t0, t1)
 	subEnt := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		Entitlement:     entName,
 		StartAt:         t0,
 		EndAt:           &t1,
@@ -52,7 +52,7 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 	// Create a scheduled admin window [t1, t2)
 	adminEnt := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		Entitlement:     entName,
 		StartAt:         t1,
 		EndAt:           &t2,
@@ -65,7 +65,7 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx,
-			`DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1 AND entitlement = $2`,
+			`DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1 AND entitlement = $2`,
 			tenantSubjectID, entName)
 	})
 
@@ -95,7 +95,7 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
 	entName := "premium_payment_revoke_" + uuid.New().String()
 	paymentID := uuid.New()
 
@@ -105,7 +105,7 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 
 	active := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		Entitlement:     entName,
 		StartAt:         activeStart,
 		EndAt:           &activeEnd,
@@ -118,7 +118,7 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 
 	future := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		Entitlement:     entName,
 		StartAt:         activeEnd,
 		EndAt:           &futureEnd,
@@ -157,7 +157,7 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
+func TestEntitlementRepo_MerchantSubjectQueries(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedPGXPool(t)
 
@@ -168,14 +168,14 @@ func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	tenantSubjectID := uuid.New()
-	otherTenantSubjectID := uuid.New()
+	otherMerchantSubjectID := uuid.New()
 	entName := "premium_tenant_subject_" + uuid.New().String()
 	finiteSourceID := uuid.New()
 	indefiniteSourceID := uuid.New()
 
 	dbtest.EnsureTestTenant(ctx, t, pool)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject) VALUES ($1, $2, $3, $4)`,
+		`INSERT INTO openrails.merchant_subjects (id, merchant_id, issuer, subject) VALUES ($1, $2, $3, $4)`,
 		tenantSubjectID,
 		dbtest.TestTenantID.UUID(),
 		"https://issuer.example",
@@ -187,7 +187,7 @@ func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
 	finiteEnd := now.Add(24 * time.Hour)
 	finite := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		Entitlement:     entName,
 		StartAt:         finiteStart,
 		EndAt:           &finiteEnd,
@@ -201,7 +201,7 @@ func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
 	indefiniteName := entName + "_indefinite"
 	indefinite := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		Entitlement:     indefiniteName,
 		StartAt:         finiteStart,
 		SourceType:      models.EntitlementSourceAdmin,
@@ -213,23 +213,23 @@ func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx,
-			`DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1 AND entitlement = ANY($2)`,
+			`DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1 AND entitlement = ANY($2)`,
 			tenantSubjectID, []string{entName, indefiniteName})
 	})
 
-	ok, err := r.IsTenantSubjectEntitled(ctx, tenantSubjectID, entName, now)
+	ok, err := r.IsMerchantSubjectEntitled(ctx, tenantSubjectID, entName, now)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	ok, err = r.IsTenantSubjectEntitled(ctx, otherTenantSubjectID, entName, now)
+	ok, err = r.IsMerchantSubjectEntitled(ctx, otherMerchantSubjectID, entName, now)
 	require.NoError(t, err)
 	require.False(t, ok)
 
-	ok, err = r.HasActiveIndefiniteByTenantSubject(ctx, tenantSubjectID, indefiniteName, now)
+	ok, err = r.HasActiveIndefiniteByMerchantSubject(ctx, tenantSubjectID, indefiniteName, now)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	latest, err := r.GetLatestFiniteActiveByTenantSubject(ctx, tenantSubjectID, entName, now)
+	latest, err := r.GetLatestFiniteActiveByMerchantSubject(ctx, tenantSubjectID, entName, now)
 	require.NoError(t, err)
 	require.Equal(t, finite.ID, latest.ID)
 }

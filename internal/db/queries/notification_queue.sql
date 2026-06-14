@@ -2,23 +2,23 @@
 
 -- name: CreateNotification :execrows
 INSERT INTO openrails.notification_queue (
-    id, tenant_id, tenant_subject_id, event_type, data, seen, created_at
+    id, merchant_id, merchant_subject_id, event_type, data, seen, created_at
 ) VALUES (
-    $1, sqlc.arg(tenant_id)::uuid, $2, $3, COALESCE(sqlc.narg(data), '{}'::jsonb), $4,
+    $1, sqlc.arg(merchant_id)::uuid, $2, $3, COALESCE(sqlc.narg(data), '{}'::jsonb), $4,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
 
 -- name: GetNotificationByID :one
 SELECT * FROM openrails.notification_queue WHERE id = $1;
 
--- name: ListNotificationsByTenantSubject :many
+-- name: ListNotificationsByMerchantSubject :many
 SELECT * FROM openrails.notification_queue nq
-WHERE nq.tenant_subject_id = $1
+WHERE nq.merchant_subject_id = $1
 ORDER BY nq.created_at DESC;
 
--- name: ListUnseenNotificationsByTenantSubject :many
+-- name: ListUnseenNotificationsByMerchantSubject :many
 SELECT * FROM openrails.notification_queue nq
-WHERE nq.tenant_subject_id = $1 AND nq.seen = false
+WHERE nq.merchant_subject_id = $1 AND nq.seen = false
 ORDER BY nq.created_at DESC;
 
 -- name: ListNotificationsByEventType :many
@@ -26,20 +26,20 @@ SELECT * FROM openrails.notification_queue nq
 WHERE nq.event_type = $1
 ORDER BY nq.created_at DESC;
 
--- name: CountNotificationsByTenantSubjectEventSince :one
+-- name: CountNotificationsByMerchantSubjectEventSince :one
 SELECT count(*) FROM openrails.notification_queue nq
-WHERE nq.tenant_subject_id = $1
+WHERE nq.merchant_subject_id = $1
   AND nq.event_type = $2
   AND nq.created_at >= $3;
 
--- name: ListTenantSubjectsWithPendingDigest :many
-SELECT DISTINCT nq.tenant_subject_id::text FROM openrails.notification_queue nq
+-- name: ListMerchantSubjectsWithPendingDigest :many
+SELECT DISTINCT nq.merchant_subject_id::text FROM openrails.notification_queue nq
 WHERE nq.event_type = $1
   AND nq.created_at >= $2;
 
--- name: ListPendingDigestForTenantSubject :many
+-- name: ListPendingDigestForMerchantSubject :many
 SELECT * FROM openrails.notification_queue nq
-WHERE nq.tenant_subject_id = $1
+WHERE nq.merchant_subject_id = $1
   AND nq.event_type = $2
   AND nq.created_at >= $3
 ORDER BY nq.created_at DESC
@@ -50,7 +50,7 @@ UPDATE openrails.notification_queue SET seen = true WHERE id = $1;
 
 -- name: UpdateNotification :execrows
 UPDATE openrails.notification_queue SET
-    tenant_subject_id = $2,
+    merchant_subject_id = $2,
     event_type = $3,
     data = sqlc.narg(data),
     seen = $4
@@ -61,13 +61,13 @@ DELETE FROM openrails.notification_queue WHERE id = $1;
 
 -- name: CountNotificationsFiltered :one
 SELECT count(*) FROM openrails.notification_queue nq
-WHERE (sqlc.narg(tenant_subject_id)::uuid IS NULL OR nq.tenant_subject_id = sqlc.narg(tenant_subject_id)::uuid)
+WHERE (sqlc.narg(merchant_subject_id)::uuid IS NULL OR nq.merchant_subject_id = sqlc.narg(merchant_subject_id)::uuid)
   AND (sqlc.narg(event_type)::text IS NULL OR nq.event_type = sqlc.narg(event_type)::text)
   AND (sqlc.narg(seen)::boolean IS NULL OR nq.seen = sqlc.narg(seen)::boolean);
 
 -- name: ListNotificationsFiltered :many
 SELECT * FROM openrails.notification_queue nq
-WHERE (sqlc.narg(tenant_subject_id)::uuid IS NULL OR nq.tenant_subject_id = sqlc.narg(tenant_subject_id)::uuid)
+WHERE (sqlc.narg(merchant_subject_id)::uuid IS NULL OR nq.merchant_subject_id = sqlc.narg(merchant_subject_id)::uuid)
   AND (sqlc.narg(event_type)::text IS NULL OR nq.event_type = sqlc.narg(event_type)::text)
   AND (sqlc.narg(seen)::boolean IS NULL OR nq.seen = sqlc.narg(seen)::boolean)
 ORDER BY nq.created_at DESC
@@ -83,14 +83,14 @@ WHERE created_at < sqlc.arg(cutoff)::timestamptz;
 
 -- name: CountRepairAlerts :one
 SELECT count(*) FROM openrails.notification_queue nq
-WHERE nq.tenant_subject_id = $1
+WHERE nq.merchant_subject_id = $1
   AND nq.event_type = $2
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
   AND (sqlc.narg(seen)::boolean IS NULL OR nq.seen = sqlc.narg(seen)::boolean);
 
 -- name: ListRepairAlerts :many
 SELECT * FROM openrails.notification_queue nq
-WHERE nq.tenant_subject_id = $1
+WHERE nq.merchant_subject_id = $1
   AND nq.event_type = $2
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
   AND (sqlc.narg(seen)::boolean IS NULL OR nq.seen = sqlc.narg(seen)::boolean)

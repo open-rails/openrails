@@ -49,7 +49,7 @@ func (q *Queries) BindSolanaCheckoutSession(ctx context.Context, arg BindSolanaC
 const createCheckoutSession = `-- name: CreateCheckoutSession :execrows
 
 INSERT INTO openrails.checkout_sessions (
-    id, tenant_id, tenant_subject_id, price_id, mode, processor, status, amount,
+    id, merchant_id, merchant_subject_id, price_id, mode, processor, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
     subscription_id, metadata, processor_fields, processor_state,
     idempotency_key, created_at, updated_at
@@ -66,39 +66,39 @@ INSERT INTO openrails.checkout_sessions (
 `
 
 type CreateCheckoutSessionParams struct {
-	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
-	PriceID         uuid.UUID
-	Mode            string
-	Processor       string
-	Status          string
-	Amount          int64
-	TenantID        uuid.UUID
-	Currency        string
-	ExpiresAt       *time.Time
-	Reference       *string
-	TransactionID   *string
-	PaymentID       *uuid.UUID
-	SubscriptionID  *uuid.UUID
-	Metadata        []byte
-	ProcessorFields []byte
-	ProcessorState  []byte
-	IdempotencyKey  *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                uuid.UUID
+	MerchantSubjectID uuid.UUID
+	PriceID           uuid.UUID
+	Mode              string
+	Processor         string
+	Status            string
+	Amount            int64
+	MerchantID        uuid.UUID
+	Currency          string
+	ExpiresAt         *time.Time
+	Reference         *string
+	TransactionID     *string
+	PaymentID         *uuid.UUID
+	SubscriptionID    *uuid.UUID
+	Metadata          []byte
+	ProcessorFields   []byte
+	ProcessorState    []byte
+	IdempotencyKey    *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // openrails.checkout_sessions.
 func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutSessionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createCheckoutSession,
 		arg.ID,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.PriceID,
 		arg.Mode,
 		arg.Processor,
 		arg.Status,
 		arg.Amount,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.Currency,
 		arg.ExpiresAt,
 		arg.Reference,
@@ -134,7 +134,7 @@ func (q *Queries) ExpireCheckoutSessions(ctx context.Context, now time.Time) (in
 }
 
 const getCheckoutSessionByID = `-- name: GetCheckoutSessionByID :one
-SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.checkout_sessions WHERE id = $1
+SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, merchant_id, merchant_subject_id FROM openrails.checkout_sessions WHERE id = $1
 `
 
 func (q *Queries) GetCheckoutSessionByID(ctx context.Context, id uuid.UUID) (OpenrailsCheckoutSession, error) {
@@ -159,14 +159,14 @@ func (q *Queries) GetCheckoutSessionByID(ctx context.Context, id uuid.UUID) (Ope
 		&i.IdempotencyKey,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
 const getCheckoutSessionByReference = `-- name: GetCheckoutSessionByReference :one
-SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.checkout_sessions cs
+SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, merchant_id, merchant_subject_id FROM openrails.checkout_sessions cs
 WHERE cs.reference = $1
 LIMIT 1
 `
@@ -193,15 +193,15 @@ func (q *Queries) GetCheckoutSessionByReference(ctx context.Context, reference *
 		&i.IdempotencyKey,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
 const getLatestOpenCheckoutSession = `-- name: GetLatestOpenCheckoutSession :one
-SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.checkout_sessions cs
-WHERE cs.tenant_subject_id = $1
+SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, merchant_id, merchant_subject_id FROM openrails.checkout_sessions cs
+WHERE cs.merchant_subject_id = $1
   AND cs.price_id = $2
   AND cs.processor = $3
   AND cs.status IN ('created', 'requires_action')
@@ -211,15 +211,15 @@ LIMIT 1
 `
 
 type GetLatestOpenCheckoutSessionParams struct {
-	TenantSubjectID uuid.UUID
-	PriceID         uuid.UUID
-	Processor       string
-	Now             time.Time
+	MerchantSubjectID uuid.UUID
+	PriceID           uuid.UUID
+	Processor         string
+	Now               time.Time
 }
 
 func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLatestOpenCheckoutSessionParams) (OpenrailsCheckoutSession, error) {
 	row := q.db.QueryRow(ctx, getLatestOpenCheckoutSession,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.PriceID,
 		arg.Processor,
 		arg.Now,
@@ -244,15 +244,15 @@ func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLates
 		&i.IdempotencyKey,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
 const updateCheckoutSession = `-- name: UpdateCheckoutSession :execrows
 UPDATE openrails.checkout_sessions SET
-    tenant_subject_id = $2,
+    merchant_subject_id = $2,
     price_id = $3,
     mode = $4,
     processor = $5,
@@ -273,30 +273,30 @@ WHERE id = $1
 `
 
 type UpdateCheckoutSessionParams struct {
-	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
-	PriceID         uuid.UUID
-	Mode            string
-	Processor       string
-	Status          string
-	Amount          int64
-	Currency        string
-	ExpiresAt       *time.Time
-	Reference       *string
-	TransactionID   *string
-	PaymentID       *uuid.UUID
-	SubscriptionID  *uuid.UUID
-	Metadata        []byte
-	ProcessorFields []byte
-	ProcessorState  []byte
-	IdempotencyKey  *string
-	UpdatedAt       time.Time
+	ID                uuid.UUID
+	MerchantSubjectID uuid.UUID
+	PriceID           uuid.UUID
+	Mode              string
+	Processor         string
+	Status            string
+	Amount            int64
+	Currency          string
+	ExpiresAt         *time.Time
+	Reference         *string
+	TransactionID     *string
+	PaymentID         *uuid.UUID
+	SubscriptionID    *uuid.UUID
+	Metadata          []byte
+	ProcessorFields   []byte
+	ProcessorState    []byte
+	IdempotencyKey    *string
+	UpdatedAt         time.Time
 }
 
 func (q *Queries) UpdateCheckoutSession(ctx context.Context, arg UpdateCheckoutSessionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateCheckoutSession,
 		arg.ID,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.PriceID,
 		arg.Mode,
 		arg.Processor,

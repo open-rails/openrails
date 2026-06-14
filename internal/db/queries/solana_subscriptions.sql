@@ -2,13 +2,13 @@
 
 -- name: UpsertSolanaSubscription :exec
 INSERT INTO openrails.solana_subscriptions (
-    id, tenant_id, subscription_id, subscriber_wallet, authority_pda,
+    id, merchant_id, subscription_id, subscriber_wallet, authority_pda,
     subscription_pda, plan_pda, merchant_address, mint,
     plan_created_at_fingerprint, last_pulled_period_start, last_signature,
     next_pull_at, status, created_at, updated_at
 ) VALUES (
     $1,
-    sqlc.arg(tenant_id)::uuid,
+    sqlc.arg(merchant_id)::uuid,
     $2, $3, $4, $5, $6, $7, $8, $9,
     sqlc.narg(last_pulled_period_start), sqlc.narg(last_signature),
     $10, $11, $12, $13
@@ -29,7 +29,7 @@ SELECT * FROM openrails.solana_subscriptions WHERE subscription_id = $1;
 -- name: ListDueSolanaSubscriptions :many
 SELECT * FROM openrails.solana_subscriptions
 WHERE status = 'active' AND next_pull_at <= sqlc.arg(now)::timestamptz
-ORDER BY tenant_id ASC, next_pull_at ASC
+ORDER BY merchant_id ASC, next_pull_at ASC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0);
 
 -- name: AdvanceSolanaSubscriptionAfterPull :exec
@@ -47,7 +47,7 @@ UPDATE openrails.solana_subscriptions SET
 WHERE id = $1;
 
 -- name: ListActiveSolanaMerchantWallets :many
-SELECT DISTINCT tenant_id, merchant_address
+SELECT DISTINCT merchant_id, merchant_address
 FROM openrails.solana_subscriptions
 WHERE status = 'active';
 

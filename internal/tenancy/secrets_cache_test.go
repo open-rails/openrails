@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // countingStore is a TenantSecretStore that records how many times each method
@@ -26,9 +26,9 @@ func newCountingStore() *countingStore {
 	return &countingStore{values: map[string]Secret{}}
 }
 
-func (s *countingStore) key(id tenant.ID, name string) string { return id.String() + "|" + name }
+func (s *countingStore) key(id merchant.ID, name string) string { return id.String() + "|" + name }
 
-func (s *countingStore) Get(_ context.Context, id tenant.ID, name string) (Secret, error) {
+func (s *countingStore) Get(_ context.Context, id merchant.ID, name string) (Secret, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gets++
@@ -42,7 +42,7 @@ func (s *countingStore) Get(_ context.Context, id tenant.ID, name string) (Secre
 	return v, nil
 }
 
-func (s *countingStore) Put(_ context.Context, id tenant.ID, name, value string) (Secret, error) {
+func (s *countingStore) Put(_ context.Context, id merchant.ID, name, value string) (Secret, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.puts++
@@ -52,7 +52,7 @@ func (s *countingStore) Put(_ context.Context, id tenant.ID, name, value string)
 	return sec, nil
 }
 
-func (s *countingStore) Delete(_ context.Context, id tenant.ID, name string) error {
+func (s *countingStore) Delete(_ context.Context, id merchant.ID, name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deletes++
@@ -60,7 +60,7 @@ func (s *countingStore) Delete(_ context.Context, id tenant.ID, name string) err
 	return nil
 }
 
-func (s *countingStore) List(_ context.Context, _ tenant.ID) ([]string, error) { return nil, nil }
+func (s *countingStore) List(_ context.Context, _ merchant.ID) ([]string, error) { return nil, nil }
 
 // withClock returns the wrapped cache plus a function to advance its clock.
 func withClock(t *testing.T, inner TenantSecretStore, ttl time.Duration) (TenantSecretStore, func(time.Duration)) {

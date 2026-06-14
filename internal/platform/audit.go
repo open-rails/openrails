@@ -18,7 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // AuditRow is a read view of a openrails.platform_audit row (list/inspect).
@@ -53,7 +53,7 @@ type AuditEntry struct {
 	ActorUserID    string
 	ActorTenant    string
 	Action         string
-	TargetTenantID *tenant.ID // nil for platform-wide actions (list/metrics)
+	TargetTenantID *merchant.ID // nil for platform-wide actions (list/metrics)
 	Reason         string
 	Before         any // JSON-serialized into before_state where applicable
 	After          any // JSON-serialized into after_state where applicable
@@ -131,7 +131,7 @@ func (a *AuditLog) Record(ctx context.Context, e AuditEntry) (string, error) {
 
 // List returns recent audit entries, most-recent first, optionally filtered to a
 // target tenant. limit is clamped to a sane range.
-func (a *AuditLog) List(ctx context.Context, targetTenant *tenant.ID, limit int) ([]AuditRow, error) {
+func (a *AuditLog) List(ctx context.Context, targetTenant *merchant.ID, limit int) ([]AuditRow, error) {
 	if a == nil || a.pool == nil {
 		return nil, errors.New("platform: audit log not configured")
 	}

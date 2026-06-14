@@ -26,7 +26,7 @@ func newExpiredSubscription() *Subscription {
 	start := past.Add(-30 * 24 * time.Hour)
 	return &Subscription{
 		ID:                    uuid.New(),
-		TenantSubjectID:       identity.TenantSubjectIDFromString("user-1").UUID(),
+		MerchantSubjectID:       identity.MerchantSubjectIDFromString("user-1").UUID(),
 		Status:                StatusActive,
 		StartedAt:             start,
 		CurrentPeriodStartsAt: &start,
@@ -88,7 +88,7 @@ func TestCancelImmediatelyAfterCreateHoldsOrdering(t *testing.T) {
 	now := time.Now()
 	sub := &Subscription{
 		ID:                    uuid.New(),
-		TenantSubjectID:       identity.TenantSubjectIDFromString("user-2").UUID(),
+		MerchantSubjectID:       identity.MerchantSubjectIDFromString("user-2").UUID(),
 		Status:                StatusActive,
 		StartedAt:             now,
 		CurrentPeriodStartsAt: &now,

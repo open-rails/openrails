@@ -100,7 +100,7 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 	fx.periodEnd = now.Add(-time.Minute)
 	fx.orderRef = fmt.Sprintf("rebill-%s-%d", fx.subID, fx.periodEnd.Unix())
 
-	userID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, uuid.NewString())
+	userID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, uuid.NewString())
 	productID := uuid.New()
 	priceID := uuid.New()
 	paymentMethodID := uuid.New()
@@ -112,25 +112,25 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 		require.NoError(t, err)
 	}
 	tenantID := dbtest.TestTenantID.UUID()
-	exec(`INSERT INTO openrails.products (id, slug, display_name, tenant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "rebill-prod-"+suffix, tenantID)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, tenant_id)
+	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id)
 	      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, tenantID)
-	exec(`INSERT INTO openrails.payment_methods (id, tenant_subject_id, processor, vault_id, billing_id, initial_transaction_id, tenant_id)
+	exec(`INSERT INTO openrails.payment_methods (id, merchant_subject_id, processor, vault_id, billing_id, initial_transaction_id, merchant_id)
 	      VALUES ($1, $2, 'mobius', $3, $4, $5, $6)`,
 		paymentMethodID, userID, "vault-"+suffix, "bill-"+suffix, "txn-init-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, processor, processor_subscription_id, payment_method_id,
-	         current_period_starts_at, current_period_ends_at, started_at, next_retry_at, retry_attempts, tenant_subject_id, tenant_id)
+	         current_period_starts_at, current_period_ends_at, started_at, next_retry_at, retry_attempts, merchant_subject_id, merchant_id)
 	      VALUES ($1, $2, $3, 'past_due', 'mobius', $4, $5, $6, $7, $6, $8, 1, $9, $10)`,
 		fx.subID, priceID, productID, "psid-"+suffix, paymentMethodID,
 		fx.periodEnd.Add(-30*24*time.Hour), fx.periodEnd, now.Add(-30*time.Second), userID, tenantID)
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE tenant_subject_id = $1", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE merchant_subject_id = $1", userID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1", userID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", fx.subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
@@ -143,7 +143,7 @@ func (fx rebillFixture) enqueueParams(attempt int) EnqueueParams {
 	subID := fx.subID
 	windowEnd := fx.periodEnd.Add(14 * 24 * time.Hour)
 	return EnqueueParams{
-		TenantID:       dbtest.TestTenantID.UUID(),
+		MerchantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeManualRebill,
 		SubscriptionID: &subID,

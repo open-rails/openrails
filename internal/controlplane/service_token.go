@@ -9,43 +9,45 @@ import (
 	"github.com/jackc/pgx/v5"
 	authcore "github.com/open-rails/authkit/core"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const (
-	// ResourceKindTenant scopes a service token to one OpenRails tenant. Resource IDs are
-	// canonical OpenRails tenant UUID strings.
-	ResourceKindTenant = "openrails.tenant"
-	// ResourceKindTenantSubject scopes a service token to one OpenRails payable subject.
-	// Resource IDs are canonical openrails.tenant_subjects UUID strings.
-	ResourceKindTenantSubject = "openrails.tenant_subject"
+	// ResourceKindMerchant scopes a service token to one OpenRails merchant. Resource
+	// IDs are canonical openrails.merchants UUID strings.
+	ResourceKindMerchant = "openrails.merchant"
+	// ResourceKindMerchantSubject scopes a service token to one OpenRails payable
+	// subject. Resource IDs are canonical openrails.merchant_subjects UUID strings.
+	ResourceKindMerchantSubject = "openrails.merchant_subject"
 )
 
-// ResolvedServiceToken is the result of validating an OpenRails-issued tenant service token against
-// live AuthKit + tenant-directory state (issue #222). It carries everything route
-// authorization needs: the owning AuthKit tenant, the resolved OpenRails tenant, and
-// the service token's granted OpenRails permission strings.
+// ResolvedServiceToken is the result of validating an OpenRails-issued service
+// token against live AuthKit + merchant-directory state. It carries everything
+// route authorization needs: the calling AuthKit tenant (org) that owns the
+// merchant, the resolved OpenRails merchant, and the granted permission strings.
+//
+// #481: the merchant is NOT the caller's identity. The caller is an AuthKit
+// principal (user OR remote_application); its authority over the merchant comes
+// from a ROLE on the merchant's owner_tenant_id (the owning org), never from an
+// identity-equation with the merchant.
 type ResolvedServiceToken struct {
-	// AuthKitTenantID is the immutable AuthKit tenant uuid that owns the
-	// service token, resolved by AuthKit's opaque service-token DB lookup —
-	// never from a JWT claim (delegated tokens carry NO tenant claims; the
-	// validated iss is the tenant identity, #361 / authkit v0.23.0). It is the
-	// canonical cross-service identifier; always populated on the service-token
-	// path (empty only on the issuer-pinned service-JWT path).
-	AuthKitTenantID string
-	// AuthKitTenantSlug is the AuthKit tenant slug that owns the service
-	// token. Slugs are MUTABLE — presentation/audit only.
-	AuthKitTenantSlug string
-	// TenantID is the OpenRails tenant (#223) the service token administers.
-	TenantID tenant.ID
-	// TenantSlug is the resolved tenant's slug.
-	TenantSlug string
-	// Permissions is the service token's granted OpenRails permission catalog entries
-	// (colon-form, e.g. "openrails:credits:write").
+	// OwnerTenantID is the AuthKit tenant (org) uuid that owns/administers the
+	// merchant — the caller's authority anchor (#481). Resolved by AuthKit's
+	// opaque service-token lookup (the token's owning tenant) or the issuer ->
+	// remote_application -> tenant mapping on the service-JWT path.
+	OwnerTenantID string
+	// OwnerTenantSlug is that owning tenant's slug (presentation/audit only).
+	OwnerTenantSlug string
+	// MerchantID is the OpenRails merchant (#480) the service token administers.
+	MerchantID merchant.ID
+	// MerchantSlug is the resolved merchant's slug.
+	MerchantSlug string
+	// Permissions is the service token's granted OpenRails permission catalog
+	// entries (colon-form, e.g. "openrails:credits:write").
 	Permissions []string
-	// Resources is the service token's AuthKit-stored OpenRails resource scope. OpenRails
-	// interprets only ResourceKindTenant and ResourceKindTenantSubject; unknown kinds
-	// fail closed during service token resolution.
+	// Resources is the service token's AuthKit-stored OpenRails resource scope.
+	// OpenRails interprets only ResourceKindMerchant and ResourceKindMerchantSubject;
+	// unknown kinds fail closed during service token resolution.
 	Resources []authcore.ServiceTokenResource
 }
 
@@ -61,40 +63,41 @@ func (r *ResolvedServiceToken) HasPermission(perm string) bool {
 	return false
 }
 
-// AllowsTenantSubject reports whether this service token may act for a payable subject
-// inside its resolved tenant. Tenant-wide tokens carry only ResourceKindTenant;
-// subject-scoped tokens additionally carry the exact ResourceKindTenantSubject id.
-func (r *ResolvedServiceToken) AllowsTenantSubject(subject uuid.UUID) bool {
+// AllowsMerchantSubject reports whether this service token may act for a payable
+// subject inside its resolved merchant. Merchant-wide tokens carry only
+// ResourceKindMerchant; subject-scoped tokens additionally carry the exact
+// ResourceKindMerchantSubject id.
+func (r *ResolvedServiceToken) AllowsMerchantSubject(subject uuid.UUID) bool {
 	if r == nil || subject == uuid.Nil {
 		return false
 	}
-	if !hasResource(r.Resources, ResourceKindTenant, r.TenantID.String()) {
+	if !hasResource(r.Resources, ResourceKindMerchant, r.MerchantID.String()) {
 		return false
 	}
-	if !hasAnyResourceKind(r.Resources, ResourceKindTenantSubject) {
+	if !hasAnyResourceKind(r.Resources, ResourceKindMerchantSubject) {
 		return true
 	}
-	return hasResource(r.Resources, ResourceKindTenantSubject, subject.String())
+	return hasResource(r.Resources, ResourceKindMerchantSubject, subject.String())
 }
 
-func TenantResource(id tenant.ID) authcore.ServiceTokenResource {
-	return authcore.ServiceTokenResource{Kind: ResourceKindTenant, ID: id.String()}
+func MerchantResource(id merchant.ID) authcore.ServiceTokenResource {
+	return authcore.ServiceTokenResource{Kind: ResourceKindMerchant, ID: id.String()}
 }
 
-func TenantSubjectResource(id uuid.UUID) authcore.ServiceTokenResource {
-	return authcore.ServiceTokenResource{Kind: ResourceKindTenantSubject, ID: id.String()}
+func MerchantSubjectResource(id uuid.UUID) authcore.ServiceTokenResource {
+	return authcore.ServiceTokenResource{Kind: ResourceKindMerchantSubject, ID: id.String()}
 }
 
-// TenantScope resolves a tenant reference (slug or UUID) to the canonical
-// OpenRails tenant id/slug and AuthKit service token tenant resource.
-func (c *ControlPlane) TenantScope(ctx context.Context, ref string) (tenant.ID, string, authcore.ServiceTokenResource, error) {
+// MerchantScope resolves a merchant reference (slug or UUID) to the canonical
+// OpenRails merchant id/slug and AuthKit service token merchant resource.
+func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.ID, string, authcore.ServiceTokenResource, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		// No default tenant (#336): the tenant to scope to must be named explicitly.
-		return tenant.ID{}, "", authcore.ServiceTokenResource{}, ErrServiceTokenTenantUnresolved
+		// No default merchant (#480): the merchant to scope to must be named explicitly.
+		return merchant.ID{}, "", authcore.ServiceTokenResource{}, ErrServiceTokenMerchantUnresolved
 	}
 	if c == nil || c.pool == nil {
-		return tenant.ID{}, "", authcore.ServiceTokenResource{}, errors.New("controlplane: pgx pool unavailable for tenant resolution")
+		return merchant.ID{}, "", authcore.ServiceTokenResource{}, errors.New("controlplane: pgx pool unavailable for merchant resolution")
 	}
 	var (
 		idStr  string
@@ -103,25 +106,25 @@ func (c *ControlPlane) TenantScope(ctx context.Context, ref string) (tenant.ID, 
 	)
 	err := c.pool.QueryRow(ctx, `
 		SELECT id::text, slug, status
-		  FROM openrails.tenants
+		  FROM openrails.merchants
 		 WHERE (id::text = $1 OR lower(slug) = lower($1))
 		   AND deleted_at IS NULL
 		 LIMIT 1
 	`, ref).Scan(&idStr, &slug, &status)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return tenant.ID{}, "", authcore.ServiceTokenResource{}, ErrServiceTokenTenantUnresolved
+			return merchant.ID{}, "", authcore.ServiceTokenResource{}, ErrServiceTokenMerchantUnresolved
 		}
-		return tenant.ID{}, "", authcore.ServiceTokenResource{}, err
+		return merchant.ID{}, "", authcore.ServiceTokenResource{}, err
 	}
 	if status != "active" {
-		return tenant.ID{}, "", authcore.ServiceTokenResource{}, ErrServiceTokenTenantUnresolved
+		return merchant.ID{}, "", authcore.ServiceTokenResource{}, ErrServiceTokenMerchantUnresolved
 	}
-	tid, err := tenant.ParseID(idStr)
+	mid, err := merchant.ParseID(idStr)
 	if err != nil {
-		return tenant.ID{}, "", authcore.ServiceTokenResource{}, err
+		return merchant.ID{}, "", authcore.ServiceTokenResource{}, err
 	}
-	return tid, slug, TenantResource(tid), nil
+	return mid, slug, MerchantResource(mid), nil
 }
 
 // TokenPrefix returns the configured service token brand prefix (e.g. "openrails"), used to
@@ -144,15 +147,14 @@ func (c *ControlPlane) LooksLikeServiceToken(token string) bool {
 //
 //   - parses the <prefix>_st_<key_id>_<secret> shape,
 //   - resolves key id + secret hash via AuthKit core (owning tenant, permissions,
-//     expiry, revocation, tenant-deleted) — returns authcore.ErrAccessTokenExpired /
+//     expiry, revocation) — returns authcore.ErrAccessTokenExpired /
 //     ErrAccessTokenRevoked / ErrInvalidAccessToken on those conditions,
-//   - maps the owning AuthKit tenant -> OpenRails tenant (#223) via the
-//     openrails.tenants directory, keyed exclusively on the IMMUTABLE AuthKit
-//     tenant uuid (authkit_tenant_id); a credential or directory row without
-//     the uuid fails verification (see tenantForAuthKitTenant).
+//   - resolves the merchant the caller administers by ROLE (#481): the merchant
+//     whose owner_tenant_id is the caller's AuthKit tenant. Ownership (who
+//     administers), not identity — the merchant is never "equal to" the org.
 //
-// A cross-tenant or unknown service-token tenant (no tenant directory row) yields
-// ErrServiceTokenTenantUnresolved so the caller can reject the request.
+// A caller whose AuthKit tenant owns no active merchant yields
+// ErrServiceTokenMerchantUnresolved so the caller can reject the request.
 func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*ResolvedServiceToken, error) {
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
@@ -167,41 +169,44 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 		return nil, err
 	}
 
-	tid, tslug, err := c.tenantForAuthKitTenant(ctx, resolved.TenantID)
+	// #481: authorize by the caller's role on the merchant's owner_tenant_id. The
+	// owning AuthKit tenant administers its merchant(s); resolve the merchant via
+	// that ownership link, never via an identity-equation.
+	mid, mslug, err := c.merchantForOwnerTenant(ctx, resolved.TenantID)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateServiceTokenResources(tid, resolved.Resources); err != nil {
+	if err := validateServiceTokenResources(mid, resolved.Resources); err != nil {
 		return nil, err
 	}
 
 	return &ResolvedServiceToken{
-		AuthKitTenantID:   resolved.TenantID,
-		AuthKitTenantSlug: resolved.TenantSlug,
-		TenantID:          tid,
-		TenantSlug:        tslug,
-		Permissions:       resolved.Permissions,
-		Resources:         resolved.Resources,
+		OwnerTenantID:   resolved.TenantID,
+		OwnerTenantSlug: resolved.TenantSlug,
+		MerchantID:      mid,
+		MerchantSlug:    mslug,
+		Permissions:     resolved.Permissions,
+		Resources:       resolved.Resources,
 	}, nil
 }
 
-// ErrServiceTokenTenantUnresolved indicates the service token's owning AuthKit tenant is not mapped to
-// any OpenRails tenant (no openrails.tenants row, or the tenant is suspended/
-// deleted). Treated as an authorization failure: the service token cannot act on any
-// tenant surface.
-var ErrServiceTokenTenantUnresolved = errors.New("controlplane: service token owning tenant maps to no active tenant")
+// ErrServiceTokenMerchantUnresolved indicates the caller's owning AuthKit tenant
+// owns no active OpenRails merchant (no openrails.merchants row with that
+// owner_tenant_id, or the merchant is suspended/deleted). Treated as an
+// authorization failure: the caller cannot act on any merchant surface.
+var ErrServiceTokenMerchantUnresolved = errors.New("controlplane: service token caller owns no active merchant")
 
 // ErrServiceTokenScopeDenied indicates an otherwise valid service token lacks the required
-// OpenRails tenant resource scope or carries unknown OpenRails resource kinds.
+// OpenRails merchant resource scope or carries unknown OpenRails resource kinds.
 var ErrServiceTokenScopeDenied = errors.New("controlplane: service token resource scope denied")
 
-func validateServiceTokenResources(tid tenant.ID, resources []authcore.ServiceTokenResource) error {
-	if !hasResource(resources, ResourceKindTenant, tid.String()) {
+func validateServiceTokenResources(mid merchant.ID, resources []authcore.ServiceTokenResource) error {
+	if !hasResource(resources, ResourceKindMerchant, mid.String()) {
 		return ErrServiceTokenScopeDenied
 	}
 	for _, r := range resources {
 		switch strings.TrimSpace(r.Kind) {
-		case ResourceKindTenant, ResourceKindTenantSubject:
+		case ResourceKindMerchant, ResourceKindMerchantSubject:
 		default:
 			return ErrServiceTokenScopeDenied
 		}
@@ -230,37 +235,68 @@ func hasAnyResourceKind(resources []authcore.ServiceTokenResource, kind string) 
 	return false
 }
 
-// tenantForAuthKitTenant maps a credential's owning AuthKit tenant to its
-// OpenRails tenant via the openrails.tenants directory. The operator tenant
-// administers the default tenant; future AuthKit tenants map to their own
-// tenant rows. Suspended/deleted tenants are rejected.
+// merchantForOwnerTenant resolves the OpenRails merchant a caller administers, by
+// ROLE on the owning AuthKit tenant (#481): the merchant whose owner_tenant_id is
+// the caller's authenticated AuthKit tenant uuid. This is OWNERSHIP (who may
+// administer), not IDENTITY — one tenant owns many merchants; the merchant is
+// never "equal to" the org. Suspended/deleted merchants are rejected.
 //
-// Resolution keys EXCLUSIVELY on the IMMUTABLE AuthKit tenant uuid
-// (authkit_tenant_id, from the `tenant_id` claim/source). A credential
-// without a uuid, or a uuid that matches no linked directory row, is a
-// verification failure — the MUTABLE slug (authkit_tenant_slug) is never
-// consulted for identity (it is presentation/audit only).
-func (c *ControlPlane) tenantForAuthKitTenant(ctx context.Context, authKitTenantID string) (tenant.ID, string, error) {
-	authKitTenantID = strings.TrimSpace(authKitTenantID)
+// (When a tenant owns several merchants, the request names which via MerchantScope
+// + AuthorizeMerchant; this single-merchant resolution serves the common
+// one-merchant-per-tenant service-token path and fails closed otherwise.)
+func (c *ControlPlane) merchantForOwnerTenant(ctx context.Context, ownerTenantID string) (merchant.ID, string, error) {
+	ownerTenantID = strings.TrimSpace(ownerTenantID)
 	if c.pool == nil {
-		return tenant.ID{}, "", errors.New("controlplane: pgx pool unavailable for tenant resolution")
+		return merchant.ID{}, "", errors.New("controlplane: pgx pool unavailable for merchant resolution")
 	}
-	if authKitTenantID == "" {
-		return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
+	if ownerTenantID == "" {
+		return merchant.ID{}, "", ErrServiceTokenMerchantUnresolved
 	}
-	tid, slug, err := c.tenantDirectoryRow(ctx, `authkit_tenant_id = $1`, authKitTenantID)
+	mid, slug, err := c.merchantDirectoryRow(ctx, `owner_tenant_id = $1`, ownerTenantID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
+		return merchant.ID{}, "", ErrServiceTokenMerchantUnresolved
 	}
-	return tid, slug, err
+	return mid, slug, err
 }
 
-// tenantDirectoryRow runs one openrails.tenants directory lookup with the given
-// WHERE predicate (which must reference exactly one $1 argument). It returns
-// pgx.ErrNoRows untouched so callers can decide whether a fallback applies;
-// an inactive (suspended) tenant is rejected with ErrServiceTokenTenantUnresolved
+// AuthorizeMerchant checks that the caller's owning AuthKit tenant owns the named
+// merchant (#481 role-based authz): the merchant's owner_tenant_id must equal the
+// caller's AuthKit tenant. Use it when a request NAMES a merchant (a tenant owning
+// many merchants) rather than relying on the single-merchant resolution.
+func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, ownerTenantID string, mid merchant.ID) error {
+	ownerTenantID = strings.TrimSpace(ownerTenantID)
+	if c == nil || c.pool == nil {
+		return errors.New("controlplane: pgx pool unavailable for merchant authorization")
+	}
+	if ownerTenantID == "" || mid.IsZero() {
+		return ErrServiceTokenMerchantUnresolved
+	}
+	var owner *string
+	var status string
+	err := c.pool.QueryRow(ctx, `
+		SELECT owner_tenant_id, status
+		  FROM openrails.merchants
+		 WHERE id = $1 AND deleted_at IS NULL
+		 LIMIT 1
+	`, mid.UUID()).Scan(&owner, &status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrServiceTokenMerchantUnresolved
+		}
+		return err
+	}
+	if status != "active" || owner == nil || strings.TrimSpace(*owner) != ownerTenantID {
+		return ErrServiceTokenScopeDenied
+	}
+	return nil
+}
+
+// merchantDirectoryRow runs one openrails.merchants directory lookup with the
+// given WHERE predicate (which must reference exactly one $1 argument). It returns
+// pgx.ErrNoRows untouched so callers can decide whether a fallback applies; an
+// inactive (suspended) merchant is rejected with ErrServiceTokenMerchantUnresolved
 // and never falls through to another key.
-func (c *ControlPlane) tenantDirectoryRow(ctx context.Context, where, arg string) (tenant.ID, string, error) {
+func (c *ControlPlane) merchantDirectoryRow(ctx context.Context, where, arg string) (merchant.ID, string, error) {
 	var (
 		idStr  string
 		slug   string
@@ -268,21 +304,21 @@ func (c *ControlPlane) tenantDirectoryRow(ctx context.Context, where, arg string
 	)
 	err := c.pool.QueryRow(ctx, `
 		SELECT id::text, slug, status
-		  FROM openrails.tenants
+		  FROM openrails.merchants
 		 WHERE `+where+`
 		   AND deleted_at IS NULL
 		 LIMIT 1
 	`, arg).Scan(&idStr, &slug, &status)
 	if err != nil {
-		return tenant.ID{}, "", err
+		return merchant.ID{}, "", err
 	}
 	if status != "active" {
-		return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
+		return merchant.ID{}, "", ErrServiceTokenMerchantUnresolved
 	}
 
-	tid, err := tenant.ParseID(idStr)
+	mid, err := merchant.ParseID(idStr)
 	if err != nil {
-		return tenant.ID{}, "", err
+		return merchant.ID{}, "", err
 	}
-	return tid, slug, nil
+	return mid, slug, nil
 }

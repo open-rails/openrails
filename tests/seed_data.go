@@ -15,19 +15,19 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-func (suite *TestContainerSuite) ensureTenantSubject(ctx context.Context, userID string) uuid.UUID {
+func (suite *TestContainerSuite) ensureMerchantSubject(ctx context.Context, userID string) uuid.UUID {
 	suite.t.Helper()
-	tenantSubjectID, err := dbrepo.EnsureTenantSubjectID(ctx, suite.Pool, dbtest.TestTenantID.UUID(), userID)
+	tenantSubjectID, err := dbrepo.EnsureMerchantSubjectID(ctx, suite.Pool, dbtest.TestTenantID.UUID(), userID)
 	require.NoError(suite.t, err, "Failed to ensure tenant subject")
 	return tenantSubjectID
 }
 
-// resolveTenantSubject is the read-side counterpart of ensureTenantSubject:
+// resolveMerchantSubject is the read-side counterpart of ensureMerchantSubject:
 // pure derivation — payable identities are UUID-only (#364), so a test userID
 // IS its own tenant_subject_id. Non-UUID test user ids are rejected.
-func (suite *TestContainerSuite) resolveTenantSubject(ctx context.Context, userID string) uuid.UUID {
+func (suite *TestContainerSuite) resolveMerchantSubject(ctx context.Context, userID string) uuid.UUID {
 	suite.t.Helper()
-	tenantSubjectID, err := dbrepo.ResolveTenantSubjectID(userID)
+	tenantSubjectID, err := dbrepo.ResolveMerchantSubjectID(userID)
 	require.NoError(suite.t, err, "Failed to resolve tenant subject")
 	return tenantSubjectID
 }
@@ -549,7 +549,7 @@ func (suite *TestContainerSuite) CreateTestSubscription(userID string, priceID u
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
-	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
+	tenantSubjectID := suite.ensureMerchantSubject(ctx, userID)
 
 	// Look up the price to get ProductID
 	price := suite.GetPrice(priceID)
@@ -559,7 +559,7 @@ func (suite *TestContainerSuite) CreateTestSubscription(userID string, priceID u
 
 	sub := &models.Subscription{
 		ID:                      uuid.New(),
-		TenantSubjectID:         tenantSubjectID,
+		MerchantSubjectID:         tenantSubjectID,
 		ProductID:               price.ProductID,
 		PriceID:                 priceID,
 		Status:                  status,
@@ -599,7 +599,7 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
 	now := suite.GetClock().Now()
-	tenantSubjectID := suite.ensureTenantSubject(ctx, opts.UserID)
+	tenantSubjectID := suite.ensureMerchantSubject(ctx, opts.UserID)
 
 	// Look up the price to get ProductID
 	price := suite.GetPrice(opts.PriceID)
@@ -624,7 +624,7 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 
 	sub := &models.Subscription{
 		ID:                      uuid.New(),
-		TenantSubjectID:         tenantSubjectID,
+		MerchantSubjectID:         tenantSubjectID,
 		ProductID:               price.ProductID,
 		PriceID:                 opts.PriceID,
 		Status:                  opts.Status,
@@ -663,11 +663,11 @@ func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
 	now := suite.GetClock().Now()
-	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
+	tenantSubjectID := suite.ensureMerchantSubject(ctx, userID)
 
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
-		TenantSubjectID:      tenantSubjectID,
+		MerchantSubjectID:      tenantSubjectID,
 		Processor:            models.ProcessorMobius,
 		VaultID:              "vault-" + uuid.New().String()[:8],
 		BillingID:            strPtr("billing-" + uuid.New().String()[:8]),
@@ -701,7 +701,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
-	tenantSubjectID := suite.ensureTenantSubject(ctx, opts.UserID)
+	tenantSubjectID := suite.ensureMerchantSubject(ctx, opts.UserID)
 
 	if opts.Processor == "" {
 		opts.Processor = models.ProcessorMobius
@@ -715,7 +715,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
-		TenantSubjectID:      tenantSubjectID,
+		MerchantSubjectID:      tenantSubjectID,
 		Processor:            opts.Processor,
 		VaultID:              opts.VaultID,
 		BillingID:            strPtrOrNil(opts.BillingID),
@@ -738,11 +738,11 @@ func (suite *TestContainerSuite) CreateTestPayment(userID string, priceID uuid.U
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
-	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
+	tenantSubjectID := suite.ensureMerchantSubject(ctx, userID)
 
 	payment := &models.Payment{
 		ID:              uuid.New(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		PriceID:         priceID,
 		SubscriptionID:  subscriptionID,
 		Processor:       models.ProcessorMobius,
@@ -775,7 +775,7 @@ func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOption
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
-	tenantSubjectID := suite.ensureTenantSubject(ctx, opts.UserID)
+	tenantSubjectID := suite.ensureMerchantSubject(ctx, opts.UserID)
 
 	if opts.Processor == "" {
 		opts.Processor = models.ProcessorMobius
@@ -795,7 +795,7 @@ func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOption
 
 	payment := &models.Payment{
 		ID:                uuid.New(),
-		TenantSubjectID:   tenantSubjectID,
+		MerchantSubjectID:   tenantSubjectID,
 		PriceID:           opts.PriceID,
 		SubscriptionID:    opts.SubscriptionID,
 		RefundedPaymentID: opts.RefundedPaymentID,
@@ -818,20 +818,20 @@ func (suite *TestContainerSuite) CreateTestEntitlement(userID string, entitlemen
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
 	now := suite.GetClock().Now()
-	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
+	tenantSubjectID := suite.ensureMerchantSubject(ctx, userID)
 
 	if sourceID == nil {
 		switch sourceType {
 		case models.EntitlementSourceAdmin:
-			adminGrant := &models.AdminGrant{
+			adminGrant := &models.EntitlementGrant{
 				ID:              uuid.New(),
-				TenantSubjectID: tenantSubjectID,
+				MerchantSubjectID: tenantSubjectID,
 				GrantedBy:       "test-admin",
 				Reason:          "test_admin_entitlement",
 				DurationDays:    nil,
 				CreatedAt:       now,
 			}
-			suite.InsertAdminGrant(ctx, adminGrant)
+			suite.InsertEntitlementGrant(ctx, adminGrant)
 			sourceID = &adminGrant.ID
 		default:
 			require.FailNow(suite.t, "sourceID is required for this sourceType", "sourceType=%s", sourceType)
@@ -848,7 +848,7 @@ func (suite *TestContainerSuite) CreateTestEntitlement(userID string, entitlemen
 
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		Entitlement:     entitlementName,
 		StartAt:         now,
 		EndAt:           endAt,
@@ -868,11 +868,11 @@ func (suite *TestContainerSuite) CreateTestNotification(userID string, eventType
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
-	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
+	tenantSubjectID := suite.ensureMerchantSubject(ctx, userID)
 
 	notif := &models.NotificationQueue{
 		ID:              uuid.New(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		EventType:       eventType,
 		Data:            data,
 		Seen:            false,
@@ -901,7 +901,7 @@ func (suite *TestContainerSuite) GetSubscription(id uuid.UUID) *models.Subscript
 func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*models.Subscription {
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
-	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
+	tenantSubjectID := suite.resolveMerchantSubject(ctx, userID)
 
 	repo := dbrepo.NewSubscriptionRepo(suite.App.Runtime.DB)
 	var subs []*models.Subscription
@@ -920,7 +920,7 @@ func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*m
 func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Payment {
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
-	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
+	tenantSubjectID := suite.resolveMerchantSubject(ctx, userID)
 
 	repo := dbrepo.NewPaymentRepo(suite.App.Runtime.DB)
 	var payments []*models.Payment
@@ -939,7 +939,7 @@ func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Pa
 func (suite *TestContainerSuite) GetPaymentMethodsByUserID(userID string) []*models.PaymentMethod {
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
-	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
+	tenantSubjectID := suite.resolveMerchantSubject(ctx, userID)
 
 	repo := dbrepo.NewPaymentMethodRepo(suite.App.Runtime.DB)
 	var pms []*models.PaymentMethod
@@ -975,7 +975,7 @@ func (suite *TestContainerSuite) GetEntitlementsByUserID(userID string) []*model
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
-	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
+	tenantSubjectID := suite.resolveMerchantSubject(ctx, userID)
 
 	rows := suite.QueryEntitlements(ctx, `
 		WHERE tenant_subject_id = $1
@@ -996,7 +996,7 @@ func (suite *TestContainerSuite) GetEntitlementsByUserID(userID string) []*model
 func (suite *TestContainerSuite) CountUnreadNotifications(userID string) int {
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
-	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
+	tenantSubjectID := suite.resolveMerchantSubject(ctx, userID)
 
 	return suite.Count(ctx,
 		"SELECT COUNT(*) FROM openrails.notification_queue WHERE tenant_subject_id = $1 AND seen = false",
@@ -1060,7 +1060,7 @@ func (suite *TestContainerSuite) SeedCCBillTestDataWithSubscription() *models.Su
 func (suite *TestContainerSuite) CleanupSubscriptionsForUser(userID string) {
 	suite.t.Helper()
 	ctx := dbtest.WithTestTenant(context.Background())
-	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
+	tenantSubjectID := suite.resolveMerchantSubject(ctx, userID)
 
 	// Also delete entitlements for this user
 	_, _ = suite.Pool.Exec(ctx,

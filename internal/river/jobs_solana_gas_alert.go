@@ -74,7 +74,7 @@ func (w *SolanaGasAlertWorker) Work(ctx context.Context, _ *river.Job[SolanaGasA
 		}
 		if bal < threshold {
 			log.WithContext(ctx).WithFields(log.Fields{
-				"tenant_id":          mw.TenantID,
+				"tenant_id":          mw.MerchantID,
 				"cranker_wallet":     mw.MerchantAddress,
 				"balance_lamports":   bal,
 				"threshold_lamports": threshold,

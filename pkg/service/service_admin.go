@@ -254,7 +254,7 @@ func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCre
 	now := time.Now().UTC()
 	payment := &models.Payment{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(req.UserID).UUID(),
+		MerchantSubjectID: identity.MerchantSubjectIDFromString(req.UserID).UUID(),
 		Amount:          req.Amount,
 		ListAmount:      req.Amount,
 		Currency:        strings.ToLower(req.Currency),
@@ -356,8 +356,8 @@ func (s *Service) AdminGetUserEntitlements(ctx context.Context, userID string, a
 	return result, nil
 }
 
-// AdminGrantEntitlement grants an entitlement to a user.
-func (s *Service) AdminGrantEntitlement(ctx context.Context, adminUserID string, req AdminGrantEntitlementRequest) (*EntitlementRecord, error) {
+// EntitlementGrantEntitlement grants an entitlement to a user.
+func (s *Service) EntitlementGrantEntitlement(ctx context.Context, adminUserID string, req EntitlementGrantEntitlementRequest) (*EntitlementRecord, error) {
 	database, dbErr := s.requireDB()
 	if dbErr != nil {
 		return nil, dbErr
@@ -383,9 +383,9 @@ func (s *Service) AdminGrantEntitlement(ctx context.Context, adminUserID string,
 	now := time.Now().UTC()
 
 	// Create admin grant record for audit
-	adminGrant := &models.AdminGrant{
+	adminGrant := &models.EntitlementGrant{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(req.UserID).UUID(),
+		MerchantSubjectID: identity.MerchantSubjectIDFromString(req.UserID).UUID(),
 		GrantedBy:       adminUserID,
 		Reason:          req.Reason,
 		CreatedAt:       now,
@@ -399,7 +399,7 @@ func (s *Service) AdminGrantEntitlement(ctx context.Context, adminUserID string,
 		}
 	}
 
-	if err := repo.NewAdminGrantRepo(database).Create(ctx, adminGrant); err != nil {
+	if err := repo.NewEntitlementGrantRepo(database).Create(ctx, adminGrant); err != nil {
 		return nil, fmt.Errorf("create admin grant: %w", err)
 	}
 
@@ -456,7 +456,7 @@ func (s *Service) AdminRevokeEntitlement(ctx context.Context, userID string, ent
 	if err != nil {
 		return fmt.Errorf("entitlement not found")
 	}
-	if ent.TenantSubjectID.String() != userID {
+	if ent.MerchantSubjectID.String() != userID {
 		return fmt.Errorf("entitlement does not belong to user")
 	}
 
@@ -648,7 +648,7 @@ func adminSubscriptionFromModel(sub *models.Subscription) Subscription {
 func entitlementRecordFromModel(e *models.Entitlement) EntitlementRecord {
 	rec := EntitlementRecord{
 		ID:          e.ID,
-		UserID:      e.TenantSubjectID.String(),
+		UserID:      e.MerchantSubjectID.String(),
 		Entitlement: e.Entitlement,
 		StartAt:     e.StartAt,
 		EndAt:       e.EndAt,

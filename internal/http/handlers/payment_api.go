@@ -79,7 +79,7 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 	} else if object == "charge" && status != "failed" && amountRefunded > 0 {
 		status = "partially_refunded"
 	}
-	payment := api.PaymentObject{ID: api.FormatPaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, User: api.FormatUserID(p.TenantSubjectID.String()), Subscription: subID, Processor: string(p.Processor), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, Created: api.ToUnix(p.CreatedAt)}
+	payment := api.PaymentObject{ID: api.FormatPaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, User: api.FormatUserID(p.MerchantSubjectID.String()), Subscription: subID, Processor: string(p.Processor), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, Created: api.ToUnix(p.CreatedAt)}
 	if refunds != nil {
 		if refundObjects == nil {
 			refundObjects = []api.PaymentObject{}

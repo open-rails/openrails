@@ -23,14 +23,14 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // This suite proves the consolidated product_access_grants table + its RLS
 // policy enforce durable ownership AND tenant isolation
 // when the app connects as the unprivileged openrails_app role (issue #227/#250).
 // It runs the REAL consolidated Postgres migrations, then drives
-// the productaccess.Service through db.RunInTenantTx (which pins app.tenant_id),
+// the productaccess.Service through db.RunInTenantTx (which pins app.merchant_id),
 // so it validates the real schema, the real policy, and the GUC plumbing.
 //
 // Asserts: purchase -> grant created; duplicate purchase -> still one grant;
@@ -41,8 +41,8 @@ var (
 	pagTenantB = mustTenant("00000000-0000-0000-0000-0000000000b2")
 )
 
-func mustTenant(s string) tenant.ID {
-	id, err := tenant.ParseID(s)
+func mustTenant(s string) merchant.ID {
+	id, err := merchant.ParseID(s)
 	if err != nil {
 		panic(err)
 	}
@@ -118,11 +118,11 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 	_, err = superPool.Exec(ctx, `ALTER ROLE openrails_app LOGIN PASSWORD 'app_pw'`)
 	require.NoError(t, err)
 	for _, tt := range []struct {
-		id   tenant.ID
+		id   merchant.ID
 		slug string
 	}{{pagTenantA, "tenant-a"}, {pagTenantB, "tenant-b"}} {
 		_, err = superPool.Exec(ctx,
-			`INSERT INTO openrails.tenants (id, slug, name, status) VALUES ($1, $2, $3, 'active') ON CONFLICT (slug) DO NOTHING`,
+			`INSERT INTO openrails.merchants (id, slug, name, status) VALUES ($1, $2, $3, 'active') ON CONFLICT (slug) DO NOTHING`,
 			tt.id.UUID(), tt.slug, tt.slug,
 		)
 		require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 			tenantID = pagTenantB.UUID()
 		}
 		_, err = superPool.Exec(ctx,
-			`INSERT INTO openrails.products (id, tenant_id, slug, display_name, status) VALUES ($1, $2, $3, 'P', 'active')`,
+			`INSERT INTO openrails.products (id, merchant_id, slug, display_name, status) VALUES ($1, $2, $3, 'P', 'active')`,
 			p.id, tenantID, p.slug,
 		)
 		require.NoError(t, err)
@@ -155,8 +155,8 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 	userID := uuid.New().String()
 	paymentID := uuid.New()
 
-	ctxA := tenant.WithID(ctx, pagTenantA)
-	ctxB := tenant.WithID(ctx, pagTenantB)
+	ctxA := merchant.WithID(ctx, pagTenantA)
+	ctxB := merchant.WithID(ctx, pagTenantB)
 
 	// (1) Purchase -> grant created (tenant A).
 	_, created, err := svc.GrantProductAccess(ctxA, GrantParams{

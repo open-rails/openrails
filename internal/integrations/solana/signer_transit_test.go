@@ -9,7 +9,7 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // fakeTransit emulates Vault Transit by holding a real Ed25519 key in-test and
@@ -112,7 +112,7 @@ func TestTransitSignerFailClosed(t *testing.T) {
 func TestTransitSignerCustomKeyName(t *testing.T) {
 	var gotName string
 	ft := &fakeTransit{key: newTestKey(t)}
-	naming := func(id tenant.ID) string { gotName = "custom-" + id.String(); return gotName }
+	naming := func(id merchant.ID) string { gotName = "custom-" + id.String(); return gotName }
 	signer := NewTransitSigner(ft, naming, time.Minute)
 	if _, err := signer.PublicKey(context.Background(), dbtest.TestTenantID); err != nil {
 		t.Fatalf("PublicKey: %v", err)

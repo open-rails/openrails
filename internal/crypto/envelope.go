@@ -29,7 +29,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const (
@@ -49,11 +49,11 @@ var ErrEncryptionDisabled = errors.New("crypto: encryption disabled (no master k
 type DEKStore interface {
 	// GetWrappedDEK returns the wrapped DEK for a tenant, or (nil, false) when the
 	// tenant has none yet.
-	GetWrappedDEK(ctx context.Context, tenantID tenant.ID) (wrapped []byte, ok bool, err error)
+	GetWrappedDEK(ctx context.Context, tenantID merchant.ID) (wrapped []byte, ok bool, err error)
 	// PutWrappedDEK stores the wrapped DEK for a tenant. It must be safe under
 	// concurrent first-use: if a row already exists it should keep the existing
 	// one and return that (so two racing creates converge on one DEK).
-	PutWrappedDEK(ctx context.Context, tenantID tenant.ID, wrapped []byte) (stored []byte, err error)
+	PutWrappedDEK(ctx context.Context, tenantID merchant.ID, wrapped []byte) (stored []byte, err error)
 }
 
 // Encryptor provides per-tenant field encryption backed by envelope encryption.
@@ -63,7 +63,7 @@ type Encryptor struct {
 	store     DEKStore
 
 	mu      sync.Mutex
-	dekGCMs map[tenant.ID]cipher.AEAD // cache of unwrapped per-tenant DEK ciphers
+	dekGCMs map[merchant.ID]cipher.AEAD // cache of unwrapped per-tenant DEK ciphers
 }
 
 // NewEncryptor builds an Encryptor from a base64-encoded 32-byte master key and a
@@ -72,7 +72,7 @@ type Encryptor struct {
 // back-compat / self-hosted-without-encryption.
 func NewEncryptor(masterKeyB64 string, store DEKStore) (*Encryptor, error) {
 	if masterKeyB64 == "" {
-		return &Encryptor{store: store, dekGCMs: map[tenant.ID]cipher.AEAD{}}, nil
+		return &Encryptor{store: store, dekGCMs: map[merchant.ID]cipher.AEAD{}}, nil
 	}
 	key, err := base64.StdEncoding.DecodeString(masterKeyB64)
 	if err != nil {
@@ -88,7 +88,7 @@ func NewEncryptor(masterKeyB64 string, store DEKStore) (*Encryptor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("crypto: master key cipher: %w", err)
 	}
-	return &Encryptor{masterGCM: gcm, store: store, dekGCMs: map[tenant.ID]cipher.AEAD{}}, nil
+	return &Encryptor{masterGCM: gcm, store: store, dekGCMs: map[merchant.ID]cipher.AEAD{}}, nil
 }
 
 // Enabled reports whether at-rest encryption is active (a master key is set).
@@ -97,7 +97,7 @@ func (e *Encryptor) Enabled() bool { return e != nil && e.masterGCM != nil }
 // Encrypt seals plaintext with the tenant's DEK and returns a base64 string
 // (nonce || ciphertext || tag). The tenant DEK is created+wrapped+stored lazily
 // on first use and reused thereafter.
-func (e *Encryptor) Encrypt(ctx context.Context, tenantID tenant.ID, plaintext []byte) (string, error) {
+func (e *Encryptor) Encrypt(ctx context.Context, tenantID merchant.ID, plaintext []byte) (string, error) {
 	if !e.Enabled() {
 		return "", ErrEncryptionDisabled
 	}
@@ -117,7 +117,7 @@ func (e *Encryptor) Encrypt(ctx context.Context, tenantID tenant.ID, plaintext [
 
 // Decrypt reverses Encrypt for the same tenant. A ciphertext produced for one
 // tenant CANNOT be decrypted with another tenant's DEK (GCM auth fails).
-func (e *Encryptor) Decrypt(ctx context.Context, tenantID tenant.ID, ciphertextB64 string) ([]byte, error) {
+func (e *Encryptor) Decrypt(ctx context.Context, tenantID merchant.ID, ciphertextB64 string) ([]byte, error) {
 	if !e.Enabled() {
 		return nil, ErrEncryptionDisabled
 	}
@@ -141,7 +141,7 @@ func (e *Encryptor) Decrypt(ctx context.Context, tenantID tenant.ID, ciphertextB
 
 // tenantGCM returns the AEAD for a tenant's DEK, lazily creating + wrapping +
 // storing the DEK on first use and caching the unwrapped cipher.
-func (e *Encryptor) tenantGCM(ctx context.Context, tenantID tenant.ID) (cipher.AEAD, error) {
+func (e *Encryptor) tenantGCM(ctx context.Context, tenantID merchant.ID) (cipher.AEAD, error) {
 	e.mu.Lock()
 	if gcm, ok := e.dekGCMs[tenantID]; ok {
 		e.mu.Unlock()
@@ -171,7 +171,7 @@ func (e *Encryptor) tenantGCM(ctx context.Context, tenantID tenant.ID) (cipher.A
 // loadOrCreateDEK fetches and unwraps the tenant's DEK, or generates a fresh DEK,
 // wraps it with the master key, and stores it (idempotently). The plaintext DEK
 // is never persisted.
-func (e *Encryptor) loadOrCreateDEK(ctx context.Context, tenantID tenant.ID) ([]byte, error) {
+func (e *Encryptor) loadOrCreateDEK(ctx context.Context, tenantID merchant.ID) ([]byte, error) {
 	if wrapped, ok, err := e.store.GetWrappedDEK(ctx, tenantID); err != nil {
 		return nil, fmt.Errorf("crypto: load wrapped DEK: %w", err)
 	} else if ok {

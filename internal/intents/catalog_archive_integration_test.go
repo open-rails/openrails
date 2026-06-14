@@ -48,7 +48,7 @@ func (fx *archiveFixture) runnerWith(cfg ModeView) *Runner {
 func (fx *archiveFixture) enqueueArchive(t *testing.T, objectID string, dueAt time.Time) uuid.UUID {
 	t.Helper()
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
-		TenantID:       dbtest.TestTenantID.UUID(),
+		MerchantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "stripe",
 		IntentType:     TypeStripeArchivePrice,
 		Payload:        StripeArchivePayload{ObjectID: objectID, MarkerKey: "retired.usd.900.30"},
@@ -127,7 +127,7 @@ func TestArchiveIntentSynchronousEnqueueAndExecute(t *testing.T) {
 	fx.api.prices[objectID] = &catalog.StripePrice{ID: objectID, Active: true}
 
 	params := EnqueueParams{
-		TenantID:       dbtest.TestTenantID.UUID(),
+		MerchantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "stripe",
 		IntentType:     TypeStripeArchivePrice,
 		Payload:        StripeArchivePayload{ObjectID: objectID, MarkerKey: "retired.usd.900.30"},
@@ -170,10 +170,10 @@ func TestArchiveIntentRelevanceSupersedesWhenObjectJoinsCatalog(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 	tenantID := dbtest.TestTenantID.UUID()
-	_, err := fx.db.Pool().Exec(ctx, `INSERT INTO openrails.products (id, slug, display_name, tenant_id) VALUES ($1, $2, $2, $3)`,
+	_, err := fx.db.Pool().Exec(ctx, `INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "join-prod-"+uuid.NewString()[:8], tenantID)
 	require.NoError(t, err)
-	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, processors, tenant_id)
+	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, processors, merchant_id)
 	      VALUES ($1, $2, 900, 'usd', 30, $3, $4)`, priceID, productID,
 		[]byte(`{"stripe": {"price_id": "`+objectID+`"}}`), tenantID)
 	require.NoError(t, err)

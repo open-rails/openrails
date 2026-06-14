@@ -35,7 +35,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	productID := uuid.New()
 	subID := uuid.New()
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
 
 	// Unit "USD" so the grant deposits into the USD money balance.
 	creditsSpec, err := json.Marshal(models.CreditsSpec{
@@ -71,7 +71,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      subID,
-		TenantSubjectID:         tenantSubjectID,
+		MerchantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 &priceID,
 		Status:                  string(models.StatusActive),
@@ -84,9 +84,9 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -111,7 +111,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM openrails.money_transactions
-		 WHERE tenant_subject_id = $1 AND currency = 'USD'
+		 WHERE merchant_subject_id = $1 AND currency = 'USD'
 		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'`,
 		tenantSubjectID).Scan(&depositCount))
 	require.Equal(t, 1, depositCount)
@@ -124,7 +124,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	dep := new(models.MoneyTransaction)
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT source_id FROM openrails.money_transactions
-		 WHERE tenant_subject_id = $1 AND currency = 'USD'
+		 WHERE merchant_subject_id = $1 AND currency = 'USD'
 		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'
 		 LIMIT 1`,
 		tenantSubjectID).Scan(&dep.SourceID))
@@ -134,7 +134,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	bal := new(models.MoneyBalance)
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT balance FROM openrails.money_balances
-		 WHERE tenant_subject_id = $1 AND currency = 'USD'
+		 WHERE merchant_subject_id = $1 AND currency = 'USD'
 		 LIMIT 1`,
 		tenantSubjectID).Scan(&bal.Balance))
 	require.Equal(t, int64(100), bal.Balance)
@@ -170,7 +170,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	productID := uuid.New()
 	subID := uuid.New()
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
 
 	creditsSpec, err := json.Marshal(models.CreditsSpec{
 		onceLabel:  {Unit: "USD", Amount: 10, Cadence: models.CreditGrantCadenceOnce},
@@ -206,7 +206,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      subID,
-		TenantSubjectID:         tenantSubjectID,
+		MerchantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 &priceID,
 		Status:                  string(models.StatusActive),
@@ -219,9 +219,9 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -260,7 +260,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	// Both labels credit the one USD balance: 10 (once) + 100 (renewal), each once.
 	bal := new(models.MoneyBalance)
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT balance FROM openrails.money_balances WHERE tenant_subject_id = $1 AND currency = 'USD'",
+		"SELECT balance FROM openrails.money_balances WHERE merchant_subject_id = $1 AND currency = 'USD'",
 		tenantSubjectID).Scan(&bal.Balance))
 	require.Equal(t, int64(110), bal.Balance)
 }

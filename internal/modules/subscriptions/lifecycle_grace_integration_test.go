@@ -56,7 +56,7 @@ func newGraceTestFixture(t *testing.T, billingDays int32) *graceTestFixture {
 		Status: string(models.CatalogStatusActive), BillingCycleDays: &billingDays, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
-	dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
@@ -69,7 +69,7 @@ func newGraceTestFixture(t *testing.T, billingDays int32) *graceTestFixture {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE source_id IN (SELECT id FROM openrails.subscriptions WHERE product_id = $1)", productID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE price_id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE tenant_subject_id IN (SELECT id FROM openrails.tenant_subjects WHERE id::text = $1)", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE merchant_subject_id IN (SELECT id FROM openrails.merchant_subjects WHERE id::text = $1)", userID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE product_id = $1", productID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)

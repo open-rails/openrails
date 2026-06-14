@@ -11,8 +11,8 @@ import (
 
 type MoneyBalance struct {
 	ID              uuid.UUID `json:"id"`
-	TenantID        uuid.UUID `json:"tenant_id"`
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	MerchantID        uuid.UUID `json:"tenant_id"`
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	Currency        string    `json:"currency"`
 	Balance         int64     `json:"balance"`
 	HeldBalance     int64     `json:"held_balance"`
@@ -22,8 +22,8 @@ type MoneyBalance struct {
 
 type MoneyTransaction struct {
 	ID              uuid.UUID      `json:"id"`
-	TenantID        uuid.UUID      `json:"tenant_id"`
-	TenantSubjectID uuid.UUID      `json:"tenant_subject_id"`
+	MerchantID        uuid.UUID      `json:"tenant_id"`
+	MerchantSubjectID uuid.UUID      `json:"tenant_subject_id"`
 	Currency        string         `json:"currency"`
 	Actor           string         `json:"actor"`
 	Resource        *string        `json:"resource,omitempty"`
@@ -44,8 +44,8 @@ type MoneyTransaction struct {
 
 type MoneyBlock struct {
 	ID                  uuid.UUID  `json:"id"`
-	TenantID            uuid.UUID  `json:"tenant_id"`
-	TenantSubjectID     uuid.UUID  `json:"tenant_subject_id"`
+	MerchantID            uuid.UUID  `json:"tenant_id"`
+	MerchantSubjectID     uuid.UUID  `json:"tenant_subject_id"`
 	Currency            string     `json:"currency"`
 	OriginalAmount      int64      `json:"original_amount"`
 	RemainingAmount     int64      `json:"remaining_amount"`
@@ -58,8 +58,8 @@ type MoneyBlock struct {
 // host admits requests against locally. See CreditWindow for the mechanics.
 type MoneyWindow struct {
 	ID              uuid.UUID `json:"id"`
-	TenantID        uuid.UUID `json:"tenant_id"`
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	MerchantID        uuid.UUID `json:"tenant_id"`
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	Currency        string    `json:"currency"`
 	HeldAmount      int64     `json:"held_amount"`
 	SettledAmount   int64     `json:"settled_amount"`
@@ -73,8 +73,8 @@ type MoneyWindow struct {
 // configuration (issue #237). NULL cap columns mean "no cap".
 type MoneyAccount struct {
 	ID              uuid.UUID `json:"id"`
-	TenantID        uuid.UUID `json:"tenant_id"`
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	MerchantID        uuid.UUID `json:"tenant_id"`
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	Currency        string    `json:"currency"`
 
 	BillingMode              string     `json:"billing_mode"`
@@ -110,8 +110,8 @@ type MoneyAccount struct {
 // (issue #237). The actor string is matched against money_transactions.actor.
 type MoneySpendLimit struct {
 	ID                     uuid.UUID `json:"id"`
-	TenantID               uuid.UUID `json:"tenant_id"`
-	TenantSubjectID        uuid.UUID `json:"tenant_subject_id"`
+	MerchantID               uuid.UUID `json:"tenant_id"`
+	MerchantSubjectID        uuid.UUID `json:"tenant_subject_id"`
 	Currency               string    `json:"currency"`
 	Actor                  string    `json:"actor"`
 	MaxSpendPerDayMicros   *int64    `json:"max_spend_per_day_micros,omitempty"`

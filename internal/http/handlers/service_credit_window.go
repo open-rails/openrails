@@ -17,7 +17,7 @@ import (
 // remainder. All service token-authed like the sibling credit spend routes.
 
 type serviceOpenWindowRequest struct {
-	TenantSubjectID string `json:"tenant_subject_id"`
+	MerchantSubjectID string `json:"tenant_subject_id"`
 	Actor           string `json:"actor"`
 	// Currency is optional; empty defaults to "USD" server-side (#476).
 	Currency   string `json:"currency"`
@@ -33,12 +33,12 @@ func ServiceOpenCreditWindow(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	payer, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	payer, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
 	if err != nil || payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *payer) {
+	if !requireServiceMerchantSubjectScope(r, *payer) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -47,7 +47,7 @@ func ServiceOpenCreditWindow(r *httprequest.Request) {
 		return
 	}
 	w, err := svc.OpenWindow(r.Request.Context(), billingservice.OpenWindowRequest{
-		TenantSubjectID: *payer,
+		MerchantSubjectID: *payer,
 		Actor:           req.Actor,
 		Currency:        req.Currency,
 		Amount:          req.Amount,

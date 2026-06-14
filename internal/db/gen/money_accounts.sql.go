@@ -16,21 +16,21 @@ const addMoneyOutstandingOwed = `-- name: AddMoneyOutstandingOwed :exec
 UPDATE openrails.money_accounts
 SET outstanding_owed_micros = outstanding_owed_micros + $3::bigint,
     updated_at = $4
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $5
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $5
 `
 
 type AddMoneyOutstandingOwedParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Amount          int64
-	Now             time.Time
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Amount            int64
+	Now               time.Time
+	Currency          string
 }
 
 func (q *Queries) AddMoneyOutstandingOwed(ctx context.Context, arg AddMoneyOutstandingOwedParams) error {
 	_, err := q.db.Exec(ctx, addMoneyOutstandingOwed,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Amount,
 		arg.Now,
 		arg.Currency,
@@ -41,16 +41,16 @@ func (q *Queries) AddMoneyOutstandingOwed(ctx context.Context, arg AddMoneyOutst
 const autoGraduateMoneyAccountTier = `-- name: AutoGraduateMoneyAccountTier :exec
 UPDATE openrails.money_accounts
 SET tier = $3::text, tier_source = 'auto', updated_at = $4
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $5
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $5
   AND tier_source <> 'admin'
 `
 
 type AutoGraduateMoneyAccountTierParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Tier            string
-	Now             time.Time
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Tier              string
+	Now               time.Time
+	Currency          string
 }
 
 // Auto-graduation write (#476): set tier_source='auto' and the new tier ONLY
@@ -59,8 +59,8 @@ type AutoGraduateMoneyAccountTierParams struct {
 // admin override at the DB level so a race cannot.
 func (q *Queries) AutoGraduateMoneyAccountTier(ctx context.Context, arg AutoGraduateMoneyAccountTierParams) error {
 	_, err := q.db.Exec(ctx, autoGraduateMoneyAccountTier,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Tier,
 		arg.Now,
 		arg.Currency,
@@ -69,24 +69,24 @@ func (q *Queries) AutoGraduateMoneyAccountTier(ctx context.Context, arg AutoGrad
 }
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
-SELECT id, tenant_id, tenant_subject_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source FROM openrails.money_accounts
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
+SELECT id, merchant_id, merchant_subject_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source FROM openrails.money_accounts
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $3
 LIMIT 1
 `
 
 type GetMoneyAccountSettingsParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
 }
 
 func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccountSettingsParams) (OpenrailsMoneyAccount, error) {
-	row := q.db.QueryRow(ctx, getMoneyAccountSettings, arg.TenantID, arg.TenantSubjectID, arg.Currency)
+	row := q.db.QueryRow(ctx, getMoneyAccountSettings, arg.MerchantID, arg.MerchantSubjectID, arg.Currency)
 	var i OpenrailsMoneyAccount
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.BillingMode,
 		&i.MaxSpendPerDayMicros,
 		&i.MaxSpendPerMonthMicros,
@@ -115,30 +115,30 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 }
 
 const getMoneySpendLimit = `-- name: GetMoneySpendLimit :one
-SELECT id, tenant_id, tenant_subject_id, actor, max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at, currency FROM openrails.money_spend_limits
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $4 AND actor = $3
+SELECT id, merchant_id, merchant_subject_id, actor, max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at, currency FROM openrails.money_spend_limits
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $4 AND actor = $3
 LIMIT 1
 `
 
 type GetMoneySpendLimitParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Actor           string
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Actor             string
+	Currency          string
 }
 
 func (q *Queries) GetMoneySpendLimit(ctx context.Context, arg GetMoneySpendLimitParams) (OpenrailsMoneySpendLimit, error) {
 	row := q.db.QueryRow(ctx, getMoneySpendLimit,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Actor,
 		arg.Currency,
 	)
 	var i OpenrailsMoneySpendLimit
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.Actor,
 		&i.MaxSpendPerDayMicros,
 		&i.MaxSpendPerMonthMicros,
@@ -151,19 +151,19 @@ func (q *Queries) GetMoneySpendLimit(ctx context.Context, arg GetMoneySpendLimit
 
 const insertMoneyAccountSettingsIfAbsent = `-- name: InsertMoneyAccountSettingsIfAbsent :exec
 INSERT INTO openrails.money_accounts (
-    id, tenant_id, tenant_subject_id, currency, billing_mode,
+    id, merchant_id, merchant_subject_id, currency, billing_mode,
     hard_stop_on_breach, alert_threshold_pct, created_at, updated_at
 ) VALUES ($1, $2, $3, $5, $4, true, 80, $6, $6)
-ON CONFLICT (tenant_id, tenant_subject_id, currency) DO NOTHING
+ON CONFLICT (merchant_id, merchant_subject_id, currency) DO NOTHING
 `
 
 type InsertMoneyAccountSettingsIfAbsentParams struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	BillingMode     string
-	Currency        string
-	Now             time.Time
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	BillingMode       string
+	Currency          string
+	Now               time.Time
 }
 
 // Default settings row (hard-stop on, 80% alert threshold) in the given
@@ -171,8 +171,8 @@ type InsertMoneyAccountSettingsIfAbsentParams struct {
 func (q *Queries) InsertMoneyAccountSettingsIfAbsent(ctx context.Context, arg InsertMoneyAccountSettingsIfAbsentParams) error {
 	_, err := q.db.Exec(ctx, insertMoneyAccountSettingsIfAbsent,
 		arg.ID,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.BillingMode,
 		arg.Currency,
 		arg.Now,
@@ -181,24 +181,24 @@ func (q *Queries) InsertMoneyAccountSettingsIfAbsent(ctx context.Context, arg In
 }
 
 const listBelowThresholdMoneyAccounts = `-- name: ListBelowThresholdMoneyAccounts :many
-SELECT s.tenant_id, s.tenant_subject_id, s.currency,
+SELECT s.merchant_id, s.merchant_subject_id, s.currency,
        (COALESCE(b.balance, 0) - COALESCE(b.held_balance, 0))::bigint AS available,
        COALESCE(s.low_balance_threshold_micros, 0)::bigint AS threshold,
        s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id,
        s.last_alert_at, s.last_topup_at
 FROM openrails.money_accounts s
 LEFT JOIN openrails.money_balances b
-  ON b.tenant_id = s.tenant_id
- AND b.tenant_subject_id = s.tenant_subject_id
+  ON b.merchant_id = s.merchant_id
+ AND b.merchant_subject_id = s.merchant_subject_id
  AND b.currency = s.currency
-WHERE s.tenant_id = $1
+WHERE s.merchant_id = $1
   AND s.low_balance_threshold_micros IS NOT NULL
   AND (COALESCE(b.balance, 0) - COALESCE(b.held_balance, 0)) < s.low_balance_threshold_micros
 `
 
 type ListBelowThresholdMoneyAccountsRow struct {
-	TenantID                 uuid.UUID
-	TenantSubjectID          uuid.UUID
+	MerchantID               uuid.UUID
+	MerchantSubjectID        uuid.UUID
 	Currency                 string
 	Available                int64
 	Threshold                int64
@@ -211,8 +211,8 @@ type ListBelowThresholdMoneyAccountsRow struct {
 
 // Money-in workers (#239/#240): accounts whose available balance
 // (balance - held) is under their configured low-balance threshold.
-func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, tenantID uuid.UUID) ([]ListBelowThresholdMoneyAccountsRow, error) {
-	rows, err := q.db.Query(ctx, listBelowThresholdMoneyAccounts, tenantID)
+func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, merchantID uuid.UUID) ([]ListBelowThresholdMoneyAccountsRow, error) {
+	rows, err := q.db.Query(ctx, listBelowThresholdMoneyAccounts, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -221,8 +221,8 @@ func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, tenantID 
 	for rows.Next() {
 		var i ListBelowThresholdMoneyAccountsRow
 		if err := rows.Scan(
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 			&i.Currency,
 			&i.Available,
 			&i.Threshold,
@@ -243,10 +243,10 @@ func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, tenantID 
 }
 
 const listChargeableArrearsMoneyAccounts = `-- name: ListChargeableArrearsMoneyAccounts :many
-SELECT s.tenant_id, s.tenant_subject_id, s.currency,
+SELECT s.merchant_id, s.merchant_subject_id, s.currency,
        s.outstanding_owed_micros, s.auto_topup_payment_method_id
 FROM openrails.money_accounts s
-WHERE s.tenant_id = $1
+WHERE s.merchant_id = $1
   AND s.billing_mode = 'arrears'
   AND s.outstanding_owed_micros > 0
   AND s.auto_topup_payment_method_id IS NOT NULL
@@ -254,13 +254,13 @@ WHERE s.tenant_id = $1
 `
 
 type ListChargeableArrearsMoneyAccountsParams struct {
-	TenantID     uuid.UUID
+	MerchantID   uuid.UUID
 	MinThreshold int64
 }
 
 type ListChargeableArrearsMoneyAccountsRow struct {
-	TenantID                 uuid.UUID
-	TenantSubjectID          uuid.UUID
+	MerchantID               uuid.UUID
+	MerchantSubjectID        uuid.UUID
 	Currency                 string
 	OutstandingOwedMicros    int64
 	AutoTopupPaymentMethodID *uuid.UUID
@@ -269,7 +269,7 @@ type ListChargeableArrearsMoneyAccountsRow struct {
 // Arrears collection (#241): accounts owing with a card on file.
 // min_threshold <= 0 means "charge every account with owed > 0".
 func (q *Queries) ListChargeableArrearsMoneyAccounts(ctx context.Context, arg ListChargeableArrearsMoneyAccountsParams) ([]ListChargeableArrearsMoneyAccountsRow, error) {
-	rows, err := q.db.Query(ctx, listChargeableArrearsMoneyAccounts, arg.TenantID, arg.MinThreshold)
+	rows, err := q.db.Query(ctx, listChargeableArrearsMoneyAccounts, arg.MerchantID, arg.MinThreshold)
 	if err != nil {
 		return nil, err
 	}
@@ -278,8 +278,8 @@ func (q *Queries) ListChargeableArrearsMoneyAccounts(ctx context.Context, arg Li
 	for rows.Next() {
 		var i ListChargeableArrearsMoneyAccountsRow
 		if err := rows.Scan(
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 			&i.Currency,
 			&i.OutstandingOwedMicros,
 			&i.AutoTopupPaymentMethodID,
@@ -296,15 +296,15 @@ func (q *Queries) ListChargeableArrearsMoneyAccounts(ctx context.Context, arg Li
 
 const listMoneyAccountPairs = `-- name: ListMoneyAccountPairs :many
 
-SELECT DISTINCT tenant_subject_id, currency
+SELECT DISTINCT merchant_subject_id, currency
 FROM openrails.money_balances
-WHERE tenant_id = $1
-ORDER BY tenant_subject_id, currency
+WHERE merchant_id = $1
+ORDER BY merchant_subject_id, currency
 `
 
 type ListMoneyAccountPairsRow struct {
-	TenantSubjectID uuid.UUID
-	Currency        string
+	MerchantSubjectID uuid.UUID
+	Currency          string
 }
 
 // openrails.money_accounts: per-(tenant, payer, currency) spend policy + money-in
@@ -313,8 +313,8 @@ type ListMoneyAccountPairsRow struct {
 // Distinct (payer, currency) pairs to finalize invoices for (#472). Sourced from
 // money_balances — the row every payer with money activity has (a money_accounts
 // row only exists once spend settings are configured).
-func (q *Queries) ListMoneyAccountPairs(ctx context.Context, tenantID uuid.UUID) ([]ListMoneyAccountPairsRow, error) {
-	rows, err := q.db.Query(ctx, listMoneyAccountPairs, tenantID)
+func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUID) ([]ListMoneyAccountPairsRow, error) {
+	rows, err := q.db.Query(ctx, listMoneyAccountPairs, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +322,7 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, tenantID uuid.UUID)
 	var items []ListMoneyAccountPairsRow
 	for rows.Next() {
 		var i ListMoneyAccountPairsRow
-		if err := rows.Scan(&i.TenantSubjectID, &i.Currency); err != nil {
+		if err := rows.Scan(&i.MerchantSubjectID, &i.Currency); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -334,24 +334,24 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, tenantID uuid.UUID)
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT id, tenant_id, tenant_subject_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source FROM openrails.money_accounts
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
+SELECT id, merchant_id, merchant_subject_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source FROM openrails.money_accounts
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $3
 FOR UPDATE
 `
 
 type LockMoneyAccountSettingsParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
 }
 
 func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAccountSettingsParams) (OpenrailsMoneyAccount, error) {
-	row := q.db.QueryRow(ctx, lockMoneyAccountSettings, arg.TenantID, arg.TenantSubjectID, arg.Currency)
+	row := q.db.QueryRow(ctx, lockMoneyAccountSettings, arg.MerchantID, arg.MerchantSubjectID, arg.Currency)
 	var i OpenrailsMoneyAccount
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 		&i.BillingMode,
 		&i.MaxSpendPerDayMicros,
 		&i.MaxSpendPerMonthMicros,
@@ -383,24 +383,24 @@ const reduceMoneyOutstandingOwedSnapshot = `-- name: ReduceMoneyOutstandingOwedS
 UPDATE openrails.money_accounts
 SET outstanding_owed_micros = GREATEST(0, outstanding_owed_micros - $3::bigint),
     updated_at = $4
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $5
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $5
   AND outstanding_owed_micros >= $3::bigint
 `
 
 type ReduceMoneyOutstandingOwedSnapshotParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Snapshot        int64
-	Now             time.Time
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Snapshot          int64
+	Now               time.Time
+	Currency          string
 }
 
 // CAS-style decrement: only applies when owed still covers the snapshot, so
 // two collection runs racing on the same snapshot can't double-decrement.
 func (q *Queries) ReduceMoneyOutstandingOwedSnapshot(ctx context.Context, arg ReduceMoneyOutstandingOwedSnapshotParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reduceMoneyOutstandingOwedSnapshot,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Snapshot,
 		arg.Now,
 		arg.Currency,
@@ -414,20 +414,20 @@ func (q *Queries) ReduceMoneyOutstandingOwedSnapshot(ctx context.Context, arg Re
 const resumeMoneyAccount = `-- name: ResumeMoneyAccount :exec
 UPDATE openrails.money_accounts
 SET suspended_at = NULL, suspend_reason = NULL, updated_at = $3
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $4
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $4
 `
 
 type ResumeMoneyAccountParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	UpdatedAt       time.Time
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	UpdatedAt         time.Time
+	Currency          string
 }
 
 func (q *Queries) ResumeMoneyAccount(ctx context.Context, arg ResumeMoneyAccountParams) error {
 	_, err := q.db.Exec(ctx, resumeMoneyAccount,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.UpdatedAt,
 		arg.Currency,
 	)
@@ -439,21 +439,21 @@ UPDATE openrails.money_accounts
 SET verified_payment_method = $3::boolean,
     verified_at = CASE WHEN $3::boolean THEN $4::timestamptz ELSE NULL END,
     updated_at = $4::timestamptz
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $5
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $5
 `
 
 type SetMoneyAccountPaymentVerifiedParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Verified        bool
-	Now             time.Time
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Verified          bool
+	Now               time.Time
+	Currency          string
 }
 
 func (q *Queries) SetMoneyAccountPaymentVerified(ctx context.Context, arg SetMoneyAccountPaymentVerifiedParams) error {
 	_, err := q.db.Exec(ctx, setMoneyAccountPaymentVerified,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Verified,
 		arg.Now,
 		arg.Currency,
@@ -464,24 +464,24 @@ func (q *Queries) SetMoneyAccountPaymentVerified(ctx context.Context, arg SetMon
 const setMoneyAccountTier = `-- name: SetMoneyAccountTier :exec
 UPDATE openrails.money_accounts
 SET tier = $3::text, tier_source = $4::text, updated_at = $5
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $6
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $6
 `
 
 type SetMoneyAccountTierParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Tier            string
-	TierSource      string
-	Now             time.Time
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Tier              string
+	TierSource        string
+	Now               time.Time
+	Currency          string
 }
 
 // Sets the tier AND its source (#476). 'admin' = an explicit override that
 // auto-graduation must not overwrite; 'auto' = schedule-driven.
 func (q *Queries) SetMoneyAccountTier(ctx context.Context, arg SetMoneyAccountTierParams) error {
 	_, err := q.db.Exec(ctx, setMoneyAccountTier,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Tier,
 		arg.TierSource,
 		arg.Now,
@@ -493,20 +493,20 @@ func (q *Queries) SetMoneyAccountTier(ctx context.Context, arg SetMoneyAccountTi
 const stampMoneyAccountAlertAt = `-- name: StampMoneyAccountAlertAt :exec
 UPDATE openrails.money_accounts
 SET last_alert_at = $3, updated_at = $3
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $4
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $4
 `
 
 type StampMoneyAccountAlertAtParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Now             *time.Time
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Now               *time.Time
+	Currency          string
 }
 
 func (q *Queries) StampMoneyAccountAlertAt(ctx context.Context, arg StampMoneyAccountAlertAtParams) error {
 	_, err := q.db.Exec(ctx, stampMoneyAccountAlertAt,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Now,
 		arg.Currency,
 	)
@@ -516,20 +516,20 @@ func (q *Queries) StampMoneyAccountAlertAt(ctx context.Context, arg StampMoneyAc
 const stampMoneyAccountTopupAt = `-- name: StampMoneyAccountTopupAt :exec
 UPDATE openrails.money_accounts
 SET last_topup_at = $3, updated_at = $3
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $4
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $4
 `
 
 type StampMoneyAccountTopupAtParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Now             *time.Time
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Now               *time.Time
+	Currency          string
 }
 
 func (q *Queries) StampMoneyAccountTopupAt(ctx context.Context, arg StampMoneyAccountTopupAtParams) error {
 	_, err := q.db.Exec(ctx, stampMoneyAccountTopupAt,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Now,
 		arg.Currency,
 	)
@@ -541,21 +541,21 @@ UPDATE openrails.money_accounts
 SET suspended_at = $3::timestamptz,
     suspend_reason = $4,
     updated_at = $3::timestamptz
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $5
+WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = $5
 `
 
 type SuspendMoneyAccountParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Now             time.Time
-	Reason          *string
-	Currency        string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Now               time.Time
+	Reason            *string
+	Currency          string
 }
 
 func (q *Queries) SuspendMoneyAccount(ctx context.Context, arg SuspendMoneyAccountParams) error {
 	_, err := q.db.Exec(ctx, suspendMoneyAccount,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Now,
 		arg.Reason,
 		arg.Currency,
@@ -565,13 +565,13 @@ func (q *Queries) SuspendMoneyAccount(ctx context.Context, arg SuspendMoneyAccou
 
 const upsertMoneyAccountSettings = `-- name: UpsertMoneyAccountSettings :exec
 INSERT INTO openrails.money_accounts (
-    id, tenant_id, tenant_subject_id, currency, billing_mode,
+    id, merchant_id, merchant_subject_id, currency, billing_mode,
     max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros,
     low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents,
     auto_topup_payment_method_id, default_credit_expiry_days,
     hard_stop_on_breach, alert_threshold_pct, created_at, updated_at
 ) VALUES ($1, $2, $3, $17, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-ON CONFLICT (tenant_id, tenant_subject_id, currency) DO UPDATE SET
+ON CONFLICT (merchant_id, merchant_subject_id, currency) DO UPDATE SET
     billing_mode = EXCLUDED.billing_mode,
     max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros,
     max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros,
@@ -588,8 +588,8 @@ ON CONFLICT (tenant_id, tenant_subject_id, currency) DO UPDATE SET
 
 type UpsertMoneyAccountSettingsParams struct {
 	ID                        uuid.UUID
-	TenantID                  uuid.UUID
-	TenantSubjectID           uuid.UUID
+	MerchantID                uuid.UUID
+	MerchantSubjectID         uuid.UUID
 	BillingMode               string
 	MaxSpendPerDayMicros      *int64
 	MaxSpendPerMonthMicros    *int64
@@ -609,8 +609,8 @@ type UpsertMoneyAccountSettingsParams struct {
 func (q *Queries) UpsertMoneyAccountSettings(ctx context.Context, arg UpsertMoneyAccountSettingsParams) error {
 	_, err := q.db.Exec(ctx, upsertMoneyAccountSettings,
 		arg.ID,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.BillingMode,
 		arg.MaxSpendPerDayMicros,
 		arg.MaxSpendPerMonthMicros,
@@ -631,10 +631,10 @@ func (q *Queries) UpsertMoneyAccountSettings(ctx context.Context, arg UpsertMone
 
 const upsertMoneySpendLimit = `-- name: UpsertMoneySpendLimit :exec
 INSERT INTO openrails.money_spend_limits (
-    id, tenant_id, tenant_subject_id, currency, actor,
+    id, merchant_id, merchant_subject_id, currency, actor,
     max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at
 ) VALUES ($1, $2, $3, $9, $4, $5, $6, $7, $8)
-ON CONFLICT (tenant_id, tenant_subject_id, currency, actor) DO UPDATE SET
+ON CONFLICT (merchant_id, merchant_subject_id, currency, actor) DO UPDATE SET
     max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros,
     max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros,
     updated_at = EXCLUDED.updated_at
@@ -642,8 +642,8 @@ ON CONFLICT (tenant_id, tenant_subject_id, currency, actor) DO UPDATE SET
 
 type UpsertMoneySpendLimitParams struct {
 	ID                     uuid.UUID
-	TenantID               uuid.UUID
-	TenantSubjectID        uuid.UUID
+	MerchantID             uuid.UUID
+	MerchantSubjectID      uuid.UUID
 	Actor                  string
 	MaxSpendPerDayMicros   *int64
 	MaxSpendPerMonthMicros *int64
@@ -655,8 +655,8 @@ type UpsertMoneySpendLimitParams struct {
 func (q *Queries) UpsertMoneySpendLimit(ctx context.Context, arg UpsertMoneySpendLimitParams) error {
 	_, err := q.db.Exec(ctx, upsertMoneySpendLimit,
 		arg.ID,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Actor,
 		arg.MaxSpendPerDayMicros,
 		arg.MaxSpendPerMonthMicros,

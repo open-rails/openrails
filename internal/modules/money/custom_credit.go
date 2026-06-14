@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Custom credits (#475): tenant-defined consumable units (api-credits, gold-coins)
@@ -60,20 +60,20 @@ func (s *MoneyService) ResolveUnit(ctx context.Context, code string) (decimals i
 	if !ok {
 		return 0, false, fmt.Errorf("money: malformed custom credit code %q", code)
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, false, err
 	}
 	// The qualifying slug must name the ctx tenant — a custom unit is only valid
 	// in its owning tenant's ledger (RLS scopes the lookup too).
-	tr, err := s.db.Gen(ctx).GetTenantBySlug(ctx, slug)
+	tr, err := s.db.Gen(ctx).GetMerchantBySlug(ctx, slug)
 	if err != nil {
 		return 0, false, fmt.Errorf("money: unknown custom credit unit %q: %w", code, err)
 	}
 	if tr.ID != tid.UUID() {
 		return 0, false, fmt.Errorf("money: custom credit unit %q not owned by ctx tenant", code)
 	}
-	ct, err := s.db.Gen(ctx).GetCustomCreditType(ctx, gen.GetCustomCreditTypeParams{TenantID: tid.UUID(), Name: name})
+	ct, err := s.db.Gen(ctx).GetCustomCreditType(ctx, gen.GetCustomCreditTypeParams{MerchantID: tid.UUID(), Name: name})
 	if err != nil {
 		return 0, false, fmt.Errorf("money: unknown custom credit unit %q: %w", code, err)
 	}
@@ -133,7 +133,7 @@ func FormatAmount(minor int64, decimals int) string {
 // DefineCustomCreditType upserts a custom credit unit for the ctx tenant
 // (idempotent on name; reactivates + updates decimals).
 func (s *MoneyService) DefineCustomCreditType(ctx context.Context, name string, decimals int) (gen.OpenrailsCustomCreditType, error) {
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return gen.OpenrailsCustomCreditType{}, err
 	}
@@ -145,13 +145,13 @@ func (s *MoneyService) DefineCustomCreditType(ctx context.Context, name string, 
 		return gen.OpenrailsCustomCreditType{}, fmt.Errorf("money: decimals out of range [0,18]: %d", decimals)
 	}
 	return s.db.Gen(ctx).DefineCustomCreditType(ctx, gen.DefineCustomCreditTypeParams{
-		TenantID: tid.UUID(), Name: name, Decimals: int32(decimals),
+		MerchantID: tid.UUID(), Name: name, Decimals: int32(decimals),
 	})
 }
 
 // ListCustomCreditTypes lists the ctx tenant's custom credit units.
 func (s *MoneyService) ListCustomCreditTypes(ctx context.Context) ([]gen.OpenrailsCustomCreditType, error) {
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -160,11 +160,11 @@ func (s *MoneyService) ListCustomCreditTypes(ctx context.Context) ([]gen.Openrai
 
 // SetCustomCreditTypeActive activates/deactivates a ctx-tenant custom credit unit.
 func (s *MoneyService) SetCustomCreditTypeActive(ctx context.Context, name string, active bool) (gen.OpenrailsCustomCreditType, error) {
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return gen.OpenrailsCustomCreditType{}, err
 	}
 	return s.db.Gen(ctx).SetCustomCreditTypeActive(ctx, gen.SetCustomCreditTypeActiveParams{
-		TenantID: tid.UUID(), Name: strings.TrimSpace(name), Active: active,
+		MerchantID: tid.UUID(), Name: strings.TrimSpace(name), Active: active,
 	})
 }

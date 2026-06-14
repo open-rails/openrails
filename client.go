@@ -149,7 +149,7 @@ type Client interface {
 // SelfIssuer is the issuer keying tenant_subjects rows for self-service
 // identities whose subject is the user's own UUID — what an embedded host
 // passes to ListActiveEntitlements for its own users (internal/db/repo
-// EnsureTenantSubjectID materializes rows under it).
+// EnsureMerchantSubjectID materializes rows under it).
 const SelfIssuer = "openrails:self"
 
 // PayerTenantID is the OpenRails tenant-subject UUID a charge is billed to.
@@ -252,11 +252,11 @@ type DepositCreditsRequest struct {
 // CreditTransaction is the ledger row returned by capture/withdraw/deposit.
 // Field names match the wire exactly (the handler serializes
 // pkg/service.CreditTransaction with Go field names, no json tags). NOTE: the
-// payer field is TenantSubjectID — go-client's PayerTenantID field name never
+// payer field is MerchantSubjectID — go-client's PayerTenantID field name never
 // decoded this and silently stayed zero; fixed here.
 type CreditTransaction struct {
 	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
+	MerchantSubjectID uuid.UUID
 	Actor           string
 	CreditTypeID    uuid.UUID
 	Amount          int64
@@ -525,7 +525,7 @@ type ResourceRevenueResponse struct {
 // ServiceEntitlementRecord wire shape (entitlements.go) verbatim.
 type EntitlementRecord struct {
 	ID              string     `json:"id"`
-	TenantSubjectID string     `json:"tenant_subject_id,omitempty"`
+	MerchantSubjectID string     `json:"tenant_subject_id,omitempty"`
 	Entitlement     string     `json:"entitlement"`
 	StartAt         time.Time  `json:"start_at"`
 	EndAt           *time.Time `json:"end_at,omitempty"`

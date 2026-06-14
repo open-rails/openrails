@@ -18,7 +18,7 @@ import (
 // spendTestEnv connects to the integration DB, verifies the money schema, and
 // seeds a funded payer. Money has no credit_type dimension (#472); the returned
 // currency is always USD.
-func spendTestEnv(t *testing.T) (*money.MoneyService, *pgxpool.Pool, identity.TenantSubjectID, string, context.Context) {
+func spendTestEnv(t *testing.T) (*money.MoneyService, *pgxpool.Pool, identity.MerchantSubjectID, string, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := context.Background()
@@ -28,22 +28,22 @@ func spendTestEnv(t *testing.T) (*money.MoneyService, *pgxpool.Pool, identity.Te
 	dbtest.EnsureTestTenant(ctx, t, pool)
 	ctx = dbtest.WithTestTenant(ctx)
 
-	payer := identity.TenantSubjectIDFromString(uuid.NewString())
+	payer := identity.MerchantSubjectIDFromString(uuid.NewString())
 	require.False(t, payer.IsZero())
 	payerID := payer.UUID()
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_spend_limits WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_accounts WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_spend_limits WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_accounts WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", payerID)
 	})
 
 	svc := money.NewMoneyService(dbi)
 	// Fund the payer generously so balance is never the binding constraint here.
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		TenantSubjectID: &payer, Actor: payerID.String(), Amount: 1_000_000, Source: "test_seed",
+		MerchantSubjectID: &payer, Actor: payerID.String(), Amount: 1_000_000, Source: "test_seed",
 	})
 	require.NoError(t, err)
 	return svc, pool, payer, money.DefaultCurrency, ctx
@@ -72,7 +72,7 @@ func TestSpendPolicy_DailyCap(t *testing.T) {
 	require.NoError(t, err)
 
 	// Spend 500 (settled withdrawal).
-	_, err = svc.Withdraw(ctx, money.WithdrawParams{TenantSubjectID: &payer, Actor: "user:a", Amount: 500, Source: "usage"})
+	_, err = svc.Withdraw(ctx, money.WithdrawParams{MerchantSubjectID: &payer, Actor: "user:a", Amount: 500, Source: "usage"})
 	require.NoError(t, err)
 
 	allow, err := svc.CheckSpendAllowed(ctx, payer, "user:a", 400) // 500+400 <= 1000
@@ -104,9 +104,9 @@ func TestSpendPolicy_PerActorCap(t *testing.T) {
 	require.NoError(t, err)
 
 	// alice spends 80; bob spends 80 (bob has no limit).
-	_, err = svc.Withdraw(ctx, money.WithdrawParams{TenantSubjectID: &payer, Actor: "user:alice", Amount: 80, Source: "usage"})
+	_, err = svc.Withdraw(ctx, money.WithdrawParams{MerchantSubjectID: &payer, Actor: "user:alice", Amount: 80, Source: "usage"})
 	require.NoError(t, err)
-	_, err = svc.Withdraw(ctx, money.WithdrawParams{TenantSubjectID: &payer, Actor: "user:bob", Amount: 80, Source: "usage"})
+	_, err = svc.Withdraw(ctx, money.WithdrawParams{MerchantSubjectID: &payer, Actor: "user:bob", Amount: 80, Source: "usage"})
 	require.NoError(t, err)
 
 	deny, err := svc.CheckSpendAllowed(ctx, payer, "user:alice", 30) // 80+30 > 100
@@ -155,7 +155,7 @@ func TestSpendPolicy_WarnOnlyDoesNotBlock(t *testing.T) {
 		MaxSpendPerDayMicros: &cap, HardStopOnBreach: &hard,
 	})
 	require.NoError(t, err)
-	_, err = svc.Withdraw(ctx, money.WithdrawParams{TenantSubjectID: &payer, Actor: "user:a", Amount: 100, Source: "usage"})
+	_, err = svc.Withdraw(ctx, money.WithdrawParams{MerchantSubjectID: &payer, Actor: "user:a", Amount: 100, Source: "usage"})
 	require.NoError(t, err)
 
 	dec, err := svc.CheckSpendAllowed(ctx, payer, "user:a", 50) // over cap but warn-only

@@ -16,10 +16,10 @@ import (
 // request neither double-records nor double-charges.
 type UsageEvent struct {
 	ID uuid.UUID `json:"id"`
-	// TenantID scopes this row to a tenant / billing namespace (issue #223/#227).
-	TenantID uuid.UUID `json:"tenant_id"`
-	// TenantSubjectID is the tenant subject BILLED for this usage (issue #221, the payer).
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	// MerchantID scopes this row to a tenant / billing namespace (issue #223/#227).
+	MerchantID uuid.UUID `json:"tenant_id"`
+	// MerchantSubjectID is the tenant subject BILLED for this usage (issue #221, the payer).
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	// Actor is the caller-supplied principal string that caused usage
 	// (opaque to OpenRails; attribution + grouping only, not the payer).
 	Actor string `json:"actor"`

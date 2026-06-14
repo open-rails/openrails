@@ -18,7 +18,7 @@ import (
 // build a purchased-library view without querying the catalog or payment history.
 type ProductAccessGrantResponse struct {
 	ID              string     `json:"id"`
-	TenantSubjectID string     `json:"tenant_subject_id"`
+	MerchantSubjectID string     `json:"tenant_subject_id"`
 	ProductID       string     `json:"product_id"`
 	ProductSlug     string     `json:"product_slug,omitempty"`
 	ProductName     string     `json:"product_name,omitempty"`
@@ -62,7 +62,7 @@ func productAccessResponses(r *httprequest.Request, grants []models.ProductAcces
 		g := grants[i]
 		resp := ProductAccessGrantResponse{
 			ID:              g.ID.String(),
-			TenantSubjectID: g.TenantSubjectID.String(),
+			MerchantSubjectID: g.MerchantSubjectID.String(),
 			ProductID:       g.ProductID.String(),
 			SourceType:      string(g.SourceType),
 			SourceID:        g.SourceID,
@@ -162,13 +162,13 @@ func GetMyProductAccess(r *httprequest.Request) {
 
 // productAccessCheckResponse is the typed payload for has-access checks.
 type productAccessCheckResponse struct {
-	TenantSubjectID string `json:"tenant_subject_id"`
+	MerchantSubjectID string `json:"tenant_subject_id"`
 	ProductID       string `json:"product_id"`
 	HasAccess       bool   `json:"has_access"`
 }
 
 func newProductAccessCheck(productID uuid.UUID, userID string, has bool) productAccessCheckResponse {
-	return productAccessCheckResponse{TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID().String(), ProductID: productID.String(), HasAccess: has}
+	return productAccessCheckResponse{MerchantSubjectID: identity.MerchantSubjectIDFromString(userID).UUID().String(), ProductID: productID.String(), HasAccess: has}
 }
 
 // --- service token service (GET /v1/service/users/:user_id/product-access) ---
@@ -309,7 +309,7 @@ func RevokeAdminProductAccess(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load grant")
 		return
 	}
-	if grant == nil || grant.TenantSubjectID.String() != path.UserID {
+	if grant == nil || grant.MerchantSubjectID.String() != path.UserID {
 		r.ErrorJSON(http.StatusNotFound, "grant not found for this user")
 		return
 	}

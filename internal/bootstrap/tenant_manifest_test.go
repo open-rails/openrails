@@ -7,17 +7,15 @@ import (
 )
 
 func TestParseBootstrapManifest(t *testing.T) {
-	// Registration is purely tenant + issuer + JWKS URI. Audiences are optional
-	// (default openrails); there is no per-issuer permission grant — a tenant has
-	// full authority over its own resources.
+	// A manifest tenant is a billing merchant (#480): slug + name + optional
+	// owner-tenant ownership link (#481). Issuer/JWKS trust is AuthKit's
+	// remote_application registry (#74), no longer declared here.
 	manifest, err := ParseBootstrapManifest([]byte(`
 version: 1
 tenants:
   - slug: cozy-art
     name: Cozy Art
-    issuers:
-      - issuer: https://auth.cozy.art
-        jwks_uri: https://auth.cozy.art/.well-known/jwks.json
+    owner_tenant_id: 11111111-1111-1111-1111-111111111111
 catalogs:
   - name: default
     tier_groups:
@@ -72,14 +70,13 @@ tenants:
 			want: `tenant "cozy-art" name is required`,
 		},
 		{
-			name: "invalid issuer url",
+			name: "issuers field removed",
 			body: base(`
     issuers:
-      - issuer: not-a-url
+      - issuer: https://auth.cozy.art
         jwks_uri: https://auth.cozy.art/.well-known/jwks.json
-        audiences: [openrails]
 `),
-			want: "must be an http(s) URL",
+			want: "issuers",
 		},
 		{
 			name: "service tokens removed",

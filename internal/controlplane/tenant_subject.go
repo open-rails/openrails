@@ -7,20 +7,20 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// ErrTenantSubjectInvalid indicates an issuer/subject pair cannot identify an
+// ErrMerchantSubjectInvalid indicates an issuer/subject pair cannot identify an
 // OpenRails payable subject.
-var ErrTenantSubjectInvalid = errors.New("controlplane: tenant subject issuer and subject are required")
+var ErrMerchantSubjectInvalid = errors.New("controlplane: tenant subject issuer and subject are required")
 
-// TouchTenantSubject resolves or creates the payable OpenRails subject for a
+// TouchMerchantSubject resolves or creates the payable OpenRails subject for a
 // tenant-scoped OIDC issuer+subject pair and updates last_seen_at.
-func (c *ControlPlane) TouchTenantSubject(ctx context.Context, tenantID tenant.ID, issuer, subject string) (uuid.UUID, error) {
+func (c *ControlPlane) TouchMerchantSubject(ctx context.Context, tenantID merchant.ID, issuer, subject string) (uuid.UUID, error) {
 	issuer = strings.TrimSpace(issuer)
 	subject = strings.TrimSpace(subject)
 	if tenantID.IsZero() || issuer == "" || subject == "" {
-		return uuid.Nil, ErrTenantSubjectInvalid
+		return uuid.Nil, ErrMerchantSubjectInvalid
 	}
 	if c == nil || c.pool == nil {
 		return uuid.Nil, errors.New("controlplane: pgx pool unavailable for tenant subject resolution")

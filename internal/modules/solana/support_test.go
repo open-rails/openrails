@@ -129,7 +129,7 @@ func TestSolanaPaymentMatchesPendingRequiresSameReferenceAndSession(t *testing.T
 		Currency:  "usd",
 	}
 	payment := &models.Payment{
-		TenantSubjectID: identity.TenantSubjectIDFromString("user_123").UUID(),
+		MerchantSubjectID: identity.MerchantSubjectIDFromString("user_123").UUID(),
 		PriceID:         priceID,
 		Amount:          1000,
 		Currency:        "USD",

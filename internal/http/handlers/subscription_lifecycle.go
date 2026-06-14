@@ -86,7 +86,7 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
-	if sub.TenantSubjectID.String() != uc.UserID {
+	if sub.MerchantSubjectID.String() != uc.UserID {
 		r.ErrorJSON(http.StatusNotFound, "subscription not found")
 		return
 	}
@@ -145,7 +145,7 @@ func ResumeSubscription(r *httprequest.Request) {
 		return
 	}
 
-	if sub.TenantSubjectID.String() != uc.UserID {
+	if sub.MerchantSubjectID.String() != uc.UserID {
 		r.ErrorJSON(http.StatusNotFound, "subscription not found")
 		return
 	}

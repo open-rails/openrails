@@ -20,7 +20,7 @@ const (
 // (tenant_id, next_pull_at).
 type SolanaSubscription struct {
 	ID             uuid.UUID `json:"id"`
-	TenantID       uuid.UUID `json:"tenant_id"`
+	MerchantID       uuid.UUID `json:"tenant_id"`
 	SubscriptionID uuid.UUID `json:"subscription_id"`
 
 	SubscriberWallet string `json:"subscriber_wallet"`

@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Gin context keys for a resolved browser-direct delegated access token (#222
@@ -79,7 +79,7 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 				response.UnauthorizedWithMessage(c, "delegated_token_expired")
 			case errors.Is(err, authcore.ErrAccessTokenRevoked):
 				response.UnauthorizedWithMessage(c, "delegated_token_revoked")
-			case errors.Is(err, controlplane.ErrServiceTokenTenantUnresolved),
+			case errors.Is(err, controlplane.ErrServiceTokenMerchantUnresolved),
 				errors.Is(err, controlplane.ErrDelegatedIssuerUnknown):
 				// Token's tenant/issuer maps to no active tenant (cross-tenant /
 				// unmapped / unregistered or disabled federated issuer).
@@ -96,7 +96,7 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 
 		// Pin the resolved tenant for tenant-owned DB access (#223). This
 		// OVERRIDES the default single-tenant resolution from ResolveTenant.
-		ctx := tenant.WithID(c.Request.Context(), resolved.TenantID)
+		ctx := merchant.WithID(c.Request.Context(), resolved.MerchantID)
 
 		// Bind the acting user so the reused user-facing handlers scope to the
 		// delegated subject. We populate BOTH the gin value and the request
@@ -111,7 +111,7 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 		ctx = authprovider.SetUserContext(ctx, uc)
 		c.Request = c.Request.WithContext(ctx)
 		c.Set("openrails.user_context", uc)
-		c.Set("openrails.tenant_id", resolved.TenantID)
+		c.Set("openrails.tenant_id", resolved.MerchantID)
 		c.Set(DelegatedContextKey, resolved)
 
 		c.Next()
@@ -158,7 +158,7 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.Ha
 		// Identical context payload to DelegatedSelfRequired: pin the resolved
 		// tenant (#223), bind the acting user, and record the delegated state for
 		// the per-route permission gates.
-		ctx := tenant.WithID(c.Request.Context(), resolved.TenantID)
+		ctx := merchant.WithID(c.Request.Context(), resolved.MerchantID)
 		uc := authprovider.UserContext{
 			UserID:        resolved.DelegatedSubject,
 			Email:         resolved.Email,
@@ -169,7 +169,7 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.Ha
 		ctx = authprovider.SetUserContext(ctx, uc)
 		c.Request = c.Request.WithContext(ctx)
 		c.Set("openrails.user_context", uc)
-		c.Set("openrails.tenant_id", resolved.TenantID)
+		c.Set("openrails.tenant_id", resolved.MerchantID)
 		c.Set(DelegatedContextKey, resolved)
 
 		c.Next()
@@ -184,7 +184,7 @@ func resolvedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*controlplane
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	tenantID, err := tenant.ParseID(strings.TrimSpace(p.TenantID))
+	tenantID, err := merchant.ParseID(strings.TrimSpace(p.MerchantID))
 	if err != nil || tenantID.IsZero() {
 		return nil, billingauth.ErrDelegatedPrincipalInvalid
 	}
@@ -203,13 +203,13 @@ func resolvedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*controlplane
 
 	return &controlplane.ResolvedDelegated{
 		Tenant:     strings.TrimSpace(p.TenantSlug),
-		TenantID:   tenantID,
+		MerchantID:   tenantID,
 		TenantSlug: strings.TrimSpace(p.TenantSlug),
 		// The self handlers key billing rows by the subject's own UUID
-		// (identity.TenantSubjectIDFromString), so mirror that derivation here.
+		// (identity.MerchantSubjectIDFromString), so mirror that derivation here.
 		// Zero when the subject is not a UUID — exactly like the handlers, which
 		// reject a zero payer.
-		TenantSubjectID:  identity.TenantSubjectIDFromString(subject).UUID(),
+		MerchantSubjectID:  identity.MerchantSubjectIDFromString(subject).UUID(),
 		DelegatedSubject: subject,
 		Issuer:           strings.TrimSpace(p.Actor),
 		Permissions:      perms,

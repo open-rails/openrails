@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Admitter is the unified admission check (issue #298): throughput (Redis) +
@@ -55,7 +55,7 @@ type BlockCheck struct {
 
 // AdmitRequest is one admission decision input.
 type AdmitRequest struct {
-	TenantSubjectID identity.TenantSubjectID // the tenant subject
+	MerchantSubjectID identity.MerchantSubjectID // the tenant subject
 	Actor           string                   // canonical actor: user:<id> / serviceToken:<key_id> / <issuer>:<sub>
 	Tier            string                   // the actor's tier (selects the throughput policy)
 	Resource        string                   // caller-supplied resource string (namespaces the throughput counters)
@@ -137,7 +137,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 
 	// Suspension (#299): a past_due/suspended account is denied all spend.
 	if req.EstimateMicros > 0 {
-		suspended, err := a.money.IsSuspended(ctx, req.TenantSubjectID)
+		suspended, err := a.money.IsSuspended(ctx, req.MerchantSubjectID)
 		if err != nil {
 			return AdmitDecision{}, err
 		}
@@ -149,7 +149,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// PM-on-file gate (#299): a credit-line (arrears) account must have a verified
 	// payment method before it may spend on credit.
 	if req.EstimateMicros > 0 {
-		needV, err := a.money.ArrearsRequiresVerification(ctx, req.TenantSubjectID)
+		needV, err := a.money.ArrearsRequiresVerification(ctx, req.MerchantSubjectID)
 		if err != nil {
 			return AdmitDecision{}, err
 		}
@@ -163,7 +163,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	tier := req.Tier
 	if tier == "" {
 		if req.EstimateMicros > 0 {
-			if t, terr := a.money.GetTier(ctx, req.TenantSubjectID); terr == nil && t != "" {
+			if t, terr := a.money.GetTier(ctx, req.MerchantSubjectID); terr == nil && t != "" {
 				tier = t
 			}
 		}
@@ -173,7 +173,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	}
 
 	// --- tier policy + endpoint gating (#298) ---
-	pol, err := a.policies.GetTierPolicy(ctx, req.TenantSubjectID, tier)
+	pol, err := a.policies.GetTierPolicy(ctx, req.MerchantSubjectID, tier)
 	if err != nil {
 		return AdmitDecision{}, err
 	}
@@ -187,12 +187,12 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// can register unlimited invokers to multiply its limit), so the capacity
 	// limit AGGREGATES across all of a payer's invokers. `Resource` is the
 	// endpoint-release uuid (the host's releaseID), never a mutable name.
-	tid, err := tenant.Require(ctx) // #336: no default tenant
+	tid, err := merchant.Require(ctx) // #336: no default tenant
 	if err != nil {
 		return AdmitDecision{}, err
 	}
 	tenantID := tid.UUID()
-	base := fmt.Sprintf("%s:%s:%s", tenantID, req.TenantSubjectID.UUID(), req.Resource)
+	base := fmt.Sprintf("%s:%s:%s", tenantID, req.MerchantSubjectID.UUID(), req.Resource)
 	// Per-release throughput VALUES (#472 G1): a release-specific window list
 	// overrides the tier-global default so two releases under one payer can carry
 	// different RPM/TPM.
@@ -272,7 +272,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		if len(scopes) > 0 {
 			// Budgets and the ledger are BOTH micro-dollars (#337/#463). The
 			// estimate reserves 1:1 against every matching scope's windows.
-			statuses, ok, blockIdx, err := a.budgets.ReserveScopes(ctx, req.TenantSubjectID, scopes, req.EstimateMicros, req.Source, req.SourceID, ttl)
+			statuses, ok, blockIdx, err := a.budgets.ReserveScopes(ctx, req.MerchantSubjectID, scopes, req.EstimateMicros, req.Source, req.SourceID, ttl)
 			if err != nil {
 				return AdmitDecision{}, err
 			}
@@ -304,7 +304,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// --- money axis (reserve the estimate via the existing ledger gate) ---
 	if req.EstimateMicros > 0 {
 		res, err := a.money.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-			Payer:          req.TenantSubjectID,
+			Payer:          req.MerchantSubjectID,
 			Actor:          req.Actor,
 			EstimateMicros: req.EstimateMicros,
 			Source:         req.Source,
@@ -318,7 +318,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 			// Roll back ALL reserved budget scopes so a money-denied request
 			// doesn't consume any of the payer's budget windows.
 			if len(budgetScopeStatuses) > 0 && a.budgets != nil {
-				_ = a.budgets.ReleaseByCoords(ctx, req.TenantSubjectID, req.Source, req.SourceID)
+				_ = a.budgets.ReleaseByCoords(ctx, req.MerchantSubjectID, req.Source, req.SourceID)
 			}
 			// Free any queue units held above (money deny must not leak the queue).
 			if queueAcquired {
@@ -354,7 +354,7 @@ func (a *Admitter) buildBudgetScopes(ctx context.Context, req AdmitRequest, pol 
 		return scopes, nil
 	}
 
-	policies, err := a.budgetScopes.LoadAll(ctx, req.TenantSubjectID)
+	policies, err := a.budgetScopes.LoadAll(ctx, req.MerchantSubjectID)
 	if err != nil {
 		return nil, err
 	}

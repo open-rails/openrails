@@ -6,7 +6,7 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Canonical per-tenant Solana secret names. These mirror tenancy's processor
@@ -41,11 +41,11 @@ type TenantSecretGetter interface {
 	// GetSecret returns the plaintext secret value for (tenant, name), or an
 	// error. Implementations MUST fail closed (never return "" + nil for a
 	// missing secret) so a missing key can be distinguished from an empty one.
-	GetSecret(ctx context.Context, tenantID tenant.ID, name string) (string, error)
+	GetSecret(ctx context.Context, tenantID merchant.ID, name string) (string, error)
 }
 
 // Signer produces Solana signatures for a tenant's merchant key WITHOUT exposing
-// the private key to callers. It is resolved PER TENANT (via tenant.ID); there
+// the private key to callers. It is resolved PER TENANT (via merchant.ID); there
 // is no process-global signer. Two implementations exist:
 //
 //   - keypairSigner: loads solana/private_key from a TenantSecretGetter and signs
@@ -58,10 +58,10 @@ type TenantSecretGetter interface {
 type Signer interface {
 	// PublicKey returns the tenant's merchant address — the fee payer and sole
 	// required signer on every plan/pull transaction this package builds.
-	PublicKey(ctx context.Context, tenantID tenant.ID) (solanago.PublicKey, error)
+	PublicKey(ctx context.Context, tenantID merchant.ID) (solanago.PublicKey, error)
 	// SignMessage signs the raw serialized Solana message bytes
 	// (Transaction.Message.MarshalBinary()) and returns the 64-byte signature.
-	SignMessage(ctx context.Context, tenantID tenant.ID, message []byte) (solanago.Signature, error)
+	SignMessage(ctx context.Context, tenantID merchant.ID, message []byte) (solanago.Signature, error)
 }
 
 // blockhashProvider is the subset of *RPCClient the tx builder needs. Declared
@@ -82,7 +82,7 @@ type blockhashProvider interface {
 // message's required-signer account list.
 func BuildSignSubmit(
 	ctx context.Context,
-	tenantID tenant.ID,
+	tenantID merchant.ID,
 	signer Signer,
 	rpc blockhashProvider,
 	instructions []solanago.Instruction,

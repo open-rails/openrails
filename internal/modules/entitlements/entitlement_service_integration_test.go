@@ -24,7 +24,7 @@ func TestPushNewEntitlement_CoveredFiniteGrantReturnsExistingWindow(t *testing.T
 	svc := NewEntitlementService(dbi, clockwork.NewFakeClockAt(now))
 
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, dbi.Pool(), userID)
+	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, dbi.Pool(), userID)
 	entName := "premium_covered_finite_" + uuid.New().String()
 	firstSourceID := uuid.New()
 	coveredSourceID := uuid.New()
@@ -57,7 +57,7 @@ func TestPushNewEntitlement_CoveredFiniteGrantReturnsExistingWindow(t *testing.T
 	var count int
 	require.NoError(t, dbi.Pool().QueryRow(ctx,
 		`SELECT count(*) FROM openrails.entitlements
-		 WHERE tenant_subject_id = $1 AND entitlement = $2
+		 WHERE merchant_subject_id = $1 AND entitlement = $2
 		   AND revoked_at IS NULL AND deleted_at IS NULL`,
 		tenantSubjectID, entName,
 	).Scan(&count))

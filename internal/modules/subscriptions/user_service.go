@@ -103,7 +103,7 @@ type UserSubscriptionResponse struct {
 func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 	type userSubscriptionJSON struct {
 		ID                    uuid.UUID                 `json:"id,omitempty"`
-		TenantSubjectID       string                    `json:"tenant_subject_id,omitempty"`
+		MerchantSubjectID       string                    `json:"tenant_subject_id,omitempty"`
 		ProductID             uuid.UUID                 `json:"product_id,omitempty"`
 		PriceID               uuid.UUID                 `json:"price_id,omitempty"`
 		ScheduledPriceID      *uuid.UUID                `json:"scheduled_price_id,omitempty"`
@@ -137,7 +137,7 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 		now := time.Now().UTC()
 		out := userSubscriptionJSON{
 			ID:                    r.Subscription.ID,
-			TenantSubjectID:       r.Subscription.TenantSubjectID.String(),
+			MerchantSubjectID:       r.Subscription.MerchantSubjectID.String(),
 			ProductID:             r.Subscription.ProductID,
 			PriceID:               r.Subscription.PriceID,
 			ScheduledPriceID:      r.Subscription.ScheduledPriceID,
@@ -343,7 +343,7 @@ func (s *UserSubscriptionService) GetUserSubscriptionByID(ctx context.Context, u
 	}
 
 	// Verify ownership
-	if subscription.TenantSubjectID.String() != userID {
+	if subscription.MerchantSubjectID.String() != userID {
 		return nil, ErrSubscriptionNotFound // Return not found to avoid leaking existence
 	}
 
@@ -449,7 +449,7 @@ func (s *UserSubscriptionService) MarkNotificationRead(ctx context.Context, user
 	}
 
 	// Verify the notification belongs to the user
-	if notification.TenantSubjectID.String() != userID {
+	if notification.MerchantSubjectID.String() != userID {
 		return ErrNotificationAccessDenied
 	}
 
@@ -568,7 +568,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	// Add notification
 	notification := &models.NotificationQueue{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		MerchantSubjectID: identity.MerchantSubjectIDFromString(userID).UUID(),
 		EventType:       models.NotificationPremiumEnded,
 		Data:            map[string]any{"reason": string(PremiumEndReasonUserCancel)},
 	}

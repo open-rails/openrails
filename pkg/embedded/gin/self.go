@@ -16,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/routes/ginroutes"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // SelfHandler returns the mountable browser-direct SELF-SERVICE + TENANT-ADMIN
@@ -76,19 +76,19 @@ func newSelfHandler(cfg *config.Config, rt *app.Runtime, authn billingauth.Deleg
 	if cfg != nil {
 		origins = cfg.AllowedCORSOrigins()
 	}
-	// Resolve the configured tenant SLUG → internal tenant.ID once at bootstrap
+	// Resolve the configured tenant SLUG → internal merchant.ID once at bootstrap
 	// (#336): the resolver pins it per request. A non-empty-but-unknown slug is
 	// a configuration error. EMBEDDED boot (embed.New) ensures the bound tenant
 	// row before this handler is built, so it never trips here; a
 	// standalone/remote deployment with an unprovisioned slug gets a CLEAR,
 	// actionable error via a fail-closed handler instead of a panic (#478).
 	var (
-		configured tenant.ID
+		configured merchant.ID
 		err        error
 	)
 	if cfg != nil && cfg.Tenant != "" && rt != nil && rt.DB != nil {
 		ctx := context.Background()
-		configured, err = db.ResolveTenantSlug(ctx, rt.DB.Qx(ctx), cfg.Tenant)
+		configured, err = db.ResolveMerchantSlug(ctx, rt.DB.Qx(ctx), cfg.Tenant)
 		if err != nil {
 			msg := fmt.Sprintf("embedded billing self handler: %v", err)
 			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

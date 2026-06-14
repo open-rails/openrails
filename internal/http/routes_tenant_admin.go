@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // TenantAdminPrefix is the admin-gated tenant provisioning/lifecycle API
@@ -59,7 +59,7 @@ func (s *Server) registerTenantAdminRoutes(e *gin.Engine) {
 // A persisted-audit failure on a real platform deployment is logged but does
 // not fail the request — the mutation already succeeded; platform-superadmin
 // break-glass grants, by contrast, treat audit failure as fatal.
-func (s *Server) auditTenantMutation(c *gin.Context, action string, target *tenant.ID, reason string, before, after any) {
+func (s *Server) auditTenantMutation(c *gin.Context, action string, target *merchant.ID, reason string, before, after any) {
 	if s.platformAudit == nil {
 		return
 	}
@@ -80,7 +80,7 @@ func (s *Server) auditTenantMutation(c *gin.Context, action string, target *tena
 // tenantStatusSnapshot returns a small before/after snapshot (status + tier) for
 // audit, tolerating a missing tenant (returns nil so the audit row records a
 // nil before/after rather than failing the mutation).
-func (s *Server) tenantStatusSnapshot(c *gin.Context, id tenant.ID) any {
+func (s *Server) tenantStatusSnapshot(c *gin.Context, id merchant.ID) any {
 	if s.tenancy == nil {
 		return nil
 	}
@@ -91,11 +91,11 @@ func (s *Server) tenantStatusSnapshot(c *gin.Context, id tenant.ID) any {
 	return gin.H{"status": string(t.Status), "billing_tier": t.BillingTier}
 }
 
-func tenantIDParam(c *gin.Context) (tenant.ID, bool) {
-	id, err := tenant.ParseID(c.Param("id"))
+func tenantIDParam(c *gin.Context) (merchant.ID, bool) {
+	id, err := merchant.ParseID(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tenant id"})
-		return tenant.ID{}, false
+		return merchant.ID{}, false
 	}
 	return id, true
 }
@@ -359,7 +359,7 @@ func tenantView(t *tenancy.Tenant) gin.H {
 		"slug":                t.Slug,
 		"name":                t.Name,
 		"status":              string(t.Status),
-		"authkit_tenant_slug": t.AuthKitTenantSlug,
+		"owner_tenant_id":     t.OwnerTenantID,
 		"billing_tier":        t.BillingTier,
 		"region":              t.Region,
 		"webhook_host":        t.WebhookHost,

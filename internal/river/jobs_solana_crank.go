@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -38,7 +38,7 @@ func (SolanaCrankArgs) Kind() string { return KindSolanaCrank }
 
 // solanaCranker is the on-chain pull surface (satisfied by *recurring.CrankService).
 type solanaCranker interface {
-	Crank(ctx context.Context, tenantID tenant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error)
+	Crank(ctx context.Context, tenantID merchant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error)
 }
 
 // membershipManager is the lifecycle surface the cranker drives (satisfied by
@@ -158,7 +158,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 }
 
 func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription) error {
-	tenantID := tenant.ID(row.TenantID)
+	tenantID := merchant.ID(row.MerchantID)
 
 	// Resolve the plan amount (token base units) + period + ghost-plan fingerprint
 	// from the linked price's Solana processor config.

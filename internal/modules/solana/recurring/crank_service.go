@@ -7,7 +7,7 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // CrankService executes the recurring pull ("cranking") — one
@@ -27,7 +27,7 @@ func NewCrankService(submitter Submitter) *CrankService {
 // Crank pulls amountBaseUnits for one subscription. On Solana, an underfunded
 // pull reverts atomically (no partial charge); the caller classifies the error
 // (insufficient USDC -> dunning vs operational -> retry; see #257).
-func (s *CrankService) Crank(ctx context.Context, tenantID tenant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error) {
+func (s *CrankService) Crank(ctx context.Context, tenantID merchant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error) {
 	if sub == nil {
 		return "", fmt.Errorf("recurring: nil subscription")
 	}

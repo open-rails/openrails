@@ -24,11 +24,11 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	})
 
 	_, err := ms.Deposit(ctx, money.DepositParams{
-		TenantSubjectID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "seed",
+		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
-	before, err := ms.GetBalanceForTenantSubject(ctx, payer, money.DefaultCurrency)
+	before, err := ms.GetBalanceForMerchantSubject(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 
 	// Two captures on endpoint "alpha" (standard tier), one on "beta" (fast tier).
@@ -42,7 +42,7 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	}
 	for _, e := range events {
 		require.NoError(t, ms.InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
-			TenantSubjectID: payer.UUID(),
+			MerchantSubjectID: payer.UUID(),
 			Actor:           "user:a",
 			EventType:       "owner/" + e.endpoint,
 			Amount:          e.amount,
@@ -57,7 +57,7 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	}
 
 	// No second debit: usage-event inserts must NOT move the ledger balance.
-	after, err := ms.GetBalanceForTenantSubject(ctx, payer, money.DefaultCurrency)
+	after, err := ms.GetBalanceForMerchantSubject(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, before.Balance, after.Balance, "InsertCaptureUsageEvent must not debit the ledger")
 

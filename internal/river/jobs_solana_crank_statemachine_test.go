@@ -10,7 +10,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -78,7 +78,7 @@ type fakeCranker struct {
 	calls int
 }
 
-func (c *fakeCranker) Crank(_ context.Context, _ tenant.ID, _ *models.SolanaSubscription, _ uint64) (string, error) {
+func (c *fakeCranker) Crank(_ context.Context, _ merchant.ID, _ *models.SolanaSubscription, _ uint64) (string, error) {
 	c.calls++
 	return c.sig, c.err
 }
@@ -158,7 +158,7 @@ func newCrankHarness(t *testing.T) *crankHarness {
 	id := uuid.New()
 	row := &models.SolanaSubscription{
 		ID:                       id,
-		TenantID:                 uuid.New(),
+		MerchantID:                 uuid.New(),
 		SubscriptionID:           uuid.New(),
 		SubscriptionPDA:          "SUB_PDA",
 		PlanCreatedAtFingerprint: smFingerprint,

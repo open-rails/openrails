@@ -17,7 +17,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // This suite proves the migration-050 Row Level Security DESIGN actually enforces
@@ -31,8 +31,8 @@ var (
 	rlsTenantB = mustID("00000000-0000-0000-0000-0000000000b2")
 )
 
-func mustID(s string) tenant.ID {
-	id, err := tenant.ParseID(s)
+func mustID(s string) merchant.ID {
+	id, err := merchant.ParseID(s)
 	if err != nil {
 		panic(err)
 	}
@@ -61,16 +61,16 @@ const rlsSetupDDL = `
 CREATE SCHEMA IF NOT EXISTS billing;
 CREATE TABLE IF NOT EXISTS openrails.rls_probe (
     id        UUID PRIMARY KEY,
-    tenant_id UUID NOT NULL,
+    merchant_id UUID NOT NULL,
     val       TEXT NOT NULL
 );
 -- Exact migration-050 policy form.
 ALTER TABLE openrails.rls_probe ENABLE ROW LEVEL SECURITY;
 ALTER TABLE openrails.rls_probe FORCE  ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS tenant_isolation ON openrails.rls_probe;
-CREATE POLICY tenant_isolation ON openrails.rls_probe
-    USING      (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
-    WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+DROP POLICY IF EXISTS merchant_isolation ON openrails.rls_probe;
+CREATE POLICY merchant_isolation ON openrails.rls_probe
+    USING      (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid)
+    WITH CHECK (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid);
 -- Unprivileged application role (migration-050 form) WITH LOGIN for the test.
 	DO $$ BEGIN
 	    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN

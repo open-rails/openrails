@@ -96,16 +96,16 @@ const createReconciliationRun = `-- name: CreateReconciliationRun :one
 
 
 INSERT INTO openrails.reconciliation_runs (
-    tenant_id, mode, providers, window_since, window_until, started_at, status
+    merchant_id, mode, providers, window_since, window_until, started_at, status
 ) VALUES (
     $1, $2, $3,
     $4, $5, now(), 'running'
 )
-RETURNING id, tenant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error
+RETURNING id, merchant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error
 `
 
 type CreateReconciliationRunParams struct {
-	TenantID    uuid.UUID
+	MerchantID  uuid.UUID
 	Mode        string
 	Providers   []string
 	WindowSince *time.Time
@@ -114,14 +114,14 @@ type CreateReconciliationRunParams struct {
 
 // #107 phase 2: reconciliation runs + findings persistence, the engine's
 // tenant-scoped local-state reads, and the enforce appliers' idempotent local
-// writes. tenant_id is stamped explicitly (multi-tenant writer pattern); all
+// writes. merchant_id is stamped explicitly (multi-tenant writer pattern); all
 // statements run on a tenant-pinned connection so RLS double-checks the stamp.
 // ============================================================================
 // Run lifecycle
 // ============================================================================
 func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconciliationRunParams) (OpenrailsReconciliationRun, error) {
 	row := q.db.QueryRow(ctx, createReconciliationRun,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.Mode,
 		arg.Providers,
 		arg.WindowSince,
@@ -130,7 +130,7 @@ func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconci
 	var i OpenrailsReconciliationRun
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.Mode,
 		&i.Providers,
 		&i.WindowSince,
@@ -197,7 +197,7 @@ func (q *Queries) FinishReconciliationRun(ctx context.Context, arg FinishReconci
 }
 
 const getLatestReconciliationRun = `-- name: GetLatestReconciliationRun :one
-SELECT id, tenant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
+SELECT id, merchant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
 ORDER BY started_at DESC
 LIMIT 1
 `
@@ -207,7 +207,7 @@ func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (OpenrailsReco
 	var i OpenrailsReconciliationRun
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.Mode,
 		&i.Providers,
 		&i.WindowSince,
@@ -222,7 +222,7 @@ func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (OpenrailsReco
 }
 
 const getReconciliationFinding = `-- name: GetReconciliationFinding :one
-SELECT id, tenant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings WHERE id = $1
+SELECT id, merchant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings WHERE id = $1
 `
 
 func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (OpenrailsReconciliationFinding, error) {
@@ -230,7 +230,7 @@ func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (O
 	var i OpenrailsReconciliationFinding
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.Provider,
 		&i.FindingType,
 		&i.SubjectKey,
@@ -257,7 +257,7 @@ func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (O
 }
 
 const getReconciliationRun = `-- name: GetReconciliationRun :one
-SELECT id, tenant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs WHERE id = $1
+SELECT id, merchant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs WHERE id = $1
 `
 
 func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (OpenrailsReconciliationRun, error) {
@@ -265,7 +265,7 @@ func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (Openr
 	var i OpenrailsReconciliationRun
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.Mode,
 		&i.Providers,
 		&i.WindowSince,
@@ -280,7 +280,7 @@ func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (Openr
 }
 
 const listOpenReconciliationFindingsByProvider = `-- name: ListOpenReconciliationFindingsByProvider :many
-SELECT id, tenant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings
+SELECT id, merchant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings
 WHERE provider = $1 AND status IN ('open', 'admin_pending')
 ORDER BY finding_type, subject_key
 `
@@ -296,7 +296,7 @@ func (q *Queries) ListOpenReconciliationFindingsByProvider(ctx context.Context, 
 		var i OpenrailsReconciliationFinding
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantID,
+			&i.MerchantID,
 			&i.Provider,
 			&i.FindingType,
 			&i.SubjectKey,
@@ -330,7 +330,7 @@ func (q *Queries) ListOpenReconciliationFindingsByProvider(ctx context.Context, 
 }
 
 const listReconciliationFindings = `-- name: ListReconciliationFindings :many
-SELECT id, tenant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings
+SELECT id, merchant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR provider = $2::text)
   AND ($3::text IS NULL OR finding_type = $3::text)
@@ -366,7 +366,7 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 		var i OpenrailsReconciliationFinding
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantID,
+			&i.MerchantID,
 			&i.Provider,
 			&i.FindingType,
 			&i.SubjectKey,
@@ -400,7 +400,7 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 }
 
 const listReconciliationRuns = `-- name: ListReconciliationRuns :many
-SELECT id, tenant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
+SELECT id, merchant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $1
 `
@@ -421,7 +421,7 @@ func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconcilia
 		var i OpenrailsReconciliationRun
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantID,
+			&i.MerchantID,
 			&i.Mode,
 			&i.Providers,
 			&i.WindowSince,
@@ -545,8 +545,8 @@ func (q *Queries) ReconcileAdoptSubscriptionStatus(ctx context.Context, arg Reco
 
 const reconcileBackfillPayment = `-- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
-    tenant_id, price_id, processor, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, tenant_subject_id
+    merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,
+    status, subscription_id, metadata, purchased_at, merchant_subject_id
 ) VALUES (
     $1::uuid,
     $2, $3::openrails.processor_type,
@@ -556,27 +556,27 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF($9::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     $10
 )
-ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING
+ON CONFLICT (merchant_id, processor, transaction_id) DO NOTHING
 `
 
 type ReconcileBackfillPaymentParams struct {
-	TenantID        uuid.UUID
-	PriceID         uuid.UUID
-	Processor       OpenrailsProcessorType
-	TransactionID   string
-	Amount          int64
-	Currency        string
-	SubscriptionID  *uuid.UUID
-	Metadata        []byte
-	PurchasedAt     time.Time
-	TenantSubjectID uuid.UUID
+	MerchantID        uuid.UUID
+	PriceID           uuid.UUID
+	Processor         OpenrailsProcessorType
+	TransactionID     string
+	Amount            int64
+	Currency          string
+	SubscriptionID    *uuid.UUID
+	Metadata          []byte
+	PurchasedAt       time.Time
+	MerchantSubjectID uuid.UUID
 }
 
 // PS-4: backfill a processor charge that has no local payment record.
 // Dedupe rides the uq_payments_tenant_processor_transaction identity.
 func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBackfillPaymentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileBackfillPayment,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.PriceID,
 		arg.Processor,
 		arg.TransactionID,
@@ -585,7 +585,7 @@ func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBac
 		arg.SubscriptionID,
 		arg.Metadata,
 		arg.PurchasedAt,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 	)
 	if err != nil {
 		return 0, err
@@ -637,7 +637,7 @@ func (q *Queries) ReconcileCancelSubscriptionLocal(ctx context.Context, arg Reco
 
 const reconcileGrantSubscriptionEntitlement = `-- name: ReconcileGrantSubscriptionEntitlement :execrows
 INSERT INTO openrails.entitlements (
-    tenant_id, tenant_subject_id, entitlement, start_at, end_at,
+    merchant_id, merchant_subject_id, entitlement, start_at, end_at,
     source_id, source_type
 )
 SELECT $1, $2, $3,
@@ -645,7 +645,7 @@ SELECT $1, $2, $3,
        $6, 'subscription'
 WHERE NOT EXISTS (
     SELECT 1 FROM openrails.entitlements ent
-    WHERE ent.tenant_subject_id = $2
+    WHERE ent.merchant_subject_id = $2
       AND ent.entitlement = $3
       AND ent.source_type = 'subscription'
       AND ent.source_id = $6
@@ -656,13 +656,13 @@ WHERE NOT EXISTS (
 `
 
 type ReconcileGrantSubscriptionEntitlementParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Entitlement     string
-	StartAt         time.Time
-	EndAt           *time.Time
-	SubscriptionID  uuid.UUID
-	Now             time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
+	StartAt           time.Time
+	EndAt             *time.Time
+	SubscriptionID    uuid.UUID
+	Now               time.Time
 }
 
 // PS-9/PS-4: grant one subscription-sourced entitlement window unless an
@@ -670,8 +670,8 @@ type ReconcileGrantSubscriptionEntitlementParams struct {
 // re-run inserts nothing).
 func (q *Queries) ReconcileGrantSubscriptionEntitlement(ctx context.Context, arg ReconcileGrantSubscriptionEntitlementParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileGrantSubscriptionEntitlement,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Entitlement,
 		arg.StartAt,
 		arg.EndAt,
@@ -685,20 +685,20 @@ func (q *Queries) ReconcileGrantSubscriptionEntitlement(ctx context.Context, arg
 }
 
 const reconcileListPaymentMethodsByProcessors = `-- name: ReconcileListPaymentMethodsByProcessors :many
-SELECT id, tenant_subject_id, processor, vault_id, last_four, card_type,
+SELECT id, merchant_subject_id, processor, vault_id, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
 WHERE processor = ANY ($1::text[])
 `
 
 type ReconcileListPaymentMethodsByProcessorsRow struct {
-	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
-	Processor       string
-	VaultID         string
-	LastFour        *string
-	CardType        *string
-	ExpiryDate      *string
+	ID                uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Processor         string
+	VaultID           string
+	LastFour          *string
+	CardType          *string
+	ExpiryDate        *string
 }
 
 func (q *Queries) ReconcileListPaymentMethodsByProcessors(ctx context.Context, processors []string) ([]ReconcileListPaymentMethodsByProcessorsRow, error) {
@@ -712,7 +712,7 @@ func (q *Queries) ReconcileListPaymentMethodsByProcessors(ctx context.Context, p
 		var i ReconcileListPaymentMethodsByProcessorsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantSubjectID,
+			&i.MerchantSubjectID,
 			&i.Processor,
 			&i.VaultID,
 			&i.LastFour,
@@ -730,7 +730,7 @@ func (q *Queries) ReconcileListPaymentMethodsByProcessors(ctx context.Context, p
 }
 
 const reconcileListPaymentsByTransactionIDs = `-- name: ReconcileListPaymentsByTransactionIDs :many
-SELECT id, tenant_subject_id, processor, transaction_id, amount, status,
+SELECT id, merchant_subject_id, processor, transaction_id, amount, status,
        subscription_id, refunded_payment_id, purchased_at
 FROM openrails.payments
 WHERE processor::text = ANY ($1::text[])
@@ -744,7 +744,7 @@ type ReconcileListPaymentsByTransactionIDsParams struct {
 
 type ReconcileListPaymentsByTransactionIDsRow struct {
 	ID                uuid.UUID
-	TenantSubjectID   uuid.UUID
+	MerchantSubjectID uuid.UUID
 	Processor         OpenrailsProcessorType
 	TransactionID     string
 	Amount            int64
@@ -765,7 +765,7 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 		var i ReconcileListPaymentsByTransactionIDsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantSubjectID,
+			&i.MerchantSubjectID,
 			&i.Processor,
 			&i.TransactionID,
 			&i.Amount,
@@ -865,7 +865,7 @@ func (q *Queries) ReconcileListSolanaSubscriptionRefs(ctx context.Context) ([]Re
 }
 
 const reconcileListSubscriptionEntitlements = `-- name: ReconcileListSubscriptionEntitlements :many
-SELECT ent.id, ent.tenant_subject_id, ent.entitlement, ent.source_id,
+SELECT ent.id, ent.merchant_subject_id, ent.entitlement, ent.source_id,
        ent.start_at, ent.end_at
 FROM openrails.entitlements ent
 JOIN openrails.subscriptions sub ON sub.id = ent.source_id
@@ -876,12 +876,12 @@ WHERE sub.processor = ANY ($1::text[])
 `
 
 type ReconcileListSubscriptionEntitlementsRow struct {
-	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
-	Entitlement     string
-	SourceID        uuid.UUID
-	StartAt         time.Time
-	EndAt           *time.Time
+	ID                uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
+	SourceID          uuid.UUID
+	StartAt           time.Time
+	EndAt             *time.Time
 }
 
 // Live subscription-sourced entitlements for the provider's subscriptions.
@@ -898,7 +898,7 @@ func (q *Queries) ReconcileListSubscriptionEntitlements(ctx context.Context, pro
 		var i ReconcileListSubscriptionEntitlementsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantSubjectID,
+			&i.MerchantSubjectID,
 			&i.Entitlement,
 			&i.SourceID,
 			&i.StartAt,
@@ -916,7 +916,7 @@ func (q *Queries) ReconcileListSubscriptionEntitlements(ctx context.Context, pro
 
 const reconcileListSubscriptionsByProcessors = `-- name: ReconcileListSubscriptionsByProcessors :many
 
-SELECT id, tenant_subject_id, price_id, product_id, status, processor,
+SELECT id, merchant_subject_id, price_id, product_id, status, processor,
        processor_subscription_id, user_email, payment_method_id,
        current_period_starts_at, current_period_ends_at, started_at, ended_at,
        cancelled_at, cancel_type, deletion_scheduled_at, tier_group,
@@ -928,7 +928,7 @@ WHERE processor = ANY ($1::text[])
 
 type ReconcileListSubscriptionsByProcessorsRow struct {
 	ID                       uuid.UUID
-	TenantSubjectID          uuid.UUID
+	MerchantSubjectID        uuid.UUID
 	PriceID                  *uuid.UUID
 	ProductID                uuid.UUID
 	Status                   OpenrailsSubscriptionStatus
@@ -964,7 +964,7 @@ func (q *Queries) ReconcileListSubscriptionsByProcessors(ctx context.Context, pr
 		var i ReconcileListSubscriptionsByProcessorsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantSubjectID,
+			&i.MerchantSubjectID,
 			&i.PriceID,
 			&i.ProductID,
 			&i.Status,
@@ -1011,9 +1011,9 @@ func (q *Queries) ReconcileMarkPaymentRefunded(ctx context.Context, id uuid.UUID
 
 const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscription :many
 INSERT INTO openrails.subscriptions (
-    tenant_id, price_id, product_id, status, processor, processor_subscription_id,
+    merchant_id, price_id, product_id, status, processor, processor_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_spec_snapshot, credits_spec_snapshot, tenant_subject_id
+    entitlements_spec_snapshot, credits_spec_snapshot, merchant_subject_id
 )
 SELECT $1::uuid, pr.id, pr.product_id, $2::openrails.subscription_status,
        $3, $4,
@@ -1034,7 +1034,7 @@ RETURNING id, entitlements_spec_snapshot
 `
 
 type ReconcileMaterializeSubscriptionParams struct {
-	TenantID                uuid.UUID
+	MerchantID              uuid.UUID
 	Status                  OpenrailsSubscriptionStatus
 	Processor               string
 	ProcessorSubscriptionID string
@@ -1042,7 +1042,7 @@ type ReconcileMaterializeSubscriptionParams struct {
 	PeriodStartsAt          *time.Time
 	PeriodEndsAt            *time.Time
 	StartedAt               *time.Time
-	TenantSubjectID         uuid.UUID
+	MerchantSubjectID       uuid.UUID
 	PriceID                 uuid.UUID
 	Processors              []string
 }
@@ -1061,7 +1061,7 @@ type ReconcileMaterializeSubscriptionRow struct {
 // rows returned = already materialized).
 func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg ReconcileMaterializeSubscriptionParams) ([]ReconcileMaterializeSubscriptionRow, error) {
 	rows, err := q.db.Query(ctx, reconcileMaterializeSubscription,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.Status,
 		arg.Processor,
 		arg.ProcessorSubscriptionID,
@@ -1069,7 +1069,7 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 		arg.PeriodStartsAt,
 		arg.PeriodEndsAt,
 		arg.StartedAt,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.PriceID,
 		arg.Processors,
 	)
@@ -1093,9 +1093,9 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 
 const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
 INSERT INTO openrails.payments (
-    tenant_id, price_id, processor, transaction_id, amount, list_amount, currency,
+    merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    tenant_subject_id
+    merchant_subject_id
 ) VALUES (
     $1::uuid,
     $2, $3::openrails.processor_type,
@@ -1106,11 +1106,11 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     $11
 )
-ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING
+ON CONFLICT (merchant_id, processor, transaction_id) DO NOTHING
 `
 
 type ReconcileRecordRefundParams struct {
-	TenantID          uuid.UUID
+	MerchantID        uuid.UUID
 	PriceID           uuid.UUID
 	Processor         OpenrailsProcessorType
 	TransactionID     string
@@ -1120,14 +1120,14 @@ type ReconcileRecordRefundParams struct {
 	RefundedPaymentID *uuid.UUID
 	Metadata          []byte
 	PurchasedAt       time.Time
-	TenantSubjectID   uuid.UUID
+	MerchantSubjectID uuid.UUID
 }
 
 // PS-5: record a processor refund that is missing locally as a negative-
 // amount payment row linked to the refunded payment. Same dedupe identity.
 func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecordRefundParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileRecordRefund,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.PriceID,
 		arg.Processor,
 		arg.TransactionID,
@@ -1137,7 +1137,7 @@ func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecord
 		arg.RefundedPaymentID,
 		arg.Metadata,
 		arg.PurchasedAt,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 	)
 	if err != nil {
 		return 0, err
@@ -1177,7 +1177,7 @@ func (q *Queries) ReconcileRevokeSubscriptionEntitlements(ctx context.Context, a
 const upsertReconciliationFinding = `-- name: UpsertReconciliationFinding :one
 
 INSERT INTO openrails.reconciliation_findings (
-    tenant_id, provider, finding_type, subject_key, severity, status,
+    merchant_id, provider, finding_type, subject_key, severity, status,
     requires_admin, recommended_action, local_evidence, remote_evidence,
     intent_evidence, first_seen_run, last_seen_run
 ) VALUES (
@@ -1187,7 +1187,7 @@ INSERT INTO openrails.reconciliation_findings (
     $9, $10,
     $11, $12, $12
 )
-ON CONFLICT (tenant_id, provider, finding_type, subject_key) DO UPDATE SET
+ON CONFLICT (merchant_id, provider, finding_type, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
     status = CASE
         WHEN openrails.reconciliation_findings.status = 'dismissed' THEN 'dismissed'
@@ -1214,11 +1214,11 @@ ON CONFLICT (tenant_id, provider, finding_type, subject_key) DO UPDATE SET
     last_seen_at = now(),
     occurrence_count = openrails.reconciliation_findings.occurrence_count + 1,
     updated_at = now()
-RETURNING id, tenant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at
+RETURNING id, merchant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at
 `
 
 type UpsertReconciliationFindingParams struct {
-	TenantID          uuid.UUID
+	MerchantID        uuid.UUID
 	Provider          string
 	FindingType       string
 	SubjectKey        string
@@ -1242,7 +1242,7 @@ type UpsertReconciliationFindingParams struct {
 // occurrences so the dismissal is auditable against reality.
 func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertReconciliationFindingParams) (OpenrailsReconciliationFinding, error) {
 	row := q.db.QueryRow(ctx, upsertReconciliationFinding,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.Provider,
 		arg.FindingType,
 		arg.SubjectKey,
@@ -1258,7 +1258,7 @@ func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertRec
 	var i OpenrailsReconciliationFinding
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.Provider,
 		&i.FindingType,
 		&i.SubjectKey,

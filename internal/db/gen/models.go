@@ -159,30 +159,12 @@ type Migration struct {
 	MigratedAt time.Time
 }
 
-// Records admin-initiated product grants (comps, contest winners, manual payments, partnerships)
-type OpenrailsAdminGrant struct {
-	ID uuid.UUID
-	// Price/Product being granted - entitlements derived from Product.EntitlementsSpec
-	PriceID *uuid.UUID
-	// Admin user ID who made the grant
-	GrantedBy string
-	// Reason for grant: comp, contest_winner, refund_compensation, partnership, manual_payment, etc.
-	Reason string
-	// Optional link to Payment record if money was received
-	PaymentID *uuid.UUID
-	// Override entitlement duration (NULL=use Product spec, 0=indefinite, N=N days)
-	DurationDays    *int32
-	CreatedAt       time.Time
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-}
-
 // Hierarchical money-budget policies (#473): {scope, owner, windows[]} composed in one admit verdict over the one payer balance. owner=platform rows are writable only via the platform path (the subject cannot see/loosen them); owner=subject rows are the subject's own caps.
 type OpenrailsBudgetPolicy struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Scope           string
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Scope             string
 	// platform (set by us; subject cannot edit/see) | subject (the subject's own cap). The write-authz split.
 	Owner string
 	// Immutable scope discriminator: role uuid (scope=role) or actor string (scope=actor); empty for scope=subject. Never a slug/name.
@@ -195,9 +177,9 @@ type OpenrailsBudgetPolicy struct {
 
 // Rolling-window money-budget reservations (issue #304). One row per in-flight/settled charge against an actor's passed-in windows; used/reserved/remaining are windowed SUM() over created_at. Idempotent on (tenant, tenant subject, actor, source, source_id).
 type OpenrailsBudgetReservation struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 	// Caller-supplied principal string whose rolling money-budget windows are capped. Opaque to OpenRails.
 	Actor          string
 	AmountMicros   int64
@@ -211,13 +193,13 @@ type OpenrailsBudgetReservation struct {
 
 // Per-(tenant, tenant subject, actor, window_key) fixed-window anchor (#337). session: window_start rewritten on reopen; fixed: window_start derived from anchor. Locked FOR UPDATE in Reserve as the boundary-rollover serialization point.
 type OpenrailsBudgetWindowState struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Actor           string
-	WindowKey       string
-	Cadence         string
-	WindowSeconds   int64
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Actor             string
+	WindowKey         string
+	Cadence           string
+	WindowSeconds     int64
 	// First-ever window open for this (subject, actor, window_key); fixed-cadence boundaries are anchor + k*window_seconds.
 	Anchor time.Time
 	// Start of the most recently OPENED window. Authoritative for session cadence; for fixed cadence the current start is derived from anchor at read time.
@@ -239,37 +221,37 @@ type OpenrailsCatalogDriftEvent struct {
 	ExternalValue         *string
 	DetectedAt            time.Time
 	ResolvedAt            *time.Time
-	TenantID              uuid.UUID
+	MerchantID            uuid.UUID
 }
 
 type OpenrailsCheckoutSession struct {
-	ID              uuid.UUID
-	PriceID         uuid.UUID
-	Mode            string
-	Processor       string
-	Status          string
-	Amount          int64
-	Currency        string
-	ExpiresAt       *time.Time
-	Reference       *string
-	TransactionID   *string
-	PaymentID       *uuid.UUID
-	SubscriptionID  *uuid.UUID
-	ProcessorFields []byte
-	ProcessorState  []byte
-	Metadata        []byte
-	IdempotencyKey  *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+	ID                uuid.UUID
+	PriceID           uuid.UUID
+	Mode              string
+	Processor         string
+	Status            string
+	Amount            int64
+	Currency          string
+	ExpiresAt         *time.Time
+	Reference         *string
+	TransactionID     *string
+	PaymentID         *uuid.UUID
+	SubscriptionID    *uuid.UUID
+	ProcessorFields   []byte
+	ProcessorState    []byte
+	Metadata          []byte
+	IdempotencyKey    *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 }
 
 // Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name.
 type OpenrailsCustomCreditType struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
-	Name     string
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Name       string
 	// Minor-unit scale for presentation (10^decimals minor units per major unit). Storage is always integer minor units.
 	Decimals  int32
 	Active    bool
@@ -290,49 +272,67 @@ type OpenrailsEntitlement struct {
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time
 	Period       pgtype.Range[pgtype.Timestamptz]
-	TenantID     uuid.UUID
+	MerchantID   uuid.UUID
 	// OpenRails payable tenant subject for this entitlement window.
-	TenantSubjectID uuid.UUID
+	MerchantSubjectID uuid.UUID
 }
 
 // Stripe-shaped first-class entitlement feature definitions (issue #245). lookup_key is the stable value carried in AuthKit JWT entitlements and host-app checks. The internal openrails.entitlements window ledger remains the source of truth for active access.
 type OpenrailsEntitlementFeature struct {
-	ID        uuid.UUID
-	TenantID  uuid.UUID
-	LookupKey string
-	Name      string
-	Active    bool
-	Metadata  []byte
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	LookupKey  string
+	Name       string
+	Active     bool
+	Metadata   []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// Records admin-initiated product grants (comps, contest winners, manual payments, partnerships)
+type OpenrailsEntitlementGrant struct {
+	ID uuid.UUID
+	// Price/Product being granted - entitlements derived from Product.EntitlementsSpec
+	PriceID *uuid.UUID
+	// Admin user ID who made the grant
+	GrantedBy string
+	// Reason for grant: comp, contest_winner, refund_compensation, partnership, manual_payment, etc.
+	Reason string
+	// Optional link to Payment record if money was received
+	PaymentID *uuid.UUID
+	// Override entitlement duration (NULL=use Product spec, 0=indefinite, N=N days)
+	DurationDays      *int32
+	CreatedAt         time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 }
 
 // Monthly itemized statements (issue #303). Line items rolled up from openrails.usage_events; money movements from the money ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.
 type OpenrailsInvoice struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Currency        string
-	PeriodFrom      time.Time
-	PeriodTo        time.Time
-	UsageTotal      int64
-	DepositsTotal   int64
-	OwedAccrued     int64
-	OwedPaid        int64
-	ClosingBalance  int64
-	LineItems       []byte
-	MoneyMovements  []byte
-	Status          string
-	FinalizedAt     *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Currency          string
+	PeriodFrom        time.Time
+	PeriodTo          time.Time
+	UsageTotal        int64
+	DepositsTotal     int64
+	OwedAccrued       int64
+	OwedPaid          int64
+	ClosingBalance    int64
+	LineItems         []byte
+	MoneyMovements    []byte
+	Status            string
+	FinalizedAt       *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Verified user wallet links for browser self-service billing identity. The wallet must come from trusted delegated-token claims, not request body input.
 type OpenrailsLinkedWallet struct {
 	ID                   uuid.UUID
-	TenantID             uuid.UUID
-	TenantSubjectID      uuid.UUID
+	MerchantID           uuid.UUID
+	MerchantSubjectID    uuid.UUID
 	Chain                string
 	Address              string
 	VerificationProvider string
@@ -343,11 +343,89 @@ type OpenrailsLinkedWallet struct {
 	UpdatedAt            time.Time
 }
 
+// Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant.
+type OpenrailsMerchant struct {
+	ID uuid.UUID
+	// Stable merchant slug used in merchant-scoped routes and resolution.
+	Slug   string
+	Name   string
+	Status string
+	// OWNERSHIP (not identity) FK to the AuthKit tenant (org) that owns/administers this merchant (#481). NULL in embedded (no AuthKit). One tenant owns MANY merchants; never used to resolve a merchant from a token.
+	OwnerTenantID *string
+	Plan          *string
+	Region        *string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	SuspendedAt   *time.Time
+	DeletedAt     *time.Time
+	// The platform's OWN billing tier for this merchant (eats own dogfood, issue #225). Distinct from plan (free-form hosting metadata).
+	BillingTier     *string
+	StripeAccountID *string
+	// Optional host an ingress uses to route inbound webhooks to this merchant. OpenRails verifies the signature AFTER merchant resolution (router is not the trust boundary).
+	WebhookHost   *string
+	WebhookPath   *string
+	ProvisionedAt *time.Time
+}
+
+// Append-only audit log of per-tenant credential put/rotate/delete/test events (issue #225).
+type OpenrailsMerchantCredentialAudit struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Name       string
+	Action     string
+	Actor      *string
+	Detail     *string
+	CreatedAt  time.Time
+}
+
+// Wrapped per-tenant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = tenant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. GLOBAL control-plane table.
+type OpenrailsMerchantDek struct {
+	MerchantID uuid.UUID
+	// AES-256-GCM(master_key, tenant_dek): nonce(12) || ciphertext(32) || tag(16).
+	WrappedDek []byte
+	KeyVersion int32
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// Tenant logical-export bookkeeping (issue #225). Tenant deletion is gated on a completed export row (export-before-delete).
+type OpenrailsMerchantExport struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	Status      string
+	Location    *string
+	RowCounts   []byte
+	CreatedAt   time.Time
+	CompletedAt *time.Time
+}
+
+// DB-backed per-tenant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. GLOBAL control-plane table.
+type OpenrailsMerchantSecret struct {
+	MerchantID uuid.UUID
+	Name       string
+	Value      string
+	Version    int32
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// OpenRails payable identity — a thin LABEL to hang charges on, NOT verified by OpenRails (the host/AuthKit already proved the subject). One row per OIDC-style subject under a merchant; billing tables reference this row.
+type OpenrailsMerchantSubject struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// OIDC issuer that asserted the subject.
+	Issuer string
+	// OIDC subject asserted by issuer. May represent a human, company, tenant, service, or chained delegated principal.
+	Subject    string
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+}
+
 // Per-(tenant, tenant subject, currency) money spend policy + money-in config. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD). Tensorhub SETS these; OpenRails STORES + ENFORCES them.
 type OpenrailsMoneyAccount struct {
 	ID                        uuid.UUID
-	TenantID                  uuid.UUID
-	TenantSubjectID           uuid.UUID
+	MerchantID                uuid.UUID
+	MerchantSubjectID         uuid.UUID
 	BillingMode               string
 	MaxSpendPerDayMicros      *int64
 	MaxSpendPerMonthMicros    *int64
@@ -379,13 +457,13 @@ type OpenrailsMoneyAccount struct {
 
 // amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
 type OpenrailsMoneyBalance struct {
-	ID              uuid.UUID
-	Balance         int64
-	HeldBalance     int64
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+	ID                uuid.UUID
+	Balance           int64
+	HeldBalance       int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
 	Currency string
 }
@@ -398,17 +476,17 @@ type OpenrailsMoneyBlock struct {
 	ExpiresAt           *time.Time
 	SourceTransactionID *uuid.UUID
 	CreatedAt           time.Time
-	TenantID            uuid.UUID
-	TenantSubjectID     uuid.UUID
+	MerchantID          uuid.UUID
+	MerchantSubjectID   uuid.UUID
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
 	Currency string
 }
 
 // Optional per-(actor, currency) money spend caps for a tenant subject. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD). actor is a caller-supplied opaque principal string.
 type OpenrailsMoneySpendLimit struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 	// Caller-supplied principal string whose spend is capped by this row. Opaque to OpenRails.
 	Actor                  string
 	MaxSpendPerDayMicros   *int64
@@ -427,30 +505,30 @@ type OpenrailsMoneyTransaction struct {
 	// Caller-supplied free-form string for what the charge was for (charge-A was for resource-B). Opaque to OpenRails; nullable.
 	Resource *string
 	// Optional caller-supplied long-tail attribution. Opaque to OpenRails; joins use source/source_id, never these.
-	Metadata         []byte
-	Amount           int64
-	BalanceAfter     *int64
-	TransactionType  string
-	Source           string
-	SourceID         *string
-	ExpiresAt        *time.Time
-	Description      *string
-	Status           string
-	AuthorizedAmount *int64
-	CapturedAmount   *int64
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	TenantID         uuid.UUID
-	TenantSubjectID  uuid.UUID
+	Metadata          []byte
+	Amount            int64
+	BalanceAfter      *int64
+	TransactionType   string
+	Source            string
+	SourceID          *string
+	ExpiresAt         *time.Time
+	Description       *string
+	Status            string
+	AuthorizedAmount  *int64
+	CapturedAmount    *int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority. amount is this currency's minor unit.
 	Currency string
 }
 
 // Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
 type OpenrailsMoneyWindow struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 	// Total reserved for this window (open + refills). Reflected in money_balances.held_balance while status=open.
 	HeldAmount int64
 	// Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.
@@ -465,13 +543,13 @@ type OpenrailsMoneyWindow struct {
 
 // Queue for user notifications related to billing and subscriptions
 type OpenrailsNotificationQueue struct {
-	ID              uuid.UUID
-	EventType       string
-	Data            []byte
-	Seen            bool
-	CreatedAt       time.Time
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+	ID                uuid.UUID
+	EventType         string
+	Data              []byte
+	Seen              bool
+	CreatedAt         time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 }
 
 // Records of all payment transactions (formerly purchases table)
@@ -497,19 +575,19 @@ type OpenrailsPayment struct {
 	CreatedAt                time.Time
 	CardBrand                *string
 	CardLast4                *string
-	TenantID                 uuid.UUID
-	TenantSubjectID          uuid.UUID
+	MerchantID               uuid.UUID
+	MerchantSubjectID        uuid.UUID
 }
 
-// Tenant-scoped blocklist of known-bad payment identifiers (issue #300). tenant_subject_id NULL = tenant-wide block; set = tenant-subject scoped. Checkout/admission deny wiring is a separate slice.
+// Tenant-scoped blocklist of known-bad payment identifiers (issue #300). merchant_subject_id NULL = tenant-wide block; set = tenant-subject scoped. Checkout/admission deny wiring is a separate slice.
 type OpenrailsPaymentBlocklist struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID *uuid.UUID
-	Kind            string
-	Value           string
-	Reason          *string
-	CreatedAt       time.Time
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID *uuid.UUID
+	Kind              string
+	Value             string
+	Reason            *string
+	CreatedAt         time.Time
 }
 
 // Generalized payment method table supporting multiple processors.
@@ -528,33 +606,33 @@ type OpenrailsPaymentMethod struct {
 	Metadata             []byte
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
-	TenantID             uuid.UUID
-	TenantSubjectID      uuid.UUID
+	MerchantID           uuid.UUID
+	MerchantSubjectID    uuid.UUID
 }
 
 // Append-only cross-tenant platform superadmin audit log (issue #226). Records actor, target tenant, action, reason, and before/after state. CROSS-TENANT control-plane state: NOT purged by tenant delete.
 type OpenrailsPlatformAudit struct {
-	ID             uuid.UUID
-	ActorUserID    string
-	ActorTenant    *string
-	Action         string
-	TargetTenantID *uuid.UUID
-	Reason         *string
-	BeforeState    []byte
-	AfterState     []byte
-	Detail         []byte
-	CreatedAt      time.Time
+	ID               uuid.UUID
+	ActorUserID      string
+	ActorTenant      *string
+	Action           string
+	TargetMerchantID *uuid.UUID
+	Reason           *string
+	BeforeState      []byte
+	AfterState       []byte
+	Detail           []byte
+	CreatedAt        time.Time
 }
 
 // Time-boxed break-glass elevation grants (issue #226). Each grant carries a written justification and an expiry, and is mirrored into platform_audit. CROSS-TENANT control-plane state.
 type OpenrailsPlatformBreakGlass struct {
-	ID             uuid.UUID
-	ActorUserID    string
-	TargetTenantID *uuid.UUID
-	Justification  string
-	GrantedAt      time.Time
-	ExpiresAt      time.Time
-	RevokedAt      *time.Time
+	ID               uuid.UUID
+	ActorUserID      string
+	TargetMerchantID *uuid.UUID
+	Justification    string
+	GrantedAt        time.Time
+	ExpiresAt        time.Time
+	RevokedAt        *time.Time
 }
 
 // Pricing tiers for products with processor-specific identifiers
@@ -568,7 +646,7 @@ type OpenrailsPrice struct {
 	Status           string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
-	TenantID         uuid.UUID
+	MerchantID       uuid.UUID
 }
 
 // Cached NMI test-mode probe verdicts (#348): one row per (provider, sha256(security_key)). Fresh 'live' refuses boot from cache, fresh 'simulated' skips the probe, stale/missing re-probes. RLS-exempt by design: instance-level credential state, not tenant data.
@@ -581,13 +659,13 @@ type OpenrailsProbeVerdict struct {
 }
 
 type OpenrailsProcessorCustomer struct {
-	ID              uuid.UUID
-	Processor       string
-	CustomerID      string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+	ID                uuid.UUID
+	Processor         string
+	CustomerID        string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 }
 
 // Product definitions that can be purchased or subscribed to
@@ -602,35 +680,35 @@ type OpenrailsProduct struct {
 	// Semantic group name for mutually-exclusive products (e.g., "premium"). Products in same group require upgrade/downgrade, not parallel ownership.
 	TierGroup *string
 	// Tier ranking within group. Higher = more premium. Used to determine upgrade (higher rank) vs downgrade (lower rank) direction.
-	TierRank  int32
-	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	TenantID  uuid.UUID
+	TierRank   int32
+	Status     string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	MerchantID uuid.UUID
 }
 
 // Durable, application-facing product ownership/access (issue #250). Distinct from feature entitlements: answers "does this user own product X?" / "list products this user can access". A successful one-time purchase creates a grant; refunds/chargebacks/admin revocation revoke it.
 type OpenrailsProductAccessGrant struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	ProductID       uuid.UUID
-	SourceType      string
-	SourceID        string
-	PaymentID       *uuid.UUID
-	Status          string
-	StartsAt        time.Time
-	EndsAt          *time.Time
-	RevokedAt       *time.Time
-	RevokeReason    *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	TenantSubjectID uuid.UUID
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	ProductID         uuid.UUID
+	SourceType        string
+	SourceID          string
+	PaymentID         *uuid.UUID
+	Status            string
+	StartsAt          time.Time
+	EndsAt            *time.Time
+	RevokedAt         *time.Time
+	RevokeReason      *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	MerchantSubjectID uuid.UUID
 }
 
 // Stripe-shaped product_feature attachments (issue #245): which entitlement features a product grants when purchased. duration_days null = indefinite.
 type OpenrailsProductEntitlementFeature struct {
 	ID                   uuid.UUID
-	TenantID             uuid.UUID
+	MerchantID           uuid.UUID
 	ProductID            uuid.UUID
 	EntitlementFeatureID uuid.UUID
 	DurationDays         *int32
@@ -641,8 +719,8 @@ type OpenrailsProductEntitlementFeature struct {
 
 // Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
 type OpenrailsProviderIntent struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
+	ID         uuid.UUID
+	MerchantID uuid.UUID
 	// Provider/processor key the mutation targets (e.g. 'mobius' for an NMI-backed processor, 'stripe').
 	Provider string
 	// Registry key selecting the per-type semantics (executor, verifier, relevance, backoff): nmi_delete_subscription, and in later phases manual_rebill, refund, plan_archive, ...
@@ -677,7 +755,7 @@ type OpenrailsProviderIntent struct {
 // Durable local-vs-processor drift ledger (#107 PS-1..PS-9). Stable identity per (tenant, provider, finding_type, subject_key): re-runs update, disappearance auto-resolves as auto_vanished. requires_admin = true rows are the admin action queue.
 type OpenrailsReconciliationFinding struct {
 	ID          uuid.UUID
-	TenantID    uuid.UUID
+	MerchantID  uuid.UUID
 	Provider    string
 	FindingType string
 	// Stable identity of the drifted subject within (provider, finding_type): processor subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.
@@ -706,7 +784,7 @@ type OpenrailsReconciliationFinding struct {
 // One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment processors. Summary jsonb carries per-provider counts and the dunning-forensics report.
 type OpenrailsReconciliationRun struct {
 	ID          uuid.UUID
-	TenantID    uuid.UUID
+	MerchantID  uuid.UUID
 	Mode        string
 	Providers   []string
 	WindowSince *time.Time
@@ -720,7 +798,7 @@ type OpenrailsReconciliationRun struct {
 
 type OpenrailsSolanaSubscription struct {
 	ID                       uuid.UUID
-	TenantID                 uuid.UUID
+	MerchantID               uuid.UUID
 	SubscriptionID           uuid.UUID
 	SubscriberWallet         string
 	AuthorityPda             string
@@ -769,124 +847,29 @@ type OpenrailsSubscription struct {
 	// Denormalized from openrails.products.tier_group (kept in sync by trigger trg_subscriptions_set_tier_group). Backs uq_subscriptions_user_tier_group_active, which enforces one active/pending subscription per (user, tier group).
 	TierGroup           *string
 	DeletionScheduledAt *time.Time
-	TenantID            uuid.UUID
-	TenantSubjectID     uuid.UUID
-}
-
-// Tenant / billing-namespace directory. GLOBAL (control-plane) table, not tenant-scoped. Tenants are created explicitly; there is no default tenant.
-type OpenrailsTenant struct {
-	ID uuid.UUID
-	// Stable tenant slug used in tenant-scoped routes and resolution.
-	Slug   string
-	Name   string
-	Status string
-	// OpenRails-owned AuthKit tenant id that operates this tenant (control plane). Nullable until org ownership is wired in #221/#222.
-	AuthkitTenantID   *string
-	AuthkitTenantSlug *string
-	Plan              *string
-	Region            *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	SuspendedAt       *time.Time
-	DeletedAt         *time.Time
-	// The platform's OWN billing tier for this tenant (eats own dogfood, issue #225). Distinct from plan (free-form hosting metadata).
-	BillingTier     *string
-	StripeAccountID *string
-	// Optional host an ingress uses to route inbound webhooks to this tenant. OpenRails verifies the signature AFTER tenant resolution (router is not the trust boundary).
-	WebhookHost   *string
-	WebhookPath   *string
-	ProvisionedAt *time.Time
-}
-
-// Append-only audit log of per-tenant credential put/rotate/delete/test events (issue #225).
-type OpenrailsTenantCredentialAudit struct {
-	ID        uuid.UUID
-	TenantID  uuid.UUID
-	Name      string
-	Action    string
-	Actor     *string
-	Detail    *string
-	CreatedAt time.Time
-}
-
-// Wrapped per-tenant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = tenant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. GLOBAL control-plane table.
-type OpenrailsTenantDek struct {
-	TenantID uuid.UUID
-	// AES-256-GCM(master_key, tenant_dek): nonce(12) || ciphertext(32) || tag(16).
-	WrappedDek []byte
-	KeyVersion int32
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
-// Federated delegated-token issuer registry (issue #259). Maps a globally-unique token issuer (iss) to the OpenRails tenant it speaks for and the JWKS URL its public keys are fetched from. MANY issuers -> ONE tenant (multiple host apps = distinct keys, one tenant, shared users). GLOBAL control-plane table, not tenant-scoped.
-type OpenrailsTenantDelegatedIssuer struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
-	// Token iss value. GLOBALLY UNIQUE -> maps to exactly one tenant (no cross-tenant forgery).
-	Issuer string
-	// The ONLY URL OpenRails fetches this issuer's keys from (allowlist; token-supplied URLs never honored).
-	JwksUri string
-	// Per-issuer kill-switch. Only enabled rows are loaded into the live verifier; disabling evicts without affecting sibling issuers of the same tenant.
-	Enabled   bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	// Accepted OIDC JWT aud values for this tenant issuer.
-	Audiences []string
-}
-
-// Tenant logical-export bookkeeping (issue #225). Tenant deletion is gated on a completed export row (export-before-delete).
-type OpenrailsTenantExport struct {
-	ID          uuid.UUID
-	TenantID    uuid.UUID
-	Status      string
-	Location    *string
-	RowCounts   []byte
-	CreatedAt   time.Time
-	CompletedAt *time.Time
-}
-
-// DB-backed per-tenant secret store (issue #225). Namespaced by (tenant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. GLOBAL control-plane table.
-type OpenrailsTenantSecret struct {
-	TenantID  uuid.UUID
-	Name      string
-	Value     string
-	Version   int32
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
-// OpenRails payable identity. One row per OIDC-style subject under an OpenRails tenant; billing tables reference this row.
-type OpenrailsTenantSubject struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
-	// OIDC issuer that asserted the subject.
-	Issuer string
-	// OIDC subject asserted by issuer. May represent a human, company, tenant, service, or chained delegated principal.
-	Subject    string
-	CreatedAt  time.Time
-	LastSeenAt time.Time
+	MerchantID          uuid.UUID
+	MerchantSubjectID   uuid.UUID
 }
 
 // Per-tenant-subject tier throughput policies for the admission check (issue #298). MONEY caps stay in money_accounts; rolling money budgets are #304.
 type OpenrailsTierPolicy struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
+	ID         uuid.UUID
+	MerchantID uuid.UUID
 	// NULL = tenant-wide default tier policy (#477 platform capacity ladder, declared once); non-NULL = per-subject override taking precedence for that subject.
-	TenantSubjectID *uuid.UUID
-	Tier            string
-	Policy          []byte
-	PolicyVersion   int64
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	MerchantSubjectID *uuid.UUID
+	Tier              string
+	Policy            []byte
+	PolicyVersion     int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Persisted tier ladder (#476): rungs[{tier,min_cumulative_paid_micros}] declared once per tenant (or per tenant-subject override). OpenRails auto-maintains money_accounts.tier from cumulative_paid vs this schedule on the deposit path; admin tier override (tier_source=admin) still wins.
 type OpenrailsTierSchedule struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
+	ID         uuid.UUID
+	MerchantID uuid.UUID
 	// NULL = tenant-wide default schedule; non-NULL = per-subject override taking precedence for that subject.
-	TenantSubjectID *uuid.UUID
+	MerchantSubjectID *uuid.UUID
 	// platform (set by us; subject cannot edit/see) | subject. Mirrors the #473 budget-policy owner split.
 	Owner string
 	// Ordered JSONB array of {tier, min_cumulative_paid_micros}; a payer's tier = highest rung whose min_cumulative_paid_micros <= cumulative_paid.
@@ -898,9 +881,9 @@ type OpenrailsTierSchedule struct {
 
 // Append-only multi-dimensional metered usage (issue #289). Source of truth for usage reporting + #303 invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path (#298) never reads this table.
 type OpenrailsUsageEvent struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 	// Caller-supplied principal string (e.g. a username slug) that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.
 	Actor string
 	// Caller-supplied free-form string for what was metered (tensorhub: endpoint slug; doujins: plan/item slug). Opaque to OpenRails; nullable, not a FK.
@@ -919,8 +902,8 @@ type OpenrailsUsageEvent struct {
 // External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.
 type OpenrailsUsdcFundingSession struct {
 	ID                uuid.UUID
-	TenantID          uuid.UUID
-	TenantSubjectID   uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 	CheckoutSessionID *uuid.UUID
 	Provider          string
 	WalletAddress     string

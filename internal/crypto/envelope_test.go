@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // memDEKStore is an in-memory DEKStore for unit tests. PutWrappedDEK keeps the
@@ -26,7 +26,7 @@ type memDEKStore struct {
 
 func newMemDEKStore() *memDEKStore { return &memDEKStore{data: map[string][]byte{}} }
 
-func (m *memDEKStore) GetWrappedDEK(_ context.Context, id tenant.ID) ([]byte, bool, error) {
+func (m *memDEKStore) GetWrappedDEK(_ context.Context, id merchant.ID) ([]byte, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.gets++
@@ -34,7 +34,7 @@ func (m *memDEKStore) GetWrappedDEK(_ context.Context, id tenant.ID) ([]byte, bo
 	return w, ok, nil
 }
 
-func (m *memDEKStore) PutWrappedDEK(_ context.Context, id tenant.ID, wrapped []byte) ([]byte, error) {
+func (m *memDEKStore) PutWrappedDEK(_ context.Context, id merchant.ID, wrapped []byte) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.puts++
@@ -54,9 +54,9 @@ func testMasterKey(t *testing.T) string {
 	return base64.StdEncoding.EncodeToString(key)
 }
 
-func newTenant(t *testing.T) tenant.ID {
+func newTenant(t *testing.T) merchant.ID {
 	t.Helper()
-	return tenant.ID(uuid.New())
+	return merchant.ID(uuid.New())
 }
 
 func TestEncrypt_RoundTripsPerTenant(t *testing.T) {

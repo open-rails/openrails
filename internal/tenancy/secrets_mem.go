@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // memSecretStore is an in-memory TenantSecretStore for tests and pure-dev runs
@@ -22,7 +22,7 @@ func NewMemorySecretStore() TenantSecretStore {
 	return &memSecretStore{data: make(map[string]map[string]Secret)}
 }
 
-func (m *memSecretStore) Get(_ context.Context, tenantID tenant.ID, name string) (Secret, error) {
+func (m *memSecretStore) Get(_ context.Context, tenantID merchant.ID, name string) (Secret, error) {
 	if err := validateSecretRef(tenantID, name); err != nil {
 		return Secret{}, err
 	}
@@ -39,7 +39,7 @@ func (m *memSecretStore) Get(_ context.Context, tenantID tenant.ID, name string)
 	return s, nil
 }
 
-func (m *memSecretStore) Put(_ context.Context, tenantID tenant.ID, name, value string) (Secret, error) {
+func (m *memSecretStore) Put(_ context.Context, tenantID merchant.ID, name, value string) (Secret, error) {
 	if err := validateSecretRef(tenantID, name); err != nil {
 		return Secret{}, err
 	}
@@ -64,7 +64,7 @@ func (m *memSecretStore) Put(_ context.Context, tenantID tenant.ID, name, value 
 	return s, nil
 }
 
-func (m *memSecretStore) Delete(_ context.Context, tenantID tenant.ID, name string) error {
+func (m *memSecretStore) Delete(_ context.Context, tenantID merchant.ID, name string) error {
 	if err := validateSecretRef(tenantID, name); err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func (m *memSecretStore) Delete(_ context.Context, tenantID tenant.ID, name stri
 	return nil
 }
 
-func (m *memSecretStore) List(_ context.Context, tenantID tenant.ID) ([]string, error) {
+func (m *memSecretStore) List(_ context.Context, tenantID merchant.ID) ([]string, error) {
 	if tenantID.IsZero() {
 		return nil, validateSecretRef(tenantID, "x")
 	}

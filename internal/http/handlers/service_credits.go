@@ -19,7 +19,7 @@ import (
 )
 
 type serviceWithdrawRequest struct {
-	TenantSubjectID string     `json:"tenant_subject_id"`
+	MerchantSubjectID string     `json:"tenant_subject_id"`
 	Actor           string     `json:"actor" binding:"required"`
 	Amount          int64      `json:"amount" binding:"required"`
 	Source          string     `json:"source" binding:"required"`
@@ -27,7 +27,7 @@ type serviceWithdrawRequest struct {
 }
 
 type serviceDepositRequest struct {
-	TenantSubjectID string     `json:"tenant_subject_id"`
+	MerchantSubjectID string     `json:"tenant_subject_id"`
 	Actor           string     `json:"actor" binding:"required"`
 	Amount          int64      `json:"amount" binding:"required"`
 	Source          string     `json:"source" binding:"required"`
@@ -37,7 +37,7 @@ type serviceDepositRequest struct {
 }
 
 type serviceHoldRequest struct {
-	TenantSubjectID string `json:"tenant_subject_id"`
+	MerchantSubjectID string `json:"tenant_subject_id"`
 	Actor           string `json:"actor" binding:"required"`
 	Amount          int64  `json:"amount" binding:"required"`
 	Source          string `json:"source" binding:"required"`
@@ -58,7 +58,7 @@ type serviceCaptureRequest struct {
 	SourceID   string           `json:"source_id,omitempty"`
 }
 
-func parseServiceTenantSubjectID(raw string) (*billingidentity.TenantSubjectID, error) {
+func parseServiceMerchantSubjectID(raw string) (*billingidentity.MerchantSubjectID, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil
@@ -67,7 +67,7 @@ func parseServiceTenantSubjectID(raw string) (*billingidentity.TenantSubjectID, 
 	if err != nil || id == uuid.Nil {
 		return nil, errors.New("invalid tenant_subject_id")
 	}
-	tenantSubject := billingidentity.TenantSubjectID(id)
+	tenantSubject := billingidentity.MerchantSubjectID(id)
 	return &tenantSubject, nil
 }
 
@@ -85,13 +85,13 @@ func serviceTokenFromRequest(r *httprequest.Request) (*controlplane.ResolvedServ
 	return resolved, 0, ""
 }
 
-func requireServiceTenantSubjectScope(r *httprequest.Request, tenantSubject billingidentity.TenantSubjectID) bool {
+func requireServiceMerchantSubjectScope(r *httprequest.Request, tenantSubject billingidentity.MerchantSubjectID) bool {
 	resolved, status, msg := serviceTokenFromRequest(r)
 	if resolved == nil {
 		r.ErrorJSON(status, msg)
 		return false
 	}
-	if !resolved.AllowsTenantSubject(tenantSubject.UUID()) {
+	if !resolved.AllowsMerchantSubject(tenantSubject.UUID()) {
 		r.ErrorJSON(http.StatusForbidden, "service_token_tenant_subject_scope_denied")
 		return false
 	}
@@ -104,7 +104,7 @@ func requireServiceTenantSubjectScope(r *httprequest.Request, tenantSubject bill
 // estimate_micros = the upper-bound charge;
 // request_id = the idempotency key for the placed hold.
 type serviceAuthorizeRequest struct {
-	TenantSubjectID string `json:"tenant_subject_id"`
+	MerchantSubjectID string `json:"tenant_subject_id"`
 	Actor           string `json:"actor"`
 	EstimateMicros  int64  `json:"estimate_micros"`
 	RequestID       string `json:"request_id" binding:"required"`
@@ -152,7 +152,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 		return
 	}
 
-	tenantSubject, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	tenantSubject, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid tenant_subject_id")
 		return
@@ -161,7 +161,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *tenantSubject) {
+	if !requireServiceMerchantSubjectScope(r, *tenantSubject) {
 		return
 	}
 
@@ -171,7 +171,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 	}
 
 	out, err := svc.AuthorizeAndHold(r.Request.Context(), billingservice.AuthorizeAndHoldRequest{
-		TenantSubjectID: *tenantSubject,
+		MerchantSubjectID: *tenantSubject,
 		Actor:           req.Actor,
 		EstimateMicros:  req.EstimateMicros,
 		RequestID:       req.RequestID,
@@ -201,7 +201,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 // serviceBalanceResponse is the tenant-subject balance snapshot served by
 // GET /v1/service/credits/balance (issue #235/#247).
 type serviceBalanceResponse struct {
-	TenantSubjectID       uuid.UUID `json:"tenant_subject_id"`
+	MerchantSubjectID       uuid.UUID `json:"tenant_subject_id"`
 	Currency              string    `json:"currency"`
 	BillingMode           string    `json:"billing_mode"`
 	BalanceMicros         int64     `json:"balance_micros"`
@@ -218,7 +218,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 	if currency == "" {
 		currency = money.DefaultCurrency
 	}
-	tenantSubject, err := parseServiceTenantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
+	tenantSubject, err := parseServiceMerchantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid tenant_subject_id")
 		return
@@ -227,7 +227,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *tenantSubject) {
+	if !requireServiceMerchantSubjectScope(r, *tenantSubject) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -241,7 +241,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(serviceBalanceResponse{
-		TenantSubjectID:       snap.TenantSubjectID,
+		MerchantSubjectID:       snap.MerchantSubjectID,
 		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
 		BalanceMicros:         snap.BalanceMicros,
@@ -251,16 +251,16 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 	})
 }
 
-// serviceQueryTenantSubject extracts the tenant subject from the query string.
-func serviceQueryTenantSubject(r *httprequest.Request) (*identity.TenantSubjectID, error) {
-	return parseServiceTenantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
+// serviceQueryMerchantSubject extracts the tenant subject from the query string.
+func serviceQueryMerchantSubject(r *httprequest.Request) (*identity.MerchantSubjectID, error) {
+	return parseServiceMerchantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
 }
 
 // serviceAccountSettingsRequest is the PUT body for configuring a tenant subject's credit
 // billing account (issue #242). All settings are optional pointers (only the
 // supplied fields are changed); tenant_subject_id + currency identify the account.
 type serviceAccountSettingsRequest struct {
-	TenantSubjectID          string  `json:"tenant_subject_id"`
+	MerchantSubjectID          string  `json:"tenant_subject_id"`
 	Currency                 string  `json:"currency"`
 	BillingMode              *string `json:"billing_mode"` // "prepaid" | "arrears"
 	MaxSpendPerDayMicros     *int64  `json:"max_spend_per_day_micros"`
@@ -284,12 +284,12 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	tenantSubject, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	tenantSubject, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
 	if err != nil || tenantSubject == nil {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *tenantSubject) {
+	if !requireServiceMerchantSubjectScope(r, *tenantSubject) {
 		return
 	}
 	currency := strings.TrimSpace(req.Currency)
@@ -337,12 +337,12 @@ func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 	if currency == "" {
 		currency = money.DefaultCurrency
 	}
-	tenantSubject, err := serviceQueryTenantSubject(r)
+	tenantSubject, err := serviceQueryMerchantSubject(r)
 	if err != nil || tenantSubject == nil {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *tenantSubject) {
+	if !requireServiceMerchantSubjectScope(r, *tenantSubject) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -358,20 +358,20 @@ func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 	r.SuccessJSON(settings)
 }
 
-// ServiceListTenantSubjectCreditTransactions (GET /v1/service/credits/transactions)
+// ServiceListMerchantSubjectCreditTransactions (GET /v1/service/credits/transactions)
 // lists a tenant subject's credit transactions (usage history) for the billing-account
 // admin surface (issue #242). Query: tenant_subject_id, currency, limit, offset.
-func ServiceListTenantSubjectCreditTransactions(r *httprequest.Request) {
+func ServiceListMerchantSubjectCreditTransactions(r *httprequest.Request) {
 	currency := strings.TrimSpace(r.Request.URL.Query().Get("currency"))
 	if currency == "" {
 		currency = money.DefaultCurrency
 	}
-	tenantSubject, err := serviceQueryTenantSubject(r)
+	tenantSubject, err := serviceQueryMerchantSubject(r)
 	if err != nil || tenantSubject == nil {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *tenantSubject) {
+	if !requireServiceMerchantSubjectScope(r, *tenantSubject) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
@@ -381,7 +381,7 @@ func ServiceListTenantSubjectCreditTransactions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	items, total, err := svc.GetTenantSubjectCreditTransactions(r.Request.Context(), *tenantSubject, currency, limit, offset)
+	items, total, err := svc.GetMerchantSubjectCreditTransactions(r.Request.Context(), *tenantSubject, currency, limit, offset)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -389,7 +389,7 @@ func ServiceListTenantSubjectCreditTransactions(r *httprequest.Request) {
 	out := make([]serviceTxnResponse, 0, len(items))
 	for _, t := range items {
 		out = append(out, serviceTxnResponse{
-			ID: t.ID, TenantSubjectID: t.TenantSubjectID, Actor: t.Actor, Amount: t.Amount,
+			ID: t.ID, MerchantSubjectID: t.MerchantSubjectID, Actor: t.Actor, Amount: t.Amount,
 			TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
 			CreatedAt: t.CreatedAt,
 		})
@@ -399,7 +399,7 @@ func ServiceListTenantSubjectCreditTransactions(r *httprequest.Request) {
 
 type serviceTxnResponse struct {
 	ID              uuid.UUID `json:"id"`
-	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	Actor           string    `json:"actor"`
 	Amount          int64     `json:"amount"`
 	TransactionType string    `json:"transaction_type"`
@@ -409,7 +409,7 @@ type serviceTxnResponse struct {
 }
 
 type serviceUsageRollupRequest struct {
-	TenantSubjectID string `json:"tenant_subject_id" binding:"required"`
+	MerchantSubjectID string `json:"tenant_subject_id" binding:"required"`
 	From            int64  `json:"from" binding:"required"` // unix seconds, inclusive
 	To              int64  `json:"to" binding:"required"`   // unix seconds, exclusive
 	GroupBy         string `json:"group_by" binding:"required"`
@@ -459,7 +459,7 @@ func ServiceUsageRollup(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	tenantSubjectID, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	tenantSubjectID, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -468,11 +468,11 @@ func ServiceUsageRollup(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *tenantSubjectID) {
+	if !requireServiceMerchantSubjectScope(r, *tenantSubjectID) {
 		return
 	}
 	rows, err := svc.ServiceUsageRollup(r.Request.Context(), billingservice.ServiceUsageRollupRequest{
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		From:            time.Unix(req.From, 0).UTC(),
 		To:              time.Unix(req.To, 0).UTC(),
 		GroupBy:         req.GroupBy,
@@ -495,7 +495,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		return
 	}
 
-	tenantSubjectID, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	tenantSubjectID, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -504,7 +504,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *tenantSubjectID) {
+	if !requireServiceMerchantSubjectScope(r, *tenantSubjectID) {
 		return
 	}
 
@@ -515,7 +515,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 	}
 
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		Actor:           req.Actor,
 		Amount:          req.Amount,
 		Source:          req.Source,
@@ -544,7 +544,7 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	tenantSubjectID, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	tenantSubjectID, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -553,11 +553,11 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *tenantSubjectID) {
+	if !requireServiceMerchantSubjectScope(r, *tenantSubjectID) {
 		return
 	}
 	trx, err := svc.WithdrawCredits(r.Request.Context(), billingservice.WithdrawCreditsRequest{
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		Actor:           req.Actor,
 		Amount:          req.Amount,
 		Source:          req.Source,
@@ -588,7 +588,7 @@ func ServiceHoldCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	tenantSubjectID, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	tenantSubjectID, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -597,11 +597,11 @@ func ServiceHoldCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *tenantSubjectID) {
+	if !requireServiceMerchantSubjectScope(r, *tenantSubjectID) {
 		return
 	}
 	hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		Actor:           req.Actor,
 		Amount:          req.Amount,
 		Source:          req.Source,
@@ -683,7 +683,7 @@ func ServiceGetActorCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "actor required")
 		return
 	}
-	tenantSubjectID, err := parseServiceTenantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
+	tenantSubjectID, err := parseServiceMerchantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -692,10 +692,10 @@ func ServiceGetActorCredits(r *httprequest.Request) {
 	var balance int64
 	var heldBalance int64
 	if tenantSubjectID != nil {
-		if !requireServiceTenantSubjectScope(r, *tenantSubjectID) {
+		if !requireServiceMerchantSubjectScope(r, *tenantSubjectID) {
 			return
 		}
-		bal, err := r.State.MoneyService.GetBalanceForTenantSubject(r.Request.Context(), *tenantSubjectID, money.DefaultCurrency)
+		bal, err := r.State.MoneyService.GetBalanceForMerchantSubject(r.Request.Context(), *tenantSubjectID, money.DefaultCurrency)
 		if err == nil {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance

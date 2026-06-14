@@ -23,7 +23,7 @@ func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *tes
 	}
 	session := &models.CheckoutSession{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString("user_123").UUID(),
+		MerchantSubjectID: identity.MerchantSubjectIDFromString("user_123").UUID(),
 		PriceID:         uuid.New(),
 		Amount:          1000,
 		Currency:        "eur",
@@ -48,7 +48,7 @@ func TestInitializeSolanaSession_TransactionRequestRejectsZeroTokenAmount(t *tes
 	}
 	session := &models.CheckoutSession{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString("user_123").UUID(),
+		MerchantSubjectID: identity.MerchantSubjectIDFromString("user_123").UUID(),
 		PriceID:         uuid.New(),
 		Amount:          0,
 		Currency:        "usd",
@@ -75,7 +75,7 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 	ref := "11111111111111111111111111111112"
 	session := &models.CheckoutSession{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString("user_123").UUID(),
+		MerchantSubjectID: identity.MerchantSubjectIDFromString("user_123").UUID(),
 		PriceID:         uuid.New(),
 		Amount:          1000,
 		Currency:        "usd",
@@ -88,7 +88,7 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 	}
 	req := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: testSignature}}
 
-	_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.TenantSubjectID.String()})
+	_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.MerchantSubjectID.String()})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 	require.Contains(t, err.Error(), "token_amount missing or invalid")
@@ -109,7 +109,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 		ref := "11111111111111111111111111111112"
 		session := &models.CheckoutSession{
 			ID:              uuid.New(),
-			TenantSubjectID: identity.TenantSubjectIDFromString("user_123").UUID(),
+			MerchantSubjectID: identity.MerchantSubjectIDFromString("user_123").UUID(),
 			PriceID:         uuid.New(),
 			Amount:          1000,
 			Currency:        "usd",
@@ -122,7 +122,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 		}
 		req := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: testSignature}}
 
-		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.TenantSubjectID.String()})
+		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.MerchantSubjectID.String()})
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 		require.Contains(t, err.Error(), "recipient missing")
@@ -133,7 +133,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 
 		session := &models.CheckoutSession{
 			ID:              uuid.New(),
-			TenantSubjectID: identity.TenantSubjectIDFromString("user_123").UUID(),
+			MerchantSubjectID: identity.MerchantSubjectIDFromString("user_123").UUID(),
 			PriceID:         uuid.New(),
 			Amount:          1000,
 			Currency:        "usd",
@@ -146,7 +146,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 		}
 		req := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: testSignature}}
 
-		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.TenantSubjectID.String()})
+		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.MerchantSubjectID.String()})
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 		require.Contains(t, err.Error(), "reference missing")
@@ -256,7 +256,7 @@ func TestSolanaBuildRequestFromSessionUsesPersistedQuote(t *testing.T) {
 	tenantSubjectID := uuid.New()
 	session := &models.CheckoutSession{
 		ID:              uuid.New(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		PriceID:         priceID,
 		Amount:          10000,
 		Currency:        "usd",

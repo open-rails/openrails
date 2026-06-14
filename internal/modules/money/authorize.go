@@ -12,14 +12,14 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // AuthorizeHoldInput is the input to AuthorizeAndHold: the payer (tenant subject), the
 // actor (canonical actor for per-actor caps), the estimated charge, and the
 // idempotency-keyed source coordinates of the hold.
 type AuthorizeHoldInput struct {
-	Payer          identity.TenantSubjectID
+	Payer          identity.MerchantSubjectID
 	Actor          string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
 	Currency       string // "" => DefaultCurrency (#472)
 	EstimateMicros int64
@@ -85,7 +85,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		q := gen.New(tx)
 		txSvc := &MoneyService{db: s.db.NewWithPgxTx(tx), clock: s.clock}
 
-		tid, terr := tenant.Require(ctx)
+		tid, terr := merchant.Require(ctx)
 		if terr != nil {
 			return terr
 		}
@@ -97,7 +97,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		// it as an allowed decision without re-evaluating (the original authorize
 		// already passed). Mirrors Hold's idempotency key.
 		existingRow, ierr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
+			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur,
 			TransactionType: "hold", Source: in.Source, SourceID: &in.SourceID,
 		})
 		if ierr == nil {
@@ -165,7 +165,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		// Place the hold within the SAME tx + held lock.
 		amount := in.EstimateMicros
 		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
+			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur,
 			HeldBalance: bal.HeldBalance + amount, UpdatedAt: now,
 		}); err != nil {
 			return err
@@ -176,8 +176,8 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		srcID := in.SourceID
 		hold := &models.MoneyTransaction{
 			ID:              uuidutil.NewV7(),
-			TenantID:        tenantID,
-			TenantSubjectID: payerID,
+			MerchantID:        tenantID,
+			MerchantSubjectID: payerID,
 			Currency:        cur,
 			Actor:           strings.TrimSpace(in.Actor),
 			Amount:          0,
@@ -214,9 +214,9 @@ type accountSnapshot struct {
 }
 
 // snapshotTx reads the balance + settings snapshot using the (tx-scoped) service.
-func (s *MoneyService) snapshotTx(ctx context.Context, payer identity.TenantSubjectID, currency string) (accountSnapshot, error) {
+func (s *MoneyService) snapshotTx(ctx context.Context, payer identity.MerchantSubjectID, currency string) (accountSnapshot, error) {
 	cur := normalizeCurrency(currency)
-	bal, err := s.GetBalanceForTenantSubject(ctx, payer, cur)
+	bal, err := s.GetBalanceForMerchantSubject(ctx, payer, cur)
 	if err != nil {
 		return accountSnapshot{}, err
 	}

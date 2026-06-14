@@ -17,7 +17,7 @@ import (
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // TypeSolanaSunsetPlan flips an on-chain Subscriptions-program plan to
@@ -64,7 +64,7 @@ type planAccountReader interface {
 // planSunsetter is the write surface (interface for unit tests). Satisfied by
 // *recurring.PlanService.
 type planSunsetter interface {
-	SunsetPlan(ctx context.Context, tenantID tenant.ID, planPDA solanago.PublicKey, current *subscriptions.PlanAccount) (string, error)
+	SunsetPlan(ctx context.Context, tenantID merchant.ID, planPDA solanago.PublicKey, current *subscriptions.PlanAccount) (string, error)
 }
 
 // SolanaSunsetPlanHandler implements verify-then-execute sunsetting:
@@ -171,7 +171,7 @@ func (h *SolanaSunsetPlanHandler) Execute(ctx context.Context, intent gen.Openra
 		return Succeeded(map[string]any{"already_sunset": true, "plan_pda": p.PlanPDA})
 	}
 
-	sig, err := h.Plans.SunsetPlan(ctx, tenant.ID(intent.TenantID), pda, acct)
+	sig, err := h.Plans.SunsetPlan(ctx, merchant.ID(intent.MerchantID), pda, acct)
 	if err != nil {
 		if errors.Is(err, solanaint.ErrProviderReadOnly) {
 			return Parked("solana provider writes blocked (mode=readonly)")

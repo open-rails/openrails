@@ -2,11 +2,11 @@
 
 -- name: CreatePrice :execrows
 INSERT INTO openrails.prices (
-    id, tenant_id, product_id, status, amount, currency,
+    id, merchant_id, product_id, status, amount, currency,
     billing_cycle_days, processors, created_at, updated_at
 ) VALUES (
     $1,
-    sqlc.arg(tenant_id)::uuid,
+    sqlc.arg(merchant_id)::uuid,
     $2,
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'active'),
     $3, $4,

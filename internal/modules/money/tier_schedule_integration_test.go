@@ -10,7 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,7 +22,7 @@ func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
-			"DELETE FROM openrails.tier_schedules WHERE tenant_subject_id = $1", payer.UUID())
+			"DELETE FROM openrails.tier_schedules WHERE merchant_subject_id = $1", payer.UUID())
 	})
 
 	schedule := []money.TierThreshold{
@@ -38,7 +38,7 @@ func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 	require.Equal(t, schedule, got)
 
 	dep := func(amt int64) {
-		_, e := svc.Deposit(ctx, money.DepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctx, money.DepositParams{MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 	tier := func() string {
@@ -79,43 +79,43 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 	// Two distinct tenants, each with its own payer.
 	tA := dbtest.TestTenantID
 	ctxA := dbtest.WithTestTenant(ctx)
-	payerA := identity.TenantSubjectIDFromString(uuid.NewString())
+	payerA := identity.MerchantSubjectIDFromString(uuid.NewString())
 
 	// Tenant B (a second, isolated tenant row).
 	tenantB := uuid.New()
 	slugB := "tier-iso-" + tenantB.String()[:8]
 	_, err := pool.Exec(ctx,
-		"INSERT INTO openrails.tenants (id, slug, name, status) VALUES ($1,$2,$2,'active')",
+		"INSERT INTO openrails.merchants (id, slug, name, status) VALUES ($1,$2,$2,'active')",
 		tenantB, slugB)
 	require.NoError(t, err)
-	ctxB := tenant.WithID(ctx, tenant.ID(tenantB))
-	payerB := identity.TenantSubjectIDFromString(uuid.NewString())
+	ctxB := merchant.WithID(ctx, merchant.ID(tenantB))
+	payerB := identity.MerchantSubjectIDFromString(uuid.NewString())
 
 	t.Cleanup(func() {
 		bg := context.Background()
 		for _, p := range []uuid.UUID{payerA.UUID(), payerB.UUID()} {
-			_, _ = pool.Exec(bg, "DELETE FROM openrails.tier_schedules WHERE tenant_subject_id = $1", p)
-			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_accounts WHERE tenant_subject_id = $1", p)
-			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_blocks WHERE tenant_subject_id = $1", p)
-			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_transactions WHERE tenant_subject_id = $1", p)
-			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_balances WHERE tenant_subject_id = $1", p)
+			_, _ = pool.Exec(bg, "DELETE FROM openrails.tier_schedules WHERE merchant_subject_id = $1", p)
+			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_accounts WHERE merchant_subject_id = $1", p)
+			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_blocks WHERE merchant_subject_id = $1", p)
+			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", p)
+			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", p)
 		}
-		_, _ = pool.Exec(bg, "DELETE FROM openrails.tier_schedules WHERE tenant_id = $1", tenantB)
-		_, _ = pool.Exec(bg, "DELETE FROM openrails.tenants WHERE id = $1", tenantB)
+		_, _ = pool.Exec(bg, "DELETE FROM openrails.tier_schedules WHERE merchant_id = $1", tenantB)
+		_, _ = pool.Exec(bg, "DELETE FROM openrails.merchants WHERE id = $1", tenantB)
 	})
 	_ = tA
 
 	// Tenant A: a tenant-wide default schedule with a low tier1 threshold.
-	require.NoError(t, svc.SetTierSchedule(ctxA, identity.TenantSubjectID{}, []money.TierThreshold{
+	require.NoError(t, svc.SetTierSchedule(ctxA, identity.MerchantSubjectID{}, []money.TierThreshold{
 		{Tier: "free", MinPaidMicros: 0}, {Tier: "tier1", MinPaidMicros: 1_000},
 	}))
 
 	depA := func(amt int64) {
-		_, e := svc.Deposit(ctxA, money.DepositParams{TenantSubjectID: &payerA, Actor: payerA.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctxA, money.DepositParams{MerchantSubjectID: &payerA, Actor: payerA.UUID().String(), Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 	depB := func(amt int64) {
-		_, e := svc.Deposit(ctxB, money.DepositParams{TenantSubjectID: &payerB, Actor: payerB.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctxB, money.DepositParams{MerchantSubjectID: &payerB, Actor: payerB.UUID().String(), Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 

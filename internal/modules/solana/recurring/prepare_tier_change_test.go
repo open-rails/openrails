@@ -9,12 +9,12 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/solana"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type tierChangeSecrets struct{ key string }
 
-func (m tierChangeSecrets) GetSecret(context.Context, tenant.ID, string) (string, error) {
+func (m tierChangeSecrets) GetSecret(context.Context, merchant.ID, string) (string, error) {
 	return m.key, nil
 }
 
@@ -49,7 +49,7 @@ func randKeyStr(t *testing.T) string {
 func newTierChangeInput(t *testing.T) PrepareTierChangeInput {
 	t.Helper()
 	return PrepareTierChangeInput{
-		TenantID:           dbtest.TestTenantID,
+		MerchantID:           dbtest.TestTenantID,
 		SubscriberWallet:   randKeyStr(t),
 		MintSymbol:         "USDC",
 		OldPlanPDA:         randKeyStr(t),

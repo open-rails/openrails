@@ -20,7 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const testUSDCFundingWallet = "11111111111111111111111111111111"
@@ -28,7 +28,7 @@ const testUSDCFundingWallet = "11111111111111111111111111111111"
 type usdcFundingDelegatedResolver struct {
 	subject     string
 	permissions []string
-	tenantID    tenant.ID
+	tenantID    merchant.ID
 }
 
 func (r usdcFundingDelegatedResolver) ResolveDelegated(context.Context, string) (*controlplane.ResolvedDelegated, error) {
@@ -38,7 +38,7 @@ func (r usdcFundingDelegatedResolver) ResolveDelegated(context.Context, string) 
 	}
 	return &controlplane.ResolvedDelegated{
 		Tenant:           dbtest.TestTenantSlug,
-		TenantID:         tenantID,
+		MerchantID:         tenantID,
 		TenantSlug:       dbtest.TestTenantSlug,
 		DelegatedSubject: r.subject,
 		Permissions:      r.permissions,

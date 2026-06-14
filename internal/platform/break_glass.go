@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // MaxBreakGlassTTL caps the duration of a break-glass grant. Emergency elevation
@@ -73,7 +73,7 @@ func NewBreakGlass(pool *db.Pool, audit *AuditLog) (*BreakGlass, error) {
 type GrantRequest struct {
 	ActorUserID   string
 	ActorTenant   string
-	TargetTenant  *tenant.ID // nil for a platform-wide elevation
+	TargetTenant  *merchant.ID // nil for a platform-wide elevation
 	Justification string
 	TTL           time.Duration // clamped to [0, MaxBreakGlassTTL]; 0 -> DefaultBreakGlassTTL
 }
@@ -198,7 +198,7 @@ func (b *BreakGlass) Revoke(ctx context.Context, id, actorUserID, actorTenant st
 // IsActive reports whether an unrevoked, unexpired break-glass grant exists for
 // the given actor (optionally scoped to a target tenant). Used to assert that an
 // emergency elevation is in force before granting elevated cross-tenant access.
-func (b *BreakGlass) IsActive(ctx context.Context, actorUserID string, targetTenant *tenant.ID) (bool, error) {
+func (b *BreakGlass) IsActive(ctx context.Context, actorUserID string, targetTenant *merchant.ID) (bool, error) {
 	if b == nil || b.pool == nil {
 		return false, errors.New("platform: break-glass not configured")
 	}

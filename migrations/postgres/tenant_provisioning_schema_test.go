@@ -12,10 +12,10 @@ func TestConsolidatedSchemaIncludesTenantProvisioningState(t *testing.T) {
 		"billing_tier text",
 		"webhook_host text",
 		"webhook_path text",
-		"CREATE TABLE openrails.tenant_secrets",
-		"CREATE TABLE openrails.tenant_credential_audit",
-		"CREATE TABLE openrails.tenant_exports",
-		"uq_tenants_webhook_host",
+		"CREATE TABLE openrails.merchant_secrets",
+		"CREATE TABLE openrails.merchant_credential_audit",
+		"CREATE TABLE openrails.merchant_exports",
+		"uq_merchants_webhook_host",
 	} {
 		if !strings.Contains(c, want) {
 			t.Errorf("001 schema missing tenant provisioning final state %q", want)
@@ -29,7 +29,7 @@ func TestConsolidatedSchemaOmitsProvisioningTransitionDDL(t *testing.T) {
 	for _, forbidden := range []string{
 		"ADD COLUMN IF NOT EXISTS billing_tier",
 		"ADD COLUMN IF NOT EXISTS webhook_host",
-		"DROP TABLE openrails.tenants",
+		"DROP TABLE openrails.merchants",
 		"DROP COLUMN",
 		"ALTER COLUMN status",
 	} {

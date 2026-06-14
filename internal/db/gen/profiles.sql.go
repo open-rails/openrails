@@ -11,37 +11,22 @@ import (
 	"github.com/google/uuid"
 )
 
-const ensureTenantBySlug = `-- name: EnsureTenantBySlug :exec
-INSERT INTO openrails.tenants (slug, name, status)
-VALUES ($1, $1, 'active')
-ON CONFLICT (slug) DO NOTHING
-`
-
-// Idempotently create the bound tenant row for an EMBEDDED host (#478): the host
-// owns the embed + DB, so auto-creating the configured tenant slug after
-// migrations is safe. A no-op when the slug already exists. Standalone/remote
-// never calls this — an unprovisioned slug there is a configuration error.
-func (q *Queries) EnsureTenantBySlug(ctx context.Context, slug string) error {
-	_, err := q.db.Exec(ctx, ensureTenantBySlug, slug)
-	return err
-}
-
-const getTenantBySlug = `-- name: GetTenantBySlug :one
+const getMerchantBySlug = `-- name: GetMerchantBySlug :one
 SELECT id, slug, name, status
-FROM openrails.tenants
+FROM openrails.merchants
 WHERE slug = $1 AND deleted_at IS NULL
 `
 
-type GetTenantBySlugRow struct {
+type GetMerchantBySlugRow struct {
 	ID     uuid.UUID
 	Slug   string
 	Name   string
 	Status string
 }
 
-func (q *Queries) GetTenantBySlug(ctx context.Context, slug string) (GetTenantBySlugRow, error) {
-	row := q.db.QueryRow(ctx, getTenantBySlug, slug)
-	var i GetTenantBySlugRow
+func (q *Queries) GetMerchantBySlug(ctx context.Context, slug string) (GetMerchantBySlugRow, error) {
+	row := q.db.QueryRow(ctx, getMerchantBySlug, slug)
+	var i GetMerchantBySlugRow
 	err := row.Scan(
 		&i.ID,
 		&i.Slug,
@@ -95,6 +80,43 @@ WHERE username = $1 AND deleted_at IS NULL
 
 func (q *Queries) GetUserIDByUsername(ctx context.Context, username *string) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, getUserIDByUsername, username)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const registerMerchant = `-- name: RegisterMerchant :one
+INSERT INTO openrails.merchants (slug, name, status, stripe_account_id, webhook_host, webhook_path)
+VALUES ($1, $2, 'active', $3, $4, $5)
+ON CONFLICT (slug) DO UPDATE SET
+    name = EXCLUDED.name,
+    stripe_account_id = COALESCE(EXCLUDED.stripe_account_id, openrails.merchants.stripe_account_id),
+    webhook_host = COALESCE(EXCLUDED.webhook_host, openrails.merchants.webhook_host),
+    webhook_path = COALESCE(EXCLUDED.webhook_path, openrails.merchants.webhook_path),
+    updated_at = now()
+RETURNING id
+`
+
+type RegisterMerchantParams struct {
+	Slug            string
+	Name            string
+	StripeAccountID *string
+	WebhookHost     *string
+	WebhookPath     *string
+}
+
+// Register a merchant (billing bucket) from config, idempotently (#480). The
+// merchant carries ONLY billing/rail state; NO auth. Used by embedded boot and
+// standalone provisioning. Re-registering an existing slug refreshes the
+// billing-only fields and returns the canonical (self-owned) merchant id.
+func (q *Queries) RegisterMerchant(ctx context.Context, arg RegisterMerchantParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, registerMerchant,
+		arg.Slug,
+		arg.Name,
+		arg.StripeAccountID,
+		arg.WebhookHost,
+		arg.WebhookPath,
+	)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err

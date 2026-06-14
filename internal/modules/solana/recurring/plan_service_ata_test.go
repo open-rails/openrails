@@ -7,7 +7,7 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const testDevnetUSDCMint = "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ"
@@ -21,15 +21,15 @@ func testSolanaTokens() map[string]config.SolanaToken {
 // fakeSubmitter captures every submitted instruction set so tests can assert on
 // the on-chain effects PublishPlan produces without a live signer/RPC.
 type fakeSubmitter struct {
-	merchant solanago.PublicKey
+	merchantPub solanago.PublicKey
 	submits  [][]solanago.Instruction
 }
 
-func (f *fakeSubmitter) MerchantAddress(_ context.Context, _ tenant.ID) (solanago.PublicKey, error) {
-	return f.merchant, nil
+func (f *fakeSubmitter) MerchantAddress(_ context.Context, _ merchant.ID) (solanago.PublicKey, error) {
+	return f.merchantPub, nil
 }
 
-func (f *fakeSubmitter) Submit(_ context.Context, _ tenant.ID, ins []solanago.Instruction) (solanago.Signature, error) {
+func (f *fakeSubmitter) Submit(_ context.Context, _ merchant.ID, ins []solanago.Instruction) (solanago.Signature, error) {
 	f.submits = append(f.submits, ins)
 	return solanago.Signature{byte(len(f.submits))}, nil
 }
@@ -62,12 +62,12 @@ func TestPublishPlanEnsuresMerchantReceivingATA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("key: %v", err)
 	}
-	merchant := merchantKey.PublicKey()
-	sub := &fakeSubmitter{merchant: merchant}
+	merchantPub := merchantKey.PublicKey()
+	sub := &fakeSubmitter{merchantPub: merchantPub}
 	svc := NewPlanService(sub, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
-		TenantID:        tenant.ID{},
+		MerchantID:        merchant.ID{},
 		PlanID:          1,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 10_000_000,
@@ -81,14 +81,14 @@ func TestPublishPlanEnsuresMerchantReceivingATA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	ix := findEnsureATA(t, sub, merchant, mint)
+	ix := findEnsureATA(t, sub, merchantPub, mint)
 
 	accs := ix.Accounts()
 	// payer is the cranker (merchant), signer+writable.
-	if !accs[0].PublicKey.Equals(merchant) || !accs[0].IsSigner || !accs[0].IsWritable {
+	if !accs[0].PublicKey.Equals(merchantPub) || !accs[0].IsSigner || !accs[0].IsWritable {
 		t.Fatal("ensure-ATA payer must be the merchant (cranker), signer+writable")
 	}
-	if !accs[2].PublicKey.Equals(merchant) {
+	if !accs[2].PublicKey.Equals(merchantPub) {
 		t.Fatal("ensure-ATA owner must be the merchant")
 	}
 	if !accs[3].PublicKey.Equals(mint) {
@@ -103,14 +103,14 @@ func TestPublishPlanEnsuresMerchantReceivingATA(t *testing.T) {
 func TestPublishPlanEnsuresColdReceivingWalletATA(t *testing.T) {
 	merchantKey, _ := solanago.NewRandomPrivateKey()
 	coldKey, _ := solanago.NewRandomPrivateKey()
-	merchant := merchantKey.PublicKey()
+	merchantPub := merchantKey.PublicKey()
 	cold := coldKey.PublicKey()
 
-	sub := &fakeSubmitter{merchant: merchant}
+	sub := &fakeSubmitter{merchantPub: merchantPub}
 	svc := NewPlanService(sub, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
-		TenantID:        tenant.ID{},
+		MerchantID:        merchant.ID{},
 		PlanID:          2,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 5_000_000,
@@ -123,13 +123,13 @@ func TestPublishPlanEnsuresColdReceivingWalletATA(t *testing.T) {
 	mint, _ := solanago.PublicKeyFromBase58(h.Mint)
 
 	// Both the merchant ATA and the cold-wallet ATA must be ensured.
-	findEnsureATA(t, sub, merchant, mint)
+	findEnsureATA(t, sub, merchantPub, mint)
 	ix := findEnsureATA(t, sub, cold, mint)
 	if !ix.Accounts()[2].PublicKey.Equals(cold) {
 		t.Fatal("cold-wallet ensure-ATA owner must be the cold wallet")
 	}
 	// Payer for the cold-wallet ATA is still the cranker (merchant pays gas).
-	if !ix.Accounts()[0].PublicKey.Equals(merchant) {
+	if !ix.Accounts()[0].PublicKey.Equals(merchantPub) {
 		t.Fatal("cold-wallet ensure-ATA must still be paid by the cranker")
 	}
 }

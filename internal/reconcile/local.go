@@ -33,7 +33,7 @@ func localProcessorNames(p Provider) []string {
 // consumes.
 type LocalSubscription struct {
 	ID                      uuid.UUID
-	TenantSubjectID         uuid.UUID
+	MerchantSubjectID         uuid.UUID
 	PriceID                 *uuid.UUID
 	ProductID               uuid.UUID
 	Status                  string
@@ -70,7 +70,7 @@ func (s *LocalSubscription) IsLive() bool {
 // LocalPayment is the slice of openrails.payments the diff engine consumes.
 type LocalPayment struct {
 	ID                uuid.UUID
-	TenantSubjectID   uuid.UUID
+	MerchantSubjectID   uuid.UUID
 	Processor         string
 	TransactionID     string
 	AmountCents       int64
@@ -83,7 +83,7 @@ type LocalPayment struct {
 // LocalEntitlement is one LIVE subscription-sourced entitlement window.
 type LocalEntitlement struct {
 	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
+	MerchantSubjectID uuid.UUID
 	Entitlement     string
 	SourceID        uuid.UUID
 	StartAt         time.Time
@@ -94,7 +94,7 @@ type LocalEntitlement struct {
 // consumes.
 type LocalPaymentMethod struct {
 	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
+	MerchantSubjectID uuid.UUID
 	Processor       string
 	VaultID         string
 	LastFour        string
@@ -157,7 +157,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider) (*Loca
 	for _, row := range subs {
 		s := LocalSubscription{
 			ID:                      row.ID,
-			TenantSubjectID:         row.TenantSubjectID,
+			MerchantSubjectID:         row.MerchantSubjectID,
 			PriceID:                 row.PriceID,
 			ProductID:               row.ProductID,
 			Status:                  string(row.Status),
@@ -203,7 +203,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider) (*Loca
 	for _, row := range ents {
 		state.Entitlements = append(state.Entitlements, LocalEntitlement{
 			ID:              row.ID,
-			TenantSubjectID: row.TenantSubjectID,
+			MerchantSubjectID: row.MerchantSubjectID,
 			Entitlement:     row.Entitlement,
 			SourceID:        row.SourceID,
 			StartAt:         row.StartAt,
@@ -242,7 +242,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider) (*Loca
 	for _, row := range pms {
 		pm := LocalPaymentMethod{
 			ID:              row.ID,
-			TenantSubjectID: row.TenantSubjectID,
+			MerchantSubjectID: row.MerchantSubjectID,
 			Processor:       row.Processor,
 			VaultID:         row.VaultID,
 		}
@@ -276,7 +276,7 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 	for _, row := range rows {
 		p := LocalPayment{
 			ID:                row.ID,
-			TenantSubjectID:   row.TenantSubjectID,
+			MerchantSubjectID:   row.MerchantSubjectID,
 			Processor:         string(row.Processor),
 			TransactionID:     row.TransactionID,
 			AmountCents:       row.Amount,

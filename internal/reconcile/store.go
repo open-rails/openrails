@@ -9,13 +9,13 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // FindingRecord is a persisted finding (one stable identity row).
 type FindingRecord struct {
 	ID                uuid.UUID      `json:"id"`
-	TenantID          uuid.UUID      `json:"tenant_id"`
+	MerchantID          uuid.UUID      `json:"tenant_id"`
 	Provider          Provider       `json:"provider"`
 	Type              FindingType    `json:"finding_type"`
 	SubjectKey        string         `json:"subject_key"`
@@ -40,7 +40,7 @@ type FindingRecord struct {
 // RunRecord is a persisted reconciliation run.
 type RunRecord struct {
 	ID          uuid.UUID       `json:"id"`
-	TenantID    uuid.UUID       `json:"tenant_id"`
+	MerchantID    uuid.UUID       `json:"tenant_id"`
 	Mode        Mode            `json:"mode"`
 	Providers   []string        `json:"providers"`
 	WindowSince *time.Time      `json:"window_since,omitempty"`
@@ -103,12 +103,12 @@ func (s *PGStore) CreateRun(ctx context.Context, mode Mode, providers []Provider
 	for _, p := range providers {
 		names = append(names, string(p))
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	row, err := s.DB.Gen(ctx).CreateReconciliationRun(ctx, gen.CreateReconciliationRunParams{
-		TenantID:    tid.UUID(),
+		MerchantID:    tid.UUID(),
 		Mode:        string(mode),
 		Providers:   names,
 		WindowSince: since,
@@ -139,12 +139,12 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 	if f.RecommendedAction != "" {
 		action = &f.RecommendedAction
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return FindingRecord{}, err
 	}
 	row, err := s.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
-		TenantID:          tid.UUID(),
+		MerchantID:          tid.UUID(),
 		Provider:          string(f.Provider),
 		FindingType:       string(f.Type),
 		SubjectKey:        f.SubjectKey,
@@ -320,7 +320,7 @@ func (s *PGStore) DismissFinding(ctx context.Context, id uuid.UUID, notes string
 func findingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord {
 	rec := FindingRecord{
 		ID:              row.ID,
-		TenantID:        row.TenantID,
+		MerchantID:        row.MerchantID,
 		Provider:        Provider(row.Provider),
 		Type:            FindingType(row.FindingType),
 		SubjectKey:      row.SubjectKey,
@@ -353,7 +353,7 @@ func findingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord 
 func runRecordFromRow(row gen.OpenrailsReconciliationRun) RunRecord {
 	rec := RunRecord{
 		ID:          row.ID,
-		TenantID:    row.TenantID,
+		MerchantID:    row.MerchantID,
 		Mode:        Mode(row.Mode),
 		Providers:   row.Providers,
 		WindowSince: row.WindowSince,

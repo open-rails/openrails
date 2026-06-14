@@ -15,7 +15,7 @@ import (
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // fakePlanReader maps base58 PDA -> account bytes (missing = absent).
@@ -39,11 +39,11 @@ type fakeSubmitter struct {
 	submitErr error
 }
 
-func (f *fakeSubmitter) MerchantAddress(context.Context, tenant.ID) (solanago.PublicKey, error) {
+func (f *fakeSubmitter) MerchantAddress(context.Context, merchant.ID) (solanago.PublicKey, error) {
 	return f.merchant, nil
 }
 
-func (f *fakeSubmitter) Submit(_ context.Context, _ tenant.ID, ixs []solanago.Instruction) (solanago.Signature, error) {
+func (f *fakeSubmitter) Submit(_ context.Context, _ merchant.ID, ixs []solanago.Instruction) (solanago.Signature, error) {
 	if f.submitErr != nil {
 		return solanago.Signature{}, f.submitErr
 	}
@@ -70,7 +70,7 @@ func sunsetIntent(t *testing.T, pda string) gen.OpenrailsProviderIntent {
 	}
 	return gen.OpenrailsProviderIntent{
 		ID:             uuid.New(),
-		TenantID:       dbtest.TestTenantID.UUID(),
+		MerchantID:       dbtest.TestTenantID.UUID(),
 		Provider:       "solana",
 		IntentType:     TypeSolanaSunsetPlan,
 		Payload:        payload,

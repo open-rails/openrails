@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Canonical per-tenant secret names. The store namespaces values by
@@ -137,22 +137,22 @@ type Secret struct {
 //     is wired in managed deployments without any schema or caller change.
 type TenantSecretStore interface {
 	// Get returns the secret for (tenant, name), or ErrSecretNotFound.
-	Get(ctx context.Context, tenantID tenant.ID, name string) (Secret, error)
+	Get(ctx context.Context, tenantID merchant.ID, name string) (Secret, error)
 	// Put creates or rotates the secret for (tenant, name). It is idempotent on
 	// value: putting the same value twice is a no-op rotation. Returns the stored
 	// secret (with its new version).
-	Put(ctx context.Context, tenantID tenant.ID, name, value string) (Secret, error)
+	Put(ctx context.Context, tenantID merchant.ID, name, value string) (Secret, error)
 	// Delete removes the secret for (tenant, name). Deleting a missing secret is a
 	// no-op (idempotent), so it is safe in tenant-delete purge.
-	Delete(ctx context.Context, tenantID tenant.ID, name string) error
+	Delete(ctx context.Context, tenantID merchant.ID, name string) error
 	// List enumerates the secret NAMES (never values) held for a tenant. Used by
 	// the export path for Vault-side secret enumeration (GDPR / portability).
-	List(ctx context.Context, tenantID tenant.ID) ([]string, error)
+	List(ctx context.Context, tenantID merchant.ID) ([]string, error)
 }
 
 // validateSecretRef guards the (tenant, name) addressing shared by every store
 // so a blank/zero tenant or empty name can never read or clobber a secret.
-func validateSecretRef(tenantID tenant.ID, name string) error {
+func validateSecretRef(tenantID merchant.ID, name string) error {
 	if tenantID.IsZero() {
 		return fmt.Errorf("tenancy: secret access requires a tenant id")
 	}

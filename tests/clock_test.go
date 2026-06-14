@@ -102,7 +102,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	assert.WithinDuration(t, mockClock.Now(), updated.UpdatedAt, time.Millisecond)
 
 	retryUserID := uuid.New().String()
-	retryTenantSubjectID := suite.ensureTenantSubject(ctx, retryUserID)
+	retryMerchantSubjectID := suite.ensureMerchantSubject(ctx, retryUserID)
 	pm := suite.CreateTestPaymentMethod(retryUserID)
 	nextRetry := mockClock.Now().Add(time.Hour)
 	retryAttempts := 1
@@ -123,10 +123,10 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		return suite.Count(ctx, `
 			SELECT COUNT(*) FROM openrails.subscriptions sub
 			WHERE sub.processor = $1
-			  AND sub.tenant_subject_id = $2
+			  AND sub.merchant_subject_id = $2
 			  AND sub.status = $3
 			  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $4`,
-			string(models.ProcessorMobius), retryTenantSubjectID,
+			string(models.ProcessorMobius), retryMerchantSubjectID,
 			string(models.StatusPastDue), mockClock.Now())
 	}
 	assert.Equal(t, 0, countDueRetries())
@@ -146,7 +146,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	})
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: suite.ensureTenantSubject(ctx, cancelUserID),
+		MerchantSubjectID: suite.ensureMerchantSubject(ctx, cancelUserID),
 		Entitlement:     "premium",
 		StartAt:         cancelStart,
 		EndAt:           &cancelPeriodEnd,
@@ -184,8 +184,8 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	blockExpiry := mockClock.Now().Add(time.Hour)
 	block := &models.MoneyBlock{
 		ID:              uuid.New(),
-		TenantID:        dbtest.TestTenantID.UUID(),
-		TenantSubjectID: suite.ensureTenantSubject(ctx, creditUserID),
+		MerchantID:        dbtest.TestTenantID.UUID(),
+		MerchantSubjectID: suite.ensureMerchantSubject(ctx, creditUserID),
 		Currency:        "USD",
 		OriginalAmount:  75,
 		RemainingAmount: 75,

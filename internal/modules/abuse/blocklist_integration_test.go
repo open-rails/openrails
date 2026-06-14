@@ -89,7 +89,7 @@ func TestBlocklist_OwnerScopedAddIsBlocked(t *testing.T) {
 			"DELETE FROM openrails.payment_blocklist WHERE value = $1", value)
 	})
 
-	owner := identity.TenantSubjectIDFromString(uuid.NewString())
+	owner := identity.MerchantSubjectIDFromString(uuid.NewString())
 
 	// Not blocked before adding.
 	blocked, err := svc.IsBlocked(ctx, abuse.KindProcessorCustomer, value)
@@ -107,7 +107,7 @@ func TestBlocklist_OwnerScopedAddIsBlocked(t *testing.T) {
 	// Verify the stored row actually carries the owner scope.
 	var storedOwner *uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT tenant_subject_id FROM openrails.payment_blocklist WHERE kind = $1 AND value = $2 LIMIT 1",
+		"SELECT merchant_subject_id FROM openrails.payment_blocklist WHERE kind = $1 AND value = $2 LIMIT 1",
 		abuse.KindProcessorCustomer, value,
 	).Scan(&storedOwner))
 	require.NotNil(t, storedOwner)

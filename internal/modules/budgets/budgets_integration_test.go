@@ -20,7 +20,7 @@ import (
 // budgetEnv spins up the budget engine over the shared migrated Postgres with an
 // injectable fake clock and a fresh payer+actor, and returns a cleanup-scoped
 // context. State is scoped by the freshly generated payer id.
-func budgetEnv(t *testing.T) (*budgets.Service, *clockwork.FakeClock, *pgxpool.Pool, identity.TenantSubjectID, string, context.Context) {
+func budgetEnv(t *testing.T) (*budgets.Service, *clockwork.FakeClock, *pgxpool.Pool, identity.MerchantSubjectID, string, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
@@ -35,12 +35,12 @@ func budgetEnv(t *testing.T) (*budgets.Service, *clockwork.FakeClock, *pgxpool.P
 		t.Skip("openrails.budget_window_state missing; run migration 005")
 	}
 
-	payer := identity.TenantSubjectIDFromString(uuid.NewString())
+	payer := identity.MerchantSubjectIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	actor := "actor_" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_reservations WHERE tenant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_window_state WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_reservations WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_window_state WHERE merchant_subject_id = $1", payerID)
 	})
 
 	// Fixed wall clock so window math is deterministic; advance it to cross
@@ -239,7 +239,7 @@ func TestFixedCadence_AdvancesOnSchedule(t *testing.T) {
 // charged request — no shared/global reset boundary.
 func TestPerUserStaggeredBoundaries(t *testing.T) {
 	svc, clk, _, payerA, actorA, ctx := budgetEnv(t)
-	payerB := identity.TenantSubjectIDFromString(uuid.NewString())
+	payerB := identity.MerchantSubjectIDFromString(uuid.NewString())
 	actorB := "actor_" + uuid.NewString()
 
 	tA := clk.Now().UTC()

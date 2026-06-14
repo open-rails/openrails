@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // SeedConfiguredTenantSolanaSecret bridges a SINGLE-TENANT install that
@@ -32,14 +32,14 @@ import (
 //
 // A backend error (store unavailable) is returned so the caller can fail boot
 // loudly rather than start a signer that will never resolve a key.
-func SeedConfiguredTenantSolanaSecret(ctx context.Context, store tenancy.TenantSecretStore, tenantID tenant.ID, configKey string) error {
+func SeedConfiguredTenantSolanaSecret(ctx context.Context, store tenancy.TenantSecretStore, tenantID merchant.ID, configKey string) error {
 	if tenantID.IsZero() {
 		return nil
 	}
 	return SeedTenantSolanaSecret(ctx, store, tenantID, configKey)
 }
 
-func SeedTenantSolanaSecret(ctx context.Context, store tenancy.TenantSecretStore, tenantID tenant.ID, configKey string) error {
+func SeedTenantSolanaSecret(ctx context.Context, store tenancy.TenantSecretStore, tenantID merchant.ID, configKey string) error {
 	key := strings.TrimSpace(configKey)
 	if key == "" {
 		return nil // nothing configured via global config
@@ -72,7 +72,7 @@ type secretStoreGetter struct {
 	store tenancy.TenantSecretStore
 }
 
-func (g secretStoreGetter) GetSecret(ctx context.Context, tenantID tenant.ID, name string) (string, error) {
+func (g secretStoreGetter) GetSecret(ctx context.Context, tenantID merchant.ID, name string) (string, error) {
 	sec, err := g.store.Get(ctx, tenantID, name)
 	if err != nil {
 		return "", err

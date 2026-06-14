@@ -5,8 +5,6 @@ package bootstrap
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"sort"
 	"strings"
@@ -18,7 +16,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	authcore "github.com/open-rails/authkit/core"
-	jwtkit "github.com/open-rails/authkit/jwt"
 	authpgmigrations "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -30,15 +27,14 @@ import (
 )
 
 const tenantManifestSchemaDDL = `
-CREATE SCHEMA IF NOT EXISTS billing;
+CREATE SCHEMA IF NOT EXISTS openrails;
 
-CREATE TABLE IF NOT EXISTS openrails.tenants (
+CREATE TABLE IF NOT EXISTS openrails.merchants (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug                TEXT NOT NULL UNIQUE,
     name                TEXT NOT NULL,
     status              TEXT NOT NULL DEFAULT 'active',
-    authkit_tenant_id   TEXT,
-    authkit_tenant_slug TEXT,
+    owner_tenant_id     TEXT,
     plan                TEXT,
     region              TEXT,
     billing_tier        TEXT,
@@ -51,78 +47,37 @@ CREATE TABLE IF NOT EXISTS openrails.tenants (
     suspended_at        TIMESTAMPTZ,
     deleted_at          TIMESTAMPTZ
 );
-
-CREATE TABLE IF NOT EXISTS openrails.tenant_delegated_issuers (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id   UUID NOT NULL REFERENCES openrails.tenants (id) ON DELETE CASCADE,
-    issuer      TEXT NOT NULL,
-    jwks_uri    TEXT NOT NULL,
-    audiences   TEXT[] NOT NULL DEFAULT '{}',
-    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    CONSTRAINT tenant_delegated_issuers_issuer_unique UNIQUE (issuer)
-);
 `
 
-func TestReconcileTenantManifestEnsuresTenantsAndIssuers(t *testing.T) {
+func TestReconcileTenantManifestEnsuresTenants(t *testing.T) {
 	ctx := context.Background()
 	pool := newTenantManifestTestPool(t)
 	cp := newTenantManifestControlPlane(t, pool)
 	require.NoError(t, ReconcileTenantManifestData(ctx, &config.Config{}, cp, cozyArtTenantManifest("starter", "us-west", "/hooks/v1"), TenantManifestReconcileOptions{}))
 
-	var tenantID, billingTier, region, webhookPath, authkitTenantSlug string
+	var tenantID, billingTier, region, webhookPath string
 	require.NoError(t, pool.QueryRow(ctx, `
-			SELECT id::text, billing_tier, region, webhook_path, authkit_tenant_slug
-		  FROM openrails.tenants
+			SELECT id::text, billing_tier, region, webhook_path
+		  FROM openrails.merchants
 		 WHERE slug = 'cozy-art'
-	`).Scan(&tenantID, &billingTier, &region, &webhookPath, &authkitTenantSlug))
+	`).Scan(&tenantID, &billingTier, &region, &webhookPath))
 	require.Equal(t, "starter", billingTier)
 	require.Equal(t, "us-west", region)
 	require.Equal(t, "/hooks/v1", webhookPath)
-	require.Equal(t, "tenant-cozy-art", authkitTenantSlug)
 
-	serviceTokens, err := cp.Core().ListServiceTokens(ctx, "tenant-cozy-art")
-	require.NoError(t, err)
-	require.Empty(t, serviceTokens, "bootstrap manifests must not mint generated service tokens")
+	// #481: provisioning a merchant does NOT auto-mint an AuthKit org, and the
+	// manifest never mints service tokens.
 
 	require.NoError(t, ReconcileTenantManifestData(ctx, &config.Config{}, cp, cozyArtTenantManifest("pro", "us-east", "/hooks/v2"), TenantManifestReconcileOptions{}))
 
 	require.NoError(t, pool.QueryRow(ctx, `
 			SELECT billing_tier, region, webhook_path
-		  FROM openrails.tenants
+		  FROM openrails.merchants
 		 WHERE slug = 'cozy-art'
 	`).Scan(&billingTier, &region, &webhookPath))
 	require.Equal(t, "pro", billingTier)
 	require.Equal(t, "us-east", region)
 	require.Equal(t, "/hooks/v2", webhookPath)
-
-	serviceTokens, err = cp.Core().ListServiceTokens(ctx, "tenant-cozy-art")
-	require.NoError(t, err)
-	require.Empty(t, serviceTokens, "idempotent reconcile must not mint generated service tokens")
-
-	issuer1 := newJWKS(t, "issuer-kid-1")
-	issuer2 := newJWKS(t, "issuer-kid-2")
-	issuerManifest := &TenantManifest{Version: 1, Tenants: []ManifestTenant{{
-		Slug: "cozy-art",
-		Issuers: []ManifestIssuer{{
-			Issuer:    "https://doujins.example",
-			JWKSURI:   issuer1.URL,
-			Audiences: []string{"openrails-v1"},
-		}},
-	}}}
-	require.True(t, reconcileManifestIssuersOnce(ctx, cp, issuerManifest))
-	assertIssuerRow(t, pool, "https://doujins.example", issuer1.URL, []string{"openrails-v1"}, true)
-
-	issuerManifest.Tenants[0].Issuers[0].JWKSURI = issuer2.URL
-	issuerManifest.Tenants[0].Issuers[0].Audiences = []string{"openrails-v2", "openrails-admin"}
-	require.True(t, reconcileManifestIssuersOnce(ctx, cp, issuerManifest))
-	assertIssuerRow(t, pool, "https://doujins.example", issuer2.URL, []string{"openrails-v2", "openrails-admin"}, true)
-
-	disabled := false
-	issuerManifest.Tenants[0].Issuers[0].Enabled = &disabled
-	require.True(t, reconcileManifestIssuersOnce(ctx, cp, issuerManifest))
-	assertIssuerRow(t, pool, "https://doujins.example", issuer2.URL, []string{"openrails-v2", "openrails-admin"}, false)
 }
 
 func TestReconcileTenantManifestSerializesConcurrentReplicas(t *testing.T) {
@@ -150,9 +105,6 @@ func TestReconcileTenantManifestSerializesConcurrentReplicas(t *testing.T) {
 	wg.Wait()
 	require.EqualValues(t, 2, successes.Load())
 
-	serviceTokens, err := cp.Core().ListServiceTokens(ctx, "tenant-cozy-art")
-	require.NoError(t, err)
-	require.Empty(t, serviceTokens, "bootstrap manifests must not mint generated service tokens")
 }
 
 func newTenantManifestTestPool(t *testing.T) *pgxpool.Pool {
@@ -267,20 +219,6 @@ func cozyArtTenantManifest(tier, region, webhookPath string) *TenantManifest {
 	}
 }
 
-func newJWKS(t *testing.T, kid string) *httptest.Server {
-	t.Helper()
-	signer, err := jwtkit.NewRSASigner(2048, kid)
-	require.NoError(t, err)
-	keys := jwtkit.JWKS{Keys: []jwtkit.JWK{
-		jwtkit.PublicToJWK(signer.PublicKey(), signer.KID(), "RS256"),
-	}}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jwtkit.ServeJWKS(w, r, keys)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
-}
-
 func resourceIDs(resources []authcore.ServiceTokenResource, kind string) []string {
 	out := make([]string, 0, len(resources))
 	for _, r := range resources {
@@ -289,21 +227,4 @@ func resourceIDs(resources []authcore.ServiceTokenResource, kind string) []strin
 		}
 	}
 	return out
-}
-
-func assertIssuerRow(t *testing.T, pool *pgxpool.Pool, issuer, jwksURI string, audiences []string, enabled bool) {
-	t.Helper()
-	var (
-		gotJWKS      string
-		gotAudiences []string
-		gotEnabled   bool
-	)
-	require.NoError(t, pool.QueryRow(context.Background(), `
-		SELECT jwks_uri, audiences, enabled
-		  FROM openrails.tenant_delegated_issuers
-		 WHERE issuer = $1
-	`, issuer).Scan(&gotJWKS, &gotAudiences, &gotEnabled))
-	require.Equal(t, jwksURI, gotJWKS)
-	require.ElementsMatch(t, audiences, gotAudiences)
-	require.Equal(t, enabled, gotEnabled)
 }

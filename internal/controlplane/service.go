@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -47,14 +46,6 @@ type ControlPlane struct {
 	// every minted token is accepted by delegatedVerifier (and the /v1/self gate).
 	delegatedAudiences []string
 
-	// issuerMu guards delegatedIssuers (the live set of FEDERATED tenant issuers
-	// registered into delegatedVerifier, issue #259). It is held while reloading
-	// the registry so concurrent register/disable calls converge.
-	issuerMu sync.Mutex
-	// delegatedIssuers is the set of tenant issuer ids currently registered into
-	// the multi-issuer verifier (excludes the self-issuer). Tracked so a reload /
-	// kill-switch can RemoveIssuer the ones no longer enabled.
-	delegatedIssuers map[string]struct{}
 }
 
 // delegatedIssuerJWKSCacheTTL is how long the verifier treats a fetched tenant
@@ -158,6 +149,10 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
 	}
 
+	// Wire AuthKit's core as the verifier's enrichment + remote_application source
+	// so it can lazy-load any single issuer on first use (#481).
+	delegatedVerifier.WithService(authSvc.Core())
+
 	cp2 := &ControlPlane{
 		cfg:                cfg,
 		authSvc:            authSvc,
@@ -165,16 +160,15 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		delegatedVerifier:  delegatedVerifier,
 		issuer:             issuer,
 		delegatedAudiences: append([]string(nil), expected...),
-		delegatedIssuers:   map[string]struct{}{},
 	}
 
-	// Load the FEDERATED tenant issuers (issue #259) into the multi-issuer
-	// verifier. A registry read failure (or an individual bad issuer) must NOT
-	// take down startup: unreachable JWKS is handled lazily/fail-closed per token
-	// at verify time. So we log and continue (delegated tokens for any tenant whose
-	// issuer failed to load simply fail closed until the next reload).
-	if err := cp2.reloadDelegatedIssuers(ctx); err != nil {
-		log.WithError(err).Warn("controlplane: initial delegated issuer load failed; delegated tokens fail closed until reload")
+	// Load AuthKit's ACTIVE remote_applications into the multi-issuer verifier
+	// (#481: standalone JWKS trust is AuthKit's remote_application registry, #74).
+	// A load failure must NOT take down startup: unreachable JWKS is handled
+	// lazily/fail-closed per token at verify time, and the verifier lazy-loads any
+	// single issuer on first use. So we log and continue.
+	if err := cp2.loadRemoteApplications(ctx); err != nil {
+		log.WithError(err).Warn("controlplane: initial remote_application load failed; delegated tokens fail closed / lazy-load until next load")
 	}
 
 	return cp2, nil

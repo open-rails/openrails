@@ -32,7 +32,7 @@ SET status = 'in_flight',
     updated_at = now()
 FROM due
 WHERE pi.id = due.id
-RETURNING pi.id, pi.tenant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.account_fingerprint
+RETURNING pi.id, pi.merchant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.account_fingerprint
 `
 
 type ClaimDueProviderIntentsParams struct {
@@ -60,7 +60,7 @@ func (q *Queries) ClaimDueProviderIntents(ctx context.Context, arg ClaimDueProvi
 		var i OpenrailsProviderIntent
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantID,
+			&i.MerchantID,
 			&i.Provider,
 			&i.IntentType,
 			&i.SubscriptionID,
@@ -107,7 +107,7 @@ SET claimed_until = $1::timestamptz,
     updated_at = now()
 FROM due
 WHERE pi.id = due.id
-RETURNING pi.id, pi.tenant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.account_fingerprint
+RETURNING pi.id, pi.merchant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.account_fingerprint
 `
 
 type ClaimDueVerifyProviderIntentsParams struct {
@@ -130,7 +130,7 @@ func (q *Queries) ClaimDueVerifyProviderIntents(ctx context.Context, arg ClaimDu
 		var i OpenrailsProviderIntent
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantID,
+			&i.MerchantID,
 			&i.Provider,
 			&i.IntentType,
 			&i.SubscriptionID,
@@ -174,7 +174,7 @@ WHERE pi.id = $2
         OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= $3::timestamptz)
       )
   AND (pi.expires_at IS NULL OR pi.expires_at > $3::timestamptz)
-RETURNING pi.id, pi.tenant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.account_fingerprint
+RETURNING pi.id, pi.merchant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.account_fingerprint
 `
 
 type ClaimProviderIntentByIDParams struct {
@@ -194,7 +194,7 @@ func (q *Queries) ClaimProviderIntentByID(ctx context.Context, arg ClaimProvider
 	var i OpenrailsProviderIntent
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.Provider,
 		&i.IntentType,
 		&i.SubscriptionID,
@@ -250,7 +250,7 @@ const enqueueProviderIntent = `-- name: EnqueueProviderIntent :one
 
 
 INSERT INTO openrails.provider_intents (
-    tenant_id, provider, intent_type, subscription_id, payment_id, price_id,
+    merchant_id, provider, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
     expires_at, account_fingerprint
 ) VALUES (
@@ -261,7 +261,7 @@ INSERT INTO openrails.provider_intents (
     $11, $12,
     $13
 )
-ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET
+ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
         WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN 'pending'
         ELSE openrails.provider_intents.status
@@ -299,11 +299,11 @@ ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET
         ELSE openrails.provider_intents.last_failure_reason
     END,
     updated_at = now()
-RETURNING id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint
+RETURNING id, merchant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint
 `
 
 type EnqueueProviderIntentParams struct {
-	TenantID           uuid.UUID
+	MerchantID         uuid.UUID
 	Provider           string
 	IntentType         string
 	SubscriptionID     *uuid.UUID
@@ -320,14 +320,14 @@ type EnqueueProviderIntentParams struct {
 
 // #358 phase A: provider intent ledger queries — idempotent enqueue, the
 // executor's SKIP LOCKED lease claim, status transitions, supersede-by-subject
-// and relevance-window expiry. tenant_id is stamped explicitly by the
+// and relevance-window expiry. merchant_id is stamped explicitly by the
 // producers (request paths run on a tenant-pinned connection, so RLS
 // double-checks the stamp); the executor/verifier workers sweep cross-tenant
 // on the privileged pool like the other River workers.
 // ============================================================================
 // Enqueue (effectively-once per logical intent)
 // ============================================================================
-// Idempotent on (tenant_id, idempotency_key). Conflict semantics by current
+// Idempotent on (merchant_id, idempotency_key). Conflict semantics by current
 // status:
 //
 //	pending              -> refresh schedule/payload (latest enqueue wins)
@@ -341,7 +341,7 @@ type EnqueueProviderIntentParams struct {
 // Always RETURNs the canonical row for the key.
 func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProviderIntentParams) (OpenrailsProviderIntent, error) {
 	row := q.db.QueryRow(ctx, enqueueProviderIntent,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.Provider,
 		arg.IntentType,
 		arg.SubscriptionID,
@@ -358,7 +358,7 @@ func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProvider
 	var i OpenrailsProviderIntent
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.Provider,
 		&i.IntentType,
 		&i.SubscriptionID,
@@ -404,7 +404,7 @@ func (q *Queries) ExpireOverdueProviderIntents(ctx context.Context, now time.Tim
 
 const getProviderIntent = `-- name: GetProviderIntent :one
 
-SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM openrails.provider_intents WHERE id = $1
+SELECT id, merchant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM openrails.provider_intents WHERE id = $1
 `
 
 // ============================================================================
@@ -415,7 +415,7 @@ func (q *Queries) GetProviderIntent(ctx context.Context, id uuid.UUID) (Openrail
 	var i OpenrailsProviderIntent
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.Provider,
 		&i.IntentType,
 		&i.SubscriptionID,
@@ -441,21 +441,21 @@ func (q *Queries) GetProviderIntent(ctx context.Context, id uuid.UUID) (Openrail
 }
 
 const getProviderIntentByIdempotencyKey = `-- name: GetProviderIntentByIdempotencyKey :one
-SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM openrails.provider_intents
-WHERE tenant_id = $1 AND idempotency_key = $2
+SELECT id, merchant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM openrails.provider_intents
+WHERE merchant_id = $1 AND idempotency_key = $2
 `
 
 type GetProviderIntentByIdempotencyKeyParams struct {
-	TenantID       uuid.UUID
+	MerchantID     uuid.UUID
 	IdempotencyKey string
 }
 
 func (q *Queries) GetProviderIntentByIdempotencyKey(ctx context.Context, arg GetProviderIntentByIdempotencyKeyParams) (OpenrailsProviderIntent, error) {
-	row := q.db.QueryRow(ctx, getProviderIntentByIdempotencyKey, arg.TenantID, arg.IdempotencyKey)
+	row := q.db.QueryRow(ctx, getProviderIntentByIdempotencyKey, arg.MerchantID, arg.IdempotencyKey)
 	var i OpenrailsProviderIntent
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.Provider,
 		&i.IntentType,
 		&i.SubscriptionID,
@@ -481,7 +481,7 @@ func (q *Queries) GetProviderIntentByIdempotencyKey(ctx context.Context, arg Get
 }
 
 const listProviderIntents = `-- name: ListProviderIntents :many
-SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM openrails.provider_intents
+SELECT id, merchant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM openrails.provider_intents
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR provider = $2::text)
   AND ($3::text IS NULL OR intent_type = $3::text)
@@ -517,7 +517,7 @@ func (q *Queries) ListProviderIntents(ctx context.Context, arg ListProviderInten
 		var i OpenrailsProviderIntent
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantID,
+			&i.MerchantID,
 			&i.Provider,
 			&i.IntentType,
 			&i.SubscriptionID,
@@ -551,7 +551,7 @@ func (q *Queries) ListProviderIntents(ctx context.Context, arg ListProviderInten
 
 const listStuckProviderIntents = `-- name: ListStuckProviderIntents :many
 
-SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM openrails.provider_intents
+SELECT id, merchant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM openrails.provider_intents
 WHERE (status IN ('pending', 'failed_retryable') AND created_at <= $1::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $2::timestamptz)
 ORDER BY created_at, id
@@ -582,7 +582,7 @@ func (q *Queries) ListStuckProviderIntents(ctx context.Context, arg ListStuckPro
 		var i OpenrailsProviderIntent
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantID,
+			&i.MerchantID,
 			&i.Provider,
 			&i.IntentType,
 			&i.SubscriptionID,

@@ -15,7 +15,7 @@ var tenantOwnedTables = []string{
 	"subscriptions",
 	"entitlements",
 	"payments",
-	"admin_grants",
+	"entitlement_grants",
 	"notification_queue",
 	"processor_customers",
 	"checkout_sessions",
@@ -43,10 +43,10 @@ func loadSchema001(t *testing.T) string {
 func TestConsolidatedSchemaHasNoDefaultTenant(t *testing.T) {
 	schema := loadSchema001(t)
 
-	if !strings.Contains(schema, "CREATE TABLE openrails.tenants") {
+	if !strings.Contains(schema, "CREATE TABLE openrails.merchants") {
 		t.Error("001 schema must create openrails.tenants")
 	}
-	if strings.Contains(schema, "INSERT INTO openrails.tenants") {
+	if strings.Contains(schema, "INSERT INTO openrails.merchants") {
 		t.Error("001 schema must not seed any tenant row")
 	}
 }
@@ -54,7 +54,7 @@ func TestConsolidatedSchemaHasNoDefaultTenant(t *testing.T) {
 func TestConsolidatedSchemaTenantIDColumns(t *testing.T) {
 	c := loadSchema001(t)
 
-	if strings.Contains(c, "WHERE tenant_id IS NULL") {
+	if strings.Contains(c, "WHERE merchant_id IS NULL") {
 		t.Error("consolidated schema must not contain tenant_id backfill logic")
 	}
 	for _, tbl := range tenantOwnedTables {
@@ -62,13 +62,13 @@ func TestConsolidatedSchemaTenantIDColumns(t *testing.T) {
 		if !strings.Contains(c, wantTable) {
 			t.Errorf("001 schema missing tenant-owned table %q", tbl)
 		}
-		if !strings.Contains(c, "CREATE POLICY tenant_isolation ON openrails."+tbl) {
+		if !strings.Contains(c, "CREATE POLICY merchant_isolation ON openrails."+tbl) {
 			t.Errorf("001 schema missing tenant_isolation policy for %q", tbl)
 		}
 	}
 }
 
-func TestConsolidatedSchemaUsesTenantSubjectUniques(t *testing.T) {
+func TestConsolidatedSchemaUsesMerchantSubjectUniques(t *testing.T) {
 	c := loadSchema001(t)
 
 	for _, forbidden := range []string{
@@ -83,12 +83,12 @@ func TestConsolidatedSchemaUsesTenantSubjectUniques(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"uq_payment_methods_tenant_subject_vault",
-		"uq_subscriptions_tenant_subject_product_lifecycle",
-		"uq_entitlements_tenant_subject_active",
-		"uq_payments_tenant_processor_transaction",
-		"uq_processor_customers_tenant_subject_processor",
-		"entitlements_tenant_subject_no_overlap",
+		"uq_payment_methods_merchant_subject_vault",
+		"uq_subscriptions_merchant_subject_product_lifecycle",
+		"uq_entitlements_merchant_subject_active",
+		"uq_payments_merchant_processor_transaction",
+		"uq_processor_customers_merchant_subject_processor",
+		"entitlements_merchant_subject_no_overlap",
 	} {
 		if !strings.Contains(c, want) {
 			t.Errorf("001 schema missing final tenant-subject invariant %q", want)

@@ -17,17 +17,17 @@ import (
 // no equivalent column and was removed.
 
 // AG-1: Admin grant without corresponding entitlement
-type CheckAdminGrantMissingEntitlements struct{}
+type CheckEntitlementGrantMissingEntitlements struct{}
 
-func (c *CheckAdminGrantMissingEntitlements) ID() string         { return "AG-1" }
-func (c *CheckAdminGrantMissingEntitlements) Name() string       { return "admin_grant_missing_entitlements" }
-func (c *CheckAdminGrantMissingEntitlements) Category() string   { return "admin_grant" }
-func (c *CheckAdminGrantMissingEntitlements) Severity() Severity { return SeverityHigh }
+func (c *CheckEntitlementGrantMissingEntitlements) ID() string         { return "AG-1" }
+func (c *CheckEntitlementGrantMissingEntitlements) Name() string       { return "admin_grant_missing_entitlements" }
+func (c *CheckEntitlementGrantMissingEntitlements) Category() string   { return "admin_grant" }
+func (c *CheckEntitlementGrantMissingEntitlements) Severity() Severity { return SeverityHigh }
 
-func (c *CheckAdminGrantMissingEntitlements) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
+func (c *CheckEntitlementGrantMissingEntitlements) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
 	var findings []Finding
 
-	results, err := q.AuditAdminGrantMissingEntitlements(ctx)
+	results, err := q.AuditEntitlementGrantMissingEntitlements(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query admin grant missing entitlements: %w", err)
 	}
@@ -41,7 +41,7 @@ func (c *CheckAdminGrantMissingEntitlements) Run(ctx context.Context, q *gen.Que
 			CheckID:        c.ID(),
 			CheckName:      c.Name(),
 			Severity:       c.Severity(),
-			EntityType:     EntityAdminGrant,
+			EntityType:     EntityEntitlementGrant,
 			EntityID:       r.GrantID,
 			UserID:         r.UserID,
 			Description:    fmt.Sprintf("Admin grant for '%s' has no corresponding entitlement", r.Reason),
@@ -100,19 +100,19 @@ func (c *CheckOrphanAdminEntitlements) Run(ctx context.Context, q *gen.Queries, 
 }
 
 // AG-4: Expired admin grant with active entitlement
-type CheckExpiredAdminGrantActiveEntitlement struct{}
+type CheckExpiredEntitlementGrantActiveEntitlement struct{}
 
-func (c *CheckExpiredAdminGrantActiveEntitlement) ID() string { return "AG-4" }
-func (c *CheckExpiredAdminGrantActiveEntitlement) Name() string {
+func (c *CheckExpiredEntitlementGrantActiveEntitlement) ID() string { return "AG-4" }
+func (c *CheckExpiredEntitlementGrantActiveEntitlement) Name() string {
 	return "expired_admin_grant_active_entitlement"
 }
-func (c *CheckExpiredAdminGrantActiveEntitlement) Category() string   { return "admin_grant" }
-func (c *CheckExpiredAdminGrantActiveEntitlement) Severity() Severity { return SeverityHigh }
+func (c *CheckExpiredEntitlementGrantActiveEntitlement) Category() string   { return "admin_grant" }
+func (c *CheckExpiredEntitlementGrantActiveEntitlement) Severity() Severity { return SeverityHigh }
 
-func (c *CheckExpiredAdminGrantActiveEntitlement) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
+func (c *CheckExpiredEntitlementGrantActiveEntitlement) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
 	var findings []Finding
 
-	results, err := q.AuditExpiredAdminGrantActiveEntitlement(ctx)
+	results, err := q.AuditExpiredEntitlementGrantActiveEntitlement(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query expired admin grant active entitlement: %w", err)
 	}

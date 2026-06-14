@@ -14,28 +14,28 @@ import (
 
 const countPaymentMethodForUser = `-- name: CountPaymentMethodForUser :one
 SELECT count(*) FROM openrails.payment_methods pm
-WHERE pm.id = $1 AND pm.tenant_subject_id = $2
+WHERE pm.id = $1 AND pm.merchant_subject_id = $2
 `
 
 type CountPaymentMethodForUserParams struct {
-	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
+	ID                uuid.UUID
+	MerchantSubjectID uuid.UUID
 }
 
 func (q *Queries) CountPaymentMethodForUser(ctx context.Context, arg CountPaymentMethodForUserParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPaymentMethodForUser, arg.ID, arg.TenantSubjectID)
+	row := q.db.QueryRow(ctx, countPaymentMethodForUser, arg.ID, arg.MerchantSubjectID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const countPaymentMethodsByTenantSubject = `-- name: CountPaymentMethodsByTenantSubject :one
+const countPaymentMethodsByMerchantSubject = `-- name: CountPaymentMethodsByMerchantSubject :one
 SELECT count(*) FROM openrails.payment_methods pm
-WHERE pm.tenant_subject_id = $1
+WHERE pm.merchant_subject_id = $1
 `
 
-func (q *Queries) CountPaymentMethodsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countPaymentMethodsByTenantSubject, tenantSubjectID)
+func (q *Queries) CountPaymentMethodsByMerchantSubject(ctx context.Context, merchantSubjectID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countPaymentMethodsByMerchantSubject, merchantSubjectID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -44,7 +44,7 @@ func (q *Queries) CountPaymentMethodsByTenantSubject(ctx context.Context, tenant
 const createPaymentMethod = `-- name: CreatePaymentMethod :execrows
 
 INSERT INTO openrails.payment_methods (
-    id, tenant_id, tenant_subject_id, processor, vault_id, billing_id,
+    id, merchant_id, merchant_subject_id, processor, vault_id, billing_id,
     initial_transaction_id, last_four, card_type, expiry_date,
     failure_reason, metadata, created_at, updated_at
 ) VALUES (
@@ -58,11 +58,11 @@ INSERT INTO openrails.payment_methods (
 
 type CreatePaymentMethodParams struct {
 	ID                   uuid.UUID
-	TenantSubjectID      uuid.UUID
+	MerchantSubjectID    uuid.UUID
 	Processor            string
 	VaultID              string
 	InitialTransactionID string
-	TenantID             uuid.UUID
+	MerchantID           uuid.UUID
 	BillingID            *string
 	LastFour             *string
 	CardType             *string
@@ -77,11 +77,11 @@ type CreatePaymentMethodParams struct {
 func (q *Queries) CreatePaymentMethod(ctx context.Context, arg CreatePaymentMethodParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createPaymentMethod,
 		arg.ID,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.Processor,
 		arg.VaultID,
 		arg.InitialTransactionID,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.BillingID,
 		arg.LastFour,
 		arg.CardType,
@@ -110,7 +110,7 @@ func (q *Queries) DeletePaymentMethod(ctx context.Context, id uuid.UUID) (int64,
 }
 
 const getPaymentMethodByID = `-- name: GetPaymentMethodByID :one
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.payment_methods WHERE id = $1
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, merchant_subject_id FROM openrails.payment_methods WHERE id = $1
 `
 
 func (q *Queries) GetPaymentMethodByID(ctx context.Context, id uuid.UUID) (OpenrailsPaymentMethod, error) {
@@ -129,14 +129,14 @@ func (q *Queries) GetPaymentMethodByID(ctx context.Context, id uuid.UUID) (Openr
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
 const getPaymentMethodByInitialTransactionID = `-- name: GetPaymentMethodByInitialTransactionID :one
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.payment_methods pm
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, merchant_subject_id FROM openrails.payment_methods pm
 WHERE pm.processor = $1 AND pm.initial_transaction_id = $2
 LIMIT 1
 `
@@ -162,14 +162,14 @@ func (q *Queries) GetPaymentMethodByInitialTransactionID(ctx context.Context, ar
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
 const getPaymentMethodByVaultID = `-- name: GetPaymentMethodByVaultID :one
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.payment_methods pm
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, merchant_subject_id FROM openrails.payment_methods pm
 WHERE pm.processor = $1 AND pm.vault_id = $2
 LIMIT 1
 `
@@ -195,14 +195,14 @@ func (q *Queries) GetPaymentMethodByVaultID(ctx context.Context, arg GetPaymentM
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
 const listPaymentMethodsByIDs = `-- name: ListPaymentMethodsByIDs :many
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.payment_methods WHERE id = ANY($1::uuid[])
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, merchant_subject_id FROM openrails.payment_methods WHERE id = ANY($1::uuid[])
 `
 
 func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsPaymentMethod, error) {
@@ -227,8 +227,144 @@ func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, ids []uuid.UUID) 
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPaymentMethodsByMerchantSubject = `-- name: ListPaymentMethodsByMerchantSubject :many
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, merchant_subject_id FROM openrails.payment_methods pm
+WHERE pm.merchant_subject_id = $1
+ORDER BY pm.created_at DESC
+`
+
+func (q *Queries) ListPaymentMethodsByMerchantSubject(ctx context.Context, merchantSubjectID uuid.UUID) ([]OpenrailsPaymentMethod, error) {
+	rows, err := q.db.Query(ctx, listPaymentMethodsByMerchantSubject, merchantSubjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPaymentMethod
+	for rows.Next() {
+		var i OpenrailsPaymentMethod
+		if err := rows.Scan(
+			&i.ID,
+			&i.Processor,
+			&i.VaultID,
+			&i.BillingID,
+			&i.InitialTransactionID,
+			&i.LastFour,
+			&i.CardType,
+			&i.ExpiryDate,
+			&i.FailureReason,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPaymentMethodsByMerchantSubjectPaged = `-- name: ListPaymentMethodsByMerchantSubjectPaged :many
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, merchant_subject_id FROM openrails.payment_methods pm
+WHERE pm.merchant_subject_id = $1
+ORDER BY pm.created_at DESC
+LIMIT NULLIF($3::int, 0) OFFSET $2::int
+`
+
+type ListPaymentMethodsByMerchantSubjectPagedParams struct {
+	MerchantSubjectID uuid.UUID
+	PageOffset        int32
+	PageLimit         int32
+}
+
+func (q *Queries) ListPaymentMethodsByMerchantSubjectPaged(ctx context.Context, arg ListPaymentMethodsByMerchantSubjectPagedParams) ([]OpenrailsPaymentMethod, error) {
+	rows, err := q.db.Query(ctx, listPaymentMethodsByMerchantSubjectPaged, arg.MerchantSubjectID, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPaymentMethod
+	for rows.Next() {
+		var i OpenrailsPaymentMethod
+		if err := rows.Scan(
+			&i.ID,
+			&i.Processor,
+			&i.VaultID,
+			&i.BillingID,
+			&i.InitialTransactionID,
+			&i.LastFour,
+			&i.CardType,
+			&i.ExpiryDate,
+			&i.FailureReason,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPaymentMethodsByMerchantSubjectProcessors = `-- name: ListPaymentMethodsByMerchantSubjectProcessors :many
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, merchant_subject_id FROM openrails.payment_methods pm
+WHERE pm.merchant_subject_id = $1
+  AND pm.processor = ANY($2::text[])
+ORDER BY pm.created_at DESC
+`
+
+type ListPaymentMethodsByMerchantSubjectProcessorsParams struct {
+	MerchantSubjectID uuid.UUID
+	Processors        []string
+}
+
+func (q *Queries) ListPaymentMethodsByMerchantSubjectProcessors(ctx context.Context, arg ListPaymentMethodsByMerchantSubjectProcessorsParams) ([]OpenrailsPaymentMethod, error) {
+	rows, err := q.db.Query(ctx, listPaymentMethodsByMerchantSubjectProcessors, arg.MerchantSubjectID, arg.Processors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPaymentMethod
+	for rows.Next() {
+		var i OpenrailsPaymentMethod
+		if err := rows.Scan(
+			&i.ID,
+			&i.Processor,
+			&i.VaultID,
+			&i.BillingID,
+			&i.InitialTransactionID,
+			&i.LastFour,
+			&i.CardType,
+			&i.ExpiryDate,
+			&i.FailureReason,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -241,7 +377,7 @@ func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, ids []uuid.UUID) 
 }
 
 const listPaymentMethodsByProcessor = `-- name: ListPaymentMethodsByProcessor :many
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.payment_methods pm
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, merchant_subject_id FROM openrails.payment_methods pm
 WHERE pm.processor = $1
 ORDER BY pm.created_at DESC
 `
@@ -268,8 +404,8 @@ func (q *Queries) ListPaymentMethodsByProcessor(ctx context.Context, processor s
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -282,7 +418,7 @@ func (q *Queries) ListPaymentMethodsByProcessor(ctx context.Context, processor s
 }
 
 const listPaymentMethodsByProcessors = `-- name: ListPaymentMethodsByProcessors :many
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.payment_methods pm
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, merchant_subject_id FROM openrails.payment_methods pm
 WHERE pm.processor = ANY($1::text[])
 ORDER BY pm.created_at DESC
 `
@@ -309,144 +445,8 @@ func (q *Queries) ListPaymentMethodsByProcessors(ctx context.Context, processors
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPaymentMethodsByTenantSubject = `-- name: ListPaymentMethodsByTenantSubject :many
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.payment_methods pm
-WHERE pm.tenant_subject_id = $1
-ORDER BY pm.created_at DESC
-`
-
-func (q *Queries) ListPaymentMethodsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]OpenrailsPaymentMethod, error) {
-	rows, err := q.db.Query(ctx, listPaymentMethodsByTenantSubject, tenantSubjectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsPaymentMethod
-	for rows.Next() {
-		var i OpenrailsPaymentMethod
-		if err := rows.Scan(
-			&i.ID,
-			&i.Processor,
-			&i.VaultID,
-			&i.BillingID,
-			&i.InitialTransactionID,
-			&i.LastFour,
-			&i.CardType,
-			&i.ExpiryDate,
-			&i.FailureReason,
-			&i.Metadata,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPaymentMethodsByTenantSubjectPaged = `-- name: ListPaymentMethodsByTenantSubjectPaged :many
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.payment_methods pm
-WHERE pm.tenant_subject_id = $1
-ORDER BY pm.created_at DESC
-LIMIT NULLIF($3::int, 0) OFFSET $2::int
-`
-
-type ListPaymentMethodsByTenantSubjectPagedParams struct {
-	TenantSubjectID uuid.UUID
-	PageOffset      int32
-	PageLimit       int32
-}
-
-func (q *Queries) ListPaymentMethodsByTenantSubjectPaged(ctx context.Context, arg ListPaymentMethodsByTenantSubjectPagedParams) ([]OpenrailsPaymentMethod, error) {
-	rows, err := q.db.Query(ctx, listPaymentMethodsByTenantSubjectPaged, arg.TenantSubjectID, arg.PageOffset, arg.PageLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsPaymentMethod
-	for rows.Next() {
-		var i OpenrailsPaymentMethod
-		if err := rows.Scan(
-			&i.ID,
-			&i.Processor,
-			&i.VaultID,
-			&i.BillingID,
-			&i.InitialTransactionID,
-			&i.LastFour,
-			&i.CardType,
-			&i.ExpiryDate,
-			&i.FailureReason,
-			&i.Metadata,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPaymentMethodsByTenantSubjectProcessors = `-- name: ListPaymentMethodsByTenantSubjectProcessors :many
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.payment_methods pm
-WHERE pm.tenant_subject_id = $1
-  AND pm.processor = ANY($2::text[])
-ORDER BY pm.created_at DESC
-`
-
-type ListPaymentMethodsByTenantSubjectProcessorsParams struct {
-	TenantSubjectID uuid.UUID
-	Processors      []string
-}
-
-func (q *Queries) ListPaymentMethodsByTenantSubjectProcessors(ctx context.Context, arg ListPaymentMethodsByTenantSubjectProcessorsParams) ([]OpenrailsPaymentMethod, error) {
-	rows, err := q.db.Query(ctx, listPaymentMethodsByTenantSubjectProcessors, arg.TenantSubjectID, arg.Processors)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsPaymentMethod
-	for rows.Next() {
-		var i OpenrailsPaymentMethod
-		if err := rows.Scan(
-			&i.ID,
-			&i.Processor,
-			&i.VaultID,
-			&i.BillingID,
-			&i.InitialTransactionID,
-			&i.LastFour,
-			&i.CardType,
-			&i.ExpiryDate,
-			&i.FailureReason,
-			&i.Metadata,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -460,7 +460,7 @@ func (q *Queries) ListPaymentMethodsByTenantSubjectProcessors(ctx context.Contex
 
 const updatePaymentMethod = `-- name: UpdatePaymentMethod :execrows
 UPDATE openrails.payment_methods SET
-    tenant_subject_id = $2,
+    merchant_subject_id = $2,
     processor = $3,
     vault_id = $4,
     billing_id = $6,
@@ -476,7 +476,7 @@ WHERE id = $1
 
 type UpdatePaymentMethodParams struct {
 	ID                   uuid.UUID
-	TenantSubjectID      uuid.UUID
+	MerchantSubjectID    uuid.UUID
 	Processor            string
 	VaultID              string
 	InitialTransactionID string
@@ -492,7 +492,7 @@ type UpdatePaymentMethodParams struct {
 func (q *Queries) UpdatePaymentMethod(ctx context.Context, arg UpdatePaymentMethodParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updatePaymentMethod,
 		arg.ID,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.Processor,
 		arg.VaultID,
 		arg.InitialTransactionID,

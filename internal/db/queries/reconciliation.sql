@@ -1,6 +1,6 @@
 -- #107 phase 2: reconciliation runs + findings persistence, the engine's
 -- tenant-scoped local-state reads, and the enforce appliers' idempotent local
--- writes. tenant_id is stamped explicitly (multi-tenant writer pattern); all
+-- writes. merchant_id is stamped explicitly (multi-tenant writer pattern); all
 -- statements run on a tenant-pinned connection so RLS double-checks the stamp.
 
 -- ============================================================================
@@ -9,9 +9,9 @@
 
 -- name: CreateReconciliationRun :one
 INSERT INTO openrails.reconciliation_runs (
-    tenant_id, mode, providers, window_since, window_until, started_at, status
+    merchant_id, mode, providers, window_since, window_until, started_at, status
 ) VALUES (
-    sqlc.arg(tenant_id), sqlc.arg(mode), sqlc.arg(providers),
+    sqlc.arg(merchant_id), sqlc.arg(mode), sqlc.arg(providers),
     sqlc.narg(window_since), sqlc.narg(window_until), now(), 'running'
 )
 RETURNING *;
@@ -48,17 +48,17 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 -- occurrences so the dismissal is auditable against reality.
 -- name: UpsertReconciliationFinding :one
 INSERT INTO openrails.reconciliation_findings (
-    tenant_id, provider, finding_type, subject_key, severity, status,
+    merchant_id, provider, finding_type, subject_key, severity, status,
     requires_admin, recommended_action, local_evidence, remote_evidence,
     intent_evidence, first_seen_run, last_seen_run
 ) VALUES (
-    sqlc.arg(tenant_id), sqlc.arg(provider), sqlc.arg(finding_type),
+    sqlc.arg(merchant_id), sqlc.arg(provider), sqlc.arg(finding_type),
     sqlc.arg(subject_key), sqlc.arg(severity), sqlc.arg(status),
     sqlc.arg(requires_admin), sqlc.narg(recommended_action),
     sqlc.narg(local_evidence), sqlc.narg(remote_evidence),
     sqlc.narg(intent_evidence), sqlc.arg(run_id), sqlc.arg(run_id)
 )
-ON CONFLICT (tenant_id, provider, finding_type, subject_key) DO UPDATE SET
+ON CONFLICT (merchant_id, provider, finding_type, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
     status = CASE
         WHEN openrails.reconciliation_findings.status = 'dismissed' THEN 'dismissed'
@@ -172,7 +172,7 @@ WHERE id = sqlc.arg(id) AND status IN ('open', 'admin_pending', 'auto_fixed');
 -- ============================================================================
 
 -- name: ReconcileListSubscriptionsByProcessors :many
-SELECT id, tenant_subject_id, price_id, product_id, status, processor,
+SELECT id, merchant_subject_id, price_id, product_id, status, processor,
        processor_subscription_id, user_email, payment_method_id,
        current_period_starts_at, current_period_ends_at, started_at, ended_at,
        cancelled_at, cancel_type, deletion_scheduled_at, tier_group,
@@ -182,7 +182,7 @@ FROM openrails.subscriptions
 WHERE processor = ANY (sqlc.arg(processors)::text[]);
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
-SELECT id, tenant_subject_id, processor, transaction_id, amount, status,
+SELECT id, merchant_subject_id, processor, transaction_id, amount, status,
        subscription_id, refunded_payment_id, purchased_at
 FROM openrails.payments
 WHERE processor::text = ANY (sqlc.arg(processors)::text[])
@@ -192,7 +192,7 @@ WHERE processor::text = ANY (sqlc.arg(processors)::text[])
 -- Grace windows and admin grants are deliberately excluded: only
 -- subscription-sourced entitlements are reconciled (PS-9).
 -- name: ReconcileListSubscriptionEntitlements :many
-SELECT ent.id, ent.tenant_subject_id, ent.entitlement, ent.source_id,
+SELECT ent.id, ent.merchant_subject_id, ent.entitlement, ent.source_id,
        ent.start_at, ent.end_at
 FROM openrails.entitlements ent
 JOIN openrails.subscriptions sub ON sub.id = ent.source_id
@@ -202,7 +202,7 @@ WHERE sub.processor = ANY (sqlc.arg(processors)::text[])
   AND ent.deleted_at IS NULL;
 
 -- name: ReconcileListPaymentMethodsByProcessors :many
-SELECT id, tenant_subject_id, processor, vault_id, last_four, card_type,
+SELECT id, merchant_subject_id, processor, vault_id, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
 WHERE processor = ANY (sqlc.arg(processors)::text[]);
@@ -276,15 +276,15 @@ WHERE source_type = 'subscription'
 -- re-run inserts nothing).
 -- name: ReconcileGrantSubscriptionEntitlement :execrows
 INSERT INTO openrails.entitlements (
-    tenant_id, tenant_subject_id, entitlement, start_at, end_at,
+    merchant_id, merchant_subject_id, entitlement, start_at, end_at,
     source_id, source_type
 )
-SELECT sqlc.arg(tenant_id), sqlc.arg(tenant_subject_id), sqlc.arg(entitlement),
+SELECT sqlc.arg(merchant_id), sqlc.arg(merchant_subject_id), sqlc.arg(entitlement),
        sqlc.arg(start_at)::timestamptz, sqlc.narg(end_at)::timestamptz,
        sqlc.arg(subscription_id), 'subscription'
 WHERE NOT EXISTS (
     SELECT 1 FROM openrails.entitlements ent
-    WHERE ent.tenant_subject_id = sqlc.arg(tenant_subject_id)
+    WHERE ent.merchant_subject_id = sqlc.arg(merchant_subject_id)
       AND ent.entitlement = sqlc.arg(entitlement)
       AND ent.source_type = 'subscription'
       AND ent.source_id = sqlc.arg(subscription_id)
@@ -297,37 +297,37 @@ WHERE NOT EXISTS (
 -- Dedupe rides the uq_payments_tenant_processor_transaction identity.
 -- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
-    tenant_id, price_id, processor, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, tenant_subject_id
+    merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,
+    status, subscription_id, metadata, purchased_at, merchant_subject_id
 ) VALUES (
-    sqlc.arg(tenant_id)::uuid,
+    sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(processor)::openrails.processor_type,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
     'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(tenant_subject_id)
+    sqlc.arg(merchant_subject_id)
 )
-ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING;
+ON CONFLICT (merchant_id, processor, transaction_id) DO NOTHING;
 
 -- PS-5: record a processor refund that is missing locally as a negative-
 -- amount payment row linked to the refunded payment. Same dedupe identity.
 -- name: ReconcileRecordRefund :execrows
 INSERT INTO openrails.payments (
-    tenant_id, price_id, processor, transaction_id, amount, list_amount, currency,
+    merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    tenant_subject_id
+    merchant_subject_id
 ) VALUES (
-    sqlc.arg(tenant_id)::uuid,
+    sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(processor)::openrails.processor_type,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
     'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(tenant_subject_id)
+    sqlc.arg(merchant_subject_id)
 )
-ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING;
+ON CONFLICT (merchant_id, processor, transaction_id) DO NOTHING;
 
 -- name: ReconcileMarkPaymentRefunded :execrows
 UPDATE openrails.payments
@@ -343,17 +343,17 @@ WHERE id = sqlc.arg(id) AND status <> 'refunded';
 -- rows returned = already materialized).
 -- name: ReconcileMaterializeSubscription :many
 INSERT INTO openrails.subscriptions (
-    tenant_id, price_id, product_id, status, processor, processor_subscription_id,
+    merchant_id, price_id, product_id, status, processor, processor_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_spec_snapshot, credits_spec_snapshot, tenant_subject_id
+    entitlements_spec_snapshot, credits_spec_snapshot, merchant_subject_id
 )
-SELECT sqlc.arg(tenant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::openrails.subscription_status,
+SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::openrails.subscription_status,
        sqlc.arg(processor), sqlc.arg(processor_subscription_id),
        sqlc.narg(user_email),
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
-       p.entitlements_spec, p.credits_spec, sqlc.arg(tenant_subject_id)
+       p.entitlements_spec, p.credits_spec, sqlc.arg(merchant_subject_id)
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
 WHERE pr.id = sqlc.arg(price_id)

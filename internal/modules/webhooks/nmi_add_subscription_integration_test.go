@@ -38,12 +38,12 @@ func TestHandleAddSubscription_ActivatesPendingWithSettledTransactionMetadata(t 
 	require.NotNil(t, gotSub.CurrentPeriodEndsAt)
 	require.Equal(t, time.Date(2026, time.June, 17, 0, 0, 0, 0, time.UTC), gotSub.CurrentPeriodEndsAt.UTC())
 
-	var paymentTenantSubjectID uuid.UUID
+	var paymentMerchantSubjectID uuid.UUID
 	var paymentSubscriptionID *uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT tenant_subject_id, subscription_id FROM openrails.payments WHERE transaction_id = $1",
-		ids.transactionID).Scan(&paymentTenantSubjectID, &paymentSubscriptionID))
-	require.Equal(t, ids.tenantSubjectID, paymentTenantSubjectID)
+		"SELECT merchant_subject_id, subscription_id FROM openrails.payments WHERE transaction_id = $1",
+		ids.transactionID).Scan(&paymentMerchantSubjectID, &paymentSubscriptionID))
+	require.Equal(t, ids.tenantSubjectID, paymentMerchantSubjectID)
 	require.NotNil(t, paymentSubscriptionID)
 	require.Equal(t, ids.subscriptionID, *paymentSubscriptionID)
 
@@ -51,7 +51,7 @@ func TestHandleAddSubscription_ActivatesPendingWithSettledTransactionMetadata(t 
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT EXISTS (
 			SELECT 1 FROM openrails.entitlements
-			WHERE tenant_subject_id = $1
+			WHERE merchant_subject_id = $1
 			  AND entitlement = $2
 			  AND source_type = $3
 			  AND source_id = $4
@@ -159,7 +159,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	providerSubID := "nmi_sub_" + uuid.New().String()
 	transactionID := "txn_" + uuid.New().String()
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
 	subscriptionID := uuid.New()
@@ -218,7 +218,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	require.NoError(t, err)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                       subscriptionID,
-		TenantSubjectID:          tenantSubjectID,
+		MerchantSubjectID:          tenantSubjectID,
 		ProductID:                productID,
 		PriceID:                  &priceID,
 		EntitlementsSpecSnapshot: snapshotJSON,
@@ -234,9 +234,9 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 
 	t.Cleanup(func() {
 		cctx := context.Background()
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.notification_queue WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.notification_queue WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE merchant_subject_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(cctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subscriptionID)
 		_, _ = pool.Exec(cctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(cctx, "DELETE FROM openrails.products WHERE id = $1", productID)

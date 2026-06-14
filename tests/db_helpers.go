@@ -63,9 +63,9 @@ func (suite *TestContainerSuite) InsertEntitlement(ctx context.Context, e *model
 	require.NoError(suite.t, dbrepo.NewEntitlementRepo(suite.App.Runtime.DB).Insert(ctx, e), "Failed to insert entitlement")
 }
 
-func (suite *TestContainerSuite) InsertAdminGrant(ctx context.Context, g *models.AdminGrant) {
+func (suite *TestContainerSuite) InsertEntitlementGrant(ctx context.Context, g *models.EntitlementGrant) {
 	suite.t.Helper()
-	require.NoError(suite.t, dbrepo.NewAdminGrantRepo(suite.App.Runtime.DB).Create(ctx, g), "Failed to insert admin grant")
+	require.NoError(suite.t, dbrepo.NewEntitlementGrantRepo(suite.App.Runtime.DB).Create(ctx, g), "Failed to insert admin grant")
 }
 
 func (suite *TestContainerSuite) InsertNotification(ctx context.Context, n *models.NotificationQueue) {
@@ -74,7 +74,7 @@ func (suite *TestContainerSuite) InsertNotification(ctx context.Context, n *mode
 }
 
 // insertMoneyBlock inserts a money lot (openrails.money_blocks). The caller
-// must set TenantID, TenantSubjectID, and Currency.
+// must set MerchantID, MerchantSubjectID, and Currency.
 func (suite *TestContainerSuite) insertMoneyBlock(ctx context.Context, b *models.MoneyBlock) {
 	suite.t.Helper()
 	_, err := suite.Pool.Exec(ctx, `
@@ -82,7 +82,7 @@ func (suite *TestContainerSuite) insertMoneyBlock(ctx context.Context, b *models
 			id, tenant_id, tenant_subject_id, currency, original_amount,
 			remaining_amount, expires_at, source_transaction_id, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		b.ID, b.TenantID, b.TenantSubjectID, b.Currency, b.OriginalAmount,
+		b.ID, b.MerchantID, b.MerchantSubjectID, b.Currency, b.OriginalAmount,
 		b.RemainingAmount, b.ExpiresAt, b.SourceTransactionID, b.CreatedAt)
 	require.NoError(suite.t, err, "Failed to insert money block")
 }
@@ -114,10 +114,10 @@ func (suite *TestContainerSuite) GetPaymentMethod(ctx context.Context, id uuid.U
 	return pm
 }
 
-// GetAdminGrant loads an admin grant by id (fails the test when missing).
-func (suite *TestContainerSuite) GetAdminGrant(ctx context.Context, id uuid.UUID) *models.AdminGrant {
+// GetEntitlementGrant loads an admin grant by id (fails the test when missing).
+func (suite *TestContainerSuite) GetEntitlementGrant(ctx context.Context, id uuid.UUID) *models.EntitlementGrant {
 	suite.t.Helper()
-	g, err := dbrepo.NewAdminGrantRepo(suite.App.Runtime.DB).GetByID(ctx, id)
+	g, err := dbrepo.NewEntitlementGrantRepo(suite.App.Runtime.DB).GetByID(ctx, id)
 	require.NoError(suite.t, err, "Failed to get admin grant %s", id)
 	return g
 }
@@ -144,7 +144,7 @@ func (suite *TestContainerSuite) QueryEntitlements(ctx context.Context, tail str
 		var sourceType string
 		var revokeReason *string
 		require.NoError(suite.t, rows.Scan(
-			&e.ID, &e.TenantID, &e.TenantSubjectID, &e.Entitlement, &e.StartAt, &e.EndAt,
+			&e.ID, &e.MerchantID, &e.MerchantSubjectID, &e.Entitlement, &e.StartAt, &e.EndAt,
 			&e.SourceID, &sourceType, &e.RevokedAt, &revokeReason, &e.CreatedAt, &e.UpdatedAt, &e.DeletedAt,
 		))
 		e.SourceType = models.EntitlementSourceType(sourceType)

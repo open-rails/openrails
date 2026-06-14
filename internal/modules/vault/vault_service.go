@@ -19,7 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -46,7 +46,7 @@ type paymentMethodStore interface {
 }
 
 type tenantSecretGetter interface {
-	Get(ctx context.Context, tenantID tenant.ID, name string) (tenancy.Secret, error)
+	Get(ctx context.Context, tenantID merchant.ID, name string) (tenancy.Secret, error)
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -189,7 +189,7 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 
 	pm := &models.PaymentMethod{
 		ID:                   uuidutil.NewV7(),
-		TenantSubjectID:      identity.TenantSubjectIDFromString(userID).UUID(),
+		MerchantSubjectID:      identity.MerchantSubjectIDFromString(userID).UUID(),
 		Processor:            models.Processor(processor),
 		VaultID:              nmiResponse.CustomerVaultID,
 		InitialTransactionID: "",
@@ -223,7 +223,7 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*
 		secretName = tenancy.SecretNMIMobiusProductionKey
 	}
 	if secretName != "" && s != nil && s.TenantSecrets != nil {
-		tid, err := tenant.Require(ctx)
+		tid, err := merchant.Require(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -443,9 +443,9 @@ func sanitizedStringPtr(value *string, sanitize func(string) string) *string {
 
 // DeleteVault deletes the vault remotely after ensuring no active subscriptions use it; deactivates locally
 func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod) error {
-	subs, _, err := s.SubscriptionService.GetPaginatedByUserID(ctx, pm.TenantSubjectID.String(), 1, 1000)
+	subs, _, err := s.SubscriptionService.GetPaginatedByUserID(ctx, pm.MerchantSubjectID.String(), 1, 1000)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"vault_id": pm.VaultID, "user_id": pm.TenantSubjectID.String()}).Error("Failed to check subscriptions for vault")
+		log.WithError(err).WithFields(log.Fields{"vault_id": pm.VaultID, "user_id": pm.MerchantSubjectID.String()}).Error("Failed to check subscriptions for vault")
 		return fmt.Errorf("failed to check vault usage: %w", err)
 	}
 

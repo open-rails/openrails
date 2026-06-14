@@ -135,25 +135,6 @@ func validateTenantManifestShape(m *TenantManifest) error {
 			return fmt.Errorf("duplicate tenant slug %q", slug)
 		}
 		seen[slug] = struct{}{}
-		for _, issuer := range t.Issuers {
-			if strings.TrimSpace(issuer.Issuer) == "" {
-				return fmt.Errorf("tenant %q issuer is required", slug)
-			}
-			if !validHTTPURL(issuer.Issuer) {
-				return fmt.Errorf("tenant %q issuer %q must be an http(s) URL", slug, issuer.Issuer)
-			}
-			if strings.TrimSpace(issuer.JWKSURI) == "" {
-				return fmt.Errorf("tenant %q issuer %q jwks_uri is required", slug, issuer.Issuer)
-			}
-			if !validHTTPURL(issuer.JWKSURI) {
-				return fmt.Errorf("tenant %q issuer %q jwks_uri must be an http(s) URL", slug, issuer.Issuer)
-			}
-			// Audiences are optional in the manifest; they default to the
-			// control-plane audience ("openrails") at reconcile time. Registering
-			// an issuer is purely "this tenant, this issuer, this JWKS URI" — the
-			// tenant has full authority over its own resources, so there is no
-			// per-issuer permission ceiling to declare.
-		}
 	}
 	return nil
 }

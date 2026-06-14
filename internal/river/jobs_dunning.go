@@ -24,7 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/normalize"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -208,7 +208,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		// #336: pin the subscription's tenant so writes in processSubscription
 		// (payment inserts, lifecycle updates) carry the app.tenant_id GUC.
 		outcome := dunningOutcomeFailed
-		if err := w.DB.RunInTenantConn(tenant.WithID(ctx, tenant.ID(sub.TenantID)), func(tctx context.Context) error {
+		if err := w.DB.RunInTenantConn(merchant.WithID(ctx, merchant.ID(sub.MerchantID)), func(tctx context.Context) error {
 			outcome = w.processSubscription(tctx, &sub, lifecycle, priceSvc, moneySvc, materialize)
 			return nil
 		}); err != nil {
@@ -313,7 +313,7 @@ func (w *DunningWorker) processSubscription(
 		}
 		windowEnd := periodEnd.Add(window)
 		row, err := w.intentRunner().Store.Enqueue(ctx, intents.EnqueueParams{
-			TenantID:       genSub.TenantID,
+			MerchantID:       genSub.MerchantID,
 			Provider:       provider,
 			IntentType:     intents.TypeManualRebill,
 			SubscriptionID: &sub.ID,
@@ -385,7 +385,7 @@ func (w *DunningWorker) processSubscription(
 	}
 	windowEnd := periodEnd.Add(window)
 	intent, err := w.intentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
-		TenantID:       genSub.TenantID,
+		MerchantID:       genSub.MerchantID,
 		Provider:       provider,
 		IntentType:     intents.TypeManualRebill,
 		SubscriptionID: &sub.ID,

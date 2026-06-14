@@ -49,7 +49,7 @@ func newHostPrincipalSelfRouter(t *testing.T, authn billingauth.DelegatedAuthent
 
 func hostPrincipal(perms ...string) *billingauth.DelegatedPrincipal {
 	return &billingauth.DelegatedPrincipal{
-		TenantID:    dbtest.TestTenantID.String(),
+		MerchantID:    dbtest.TestTenantID.String(),
 		TenantSlug:  dbtest.TestTenantSlug,
 		SubjectID:   "0d4cdb35-9f3f-4a16-bb83-90a8aa20a2c1",
 		Actor:       "https://auth.host.example",
@@ -103,20 +103,20 @@ func TestHostPrincipal_InvalidPrincipalsRejected(t *testing.T) {
 			SubjectID: "user-1", Permissions: []string{controlplane.PermSelfBillingRead},
 		}},
 		{"empty subject", &billingauth.DelegatedPrincipal{
-			TenantID: dbtest.TestTenantID.String(), Permissions: []string{controlplane.PermSelfBillingRead},
+			MerchantID: dbtest.TestTenantID.String(), Permissions: []string{controlplane.PermSelfBillingRead},
 		}},
 		{"non-uuid tenant", &billingauth.DelegatedPrincipal{
-			TenantID: "tensorhub", SubjectID: "user-1", Permissions: []string{controlplane.PermSelfBillingRead},
+			MerchantID: "tensorhub", SubjectID: "user-1", Permissions: []string{controlplane.PermSelfBillingRead},
 		}},
 		{"no permissions", &billingauth.DelegatedPrincipal{
-			TenantID: dbtest.TestTenantID.String(), SubjectID: "user-1",
+			MerchantID: dbtest.TestTenantID.String(), SubjectID: "user-1",
 		}},
 		{"service grant smuggled", &billingauth.DelegatedPrincipal{
-			TenantID: dbtest.TestTenantID.String(), SubjectID: "user-1",
+			MerchantID: dbtest.TestTenantID.String(), SubjectID: "user-1",
 			Permissions: []string{controlplane.PermCreditsWrite},
 		}},
 		{"admin grant smuggled", &billingauth.DelegatedPrincipal{
-			TenantID: dbtest.TestTenantID.String(), SubjectID: "user-1",
+			MerchantID: dbtest.TestTenantID.String(), SubjectID: "user-1",
 			Permissions: []string{controlplane.PermSelfBillingRead, controlplane.PermAdmin},
 		}},
 	}

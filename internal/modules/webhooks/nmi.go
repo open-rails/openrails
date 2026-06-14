@@ -423,7 +423,7 @@ func (s *NMIWebhookService) logSubscriptionEvent(ctx context.Context, sub *model
 	event := analytics.SubscriptionEventData{
 		EventID:                 uuidutil.NewV7(),
 		SubscriptionID:          sub.ID,
-		UserID:                  sub.TenantSubjectID.String(),
+		UserID:                  sub.MerchantSubjectID.String(),
 		EventType:               eventType,
 		Status:                  string(status),
 		CancelType:              cancelType,
@@ -599,7 +599,7 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 
 	if _, err := s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 		PriceID:                 subscription.PriceID,
-		UserID:                  subscription.TenantSubjectID.String(),
+		UserID:                  subscription.MerchantSubjectID.String(),
 		Processor:               models.Processor(provider),
 		ProcessorSubscriptionID: &subscription.ProcessorSubscriptionID,
 		UserEmail:               subscription.UserEmail,
@@ -709,7 +709,7 @@ func (s *NMIWebhookService) handleDeleteSubscription(ctx context.Context) error 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscription_id":           subscription.ID,
 		"processor_subscription_id": nmiSubID,
-		"user_id":                   subscription.TenantSubjectID.String(),
+		"user_id":                   subscription.MerchantSubjectID.String(),
 	}).Info("Cancelling subscription via NMI delete event")
 	if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 		RevokeAccess:            false, // User keeps access until period end
@@ -868,13 +868,13 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		}
 
 		if s.DB != nil {
-			removed, err := subscriptions.RemoveCancelledSubscriptionsForActivation(ctx, s.DB, subscription.TenantSubjectID.String(), subscription.ProductID, subscription.ID)
+			removed, err := subscriptions.RemoveCancelledSubscriptionsForActivation(ctx, s.DB, subscription.MerchantSubjectID.String(), subscription.ProductID, subscription.ID)
 			if err != nil {
 				return fmt.Errorf("failed to cleanup cancelled subscriptions before activation: %w", err)
 			}
 			if removed > 0 {
 				log.WithContext(ctx).WithFields(log.Fields{
-					"user_id":     subscription.TenantSubjectID.String(),
+					"user_id":     subscription.MerchantSubjectID.String(),
 					"product_id":  subscription.ProductID,
 					"removed_cnt": removed,
 				}).Info("Removed cancelled subscriptions before activation (NMI)")
@@ -894,7 +894,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 
 		_, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 			PriceID:                 subscription.PriceID,
-			UserID:                  subscription.TenantSubjectID.String(),
+			UserID:                  subscription.MerchantSubjectID.String(),
 			Processor:               models.Processor(provider),
 			ProcessorSubscriptionID: &subscription.ProcessorSubscriptionID,
 			UserEmail:               subscription.UserEmail,
@@ -927,7 +927,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			"subscription_id":           subscription.ID,
 			"processor_subscription_id": subscription.ProcessorSubscriptionID,
 			"transaction_id":            txnID,
-			"user_id":                   subscription.TenantSubjectID.String(),
+			"user_id":                   subscription.MerchantSubjectID.String(),
 		}).Info("Subscription activated via NMI transaction success")
 
 		processed = true
@@ -986,7 +986,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			"subscription_id":           subscription.ID,
 			"processor_subscription_id": subscription.ProcessorSubscriptionID,
 			"transaction_id":            txnID,
-			"user_id":                   subscription.TenantSubjectID.String(),
+			"user_id":                   subscription.MerchantSubjectID.String(),
 		}).Info("Subscription renewed via NMI transaction success")
 
 		processed = true
@@ -1044,7 +1044,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		paymentEvent := analytics.PaymentEventData{
 			EventID:        uuidutil.NewV7(),
 			SubscriptionID: &subscription.ID,
-			UserID:         subscription.TenantSubjectID.String(),
+			UserID:         subscription.MerchantSubjectID.String(),
 			EventType:      analytics.PaymentEventChargeSuccess,
 			Processor:      s.Processor,
 			Amount:         amountPtr,
@@ -1201,7 +1201,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 			now := s.now()
 			payment := &models.Payment{
 				ID:              uuidutil.NewV7(),
-				TenantSubjectID: subscription.TenantSubjectID,
+				MerchantSubjectID: subscription.MerchantSubjectID,
 				PriceID:         subscription.PriceID,
 				SubscriptionID:  &subscription.ID,
 				Processor:       models.Processor(s.Processor),
@@ -1270,7 +1270,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 		paymentEvent := analytics.PaymentEventData{
 			EventID:        uuidutil.NewV7(),
 			SubscriptionID: &subscription.ID,
-			UserID:         subscription.TenantSubjectID.String(),
+			UserID:         subscription.MerchantSubjectID.String(),
 			EventType:      analytics.PaymentEventChargeFailure,
 			Processor:      s.Processor,
 			Amount:         amountPtr,
@@ -2136,7 +2136,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		paymentEventData := analytics.PaymentEventData{
 			EventID:        uuidutil.NewV7(),
 			SubscriptionID: &subscription.ID,
-			UserID:         subscription.TenantSubjectID.String(),
+			UserID:         subscription.MerchantSubjectID.String(),
 			EventType:      analytics.PaymentEventRefund,
 			Processor:      s.Processor,
 			Amount:         &negativeAmount,
@@ -2307,7 +2307,7 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 		}
 		if subscription != nil {
 			paymentEventData.SubscriptionID = &subscription.ID
-			paymentEventData.UserID = subscription.TenantSubjectID.String()
+			paymentEventData.UserID = subscription.MerchantSubjectID.String()
 		}
 
 		if err := s.EventLogService.LogPaymentEvent(ctx, paymentEventData); err != nil {

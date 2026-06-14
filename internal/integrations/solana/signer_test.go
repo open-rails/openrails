@@ -9,7 +9,7 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // fakeSecrets is an in-memory TenantSecretGetter that counts reads so tests can
@@ -21,7 +21,7 @@ type fakeSecrets struct {
 	reads int
 }
 
-func (f *fakeSecrets) GetSecret(_ context.Context, _ tenant.ID, _ string) (string, error) {
+func (f *fakeSecrets) GetSecret(_ context.Context, _ merchant.ID, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reads++
@@ -127,7 +127,7 @@ func TestKeypairSignerFailClosed(t *testing.T) {
 func TestKeypairSignerRejectsZeroTenant(t *testing.T) {
 	key := newTestKey(t)
 	signer := NewKeypairSigner(&fakeSecrets{value: key.String()}, time.Minute)
-	if _, err := signer.SignMessage(context.Background(), tenant.ID{}, []byte("x")); err == nil {
+	if _, err := signer.SignMessage(context.Background(), merchant.ID{}, []byte("x")); err == nil {
 		t.Fatal("expected error for zero tenant id, got nil")
 	}
 }

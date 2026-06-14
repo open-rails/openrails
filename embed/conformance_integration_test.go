@@ -58,11 +58,11 @@ func (stubResolver) ResolveServiceToken(_ context.Context, token string) (*contr
 		return nil, authcore.ErrInvalidAccessToken
 	}
 	return &controlplane.ResolvedServiceToken{
-		AuthKitTenantSlug: "operator",
-		TenantID:          dbtest.TestTenantID,
-		TenantSlug:        dbtest.TestTenantSlug,
+		OwnerTenantSlug: "operator",
+		MerchantID:          dbtest.TestTenantID,
+		MerchantSlug:        dbtest.TestTenantSlug,
 		Permissions:       []string{controlplane.PermAdmin},
-		Resources:         []authcore.ServiceTokenResource{controlplane.TenantResource(dbtest.TestTenantID)},
+		Resources:         []authcore.ServiceTokenResource{controlplane.MerchantResource(dbtest.TestTenantID)},
 	}, nil
 }
 
@@ -115,7 +115,7 @@ func observeTxn(t *testing.T, label string, txn *openrails.CreditTransaction) ob
 	t.Helper()
 	require.NotNil(t, txn, label)
 	require.NotEqual(t, uuid.Nil, txn.ID, "%s: txn id", label)
-	require.NotEqual(t, uuid.Nil, txn.TenantSubjectID, "%s: txn tenant_subject_id", label)
+	require.NotEqual(t, uuid.Nil, txn.MerchantSubjectID, "%s: txn merchant_subject_id", label)
 	require.False(t, txn.CreatedAt.IsZero(), "%s: created_at", label)
 	o := obsTxn{
 		Amount:          txn.Amount,
@@ -314,7 +314,7 @@ func observeEntitlements(ents []openrails.EntitlementRecord, payer uuid.UUID) []
 			Entitlement:  e.Entitlement,
 			SourceType:   e.SourceType,
 			HasEnd:       e.EndAt != nil,
-			PayerMatches: e.TenantSubjectID == payer.String(),
+			PayerMatches: e.MerchantSubjectID == payer.String(),
 		})
 	}
 	return out
@@ -390,7 +390,7 @@ type scriptEnv struct {
 	side       string
 	from, to   time.Time
 	// issuer/subject are the payer's EXTERNAL identity (its
-	// openrails.tenant_subjects row) for the entitlements steps.
+	// openrails.merchant_subjects row) for the entitlements steps.
 	issuer  string
 	subject string
 }
@@ -575,7 +575,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	var decoded struct {
 		Transactions []struct {
 			ID              uuid.UUID `json:"id"`
-			TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+			MerchantSubjectID uuid.UUID `json:"merchant_subject_id"`
 			Actor           string    `json:"actor"`
 			Amount          int64     `json:"amount"`
 			TransactionType string    `json:"transaction_type"`
@@ -589,7 +589,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	r.TxnsTotal = decoded.Total
 	for _, txn := range decoded.Transactions {
 		require.NotEqual(t, uuid.Nil, txn.ID, "%s txn id", env.side)
-		require.Equal(t, env.payer, txn.TenantSubjectID, "%s txn payer", env.side)
+		require.Equal(t, env.payer, txn.MerchantSubjectID, "%s txn payer", env.side)
 		require.False(t, txn.CreatedAt.IsZero(), "%s txn created_at", env.side)
 		r.Txns = append(r.Txns, obsTxn{
 			Amount:          txn.Amount,
@@ -855,7 +855,6 @@ func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
 		router.Group("/v1/service"),
 		rt.Embedded().App().Runtime,
 		ginmw.ServiceTokenRequired(stubResolver{}),
-		nil,
 	)
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
@@ -877,13 +876,13 @@ func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
 		id := uuid.New()
 		subject := side + "-" + id.String()
 		_, err := pool.Exec(ctx, `
-			INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject, created_at, last_seen_at)
+			INSERT INTO openrails.merchant_subjects (id, merchant_id, issuer, subject, created_at, last_seen_at)
 			VALUES ($1, $2, $3, $4, now(), now())`,
 			id, dbtest.TestTenantID.UUID(), issuer, subject)
 		require.NoError(t, err)
 		// One active entitlement row for the entitlements steps.
 		_, err = pool.Exec(ctx, `
-			INSERT INTO openrails.entitlements (id, tenant_id, tenant_subject_id, entitlement, start_at, source_id, source_type)
+			INSERT INTO openrails.entitlements (id, merchant_id, merchant_subject_id, entitlement, start_at, source_id, source_type)
 			VALUES ($1, $2, $3, 'premium', now() - interval '1 hour', $4, 'admin')`,
 			uuid.New(), dbtest.TestTenantID.UUID(), id, uuid.New())
 		require.NoError(t, err)

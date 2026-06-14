@@ -24,23 +24,23 @@ func (q *Queries) AcquireEntitlementTimelineLock(ctx context.Context, key int64)
 	return err
 }
 
-const attachEntitlementTenantSubject = `-- name: AttachEntitlementTenantSubject :exec
+const attachEntitlementMerchantSubject = `-- name: AttachEntitlementMerchantSubject :exec
 UPDATE openrails.entitlements ent SET
-    tenant_subject_id = $2,
+    merchant_subject_id = $2,
     updated_at = $3
 WHERE ent.id = $1
-  AND ent.tenant_subject_id IS NULL
+  AND ent.merchant_subject_id IS NULL
 `
 
-type AttachEntitlementTenantSubjectParams struct {
-	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
-	UpdatedAt       time.Time
+type AttachEntitlementMerchantSubjectParams struct {
+	ID                uuid.UUID
+	MerchantSubjectID uuid.UUID
+	UpdatedAt         time.Time
 }
 
 // Backfill the payable subject onto a legacy row that predates #317.
-func (q *Queries) AttachEntitlementTenantSubject(ctx context.Context, arg AttachEntitlementTenantSubjectParams) error {
-	_, err := q.db.Exec(ctx, attachEntitlementTenantSubject, arg.ID, arg.TenantSubjectID, arg.UpdatedAt)
+func (q *Queries) AttachEntitlementMerchantSubject(ctx context.Context, arg AttachEntitlementMerchantSubjectParams) error {
+	_, err := q.db.Exec(ctx, attachEntitlementMerchantSubject, arg.ID, arg.MerchantSubjectID, arg.UpdatedAt)
 	return err
 }
 
@@ -69,7 +69,7 @@ func (q *Queries) CountInvalidEndBySubscription(ctx context.Context, arg CountIn
 const createEntitlement = `-- name: CreateEntitlement :one
 
 INSERT INTO openrails.entitlements (
-    id, tenant_id, tenant_subject_id, entitlement, start_at, end_at,
+    id, merchant_id, merchant_subject_id, entitlement, start_at, end_at,
     source_id, source_type, revoked_at, revoke_reason, created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
@@ -84,18 +84,18 @@ RETURNING id
 `
 
 type CreateEntitlementParams struct {
-	Entitlement     string
-	StartAt         time.Time
-	SourceType      string
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	EndAt           *time.Time
-	SourceID        *uuid.UUID
-	RevokedAt       *time.Time
-	RevokeReason    *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	Entitlement       string
+	StartAt           time.Time
+	SourceType        string
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	EndAt             *time.Time
+	SourceID          *uuid.UUID
+	RevokedAt         *time.Time
+	RevokeReason      *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // openrails.entitlements. The model is bun-soft-delete (deleted_at): every
@@ -106,8 +106,8 @@ func (q *Queries) CreateEntitlement(ctx context.Context, arg CreateEntitlementPa
 		arg.StartAt,
 		arg.SourceType,
 		arg.ID,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.EndAt,
 		arg.SourceID,
 		arg.RevokedAt,
@@ -155,8 +155,8 @@ func (q *Queries) EndActiveEntitlementsBySubscription(ctx context.Context, arg E
 const entitlementExistsActive = `-- name: EntitlementExistsActive :one
 SELECT EXISTS (
     SELECT 1 FROM openrails.entitlements ent
-    WHERE ent.tenant_id = $1
-      AND ent.tenant_subject_id = $2
+    WHERE ent.merchant_id = $1
+      AND ent.merchant_subject_id = $2
       AND ent.entitlement = $3
       AND ent.start_at <= $4::timestamptz
       AND (ent.end_at IS NULL OR ent.end_at > $4::timestamptz)
@@ -166,16 +166,16 @@ SELECT EXISTS (
 `
 
 type EntitlementExistsActiveParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Entitlement     string
-	At              time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
+	At                time.Time
 }
 
 func (q *Queries) EntitlementExistsActive(ctx context.Context, arg EntitlementExistsActiveParams) (bool, error) {
 	row := q.db.QueryRow(ctx, entitlementExistsActive,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Entitlement,
 		arg.At,
 	)
@@ -211,8 +211,8 @@ func (q *Queries) EntitlementExistsBySource(ctx context.Context, arg Entitlement
 const entitlementHasActiveIndefinite = `-- name: EntitlementHasActiveIndefinite :one
 SELECT EXISTS (
     SELECT 1 FROM openrails.entitlements ent
-    WHERE ent.tenant_id = $1
-      AND ent.tenant_subject_id = $2
+    WHERE ent.merchant_id = $1
+      AND ent.merchant_subject_id = $2
       AND ent.entitlement = $3
       AND ent.revoked_at IS NULL AND ent.end_at IS NULL
       AND ent.start_at <= $4::timestamptz
@@ -221,16 +221,16 @@ SELECT EXISTS (
 `
 
 type EntitlementHasActiveIndefiniteParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Entitlement     string
-	At              time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
+	At                time.Time
 }
 
 func (q *Queries) EntitlementHasActiveIndefinite(ctx context.Context, arg EntitlementHasActiveIndefiniteParams) (bool, error) {
 	row := q.db.QueryRow(ctx, entitlementHasActiveIndefinite,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Entitlement,
 		arg.At,
 	)
@@ -240,7 +240,7 @@ func (q *Queries) EntitlementHasActiveIndefinite(ctx context.Context, arg Entitl
 }
 
 const getEntitlementByID = `-- name: GetEntitlementByID :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, merchant_subject_id FROM openrails.entitlements ent
 WHERE ent.id = $1
   AND ent.deleted_at IS NULL
 LIMIT 1
@@ -262,16 +262,16 @@ func (q *Queries) GetEntitlementByID(ctx context.Context, id uuid.UUID) (Openrai
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.Period,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
 const getLatestActiveEntitlement = `-- name: GetLatestActiveEntitlement :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
-WHERE ent.tenant_id = $1
-  AND ent.tenant_subject_id = $2
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, merchant_subject_id FROM openrails.entitlements ent
+WHERE ent.merchant_id = $1
+  AND ent.merchant_subject_id = $2
   AND ent.entitlement = $3
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -280,13 +280,13 @@ LIMIT 1
 `
 
 type GetLatestActiveEntitlementParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Entitlement     string
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
 }
 
 func (q *Queries) GetLatestActiveEntitlement(ctx context.Context, arg GetLatestActiveEntitlementParams) (OpenrailsEntitlement, error) {
-	row := q.db.QueryRow(ctx, getLatestActiveEntitlement, arg.TenantID, arg.TenantSubjectID, arg.Entitlement)
+	row := q.db.QueryRow(ctx, getLatestActiveEntitlement, arg.MerchantID, arg.MerchantSubjectID, arg.Entitlement)
 	var i OpenrailsEntitlement
 	err := row.Scan(
 		&i.ID,
@@ -301,16 +301,16 @@ func (q *Queries) GetLatestActiveEntitlement(ctx context.Context, arg GetLatestA
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.Period,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
 const getLatestFiniteActiveEntitlement = `-- name: GetLatestFiniteActiveEntitlement :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
-WHERE ent.tenant_id = $1
-  AND ent.tenant_subject_id = $2
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, merchant_subject_id FROM openrails.entitlements ent
+WHERE ent.merchant_id = $1
+  AND ent.merchant_subject_id = $2
   AND ent.entitlement = $3
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -322,16 +322,16 @@ LIMIT 1
 `
 
 type GetLatestFiniteActiveEntitlementParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Entitlement     string
-	At              time.Time
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
+	At                time.Time
 }
 
 func (q *Queries) GetLatestFiniteActiveEntitlement(ctx context.Context, arg GetLatestFiniteActiveEntitlementParams) (OpenrailsEntitlement, error) {
 	row := q.db.QueryRow(ctx, getLatestFiniteActiveEntitlement,
-		arg.TenantID,
-		arg.TenantSubjectID,
+		arg.MerchantID,
+		arg.MerchantSubjectID,
 		arg.Entitlement,
 		arg.At,
 	)
@@ -349,15 +349,15 @@ func (q *Queries) GetLatestFiniteActiveEntitlement(ctx context.Context, arg GetL
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.Period,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
 const getTimelineCoveringWindow = `-- name: GetTimelineCoveringWindow :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
-WHERE ent.tenant_subject_id = $1
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, merchant_subject_id FROM openrails.entitlements ent
+WHERE ent.merchant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -368,14 +368,14 @@ LIMIT 1
 `
 
 type GetTimelineCoveringWindowParams struct {
-	TenantSubjectID uuid.UUID
-	Entitlement     string
-	At              time.Time
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
+	At                time.Time
 }
 
 // The window covering instant `at` (for already-covered EndAt requests).
 func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimelineCoveringWindowParams) (OpenrailsEntitlement, error) {
-	row := q.db.QueryRow(ctx, getTimelineCoveringWindow, arg.TenantSubjectID, arg.Entitlement, arg.At)
+	row := q.db.QueryRow(ctx, getTimelineCoveringWindow, arg.MerchantSubjectID, arg.Entitlement, arg.At)
 	var i OpenrailsEntitlement
 	err := row.Scan(
 		&i.ID,
@@ -390,15 +390,15 @@ func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimeline
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.Period,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
 const getTimelineIndefinite = `-- name: GetTimelineIndefinite :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
-WHERE ent.tenant_subject_id = $1
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, merchant_subject_id FROM openrails.entitlements ent
+WHERE ent.merchant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -408,12 +408,12 @@ LIMIT 1
 `
 
 type GetTimelineIndefiniteParams struct {
-	TenantSubjectID uuid.UUID
-	Entitlement     string
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
 }
 
 func (q *Queries) GetTimelineIndefinite(ctx context.Context, arg GetTimelineIndefiniteParams) (OpenrailsEntitlement, error) {
-	row := q.db.QueryRow(ctx, getTimelineIndefinite, arg.TenantSubjectID, arg.Entitlement)
+	row := q.db.QueryRow(ctx, getTimelineIndefinite, arg.MerchantSubjectID, arg.Entitlement)
 	var i OpenrailsEntitlement
 	err := row.Scan(
 		&i.ID,
@@ -428,15 +428,15 @@ func (q *Queries) GetTimelineIndefinite(ctx context.Context, arg GetTimelineInde
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.Period,
-		&i.TenantID,
-		&i.TenantSubjectID,
+		&i.MerchantID,
+		&i.MerchantSubjectID,
 	)
 	return i, err
 }
 
 const getTimelineTailEnd = `-- name: GetTimelineTailEnd :one
 SELECT ent.end_at FROM openrails.entitlements ent
-WHERE ent.tenant_subject_id = $1
+WHERE ent.merchant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -446,13 +446,13 @@ LIMIT 1
 `
 
 type GetTimelineTailEndParams struct {
-	TenantSubjectID uuid.UUID
-	Entitlement     string
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
 }
 
 // The latest finite end on the timeline (the tail a new window starts after).
 func (q *Queries) GetTimelineTailEnd(ctx context.Context, arg GetTimelineTailEndParams) (*time.Time, error) {
-	row := q.db.QueryRow(ctx, getTimelineTailEnd, arg.TenantSubjectID, arg.Entitlement)
+	row := q.db.QueryRow(ctx, getTimelineTailEnd, arg.MerchantSubjectID, arg.Entitlement)
 	var end_at *time.Time
 	err := row.Scan(&end_at)
 	return end_at, err
@@ -460,7 +460,7 @@ func (q *Queries) GetTimelineTailEnd(ctx context.Context, arg GetTimelineTailEnd
 
 const listActiveEntitlementNames = `-- name: ListActiveEntitlementNames :many
 SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
-WHERE ent.tenant_subject_id = $1
+WHERE ent.merchant_subject_id = $1
   AND ent.start_at <= $2::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > $2::timestamptz)
   AND ent.revoked_at IS NULL
@@ -468,13 +468,13 @@ WHERE ent.tenant_subject_id = $1
 `
 
 type ListActiveEntitlementNamesParams struct {
-	TenantSubjectID uuid.UUID
-	At              time.Time
+	MerchantSubjectID uuid.UUID
+	At                time.Time
 }
 
-// No tenant_id predicate: matches the bun-era user-keyed variant exactly.
+// No merchant_id predicate: matches the bun-era user-keyed variant exactly.
 func (q *Queries) ListActiveEntitlementNames(ctx context.Context, arg ListActiveEntitlementNamesParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listActiveEntitlementNames, arg.TenantSubjectID, arg.At)
+	rows, err := q.db.Query(ctx, listActiveEntitlementNames, arg.MerchantSubjectID, arg.At)
 	if err != nil {
 		return nil, err
 	}
@@ -493,24 +493,24 @@ func (q *Queries) ListActiveEntitlementNames(ctx context.Context, arg ListActive
 	return items, nil
 }
 
-const listActiveEntitlementNamesTenant = `-- name: ListActiveEntitlementNamesTenant :many
+const listActiveEntitlementNamesMerchant = `-- name: ListActiveEntitlementNamesMerchant :many
 SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
-WHERE ent.tenant_id = $1
-  AND ent.tenant_subject_id = $2
+WHERE ent.merchant_id = $1
+  AND ent.merchant_subject_id = $2
   AND ent.start_at <= $3::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > $3::timestamptz)
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
 `
 
-type ListActiveEntitlementNamesTenantParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	At              time.Time
+type ListActiveEntitlementNamesMerchantParams struct {
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	At                time.Time
 }
 
-func (q *Queries) ListActiveEntitlementNamesTenant(ctx context.Context, arg ListActiveEntitlementNamesTenantParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listActiveEntitlementNamesTenant, arg.TenantID, arg.TenantSubjectID, arg.At)
+func (q *Queries) ListActiveEntitlementNamesMerchant(ctx context.Context, arg ListActiveEntitlementNamesMerchantParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listActiveEntitlementNamesMerchant, arg.MerchantID, arg.MerchantSubjectID, arg.At)
 	if err != nil {
 		return nil, err
 	}
@@ -530,8 +530,8 @@ func (q *Queries) ListActiveEntitlementNamesTenant(ctx context.Context, arg List
 }
 
 const listActiveEntitlementRecords = `-- name: ListActiveEntitlementRecords :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
-WHERE ent.tenant_subject_id = $1
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, merchant_subject_id FROM openrails.entitlements ent
+WHERE ent.merchant_subject_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
   AND ent.start_at <= $2::timestamptz
@@ -540,12 +540,12 @@ ORDER BY ent.start_at ASC
 `
 
 type ListActiveEntitlementRecordsParams struct {
-	TenantSubjectID uuid.UUID
-	At              time.Time
+	MerchantSubjectID uuid.UUID
+	At                time.Time
 }
 
 func (q *Queries) ListActiveEntitlementRecords(ctx context.Context, arg ListActiveEntitlementRecordsParams) ([]OpenrailsEntitlement, error) {
-	rows, err := q.db.Query(ctx, listActiveEntitlementRecords, arg.TenantSubjectID, arg.At)
+	rows, err := q.db.Query(ctx, listActiveEntitlementRecords, arg.MerchantSubjectID, arg.At)
 	if err != nil {
 		return nil, err
 	}
@@ -566,8 +566,8 @@ func (q *Queries) ListActiveEntitlementRecords(ctx context.Context, arg ListActi
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.Period,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -580,12 +580,12 @@ func (q *Queries) ListActiveEntitlementRecords(ctx context.Context, arg ListActi
 }
 
 const listActiveEntitlementRecordsByExternalSubjects = `-- name: ListActiveEntitlementRecordsByExternalSubjects :many
-SELECT ts.subject AS external_subject, ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.period, ent.tenant_id, ent.tenant_subject_id FROM openrails.entitlements ent
-JOIN openrails.tenant_subjects ts ON ts.id = ent.tenant_subject_id
-WHERE ts.tenant_id = $1
+SELECT ts.subject AS external_subject, ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.period, ent.merchant_id, ent.merchant_subject_id FROM openrails.entitlements ent
+JOIN openrails.merchant_subjects ts ON ts.id = ent.merchant_subject_id
+WHERE ts.merchant_id = $1
   AND ts.issuer = $2
   AND ts.subject = ANY($3::text[])
-  AND ent.tenant_id = $1
+  AND ent.merchant_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
   AND ent.start_at <= $4::timestamptz
@@ -594,28 +594,28 @@ ORDER BY ts.subject, ent.start_at ASC
 `
 
 type ListActiveEntitlementRecordsByExternalSubjectsParams struct {
-	TenantID uuid.UUID
-	Issuer   string
-	Subjects []string
-	At       time.Time
+	MerchantID uuid.UUID
+	Issuer     string
+	Subjects   []string
+	At         time.Time
 }
 
 type ListActiveEntitlementRecordsByExternalSubjectsRow struct {
-	ExternalSubject string
-	ID              uuid.UUID
-	Entitlement     string
-	StartAt         time.Time
-	EndAt           *time.Time
-	SourceID        uuid.UUID
-	SourceType      string
-	RevokedAt       *time.Time
-	RevokeReason    *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	DeletedAt       *time.Time
-	Period          pgtype.Range[pgtype.Timestamptz]
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+	ExternalSubject   string
+	ID                uuid.UUID
+	Entitlement       string
+	StartAt           time.Time
+	EndAt             *time.Time
+	SourceID          uuid.UUID
+	SourceType        string
+	RevokedAt         *time.Time
+	RevokeReason      *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	DeletedAt         *time.Time
+	Period            pgtype.Range[pgtype.Timestamptz]
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
 }
 
 // Batch read (#354): active entitlement rows for MANY external subjects of one
@@ -624,7 +624,7 @@ type ListActiveEntitlementRecordsByExternalSubjectsRow struct {
 // the handler/SDK reconstruct empty entries per requested subject.
 func (q *Queries) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Context, arg ListActiveEntitlementRecordsByExternalSubjectsParams) ([]ListActiveEntitlementRecordsByExternalSubjectsRow, error) {
 	rows, err := q.db.Query(ctx, listActiveEntitlementRecordsByExternalSubjects,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.Issuer,
 		arg.Subjects,
 		arg.At,
@@ -650,8 +650,8 @@ func (q *Queries) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Con
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.Period,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -663,10 +663,10 @@ func (q *Queries) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Con
 	return items, nil
 }
 
-const listActiveEntitlementRecordsTenant = `-- name: ListActiveEntitlementRecordsTenant :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
-WHERE ent.tenant_id = $1
-  AND ent.tenant_subject_id = $2
+const listActiveEntitlementRecordsMerchant = `-- name: ListActiveEntitlementRecordsMerchant :many
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, merchant_subject_id FROM openrails.entitlements ent
+WHERE ent.merchant_id = $1
+  AND ent.merchant_subject_id = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
   AND ent.start_at <= $3::timestamptz
@@ -674,14 +674,14 @@ WHERE ent.tenant_id = $1
 ORDER BY ent.start_at ASC
 `
 
-type ListActiveEntitlementRecordsTenantParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	At              time.Time
+type ListActiveEntitlementRecordsMerchantParams struct {
+	MerchantID        uuid.UUID
+	MerchantSubjectID uuid.UUID
+	At                time.Time
 }
 
-func (q *Queries) ListActiveEntitlementRecordsTenant(ctx context.Context, arg ListActiveEntitlementRecordsTenantParams) ([]OpenrailsEntitlement, error) {
-	rows, err := q.db.Query(ctx, listActiveEntitlementRecordsTenant, arg.TenantID, arg.TenantSubjectID, arg.At)
+func (q *Queries) ListActiveEntitlementRecordsMerchant(ctx context.Context, arg ListActiveEntitlementRecordsMerchantParams) ([]OpenrailsEntitlement, error) {
+	rows, err := q.db.Query(ctx, listActiveEntitlementRecordsMerchant, arg.MerchantID, arg.MerchantSubjectID, arg.At)
 	if err != nil {
 		return nil, err
 	}
@@ -702,8 +702,8 @@ func (q *Queries) ListActiveEntitlementRecordsTenant(ctx context.Context, arg Li
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.Period,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -716,7 +716,7 @@ func (q *Queries) ListActiveEntitlementRecordsTenant(ctx context.Context, arg Li
 }
 
 const listActiveGraceWindowsForUpdate = `-- name: ListActiveGraceWindowsForUpdate :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, merchant_subject_id FROM openrails.entitlements ent
 WHERE ent.source_type = 'grace'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
@@ -753,8 +753,8 @@ func (q *Queries) ListActiveGraceWindowsForUpdate(ctx context.Context, arg ListA
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.Period,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -799,15 +799,15 @@ func (q *Queries) ListDistinctEntitlementNamesBySource(ctx context.Context, arg 
 	return items, nil
 }
 
-const listEntitlementsByTenantSubject = `-- name: ListEntitlementsByTenantSubject :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
-WHERE ent.tenant_subject_id = $1
+const listEntitlementsByMerchantSubject = `-- name: ListEntitlementsByMerchantSubject :many
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, merchant_subject_id FROM openrails.entitlements ent
+WHERE ent.merchant_subject_id = $1
   AND ent.deleted_at IS NULL
 ORDER BY ent.start_at DESC
 `
 
-func (q *Queries) ListEntitlementsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]OpenrailsEntitlement, error) {
-	rows, err := q.db.Query(ctx, listEntitlementsByTenantSubject, tenantSubjectID)
+func (q *Queries) ListEntitlementsByMerchantSubject(ctx context.Context, merchantSubjectID uuid.UUID) ([]OpenrailsEntitlement, error) {
+	rows, err := q.db.Query(ctx, listEntitlementsByMerchantSubject, merchantSubjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -828,8 +828,8 @@ func (q *Queries) ListEntitlementsByTenantSubject(ctx context.Context, tenantSub
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.Period,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -842,7 +842,7 @@ func (q *Queries) ListEntitlementsByTenantSubject(ctx context.Context, tenantSub
 }
 
 const listExtendableSubscriptionEntitlements = `-- name: ListExtendableSubscriptionEntitlements :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM openrails.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, merchant_subject_id FROM openrails.entitlements ent
 WHERE ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
@@ -878,8 +878,8 @@ func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, ar
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.Period,
-			&i.TenantID,
-			&i.TenantSubjectID,
+			&i.MerchantID,
+			&i.MerchantSubjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -949,7 +949,7 @@ UPDATE openrails.entitlements ent SET
     revoked_at = $3::timestamptz,
     revoke_reason = $4::text,
     updated_at = $3::timestamptz
-WHERE ent.tenant_subject_id = $1
+WHERE ent.merchant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -960,19 +960,19 @@ WHERE ent.tenant_subject_id = $1
 `
 
 type RevokeActiveTimelineWindowsParams struct {
-	TenantSubjectID uuid.UUID
-	Entitlement     string
-	Now             time.Time
-	RevokeReason    string
-	SourceType      *string
-	SourceID        *uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
+	Now               time.Time
+	RevokeReason      string
+	SourceType        *string
+	SourceID          *uuid.UUID
 }
 
 // Revoke every currently-active window on the timeline, optionally filtered
 // to one source (NULL filter = any).
 func (q *Queries) RevokeActiveTimelineWindows(ctx context.Context, arg RevokeActiveTimelineWindowsParams) error {
 	_, err := q.db.Exec(ctx, revokeActiveTimelineWindows,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.Entitlement,
 		arg.Now,
 		arg.RevokeReason,
@@ -1093,7 +1093,7 @@ UPDATE openrails.entitlements ent SET
     end_at = CASE WHEN ent.end_at IS NULL THEN NULL
              ELSE ent.end_at + ($3::bigint * interval '1 second') END,
     updated_at = $4::timestamptz
-WHERE ent.tenant_subject_id = $1
+WHERE ent.merchant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -1102,17 +1102,17 @@ WHERE ent.tenant_subject_id = $1
 `
 
 type ShiftEntitlementTimelineWindowsParams struct {
-	TenantSubjectID uuid.UUID
-	Entitlement     string
-	DeltaSeconds    int64
-	Now             time.Time
-	FromAt          time.Time
-	ExcludeIds      []uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
+	DeltaSeconds      int64
+	Now               time.Time
+	FromAt            time.Time
+	ExcludeIds        []uuid.UUID
 }
 
 func (q *Queries) ShiftEntitlementTimelineWindows(ctx context.Context, arg ShiftEntitlementTimelineWindowsParams) error {
 	_, err := q.db.Exec(ctx, shiftEntitlementTimelineWindows,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.Entitlement,
 		arg.DeltaSeconds,
 		arg.Now,
@@ -1188,7 +1188,7 @@ const softDeleteFutureTimelineWindows = `-- name: SoftDeleteFutureTimelineWindow
 UPDATE openrails.entitlements ent SET
     deleted_at = $3::timestamptz,
     updated_at = $3::timestamptz
-WHERE ent.tenant_subject_id = $1
+WHERE ent.merchant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -1198,18 +1198,18 @@ WHERE ent.tenant_subject_id = $1
 `
 
 type SoftDeleteFutureTimelineWindowsParams struct {
-	TenantSubjectID uuid.UUID
-	Entitlement     string
-	Now             time.Time
-	SourceType      *string
-	SourceID        *uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
+	Now               time.Time
+	SourceType        *string
+	SourceID          *uuid.UUID
 }
 
 // Soft-delete every future scheduled window on the timeline, optionally
 // filtered to one source (NULL filter = any).
 func (q *Queries) SoftDeleteFutureTimelineWindows(ctx context.Context, arg SoftDeleteFutureTimelineWindowsParams) error {
 	_, err := q.db.Exec(ctx, softDeleteFutureTimelineWindows,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.Entitlement,
 		arg.Now,
 		arg.SourceType,
@@ -1242,7 +1242,7 @@ const softDeleteLaterEntitlementWindows = `-- name: SoftDeleteLaterEntitlementWi
 UPDATE openrails.entitlements ent SET
     deleted_at = $3::timestamptz,
     updated_at = $3::timestamptz
-WHERE ent.tenant_subject_id = $1
+WHERE ent.merchant_subject_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -1251,16 +1251,16 @@ WHERE ent.tenant_subject_id = $1
 `
 
 type SoftDeleteLaterEntitlementWindowsParams struct {
-	TenantSubjectID uuid.UUID
-	Entitlement     string
-	Now             time.Time
-	FromAt          time.Time
-	ExcludeID       uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
+	Now               time.Time
+	FromAt            time.Time
+	ExcludeID         uuid.UUID
 }
 
 func (q *Queries) SoftDeleteLaterEntitlementWindows(ctx context.Context, arg SoftDeleteLaterEntitlementWindowsParams) error {
 	_, err := q.db.Exec(ctx, softDeleteLaterEntitlementWindows,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.Entitlement,
 		arg.Now,
 		arg.FromAt,
@@ -1273,7 +1273,7 @@ const timelineHasIndefinite = `-- name: TimelineHasIndefinite :one
 
 SELECT EXISTS (
     SELECT 1 FROM openrails.entitlements ent
-    WHERE ent.tenant_subject_id = $1
+    WHERE ent.merchant_subject_id = $1
       AND ent.entitlement = $2
       AND ent.revoked_at IS NULL
       AND ent.deleted_at IS NULL
@@ -1282,16 +1282,16 @@ SELECT EXISTS (
 `
 
 type TimelineHasIndefiniteParams struct {
-	TenantSubjectID uuid.UUID
-	Entitlement     string
+	MerchantSubjectID uuid.UUID
+	Entitlement       string
 }
 
 // Timeline-service queries (#334: modules/entitlements PushNewEntitlement /
 // RevokeExistingEntitlement). Tenant scoping comes from RLS via TenantTx; the
-// timeline key is (tenant_subject_id, entitlement), matching the bun-era
+// timeline key is (merchant_subject_id, entitlement), matching the bun-era
 // service which never added an explicit tenant predicate here.
 func (q *Queries) TimelineHasIndefinite(ctx context.Context, arg TimelineHasIndefiniteParams) (bool, error) {
-	row := q.db.QueryRow(ctx, timelineHasIndefinite, arg.TenantSubjectID, arg.Entitlement)
+	row := q.db.QueryRow(ctx, timelineHasIndefinite, arg.MerchantSubjectID, arg.Entitlement)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err

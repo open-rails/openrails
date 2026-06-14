@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Unified credit-line model (issue #302). Credit is ONE dial: an account spends
@@ -27,7 +27,7 @@ import (
 
 // SpendParams is a unified immediate spend (balance first, then owed).
 type SpendParams struct {
-	Payer    *identity.TenantSubjectID
+	Payer    *identity.MerchantSubjectID
 	Actor    string
 	Currency string // "" => DefaultCurrency (#472)
 	Amount   int64
@@ -52,7 +52,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 	if err := ValidateCurrency(cur); err != nil {
 		return err
 	}
-	payer, err := resolveTenantSubject(params.Payer, params.Actor)
+	payer, err := resolveMerchantSubject(params.Payer, params.Actor)
 	if err != nil {
 		return err
 	}
@@ -65,13 +65,13 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 			return err
 		}
 		if params.SourceID != "" {
-			tid, terr := tenant.Require(ctx)
+			tid, terr := merchant.Require(ctx)
 			if terr != nil {
 				return terr
 			}
 			tenantID := tid.UUID()
 			existing, cerr := q.CountMoneySpendByCoords(ctx, gen.CountMoneySpendByCoordsParams{
-				TenantID: tenantID, TenantSubjectID: payer.UUID(), Currency: cur,
+				MerchantID: tenantID, MerchantSubjectID: payer.UUID(), Currency: cur,
 				Source: params.Source, SourceID: &params.SourceID,
 			})
 			if cerr != nil {
@@ -93,7 +93,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 // already locked the balance row (serialization point) and handled idempotency.
 // Returns the balance-debit and owed-accrual transaction ids (either may be nil).
 func (s *MoneyService) spendBalanceThenOwedTx(
-	ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID,
+	ctx context.Context, q *gen.Queries, payer identity.MerchantSubjectID,
 	userID, currency, source, sourceID string, amount int64,
 ) (balanceTxnID, owedTxnID *uuid.UUID, err error) {
 	if amount <= 0 {
@@ -101,7 +101,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	}
 	now := s.now()
 	cur := normalizeCurrency(currency)
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -125,7 +125,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	// The remainder can only go to owed when the account has a credit line.
 	if fromOwed > 0 {
 		settingsRow, serr := q.LockMoneyAccountSettings(ctx, gen.LockMoneyAccountSettingsParams{
-			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
+			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur,
 		})
 		if errors.Is(serr, pgx.ErrNoRows) {
 			// No settings row => prepaid default => no credit line.
@@ -151,7 +151,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		newBal := bal.Balance - fromBalance
 		neg := -fromBalance
 		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Currency: cur, Actor: userID,
+			ID: uuidutil.NewV7(), MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur, Actor: userID,
 			Amount: neg, BalanceAfter: &newBal,
 			TransactionType: "withdrawal", Status: "posted",
 			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
@@ -164,13 +164,13 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 
 	if fromOwed > 0 {
 		if err := q.AddMoneyOutstandingOwed(ctx, gen.AddMoneyOutstandingOwedParams{
-			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
+			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur,
 			Amount: fromOwed, Now: now,
 		}); err != nil {
 			return nil, nil, err
 		}
 		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Currency: cur, Actor: userID,
+			ID: uuidutil.NewV7(), MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur, Actor: userID,
 			Amount: fromOwed, TransactionType: txOwedAccrual, Status: "posted",
 			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
 		}
@@ -197,10 +197,10 @@ func nullStr(s string) *string {
 // balance can't cover it. availableAfter is the available balance AFTER this
 // hold's reservation has been released. The capture is pre-authorized, so this
 // never re-gates. Returns the post-settlement balance.
-func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, userID, currency string, amount, availableAfter int64) (int64, error) {
+func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, payer identity.MerchantSubjectID, userID, currency string, amount, availableAfter int64) (int64, error) {
 	now := s.now()
 	cur := normalizeCurrency(currency)
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -224,7 +224,7 @@ func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, paye
 		newBal = nb
 	} else {
 		b, err := q.GetMoneyBalance(ctx, gen.GetMoneyBalanceParams{
-			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
+			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur,
 		})
 		if err != nil {
 			return 0, err
@@ -238,7 +238,7 @@ func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, paye
 			return 0, err
 		}
 		if err := q.AddMoneyOutstandingOwed(ctx, gen.AddMoneyOutstandingOwedParams{
-			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
+			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur,
 			Amount: fromOwed, Now: now,
 		}); err != nil {
 			return 0, err

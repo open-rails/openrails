@@ -40,18 +40,18 @@ func TestAdminEntitlementGrantCreatesSourceRecord(t *testing.T) {
 	var ent models.Entitlement
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ent))
 
-	require.Equal(t, userID, ent.TenantSubjectID.String())
+	require.Equal(t, userID, ent.MerchantSubjectID.String())
 	require.Equal(t, "premium", ent.Entitlement)
 	require.Equal(t, models.EntitlementSourceAdmin, ent.SourceType)
 	require.NotNil(t, ent.SourceID)
 
-	grant := suite.GetAdminGrant(req.Context(), *ent.SourceID)
-	require.Equal(t, userID, grant.TenantSubjectID.String())
+	grant := suite.GetEntitlementGrant(req.Context(), *ent.SourceID)
+	require.Equal(t, userID, grant.MerchantSubjectID.String())
 	require.Equal(t, "admin_entitlement", grant.Reason)
 	require.Nil(t, grant.PriceID)
 }
 
-func TestRemovedAdminGrantRoutesReturn404(t *testing.T) {
+func TestRemovedEntitlementGrantRoutesReturn404(t *testing.T) {
 	suite, adminToken := setupAdminTestSuite(t)
 
 	userID := uuid.New().String()
@@ -83,7 +83,7 @@ func TestAdminEntitlementAppendsAfterLatestEnd(t *testing.T) {
 	subEnd := fixedNow.Add(30 * 24 * time.Hour)
 	existing := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: suite.ensureTenantSubject(context.Background(), userID),
+		MerchantSubjectID: suite.ensureMerchantSubject(context.Background(), userID),
 		Entitlement:     "premium",
 		StartAt:         start,
 		EndAt:           &subEnd,

@@ -130,14 +130,14 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		return nil, fmt.Errorf("load NMI sale attempt: %w", err)
 	}
 
-	payerTSID, err := payerTenantSubjectID(user.ID)
+	payerTSID, err := payerMerchantSubjectID(user.ID)
 	if err != nil {
 		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
 	attempt, err := s.PurchaseService.PaymentService.ReserveProviderAttempt(ctx, &models.Payment{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: payerTSID,
+		MerchantSubjectID: payerTSID,
 		PriceID:         price.ID,
 		Processor:       models.Processor(provider),
 		TransactionID:   attemptTransactionID,

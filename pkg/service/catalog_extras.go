@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Issue #357 — provider-side catalog extras: detection + (--exhaustive) archive.
@@ -513,7 +513,7 @@ func (s *Service) ArchiveCatalogExtras(ctx context.Context, extras []CatalogExtr
 	if err != nil {
 		return nil, err
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -528,7 +528,7 @@ func archiveCatalogExtrasVia(ctx context.Context, exec intentExecutor, tenantID 
 	var failed int
 	enqueue := func(e CatalogExtra, intentType, provider, idempotencyKey string, payload any) {
 		row, err := exec.EnqueueAndExecute(ctx, intents.EnqueueParams{
-			TenantID:       tenantID,
+			MerchantID:       tenantID,
 			Provider:       provider,
 			IntentType:     intentType,
 			Payload:        payload,

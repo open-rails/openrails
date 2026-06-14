@@ -26,7 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Valid blocklist identifier kinds. Mirrors the CHECK constraint on
@@ -53,7 +53,7 @@ func validKind(kind string) bool {
 
 // BlocklistService manages the tenant-scoped payment blocklist (issue #300).
 // All operations are RLS-scoped to the request tenant
-// (tenant.Require) via the db.DB tenant-connection helpers, exactly
+// (merchant.Require) via the db.DB tenant-connection helpers, exactly
 // like the credits service.
 type BlocklistService struct {
 	db *db.DB
@@ -70,7 +70,7 @@ func NewBlocklistService(database *db.DB) *BlocklistService {
 //
 // Add is idempotent on (tenant, kind, value): re-adding the same identifier is a
 // no-op (the existing row and its payer scoping are left untouched).
-func (s *BlocklistService) Add(ctx context.Context, payer *identity.TenantSubjectID, kind, value, reason string) error {
+func (s *BlocklistService) Add(ctx context.Context, payer *identity.MerchantSubjectID, kind, value, reason string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("blocklist service not initialized")
 	}
@@ -83,7 +83,7 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.TenantSubjec
 		return fmt.Errorf("value required")
 	}
 
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
@@ -100,8 +100,8 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.TenantSubjec
 
 	entry := &models.PaymentBlocklistEntry{
 		ID:              uuidutil.NewV7(),
-		TenantID:        tenantID,
-		TenantSubjectID: payerTenantID,
+		MerchantID:        tenantID,
+		MerchantSubjectID: payerTenantID,
 		Kind:            kind,
 		Value:           value,
 		Reason:          reasonPtr,
@@ -112,14 +112,14 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.TenantSubjec
 		// Owner-scoped blocks reference a payable tenant subject; materialize its
 		// tenant_subjects row so the payment_blocklist FK (migration 076) holds (#317).
 		if payerTenantID != nil {
-			if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Qx(ctx), tenantID, payerTenantID.String()); err != nil {
+			if _, err := repo.EnsureMerchantSubjectID(ctx, s.db.Qx(ctx), tenantID, payerTenantID.String()); err != nil {
 				return err
 			}
 		}
 		return s.db.Gen(ctx).InsertPaymentBlockIfAbsent(ctx, gen.InsertPaymentBlockIfAbsentParams{
 			ID:              entry.ID,
-			TenantID:        entry.TenantID,
-			TenantSubjectID: entry.TenantSubjectID,
+			MerchantID:        entry.MerchantID,
+			MerchantSubjectID: entry.MerchantSubjectID,
 			Kind:            entry.Kind,
 			Value:           entry.Value,
 			Reason:          entry.Reason,
@@ -143,14 +143,14 @@ func (s *BlocklistService) Remove(ctx context.Context, kind, value string) error
 		return fmt.Errorf("value required")
 	}
 
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
 	tenantID := tid.UUID()
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		return s.db.Gen(ctx).DeletePaymentBlock(ctx, gen.DeletePaymentBlockParams{
-			TenantID: tenantID, Kind: kind, Value: value,
+			MerchantID: tenantID, Kind: kind, Value: value,
 		})
 	})
 }
@@ -171,7 +171,7 @@ func (s *BlocklistService) IsBlocked(ctx context.Context, kind, value string) (b
 		return false, fmt.Errorf("value required")
 	}
 
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -179,7 +179,7 @@ func (s *BlocklistService) IsBlocked(ctx context.Context, kind, value string) (b
 	var blocked bool
 	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		exists, err := s.db.Gen(ctx).PaymentBlockExists(ctx, gen.PaymentBlockExistsParams{
-			TenantID: tenantID, Kind: kind, Value: value,
+			MerchantID: tenantID, Kind: kind, Value: value,
 		})
 		if err != nil {
 			return err

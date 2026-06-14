@@ -3,200 +3,73 @@ package controlplane
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	authhttp "github.com/open-rails/authkit/http"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// DelegatedIssuer is one registered federated delegated-token issuer (issue
-// #259): a tenant host backend that signs its own
-// aud=openrails browser tokens and publishes a JWKS. OpenRails verifies
-// tenant-signed tokens against the issuer's registered JWKS and resolves the
-// OpenRails tenant from the validated `iss`.
-type DelegatedIssuer struct {
-	// Issuer is the token `iss`. GLOBALLY UNIQUE -> maps to exactly one tenant.
-	Issuer string
-	// JWKSURI is the ONLY URL OpenRails fetches this issuer's keys from
-	// (allowlist; a token-supplied jwks_uri/iss is never fetched).
-	JWKSURI string
-	// Audiences are accepted JWT `aud` values for this issuer.
-	Audiences []string
-	// TenantID is the OpenRails tenant (#223) this issuer speaks for.
-	TenantID tenant.ID
-	// TenantSlug is that tenant's slug.
-	TenantSlug string
-	// Enabled is the per-issuer kill-switch state. Only enabled issuers are
-	// loaded into the live verifier.
-	Enabled bool
-}
-
 // ErrDelegatedIssuerUnknown indicates a presented token's validated `iss` is not
-// a registered+enabled issuer mapped to an active tenant. Fail closed: the token
-// is rejected even if its signature is well-formed.
-var ErrDelegatedIssuerUnknown = errors.New("controlplane: delegated token issuer is not registered for an active tenant")
+// a registered AuthKit remote_application mapped (via tenant ownership) to an
+// active merchant. Fail closed: the token is rejected even if well-formed.
+var ErrDelegatedIssuerUnknown = errors.New("controlplane: delegated token issuer maps to no active merchant")
 
-// loadEnabledDelegatedIssuers returns every enabled issuer whose tenant is
-// active, joined to the tenant slug. This is the set registered into the
-// multi-issuer verifier at startup and on reload. Issuers whose tenant is
-// suspended/deleted are excluded (fail closed) even if the row is enabled.
-func (c *ControlPlane) loadEnabledDelegatedIssuers(ctx context.Context) ([]DelegatedIssuer, error) {
-	if c == nil || c.pool == nil {
-		return nil, errors.New("controlplane: pgx pool unavailable for issuer registry")
-	}
-	rows, err := c.pool.Query(ctx, `
-		SELECT i.issuer, i.jwks_uri, i.audiences, i.tenant_id::text, t.slug, i.enabled
-		  FROM openrails.tenant_delegated_issuers i
-		  JOIN openrails.tenants t ON t.id = i.tenant_id
-		 WHERE i.enabled
-		   AND cardinality(i.audiences) > 0
-		   AND t.status = 'active'
-		   AND t.deleted_at IS NULL
-		 ORDER BY i.issuer
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []DelegatedIssuer
-	for rows.Next() {
-		var (
-			issuer  string
-			jwksURI string
-			aud     []string
-			tidStr  string
-			slug    string
-			enabled bool
-		)
-		if err := rows.Scan(&issuer, &jwksURI, &aud, &tidStr, &slug, &enabled); err != nil {
-			return nil, err
-		}
-		tid, perr := tenant.ParseID(tidStr)
-		if perr != nil {
-			return nil, perr
-		}
-		out = append(out, DelegatedIssuer{
-			Issuer:     strings.TrimSpace(issuer),
-			JWKSURI:    strings.TrimSpace(jwksURI),
-			Audiences:  cleanAudiences(aud),
-			TenantID:   tid,
-			TenantSlug: slug,
-			Enabled:    enabled,
-		})
-	}
-	return out, rows.Err()
-}
-
-// reloadDelegatedIssuers reconciles the live multi-issuer verifier with the
-// registry: every enabled issuer (mapped to an active tenant) is registered via
-// AddIssuer with JWKS-URL key fetching, and any issuer previously registered but
-// no longer enabled is removed (the per-issuer kill-switch + reload convergence
-// path, issue #259). Every delegated-token issuer is a federated tenant issuer;
-// OpenRails registers no self-issuer of its own.
-//
-// JWKS keys are fetched lazily by the verifier on first use and refreshed on the
-// configured cadence / on unknown-kid, so registering an issuer whose JWKS is
-// momentarily unreachable does not fail here — it fails closed per token at
-// verify time. Registration-time reachability is validated by the service token-gated
-// register route (issue #259 bootstrap), not here.
-func (c *ControlPlane) reloadDelegatedIssuers(ctx context.Context) error {
+// loadRemoteApplications loads AuthKit's ACTIVE remote_applications into the
+// delegated verifier (#481): standalone JWKS/issuer trust is AuthKit's
+// remote_application registry (#74), NOT an OpenRails-owned table (the
+// tenant_delegated_issuers registry was dropped in #480). The verifier's
+// in-house JWKS fetch/refresh handles keys; this is also re-callable to pick up
+// store changes, and the verifier lazy-loads any single issuer on first use.
+func (c *ControlPlane) loadRemoteApplications(ctx context.Context) error {
 	if c == nil || c.delegatedVerifier == nil {
 		return ErrDelegatedNotConfigured
 	}
-
-	issuers, err := c.loadEnabledDelegatedIssuers(ctx)
-	if err != nil {
-		return err
-	}
-
-	c.issuerMu.Lock()
-	defer c.issuerMu.Unlock()
-
-	desired := make(map[string]struct{}, len(issuers))
-	for _, iss := range issuers {
-		if iss.Issuer == "" || iss.JWKSURI == "" {
-			continue
-		}
-		// Never let a registered tenant issuer collide with the control plane's
-		// own self-issuer (defense in depth; global-uniqueness + the register
-		// route already prevent this).
-		if iss.Issuer == strings.TrimSpace(c.issuer) {
-			continue
-		}
-		// Re-registration must replace the JWKS cache. AuthKit's AddIssuer
-		// upserts issuer metadata but intentionally preserves cached keys unless
-		// explicit keys are supplied, so remove first to make issuer rotations
-		// take effect immediately after registry reload.
-		c.delegatedVerifier.RemoveIssuer(iss.Issuer)
-		// No IssuerOptions.TenantSlug: it only populates the service-JWT
-		// principal's Tenant, which OpenRails never reads — ResolveServiceJWT and
-		// ResolveDelegated both resolve the tenant LIVE from openrails.tenants via
-		// tenantForIssuer, so a cached slug could only go stale between renames
-		// and reloads.
-		if err := c.delegatedVerifier.AddIssuer(iss.Issuer, iss.Audiences, authhttp.IssuerOptions{
-			JWKSURI:  iss.JWKSURI,
-			CacheTTL: delegatedIssuerJWKSCacheTTL,
-		}); err != nil {
-			return fmt.Errorf("controlplane: register delegated issuer %q: %w", iss.Issuer, err)
-		}
-		desired[iss.Issuer] = struct{}{}
-	}
-
-	// Evict issuers that were registered before but are no longer enabled/active.
-	for prev := range c.delegatedIssuers {
-		if _, keep := desired[prev]; !keep {
-			c.delegatedVerifier.RemoveIssuer(prev)
-		}
-	}
-	c.delegatedIssuers = desired
-	return nil
+	return c.delegatedVerifier.LoadRemoteApplications(ctx, c.Core(), c.delegatedAudiences)
 }
 
-// tenantForIssuer resolves the OpenRails tenant for a VALIDATED token issuer.
-// The `iss` must already be signature-verified by the multi-issuer verifier; this
-// maps it to the tenant via the registry, enforcing the issuer is enabled and its
-// tenant active. Because `issuer` is globally unique, this is the issuer->tenant
-// pin that makes no-cross-tenant-forgery hold: a given key can only ever resolve
-// to its own tenant.
+// merchantForIssuer resolves the OpenRails MERCHANT a VALIDATED token issuer may
+// act on (#481). The chain is role-based, never identity: validated `iss` ->
+// AuthKit remote_application -> the tenant(s) it controls (its tenant
+// memberships) -> the merchant owned by that tenant (merchants.owner_tenant_id).
+// A remote_application controls a tenant and a tenant owns merchants, so this is
+// the runtime billing-authz path: the remote_application is authorized to bill
+// the merchant its owning tenant owns.
 //
-// Returns ErrDelegatedIssuerUnknown when the issuer is not registered, disabled,
-// or maps to a non-active tenant (fail closed).
-func (c *ControlPlane) tenantForIssuer(ctx context.Context, issuer string) (tenant.ID, string, error) {
+// Returns ErrDelegatedIssuerUnknown when the issuer is unregistered, controls no
+// tenant, or that tenant owns no active merchant (fail closed).
+func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (merchant.ID, string, error) {
 	issuer = strings.TrimSpace(issuer)
 	if issuer == "" {
-		return tenant.ID{}, "", ErrDelegatedIssuerUnknown
+		return merchant.ID{}, "", ErrDelegatedIssuerUnknown
 	}
-	if c.pool == nil {
-		return tenant.ID{}, "", errors.New("controlplane: pgx pool unavailable for issuer resolution")
+	if c == nil || c.Core() == nil || c.pool == nil {
+		return merchant.ID{}, "", errors.New("controlplane: control plane unavailable for issuer resolution")
 	}
 
-	var (
-		tidStr string
-		slug   string
-	)
-	err := c.pool.QueryRow(ctx, `
-		SELECT t.id::text, t.slug
-		  FROM openrails.tenant_delegated_issuers i
-		  JOIN openrails.tenants t ON t.id = i.tenant_id
-		 WHERE i.issuer = $1
-		   AND i.enabled
-		   AND t.status = 'active'
-		   AND t.deleted_at IS NULL
-		 LIMIT 1
-	`, issuer).Scan(&tidStr, &slug)
+	ra, err := c.Core().GetRemoteApplication(ctx, issuer)
+	if err != nil || ra == nil || !ra.Enabled {
+		return merchant.ID{}, "", ErrDelegatedIssuerUnknown
+	}
+
+	// The tenant(s) the remote_application controls (its memberships). Resolve the
+	// first one that owns an active merchant.
+	memberships, err := c.Core().RemoteApplicationTenantRoles(ctx, ra.ID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return tenant.ID{}, "", ErrDelegatedIssuerUnknown
+		return merchant.ID{}, "", err
+	}
+	for _, m := range memberships {
+		t, terr := c.Core().ResolveTenantBySlug(ctx, m.Tenant)
+		if terr != nil || t == nil {
+			continue
 		}
-		return tenant.ID{}, "", err
+		mid, mslug, merr := c.merchantDirectoryRow(ctx, `owner_tenant_id = $1`, t.ID)
+		if merr == nil {
+			return mid, mslug, nil
+		}
+		if !errors.Is(merr, pgx.ErrNoRows) {
+			return merchant.ID{}, "", merr
+		}
 	}
-	tid, err := tenant.ParseID(tidStr)
-	if err != nil {
-		return tenant.ID{}, "", err
-	}
-	return tid, slug, nil
+	return merchant.ID{}, "", ErrDelegatedIssuerUnknown
 }

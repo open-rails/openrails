@@ -73,7 +73,7 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 			return nil
 		}
 		// Verify ownership
-		if sub.TenantSubjectID.String() != userID {
+		if sub.MerchantSubjectID.String() != userID {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"user_id":         userID,
 				"subscription_id": job.Args.SubscriptionID,
@@ -157,7 +157,7 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 			return nil
 		}
 		// Verify ownership
-		if sub.TenantSubjectID.String() != userID {
+		if sub.MerchantSubjectID.String() != userID {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"user_id":         userID,
 				"subscription_id": job.Args.SubscriptionID,
@@ -166,7 +166,7 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 		}
 	} else {
 		// Fallback to active subscription lookup
-		tsid, terr := repo.ResolveTenantSubjectID(userID)
+		tsid, terr := repo.ResolveMerchantSubjectID(userID)
 		if terr != nil {
 			return terr
 		}

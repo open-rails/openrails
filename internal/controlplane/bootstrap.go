@@ -10,7 +10,7 @@ import (
 	authcore "github.com/open-rails/authkit/core"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // BootstrapResult reports what the idempotent bootstrap did/ensured.
@@ -126,11 +126,12 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 			Info("controlplane: assigned admin role to initial admin")
 	}
 
-	// 4. Record the AuthKit org on the bootstrap tenant's directory row
-	//    (openrails.tenants, keyed by slug) so tenant resolution / admin policy can
-	//    map this tenant -> org. The resolved OpenRails tenant id is what the admin
-	//    service token below is resource-scoped to (no default tenant; #336).
-	bootstrapTenantID, err := c.recordAuthKitTenantBySlug(ctx, slug, authkitTenant.ID)
+	// 4. Record the owning AuthKit tenant on the bootstrap merchant's directory row
+	//    (openrails.merchants.owner_tenant_id, keyed by slug) so role-based authz can
+	//    map this merchant -> owning tenant (#481 ownership link, NOT identity). The
+	//    resolved OpenRails merchant id is what the admin service token below is
+	//    resource-scoped to (no default merchant; #480).
+	bootstrapMerchantID, err := c.recordOwnerTenantBySlug(ctx, slug, authkitTenant.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +152,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 			serviceToken, secret, merr := core.MintServiceTokenWithOptions(ctx, slug, authcore.ServiceTokenMintOptions{
 				Name:        name,
 				Permissions: OperatorRolePermissions(),
-				Resources:   []authcore.ServiceTokenResource{TenantResource(bootstrapTenantID)},
+				Resources:   []authcore.ServiceTokenResource{MerchantResource(bootstrapMerchantID)},
 			})
 			if merr != nil {
 				return nil, fmt.Errorf("controlplane: mint initial admin service token: %w", merr)
@@ -258,33 +259,32 @@ func anyLiveServiceToken(toks []authcore.ServiceToken) bool {
 	return false
 }
 
-// recordAuthKitTenantBySlug writes the AuthKit org id/slug onto the bootstrap
-// tenant's directory row (openrails.tenants), keyed by the bootstrap slug, and
-// returns the resolved OpenRails tenant id. openrails.* is OpenRails-owned
-// control-plane state, so this is a direct, idempotent UPDATE ... RETURNING — not
-// AuthKit SQL. The bootstrap slug is BOTH the AuthKit org slug and the OpenRails
-// tenant slug; there is no default tenant the row could fall back to (#336), so a
-// missing directory row is an error the caller must surface (provision the tenant
-// first).
-func (c *ControlPlane) recordAuthKitTenantBySlug(ctx context.Context, slug, authKitTenantID string) (tenant.ID, error) {
+// recordOwnerTenantBySlug writes the owning AuthKit tenant uuid onto the bootstrap
+// merchant's directory row (openrails.merchants.owner_tenant_id), keyed by the
+// bootstrap slug, and returns the resolved OpenRails merchant id. This is the
+// #481 OWNERSHIP link (who administers), not identity — openrails.* is
+// OpenRails-owned control-plane state, so this is a direct, idempotent
+// UPDATE ... RETURNING. There is no default merchant the row could fall back to
+// (#480), so a missing directory row is an error the caller must surface (register
+// the merchant before bootstrap).
+func (c *ControlPlane) recordOwnerTenantBySlug(ctx context.Context, slug, ownerTenantID string) (merchant.ID, error) {
 	if c.pool == nil {
-		return tenant.ID{}, errors.New("controlplane: pgx pool unavailable for tenant directory update")
+		return merchant.ID{}, errors.New("controlplane: pgx pool unavailable for merchant directory update")
 	}
 	var idStr string
 	err := c.pool.QueryRow(ctx, `
-		UPDATE openrails.tenants
-		   SET authkit_tenant_id   = $2,
-		       authkit_tenant_slug = $1,
-		       updated_at       = current_timestamp
+		UPDATE openrails.merchants
+		   SET owner_tenant_id = $2,
+		       updated_at      = current_timestamp
 		 WHERE lower(slug) = lower($1)
 		   AND deleted_at IS NULL
 		RETURNING id::text
-	`, slug, authKitTenantID).Scan(&idStr)
+	`, slug, ownerTenantID).Scan(&idStr)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return tenant.ID{}, fmt.Errorf("controlplane: no openrails tenant directory row for bootstrap slug %q (provision the tenant before bootstrap)", slug)
+		return merchant.ID{}, fmt.Errorf("controlplane: no openrails merchant directory row for bootstrap slug %q (register the merchant before bootstrap)", slug)
 	}
 	if err != nil {
-		return tenant.ID{}, fmt.Errorf("controlplane: record authkit tenant on tenant %q: %w", slug, err)
+		return merchant.ID{}, fmt.Errorf("controlplane: record owner tenant on merchant %q: %w", slug, err)
 	}
-	return tenant.ParseID(idStr)
+	return merchant.ParseID(idStr)
 }

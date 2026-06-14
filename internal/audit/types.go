@@ -29,7 +29,7 @@ const (
 	EntityEntitlement   EntityType = "entitlement"
 	EntityPayment       EntityType = "payment"
 	EntityPaymentMethod EntityType = "payment_method"
-	EntityAdminGrant    EntityType = "admin_grant"
+	EntityEntitlementGrant    EntityType = "admin_grant"
 	EntityProduct       EntityType = "product"
 	EntityPrice         EntityType = "price"
 )
@@ -171,9 +171,9 @@ func (c *Checker) registerAllChecks() {
 		// AG-3 (revoked admin grant with active entitlement) was removed during
 		// the sqlc migration: openrails.admin_grants has no revoked_at column, so
 		// the bun-era check could never have executed.
-		&CheckAdminGrantMissingEntitlements{},      // AG-1
+		&CheckEntitlementGrantMissingEntitlements{},      // AG-1
 		&CheckOrphanAdminEntitlements{},            // AG-2
-		&CheckExpiredAdminGrantActiveEntitlement{}, // AG-4
+		&CheckExpiredEntitlementGrantActiveEntitlement{}, // AG-4
 
 		// =====================================================================
 		// Temporal checks

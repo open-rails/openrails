@@ -1,6 +1,6 @@
 -- #358 phase A: provider intent ledger queries — idempotent enqueue, the
 -- executor's SKIP LOCKED lease claim, status transitions, supersede-by-subject
--- and relevance-window expiry. tenant_id is stamped explicitly by the
+-- and relevance-window expiry. merchant_id is stamped explicitly by the
 -- producers (request paths run on a tenant-pinned connection, so RLS
 -- double-checks the stamp); the executor/verifier workers sweep cross-tenant
 -- on the privileged pool like the other River workers.
@@ -9,7 +9,7 @@
 -- Enqueue (effectively-once per logical intent)
 -- ============================================================================
 
--- Idempotent on (tenant_id, idempotency_key). Conflict semantics by current
+-- Idempotent on (merchant_id, idempotency_key). Conflict semantics by current
 -- status:
 --   pending              -> refresh schedule/payload (latest enqueue wins)
 --   superseded | expired -> REVIVE: the intent became relevant again (e.g. a
@@ -21,18 +21,18 @@
 -- Always RETURNs the canonical row for the key.
 -- name: EnqueueProviderIntent :one
 INSERT INTO openrails.provider_intents (
-    tenant_id, provider, intent_type, subscription_id, payment_id, price_id,
+    merchant_id, provider, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
     expires_at, account_fingerprint
 ) VALUES (
-    sqlc.arg(tenant_id), sqlc.arg(provider), sqlc.arg(intent_type),
+    sqlc.arg(merchant_id), sqlc.arg(provider), sqlc.arg(intent_type),
     sqlc.narg(subscription_id), sqlc.narg(payment_id), sqlc.narg(price_id),
     sqlc.narg(payload), sqlc.arg(idempotency_key), 'pending',
     sqlc.arg(next_attempt_at)::timestamptz, sqlc.arg(origin),
     sqlc.narg(origin_reason), sqlc.narg(expires_at),
     sqlc.narg(account_fingerprint)
 )
-ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET
+ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
         WHEN openrails.provider_intents.status IN ('pending', 'superseded', 'expired') THEN 'pending'
         ELSE openrails.provider_intents.status
@@ -259,7 +259,7 @@ SELECT * FROM openrails.provider_intents WHERE id = $1;
 
 -- name: GetProviderIntentByIdempotencyKey :one
 SELECT * FROM openrails.provider_intents
-WHERE tenant_id = sqlc.arg(tenant_id) AND idempotency_key = sqlc.arg(idempotency_key);
+WHERE merchant_id = sqlc.arg(merchant_id) AND idempotency_key = sqlc.arg(idempotency_key);
 
 -- name: CountProviderIntents :one
 SELECT count(*) FROM openrails.provider_intents

@@ -11,7 +11,7 @@ import (
 	authcore "github.com/open-rails/authkit/core"
 	authhttp "github.com/open-rails/authkit/http"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ResolvedDelegated is the result of validating a browser-direct DELEGATED ACCESS
@@ -26,13 +26,13 @@ type ResolvedDelegated struct {
 	// tenant claims (authkit v0.23.0 issuer-only profile); the slug is
 	// receiver-side directory data, identical to TenantSlug.
 	Tenant string
-	// TenantID is the resolved OpenRails tenant (#223).
-	TenantID tenant.ID
+	// MerchantID is the resolved OpenRails tenant (#223).
+	MerchantID merchant.ID
 	// TenantSlug is the resolved tenant's slug.
 	TenantSlug string
-	// TenantSubjectID is the durable OpenRails payable subject for
-	// (TenantID, Issuer, DelegatedSubject).
-	TenantSubjectID uuid.UUID
+	// MerchantSubjectID is the durable OpenRails payable subject for
+	// (MerchantID, Issuer, DelegatedSubject).
+	MerchantSubjectID uuid.UUID
 	// DelegatedSubject is the acting end-user id (`delegated_sub`). This is the
 	// user the self-service handlers scope every read/write to. There is NEVER a
 	// normal `sub` on a delegated access token.
@@ -208,21 +208,21 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 	// The token carries no tenant claims (issuer-only profile, authkit v0.23.0):
 	// the issuer registry is the SOLE source of tenant identity, so slug renames
 	// never invalidate in-flight tokens.
-	tid, tslug, err := c.tenantForIssuer(ctx, issuer)
+	tid, tslug, err := c.merchantForIssuer(ctx, issuer)
 	if err != nil {
 		return nil, err
 	}
 
-	tenantSubjectID, err := c.TouchTenantSubject(ctx, tid, issuer, subject)
+	tenantSubjectID, err := c.TouchMerchantSubject(ctx, tid, issuer, subject)
 	if err != nil {
 		return nil, err
 	}
 
 	return &ResolvedDelegated{
 		Tenant:               tslug,
-		TenantID:             tid,
+		MerchantID: tid,
 		TenantSlug:           tslug,
-		TenantSubjectID:      tenantSubjectID,
+		MerchantSubjectID:      tenantSubjectID,
 		DelegatedSubject:     subject,
 		Issuer:               issuer,
 		Permissions:          append([]string(nil), principal.Permissions...),

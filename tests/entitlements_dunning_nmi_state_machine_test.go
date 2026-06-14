@@ -100,7 +100,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	}
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1", suite.ensureMerchantSubject(ctx, userID))
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", sub.ID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm.ID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
@@ -187,7 +187,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1", suite.ensureMerchantSubject(ctx, userID))
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", sub.ID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm.ID)
 	})

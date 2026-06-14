@@ -2,11 +2,11 @@
 
 -- name: CreateProduct :execrows
 INSERT INTO openrails.products (
-    id, tenant_id, slug, display_name, description, entitlements_spec,
+    id, merchant_id, slug, display_name, description, entitlements_spec,
     credits_spec, tier_group, tier_rank, status, created_at, updated_at
 ) VALUES (
     $1,
-    sqlc.arg(tenant_id)::uuid,
+    sqlc.arg(merchant_id)::uuid,
     $2, $3, sqlc.narg(description), sqlc.narg(entitlements_spec),
     sqlc.narg(credits_spec), sqlc.narg(tier_group),
     COALESCE(NULLIF(sqlc.arg(tier_rank)::int, 0), 0),

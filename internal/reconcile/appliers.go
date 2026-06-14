@@ -8,7 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // LocalWriter performs enforce mode's idempotent LOCAL writes. No method ever
@@ -82,12 +82,12 @@ func metadataJSON(m map[string]any) []byte {
 }
 
 func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error) {
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
 	}
 	n, err := w.DB.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
-		TenantID:        tid.UUID(),
+		MerchantID:        tid.UUID(),
 		PriceID:         a.PriceID,
 		Processor:       gen.OpenrailsProcessorType(a.Processor),
 		TransactionID:   a.TransactionID,
@@ -96,7 +96,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 		SubscriptionID:  a.SubscriptionID,
 		Metadata:        metadataJSON(a.Metadata),
 		PurchasedAt:     a.PurchasedAt,
-		TenantSubjectID: a.TenantSubjectID,
+		MerchantSubjectID: a.MerchantSubjectID,
 	})
 	if err != nil {
 		return false, err
@@ -121,12 +121,12 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	if amount > 0 {
 		amount = -amount // refunds are negative-amount payment rows
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
 	}
 	n, err := w.DB.Gen(ctx).ReconcileRecordRefund(ctx, gen.ReconcileRecordRefundParams{
-		TenantID:          tid.UUID(),
+		MerchantID:          tid.UUID(),
 		PriceID:           a.PriceID,
 		Processor:         gen.OpenrailsProcessorType(a.Processor),
 		TransactionID:     a.TransactionID,
@@ -136,7 +136,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		RefundedPaymentID: a.RefundedPaymentID,
 		Metadata:          metadataJSON(a.Metadata),
 		PurchasedAt:       a.PurchasedAt,
-		TenantSubjectID:   a.TenantSubjectID,
+		MerchantSubjectID:   a.MerchantSubjectID,
 	})
 	if err != nil {
 		return false, err
@@ -161,14 +161,14 @@ func (w *PGLocalWriter) AdoptPaymentMethod(ctx context.Context, a AdoptVaultActi
 func (w *PGLocalWriter) GrantEntitlements(ctx context.Context, a GrantEntitlementsAction) (int, error) {
 	now := w.now()
 	granted := 0
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return granted, err
 	}
 	for _, name := range a.Entitlements {
 		n, err := w.DB.Gen(ctx).ReconcileGrantSubscriptionEntitlement(ctx, gen.ReconcileGrantSubscriptionEntitlementParams{
-			TenantID:        tid.UUID(),
-			TenantSubjectID: a.TenantSubjectID,
+			MerchantID:        tid.UUID(),
+			MerchantSubjectID: a.MerchantSubjectID,
 			Entitlement:     name,
 			StartAt:         a.StartAt,
 			EndAt:           a.EndAt,
@@ -194,12 +194,12 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 	if email := a.UserEmail; email != "" {
 		emailPtr = &email
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return MaterializeResult{}, err
 	}
 	rows, err := w.DB.Gen(ctx).ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
-		TenantID:                tid.UUID(),
+		MerchantID:                tid.UUID(),
 		Status:                  gen.OpenrailsSubscriptionStatus(a.Status),
 		Processor:               a.Processor,
 		ProcessorSubscriptionID: a.ProcessorSubscriptionID,
@@ -207,7 +207,7 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		PeriodStartsAt:          a.PeriodStartsAt,
 		PeriodEndsAt:            a.PeriodEndsAt,
 		StartedAt:               a.StartedAt,
-		TenantSubjectID:         a.TenantSubjectID,
+		MerchantSubjectID:         a.MerchantSubjectID,
 		PriceID:                 a.PriceID,
 		Processors:              localProcessorNames(a.Provider),
 	})
@@ -239,7 +239,7 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 			}
 			granted, err := w.GrantEntitlements(ctx, GrantEntitlementsAction{
 				SubscriptionID:  res.SubscriptionID,
-				TenantSubjectID: a.TenantSubjectID,
+				MerchantSubjectID: a.MerchantSubjectID,
 				Entitlements:    names,
 				StartAt:         start,
 				EndAt:           a.PeriodEndsAt,

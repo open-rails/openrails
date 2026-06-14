@@ -26,15 +26,14 @@ import (
 // (entitlements) so export/delete have rows to purge, and the #225 control-plane
 // tables. It mirrors migrations 039 + 041 for the columns under test.
 const schemaDDL = `
-CREATE SCHEMA IF NOT EXISTS billing;
+CREATE SCHEMA IF NOT EXISTS openrails;
 
-CREATE TABLE IF NOT EXISTS openrails.tenants (
+CREATE TABLE IF NOT EXISTS openrails.merchants (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug             TEXT NOT NULL UNIQUE,
     name             TEXT NOT NULL,
     status           TEXT NOT NULL DEFAULT 'active',
-    authkit_tenant_id   TEXT,
-    authkit_tenant_slug TEXT,
+    owner_tenant_id  TEXT,
     plan             TEXT,
     region           TEXT,
     billing_tier     TEXT,
@@ -50,30 +49,30 @@ CREATE TABLE IF NOT EXISTS openrails.tenants (
 
 CREATE TABLE IF NOT EXISTS openrails.entitlements (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id         UUID,
-    tenant_subject_id UUID
+    merchant_id      UUID,
+    merchant_subject_id UUID
 );
 
-CREATE TABLE IF NOT EXISTS openrails.tenant_subjects (
+CREATE TABLE IF NOT EXISTS openrails.merchant_subjects (
     id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
+    merchant_id UUID NOT NULL,
     issuer    TEXT NOT NULL,
     subject   TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS openrails.tenant_secrets (
-    tenant_id  UUID NOT NULL,
+CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (
+    merchant_id UUID NOT NULL,
     name       TEXT NOT NULL,
     value      TEXT NOT NULL,
     version    INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    PRIMARY KEY (tenant_id, name)
+    PRIMARY KEY (merchant_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS openrails.tenant_credential_audit (
+CREATE TABLE IF NOT EXISTS openrails.merchant_credential_audit (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id  UUID NOT NULL,
+    merchant_id UUID NOT NULL,
     name       TEXT NOT NULL,
     action     TEXT NOT NULL,
     actor      TEXT,
@@ -81,9 +80,9 @@ CREATE TABLE IF NOT EXISTS openrails.tenant_credential_audit (
     created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
 );
 
-CREATE TABLE IF NOT EXISTS openrails.tenant_exports (
+CREATE TABLE IF NOT EXISTS openrails.merchant_exports (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id    UUID NOT NULL,
+    merchant_id  UUID NOT NULL,
     status       TEXT NOT NULL DEFAULT 'completed',
     location     TEXT,
     row_counts   JSONB,
@@ -152,48 +151,44 @@ func newExternalTenancyTestPool(t *testing.T, ctx context.Context, adminDSN stri
 	return pool
 }
 
-// fakeTenantProvisioner records EnsureAuthKitTenant calls and returns a stable id.
-type fakeTenantProvisioner struct{ calls int }
-
-func (f *fakeTenantProvisioner) EnsureAuthKitTenant(_ context.Context, slug string) (string, error) {
-	f.calls++
-	return "org-" + slug, nil
-}
-
-func newSvc(t *testing.T) (*Service, *fakeTenantProvisioner) {
+func newSvc(t *testing.T) *Service {
 	pool := newTestPool(t)
-	tenants := &fakeTenantProvisioner{}
-	svc, err := NewService(db.WrapPool(pool, ""), tenants, NewMemorySecretStore())
+	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore())
 	require.NoError(t, err)
-	return svc, tenants
+	return svc
 }
 
 func TestProvision_Idempotent(t *testing.T) {
 	ctx := context.Background()
-	svc, tenants := newSvc(t)
+	svc := newSvc(t)
 
-	req := ProvisionRequest{Slug: "acme", Name: "Acme", WebhookHost: "acme.example.com", BillingTier: "pro"}
+	// #481: provisioning a merchant does NOT auto-mint an AuthKit org. The owner
+	// tenant is an EXPLICIT link the caller supplies (here a pre-existing org uuid).
+	req := ProvisionRequest{Slug: "acme", Name: "Acme", OwnerTenantID: "org-acme", WebhookHost: "acme.example.com", BillingTier: "pro"}
 	first, err := svc.Provision(ctx, req)
 	require.NoError(t, err)
 	require.Equal(t, "acme", first.Slug)
-	require.Equal(t, "org-tenant-acme", first.AuthKitTenantID)
+	require.Equal(t, "org-acme", first.OwnerTenantID, "explicit owner-tenant link recorded (never auto-minted)")
 	require.Equal(t, "pro", first.BillingTier)
 
-	// Re-provision: same tenant id, no duplicate row, org ensured again (the org
-	// provisioner is itself idempotent).
+	// Re-provision: same merchant id, no duplicate row (idempotent).
 	second, err := svc.Provision(ctx, req)
 	require.NoError(t, err)
 	require.Equal(t, first.ID, second.ID)
 
 	var count int
-	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.tenants WHERE slug='acme'`).Scan(&count))
-	require.Equal(t, 1, count, "provision must not create a duplicate tenant row")
-	require.GreaterOrEqual(t, tenants.calls, 2, "org provisioner called on each provision")
+	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchants WHERE slug='acme'`).Scan(&count))
+	require.Equal(t, 1, count, "provision must not create a duplicate merchant row")
+
+	// A merchant provisioned with NO owner is unowned (embedded path): no org minted.
+	un, err := svc.Provision(ctx, ProvisionRequest{Slug: "noown", Name: "NoOwner"})
+	require.NoError(t, err)
+	require.Empty(t, un.OwnerTenantID, "no owner supplied -> unowned merchant, no auto-minted org")
 }
 
 func TestSuspend_DeniesWritesAllowsReads(t *testing.T) {
 	ctx := context.Background()
-	svc, _ := newSvc(t)
+	svc := newSvc(t)
 	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", Name: "Acme"})
 	require.NoError(t, err)
 
@@ -225,18 +220,18 @@ func TestSuspend_DeniesWritesAllowsReads(t *testing.T) {
 
 func TestDelete_RequiresExport(t *testing.T) {
 	ctx := context.Background()
-	svc, _ := newSvc(t)
+	svc := newSvc(t)
 	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", Name: "Acme"})
 	require.NoError(t, err)
 
 	// Seed a tenant-owned row + a secret so the purge has something to remove.
 	_, err = svc.pool.Exec(ctx, `
 		WITH subject AS (
-			INSERT INTO openrails.tenant_subjects (tenant_id, issuer, subject)
+			INSERT INTO openrails.merchant_subjects (merchant_id, issuer, subject)
 			VALUES ($1::uuid, 'test', 'u1')
 			RETURNING id
 		)
-		INSERT INTO openrails.entitlements (tenant_id, tenant_subject_id)
+		INSERT INTO openrails.entitlements (merchant_id, merchant_subject_id)
 		SELECT $1::uuid, id FROM subject
 	`, tn.ID.String())
 	require.NoError(t, err)
@@ -259,7 +254,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 	require.NoError(t, svc.Delete(ctx, tn.ID, DeleteOptions{Confirm: true}))
 
 	var entCount int
-	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements WHERE tenant_id=$1::uuid`, tn.ID.String()).Scan(&entCount))
+	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1::uuid`, tn.ID.String()).Scan(&entCount))
 	require.Equal(t, 0, entCount, "delete must purge tenant-owned rows")
 
 	// The directory row is tombstoned (no longer resolvable as active).
@@ -269,7 +264,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 
 func TestCredentialRotation_WritesAudit(t *testing.T) {
 	ctx := context.Background()
-	svc, _ := newSvc(t)
+	svc := newSvc(t)
 	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", Name: "Acme"})
 	require.NoError(t, err)
 
@@ -289,7 +284,7 @@ func TestCredentialRotation_WritesAudit(t *testing.T) {
 	// Audit rows recorded for both put and rotate.
 	var auditCount int
 	require.NoError(t, svc.pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.tenant_credential_audit WHERE tenant_id=$1::uuid`,
+		`SELECT count(*) FROM openrails.merchant_credential_audit WHERE merchant_id=$1::uuid`,
 		tn.ID.String()).Scan(&auditCount))
 	require.GreaterOrEqual(t, auditCount, 2)
 
@@ -306,19 +301,19 @@ func TestCredentialRotation_WritesAudit(t *testing.T) {
 
 func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	ctx := context.Background()
-	svc, _ := newSvc(t)
+	svc := newSvc(t)
 	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", Name: "Acme", WebhookHost: "hooks.acme.com"})
 	require.NoError(t, err)
 
 	// Resolve by slug.
 	route, err := svc.ResolveBySlug(ctx, "acme")
 	require.NoError(t, err)
-	require.Equal(t, tn.ID, route.TenantID)
+	require.Equal(t, tn.ID, route.MerchantID)
 
 	// Resolve by host (with a port, which must be stripped).
 	route, err = svc.ResolveByHost(ctx, "hooks.acme.com:443")
 	require.NoError(t, err)
-	require.Equal(t, tn.ID, route.TenantID)
+	require.Equal(t, tn.ID, route.MerchantID)
 
 	// Unknown slug/host is unresolved (caller must reject; never default-fallback).
 	_, err = svc.ResolveBySlug(ctx, "nope")
@@ -330,7 +325,7 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	// boundary), which is namespaced to the tenant.
 	_, err = svc.secrets.Put(ctx, tn.ID, SecretStripeWebhookSigning, "whsec_acme")
 	require.NoError(t, err)
-	creds, err := svc.LoadStripeCredentials(ctx, route.TenantID)
+	creds, err := svc.LoadStripeCredentials(ctx, route.MerchantID)
 	require.NoError(t, err)
 	require.Equal(t, "whsec_acme", creds.WebhookSigningSecret)
 

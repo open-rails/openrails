@@ -51,13 +51,13 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// ErrTenantSubjectRequired is returned when a budget operation is given a zero tenant subject
+// ErrMerchantSubjectRequired is returned when a budget operation is given a zero tenant subject
 // id. Like the credits engine, the payer is supplied by the caller and is never
 // synthesized.
-var ErrTenantSubjectRequired = errors.New("tenant_subject_id required")
+var ErrMerchantSubjectRequired = errors.New("tenant_subject_id required")
 
 // ErrReservationNotFound is returned by Capture/Release when no active
 // reservation with the given id exists for the request tenant.
@@ -152,12 +152,12 @@ func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
 // Check computes per-window used/reserved/remaining for an actor and returns the
 // allow/deny decision for requestedMicros WITHOUT writing anything (window
 // state is derived virtually; expired session windows read as fresh).
-func (s *Service) Check(ctx context.Context, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, requestedMicros int64) ([]WindowStatus, bool, error) {
+func (s *Service) Check(ctx context.Context, payer identity.MerchantSubjectID, actor string, windows []BudgetWindow, requestedMicros int64) ([]WindowStatus, bool, error) {
 	if s == nil || s.db == nil {
 		return nil, false, fmt.Errorf("budgets service not initialized")
 	}
 	if payer.IsZero() {
-		return nil, false, ErrTenantSubjectRequired
+		return nil, false, ErrMerchantSubjectRequired
 	}
 	actor = strings.TrimSpace(actor)
 	if actor == "" {
@@ -187,12 +187,12 @@ func (s *Service) Check(ctx context.Context, payer identity.TenantSubjectID, act
 // window_start; a first-ever charge inserts the state row with anchor=now) and
 // inserts an "active" reservation, all in one transaction. Denied requests
 // write nothing: a denied first request does NOT start a user's window.
-func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, amountMicros int64, source, sourceID string, ttl time.Duration) (uuid.UUID, []WindowStatus, bool, error) {
+func (s *Service) Reserve(ctx context.Context, payer identity.MerchantSubjectID, actor string, windows []BudgetWindow, amountMicros int64, source, sourceID string, ttl time.Duration) (uuid.UUID, []WindowStatus, bool, error) {
 	if s == nil || s.db == nil {
 		return uuid.Nil, nil, false, fmt.Errorf("budgets service not initialized")
 	}
 	if payer.IsZero() {
-		return uuid.Nil, nil, false, ErrTenantSubjectRequired
+		return uuid.Nil, nil, false, ErrMerchantSubjectRequired
 	}
 	actor = strings.TrimSpace(actor)
 	if actor == "" {
@@ -207,7 +207,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 		return uuid.Nil, nil, false, fmt.Errorf("amount must be non-negative")
 	}
 
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return uuid.Nil, nil, false, err
 	}
@@ -224,13 +224,13 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 
 		// Materialize the payable tenant_subjects row so the budget_reservations /
 		// budget_window_state FKs are satisfied on a subject's first reservation (#317).
-		if _, err := repo.EnsureTenantSubjectID(ctx, tx, tenantID, payerID.String()); err != nil {
+		if _, err := repo.EnsureMerchantSubjectID(ctx, tx, tenantID, payerID.String()); err != nil {
 			return err
 		}
 
 		// Idempotency: a replayed Reserve returns the existing row verbatim.
 		existing, gerr := q.GetBudgetReservationByCoords(ctx, gen.GetBudgetReservationByCoordsParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			MerchantID: tenantID, MerchantSubjectID: payerID,
 			Actor: actor, Source: source, SourceID: sourceID,
 		})
 		if gerr == nil {
@@ -264,8 +264,8 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 			if op.insert != nil {
 				if err := q.InsertBudgetWindowStateIfAbsent(ctx, gen.InsertBudgetWindowStateIfAbsentParams{
 					ID:              op.insert.ID,
-					TenantID:        tenantID,
-					TenantSubjectID: payerID,
+					MerchantID:        tenantID,
+					MerchantSubjectID: payerID,
 					Actor:           op.insert.Actor,
 					WindowKey:       op.insert.WindowKey,
 					Cadence:         op.insert.Cadence,
@@ -292,8 +292,8 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 
 		res := &models.BudgetReservation{
 			ID:              uuidutil.NewV7(),
-			TenantID:        tenantID,
-			TenantSubjectID: payerID,
+			MerchantID:        tenantID,
+			MerchantSubjectID: payerID,
 			Actor:           actor,
 			AmountMicros:    amountMicros,
 			Status:          "active",
@@ -307,8 +307,8 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 		}
 		if err := q.InsertBudgetReservation(ctx, gen.InsertBudgetReservationParams{
 			ID:              res.ID,
-			TenantID:        res.TenantID,
-			TenantSubjectID: res.TenantSubjectID,
+			MerchantID:        res.MerchantID,
+			MerchantSubjectID: res.MerchantSubjectID,
 			Actor:           res.Actor,
 			AmountMicros:    res.AmountMicros,
 			Status:          res.Status,
@@ -419,8 +419,8 @@ func effectiveStart(st *models.BudgetWindowState, cadence string, windowSeconds 
 func windowStateFromGen(r gen.OpenrailsBudgetWindowState) *models.BudgetWindowState {
 	return &models.BudgetWindowState{
 		ID:              r.ID,
-		TenantID:        r.TenantID,
-		TenantSubjectID: r.TenantSubjectID,
+		MerchantID:        r.MerchantID,
+		MerchantSubjectID: r.MerchantSubjectID,
 		Actor:           r.Actor,
 		WindowKey:       r.WindowKey,
 		Cadence:         r.Cadence,
@@ -442,9 +442,9 @@ func windowStateFromGen(r gen.OpenrailsBudgetWindowState) *models.BudgetWindowSt
 // reserves around a boundary — and the returned []windowOpen describes the
 // state writes to apply if the request proceeds. With lock=false (Check,
 // post-insert echo) nothing is locked and opens is nil.
-func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, requestedMicros int64, lock bool) ([]WindowStatus, bool, []windowOpen, error) {
+func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identity.MerchantSubjectID, actor string, windows []BudgetWindow, requestedMicros int64, lock bool) ([]WindowStatus, bool, []windowOpen, error) {
 	now := s.now()
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, false, nil, err
 	}
@@ -476,7 +476,7 @@ func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identit
 
 		var st *models.BudgetWindowState
 		stateKey := gen.GetBudgetWindowStateParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			MerchantID: tenantID, MerchantSubjectID: payerID,
 			Actor: actor, WindowKey: w.Key,
 		}
 		var row gen.OpenrailsBudgetWindowState
@@ -500,7 +500,7 @@ func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identit
 		var used, reserved int64
 		if active {
 			agg, err := q.AggregateBudgetWindow(ctx, gen.AggregateBudgetWindowParams{
-				TenantID: tenantID, TenantSubjectID: payerID, Actor: actor,
+				MerchantID: tenantID, MerchantSubjectID: payerID, Actor: actor,
 				WindowStart: start,
 			})
 			if err != nil {

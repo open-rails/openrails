@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // dbDEKStore persists wrapped per-tenant DEKs in openrails.tenant_deks (migration
@@ -27,7 +27,7 @@ func NewDBDEKStore(pool *db.Pool) (DEKStore, error) {
 	return &dbDEKStore{pool: pool}, nil
 }
 
-func (s *dbDEKStore) GetWrappedDEK(ctx context.Context, tenantID tenant.ID) ([]byte, bool, error) {
+func (s *dbDEKStore) GetWrappedDEK(ctx context.Context, tenantID merchant.ID) ([]byte, bool, error) {
 	var wrapped []byte
 	err := s.pool.QueryRow(ctx, `
 		SELECT wrapped_dek FROM openrails.tenant_deks WHERE tenant_id = $1::uuid
@@ -45,7 +45,7 @@ func (s *dbDEKStore) GetWrappedDEK(ctx context.Context, tenantID tenant.ID) ([]b
 // tenant (concurrent first-use) — keeps the existing wrapped DEK and returns it.
 // The ON CONFLICT ... DO UPDATE with the no-op assignment guarantees RETURNING
 // yields the row that actually persists, so racing creators converge.
-func (s *dbDEKStore) PutWrappedDEK(ctx context.Context, tenantID tenant.ID, wrapped []byte) ([]byte, error) {
+func (s *dbDEKStore) PutWrappedDEK(ctx context.Context, tenantID merchant.ID, wrapped []byte) ([]byte, error) {
 	var stored []byte
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO openrails.tenant_deks (tenant_id, wrapped_dek)

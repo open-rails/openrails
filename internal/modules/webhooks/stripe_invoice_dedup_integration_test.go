@@ -31,7 +31,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 
 	now := time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
 	billingDays := int32(30)
@@ -63,7 +63,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE merchant_subject_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
@@ -76,7 +76,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	const invoiceID = "in_dedup_1"
 	require.NoError(t, paymentSvc.Create(ctx, &models.Payment{
 		ID:              uuid.New(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		PriceID:         priceID,
 		Processor:       models.ProcessorStripe,
 		TransactionID:   chargeID,
@@ -114,7 +114,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	// metadata, so they never match.
 	require.NoError(t, paymentSvc.Create(ctx, &models.Payment{
 		ID:              uuid.New(),
-		TenantSubjectID: tenantSubjectID,
+		MerchantSubjectID: tenantSubjectID,
 		PriceID:         priceID,
 		Processor:       models.ProcessorStripe,
 		TransactionID:   "failed:in_dedup_2",

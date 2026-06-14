@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // This file holds the gin-free net/http analogues of the global engine
@@ -128,16 +128,16 @@ func CORSHTTP(allowedOrigins []string) HTTPMiddleware {
 // the correct tenant (issue #223/#227). An OpenRails engine is bound to a single
 // tenant at construction — there is NO default tenant (#336).
 //
-// If `configured` is zero, NOTHING is pinned: downstream tenant.Require fails,
+// If `configured` is zero, NOTHING is pinned: downstream merchant.Require fails,
 // so a missing tenant is a hard error rather than a silent default.
-func ResolveTenantHTTP(configured tenant.ID) HTTPMiddleware {
+func ResolveTenantHTTP(configured merchant.ID) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if configured.IsZero() {
 				next.ServeHTTP(w, r)
 				return
 			}
-			ctx := tenant.WithID(r.Context(), configured)
+			ctx := merchant.WithID(r.Context(), configured)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

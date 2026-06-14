@@ -330,7 +330,7 @@ func (w *fakeWriter) BackfillPayment(ctx context.Context, a BackfillPaymentActio
 		}
 	}
 	w.local.payments = append(w.local.payments, LocalPayment{
-		ID: uuid.New(), TenantSubjectID: a.TenantSubjectID, Processor: a.Processor,
+		ID: uuid.New(), MerchantSubjectID: a.MerchantSubjectID, Processor: a.Processor,
 		TransactionID: a.TransactionID, AmountCents: a.AmountCents, Status: "completed",
 		SubscriptionID: a.SubscriptionID, PurchasedAt: a.PurchasedAt,
 	})
@@ -362,7 +362,7 @@ func (w *fakeWriter) RecordRefund(ctx context.Context, a RecordRefundAction) (bo
 		}
 	}
 	w.local.payments = append(w.local.payments, LocalPayment{
-		ID: uuid.New(), TenantSubjectID: a.TenantSubjectID, Processor: a.Processor,
+		ID: uuid.New(), MerchantSubjectID: a.MerchantSubjectID, Processor: a.Processor,
 		TransactionID: a.TransactionID, AmountCents: -a.AmountCents, Status: "completed",
 		SubscriptionID: a.SubscriptionID, RefundedPaymentID: a.RefundedPaymentID, PurchasedAt: a.PurchasedAt,
 	})
@@ -416,7 +416,7 @@ func (w *fakeWriter) GrantEntitlements(ctx context.Context, a GrantEntitlementsA
 			continue
 		}
 		w.local.state.Entitlements = append(w.local.state.Entitlements, LocalEntitlement{
-			ID: uuid.New(), TenantSubjectID: a.TenantSubjectID, Entitlement: name,
+			ID: uuid.New(), MerchantSubjectID: a.MerchantSubjectID, Entitlement: name,
 			SourceID: a.SubscriptionID, StartAt: a.StartAt, EndAt: a.EndAt,
 		})
 		granted++
@@ -440,7 +440,7 @@ func (w *fakeWriter) MaterializeSubscription(ctx context.Context, a MaterializeS
 	priceID := a.PriceID
 	sub := LocalSubscription{
 		ID:                      uuid.New(),
-		TenantSubjectID:         a.TenantSubjectID,
+		MerchantSubjectID:         a.MerchantSubjectID,
 		PriceID:                 &priceID,
 		ProductID:               a.ProductID,
 		Status:                  a.Status,
@@ -463,7 +463,7 @@ func (w *fakeWriter) MaterializeSubscription(ctx context.Context, a MaterializeS
 		}
 		granted, err := w.GrantEntitlements(ctx, GrantEntitlementsAction{
 			SubscriptionID:  sub.ID,
-			TenantSubjectID: a.TenantSubjectID,
+			MerchantSubjectID: a.MerchantSubjectID,
 			Entitlements:    fakeMaterializeEntitlements,
 			StartAt:         start,
 			EndAt:           a.PeriodEndsAt,
@@ -526,7 +526,7 @@ func liveLocalSub(provider Provider, psid string) LocalSubscription {
 	priceID := uuid.New()
 	return LocalSubscription{
 		ID:                      uuid.New(),
-		TenantSubjectID:         uuid.New(),
+		MerchantSubjectID:         uuid.New(),
 		PriceID:                 &priceID,
 		ProductID:               uuid.New(),
 		Status:                  "active",
@@ -541,7 +541,7 @@ func liveLocalSub(provider Provider, psid string) LocalSubscription {
 
 func withLiveEntitlement(local *fakeLocal, s *LocalSubscription) {
 	local.state.Entitlements = append(local.state.Entitlements, LocalEntitlement{
-		ID: uuid.New(), TenantSubjectID: s.TenantSubjectID, Entitlement: "premium",
+		ID: uuid.New(), MerchantSubjectID: s.MerchantSubjectID, Entitlement: "premium",
 		SourceID: s.ID, StartAt: testNow.Add(-10 * 24 * time.Hour), EndAt: s.CurrentPeriodEndsAt,
 	})
 }
@@ -794,7 +794,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		// Payment exists + entitlement granted for the current period.
 		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, []string{"txn-1001"})
 		require.Len(t, payments, 1)
-		assert.Equal(t, sub.TenantSubjectID, payments[0].TenantSubjectID)
+		assert.Equal(t, sub.MerchantSubjectID, payments[0].MerchantSubjectID)
 		st, _ := local.Load(ctx, ProviderNMI)
 		require.Len(t, st.Entitlements, 1)
 		assert.Equal(t, "premium", st.Entitlements[0].Entitlement)
@@ -838,7 +838,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		local.state.Subscriptions = []LocalSubscription{sub}
 		subID := sub.ID
 		original := LocalPayment{
-			ID: uuid.New(), TenantSubjectID: sub.TenantSubjectID, Processor: "nmi",
+			ID: uuid.New(), MerchantSubjectID: sub.MerchantSubjectID, Processor: "nmi",
 			TransactionID: "txn-5001", AmountCents: 999, Status: "completed",
 			SubscriptionID: &subID, PurchasedAt: testNow.Add(-10 * 24 * time.Hour),
 		}
@@ -877,8 +877,8 @@ func TestDiffTaxonomy(t *testing.T) {
 		subID := sub.ID
 		originalID := uuid.New()
 		local.payments = []LocalPayment{
-			{ID: originalID, TenantSubjectID: sub.TenantSubjectID, Processor: "stripe", TransactionID: "ch_1", AmountCents: 999, Status: "refunded", SubscriptionID: &subID, PurchasedAt: testNow.Add(-9 * 24 * time.Hour)},
-			{ID: uuid.New(), TenantSubjectID: sub.TenantSubjectID, Processor: "stripe", TransactionID: "re_1", AmountCents: -999, Status: "completed", SubscriptionID: &subID, RefundedPaymentID: &originalID, PurchasedAt: testNow.Add(-8 * 24 * time.Hour)},
+			{ID: originalID, MerchantSubjectID: sub.MerchantSubjectID, Processor: "stripe", TransactionID: "ch_1", AmountCents: 999, Status: "refunded", SubscriptionID: &subID, PurchasedAt: testNow.Add(-9 * 24 * time.Hour)},
+			{ID: uuid.New(), MerchantSubjectID: sub.MerchantSubjectID, Processor: "stripe", TransactionID: "re_1", AmountCents: -999, Status: "completed", SubscriptionID: &subID, RefundedPaymentID: &originalID, PurchasedAt: testNow.Add(-8 * 24 * time.Hour)},
 		}
 		snap := &RemoteSnapshot{
 			Provider:     ProviderStripe,
@@ -903,7 +903,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		withLiveEntitlement(local, &sub)
 		subID := sub.ID
 		local.payments = []LocalPayment{
-			{ID: uuid.New(), TenantSubjectID: sub.TenantSubjectID, Processor: "stripe", TransactionID: "ch_66", AmountCents: 999, Status: "completed", SubscriptionID: &subID, PurchasedAt: testNow.Add(-5 * 24 * time.Hour)},
+			{ID: uuid.New(), MerchantSubjectID: sub.MerchantSubjectID, Processor: "stripe", TransactionID: "ch_66", AmountCents: 999, Status: "completed", SubscriptionID: &subID, PurchasedAt: testNow.Add(-5 * 24 * time.Hour)},
 		}
 		snap := &RemoteSnapshot{
 			Provider:     ProviderStripe,
@@ -930,7 +930,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		local := &fakeLocal{}
 		sub := liveLocalSub(ProviderNMI, "nmi-sub-7")
 		pm := LocalPaymentMethod{
-			ID: uuid.New(), TenantSubjectID: sub.TenantSubjectID, Processor: "nmi",
+			ID: uuid.New(), MerchantSubjectID: sub.MerchantSubjectID, Processor: "nmi",
 			VaultID: "vault-7", LastFour: "1111", ExpiryDate: "10/25",
 		}
 		local.state.Subscriptions = []LocalSubscription{sub}
@@ -963,7 +963,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		sub := liveLocalSub(ProviderNMI, "dup-1")
 		sub.TierGroup = "premium"
 		dup := liveLocalSub(ProviderNMI, "dup-2")
-		dup.TenantSubjectID = sub.TenantSubjectID
+		dup.MerchantSubjectID = sub.MerchantSubjectID
 		dup.TierGroup = "premium"
 		dup.Status = "past_due"
 		local.state.Subscriptions = []LocalSubscription{sub, dup}
@@ -1158,12 +1158,12 @@ func TestCapabilityGating(t *testing.T) {
 	ctx := context.Background()
 	local := &fakeLocal{}
 	sub := liveLocalSub(ProviderNMI, "nmi-gate")
-	pm := LocalPaymentMethod{ID: uuid.New(), TenantSubjectID: sub.TenantSubjectID, Processor: "nmi", VaultID: "vault-gate", LastFour: "1111", ExpiryDate: "1025"}
+	pm := LocalPaymentMethod{ID: uuid.New(), MerchantSubjectID: sub.MerchantSubjectID, Processor: "nmi", VaultID: "vault-gate", LastFour: "1111", ExpiryDate: "1025"}
 	local.state.Subscriptions = []LocalSubscription{sub}
 	local.state.PaymentMethods = []LocalPaymentMethod{pm}
 	subID := sub.ID
 	local.payments = []LocalPayment{
-		{ID: uuid.New(), TenantSubjectID: sub.TenantSubjectID, Processor: "nmi", TransactionID: "txn-gate", AmountCents: 999, Status: "completed", SubscriptionID: &subID, PurchasedAt: testNow.Add(-time.Hour)},
+		{ID: uuid.New(), MerchantSubjectID: sub.MerchantSubjectID, Processor: "nmi", TransactionID: "txn-gate", AmountCents: 999, Status: "completed", SubscriptionID: &subID, PurchasedAt: testNow.Add(-time.Hour)},
 	}
 	// Snapshot contains a chargeback and a divergent vault entry, but the
 	// provider declares neither capability: both checks must be skipped.
@@ -1347,7 +1347,7 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 	}
 	local.state.Prices = []LocalPrice{price}
 	local.state.PaymentMethods = []LocalPaymentMethod{{
-		ID: uuid.New(), TenantSubjectID: subjectID, Processor: "mobius",
+		ID: uuid.New(), MerchantSubjectID: subjectID, Processor: "mobius",
 		VaultID: "vault-77", LastFour: "1111", ExpiryDate: "1029",
 	}}
 	end := testNow.Add(20 * 24 * time.Hour)

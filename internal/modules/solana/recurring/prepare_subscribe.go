@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -113,7 +113,7 @@ func NewPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rp
 // the canonical, server-resolved values from the price's Solana config (never
 // client-supplied amounts).
 type PrepareSubscribeInput struct {
-	TenantID         tenant.ID
+	MerchantID         merchant.ID
 	SubscriberWallet string // the connected wallet (signer + fee payer)
 	PlanID           uint64
 	MintSymbol       string
@@ -174,7 +174,7 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	if err != nil {
 		return nil, fmt.Errorf("recurring: invalid subscriber wallet: %w", err)
 	}
-	merchant, err := s.submitter.MerchantAddress(ctx, in.TenantID)
+	merchant, err := s.submitter.MerchantAddress(ctx, in.MerchantID)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: resolve merchant: %w", err)
 	}
@@ -321,7 +321,7 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	if err != nil {
 		return nil, err
 	}
-	tx, err := solanaint.BuildPartiallySignedTx(ctx, in.TenantID, s.signer, s.rpc, subscriber,
+	tx, err := solanaint.BuildPartiallySignedTx(ctx, in.MerchantID, s.signer, s.rpc, subscriber,
 		[]solanago.Instruction{taggedSubscribeIx, transferIx})
 	if err != nil {
 		return nil, err

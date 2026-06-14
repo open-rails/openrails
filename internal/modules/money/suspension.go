@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // suspension.go — account suspension + payment-method-verification STATE
@@ -32,11 +32,11 @@ import (
 // NOTE: this only RECORDS the flag. The actual $1 auth-and-void verification
 // charge (needing a Charger.AuthorizeAndVoid capability) is out of this slice;
 // a caller flips this after running that flow successfully.
-func (s *MoneyService) SetPaymentMethodVerified(ctx context.Context, payer identity.TenantSubjectID, verified bool) error {
+func (s *MoneyService) SetPaymentMethodVerified(ctx context.Context, payer identity.MerchantSubjectID, verified bool) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
@@ -50,7 +50,7 @@ func (s *MoneyService) SetPaymentMethodVerified(ctx context.Context, payer ident
 			return err
 		}
 		return q.SetMoneyAccountPaymentVerified(ctx, gen.SetMoneyAccountPaymentVerifiedParams{
-			TenantID: tenantID, TenantSubjectID: payerID, Currency: DefaultCurrency,
+			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: DefaultCurrency,
 			Verified: verified, Now: now,
 		})
 	})
@@ -59,11 +59,11 @@ func (s *MoneyService) SetPaymentMethodVerified(ctx context.Context, payer ident
 // Suspend marks (payer, credit_type) suspended: stamps suspended_at=now and
 // records suspend_reason. Upserts the settings row if one does not yet exist.
 // Admission-deny-on-suspended wiring is a separate slice.
-func (s *MoneyService) Suspend(ctx context.Context, payer identity.TenantSubjectID, reason string) error {
+func (s *MoneyService) Suspend(ctx context.Context, payer identity.MerchantSubjectID, reason string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
@@ -78,7 +78,7 @@ func (s *MoneyService) Suspend(ctx context.Context, payer identity.TenantSubject
 			return err
 		}
 		return q.SuspendMoneyAccount(ctx, gen.SuspendMoneyAccountParams{
-			TenantID: tenantID, TenantSubjectID: payerID, Currency: DefaultCurrency,
+			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: DefaultCurrency,
 			Now: now, Reason: nilIfEmpty(reason),
 		})
 	})
@@ -86,11 +86,11 @@ func (s *MoneyService) Suspend(ctx context.Context, payer identity.TenantSubject
 
 // Resume clears the suspension on (payer, credit_type): nulls suspended_at and
 // suspend_reason. No-op (other than touching updated_at) if not suspended.
-func (s *MoneyService) Resume(ctx context.Context, payer identity.TenantSubjectID) error {
+func (s *MoneyService) Resume(ctx context.Context, payer identity.MerchantSubjectID) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
@@ -104,14 +104,14 @@ func (s *MoneyService) Resume(ctx context.Context, payer identity.TenantSubjectI
 			return err
 		}
 		return q.ResumeMoneyAccount(ctx, gen.ResumeMoneyAccountParams{
-			TenantID: tenantID, TenantSubjectID: payerID, Currency: DefaultCurrency, UpdatedAt: now,
+			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: DefaultCurrency, UpdatedAt: now,
 		})
 	})
 }
 
 // IsSuspended reports whether (payer, credit_type) is currently suspended
 // (suspended_at set). An payer with no settings row is not suspended.
-func (s *MoneyService) IsSuspended(ctx context.Context, payer identity.TenantSubjectID) (bool, error) {
+func (s *MoneyService) IsSuspended(ctx context.Context, payer identity.MerchantSubjectID) (bool, error) {
 	settings, err := s.GetAccountSettings(ctx, payer)
 	if err != nil {
 		return false, err
@@ -121,7 +121,7 @@ func (s *MoneyService) IsSuspended(ctx context.Context, payer identity.TenantSub
 
 // IsPaymentMethodVerified reports whether (payer, credit_type) has a verified
 // payment method. An payer with no settings row is not verified.
-func (s *MoneyService) IsPaymentMethodVerified(ctx context.Context, payer identity.TenantSubjectID) (bool, error) {
+func (s *MoneyService) IsPaymentMethodVerified(ctx context.Context, payer identity.MerchantSubjectID) (bool, error) {
 	settings, err := s.GetAccountSettings(ctx, payer)
 	if err != nil {
 		return false, err
@@ -132,7 +132,7 @@ func (s *MoneyService) IsPaymentMethodVerified(ctx context.Context, payer identi
 // ArrearsRequiresVerification reports whether an account is on a credit line
 // (arrears) but has NOT verified a payment method (#299 PM-on-file gate). When
 // true, admission should deny credit-line spend until a method is verified.
-func (s *MoneyService) ArrearsRequiresVerification(ctx context.Context, payer identity.TenantSubjectID) (bool, error) {
+func (s *MoneyService) ArrearsRequiresVerification(ctx context.Context, payer identity.MerchantSubjectID) (bool, error) {
 	settings, err := s.GetAccountSettings(ctx, payer)
 	if err != nil {
 		return false, err

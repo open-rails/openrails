@@ -23,7 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // TestAuthorizeAndHold_Atomic proves the #235/#247 atomic authorize+hold under
@@ -65,7 +65,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
-	payer := identity.TenantSubjectIDFromString(uuid.NewString())
+	payer := identity.MerchantSubjectIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 
 	t.Cleanup(func() {
@@ -110,12 +110,12 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	svc, err := billingservice.New(rt)
 	require.NoError(t, err)
 
-	tctx := tenant.WithID(ctx, mustTenantID(t, tenantID))
+	tctx := merchant.WithID(ctx, mustTenantID(t, tenantID))
 	exp := now.Add(time.Hour)
 
 	// (1) Authorize WITHIN balance => allowed + hold placed + available reduced.
 	res, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-		TenantSubjectID: payer, Actor: "serviceToken:k1", EstimateMicros: 600,
+		MerchantSubjectID: payer, Actor: "serviceToken:k1", EstimateMicros: 600,
 		RequestID: "req-1", ExpiresAt: exp,
 	})
 	require.NoError(t, err)
@@ -130,7 +130,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 
 	// (2) Authorize OVER remaining balance => denied, NO new hold.
 	deny, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-		TenantSubjectID: payer, Actor: "serviceToken:k1", EstimateMicros: 700,
+		MerchantSubjectID: payer, Actor: "serviceToken:k1", EstimateMicros: 700,
 		RequestID: "req-2", ExpiresAt: exp,
 	})
 	require.NoError(t, err)
@@ -152,7 +152,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			results[i], errs[i] = svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-				TenantSubjectID: payer, Actor: "serviceToken:k1", EstimateMicros: 300,
+				MerchantSubjectID: payer, Actor: "serviceToken:k1", EstimateMicros: 300,
 				RequestID: "req-conc-" + string(rune('a'+i)), ExpiresAt: exp,
 			})
 		}(i)
@@ -175,9 +175,9 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	require.Equal(t, int64(100), final.AvailableMicros)
 }
 
-func mustTenantID(t *testing.T, s string) tenant.ID {
+func mustTenantID(t *testing.T, s string) merchant.ID {
 	t.Helper()
-	id, err := tenant.ParseID(s)
+	id, err := merchant.ParseID(s)
 	require.NoError(t, err)
 	return id
 }

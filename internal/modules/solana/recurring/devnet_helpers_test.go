@@ -46,7 +46,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -154,7 +154,7 @@ func (f fixedSubReader) GetBySubscriptionID(context.Context, uuid.UUID) (*models
 // solana/private_key so the production keypair signer / Submitter resolve it.
 type memSecretGetter struct{ key string }
 
-func (m memSecretGetter) GetSecret(_ context.Context, _ tenant.ID, name string) (string, error) {
+func (m memSecretGetter) GetSecret(_ context.Context, _ merchant.ID, name string) (string, error) {
 	return m.key, nil
 }
 
@@ -169,7 +169,7 @@ func newMerchantSigner(merchant solanago.PrivateKey) solanaint.Signer {
 func publishUSDCPlan(ctx context.Context, t *testing.T, planSvc *PlanService, amount, periodHours uint64) *PlanHandle {
 	t.Helper()
 	h, err := planSvc.PublishPlan(ctx, PublishPlanInput{
-		TenantID: dbtest.TestTenantID, PlanID: uint64(time.Now().UnixNano()),
+		MerchantID: dbtest.TestTenantID, PlanID: uint64(time.Now().UnixNano()),
 		TokenSymbol: "USDC", AmountBaseUnits: amount, PeriodHours: periodHours,
 	})
 	require.NoError(t, err, "PublishPlan(%d/%dh) should create the plan on-chain", amount, periodHours)
@@ -191,7 +191,7 @@ func devnetSubscribe(ctx context.Context, t *testing.T, rc *solanaint.RPCClient,
 	t.Helper()
 	prepare := func() *PrepareSubscribeResult {
 		res, err := prepSvc.Prepare(ctx, PrepareSubscribeInput{
-			TenantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(),
+			MerchantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(),
 			PlanID: h.PlanID, MintSymbol: "USDC", AmountBaseUnits: amount, PeriodHours: periodHours, PlanCreatedAt: h.CreatedAt,
 		})
 		require.NoError(t, err)

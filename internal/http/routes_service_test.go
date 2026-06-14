@@ -33,7 +33,7 @@ func TestRegisterServiceRoutes_ServiceTokenAuthGatesMountedSurface(t *testing.T)
 	// Use the same registration path as the server, with a rejecting service token gate.
 	// Runtime is only dereferenced lazily inside handlers, which the rejecting
 	// gate prevents from ever running.
-	httproutes.RegisterServiceRoutes(group, nil, rejectAll, nil)
+	httproutes.RegisterServiceRoutes(group, nil, rejectAll)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/service/credits/hold", nil)
 	w := httptest.NewRecorder()

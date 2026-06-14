@@ -41,7 +41,7 @@ func (q *Queries) AdvanceSolanaSubscriptionAfterPull(ctx context.Context, arg Ad
 }
 
 const getSolanaSubscriptionByPDA = `-- name: GetSolanaSubscriptionByPDA :one
-SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions WHERE subscription_pda = $1
+SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions WHERE subscription_pda = $1
 `
 
 func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, subscriptionPda string) (OpenrailsSolanaSubscription, error) {
@@ -49,7 +49,7 @@ func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, subscriptionPd
 	var i OpenrailsSolanaSubscription
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.SubscriptionID,
 		&i.SubscriberWallet,
 		&i.AuthorityPda,
@@ -69,7 +69,7 @@ func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, subscriptionPd
 }
 
 const getSolanaSubscriptionBySubscriptionID = `-- name: GetSolanaSubscriptionBySubscriptionID :one
-SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions WHERE subscription_id = $1
+SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions WHERE subscription_id = $1
 `
 
 func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (OpenrailsSolanaSubscription, error) {
@@ -77,7 +77,7 @@ func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, sub
 	var i OpenrailsSolanaSubscription
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.MerchantID,
 		&i.SubscriptionID,
 		&i.SubscriberWallet,
 		&i.AuthorityPda,
@@ -97,13 +97,13 @@ func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, sub
 }
 
 const listActiveSolanaMerchantWallets = `-- name: ListActiveSolanaMerchantWallets :many
-SELECT DISTINCT tenant_id, merchant_address
+SELECT DISTINCT merchant_id, merchant_address
 FROM openrails.solana_subscriptions
 WHERE status = 'active'
 `
 
 type ListActiveSolanaMerchantWalletsRow struct {
-	TenantID        uuid.UUID
+	MerchantID      uuid.UUID
 	MerchantAddress string
 }
 
@@ -116,7 +116,7 @@ func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context) ([]ListAc
 	var items []ListActiveSolanaMerchantWalletsRow
 	for rows.Next() {
 		var i ListActiveSolanaMerchantWalletsRow
-		if err := rows.Scan(&i.TenantID, &i.MerchantAddress); err != nil {
+		if err := rows.Scan(&i.MerchantID, &i.MerchantAddress); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -128,7 +128,7 @@ func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context) ([]ListAc
 }
 
 const listActiveSolanaSubscriptionsWithSignature = `-- name: ListActiveSolanaSubscriptionsWithSignature :many
-SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions
+SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions
 WHERE status = 'active'
   AND last_signature IS NOT NULL
   AND last_signature <> ''
@@ -147,7 +147,7 @@ func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context
 		var i OpenrailsSolanaSubscription
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantID,
+			&i.MerchantID,
 			&i.SubscriptionID,
 			&i.SubscriberWallet,
 			&i.AuthorityPda,
@@ -174,9 +174,9 @@ func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context
 }
 
 const listDueSolanaSubscriptions = `-- name: ListDueSolanaSubscriptions :many
-SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions
+SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions
 WHERE status = 'active' AND next_pull_at <= $1::timestamptz
-ORDER BY tenant_id ASC, next_pull_at ASC
+ORDER BY merchant_id ASC, next_pull_at ASC
 LIMIT NULLIF($2::int, 0)
 `
 
@@ -196,7 +196,7 @@ func (q *Queries) ListDueSolanaSubscriptions(ctx context.Context, arg ListDueSol
 		var i OpenrailsSolanaSubscription
 		if err := rows.Scan(
 			&i.ID,
-			&i.TenantID,
+			&i.MerchantID,
 			&i.SubscriptionID,
 			&i.SubscriberWallet,
 			&i.AuthorityPda,
@@ -261,7 +261,7 @@ func (q *Queries) SetSolanaSubscriptionStatus(ctx context.Context, arg SetSolana
 const upsertSolanaSubscription = `-- name: UpsertSolanaSubscription :exec
 
 INSERT INTO openrails.solana_subscriptions (
-    id, tenant_id, subscription_id, subscriber_wallet, authority_pda,
+    id, merchant_id, subscription_id, subscriber_wallet, authority_pda,
     subscription_pda, plan_pda, merchant_address, mint,
     plan_created_at_fingerprint, last_pulled_period_start, last_signature,
     next_pull_at, status, created_at, updated_at
@@ -294,7 +294,7 @@ type UpsertSolanaSubscriptionParams struct {
 	Status                   string
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
-	TenantID                 uuid.UUID
+	MerchantID               uuid.UUID
 	LastPulledPeriodStart    *time.Time
 	LastSignature            *string
 }
@@ -315,7 +315,7 @@ func (q *Queries) UpsertSolanaSubscription(ctx context.Context, arg UpsertSolana
 		arg.Status,
 		arg.CreatedAt,
 		arg.UpdatedAt,
-		arg.TenantID,
+		arg.MerchantID,
 		arg.LastPulledPeriodStart,
 		arg.LastSignature,
 	)

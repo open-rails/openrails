@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -119,21 +119,21 @@ func dsnHostPart(t *testing.T, dsn string) string {
 	return dsn[at+1:]
 }
 
-func seedTenantsAndEntitlements(t *testing.T, ctx context.Context, superDSN string, tA, tB tenant.ID) {
+func seedTenantsAndEntitlements(t *testing.T, ctx context.Context, superDSN string, tA, tB merchant.ID) {
 	t.Helper()
 	pool, err := pgxpool.New(ctx, superDSN)
 	require.NoError(t, err)
 	defer pool.Close()
 
-	for _, id := range []tenant.ID{tA, tB} {
+	for _, id := range []merchant.ID{tA, tB} {
 		_, err = pool.Exec(ctx, `
-			INSERT INTO openrails.tenants (id, slug, name, status)
+			INSERT INTO openrails.merchants (id, slug, name, status)
 			VALUES ($1::uuid, $2, $2, 'active') ON CONFLICT (id) DO NOTHING
 		`, id.String(), "t-"+id.String()[:8])
 		require.NoError(t, err)
 		tenantSubjectID := uuid.New()
 		_, err = pool.Exec(ctx, `
-			INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject)
+			INSERT INTO openrails.merchant_subjects (id, merchant_id, issuer, subject)
 			VALUES ($1::uuid, $2::uuid, 'test', $3)
 			ON CONFLICT (id) DO NOTHING
 		`, tenantSubjectID.String(), id.String(), "user-"+id.String()[:8])
@@ -141,7 +141,7 @@ func seedTenantsAndEntitlements(t *testing.T, ctx context.Context, superDSN stri
 		// One entitlement row per tenant.
 		_, err = pool.Exec(ctx, `
 			INSERT INTO openrails.entitlements
-				(tenant_id, tenant_subject_id, entitlement, start_at, source_id, source_type)
+				(merchant_id, merchant_subject_id, entitlement, start_at, source_id, source_type)
 			VALUES ($1::uuid, $2::uuid, 'premium', current_timestamp, gen_random_uuid(), 'admin')
 		`, id.String(), tenantSubjectID.String())
 		require.NoError(t, err)
@@ -149,13 +149,13 @@ func seedTenantsAndEntitlements(t *testing.T, ctx context.Context, superDSN stri
 }
 
 // TestRLS_AppRoleCannotSeeOtherTenantRows proves the migration-050 policies
-// enforce when connecting AS the unprivileged app role: with app.tenant_id set
+// enforce when connecting AS the unprivileged app role: with app.merchant_id set
 // to tenant A, a SELECT WITHOUT any tenant predicate returns ONLY tenant A's
 // rows, and an attempt to read tenant B by explicit predicate returns nothing.
 func TestRLS_AppRoleCannotSeeOtherTenantRows(t *testing.T) {
 	superDSN, appDSN, ctx := startRLSPostgres(t)
-	tA := tenant.ID(uuid.New())
-	tB := tenant.ID(uuid.New())
+	tA := merchant.ID(uuid.New())
+	tB := merchant.ID(uuid.New())
 	seedTenantsAndEntitlements(t, ctx, superDSN, tA, tB)
 
 	appPool, err := pgxpool.New(ctx, appDSN)
@@ -168,7 +168,7 @@ func TestRLS_AppRoleCannotSeeOtherTenantRows(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tA.String())
+	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, tA.String())
 	require.NoError(t, err)
 
 	var total int
@@ -178,7 +178,7 @@ func TestRLS_AppRoleCannotSeeOtherTenantRows(t *testing.T) {
 	// Even explicitly asking for tenant B returns nothing under tenant A's GUC.
 	var leaked int
 	require.NoError(t, tx.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.entitlements WHERE tenant_id = $1::uuid`, tB.String(),
+		`SELECT count(*) FROM openrails.entitlements WHERE merchant_id = $1::uuid`, tB.String(),
 	).Scan(&leaked))
 	require.Equal(t, 0, leaked, "RLS must deny reading another tenant's rows even with an explicit predicate")
 }
@@ -187,8 +187,8 @@ func TestRLS_AppRoleCannotSeeOtherTenantRows(t *testing.T) {
 // tenant, and that an UNSET GUC sees nothing (fail-closed).
 func TestRLS_GUCScopesCorrectly(t *testing.T) {
 	superDSN, appDSN, ctx := startRLSPostgres(t)
-	tA := tenant.ID(uuid.New())
-	tB := tenant.ID(uuid.New())
+	tA := merchant.ID(uuid.New())
+	tB := merchant.ID(uuid.New())
 	seedTenantsAndEntitlements(t, ctx, superDSN, tA, tB)
 
 	appPool, err := pgxpool.New(ctx, appDSN)
@@ -200,7 +200,7 @@ func TestRLS_GUCScopesCorrectly(t *testing.T) {
 		require.NoError(t, err)
 		defer func() { _ = tx.Rollback(ctx) }()
 		if setTenant != "" {
-			_, err = tx.Exec(ctx, `SELECT set_config('app.tenant_id', $1, true)`, setTenant)
+			_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, setTenant)
 			require.NoError(t, err)
 		}
 		var n int
@@ -217,8 +217,8 @@ func TestRLS_GUCScopesCorrectly(t *testing.T) {
 // context so a tenant-owned query through it is RLS-scoped.
 func TestTenantTx_ScopesGUC(t *testing.T) {
 	superDSN, appDSN, ctx := startRLSPostgres(t)
-	tA := tenant.ID(uuid.New())
-	tB := tenant.ID(uuid.New())
+	tA := merchant.ID(uuid.New())
+	tB := merchant.ID(uuid.New())
 	seedTenantsAndEntitlements(t, ctx, superDSN, tA, tB)
 
 	// Open over the APP role so RLS applies.
@@ -226,7 +226,7 @@ func TestTenantTx_ScopesGUC(t *testing.T) {
 	require.NoError(t, err)
 	defer d.Close()
 
-	ctxA := tenant.WithID(ctx, tA)
+	ctxA := merchant.WithID(ctx, tA)
 	var n int
 	err = d.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements`).Scan(&n)

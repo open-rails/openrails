@@ -57,9 +57,9 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	require.NoError(t, err)
 
 	billingID := "bill_" + uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID: paymentMethodID, TenantSubjectID: tenantSubjectID, Processor: string(models.ProcessorMobius),
+		ID: paymentMethodID, MerchantSubjectID: tenantSubjectID, Processor: string(models.ProcessorMobius),
 		VaultID: "vault_" + uuid.New().String(), BillingID: &billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
 	})
@@ -70,7 +70,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	nextRetry := now.Add(-time.Minute)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: subID, TenantID: dbtest.TestTenantID.UUID(), TenantSubjectID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
+		ID: subID, MerchantID: dbtest.TestTenantID.UUID(), MerchantSubjectID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Processor: string(models.ProcessorMobius),
 		ProcessorSubscriptionID: "sub_mat_" + uuid.New().String(), PaymentMethodID: &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
@@ -184,14 +184,14 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	})
 	require.NoError(t, err)
 
-	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
 	// Months-stale: the legacy-migration shape. Window for 30-day cycle is
 	// ~2 weeks; 90 days is far past it.
 	periodEnd := now.Add(-90 * 24 * time.Hour)
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	nextRetry := now.Add(-time.Minute)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: subID, TenantID: dbtest.TestTenantID.UUID(), TenantSubjectID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
+		ID: subID, MerchantID: dbtest.TestTenantID.UUID(), MerchantSubjectID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Processor: string(models.ProcessorMobius),
 		ProcessorSubscriptionID: "sub_wexp_" + uuid.New().String(),
 		CurrentPeriodStartsAt:   &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,

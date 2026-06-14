@@ -27,7 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // EmbeddedV1Prefix is the canonical API prefix for embedded mode handlers.
@@ -133,7 +133,7 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	if s.Cfg != nil {
 		origins = s.Cfg.AllowedCORSOrigins()
 	}
-	// Resolve the configured tenant SLUG → internal tenant.ID once at
+	// Resolve the configured tenant SLUG → internal merchant.ID once at
 	// bootstrap (#336): the resolver pins it per request. A non-empty-but-
 	// unknown slug is a configuration error. EMBEDDED boot (embed.New) ensures
 	// the bound tenant row before this runs, so it never trips here; a
@@ -153,19 +153,19 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 }
 
 // resolveConfiguredTenant resolves the construction-time tenant SLUG
-// (Cfg.Tenant) to the internal tenant.ID via the Runtime's pool (#336). An
+// (Cfg.Tenant) to the internal merchant.ID via the Runtime's pool (#336). An
 // empty slug yields the zero id (no tenant pinned; tenant-owned ops hard-fail
 // downstream by design); a non-empty-but-unknown slug is an error.
-func (s *Assembler) resolveConfiguredTenant() (tenant.ID, error) {
+func (s *Assembler) resolveConfiguredTenant() (merchant.ID, error) {
 	var slug string
 	if s.Cfg != nil {
 		slug = s.Cfg.Tenant
 	}
 	if slug == "" || s.Runtime == nil || s.Runtime.DB == nil {
-		return tenant.ID{}, nil
+		return merchant.ID{}, nil
 	}
 	ctx := context.Background()
-	return db.ResolveTenantSlug(ctx, s.Runtime.DB.Qx(ctx), slug)
+	return db.ResolveMerchantSlug(ctx, s.Runtime.DB.Qx(ctx), slug)
 }
 
 // captchaStatusHandler is the gin-free captcha status endpoint (issue #282).

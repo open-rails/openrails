@@ -9,7 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ledger is the Store surface the Runner drives (interface for unit tests).
@@ -148,7 +148,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsProviderInt
 
 	// Pin the intent's tenant so handler execution (and any tenant-scoped DB
 	// write it triggers, e.g. membership renewal) resolves it (#336).
-	ctx = tenant.WithID(ctx, tenant.ID(intent.TenantID))
+	ctx = merchant.WithID(ctx, merchant.ID(intent.MerchantID))
 
 	handler := r.Registry.Lookup(intent.IntentType)
 	if handler == nil {
@@ -244,7 +244,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 
 	for _, intent := range claimed {
 		// Pin the intent's tenant for tenant-scoped verify/repair writes (#336).
-		ctx := tenant.WithID(ctx, tenant.ID(intent.TenantID))
+		ctx := merchant.WithID(ctx, merchant.ID(intent.MerchantID))
 		logEntry := log.WithContext(ctx).WithFields(log.Fields{
 			"intent_id":   intent.ID,
 			"intent_type": intent.IntentType,

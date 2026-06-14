@@ -16,7 +16,7 @@ import (
 // CreditAccountSnapshot is the balance + policy view of an payer's credit
 // account, served by the authorize/balance route (issue #235).
 type CreditAccountSnapshot struct {
-	TenantSubjectID       uuid.UUID `json:"tenant_subject_id"`
+	MerchantSubjectID       uuid.UUID `json:"tenant_subject_id"`
 	Currency              string    `json:"currency"`
 	BillingMode           string    `json:"billing_mode"`
 	BalanceMicros         int64     `json:"balance_micros"`
@@ -26,7 +26,7 @@ type CreditAccountSnapshot struct {
 }
 
 // GetCreditAccount returns the balance + policy snapshot for an tenant subject.
-func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSubjectID, currency string) (*CreditAccountSnapshot, error) {
+func (s *Service) GetCreditAccount(ctx context.Context, payer identity.MerchantSubjectID, currency string) (*CreditAccountSnapshot, error) {
 	// #476: the currency is echoed back on the snapshot; empty defaults to "USD".
 	currency = strings.TrimSpace(currency)
 	if currency == "" {
@@ -41,7 +41,7 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSub
 	// one, so this is safe whether called from a request or directly.
 	var snap *CreditAccountSnapshot
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		bal, err := s.moneyService().GetBalanceForTenantSubject(ctx, payer, money.DefaultCurrency)
+		bal, err := s.moneyService().GetBalanceForMerchantSubject(ctx, payer, money.DefaultCurrency)
 		if err != nil {
 			return err
 		}
@@ -50,7 +50,7 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSub
 			return err
 		}
 		snap = &CreditAccountSnapshot{
-			TenantSubjectID:       payer.UUID(),
+			MerchantSubjectID:       payer.UUID(),
 			Currency:              currency,
 			BillingMode:           settings.BillingMode,
 			BalanceMicros:         bal.Balance,
@@ -79,7 +79,7 @@ type UsageRow struct {
 // a tenant-scoped connection so the rollup query runs RLS-scoped under the
 // openrails_app role (#227); RunInTenantConn reuses the request's already-pinned
 // connection when one is set.
-func (s *Service) GetUsage(ctx context.Context, payer identity.TenantSubjectID, from, to time.Time) ([]UsageRow, error) {
+func (s *Service) GetUsage(ctx context.Context, payer identity.MerchantSubjectID, from, to time.Time) ([]UsageRow, error) {
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
@@ -168,7 +168,7 @@ func invoiceToDTO(inv *models.Invoice) InvoiceDTO {
 // read runs RLS-scoped under the openrails_app role (#227); RunInTenantConn
 // reuses the request's already-pinned connection when one is set. Returns the
 // page of public DTOs plus the total count for pagination.
-func (s *Service) ListInvoices(ctx context.Context, payer identity.TenantSubjectID, limit, offset int) ([]InvoiceDTO, int, error) {
+func (s *Service) ListInvoices(ctx context.Context, payer identity.MerchantSubjectID, limit, offset int) ([]InvoiceDTO, int, error) {
 	if payer.IsZero() {
 		return nil, 0, fmt.Errorf("payer required")
 	}
@@ -195,7 +195,7 @@ func (s *Service) ListInvoices(ctx context.Context, payer identity.TenantSubject
 // GetInvoice returns one finalized invoice (with its line items) for an payer by
 // id (issue #303). RLS-scoped like ListInvoices; an invoice belonging to another
 // payer/tenant is unreachable (fail closed). Returns a public DTO.
-func (s *Service) GetInvoice(ctx context.Context, payer identity.TenantSubjectID, id uuid.UUID) (*InvoiceDTO, error) {
+func (s *Service) GetInvoice(ctx context.Context, payer identity.MerchantSubjectID, id uuid.UUID) (*InvoiceDTO, error) {
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
@@ -219,7 +219,7 @@ func (s *Service) GetInvoice(ctx context.Context, payer identity.TenantSubjectID
 // of the authorize/hold route (issue #235). The hold itself is placed by
 // HoldCredits once this allows it.
 type AuthorizeSpendRequest struct {
-	TenantSubjectID identity.TenantSubjectID
+	MerchantSubjectID identity.MerchantSubjectID
 	Actor           string
 	EstimateMicros  int64
 }
@@ -248,15 +248,15 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 	if req.EstimateMicros < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
 	}
-	if req.TenantSubjectID.IsZero() {
+	if req.MerchantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 
-	snap, err := s.GetCreditAccount(ctx, req.TenantSubjectID, "")
+	snap, err := s.GetCreditAccount(ctx, req.MerchantSubjectID, "")
 	if err != nil {
 		return nil, err
 	}
-	dec, err := s.moneyService().CheckSpendAllowed(ctx, req.TenantSubjectID, strings.TrimSpace(req.Actor), req.EstimateMicros)
+	dec, err := s.moneyService().CheckSpendAllowed(ctx, req.MerchantSubjectID, strings.TrimSpace(req.Actor), req.EstimateMicros)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +289,7 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 // actor for per-actor sub-budgets; RequestID is the idempotency key for the
 // placed hold.
 type AuthorizeAndHoldRequest struct {
-	TenantSubjectID identity.TenantSubjectID
+	MerchantSubjectID identity.MerchantSubjectID
 	Actor           string
 	// Currency is the ledger unit; empty defaults to "USD" (#476).
 	Currency       string
@@ -329,7 +329,7 @@ const defaultAuthorizeHoldTTL = 15 * time.Minute
 // the same available balance: the balance row is locked for the duration of the
 // decision + hold. Idempotent on RequestID.
 func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequest) (*AuthorizeAndHoldResult, error) {
-	if req.TenantSubjectID.IsZero() {
+	if req.MerchantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if req.EstimateMicros < 0 {
@@ -345,7 +345,7 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 	}
 
 	out, err := s.moneyService().AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-		Payer:          req.TenantSubjectID,
+		Payer:          req.MerchantSubjectID,
 		Actor:          strings.TrimSpace(req.Actor),
 		Currency:       req.Currency,
 		EstimateMicros: req.EstimateMicros,
@@ -394,7 +394,7 @@ func remainingTodayCents(caps []money.CapResult) *int64 {
 
 // SetCreditAccountSettings upserts an payer's spend policy (issue #237/#235
 // admin surface). Thin passthrough to the credits service.
-func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.TenantSubjectID, creditType string, in money.AccountSettingsInput) error {
+func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.MerchantSubjectID, creditType string, in money.AccountSettingsInput) error {
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
@@ -408,16 +408,16 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.T
 // GetCreditAccountSettings returns an payer's stored credit-account settings
 // (billing mode prepaid|arrears, spend caps, auto-top-up, expiry default) for the
 // org billing-account admin surface (issue #242). RLS-scoped.
-func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*models.MoneyAccount, error) {
+func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.MerchantSubjectID, creditType string) (*models.MoneyAccount, error) {
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	return s.moneyService().GetAccountSettingsForTenantSubject(ctx, payer)
+	return s.moneyService().GetAccountSettingsForMerchantSubject(ctx, payer)
 }
 
-// GetTenantSubjectCreditTransactions lists a tenant subject's credit transactions (usage) for
+// GetMerchantSubjectCreditTransactions lists a tenant subject's credit transactions (usage) for
 // the billing-account admin surface (issue #242). RLS-scoped.
-func (s *Service) GetTenantSubjectCreditTransactions(ctx context.Context, payer identity.TenantSubjectID, creditType string, limit, offset int) ([]models.MoneyTransaction, int, error) {
+func (s *Service) GetMerchantSubjectCreditTransactions(ctx context.Context, payer identity.MerchantSubjectID, creditType string, limit, offset int) ([]models.MoneyTransaction, int, error) {
 	if payer.IsZero() {
 		return nil, 0, fmt.Errorf("payer required")
 	}
@@ -425,14 +425,14 @@ func (s *Service) GetTenantSubjectCreditTransactions(ctx context.Context, payer 
 	var total int
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
-		items, total, e = s.moneyService().GetTransactionsByTenantSubject(ctx, payer, money.DefaultCurrency, limit, offset)
+		items, total, e = s.moneyService().GetTransactionsByMerchantSubject(ctx, payer, money.DefaultCurrency, limit, offset)
 		return e
 	})
 	return items, total, err
 }
 
 // SetSpendLimit upserts a per-actor spend cap under an payer (issue #237).
-func (s *Service) SetSpendLimit(ctx context.Context, payer identity.TenantSubjectID, creditType, actor string, maxDay, maxMonth *int64) error {
+func (s *Service) SetSpendLimit(ctx context.Context, payer identity.MerchantSubjectID, creditType, actor string, maxDay, maxMonth *int64) error {
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}

@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // TestTenantConn_BurstDoesNotWedge guards against the #334 Phase-0 twin-pinning
@@ -39,7 +39,7 @@ func TestTenantConn_BurstDoesNotWedge(t *testing.T) {
 	defer d.Close()
 
 	const burst = 64
-	tctx := tenant.WithID(ctx, rlsTenantA)
+	tctx := merchant.WithID(ctx, rlsTenantA)
 
 	errs := make([]error, burst)
 	var wg sync.WaitGroup
@@ -92,7 +92,7 @@ func TestTenantConn_LazyConnNotAcquiredWithoutUse(t *testing.T) {
 	require.NoError(t, err)
 	defer d.Close()
 
-	tctx := tenant.WithID(ctx, rlsTenantA)
+	tctx := merchant.WithID(ctx, rlsTenantA)
 	// 16 concurrent no-op requests against a 2-conn pool: if the pin were
 	// eager, at most 2 could ever hold a pin and the rest would time out.
 	const n = 16

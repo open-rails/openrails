@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Billing modes.
@@ -143,10 +143,10 @@ func monthWindow(now time.Time) (start, reset time.Time) {
 // explicit settings row: prepaid, no caps, hard-stop on, 80% alerts, 365-day
 // default expiry. Used by GetAccountSettings and the enforcement path so an
 // unconfigured account "just works" (prepaid, balance-gated only).
-func DefaultAccountSettings(payer identity.TenantSubjectID) *models.MoneyAccount {
+func DefaultAccountSettings(payer identity.MerchantSubjectID) *models.MoneyAccount {
 	days := 365
 	return &models.MoneyAccount{
-		TenantSubjectID:         payer.UUID(),
+		MerchantSubjectID:         payer.UUID(),
 		BillingMode:             BillingModePrepaid,
 		HardStopOnBreach:        true,
 		AlertThresholdPct:       80,
@@ -157,12 +157,12 @@ func DefaultAccountSettings(payer identity.TenantSubjectID) *models.MoneyAccount
 // GetAccountSettings returns the stored settings for (payer, credit_type), or a
 // DefaultAccountSettings value when none exists (never nil, never an error for a
 // missing row).
-func (s *MoneyService) GetAccountSettings(ctx context.Context, payer identity.TenantSubjectID) (*models.MoneyAccount, error) {
+func (s *MoneyService) GetAccountSettings(ctx context.Context, payer identity.MerchantSubjectID) (*models.MoneyAccount, error) {
 	return s.getAccountSettings(ctx, payer, DefaultCurrency)
 }
 
 // getAccountSettings is the currency-aware form (#472).
-func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.TenantSubjectID, currency string) (*models.MoneyAccount, error) {
+func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.MerchantSubjectID, currency string) (*models.MoneyAccount, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -172,20 +172,20 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Te
 	if err := RequireBillingCurrency(cur); err != nil {
 		return nil, err
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	tenantID := tid.UUID()
 	row, err := s.db.Gen(ctx).GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{
-		TenantID: tenantID, TenantSubjectID: payer.UUID(), Currency: cur,
+		MerchantID: tenantID, MerchantSubjectID: payer.UUID(), Currency: cur,
 	})
 	if err == nil {
 		return settingsFromGen(row), nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		d := DefaultAccountSettings(payer)
-		d.TenantID = tenantID
+		d.MerchantID = tenantID
 		d.Currency = cur
 		return d, nil
 	}
@@ -210,17 +210,17 @@ type AccountSettingsInput struct {
 
 // UpsertAccountSettings creates or updates the spend policy for (payer,
 // credit_type). Validates the billing mode and alert threshold.
-func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity.TenantSubjectID, in AccountSettingsInput) (*models.MoneyAccount, error) {
+func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity.MerchantSubjectID, in AccountSettingsInput) (*models.MoneyAccount, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	// Materialize the payable tenant_subjects row so the credit_account_settings
 	// FK (migration 076) is satisfied on a subject's first settings write (#317).
-	if err := ensureTenantSubject(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID()); err != nil {
+	if err := ensureMerchantSubject(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID()); err != nil {
 		return nil, err
 	}
 	if in.BillingMode != nil {
@@ -275,8 +275,8 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 		cur.AlertThresholdPct = *in.AlertThresholdPct
 	}
 
-	cur.TenantID = tenantID
-	cur.TenantSubjectID = payer.UUID()
+	cur.MerchantID = tenantID
+	cur.MerchantSubjectID = payer.UUID()
 	cur.Currency = normalizeCurrency(cur.Currency)
 	// #474 invariant: money_accounts (billing settings) are external-currency-only.
 	if err := RequireBillingCurrency(cur.Currency); err != nil {
@@ -296,8 +296,8 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 	alertPct, _ := safecast.Convert[int32](cur.AlertThresholdPct)
 	if err := s.db.Gen(ctx).UpsertMoneyAccountSettings(ctx, gen.UpsertMoneyAccountSettingsParams{
 		ID:                        cur.ID,
-		TenantID:                  cur.TenantID,
-		TenantSubjectID:           cur.TenantSubjectID,
+		MerchantID:                  cur.MerchantID,
+		MerchantSubjectID:           cur.MerchantSubjectID,
 		Currency:                  cur.Currency,
 		BillingMode:               cur.BillingMode,
 		MaxSpendPerDayMicros:      cur.MaxSpendPerDayMicros,
@@ -328,17 +328,17 @@ func nilIfNeg(v *int64) *int64 {
 // SetSpendLimit upserts a per-actor sub-limit under (payer, credit_type).
 // A nil day/month cap clears that cap. actor is a canonical actor string
 // ('serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>').
-func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.TenantSubjectID, actor string, maxDay, maxMonth *int64) (*models.MoneySpendLimit, error) {
+func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.MerchantSubjectID, actor string, maxDay, maxMonth *int64) (*models.MoneySpendLimit, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	// Materialize the payable tenant_subjects row so the credit_spend_limits FK
 	// (migration 076) is satisfied on a subject's first spend-limit write (#317).
-	if err := ensureTenantSubject(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID()); err != nil {
+	if err := ensureMerchantSubject(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID()); err != nil {
 		return nil, err
 	}
 	actor = strings.TrimSpace(actor)
@@ -349,8 +349,8 @@ func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.TenantS
 	now := s.now()
 	row := &models.MoneySpendLimit{
 		ID:                     uuidutil.NewV7(),
-		TenantID:               tenantID,
-		TenantSubjectID:        payer.UUID(),
+		MerchantID:               tenantID,
+		MerchantSubjectID:        payer.UUID(),
 		Currency:               DefaultCurrency,
 		Actor:                  actor,
 		MaxSpendPerDayMicros:   nilIfNeg(maxDay),
@@ -360,8 +360,8 @@ func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.TenantS
 	}
 	if err := s.db.Gen(ctx).UpsertMoneySpendLimit(ctx, gen.UpsertMoneySpendLimitParams{
 		ID:                     row.ID,
-		TenantID:               row.TenantID,
-		TenantSubjectID:        row.TenantSubjectID,
+		MerchantID:               row.MerchantID,
+		MerchantSubjectID:        row.MerchantSubjectID,
 		Currency:               row.Currency,
 		Actor:                  row.Actor,
 		MaxSpendPerDayMicros:   row.MaxSpendPerDayMicros,
@@ -376,7 +376,7 @@ func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.TenantS
 
 func (s *MoneyService) getSpendLimit(ctx context.Context, tenantID, payerID uuid.UUID, currency, actor string) (*models.MoneySpendLimit, error) {
 	row, err := s.db.Gen(ctx).GetMoneySpendLimit(ctx, gen.GetMoneySpendLimitParams{
-		TenantID: tenantID, TenantSubjectID: payerID, Currency: normalizeCurrency(currency), Actor: actor,
+		MerchantID: tenantID, MerchantSubjectID: payerID, Currency: normalizeCurrency(currency), Actor: actor,
 	})
 	if err == nil {
 		return spendLimitFromGen(row), nil
@@ -393,7 +393,7 @@ func (s *MoneyService) getSpendLimit(ctx context.Context, tenantID, payerID uuid
 // When actor is non-empty the sum is scoped to that actor.
 func (s *MoneyService) spentInWindow(ctx context.Context, tenantID, payerID uuid.UUID, currency string, since time.Time, actor string) (int64, error) {
 	return s.db.Gen(ctx).SumSpentInMoneyWindow(ctx, gen.SumSpentInMoneyWindowParams{
-		TenantID: tenantID, TenantSubjectID: payerID, Currency: normalizeCurrency(currency),
+		MerchantID: tenantID, MerchantSubjectID: payerID, Currency: normalizeCurrency(currency),
 		Since: since, Actor: actor,
 	})
 }
@@ -402,7 +402,7 @@ func (s *MoneyService) spentInWindow(ctx context.Context, tenantID, payerID uuid
 // (current reservation exposure, regardless of window).
 func (s *MoneyService) activeHoldsTotal(ctx context.Context, tenantID, payerID uuid.UUID, currency string) (int64, error) {
 	return s.db.Gen(ctx).SumActiveMoneyHoldAuthorizations(ctx, gen.SumActiveMoneyHoldAuthorizationsParams{
-		TenantID: tenantID, TenantSubjectID: payerID, Currency: normalizeCurrency(currency),
+		MerchantID: tenantID, MerchantSubjectID: payerID, Currency: normalizeCurrency(currency),
 	})
 }
 
@@ -411,7 +411,7 @@ func (s *MoneyService) activeHoldsTotal(ctx context.Context, tenantID, payerID u
 // per-actor daily/monthly caps, org daily/monthly caps, and the outstanding
 // exposure ceiling (settled owed + active holds + this estimate). The balance
 // itself is enforced separately by Hold.
-func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.TenantSubjectID, actor string, estimateCents int64) (SpendDecision, error) {
+func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.MerchantSubjectID, actor string, estimateCents int64) (SpendDecision, error) {
 	if s == nil || s.db == nil {
 		return SpendDecision{}, fmt.Errorf("money service not initialized")
 	}
@@ -420,7 +420,7 @@ func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.Ten
 	if err != nil {
 		return SpendDecision{}, err
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return SpendDecision{}, err
 	}

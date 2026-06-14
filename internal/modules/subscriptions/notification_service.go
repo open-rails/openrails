@@ -113,7 +113,7 @@ func (s *NotificationService) CreateAndDeliver(ctx context.Context, notification
 	if err := s.deliverExternalNotifications(ctx, notification); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 			"notification_id": notification.ID,
-			"user_id":         notification.TenantSubjectID.String(),
+			"user_id":         notification.MerchantSubjectID.String(),
 			"event_type":      notification.EventType,
 		}).Error("failed to deliver external notifications")
 	}
@@ -142,9 +142,9 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 
 	switch notification.EventType {
 	case models.NotificationPremiumStarted:
-		return s.emailService.SendSubscriptionConfirmed(ctx, notification.TenantSubjectID.String())
+		return s.emailService.SendSubscriptionConfirmed(ctx, notification.MerchantSubjectID.String())
 	case models.NotificationPremiumRenewed:
-		return s.emailService.SendSubscriptionRenewed(ctx, notification.TenantSubjectID.String())
+		return s.emailService.SendSubscriptionRenewed(ctx, notification.MerchantSubjectID.String())
 	case models.NotificationPremiumEnded:
 		reason := PremiumEndReasonUnknown
 		if notification.Data != nil {
@@ -152,24 +152,24 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 				reason = ParsePremiumEndReason(r)
 			}
 		}
-		return s.emailService.SendPremiumEnded(ctx, notification.TenantSubjectID.String(), reason)
+		return s.emailService.SendPremiumEnded(ctx, notification.MerchantSubjectID.String(), reason)
 	case models.NotificationPaymentMethodFailed:
-		return s.emailService.SendPaymentFailed(ctx, notification.TenantSubjectID.String())
+		return s.emailService.SendPaymentFailed(ctx, notification.MerchantSubjectID.String())
 	case models.NotificationOneOffPurchaseCompleted:
 		if notification.Data == nil {
-			log.WithContext(ctx).WithField("user_id", notification.TenantSubjectID.String()).Warn("one-off purchase notification missing data payload")
+			log.WithContext(ctx).WithField("user_id", notification.MerchantSubjectID.String()).Warn("one-off purchase notification missing data payload")
 			return nil
 		}
 
 		email, _ := notification.Data["user_email"].(string)
 		if email == "" {
-			if uname, mail, err := s.emailService.getUserEmail(ctx, notification.TenantSubjectID.String()); err == nil && mail != "" {
+			if uname, mail, err := s.emailService.getUserEmail(ctx, notification.MerchantSubjectID.String()); err == nil && mail != "" {
 				_ = uname
 				email = mail
 			}
 		}
 		if email == "" {
-			log.WithContext(ctx).WithField("user_id", notification.TenantSubjectID.String()).Warn("one-off purchase notification missing user email and profile lookup failed")
+			log.WithContext(ctx).WithField("user_id", notification.MerchantSubjectID.String()).Warn("one-off purchase notification missing user email and profile lookup failed")
 			return nil
 		}
 
@@ -217,14 +217,14 @@ func (s *NotificationService) cleanupObsoleteNotifications(ctx context.Context, 
 	}
 
 	if len(obsoleteEventTypes) > 0 {
-		cleanedCount, err := s.removeObsoleteNotifications(ctx, newNotification.TenantSubjectID.String(), obsoleteEventTypes)
+		cleanedCount, err := s.removeObsoleteNotifications(ctx, newNotification.MerchantSubjectID.String(), obsoleteEventTypes)
 		if err != nil {
 			return fmt.Errorf("failed to remove obsolete notifications: %w", err)
 		}
 
 		if cleanedCount > 0 {
 			log.WithContext(ctx).WithFields(log.Fields{
-				"user_id":        newNotification.TenantSubjectID.String(),
+				"user_id":        newNotification.MerchantSubjectID.String(),
 				"new_event_type": newNotification.EventType,
 				"cleaned_count":  cleanedCount,
 				"obsolete_types": obsoleteEventTypes,

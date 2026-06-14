@@ -14,24 +14,24 @@ import (
 
 const getProcessorCustomerID = `-- name: GetProcessorCustomerID :one
 SELECT customer_id FROM openrails.processor_customers
-WHERE tenant_subject_id = $1 AND processor = $2
+WHERE merchant_subject_id = $1 AND processor = $2
 LIMIT 1
 `
 
 type GetProcessorCustomerIDParams struct {
-	TenantSubjectID uuid.UUID
-	Processor       string
+	MerchantSubjectID uuid.UUID
+	Processor         string
 }
 
 func (q *Queries) GetProcessorCustomerID(ctx context.Context, arg GetProcessorCustomerIDParams) (string, error) {
-	row := q.db.QueryRow(ctx, getProcessorCustomerID, arg.TenantSubjectID, arg.Processor)
+	row := q.db.QueryRow(ctx, getProcessorCustomerID, arg.MerchantSubjectID, arg.Processor)
 	var customer_id string
 	err := row.Scan(&customer_id)
 	return customer_id, err
 }
 
 const getProcessorCustomerSubject = `-- name: GetProcessorCustomerSubject :one
-SELECT tenant_subject_id::text FROM openrails.processor_customers
+SELECT merchant_subject_id::text FROM openrails.processor_customers
 WHERE customer_id = $1 AND processor = $2
 ORDER BY updated_at DESC
 LIMIT 1
@@ -44,41 +44,41 @@ type GetProcessorCustomerSubjectParams struct {
 
 func (q *Queries) GetProcessorCustomerSubject(ctx context.Context, arg GetProcessorCustomerSubjectParams) (string, error) {
 	row := q.db.QueryRow(ctx, getProcessorCustomerSubject, arg.CustomerID, arg.Processor)
-	var tenant_subject_id string
-	err := row.Scan(&tenant_subject_id)
-	return tenant_subject_id, err
+	var merchant_subject_id string
+	err := row.Scan(&merchant_subject_id)
+	return merchant_subject_id, err
 }
 
 const upsertProcessorCustomer = `-- name: UpsertProcessorCustomer :exec
 
 INSERT INTO openrails.processor_customers (
-    id, tenant_id, tenant_subject_id, processor, customer_id, created_at, updated_at
+    id, merchant_id, merchant_subject_id, processor, customer_id, created_at, updated_at
 ) VALUES ($1, $7::uuid, $2, $3, $4, $5, $6)
-ON CONFLICT (tenant_id, tenant_subject_id, processor) DO UPDATE SET
+ON CONFLICT (merchant_id, merchant_subject_id, processor) DO UPDATE SET
     customer_id = EXCLUDED.customer_id,
     updated_at = EXCLUDED.updated_at
 `
 
 type UpsertProcessorCustomerParams struct {
-	ID              uuid.UUID
-	TenantSubjectID uuid.UUID
-	Processor       string
-	CustomerID      string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	TenantID        uuid.UUID
+	ID                uuid.UUID
+	MerchantSubjectID uuid.UUID
+	Processor         string
+	CustomerID        string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	MerchantID        uuid.UUID
 }
 
 // openrails.processor_customers: payable-subject <-> processor customer mapping.
 func (q *Queries) UpsertProcessorCustomer(ctx context.Context, arg UpsertProcessorCustomerParams) error {
 	_, err := q.db.Exec(ctx, upsertProcessorCustomer,
 		arg.ID,
-		arg.TenantSubjectID,
+		arg.MerchantSubjectID,
 		arg.Processor,
 		arg.CustomerID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
-		arg.TenantID,
+		arg.MerchantID,
 	)
 	return err
 }

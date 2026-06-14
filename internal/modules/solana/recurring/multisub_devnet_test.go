@@ -72,7 +72,7 @@ func TestDevnetMultiSub(t *testing.T) {
 		// DUPLICATE SAME PLAN: re-subscribing plan A must NOT succeed (the Subscription
 		// PDA already exists). Either Prepare refuses, or the tx reverts on-chain.
 		dupRes, dupErr := prepSvc.Prepare(ctx, PrepareSubscribeInput{
-			TenantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(),
+			MerchantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(),
 			PlanID: hA.PlanID, MintSymbol: "USDC", AmountBaseUnits: amount, PeriodHours: 720, PlanCreatedAt: hA.CreatedAt,
 		})
 		if dupErr != nil {

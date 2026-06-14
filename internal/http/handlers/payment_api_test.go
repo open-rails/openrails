@@ -27,7 +27,7 @@ func TestPaymentToAPIStatusAndCaptured(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			payment := &models.Payment{
 				ID:              uuid.New(),
-				TenantSubjectID: identity.TenantSubjectIDFromString(uuid.NewString()).UUID(),
+				MerchantSubjectID: identity.MerchantSubjectIDFromString(uuid.NewString()).UUID(),
 				PriceID:         uuid.New(),
 				Processor:       models.ProcessorMobius,
 				TransactionID:   "txn_123",
@@ -48,7 +48,7 @@ func TestPaymentToAPIRefundObjectNotCaptured(t *testing.T) {
 	originalID := uuid.New()
 	refund := &models.Payment{
 		ID:                uuid.New(),
-		TenantSubjectID:   identity.TenantSubjectIDFromString(uuid.NewString()).UUID(),
+		MerchantSubjectID:   identity.MerchantSubjectIDFromString(uuid.NewString()).UUID(),
 		PriceID:           uuid.New(),
 		RefundedPaymentID: &originalID,
 		Processor:         models.ProcessorMobius,
@@ -75,7 +75,7 @@ func TestPaymentToAPIRefundObjectPreservesPendingAndFailedStatus(t *testing.T) {
 		t.Run(tt.status, func(t *testing.T) {
 			refund := &models.Payment{
 				ID:                uuid.New(),
-				TenantSubjectID:   identity.TenantSubjectIDFromString(uuid.NewString()).UUID(),
+				MerchantSubjectID:   identity.MerchantSubjectIDFromString(uuid.NewString()).UUID(),
 				PriceID:           uuid.New(),
 				RefundedPaymentID: &originalID,
 				Processor:         models.ProcessorMobius,
@@ -97,7 +97,7 @@ func TestPaymentToAPIAmountRefundedCountsOnlyCompletedRefunds(t *testing.T) {
 	originalID := uuid.New()
 	payment := &models.Payment{
 		ID:              originalID,
-		TenantSubjectID: identity.TenantSubjectIDFromString(uuid.NewString()).UUID(),
+		MerchantSubjectID: identity.MerchantSubjectIDFromString(uuid.NewString()).UUID(),
 		PriceID:         uuid.New(),
 		Processor:       models.ProcessorMobius,
 		TransactionID:   "txn_123",
@@ -107,9 +107,9 @@ func TestPaymentToAPIAmountRefundedCountsOnlyCompletedRefunds(t *testing.T) {
 		CreatedAt:       time.Unix(100, 0),
 	}
 	refunds := []*models.Payment{
-		{ID: uuid.New(), TenantSubjectID: payment.TenantSubjectID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_completed", Amount: -300, Currency: "usd", Status: "completed"},
-		{ID: uuid.New(), TenantSubjectID: payment.TenantSubjectID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_pending", Amount: -400, Currency: "usd", Status: "pending"},
-		{ID: uuid.New(), TenantSubjectID: payment.TenantSubjectID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_failed", Amount: -500, Currency: "usd", Status: "failed"},
+		{ID: uuid.New(), MerchantSubjectID: payment.MerchantSubjectID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_completed", Amount: -300, Currency: "usd", Status: "completed"},
+		{ID: uuid.New(), MerchantSubjectID: payment.MerchantSubjectID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_pending", Amount: -400, Currency: "usd", Status: "pending"},
+		{ID: uuid.New(), MerchantSubjectID: payment.MerchantSubjectID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_failed", Amount: -500, Currency: "usd", Status: "failed"},
 	}
 
 	got := PaymentToAPI(payment, refunds)

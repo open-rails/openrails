@@ -18,7 +18,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for the migration bootstrap
 	"github.com/open-rails/migratekit"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -89,7 +89,7 @@ func TestDBDEKStore_LazyCreateReuseAndRoundTrip(t *testing.T) {
 	enc, err := NewEncryptor(mk, store)
 	require.NoError(t, err)
 
-	tA := tenant.ID(uuid.New())
+	tA := merchant.ID(uuid.New())
 
 	// No DEK row before first use.
 	var before int
@@ -124,8 +124,8 @@ func TestDBDEKStore_CrossTenantCiphertextIsolation(t *testing.T) {
 	store, _ := NewDBDEKStore(pool)
 	enc, _ := NewEncryptor(masterKey(t), store)
 
-	tA := tenant.ID(uuid.New())
-	tB := tenant.ID(uuid.New())
+	tA := merchant.ID(uuid.New())
+	tB := merchant.ID(uuid.New())
 	ctA, err := enc.Encrypt(ctx, tA, []byte("A-only"))
 	require.NoError(t, err)
 	_, err = enc.Decrypt(ctx, tB, ctA)

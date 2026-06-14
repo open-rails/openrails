@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // RecordUsageParams is one metered, host-priced usage event (issue #289). The
@@ -22,7 +22,7 @@ import (
 type RecordUsageParams struct {
 	// Payer is the tenant subject BILLED for this usage (the payer). When nil it is
 	// resolved from Actor (self-hosted/personal case), never synthesized.
-	Payer     *identity.TenantSubjectID
+	Payer     *identity.MerchantSubjectID
 	Actor     string // actor (attribution only)
 	Currency  string // "" => DefaultCurrency (#472)
 	EventType string // metered event kind, e.g. "gpt-4o"
@@ -69,7 +69,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 	if err := ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
-	payer, err := resolveTenantSubject(params.Payer, params.Actor)
+	payer, err := resolveMerchantSubject(params.Payer, params.Actor)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 	var ev *models.UsageEvent
 	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		tid, terr := tenant.Require(ctx)
+		tid, terr := merchant.Require(ctx)
 		if terr != nil {
 			return terr
 		}
@@ -92,7 +92,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		}
 
 		existingRow, gerr := q.GetUsageEventByCoords(ctx, gen.GetUsageEventByCoordsParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			MerchantID: tenantID, MerchantSubjectID: payerID,
 			EventType: params.EventType, Source: params.Source, SourceID: params.SourceID,
 		})
 		if gerr == nil {
@@ -126,8 +126,8 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		}
 		ev = &models.UsageEvent{
 			ID:                 uuidutil.NewV7(),
-			TenantID:           tenantID,
-			TenantSubjectID:    payerID,
+			MerchantID:           tenantID,
+			MerchantSubjectID:    payerID,
 			Actor:              params.Actor,
 			EventType:          params.EventType,
 			Dimensions:         params.Dimensions,
@@ -149,8 +149,8 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		}
 		return q.InsertUsageEvent(ctx, gen.InsertUsageEventParams{
 			ID:                 ev.ID,
-			TenantID:           ev.TenantID,
-			TenantSubjectID:    ev.TenantSubjectID,
+			MerchantID:           ev.MerchantID,
+			MerchantSubjectID:    ev.MerchantSubjectID,
 			Actor:              ev.Actor,
 			Resource:           ev.Resource,
 			EventType:          ev.EventType,
@@ -183,14 +183,14 @@ type UsageRollupRow struct {
 // AggregateUsage rolls up an payer's usage_events over [from, to) grouped by
 // event_type, with summed dimensions. RLS-scoped to the request tenant. This is
 // the rollup layer — it is NEVER called on the per-request admission hot path.
-func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.TenantSubjectID, from, to time.Time) ([]UsageRollupRow, error) {
+func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.MerchantSubjectID, from, to time.Time) ([]UsageRollupRow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	tid, err := tenant.Require(ctx)
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.Tenant
 	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
 		totals, err := q.AggregateUsageTotals(ctx, gen.AggregateUsageTotalsParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			MerchantID: tenantID, MerchantSubjectID: payerID,
 			FromAt: from.UTC(), ToAt: to.UTC(),
 		})
 		if err != nil {
@@ -217,7 +217,7 @@ func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.Tenant
 		}
 
 		dims, err := q.AggregateUsageDimensions(ctx, gen.AggregateUsageDimensionsParams{
-			TenantID: tenantID, TenantSubjectID: payerID,
+			MerchantID: tenantID, MerchantSubjectID: payerID,
 			FromAt: from.UTC(), ToAt: to.UTC(),
 		})
 		if err != nil {

@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // TestTenantFilterScopesByTenant proves the metrics query builder emits a
@@ -14,7 +14,7 @@ import (
 // per-tenant admin path: a tenant operator's metrics query is always pinned to
 // WHERE tenant_id = ?.
 func TestTenantFilterScopesByTenant(t *testing.T) {
-	tid := tenant.ID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
+	tid := merchant.ID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
 	filter, args := tenantFilter(tid, false)
 
 	if !strings.Contains(filter, "tenant_id = ?") {

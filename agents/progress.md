@@ -7,7 +7,145 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 480
+next_id: 483
+
+---
+
+# #482: Rename `admin_grants` → `entitlement_grants` (disambiguate from authorization "grants")
+
+Design (Paul, 2026-06-13): `openrails.admin_grants` records admin-initiated ENTITLEMENT freebies — comps,
+contest winners, partnerships, manual payments (grants a `price_id`/product → a `tenant_subject`; see the table
+comment line ~700). The bare word "grants" reads as an AUTHORIZATION grant and already misled an agent into
+treating it as an operator→merchant admin mechanism (it is not). Rename to make the billing intent obvious; it
+sits naturally beside `entitlements`/`entitlement_features`.
+
+Name: **`entitlement_grants`** (covers all four reasons; unambiguously billing). Alt: `comp_grants` (too narrow
+— it's not only comps). Avoid keeping bare "grants".
+
+Mechanical, no logic change. Fold into the #480 tenant→merchant rename pass (`tenant_id`→`merchant_id`,
+`tenant_subject_id`→`merchant_subject_id` happen there anyway).
+
+**Tasks:**
+- [x] Migration: `ALTER TABLE openrails.admin_grants RENAME TO entitlement_grants` (+ rename its
+      constraints/indexes/grants); update the table/column comments. (migration 018, dynamic + guarded;
+      001 baseline updated; constraint/index names re-prefixed admin_grants->entitlement_grants.)
+- [x] sqlc-gen type + queries + all Go refs renamed (`AdminGrant*` → `EntitlementGrant*`).
+      (queries/entitlement_grants.sql; gen regenerated, no drift.)
+- [x] Confirm no external consumer references the old table name (it's internal billing state).
+
+---
+
+# #480: Rename tenant→MERCHANT (a dumb billing bucket); embedded = ZERO auth (host owns all of it); register a merchant from config (supersedes #478, realizes #473)
+
+Design (Paul, 2026-06-13): the OpenRails "tenant" is a BILLING LABEL, not an identity — it answers "whose books
+does this row go on?", never "who are you / what may you do." Auth is 100% AuthKit's job. So:
+- **Rename `tenant` → `merchant`** across OpenRails (specific + billing-flavored; matches NMI's own word; each
+  merchant maps 1:1 to a Stripe connected `account`/NMI merchant account — see the existing `stripe_account_id`).
+  A merchant carries ONLY billing/money-rail state and NO auth columns. The merchant OWNS all processor config:
+  `stripe_account_id` + Stripe webhook secrets, NMI security keys + webhook callbacks (`webhook_host`/`webhook_path`),
+  CCBill accounts, Solana wallets/config — i.e. `merchant_secrets`/`merchant_deks` (was `tenant_secrets`/`tenant_deks`),
+  `payment_methods`, `processor_customers`, `linked_wallets`, `solana_subscriptions` all key on `merchant_id`.
+  The ONLY things that LEAVE the merchant are the AUTH bits currently conflated onto `tenants`: `authkit_tenant_id`
+  (→ #481) and the JWKS/issuer registry `tenant_delegated_issuers` (→ AuthKit, #74). Rails stay; identity goes.
+- **Embedded mode runs NO AuthKit and stores ZERO auth state.** The host authenticates everyone (its own AuthKit
+  / own logic) and hands OpenRails a trusted `(merchant, subject)` via the host-plugged authenticator
+  (`DelegatedAuthenticator`/host authenticator). OpenRails verifies nothing → the JWKS/issuer registry
+  (`tenant_delegated_issuers`) is an AUTH concern and is DROPPED from OpenRails (lives host-side in embedded;
+  AuthKit-side in standalone — #74/#481).
+- The merchant row must NOT be "seeded" as a random uuid; it's REGISTERED from config at boot, idempotently.
+
+## What changes
+1. **Rename pass** (mechanical, no logic change): `openrails.tenants`→`merchants`, `tenant_subjects`→
+   `merchant_subjects`, `tenant.ID`/`tenant.Require`→`merchant.*`, GUC `app.tenant_id`→`app.merchant_id`, sqlc
+   types + ~all refs. (Do this first; #481 builds on it.)
+2. **`merchant_subjects` = thin payable-identity reference** `(merchant_id, issuer, subject)` — a LABEL to hang
+   charges on, NOT verified by OpenRails. The host/AuthKit already proved the subject.
+3. **`db.RegisterMerchant(ctx, qx, {slug, name, processor refs})`** — billing-only, config-driven, idempotent
+   (ON CONFLICT). Replaces ALL THREE seeds: `db.EnsureTenantBySlug` (#478), doujins `Seed()`, control-plane
+   org-minting. `embed.New` calls it after migrations; resolves the bound `merchant.ID` from the row.
+4. **Drop `openrails.tenant_delegated_issuers`** (JWKS = auth, not billing). Embedded: host authenticator does
+   verification. Standalone: AuthKit `remote_application` holds JWKS (#74/#481).
+5. **Canonical merchant uuid = `openrails.merchants.id`** (#473), self-owned uuidv7 — never an AuthKit uuid.
+6. **#478 superseded.**
+
+## Non-goals
+- Standalone AuthKit wiring + `authkit_tenant_id` teardown → #481. AuthKit org/remote_application split → #74.
+
+**Tasks:**
+- [x] Rename pass tenant→merchant (tables, GUC `app.tenant_id`→`app.merchant_id`, `merchant` pkg, sqlc, refs).
+      Migration 018 (idempotent, dynamic): `tenants`→`merchants`, `tenant_subjects`→`merchant_subjects`,
+      tenant_{deks,secrets,exports,credential_audit}→merchant_*, all tenant_id/tenant_subject_id columns,
+      RLS tenant_isolation→merchant_isolation, constraint/index names; 001 baseline kept in sync; verified an
+      existing DB migrates to the exact fresh-baseline shape (cols/indexes/constraints identical).
+- [x] Drop `tenant_delegated_issuers` table + its code; embedded verifies nothing (host-plugged authenticator).
+      Standalone JWKS = AuthKit remote_application (loadRemoteApplications + verifier.WithService); the OpenRails
+      issuer registry (issuer_registry/issuer_admin + routes + manifest reconciliation) is removed.
+- [x] `db.RegisterMerchant({slug, name, processor refs})` idempotent (ON CONFLICT); called in `embed.New` after
+      migrations; resolves bound `merchant.ID` from the row. `EnsureTenantBySlug` + seed two-step deleted.
+- [x] `embed.Options` carries the billing-only bound slug; RegisterMerchant is billing-only (no issuer/JWKS).
+- [x] Kept `ResolveMerchantSlug`'s unprovisioned error for standalone; integration test (embed) registers a
+      FRESH slug + is idempotent on a second `New` (passes against a real migrated DB).
+- [x] Fixed the embed conformance test (merchant resource/owner-tenant fields; RegisterServiceRoutes arity).
+- [ ] Docs: embedding guide note (deferred — no code-blocking doc; behavior covered by tests/comments).
+
+---
+
+# #481: Standalone — AuthKit owns identity/authz; the TENANT (org) is the ownership hub; merchant gets an explicit owner-tenant link + role-based admin; kill the `authkit_tenant_id` identity-equation + org-per-merchant minting
+
+Design (Paul, 2026-06-13). Standalone OpenRails embeds AuthKit for ALL identity/authorization, and the **tenant
+(org) is the ownership hub**. The provisioning model:
+1. user registers (AuthKit native `user`).
+2. user creates a **tenant (org)** — user is auto-`owner` (the one predefined minimum role; standalone may
+   define additional roles + permissions).
+3. user creates a **remote_application** controlling that tenant (external JWKS peer; AuthKit #74).
+4. user creates a **merchant** linked to that tenant (a billing bucket; #480).
+
+A user's role on the tenant is what authorizes them to administer that tenant's remote_applications and
+merchants. ONE tenant → MANY merchants/remote_applications. There is NO bespoke OpenRails grant table
+(`admin_grants` is unrelated — it records comp/free product grants, not authz).
+
+## What changes (the actual fix)
+1. **Kill the identity-equation.** Today `authkit_tenant_id` fuses billing with auth: service-token auth
+   resolves the merchant 1:1 as "the org that owns your token" (`controlplane/service_token.go:243
+   tenantForAuthKitTenant`, `WHERE authkit_tenant_id = $1`), and provisioning AUTO-MINTS an org per merchant
+   (`tenancy/lifecycle.go:151 EnsureAuthKitTenant` → `UPDATE ... SET authkit_tenant_id`). Both go.
+2. **Explicit owner-tenant link instead.** A merchant carries a nullable **`owner_tenant_id`** (the org that
+   owns it) — user-created in step 4, NULL in embedded (no AuthKit). This is the ONE permitted billing→auth
+   reference, and it is OWNERSHIP (who administers), not IDENTITY (the merchant is never "equal to" the org;
+   one org owns many merchants). It is never used to resolve a merchant from a token.
+3. **Authorization is role-based on the owning tenant.** Admin (human managing merchant/catalog/config): a role
+   on the merchant's `owner_tenant_id` (owner minimum; custom roles/permissions allowed). Runtime (a
+   remote_application's delegated token billing a merchant): the remote_application controls the tenant that
+   owns the merchant. Verification (JWKS) is AuthKit's `remote_application` (#74); OpenRails holds no issuer
+   registry (dropped in #480).
+4. **Provisioning = explicit user flow**, not auto-minting. Remove `EnsureAuthKitTenant`/
+   `recordAuthKitTenantBySlug` org-per-merchant creation; merchant via #480 `RegisterMerchant`,
+   remote_application via AuthKit #74, both linked to the user's tenant.
+
+## Depends on / relates
+- #480 (merchant rename + JWKS removed). AuthKit #74 (tenant/org + roles, remote_application owns issuer/JWKS).
+- App-specific escape hatch is AuthKit #75 (token `attributes` + consumer-stored mapping; OpenRails adds nothing).
+
+## Non-goals
+- Embedded path (no AuthKit, `owner_tenant_id` NULL) → #480.
+
+**Tasks:**
+- [x] Added nullable `merchants.owner_tenant_id` (ownership FK to the AuthKit org); migration 018 drops
+      `authkit_tenant_id`/`authkit_tenant_slug` + their index (001 baseline in sync).
+- [x] Replaced `tenantForAuthKitTenant` (`WHERE authkit_tenant_id = $1`) with role-based authz:
+      `merchantForOwnerTenant` (`WHERE owner_tenant_id = $1`) + `AuthorizeMerchant` (request NAMES the merchant;
+      check caller's owning tenant owns it). Caller identity + JWKS come from AuthKit (remote_application). The
+      delegated/service-JWT paths resolve merchant via `merchantForIssuer` (iss→remote_application→its tenant
+      memberships→owner_tenant_id→merchant).
+- [x] Removed org-per-merchant minting: `EnsureAuthKitTenant` + `TenantProvisioner` deleted from tenancy;
+      `recordAuthKitTenantBySlug`→`recordOwnerTenantBySlug` (records owner_tenant_id only). Provisioning takes an
+      EXPLICIT `OwnerTenantID` (never auto-minted; embedded leaves it NULL).
+- [x] Audited/cleaned the Go refs (`controlplane/service_token.go`, `service_jwt.go`, `delegated.go`,
+      `issuer_registry.go`, `bootstrap.go`, `tenancy/lifecycle.go`, `ginmw/service_token.go`,
+      `http/routes_tenant_admin.go`, `bootstrap/tenant_manifest.go`).
+- [x] Tests: standalone authz via owner-tenant role (`TestMerchantForOwnerTenant` incl. a tenant owning TWO
+      merchants + AuthorizeMerchant), `TestProvision_Idempotent` (merchant with no auto-minted org + unowned
+      embedded path), `TestBootstrap_Idempotent` (owner_tenant_id recorded). All pass vs a real migrated DB.
 
 ---
 

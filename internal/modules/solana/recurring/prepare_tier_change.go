@@ -8,7 +8,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // tierChangeRPC is the minimal RPC surface PrepareTierChange needs (satisfied by
@@ -52,7 +52,7 @@ func NewPrepareTierChangeService(signer solanaint.Signer, rpc tierChangeRPC, net
 // terms are the canonical, server-resolved values from the new price's config;
 // the old on-chain identifiers come from the stored solana_subscriptions row.
 type PrepareTierChangeInput struct {
-	TenantID         tenant.ID
+	MerchantID         merchant.ID
 	SubscriberWallet string
 	MintSymbol       string
 
@@ -126,7 +126,7 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 	if err != nil {
 		return nil, err
 	}
-	merchant, err := s.signer.PublicKey(ctx, in.TenantID)
+	merchant, err := s.signer.PublicKey(ctx, in.MerchantID)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: resolve merchant: %w", err)
 	}
@@ -232,7 +232,7 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 		Delegator:             subscriber,
 	})
 
-	tx, err := solanaint.BuildPartiallySignedTx(ctx, in.TenantID, s.signer, s.rpc, subscriber,
+	tx, err := solanaint.BuildPartiallySignedTx(ctx, in.MerchantID, s.signer, s.rpc, subscriber,
 		[]solanago.Instruction{cancelOld, subscribeNew, transferNew})
 	if err != nil {
 		return nil, err

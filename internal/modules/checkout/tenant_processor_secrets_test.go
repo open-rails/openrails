@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type checkoutFakeVaultKV struct {
@@ -54,18 +54,18 @@ func (f *checkoutFakeVaultKV) ListSecrets(_ context.Context, prefix string) ([]s
 
 type checkoutSlugResolver map[string]string
 
-func (r checkoutSlugResolver) TenantSlug(_ context.Context, id tenant.ID) (string, error) {
+func (r checkoutSlugResolver) TenantSlug(_ context.Context, id merchant.ID) (string, error) {
 	return r[id.String()], nil
 }
 
 type unavailableSecretStore struct{}
 
-func (unavailableSecretStore) Get(context.Context, tenant.ID, string) (tenancy.Secret, error) {
+func (unavailableSecretStore) Get(context.Context, merchant.ID, string) (tenancy.Secret, error) {
 	return tenancy.Secret{}, tenancy.ErrSecretBackendUnavailable
 }
 
 func TestCheckoutResolvesMobiusClientFromVaultTenantSecret(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	ctx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 	fakeKV := newCheckoutFakeVaultKV()
 	store := tenancy.NewVaultSecretStore("secret", fakeKV, checkoutSlugResolver{dbtest.TestTenantID.String(): "cozy-art"})
 	_, err := store.Put(ctx, dbtest.TestTenantID, tenancy.SecretNMIMobiusProductionKey, "tenant-mobius-key")
@@ -81,7 +81,7 @@ func TestCheckoutResolvesMobiusClientFromVaultTenantSecret(t *testing.T) {
 }
 
 func TestCheckoutFallsBackToStaticMobiusClientWhenTenantSecretMissing(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	ctx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 	svc := &CheckoutService{Config: checkoutProcessorConfig(true, "static-mobius-key")}
 
 	client, err := svc.resolveNMIClient(ctx, "mobius")
@@ -90,7 +90,7 @@ func TestCheckoutFallsBackToStaticMobiusClientWhenTenantSecretMissing(t *testing
 }
 
 func TestCheckoutFailsClosedWhenTenantSecretBackendUnavailable(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	ctx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 	svc := &CheckoutService{Config: checkoutProcessorConfig(true, "static-mobius-key")}
 	svc.SetTenantSecretStore(unavailableSecretStore{})
 
@@ -100,7 +100,7 @@ func TestCheckoutFailsClosedWhenTenantSecretBackendUnavailable(t *testing.T) {
 }
 
 func TestCheckoutResolvesCCBillConfigFromTenantSecret(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	ctx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 	store := tenancy.NewMemorySecretStore()
 	_, err := store.Put(ctx, dbtest.TestTenantID, tenancy.SecretCCBillAccountConfig, `{
 		"client_acc_num": "tenant-acc",
@@ -129,7 +129,7 @@ func TestCheckoutResolvesCCBillConfigFromTenantSecret(t *testing.T) {
 }
 
 func TestCheckoutCCBillSubscriptionUsesTenantSecret(t *testing.T) {
-	ctx := tenant.WithID(context.Background(), dbtest.TestTenantID)
+	ctx := merchant.WithID(context.Background(), dbtest.TestTenantID)
 	store := tenancy.NewMemorySecretStore()
 	_, err := store.Put(ctx, dbtest.TestTenantID, tenancy.SecretCCBillAccountConfig, `{
 		"client_acc_num": "tenant-acc",

@@ -273,7 +273,7 @@ func TestArchiveCatalogExtrasVia_EnqueuesOnlyOwnedActiveObjects(t *testing.T) {
 		if c.Origin != intents.OriginAdmin {
 			t.Errorf("%s: archive intents must be ADMIN-origin (the --exhaustive flag is a human request), got %q", c.IntentType, c.Origin)
 		}
-		if c.TenantID != dbtest.TestTenantID.UUID() {
+		if c.MerchantID != dbtest.TestTenantID.UUID() {
 			t.Errorf("%s: tenant not stamped", c.IntentType)
 		}
 	}

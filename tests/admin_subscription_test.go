@@ -115,7 +115,7 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 
 		// #317: the profile is keyed by the payable tenant subject (for the
 		// personal/self-hosted case this is the user's own UUID).
-		assert.Equal(t, userID, response["tenant_subject_id"], "Tenant subject ID should match")
+		assert.Equal(t, userID, response["merchant_subject_id"], "Tenant subject ID should match")
 	})
 
 	t.Run("returns entitlements in user profile", func(t *testing.T) {
@@ -123,18 +123,18 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 
 		now := time.Now().UTC()
 		endAt := now.Add(30 * 24 * time.Hour)
-		adminGrant := &models.AdminGrant{
+		adminGrant := &models.EntitlementGrant{
 			ID:              uuid.New(),
-			TenantSubjectID: suite.ensureTenantSubject(context.Background(), userID),
+			MerchantSubjectID: suite.ensureMerchantSubject(context.Background(), userID),
 			GrantedBy:       "test-admin",
 			Reason:          "test_admin_entitlement",
 			DurationDays:    nil,
 			CreatedAt:       now,
 		}
-		suite.InsertAdminGrant(context.Background(), adminGrant)
+		suite.InsertEntitlementGrant(context.Background(), adminGrant)
 		suite.InsertEntitlement(context.Background(), &models.Entitlement{
 			ID:              uuid.New(),
-			TenantSubjectID: suite.ensureTenantSubject(context.Background(), userID),
+			MerchantSubjectID: suite.ensureMerchantSubject(context.Background(), userID),
 			Entitlement:     "premium",
 			StartAt:         now.Add(-time.Second),
 			EndAt:           &endAt,
@@ -156,7 +156,7 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
-		assert.Equal(t, userID, response["tenant_subject_id"], "Tenant subject ID should match")
+		assert.Equal(t, userID, response["merchant_subject_id"], "Tenant subject ID should match")
 		// The profile includes entitlements as part of the response
 		entitlements, ok := response["entitlements"].([]interface{})
 		require.True(t, ok, "Response should have entitlements array")

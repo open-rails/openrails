@@ -28,7 +28,7 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
 
@@ -58,14 +58,14 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 
 	t.Cleanup(func() {
 		cctx := context.Background()
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE merchant_subject_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(cctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(cctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	reserve := func(orderID string) *models.Payment {
 		attempt, err := svc.ReserveProviderAttempt(ctx, &models.Payment{
-			TenantSubjectID: tenantSubjectID,
+			MerchantSubjectID: tenantSubjectID,
 			PriceID:         priceID,
 			Processor:       models.ProcessorMobius,
 			TransactionID:   "nmi_sub_attempt:" + orderID,

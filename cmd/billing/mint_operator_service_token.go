@@ -75,7 +75,7 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("read tenant flag: %w", err)
 	}
-	tenantID, tenantSlug, tenantResource, err := cp.TenantScope(ctx, tenantRef)
+	tenantID, tenantSlug, tenantResource, err := cp.MerchantScope(ctx, tenantRef)
 	if err != nil {
 		return fmt.Errorf("resolve tenant %q: %w", tenantRef, err)
 	}

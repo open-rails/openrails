@@ -109,7 +109,7 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 
 	refund := &models.Payment{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: orig.TenantSubjectID,
+		MerchantSubjectID: orig.MerchantSubjectID,
 		PriceID:         orig.PriceID,
 		SubscriptionID:  orig.SubscriptionID,
 		RefundedPaymentID: func() *uuid.UUID {
@@ -147,7 +147,7 @@ func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uu
 	now := s.now()
 	refund := &models.Payment{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: orig.TenantSubjectID,
+		MerchantSubjectID: orig.MerchantSubjectID,
 		PriceID:         orig.PriceID,
 		SubscriptionID:  orig.SubscriptionID,
 		RefundedPaymentID: func() *uuid.UUID {
