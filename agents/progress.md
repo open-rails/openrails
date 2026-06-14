@@ -882,14 +882,19 @@ tier_schedules (#476), credit-line (#489), money-denominated spend-caps, #487 ma
 max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
 
 **Tasks:**
-- [ ] Make `customer` a PURE balance account: DROP (issuer, subject) from customers; customer =
-      (id, merchant_id) + money. The (issuer, subject) auth key moves to the actor. Migrate existing
-      customers rows (the federated ones collapse to one payer per issuer; embedded ones become per-user
-      balances).
-- [ ] Track the `actor` (invoker) as a MERCHANT-SUPPLIED opaque label scoped under a customer:
-      (merchant_id, customer_id, actor_string), holding spend-attribution + per-actor abuse counters. NOT
-      authenticated, NOT (issuer, subject). SEED: money_spend_limits already has exactly this opaque `actor`
-      string — build on it. NO money, NO tier.
+- [x] Make `customer` a PURE balance account: DROP (issuer, subject) from customers; customer =
+      (id, merchant_id) + money. Done (slice 1, 53f8fb37): migration 024 drops the columns/constraint
+      idempotently; the three upserts fold into one EnsureCustomer(id, merchant_id); federated (issuer,
+      subject) -> customer maps to a deterministic UUIDv5 (identity.FederatedCustomerID) instead of a
+      lookup column. NOTE: existing-row collapse (federated -> one payer per issuer) is NOT migrated —
+      each existing UUID id stays its own balance; a separate data-collapse migration if/when needed.
+- [x] Track the `actor` (invoker) as a MERCHANT-SUPPLIED opaque label scoped under a customer. Partial
+      (slice 2, c290de39): the BUDGET SCOPE actor->invoker is renamed (Go ScopeInvoker; canonical stored
+      value 'invoker' via migration 025 + NormalizeScope accepting 'actor' transiently), scoped
+      (merchant_id, customer_id, invoker_string). NOTE: the opaque KEY column (`actor`) on
+      budget_reservations/budget_window_state and the money_transactions/usage_events/money_spend_limits
+      `actor` columns are intentionally NOT renamed (opaque keys; a column rename is high-risk + out of
+      the minimal-safe slice). Per-invoker abuse counters onto a first-class actor identity row remains.
 - [ ] Federated resolution: a delegated request (issuer, subject) resolves to an ACTOR whose customer_id =
       the issuer's single designated payer balance (issuer registry) — STOP materializing a money_account
       per delegated-user.
@@ -903,22 +908,25 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       actor -> customer 1:1.
 - [ ] Move #488 per-invoker flat wasted-budget + a per-actor concurrent-capacity cap onto the actor
       identity (persist attribution; abuse counters may stay in Redis but keyed by the real actor id).
-- [ ] SDK + wire: distinguish payer (customer) from actor on Admit/charge; surface per-actor spend
-      attribution to the payer.
-- [ ] NO customer-claim-in-token needed (corrected): the authenticated token subject (delegated_sub, or a
-      merchant self-token) is ALWAYS a CUSTOMER or the merchant — never an unbilled end-user. The invoker
-      (actor) arrives as a MERCHANT-SUPPLIED opaque request field on Admit/charge (= money_spend_limits.actor)
-      for attribution + abuse only. PATHS: PROXY = merchant self-token + customer + actor request fields (the
-      charge path); DIRECT = a delegated token whose delegated_sub IS a customer doing self-service (read own
-      balance), no separate actor.
-- [ ] DROP money_balances (it is a read-cache roll-up): derive available = SUM(unexpired
-      money_blocks.remaining_amount) and held = SUM(active-hold authorized_amount in money_transactions).
-      Move the FOR UPDATE spend mutex (today LockMoneyBalance) onto the CUSTOMER row (now the account) or a
-      pg_advisory_xact_lock(customer_id). Delete the drift/anomaly reconciliation queries
-      (ListMoneyHeldBalanceDrift / ListMoneyBalanceAnomalies) — no cache, no drift.
-- [ ] Background COMPACTION job (extend the existing credit-block EXPIRY River job) to delete
-      fully-spent (remaining_amount=0) and expired money_blocks, keeping the spendable-lot table bounded so
-      the derived SUM stays O(log n). Touches money_blocks ONLY.
+- [x] SDK + wire: distinguish payer (customer) from actor on Admit/charge. Verified (slice 4): the
+      Admit/charge/spend wire DTOs already carry customer_id (payable uuid) + actor (the invoker opaque
+      label) as REQUEST fields (serviceAdmitRequest, service_credits, service_credit_window). No code
+      change — the split already exists at the wire. NOTE: wire field stays json:"actor" (renaming it to
+      "invoker" is a wire-breaking change for existing consumers + a stored-column value; deferred, like
+      the Slice 2 column-rename). Per-actor spend attribution surfacing to the payer is unchanged.
+- [x] NO customer-claim-in-token needed. Verified (slice 4): no invoker/actor JWT claim exists anywhere;
+      the invoker (actor) arrives ONLY as a merchant-supplied opaque request field on Admit/charge/spend
+      (= money_spend_limits.actor). The authenticated subject is always a customer or the merchant
+      self-token. Confirmed in serviceAdmitRequest + the service_credits/window handlers; no change needed.
+- [x] DROP money_balances (read-cache roll-up). Done (slice 3, 5e302967): available = SUM(unexpired
+      money_blocks.remaining_amount), held = SUM(active-hold authorized_amount) + open-window unsettled
+      (windows reserve held without a hold row). Spend mutex moved to FOR UPDATE on the customers row
+      (LockCustomerForSpend). Drift/anomaly queries + GetMoneyBalance/Set*/Insert* deleted. Migration 026
+      DROP TABLE money_balances + partial index money_blocks(merchant,customer,currency) WHERE
+      remaining_amount>0. Money integration + conformance + controlplane integration gates GREEN.
+- [x] Background COMPACTION job. Done (slice 3, 5e302967): the credit-block EXPIRY River job now DELETEs
+      fully-spent (remaining_amount=0) and expired money_blocks (DeleteCompactableMoneyBlocks), bounded
+      batch, touching money_blocks ONLY — never money_transactions or payments.
 - [ ] AUDIT-SAFE: the purchase receipt lives in `payments` (the card charge, "bought $10 June 11") + the
       `money_transactions` transaction_type='deposit' row — NOT in money_blocks. Compaction must NEVER
       delete money_transactions deposit rows or payments; only the derived spendable lots. (money_blocks
