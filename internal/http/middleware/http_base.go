@@ -80,20 +80,37 @@ func CORSHTTP(allowedOrigins []string) HTTPMiddleware {
 	)
 	maxAge := strconv.Itoa(int((12 * time.Hour).Seconds()))
 
+	setCommon := func(h http.Header) {
+		h.Set("Access-Control-Allow-Headers", allowHeaders)
+		h.Set("Access-Control-Allow-Methods", allowMethods)
+		h.Set("Access-Control-Expose-Headers", exposeHeaders)
+		h.Set("Access-Control-Max-Age", maxAge)
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
 			if origin != "" {
-				_, ok := allowed[origin]
-				if allowAll || ok {
-					h := w.Header()
+				h := w.Header()
+				if _, ok := allowed[origin]; ok {
+					// Explicitly allow-listed origin: safe to reflect it and
+					// grant credentials.
 					h.Set("Access-Control-Allow-Origin", origin)
 					h.Add("Vary", "Origin")
 					h.Set("Access-Control-Allow-Credentials", "true")
-					h.Set("Access-Control-Allow-Headers", allowHeaders)
-					h.Set("Access-Control-Allow-Methods", allowMethods)
-					h.Set("Access-Control-Expose-Headers", exposeHeaders)
-					h.Set("Access-Control-Max-Age", maxAge)
+					setCommon(h)
+				} else if allowAll {
+					// Allow-all (no origins configured, e.g. development): emit a
+					// wildcard and DO NOT set Access-Control-Allow-Credentials.
+					// Reflecting the caller's Origin together with
+					// credentials=true is the classic CORS misconfiguration — it
+					// lets any site issue authenticated cross-origin requests with
+					// the user's credentials and read the response, defeating the
+					// same-origin policy. A bare "*" cannot carry credentials, so
+					// browsers keep cross-origin reads anonymous. This matches the
+					// effective behaviour of the gin CORS path (AllowAllOrigins).
+					h.Set("Access-Control-Allow-Origin", "*")
+					setCommon(h)
 				}
 			}
 			if r.Method == http.MethodOptions {
