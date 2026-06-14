@@ -7,7 +7,110 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 487
+next_id: 491
+
+---
+
+# #487: Generic spend-graduated tier policy + $-denominated admit limits (in-flight held-$ cap + per-charge cap)
+
+Consumer: tensorhub #486 (platform rate-limiting/tier redesign). MUST stay GENERIC — OpenRails sees only $, tiers,
+holds, and host-reported events; no host-domain concepts (GPU/tokens/images) leak in. The $-denomination is what
+keeps it reusable by other platforms.
+
+Today OpenRails has SetTierSchedule (cumulative-spend thresholds → auto-graduation) + SetTierPolicy carrying
+unit-based throughput windows (rpm/tpm/ipm) + queue limits. The tensorhub consumer no longer needs the throughput
+dimensions; it needs two $-denominated per-tier limits. KEEP the throughput capability (other hosts may use it);
+ADD/expose these generic primitives.
+
+## Scope
+- KEEP: SetTierSchedule + auto-graduation by cumulative CAPTURED spend (generic, unchanged); KEEP `ResolvedTier` on
+  AdmitResponse; KEEP captured-ledger $ budget windows (#475).
+- ADD two GENERIC $-denominated per-tier limits to the tier policy:
+  - `max_concurrent_held_micros` — cap on the sum of a payer's ACTIVE (un-settled) hold $. Enforce at admit
+    (over-limit signal) AND surface the resolved value on AdmitResponse, so a host that enforces true occupancy
+    itself (tensorhub's scheduler — only it sees live GPU occupancy) can use the value + the per-job estimate.
+  - `max_single_charge_micros` — per-charge ceiling; reject an Admit whose estimate exceeds it. Generic runaway guard.
+- Throughput windows + queue limits: keep supported; tensorhub simply stops pushing them.
+
+## Notes
+- "held $" = running + queued (admitted-not-settled). OpenRails' own enforcement is a committed-$ admission gate; a
+  host wanting work-conserving QUEUEING reads the cap value + per-job estimate and queues in its scheduler instead
+  (tensorhub does this) rather than getting a hard deny.
+- Values are tenant-wide defaults (empty subject), auto-applied at the payer's resolved tier.
+
+## Pairs with
+tensorhub #486; openrails #488 (failure windows), #489 (arrears), #490 (deposit fraud).
+
+---
+
+# #488: $-valued failure/wasted-spend budget windows (per-payer tier + per-invoker flat) + report-failed-charge API
+
+Consumer: tensorhub #486. GENERIC — every platform has failed/refunded work that costs it money (a hold released
+without capture, or a host-reported out-of-band cost). Rate-limit that "wasted spend" so a low-trust account can't
+abuse expensive failures for free (the prepaid balance can't bound this — failures are refunded).
+
+Today there are event-COUNT AbuseWindows (LimitEvents) + abuse_rate_limited / moderation_rate_limited /
+failure_rate_limited codes + /abuse-usage. Generalize to $-VALUED windows so a pricey failure weighs more than a
+cheap one.
+
+## Scope
+- A host API to REPORT a failed/wasted charge: `ReportWastedSpend(payer, actor, micros, reason)` (or a "wasted" flag
+  on the settle/release path) — the host says "this attempt failed and cost $X." (tensorhub reports content-filter
+  rejects + inference failures; cheap malformed rejects ≈ $0, not reported.)
+- Track per-PAYER and per-ACTOR (invoker) wasted-spend in $ windows, multi-window (e.g. 15 min + 5 h).
+- Budgets: per-PAYER window graduated by the tier policy (#487) — a `bad_spend` $ budget per tier; per-ACTOR window
+  a flat config default (invokers aren't trusted — an account mints unlimited).
+- Enforce at admit: deny when EITHER the payer or the actor is over its wasted-$ budget (reuse
+  abuse_rate_limited / failure_rate_limited). Surface wasted $ (not just counts) on /abuse-usage.
+
+## Pairs with
+tensorhub #486 (reports the failures + defines the $ amounts); openrails #487 (per-tier bad_spend budget lives in the
+tier policy).
+
+---
+
+# #489: Per-tenant arrears credit-line (admin-set credit limit; negative-balance-up-to-limit)
+
+Consumer: tensorhub #486 (admin-only arrears for trusted tenants). GENERIC — OpenRails already supports an arrears
+billing mode; make the credit exposure an explicit, admin-set per-tenant limit.
+
+## Scope
+- Per-tenant `credit_limit_micros` (admin/operator-set, NOT self-serve): under billing_mode=arrears, allow the
+  balance to go NEGATIVE up to the credit limit; AdmitHold denies (insufficient_credit) when a new hold would
+  exceed it.
+- Periodic invoicing of accrued arrears (or expose the arrears balance for the host to invoice) — confirm what the
+  existing arrears mode already does vs new.
+- Default OFF: prepaid, credit_limit = 0 unless an operator sets it.
+- Capacity (#487 held-$ cap) for an arrears tenant scales from the credit limit (the trust signal) rather than a
+  positive balance.
+
+## Pairs with
+tensorhub #486 (per-tenant `arrears_allowed` flag + admin surface); openrails #487.
+
+---
+
+# #490: Deposit/chargeback fraud controls — 3-D Secure + processor fraud screening + unseasoned-funds spend velocity
+
+Consumer: tensorhub #486 (the "fraud" the tier ramp pretended to address actually lives at the PAYMENT layer).
+GENERIC — any prepaid platform taking card deposits faces chargeback fraud (deposit on a stolen/disputed card,
+consume irreversible value, then charge back). The prepaid balance does NOT bound this (the deposit reverses AFTER
+delivery); the existential risk is the chargeback RATIO terminating the merchant account.
+
+## Scope (payment-layer, distinct from the capacity system)
+- 3-D Secure (SCA) on deposits — shifts liability for fraudulent disputes to the card issuer; largely neutralizes
+  the stolen-card vector. Wire on the deposit/checkout path per processor (NMI / Stripe / CCBill / etc).
+- Processor fraud screening at deposit (Radar-equivalent / NMI fraud tools): risky BIN / AVS / CVC / velocity → block.
+- Unseasoned-funds spend velocity (optional): limit how fast NEWLY-deposited funds drain for a new/low-trust account,
+  slowing extraction before a chargeback lands. Distinct from the capacity held-$ cap.
+- Optional KYC / friction above a deposit threshold.
+
+## Notes
+- Priority: 3DS + screening are the high-leverage controls; velocity/KYC secondary. Arguably more important than the
+  capacity ladder ever was — this is the real fraud surface.
+
+## Pairs with
+tensorhub #486 (out-of-scope-there → here); openrails #489 (arrears amplifies deposit-fraud exposure — extra reason
+arrears is trust-gated).
 
 ---
 
