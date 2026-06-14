@@ -83,10 +83,20 @@ primitives as-is; do NOT give custom credits a `money_accounts`/invoice/owed row
 Design notes:
 - Unit namespace: qualified `tenant-slug/name` (e.g. `tensorhub/api-credit`) = custom credit;
   unqualified (`usd`) = built-in currency (#474). One `currency`/`unit` column hosts both.
-- Tasks: (1) a per-tenant custom-credit-type registry (define/list/activate); (2) allow the money
-  ledger's `currency` column to hold qualified codes + validate (tenant-owned); (3) product grants
-  may target a custom-credit unit; (4) the admission/spend path consumes custom credits;
-  (5) ENFORCE the invariant — billing/invoice/owed/charge paths reject non-currency (qualified) units.
+- DEFINITION model (like Sui custom coins): a custom credit type is just `{name, decimals}` — the
+  tenant picks a name + a decimal precision. `decimals` separates PRESENTATION (what the user/admin
+  sees) from internal STORAGE: amounts are ALWAYS stored as integer minor units, and the UI divides
+  by 10^decimals for display. Examples: tickets → decimals=0; gold coins → decimals=2. This is exactly
+  how the built-in currencies already work — micro-USD is "USD with decimals=6" — so the SAME storage
+  model + currency registry shape covers both; built-ins are {USD/USDC/EUR=6, JPY=4, SOL=9}, custom
+  types carry their tenant-chosen decimals in the per-tenant registry.
+- Tasks: (1) a per-tenant custom-credit-type registry storing `{tenant, name, decimals, active}`
+  (define/list/activate); (2) allow the money ledger's `currency` column to hold qualified codes +
+  resolve their decimals from the registry (tenant-owned); (3) product grants may target a
+  custom-credit unit; (4) the admission/spend path consumes custom credits; (5) presentation: format
+  stored integer minor units → display via the unit's decimals (built-in or custom) at the API/admin
+  boundary; (6) ENFORCE the invariant — billing/invoice/owed/charge paths reject non-currency
+  (qualified) units.
 - Keep it minimal; build only when a tenant actually needs a non-dollar unit.
 
 ---
