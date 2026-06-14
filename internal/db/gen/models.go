@@ -453,6 +453,8 @@ type OpenrailsMoneyAccount struct {
 	Currency string
 	// auto = tier maintained by the tier_schedule auto-graduation (#476); admin = explicit override that auto-graduation must not overwrite.
 	TierSource string
+	// Admin-set per-account arrears credit line (#489): under billing_mode=arrears the balance may go negative up to this amount; AdmitHold denies insufficient_credit when a new hold would exceed it. 0 = off (prepaid/existing-arrears behavior unchanged). NOT self-serve.
+	CreditLimitMicros int64
 }
 
 // amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).

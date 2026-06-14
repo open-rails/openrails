@@ -109,6 +109,51 @@ func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, 
 	})
 }
 
+// SetCreditLimit sets the admin/operator arrears credit line for a payer (#489):
+// under billing_mode=arrears the balance may go negative up to creditLimitMicros;
+// AdmitHold denies insufficient_credit when a new hold would exceed it. 0 turns
+// the credit line OFF (prepaid/existing-arrears behavior). This is OPERATOR-only
+// — deliberately NOT part of the self-serve UpsertAccountSettings surface. It
+// ensures a settings row exists, then stamps the limit.
+func (s *MoneyService) SetCreditLimit(ctx context.Context, payer identity.CustomerID, creditLimitMicros int64) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("money service not initialized")
+	}
+	if payer.IsZero() {
+		return fmt.Errorf("payer required")
+	}
+	if creditLimitMicros < 0 {
+		return fmt.Errorf("credit_limit_micros must be >= 0")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tenantID := tid.UUID()
+	now := s.now()
+	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		// Ensure a settings row exists (arrears mode if creating — a credit line
+		// only matters for arrears; no-op when the row already exists).
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payer.UUID(), DefaultCurrency, BillingModeArrears, now); err != nil {
+			return err
+		}
+		return q.SetMoneyAccountCreditLimit(ctx, gen.SetMoneyAccountCreditLimitParams{
+			MerchantID: tenantID, CustomerID: payer.UUID(), Currency: DefaultCurrency,
+			CreditLimit: creditLimitMicros, Now: now,
+		})
+	})
+}
+
+// GetCreditLimit returns the admin-set arrears credit line for a payer (#489).
+func (s *MoneyService) GetCreditLimit(ctx context.Context, payer identity.CustomerID) (int64, error) {
+	settings, err := s.GetAccountSettings(ctx, payer)
+	if err != nil {
+		return 0, err
+	}
+	return settings.CreditLimitMicros, nil
+}
+
 // GetOutstandingOwed returns the current outstanding owed for payer in currency.
 func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
 	settings, err := s.getAccountSettings(ctx, payer, currency)

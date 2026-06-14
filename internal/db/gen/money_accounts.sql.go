@@ -69,7 +69,7 @@ func (q *Queries) AutoGraduateMoneyAccountTier(ctx context.Context, arg AutoGrad
 }
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
-SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source FROM openrails.money_accounts
+SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source, credit_limit_micros FROM openrails.money_accounts
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -110,6 +110,7 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.Tier,
 		&i.Currency,
 		&i.TierSource,
+		&i.CreditLimitMicros,
 	)
 	return i, err
 }
@@ -334,7 +335,7 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUI
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source FROM openrails.money_accounts
+SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source, credit_limit_micros FROM openrails.money_accounts
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -375,6 +376,7 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.Tier,
 		&i.Currency,
 		&i.TierSource,
+		&i.CreditLimitMicros,
 	)
 	return i, err
 }
@@ -429,6 +431,34 @@ func (q *Queries) ResumeMoneyAccount(ctx context.Context, arg ResumeMoneyAccount
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.UpdatedAt,
+		arg.Currency,
+	)
+	return err
+}
+
+const setMoneyAccountCreditLimit = `-- name: SetMoneyAccountCreditLimit :exec
+UPDATE openrails.money_accounts
+SET credit_limit_micros = $3::bigint, updated_at = $4
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
+`
+
+type SetMoneyAccountCreditLimitParams struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	CreditLimit int64
+	Now         time.Time
+	Currency    string
+}
+
+// Admin-only arrears credit-line setter (#489). NOT part of the self-serve
+// UpsertMoneyAccountSettings — an operator path calls this. The settings row must
+// already exist (the caller ensures it).
+func (q *Queries) SetMoneyAccountCreditLimit(ctx context.Context, arg SetMoneyAccountCreditLimitParams) error {
+	_, err := q.db.Exec(ctx, setMoneyAccountCreditLimit,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.CreditLimit,
+		arg.Now,
 		arg.Currency,
 	)
 	return err

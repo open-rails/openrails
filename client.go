@@ -107,6 +107,14 @@ type Client interface {
 	// (#488 introspection) — wasted $, not just counts. Empty actor omits the actor
 	// windows; empty tier resolves the payer's current tier.
 	AbuseUsage(ctx context.Context, tenantSubjectID, actor, tier string) (*AbuseUsageResponse, error)
+	// SetCreditLimit sets the admin/operator arrears credit line for a payer
+	// (#489): under billing_mode=arrears the balance may go NEGATIVE up to
+	// creditLimitMicros; AdmitHold denies insufficient_credit when a new hold would
+	// exceed it. 0 = off (prepaid / existing-arrears behavior, unchanged).
+	// OPERATOR-only — NOT self-serve.
+	SetCreditLimit(ctx context.Context, tenantSubjectID string, creditLimitMicros int64) error
+	// GetCreditLimit returns the admin-set arrears credit line for a payer (#489).
+	GetCreditLimit(ctx context.Context, tenantSubjectID string) (int64, error)
 	// SetSubjectBudgetPolicy upserts a SUBJECT-owned hierarchical budget-scope
 	// policy (#473): the subject's self cap (scope=subject) or a (subject, role)
 	// pool (scope=role, RoleID = the role uuid). The owner is forced to "subject"

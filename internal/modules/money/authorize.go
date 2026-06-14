@@ -141,12 +141,34 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			return derr
 		}
 
-		// Prepaid accounts additionally gate on available balance; arrears accounts
-		// are gated by the outstanding ceiling inside CheckSpendAllowed.
-		if settings.BillingMode != BillingModeArrears && in.EstimateMicros > available {
-			dec.Allowed = false
-			if dec.DenyCode == "" {
-				dec.DenyCode = DenyInsufficientBalance
+		// Admit-time balance/credit gate. Prepaid accounts gate on available balance
+		// (unchanged). Arrears accounts (#489): when an admin has set a credit line
+		// (credit_limit_micros > 0) the balance may go NEGATIVE only up to it, so a
+		// hold is allowed while estimate <= available + credit_limit and denied
+		// insufficient_credit otherwise. credit_limit=0 (the default) is OFF and
+		// preserves the EXISTING arrears behavior (#302): no admit-time balance gate
+		// — a hold may exceed the balance and spill to owed at capture, bounded only
+		// by the outstanding ceiling (MaxOutstandingOwed, inside CheckSpendAllowed).
+		//
+		// NOTE (design choice): #489's literal "credit_limit=0 ⇒ prepaid behavior"
+		// would block #302's arrears-spill-past-balance, a real existing capability.
+		// We instead make 0 = OFF (existing behavior unchanged) and a positive limit
+		// = the new explicit admit-time credit ceiling. Prepaid is unaffected either
+		// way.
+		switch {
+		case settings.BillingMode != BillingModeArrears:
+			if in.EstimateMicros > available {
+				dec.Allowed = false
+				if dec.DenyCode == "" {
+					dec.DenyCode = DenyInsufficientBalance
+				}
+			}
+		case settings.CreditLimitMicros > 0:
+			if in.EstimateMicros > available+settings.CreditLimitMicros {
+				dec.Allowed = false
+				if dec.DenyCode == "" {
+					dec.DenyCode = DenyInsufficientCredit
+				}
 			}
 		}
 
@@ -206,6 +228,11 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 // DenyInsufficientBalance is the deny code when a prepaid account lacks the
 // available balance to cover the estimate. Mirrored by the pkg/service facade.
 const DenyInsufficientBalance = "insufficient_balance"
+
+// DenyInsufficientCredit is the deny code (#489) when an arrears account with an
+// admin-set credit line would exceed credit_limit_micros (the negative-balance
+// ceiling) by placing this hold.
+const DenyInsufficientCredit = "insufficient_credit"
 
 type accountSnapshot struct {
 	billingMode string

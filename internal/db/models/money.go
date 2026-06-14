@@ -89,9 +89,14 @@ type MoneyAccount struct {
 	HardStopOnBreach         bool       `json:"hard_stop_on_breach"`
 	AlertThresholdPct        int        `json:"alert_threshold_pct"`
 
-	OutstandingOwedMicros int64      `json:"outstanding_owed_micros"`
-	LastAlertAt           *time.Time `json:"last_alert_at,omitempty"`
-	LastTopupAt           *time.Time `json:"last_topup_at,omitempty"`
+	OutstandingOwedMicros int64 `json:"outstanding_owed_micros"`
+	// CreditLimitMicros is the admin-set arrears credit line (#489): under
+	// billing_mode=arrears the balance may go negative up to this amount; AdmitHold
+	// denies insufficient_credit when a new hold would exceed it. 0 = off. NOT
+	// self-serve (set via SetCreditLimit, never UpsertAccountSettings).
+	CreditLimitMicros int64      `json:"credit_limit_micros"`
+	LastAlertAt       *time.Time `json:"last_alert_at,omitempty"`
+	LastTopupAt       *time.Time `json:"last_topup_at,omitempty"`
 
 	VerifiedPaymentMethod bool       `json:"verified_payment_method"`
 	VerifiedAt            *time.Time `json:"verified_at,omitempty"`

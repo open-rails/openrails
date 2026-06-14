@@ -405,6 +405,34 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.C
 	})
 }
 
+// SetCreditLimit sets the admin/operator arrears credit line for a payer (#489):
+// under billing_mode=arrears the balance may go negative up to creditLimitMicros;
+// AdmitHold denies insufficient_credit when a new hold would exceed it. 0 = off.
+// OPERATOR-only — deliberately separate from SetCreditAccountSettings (the
+// self-serve surface): a subject cannot raise its own credit line.
+func (s *Service) SetCreditLimit(ctx context.Context, payer identity.CustomerID, creditLimitMicros int64) error {
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return fmt.Errorf("payer required")
+	}
+	return s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+		return s.moneyService().SetCreditLimit(ctx, payer, creditLimitMicros)
+	})
+}
+
+// GetCreditLimit returns the admin-set arrears credit line for a payer (#489).
+func (s *Service) GetCreditLimit(ctx context.Context, payer identity.CustomerID) (int64, error) {
+	if s == nil || s.rt == nil {
+		return 0, fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return 0, fmt.Errorf("payer required")
+	}
+	return s.moneyService().GetCreditLimit(ctx, payer)
+}
+
 // GetCreditAccountSettings returns an payer's stored credit-account settings
 // (billing mode prepaid|arrears, spend caps, auto-top-up, expiry default) for the
 // org billing-account admin surface (issue #242). RLS-scoped.

@@ -121,6 +121,10 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	group.POST("/wasted-spend", creditsWrite, wrap(httphandlers.ServiceReportWastedSpend))
 	// Wasted-spend usage READ (#488): the payer's + actor's running wasted-$ totals.
 	group.GET("/abuse-usage", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceAbuseUsage))
+	// Arrears credit-line admin (#489): operator sets the per-payer negative-balance
+	// ceiling. Admin-gated (openrails:admin) — NOT self-serve. Read is credits:read.
+	group.PUT("/credit-limit", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), wrap(httphandlers.ServiceSetCreditLimit))
+	group.GET("/credit-limit", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetCreditLimit))
 	// Hierarchical budget-scope policies (#473). Subject-owned caps (self +
 	// (subject, role) pools) are written/read with the same operator credits
 	// gates as tier policies. The PLATFORM-owned payer cap is operator-admin

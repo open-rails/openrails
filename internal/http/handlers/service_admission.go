@@ -339,6 +339,69 @@ func ServiceAbuseUsage(r *httprequest.Request) {
 	r.JSON(http.StatusOK, map[string]any{"payer_windows": pw, "actor_windows": aw})
 }
 
+type serviceCreditLimitRequest struct {
+	CustomerID        string `json:"customer_id"`
+	CreditLimitMicros int64  `json:"credit_limit_micros"`
+}
+
+// ServiceSetCreditLimit sets the admin/operator arrears credit line for a payer
+// (#489): under billing_mode=arrears the balance may go NEGATIVE up to the limit;
+// AdmitHold denies insufficient_credit when a new hold would exceed it. 0 = off.
+// OPERATOR-ADMIN gated at the route (openrails:admin) — NOT self-serve.
+func ServiceSetCreditLimit(r *httprequest.Request) {
+	var req serviceCreditLimitRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	if req.CreditLimitMicros < 0 {
+		r.ErrorJSON(http.StatusBadRequest, "credit_limit_micros must be >= 0")
+		return
+	}
+	payer, err := parseServiceCustomerID(req.CustomerID)
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
+		return
+	}
+	if !requireServiceCustomerScope(r, *payer) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	if err := svc.SetCreditLimit(r.Request.Context(), *payer, req.CreditLimitMicros); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "set credit limit failed")
+		return
+	}
+	r.SuccessJSONMessage("ok")
+}
+
+// ServiceGetCreditLimit returns the admin-set arrears credit line for a payer
+// (#489). customer_id is a query param; the tenant is pinned from the service
+// token. Operator service token, credits:read.
+func ServiceGetCreditLimit(r *httprequest.Request) {
+	payer, err := parseServiceCustomerID(r.Query("customer_id"))
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
+		return
+	}
+	if !requireServiceCustomerScope(r, *payer) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	v, err := svc.GetCreditLimit(r.Request.Context(), *payer)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "credit limit lookup failed")
+		return
+	}
+	r.SuccessJSON(map[string]any{"credit_limit_micros": v})
+}
+
 type serviceBudgetCheckRequest struct {
 	CustomerID      string                                  `json:"customer_id"`
 	Actor           string                                  `json:"actor"`

@@ -92,6 +92,7 @@ func settingsFromGen(r gen.OpenrailsMoneyAccount) *models.MoneyAccount {
 		HardStopOnBreach:         r.HardStopOnBreach,
 		AlertThresholdPct:        int(r.AlertThresholdPct),
 		OutstandingOwedMicros:    r.OutstandingOwedMicros,
+		CreditLimitMicros:        r.CreditLimitMicros,
 		LastAlertAt:              r.LastAlertAt,
 		LastTopupAt:              r.LastTopupAt,
 		VerifiedPaymentMethod:    r.VerifiedPaymentMethod,

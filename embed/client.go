@@ -797,6 +797,33 @@ func (c *localClient) AbuseUsage(ctx context.Context, tenantSubjectID, actor, ti
 	}, nil
 }
 
+// SetCreditLimit transcribes handlers.ServiceSetCreditLimit (#489).
+func (c *localClient) SetCreditLimit(ctx context.Context, tenantSubjectID string, creditLimitMicros int64) error {
+	ctx = c.ensureTenant(ctx)
+	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
+	if err != nil {
+		return err
+	}
+	if err := c.svc.SetCreditLimit(ctx, payer, creditLimitMicros); err != nil {
+		return internalErr("set credit limit failed")
+	}
+	return nil
+}
+
+// GetCreditLimit transcribes handlers.ServiceGetCreditLimit (#489).
+func (c *localClient) GetCreditLimit(ctx context.Context, tenantSubjectID string) (int64, error) {
+	ctx = c.ensureTenant(ctx)
+	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
+	if err != nil {
+		return 0, err
+	}
+	v, gerr := c.svc.GetCreditLimit(ctx, payer)
+	if gerr != nil {
+		return 0, internalErr("get credit limit failed")
+	}
+	return v, nil
+}
+
 func abuseUsageWindows(ws []billingservice.AbuseUsageWindow) []openrails.AbuseUsageWindow {
 	out := make([]openrails.AbuseUsageWindow, 0, len(ws))
 	for _, w := range ws {

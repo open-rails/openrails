@@ -432,6 +432,28 @@ func (c *remote) AbuseUsage(ctx context.Context, tenantSubjectID, actor, tier st
 	return &out, nil
 }
 
+// SetCreditLimit implements Client (handler ServiceSetCreditLimit, #489).
+func (c *remote) SetCreditLimit(ctx context.Context, tenantSubjectID string, creditLimitMicros int64) error {
+	body := map[string]any{
+		"customer_id":         strings.TrimSpace(tenantSubjectID),
+		"credit_limit_micros": creditLimitMicros,
+	}
+	return c.do(ctx, http.MethodPut, "/v1/service/credit-limit", body, nil)
+}
+
+// GetCreditLimit implements Client (handler ServiceGetCreditLimit, #489).
+func (c *remote) GetCreditLimit(ctx context.Context, tenantSubjectID string) (int64, error) {
+	q := url.Values{}
+	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
+	var resp struct {
+		CreditLimitMicros int64 `json:"credit_limit_micros"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/service/credit-limit?"+q.Encode(), nil, &resp); err != nil {
+		return 0, err
+	}
+	return resp.CreditLimitMicros, nil
+}
+
 // SetSubjectBudgetPolicy implements Client (handler ServiceSetSubjectBudgetPolicy, #473).
 func (c *remote) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in SubjectBudgetPolicyInput) error {
 	body := map[string]any{

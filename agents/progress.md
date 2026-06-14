@@ -115,6 +115,21 @@ billing mode; make the credit exposure an explicit, admin-set per-tenant limit.
 ## Pairs with
 tensorhub #486 (per-tenant `arrears_allowed` flag + admin surface); openrails #487.
 
+## Outcome
+LANDED. EXISTING vs NEW: the existing arrears mode ALREADY had a credit line — `max_outstanding_owed_micros` (the
+existing tests literally name it "credit limit") — but it is (a) SELF-SERVE (set via UpsertAccountSettings) and (b)
+enforced on the SETTLEMENT path (SpendCredits/AccrueOwed); AuthorizeAndHold SKIPPED the balance gate for arrears
+entirely. #489's NEW bits: an explicit OPERATOR-ONLY `credit_limit_micros` column (migration 022) + admit-time
+enforcement in AuthorizeAndHold (deny `insufficient_credit` when a new hold would push the balance below
+-credit_limit). New `MoneyService.SetCreditLimit/GetCreditLimit` (operator-only, dedicated SQL — NOT on the self-serve
+AccountSettingsInput) + pkg/service + SDK (client/remote/embed) + admin-gated PUT/GET /v1/service/credit-limit routes.
+DESIGN CHOICE / spec deviation: the spec's literal "credit_limit=0 ⇒ prepaid behavior" would REGRESS the existing #302
+arrears-spill-past-balance (a hold may exceed the balance and spill to owed at capture). So credit_limit=0 = OFF
+(existing arrears behavior UNCHANGED; bounded by the outstanding ceiling), and credit_limit>0 = the new admit-time
+ceiling. Prepaid is unaffected either way. Tests: 3 new integration tests (credit-line allow up to limit +
+insufficient_credit deny; 0=existing-arrears-behavior; prepaid-unaffected); money + admission + pkg/service integration
+suites green (incl. the pre-existing #302 spill test); build + sqlc generate/vet OK.
+
 ---
 
 # #469: HARD CUT: control plane mandatory in standalone — remove verifier-only mode entirely

@@ -52,6 +52,14 @@ ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     alert_threshold_pct = EXCLUDED.alert_threshold_pct,
     updated_at = EXCLUDED.updated_at;
 
+-- name: SetMoneyAccountCreditLimit :exec
+-- Admin-only arrears credit-line setter (#489). NOT part of the self-serve
+-- UpsertMoneyAccountSettings — an operator path calls this. The settings row must
+-- already exist (the caller ensures it).
+UPDATE openrails.money_accounts
+SET credit_limit_micros = sqlc.arg(credit_limit)::bigint, updated_at = sqlc.arg(now)
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
+
 -- name: AddMoneyOutstandingOwed :exec
 UPDATE openrails.money_accounts
 SET outstanding_owed_micros = outstanding_owed_micros + sqlc.arg(amount)::bigint,
