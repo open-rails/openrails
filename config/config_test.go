@@ -55,6 +55,23 @@ func TestLoad_EnvMapping(t *testing.T) {
 		assert.True(t, cfg.IsTestEnv())
 	})
 
+	t.Run("defaults to sandbox in development when test_env is unset (#355)", func(t *testing.T) {
+		cfg, err := Load("nonexistent-config.yaml")
+		assert.NoError(t, err)
+		assert.True(t, cfg.IsDev(), "default env is development")
+		assert.True(t, cfg.TestEnv, "unset test_env defaults to sandbox in dev — a local boot can never silently use live credentials")
+		assert.True(t, cfg.IsTestEnv())
+	})
+
+	t.Run("explicit test_env=false runs live in development (#355)", func(t *testing.T) {
+		t.Setenv("TEST_ENV", "false")
+		cfg, err := Load("nonexistent-config.yaml")
+		assert.NoError(t, err)
+		assert.True(t, cfg.IsDev())
+		assert.False(t, cfg.TestEnv, "explicit false is honored over the dev sandbox default")
+		assert.False(t, cfg.IsTestEnv())
+	})
+
 	t.Run("maps canonical OpenRails hot-path env vars", func(t *testing.T) {
 		t.Setenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY", "fail_open")
 
@@ -332,11 +349,14 @@ func TestProductionTestEnvValidation(t *testing.T) {
 		assert.ErrorContains(t, Validate(cfg), "mode is required outside development")
 	})
 
-	t.Run("dev env defaults to live credentials and full behavior", func(t *testing.T) {
+	t.Run("a zero-value struct is live + full behavior (Load applies the dev sandbox default separately)", func(t *testing.T) {
+		// This builds the struct directly, bypassing Load(), so the zero-value
+		// TestEnv is live. The dev sandbox-by-default behavior is applied by
+		// Load() and covered in TestLoad_EnvMapping (#355).
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "dev"
 		assembleDBURL(cfg)
-		assert.False(t, cfg.IsTestEnv(), "unset test_env in dev defaults to live credentials")
+		assert.False(t, cfg.IsTestEnv(), "zero-value test_env is live; the dev sandbox default is a Load() concern")
 		assert.False(t, cfg.IsLimitedMode(), "unset mode in dev defaults to full behavior")
 		assert.NoError(t, Validate(cfg))
 	})

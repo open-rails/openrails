@@ -117,8 +117,11 @@ type Config struct {
 	// refuses to boot, configured NMI accounts are probed at boot (a decline
 	// of the non-issued test card proves production credentials and refuses
 	// the boot), CCBill uses the sandbox URL, and Solana derives devnet.
-	// Default false (live credentials). test_env=true is rejected outside
-	// env=development — sandbox money is dev-only.
+	// When omitted, defaults to sandbox in development and live outside it
+	// (Load sets this fail-closed; see #355) — so a local boot is sandbox by
+	// default and a prod boot is live by default. test_env=true is rejected
+	// outside env=development — sandbox money is dev-only. Set test_env=false
+	// explicitly to run live credentials locally.
 	TestEnv bool `koanf:"test_env,omitempty"`
 
 	// APIURL is the base URL where billing's versioned routes are mounted.
@@ -1421,8 +1424,9 @@ func (cfg *Config) GetMode() string {
 // IsTestEnv returns true if payment processors should use sandbox/test
 // environments and the sandbox-credential guarantees apply (#355): Stripe
 // live-key refusal, NMI boot probe, CCBill sandbox URL, Solana devnet.
-// Orthogonal to Mode (pure behavior). Default false; Validate rejects
-// test_env=true outside development.
+// Orthogonal to Mode (pure behavior). When unset, Load defaults it to sandbox
+// in development and live outside it (#355); Validate rejects test_env=true
+// outside development.
 func (cfg *Config) IsTestEnv() bool {
 	return cfg.TestEnv
 }
@@ -1816,6 +1820,20 @@ func Load(configPath string) (*Config, error) {
 	// Unmarshal into config struct (overlay onto defaults)
 	if err := k.Unmarshal("", cfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
+	}
+
+	// Sandbox-by-default in development (#355): when test_env is not explicitly
+	// provided, a dev-like boot defaults to sandbox credentials so a local run
+	// can never accidentally move real money against live processor credentials
+	// — the dangerous case is silent ("forgot to set it"), so the safe value is
+	// the one you get by omission. Outside development the default stays live
+	// (false), and an explicit test_env=true is still rejected by Validate: prod
+	// opts into live only by omission and can never opt into sandbox. To run
+	// live locally, set test_env=false explicitly (env TEST_ENV=false, flag
+	// --test-env=false). This only governs standalone Load(); embedded hosts
+	// build the Config programmatically and supply their own value.
+	if !k.Exists("test_env") {
+		cfg.TestEnv = cfg.IsDev()
 	}
 
 	// Store defaults (used across the system for branding)
