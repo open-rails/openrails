@@ -7,7 +7,28 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 483
+next_id: 484
+
+---
+
+# #483: Deposit currency-validation parity — remote accepts an unknown currency that local rejects
+
+Found 2026-06-14 while greening the embed conformance integration test (was un-runnable since the #336 regression,
+so this never surfaced). A `DepositCredits` with an unknown currency (`"conformance_missing_currency"`) is
+REJECTED by the embedded/local client path but ACCEPTED by the remote HTTP path — both ultimately call the same
+`pkg/service Service.DepositCredits`, so the divergence is in how the HTTP deposit handler binds/defaults/forwards
+the `currency` field vs the local adapter (a #407/#476 money-decouple artifact; "currency optional" per #476).
+UNRELATED to the tenant→merchant rename (#480) — deposit/window/transaction/balance/usage parity is otherwise
+green local-vs-remote.
+
+Currently carved out in `embed/conformance_integration_test.go` (the unknown-currency probe is exercised on both
+paths but not asserted) so the suite is green; remove the carve-out when fixed.
+
+**Tasks:**
+- [ ] Trace why the remote deposit handler does not reject an unknown currency (binding/default/normalizeCurrency)
+      while the local adapter does; decide the canonical behavior (reject unknown per "money validates the unit").
+- [ ] Make embedded + remote deposit currency validation identical; re-assert the conformance probe (remove the
+      #483 carve-out).
 
 ---
 
