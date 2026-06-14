@@ -895,7 +895,7 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       per delegated-user.
 - [ ] Re-key/confirm money_accounts, processor_customers, tier_schedules, credit-line on customer(balance)
       only; migrate any per-delegated-user money_accounts created under the old model.
-- [ ] RENAME money_accounts -> money_settings (or money_config): it holds NO money and nothing FKs to it
+- [x] RENAMED money_accounts -> money_settings (shipped v0.29.2). Done: it holds NO money and nothing FKs to it
       (all money_* tables FK customers(id)) — it is a per-(customer,currency) settings/policy sibling
       (billing mode, caps, auto-topup, alerts, suspension, tier), NOT an account. "account" collides with
       customer-as-the-account under this issue. Name TBD with owner.
