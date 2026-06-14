@@ -827,10 +827,18 @@ promotes the split to the identity model.
 TERMINOLOGY (decided): **customer = the PAYER** (money account, merchant-scoped, NEVER delegated).
 **actor** (a.k.a. invoker) = the doer (can be a delegated-user, a native user, or the tenant itself).
 
-CHAIN (federated): delegated-user(actor) -> issuer(remote_app) -> tenant -> merchant -> customer(payer).
-An issuer has MANY actors; ALL of an issuer's actors resolve to the SAME customer — the tenant's single
-payer account (depends on authkit#77: issuer owned by exactly one tenant). So tenant(1) <-> merchant(1)
-<-> customer(1, the payer); customer(1) -> actors(many).
+STRUCTURE (corrected): the MERCHANT is OpenRails's OWN multi-company billing/isolation namespace — one
+OpenRails server/DB hosts MANY merchants (companies). It is NOT a hop between tenant and customer, and is
+NOT resolved from an AuthKit token (merchants.owner_tenant_id is ownership/admin only — the schema comment
+says it is "never used to resolve a merchant from a token"). The customer is merchant-scoped
+(merchant:customer). Within a merchant: customer = the PAYER, linked 1:1 to an AuthKit TENANT; actor = the
+invoker (delegated-user) under that customer.
+
+  merchant(1) -> customers(many);   customer(1) <-> tenant(1);   customer(1) -> actors(many)
+
+FEDERATED resolution of a delegated request: issuer -> merchant (issuer registry) selects the billing
+NAMESPACE; issuer -> tenant (authkit#77) -> customer selects the PAYER within it; subject -> actor. An
+issuer has MANY actors, ALL resolving to the SAME customer (the tenant's single payer account).
 
 EMBEDDED degenerate case (doujins): the end-user genuinely holds money, so end-user = customer(payer) =
 actor (1:1); MANY customers per merchant (one per end-user), one actor each. Unifying rule: actor->customer
@@ -862,8 +870,10 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       identity (persist attribution; abuse counters may stay in Redis but keyed by the real actor id).
 - [ ] SDK + wire: distinguish payer (customer) from actor on Admit/charge; surface per-actor spend
       attribution to the payer.
-- [ ] Fold in `merchantForIssuer` simplification once authkit#77 lands: issuer -> remote_app.tenant_id ->
-      merchant (owner_tenant_id) — replace the membership-walk / slug convention.
+- [ ] Resolution (authkit#77): issuer -> merchant comes from the ISSUER REGISTRY (the billing namespace);
+      issuer -> tenant -> customer selects the PAYER within it (NOT issuer->tenant->merchant). Decide how
+      customer<->tenant is keyed: derive via issuer->tenant with the payer customer keyed (merchant_id,
+      tenant) — one per tenant — vs an explicit customer.tenant_id. OPEN.
 - [ ] Tests: federated many-actors-one-payer (spend attributed per actor, money debited from the ONE
       payer, per-actor abuse cap trips before the payer's); embedded actor==customer 1:1; a delegated-user
       has no tier and no money_account.
