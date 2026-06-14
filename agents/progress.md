@@ -7,7 +7,33 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 478
+next_id: 479
+
+---
+
+# #478: embed.New auto-ensures the bound tenant; clear unprovisioned-tenant error (not panic)
+
+The no-default-tenant change (#336) left embedded boot broken: a host binds the engine to a tenant
+SLUG via `embed.New(... Options{Tenant: "x"} ...)`, but nothing created that tenant row, so tenant
+resolution PANICKED at handler build (`embedhttp: resolve configured tenant ... no rows in result
+set`; same in `pkg/embedded/gin/self.go`).
+
+Fix (MODE-AWARE):
+- EMBEDDED (`embed.New`): after `migrate.RunPostgres`, idempotently ensure the bound tenant exists
+  (`db.EnsureTenantBySlug` → `INSERT ... ON CONFLICT (slug) DO NOTHING`, schema-rewrite-aware via the
+  engine's `DB.Qx`). The host owns the embed + DB, so auto-create is safe + idempotent.
+- STANDALONE/REMOTE: do NOT auto-create. `db.ResolveTenantSlug` now maps a no-rows result to a CLEAR
+  error — "configured tenant slug %q is not provisioned — create the tenant and register its JWKS via
+  the control plane". The two former `panic(...)` sites (embedhttp.NewHTTPHandler, gin self handler)
+  return a fail-closed 500 handler carrying that message instead of panicking. (standalone server.go
+  already fails boot on the error.)
+
+**Tasks:**
+- [x] `db.EnsureTenantBySlug` (sqlc `EnsureTenantBySlug` :exec) + call in `embed.New` after migrations.
+- [x] `db.ResolveTenantSlug` returns the actionable unprovisioned-tenant error on `pgx.ErrNoRows`.
+- [x] Replace the embedhttp + gin self-handler panics with fail-closed error handlers.
+- [x] Integration test: embed.New on a FRESH slug boots (no panic), row exists, handler builds, second
+      New is an idempotent no-op (embed/tenant_ensure_integration_test.go).
 
 ---
 

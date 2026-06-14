@@ -23,3 +23,12 @@ WHERE username = $1 AND deleted_at IS NULL;
 SELECT id, slug, name, status
 FROM openrails.tenants
 WHERE slug = $1 AND deleted_at IS NULL;
+
+-- name: EnsureTenantBySlug :exec
+-- Idempotently create the bound tenant row for an EMBEDDED host (#478): the host
+-- owns the embed + DB, so auto-creating the configured tenant slug after
+-- migrations is safe. A no-op when the slug already exists. Standalone/remote
+-- never calls this — an unprovisioned slug there is a configuration error.
+INSERT INTO openrails.tenants (slug, name, status)
+VALUES ($1, $1, 'active')
+ON CONFLICT (slug) DO NOTHING;

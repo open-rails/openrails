@@ -15,6 +15,7 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/service"
@@ -117,6 +118,21 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	emb, err := embedded.New(opts.Options)
 	if err != nil {
 		return nil, err
+	}
+	// Idempotently ensure the bound tenant row exists (#478). A host binds the
+	// engine to a tenant SLUG (opts.Tenant), but nothing else creates that row;
+	// without it, tenant resolution (HTTP handler / self handler) would fail.
+	// The host owns the embed + DB, so auto-create is safe and idempotent. This
+	// runs after migrations (RunMigrations above) so the tenants table exists. A
+	// second New is a no-op (INSERT ... ON CONFLICT DO NOTHING).
+	if opts.Config.Tenant != "" {
+		if a := emb.App(); a != nil && a.Runtime != nil && a.Runtime.DB != nil {
+			ectx := ctx
+			if err := db.EnsureTenantBySlug(ectx, a.Runtime.DB.Qx(ectx), opts.Config.Tenant); err != nil {
+				_ = emb.Close(ctx)
+				return nil, fmt.Errorf("openrails embed: %w", err)
+			}
+		}
 	}
 	svc, err := emb.Service()
 	if err != nil {

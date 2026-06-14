@@ -11,6 +11,21 @@ import (
 	"github.com/google/uuid"
 )
 
+const ensureTenantBySlug = `-- name: EnsureTenantBySlug :exec
+INSERT INTO openrails.tenants (slug, name, status)
+VALUES ($1, $1, 'active')
+ON CONFLICT (slug) DO NOTHING
+`
+
+// Idempotently create the bound tenant row for an EMBEDDED host (#478): the host
+// owns the embed + DB, so auto-creating the configured tenant slug after
+// migrations is safe. A no-op when the slug already exists. Standalone/remote
+// never calls this — an unprovisioned slug there is a configuration error.
+func (q *Queries) EnsureTenantBySlug(ctx context.Context, slug string) error {
+	_, err := q.db.Exec(ctx, ensureTenantBySlug, slug)
+	return err
+}
+
 const getTenantBySlug = `-- name: GetTenantBySlug :one
 SELECT id, slug, name, status
 FROM openrails.tenants

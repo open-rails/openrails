@@ -78,7 +78,10 @@ func newSelfHandler(cfg *config.Config, rt *app.Runtime, authn billingauth.Deleg
 	}
 	// Resolve the configured tenant SLUG → internal tenant.ID once at bootstrap
 	// (#336): the resolver pins it per request. A non-empty-but-unknown slug is
-	// a configuration error that must fail boot.
+	// a configuration error. EMBEDDED boot (embed.New) ensures the bound tenant
+	// row before this handler is built, so it never trips here; a
+	// standalone/remote deployment with an unprovisioned slug gets a CLEAR,
+	// actionable error via a fail-closed handler instead of a panic (#478).
 	var (
 		configured tenant.ID
 		err        error
@@ -87,7 +90,12 @@ func newSelfHandler(cfg *config.Config, rt *app.Runtime, authn billingauth.Deleg
 		ctx := context.Background()
 		configured, err = db.ResolveTenantSlug(ctx, rt.DB.Qx(ctx), cfg.Tenant)
 		if err != nil {
-			panic(fmt.Sprintf("embedded billing self handler: resolve configured tenant: %v", err))
+			msg := fmt.Sprintf("embedded billing self handler: %v", err)
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(fmt.Sprintf("{%q:%q}", "error", msg)))
+			})
 		}
 	}
 	return middleware.ChainHTTP(engine,
