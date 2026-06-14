@@ -827,12 +827,16 @@ promotes the split to the identity model.
 TERMINOLOGY (decided): **customer = the PAYER** (money account, merchant-scoped, NEVER delegated).
 **actor** (a.k.a. invoker) = the doer (can be a delegated-user, a native user, or the tenant itself).
 
-STRUCTURE (corrected): the MERCHANT is OpenRails's OWN billing/isolation boundary — one OpenRails server/DB
-hosts MANY merchants. There is NO tenant<->merchant relationship. A TENANT (authkit) MAY have an associated
-openrails CUSTOMER-id (its payer balance), and that customer is scoped to a SPECIFIC merchant — so a tenant
-reaches a merchant ONLY indirectly, through its customer (tenant -> customer -> merchant). owner_tenant_id
-stays ownership/admin-only, NOT a resolution key. OPEN: the exact token->merchant resolution mechanism
-(see the Resolution task). Within a merchant:
+STRUCTURE (corrected, per cozy-art->tensorhub->openrails walkthrough): the MERCHANT is the OPERATOR that
+authenticates to OpenRails — its issuer/tenant/service-token in OpenRails's mounted authkit IS the merchant
+(e.g. tensorhub). OpenRails hosts MANY merchants. The merchant is the ONLY party OpenRails authenticates; it
+ASSERTS, for its OWN namespace only, who the CUSTOMER (payer) and ACTOR (invoker) are — opaque strings
+OpenRails records but does NOT independently authenticate. OpenRails is FEDERATION-AGNOSTIC: it does not
+care whether the merchant's end-user is native or delegated; the merchant runs its OWN end-user auth (e.g.
+tensorhub's internal cozy-art federation, invisible to OpenRails) and just reports (customer, actor).
+cozy-art is a CUSTOMER STRING, not an OpenRails-authkit entity. NO tenant<->merchant schema link: the
+operator's authkit tenant/issuer CORRESPONDS to its merchant (same real entity), and issuer -> merchant is
+the issuer registry. owner_tenant_id stays ownership/admin-only. Within a merchant:
 
   customer = the PAYER = a BALANCE / money account — a PURE billing entity: (id, merchant_id). ALL the
     money state already FKs to customers(id): money_balances (balance + held), money_blocks (credit lots),
@@ -849,12 +853,12 @@ The ISSUER is whoever AUTHENTICATED the actor — the HOST in embedded (it prove
 remote_app/JWKS for a federated delegated-user or a tenant self-token. Every request has an actor with an
 (issuer, subject); the customer it bills is just an account id.
 
-A customer is a payer/balance scoped to a merchant. A tenant (authkit org) that is a payer maps to ONE
-customer-id (tenant -> customer, the customer scoped to a merchant). STANDALONE-individual (doujins/hentai0):
-each end-user is BOTH the payer (customer/balance) and the invoker (actor) — actor -> customer 1:1, many
-customers per merchant; these end-users are NOT tenants. B2B2C (cozy-art): cozy-art is a TENANT with a
-customer-id (scoped to the operator's merchant) whose MANY delegated-users are the actors — actor ->
-customer many:1. EMBEDDED: the host vouches; one merchant, customer ids passed directly.
+A customer is a payer/balance scoped to a merchant, ASSERTED by the merchant. STANDALONE-individual
+(doujins): each end-user is BOTH payer (customer) and invoker (actor) — actor -> customer 1:1; the end-user's
+merchant-minted token is sent straight to OpenRails, which verifies it (subject = customer/actor). B2B2C
+(cozy-art via tensorhub): the MERCHANT = tensorhub; cozy-art = a CUSTOMER STRING tensorhub reports (NOT an
+OpenRails-authkit entity); cozy-art's users = the ACTORS (many:1); tensorhub runs the cozy-art federation
+itself, OpenRails never sees it. EMBEDDED: host vouches; customer/actor ids passed directly.
 
 EMBEDDED degenerate case (doujins): the end-user genuinely holds money, so end-user = customer(payer) =
 actor (1:1); MANY customers per merchant (one per end-user), one actor each. Unifying rule: actor->customer
@@ -908,12 +912,12 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       `money_transactions` transaction_type='deposit' row — NOT in money_blocks. Compaction must NEVER
       delete money_transactions deposit rows or payments; only the derived spendable lots. (money_blocks
       .source_transaction_id -> money_transactions may dangle/null on block delete; the receipt survives.)
-- [ ] Resolution — RESOLVE WITH OWNER. NO tenant<->merchant link; owner_tenant_id stays ownership/admin-only.
-      A tenant that is a payer has a customer_id scoped to a merchant (tenant -> customer -> merchant,
-      indirect). Candidate chain: issuer -> tenant (#77 owner) -> tenant.customer_id -> customer.merchant_id;
-      BUT operator individual end-users (doujins) have NO tenant — for them merchant likely comes from the
-      issuer registry (issuer -> merchant) + subject -> per-user customer. Two different paths — confirm the
-      single intended mechanism before building.
+- [ ] Resolution (RESOLVED): the MERCHANT = the authenticated OPERATOR (its issuer/tenant/service-token in
+      OpenRails-authkit; issuer -> merchant via the issuer registry). CUSTOMER + ACTOR are ASSERTED by that
+      merchant for its own namespace — opaque, never re-authenticated by OpenRails. Two interaction patterns,
+      same anchor: (1) DIRECT — end-user's merchant-minted token sent to OpenRails; OpenRails verifies,
+      subject = customer/actor (doujins). (2) PROXY — merchant server authenticates as itself and REPORTS
+      (customer, actor) (tensorhub). NO tenant->merchant FK; owner_tenant_id ownership-only.
 - [ ] Tests: federated many-actors-one-payer (spend attributed per actor, money debited from the ONE
       payer, per-actor abuse cap trips before the payer's); embedded actor==customer 1:1; a delegated-user
       has no tier and no money_account.
