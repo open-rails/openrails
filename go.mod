@@ -12,7 +12,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/vault/api v1.23.0
-	github.com/jackc/pgx/v5 v5.9.0
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/jonboulle/clockwork v0.5.0
 	github.com/knadh/koanf/parsers/yaml v1.1.0
 	github.com/knadh/koanf/providers/env v1.1.0
