@@ -438,7 +438,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	if err != nil {
 		return nil, fmt.Errorf("subscription not found")
 	}
-	if sub.MerchantSubjectID.String() != userID {
+	if sub.CustomerID.String() != userID {
 		return nil, fmt.Errorf("subscription does not belong to user")
 	}
 	if !processors.IsNMIBackedProcessor(sub.Processor) {
@@ -452,7 +452,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	if err != nil {
 		return nil, fmt.Errorf("payment method not found")
 	}
-	if pm.MerchantSubjectID.String() != userID {
+	if pm.CustomerID.String() != userID {
 		return nil, fmt.Errorf("payment method does not belong to user")
 	}
 	if !processors.IsNMIBackedProcessor(pm.Processor) {
@@ -627,7 +627,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 	if err != nil {
 		return nil, fmt.Errorf("payment method not found")
 	}
-	if pm.MerchantSubjectID.String() != userID {
+	if pm.CustomerID.String() != userID {
 		return nil, fmt.Errorf("payment method does not belong to user")
 	}
 
@@ -678,7 +678,7 @@ func (s *Service) DeletePaymentMethod(ctx context.Context, userID string, paymen
 	if err != nil {
 		return fmt.Errorf("payment method not found")
 	}
-	if pm.MerchantSubjectID.String() != userID {
+	if pm.CustomerID.String() != userID {
 		return fmt.Errorf("payment method does not belong to user")
 	}
 
@@ -857,7 +857,7 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, _ string, o
 	for _, t := range transactions {
 		result = append(result, CreditTransaction{
 			ID:              t.ID,
-			MerchantSubjectID: t.MerchantSubjectID,
+			CustomerID:      t.CustomerID,
 			Actor:           t.Actor,
 			Amount:          t.Amount,
 			TransactionType: t.TransactionType,
@@ -1087,7 +1087,7 @@ func paymentFromModel(p *models.Payment) Payment {
 		Status:        "succeeded",
 		Amount:        p.Amount,
 		Currency:      p.Currency,
-		UserID:        api.FormatUserID(p.MerchantSubjectID.String()),
+		UserID:        api.FormatUserID(p.CustomerID.String()),
 		Processor:     string(p.Processor),
 		TransactionID: p.TransactionID,
 		Created:       api.ToUnix(p.CreatedAt),

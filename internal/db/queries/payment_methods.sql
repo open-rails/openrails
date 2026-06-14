@@ -2,7 +2,7 @@
 
 -- name: CreatePaymentMethod :execrows
 INSERT INTO openrails.payment_methods (
-    id, merchant_id, merchant_subject_id, processor, vault_id, billing_id,
+    id, merchant_id, customer_id, processor, vault_id, billing_id,
     initial_transaction_id, last_four, card_type, expiry_date,
     failure_reason, metadata, created_at, updated_at
 ) VALUES (
@@ -22,18 +22,18 @@ SELECT * FROM openrails.payment_methods WHERE id = ANY(sqlc.arg(ids)::uuid[]);
 -- name: DeletePaymentMethod :execrows
 DELETE FROM openrails.payment_methods WHERE id = $1;
 
--- name: ListPaymentMethodsByMerchantSubject :many
+-- name: ListPaymentMethodsByCustomer :many
 SELECT * FROM openrails.payment_methods pm
-WHERE pm.merchant_subject_id = $1
+WHERE pm.customer_id = $1
 ORDER BY pm.created_at DESC;
 
--- name: CountPaymentMethodsByMerchantSubject :one
+-- name: CountPaymentMethodsByCustomer :one
 SELECT count(*) FROM openrails.payment_methods pm
-WHERE pm.merchant_subject_id = $1;
+WHERE pm.customer_id = $1;
 
--- name: ListPaymentMethodsByMerchantSubjectPaged :many
+-- name: ListPaymentMethodsByCustomerPaged :many
 SELECT * FROM openrails.payment_methods pm
-WHERE pm.merchant_subject_id = $1
+WHERE pm.customer_id = $1
 ORDER BY pm.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
@@ -49,7 +49,7 @@ LIMIT 1;
 
 -- name: UpdatePaymentMethod :execrows
 UPDATE openrails.payment_methods SET
-    merchant_subject_id = $2,
+    customer_id = $2,
     processor = $3,
     vault_id = $4,
     billing_id = sqlc.narg(billing_id),
@@ -67,15 +67,15 @@ SELECT * FROM openrails.payment_methods pm
 WHERE pm.processor = ANY(sqlc.arg(processors)::text[])
 ORDER BY pm.created_at DESC;
 
--- name: ListPaymentMethodsByMerchantSubjectProcessors :many
+-- name: ListPaymentMethodsByCustomerProcessors :many
 SELECT * FROM openrails.payment_methods pm
-WHERE pm.merchant_subject_id = $1
+WHERE pm.customer_id = $1
   AND pm.processor = ANY(sqlc.arg(processors)::text[])
 ORDER BY pm.created_at DESC;
 
 -- name: CountPaymentMethodForUser :one
 SELECT count(*) FROM openrails.payment_methods pm
-WHERE pm.id = $1 AND pm.merchant_subject_id = $2;
+WHERE pm.id = $1 AND pm.customer_id = $2;
 
 -- name: ListPaymentMethodsByProcessor :many
 SELECT * FROM openrails.payment_methods pm

@@ -22,8 +22,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/open-rails/openrails/pkg/merchant"
+	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // TestAuthorizeAndHold_Atomic proves the #235/#247 atomic authorize+hold under
@@ -65,7 +65,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
-	payer := identity.MerchantSubjectIDFromString(uuid.NewString())
+	payer := identity.CustomerIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 
 	t.Cleanup(func() {
@@ -74,8 +74,8 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 			where string
 			arg   any
 		}{
-			{"openrails.money_transactions", "tenant_subject_id = $1", payerID},
-			{"openrails.money_balances", "tenant_subject_id = $1", payerID},
+			{"openrails.money_transactions", "customer_id = $1", payerID},
+			{"openrails.money_balances", "customer_id = $1", payerID},
 			{"openrails.tenants", "id = $1", tenantID},
 		} {
 			_, _ = super.Pool().Exec(ctx, "DELETE FROM "+q.tbl+" WHERE "+q.where, q.arg)
@@ -86,7 +86,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	// test tenant. Money is unit-less — one balance per currency (#472).
 	_, err = super.Pool().Exec(ctx,
 		`INSERT INTO openrails.money_balances
-		   (id, tenant_id, tenant_subject_id, currency, balance, held_balance, created_at, updated_at)
+		   (id, tenant_id, customer_id, currency, balance, held_balance, created_at, updated_at)
 		 VALUES ($1,$2,$3,'USD',1000,0,$4,$5)`,
 		uuid.New(), tenantID, payerID, now, now)
 	require.NoError(t, err)
@@ -115,7 +115,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 
 	// (1) Authorize WITHIN balance => allowed + hold placed + available reduced.
 	res, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-		MerchantSubjectID: payer, Actor: "serviceToken:k1", EstimateMicros: 600,
+		CustomerID: payer, Actor: "serviceToken:k1", EstimateMicros: 600,
 		RequestID: "req-1", ExpiresAt: exp,
 	})
 	require.NoError(t, err)
@@ -130,7 +130,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 
 	// (2) Authorize OVER remaining balance => denied, NO new hold.
 	deny, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-		MerchantSubjectID: payer, Actor: "serviceToken:k1", EstimateMicros: 700,
+		CustomerID: payer, Actor: "serviceToken:k1", EstimateMicros: 700,
 		RequestID: "req-2", ExpiresAt: exp,
 	})
 	require.NoError(t, err)
@@ -152,7 +152,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			results[i], errs[i] = svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-				MerchantSubjectID: payer, Actor: "serviceToken:k1", EstimateMicros: 300,
+				CustomerID: payer, Actor: "serviceToken:k1", EstimateMicros: 300,
 				RequestID: "req-conc-" + string(rune('a'+i)), ExpiresAt: exp,
 			})
 		}(i)

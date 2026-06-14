@@ -22,7 +22,7 @@ func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
-			"DELETE FROM openrails.tier_schedules WHERE merchant_subject_id = $1", payer.UUID())
+			"DELETE FROM openrails.tier_schedules WHERE customer_id = $1", payer.UUID())
 	})
 
 	schedule := []money.TierThreshold{
@@ -38,7 +38,7 @@ func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 	require.Equal(t, schedule, got)
 
 	dep := func(amt int64) {
-		_, e := svc.Deposit(ctx, money.DepositParams{MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 	tier := func() string {
@@ -79,7 +79,7 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 	// Two distinct tenants, each with its own payer.
 	tA := dbtest.TestTenantID
 	ctxA := dbtest.WithTestTenant(ctx)
-	payerA := identity.MerchantSubjectIDFromString(uuid.NewString())
+	payerA := identity.CustomerIDFromString(uuid.NewString())
 
 	// Tenant B (a second, isolated tenant row).
 	tenantB := uuid.New()
@@ -89,16 +89,16 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 		tenantB, slugB)
 	require.NoError(t, err)
 	ctxB := merchant.WithID(ctx, merchant.ID(tenantB))
-	payerB := identity.MerchantSubjectIDFromString(uuid.NewString())
+	payerB := identity.CustomerIDFromString(uuid.NewString())
 
 	t.Cleanup(func() {
 		bg := context.Background()
 		for _, p := range []uuid.UUID{payerA.UUID(), payerB.UUID()} {
-			_, _ = pool.Exec(bg, "DELETE FROM openrails.tier_schedules WHERE merchant_subject_id = $1", p)
-			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_accounts WHERE merchant_subject_id = $1", p)
-			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_blocks WHERE merchant_subject_id = $1", p)
-			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", p)
-			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", p)
+			_, _ = pool.Exec(bg, "DELETE FROM openrails.tier_schedules WHERE customer_id = $1", p)
+			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_accounts WHERE customer_id = $1", p)
+			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", p)
+			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", p)
+			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_balances WHERE customer_id = $1", p)
 		}
 		_, _ = pool.Exec(bg, "DELETE FROM openrails.tier_schedules WHERE merchant_id = $1", tenantB)
 		_, _ = pool.Exec(bg, "DELETE FROM openrails.merchants WHERE id = $1", tenantB)
@@ -106,16 +106,16 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 	_ = tA
 
 	// Tenant A: a tenant-wide default schedule with a low tier1 threshold.
-	require.NoError(t, svc.SetTierSchedule(ctxA, identity.MerchantSubjectID{}, []money.TierThreshold{
+	require.NoError(t, svc.SetTierSchedule(ctxA, identity.CustomerID{}, []money.TierThreshold{
 		{Tier: "free", MinPaidMicros: 0}, {Tier: "tier1", MinPaidMicros: 1_000},
 	}))
 
 	depA := func(amt int64) {
-		_, e := svc.Deposit(ctxA, money.DepositParams{MerchantSubjectID: &payerA, Actor: payerA.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctxA, money.DepositParams{CustomerID: &payerA, Actor: payerA.UUID().String(), Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 	depB := func(amt int64) {
-		_, e := svc.Deposit(ctxB, money.DepositParams{MerchantSubjectID: &payerB, Actor: payerB.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctxB, money.DepositParams{CustomerID: &payerB, Actor: payerB.UUID().String(), Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 

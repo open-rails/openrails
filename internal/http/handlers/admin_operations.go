@@ -32,7 +32,7 @@ func adminOperationsPagination(r *httprequest.Request) (int, int) {
 func GetAdminRepairAlerts(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	limit, offset := adminOperationsPagination(r)
-	tsid := repo.SystemMerchantSubjectID
+	tsid := repo.SystemCustomerID
 
 	var seen *bool
 	seenParam := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("seen")))
@@ -43,7 +43,7 @@ func GetAdminRepairAlerts(r *httprequest.Request) {
 
 	q := r.State.DB.Gen(ctx)
 	total, err := q.CountRepairAlerts(ctx, gen.CountRepairAlertsParams{
-		MerchantSubjectID: tsid, EventType: string(models.NotificationSystemAlert), Seen: seen,
+		CustomerID: tsid, EventType: string(models.NotificationSystemAlert), Seen: seen,
 	})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to count repair alerts")
@@ -52,7 +52,7 @@ func GetAdminRepairAlerts(r *httprequest.Request) {
 	limit32, _ := safecast.Convert[int32](limit)
 	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListRepairAlerts(ctx, gen.ListRepairAlertsParams{
-		MerchantSubjectID: tsid, EventType: string(models.NotificationSystemAlert), Seen: seen,
+		CustomerID: tsid, EventType: string(models.NotificationSystemAlert), Seen: seen,
 		Column3: limit32, Column4: offset32,
 	})
 	if err != nil {

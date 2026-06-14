@@ -22,17 +22,17 @@ import (
 )
 
 type ServiceEntitlementRecord struct {
-	ID              string     `json:"id"`
-	MerchantSubjectID string     `json:"tenant_subject_id,omitempty"`
-	Entitlement     string     `json:"entitlement"`
-	StartAt         time.Time  `json:"start_at"`
-	EndAt           *time.Time `json:"end_at,omitempty"`
-	SourceID        *string    `json:"source_id,omitempty"`
-	SourceType      string     `json:"source_type"`
-	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
-	RevokeReason    *string    `json:"revoke_reason,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID           string     `json:"id"`
+	CustomerID   string     `json:"customer_id,omitempty"`
+	Entitlement  string     `json:"entitlement"`
+	StartAt      time.Time  `json:"start_at"`
+	EndAt        *time.Time `json:"end_at,omitempty"`
+	SourceID     *string    `json:"source_id,omitempty"`
+	SourceType   string     `json:"source_type"`
+	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
+	RevokeReason *string    `json:"revoke_reason,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 type adminUserEntitlementsPath struct {
@@ -49,14 +49,14 @@ type grantEntitlementRequest struct {
 	Days        *int   `json:"days,omitempty"`
 }
 
-func ServiceGetMerchantSubjectEntitlements(r *httprequest.Request) {
-	tenantSubject, err := parseServiceMerchantSubjectID(r.Param("tenant_subject_id"))
+func ServiceGetCustomerEntitlements(r *httprequest.Request) {
+	tenantSubject, err := parseServiceCustomerID(r.Param("customer_id"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 	if tenantSubject == nil {
-		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
 	atStr := strings.TrimSpace(r.Query("at"))
@@ -78,7 +78,7 @@ func ServiceGetMerchantSubjectEntitlements(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	entitlements, err := svc.ListActiveEntitlementRecordsForMerchantSubject(r.Request.Context(), *tenantSubject, queryTime)
+	entitlements, err := svc.ListActiveEntitlementRecordsForCustomer(r.Request.Context(), *tenantSubject, queryTime)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
 		return
@@ -153,7 +153,7 @@ func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
 		if len(records) == 0 {
 			continue
 		}
-		if !requireServiceMerchantSubjectScope(r, identity.MerchantSubjectID(records[0].MerchantSubjectID)) {
+		if !requireServiceCustomerScope(r, identity.CustomerID(records[0].CustomerID)) {
 			return
 		}
 	}
@@ -232,7 +232,7 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 	if r.State.Clock != nil {
 		now = r.State.Clock.Now()
 	}
-	adminGrant := &models.EntitlementGrant{ID: uuidutil.NewV7(), MerchantSubjectID: tenantSubjectID, GrantedBy: adminUser.ID, Reason: "admin_entitlement", DurationDays: req.Days, CreatedAt: now}
+	adminGrant := &models.EntitlementGrant{ID: uuidutil.NewV7(), CustomerID: tenantSubjectID, GrantedBy: adminUser.ID, Reason: "admin_entitlement", DurationDays: req.Days, CreatedAt: now}
 	if err := repo.NewEntitlementGrantRepo(r.State.DB).Create(r.Request.Context(), adminGrant); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to create admin grant source record")
 		return
@@ -240,9 +240,9 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 	var ent *models.Entitlement
 	if req.Days != nil {
 		d := time.Duration(*req.Days) * 24 * time.Hour
-		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, MerchantSubjectID: tenantSubjectID, Entitlement: req.Entitlement, Duration: &d, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
+		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, CustomerID: tenantSubjectID, Entitlement: req.Entitlement, Duration: &d, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
 	} else {
-		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, MerchantSubjectID: tenantSubjectID, Entitlement: req.Entitlement, Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
+		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, CustomerID: tenantSubjectID, Entitlement: req.Entitlement, Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
 	}
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
@@ -257,10 +257,10 @@ func tenantSubjectForEntitlementGrantTarget(r *httprequest.Request, subject stri
 		// Non-delegated (org-admin JWT) caller: the target is a self-service
 		// identity, so resolve (or materialize) its payable tenant subject the
 		// same way commerce writers do (#317) — a UUID subject IS its own
-		// tenant_subject_id (UUID-only, #364). Returning uuid.Nil here would
+		// customer_id (UUID-only, #364). Returning uuid.Nil here would
 		// make the admin_grants insert violate its tenant_subject FK and 500
 		// every non-delegated admin grant.
-		return repo.EnsureMerchantSubjectID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, subject)
+		return repo.EnsureCustomerID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, subject)
 	}
 	resolved, ok := value.(*controlplane.ResolvedDelegated)
 	if !ok || resolved == nil {
@@ -269,12 +269,12 @@ func tenantSubjectForEntitlementGrantTarget(r *httprequest.Request, subject stri
 	issuer := strings.TrimSpace(resolved.Issuer)
 	subject = strings.TrimSpace(subject)
 	if resolved.MerchantID.IsZero() || issuer == "" || subject == "" {
-		return uuid.Nil, controlplane.ErrMerchantSubjectInvalid
+		return uuid.Nil, controlplane.ErrCustomerInvalid
 	}
-	return r.State.DB.Gen(r.Request.Context()).UpsertFederatedMerchantSubject(r.Request.Context(), gen.UpsertFederatedMerchantSubjectParams{
+	return r.State.DB.Gen(r.Request.Context()).UpsertFederatedCustomer(r.Request.Context(), gen.UpsertFederatedCustomerParams{
 		MerchantID: resolved.MerchantID.UUID(),
-		Issuer:   issuer,
-		Subject:  subject,
+		Issuer:     issuer,
+		Subject:    subject,
 	})
 }
 
@@ -299,7 +299,7 @@ func RevokeAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "entitlement not found")
 		return
 	}
-	if ent.MerchantSubjectID.String() != path.UserID {
+	if ent.CustomerID.String() != path.UserID {
 		r.ErrorJSON(http.StatusNotFound, "entitlement not found for this user")
 		return
 	}
@@ -313,7 +313,7 @@ func RevokeAdminEntitlement(r *httprequest.Request) {
 func serviceEntitlementRecordsFromModels(entitlements []models.Entitlement) []ServiceEntitlementRecord {
 	result := make([]ServiceEntitlementRecord, 0, len(entitlements))
 	for _, e := range entitlements {
-		rec := ServiceEntitlementRecord{ID: e.ID.String(), MerchantSubjectID: e.MerchantSubjectID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: string(e.SourceType), CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+		rec := ServiceEntitlementRecord{ID: e.ID.String(), CustomerID: e.CustomerID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: string(e.SourceType), CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 		if e.EndAt != nil {
 			rec.EndAt = e.EndAt
 		}
@@ -336,7 +336,7 @@ func serviceEntitlementRecordsFromModels(entitlements []models.Entitlement) []Se
 func serviceEntitlementRecordsFromService(entitlements []billingservice.EntitlementRecord) []ServiceEntitlementRecord {
 	result := make([]ServiceEntitlementRecord, 0, len(entitlements))
 	for _, e := range entitlements {
-		rec := ServiceEntitlementRecord{ID: e.ID.String(), MerchantSubjectID: e.MerchantSubjectID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+		rec := ServiceEntitlementRecord{ID: e.ID.String(), CustomerID: e.CustomerID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 		if e.EndAt != nil {
 			rec.EndAt = e.EndAt
 		}

@@ -67,7 +67,7 @@ func (s *intentDeferredDeleteScheduler) ScheduleNMIDelete(ctx context.Context, u
 		return fmt.Errorf("load subscription for deferred delete intent: %w", err)
 	}
 	_, err = s.store.Enqueue(ctx, intents.EnqueueParams{
-		MerchantID:       sub.MerchantID,
+		MerchantID:     sub.MerchantID,
 		Provider:       strings.ToLower(sub.Processor),
 		IntentType:     intents.TypeNMIDeleteSubscription,
 		SubscriptionID: &subscriptionID,
@@ -151,12 +151,12 @@ func (r *Runtime) ConvertDeferredDeleteMarkersToIntents(ctx context.Context) (in
 		}
 		subID := sub.ID
 		_, err := store.Enqueue(ctx, intents.EnqueueParams{
-			MerchantID:       sub.MerchantID,
+			MerchantID:     sub.MerchantID,
 			Provider:       strings.ToLower(sub.Processor),
 			IntentType:     intents.TypeNMIDeleteSubscription,
 			SubscriptionID: &subID,
 			Payload: intents.NMIDeletePayload{
-				UserID:                  sub.MerchantSubjectID.String(),
+				UserID:                  sub.CustomerID.String(),
 				ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
 			},
 			IdempotencyKey: intents.NMIDeleteIdempotencyKey(subID),

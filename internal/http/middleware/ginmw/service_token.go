@@ -140,17 +140,17 @@ func resolveServiceCredential(ctx context.Context, resolver ServiceTokenResolver
 	return nil, authcore.ErrInvalidAccessToken
 }
 
-// RequireServiceTokenMerchantSubjectScope gates a route on the resolved service token's payer resource
+// RequireServiceTokenCustomerScope gates a route on the resolved service token's payer resource
 // scope. It must run after ServiceTokenRequired; tenant-wide service tokens pass, payer-scoped service tokens
 // pass only for their exact tenant subject id.
-func RequireServiceTokenMerchantSubjectScope(c *gin.Context, payer uuid.UUID) bool {
+func RequireServiceTokenCustomerScope(c *gin.Context, payer uuid.UUID) bool {
 	resolved, ok := ServiceTokenFromGin(c)
 	if !ok || resolved == nil {
 		response.UnauthorizedWithMessage(c, "service token required")
 		c.Abort()
 		return false
 	}
-	if !resolved.AllowsMerchantSubject(payer) {
+	if !resolved.AllowsCustomer(payer) {
 		response.ForbiddenWithMessage(c, "service_token_tenant_subject_scope_denied")
 		c.Abort()
 		return false

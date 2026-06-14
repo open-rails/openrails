@@ -10,11 +10,11 @@ import (
 // This is an immutable event log of all payments received
 type Payment struct {
 	ID uuid.UUID `json:"id"`
-	// MerchantSubjectID is the OpenRails payable tenant subject for this row (#317).
+	// CustomerID is the OpenRails payable tenant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
-	// it before user_id is dropped. Join openrails.tenant_subjects for issuer/subject.
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id,omitempty"`
-	PriceID         uuid.UUID `json:"price_id"`
+	// it before user_id is dropped. Join openrails.customers for issuer/subject.
+	CustomerID uuid.UUID `json:"customer_id,omitempty"`
+	PriceID    uuid.UUID `json:"price_id"`
 
 	// Optional linkage to the subscription that generated this payment
 	SubscriptionID *uuid.UUID `json:"subscription_id,omitempty"`

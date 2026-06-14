@@ -18,7 +18,7 @@ func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
 	bm := money.BillingModeArrears
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{BillingMode: &bm})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 300, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 300, Source: "seed"})
 	require.NoError(t, err)
 
 	res, err := svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
@@ -32,7 +32,7 @@ func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
 	_, err = svc.CaptureHold(ctx, res.Hold.ID, 800)
 	require.NoError(t, err, "arrears capture past balance must not error")
 
-	bal, _ := svc.GetBalanceForMerchantSubject(ctx, payer, cur)
+	bal, _ := svc.GetBalanceForCustomer(ctx, payer, cur)
 	require.Equal(t, int64(0), bal.Balance, "balance drawn first")
 	owed, _ := svc.GetOutstandingOwed(ctx, payer, cur)
 	require.Equal(t, int64(500), owed, "remainder (800-300) spilled to owed")

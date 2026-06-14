@@ -17,7 +17,7 @@ import (
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
-func mintMerchantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
+func mintCustomerServiceToken(cmd *cobra.Command, _ []string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	ctx := context.Background()
 
@@ -60,13 +60,13 @@ func mintMerchantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("resolve tenant %q: %w", tenantRef, err)
 	}
 
-	tenantSubjectRef, err := cmd.Flags().GetString("tenant-subject")
+	customerRef, err := cmd.Flags().GetString("customer")
 	if err != nil {
-		return fmt.Errorf("read tenant-subject flag: %w", err)
+		return fmt.Errorf("read customer flag: %w", err)
 	}
-	tenantSubjectID, err := uuid.Parse(strings.TrimSpace(tenantSubjectRef))
-	if err != nil || tenantSubjectID == uuid.Nil {
-		return fmt.Errorf("--tenant-subject must be a tenant subject UUID")
+	customerID, err := uuid.Parse(strings.TrimSpace(customerRef))
+	if err != nil || customerID == uuid.Nil {
+		return fmt.Errorf("--customer must be a customer UUID")
 	}
 
 	name, err := cmd.Flags().GetString("name")
@@ -75,7 +75,7 @@ func mintMerchantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = "openrails-tenant-subject-" + tenantSubjectID.String()
+		name = "openrails-customer-" + customerID.String()
 	}
 
 	permissions, err := cmd.Flags().GetStringSlice("permission")
@@ -91,7 +91,7 @@ func mintMerchantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 
 	resources := []authcore.ServiceTokenResource{
 		tenantResource,
-		controlplane.MerchantSubjectResource(tenantSubjectID),
+		controlplane.CustomerResource(customerID),
 	}
 	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, bootstrapTenant, authcore.ServiceTokenMintOptions{
 		Name:        name,
@@ -99,7 +99,7 @@ func mintMerchantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 		Resources:   resources,
 	})
 	if err != nil {
-		return fmt.Errorf("mint tenant subject service token: %w", err)
+		return fmt.Errorf("mint customer service token: %w", err)
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
@@ -107,7 +107,7 @@ func mintMerchantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 		"name":                 name,
 		"tenant":               tenantSlug,
 		"tenant_id":            tenantID.String(),
-		"tenant_subject_id":    tenantSubjectID.String(),
+		"customer_id":          customerID.String(),
 		"service_token_key_id": serviceToken.KeyID,
 		"service_token_secret": token,
 		"permissions":          serviceToken.Permissions,

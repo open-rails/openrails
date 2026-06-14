@@ -31,7 +31,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 
 	now := time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
 	billingDays := int32(30)
@@ -63,7 +63,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
@@ -75,17 +75,17 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	const chargeID = "ch_dedup_1"
 	const invoiceID = "in_dedup_1"
 	require.NoError(t, paymentSvc.Create(ctx, &models.Payment{
-		ID:              uuid.New(),
-		MerchantSubjectID: tenantSubjectID,
-		PriceID:         priceID,
-		Processor:       models.ProcessorStripe,
-		TransactionID:   chargeID,
-		Amount:          2900,
-		ListAmount:      2900,
-		Currency:        "usd",
-		Status:          payments.PaymentStatusCompletedValue,
-		PurchasedAt:     now,
-		CreatedAt:       now,
+		ID:            uuid.New(),
+		CustomerID:    tenantSubjectID,
+		PriceID:       priceID,
+		Processor:     models.ProcessorStripe,
+		TransactionID: chargeID,
+		Amount:        2900,
+		ListAmount:    2900,
+		Currency:      "usd",
+		Status:        payments.PaymentStatusCompletedValue,
+		PurchasedAt:   now,
+		CreatedAt:     now,
 		Metadata: map[string]any{
 			"source":            "stripe_reconcile_backfill",
 			"stripe_charge_id":  chargeID,
@@ -113,17 +113,17 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	// eventual success: failed rows are "failed:"-prefixed with no invoice
 	// metadata, so they never match.
 	require.NoError(t, paymentSvc.Create(ctx, &models.Payment{
-		ID:              uuid.New(),
-		MerchantSubjectID: tenantSubjectID,
-		PriceID:         priceID,
-		Processor:       models.ProcessorStripe,
-		TransactionID:   "failed:in_dedup_2",
-		Amount:          2900,
-		ListAmount:      2900,
-		Currency:        "usd",
-		Status:          payments.PaymentStatusFailedValue,
-		PurchasedAt:     now,
-		CreatedAt:       now,
+		ID:            uuid.New(),
+		CustomerID:    tenantSubjectID,
+		PriceID:       priceID,
+		Processor:     models.ProcessorStripe,
+		TransactionID: "failed:in_dedup_2",
+		Amount:        2900,
+		ListAmount:    2900,
+		Currency:      "usd",
+		Status:        payments.PaymentStatusFailedValue,
+		PurchasedAt:   now,
+		CreatedAt:     now,
 	}))
 	recorded, err = svc.stripeInvoicePaymentAlreadyRecorded(ctx, stripeInvoice{ID: "in_dedup_2"})
 	require.NoError(t, err)

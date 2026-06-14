@@ -56,7 +56,7 @@ func ShiftEntitlementTimeline(
 		return nil
 	}
 
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return err
 	}
@@ -64,12 +64,12 @@ func ShiftEntitlementTimeline(
 		excludeIDs = []uuid.UUID{}
 	}
 	return gen.New(qx).ShiftEntitlementTimelineWindows(ctx, gen.ShiftEntitlementTimelineWindowsParams{
-		MerchantSubjectID: tsid,
-		Entitlement:     entitlement,
-		DeltaSeconds:    deltaSeconds,
-		Now:             now,
-		FromAt:          from,
-		ExcludeIds:      excludeIDs,
+		CustomerID:   tsid,
+		Entitlement:  entitlement,
+		DeltaSeconds: deltaSeconds,
+		Now:          now,
+		FromAt:       from,
+		ExcludeIds:   excludeIDs,
 	})
 }
 
@@ -109,7 +109,7 @@ func SetEntitlementEndAtTx(ctx context.Context, qx gen.DBTX, id uuid.UUID, endAt
 		}
 	}
 
-	if err := LockEntitlementTimeline(ctx, qx, ent.MerchantSubjectID.String(), ent.Entitlement); err != nil {
+	if err := LockEntitlementTimeline(ctx, qx, ent.CustomerID.String(), ent.Entitlement); err != nil {
 		return err
 	}
 
@@ -133,16 +133,16 @@ func SetEntitlementEndAtTx(ctx context.Context, qx gen.DBTX, id uuid.UUID, endAt
 	// - If end_at is set to NULL (indefinite), remove later windows (they would overlap).
 	if oldEnd != nil && endAt != nil && !endAt.Equal(*oldEnd) {
 		delta := endAt.Sub(*oldEnd)
-		return ShiftEntitlementTimeline(ctx, qx, ent.MerchantSubjectID.String(), ent.Entitlement, *oldEnd, delta, now, []uuid.UUID{id})
+		return ShiftEntitlementTimeline(ctx, qx, ent.CustomerID.String(), ent.Entitlement, *oldEnd, delta, now, []uuid.UUID{id})
 	}
 	if oldEnd != nil && endAt == nil {
 		// Indefinite terminates the timeline; delete any later windows.
 		return q.SoftDeleteLaterEntitlementWindows(ctx, gen.SoftDeleteLaterEntitlementWindowsParams{
-			MerchantSubjectID: ent.MerchantSubjectID,
-			Entitlement:     ent.Entitlement,
-			Now:             now,
-			FromAt:          *oldEnd,
-			ExcludeID:       id,
+			CustomerID:  ent.CustomerID,
+			Entitlement: ent.Entitlement,
+			Now:         now,
+			FromAt:      *oldEnd,
+			ExcludeID:   id,
 		})
 	}
 	return nil
@@ -171,7 +171,7 @@ func RevokeEntitlementNowTx(
 		return fmt.Errorf("cannot revoke entitlement: revoke_at must be after start_at")
 	}
 
-	if err := LockEntitlementTimeline(ctx, qx, ent.MerchantSubjectID.String(), ent.Entitlement); err != nil {
+	if err := LockEntitlementTimeline(ctx, qx, ent.CustomerID.String(), ent.Entitlement); err != nil {
 		return err
 	}
 
@@ -193,7 +193,7 @@ func RevokeEntitlementNowTx(
 	// Keep the timeline gapless by shifting later windows earlier/forward based on the change in end_at.
 	if oldEnd != nil && !revokeAt.Equal(*oldEnd) {
 		delta := revokeAt.Sub(*oldEnd)
-		return ShiftEntitlementTimeline(ctx, qx, ent.MerchantSubjectID.String(), ent.Entitlement, *oldEnd, delta, now, []uuid.UUID{id})
+		return ShiftEntitlementTimeline(ctx, qx, ent.CustomerID.String(), ent.Entitlement, *oldEnd, delta, now, []uuid.UUID{id})
 	}
 	// Indefinite windows should have no later windows; nothing to shift.
 	return nil
@@ -208,14 +208,14 @@ func RevokeEntitlementNowTx(
 // for (tenant subject, entitlement) — the timeline-terminal state.
 func TimelineHasIndefinite(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.UUID, entitlement string) (bool, error) {
 	return gen.New(qx).TimelineHasIndefinite(ctx, gen.TimelineHasIndefiniteParams{
-		MerchantSubjectID: tenantSubjectID, Entitlement: entitlement,
+		CustomerID: tenantSubjectID, Entitlement: entitlement,
 	})
 }
 
 // GetTimelineIndefinite returns the (earliest) indefinite window.
 func GetTimelineIndefinite(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.UUID, entitlement string) (*models.Entitlement, error) {
 	row, err := gen.New(qx).GetTimelineIndefinite(ctx, gen.GetTimelineIndefiniteParams{
-		MerchantSubjectID: tenantSubjectID, Entitlement: entitlement,
+		CustomerID: tenantSubjectID, Entitlement: entitlement,
 	})
 	if err != nil {
 		return nil, err
@@ -227,7 +227,7 @@ func GetTimelineIndefinite(ctx context.Context, qx gen.DBTX, tenantSubjectID uui
 // when the timeline has no finite windows.
 func GetTimelineTailEnd(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.UUID, entitlement string) (*time.Time, error) {
 	end, err := gen.New(qx).GetTimelineTailEnd(ctx, gen.GetTimelineTailEndParams{
-		MerchantSubjectID: tenantSubjectID, Entitlement: entitlement,
+		CustomerID: tenantSubjectID, Entitlement: entitlement,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -242,7 +242,7 @@ func GetTimelineTailEnd(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.U
 // (pgx.ErrNoRows when none does).
 func GetTimelineCoveringWindow(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (*models.Entitlement, error) {
 	row, err := gen.New(qx).GetTimelineCoveringWindow(ctx, gen.GetTimelineCoveringWindowParams{
-		MerchantSubjectID: tenantSubjectID, Entitlement: entitlement, At: at,
+		CustomerID: tenantSubjectID, Entitlement: entitlement, At: at,
 	})
 	if err != nil {
 		return nil, err
@@ -267,34 +267,34 @@ func InsertTimelineWindow(ctx context.Context, qx gen.DBTX, ent *models.Entitlem
 		ent.MerchantID = tid.UUID()
 	}
 	_, err := gen.New(qx).CreateEntitlement(ctx, gen.CreateEntitlementParams{
-		ID:              ent.ID,
-		MerchantID:        ent.MerchantID,
-		MerchantSubjectID: ent.MerchantSubjectID,
-		Entitlement:     ent.Entitlement,
-		StartAt:         ent.StartAt,
-		EndAt:           ent.EndAt,
-		SourceID:        sourceID,
-		SourceType:      string(ent.SourceType),
-		RevokedAt:       ent.RevokedAt,
-		RevokeReason:    revokeReasonPtr(ent.RevokeReason),
-		CreatedAt:       ent.CreatedAt,
-		UpdatedAt:       ent.UpdatedAt,
+		ID:           ent.ID,
+		MerchantID:   ent.MerchantID,
+		CustomerID:   ent.CustomerID,
+		Entitlement:  ent.Entitlement,
+		StartAt:      ent.StartAt,
+		EndAt:        ent.EndAt,
+		SourceID:     sourceID,
+		SourceType:   string(ent.SourceType),
+		RevokedAt:    ent.RevokedAt,
+		RevokeReason: revokeReasonPtr(ent.RevokeReason),
+		CreatedAt:    ent.CreatedAt,
+		UpdatedAt:    ent.UpdatedAt,
 	})
 	return err
 }
 
-// AttachMerchantSubjectIfMissing backfills tenant_subject_id onto a legacy row
+// AttachCustomerIfMissing backfills customer_id onto a legacy row
 // (#317); no-op when the row already carries one.
-func AttachMerchantSubjectIfMissing(ctx context.Context, qx gen.DBTX, ent *models.Entitlement, tenantSubjectID uuid.UUID, now time.Time) error {
-	if ent == nil || tenantSubjectID == uuid.Nil || ent.MerchantSubjectID != uuid.Nil {
+func AttachCustomerIfMissing(ctx context.Context, qx gen.DBTX, ent *models.Entitlement, tenantSubjectID uuid.UUID, now time.Time) error {
+	if ent == nil || tenantSubjectID == uuid.Nil || ent.CustomerID != uuid.Nil {
 		return nil
 	}
-	if err := gen.New(qx).AttachEntitlementMerchantSubject(ctx, gen.AttachEntitlementMerchantSubjectParams{
-		ID: ent.ID, MerchantSubjectID: tenantSubjectID, UpdatedAt: now,
+	if err := gen.New(qx).AttachEntitlementCustomer(ctx, gen.AttachEntitlementCustomerParams{
+		ID: ent.ID, CustomerID: tenantSubjectID, UpdatedAt: now,
 	}); err != nil {
 		return err
 	}
-	ent.MerchantSubjectID = tenantSubjectID
+	ent.CustomerID = tenantSubjectID
 	ent.UpdatedAt = now
 	return nil
 }
@@ -324,7 +324,7 @@ func RevokeActiveTimelineWindows(ctx context.Context, qx gen.DBTX, tenantSubject
 		sourceID = nil
 	}
 	return gen.New(qx).RevokeActiveTimelineWindows(ctx, gen.RevokeActiveTimelineWindowsParams{
-		MerchantSubjectID: tenantSubjectID, Entitlement: entitlement,
+		CustomerID: tenantSubjectID, Entitlement: entitlement,
 		Now: now, RevokeReason: string(reason), SourceType: st, SourceID: sourceID,
 	})
 }
@@ -341,7 +341,7 @@ func SoftDeleteFutureTimelineWindows(ctx context.Context, qx gen.DBTX, tenantSub
 		sourceID = nil
 	}
 	return gen.New(qx).SoftDeleteFutureTimelineWindows(ctx, gen.SoftDeleteFutureTimelineWindowsParams{
-		MerchantSubjectID: tenantSubjectID, Entitlement: entitlement,
+		CustomerID: tenantSubjectID, Entitlement: entitlement,
 		Now: now, SourceType: st, SourceID: sourceID,
 	})
 }

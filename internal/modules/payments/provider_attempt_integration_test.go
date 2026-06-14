@@ -20,7 +20,7 @@ import (
 func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
@@ -28,7 +28,7 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
 
@@ -58,22 +58,22 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 
 	t.Cleanup(func() {
 		cctx := context.Background()
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE customer_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(cctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(cctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
 	reserve := func(orderID string) *models.Payment {
 		attempt, err := svc.ReserveProviderAttempt(ctx, &models.Payment{
-			MerchantSubjectID: tenantSubjectID,
-			PriceID:         priceID,
-			Processor:       models.ProcessorMobius,
-			TransactionID:   "nmi_sub_attempt:" + orderID,
-			Amount:          2300,
-			ListAmount:      2300,
-			Currency:        "USD",
-			Status:          PaymentStatusPendingValue,
-			Metadata:        map[string]any{"nmi_subscription_order_id": orderID, "nmi_attempt_status": "pending"},
+			CustomerID:    tenantSubjectID,
+			PriceID:       priceID,
+			Processor:     models.ProcessorMobius,
+			TransactionID: "nmi_sub_attempt:" + orderID,
+			Amount:        2300,
+			ListAmount:    2300,
+			Currency:      "USD",
+			Status:        PaymentStatusPendingValue,
+			Metadata:      map[string]any{"nmi_subscription_order_id": orderID, "nmi_attempt_status": "pending"},
 		})
 		require.NoError(t, err)
 		require.Equal(t, PaymentStatusPendingValue, attempt.Status)

@@ -39,8 +39,8 @@ type Entitlement struct {
 	// default-tenant column default, so single-tenant code keeps working.
 	MerchantID uuid.UUID `json:"tenant_id"`
 
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id,omitempty"`
-	Entitlement     string    `json:"entitlement"`
+	CustomerID  uuid.UUID `json:"customer_id,omitempty"`
+	Entitlement string    `json:"entitlement"`
 
 	StartAt time.Time  `json:"start_at"`
 	EndAt   *time.Time `json:"end_at,omitempty"`

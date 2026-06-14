@@ -22,8 +22,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/spool"
 	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/pkg/spool"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -316,7 +316,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			}
 			transAsPayments = append(transAsPayments, PaymentEventData{
 				EventID:                d.EventID,
-				MerchantID:               d.MerchantID,
+				MerchantID:             d.MerchantID,
 				SubscriptionID:         d.SubscriptionID,
 				UserID:                 userID,
 				EventType:              d.EventType,
@@ -446,7 +446,7 @@ type SubscriptionEventData struct {
 	// MerchantID scopes this analytics event to a tenant / billing namespace
 	// (issue #232). It is populated from the request context at log time via
 	// merchant.Require; never write an unscoped hosted event.
-	MerchantID                string     `json:"tenant_id"`
+	MerchantID              string     `json:"tenant_id"`
 	SubscriptionID          uuid.UUID  `json:"subscription_id"`
 	UserID                  string     `json:"user_id"`
 	EventType               string     `json:"event_type"`
@@ -505,7 +505,7 @@ const (
 type PaymentEventData struct {
 	EventID uuid.UUID `json:"event_id"`
 	// MerchantID scopes this analytics event to a tenant / billing namespace (issue #232).
-	MerchantID               string     `json:"tenant_id"`
+	MerchantID             string     `json:"tenant_id"`
 	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
 	UserID                 string     `json:"user_id"`
 	EventType              string     `json:"event_type"`
@@ -523,7 +523,7 @@ type PaymentEventData struct {
 type TransactionEventData struct {
 	EventID uuid.UUID `json:"event_id"`
 	// MerchantID scopes this analytics event to a tenant / billing namespace (issue #232).
-	MerchantID               string     `json:"tenant_id"`
+	MerchantID             string     `json:"tenant_id"`
 	TransactionID          string     `json:"transaction_id"`
 	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
 	UserID                 *string    `json:"user_id,omitempty"`
@@ -541,7 +541,7 @@ type TransactionEventData struct {
 type ACUEventData struct {
 	EventID uuid.UUID `json:"event_id"`
 	// MerchantID scopes this analytics event to a tenant / billing namespace (issue #232).
-	MerchantID                string     `json:"tenant_id"`
+	MerchantID              string     `json:"tenant_id"`
 	SubscriptionID          *uuid.UUID `json:"subscription_id,omitempty"`
 	UserID                  *string    `json:"user_id,omitempty"`
 	EventType               string     `json:"event_type"`
@@ -559,7 +559,7 @@ type ACUEventData struct {
 type ChargebackEventData struct {
 	EventID uuid.UUID `json:"event_id"`
 	// MerchantID scopes this analytics event to a tenant / billing namespace (issue #232).
-	MerchantID               string     `json:"tenant_id"`
+	MerchantID             string     `json:"tenant_id"`
 	ChargebackID           string     `json:"chargeback_id"`
 	BatchID                string     `json:"batch_id"`
 	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
@@ -744,7 +744,7 @@ func (s *EventLogService) LogTransactionEvent(ctx context.Context, data Transact
 
 	ped := PaymentEventData{
 		EventID:                data.EventID,
-		MerchantID:               data.MerchantID,
+		MerchantID:             data.MerchantID,
 		SubscriptionID:         data.SubscriptionID,
 		UserID:                 *data.UserID,
 		EventType:              paymentType,
@@ -964,7 +964,7 @@ func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, 
 
 	return s.LogSubscriptionEvent(ctx, SubscriptionEventData{
 		SubscriptionID:          subscription.ID,
-		UserID:                  subscription.MerchantSubjectID.String(),
+		UserID:                  subscription.CustomerID.String(),
 		EventType:               PaymentEventSubscriptionCancelled,
 		Status:                  string(subscription.Status),
 		CancelType:              cancelType,
@@ -1002,7 +1002,7 @@ func (s *EventLogService) LogLifecycleChargeSuccess(ctx context.Context, sub *mo
 	metadata["subscription_id"] = sub.ID.String()
 	return s.LogPaymentEvent(ctx, PaymentEventData{
 		SubscriptionID:         &sub.ID,
-		UserID:                 sub.MerchantSubjectID.String(),
+		UserID:                 sub.CustomerID.String(),
 		EventType:              PaymentEventChargeSuccess,
 		Processor:              string(processor),
 		ProcessorTransactionID: txnID,

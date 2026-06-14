@@ -19,7 +19,7 @@ import (
 // actor (canonical actor for per-actor caps), the estimated charge, and the
 // idempotency-keyed source coordinates of the hold.
 type AuthorizeHoldInput struct {
-	Payer          identity.MerchantSubjectID
+	Payer          identity.CustomerID
 	Actor          string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
 	Currency       string // "" => DefaultCurrency (#472)
 	EstimateMicros int64
@@ -97,7 +97,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		// it as an allowed decision without re-evaluating (the original authorize
 		// already passed). Mirrors Hold's idempotency key.
 		existingRow, ierr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur,
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			TransactionType: "hold", Source: in.Source, SourceID: &in.SourceID,
 		})
 		if ierr == nil {
@@ -165,7 +165,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		// Place the hold within the SAME tx + held lock.
 		amount := in.EstimateMicros
 		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur,
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			HeldBalance: bal.HeldBalance + amount, UpdatedAt: now,
 		}); err != nil {
 			return err
@@ -176,8 +176,8 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		srcID := in.SourceID
 		hold := &models.MoneyTransaction{
 			ID:              uuidutil.NewV7(),
-			MerchantID:        tenantID,
-			MerchantSubjectID: payerID,
+			MerchantID:      tenantID,
+			CustomerID:      payerID,
 			Currency:        cur,
 			Actor:           strings.TrimSpace(in.Actor),
 			Amount:          0,
@@ -214,9 +214,9 @@ type accountSnapshot struct {
 }
 
 // snapshotTx reads the balance + settings snapshot using the (tx-scoped) service.
-func (s *MoneyService) snapshotTx(ctx context.Context, payer identity.MerchantSubjectID, currency string) (accountSnapshot, error) {
+func (s *MoneyService) snapshotTx(ctx context.Context, payer identity.CustomerID, currency string) (accountSnapshot, error) {
 	cur := normalizeCurrency(currency)
-	bal, err := s.GetBalanceForMerchantSubject(ctx, payer, cur)
+	bal, err := s.GetBalanceForCustomer(ctx, payer, cur)
 	if err != nil {
 		return accountSnapshot{}, err
 	}

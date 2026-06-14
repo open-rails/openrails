@@ -64,7 +64,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 
 	suite.InsertSubscription(ctx, &models.Subscription{
 		ID:                      subID,
-		MerchantSubjectID:         suite.ensureMerchantSubject(ctx, userID),
+		CustomerID:              suite.ensureCustomer(ctx, userID),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -115,11 +115,11 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 
 	// Admin manual grant: extra +5 days, should schedule after subscription end too.
 	adminGrant := &models.EntitlementGrant{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-		GrantedBy:       "admin",
-		Reason:          "test",
-		CreatedAt:       clock.Now().UTC(),
+		ID:         uuid.New(),
+		CustomerID: suite.ensureCustomer(ctx, userID),
+		GrantedBy:  "admin",
+		Reason:     "test",
+		CreatedAt:  clock.Now().UTC(),
 	}
 	suite.InsertEntitlementGrant(ctx, adminGrant)
 
@@ -147,7 +147,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1", suite.ensureMerchantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", suite.ensureCustomer(ctx, userID))
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.payments WHERE id = $1", payment.ID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlement_grants WHERE id = $1", adminGrant.ID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
@@ -192,15 +192,15 @@ func TestEntitlementSoftDeleteExcludedFromIsEntitled(t *testing.T) {
 
 	// Insert an entitlement window that is currently active.
 	ent := &models.Entitlement{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-		Entitlement:     entName,
-		StartAt:         now.Add(-1 * time.Hour),
-		EndAt:           nil, // active indefinitely
-		SourceType:      models.EntitlementSourceAdmin,
-		SourceID:        ptrUUID(uuid.New()),
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:          uuid.New(),
+		CustomerID:  suite.ensureCustomer(ctx, userID),
+		Entitlement: entName,
+		StartAt:     now.Add(-1 * time.Hour),
+		EndAt:       nil, // active indefinitely
+		SourceType:  models.EntitlementSourceAdmin,
+		SourceID:    ptrUUID(uuid.New()),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	suite.InsertEntitlement(ctx, ent)
 

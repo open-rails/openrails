@@ -50,10 +50,10 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
 CREATE TABLE IF NOT EXISTS openrails.entitlements (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id      UUID,
-    merchant_subject_id UUID
+    customer_id UUID
 );
 
-CREATE TABLE IF NOT EXISTS openrails.merchant_subjects (
+CREATE TABLE IF NOT EXISTS openrails.customers (
     id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id UUID NOT NULL,
     issuer    TEXT NOT NULL,
@@ -227,11 +227,11 @@ func TestDelete_RequiresExport(t *testing.T) {
 	// Seed a tenant-owned row + a secret so the purge has something to remove.
 	_, err = svc.pool.Exec(ctx, `
 		WITH subject AS (
-			INSERT INTO openrails.merchant_subjects (merchant_id, issuer, subject)
+			INSERT INTO openrails.customers (merchant_id, issuer, subject)
 			VALUES ($1::uuid, 'test', 'u1')
 			RETURNING id
 		)
-		INSERT INTO openrails.entitlements (merchant_id, merchant_subject_id)
+		INSERT INTO openrails.entitlements (merchant_id, customer_id)
 		SELECT $1::uuid, id FROM subject
 	`, tn.ID.String())
 	require.NoError(t, err)

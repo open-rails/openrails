@@ -2,7 +2,7 @@
 
 -- name: CreateCheckoutSession :execrows
 INSERT INTO openrails.checkout_sessions (
-    id, merchant_id, merchant_subject_id, price_id, mode, processor, status, amount,
+    id, merchant_id, customer_id, price_id, mode, processor, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
     subscription_id, metadata, processor_fields, processor_state,
     idempotency_key, created_at, updated_at
@@ -22,7 +22,7 @@ SELECT * FROM openrails.checkout_sessions WHERE id = $1;
 
 -- name: UpdateCheckoutSession :execrows
 UPDATE openrails.checkout_sessions SET
-    merchant_subject_id = $2,
+    customer_id = $2,
     price_id = $3,
     mode = $4,
     processor = $5,
@@ -59,7 +59,7 @@ LIMIT 1;
 
 -- name: GetLatestOpenCheckoutSession :one
 SELECT * FROM openrails.checkout_sessions cs
-WHERE cs.merchant_subject_id = $1
+WHERE cs.customer_id = $1
   AND cs.price_id = $2
   AND cs.processor = $3
   AND cs.status IN ('created', 'requires_action')

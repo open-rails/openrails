@@ -36,12 +36,12 @@ type Subscription struct {
 	// MerchantID is the owning tenant (#336): lets workers pin app.tenant_id when
 	// writing on this subscription's behalf.
 	MerchantID uuid.UUID `json:"tenant_id"`
-	// MerchantSubjectID is the OpenRails payable tenant subject for this row (#317).
+	// CustomerID is the OpenRails payable tenant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
-	// it before user_id is dropped. Join openrails.tenant_subjects for issuer/subject.
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id,omitempty"`
-	ProductID       uuid.UUID `json:"product_id"` // Denormalized for efficient product-based lookups
-	PriceID         uuid.UUID `json:"price_id"`   // Required for all subscriptions
+	// it before user_id is dropped. Join openrails.customers for issuer/subject.
+	CustomerID uuid.UUID `json:"customer_id,omitempty"`
+	ProductID  uuid.UUID `json:"product_id"` // Denormalized for efficient product-based lookups
+	PriceID    uuid.UUID `json:"price_id"`   // Required for all subscriptions
 
 	// Scheduled tier change (for downgrades that take effect at end of period)
 	ScheduledPriceID *uuid.UUID `json:"scheduled_price_id,omitempty"`

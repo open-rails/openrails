@@ -25,21 +25,21 @@ var (
 
 // OpenWindowRequest opens a prepaid window for one payer.
 type OpenWindowRequest struct {
-	MerchantSubjectID identity.MerchantSubjectID
-	Actor           string
-	Currency        string // "" => DefaultCurrency (#476)
-	Amount          int64
-	TTL             time.Duration
+	CustomerID identity.CustomerID
+	Actor      string
+	Currency   string // "" => DefaultCurrency (#476)
+	Amount     int64
+	TTL        time.Duration
 }
 
 // CreditWindowDTO is the public view of a window.
 type CreditWindowDTO struct {
-	WindowID        uuid.UUID `json:"window_id"`
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
-	HeldAmount      int64     `json:"held_amount"`
-	SettledAmount   int64     `json:"settled_amount"`
-	Status          string    `json:"status"`
-	ExpiresAt       time.Time `json:"expires_at"`
+	WindowID      uuid.UUID `json:"window_id"`
+	CustomerID    uuid.UUID `json:"customer_id"`
+	HeldAmount    int64     `json:"held_amount"`
+	SettledAmount int64     `json:"settled_amount"`
+	Status        string    `json:"status"`
+	ExpiresAt     time.Time `json:"expires_at"`
 }
 
 // defaultWindowTTL bounds a window when the caller does not supply a TTL.
@@ -54,8 +54,8 @@ func (s *Service) OpenWindow(ctx context.Context, req OpenWindowRequest) (*Credi
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
-	if req.MerchantSubjectID.IsZero() {
-		return nil, fmt.Errorf("tenant_subject_id required")
+	if req.CustomerID.IsZero() {
+		return nil, fmt.Errorf("customer_id required")
 	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
@@ -65,7 +65,7 @@ func (s *Service) OpenWindow(ctx context.Context, req OpenWindowRequest) (*Credi
 		ttl = defaultWindowTTL
 	}
 	w, err := s.moneyService().OpenWindow(ctx, money.OpenWindowParams{
-		Payer:     req.MerchantSubjectID,
+		Payer:     req.CustomerID,
 		Actor:     strings.TrimSpace(req.Actor),
 		Currency:  req.Currency,
 		Amount:    req.Amount,
@@ -146,11 +146,11 @@ func (s *Service) CloseWindow(ctx context.Context, windowID uuid.UUID) (*CreditW
 
 func windowToDTO(w *models.MoneyWindow) *CreditWindowDTO {
 	return &CreditWindowDTO{
-		WindowID:        w.ID,
-		MerchantSubjectID: w.MerchantSubjectID,
-		HeldAmount:      w.HeldAmount,
-		SettledAmount:   w.SettledAmount,
-		Status:          w.Status,
-		ExpiresAt:       w.ExpiresAt,
+		WindowID:      w.ID,
+		CustomerID:    w.CustomerID,
+		HeldAmount:    w.HeldAmount,
+		SettledAmount: w.SettledAmount,
+		Status:        w.Status,
+		ExpiresAt:     w.ExpiresAt,
 	}
 }

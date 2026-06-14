@@ -30,9 +30,9 @@ type ResolvedDelegated struct {
 	MerchantID merchant.ID
 	// TenantSlug is the resolved tenant's slug.
 	TenantSlug string
-	// MerchantSubjectID is the durable OpenRails payable subject for
+	// CustomerID is the durable OpenRails payable subject for
 	// (MerchantID, Issuer, DelegatedSubject).
-	MerchantSubjectID uuid.UUID
+	CustomerID uuid.UUID
 	// DelegatedSubject is the acting end-user id (`delegated_sub`). This is the
 	// user the self-service handlers scope every read/write to. There is NEVER a
 	// normal `sub` on a delegated access token.
@@ -213,16 +213,16 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 		return nil, err
 	}
 
-	tenantSubjectID, err := c.TouchMerchantSubject(ctx, tid, issuer, subject)
+	tenantSubjectID, err := c.TouchCustomer(ctx, tid, issuer, subject)
 	if err != nil {
 		return nil, err
 	}
 
 	return &ResolvedDelegated{
 		Tenant:               tslug,
-		MerchantID: tid,
+		MerchantID:           tid,
 		TenantSlug:           tslug,
-		MerchantSubjectID:      tenantSubjectID,
+		CustomerID:           tenantSubjectID,
 		DelegatedSubject:     subject,
 		Issuer:               issuer,
 		Permissions:          append([]string(nil), principal.Permissions...),

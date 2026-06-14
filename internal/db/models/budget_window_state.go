@@ -28,7 +28,7 @@ type BudgetWindowState struct {
 
 	MerchantID uuid.UUID `json:"tenant_id"`
 
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	CustomerID uuid.UUID `json:"customer_id"`
 
 	Actor string `json:"actor"`
 

@@ -53,16 +53,16 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 			func(context.Context) (string, error) { return authorized.Token, nil }))
 
 		payer := uuid.New()
-		pid := openrails.PayerTenantID(payer)
+		pid := openrails.CustomerID(payer)
 		src := uuid.New()
 		dep, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
-			PayerTenantID: &pid,
-			Actor:         "or484-test",
-			Currency:      "USD",
-			Amount:        500_000,
-			Source:        "or484",
-			SourceID:      &src,
-			Description:   "jwks-principal deposit",
+			CustomerID:  &pid,
+			Actor:       "or484-test",
+			Currency:    "USD",
+			Amount:      500_000,
+			Source:      "or484",
+			SourceID:    &src,
+			Description: "jwks-principal deposit",
 		})
 		require.NoError(t, err, "authorized JWKS principal must administer the merchant")
 		require.Equal(t, int64(500_000), dep.Amount)
@@ -77,16 +77,16 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 			func(context.Context) (string, error) { return unauthorized.Token, nil }))
 
 		payer := uuid.New()
-		pid := openrails.PayerTenantID(payer)
+		pid := openrails.CustomerID(payer)
 		src := uuid.New()
 		_, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
-			PayerTenantID: &pid,
-			Actor:         "or484-test",
-			Currency:      "USD",
-			Amount:        500_000,
-			Source:        "or484",
-			SourceID:      &src,
-			Description:   "should be denied",
+			CustomerID:  &pid,
+			Actor:       "or484-test",
+			Currency:    "USD",
+			Amount:      500_000,
+			Source:      "or484",
+			SourceID:    &src,
+			Description: "should be denied",
 		})
 		require.Error(t, err, "JWKS principal without a role on the owner_tenant must be denied")
 		require.True(t,
@@ -99,16 +99,16 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		// working unchanged (the JWKS path is purely additive).
 		c := standalone.Client()
 		payer := uuid.New()
-		pid := openrails.PayerTenantID(payer)
+		pid := openrails.CustomerID(payer)
 		src := uuid.New()
 		_, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
-			PayerTenantID: &pid,
-			Actor:         "or484-test",
-			Currency:      "USD",
-			Amount:        1_000,
-			Source:        "or484",
-			SourceID:      &src,
-			Description:   "service-token still works",
+			CustomerID:  &pid,
+			Actor:       "or484-test",
+			Currency:    "USD",
+			Amount:      1_000,
+			Source:      "or484",
+			SourceID:    &src,
+			Description: "service-token still works",
 		})
 		require.NoError(t, err, "service-token auth must keep working")
 	})

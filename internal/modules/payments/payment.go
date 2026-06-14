@@ -108,10 +108,10 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 	}
 
 	refund := &models.Payment{
-		ID:              uuidutil.NewV7(),
-		MerchantSubjectID: orig.MerchantSubjectID,
-		PriceID:         orig.PriceID,
-		SubscriptionID:  orig.SubscriptionID,
+		ID:             uuidutil.NewV7(),
+		CustomerID:     orig.CustomerID,
+		PriceID:        orig.PriceID,
+		SubscriptionID: orig.SubscriptionID,
 		RefundedPaymentID: func() *uuid.UUID {
 			id := orig.ID
 			return &id
@@ -146,10 +146,10 @@ func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uu
 
 	now := s.now()
 	refund := &models.Payment{
-		ID:              uuidutil.NewV7(),
-		MerchantSubjectID: orig.MerchantSubjectID,
-		PriceID:         orig.PriceID,
-		SubscriptionID:  orig.SubscriptionID,
+		ID:             uuidutil.NewV7(),
+		CustomerID:     orig.CustomerID,
+		PriceID:        orig.PriceID,
+		SubscriptionID: orig.SubscriptionID,
 		RefundedPaymentID: func() *uuid.UUID {
 			id := orig.ID
 			return &id

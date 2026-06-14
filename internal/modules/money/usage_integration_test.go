@@ -13,11 +13,11 @@ import (
 func TestRecordUsage_DebitsAndAggregates(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE merchant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 	})
 
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 100_000, Source: "seed",
+		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 100_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
@@ -35,7 +35,7 @@ func TestRecordUsage_DebitsAndAggregates(t *testing.T) {
 	require.NoError(t, err)
 
 	// Balance debited by 8_000.
-	bal, err := svc.GetBalanceForMerchantSubject(ctx, payer, cur)
+	bal, err := svc.GetBalanceForCustomer(ctx, payer, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(92_000), bal.Balance)
 
@@ -54,11 +54,11 @@ func TestRecordUsage_DebitsAndAggregates(t *testing.T) {
 func TestRecordUsage_Idempotent(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE merchant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 	})
 
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 10_000, Source: "seed",
+		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 10_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
@@ -73,7 +73,7 @@ func TestRecordUsage_Idempotent(t *testing.T) {
 	require.Equal(t, ev1.ID, ev2.ID, "replay must return the same event")
 
 	// Only ONE debit happened.
-	bal, err := svc.GetBalanceForMerchantSubject(ctx, payer, cur)
+	bal, err := svc.GetBalanceForCustomer(ctx, payer, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(8_000), bal.Balance)
 }
@@ -81,11 +81,11 @@ func TestRecordUsage_Idempotent(t *testing.T) {
 func TestRecordUsage_ZeroCostNoDebit(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE merchant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 	})
 
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 5_000, Source: "seed",
+		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 5_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
@@ -97,7 +97,7 @@ func TestRecordUsage_ZeroCostNoDebit(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, ev.MoneyTransactionID, "zero-cost event has no debit txn")
 
-	bal, err := svc.GetBalanceForMerchantSubject(ctx, payer, cur)
+	bal, err := svc.GetBalanceForCustomer(ctx, payer, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(5_000), bal.Balance, "zero-cost event must not debit")
 }

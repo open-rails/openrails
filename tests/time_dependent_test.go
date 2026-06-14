@@ -38,15 +38,15 @@ func TestEntitlementExpiry(t *testing.T) {
 	sourceID := uuid.New()
 
 	ent := &models.Entitlement{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-		Entitlement:     entitlementName,
-		StartAt:         startTime,
-		EndAt:           &endAt,
-		SourceType:      models.EntitlementSourceOneOff,
-		SourceID:        &sourceID,
-		CreatedAt:       startTime,
-		UpdatedAt:       startTime,
+		ID:          uuid.New(),
+		CustomerID:  suite.ensureCustomer(ctx, userID),
+		Entitlement: entitlementName,
+		StartAt:     startTime,
+		EndAt:       &endAt,
+		SourceType:  models.EntitlementSourceOneOff,
+		SourceID:    &sourceID,
+		CreatedAt:   startTime,
+		UpdatedAt:   startTime,
 	}
 	suite.InsertEntitlement(ctx, ent)
 
@@ -102,15 +102,15 @@ func TestEntitlementStacking(t *testing.T) {
 	firstEnd := startTime.Add(15 * 24 * time.Hour)
 	firstSourceID := uuid.New()
 	ent1 := &models.Entitlement{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-		Entitlement:     entitlementName,
-		StartAt:         startTime,
-		EndAt:           &firstEnd,
-		SourceType:      models.EntitlementSourceOneOff,
-		SourceID:        &firstSourceID,
-		CreatedAt:       startTime,
-		UpdatedAt:       startTime,
+		ID:          uuid.New(),
+		CustomerID:  suite.ensureCustomer(ctx, userID),
+		Entitlement: entitlementName,
+		StartAt:     startTime,
+		EndAt:       &firstEnd,
+		SourceType:  models.EntitlementSourceOneOff,
+		SourceID:    &firstSourceID,
+		CreatedAt:   startTime,
+		UpdatedAt:   startTime,
 	}
 	suite.InsertEntitlement(ctx, ent1)
 
@@ -119,15 +119,15 @@ func TestEntitlementStacking(t *testing.T) {
 	secondEnd := secondStart.Add(15 * 24 * time.Hour) // 30 days from original start
 	secondSourceID := uuid.New()
 	ent2 := &models.Entitlement{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-		Entitlement:     entitlementName,
-		StartAt:         secondStart,
-		EndAt:           &secondEnd,
-		SourceType:      models.EntitlementSourceOneOff,
-		SourceID:        &secondSourceID,
-		CreatedAt:       startTime,
-		UpdatedAt:       startTime,
+		ID:          uuid.New(),
+		CustomerID:  suite.ensureCustomer(ctx, userID),
+		Entitlement: entitlementName,
+		StartAt:     secondStart,
+		EndAt:       &secondEnd,
+		SourceType:  models.EntitlementSourceOneOff,
+		SourceID:    &secondSourceID,
+		CreatedAt:   startTime,
+		UpdatedAt:   startTime,
 	}
 	suite.InsertEntitlement(ctx, ent2)
 
@@ -173,15 +173,15 @@ func TestIndefiniteEntitlement(t *testing.T) {
 
 	// Grant an indefinite entitlement (EndAt is nil)
 	ent := &models.Entitlement{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-		Entitlement:     entitlementName,
-		StartAt:         startTime,
-		EndAt:           nil, // Indefinite
-		SourceType:      models.EntitlementSourceSubscription,
-		SourceID:        &sourceID,
-		CreatedAt:       startTime,
-		UpdatedAt:       startTime,
+		ID:          uuid.New(),
+		CustomerID:  suite.ensureCustomer(ctx, userID),
+		Entitlement: entitlementName,
+		StartAt:     startTime,
+		EndAt:       nil, // Indefinite
+		SourceType:  models.EntitlementSourceSubscription,
+		SourceID:    &sourceID,
+		CreatedAt:   startTime,
+		UpdatedAt:   startTime,
 	}
 	suite.InsertEntitlement(ctx, ent)
 
@@ -245,15 +245,15 @@ func TestCancelAccessAtPeriodEnd(t *testing.T) {
 
 	// Create a paid-term entitlement linked to the subscription
 	ent := &models.Entitlement{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-		Entitlement:     "premium",
-		StartAt:         startTime,
-		EndAt:           &periodEnd,
-		SourceType:      models.EntitlementSourceSubscription,
-		SourceID:        &sub.ID,
-		CreatedAt:       startTime,
-		UpdatedAt:       startTime,
+		ID:          uuid.New(),
+		CustomerID:  suite.ensureCustomer(ctx, userID),
+		Entitlement: "premium",
+		StartAt:     startTime,
+		EndAt:       &periodEnd,
+		SourceType:  models.EntitlementSourceSubscription,
+		SourceID:    &sub.ID,
+		CreatedAt:   startTime,
+		UpdatedAt:   startTime,
 	}
 	suite.InsertEntitlement(ctx, ent)
 
@@ -352,15 +352,15 @@ func TestAdminRevokeAccess(t *testing.T) {
 
 	// Create an indefinite entitlement linked to the subscription
 	ent := &models.Entitlement{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-		Entitlement:     "premium",
-		StartAt:         startTime,
-		EndAt:           nil, // Indefinite while subscription is active
-		SourceType:      models.EntitlementSourceSubscription,
-		SourceID:        &sub.ID,
-		CreatedAt:       startTime,
-		UpdatedAt:       startTime,
+		ID:          uuid.New(),
+		CustomerID:  suite.ensureCustomer(ctx, userID),
+		Entitlement: "premium",
+		StartAt:     startTime,
+		EndAt:       nil, // Indefinite while subscription is active
+		SourceType:  models.EntitlementSourceSubscription,
+		SourceID:    &sub.ID,
+		CreatedAt:   startTime,
+		UpdatedAt:   startTime,
 	}
 	suite.InsertEntitlement(ctx, ent)
 
@@ -542,15 +542,15 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 
 	// Create an indefinite entitlement linked to the subscription
 	ent := &models.Entitlement{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-		Entitlement:     "premium",
-		StartAt:         startTime.Add(-30 * 24 * time.Hour),
-		EndAt:           nil, // Indefinite
-		SourceType:      models.EntitlementSourceSubscription,
-		SourceID:        &sub.ID,
-		CreatedAt:       startTime,
-		UpdatedAt:       startTime,
+		ID:          uuid.New(),
+		CustomerID:  suite.ensureCustomer(ctx, userID),
+		Entitlement: "premium",
+		StartAt:     startTime.Add(-30 * 24 * time.Hour),
+		EndAt:       nil, // Indefinite
+		SourceType:  models.EntitlementSourceSubscription,
+		SourceID:    &sub.ID,
+		CreatedAt:   startTime,
+		UpdatedAt:   startTime,
 	}
 	suite.InsertEntitlement(ctx, ent)
 
@@ -826,14 +826,14 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 	t.Run("payment PurchasedAt uses mock clock time", func(t *testing.T) {
 		// Create a payment with TransactionID (required unique field)
 		payment := &models.Payment{
-			ID:              uuid.New(),
-			MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-			PriceID:         priceID,
-			Processor:       models.ProcessorMobius,
-			TransactionID:   "test-tx-" + uuid.New().String()[:8],
-			Amount:          999,
-			Currency:        "usd",
-			PurchasedAt:     mockClock.Now(),
+			ID:            uuid.New(),
+			CustomerID:    suite.ensureCustomer(ctx, userID),
+			PriceID:       priceID,
+			Processor:     models.ProcessorMobius,
+			TransactionID: "test-tx-" + uuid.New().String()[:8],
+			Amount:        999,
+			Currency:      "usd",
+			PurchasedAt:   mockClock.Now(),
 		}
 
 		err := paymentService.Create(ctx, payment)
@@ -851,14 +851,14 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 
 		// Create another payment with unique TransactionID
 		payment := &models.Payment{
-			ID:              uuid.New(),
-			MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-			PriceID:         priceID,
-			Processor:       models.ProcessorMobius,
-			TransactionID:   "test-tx-" + uuid.New().String()[:8],
-			Amount:          999,
-			Currency:        "usd",
-			PurchasedAt:     mockClock.Now(),
+			ID:            uuid.New(),
+			CustomerID:    suite.ensureCustomer(ctx, userID),
+			PriceID:       priceID,
+			Processor:     models.ProcessorMobius,
+			TransactionID: "test-tx-" + uuid.New().String()[:8],
+			Amount:        999,
+			Currency:      "usd",
+			PurchasedAt:   mockClock.Now(),
 		}
 
 		err := paymentService.Create(ctx, payment)
@@ -902,15 +902,15 @@ func TestSubscriptionExpiryAtExactBoundary(t *testing.T) {
 
 	// Create entitlement that ends exactly at period end
 	ent := &models.Entitlement{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-		Entitlement:     "premium",
-		StartAt:         startTime,
-		EndAt:           &periodEnd,
-		SourceType:      models.EntitlementSourceSubscription,
-		SourceID:        &sub.ID,
-		CreatedAt:       startTime,
-		UpdatedAt:       startTime,
+		ID:          uuid.New(),
+		CustomerID:  suite.ensureCustomer(ctx, userID),
+		Entitlement: "premium",
+		StartAt:     startTime,
+		EndAt:       &periodEnd,
+		SourceType:  models.EntitlementSourceSubscription,
+		SourceID:    &sub.ID,
+		CreatedAt:   startTime,
+		UpdatedAt:   startTime,
 	}
 	suite.InsertEntitlement(ctx, ent)
 
@@ -1036,12 +1036,12 @@ func TestVaultTimestamps(t *testing.T) {
 
 	// Create a payment method directly
 	pm := &models.PaymentMethod{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-		Processor:       models.ProcessorMobius,
-		VaultID:         "test-vault-" + uuid.New().String()[:8],
-		CreatedAt:       mockClock.Now(),
-		UpdatedAt:       mockClock.Now(),
+		ID:         uuid.New(),
+		CustomerID: suite.ensureCustomer(ctx, userID),
+		Processor:  models.ProcessorMobius,
+		VaultID:    "test-vault-" + uuid.New().String()[:8],
+		CreatedAt:  mockClock.Now(),
+		UpdatedAt:  mockClock.Now(),
 	}
 	suite.InsertPaymentMethod(ctx, pm)
 

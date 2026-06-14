@@ -26,7 +26,7 @@ var (
 )
 
 func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod) error {
-	if err := ensureMerchantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, m.MerchantSubjectID); err != nil {
+	if err := ensureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, m.CustomerID); err != nil {
 		return err
 	}
 	meta, err := toJSONB(m.Metadata)
@@ -39,8 +39,8 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   m.ID,
-		MerchantID:             tid.UUID(),
-		MerchantSubjectID:      m.MerchantSubjectID,
+		MerchantID:           tid.UUID(),
+		CustomerID:           m.CustomerID,
 		Processor:            string(m.Processor),
 		VaultID:              m.VaultID,
 		BillingID:            m.BillingID,
@@ -149,11 +149,11 @@ func (r *PaymentMethodRepo) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByMerchantSubject(ctx, tsid)
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByCustomer(ctx, tsid)
 	if err != nil {
 		return nil, err
 	}
@@ -161,21 +161,21 @@ func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*
 }
 
 func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*models.PaymentMethod, int64, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
 	q := r.db.Gen(ctx)
-	total, err := q.CountPaymentMethodsByMerchantSubject(ctx, tsid)
+	total, err := q.CountPaymentMethodsByCustomer(ctx, tsid)
 	if err != nil {
 		return nil, 0, err
 	}
 	limit32, _ := safecast.Convert[int32](limit)
 	offset32, _ := safecast.Convert[int32](offset)
-	rows, err := q.ListPaymentMethodsByMerchantSubjectPaged(ctx, gen.ListPaymentMethodsByMerchantSubjectPagedParams{
-		MerchantSubjectID: tsid,
-		PageLimit:       limit32,
-		PageOffset:      offset32,
+	rows, err := q.ListPaymentMethodsByCustomerPaged(ctx, gen.ListPaymentMethodsByCustomerPagedParams{
+		CustomerID: tsid,
+		PageLimit:  limit32,
+		PageOffset: offset32,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -225,7 +225,7 @@ func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMe
 	}
 	rows, err := r.db.Gen(ctx).UpdatePaymentMethod(ctx, gen.UpdatePaymentMethodParams{
 		ID:                   method.ID,
-		MerchantSubjectID:      method.MerchantSubjectID,
+		CustomerID:           method.CustomerID,
 		Processor:            string(method.Processor),
 		VaultID:              method.VaultID,
 		BillingID:            method.BillingID,
@@ -257,13 +257,13 @@ func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.Paym
 
 // GetNMIBackedByUserID returns all payment methods for NMI-backed processors for a user
 func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByMerchantSubjectProcessors(ctx, gen.ListPaymentMethodsByMerchantSubjectProcessorsParams{
-		MerchantSubjectID: tsid,
-		Processors:      processors.GetNMIBackedProcessorsList(),
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByCustomerProcessors(ctx, gen.ListPaymentMethodsByCustomerProcessorsParams{
+		CustomerID: tsid,
+		Processors: processors.GetNMIBackedProcessorsList(),
 	})
 	if err != nil {
 		return nil, err
@@ -272,13 +272,13 @@ func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID str
 }
 
 func (r *PaymentMethodRepo) ExistsForUser(ctx context.Context, id uuid.UUID, userID string) (bool, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return false, err
 	}
 	count, err := r.db.Gen(ctx).CountPaymentMethodForUser(ctx, gen.CountPaymentMethodForUserParams{
-		ID:              id,
-		MerchantSubjectID: tsid,
+		ID:         id,
+		CustomerID: tsid,
 	})
 	if err != nil {
 		return false, err

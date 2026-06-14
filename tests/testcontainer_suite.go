@@ -342,8 +342,8 @@ func (suite *TestContainerSuite) runDatabaseMigrations() {
 	seedPool, perr := pgxpool.New(suite.ctx, suite.Config.DB.URL)
 	require.NoError(suite.t, perr)
 	_, perr = seedPool.Exec(suite.ctx,
-		`INSERT INTO openrails.tenants (id, slug, name, status)
-		 VALUES ($1, $2, 'Test Tenant', 'active') ON CONFLICT (slug) DO NOTHING`,
+		`INSERT INTO openrails.merchants (id, slug, name, status)
+		 VALUES ($1, $2, 'Test Merchant', 'active') ON CONFLICT (slug) DO NOTHING`,
 		dbtest.TestTenantID.UUID(), dbtest.TestTenantSlug)
 	seedPool.Close()
 	require.NoError(suite.t, perr)
@@ -438,8 +438,8 @@ func (suite *TestContainerSuite) initializeServer() {
 	// ensure the test tenant's AuthKit org exists with the operator role holding
 	// the full openrails:* catalog, so admin identities created by the test
 	// helpers carry LIVE openrails:admin authority. Idempotent; runs after
-	// migrations (profiles.* + openrails.tenants exist). #336: bootstrap is
-	// pinned to an explicit tenant slug (no default tenant).
+	// migrations (profiles.* + openrails.merchants exist). #336: bootstrap is
+	// pinned to an explicit merchant slug (no default merchant).
 	_, err = embcp.RunBootstrap(suite.ctx, suite.App, controlplane.BootstrapOptions{
 		BootstrapTenantSlug:     dbtest.TestTenantSlug,
 		MintInitialServiceToken: false,

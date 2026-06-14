@@ -15,7 +15,7 @@ import (
 const createProductAccessGrant = `-- name: CreateProductAccessGrant :one
 
 INSERT INTO openrails.product_access_grants (
-    id, merchant_id, merchant_subject_id, product_id, source_type, source_id,
+    id, merchant_id, customer_id, product_id, source_type, source_id,
     payment_id, status, starts_at, ends_at, revoked_at, revoke_reason,
     created_at, updated_at
 ) VALUES (
@@ -34,26 +34,26 @@ RETURNING id
 `
 
 type CreateProductAccessGrantParams struct {
-	MerchantSubjectID uuid.UUID
-	ProductID         uuid.UUID
-	SourceType        string
-	ID                uuid.UUID
-	MerchantID        uuid.UUID
-	SourceID          string
-	PaymentID         *uuid.UUID
-	Status            string
-	StartsAt          time.Time
-	EndsAt            *time.Time
-	RevokedAt         *time.Time
-	RevokeReason      *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	CustomerID   uuid.UUID
+	ProductID    uuid.UUID
+	SourceType   string
+	ID           uuid.UUID
+	MerchantID   uuid.UUID
+	SourceID     string
+	PaymentID    *uuid.UUID
+	Status       string
+	StartsAt     time.Time
+	EndsAt       *time.Time
+	RevokedAt    *time.Time
+	RevokeReason *string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // openrails.product_access_grants (issue #250).
 func (q *Queries) CreateProductAccessGrant(ctx context.Context, arg CreateProductAccessGrantParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, createProductAccessGrant,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.ProductID,
 		arg.SourceType,
 		arg.ID,
@@ -74,7 +74,7 @@ func (q *Queries) CreateProductAccessGrant(ctx context.Context, arg CreateProduc
 }
 
 const getProductAccessGrantByID = `-- name: GetProductAccessGrantByID :one
-SELECT id, merchant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, merchant_subject_id FROM openrails.product_access_grants pag
+SELECT id, merchant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, customer_id FROM openrails.product_access_grants pag
 WHERE pag.merchant_id = $1 AND pag.id = $2
 `
 
@@ -100,31 +100,31 @@ func (q *Queries) GetProductAccessGrantByID(ctx context.Context, arg GetProductA
 		&i.RevokeReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 	)
 	return i, err
 }
 
 const getProductAccessGrantBySource = `-- name: GetProductAccessGrantBySource :one
-SELECT id, merchant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, merchant_subject_id FROM openrails.product_access_grants pag
+SELECT id, merchant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, customer_id FROM openrails.product_access_grants pag
 WHERE pag.merchant_id = $1
-  AND pag.merchant_subject_id = $2
+  AND pag.customer_id = $2
   AND pag.product_id = $3
   AND pag.source_id = $4
 LIMIT 1
 `
 
 type GetProductAccessGrantBySourceParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	ProductID         uuid.UUID
-	SourceID          string
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ProductID  uuid.UUID
+	SourceID   string
 }
 
 func (q *Queries) GetProductAccessGrantBySource(ctx context.Context, arg GetProductAccessGrantBySourceParams) (OpenrailsProductAccessGrant, error) {
 	row := q.db.QueryRow(ctx, getProductAccessGrantBySource,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.ProductID,
 		arg.SourceID,
 	)
@@ -143,7 +143,7 @@ func (q *Queries) GetProductAccessGrantBySource(ctx context.Context, arg GetProd
 		&i.RevokeReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 	)
 	return i, err
 }
@@ -152,7 +152,7 @@ const hasActiveProductAccess = `-- name: HasActiveProductAccess :one
 SELECT EXISTS (
     SELECT 1 FROM openrails.product_access_grants pag
     WHERE pag.merchant_id = $1
-      AND pag.merchant_subject_id = $2
+      AND pag.customer_id = $2
       AND pag.product_id = $3
       AND pag.status = 'active'
       AND pag.revoked_at IS NULL
@@ -162,16 +162,16 @@ SELECT EXISTS (
 `
 
 type HasActiveProductAccessParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	ProductID         uuid.UUID
-	At                time.Time
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ProductID  uuid.UUID
+	At         time.Time
 }
 
 func (q *Queries) HasActiveProductAccess(ctx context.Context, arg HasActiveProductAccessParams) (bool, error) {
 	row := q.db.QueryRow(ctx, hasActiveProductAccess,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.ProductID,
 		arg.At,
 	)
@@ -180,10 +180,10 @@ func (q *Queries) HasActiveProductAccess(ctx context.Context, arg HasActiveProdu
 	return exists, err
 }
 
-const listActiveProductAccessGrantsByMerchantSubject = `-- name: ListActiveProductAccessGrantsByMerchantSubject :many
-SELECT id, merchant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, merchant_subject_id FROM openrails.product_access_grants pag
+const listActiveProductAccessGrantsByCustomer = `-- name: ListActiveProductAccessGrantsByCustomer :many
+SELECT id, merchant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, customer_id FROM openrails.product_access_grants pag
 WHERE pag.merchant_id = $1
-  AND pag.merchant_subject_id = $2
+  AND pag.customer_id = $2
   AND pag.status = 'active'
   AND pag.revoked_at IS NULL
   AND pag.starts_at <= $3::timestamptz
@@ -191,14 +191,14 @@ WHERE pag.merchant_id = $1
 ORDER BY pag.created_at DESC
 `
 
-type ListActiveProductAccessGrantsByMerchantSubjectParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	At                time.Time
+type ListActiveProductAccessGrantsByCustomerParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	At         time.Time
 }
 
-func (q *Queries) ListActiveProductAccessGrantsByMerchantSubject(ctx context.Context, arg ListActiveProductAccessGrantsByMerchantSubjectParams) ([]OpenrailsProductAccessGrant, error) {
-	rows, err := q.db.Query(ctx, listActiveProductAccessGrantsByMerchantSubject, arg.MerchantID, arg.MerchantSubjectID, arg.At)
+func (q *Queries) ListActiveProductAccessGrantsByCustomer(ctx context.Context, arg ListActiveProductAccessGrantsByCustomerParams) ([]OpenrailsProductAccessGrant, error) {
+	rows, err := q.db.Query(ctx, listActiveProductAccessGrantsByCustomer, arg.MerchantID, arg.CustomerID, arg.At)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +220,7 @@ func (q *Queries) ListActiveProductAccessGrantsByMerchantSubject(ctx context.Con
 			&i.RevokeReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.MerchantSubjectID,
+			&i.CustomerID,
 		); err != nil {
 			return nil, err
 		}
@@ -232,20 +232,20 @@ func (q *Queries) ListActiveProductAccessGrantsByMerchantSubject(ctx context.Con
 	return items, nil
 }
 
-const listProductAccessGrantsByMerchantSubject = `-- name: ListProductAccessGrantsByMerchantSubject :many
-SELECT id, merchant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, merchant_subject_id FROM openrails.product_access_grants pag
+const listProductAccessGrantsByCustomer = `-- name: ListProductAccessGrantsByCustomer :many
+SELECT id, merchant_id, product_id, source_type, source_id, payment_id, status, starts_at, ends_at, revoked_at, revoke_reason, created_at, updated_at, customer_id FROM openrails.product_access_grants pag
 WHERE pag.merchant_id = $1
-  AND pag.merchant_subject_id = $2
+  AND pag.customer_id = $2
 ORDER BY pag.created_at DESC
 `
 
-type ListProductAccessGrantsByMerchantSubjectParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
+type ListProductAccessGrantsByCustomerParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
 }
 
-func (q *Queries) ListProductAccessGrantsByMerchantSubject(ctx context.Context, arg ListProductAccessGrantsByMerchantSubjectParams) ([]OpenrailsProductAccessGrant, error) {
-	rows, err := q.db.Query(ctx, listProductAccessGrantsByMerchantSubject, arg.MerchantID, arg.MerchantSubjectID)
+func (q *Queries) ListProductAccessGrantsByCustomer(ctx context.Context, arg ListProductAccessGrantsByCustomerParams) ([]OpenrailsProductAccessGrant, error) {
+	rows, err := q.db.Query(ctx, listProductAccessGrantsByCustomer, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +267,7 @@ func (q *Queries) ListProductAccessGrantsByMerchantSubject(ctx context.Context, 
 			&i.RevokeReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.MerchantSubjectID,
+			&i.CustomerID,
 		); err != nil {
 			return nil, err
 		}

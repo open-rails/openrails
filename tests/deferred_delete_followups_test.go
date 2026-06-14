@@ -254,7 +254,7 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 
 	require.Len(t, recorder.scheduled, 1, "exactly one deferred delete scheduled")
 	assert.Equal(t, sub.ID, recorder.scheduled[0].SubscriptionID)
-	assert.Equal(t, updated.MerchantSubjectID.String(), recorder.scheduled[0].UserID)
+	assert.Equal(t, updated.CustomerID.String(), recorder.scheduled[0].UserID)
 	assert.WithinDuration(t, time.Now(), recorder.scheduled[0].RunAt, time.Minute)
 }
 

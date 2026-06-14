@@ -98,7 +98,7 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	fx := refundFixture{db: dbi, store: NewStore(dbi)}
 	fx.paymentID = uuid.New()
 	fx.originalTxn = "txn-" + uuid.NewString()[:8]
-	userID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, uuid.NewString())
+	userID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, uuid.NewString())
 
 	productID := uuid.New()
 	priceID := uuid.New()
@@ -114,7 +114,7 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 		productID, "refund-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 1000, 'usd', $3)`,
 		priceID, productID, tenantID)
-	exec(`INSERT INTO openrails.payments (id, price_id, processor, transaction_id, amount, list_amount, currency, status, merchant_subject_id, merchant_id)
+	exec(`INSERT INTO openrails.payments (id, price_id, processor, transaction_id, amount, list_amount, currency, status, customer_id, merchant_id)
 	      VALUES ($1, $2, 'mobius', $3, 1000, 1000, 'usd', 'completed', $4, $5)`,
 		fx.paymentID, priceID, fx.originalTxn, userID, tenantID)
 
@@ -145,7 +145,7 @@ func (fx refundFixture) payload(amountCents int64) RefundPayload {
 func (fx refundFixture) enqueueParams(amountCents int64) EnqueueParams {
 	paymentID := fx.paymentID
 	return EnqueueParams{
-		MerchantID:       dbtest.TestTenantID.UUID(),
+		MerchantID:     dbtest.TestTenantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeNMIRefund,
 		PaymentID:      &paymentID,

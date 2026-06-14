@@ -24,12 +24,12 @@ func TestListInvoices_Statement(t *testing.T) {
 	// rows but not these.
 	pool := testPool(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
 
 	_, err := ms.Deposit(ctx, money.DepositParams{
-		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "purchase",
+		CustomerID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "purchase",
 	})
 	require.NoError(t, err)
 

@@ -20,7 +20,7 @@ type Charger interface {
 }
 
 type ChargeRequest struct {
-	Payer           identity.MerchantSubjectID
+	Payer           identity.CustomerID
 	Actor           string
 	PaymentMethodID uuid.UUID
 	AmountCents     int64
@@ -36,13 +36,13 @@ type ChargeResult struct {
 // Alerter delivers a low-balance notification. Implemented by the notification
 // layer; faked in tests (#240).
 type Alerter interface {
-	LowBalanceAlert(ctx context.Context, payer identity.MerchantSubjectID, available, threshold int64) error
+	LowBalanceAlert(ctx context.Context, payer identity.CustomerID, available, threshold int64) error
 }
 
 // moneyInAccount is a scanned (settings ⨝ balance) row for the money-in workers.
 type moneyInAccount struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
+	MerchantID      uuid.UUID
+	CustomerID      uuid.UUID
 	Currency        string
 	Available       int64
 	Threshold       int64
@@ -68,8 +68,8 @@ func (s *MoneyService) belowThresholdAccounts(ctx context.Context) ([]moneyInAcc
 	out := make([]moneyInAccount, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, moneyInAccount{
-			MerchantID:        r.MerchantID,
-			MerchantSubjectID: r.MerchantSubjectID,
+			MerchantID:      r.MerchantID,
+			CustomerID:      r.CustomerID,
 			Currency:        r.Currency,
 			Available:       r.Available,
 			Threshold:       r.Threshold,
@@ -103,7 +103,7 @@ func (s *MoneyService) RunLowBalanceAlerts(ctx context.Context, alerter Alerter,
 		if r.LastAlertAt != nil && now.Sub(*r.LastAlertAt) < cooldown {
 			continue
 		}
-		payer := identity.MerchantSubjectID(r.MerchantSubjectID)
+		payer := identity.CustomerID(r.CustomerID)
 		if err := alerter.LowBalanceAlert(ctx, payer, r.Available, r.Threshold); err != nil {
 			continue // best-effort; try again next tick
 		}
@@ -157,13 +157,13 @@ func (s *MoneyService) RunAutoTopups(ctx context.Context, charger Charger, coold
 // skipped entirely; the Charger also receives the idempotency key so a retry
 // after a charge-but-before-deposit crash does not double-charge.
 func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r moneyInAccount, cooldown time.Duration, now time.Time) (bool, error) {
-	payer := identity.MerchantSubjectID(r.MerchantSubjectID)
+	payer := identity.CustomerID(r.CustomerID)
 	// #474 invariant: auto-topup charges a card → external-currency-only.
 	if err := RequireBillingCurrency(normalizeCurrency(r.Currency)); err != nil {
 		return false, nil
 	}
 	bucket := now.Truncate(max(cooldown, time.Minute)).Unix()
-	episode := fmt.Sprintf("autotopup:%s:%d", r.MerchantSubjectID, bucket)
+	episode := fmt.Sprintf("autotopup:%s:%d", r.CustomerID, bucket)
 	depositSourceID := uuid.NewSHA1(uuid.Nil, []byte(episode))
 
 	// If this episode already deposited, we're done (idempotent).
@@ -193,7 +193,7 @@ func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r mone
 	// auto_topup_amount_cents is the card charge in cents; the ledger is
 	// micro-dollars (1 cent = 10,000 micros).
 	if _, err := s.Deposit(ctx, DepositParams{
-		MerchantSubjectID:           &payer,
+		CustomerID:                &payer,
 		Actor:                     payer.UUID().String(),
 		Currency:                  r.Currency,
 		Amount:                    *r.TopupAmount * 10_000,
@@ -214,11 +214,11 @@ func (s *MoneyService) stampMoneyInTimestamp(ctx context.Context, r moneyInAccou
 	switch column {
 	case "last_alert_at":
 		return s.db.Gen(ctx).StampMoneyAccountAlertAt(ctx, gen.StampMoneyAccountAlertAtParams{
-			MerchantID: r.MerchantID, MerchantSubjectID: r.MerchantSubjectID, Currency: normalizeCurrency(r.Currency), Now: &now,
+			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency), Now: &now,
 		})
 	case "last_topup_at":
 		return s.db.Gen(ctx).StampMoneyAccountTopupAt(ctx, gen.StampMoneyAccountTopupAtParams{
-			MerchantID: r.MerchantID, MerchantSubjectID: r.MerchantSubjectID, Currency: normalizeCurrency(r.Currency), Now: &now,
+			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency), Now: &now,
 		})
 	default:
 		return fmt.Errorf("money: unknown money-in timestamp column %q", column)

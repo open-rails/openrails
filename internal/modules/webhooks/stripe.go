@@ -361,7 +361,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 		// Stripe retries once the mapping exists.
 		if procSubID := inv.processorSubscriptionID(); procSubID != "" {
 			if sub, lookupErr := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), procSubID); lookupErr == nil && sub != nil {
-				userID = strings.TrimSpace(sub.MerchantSubjectID.String())
+				userID = strings.TrimSpace(sub.CustomerID.String())
 			}
 		}
 		if userID == "" && s.ProcessorCustomerService != nil {
@@ -564,7 +564,7 @@ func (s *StripeWebhookService) ensureStripePaidSubscriptionEntitlements(ctx cont
 			continue
 		}
 		params := entitlements.PushNewEntitlementParams{
-			UserID:      sub.MerchantSubjectID.String(),
+			UserID:      sub.CustomerID.String(),
 			Entitlement: entName,
 			NotBefore:   &notBefore,
 			SourceType:  models.EntitlementSourceSubscription,
@@ -979,7 +979,7 @@ func (s *StripeWebhookService) reconcileStripeSubscriptionEntitlements(ctx conte
 	now := s.now().UTC()
 
 	if sub.Status == models.StatusCancelled && (sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.After(now)) {
-		if err := entSvc.RevokeSourcesForSubscription(ctx, sub.MerchantSubjectID.String(), sub.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+		if err := entSvc.RevokeSourcesForSubscription(ctx, sub.CustomerID.String(), sub.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
 			return fmt.Errorf("revoke stripe subscription entitlements after terminal update: %w", err)
 		}
 		return nil
@@ -1006,7 +1006,7 @@ func (s *StripeWebhookService) reconcileStripeSubscriptionEntitlements(ctx conte
 			continue
 		}
 		if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-			UserID:      sub.MerchantSubjectID.String(),
+			UserID:      sub.CustomerID.String(),
 			Entitlement: entName,
 			SourceType:  &sourceType,
 			SourceID:    &sourceID,
@@ -1106,17 +1106,17 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 		txnID := failedPaymentTransactionID(inv)
 		subID := sub.ID
 		failed := &models.Payment{
-			ID:              uuidutil.NewV7(),
-			MerchantSubjectID: sub.MerchantSubjectID,
-			PriceID:         sub.PriceID,
-			SubscriptionID:  &subID,
-			Processor:       models.ProcessorStripe,
-			TransactionID:   txnID,
-			Amount:          amount,
-			ListAmount:      amount,
-			Currency:        normalize.FirstNonEmpty(inv.Currency, "usd"),
-			Status:          "failed",
-			PurchasedAt:     s.now(),
+			ID:             uuidutil.NewV7(),
+			CustomerID:     sub.CustomerID,
+			PriceID:        sub.PriceID,
+			SubscriptionID: &subID,
+			Processor:      models.ProcessorStripe,
+			TransactionID:  txnID,
+			Amount:         amount,
+			ListAmount:     amount,
+			Currency:       normalize.FirstNonEmpty(inv.Currency, "usd"),
+			Status:         "failed",
+			PurchasedAt:    s.now(),
 		}
 		if _, err := s.PaymentService.CreateIfNotExists(ctx, failed); err != nil {
 			return fmt.Errorf("record failed payment: %w", err)
@@ -1125,9 +1125,9 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 
 	if s.NotificationService != nil {
 		notification := &models.NotificationQueue{
-			ID:              uuidutil.NewV7(),
-			MerchantSubjectID: sub.MerchantSubjectID,
-			EventType:       models.NotificationPaymentMethodFailed,
+			ID:         uuidutil.NewV7(),
+			CustomerID: sub.CustomerID,
+			EventType:  models.NotificationPaymentMethodFailed,
 			Data: map[string]any{
 				"processor":                 string(models.ProcessorStripe),
 				"processor_subscription_id": processorSubID,
@@ -1152,7 +1152,7 @@ func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub 
 		return
 	}
 	reason := "stripe_invoice_payment_failed"
-	if err := s.EventLogService.LogLifecycleFailure(ctx, sub.ID, sub.MerchantSubjectID.String(), models.ProcessorStripe, models.StatusPastDue, &reason, nil, s.now()); err != nil {
+	if err := s.EventLogService.LogLifecycleFailure(ctx, sub.ID, sub.CustomerID.String(), models.ProcessorStripe, models.StatusPastDue, &reason, nil, s.now()); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 			"subscription_id":           sub.ID,
 			"processor_subscription_id": processorSubID,
@@ -1192,7 +1192,7 @@ func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub 
 	if err := s.EventLogService.LogSubscriptionEvent(ctx, analytics.SubscriptionEventData{
 		EventID:                 uuidutil.NewV7(),
 		SubscriptionID:          sub.ID,
-		UserID:                  sub.MerchantSubjectID.String(),
+		UserID:                  sub.CustomerID.String(),
 		EventType:               analytics.PaymentEventSubscriptionPastDue,
 		Status:                  statusPastDue,
 		PriceAmount:             priceAmount,
@@ -1394,7 +1394,7 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 			Provider:          "stripe",
 			Operation:         "dispute_reversal",
 			TransactionID:     disputeID,
-			UserID:            original.MerchantSubjectID.String(),
+			UserID:            original.CustomerID.String(),
 			OriginalPaymentID: &originalID,
 			SubscriptionID:    original.SubscriptionID,
 			Err:               ledgerErr,
@@ -1452,7 +1452,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 	} else {
 		recovery := &models.Payment{
 			ID:                uuidutil.NewV7(),
-			MerchantSubjectID:   original.MerchantSubjectID,
+			CustomerID:        original.CustomerID,
 			PriceID:           original.PriceID,
 			SubscriptionID:    original.SubscriptionID,
 			RefundedPaymentID: &original.ID,

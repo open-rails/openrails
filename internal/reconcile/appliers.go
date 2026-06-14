@@ -87,16 +87,16 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 		return false, err
 	}
 	n, err := w.DB.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
-		MerchantID:        tid.UUID(),
-		PriceID:         a.PriceID,
-		Processor:       gen.OpenrailsProcessorType(a.Processor),
-		TransactionID:   a.TransactionID,
-		Amount:          a.AmountCents,
-		Currency:        a.Currency,
-		SubscriptionID:  a.SubscriptionID,
-		Metadata:        metadataJSON(a.Metadata),
-		PurchasedAt:     a.PurchasedAt,
-		MerchantSubjectID: a.MerchantSubjectID,
+		MerchantID:     tid.UUID(),
+		PriceID:        a.PriceID,
+		Processor:      gen.OpenrailsProcessorType(a.Processor),
+		TransactionID:  a.TransactionID,
+		Amount:         a.AmountCents,
+		Currency:       a.Currency,
+		SubscriptionID: a.SubscriptionID,
+		Metadata:       metadataJSON(a.Metadata),
+		PurchasedAt:    a.PurchasedAt,
+		CustomerID:     a.CustomerID,
 	})
 	if err != nil {
 		return false, err
@@ -126,7 +126,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		return false, err
 	}
 	n, err := w.DB.Gen(ctx).ReconcileRecordRefund(ctx, gen.ReconcileRecordRefundParams{
-		MerchantID:          tid.UUID(),
+		MerchantID:        tid.UUID(),
 		PriceID:           a.PriceID,
 		Processor:         gen.OpenrailsProcessorType(a.Processor),
 		TransactionID:     a.TransactionID,
@@ -136,7 +136,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		RefundedPaymentID: a.RefundedPaymentID,
 		Metadata:          metadataJSON(a.Metadata),
 		PurchasedAt:       a.PurchasedAt,
-		MerchantSubjectID:   a.MerchantSubjectID,
+		CustomerID:        a.CustomerID,
 	})
 	if err != nil {
 		return false, err
@@ -167,13 +167,13 @@ func (w *PGLocalWriter) GrantEntitlements(ctx context.Context, a GrantEntitlemen
 	}
 	for _, name := range a.Entitlements {
 		n, err := w.DB.Gen(ctx).ReconcileGrantSubscriptionEntitlement(ctx, gen.ReconcileGrantSubscriptionEntitlementParams{
-			MerchantID:        tid.UUID(),
-			MerchantSubjectID: a.MerchantSubjectID,
-			Entitlement:     name,
-			StartAt:         a.StartAt,
-			EndAt:           a.EndAt,
-			SubscriptionID:  a.SubscriptionID,
-			Now:             now,
+			MerchantID:     tid.UUID(),
+			CustomerID:     a.CustomerID,
+			Entitlement:    name,
+			StartAt:        a.StartAt,
+			EndAt:          a.EndAt,
+			SubscriptionID: a.SubscriptionID,
+			Now:            now,
 		})
 		if err != nil {
 			return granted, err
@@ -199,7 +199,7 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		return MaterializeResult{}, err
 	}
 	rows, err := w.DB.Gen(ctx).ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
-		MerchantID:                tid.UUID(),
+		MerchantID:              tid.UUID(),
 		Status:                  gen.OpenrailsSubscriptionStatus(a.Status),
 		Processor:               a.Processor,
 		ProcessorSubscriptionID: a.ProcessorSubscriptionID,
@@ -207,7 +207,7 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		PeriodStartsAt:          a.PeriodStartsAt,
 		PeriodEndsAt:            a.PeriodEndsAt,
 		StartedAt:               a.StartedAt,
-		MerchantSubjectID:         a.MerchantSubjectID,
+		CustomerID:              a.CustomerID,
 		PriceID:                 a.PriceID,
 		Processors:              localProcessorNames(a.Provider),
 	})
@@ -238,11 +238,11 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 				start = *a.PeriodStartsAt
 			}
 			granted, err := w.GrantEntitlements(ctx, GrantEntitlementsAction{
-				SubscriptionID:  res.SubscriptionID,
-				MerchantSubjectID: a.MerchantSubjectID,
-				Entitlements:    names,
-				StartAt:         start,
-				EndAt:           a.PeriodEndsAt,
+				SubscriptionID: res.SubscriptionID,
+				CustomerID:     a.CustomerID,
+				Entitlements:   names,
+				StartAt:        start,
+				EndAt:          a.PeriodEndsAt,
 			})
 			if err != nil {
 				return res, err

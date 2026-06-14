@@ -21,8 +21,8 @@ const (
 
 type USDCFundingSession struct {
 	ID                uuid.UUID                `json:"id"`
-	MerchantID          uuid.UUID                `json:"tenant_id"`
-	MerchantSubjectID   uuid.UUID                `json:"tenant_subject_id"`
+	MerchantID        uuid.UUID                `json:"tenant_id"`
+	CustomerID        uuid.UUID                `json:"customer_id"`
 	CheckoutSessionID *uuid.UUID               `json:"checkout_session_id,omitempty"`
 	Provider          string                   `json:"provider"`
 	WalletAddress     string                   `json:"wallet_address"`

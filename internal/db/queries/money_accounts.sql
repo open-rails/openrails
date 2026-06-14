@@ -6,39 +6,39 @@
 -- Distinct (payer, currency) pairs to finalize invoices for (#472). Sourced from
 -- money_balances — the row every payer with money activity has (a money_accounts
 -- row only exists once spend settings are configured).
-SELECT DISTINCT merchant_subject_id, currency
+SELECT DISTINCT customer_id, currency
 FROM openrails.money_balances
 WHERE merchant_id = $1
-ORDER BY merchant_subject_id, currency;
+ORDER BY customer_id, currency;
 
 -- name: GetMoneyAccountSettings :one
 SELECT * FROM openrails.money_accounts
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(currency)
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 LIMIT 1;
 
 -- name: LockMoneyAccountSettings :one
 SELECT * FROM openrails.money_accounts
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(currency)
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 FOR UPDATE;
 
 -- name: InsertMoneyAccountSettingsIfAbsent :exec
 -- Default settings row (hard-stop on, 80% alert threshold) in the given
 -- billing mode; no-op when the row exists.
 INSERT INTO openrails.money_accounts (
-    id, merchant_id, merchant_subject_id, currency, billing_mode,
+    id, merchant_id, customer_id, currency, billing_mode,
     hard_stop_on_breach, alert_threshold_pct, created_at, updated_at
 ) VALUES ($1, $2, $3, sqlc.arg(currency), $4, true, 80, sqlc.arg(now), sqlc.arg(now))
-ON CONFLICT (merchant_id, merchant_subject_id, currency) DO NOTHING;
+ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
 
 -- name: UpsertMoneyAccountSettings :exec
 INSERT INTO openrails.money_accounts (
-    id, merchant_id, merchant_subject_id, currency, billing_mode,
+    id, merchant_id, customer_id, currency, billing_mode,
     max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros,
     low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents,
     auto_topup_payment_method_id, default_credit_expiry_days,
     hard_stop_on_breach, alert_threshold_pct, created_at, updated_at
 ) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-ON CONFLICT (merchant_id, merchant_subject_id, currency) DO UPDATE SET
+ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     billing_mode = EXCLUDED.billing_mode,
     max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros,
     max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros,
@@ -56,7 +56,7 @@ ON CONFLICT (merchant_id, merchant_subject_id, currency) DO UPDATE SET
 UPDATE openrails.money_accounts
 SET outstanding_owed_micros = outstanding_owed_micros + sqlc.arg(amount)::bigint,
     updated_at = sqlc.arg(now)
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(currency);
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: ReduceMoneyOutstandingOwedSnapshot :execrows
 -- CAS-style decrement: only applies when owed still covers the snapshot, so
@@ -64,44 +64,44 @@ WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(curr
 UPDATE openrails.money_accounts
 SET outstanding_owed_micros = GREATEST(0, outstanding_owed_micros - sqlc.arg(snapshot)::bigint),
     updated_at = sqlc.arg(now)
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(currency)
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND outstanding_owed_micros >= sqlc.arg(snapshot)::bigint;
 
 -- name: StampMoneyAccountAlertAt :exec
 UPDATE openrails.money_accounts
 SET last_alert_at = sqlc.arg(now), updated_at = sqlc.arg(now)
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(currency);
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: StampMoneyAccountTopupAt :exec
 UPDATE openrails.money_accounts
 SET last_topup_at = sqlc.arg(now), updated_at = sqlc.arg(now)
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(currency);
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: SetMoneyAccountPaymentVerified :exec
 UPDATE openrails.money_accounts
 SET verified_payment_method = sqlc.arg(verified)::boolean,
     verified_at = CASE WHEN sqlc.arg(verified)::boolean THEN sqlc.arg(now)::timestamptz ELSE NULL END,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(currency);
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: SuspendMoneyAccount :exec
 UPDATE openrails.money_accounts
 SET suspended_at = sqlc.arg(now)::timestamptz,
     suspend_reason = sqlc.narg(reason),
     updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(currency);
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: ResumeMoneyAccount :exec
 UPDATE openrails.money_accounts
 SET suspended_at = NULL, suspend_reason = NULL, updated_at = $3
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(currency);
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: SetMoneyAccountTier :exec
 -- Sets the tier AND its source (#476). 'admin' = an explicit override that
 -- auto-graduation must not overwrite; 'auto' = schedule-driven.
 UPDATE openrails.money_accounts
 SET tier = sqlc.arg(tier)::text, tier_source = sqlc.arg(tier_source)::text, updated_at = sqlc.arg(now)
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(currency);
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: AutoGraduateMoneyAccountTier :exec
 -- Auto-graduation write (#476): set tier_source='auto' and the new tier ONLY
@@ -110,13 +110,13 @@ WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(curr
 -- admin override at the DB level so a race cannot.
 UPDATE openrails.money_accounts
 SET tier = sqlc.arg(tier)::text, tier_source = 'auto', updated_at = sqlc.arg(now)
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(currency)
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND tier_source <> 'admin';
 
 -- name: ListBelowThresholdMoneyAccounts :many
 -- Money-in workers (#239/#240): accounts whose available balance
 -- (balance - held) is under their configured low-balance threshold.
-SELECT s.merchant_id, s.merchant_subject_id, s.currency,
+SELECT s.merchant_id, s.customer_id, s.currency,
        (COALESCE(b.balance, 0) - COALESCE(b.held_balance, 0))::bigint AS available,
        COALESCE(s.low_balance_threshold_micros, 0)::bigint AS threshold,
        s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id,
@@ -124,7 +124,7 @@ SELECT s.merchant_id, s.merchant_subject_id, s.currency,
 FROM openrails.money_accounts s
 LEFT JOIN openrails.money_balances b
   ON b.merchant_id = s.merchant_id
- AND b.merchant_subject_id = s.merchant_subject_id
+ AND b.customer_id = s.customer_id
  AND b.currency = s.currency
 WHERE s.merchant_id = $1
   AND s.low_balance_threshold_micros IS NOT NULL
@@ -133,7 +133,7 @@ WHERE s.merchant_id = $1
 -- name: ListChargeableArrearsMoneyAccounts :many
 -- Arrears collection (#241): accounts owing with a card on file.
 -- min_threshold <= 0 means "charge every account with owed > 0".
-SELECT s.merchant_id, s.merchant_subject_id, s.currency,
+SELECT s.merchant_id, s.customer_id, s.currency,
        s.outstanding_owed_micros, s.auto_topup_payment_method_id
 FROM openrails.money_accounts s
 WHERE s.merchant_id = $1
@@ -144,15 +144,15 @@ WHERE s.merchant_id = $1
 
 -- name: GetMoneySpendLimit :one
 SELECT * FROM openrails.money_spend_limits
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND currency = sqlc.arg(currency) AND actor = $3
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency) AND actor = $3
 LIMIT 1;
 
 -- name: UpsertMoneySpendLimit :exec
 INSERT INTO openrails.money_spend_limits (
-    id, merchant_id, merchant_subject_id, currency, actor,
+    id, merchant_id, customer_id, currency, actor,
     max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at
 ) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8)
-ON CONFLICT (merchant_id, merchant_subject_id, currency, actor) DO UPDATE SET
+ON CONFLICT (merchant_id, customer_id, currency, actor) DO UPDATE SET
     max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros,
     max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros,
     updated_at = EXCLUDED.updated_at;

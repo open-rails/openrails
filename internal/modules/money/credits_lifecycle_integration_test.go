@@ -27,11 +27,11 @@ func TestCreditsDepositOverflowGuard(t *testing.T) {
 	ctx = dbtest.WithTestTenant(ctx)
 
 	userID := uuid.NewString()
-	payerID := identity.MerchantSubjectIDFromString(userID).UUID()
+	payerID := identity.CustomerIDFromString(userID).UUID()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE customer_id = $1", payerID)
 	})
 
 	moneySvc := money.NewMoneyService(dbi)
@@ -66,12 +66,12 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.NewString()
-	payerID := identity.MerchantSubjectIDFromString(userID).UUID()
+	payerID := identity.CustomerIDFromString(userID).UUID()
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE customer_id = $1", payerID)
 	})
 
 	moneySvc := money.NewMoneyService(dbi)
@@ -139,8 +139,8 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 //
 // SKIPPED (#472): the HoldExpiryWorker has a production currency bug —
 // internal/river/jobs_hold_expiry.go builds its LockMoneyBalanceParams /
-// SetMoneyHeldBalanceParams keyed by (merchant_id, merchant_subject_id) only, with
-// no Currency, so it queries currency='' and never matches the real 'USD'
+// SetMoneyHeldBalanceParams keyed by (merchant_id, customer_id) only, with
+// no Currency, so it queries currency=” and never matches the real 'USD'
 // balance row (LockMoneyBalance returns "no rows"). The fix is in the worker
 // (pass money.DefaultCurrency through the release key), which is production code
 // outside this test-parity change. Un-skip once the worker passes currency.

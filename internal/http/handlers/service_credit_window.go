@@ -17,8 +17,8 @@ import (
 // remainder. All service token-authed like the sibling credit spend routes.
 
 type serviceOpenWindowRequest struct {
-	MerchantSubjectID string `json:"tenant_subject_id"`
-	Actor           string `json:"actor"`
+	CustomerID string `json:"customer_id"`
+	Actor      string `json:"actor"`
 	// Currency is optional; empty defaults to "USD" server-side (#476).
 	Currency   string `json:"currency"`
 	Amount     int64  `json:"amount" binding:"required"`
@@ -33,12 +33,12 @@ func ServiceOpenCreditWindow(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	payer, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
+	payer, err := parseServiceCustomerID(req.CustomerID)
 	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
-	if !requireServiceMerchantSubjectScope(r, *payer) {
+	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -47,11 +47,11 @@ func ServiceOpenCreditWindow(r *httprequest.Request) {
 		return
 	}
 	w, err := svc.OpenWindow(r.Request.Context(), billingservice.OpenWindowRequest{
-		MerchantSubjectID: *payer,
-		Actor:           req.Actor,
-		Currency:        req.Currency,
-		Amount:          req.Amount,
-		TTL:             time.Duration(req.TTLSeconds) * time.Second,
+		CustomerID: *payer,
+		Actor:      req.Actor,
+		Currency:   req.Currency,
+		Amount:     req.Amount,
+		TTL:        time.Duration(req.TTLSeconds) * time.Second,
 	})
 	if errors.Is(err, billingservice.ErrInsufficientCredits) {
 		r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")

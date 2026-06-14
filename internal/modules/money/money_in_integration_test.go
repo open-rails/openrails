@@ -18,7 +18,7 @@ import (
 
 // moneyInEnv provisions a fresh payer with NO initial deposit (balance 0). Money
 // has no credit_type dimension (#472); the returned currency is always USD.
-func moneyInEnv(t *testing.T) (*money.MoneyService, *pgxpool.Pool, identity.MerchantSubjectID, string, context.Context) {
+func moneyInEnv(t *testing.T) (*money.MoneyService, *pgxpool.Pool, identity.CustomerID, string, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
 	ctx := context.Background()
@@ -28,14 +28,14 @@ func moneyInEnv(t *testing.T) (*money.MoneyService, *pgxpool.Pool, identity.Merc
 	dbtest.EnsureTestTenant(ctx, t, pool)
 	ctx = dbtest.WithTestTenant(ctx)
 
-	payer := identity.MerchantSubjectIDFromString(uuid.NewString())
+	payer := identity.CustomerIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_spend_limits WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_accounts WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_spend_limits WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_accounts WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE customer_id = $1", payerID)
 	})
 	return money.NewMoneyService(dbi), pool, payer, money.DefaultCurrency, ctx
 }
@@ -57,7 +57,7 @@ func (f *fakeCharger) ChargeSavedMethod(_ context.Context, req money.ChargeReque
 
 type fakeAlerter struct{ calls int }
 
-func (f *fakeAlerter) LowBalanceAlert(_ context.Context, _ identity.MerchantSubjectID, _, _ int64) error {
+func (f *fakeAlerter) LowBalanceAlert(_ context.Context, _ identity.CustomerID, _, _ int64) error {
 	f.calls++
 	return nil
 }
@@ -66,7 +66,7 @@ func latestBlock(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payerID 
 	t.Helper()
 	b := new(models.MoneyBlock)
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT expires_at FROM openrails.money_blocks WHERE merchant_subject_id = $1 ORDER BY created_at DESC LIMIT 1",
+		"SELECT expires_at FROM openrails.money_blocks WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
 		payerID).Scan(&b.ExpiresAt))
 	return b
 }
@@ -76,7 +76,7 @@ func latestBlock(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payerID 
 func TestDeposit_DefaultExpiry_NoSettingsRow(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 1000,
+		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1000,
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
@@ -89,7 +89,7 @@ func TestDeposit_DefaultExpiry_NoSettingsRow(t *testing.T) {
 func TestDeposit_NoFlag_Permanent(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "grant",
+		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "grant",
 	})
 	require.NoError(t, err)
 	b := latestBlock(t, pool, ctx, payer.UUID())
@@ -102,7 +102,7 @@ func TestDeposit_ConfiguredExpiryDays(t *testing.T) {
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{DefaultCreditExpiryDays: &days})
 	require.NoError(t, err)
 	_, err = svc.Deposit(ctx, money.DepositParams{
-		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 1000,
+		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1000,
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
@@ -119,7 +119,7 @@ func TestRunLowBalanceAlerts(t *testing.T) {
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{LowBalanceThreshold: &thr})
 	require.NoError(t, err)
 	// available 500 < 1000
-	_, err = svc.Deposit(ctx, money.DepositParams{MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	al := &fakeAlerter{}
@@ -146,7 +146,7 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}
@@ -158,7 +158,7 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 	require.Equal(t, int64(5000), ch.charges[0].AmountCents)
 	require.Equal(t, pm, ch.charges[0].PaymentMethodID)
 
-	bal, err := svc.GetBalanceForMerchantSubject(ctx, payer, currency)
+	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
 	require.NoError(t, err)
 	// Ledger is micros: 500 seed + 5000 cents * 10_000 micros/cent deposited.
 	require.Equal(t, int64(50_000_500), bal.Balance)
@@ -179,7 +179,7 @@ func TestRunAutoTopups_Declined(t *testing.T) {
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	ch := &fakeCharger{declineAll: true}
@@ -187,7 +187,7 @@ func TestRunAutoTopups_Declined(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Len(t, ch.charges, 1, "charge attempted")
-	bal, err := svc.GetBalanceForMerchantSubject(ctx, payer, currency)
+	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
 	require.NoError(t, err)
 	require.Equal(t, int64(500), bal.Balance, "declined -> no deposit")
 }

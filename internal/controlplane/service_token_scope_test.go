@@ -10,31 +10,31 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-func TestResolvedServiceTokenAllowsMerchantSubjectScopes(t *testing.T) {
+func TestResolvedServiceTokenAllowsCustomerScopes(t *testing.T) {
 	subject := uuid.New()
 	other := uuid.New()
 
 	tenantWide := &ResolvedServiceToken{
-		MerchantID:  dbtest.TestTenantID,
-		Resources: []authcore.ServiceTokenResource{MerchantResource(dbtest.TestTenantID)},
+		MerchantID: dbtest.TestTenantID,
+		Resources:  []authcore.ServiceTokenResource{MerchantResource(dbtest.TestTenantID)},
 	}
-	require.True(t, tenantWide.AllowsMerchantSubject(subject))
+	require.True(t, tenantWide.AllowsCustomer(subject))
 
 	subjectScoped := &ResolvedServiceToken{
 		MerchantID: dbtest.TestTenantID,
 		Resources: []authcore.ServiceTokenResource{
 			MerchantResource(dbtest.TestTenantID),
-			MerchantSubjectResource(subject),
+			CustomerResource(subject),
 		},
 	}
-	require.True(t, subjectScoped.AllowsMerchantSubject(subject))
-	require.False(t, subjectScoped.AllowsMerchantSubject(other))
+	require.True(t, subjectScoped.AllowsCustomer(subject))
+	require.False(t, subjectScoped.AllowsCustomer(other))
 }
 
 func TestValidateServiceTokenResourcesRequiresTenantAndKnownKinds(t *testing.T) {
 	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestTenantID, nil), ErrServiceTokenScopeDenied)
 	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
-		MerchantSubjectResource(uuid.New()),
+		CustomerResource(uuid.New()),
 	}), ErrServiceTokenScopeDenied)
 	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
 		MerchantResource(dbtest.TestTenantID),
@@ -42,6 +42,6 @@ func TestValidateServiceTokenResourcesRequiresTenantAndKnownKinds(t *testing.T) 
 	}), ErrServiceTokenScopeDenied)
 	require.NoError(t, validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
 		MerchantResource(dbtest.TestTenantID),
-		MerchantSubjectResource(uuid.New()),
+		CustomerResource(uuid.New()),
 	}))
 }

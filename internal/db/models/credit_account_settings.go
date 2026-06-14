@@ -10,10 +10,10 @@ import (
 // and money-in configuration (issue #237). Tensorhub sets these; OpenRails
 // stores and enforces them. NULL cap columns mean "no cap".
 type CreditAccountSettings struct {
-	ID              uuid.UUID `json:"id"`
-	MerchantID        uuid.UUID `json:"tenant_id"`
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
-	CreditTypeID    uuid.UUID `json:"credit_type_id"`
+	ID           uuid.UUID `json:"id"`
+	MerchantID   uuid.UUID `json:"tenant_id"`
+	CustomerID   uuid.UUID `json:"customer_id"`
+	CreditTypeID uuid.UUID `json:"credit_type_id"`
 
 	// Policy.
 	BillingMode              string     `json:"billing_mode"`
@@ -51,8 +51,8 @@ type CreditAccountSettings struct {
 // canonical forms: 'serviceToken:<key_id>', 'user:<user_id>', or '<issuer>:<sub>'.
 type CreditSpendLimit struct {
 	ID                     uuid.UUID `json:"id"`
-	MerchantID               uuid.UUID `json:"tenant_id"`
-	MerchantSubjectID        uuid.UUID `json:"tenant_subject_id"`
+	MerchantID             uuid.UUID `json:"tenant_id"`
+	CustomerID             uuid.UUID `json:"customer_id"`
 	CreditTypeID           uuid.UUID `json:"credit_type_id"`
 	Actor                  string    `json:"actor"`
 	MaxSpendPerDayMicros   *int64    `json:"max_spend_per_day_micros,omitempty"`

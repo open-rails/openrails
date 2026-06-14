@@ -14,21 +14,21 @@ import (
 // HeldBalanceDrift is a balance row whose stored held_balance disagrees with the
 // sum of its currently-active holds.
 type HeldBalanceDrift struct {
-	MerchantID        uuid.UUID `json:"tenant_id"`
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
-	Currency        string    `json:"currency"`
-	Stored          int64     `json:"stored_held_balance"`
-	Computed        int64     `json:"computed_held_balance"`
+	MerchantID uuid.UUID `json:"tenant_id"`
+	CustomerID uuid.UUID `json:"customer_id"`
+	Currency   string    `json:"currency"`
+	Stored     int64     `json:"stored_held_balance"`
+	Computed   int64     `json:"computed_held_balance"`
 }
 
 // BalanceAnomaly flags a balance row that violates a hard invariant.
 type BalanceAnomaly struct {
-	MerchantID        uuid.UUID `json:"tenant_id"`
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
-	Currency        string    `json:"currency"`
-	Balance         int64     `json:"balance"`
-	HeldBalance     int64     `json:"held_balance"`
-	Reason          string    `json:"reason"`
+	MerchantID  uuid.UUID `json:"tenant_id"`
+	CustomerID  uuid.UUID `json:"customer_id"`
+	Currency    string    `json:"currency"`
+	Balance     int64     `json:"balance"`
+	HeldBalance int64     `json:"held_balance"`
+	Reason      string    `json:"reason"`
 }
 
 // ReconcileReport is the alert-only output of Reconcile. Empty slices mean the
@@ -43,10 +43,10 @@ type ReconcileReport struct {
 // OrphanedHold is an active hold that has passed its expiry and should have been
 // released by HoldExpiryWorker.
 type OrphanedHold struct {
-	ID              uuid.UUID  `json:"id"`
-	MerchantSubjectID uuid.UUID  `json:"tenant_subject_id"`
-	Amount          int64      `json:"authorized_amount"`
-	ExpiresAt       *time.Time `json:"expires_at"`
+	ID         uuid.UUID  `json:"id"`
+	CustomerID uuid.UUID  `json:"customer_id"`
+	Amount     int64      `json:"authorized_amount"`
+	ExpiresAt  *time.Time `json:"expires_at"`
 }
 
 // Reconcile runs all alert-only consistency checks and returns a report. It
@@ -99,7 +99,7 @@ func (s *MoneyService) FindOrphanedExpiredHolds(ctx context.Context) ([]Orphaned
 		if holds[i].AuthorizedAmount != nil {
 			amt = *holds[i].AuthorizedAmount
 		}
-		out = append(out, OrphanedHold{ID: holds[i].ID, MerchantSubjectID: holds[i].MerchantSubjectID, Amount: amt, ExpiresAt: holds[i].ExpiresAt})
+		out = append(out, OrphanedHold{ID: holds[i].ID, CustomerID: holds[i].CustomerID, Amount: amt, ExpiresAt: holds[i].ExpiresAt})
 	}
 	return out, nil
 }
@@ -119,11 +119,11 @@ func (s *MoneyService) FindHeldBalanceDrift(ctx context.Context) ([]HeldBalanceD
 	out := make([]HeldBalanceDrift, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, HeldBalanceDrift{
-			MerchantID:        r.MerchantID,
-			MerchantSubjectID: r.MerchantSubjectID,
-			Currency:        r.Currency,
-			Stored:          r.Stored,
-			Computed:        r.Computed,
+			MerchantID: r.MerchantID,
+			CustomerID: r.CustomerID,
+			Currency:   r.Currency,
+			Stored:     r.Stored,
+			Computed:   r.Computed,
 		})
 	}
 	return out, nil
@@ -144,11 +144,11 @@ func (s *MoneyService) FindBalanceAnomalies(ctx context.Context) ([]BalanceAnoma
 	out := make([]BalanceAnomaly, 0, len(rows))
 	for _, r := range rows {
 		a := BalanceAnomaly{
-			MerchantID:        r.MerchantID,
-			MerchantSubjectID: r.MerchantSubjectID,
-			Currency:        r.Currency,
-			Balance:         r.Balance,
-			HeldBalance:     r.HeldBalance,
+			MerchantID:  r.MerchantID,
+			CustomerID:  r.CustomerID,
+			Currency:    r.Currency,
+			Balance:     r.Balance,
+			HeldBalance: r.HeldBalance,
 		}
 		switch {
 		case a.Balance < 0:
@@ -166,7 +166,7 @@ func (s *MoneyService) FindBalanceAnomalies(ctx context.Context) ([]BalanceAnoma
 // RepairHeldBalance recomputes held_balance for (payer, credit_type) from the sum
 // of active holds and writes it. This is the safe auto-repair for HeldBalanceDrift
 // (the active holds are the source of truth). Returns the corrected value.
-func (s *MoneyService) RepairHeldBalance(ctx context.Context, payer identity.MerchantSubjectID, currency string) (int64, error) {
+func (s *MoneyService) RepairHeldBalance(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
 	}
@@ -185,7 +185,7 @@ func (s *MoneyService) RepairHeldBalance(ctx context.Context, payer identity.Mer
 		return 0, err
 	}
 	if err := s.db.Gen(ctx).SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-		MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur,
+		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 		HeldBalance: computed, UpdatedAt: s.now(),
 	}); err != nil {
 		return 0, err

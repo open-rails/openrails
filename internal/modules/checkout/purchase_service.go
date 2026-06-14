@@ -16,9 +16,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -382,14 +382,14 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		purchasedAt = req.PurchasedAt.UTC()
 	}
 
-	payerTSID, err := payerMerchantSubjectID(req.UserID)
+	customerID, err := customerIDFromUser(req.UserID)
 	if err != nil {
 		return nil, err
 	}
 	paymentID := uuidutil.NewV7()
 	payment := &models.Payment{
 		ID:                       paymentID,
-		MerchantSubjectID:          payerTSID,
+		CustomerID:               customerID,
 		PriceID:                  price.ID,
 		SubscriptionID:           req.SubscriptionID,
 		Processor:                models.Processor(req.Processor),
@@ -416,7 +416,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		if err != nil {
 			return nil, fmt.Errorf("failed to load existing payment record: %w", err)
 		}
-		if existingPayment.MerchantSubjectID.String() != req.UserID {
+		if existingPayment.CustomerID.String() != req.UserID {
 			return nil, fmt.Errorf("payment transaction belongs to a different user")
 		}
 		if existingPayment.PriceID != req.PriceID {
@@ -554,7 +554,7 @@ func (s *CheckoutPurchaseService) grantPurchaseCredits(ctx context.Context, user
 	if s.MoneyService == nil || len(creditsSpec) == 0 || isSubscription {
 		return
 	}
-	payer := identity.MerchantSubjectIDFromString(userID)
+	payer := identity.CustomerIDFromString(userID)
 	if payer.IsZero() {
 		log.WithField("user_id", userID).Error("skip purchase credit grant: payer is not a UUID")
 		return

@@ -57,7 +57,7 @@ func (p ResolvedPolicy) ThroughputForRelease(release string) ratelimit.Policy {
 }
 
 // UpsertTierPolicy sets the throughput windows for (payer, tier).
-func (s *TierPolicyStore) UpsertTierPolicy(ctx context.Context, payer identity.MerchantSubjectID, tier string, windows []models.ThroughputWindow) error {
+func (s *TierPolicyStore) UpsertTierPolicy(ctx context.Context, payer identity.CustomerID, tier string, windows []models.ThroughputWindow) error {
 	return s.UpsertTierPolicyFull(ctx, payer, tier, models.ThroughputPolicy{Windows: windows})
 }
 
@@ -65,7 +65,7 @@ func (s *TierPolicyStore) UpsertTierPolicy(ctx context.Context, payer identity.M
 // A ZERO payer writes the TENANT-WIDE DEFAULT policy for the tier (#477): the
 // platform capacity ladder declared once, applied to every payer at that tier
 // (selected by GetTierPolicy when the payer has no own override).
-func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identity.MerchantSubjectID, tier string, policy models.ThroughputPolicy) error {
+func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identity.CustomerID, tier string, policy models.ThroughputPolicy) error {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -81,7 +81,7 @@ func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identi
 		if payer.IsZero() {
 			return s.db.Gen(ctx).UpsertTierPolicyDefault(ctx, gen.UpsertTierPolicyDefaultParams{
 				ID:            uuidutil.NewV7(),
-				MerchantID:      tenantID,
+				MerchantID:    tenantID,
 				Tier:          tier,
 				Policy:        policyJSON,
 				PolicyVersion: 1,
@@ -89,28 +89,28 @@ func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identi
 				UpdatedAt:     now,
 			})
 		}
-		// Per-subject override: materialize the payable tenant_subjects row so the
+		// Per-subject override: materialize the payable customers row so the
 		// tier_policies FK (migration 076) is satisfied on first write (#317).
-		if _, err := repo.EnsureMerchantSubjectID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
+		if _, err := repo.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
 			return err
 		}
 		subjectID := payer.UUID()
 		return s.db.Gen(ctx).UpsertTierPolicy(ctx, gen.UpsertTierPolicyParams{
-			ID:              uuidutil.NewV7(),
-			MerchantID:        tenantID,
-			MerchantSubjectID: &subjectID,
-			Tier:            tier,
-			Policy:          policyJSON,
-			PolicyVersion:   1,
-			CreatedAt:       now,
-			UpdatedAt:       now,
+			ID:            uuidutil.NewV7(),
+			MerchantID:    tenantID,
+			CustomerID:    &subjectID,
+			Tier:          tier,
+			Policy:        policyJSON,
+			PolicyVersion: 1,
+			CreatedAt:     now,
+			UpdatedAt:     now,
 		})
 	})
 }
 
 // GetTierPolicy returns the enforceable policy for (payer, tier). A missing row
 // yields an empty policy (no throughput limit, all resources allowed).
-func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.MerchantSubjectID, tier string) (ResolvedPolicy, error) {
+func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.CustomerID, tier string) (ResolvedPolicy, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return ResolvedPolicy{}, err
@@ -124,7 +124,7 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Merc
 	subjectID := payer.UUID()
 	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		genRow, e := s.db.Gen(ctx).GetTierPolicy(ctx, gen.GetTierPolicyParams{
-			MerchantID: tenantID, MerchantSubjectID: &subjectID, Tier: tier,
+			MerchantID: tenantID, CustomerID: &subjectID, Tier: tier,
 		})
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil
@@ -198,7 +198,7 @@ func budgetPolicyFromGen(r gen.OpenrailsBudgetPolicy) (BudgetScopePolicy, error)
 
 // LoadAll returns every budget-scope policy for a subject regardless of owner
 // (the admit path composes all of them). Returns nil when none exist.
-func (s *BudgetPolicyStore) LoadAll(ctx context.Context, payer identity.MerchantSubjectID) ([]BudgetScopePolicy, error) {
+func (s *BudgetPolicyStore) LoadAll(ctx context.Context, payer identity.CustomerID) ([]BudgetScopePolicy, error) {
 	tid, terr := merchant.Require(ctx) // #336/#474: no default tenant
 	if terr != nil {
 		return nil, terr
@@ -207,7 +207,7 @@ func (s *BudgetPolicyStore) LoadAll(ctx context.Context, payer identity.Merchant
 	var out []BudgetScopePolicy
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		rows, e := s.db.Gen(ctx).ListBudgetPolicies(ctx, gen.ListBudgetPoliciesParams{
-			MerchantID: tenantID, MerchantSubjectID: payer.UUID(),
+			MerchantID: tenantID, CustomerID: payer.UUID(),
 		})
 		if e != nil {
 			return e
@@ -226,7 +226,7 @@ func (s *BudgetPolicyStore) LoadAll(ctx context.Context, payer identity.Merchant
 
 // LoadByOwner returns a subject's budget-scope policies for one owner only — the
 // subject-facing read uses owner="subject" so platform-owned caps are invisible.
-func (s *BudgetPolicyStore) LoadByOwner(ctx context.Context, payer identity.MerchantSubjectID, owner string) ([]BudgetScopePolicy, error) {
+func (s *BudgetPolicyStore) LoadByOwner(ctx context.Context, payer identity.CustomerID, owner string) ([]BudgetScopePolicy, error) {
 	tid, terr := merchant.Require(ctx) // #336/#474: no default tenant
 	if terr != nil {
 		return nil, terr
@@ -235,7 +235,7 @@ func (s *BudgetPolicyStore) LoadByOwner(ctx context.Context, payer identity.Merc
 	var out []BudgetScopePolicy
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		rows, e := s.db.Gen(ctx).ListBudgetPoliciesByOwner(ctx, gen.ListBudgetPoliciesByOwnerParams{
-			MerchantID: tenantID, MerchantSubjectID: payer.UUID(), Owner: owner,
+			MerchantID: tenantID, CustomerID: payer.UUID(), Owner: owner,
 		})
 		if e != nil {
 			return e
@@ -255,7 +255,7 @@ func (s *BudgetPolicyStore) LoadByOwner(ctx context.Context, payer identity.Merc
 // Upsert writes one budget-scope policy. owner MUST be supplied by the caller's
 // authz path (SetSubjectBudgetPolicy / SetPlatformBudgetPolicy at the service
 // layer); this method does not itself decide authz.
-func (s *BudgetPolicyStore) Upsert(ctx context.Context, payer identity.MerchantSubjectID, p BudgetScopePolicy) error {
+func (s *BudgetPolicyStore) Upsert(ctx context.Context, payer identity.CustomerID, p BudgetScopePolicy) error {
 	tid, terr := merchant.Require(ctx) // #336/#474: no default tenant
 	if terr != nil {
 		return terr
@@ -267,27 +267,27 @@ func (s *BudgetPolicyStore) Upsert(ctx context.Context, payer identity.MerchantS
 		return fmt.Errorf("admission: encode budget policy windows: %w", err)
 	}
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		if _, err := repo.EnsureMerchantSubjectID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
+		if _, err := repo.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
 			return err
 		}
 		return s.db.Gen(ctx).UpsertBudgetPolicy(ctx, gen.UpsertBudgetPolicyParams{
-			ID:              uuidutil.NewV7(),
-			MerchantID:        tenantID,
-			MerchantSubjectID: payer.UUID(),
-			Scope:           p.Scope,
-			Owner:           p.Owner,
-			ScopeKey:        p.ScopeKey,
-			Windows:         windowsJSON,
-			PolicyVersion:   1,
-			CreatedAt:       now,
-			UpdatedAt:       now,
+			ID:            uuidutil.NewV7(),
+			MerchantID:    tenantID,
+			CustomerID:    payer.UUID(),
+			Scope:         p.Scope,
+			Owner:         p.Owner,
+			ScopeKey:      p.ScopeKey,
+			Windows:       windowsJSON,
+			PolicyVersion: 1,
+			CreatedAt:     now,
+			UpdatedAt:     now,
 		})
 	})
 }
 
 // Delete removes one budget-scope policy (owner-qualified so a subject path
 // cannot delete a platform-owned row).
-func (s *BudgetPolicyStore) Delete(ctx context.Context, payer identity.MerchantSubjectID, scope, owner, scopeKey string) error {
+func (s *BudgetPolicyStore) Delete(ctx context.Context, payer identity.CustomerID, scope, owner, scopeKey string) error {
 	tid, terr := merchant.Require(ctx) // #336/#474: no default tenant
 	if terr != nil {
 		return terr
@@ -295,7 +295,7 @@ func (s *BudgetPolicyStore) Delete(ctx context.Context, payer identity.MerchantS
 	tenantID := tid.UUID()
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		_, err := s.db.Gen(ctx).DeleteBudgetPolicy(ctx, gen.DeleteBudgetPolicyParams{
-			MerchantID: tenantID, MerchantSubjectID: payer.UUID(),
+			MerchantID: tenantID, CustomerID: payer.UUID(),
 			Scope: scope, Owner: owner, ScopeKey: scopeKey,
 		})
 		return err

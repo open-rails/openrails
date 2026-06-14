@@ -81,7 +81,7 @@ func startOwnerTenantPostgres(t *testing.T) (*db.DB, string, context.Context) {
 }
 
 // TestSchema_EnforcesNotNullTenantAndPayer proves the HARDCUT schema enforces NOT
-// NULL on tenant_id and merchant_subject_id for money_balances: an insert that
+// NULL on tenant_id and customer_id for money_balances: an insert that
 // omits either is rejected by the database, so there is no path to a tenant-less
 // or payer-less money row.
 func TestSchema_EnforcesNotNullTenantAndPayer(t *testing.T) {
@@ -89,26 +89,26 @@ func TestSchema_EnforcesNotNullTenantAndPayer(t *testing.T) {
 	pool := dbi.Pool()
 
 	payer := uuid.New()
-	seedMerchantSubject(t, ctx, pool, payer)
+	seedCustomer(t, ctx, pool, payer)
 
-	// merchant_subject_id has no default: an insert that leaves it unset must be rejected.
+	// customer_id has no default: an insert that leaves it unset must be rejected.
 	_, err := pool.Exec(ctx,
 		`INSERT INTO openrails.money_balances (id, currency, balance, held_balance)
 		 VALUES ($1, 'USD', 0, 0)`,
 		uuid.New())
-	require.Error(t, err, "insert with NULL merchant_subject_id must violate NOT NULL")
+	require.Error(t, err, "insert with NULL customer_id must violate NOT NULL")
 
 	// tenant_id is NOT NULL but defaulted; an explicit NULL must still be rejected.
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.money_balances (id, merchant_subject_id, merchant_id, currency, balance, held_balance)
+		`INSERT INTO openrails.money_balances (id, customer_id, merchant_id, currency, balance, held_balance)
 		 VALUES ($1, $2, NULL, 'USD', 0, 0)`,
 		uuid.New(), payer)
 	require.Error(t, err, "insert with explicit NULL tenant_id must violate NOT NULL")
 
 	// A fully-specified payer+tenant row inserts cleanly. tenant_id must match the
-	// tenant_subject's tenant (seeded by seedMerchantSubject: the test tenant).
+	// tenant_subject's tenant (seeded by seedCustomer: the test tenant).
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.money_balances (id, merchant_subject_id, merchant_id, currency, balance, held_balance)
+		`INSERT INTO openrails.money_balances (id, customer_id, merchant_id, currency, balance, held_balance)
 		 VALUES ($1, $2, $3, 'USD', 0, 0)`,
 		uuid.New(), payer, dbtest.TestTenantID.UUID())
 	require.NoError(t, err, "fully-specified payer+tenant insert must succeed")
@@ -123,18 +123,18 @@ func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
 	pool := dbi.Pool()
 
 	payer := uuid.New()
-	seedMerchantSubject(t, ctx, pool, payer)
+	seedCustomer(t, ctx, pool, payer)
 
-	// First row in the tenant_subject's tenant (seeded by seedMerchantSubject: the test tenant).
+	// First row in the tenant_subject's tenant (seeded by seedCustomer: the test tenant).
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.money_balances (id, merchant_subject_id, merchant_id, currency, balance, held_balance)
+		`INSERT INTO openrails.money_balances (id, customer_id, merchant_id, currency, balance, held_balance)
 		 VALUES ($1, $2, $3, 'USD', 0, 0)`,
 		uuid.New(), payer, dbtest.TestTenantID.UUID())
 	require.NoError(t, err)
 
 	// Duplicate (tenant, payer, currency) -> unique violation. Same tenant as above.
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.money_balances (id, merchant_subject_id, merchant_id, currency, balance, held_balance)
+		`INSERT INTO openrails.money_balances (id, customer_id, merchant_id, currency, balance, held_balance)
 		 VALUES ($1, $2, $3, 'USD', 0, 0)`,
 		uuid.New(), payer, dbtest.TestTenantID.UUID())
 	require.Error(t, err, "duplicate (tenant, payer, currency) must violate uniqueness")
@@ -146,7 +146,7 @@ func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
 		otherTenant, "other_"+uuid.NewString())
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.money_balances (id, merchant_subject_id, merchant_id, currency, balance, held_balance)
+		`INSERT INTO openrails.money_balances (id, customer_id, merchant_id, currency, balance, held_balance)
 		 VALUES ($1, $2, $3, 'USD', 0, 0)`,
 		uuid.New(), payer, otherTenant)
 	require.NoError(t, err, "same payer in a different tenant must NOT collide")

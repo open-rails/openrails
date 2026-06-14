@@ -25,7 +25,7 @@ import (
 // plus the budget-policy store + tier-policy store, a fresh payer, and a
 // generously funded USD money balance so the money axis never blocks the
 // budget-scope tests. Money has no credit_type dimension (#472).
-func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, *admission.TierPolicyStore, identity.MerchantSubjectID, context.Context) {
+func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, *admission.TierPolicyStore, identity.CustomerID, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -35,16 +35,16 @@ func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, 
 	dbtest.EnsureTestTenant(ctx, t, pool)
 	ctx = dbtest.WithTestTenant(ctx)
 
-	payer := identity.MerchantSubjectIDFromString(uuid.NewString())
+	payer := identity.CustomerIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_policies WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.tier_policies WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_reservations WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_window_state WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_accounts WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE merchant_subject_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE merchant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_policies WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.tier_policies WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_reservations WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_window_state WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_accounts WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE customer_id = $1", payerID)
 	})
 
 	rc, err := tcredis.Run(ctx, "redis:7-alpine")
@@ -60,7 +60,7 @@ func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, 
 
 	cs := money.NewMoneyService(dbi)
 	// Fund the payer generously so money never blocks (budgets are the gate here).
-	_, err = cs.Deposit(ctx, money.DepositParams{MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 1_000_000_000, Source: "seed"})
+	_, err = cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1_000_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	tierStore := admission.NewTierPolicyStore(dbi)
@@ -71,9 +71,9 @@ func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, 
 	return adm, bpStore, tierStore, payer, ctx
 }
 
-func mustReq(payer identity.MerchantSubjectID, actor, srcID string, roles []uuid.UUID, micros int64) admission.AdmitRequest {
+func mustReq(payer identity.CustomerID, actor, srcID string, roles []uuid.UUID, micros int64) admission.AdmitRequest {
 	return admission.AdmitRequest{
-		MerchantSubjectID: payer, Actor: actor, Tier: "free", Resource: "gpt-4o",
+		CustomerID: payer, Actor: actor, Tier: "free", Resource: "gpt-4o",
 		Roles: roles, Amounts: map[string]int64{"request": 1},
 		EstimateMicros: micros, Source: "usage", SourceID: srcID, ExpiresAt: time.Now().Add(time.Hour),
 	}
@@ -232,8 +232,16 @@ func TestThroughput_PerReleaseWindows(t *testing.T) {
 			"rel-small": {{Unit: "request", WindowSeconds: 60, Max: 1}},
 		},
 	}))
-	small := func() admission.AdmitRequest { r := mustReq(payer, "user:a", "x", nil, 0); r.Resource = "rel-small"; return r }
-	big := func() admission.AdmitRequest { r := mustReq(payer, "user:a", "x", nil, 0); r.Resource = "rel-big"; return r }
+	small := func() admission.AdmitRequest {
+		r := mustReq(payer, "user:a", "x", nil, 0)
+		r.Resource = "rel-small"
+		return r
+	}
+	big := func() admission.AdmitRequest {
+		r := mustReq(payer, "user:a", "x", nil, 0)
+		r.Resource = "rel-big"
+		return r
+	}
 
 	// rel-small caps at 1.
 	d, err := adm.Admit(ctx, small())

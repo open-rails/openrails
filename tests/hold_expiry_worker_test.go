@@ -18,26 +18,25 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
-
 // createTestMoneyBalance creates a tenant-subject money balance for testing (USD).
 func (suite *TestContainerSuite) createTestMoneyBalance(userID string, balance, heldBalance int64) *models.MoneyBalance {
 	ctx := context.Background()
 	now := suite.GetClock().Now()
-	tenantSubjectID := suite.ensureMerchantSubject(ctx, userID)
+	tenantSubjectID := suite.ensureCustomer(ctx, userID)
 	bal := &models.MoneyBalance{
-		ID:              uuid.New(),
-		MerchantID:        dbtest.TestTenantID.UUID(),
-		MerchantSubjectID: tenantSubjectID,
-		Currency:        "USD",
-		Balance:         balance,
-		HeldBalance:     heldBalance,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:          uuid.New(),
+		MerchantID:  dbtest.TestTenantID.UUID(),
+		CustomerID:  tenantSubjectID,
+		Currency:    "USD",
+		Balance:     balance,
+		HeldBalance: heldBalance,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.money_balances (id, merchant_id, merchant_subject_id, currency, balance, held_balance, created_at, updated_at)
+		INSERT INTO openrails.money_balances (id, merchant_id, customer_id, currency, balance, held_balance, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		bal.ID, bal.MerchantID, bal.MerchantSubjectID, bal.Currency, bal.Balance, bal.HeldBalance, bal.CreatedAt, bal.UpdatedAt)
+		bal.ID, bal.MerchantID, bal.CustomerID, bal.Currency, bal.Balance, bal.HeldBalance, bal.CreatedAt, bal.UpdatedAt)
 	if err != nil {
 		panic(err)
 	}
@@ -49,12 +48,12 @@ func (suite *TestContainerSuite) createTestMoneyBalance(userID string, balance, 
 func (suite *TestContainerSuite) createTestMoneyHold(userID string, amount int64, status string, expiresAt time.Time) *models.MoneyTransaction {
 	ctx := context.Background()
 	now := suite.GetClock().Now()
-	tenantSubjectID := suite.ensureMerchantSubject(ctx, userID)
+	tenantSubjectID := suite.ensureCustomer(ctx, userID)
 	auth := amount
 	sid := uuid.New().String()
 	hold := &models.MoneyTransaction{
 		ID:              uuid.New(),
-		MerchantSubjectID: tenantSubjectID,
+		CustomerID:      tenantSubjectID,
 		Currency:        "USD",
 		Actor:           userID,
 		Amount:          0,
@@ -72,11 +71,11 @@ func (suite *TestContainerSuite) createTestMoneyHold(userID string, amount int64
 	}
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.money_transactions (
-			id, merchant_id, merchant_subject_id, currency, actor, amount, balance_after,
+			id, merchant_id, customer_id, currency, actor, amount, balance_after,
 			transaction_type, status, authorized_amount, captured_amount,
 			source, source_id, expires_at, description, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-		hold.ID, dbtest.TestTenantID.UUID(), hold.MerchantSubjectID, hold.Currency, hold.Actor, hold.Amount, hold.BalanceAfter,
+		hold.ID, dbtest.TestTenantID.UUID(), hold.CustomerID, hold.Currency, hold.Actor, hold.Amount, hold.BalanceAfter,
 		hold.TransactionType, hold.Status, hold.Authorized, hold.Captured,
 		hold.Source, hold.SourceID, hold.ExpiresAt, hold.Description, hold.CreatedAt, hold.UpdatedAt)
 	if err != nil {
@@ -86,14 +85,14 @@ func (suite *TestContainerSuite) createTestMoneyHold(userID string, amount int64
 }
 
 // moneyTransactionCols is the column list scanned into models.MoneyTransaction.
-const moneyTransactionCols = `id, merchant_id, merchant_subject_id, currency, actor, resource, metadata,
+const moneyTransactionCols = `id, merchant_id, customer_id, currency, actor, resource, metadata,
 	amount, balance_after, transaction_type, status, authorized_amount,
 	captured_amount, source, source_id, expires_at, description, created_at, updated_at`
 
 func scanMoneyTransaction(row interface{ Scan(...any) error }) (*models.MoneyTransaction, error) {
 	t := new(models.MoneyTransaction)
 	err := row.Scan(
-		&t.ID, &t.MerchantID, &t.MerchantSubjectID, &t.Currency, &t.Actor, &t.Resource, &t.Metadata,
+		&t.ID, &t.MerchantID, &t.CustomerID, &t.Currency, &t.Actor, &t.Resource, &t.Metadata,
 		&t.Amount, &t.BalanceAfter, &t.TransactionType, &t.Status, &t.Authorized,
 		&t.Captured, &t.Source, &t.SourceID, &t.ExpiresAt, &t.Description, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
@@ -117,9 +116,9 @@ func (suite *TestContainerSuite) getMoneyHold(id uuid.UUID) *models.MoneyTransac
 func (suite *TestContainerSuite) getMoneyBalance(id uuid.UUID) *models.MoneyBalance {
 	bal := new(models.MoneyBalance)
 	err := suite.Pool.QueryRow(context.Background(), `
-		SELECT id, merchant_id, merchant_subject_id, currency, balance, held_balance, created_at, updated_at
+		SELECT id, merchant_id, customer_id, currency, balance, held_balance, created_at, updated_at
 		FROM openrails.money_balances WHERE id = $1`, id).
-		Scan(&bal.ID, &bal.MerchantID, &bal.MerchantSubjectID, &bal.Currency,
+		Scan(&bal.ID, &bal.MerchantID, &bal.CustomerID, &bal.Currency,
 			&bal.Balance, &bal.HeldBalance, &bal.CreatedAt, &bal.UpdatedAt)
 	if err != nil {
 		panic(err)

@@ -44,7 +44,7 @@ const (
 
 // OpenWindowParams opens a prepaid window for a payer.
 type OpenWindowParams struct {
-	Payer     identity.MerchantSubjectID
+	Payer     identity.CustomerID
 	Actor     string // attribution; stamped on the ledger record
 	Currency  string // "" => DefaultCurrency (#472)
 	Amount    int64
@@ -54,16 +54,16 @@ type OpenWindowParams struct {
 // creditWindowFromGen maps a generated window row onto the domain model.
 func creditWindowFromGen(r gen.OpenrailsMoneyWindow) *models.MoneyWindow {
 	return &models.MoneyWindow{
-		ID:              r.ID,
-		MerchantID:        r.MerchantID,
-		MerchantSubjectID: r.MerchantSubjectID,
-		Currency:        r.Currency,
-		HeldAmount:      r.HeldAmount,
-		SettledAmount:   r.SettledAmount,
-		Status:          r.Status,
-		ExpiresAt:       r.ExpiresAt,
-		CreatedAt:       r.CreatedAt,
-		UpdatedAt:       r.UpdatedAt,
+		ID:            r.ID,
+		MerchantID:    r.MerchantID,
+		CustomerID:    r.CustomerID,
+		Currency:      r.Currency,
+		HeldAmount:    r.HeldAmount,
+		SettledAmount: r.SettledAmount,
+		Status:        r.Status,
+		ExpiresAt:     r.ExpiresAt,
+		CreatedAt:     r.CreatedAt,
+		UpdatedAt:     r.UpdatedAt,
 	}
 }
 
@@ -100,7 +100,7 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 		}
 		tenantID := tid.UUID()
 		payerID := p.Payer.UUID()
-		if err := ensureMerchantSubject(ctx, q, tenantID, payerID); err != nil {
+		if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
 			return err
 		}
 
@@ -112,7 +112,7 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 			return ErrInsufficientCredits
 		}
 		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur,
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			HeldBalance: bal.HeldBalance + p.Amount, UpdatedAt: now,
 		}); err != nil {
 			return err
@@ -120,19 +120,19 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 
 		exp := p.ExpiresAt.UTC()
 		w := &models.MoneyWindow{
-			ID:              uuidutil.NewV7(),
-			MerchantID:        tenantID,
-			MerchantSubjectID: payerID,
-			Currency:        cur,
-			HeldAmount:      p.Amount,
-			SettledAmount:   0,
-			Status:          "open",
-			ExpiresAt:       exp,
-			CreatedAt:       now,
-			UpdatedAt:       now,
+			ID:            uuidutil.NewV7(),
+			MerchantID:    tenantID,
+			CustomerID:    payerID,
+			Currency:      cur,
+			HeldAmount:    p.Amount,
+			SettledAmount: 0,
+			Status:        "open",
+			ExpiresAt:     exp,
+			CreatedAt:     now,
+			UpdatedAt:     now,
 		}
 		if err := q.InsertMoneyWindow(ctx, gen.InsertMoneyWindowParams{
-			ID: w.ID, MerchantID: w.MerchantID, MerchantSubjectID: w.MerchantSubjectID, Currency: w.Currency,
+			ID: w.ID, MerchantID: w.MerchantID, CustomerID: w.CustomerID, Currency: w.Currency,
 			HeldAmount: w.HeldAmount, SettledAmount: w.SettledAmount,
 			Status: w.Status, ExpiresAt: w.ExpiresAt, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
 		}); err != nil {
@@ -159,8 +159,8 @@ func insertWindowRecordTx(ctx context.Context, q *gen.Queries, w *models.MoneyWi
 	srcID := w.ID.String()
 	rec := &models.MoneyTransaction{
 		ID:              uuidutil.NewV7(),
-		MerchantID:        w.MerchantID,
-		MerchantSubjectID: w.MerchantSubjectID,
+		MerchantID:      w.MerchantID,
+		CustomerID:      w.CustomerID,
 		Currency:        normalizeCurrency(w.Currency),
 		Actor:           actor,
 		Amount:          0,
@@ -252,14 +252,14 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 			return err
 		}
 		w := creditWindowFromGen(wRow)
-		payer := identity.MerchantSubjectID(w.MerchantSubjectID)
-		actor := windowActor(item.Actor, w.MerchantSubjectID)
+		payer := identity.CustomerID(w.CustomerID)
+		actor := windowActor(item.Actor, w.CustomerID)
 		cur := normalizeCurrency(w.Currency)
 
 		// Replay check FIRST (under the window lock) so a re-sent batch returns
 		// success even after the window has since closed/expired.
 		existing, derr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			MerchantID: w.MerchantID, MerchantSubjectID: w.MerchantSubjectID, Currency: cur,
+			MerchantID: w.MerchantID, CustomerID: w.CustomerID, Currency: cur,
 			TransactionType: "withdrawal", Source: windowSettleSource, SourceID: &res.RequestID,
 		})
 		if derr == nil {
@@ -289,7 +289,7 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 			newHeld = 0
 		}
 		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			MerchantID: w.MerchantID, MerchantSubjectID: w.MerchantSubjectID, Currency: cur,
+			MerchantID: w.MerchantID, CustomerID: w.CustomerID, Currency: cur,
 			HeldBalance: newHeld, UpdatedAt: now,
 		}); err != nil {
 			return err
@@ -308,8 +308,8 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 		srcID := res.RequestID
 		trx := &models.MoneyTransaction{
 			ID:              uuidutil.NewV7(),
-			MerchantID:        w.MerchantID,
-			MerchantSubjectID: w.MerchantSubjectID,
+			MerchantID:      w.MerchantID,
+			CustomerID:      w.CustomerID,
 			Currency:        cur,
 			Actor:           actor,
 			Resource:        nilIfEmpty(strings.TrimSpace(item.Resource)),
@@ -335,8 +335,8 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 			}
 			if err := q.InsertUsageEvent(ctx, gen.InsertUsageEventParams{
 				ID:                 uuidutil.NewV7(),
-				MerchantID:           w.MerchantID,
-				MerchantSubjectID:    w.MerchantSubjectID,
+				MerchantID:         w.MerchantID,
+				CustomerID:         w.CustomerID,
 				Actor:              actor,
 				Resource:           nilIfEmpty(strings.TrimSpace(item.Resource)),
 				EventType:          et,
@@ -412,8 +412,8 @@ func (s *MoneyService) RefillWindow(ctx context.Context, windowID uuid.UUID, amo
 		if w.Status != "open" {
 			return ErrWindowNotOpen
 		}
-		payer := identity.MerchantSubjectID(w.MerchantSubjectID)
-		actor := w.MerchantSubjectID.String()
+		payer := identity.CustomerID(w.CustomerID)
+		actor := w.CustomerID.String()
 		cur := normalizeCurrency(w.Currency)
 
 		if amount > 0 {
@@ -425,7 +425,7 @@ func (s *MoneyService) RefillWindow(ctx context.Context, windowID uuid.UUID, amo
 				return ErrInsufficientCredits
 			}
 			if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-				MerchantID: w.MerchantID, MerchantSubjectID: w.MerchantSubjectID, Currency: cur,
+				MerchantID: w.MerchantID, CustomerID: w.CustomerID, Currency: cur,
 				HeldBalance: bal.HeldBalance + amount, UpdatedAt: now,
 			}); err != nil {
 				return err
@@ -483,11 +483,11 @@ func (s *MoneyService) CloseWindow(ctx context.Context, windowID uuid.UUID) (*mo
 			window = w // already closed/expired: remainder already released
 			return nil
 		}
-		payer := identity.MerchantSubjectID(w.MerchantSubjectID)
+		payer := identity.CustomerID(w.CustomerID)
 		cur := normalizeCurrency(w.Currency)
 
 		if remainder := w.HeldAmount - w.SettledAmount; remainder > 0 {
-			bal, err := s.lockBalance(ctx, q, payer, w.MerchantSubjectID.String(), cur)
+			bal, err := s.lockBalance(ctx, q, payer, w.CustomerID.String(), cur)
 			if err != nil {
 				return err
 			}
@@ -496,7 +496,7 @@ func (s *MoneyService) CloseWindow(ctx context.Context, windowID uuid.UUID) (*mo
 				newHeld = 0
 			}
 			if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-				MerchantID: w.MerchantID, MerchantSubjectID: w.MerchantSubjectID, Currency: cur,
+				MerchantID: w.MerchantID, CustomerID: w.CustomerID, Currency: cur,
 				HeldBalance: newHeld, UpdatedAt: now,
 			}); err != nil {
 				return err
@@ -575,15 +575,15 @@ func (s *MoneyService) ExpireWindows(ctx context.Context, batchSize int) (int, e
 
 			// Group released remainders by balance key (the HoldExpiryWorker pattern).
 			type key struct {
-				MerchantID        uuid.UUID
-				MerchantSubjectID uuid.UUID
-				Currency        string
+				MerchantID uuid.UUID
+				CustomerID uuid.UUID
+				Currency   string
 			}
 			released := make(map[key]int64)
 			for i := range windows {
 				w := windows[i]
 				if rem := w.HeldAmount - w.SettledAmount; rem > 0 {
-					released[key{w.MerchantID, w.MerchantSubjectID, normalizeCurrency(w.Currency)}] += rem
+					released[key{w.MerchantID, w.CustomerID, normalizeCurrency(w.Currency)}] += rem
 				}
 				if err := q.SetMoneyWindowStatus(ctx, gen.SetMoneyWindowStatusParams{
 					ID: w.ID, Status: "expired", UpdatedAt: now,
@@ -593,7 +593,7 @@ func (s *MoneyService) ExpireWindows(ctx context.Context, batchSize int) (int, e
 			}
 			for k, amount := range released {
 				bal, err := q.LockMoneyBalance(ctx, gen.LockMoneyBalanceParams{
-					MerchantID: k.MerchantID, MerchantSubjectID: k.MerchantSubjectID, Currency: k.Currency,
+					MerchantID: k.MerchantID, CustomerID: k.CustomerID, Currency: k.Currency,
 				})
 				if err != nil {
 					return err
@@ -603,7 +603,7 @@ func (s *MoneyService) ExpireWindows(ctx context.Context, batchSize int) (int, e
 					newHeld = 0
 				}
 				if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-					MerchantID: k.MerchantID, MerchantSubjectID: k.MerchantSubjectID, Currency: k.Currency,
+					MerchantID: k.MerchantID, CustomerID: k.CustomerID, Currency: k.Currency,
 					HeldBalance: newHeld, UpdatedAt: now,
 				}); err != nil {
 					return err

@@ -10,11 +10,11 @@ import (
 // (issue #298). The money axis stays in CreditAccountSettings; this holds the
 // rate-limit windows. Rolling money-budget windows (#304) extend this.
 type TierPolicy struct {
-	ID       uuid.UUID `json:"id"`
+	ID         uuid.UUID `json:"id"`
 	MerchantID uuid.UUID `json:"tenant_id"`
-	// MerchantSubjectID the policy belongs to. The all-zero uuid is the reserved sentinel
+	// CustomerID the policy belongs to. The all-zero uuid is the reserved sentinel
 	// for tenant-wide defaults; a real payer id scopes policy to that payer.
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	CustomerID uuid.UUID `json:"customer_id"`
 	// Tier name (e.g. "free", "tier_1"); the policy applies to actors at this tier.
 	Tier string `json:"tier"`
 	// Policy is the throughput windows: {"windows":[{"unit","window_seconds","max"}]}.

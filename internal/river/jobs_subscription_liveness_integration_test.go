@@ -81,10 +81,10 @@ func newLivenessFixture(t *testing.T, processor models.Processor, periodEndAgo t
 	})
 	require.NoError(t, err)
 
-	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, f.userID)
+	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, f.userID)
 	billingID := "bill_" + uuid.New().String()
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID: f.paymentMethodID, MerchantSubjectID: tenantSubjectID, Processor: string(processor),
+		ID: f.paymentMethodID, CustomerID: tenantSubjectID, Processor: string(processor),
 		VaultID: "vault_" + uuid.New().String(), BillingID: &billingID,
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
 	})
@@ -95,7 +95,7 @@ func newLivenessFixture(t *testing.T, processor models.Processor, periodEndAgo t
 	periodEnd := now.Add(-periodEndAgo)
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: f.subID, MerchantID: dbtest.TestTenantID.UUID(), MerchantSubjectID: tenantSubjectID, ProductID: f.productID, PriceID: &f.priceID,
+		ID: f.subID, MerchantID: dbtest.TestTenantID.UUID(), CustomerID: tenantSubjectID, ProductID: f.productID, PriceID: &f.priceID,
 		Status: string(models.StatusActive), Processor: string(processor),
 		ProcessorSubscriptionID: f.procSubID, PaymentMethodID: &f.paymentMethodID,
 		EntitlementsSpecSnapshot: []byte(`{"premium": null}`),
@@ -292,9 +292,9 @@ func TestLivenessWorker_RemoteAbsentCancelsAndRevokes(t *testing.T) {
 	// Give the user a lingering entitlement window from the subscription so
 	// the revocation is observable.
 	var tenantSubjectID uuid.UUID
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT merchant_subject_id FROM openrails.subscriptions WHERE id = $1`, f.subID).Scan(&tenantSubjectID))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT customer_id FROM openrails.subscriptions WHERE id = $1`, f.subID).Scan(&tenantSubjectID))
 	_, err := f.pool.Exec(ctx,
-		`INSERT INTO openrails.entitlements (id, entitlement, start_at, end_at, source_id, source_type, merchant_subject_id, merchant_id)
+		`INSERT INTO openrails.entitlements (id, entitlement, start_at, end_at, source_id, source_type, customer_id, merchant_id)
 		 VALUES ($1, 'premium', now() - interval '40 days', now() + interval '10 days', $2, 'subscription', $3, $4)`,
 		uuid.New(), f.subID, tenantSubjectID, dbtest.TestTenantID.UUID())
 	require.NoError(t, err)

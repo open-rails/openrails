@@ -174,11 +174,11 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 		// Insert an old seen notification (created 95 days ago relative to mock time)
 		userID := uuid.New().String()
 		notification := &models.NotificationQueue{
-			ID:              uuid.New(),
-			MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-			EventType:       models.NotificationSystemAlert,
-			Seen:            true, // Seen notifications have 90-day retention
-			CreatedAt:       mockClock.Now().Add(-95 * 24 * time.Hour),
+			ID:         uuid.New(),
+			CustomerID: suite.ensureCustomer(ctx, userID),
+			EventType:  models.NotificationSystemAlert,
+			Seen:       true, // Seen notifications have 90-day retention
+			CreatedAt:  mockClock.Now().Add(-95 * 24 * time.Hour),
 		}
 		suite.InsertNotification(ctx, notification)
 
@@ -203,11 +203,11 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 		// Insert recent notification (just created)
 		userID := uuid.New().String()
 		notification := &models.NotificationQueue{
-			ID:              uuid.New(),
-			MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-			EventType:       models.NotificationSystemAlert,
-			Seen:            false,
-			CreatedAt:       mockClock.Now(),
+			ID:         uuid.New(),
+			CustomerID: suite.ensureCustomer(ctx, userID),
+			EventType:  models.NotificationSystemAlert,
+			Seen:       false,
+			CreatedAt:  mockClock.Now(),
 		}
 		suite.InsertNotification(ctx, notification)
 

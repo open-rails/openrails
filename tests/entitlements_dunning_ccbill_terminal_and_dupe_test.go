@@ -63,7 +63,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	})
 
 	userID := uuid.New().String()
-	tenantSubjectID := suite.ensureMerchantSubject(ctx, userID)
+	tenantSubjectID := suite.ensureCustomer(ctx, userID)
 	subID := uuid.New()
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 
@@ -72,7 +72,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 
 	suite.InsertSubscription(ctx, &models.Subscription{
 		ID:                      subID,
-		MerchantSubjectID:         tenantSubjectID,
+		CustomerID:              tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -101,7 +101,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	}
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -175,7 +175,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	for _, entName := range []string{"premium", "extra"} {
 		n := suite.Count(ctx, `
 			SELECT COUNT(*) FROM openrails.entitlements
-			WHERE merchant_subject_id = $1 AND entitlement = $2
+			WHERE customer_id = $1 AND entitlement = $2
 			  AND source_type = $3 AND source_id = $4
 			  AND deleted_at IS NULL`,
 			tenantSubjectID, entName, string(models.EntitlementSourceSubscription), subID)
@@ -227,7 +227,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	})
 
 	userID := uuid.New().String()
-	tenantSubjectID := suite.ensureMerchantSubject(ctx, userID)
+	tenantSubjectID := suite.ensureCustomer(ctx, userID)
 	subID := uuid.New()
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 
@@ -236,7 +236,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 
 	suite.InsertSubscription(ctx, &models.Subscription{
 		ID:                      subID,
-		MerchantSubjectID:         tenantSubjectID,
+		CustomerID:              tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -262,7 +262,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -307,10 +307,10 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	// Only one renewal window should exist for this subscription.
 	n := suite.Count(ctx, `
 		SELECT COUNT(*) FROM openrails.entitlements
-		WHERE merchant_subject_id = $1 AND entitlement = $2
+		WHERE customer_id = $1 AND entitlement = $2
 		  AND source_type = $3 AND source_id = $4
 		  AND deleted_at IS NULL`,
-		suite.ensureMerchantSubject(ctx, userID), "premium",
+		suite.ensureCustomer(ctx, userID), "premium",
 		string(models.EntitlementSourceSubscription), subID)
 	require.Equal(t, 2, n) // original + one renewal
 }

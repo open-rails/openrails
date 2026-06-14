@@ -129,10 +129,10 @@ func TestSolanaPaymentMatchesPendingRequiresSameReferenceAndSession(t *testing.T
 		Currency:  "usd",
 	}
 	payment := &models.Payment{
-		MerchantSubjectID: identity.MerchantSubjectIDFromString("user_123").UUID(),
-		PriceID:         priceID,
-		Amount:          1000,
-		Currency:        "USD",
+		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
+		PriceID:    priceID,
+		Amount:     1000,
+		Currency:   "USD",
 		Metadata: map[string]any{
 			"solana_reference":    "reference_123",
 			"checkout_session_id": "session_123",

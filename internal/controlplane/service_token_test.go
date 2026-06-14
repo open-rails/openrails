@@ -47,7 +47,7 @@ func TestControlPlane_TokenPrefix_NilSafe(t *testing.T) {
 
 func TestValidateServiceTokenResourcesRejectsLegacyPayableKinds(t *testing.T) {
 	legacyKinds := []string{
-		"merchant_subject_id",
+		"customer_id",
 		"payer_account_id",
 		"account_id",
 		"delegated_user_id",

@@ -201,7 +201,7 @@ func UpsertStripeCardForCustomer(
 	case errors.Is(err, repo.ErrPaymentMethodNotFound):
 		pm = &models.PaymentMethod{
 			ID:                   uuidutil.NewV7(),
-			MerchantSubjectID:      identity.MerchantSubjectIDFromString(userID).UUID(),
+			CustomerID:           identity.CustomerIDFromString(userID).UUID(),
 			Processor:            models.ProcessorStripe,
 			VaultID:              vaultID,
 			InitialTransactionID: strings.TrimSpace(initialTxnID),
@@ -214,7 +214,7 @@ func UpsertStripeCardForCustomer(
 			pm.ExpiryDate = &card.Expiry
 		}
 		// Stamp the payable tenant subject alongside the legacy user_id (#317).
-		if pm.MerchantSubjectID, err = repo.EnsureMerchantSubjectID(ctx, database.Qx(ctx), uuid.Nil, userID); err != nil {
+		if pm.CustomerID, err = repo.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, userID); err != nil {
 			return fmt.Errorf("resolve tenant subject for stripe payment method: %w", err)
 		}
 		if err := methods.Create(ctx, pm); err != nil {

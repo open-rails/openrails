@@ -35,8 +35,8 @@ func (s *ProcessorCustomerService) Upsert(ctx context.Context, userID, processor
 	}
 	now := time.Now().UTC()
 	// Resolve the payable tenant subject for this (tenant, user) so the row carries
-	// tenant_subject_id alongside the legacy user_id (#317).
-	tenantSubjectID, err := repo.EnsureMerchantSubjectID(ctx, s.DB.Qx(ctx), uuid.Nil, userID)
+	// customer_id alongside the legacy user_id (#317).
+	customerRowID, err := repo.EnsureCustomerID(ctx, s.DB.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return err
 	}
@@ -45,15 +45,15 @@ func (s *ProcessorCustomerService) Upsert(ctx context.Context, userID, processor
 		return err
 	}
 	// id is generated explicitly: the upsert targets the tenant-scoped
-	// (tenant_id, tenant_subject_id, processor) unique, not the pk.
+	// (tenant_id, customer_id, processor) unique, not the pk.
 	return s.DB.Gen(ctx).UpsertProcessorCustomer(ctx, gen.UpsertProcessorCustomerParams{
-		ID:              uuidutil.NewV7(),
-		MerchantID:        tid.UUID(),
-		MerchantSubjectID: tenantSubjectID,
-		Processor:       processor,
-		CustomerID:      customerID,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:                  uuidutil.NewV7(),
+		MerchantID:          tid.UUID(),
+		CustomerID:          customerRowID,
+		Processor:           processor,
+		ProcessorCustomerID: customerID,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	})
 }
 
@@ -66,12 +66,12 @@ func (s *ProcessorCustomerService) GetCustomerID(ctx context.Context, userID, pr
 	if userID == "" || processor == "" {
 		return "", fmt.Errorf("invalid processor customer args")
 	}
-	tsid, err := repo.ResolveMerchantSubjectID(userID)
+	tsid, err := repo.ResolveCustomerID(userID)
 	if err != nil {
 		return "", err
 	}
 	return s.DB.Gen(ctx).GetProcessorCustomerID(ctx, gen.GetProcessorCustomerIDParams{
-		MerchantSubjectID: tsid, Processor: processor,
+		CustomerID: tsid, Processor: processor,
 	})
 }
 
@@ -88,6 +88,6 @@ func (s *ProcessorCustomerService) GetUserIDByCustomerID(ctx context.Context, pr
 		return "", fmt.Errorf("invalid processor customer args")
 	}
 	return s.DB.Gen(ctx).GetProcessorCustomerSubject(ctx, gen.GetProcessorCustomerSubjectParams{
-		CustomerID: customerID, Processor: processor,
+		ProcessorCustomerID: customerID, Processor: processor,
 	})
 }

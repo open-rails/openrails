@@ -2,7 +2,7 @@
 
 -- name: CreateProductAccessGrant :one
 INSERT INTO openrails.product_access_grants (
-    id, merchant_id, merchant_subject_id, product_id, source_type, source_id,
+    id, merchant_id, customer_id, product_id, source_type, source_id,
     payment_id, status, starts_at, ends_at, revoked_at, revoke_reason,
     created_at, updated_at
 ) VALUES (
@@ -22,7 +22,7 @@ RETURNING id;
 -- name: GetProductAccessGrantBySource :one
 SELECT * FROM openrails.product_access_grants pag
 WHERE pag.merchant_id = $1
-  AND pag.merchant_subject_id = $2
+  AND pag.customer_id = $2
   AND pag.product_id = $3
   AND pag.source_id = $4
 LIMIT 1;
@@ -31,7 +31,7 @@ LIMIT 1;
 SELECT EXISTS (
     SELECT 1 FROM openrails.product_access_grants pag
     WHERE pag.merchant_id = $1
-      AND pag.merchant_subject_id = $2
+      AND pag.customer_id = $2
       AND pag.product_id = $3
       AND pag.status = 'active'
       AND pag.revoked_at IS NULL
@@ -39,20 +39,20 @@ SELECT EXISTS (
       AND (pag.ends_at IS NULL OR pag.ends_at > sqlc.arg(at)::timestamptz)
 );
 
--- name: ListActiveProductAccessGrantsByMerchantSubject :many
+-- name: ListActiveProductAccessGrantsByCustomer :many
 SELECT * FROM openrails.product_access_grants pag
 WHERE pag.merchant_id = $1
-  AND pag.merchant_subject_id = $2
+  AND pag.customer_id = $2
   AND pag.status = 'active'
   AND pag.revoked_at IS NULL
   AND pag.starts_at <= sqlc.arg(at)::timestamptz
   AND (pag.ends_at IS NULL OR pag.ends_at > sqlc.arg(at)::timestamptz)
 ORDER BY pag.created_at DESC;
 
--- name: ListProductAccessGrantsByMerchantSubject :many
+-- name: ListProductAccessGrantsByCustomer :many
 SELECT * FROM openrails.product_access_grants pag
 WHERE pag.merchant_id = $1
-  AND pag.merchant_subject_id = $2
+  AND pag.customer_id = $2
 ORDER BY pag.created_at DESC;
 
 -- name: GetProductAccessGrantByID :one

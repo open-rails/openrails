@@ -14,16 +14,16 @@ import (
 
 const countInvoicesByPayer = `-- name: CountInvoicesByPayer :one
 SELECT count(*) FROM openrails.invoices
-WHERE merchant_id = $1 AND merchant_subject_id = $2
+WHERE merchant_id = $1 AND customer_id = $2
 `
 
 type CountInvoicesByPayerParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
 }
 
 func (q *Queries) CountInvoicesByPayer(ctx context.Context, arg CountInvoicesByPayerParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countInvoicesByPayer, arg.MerchantID, arg.MerchantSubjectID)
+	row := q.db.QueryRow(ctx, countInvoicesByPayer, arg.MerchantID, arg.CustomerID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -31,18 +31,18 @@ func (q *Queries) CountInvoicesByPayer(ctx context.Context, arg CountInvoicesByP
 
 const getInvoiceByPeriod = `-- name: GetInvoiceByPeriod :one
 
-SELECT id, merchant_id, merchant_subject_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM openrails.invoices
-WHERE merchant_id = $1 AND merchant_subject_id = $2
+SELECT id, merchant_id, customer_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM openrails.invoices
+WHERE merchant_id = $1 AND customer_id = $2
   AND period_from = $3 AND period_to = $4 AND currency = $5
 LIMIT 1
 `
 
 type GetInvoiceByPeriodParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	PeriodFrom        time.Time
-	PeriodTo          time.Time
-	Currency          string
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	PeriodFrom time.Time
+	PeriodTo   time.Time
+	Currency   string
 }
 
 // openrails.invoices: monthly itemized statements (#303), immutable once
@@ -51,7 +51,7 @@ type GetInvoiceByPeriodParams struct {
 func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriodParams) (OpenrailsInvoice, error) {
 	row := q.db.QueryRow(ctx, getInvoiceByPeriod,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.PeriodFrom,
 		arg.PeriodTo,
 		arg.Currency,
@@ -60,7 +60,7 @@ func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriod
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 		&i.Currency,
 		&i.PeriodFrom,
 		&i.PeriodTo,
@@ -80,24 +80,24 @@ func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriod
 }
 
 const getInvoiceForPayer = `-- name: GetInvoiceForPayer :one
-SELECT id, merchant_id, merchant_subject_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM openrails.invoices
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND id = $3
+SELECT id, merchant_id, customer_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM openrails.invoices
+WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 `
 
 type GetInvoiceForPayerParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	ID                uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ID         uuid.UUID
 }
 
 func (q *Queries) GetInvoiceForPayer(ctx context.Context, arg GetInvoiceForPayerParams) (OpenrailsInvoice, error) {
-	row := q.db.QueryRow(ctx, getInvoiceForPayer, arg.MerchantID, arg.MerchantSubjectID, arg.ID)
+	row := q.db.QueryRow(ctx, getInvoiceForPayer, arg.MerchantID, arg.CustomerID, arg.ID)
 	var i OpenrailsInvoice
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 		&i.Currency,
 		&i.PeriodFrom,
 		&i.PeriodTo,
@@ -118,37 +118,37 @@ func (q *Queries) GetInvoiceForPayer(ctx context.Context, arg GetInvoiceForPayer
 
 const insertInvoice = `-- name: InsertInvoice :exec
 INSERT INTO openrails.invoices (
-    id, merchant_id, merchant_subject_id, currency,
+    id, merchant_id, customer_id, currency,
     period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid,
     closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12, '[]'::jsonb), COALESCE($13, '{}'::jsonb), $14, $15, $16, $17)
 `
 
 type InsertInvoiceParams struct {
-	ID                uuid.UUID
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Currency          string
-	PeriodFrom        time.Time
-	PeriodTo          time.Time
-	UsageTotal        int64
-	DepositsTotal     int64
-	OwedAccrued       int64
-	OwedPaid          int64
-	ClosingBalance    int64
-	LineItems         []byte
-	MoneyMovements    []byte
-	Status            string
-	FinalizedAt       *time.Time
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID             uuid.UUID
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	PeriodFrom     time.Time
+	PeriodTo       time.Time
+	UsageTotal     int64
+	DepositsTotal  int64
+	OwedAccrued    int64
+	OwedPaid       int64
+	ClosingBalance int64
+	LineItems      []byte
+	MoneyMovements []byte
+	Status         string
+	FinalizedAt    *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 func (q *Queries) InsertInvoice(ctx context.Context, arg InsertInvoiceParams) error {
 	_, err := q.db.Exec(ctx, insertInvoice,
 		arg.ID,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Currency,
 		arg.PeriodFrom,
 		arg.PeriodTo,
@@ -168,10 +168,10 @@ func (q *Queries) InsertInvoice(ctx context.Context, arg InsertInvoiceParams) er
 }
 
 const listCreditAccountPairs = `-- name: ListCreditAccountPairs :many
-SELECT merchant_subject_id
+SELECT customer_id
 FROM openrails.money_balances
 WHERE merchant_id = $1
-GROUP BY merchant_subject_id
+GROUP BY customer_id
 `
 
 // Every known payer in the tenant (= has a money balance row), for the
@@ -184,11 +184,11 @@ func (q *Queries) ListCreditAccountPairs(ctx context.Context, merchantID uuid.UU
 	defer rows.Close()
 	var items []uuid.UUID
 	for rows.Next() {
-		var merchant_subject_id uuid.UUID
-		if err := rows.Scan(&merchant_subject_id); err != nil {
+		var customer_id uuid.UUID
+		if err := rows.Scan(&customer_id); err != nil {
 			return nil, err
 		}
-		items = append(items, merchant_subject_id)
+		items = append(items, customer_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -197,23 +197,23 @@ func (q *Queries) ListCreditAccountPairs(ctx context.Context, merchantID uuid.UU
 }
 
 const listInvoicesByPayer = `-- name: ListInvoicesByPayer :many
-SELECT id, merchant_id, merchant_subject_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM openrails.invoices
-WHERE merchant_id = $1 AND merchant_subject_id = $2
+SELECT id, merchant_id, customer_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM openrails.invoices
+WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY period_from DESC
 LIMIT $3::int OFFSET $4::int
 `
 
 type ListInvoicesByPayerParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Column3           int32
-	Column4           int32
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Column3    int32
+	Column4    int32
 }
 
 func (q *Queries) ListInvoicesByPayer(ctx context.Context, arg ListInvoicesByPayerParams) ([]OpenrailsInvoice, error) {
 	rows, err := q.db.Query(ctx, listInvoicesByPayer,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Column3,
 		arg.Column4,
 	)
@@ -227,7 +227,7 @@ func (q *Queries) ListInvoicesByPayer(ctx context.Context, arg ListInvoicesByPay
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
-			&i.MerchantSubjectID,
+			&i.CustomerID,
 			&i.Currency,
 			&i.PeriodFrom,
 			&i.PeriodTo,

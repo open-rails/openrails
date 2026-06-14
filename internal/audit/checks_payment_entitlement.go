@@ -26,11 +26,11 @@ func (c *CheckCompletedPaymentMissingEntitlements) Run(ctx context.Context, q *g
 	// Get all one-off payments (subscription_id IS NULL) with their product
 	var params gen.AuditOneOffPaymentsWithSpecParams
 	if opts.UserID != "" {
-		tsid, err := repo.ResolveMerchantSubjectID(opts.UserID)
+		tsid, err := repo.ResolveCustomerID(opts.UserID)
 		if err != nil {
 			return nil, err
 		}
-		params.MerchantSubjectID = &tsid
+		params.CustomerID = &tsid
 	}
 	if opts.Since != nil {
 		params.Since = opts.Since
@@ -66,7 +66,7 @@ func (c *CheckCompletedPaymentMissingEntitlements) Run(ctx context.Context, q *g
 				Severity:       c.Severity(),
 				EntityType:     EntityPayment,
 				EntityID:       payment.ID,
-				UserID:         payment.MerchantSubjectID.String(),
+				UserID:         payment.CustomerID.String(),
 				Description:    fmt.Sprintf("Completed one-off payment %s for product '%s' has no entitlements granted", payment.ID, payment.ProductSlug),
 				Recommendation: fmt.Sprintf("Grant entitlements from product.entitlements_spec with source_type=one_off, source_id=%s", payment.ID),
 				AutoFixable:    true,

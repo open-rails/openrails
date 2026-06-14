@@ -16,9 +16,9 @@ const (
 	// ResourceKindMerchant scopes a service token to one OpenRails merchant. Resource
 	// IDs are canonical openrails.merchants UUID strings.
 	ResourceKindMerchant = "openrails.merchant"
-	// ResourceKindMerchantSubject scopes a service token to one OpenRails payable
-	// subject. Resource IDs are canonical openrails.merchant_subjects UUID strings.
-	ResourceKindMerchantSubject = "openrails.merchant_subject"
+	// ResourceKindCustomer scopes a service token to one OpenRails payable
+	// subject. Resource IDs are canonical openrails.customers UUID strings.
+	ResourceKindCustomer = "openrails.customer"
 )
 
 // ResolvedServiceToken is the result of validating an OpenRails-issued service
@@ -46,7 +46,7 @@ type ResolvedServiceToken struct {
 	// entries (colon-form, e.g. "openrails:credits:write").
 	Permissions []string
 	// Resources is the service token's AuthKit-stored OpenRails resource scope.
-	// OpenRails interprets only ResourceKindMerchant and ResourceKindMerchantSubject;
+	// OpenRails interprets only ResourceKindMerchant and ResourceKindCustomer;
 	// unknown kinds fail closed during service token resolution.
 	Resources []authcore.ServiceTokenResource
 }
@@ -63,29 +63,29 @@ func (r *ResolvedServiceToken) HasPermission(perm string) bool {
 	return false
 }
 
-// AllowsMerchantSubject reports whether this service token may act for a payable
+// AllowsCustomer reports whether this service token may act for a payable
 // subject inside its resolved merchant. Merchant-wide tokens carry only
 // ResourceKindMerchant; subject-scoped tokens additionally carry the exact
-// ResourceKindMerchantSubject id.
-func (r *ResolvedServiceToken) AllowsMerchantSubject(subject uuid.UUID) bool {
+// ResourceKindCustomer id.
+func (r *ResolvedServiceToken) AllowsCustomer(subject uuid.UUID) bool {
 	if r == nil || subject == uuid.Nil {
 		return false
 	}
 	if !hasResource(r.Resources, ResourceKindMerchant, r.MerchantID.String()) {
 		return false
 	}
-	if !hasAnyResourceKind(r.Resources, ResourceKindMerchantSubject) {
+	if !hasAnyResourceKind(r.Resources, ResourceKindCustomer) {
 		return true
 	}
-	return hasResource(r.Resources, ResourceKindMerchantSubject, subject.String())
+	return hasResource(r.Resources, ResourceKindCustomer, subject.String())
 }
 
 func MerchantResource(id merchant.ID) authcore.ServiceTokenResource {
 	return authcore.ServiceTokenResource{Kind: ResourceKindMerchant, ID: id.String()}
 }
 
-func MerchantSubjectResource(id uuid.UUID) authcore.ServiceTokenResource {
-	return authcore.ServiceTokenResource{Kind: ResourceKindMerchantSubject, ID: id.String()}
+func CustomerResource(id uuid.UUID) authcore.ServiceTokenResource {
+	return authcore.ServiceTokenResource{Kind: ResourceKindCustomer, ID: id.String()}
 }
 
 // MerchantScope resolves a merchant reference (slug or UUID) to the canonical
@@ -206,7 +206,7 @@ func validateServiceTokenResources(mid merchant.ID, resources []authcore.Service
 	}
 	for _, r := range resources {
 		switch strings.TrimSpace(r.Kind) {
-		case ResourceKindMerchant, ResourceKindMerchantSubject:
+		case ResourceKindMerchant, ResourceKindCustomer:
 		default:
 			return ErrServiceTokenScopeDenied
 		}

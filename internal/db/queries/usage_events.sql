@@ -3,22 +3,22 @@
 
 -- name: InsertUsageEvent :exec
 INSERT INTO openrails.usage_events (
-    id, merchant_id, merchant_subject_id, actor, resource,
+    id, merchant_id, customer_id, actor, resource,
     event_type, dimensions, amount, source, source_id,
     money_transaction_id, metadata, occurred_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14);
 
 -- name: InsertUsageEventIfAbsent :exec
 INSERT INTO openrails.usage_events (
-    id, merchant_id, merchant_subject_id, actor, resource,
+    id, merchant_id, customer_id, actor, resource,
     event_type, dimensions, amount, source, source_id,
     money_transaction_id, metadata, occurred_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
-ON CONFLICT (merchant_id, merchant_subject_id, event_type, source, source_id) DO NOTHING;
+ON CONFLICT (merchant_id, customer_id, event_type, source, source_id) DO NOTHING;
 
 -- name: GetUsageEventByCoords :one
 SELECT * FROM openrails.usage_events
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND event_type = $3
+WHERE merchant_id = $1 AND customer_id = $2 AND event_type = $3
   AND source = $4 AND source_id = $5
 LIMIT 1;
 
@@ -28,7 +28,7 @@ SELECT event_type,
        COALESCE(SUM(amount), 0)::bigint AS total_amount,
        COUNT(*)::bigint AS event_count
 FROM openrails.usage_events
-WHERE merchant_id = $1 AND merchant_subject_id = $2
+WHERE merchant_id = $1 AND customer_id = $2
   AND occurred_at >= sqlc.arg(from_at)::timestamptz
   AND occurred_at < sqlc.arg(to_at)::timestamptz
 GROUP BY event_type;
@@ -40,7 +40,7 @@ SELECT ue.event_type,
        COALESCE(SUM((d.value)::bigint), 0)::bigint AS total
 FROM openrails.usage_events ue
 CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d
-WHERE ue.merchant_id = $1 AND ue.merchant_subject_id = $2
+WHERE ue.merchant_id = $1 AND ue.customer_id = $2
   AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
   AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
 GROUP BY ue.event_type, d.key;
@@ -58,7 +58,7 @@ SELECT COALESCE(CASE sqlc.arg(group_by)::text
        COUNT(*)::bigint AS event_count,
        COALESCE(SUM(ue.amount), 0)::bigint AS total_amount
 FROM openrails.usage_events ue
-WHERE ue.merchant_id = $1 AND ue.merchant_subject_id = $2
+WHERE ue.merchant_id = $1 AND ue.customer_id = $2
   AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
   AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
 GROUP BY 1

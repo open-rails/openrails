@@ -44,7 +44,7 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 	solRepo := dbrepo.NewSolanaSubscriptionRepo(dbi)
 	solRow := &models.SolanaSubscription{
 		ID:                       uuid.New(),
-		MerchantID:                 uuid.New(),
+		MerchantID:               uuid.New(),
 		SubscriptionID:           subID,
 		SubscriberWallet:         "wallet_" + uuid.NewString(),
 		AuthorityPDA:             "auth_" + uuid.NewString(),
@@ -165,7 +165,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 	subPriceID := priceID
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
-		MerchantSubjectID:       dbtest.EnsureMerchantSubjectIDPgx(ctx, t, dbi.Pool(), userID),
+		CustomerID:            dbtest.EnsureCustomerIDPgx(ctx, t, dbi.Pool(), userID),
 		ProductID:             productID,
 		PriceID:               &subPriceID,
 		Status:                string(models.StatusActive),

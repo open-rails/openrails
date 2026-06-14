@@ -22,11 +22,11 @@ func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *tes
 		solanaTransactionService: &stubSolanaTransactionService{},
 	}
 	session := &models.CheckoutSession{
-		ID:              uuid.New(),
-		MerchantSubjectID: identity.MerchantSubjectIDFromString("user_123").UUID(),
-		PriceID:         uuid.New(),
-		Amount:          1000,
-		Currency:        "eur",
+		ID:         uuid.New(),
+		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
+		PriceID:    uuid.New(),
+		Amount:     1000,
+		Currency:   "eur",
 	}
 	payment := &CheckoutSessionPaymentRequest{
 		TokenSymbol: "USDC",
@@ -47,11 +47,11 @@ func TestInitializeSolanaSession_TransactionRequestRejectsZeroTokenAmount(t *tes
 		solanaTransactionService: &stubSolanaTransactionService{},
 	}
 	session := &models.CheckoutSession{
-		ID:              uuid.New(),
-		MerchantSubjectID: identity.MerchantSubjectIDFromString("user_123").UUID(),
-		PriceID:         uuid.New(),
-		Amount:          0,
-		Currency:        "usd",
+		ID:         uuid.New(),
+		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
+		PriceID:    uuid.New(),
+		Amount:     0,
+		Currency:   "usd",
 	}
 	payment := &CheckoutSessionPaymentRequest{
 		TokenSymbol: "USDC",
@@ -74,12 +74,12 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 	}
 	ref := "11111111111111111111111111111112"
 	session := &models.CheckoutSession{
-		ID:              uuid.New(),
-		MerchantSubjectID: identity.MerchantSubjectIDFromString("user_123").UUID(),
-		PriceID:         uuid.New(),
-		Amount:          1000,
-		Currency:        "usd",
-		Reference:       &ref,
+		ID:         uuid.New(),
+		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
+		PriceID:    uuid.New(),
+		Amount:     1000,
+		Currency:   "usd",
+		Reference:  &ref,
 		ProcessorState: map[string]any{
 			"token_symbol": "USDC",
 			"token_mint":   devnetUSDCMint,
@@ -88,7 +88,7 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 	}
 	req := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: testSignature}}
 
-	_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.MerchantSubjectID.String()})
+	_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.CustomerID.String()})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 	require.Contains(t, err.Error(), "token_amount missing or invalid")
@@ -108,12 +108,12 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 
 		ref := "11111111111111111111111111111112"
 		session := &models.CheckoutSession{
-			ID:              uuid.New(),
-			MerchantSubjectID: identity.MerchantSubjectIDFromString("user_123").UUID(),
-			PriceID:         uuid.New(),
-			Amount:          1000,
-			Currency:        "usd",
-			Reference:       &ref,
+			ID:         uuid.New(),
+			CustomerID: identity.CustomerIDFromString("user_123").UUID(),
+			PriceID:    uuid.New(),
+			Amount:     1000,
+			Currency:   "usd",
+			Reference:  &ref,
 			ProcessorState: map[string]any{
 				"token_symbol": "USDC",
 				"token_mint":   devnetUSDCMint,
@@ -122,7 +122,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 		}
 		req := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: testSignature}}
 
-		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.MerchantSubjectID.String()})
+		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.CustomerID.String()})
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 		require.Contains(t, err.Error(), "recipient missing")
@@ -132,11 +132,11 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 		t.Parallel()
 
 		session := &models.CheckoutSession{
-			ID:              uuid.New(),
-			MerchantSubjectID: identity.MerchantSubjectIDFromString("user_123").UUID(),
-			PriceID:         uuid.New(),
-			Amount:          1000,
-			Currency:        "usd",
+			ID:         uuid.New(),
+			CustomerID: identity.CustomerIDFromString("user_123").UUID(),
+			PriceID:    uuid.New(),
+			Amount:     1000,
+			Currency:   "usd",
 			ProcessorState: map[string]any{
 				"token_symbol": "USDC",
 				"token_mint":   devnetUSDCMint,
@@ -146,7 +146,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 		}
 		req := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: testSignature}}
 
-		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.MerchantSubjectID.String()})
+		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.CustomerID.String()})
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 		require.Contains(t, err.Error(), "reference missing")
@@ -255,12 +255,12 @@ func TestSolanaBuildRequestFromSessionUsesPersistedQuote(t *testing.T) {
 	priceID := uuid.New()
 	tenantSubjectID := uuid.New()
 	session := &models.CheckoutSession{
-		ID:              uuid.New(),
-		MerchantSubjectID: tenantSubjectID,
-		PriceID:         priceID,
-		Amount:          10000,
-		Currency:        "usd",
-		Reference:       &ref,
+		ID:         uuid.New(),
+		CustomerID: tenantSubjectID,
+		PriceID:    priceID,
+		Amount:     10000,
+		Currency:   "usd",
+		Reference:  &ref,
 		ProcessorState: map[string]any{
 			"token_symbol": "USDC",
 			"token_mint":   devnetUSDCMint,

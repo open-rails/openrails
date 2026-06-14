@@ -504,15 +504,15 @@ func TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites(t *testing.T)
 	entStart := time.Now().Add(-30 * 24 * time.Hour).UTC()
 	entEnd := time.Now().Add(30 * 24 * time.Hour).UTC()
 	suite.InsertEntitlement(dbtest.WithTestTenant(ctx), &models.Entitlement{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, expiredUser),
-		Entitlement:     "premium",
-		StartAt:         entStart,
-		EndAt:           &entEnd,
-		SourceType:      models.EntitlementSourceSubscription,
-		SourceID:        &expiredSub.ID,
-		CreatedAt:       entStart,
-		UpdatedAt:       entStart,
+		ID:          uuid.New(),
+		CustomerID:  suite.ensureCustomer(ctx, expiredUser),
+		Entitlement: "premium",
+		StartAt:     entStart,
+		EndAt:       &entEnd,
+		SourceType:  models.EntitlementSourceSubscription,
+		SourceID:    &expiredSub.ID,
+		CreatedAt:   entStart,
+		UpdatedAt:   entStart,
 	})
 
 	// Sub B: IN-WINDOW -> charge decision materialized as a parked intent; the

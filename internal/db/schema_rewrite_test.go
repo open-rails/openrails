@@ -42,8 +42,8 @@ func TestSchemaRewriter(t *testing.T) {
 	t.Run("does not touch unrelated identifiers", func(t *testing.T) {
 		r := newSchemaRewriter("shop")
 		// public.* and profiles.* (AuthKit) qualifiers must survive untouched.
-		const sql = "SELECT public.gen_random_uuid(), p.id FROM profiles.users p JOIN openrails.tenant_subjects ts ON ts.subject = p.id"
-		want := "SELECT public.gen_random_uuid(), p.id FROM profiles.users p JOIN shop.tenant_subjects ts ON ts.subject = p.id"
+		const sql = "SELECT public.gen_random_uuid(), p.id FROM profiles.users p JOIN openrails.customers c ON c.subject = p.id"
+		want := "SELECT public.gen_random_uuid(), p.id FROM profiles.users p JOIN shop.customers c ON c.subject = p.id"
 		if got := r.apply(sql); got != want {
 			t.Fatalf("rewrite touched unrelated schema:\n got  %q\n want %q", got, want)
 		}

@@ -11,12 +11,12 @@ import (
 // The admin picks a Price/Product, and the system derives entitlements from Product.EntitlementsSpec.
 type EntitlementGrant struct {
 	ID uuid.UUID `json:"id"`
-	// MerchantSubjectID is the OpenRails payable tenant subject for this row (#317).
+	// CustomerID is the OpenRails payable tenant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
-	// it before user_id is dropped. Join openrails.tenant_subjects for issuer/subject.
-	MerchantSubjectID uuid.UUID  `json:"tenant_subject_id,omitempty"`
-	PriceID         *uuid.UUID `json:"price_id,omitempty"` // Optional: Price/Product being granted
-	GrantedBy       string     `json:"granted_by"`         // Admin user ID who made the grant
+	// it before user_id is dropped. Join openrails.customers for issuer/subject.
+	CustomerID uuid.UUID  `json:"customer_id,omitempty"`
+	PriceID    *uuid.UUID `json:"price_id,omitempty"` // Optional: Price/Product being granted
+	GrantedBy  string     `json:"granted_by"`         // Admin user ID who made the grant
 
 	// Reason for the grant (e.g., "comp", "contest_winner", "refund_compensation", "partnership", "manual_payment")
 	Reason string `json:"reason"`

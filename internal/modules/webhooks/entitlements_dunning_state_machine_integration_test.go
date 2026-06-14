@@ -32,7 +32,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	clock := clockwork.NewFakeClockAt(t0)
 
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	subID := uuid.New()
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 	productID := uuid.New()
@@ -71,7 +71,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      subID,
-		MerchantSubjectID:         tenantSubjectID,
+		CustomerID:              tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 &priceID,
 		Status:                  string(models.StatusActive),
@@ -87,20 +87,20 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 
 	paidEntID := uuid.New()
 	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
-		ID:              paidEntID,
-		MerchantSubjectID: tenantSubjectID,
-		Entitlement:     "premium",
-		StartAt:         periodStart,
-		EndAt:           &paidEnd,
-		SourceType:      string(models.EntitlementSourceSubscription),
-		SourceID:        &subID,
-		CreatedAt:       clock.Now().UTC(),
-		UpdatedAt:       clock.Now().UTC(),
+		ID:          paidEntID,
+		CustomerID:  tenantSubjectID,
+		Entitlement: "premium",
+		StartAt:     periodStart,
+		EndAt:       &paidEnd,
+		SourceType:  string(models.EntitlementSourceSubscription),
+		SourceID:    &subID,
+		CreatedAt:   clock.Now().UTC(),
+		UpdatedAt:   clock.Now().UTC(),
 	})
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -212,7 +212,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	// deleted. Raw SQL sees the soft-deleted future window (deleted_at set)
 	// without any opt-in.
 	graceQuery := `SELECT start_at, end_at, revoked_at, deleted_at FROM openrails.entitlements
-		WHERE merchant_subject_id = $1 AND entitlement = $2
+		WHERE customer_id = $1 AND entitlement = $2
 		  AND source_type = $3
 		  AND source_id = $4
 		ORDER BY start_at ASC`
@@ -246,7 +246,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	// Renewal should append a new paid window that starts now and ends at the processor-provided paid term end.
 	expectedPaidEnd := time.Date(2026, 3, 5, 23, 59, 59, 0, time.UTC)
 	paidQuery := `SELECT start_at, end_at FROM openrails.entitlements
-		WHERE merchant_subject_id = $1 AND entitlement = $2
+		WHERE customer_id = $1 AND entitlement = $2
 		  AND source_type = $3
 		  AND source_id = $4
 		  AND revoked_at IS NULL

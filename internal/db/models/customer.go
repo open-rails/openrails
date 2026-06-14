@@ -6,10 +6,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// MerchantSubject is the OpenRails payable identity. It stores the OIDC-style
-// external principal once; billing tables reference tenant_subject_id and join
+// Customer is the OpenRails payable identity. It stores the OIDC-style
+// external principal once; billing tables reference customer_id and join
 // here when they need tenant/issuer/subject.
-type MerchantSubject struct {
+type Customer struct {
 	ID         uuid.UUID `json:"id"`
 	MerchantID   uuid.UUID `json:"tenant_id"`
 	Issuer     string    `json:"issuer"`

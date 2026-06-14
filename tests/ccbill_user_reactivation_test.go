@@ -168,8 +168,8 @@ func TestCCBillChargeback_DedupesDuplicateDelivery(t *testing.T) {
 	require.Eventually(t, func() bool {
 		var count int
 		err := suite.Pool.QueryRow(ctx,
-			"SELECT COUNT(*) FROM openrails.notification_queue WHERE merchant_subject_id = $1 AND event_type = $2",
-			suite.ensureMerchantSubject(ctx, userID), string(models.NotificationPremiumEnded)).Scan(&count)
+			"SELECT COUNT(*) FROM openrails.notification_queue WHERE customer_id = $1 AND event_type = $2",
+			suite.ensureCustomer(ctx, userID), string(models.NotificationPremiumEnded)).Scan(&count)
 		if err != nil {
 			return false
 		}
@@ -210,15 +210,15 @@ func seedCCBillActiveSubscriptionWithEntitlement(t *testing.T) (*TestContainerSu
 	endAt := now.Add(25 * 24 * time.Hour)
 	subID := created.ID
 	suite.InsertEntitlement(ctx, &models.Entitlement{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
-		Entitlement:     "premium",
-		StartAt:         startAt,
-		EndAt:           &endAt,
-		SourceType:      models.EntitlementSourceSubscription,
-		SourceID:        &subID,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:          uuid.New(),
+		CustomerID:  suite.ensureCustomer(ctx, userID),
+		Entitlement: "premium",
+		StartAt:     startAt,
+		EndAt:       &endAt,
+		SourceType:  models.EntitlementSourceSubscription,
+		SourceID:    &subID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	})
 
 	return suite, userID, processorSubID, created.ID, now

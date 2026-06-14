@@ -17,14 +17,14 @@ import (
 // Release -> "released" (counts against neither).
 //
 // Idempotency is enforced by a unique index on
-// (tenant_id, tenant_subject_id, actor, source, source_id): a replayed Reserve returns
+// (tenant_id, customer_id, actor, source, source_id): a replayed Reserve returns
 // the existing row rather than double-reserving.
 type BudgetReservation struct {
 	ID uuid.UUID `json:"id"`
 	// MerchantID scopes this row to a tenant / billing namespace (issue #223/#227).
 	MerchantID uuid.UUID `json:"tenant_id"`
-	// MerchantSubjectID is the tenant subject the budget is charged against (issue #221, the payer).
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	// CustomerID is the tenant subject the budget is charged against (issue #221, the payer).
+	CustomerID uuid.UUID `json:"customer_id"`
 	// Actor is the caller-supplied principal string whose spend the windows cap.
 	Actor string `json:"actor"`
 	// AmountMicros is the reserved (authorized) amount; counts against

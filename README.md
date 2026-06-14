@@ -146,7 +146,7 @@ server-to-server with its service token. The high-traffic surface is credits/usa
 # Pre-authorize + place a hold atomically before doing expensive work
 curl -X POST https://openrails.example/v1/service/credits/authorize \
   -H "Authorization: Bearer openrails_st_..." \
-  -d '{"tenant_subject_id": "...", "actor": "user-123", "credit_type": "api_credits",
+  -d '{"customer_id": "...", "actor": "user-123", "credit_type": "api_credits",
        "estimate_micros": 50000, "request_id": "req-789"}'
 
 # Settle the real cost (or POST .../holds/{id}/release on failure)

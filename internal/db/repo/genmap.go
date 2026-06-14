@@ -39,7 +39,7 @@ func toJSONB[M ~map[string]V, V any](m M) ([]byte, error) {
 func paymentFromGen(p gen.OpenrailsPayment) (*models.Payment, error) {
 	m := &models.Payment{
 		ID:                p.ID,
-		MerchantSubjectID:   p.MerchantSubjectID,
+		CustomerID:        p.CustomerID,
 		PriceID:           p.PriceID,
 		SubscriptionID:    p.SubscriptionID,
 		RefundedPaymentID: p.RefundedPaymentID,
@@ -86,7 +86,7 @@ func paymentsFromGen(rows []gen.OpenrailsPayment) ([]*models.Payment, error) {
 func priceFromGen(p gen.OpenrailsPrice) (*models.Price, error) {
 	m := &models.Price{
 		ID:               p.ID,
-		MerchantID:         p.MerchantID,
+		MerchantID:       p.MerchantID,
 		ProductID:        p.ProductID,
 		Status:           models.CatalogStatus(p.Status),
 		Amount:           p.Amount,
@@ -104,7 +104,7 @@ func priceFromGen(p gen.OpenrailsPrice) (*models.Price, error) {
 func productFromGen(p gen.OpenrailsProduct) (*models.Product, error) {
 	m := &models.Product{
 		ID:          p.ID,
-		MerchantID:    p.MerchantID,
+		MerchantID:  p.MerchantID,
 		Slug:        p.Slug,
 		DisplayName: p.DisplayName,
 		Description: derefStr(p.Description),
@@ -149,8 +149,8 @@ func derefUUID(u *uuid.UUID) uuid.UUID {
 func subscriptionFromGen(s gen.OpenrailsSubscription) (*models.Subscription, error) {
 	m := &models.Subscription{
 		ID:                      s.ID,
-		MerchantID:                s.MerchantID,
-		MerchantSubjectID:         s.MerchantSubjectID,
+		MerchantID:              s.MerchantID,
+		CustomerID:              s.CustomerID,
 		ProductID:               s.ProductID,
 		PriceID:                 derefUUID(s.PriceID),
 		ScheduledPriceID:        s.ScheduledPriceID,
@@ -202,7 +202,7 @@ func subscriptionsFromGen(rows []gen.OpenrailsSubscription) ([]*models.Subscript
 func paymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*models.PaymentMethod, error) {
 	m := &models.PaymentMethod{
 		ID:                   p.ID,
-		MerchantSubjectID:      p.MerchantSubjectID,
+		CustomerID:           p.CustomerID,
 		Processor:            models.Processor(p.Processor),
 		VaultID:              p.VaultID,
 		BillingID:            p.BillingID,
@@ -234,22 +234,22 @@ func paymentMethodsFromGen(rows []gen.OpenrailsPaymentMethod) ([]*models.Payment
 
 func checkoutSessionFromGen(c gen.OpenrailsCheckoutSession) (*models.CheckoutSession, error) {
 	m := &models.CheckoutSession{
-		ID:              c.ID,
-		MerchantSubjectID: c.MerchantSubjectID,
-		PriceID:         c.PriceID,
-		Mode:            models.CheckoutSessionMode(c.Mode),
-		Processor:       models.Processor(c.Processor),
-		Status:          models.CheckoutSessionStatus(c.Status),
-		Amount:          c.Amount,
-		Currency:        c.Currency,
-		ExpiresAt:       c.ExpiresAt,
-		Reference:       c.Reference,
-		TransactionID:   c.TransactionID,
-		PaymentID:       c.PaymentID,
-		SubscriptionID:  c.SubscriptionID,
-		IdempotencyKey:  c.IdempotencyKey,
-		CreatedAt:       c.CreatedAt,
-		UpdatedAt:       c.UpdatedAt,
+		ID:             c.ID,
+		CustomerID:     c.CustomerID,
+		PriceID:        c.PriceID,
+		Mode:           models.CheckoutSessionMode(c.Mode),
+		Processor:      models.Processor(c.Processor),
+		Status:         models.CheckoutSessionStatus(c.Status),
+		Amount:         c.Amount,
+		Currency:       c.Currency,
+		ExpiresAt:      c.ExpiresAt,
+		Reference:      c.Reference,
+		TransactionID:  c.TransactionID,
+		PaymentID:      c.PaymentID,
+		SubscriptionID: c.SubscriptionID,
+		IdempotencyKey: c.IdempotencyKey,
+		CreatedAt:      c.CreatedAt,
+		UpdatedAt:      c.UpdatedAt,
 	}
 	if err := fromJSONB(c.Metadata, &m.Metadata, "checkout_sessions.metadata"); err != nil {
 		return nil, err
@@ -266,18 +266,18 @@ func checkoutSessionFromGen(c gen.OpenrailsCheckoutSession) (*models.CheckoutSes
 func entitlementFromGen(e gen.OpenrailsEntitlement) *models.Entitlement {
 	sourceID := e.SourceID
 	m := &models.Entitlement{
-		ID:              e.ID,
-		MerchantID:        e.MerchantID,
-		MerchantSubjectID: e.MerchantSubjectID,
-		Entitlement:     e.Entitlement,
-		StartAt:         e.StartAt,
-		EndAt:           e.EndAt,
-		SourceID:        &sourceID,
-		SourceType:      models.EntitlementSourceType(e.SourceType),
-		RevokedAt:       e.RevokedAt,
-		CreatedAt:       e.CreatedAt,
-		UpdatedAt:       e.UpdatedAt,
-		DeletedAt:       e.DeletedAt,
+		ID:          e.ID,
+		MerchantID:  e.MerchantID,
+		CustomerID:  e.CustomerID,
+		Entitlement: e.Entitlement,
+		StartAt:     e.StartAt,
+		EndAt:       e.EndAt,
+		SourceID:    &sourceID,
+		SourceType:  models.EntitlementSourceType(e.SourceType),
+		RevokedAt:   e.RevokedAt,
+		CreatedAt:   e.CreatedAt,
+		UpdatedAt:   e.UpdatedAt,
+		DeletedAt:   e.DeletedAt,
 	}
 	if e.RevokeReason != nil {
 		rr := models.EntitlementRevokeReason(*e.RevokeReason)

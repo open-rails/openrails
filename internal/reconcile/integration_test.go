@@ -57,7 +57,7 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		subDead:   uuid.New(),
 		entDeadID: uuid.New(),
 	}
-	s.subjectID = dbtest.EnsureMerchantSubjectIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+	s.subjectID = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 
 	suffix := uuid.NewString()[:8]
 	now := time.Now().UTC()
@@ -91,7 +91,7 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, processor, processor_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
-		         entitlements_spec_snapshot, merchant_subject_id, merchant_id)
+		         entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, jsonb_build_object($8::text, null), $7, $9)`,
 			subID, priceID, productID, fmt.Sprintf("it-%d-%s", i, suffix),
 			periodStart, periodEnd, s.subjectID, entName, dbtest.TestTenantID.UUID())
@@ -99,7 +99,7 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		if subID == s.subDead {
 			entID = s.entDeadID
 		}
-		exec(`INSERT INTO openrails.entitlements (id, merchant_subject_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
+		exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 		      VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7)`,
 			entID, s.subjectID, entName, periodStart, periodEnd, subID, dbtest.TestTenantID.UUID())
 	}
@@ -240,7 +240,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 		var amount int64
 		var subjectID uuid.UUID
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT amount, merchant_subject_id FROM openrails.payments WHERE processor = 'nmi' AND transaction_id LIKE 'itxn-%'`).
+			`SELECT amount, customer_id FROM openrails.payments WHERE processor = 'nmi' AND transaction_id LIKE 'itxn-%'`).
 			Scan(&amount, &subjectID))
 		assert.Equal(t, int64(999), amount)
 		assert.Equal(t, seeded.subjectID, subjectID)
@@ -344,7 +344,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	entName := "premium-mat-" + suffix
 
 	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
-		subjectIDHolder = dbtest.EnsureMerchantSubjectIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		subjectIDHolder = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 		exec := func(sql string, args ...any) {
 			t.Helper()
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
@@ -359,7 +359,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		      VALUES ($1, $2, 1499, 'usd', 30, jsonb_build_object('nmi', jsonb_build_object('plan_id', $3::text)), $4)`,
 			priceID, productID, planID, dbtest.TestTenantID.UUID())
 		// Identity anchor: a stored payment method holding the remote vault id.
-		exec(`INSERT INTO openrails.payment_methods (id, merchant_subject_id, processor, vault_id, initial_transaction_id, last_four, expiry_date, merchant_id)
+		exec(`INSERT INTO openrails.payment_methods (id, customer_id, processor, vault_id, initial_transaction_id, last_four, expiry_date, merchant_id)
 		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029', $5)`, pmID, subjectIDHolder, vaultID, suffix, dbtest.TestTenantID.UUID())
 		return nil
 	}))
@@ -446,7 +446,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		var gotSubject uuid.UUID
 		var gotPeriodEnd time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT id, status::text, processor, merchant_subject_id, current_period_ends_at
+			`SELECT id, status::text, processor, customer_id, current_period_ends_at
 			 FROM openrails.subscriptions WHERE processor_subscription_id = $1`, resolvablePSID).
 			Scan(&subID, &status, &processor, &gotSubject, &gotPeriodEnd))
 		assert.Equal(t, "active", status)

@@ -83,13 +83,13 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 
 			// Group holds by the BALANCE KEY to batch balance updates. The unified
 			// lifecycle balance row (issue #221/#223) is keyed by
-			// (tenant_id, tenant_subject_id) — actor is ACTOR attribution only and is
+			// (tenant_id, customer_id) — actor is ACTOR attribution only and is
 			// NOT part of the balance identity, so releasing held_balance must target
 			// the payer's row, not the actor's.
 			type key struct {
-				MerchantID        uuid.UUID
-				MerchantSubjectID uuid.UUID
-				Currency        string
+				MerchantID uuid.UUID
+				CustomerID uuid.UUID
+				Currency   string
 			}
 			releasedTotals := make(map[key]int64)
 
@@ -98,7 +98,7 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 				if hold.AuthorizedAmount == nil || *hold.AuthorizedAmount <= 0 {
 					continue
 				}
-				k := key{MerchantID: hold.MerchantID, MerchantSubjectID: hold.MerchantSubjectID, Currency: hold.Currency}
+				k := key{MerchantID: hold.MerchantID, CustomerID: hold.CustomerID, Currency: hold.Currency}
 				releasedTotals[k] += *hold.AuthorizedAmount
 
 				// Mark hold as expired
@@ -114,7 +114,7 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 				}
 
 				bal, err := q.LockMoneyBalance(ctx, gen.LockMoneyBalanceParams{
-					MerchantID: k.MerchantID, MerchantSubjectID: k.MerchantSubjectID, Currency: k.Currency,
+					MerchantID: k.MerchantID, CustomerID: k.CustomerID, Currency: k.Currency,
 				})
 				if err != nil {
 					return err
@@ -128,16 +128,16 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 				}
 
 				if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-					MerchantID: k.MerchantID, MerchantSubjectID: k.MerchantSubjectID, Currency: k.Currency,
+					MerchantID: k.MerchantID, CustomerID: k.CustomerID, Currency: k.Currency,
 					HeldBalance: newHeldBalance, UpdatedAt: now,
 				}); err != nil {
 					return err
 				}
 
 				logger.WithFields(log.Fields{
-					"tenant_id":         k.MerchantID,
-					"tenant_subject_id": k.MerchantSubjectID,
-					"amount":            amount,
+					"tenant_id":   k.MerchantID,
+					"customer_id": k.CustomerID,
+					"amount":      amount,
 				}).Debug("released expired hold funds")
 			}
 			return nil

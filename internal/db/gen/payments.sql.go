@@ -89,14 +89,14 @@ SELECT
         AND COALESCE(purch.status::text, 'completed') = 'completed')::bigint AS successful,
     count(*) FILTER (WHERE COALESCE(purch.status::text, 'completed') = 'failed')::bigint AS failed
 FROM openrails.payments purch
-WHERE purch.merchant_subject_id = $1
+WHERE purch.customer_id = $1
   AND purch.processor = $2
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 `
 
 type CountPaymentOutcomesBySubjectProcessorParams struct {
-	MerchantSubjectID uuid.UUID
-	Processor         OpenrailsProcessorType
+	CustomerID uuid.UUID
+	Processor  OpenrailsProcessorType
 }
 
 type CountPaymentOutcomesBySubjectProcessorRow struct {
@@ -105,20 +105,20 @@ type CountPaymentOutcomesBySubjectProcessorRow struct {
 }
 
 func (q *Queries) CountPaymentOutcomesBySubjectProcessor(ctx context.Context, arg CountPaymentOutcomesBySubjectProcessorParams) (CountPaymentOutcomesBySubjectProcessorRow, error) {
-	row := q.db.QueryRow(ctx, countPaymentOutcomesBySubjectProcessor, arg.MerchantSubjectID, arg.Processor)
+	row := q.db.QueryRow(ctx, countPaymentOutcomesBySubjectProcessor, arg.CustomerID, arg.Processor)
 	var i CountPaymentOutcomesBySubjectProcessorRow
 	err := row.Scan(&i.Successful, &i.Failed)
 	return i, err
 }
 
-const countPaymentsByMerchantSubject = `-- name: CountPaymentsByMerchantSubject :one
+const countPaymentsByCustomer = `-- name: CountPaymentsByCustomer :one
 SELECT count(*) FROM openrails.payments purch
-WHERE purch.merchant_subject_id = $1
+WHERE purch.customer_id = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 `
 
-func (q *Queries) CountPaymentsByMerchantSubject(ctx context.Context, merchantSubjectID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countPaymentsByMerchantSubject, merchantSubjectID)
+func (q *Queries) CountPaymentsByCustomer(ctx context.Context, customerID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countPaymentsByCustomer, customerID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -127,7 +127,7 @@ func (q *Queries) CountPaymentsByMerchantSubject(ctx context.Context, merchantSu
 const countPaymentsFiltered = `-- name: CountPaymentsFiltered :one
 SELECT count(*) FROM openrails.payments purch
 WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND ($1::uuid IS NULL OR purch.merchant_subject_id = $1::uuid)
+  AND ($1::uuid IS NULL OR purch.customer_id = $1::uuid)
   AND ($2::uuid IS NULL OR purch.price_id = $2::uuid)
   AND ($3::uuid IS NULL OR purch.subscription_id = $3::uuid)
   AND ($4::text IS NULL OR purch.processor::text = $4::text)
@@ -140,21 +140,21 @@ WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 `
 
 type CountPaymentsFilteredParams struct {
-	MerchantSubjectID *uuid.UUID
-	PriceID           *uuid.UUID
-	SubscriptionID    *uuid.UUID
-	Processor         *string
-	TransactionID     *string
-	PurchasedAfter    *time.Time
-	PurchasedBefore   *time.Time
-	MinAmount         *int64
-	MaxAmount         *int64
-	RefundsOnly       bool
+	CustomerID      *uuid.UUID
+	PriceID         *uuid.UUID
+	SubscriptionID  *uuid.UUID
+	Processor       *string
+	TransactionID   *string
+	PurchasedAfter  *time.Time
+	PurchasedBefore *time.Time
+	MinAmount       *int64
+	MaxAmount       *int64
+	RefundsOnly     bool
 }
 
 func (q *Queries) CountPaymentsFiltered(ctx context.Context, arg CountPaymentsFilteredParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countPaymentsFiltered,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.PriceID,
 		arg.SubscriptionID,
 		arg.Processor,
@@ -177,7 +177,7 @@ INSERT INTO openrails.payments (
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
-    card_last4, merchant_subject_id
+    card_last4, customer_id
 ) VALUES (
     $1, $7::uuid, $2, $3, $4, $5, $6,
     COALESCE(NULLIF($8::text, ''), 'usd'),
@@ -214,7 +214,7 @@ type CreatePaymentParams struct {
 	CreatedAt                time.Time
 	CardBrand                *string
 	CardLast4                *string
-	MerchantSubjectID        uuid.UUID
+	CustomerID               uuid.UUID
 }
 
 // openrails.payments — immutable payment event log.
@@ -247,7 +247,7 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (i
 		arg.CreatedAt,
 		arg.CardBrand,
 		arg.CardLast4,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 	)
 	if err != nil {
 		return 0, err
@@ -261,7 +261,7 @@ INSERT INTO openrails.payments (
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
-    card_last4, merchant_subject_id
+    card_last4, customer_id
 ) VALUES (
     $1, $7::uuid, $2, $3, $4, $5, $6,
     COALESCE(NULLIF($8::text, ''), 'usd'),
@@ -299,7 +299,7 @@ type CreatePaymentIfNotExistsParams struct {
 	CreatedAt                time.Time
 	CardBrand                *string
 	CardLast4                *string
-	MerchantSubjectID        uuid.UUID
+	CustomerID               uuid.UUID
 }
 
 func (q *Queries) CreatePaymentIfNotExists(ctx context.Context, arg CreatePaymentIfNotExistsParams) (int64, error) {
@@ -325,7 +325,7 @@ func (q *Queries) CreatePaymentIfNotExists(ctx context.Context, arg CreatePaymen
 		arg.CreatedAt,
 		arg.CardBrand,
 		arg.CardLast4,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 	)
 	if err != nil {
 		return 0, err
@@ -346,7 +346,7 @@ func (q *Queries) DeletePayment(ctx context.Context, id uuid.UUID) (int64, error
 }
 
 const getLatestChargeBySubscriptionID = `-- name: GetLatestChargeBySubscriptionID :one
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments purch
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments purch
 WHERE purch.subscription_id = $1
   AND purch.amount > 0
   AND COALESCE(purch.status::text, 'completed') = 'completed'
@@ -379,27 +379,27 @@ func (q *Queries) GetLatestChargeBySubscriptionID(ctx context.Context, subscript
 		&i.CardBrand,
 		&i.CardLast4,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 	)
 	return i, err
 }
 
-const getLatestPaymentByMerchantSubjectProcessor = `-- name: GetLatestPaymentByMerchantSubjectProcessor :one
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments purch
-WHERE purch.merchant_subject_id = $1
+const getLatestPaymentByCustomerProcessor = `-- name: GetLatestPaymentByCustomerProcessor :one
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments purch
+WHERE purch.customer_id = $1
   AND purch.processor = $2
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC
 LIMIT 1
 `
 
-type GetLatestPaymentByMerchantSubjectProcessorParams struct {
-	MerchantSubjectID uuid.UUID
-	Processor         OpenrailsProcessorType
+type GetLatestPaymentByCustomerProcessorParams struct {
+	CustomerID uuid.UUID
+	Processor  OpenrailsProcessorType
 }
 
-func (q *Queries) GetLatestPaymentByMerchantSubjectProcessor(ctx context.Context, arg GetLatestPaymentByMerchantSubjectProcessorParams) (OpenrailsPayment, error) {
-	row := q.db.QueryRow(ctx, getLatestPaymentByMerchantSubjectProcessor, arg.MerchantSubjectID, arg.Processor)
+func (q *Queries) GetLatestPaymentByCustomerProcessor(ctx context.Context, arg GetLatestPaymentByCustomerProcessorParams) (OpenrailsPayment, error) {
+	row := q.db.QueryRow(ctx, getLatestPaymentByCustomerProcessor, arg.CustomerID, arg.Processor)
 	var i OpenrailsPayment
 	err := row.Scan(
 		&i.ID,
@@ -423,13 +423,13 @@ func (q *Queries) GetLatestPaymentByMerchantSubjectProcessor(ctx context.Context
 		&i.CardBrand,
 		&i.CardLast4,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 	)
 	return i, err
 }
 
 const getLatestPaymentBySubscriptionID = `-- name: GetLatestPaymentBySubscriptionID :one
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments purch
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments purch
 WHERE purch.subscription_id = $1
 ORDER BY purch.purchased_at DESC
 LIMIT 1
@@ -460,13 +460,13 @@ func (q *Queries) GetLatestPaymentBySubscriptionID(ctx context.Context, subscrip
 		&i.CardBrand,
 		&i.CardLast4,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 	)
 	return i, err
 }
 
 const getPaymentByID = `-- name: GetPaymentByID :one
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments WHERE id = $1
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments WHERE id = $1
 `
 
 func (q *Queries) GetPaymentByID(ctx context.Context, id uuid.UUID) (OpenrailsPayment, error) {
@@ -494,13 +494,13 @@ func (q *Queries) GetPaymentByID(ctx context.Context, id uuid.UUID) (OpenrailsPa
 		&i.CardBrand,
 		&i.CardLast4,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 	)
 	return i, err
 }
 
 const getPaymentByMetadataValue = `-- name: GetPaymentByMetadataValue :one
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments purch
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments purch
 WHERE purch.metadata ->> $1::text = $2::text
 LIMIT 1
 `
@@ -535,13 +535,13 @@ func (q *Queries) GetPaymentByMetadataValue(ctx context.Context, arg GetPaymentB
 		&i.CardBrand,
 		&i.CardLast4,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 	)
 	return i, err
 }
 
 const getPaymentByTransactionID = `-- name: GetPaymentByTransactionID :one
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments purch
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments purch
 WHERE purch.processor = $1 AND purch.transaction_id = $2
 `
 
@@ -575,13 +575,13 @@ func (q *Queries) GetPaymentByTransactionID(ctx context.Context, arg GetPaymentB
 		&i.CardBrand,
 		&i.CardLast4,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 	)
 	return i, err
 }
 
 const getPaymentWithPriceProduct = `-- name: GetPaymentWithPriceProduct :one
-SELECT purch.id, purch.price_id, purch.processor, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_spec_snapshot, purch.credits_spec_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.merchant_subject_id, p.id, p.product_id, p.amount, p.currency, p.billing_cycle_days, p.processors, p.status, p.created_at, p.updated_at, p.merchant_id, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT purch.id, purch.price_id, purch.processor, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_spec_snapshot, purch.credits_spec_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, p.id, p.product_id, p.amount, p.currency, p.billing_cycle_days, p.processors, p.status, p.created_at, p.updated_at, p.merchant_id, prod.id, prod.slug, prod.display_name, prod.description, prod.entitlements_spec, prod.credits_spec, prod.tier_group, prod.tier_rank, prod.status, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.payments purch
 JOIN openrails.prices p ON p.id = purch.price_id
 JOIN openrails.products prod ON prod.id = p.product_id
@@ -619,7 +619,7 @@ func (q *Queries) GetPaymentWithPriceProduct(ctx context.Context, id uuid.UUID) 
 		&i.OpenrailsPayment.CardBrand,
 		&i.OpenrailsPayment.CardLast4,
 		&i.OpenrailsPayment.MerchantID,
-		&i.OpenrailsPayment.MerchantSubjectID,
+		&i.OpenrailsPayment.CustomerID,
 		&i.OpenrailsPrice.ID,
 		&i.OpenrailsPrice.ProductID,
 		&i.OpenrailsPrice.Amount,
@@ -647,7 +647,7 @@ func (q *Queries) GetPaymentWithPriceProduct(ctx context.Context, id uuid.UUID) 
 }
 
 const getRefundByAdminIdempotencyKey = `-- name: GetRefundByAdminIdempotencyKey :one
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments purch
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments purch
 WHERE purch.refunded_payment_id = $1
   AND purch.metadata ->> 'admin_refund_idempotency_key' = $2::text
 LIMIT 1
@@ -683,7 +683,7 @@ func (q *Queries) GetRefundByAdminIdempotencyKey(ctx context.Context, arg GetRef
 		&i.CardBrand,
 		&i.CardLast4,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 	)
 	return i, err
 }
@@ -727,8 +727,115 @@ func (q *Queries) LinkRefundedPayment(ctx context.Context, arg LinkRefundedPayme
 	return result.RowsAffected(), nil
 }
 
+const listPaymentsByCustomer = `-- name: ListPaymentsByCustomer :many
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments purch
+WHERE purch.customer_id = $1
+  AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
+ORDER BY purch.purchased_at DESC
+`
+
+func (q *Queries) ListPaymentsByCustomer(ctx context.Context, customerID uuid.UUID) ([]OpenrailsPayment, error) {
+	rows, err := q.db.Query(ctx, listPaymentsByCustomer, customerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPayment
+	for rows.Next() {
+		var i OpenrailsPayment
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.Processor,
+			&i.TransactionID,
+			&i.Amount,
+			&i.ListAmount,
+			&i.Currency,
+			&i.Status,
+			&i.SubscriptionID,
+			&i.RefundedPaymentID,
+			&i.DiscountCode,
+			&i.DiscountReason,
+			&i.DiscountMetadata,
+			&i.EntitlementsSpecSnapshot,
+			&i.CreditsSpecSnapshot,
+			&i.Metadata,
+			&i.PurchasedAt,
+			&i.CreatedAt,
+			&i.CardBrand,
+			&i.CardLast4,
+			&i.MerchantID,
+			&i.CustomerID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPaymentsByCustomerPaged = `-- name: ListPaymentsByCustomerPaged :many
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments purch
+WHERE purch.customer_id = $1
+  AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
+ORDER BY purch.purchased_at DESC
+LIMIT $3::int OFFSET $2::int
+`
+
+type ListPaymentsByCustomerPagedParams struct {
+	CustomerID uuid.UUID
+	PageOffset int32
+	PageLimit  int32
+}
+
+func (q *Queries) ListPaymentsByCustomerPaged(ctx context.Context, arg ListPaymentsByCustomerPagedParams) ([]OpenrailsPayment, error) {
+	rows, err := q.db.Query(ctx, listPaymentsByCustomerPaged, arg.CustomerID, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPayment
+	for rows.Next() {
+		var i OpenrailsPayment
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.Processor,
+			&i.TransactionID,
+			&i.Amount,
+			&i.ListAmount,
+			&i.Currency,
+			&i.Status,
+			&i.SubscriptionID,
+			&i.RefundedPaymentID,
+			&i.DiscountCode,
+			&i.DiscountReason,
+			&i.DiscountMetadata,
+			&i.EntitlementsSpecSnapshot,
+			&i.CreditsSpecSnapshot,
+			&i.Metadata,
+			&i.PurchasedAt,
+			&i.CreatedAt,
+			&i.CardBrand,
+			&i.CardLast4,
+			&i.MerchantID,
+			&i.CustomerID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPaymentsByIDs = `-- name: ListPaymentsByIDs :many
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments WHERE id = ANY($1::uuid[])
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments WHERE id = ANY($1::uuid[])
 `
 
 func (q *Queries) ListPaymentsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsPayment, error) {
@@ -762,114 +869,7 @@ func (q *Queries) ListPaymentsByIDs(ctx context.Context, ids []uuid.UUID) ([]Ope
 			&i.CardBrand,
 			&i.CardLast4,
 			&i.MerchantID,
-			&i.MerchantSubjectID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPaymentsByMerchantSubject = `-- name: ListPaymentsByMerchantSubject :many
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments purch
-WHERE purch.merchant_subject_id = $1
-  AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-ORDER BY purch.purchased_at DESC
-`
-
-func (q *Queries) ListPaymentsByMerchantSubject(ctx context.Context, merchantSubjectID uuid.UUID) ([]OpenrailsPayment, error) {
-	rows, err := q.db.Query(ctx, listPaymentsByMerchantSubject, merchantSubjectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsPayment
-	for rows.Next() {
-		var i OpenrailsPayment
-		if err := rows.Scan(
-			&i.ID,
-			&i.PriceID,
-			&i.Processor,
-			&i.TransactionID,
-			&i.Amount,
-			&i.ListAmount,
-			&i.Currency,
-			&i.Status,
-			&i.SubscriptionID,
-			&i.RefundedPaymentID,
-			&i.DiscountCode,
-			&i.DiscountReason,
-			&i.DiscountMetadata,
-			&i.EntitlementsSpecSnapshot,
-			&i.CreditsSpecSnapshot,
-			&i.Metadata,
-			&i.PurchasedAt,
-			&i.CreatedAt,
-			&i.CardBrand,
-			&i.CardLast4,
-			&i.MerchantID,
-			&i.MerchantSubjectID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPaymentsByMerchantSubjectPaged = `-- name: ListPaymentsByMerchantSubjectPaged :many
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments purch
-WHERE purch.merchant_subject_id = $1
-  AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-ORDER BY purch.purchased_at DESC
-LIMIT $3::int OFFSET $2::int
-`
-
-type ListPaymentsByMerchantSubjectPagedParams struct {
-	MerchantSubjectID uuid.UUID
-	PageOffset        int32
-	PageLimit         int32
-}
-
-func (q *Queries) ListPaymentsByMerchantSubjectPaged(ctx context.Context, arg ListPaymentsByMerchantSubjectPagedParams) ([]OpenrailsPayment, error) {
-	rows, err := q.db.Query(ctx, listPaymentsByMerchantSubjectPaged, arg.MerchantSubjectID, arg.PageOffset, arg.PageLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsPayment
-	for rows.Next() {
-		var i OpenrailsPayment
-		if err := rows.Scan(
-			&i.ID,
-			&i.PriceID,
-			&i.Processor,
-			&i.TransactionID,
-			&i.Amount,
-			&i.ListAmount,
-			&i.Currency,
-			&i.Status,
-			&i.SubscriptionID,
-			&i.RefundedPaymentID,
-			&i.DiscountCode,
-			&i.DiscountReason,
-			&i.DiscountMetadata,
-			&i.EntitlementsSpecSnapshot,
-			&i.CreditsSpecSnapshot,
-			&i.Metadata,
-			&i.PurchasedAt,
-			&i.CreatedAt,
-			&i.CardBrand,
-			&i.CardLast4,
-			&i.MerchantID,
-			&i.MerchantSubjectID,
+			&i.CustomerID,
 		); err != nil {
 			return nil, err
 		}
@@ -882,7 +882,7 @@ func (q *Queries) ListPaymentsByMerchantSubjectPaged(ctx context.Context, arg Li
 }
 
 const listPaymentsByPriceID = `-- name: ListPaymentsByPriceID :many
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments purch
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments purch
 WHERE purch.price_id = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC
@@ -919,7 +919,7 @@ func (q *Queries) ListPaymentsByPriceID(ctx context.Context, priceID uuid.UUID) 
 			&i.CardBrand,
 			&i.CardLast4,
 			&i.MerchantID,
-			&i.MerchantSubjectID,
+			&i.CustomerID,
 		); err != nil {
 			return nil, err
 		}
@@ -932,7 +932,7 @@ func (q *Queries) ListPaymentsByPriceID(ctx context.Context, priceID uuid.UUID) 
 }
 
 const listPaymentsByProcessor = `-- name: ListPaymentsByProcessor :many
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments purch
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments purch
 WHERE purch.processor = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC
@@ -969,7 +969,7 @@ func (q *Queries) ListPaymentsByProcessor(ctx context.Context, processor Openrai
 			&i.CardBrand,
 			&i.CardLast4,
 			&i.MerchantID,
-			&i.MerchantSubjectID,
+			&i.CustomerID,
 		); err != nil {
 			return nil, err
 		}
@@ -982,9 +982,9 @@ func (q *Queries) ListPaymentsByProcessor(ctx context.Context, processor Openrai
 }
 
 const listPaymentsFiltered = `-- name: ListPaymentsFiltered :many
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments purch
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments purch
 WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND ($1::uuid IS NULL OR purch.merchant_subject_id = $1::uuid)
+  AND ($1::uuid IS NULL OR purch.customer_id = $1::uuid)
   AND ($2::uuid IS NULL OR purch.price_id = $2::uuid)
   AND ($3::uuid IS NULL OR purch.subscription_id = $3::uuid)
   AND ($4::text IS NULL OR purch.processor::text = $4::text)
@@ -1005,27 +1005,27 @@ LIMIT $14::int OFFSET $13::int
 `
 
 type ListPaymentsFilteredParams struct {
-	MerchantSubjectID *uuid.UUID
-	PriceID           *uuid.UUID
-	SubscriptionID    *uuid.UUID
-	Processor         *string
-	TransactionID     *string
-	PurchasedAfter    *time.Time
-	PurchasedBefore   *time.Time
-	MinAmount         *int64
-	MaxAmount         *int64
-	RefundsOnly       bool
-	SortBy            string
-	SortDesc          bool
-	PageOffset        int32
-	PageLimit         int32
+	CustomerID      *uuid.UUID
+	PriceID         *uuid.UUID
+	SubscriptionID  *uuid.UUID
+	Processor       *string
+	TransactionID   *string
+	PurchasedAfter  *time.Time
+	PurchasedBefore *time.Time
+	MinAmount       *int64
+	MaxAmount       *int64
+	RefundsOnly     bool
+	SortBy          string
+	SortDesc        bool
+	PageOffset      int32
+	PageLimit       int32
 }
 
 // Sorting is static SQL over a validated (sort_by, sort_desc) pair via the
 // CASE pattern — no identifier interpolation (#334 escape-hatch rule).
 func (q *Queries) ListPaymentsFiltered(ctx context.Context, arg ListPaymentsFilteredParams) ([]OpenrailsPayment, error) {
 	rows, err := q.db.Query(ctx, listPaymentsFiltered,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.PriceID,
 		arg.SubscriptionID,
 		arg.Processor,
@@ -1069,7 +1069,7 @@ func (q *Queries) ListPaymentsFiltered(ctx context.Context, arg ListPaymentsFilt
 			&i.CardBrand,
 			&i.CardLast4,
 			&i.MerchantID,
-			&i.MerchantSubjectID,
+			&i.CustomerID,
 		); err != nil {
 			return nil, err
 		}
@@ -1112,7 +1112,7 @@ func (q *Queries) ListRefundRowsForTotal(ctx context.Context, refundedPaymentID 
 }
 
 const listRefundsForPayment = `-- name: ListRefundsForPayment :many
-SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, merchant_subject_id FROM openrails.payments
+SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id FROM openrails.payments
 WHERE refunded_payment_id = $1
 ORDER BY created_at DESC
 `
@@ -1148,7 +1148,7 @@ func (q *Queries) ListRefundsForPayment(ctx context.Context, refundedPaymentID *
 			&i.CardBrand,
 			&i.CardLast4,
 			&i.MerchantID,
-			&i.MerchantSubjectID,
+			&i.CustomerID,
 		); err != nil {
 			return nil, err
 		}
@@ -1174,7 +1174,7 @@ SELECT p.id AS payment_id,
        p.transaction_id AS payment_transaction_id,
        p.subscription_id AS subscription_id,
        COALESCE(sub.processor_subscription_id, '')::text AS processor_subscription_id,
-       p.merchant_subject_id::text AS user_id,
+       p.customer_id::text AS user_id,
        p.amount AS amount_cents,
        p.currency AS currency,
        p.purchased_at AS purchased_at,

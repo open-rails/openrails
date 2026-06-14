@@ -55,7 +55,7 @@ func AdminPublishSolanaPlan(r *httprequest.Request) {
 		return
 	}
 	handle, err := svc.PublishPlan(r.Request.Context(), recurring.PublishPlanInput{
-		MerchantID:        tenantID,
+		MerchantID:      tenantID,
 		PlanID:          req.PlanID,
 		TokenSymbol:     req.TokenSymbol,
 		AmountBaseUnits: req.AmountBaseUnits,
@@ -161,7 +161,7 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 		return
 	}
 	sub, err := svc.ConfirmEnrollment(r.Request.Context(), recurring.EnrollInput{
-		MerchantID:         tenantID,
+		MerchantID:       tenantID,
 		UserID:           user.ID,
 		UserEmail:        email,
 		PriceID:          priceID,
@@ -229,7 +229,7 @@ func PrepareSolanaCancelTx(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
 		return
 	}
-	if sub.MerchantSubjectID.String() != uc.UserID {
+	if sub.CustomerID.String() != uc.UserID {
 		r.ErrorJSON(http.StatusNotFound, "subscription not found")
 		return
 	}
@@ -308,7 +308,7 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
 		return
 	}
-	if sub.MerchantSubjectID.String() != uc.UserID {
+	if sub.CustomerID.String() != uc.UserID {
 		r.ErrorJSON(http.StatusNotFound, "subscription not found")
 		return
 	}
@@ -382,7 +382,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		}
 		return nil, http.StatusInternalServerError, "failed to retrieve subscription"
 	}
-	if oldSub.MerchantSubjectID.String() != uc.UserID {
+	if oldSub.CustomerID.String() != uc.UserID {
 		return nil, http.StatusNotFound, "subscription not found"
 	}
 	if oldSub.Processor != models.ProcessorSolana {
@@ -548,7 +548,7 @@ func PrepareSolanaTierChange(r *httprequest.Request) {
 		return
 	}
 	res, err := svc.Prepare(r.Request.Context(), recurring.PrepareTierChangeInput{
-		MerchantID:             tenantID,
+		MerchantID:           tenantID,
 		SubscriberWallet:     resolved.oldRow.SubscriberWallet,
 		MintSymbol:           resolved.newTerms.mintSymbol,
 		OldPlanPDA:           resolved.oldRow.PlanPDA,
@@ -610,7 +610,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 		return
 	}
 	prep, err := r.State.SolanaPrepareTierChangeService.Prepare(r.Request.Context(), recurring.PrepareTierChangeInput{
-		MerchantID:             tenantID,
+		MerchantID:           tenantID,
 		SubscriberWallet:     resolved.oldRow.SubscriberWallet,
 		MintSymbol:           resolved.newTerms.mintSymbol,
 		OldPlanPDA:           resolved.oldRow.PlanPDA,
@@ -649,7 +649,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 	result, err := svc.Confirm(r.Request.Context(), recurring.ConfirmTierChangeInput{
 		Signature:            req.Signature,
 		OldSubscriptionID:    subscriptionID,
-		UserID:               resolved.oldSub.MerchantSubjectID.String(),
+		UserID:               resolved.oldSub.CustomerID.String(),
 		UserEmail:            email,
 		NewPriceID:           resolved.newPrice.ID,
 		NewSubscriptionPDA:   prep.NewSubscriptionPDA,

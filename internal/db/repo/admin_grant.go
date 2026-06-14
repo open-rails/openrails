@@ -21,14 +21,14 @@ func NewEntitlementGrantRepo(db *db.DB) *EntitlementGrantRepo {
 
 func adminGrantFromGen(g gen.OpenrailsEntitlementGrant) *models.EntitlementGrant {
 	return &models.EntitlementGrant{
-		ID:              g.ID,
-		MerchantSubjectID: g.MerchantSubjectID,
-		PriceID:         g.PriceID,
-		GrantedBy:       g.GrantedBy,
-		Reason:          g.Reason,
-		PaymentID:       g.PaymentID,
-		DurationDays:    derefIntPtr(g.DurationDays),
-		CreatedAt:       g.CreatedAt,
+		ID:           g.ID,
+		CustomerID:   g.CustomerID,
+		PriceID:      g.PriceID,
+		GrantedBy:    g.GrantedBy,
+		Reason:       g.Reason,
+		PaymentID:    g.PaymentID,
+		DurationDays: derefIntPtr(g.DurationDays),
+		CreatedAt:    g.CreatedAt,
 	}
 }
 
@@ -93,7 +93,7 @@ func (r *EntitlementGrantRepo) attachEntitlementGrantRelations(ctx context.Conte
 
 // Create inserts a new admin grant record
 func (r *EntitlementGrantRepo) Create(ctx context.Context, grant *models.EntitlementGrant) error {
-	if err := ensureMerchantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, grant.MerchantSubjectID); err != nil {
+	if err := ensureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, grant.CustomerID); err != nil {
 		return err
 	}
 	tid, err := merchant.Require(ctx)
@@ -101,15 +101,15 @@ func (r *EntitlementGrantRepo) Create(ctx context.Context, grant *models.Entitle
 		return err
 	}
 	id, err := r.db.Gen(ctx).CreateEntitlementGrant(ctx, gen.CreateEntitlementGrantParams{
-		ID:              grant.ID,
-		MerchantID:        tid.UUID(),
-		MerchantSubjectID: grant.MerchantSubjectID,
-		PriceID:         grant.PriceID,
-		GrantedBy:       grant.GrantedBy,
-		Reason:          grant.Reason,
-		PaymentID:       grant.PaymentID,
-		DurationDays:    intPtrTo32(grant.DurationDays),
-		CreatedAt:       grant.CreatedAt,
+		ID:           grant.ID,
+		MerchantID:   tid.UUID(),
+		CustomerID:   grant.CustomerID,
+		PriceID:      grant.PriceID,
+		GrantedBy:    grant.GrantedBy,
+		Reason:       grant.Reason,
+		PaymentID:    grant.PaymentID,
+		DurationDays: intPtrTo32(grant.DurationDays),
+		CreatedAt:    grant.CreatedAt,
 	})
 	if err != nil {
 		return err
@@ -133,21 +133,21 @@ func (r *EntitlementGrantRepo) GetByID(ctx context.Context, id uuid.UUID) (*mode
 
 // ListByUserID retrieves all admin grants for a user
 func (r *EntitlementGrantRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]models.EntitlementGrant, int, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
 	q := r.db.Gen(ctx)
-	total, err := q.CountEntitlementGrantsByMerchantSubject(ctx, tsid)
+	total, err := q.CountEntitlementGrantsByCustomer(ctx, tsid)
 	if err != nil {
 		return nil, 0, err
 	}
 	limit32, _ := safecast.Convert[int32](limit)
 	offset32, _ := safecast.Convert[int32](offset)
-	rows, err := q.ListEntitlementGrantsByMerchantSubject(ctx, gen.ListEntitlementGrantsByMerchantSubjectParams{
-		MerchantSubjectID: tsid,
-		PageLimit:       limit32,
-		PageOffset:      offset32,
+	rows, err := q.ListEntitlementGrantsByCustomer(ctx, gen.ListEntitlementGrantsByCustomerParams{
+		CustomerID: tsid,
+		PageLimit:  limit32,
+		PageOffset: offset32,
 	})
 	if err != nil {
 		return nil, 0, err

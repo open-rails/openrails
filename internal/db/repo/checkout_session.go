@@ -36,7 +36,7 @@ func checkoutSessionJSONB(s *models.CheckoutSession) (meta, fields, state []byte
 }
 
 func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.CheckoutSession) error {
-	if err := ensureMerchantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, session.MerchantSubjectID); err != nil {
+	if err := ensureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, session.CustomerID); err != nil {
 		return err
 	}
 	meta, fields, state, err := checkoutSessionJSONB(session)
@@ -49,8 +49,8 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 	}
 	rows, err := r.db.Gen(ctx).CreateCheckoutSession(ctx, gen.CreateCheckoutSessionParams{
 		ID:              session.ID,
-		MerchantID:        tid.UUID(),
-		MerchantSubjectID: session.MerchantSubjectID,
+		MerchantID:      tid.UUID(),
+		CustomerID:      session.CustomerID,
 		PriceID:         session.PriceID,
 		Mode:            string(session.Mode),
 		Processor:       string(session.Processor),
@@ -93,7 +93,7 @@ func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.Checko
 	}
 	rows, err := r.db.Gen(ctx).UpdateCheckoutSession(ctx, gen.UpdateCheckoutSessionParams{
 		ID:              session.ID,
-		MerchantSubjectID: session.MerchantSubjectID,
+		CustomerID:      session.CustomerID,
 		PriceID:         session.PriceID,
 		Mode:            string(session.Mode),
 		Processor:       string(session.Processor),
@@ -169,15 +169,15 @@ func (r *CheckoutSessionRepo) GetByReference(ctx context.Context, reference stri
 }
 
 func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceProcessor(ctx context.Context, userID string, priceID uuid.UUID, processor models.Processor) (*models.CheckoutSession, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
 	row, err := r.db.Gen(ctx).GetLatestOpenCheckoutSession(ctx, gen.GetLatestOpenCheckoutSessionParams{
-		MerchantSubjectID: tsid,
-		PriceID:         priceID,
-		Processor:       string(processor),
-		Now:             time.Now(),
+		CustomerID: tsid,
+		PriceID:    priceID,
+		Processor:  string(processor),
+		Now:        time.Now(),
 	})
 	if err != nil {
 		return nil, err

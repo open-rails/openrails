@@ -28,8 +28,8 @@ func NewUSDCFundingSessionRepo(d *db.DB) *USDCFundingSessionRepo {
 func usdcFundingSessionFromGen(s gen.OpenrailsUsdcFundingSession) (*models.USDCFundingSession, error) {
 	m := &models.USDCFundingSession{
 		ID:                s.ID,
-		MerchantID:          s.MerchantID,
-		MerchantSubjectID:   s.MerchantSubjectID,
+		MerchantID:        s.MerchantID,
+		CustomerID:        s.CustomerID,
 		CheckoutSessionID: s.CheckoutSessionID,
 		Provider:          s.Provider,
 		WalletAddress:     s.WalletAddress,
@@ -53,11 +53,11 @@ func usdcFundingSessionFromGen(s gen.OpenrailsUsdcFundingSession) (*models.USDCF
 }
 
 func (r *USDCFundingSessionRepo) CreateForUserID(ctx context.Context, userID string, session *models.USDCFundingSession) error {
-	tsid, err := EnsureMerchantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := EnsureCustomerID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return err
 	}
-	if err := ensureMerchantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, tsid); err != nil {
+	if err := ensureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, tsid); err != nil {
 		return err
 	}
 	tid, err := merchant.Require(ctx)
@@ -65,7 +65,7 @@ func (r *USDCFundingSessionRepo) CreateForUserID(ctx context.Context, userID str
 		return err
 	}
 	session.MerchantID = tid.UUID()
-	session.MerchantSubjectID = tsid
+	session.CustomerID = tsid
 	if session.Metadata == nil {
 		session.Metadata = map[string]any{}
 	}
@@ -75,8 +75,8 @@ func (r *USDCFundingSessionRepo) CreateForUserID(ctx context.Context, userID str
 	}
 	return r.db.Gen(ctx).CreateUSDCFundingSession(ctx, gen.CreateUSDCFundingSessionParams{
 		ID:                session.ID,
-		MerchantID:          session.MerchantID,
-		MerchantSubjectID:   session.MerchantSubjectID,
+		MerchantID:        session.MerchantID,
+		CustomerID:        session.CustomerID,
 		CheckoutSessionID: session.CheckoutSessionID,
 		Provider:          session.Provider,
 		WalletAddress:     session.WalletAddress,
@@ -97,16 +97,16 @@ func (r *USDCFundingSessionRepo) CreateForUserID(ctx context.Context, userID str
 }
 
 func (r *USDCFundingSessionRepo) GetByIDForUserID(ctx context.Context, id uuid.UUID, userID string) (*models.USDCFundingSession, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
 	if tsid == uuid.Nil {
 		return nil, ErrUSDCFundingSessionNotFound
 	}
-	row, err := r.db.Gen(ctx).GetUSDCFundingSessionByIDForMerchantSubject(ctx, gen.GetUSDCFundingSessionByIDForMerchantSubjectParams{
-		ID:              id,
-		MerchantSubjectID: tsid,
+	row, err := r.db.Gen(ctx).GetUSDCFundingSessionByIDForCustomer(ctx, gen.GetUSDCFundingSessionByIDForCustomerParams{
+		ID:         id,
+		CustomerID: tsid,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUSDCFundingSessionNotFound
@@ -133,7 +133,7 @@ func (r *USDCFundingSessionRepo) GetByIdempotencyKeyForUserID(ctx context.Contex
 	if key == "" {
 		return nil, ErrUSDCFundingSessionNotFound
 	}
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -141,8 +141,8 @@ func (r *USDCFundingSessionRepo) GetByIdempotencyKeyForUserID(ctx context.Contex
 		return nil, ErrUSDCFundingSessionNotFound
 	}
 	row, err := r.db.Gen(ctx).GetUSDCFundingSessionByIdempotencyKey(ctx, gen.GetUSDCFundingSessionByIdempotencyKeyParams{
-		MerchantSubjectID: tsid,
-		IdempotencyKey:  &key,
+		CustomerID:     tsid,
+		IdempotencyKey: &key,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUSDCFundingSessionNotFound

@@ -28,11 +28,11 @@ func (c *CheckActiveSubscriptionMissingEntitlements) Run(ctx context.Context, q 
 	// Get all active subscriptions with their product
 	var params gen.AuditActiveSubscriptionsWithSpecParams
 	if opts.UserID != "" {
-		tsid, err := repo.ResolveMerchantSubjectID(opts.UserID)
+		tsid, err := repo.ResolveCustomerID(opts.UserID)
 		if err != nil {
 			return nil, err
 		}
-		params.MerchantSubjectID = &tsid
+		params.CustomerID = &tsid
 	}
 	if opts.Since != nil {
 		params.Since = opts.Since
@@ -59,10 +59,10 @@ func (c *CheckActiveSubscriptionMissingEntitlements) Run(ctx context.Context, q 
 		for entName := range spec {
 			// Check if user has this entitlement from this subscription
 			count, err := q.AuditActiveSubscriptionEntitlementCount(ctx, gen.AuditActiveSubscriptionEntitlementCountParams{
-				MerchantSubjectID: sub.MerchantSubjectID,
-				Entitlement:     entName,
-				SourceID:        sub.ID,
-				Now:             time.Now(),
+				CustomerID:  sub.CustomerID,
+				Entitlement: entName,
+				SourceID:    sub.ID,
+				Now:         time.Now(),
 			})
 			if err != nil {
 				return nil, fmt.Errorf("check entitlement %s for sub %s: %w", entName, sub.ID, err)
@@ -75,7 +75,7 @@ func (c *CheckActiveSubscriptionMissingEntitlements) Run(ctx context.Context, q 
 					Severity:       c.Severity(),
 					EntityType:     EntitySubscription,
 					EntityID:       sub.ID,
-					UserID:         sub.MerchantSubjectID.String(),
+					UserID:         sub.CustomerID.String(),
 					Description:    fmt.Sprintf("Active subscription missing entitlement '%s' from product '%s'", entName, sub.ProductSlug),
 					Recommendation: fmt.Sprintf("Grant entitlement '%s' with source_type=subscription, source_id=%s", entName, sub.ID),
 					AutoFixable:    true,

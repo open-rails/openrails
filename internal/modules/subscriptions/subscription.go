@@ -121,9 +121,9 @@ func (s *SubscriptionService) CancelUserSubscription(ctx context.Context, userID
 
 	// Add notification
 	notification := &models.NotificationQueue{
-		ID:              uuidutil.NewV7(),
-		MerchantSubjectID: identity.MerchantSubjectIDFromString(userID).UUID(),
-		EventType:       models.NotificationPremiumEnded,
+		ID:         uuidutil.NewV7(),
+		CustomerID: identity.CustomerIDFromString(userID).UUID(),
+		EventType:  models.NotificationPremiumEnded,
 		Data: map[string]any{
 			"reason": "user_cancel",
 		},
@@ -190,7 +190,7 @@ func (s *SubscriptionService) Create(ctx context.Context, subscription *models.S
 	}
 
 	if subscription.Status == models.StatusActive || subscription.Status == models.StatusPending || subscription.Status == models.StatusPastDue {
-		_, err := s.GetActiveOrPendingByUserIDAndProductID(ctx, subscription.MerchantSubjectID.String(), subscription.ProductID)
+		_, err := s.GetActiveOrPendingByUserIDAndProductID(ctx, subscription.CustomerID.String(), subscription.ProductID)
 		if err == nil {
 			return ErrActiveSubscriptionExists
 		}

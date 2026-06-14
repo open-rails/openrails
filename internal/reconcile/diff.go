@@ -35,7 +35,7 @@ func buildLocalIndex(local *LocalState) *localIndex {
 	for i := range local.Subscriptions {
 		s := &local.Subscriptions[i]
 		idx.byID[s.ID] = s
-		idx.bySubject[s.MerchantSubjectID] = append(idx.bySubject[s.MerchantSubjectID], s)
+		idx.bySubject[s.CustomerID] = append(idx.bySubject[s.CustomerID], s)
 		if s.ProcessorSubscriptionID != "" {
 			// Prefer the live row when several local rows share one processor
 			// subscription id (supersede history).
@@ -222,7 +222,7 @@ func (c *correlator) subForTxn(t *RemoteTransaction) (sub *LocalSubscription, ho
 			continue
 		}
 		if pm, ok := c.local.pmByVault[vaultID]; ok {
-			subs := c.local.bySubject[pm.MerchantSubjectID]
+			subs := c.local.bySubject[pm.CustomerID]
 			if s, ok := uniqueSub(subs); ok {
 				return s, "vault_id", false
 			}
@@ -284,7 +284,7 @@ func uniqueSub(subs []*LocalSubscription) (*LocalSubscription, bool) {
 func localSubEvidence(s *LocalSubscription) map[string]any {
 	ev := map[string]any{
 		"subscription_id":           s.ID.String(),
-		"tenant_subject_id":         s.MerchantSubjectID.String(),
+		"customer_id":               s.CustomerID.String(),
 		"status":                    s.Status,
 		"processor":                 s.Processor,
 		"processor_subscription_id": s.ProcessorSubscriptionID,
@@ -503,7 +503,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 			for _, c := range candidates {
 				matches = append(matches, map[string]any{
 					"subscription_id":           c.ID.String(),
-					"tenant_subject_id":         c.MerchantSubjectID.String(),
+					"customer_id":               c.CustomerID.String(),
 					"status":                    c.Status,
 					"processor_subscription_id": c.ProcessorSubscriptionID,
 				})
@@ -543,7 +543,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		Provider:                provider,
 		Processor:               link.processorName,
 		ProcessorSubscriptionID: r.ProcessorSubscriptionID,
-		MerchantSubjectID:         subjectID,
+		CustomerID:              subjectID,
 		PriceID:                 link.price.ID,
 		ProductID:               link.price.ProductID,
 		Status:                  string(r.Status),
@@ -560,13 +560,13 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 	}
 	if t := latestChargeForRemoteSub(snap, r); t != nil {
 		action.Backfill = &BackfillPaymentAction{
-			Processor:       link.processorName,
-			TransactionID:   t.TransactionID,
-			AmountCents:     t.AmountCents,
-			Currency:        strings.ToLower(t.Currency),
-			PurchasedAt:     t.OccurredAt,
-			PriceID:         link.price.ID,
-			MerchantSubjectID: subjectID,
+			Processor:     link.processorName,
+			TransactionID: t.TransactionID,
+			AmountCents:   t.AmountCents,
+			Currency:      strings.ToLower(t.Currency),
+			PurchasedAt:   t.OccurredAt,
+			PriceID:       link.price.ID,
+			CustomerID:    subjectID,
 			Metadata: map[string]any{
 				"reconcile_backfill":    true,
 				"reconcile_materialize": true,
@@ -586,7 +586,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		f.LocalEvidence = map[string]any{}
 	}
 	f.LocalEvidence["materialize_identity_via"] = identityVia
-	f.LocalEvidence["materialize_tenant_subject_id"] = subjectID.String()
+	f.LocalEvidence["materialize_customer_id"] = subjectID.String()
 	f.LocalEvidence["materialize_price_id"] = link.price.ID.String()
 	f.LocalEvidence["materialize_processor"] = link.processorName
 	return f
@@ -601,13 +601,13 @@ func resolvePS1Identity(r *RemoteSubscription, idx *localIndex) (uuid.UUID, stri
 	subjects := map[uuid.UUID]string{} // subject -> how it matched (vault wins)
 	if r.CustomerID != "" {
 		if pm, ok := idx.pmByVault[r.CustomerID]; ok {
-			subjects[pm.MerchantSubjectID] = "vault_id"
+			subjects[pm.CustomerID] = "vault_id"
 		}
 	}
 	if email := strings.ToLower(strings.TrimSpace(r.Email)); email != "" {
 		for _, s := range idx.byEmail[email] {
-			if _, ok := subjects[s.MerchantSubjectID]; !ok {
-				subjects[s.MerchantSubjectID] = "email"
+			if _, ok := subjects[s.CustomerID]; !ok {
+				subjects[s.CustomerID] = "email"
 			}
 		}
 	}
@@ -813,7 +813,7 @@ func diffDuplicates(provider Provider, idx *localIndex, ridx *remoteIndex) []Fin
 		}
 		if l, ok := idx.byPSID[r.ProcessorSubscriptionID]; ok {
 			// Matched: duplicates within one (subject, tier group).
-			addGroup("subject:"+l.MerchantSubjectID.String()+"|tier:"+l.TierGroup, r, l)
+			addGroup("subject:"+l.CustomerID.String()+"|tier:"+l.TierGroup, r, l)
 			continue
 		}
 		// Unmatched: duplicates on the same processor-side identity + plan.
@@ -930,14 +930,14 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 		f.RecommendedAction = "enforce backfills the missing openrails.payments row (deduped on processor+transaction_id)"
 		subID := sub.ID
 		action := &BackfillPaymentAction{
-			Processor:       sub.Processor,
-			TransactionID:   t.TransactionID,
-			AmountCents:     t.AmountCents,
-			Currency:        strings.ToLower(t.Currency),
-			PurchasedAt:     t.OccurredAt,
-			PriceID:         *sub.PriceID,
-			SubscriptionID:  &subID,
-			MerchantSubjectID: sub.MerchantSubjectID,
+			Processor:      sub.Processor,
+			TransactionID:  t.TransactionID,
+			AmountCents:    t.AmountCents,
+			Currency:       strings.ToLower(t.Currency),
+			PurchasedAt:    t.OccurredAt,
+			PriceID:        *sub.PriceID,
+			SubscriptionID: &subID,
+			CustomerID:     sub.CustomerID,
 			Metadata: map[string]any{
 				"reconcile_backfill": true,
 				"correlated_via":     how,
@@ -951,11 +951,11 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 				start = *sub.CurrentPeriodStartsAt
 			}
 			action.Grant = &GrantEntitlementsAction{
-				SubscriptionID:  sub.ID,
-				MerchantSubjectID: sub.MerchantSubjectID,
-				Entitlements:    sub.EntitlementNames,
-				StartAt:         start,
-				EndAt:           sub.CurrentPeriodEndsAt,
+				SubscriptionID: sub.ID,
+				CustomerID:     sub.CustomerID,
+				Entitlements:   sub.EntitlementNames,
+				StartAt:        start,
+				EndAt:          sub.CurrentPeriodEndsAt,
 			}
 			f.RecommendedAction += "; the charge's period is current, so missing subscription entitlements are granted too"
 		}
@@ -1014,11 +1014,11 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 	}
 
 	f.LocalEvidence = map[string]any{
-		"payment_id":        original.ID.String(),
-		"tenant_subject_id": original.MerchantSubjectID.String(),
-		"transaction_id":    original.TransactionID,
-		"amount_cents":      original.AmountCents,
-		"status":            original.Status,
+		"payment_id":     original.ID.String(),
+		"customer_id":    original.CustomerID.String(),
+		"transaction_id": original.TransactionID,
+		"amount_cents":   original.AmountCents,
+		"status":         original.Status,
 	}
 	f.RecommendedAction = "enforce records the refund locally (negative payment row + original marked refunded). Revoking any entitlement the refunded payment granted is a human decision — review in the admin queue if warranted"
 
@@ -1031,7 +1031,7 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 		PurchasedAt:       t.OccurredAt,
 		RefundedPaymentID: &originalID,
 		SubscriptionID:    original.SubscriptionID,
-		MerchantSubjectID:   original.MerchantSubjectID,
+		CustomerID:        original.CustomerID,
 		Metadata: map[string]any{
 			"reconcile_refund_backfill": true,
 			"provider":                  string(provider),
@@ -1108,7 +1108,7 @@ func diffVault(provider Provider, local *LocalState, ridx *remoteIndex, traits p
 				Status:     FindingStatusOpen,
 				LocalEvidence: map[string]any{
 					"payment_method_id": pm.ID.String(),
-					"tenant_subject_id": pm.MerchantSubjectID.String(),
+					"customer_id":       pm.CustomerID.String(),
 					"vault_id":          pm.VaultID,
 					"last_four":         pm.LastFour,
 					"expiry_date":       pm.ExpiryDate,
@@ -1135,7 +1135,7 @@ func diffVault(provider Provider, local *LocalState, ridx *remoteIndex, traits p
 			Status:     FindingStatusOpen,
 			LocalEvidence: map[string]any{
 				"payment_method_id": pm.ID.String(),
-				"tenant_subject_id": pm.MerchantSubjectID.String(),
+				"customer_id":       pm.CustomerID.String(),
 				"vault_id":          pm.VaultID,
 				"last_four":         pm.LastFour,
 				"expiry_date":       pm.ExpiryDate,
@@ -1211,18 +1211,18 @@ func diffEntitlements(provider Provider, local *LocalState, idx *localIndex, now
 				Status:     FindingStatusOpen,
 				LocalEvidence: map[string]any{
 					"subscription_id":      s.ID.String(),
-					"tenant_subject_id":    s.MerchantSubjectID.String(),
+					"customer_id":          s.CustomerID.String(),
 					"status":               s.Status,
 					"missing_entitlements": missing,
 					"direction":            "grant",
 				},
 				RecommendedAction: "active subscription is missing subscription-sourced entitlements; enforce grants them for the current period",
 				Apply: &ApplyAction{GrantEntitlements: &GrantEntitlementsAction{
-					SubscriptionID:  s.ID,
-					MerchantSubjectID: s.MerchantSubjectID,
-					Entitlements:    missing,
-					StartAt:         start,
-					EndAt:           s.CurrentPeriodEndsAt,
+					SubscriptionID: s.ID,
+					CustomerID:     s.CustomerID,
+					Entitlements:   missing,
+					StartAt:        start,
+					EndAt:          s.CurrentPeriodEndsAt,
 				}},
 			})
 
@@ -1240,7 +1240,7 @@ func diffEntitlements(provider Provider, local *LocalState, idx *localIndex, now
 				Status:     FindingStatusOpen,
 				LocalEvidence: map[string]any{
 					"subscription_id":   s.ID.String(),
-					"tenant_subject_id": s.MerchantSubjectID.String(),
+					"customer_id":       s.CustomerID.String(),
 					"status":            s.Status,
 					"live_entitlements": names,
 					"direction":         "revoke",

@@ -10,11 +10,11 @@ import (
 // This replaces processor-specific payment method tables
 type PaymentMethod struct {
 	ID uuid.UUID `json:"id"`
-	// MerchantSubjectID is the OpenRails payable tenant subject for this row (#317).
+	// CustomerID is the OpenRails payable tenant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
-	// it before user_id is dropped. Join openrails.tenant_subjects for issuer/subject.
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id,omitempty"`
-	Processor       Processor `json:"processor"` // Processor: mobius, ccbill, solana
+	// it before user_id is dropped. Join openrails.customers for issuer/subject.
+	CustomerID uuid.UUID `json:"customer_id,omitempty"`
+	Processor  Processor `json:"processor"` // Processor: mobius, ccbill, solana
 
 	// Processor-specific vault/payment method identifiers
 	VaultID              string  `json:"-"` // Primary identifier in processor's system

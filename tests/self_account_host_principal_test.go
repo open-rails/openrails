@@ -41,7 +41,7 @@ type hostSeamAuthenticator struct {
 
 func (h hostSeamAuthenticator) AuthenticateDelegated(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 	return &billingauth.DelegatedPrincipal{
-		MerchantID:    dbtest.TestTenantID.String(),
+		MerchantID:  dbtest.TestTenantID.String(),
 		TenantSlug:  dbtest.TestTenantSlug,
 		SubjectID:   h.subject,
 		Actor:       "https://auth.host.example",
@@ -88,16 +88,16 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 
 	subjectA := uuid.NewString()
 	subjectB := uuid.NewString()
-	payerA := identity.MerchantSubjectIDFromString(subjectA)
+	payerA := identity.CustomerIDFromString(subjectA)
 	sourceID := uuid.New()
 
 	// Fund subject A so its account has a balance and a transaction.
 	_, err = svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
-		MerchantSubjectID: &payerA,
-		Actor:           subjectA,
-		Amount:          7_500_000,
-		Source:          "test_seed",
-		SourceID:        &sourceID,
+		CustomerID: &payerA,
+		Actor:      subjectA,
+		Amount:     7_500_000,
+		Source:     "test_seed",
+		SourceID:   &sourceID,
 	})
 	require.NoError(t, err)
 
@@ -132,7 +132,7 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	require.EqualValues(t, 1_000_000, stored["max_spend_per_day_micros"])
 	require.EqualValues(t, 2_000_000, stored["max_outstanding_owed_micros"])
 	require.Equal(t, true, stored["hard_stop_on_breach"])
-	require.Equal(t, payerA.UUID().String(), stored["merchant_subject_id"],
+	require.Equal(t, payerA.UUID().String(), stored["customer_id"],
 		"settings must be stored under the delegated subject, never caller-supplied")
 
 	// The settings round-trip through the account read.
@@ -150,7 +150,7 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	require.Len(t, list, 1)
 	first, ok := list[0].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, payerA.UUID().String(), first["merchant_subject_id"])
+	require.Equal(t, payerA.UUID().String(), first["customer_id"])
 	require.EqualValues(t, 7_500_000, first["amount"])
 
 	// --- SCOPING: subject B sees NONE of A's data. ---

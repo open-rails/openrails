@@ -27,7 +27,7 @@ const (
 // ledger row is written. Idempotent on (payer, source, source_id).
 // The payer's outstanding ceiling is enforced separately at authorize time
 // (CheckSpendAllowed); this is the settlement side. (#241)
-func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.MerchantSubjectID, currency, source, sourceID string, amount int64) (*models.MoneyTransaction, error) {
+func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID, currency, source, sourceID string, amount int64) (*models.MoneyTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -60,7 +60,7 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.MerchantSu
 
 		// Idempotency.
 		existing, gerr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur,
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			TransactionType: txOwedAccrual, Source: source, SourceID: &sourceID,
 		})
 		if gerr == nil {
@@ -75,14 +75,14 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.MerchantSu
 			return err
 		}
 		if err := q.AddMoneyOutstandingOwed(ctx, gen.AddMoneyOutstandingOwedParams{
-			MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur,
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			Amount: amount, Now: now,
 		}); err != nil {
 			return err
 		}
 
 		trx = &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), MerchantID: tenantID, MerchantSubjectID: payerID, Currency: cur, Actor: payerID.String(),
+			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: cur, Actor: payerID.String(),
 			Amount: amount, TransactionType: txOwedAccrual, Status: "posted",
 			Source: source, SourceID: &sourceID, CreatedAt: now, UpdatedAt: now,
 		}
@@ -97,20 +97,20 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.MerchantSu
 // ensureSettingsRowTx inserts a default settings row for payer if one does not
 // exist, using the given billing mode. No-op when the row exists.
 func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, currency, mode string, now time.Time) error {
-	// Materialize the payable tenant_subjects row so the money_accounts FK
+	// Materialize the payable customers row so the money_accounts FK
 	// (migration 076) is satisfied — this is the shared choke point for settings
 	// writes (suspend/resume/verify/graduate/arrears) (#317).
-	if err := ensureMerchantSubject(ctx, q, tenantID, payerID); err != nil {
+	if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
 		return err
 	}
 	return q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{
-		ID: uuidutil.NewV7(), MerchantID: tenantID, MerchantSubjectID: payerID, Currency: normalizeCurrency(currency),
+		ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency),
 		BillingMode: mode, Now: now,
 	})
 }
 
 // GetOutstandingOwed returns the current outstanding owed for payer in currency.
-func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.MerchantSubjectID, currency string) (int64, error) {
+func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
 	settings, err := s.getAccountSettings(ctx, payer, currency)
 	if err != nil {
 		return 0, err
@@ -120,8 +120,8 @@ func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.Me
 
 // arrearsAccount is a scanned arrears-account row for the charge job.
 type arrearsAccount struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
+	MerchantID      uuid.UUID
+	CustomerID      uuid.UUID
 	Currency        string
 	Owed            int64
 	PaymentMethodID *uuid.UUID
@@ -155,8 +155,8 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 	rows := make([]arrearsAccount, 0, len(genRows))
 	for _, r := range genRows {
 		rows = append(rows, arrearsAccount{
-			MerchantID:        r.MerchantID,
-			MerchantSubjectID: r.MerchantSubjectID,
+			MerchantID:      r.MerchantID,
+			CustomerID:      r.CustomerID,
 			Currency:        r.Currency,
 			Owed:            r.OutstandingOwedMicros,
 			PaymentMethodID: r.AutoTopupPaymentMethodID,
@@ -177,7 +177,7 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 }
 
 func (s *MoneyService) chargeOneOutstanding(ctx context.Context, charger Charger, r arrearsAccount) (bool, error) {
-	payer := identity.MerchantSubjectID(r.MerchantSubjectID)
+	payer := identity.CustomerID(r.CustomerID)
 	snapshot := r.Owed
 	if snapshot <= 0 || r.PaymentMethodID == nil {
 		return false, nil
@@ -186,7 +186,7 @@ func (s *MoneyService) chargeOneOutstanding(ctx context.Context, charger Charger
 	if err := RequireBillingCurrency(normalizeCurrency(r.Currency)); err != nil {
 		return false, nil
 	}
-	key := fmt.Sprintf("arrears:%s:%d", r.MerchantSubjectID, snapshot)
+	key := fmt.Sprintf("arrears:%s:%d", r.CustomerID, snapshot)
 
 	// Owed is in ledger micro-dollars; the processor charges whole cents
 	// (1 cent = 10,000 micros). Round up so we never under-collect.
@@ -214,7 +214,7 @@ func (s *MoneyService) chargeOneOutstanding(ctx context.Context, charger Charger
 		// Reduce owed by the snapshot (never below zero); CAS-style guard prevents a
 		// double-decrement if two runs race on the same snapshot.
 		n, uerr := q.ReduceMoneyOutstandingOwedSnapshot(ctx, gen.ReduceMoneyOutstandingOwedSnapshotParams{
-			MerchantID: r.MerchantID, MerchantSubjectID: r.MerchantSubjectID, Currency: normalizeCurrency(r.Currency),
+			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency),
 			Snapshot: snapshot, Now: now,
 		})
 		if uerr != nil {
@@ -227,7 +227,7 @@ func (s *MoneyService) chargeOneOutstanding(ctx context.Context, charger Charger
 
 		sid := key
 		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), MerchantID: r.MerchantID, MerchantSubjectID: r.MerchantSubjectID, Currency: normalizeCurrency(r.Currency), Actor: r.MerchantSubjectID.String(),
+			ID: uuidutil.NewV7(), MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency), Actor: r.CustomerID.String(),
 			Amount: -snapshot, TransactionType: txOwedPayment, Status: "posted",
 			Source: "arrears_charge", SourceID: &sid, CreatedAt: now, UpdatedAt: now,
 		}

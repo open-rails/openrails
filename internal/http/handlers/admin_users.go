@@ -18,10 +18,10 @@ type adminUserPath struct {
 }
 
 type adminUserBillingProfile struct {
-	MerchantSubjectID string               `json:"tenant_subject_id"`
-	Subscription    *models.Subscription `json:"subscription,omitempty"`
-	Entitlements    []models.Entitlement `json:"entitlements"`
-	Payments        []*models.Payment    `json:"payments"`
+	CustomerID   string               `json:"customer_id"`
+	Subscription *models.Subscription `json:"subscription,omitempty"`
+	Entitlements []models.Entitlement `json:"entitlements"`
+	Payments     []*models.Payment    `json:"payments"`
 }
 
 type adminSubscriptionPath struct {
@@ -72,7 +72,7 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	}
 	ctx := r.Request.Context()
 	now := time.Now()
-	profile := adminUserBillingProfile{MerchantSubjectID: identity.MerchantSubjectIDFromString(path.UserID).UUID().String(), Entitlements: []models.Entitlement{}, Payments: []*models.Payment{}}
+	profile := adminUserBillingProfile{CustomerID: identity.CustomerIDFromString(path.UserID).UUID().String(), Entitlements: []models.Entitlement{}, Payments: []*models.Payment{}}
 	if r.State.SubscriptionService != nil {
 		sub, err := r.State.SubscriptionService.GetActiveSubscription(ctx, path.UserID)
 		if err == nil {

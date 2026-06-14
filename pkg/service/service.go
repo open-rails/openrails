@@ -55,13 +55,13 @@ var ErrInsufficientCredits = money.ErrInsufficientCredits
 var ErrCreditTypeInactive = errors.New("credit_type_inactive")
 
 type HoldCreditsRequest struct {
-	MerchantSubjectID *identity.MerchantSubjectID
-	Actor           string
-	Currency        string // "" => DefaultCurrency (#476)
-	Amount          int64
-	Source          string
-	SourceID        string
-	ExpiresAt       time.Time
+	CustomerID *identity.CustomerID
+	Actor      string
+	Currency   string // "" => DefaultCurrency (#476)
+	Amount     int64
+	Source     string
+	SourceID   string
+	ExpiresAt  time.Time
 }
 
 type CreditHold struct {
@@ -81,8 +81,8 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 	req.Actor = strings.TrimSpace(req.Actor)
 	req.Source = strings.TrimSpace(req.Source)
 	req.SourceID = strings.TrimSpace(req.SourceID)
-	if req.MerchantSubjectID == nil || req.MerchantSubjectID.IsZero() {
-		return nil, fmt.Errorf("tenant_subject_id required")
+	if req.CustomerID == nil || req.CustomerID.IsZero() {
+		return nil, fmt.Errorf("customer_id required")
 	}
 	if req.Actor == "" {
 		return nil, fmt.Errorf("actor required")
@@ -100,7 +100,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 		return nil, fmt.Errorf("expires_at required")
 	}
 
-	hold, err := s.moneyService().Hold(ctx, req.MerchantSubjectID, req.Actor, req.Currency, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
+	hold, err := s.moneyService().Hold(ctx, req.CustomerID, req.Actor, req.Currency, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ type CaptureHoldRequest struct {
 
 type CreditTransaction struct {
 	ID              uuid.UUID
-	MerchantSubjectID uuid.UUID
+	CustomerID      uuid.UUID
 	Actor           string
 	Amount          int64
 	BalanceAfter    *int64
@@ -170,19 +170,19 @@ type CreditTransaction struct {
 }
 
 type WithdrawCreditsRequest struct {
-	MerchantSubjectID *identity.MerchantSubjectID
-	Actor           string
-	Currency        string // "" => DefaultCurrency (#476)
-	Amount          int64
-	Source          string
-	SourceID        *uuid.UUID
+	CustomerID *identity.CustomerID
+	Actor      string
+	Currency   string // "" => DefaultCurrency (#476)
+	Amount     int64
+	Source     string
+	SourceID   *uuid.UUID
 }
 
 func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error) {
 	req.Actor = strings.TrimSpace(req.Actor)
 	req.Source = strings.TrimSpace(req.Source)
-	if req.MerchantSubjectID == nil || req.MerchantSubjectID.IsZero() {
-		return nil, fmt.Errorf("tenant_subject_id required")
+	if req.CustomerID == nil || req.CustomerID.IsZero() {
+		return nil, fmt.Errorf("customer_id required")
 	}
 	if req.Actor == "" {
 		return nil, fmt.Errorf("actor required")
@@ -197,19 +197,19 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 		return nil, fmt.Errorf("source_id required")
 	}
 	trx, err := s.moneyService().Withdraw(ctx, money.WithdrawParams{
-		MerchantSubjectID: req.MerchantSubjectID,
-		Actor:           req.Actor,
-		Currency:        req.Currency,
-		Amount:          req.Amount,
-		Source:          req.Source,
-		SourceID:        req.SourceID,
+		CustomerID: req.CustomerID,
+		Actor:      req.Actor,
+		Currency:   req.Currency,
+		Amount:     req.Amount,
+		Source:     req.Source,
+		SourceID:   req.SourceID,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		MerchantSubjectID: trx.MerchantSubjectID,
+		CustomerID:      trx.CustomerID,
 		Actor:           trx.Actor,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
@@ -227,21 +227,21 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 }
 
 type DepositCreditsRequest struct {
-	MerchantSubjectID *identity.MerchantSubjectID
-	Actor           string
-	Currency        string // "" => DefaultCurrency (#476)
-	Amount          int64
-	Source          string
-	SourceID        *uuid.UUID
-	ExpiresAt       *time.Time
-	Description     *string
+	CustomerID  *identity.CustomerID
+	Actor       string
+	Currency    string // "" => DefaultCurrency (#476)
+	Amount      int64
+	Source      string
+	SourceID    *uuid.UUID
+	ExpiresAt   *time.Time
+	Description *string
 }
 
 func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
 	req.Actor = strings.TrimSpace(req.Actor)
 	req.Source = strings.TrimSpace(req.Source)
-	if req.MerchantSubjectID == nil || req.MerchantSubjectID.IsZero() {
-		return nil, fmt.Errorf("tenant_subject_id required")
+	if req.CustomerID == nil || req.CustomerID.IsZero() {
+		return nil, fmt.Errorf("customer_id required")
 	}
 	if req.Actor == "" {
 		return nil, fmt.Errorf("actor required")
@@ -256,21 +256,21 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 		return nil, fmt.Errorf("source_id required")
 	}
 	trx, err := s.moneyService().Deposit(ctx, money.DepositParams{
-		MerchantSubjectID: req.MerchantSubjectID,
-		Actor:           req.Actor,
-		Currency:        req.Currency,
-		Amount:          req.Amount,
-		Source:          req.Source,
-		SourceID:        req.SourceID,
-		ExpiresAt:       req.ExpiresAt,
-		Description:     req.Description,
+		CustomerID:  req.CustomerID,
+		Actor:       req.Actor,
+		Currency:    req.Currency,
+		Amount:      req.Amount,
+		Source:      req.Source,
+		SourceID:    req.SourceID,
+		ExpiresAt:   req.ExpiresAt,
+		Description: req.Description,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		MerchantSubjectID: trx.MerchantSubjectID,
+		CustomerID:      trx.CustomerID,
 		Actor:           trx.Actor,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
@@ -314,7 +314,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 		}
 		captureTxnID := trx.ID
 		if uerr := s.moneyService().InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
-			MerchantSubjectID:    trx.MerchantSubjectID,
+			CustomerID:         trx.CustomerID,
 			Actor:              trx.Actor,
 			EventType:          req.EventType,
 			Resource:           strings.TrimSpace(req.Resource),
@@ -332,7 +332,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		MerchantSubjectID: trx.MerchantSubjectID,
+		CustomerID:      trx.CustomerID,
 		Actor:           trx.Actor,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
@@ -359,20 +359,20 @@ type ServiceUsageRollupRow struct {
 
 // ServiceUsageRollupRequest selects a payer + window + grouping dimension.
 type ServiceUsageRollupRequest struct {
-	MerchantSubjectID *identity.MerchantSubjectID
-	From            time.Time
-	To              time.Time
-	GroupBy         string // endpoint | function | tier | user
+	CustomerID *identity.CustomerID
+	From       time.Time
+	To         time.Time
+	GroupBy    string // endpoint | function | tier | user
 }
 
 // ServiceUsageRollup returns per-dimension-value spend for a payer over a
 // window (#311) — the OpenRails-sourced data behind the platform's
 // /budget-usage + revenue analytics. Service-scoped (operator service token).
 func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollupRequest) ([]ServiceUsageRollupRow, error) {
-	if req.MerchantSubjectID == nil || req.MerchantSubjectID.IsZero() {
-		return nil, fmt.Errorf("tenant_subject_id required")
+	if req.CustomerID == nil || req.CustomerID.IsZero() {
+		return nil, fmt.Errorf("customer_id required")
 	}
-	rows, err := s.moneyService().ServiceUsageRollup(ctx, *req.MerchantSubjectID, req.From, req.To, req.GroupBy)
+	rows, err := s.moneyService().ServiceUsageRollup(ctx, *req.CustomerID, req.From, req.To, req.GroupBy)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +427,7 @@ func (s *Service) releaseBudgetScopes(ctx context.Context, trx *models.MoneyTran
 	if trx == nil || trx.SourceID == nil || strings.TrimSpace(*trx.SourceID) == "" {
 		return
 	}
-	payer := identity.MerchantSubjectID(trx.MerchantSubjectID)
+	payer := identity.CustomerID(trx.CustomerID)
 	bsvc := budgets.NewService(s.rt.DB)
 	if err := bsvc.ReleaseByCoords(ctx, payer, trx.Source, *trx.SourceID); err != nil {
 		log.Warnf("service release: budget scope release failed (hold %s released): %v", trx.ID, err)
@@ -458,7 +458,7 @@ func (s *Service) captureBudgetScopes(ctx context.Context, trx *models.MoneyTran
 	if trx == nil || trx.SourceID == nil || strings.TrimSpace(*trx.SourceID) == "" {
 		return
 	}
-	payer := identity.MerchantSubjectID(trx.MerchantSubjectID)
+	payer := identity.CustomerID(trx.CustomerID)
 	bsvc := budgets.NewService(s.rt.DB)
 	if err := bsvc.CaptureByCoords(ctx, payer, trx.Source, *trx.SourceID, capturedMicros); err != nil {
 		log.Warnf("service capture: budget scope capture failed (hold %s captured): %v", trx.ID, err)
@@ -478,19 +478,19 @@ func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at 
 	return s.entitlementService().ListActiveEntitlements(ctx, userID, at.UTC())
 }
 
-func (s *Service) ListActiveEntitlementsForMerchantSubject(ctx context.Context, tenantSubjectID identity.MerchantSubjectID, at time.Time) ([]string, error) {
+func (s *Service) ListActiveEntitlementsForCustomer(ctx context.Context, tenantSubjectID identity.CustomerID, at time.Time) ([]string, error) {
 	if tenantSubjectID.IsZero() {
-		return nil, fmt.Errorf("tenant_subject_id required")
+		return nil, fmt.Errorf("customer_id required")
 	}
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
-	return s.entitlementService().ListActiveEntitlementsByMerchantSubject(ctx, tenantSubjectID.UUID(), at.UTC())
+	return s.entitlementService().ListActiveEntitlementsByCustomer(ctx, tenantSubjectID.UUID(), at.UTC())
 }
 
-func (s *Service) IsMerchantSubjectEntitled(ctx context.Context, tenantSubjectID identity.MerchantSubjectID, entitlement string, at time.Time) (bool, error) {
+func (s *Service) IsCustomerEntitled(ctx context.Context, tenantSubjectID identity.CustomerID, entitlement string, at time.Time) (bool, error) {
 	if tenantSubjectID.IsZero() {
-		return false, fmt.Errorf("tenant_subject_id required")
+		return false, fmt.Errorf("customer_id required")
 	}
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
@@ -499,12 +499,12 @@ func (s *Service) IsMerchantSubjectEntitled(ctx context.Context, tenantSubjectID
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
-	return s.entitlementService().IsMerchantSubjectEntitled(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
+	return s.entitlementService().IsCustomerEntitled(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
 }
 
-func (s *Service) HasActiveIndefiniteEntitlementForMerchantSubject(ctx context.Context, tenantSubjectID identity.MerchantSubjectID, entitlement string, at time.Time) (bool, error) {
+func (s *Service) HasActiveIndefiniteEntitlementForCustomer(ctx context.Context, tenantSubjectID identity.CustomerID, entitlement string, at time.Time) (bool, error) {
 	if tenantSubjectID.IsZero() {
-		return false, fmt.Errorf("tenant_subject_id required")
+		return false, fmt.Errorf("customer_id required")
 	}
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
@@ -513,12 +513,12 @@ func (s *Service) HasActiveIndefiniteEntitlementForMerchantSubject(ctx context.C
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
-	return s.entitlementService().HasActiveIndefiniteByMerchantSubject(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
+	return s.entitlementService().HasActiveIndefiniteByCustomer(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
 }
 
-func (s *Service) LatestFiniteEntitlementWindowForMerchantSubject(ctx context.Context, tenantSubjectID identity.MerchantSubjectID, entitlement string, at time.Time) (*EntitlementRecord, error) {
+func (s *Service) LatestFiniteEntitlementWindowForCustomer(ctx context.Context, tenantSubjectID identity.CustomerID, entitlement string, at time.Time) (*EntitlementRecord, error) {
 	if tenantSubjectID.IsZero() {
-		return nil, fmt.Errorf("tenant_subject_id required")
+		return nil, fmt.Errorf("customer_id required")
 	}
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
@@ -527,7 +527,7 @@ func (s *Service) LatestFiniteEntitlementWindowForMerchantSubject(ctx context.Co
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
-	ent, err := s.entitlementService().LatestFiniteWindowByMerchantSubject(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
+	ent, err := s.entitlementService().LatestFiniteWindowByCustomer(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -536,18 +536,18 @@ func (s *Service) LatestFiniteEntitlementWindowForMerchantSubject(ctx context.Co
 }
 
 type EntitlementRecord struct {
-	ID              uuid.UUID
-	MerchantSubjectID uuid.UUID
-	UserID          string
-	Entitlement     string
-	StartAt         time.Time
-	EndAt           *time.Time
-	SourceID        *uuid.UUID
-	SourceType      string
-	RevokedAt       *time.Time
-	RevokeReason    *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID           uuid.UUID
+	CustomerID   uuid.UUID
+	UserID       string
+	Entitlement  string
+	StartAt      time.Time
+	EndAt        *time.Time
+	SourceID     *uuid.UUID
+	SourceType   string
+	RevokedAt    *time.Time
+	RevokeReason *string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 func (s *Service) ListActiveEntitlementRecords(ctx context.Context, userID string, at time.Time) ([]EntitlementRecord, error) {
@@ -570,31 +570,31 @@ func (s *Service) ListActiveEntitlementRecords(ctx context.Context, userID strin
 			reason = &v
 		}
 		out = append(out, EntitlementRecord{
-			ID:              e.ID,
-			MerchantSubjectID: e.MerchantSubjectID,
-			UserID:          e.MerchantSubjectID.String(),
-			Entitlement:     e.Entitlement,
-			StartAt:         e.StartAt,
-			EndAt:           e.EndAt,
-			SourceID:        e.SourceID,
-			SourceType:      string(e.SourceType),
-			RevokedAt:       e.RevokedAt,
-			RevokeReason:    reason,
-			CreatedAt:       e.CreatedAt,
-			UpdatedAt:       e.UpdatedAt,
+			ID:           e.ID,
+			CustomerID:   e.CustomerID,
+			UserID:       e.CustomerID.String(),
+			Entitlement:  e.Entitlement,
+			StartAt:      e.StartAt,
+			EndAt:        e.EndAt,
+			SourceID:     e.SourceID,
+			SourceType:   string(e.SourceType),
+			RevokedAt:    e.RevokedAt,
+			RevokeReason: reason,
+			CreatedAt:    e.CreatedAt,
+			UpdatedAt:    e.UpdatedAt,
 		})
 	}
 	return out, nil
 }
 
-func (s *Service) ListActiveEntitlementRecordsForMerchantSubject(ctx context.Context, tenantSubjectID identity.MerchantSubjectID, at time.Time) ([]EntitlementRecord, error) {
+func (s *Service) ListActiveEntitlementRecordsForCustomer(ctx context.Context, tenantSubjectID identity.CustomerID, at time.Time) ([]EntitlementRecord, error) {
 	if tenantSubjectID.IsZero() {
-		return nil, fmt.Errorf("tenant_subject_id required")
+		return nil, fmt.Errorf("customer_id required")
 	}
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
-	records, err := s.entitlementService().ListActiveRecordsByMerchantSubject(ctx, tenantSubjectID.UUID(), at.UTC())
+	records, err := s.entitlementService().ListActiveRecordsByCustomer(ctx, tenantSubjectID.UUID(), at.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -606,18 +606,18 @@ func (s *Service) ListActiveEntitlementRecordsForMerchantSubject(ctx context.Con
 			reason = &v
 		}
 		out = append(out, EntitlementRecord{
-			ID:              e.ID,
-			MerchantSubjectID: e.MerchantSubjectID,
-			UserID:          e.MerchantSubjectID.String(),
-			Entitlement:     e.Entitlement,
-			StartAt:         e.StartAt,
-			EndAt:           e.EndAt,
-			SourceID:        e.SourceID,
-			SourceType:      string(e.SourceType),
-			RevokedAt:       e.RevokedAt,
-			RevokeReason:    reason,
-			CreatedAt:       e.CreatedAt,
-			UpdatedAt:       e.UpdatedAt,
+			ID:           e.ID,
+			CustomerID:   e.CustomerID,
+			UserID:       e.CustomerID.String(),
+			Entitlement:  e.Entitlement,
+			StartAt:      e.StartAt,
+			EndAt:        e.EndAt,
+			SourceID:     e.SourceID,
+			SourceType:   string(e.SourceType),
+			RevokedAt:    e.RevokedAt,
+			RevokeReason: reason,
+			CreatedAt:    e.CreatedAt,
+			UpdatedAt:    e.UpdatedAt,
 		})
 	}
 	return out, nil
@@ -656,18 +656,18 @@ func (s *Service) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Con
 				reason = &v
 			}
 			rs = append(rs, EntitlementRecord{
-				ID:              e.ID,
-				MerchantSubjectID: e.MerchantSubjectID,
-				UserID:          e.MerchantSubjectID.String(),
-				Entitlement:     e.Entitlement,
-				StartAt:         e.StartAt,
-				EndAt:           e.EndAt,
-				SourceID:        e.SourceID,
-				SourceType:      string(e.SourceType),
-				RevokedAt:       e.RevokedAt,
-				RevokeReason:    reason,
-				CreatedAt:       e.CreatedAt,
-				UpdatedAt:       e.UpdatedAt,
+				ID:           e.ID,
+				CustomerID:   e.CustomerID,
+				UserID:       e.CustomerID.String(),
+				Entitlement:  e.Entitlement,
+				StartAt:      e.StartAt,
+				EndAt:        e.EndAt,
+				SourceID:     e.SourceID,
+				SourceType:   string(e.SourceType),
+				RevokedAt:    e.RevokedAt,
+				RevokeReason: reason,
+				CreatedAt:    e.CreatedAt,
+				UpdatedAt:    e.UpdatedAt,
 			})
 		}
 		out[subject] = rs

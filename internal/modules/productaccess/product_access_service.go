@@ -108,16 +108,16 @@ func (s *Service) GrantProductAccess(ctx context.Context, params GrantParams) (*
 			endsAt = &e
 		}
 		grant := &models.ProductAccessGrant{
-			MerchantSubjectID: identity.MerchantSubjectIDFromString(params.UserID).UUID(),
-			ProductID:       params.ProductID,
-			SourceType:      params.SourceType,
-			SourceID:        params.SourceID,
-			PaymentID:       params.PaymentID,
-			Status:          models.ProductAccessStatusActive,
-			StartsAt:        now,
-			EndsAt:          endsAt,
-			CreatedAt:       now,
-			UpdatedAt:       now,
+			CustomerID: identity.CustomerIDFromString(params.UserID).UUID(),
+			ProductID:  params.ProductID,
+			SourceType: params.SourceType,
+			SourceID:   params.SourceID,
+			PaymentID:  params.PaymentID,
+			Status:     models.ProductAccessStatusActive,
+			StartsAt:   now,
+			EndsAt:     endsAt,
+			CreatedAt:  now,
+			UpdatedAt:  now,
 		}
 		if err := r.Insert(ctx, grant); err != nil {
 			return fmt.Errorf("insert grant: %w", err)

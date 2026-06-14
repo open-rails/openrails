@@ -11,13 +11,13 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// EnsureMerchantSubjectIDPgx materializes the tenant_subjects FK row for
+// EnsureCustomerIDPgx materializes the customers FK row for
 // integration tests that insert tenant-owned rows directly instead of going
 // through repos. Callers pass the test app-DB's pool
 // (dbtest.OpenAppDB(t, dsn).Pool()) or any gen.DBTX. Payable identities are
 // UUID-only (#364), so the test user id must be a UUID — the row id IS the
 // subject UUID.
-func EnsureMerchantSubjectIDPgx(ctx context.Context, t testing.TB, qx gen.DBTX, userID string) uuid.UUID {
+func EnsureCustomerIDPgx(ctx context.Context, t testing.TB, qx gen.DBTX, userID string) uuid.UUID {
 	t.Helper()
 	userID = strings.TrimSpace(userID)
 	require.NotEmpty(t, userID, "test user id must be set")
@@ -26,9 +26,9 @@ func EnsureMerchantSubjectIDPgx(ctx context.Context, t testing.TB, qx gen.DBTX, 
 	require.NoError(t, err, "test user id must be a UUID (#364): %q", userID)
 
 	// No default tenant (#336): materialize the canonical test tenant first so
-	// the tenant_subjects FK resolves, then pin the subject under it.
+	// the customers FK resolves, then pin the subject under it.
 	EnsureTestTenant(ctx, t, qx)
-	id, err := gen.New(qx).UpsertSelfMerchantSubject(ctx, gen.UpsertSelfMerchantSubjectParams{
+	id, err := gen.New(qx).UpsertSelfCustomer(ctx, gen.UpsertSelfCustomerParams{
 		ID:       uid,
 		MerchantID: TestTenantID.UUID(),
 		Issuer:   "openrails:self",

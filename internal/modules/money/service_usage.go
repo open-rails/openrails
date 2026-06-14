@@ -21,7 +21,7 @@ import (
 // the service usage rollup (#311) so the tensorhub platform's /budget-usage +
 // revenue analytics can be served from OpenRails as the billing source of truth.
 type CaptureUsageEventParams struct {
-	MerchantSubjectID uuid.UUID
+	CustomerID uuid.UUID
 	// Actor is the caller-supplied principal string attributable to this usage
 	// (opaque to OpenRails). Required.
 	Actor     string
@@ -64,13 +64,13 @@ func (s *MoneyService) InsertCaptureUsageEvent(ctx context.Context, p CaptureUsa
 		if terr != nil {
 			return terr
 		}
-		if err := ensureMerchantSubject(ctx, q, tid.UUID(), p.MerchantSubjectID); err != nil {
+		if err := ensureCustomer(ctx, q, tid.UUID(), p.CustomerID); err != nil {
 			return err
 		}
 		ev := &models.UsageEvent{
 			ID:                 uuidutil.NewV7(),
-			MerchantID:           tid.UUID(),
-			MerchantSubjectID:    p.MerchantSubjectID,
+			MerchantID:         tid.UUID(),
+			CustomerID:         p.CustomerID,
 			Actor:              p.Actor,
 			Resource:           nilIfEmpty(p.Resource),
 			EventType:          p.EventType,
@@ -93,8 +93,8 @@ func (s *MoneyService) InsertCaptureUsageEvent(ctx context.Context, p CaptureUsa
 		}
 		return q.InsertUsageEventIfAbsent(ctx, gen.InsertUsageEventIfAbsentParams{
 			ID:                 ev.ID,
-			MerchantID:           ev.MerchantID,
-			MerchantSubjectID:    ev.MerchantSubjectID,
+			MerchantID:         ev.MerchantID,
+			CustomerID:         ev.CustomerID,
 			Actor:              ev.Actor,
 			Resource:           ev.Resource,
 			EventType:          ev.EventType,
@@ -132,7 +132,7 @@ var serviceUsageGroupKeys = map[string]bool{
 // ServiceUsageRollup returns per-dimension-VALUE spend for a tenant subject over
 // [from, to), grouped by group_by. Service-scoped (any payer), for the platform
 // usage/revenue surfaces — NOT the hot admission path.
-func (s *MoneyService) ServiceUsageRollup(ctx context.Context, payer identity.MerchantSubjectID, from, to time.Time, groupBy string) ([]ServiceUsageRollupRow, error) {
+func (s *MoneyService) ServiceUsageRollup(ctx context.Context, payer identity.CustomerID, from, to time.Time, groupBy string) ([]ServiceUsageRollupRow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -150,11 +150,11 @@ func (s *MoneyService) ServiceUsageRollup(ctx context.Context, payer identity.Me
 			return terr
 		}
 		rows, err := s.db.Gen(ctx).ServiceUsageRollup(ctx, gen.ServiceUsageRollupParams{
-			MerchantID:        tid.UUID(),
-			MerchantSubjectID: payer.UUID(),
-			GroupBy:         groupBy,
-			FromAt:          from.UTC(),
-			ToAt:            to.UTC(),
+			MerchantID: tid.UUID(),
+			CustomerID: payer.UUID(),
+			GroupBy:    groupBy,
+			FromAt:     from.UTC(),
+			ToAt:       to.UTC(),
 		})
 		if err != nil {
 			return err
@@ -197,9 +197,9 @@ func (s *MoneyService) ResourceRevenueDaily(ctx context.Context, resource string
 		}
 		rows, err := s.db.Gen(ctx).ResourceRevenueDaily(ctx, gen.ResourceRevenueDailyParams{
 			MerchantID: tid.UUID(),
-			Resource: &resource,
-			FromAt:   from.UTC(),
-			ToAt:     to.UTC(),
+			Resource:   &resource,
+			FromAt:     from.UTC(),
+			ToAt:       to.UTC(),
 		})
 		if err != nil {
 			return err

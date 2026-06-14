@@ -283,8 +283,8 @@ constrain where they may act, and granted permissions gate what they may do.
 Every generated service token must carry
 `resources: [{kind:"openrails.tenant", id:"<tenant_uuid>"}]`.
 Subject-scoped tokens additionally carry
-`{kind:"openrails.tenant_subject", id:"<tenant_subject_uuid>"}` and may only act
-for that exact `tenant_subject_id`; tenant-wide tokens omit the tenant-subject
+`{kind:"openrails.customer", id:"<customer_uuid>"}` and may only act
+for that exact `customer_id`; tenant-wide tokens omit the tenant-subject
 resource.
 
 First-party service JWTs are signed by a registered tenant issuer and must carry
@@ -302,16 +302,16 @@ Machine-credential examples:
 - Doujins/Hentai0/Cozy backend entitlement read: first-party service JWT subject
   such as `service:doujins-runtime`, permission `openrails:entitlements:read`,
   resource `openrails.tenant=<tenant_uuid>`, route
-  `GET /v1/service/tenant-subjects/{tenant_subject_id}/entitlements`.
+  `GET /v1/service/customers/{customer_id}/entitlements`.
 - Tensorhub balance reserve/capture/release: permissions
   `openrails:credits:read`, `openrails:credits:write`, and
   `openrails:credits:spend`; resources include `openrails.tenant=<tenant_uuid>`
   and, for payer-scoped generated tokens or service-JWT grants,
-  `openrails.tenant_subject=<tenant_subject_uuid>`.
+  `openrails.customer=<customer_uuid>`.
 
 | Route | Required permission |
 |-------|---------------------|
-| `GET /v1/service/tenant-subjects/{tenant_subject_id}/entitlements` | `openrails:entitlements:read` |
+| `GET /v1/service/customers/{customer_id}/entitlements` | `openrails:entitlements:read` |
 | `GET /v1/service/invokers/{invoker_id}/credits`, `GET /v1/service/credits/invokers/{invoker_id}`, `GET /v1/service/credits/transactions/lookup`, `GET /v1/service/credit-types` | `openrails:credits:read` |
 | `POST /v1/service/credits/{deposit,withdraw,hold}`, `.../hold(s)/{id}/{capture,release}` | `openrails:credits:write` |
 | `POST/PATCH /v1/service/credit-types*` (definition writes) | `openrails:catalog:write` |
@@ -326,31 +326,31 @@ boundary, delegated user = external OIDC `issuer` + `subject`, tenant subject =
 payable identity, generated service token/service JWT = server-to-server
 credentials.
 
-### GET /v1/service/tenant-subjects/{tenant_subject_id}/entitlements
+### GET /v1/service/customers/{customer_id}/entitlements
 Returns active entitlements for the payable tenant subject at the current time.
 Optional query param `at` (RFC3339) queries entitlements at a specific time.
-Response: array of entitlement records with `tenant_subject_id`. Service
-entitlement reads query `billing.entitlements.tenant_subject_id` directly; they
+Response: array of entitlement records with `customer_id`. Service
+entitlement reads query `billing.entitlements.customer_id` directly; they
 do not translate the tenant subject through legacy `user_id`.
 
 ### GET /v1/service/credits/invokers/{invoker_id}
-Returns credit balance summary for an invoker. Optional query params: `tenant_subject_id` and `type` (defaults to `api_credits`, which must exist in `billing.credit_types`).
+Returns credit balance summary for an invoker. Optional query params: `customer_id` and `type` (defaults to `api_credits`, which must exist in `billing.credit_types`).
 Response: `{ type, balance, held_balance }`.
 
 ### POST /v1/service/credits/deposit
-Deposit/grant credits. Body: `{ tenant_subject_id, invoker_id, credit_type, amount, source, source_id?, expires_at?, description? }` where `expires_at` is epoch seconds.
-Returns a `CreditTransaction`. If `source_id` is provided, deposits are idempotent per `(tenant_subject_id, credit_type, source, source_id)`.
+Deposit/grant credits. Body: `{ customer_id, invoker_id, credit_type, amount, source, source_id?, expires_at?, description? }` where `expires_at` is epoch seconds.
+Returns a `CreditTransaction`. If `source_id` is provided, deposits are idempotent per `(customer_id, credit_type, source, source_id)`.
 
 ### POST /v1/service/credits/withdraw
-Withdraw credits. Body: `{ tenant_subject_id, invoker_id, credit_type, amount, source, source_id? }`.
+Withdraw credits. Body: `{ customer_id, invoker_id, credit_type, amount, source, source_id? }`.
 Returns a `CreditTransaction`. On insufficient credits, returns 402 with `insufficient_credits`.
 
 ### POST /v1/service/credits/hold
-Reserve credits for long-running jobs. Body: `{ tenant_subject_id, invoker_id, credit_type, amount, source, source_id, expires_at }` (epoch seconds).
+Reserve credits for long-running jobs. Body: `{ customer_id, invoker_id, credit_type, amount, source, source_id, expires_at }` (epoch seconds).
 Returns a `CreditTransaction` with `transaction_type='hold'` and `status='active'`. The returned `id` is the durable identifier you later use to capture or release the hold. On insufficient credits, returns 402.
 
 Idempotency:
-- Hold creation is idempotent per `(tenant_subject_id, credit_type, source, source_id)`; retries return the existing hold transaction.
+- Hold creation is idempotent per `(customer_id, credit_type, source, source_id)`; retries return the existing hold transaction.
 
 ### POST /v1/service/credits/holds/{id}/capture
 Capture a hold: `{ amount }` (amount <= hold). Updates the same `CreditTransaction` row to `status='captured'`, setting `captured_amount` and `amount` (negative).
@@ -543,7 +543,7 @@ Initiates a refund via the underlying processor's API and records it in the data
 **Response:** Returns the created refund payment object on success.
 
 ### GET /v1/admin/users/{user_id}
-Returns the user's billing profile: `{ tenant_subject_id, subscription, entitlements, payments }`. The `{user_id}` path segment is the external subject the admin addresses; it is resolved to the payable `tenant_subject_id` internally (#317), and the response identifies the payable entity by `tenant_subject_id`.
+Returns the user's billing profile: `{ customer_id, subscription, entitlements, payments }`. The `{user_id}` path segment is the external subject the admin addresses; it is resolved to the payable `customer_id` internally (#317), and the response identifies the payable entity by `customer_id`.
 
 ### GET /v1/admin/users/{user_id}/nmi
 Returns billing detail for the user's active NMI-backed subscription. Returns 404 if the user has no active

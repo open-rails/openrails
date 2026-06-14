@@ -3,7 +3,7 @@
 -- name: CreateEntitlementGrant :one
 -- RETURNING id matches bun's pk write-back for the uuidv7() default.
 INSERT INTO openrails.entitlement_grants (
-    id, merchant_id, merchant_subject_id, price_id, granted_by, reason, payment_id,
+    id, merchant_id, customer_id, price_id, granted_by, reason, payment_id,
     duration_days, created_at
 ) VALUES (
     COALESCE(NULLIF(sqlc.arg(id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
@@ -17,12 +17,12 @@ RETURNING id;
 -- name: GetEntitlementGrantByID :one
 SELECT * FROM openrails.entitlement_grants WHERE id = $1;
 
--- name: CountEntitlementGrantsByMerchantSubject :one
-SELECT count(*) FROM openrails.entitlement_grants ag WHERE ag.merchant_subject_id = $1;
+-- name: CountEntitlementGrantsByCustomer :one
+SELECT count(*) FROM openrails.entitlement_grants ag WHERE ag.customer_id = $1;
 
--- name: ListEntitlementGrantsByMerchantSubject :many
+-- name: ListEntitlementGrantsByCustomer :many
 SELECT * FROM openrails.entitlement_grants ag
-WHERE ag.merchant_subject_id = $1
+WHERE ag.customer_id = $1
 ORDER BY ag.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 

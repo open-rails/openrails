@@ -16,16 +16,16 @@ const aggregateBudgetWindow = `-- name: AggregateBudgetWindow :one
 SELECT COALESCE(SUM(captured_micros) FILTER (WHERE status = 'captured'), 0)::bigint AS used,
        COALESCE(SUM(amount_micros) FILTER (WHERE status = 'active'), 0)::bigint AS reserved
 FROM openrails.budget_reservations
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND actor = $3
+WHERE merchant_id = $1 AND customer_id = $2 AND actor = $3
   AND created_at >= $4::timestamptz
   AND status IN ('active','captured')
 `
 
 type AggregateBudgetWindowParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Actor             string
-	WindowStart       time.Time
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Actor       string
+	WindowStart time.Time
 }
 
 type AggregateBudgetWindowRow struct {
@@ -38,7 +38,7 @@ type AggregateBudgetWindowRow struct {
 func (q *Queries) AggregateBudgetWindow(ctx context.Context, arg AggregateBudgetWindowParams) (AggregateBudgetWindowRow, error) {
 	row := q.db.QueryRow(ctx, aggregateBudgetWindow,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Actor,
 		arg.WindowStart,
 	)
@@ -69,16 +69,16 @@ func (q *Queries) CaptureBudgetReservation(ctx context.Context, arg CaptureBudge
 const captureBudgetReservationsByCoords = `-- name: CaptureBudgetReservationsByCoords :execrows
 UPDATE openrails.budget_reservations
 SET status = 'captured', captured_micros = $5::bigint
-WHERE merchant_id = $1 AND merchant_subject_id = $2
+WHERE merchant_id = $1 AND customer_id = $2
   AND source = $3 AND source_id = $4 AND status = 'active'
 `
 
 type CaptureBudgetReservationsByCoordsParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Source            string
-	SourceID          string
-	CapturedMicros    int64
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	Source         string
+	SourceID       string
+	CapturedMicros int64
 }
 
 // Settle ALL scopes reserved under one request (#473): every active budget
@@ -87,7 +87,7 @@ type CaptureBudgetReservationsByCoordsParams struct {
 func (q *Queries) CaptureBudgetReservationsByCoords(ctx context.Context, arg CaptureBudgetReservationsByCoordsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, captureBudgetReservationsByCoords,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Source,
 		arg.SourceID,
 		arg.CapturedMicros,
@@ -100,22 +100,22 @@ func (q *Queries) CaptureBudgetReservationsByCoords(ctx context.Context, arg Cap
 
 const deleteBudgetPolicy = `-- name: DeleteBudgetPolicy :execrows
 DELETE FROM openrails.budget_policies
-WHERE merchant_id = $1 AND merchant_subject_id = $2
+WHERE merchant_id = $1 AND customer_id = $2
   AND scope = $3 AND owner = $4 AND scope_key = $5
 `
 
 type DeleteBudgetPolicyParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Scope             string
-	Owner             string
-	ScopeKey          string
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Scope      string
+	Owner      string
+	ScopeKey   string
 }
 
 func (q *Queries) DeleteBudgetPolicy(ctx context.Context, arg DeleteBudgetPolicyParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteBudgetPolicy,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Scope,
 		arg.Owner,
 		arg.ScopeKey,
@@ -144,18 +144,18 @@ func (q *Queries) DeletePaymentBlock(ctx context.Context, arg DeletePaymentBlock
 
 const getBudgetReservationByCoords = `-- name: GetBudgetReservationByCoords :one
 
-SELECT id, merchant_id, merchant_subject_id, actor, amount_micros, captured_micros, status, source, source_id, created_at, expires_at FROM openrails.budget_reservations
-WHERE merchant_id = $1 AND merchant_subject_id = $2
+SELECT id, merchant_id, customer_id, actor, amount_micros, captured_micros, status, source, source_id, created_at, expires_at FROM openrails.budget_reservations
+WHERE merchant_id = $1 AND customer_id = $2
   AND actor = $3 AND source = $4 AND source_id = $5
 LIMIT 1
 `
 
 type GetBudgetReservationByCoordsParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Actor             string
-	Source            string
-	SourceID          string
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Actor      string
+	Source     string
+	SourceID   string
 }
 
 // Admission-plane support tables: rolling money budgets (#304), the payment
@@ -163,7 +163,7 @@ type GetBudgetReservationByCoordsParams struct {
 func (q *Queries) GetBudgetReservationByCoords(ctx context.Context, arg GetBudgetReservationByCoordsParams) (OpenrailsBudgetReservation, error) {
 	row := q.db.QueryRow(ctx, getBudgetReservationByCoords,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Actor,
 		arg.Source,
 		arg.SourceID,
@@ -172,7 +172,7 @@ func (q *Queries) GetBudgetReservationByCoords(ctx context.Context, arg GetBudge
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 		&i.Actor,
 		&i.AmountMicros,
 		&i.CapturedMicros,
@@ -186,23 +186,23 @@ func (q *Queries) GetBudgetReservationByCoords(ctx context.Context, arg GetBudge
 }
 
 const getBudgetWindowState = `-- name: GetBudgetWindowState :one
-SELECT id, merchant_id, merchant_subject_id, actor, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM openrails.budget_window_state bws
-WHERE bws.merchant_id = $1 AND bws.merchant_subject_id = $2
+SELECT id, merchant_id, customer_id, actor, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM openrails.budget_window_state bws
+WHERE bws.merchant_id = $1 AND bws.customer_id = $2
   AND bws.actor = $3 AND bws.window_key = $4
 LIMIT 1
 `
 
 type GetBudgetWindowStateParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Actor             string
-	WindowKey         string
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Actor      string
+	WindowKey  string
 }
 
 func (q *Queries) GetBudgetWindowState(ctx context.Context, arg GetBudgetWindowStateParams) (OpenrailsBudgetWindowState, error) {
 	row := q.db.QueryRow(ctx, getBudgetWindowState,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Actor,
 		arg.WindowKey,
 	)
@@ -210,7 +210,7 @@ func (q *Queries) GetBudgetWindowState(ctx context.Context, arg GetBudgetWindowS
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 		&i.Actor,
 		&i.WindowKey,
 		&i.Cadence,
@@ -224,17 +224,17 @@ func (q *Queries) GetBudgetWindowState(ctx context.Context, arg GetBudgetWindowS
 }
 
 const getBudgetWindowStateForUpdate = `-- name: GetBudgetWindowStateForUpdate :one
-SELECT id, merchant_id, merchant_subject_id, actor, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM openrails.budget_window_state bws
-WHERE bws.merchant_id = $1 AND bws.merchant_subject_id = $2
+SELECT id, merchant_id, customer_id, actor, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM openrails.budget_window_state bws
+WHERE bws.merchant_id = $1 AND bws.customer_id = $2
   AND bws.actor = $3 AND bws.window_key = $4
 FOR UPDATE
 `
 
 type GetBudgetWindowStateForUpdateParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Actor             string
-	WindowKey         string
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Actor      string
+	WindowKey  string
 }
 
 // The boundary-rollover serialization point: Reserve locks the state row so
@@ -242,7 +242,7 @@ type GetBudgetWindowStateForUpdateParams struct {
 func (q *Queries) GetBudgetWindowStateForUpdate(ctx context.Context, arg GetBudgetWindowStateForUpdateParams) (OpenrailsBudgetWindowState, error) {
 	row := q.db.QueryRow(ctx, getBudgetWindowStateForUpdate,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Actor,
 		arg.WindowKey,
 	)
@@ -250,7 +250,7 @@ func (q *Queries) GetBudgetWindowStateForUpdate(ctx context.Context, arg GetBudg
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 		&i.Actor,
 		&i.WindowKey,
 		&i.Cadence,
@@ -264,30 +264,30 @@ func (q *Queries) GetBudgetWindowStateForUpdate(ctx context.Context, arg GetBudg
 }
 
 const getEffectiveTierSchedule = `-- name: GetEffectiveTierSchedule :one
-SELECT id, merchant_id, merchant_subject_id, owner, rungs, schedule_version, created_at, updated_at FROM openrails.tier_schedules
+SELECT id, merchant_id, customer_id, owner, rungs, schedule_version, created_at, updated_at FROM openrails.tier_schedules
 WHERE merchant_id = $1 AND owner = $2
-  AND (merchant_subject_id = $3 OR merchant_subject_id IS NULL)
-ORDER BY (merchant_subject_id IS NOT NULL) DESC
+  AND (customer_id = $3 OR customer_id IS NULL)
+ORDER BY (customer_id IS NOT NULL) DESC
 LIMIT 1
 `
 
 type GetEffectiveTierScheduleParams struct {
-	MerchantID        uuid.UUID
-	Owner             string
-	MerchantSubjectID *uuid.UUID
+	MerchantID uuid.UUID
+	Owner      string
+	CustomerID *uuid.UUID
 }
 
 // The effective schedule for a (tenant, subject): the subject's own override if
-// present, else the tenant-wide default (merchant_subject_id IS NULL). owner is
+// present, else the tenant-wide default (customer_id IS NULL). owner is
 // the read filter (auto-graduation reads owner='platform'). Subject-specific
 // rows sort first so LIMIT 1 picks the override.
 func (q *Queries) GetEffectiveTierSchedule(ctx context.Context, arg GetEffectiveTierScheduleParams) (OpenrailsTierSchedule, error) {
-	row := q.db.QueryRow(ctx, getEffectiveTierSchedule, arg.MerchantID, arg.Owner, arg.MerchantSubjectID)
+	row := q.db.QueryRow(ctx, getEffectiveTierSchedule, arg.MerchantID, arg.Owner, arg.CustomerID)
 	var i OpenrailsTierSchedule
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 		&i.Owner,
 		&i.Rungs,
 		&i.ScheduleVersion,
@@ -298,29 +298,29 @@ func (q *Queries) GetEffectiveTierSchedule(ctx context.Context, arg GetEffective
 }
 
 const getTierPolicy = `-- name: GetTierPolicy :one
-SELECT id, merchant_id, merchant_subject_id, tier, policy, policy_version, created_at, updated_at FROM openrails.tier_policies
+SELECT id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at FROM openrails.tier_policies
 WHERE merchant_id = $1 AND tier = $3
-  AND (merchant_subject_id = $2 OR merchant_subject_id IS NULL)
-ORDER BY (merchant_subject_id IS NOT NULL) DESC
+  AND (customer_id = $2 OR customer_id IS NULL)
+ORDER BY (customer_id IS NOT NULL) DESC
 LIMIT 1
 `
 
 type GetTierPolicyParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID *uuid.UUID
-	Tier              string
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Tier       string
 }
 
 // The effective policy for a (tenant, subject, tier): the subject's own override
-// if present, else the tenant-wide default (merchant_subject_id IS NULL, #477).
+// if present, else the tenant-wide default (customer_id IS NULL, #477).
 // Subject-specific rows sort first so LIMIT 1 picks the override.
 func (q *Queries) GetTierPolicy(ctx context.Context, arg GetTierPolicyParams) (OpenrailsTierPolicy, error) {
-	row := q.db.QueryRow(ctx, getTierPolicy, arg.MerchantID, arg.MerchantSubjectID, arg.Tier)
+	row := q.db.QueryRow(ctx, getTierPolicy, arg.MerchantID, arg.CustomerID, arg.Tier)
 	var i OpenrailsTierPolicy
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 		&i.Tier,
 		&i.Policy,
 		&i.PolicyVersion,
@@ -332,29 +332,29 @@ func (q *Queries) GetTierPolicy(ctx context.Context, arg GetTierPolicyParams) (O
 
 const insertBudgetReservation = `-- name: InsertBudgetReservation :exec
 INSERT INTO openrails.budget_reservations (
-    id, merchant_id, merchant_subject_id, actor,
+    id, merchant_id, customer_id, actor,
     amount_micros, status, source, source_id, expires_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 type InsertBudgetReservationParams struct {
-	ID                uuid.UUID
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Actor             string
-	AmountMicros      int64
-	Status            string
-	Source            string
-	SourceID          string
-	ExpiresAt         *time.Time
-	CreatedAt         time.Time
+	ID           uuid.UUID
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+	Actor        string
+	AmountMicros int64
+	Status       string
+	Source       string
+	SourceID     string
+	ExpiresAt    *time.Time
+	CreatedAt    time.Time
 }
 
 func (q *Queries) InsertBudgetReservation(ctx context.Context, arg InsertBudgetReservationParams) error {
 	_, err := q.db.Exec(ctx, insertBudgetReservation,
 		arg.ID,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Actor,
 		arg.AmountMicros,
 		arg.Status,
@@ -368,24 +368,24 @@ func (q *Queries) InsertBudgetReservation(ctx context.Context, arg InsertBudgetR
 
 const insertBudgetWindowStateIfAbsent = `-- name: InsertBudgetWindowStateIfAbsent :exec
 INSERT INTO openrails.budget_window_state (
-    id, merchant_id, merchant_subject_id, actor, window_key,
+    id, merchant_id, customer_id, actor, window_key,
     cadence, window_seconds, anchor, window_start, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-ON CONFLICT (merchant_id, merchant_subject_id, actor, window_key) DO NOTHING
+ON CONFLICT (merchant_id, customer_id, actor, window_key) DO NOTHING
 `
 
 type InsertBudgetWindowStateIfAbsentParams struct {
-	ID                uuid.UUID
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Actor             string
-	WindowKey         string
-	Cadence           string
-	WindowSeconds     int64
-	Anchor            time.Time
-	WindowStart       time.Time
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID            uuid.UUID
+	MerchantID    uuid.UUID
+	CustomerID    uuid.UUID
+	Actor         string
+	WindowKey     string
+	Cadence       string
+	WindowSeconds int64
+	Anchor        time.Time
+	WindowStart   time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // First-ever charge on a window key: open at now, anchor at now.
@@ -393,7 +393,7 @@ func (q *Queries) InsertBudgetWindowStateIfAbsent(ctx context.Context, arg Inser
 	_, err := q.db.Exec(ctx, insertBudgetWindowStateIfAbsent,
 		arg.ID,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Actor,
 		arg.WindowKey,
 		arg.Cadence,
@@ -408,26 +408,26 @@ func (q *Queries) InsertBudgetWindowStateIfAbsent(ctx context.Context, arg Inser
 
 const insertPaymentBlockIfAbsent = `-- name: InsertPaymentBlockIfAbsent :exec
 INSERT INTO openrails.payment_blocklist (
-    id, merchant_id, merchant_subject_id, kind, value, reason, created_at
+    id, merchant_id, customer_id, kind, value, reason, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (merchant_id, kind, value) DO NOTHING
 `
 
 type InsertPaymentBlockIfAbsentParams struct {
-	ID                uuid.UUID
-	MerchantID        uuid.UUID
-	MerchantSubjectID *uuid.UUID
-	Kind              string
-	Value             string
-	Reason            *string
-	CreatedAt         time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Kind       string
+	Value      string
+	Reason     *string
+	CreatedAt  time.Time
 }
 
 func (q *Queries) InsertPaymentBlockIfAbsent(ctx context.Context, arg InsertPaymentBlockIfAbsentParams) error {
 	_, err := q.db.Exec(ctx, insertPaymentBlockIfAbsent,
 		arg.ID,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Kind,
 		arg.Value,
 		arg.Reason,
@@ -437,19 +437,19 @@ func (q *Queries) InsertPaymentBlockIfAbsent(ctx context.Context, arg InsertPaym
 }
 
 const listBudgetPolicies = `-- name: ListBudgetPolicies :many
-SELECT id, merchant_id, merchant_subject_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at FROM openrails.budget_policies
-WHERE merchant_id = $1 AND merchant_subject_id = $2
+SELECT id, merchant_id, customer_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at FROM openrails.budget_policies
+WHERE merchant_id = $1 AND customer_id = $2
 `
 
 type ListBudgetPoliciesParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
 }
 
 // ALL budget policies for a subject regardless of owner (the admit path reads
 // every scope to compose the verdict).
 func (q *Queries) ListBudgetPolicies(ctx context.Context, arg ListBudgetPoliciesParams) ([]OpenrailsBudgetPolicy, error) {
-	rows, err := q.db.Query(ctx, listBudgetPolicies, arg.MerchantID, arg.MerchantSubjectID)
+	rows, err := q.db.Query(ctx, listBudgetPolicies, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
@@ -460,7 +460,7 @@ func (q *Queries) ListBudgetPolicies(ctx context.Context, arg ListBudgetPolicies
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
-			&i.MerchantSubjectID,
+			&i.CustomerID,
 			&i.Scope,
 			&i.Owner,
 			&i.ScopeKey,
@@ -480,20 +480,20 @@ func (q *Queries) ListBudgetPolicies(ctx context.Context, arg ListBudgetPolicies
 }
 
 const listBudgetPoliciesByOwner = `-- name: ListBudgetPoliciesByOwner :many
-SELECT id, merchant_id, merchant_subject_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at FROM openrails.budget_policies
-WHERE merchant_id = $1 AND merchant_subject_id = $2 AND owner = $3
+SELECT id, merchant_id, customer_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at FROM openrails.budget_policies
+WHERE merchant_id = $1 AND customer_id = $2 AND owner = $3
 `
 
 type ListBudgetPoliciesByOwnerParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Owner             string
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Owner      string
 }
 
 // Budget policies for a subject filtered by owner (the subject-facing read must
 // NOT expose platform-owned rows).
 func (q *Queries) ListBudgetPoliciesByOwner(ctx context.Context, arg ListBudgetPoliciesByOwnerParams) ([]OpenrailsBudgetPolicy, error) {
-	rows, err := q.db.Query(ctx, listBudgetPoliciesByOwner, arg.MerchantID, arg.MerchantSubjectID, arg.Owner)
+	rows, err := q.db.Query(ctx, listBudgetPoliciesByOwner, arg.MerchantID, arg.CustomerID, arg.Owner)
 	if err != nil {
 		return nil, err
 	}
@@ -504,7 +504,7 @@ func (q *Queries) ListBudgetPoliciesByOwner(ctx context.Context, arg ListBudgetP
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
-			&i.MerchantSubjectID,
+			&i.CustomerID,
 			&i.Scope,
 			&i.Owner,
 			&i.ScopeKey,
@@ -560,15 +560,15 @@ func (q *Queries) ReleaseBudgetReservation(ctx context.Context, id uuid.UUID) (i
 const releaseBudgetReservationsByCoords = `-- name: ReleaseBudgetReservationsByCoords :execrows
 UPDATE openrails.budget_reservations
 SET status = 'released'
-WHERE merchant_id = $1 AND merchant_subject_id = $2
+WHERE merchant_id = $1 AND customer_id = $2
   AND source = $3 AND source_id = $4 AND status = 'active'
 `
 
 type ReleaseBudgetReservationsByCoordsParams struct {
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Source            string
-	SourceID          string
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Source     string
+	SourceID   string
 }
 
 // Free ALL scopes reserved under one request (#473): every active budget
@@ -576,7 +576,7 @@ type ReleaseBudgetReservationsByCoordsParams struct {
 func (q *Queries) ReleaseBudgetReservationsByCoords(ctx context.Context, arg ReleaseBudgetReservationsByCoordsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, releaseBudgetReservationsByCoords,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Source,
 		arg.SourceID,
 	)
@@ -615,24 +615,24 @@ func (q *Queries) ReopenBudgetWindowState(ctx context.Context, arg ReopenBudgetW
 
 const upsertBudgetPolicy = `-- name: UpsertBudgetPolicy :exec
 INSERT INTO openrails.budget_policies (
-    id, merchant_id, merchant_subject_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at
+    id, merchant_id, customer_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-ON CONFLICT (merchant_id, merchant_subject_id, scope, owner, scope_key) DO UPDATE SET
+ON CONFLICT (merchant_id, customer_id, scope, owner, scope_key) DO UPDATE SET
     windows = EXCLUDED.windows,
     updated_at = EXCLUDED.updated_at
 `
 
 type UpsertBudgetPolicyParams struct {
-	ID                uuid.UUID
-	MerchantID        uuid.UUID
-	MerchantSubjectID uuid.UUID
-	Scope             string
-	Owner             string
-	ScopeKey          string
-	Windows           []byte
-	PolicyVersion     int64
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID            uuid.UUID
+	MerchantID    uuid.UUID
+	CustomerID    uuid.UUID
+	Scope         string
+	Owner         string
+	ScopeKey      string
+	Windows       []byte
+	PolicyVersion int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // Hierarchical money-budget policy upsert (#473). The owner discriminator is the
@@ -642,7 +642,7 @@ func (q *Queries) UpsertBudgetPolicy(ctx context.Context, arg UpsertBudgetPolicy
 	_, err := q.db.Exec(ctx, upsertBudgetPolicy,
 		arg.ID,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Scope,
 		arg.Owner,
 		arg.ScopeKey,
@@ -656,22 +656,22 @@ func (q *Queries) UpsertBudgetPolicy(ctx context.Context, arg UpsertBudgetPolicy
 
 const upsertTierPolicy = `-- name: UpsertTierPolicy :exec
 INSERT INTO openrails.tier_policies (
-    id, merchant_id, merchant_subject_id, tier, policy, policy_version, created_at, updated_at
+    id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-ON CONFLICT (merchant_id, merchant_subject_id, tier) WHERE (merchant_subject_id IS NOT NULL) DO UPDATE SET
+ON CONFLICT (merchant_id, customer_id, tier) WHERE (customer_id IS NOT NULL) DO UPDATE SET
     policy = EXCLUDED.policy,
     updated_at = EXCLUDED.updated_at
 `
 
 type UpsertTierPolicyParams struct {
-	ID                uuid.UUID
-	MerchantID        uuid.UUID
-	MerchantSubjectID *uuid.UUID
-	Tier              string
-	Policy            []byte
-	PolicyVersion     int64
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID            uuid.UUID
+	MerchantID    uuid.UUID
+	CustomerID    *uuid.UUID
+	Tier          string
+	Policy        []byte
+	PolicyVersion int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // Per-(subject, tier) policy override. ON CONFLICT targets the partial unique
@@ -680,7 +680,7 @@ func (q *Queries) UpsertTierPolicy(ctx context.Context, arg UpsertTierPolicyPara
 	_, err := q.db.Exec(ctx, upsertTierPolicy,
 		arg.ID,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Tier,
 		arg.Policy,
 		arg.PolicyVersion,
@@ -692,9 +692,9 @@ func (q *Queries) UpsertTierPolicy(ctx context.Context, arg UpsertTierPolicyPara
 
 const upsertTierPolicyDefault = `-- name: UpsertTierPolicyDefault :exec
 INSERT INTO openrails.tier_policies (
-    id, merchant_id, merchant_subject_id, tier, policy, policy_version, created_at, updated_at
+    id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at
 ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
-ON CONFLICT (merchant_id, tier) WHERE (merchant_subject_id IS NULL) DO UPDATE SET
+ON CONFLICT (merchant_id, tier) WHERE (customer_id IS NULL) DO UPDATE SET
     policy = EXCLUDED.policy,
     updated_at = EXCLUDED.updated_at
 `
@@ -709,7 +709,7 @@ type UpsertTierPolicyDefaultParams struct {
 	UpdatedAt     time.Time
 }
 
-// Tenant-wide DEFAULT tier policy (#477): merchant_subject_id IS NULL applies to
+// Tenant-wide DEFAULT tier policy (#477): customer_id IS NULL applies to
 // every payer at this tier — the platform capacity ladder declared once. ON
 // CONFLICT targets the partial unique index for the NULL-subject default.
 func (q *Queries) UpsertTierPolicyDefault(ctx context.Context, arg UpsertTierPolicyDefaultParams) error {
@@ -727,9 +727,9 @@ func (q *Queries) UpsertTierPolicyDefault(ctx context.Context, arg UpsertTierPol
 
 const upsertTierScheduleDefault = `-- name: UpsertTierScheduleDefault :exec
 INSERT INTO openrails.tier_schedules (
-    id, merchant_id, merchant_subject_id, owner, rungs, schedule_version, created_at, updated_at
+    id, merchant_id, customer_id, owner, rungs, schedule_version, created_at, updated_at
 ) VALUES ($1, $2, NULL, $3, $4, 1, $5, $6)
-ON CONFLICT (merchant_id, owner) WHERE (merchant_subject_id IS NULL) DO UPDATE SET
+ON CONFLICT (merchant_id, owner) WHERE (customer_id IS NULL) DO UPDATE SET
     rungs = EXCLUDED.rungs,
     schedule_version = openrails.tier_schedules.schedule_version + 1,
     updated_at = EXCLUDED.updated_at
@@ -744,7 +744,7 @@ type UpsertTierScheduleDefaultParams struct {
 	UpdatedAt  time.Time
 }
 
-// Tenant-wide tier schedule upsert (#476): merchant_subject_id IS NULL is the
+// Tenant-wide tier schedule upsert (#476): customer_id IS NULL is the
 // tenant's default ladder. owner is supplied by the caller's authz path.
 func (q *Queries) UpsertTierScheduleDefault(ctx context.Context, arg UpsertTierScheduleDefaultParams) error {
 	_, err := q.db.Exec(ctx, upsertTierScheduleDefault,
@@ -760,22 +760,22 @@ func (q *Queries) UpsertTierScheduleDefault(ctx context.Context, arg UpsertTierS
 
 const upsertTierScheduleSubject = `-- name: UpsertTierScheduleSubject :exec
 INSERT INTO openrails.tier_schedules (
-    id, merchant_id, merchant_subject_id, owner, rungs, schedule_version, created_at, updated_at
+    id, merchant_id, customer_id, owner, rungs, schedule_version, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, 1, $6, $7)
-ON CONFLICT (merchant_id, merchant_subject_id, owner) WHERE (merchant_subject_id IS NOT NULL) DO UPDATE SET
+ON CONFLICT (merchant_id, customer_id, owner) WHERE (customer_id IS NOT NULL) DO UPDATE SET
     rungs = EXCLUDED.rungs,
     schedule_version = openrails.tier_schedules.schedule_version + 1,
     updated_at = EXCLUDED.updated_at
 `
 
 type UpsertTierScheduleSubjectParams struct {
-	ID                uuid.UUID
-	MerchantID        uuid.UUID
-	MerchantSubjectID *uuid.UUID
-	Owner             string
-	Rungs             []byte
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Owner      string
+	Rungs      []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // Per-subject tier schedule override upsert (#476): takes precedence over the
@@ -784,7 +784,7 @@ func (q *Queries) UpsertTierScheduleSubject(ctx context.Context, arg UpsertTierS
 	_, err := q.db.Exec(ctx, upsertTierScheduleSubject,
 		arg.ID,
 		arg.MerchantID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Owner,
 		arg.Rungs,
 		arg.CreatedAt,

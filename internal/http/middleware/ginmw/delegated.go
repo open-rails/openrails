@@ -203,13 +203,13 @@ func resolvedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*controlplane
 
 	return &controlplane.ResolvedDelegated{
 		Tenant:     strings.TrimSpace(p.TenantSlug),
-		MerchantID:   tenantID,
+		MerchantID: tenantID,
 		TenantSlug: strings.TrimSpace(p.TenantSlug),
 		// The self handlers key billing rows by the subject's own UUID
-		// (identity.MerchantSubjectIDFromString), so mirror that derivation here.
+		// (identity.CustomerIDFromString), so mirror that derivation here.
 		// Zero when the subject is not a UUID — exactly like the handlers, which
 		// reject a zero payer.
-		MerchantSubjectID:  identity.MerchantSubjectIDFromString(subject).UUID(),
+		CustomerID:       identity.CustomerIDFromString(subject).UUID(),
 		DelegatedSubject: subject,
 		Issuer:           strings.TrimSpace(p.Actor),
 		Permissions:      perms,

@@ -70,7 +70,7 @@ func NewBlocklistService(database *db.DB) *BlocklistService {
 //
 // Add is idempotent on (tenant, kind, value): re-adding the same identifier is a
 // no-op (the existing row and its payer scoping are left untouched).
-func (s *BlocklistService) Add(ctx context.Context, payer *identity.MerchantSubjectID, kind, value, reason string) error {
+func (s *BlocklistService) Add(ctx context.Context, payer *identity.CustomerID, kind, value, reason string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("blocklist service not initialized")
 	}
@@ -88,10 +88,10 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.MerchantSubj
 		return err
 	}
 	tenantID := tid.UUID()
-	var payerTenantID *uuid.UUID
+	var customerID *uuid.UUID
 	if payer != nil && !payer.IsZero() {
 		id := payer.UUID()
-		payerTenantID = &id
+		customerID = &id
 	}
 	var reasonPtr *string
 	if r := strings.TrimSpace(reason); r != "" {
@@ -99,31 +99,31 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.MerchantSubj
 	}
 
 	entry := &models.PaymentBlocklistEntry{
-		ID:              uuidutil.NewV7(),
-		MerchantID:        tenantID,
-		MerchantSubjectID: payerTenantID,
-		Kind:            kind,
-		Value:           value,
-		Reason:          reasonPtr,
-		CreatedAt:       time.Now().UTC(),
+		ID:         uuidutil.NewV7(),
+		MerchantID: tenantID,
+		CustomerID: customerID,
+		Kind:       kind,
+		Value:      value,
+		Reason:     reasonPtr,
+		CreatedAt:  time.Now().UTC(),
 	}
 
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		// Owner-scoped blocks reference a payable tenant subject; materialize its
-		// tenant_subjects row so the payment_blocklist FK (migration 076) holds (#317).
-		if payerTenantID != nil {
-			if _, err := repo.EnsureMerchantSubjectID(ctx, s.db.Qx(ctx), tenantID, payerTenantID.String()); err != nil {
+		// customers row so the payment_blocklist FK (migration 076) holds (#317).
+		if customerID != nil {
+			if _, err := repo.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, customerID.String()); err != nil {
 				return err
 			}
 		}
 		return s.db.Gen(ctx).InsertPaymentBlockIfAbsent(ctx, gen.InsertPaymentBlockIfAbsentParams{
-			ID:              entry.ID,
-			MerchantID:        entry.MerchantID,
-			MerchantSubjectID: entry.MerchantSubjectID,
-			Kind:            entry.Kind,
-			Value:           entry.Value,
-			Reason:          entry.Reason,
-			CreatedAt:       entry.CreatedAt,
+			ID:         entry.ID,
+			MerchantID: entry.MerchantID,
+			CustomerID: entry.CustomerID,
+			Kind:       entry.Kind,
+			Value:      entry.Value,
+			Reason:     entry.Reason,
+			CreatedAt:  entry.CreatedAt,
 		})
 	})
 }
@@ -156,7 +156,7 @@ func (s *BlocklistService) Remove(ctx context.Context, kind, value string) error
 }
 
 // IsBlocked reports whether (kind, value) is blocked in the request tenant. It
-// returns true if a matching TENANT-WIDE row (tenant_subject_id IS NULL) OR ANY
+// returns true if a matching TENANT-WIDE row (customer_id IS NULL) OR ANY
 // subject-scoped row exists for that (kind, value).
 func (s *BlocklistService) IsBlocked(ctx context.Context, kind, value string) (bool, error) {
 	if s == nil || s.db == nil {

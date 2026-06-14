@@ -575,17 +575,17 @@ func ensureChargePayment(
 
 	now := paymentService.Clock().Now()
 	payment := &models.Payment{
-		ID:              uuidutil.NewV7(),
-		MerchantSubjectID: identity.MerchantSubjectIDFromString(userID).UUID(),
-		PriceID:         priceID,
-		Processor:       models.ProcessorStripe,
-		TransactionID:   txnID,
-		Amount:          charge.Amount,
-		ListAmount:      charge.Amount,
-		Currency:        currency,
-		Status:          payments.PaymentStatusCompletedValue,
-		PurchasedAt:     now,
-		CreatedAt:       now,
+		ID:            uuidutil.NewV7(),
+		CustomerID:    identity.CustomerIDFromString(userID).UUID(),
+		PriceID:       priceID,
+		Processor:     models.ProcessorStripe,
+		TransactionID: txnID,
+		Amount:        charge.Amount,
+		ListAmount:    charge.Amount,
+		Currency:      currency,
+		Status:        payments.PaymentStatusCompletedValue,
+		PurchasedAt:   now,
+		CreatedAt:     now,
 		Metadata: map[string]any{
 			"source":            "stripe_reconcile_backfill",
 			"stripe_charge_id":  strings.TrimSpace(charge.ID),

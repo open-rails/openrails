@@ -102,7 +102,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	assert.WithinDuration(t, mockClock.Now(), updated.UpdatedAt, time.Millisecond)
 
 	retryUserID := uuid.New().String()
-	retryMerchantSubjectID := suite.ensureMerchantSubject(ctx, retryUserID)
+	retryCustomerID := suite.ensureCustomer(ctx, retryUserID)
 	pm := suite.CreateTestPaymentMethod(retryUserID)
 	nextRetry := mockClock.Now().Add(time.Hour)
 	retryAttempts := 1
@@ -123,10 +123,10 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		return suite.Count(ctx, `
 			SELECT COUNT(*) FROM openrails.subscriptions sub
 			WHERE sub.processor = $1
-			  AND sub.merchant_subject_id = $2
+			  AND sub.customer_id = $2
 			  AND sub.status = $3
 			  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $4`,
-			string(models.ProcessorMobius), retryMerchantSubjectID,
+			string(models.ProcessorMobius), retryCustomerID,
 			string(models.StatusPastDue), mockClock.Now())
 	}
 	assert.Equal(t, 0, countDueRetries())
@@ -145,15 +145,15 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		PeriodEnd:   cancelPeriodEnd,
 	})
 	ent := &models.Entitlement{
-		ID:              uuid.New(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, cancelUserID),
-		Entitlement:     "premium",
-		StartAt:         cancelStart,
-		EndAt:           &cancelPeriodEnd,
-		SourceType:      models.EntitlementSourceSubscription,
-		SourceID:        &cancelSub.ID,
-		CreatedAt:       cancelStart,
-		UpdatedAt:       cancelStart,
+		ID:          uuid.New(),
+		CustomerID:  suite.ensureCustomer(ctx, cancelUserID),
+		Entitlement: "premium",
+		StartAt:     cancelStart,
+		EndAt:       &cancelPeriodEnd,
+		SourceType:  models.EntitlementSourceSubscription,
+		SourceID:    &cancelSub.ID,
+		CreatedAt:   cancelStart,
+		UpdatedAt:   cancelStart,
 	}
 	suite.InsertEntitlement(ctx, ent)
 
@@ -184,8 +184,8 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	blockExpiry := mockClock.Now().Add(time.Hour)
 	block := &models.MoneyBlock{
 		ID:              uuid.New(),
-		MerchantID:        dbtest.TestTenantID.UUID(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, creditUserID),
+		MerchantID:      dbtest.TestTenantID.UUID(),
+		CustomerID:      suite.ensureCustomer(ctx, creditUserID),
 		Currency:        "USD",
 		OriginalAmount:  75,
 		RemainingAmount: 75,

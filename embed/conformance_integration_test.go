@@ -86,7 +86,7 @@ func observeTxn(t *testing.T, label string, txn *openrails.CreditTransaction) ob
 	t.Helper()
 	require.NotNil(t, txn, label)
 	require.NotEqual(t, uuid.Nil, txn.ID, "%s: txn id", label)
-	require.NotEqual(t, uuid.Nil, txn.MerchantSubjectID, "%s: txn merchant_subject_id", label)
+	require.NotEqual(t, uuid.Nil, txn.CustomerID, "%s: txn customer_id", label)
 	require.False(t, txn.CreatedAt.IsZero(), "%s: created_at", label)
 	o := obsTxn{
 		Amount:          txn.Amount,
@@ -285,7 +285,7 @@ func observeEntitlements(ents []openrails.EntitlementRecord, payer uuid.UUID) []
 			Entitlement:  e.Entitlement,
 			SourceType:   e.SourceType,
 			HasEnd:       e.EndAt != nil,
-			PayerMatches: e.MerchantSubjectID == payer.String(),
+			PayerMatches: e.CustomerID == payer.String(),
 		})
 	}
 	return out
@@ -307,7 +307,7 @@ func observeWindow(t *testing.T, label string, w *openrails.CreditWindow, payer 
 		Held:         w.HeldMicros,
 		Settled:      w.SettledMicros,
 		Status:       w.Status,
-		PayerMatches: w.PayerTenantID == payer,
+		PayerMatches: w.CustomerID == payer,
 		HasExpiry:    !w.ExpiresAt.IsZero(),
 	}
 }
@@ -358,10 +358,10 @@ type scriptEnv struct {
 	actor    string
 	currency string
 	resource string // per-side: ResourceRevenueDaily is cross-payer within the tenant
-	side       string
-	from, to   time.Time
+	side     string
+	from, to time.Time
 	// issuer/subject are the payer's EXTERNAL identity (its
-	// openrails.merchant_subjects row) for the entitlements steps.
+	// openrails.customers row) for the entitlements steps.
 	issuer  string
 	subject string
 }
@@ -372,31 +372,31 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	t.Helper()
 	var r scriptResult
 	payerID := env.payer.String()
-	pid := openrails.PayerTenantID(env.payer)
+	pid := openrails.CustomerID(env.payer)
 
 	// 1) Deposit 1,000,000 micros.
 	depositSrc := uuid.New()
 	dep, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
-		PayerTenantID: &pid,
-		Actor:         env.actor,
-		Currency:      env.currency,
-		Amount:        1_000_000,
-		Source:        "conformance",
-		SourceID:      &depositSrc,
-		Description:   "seed",
+		CustomerID:  &pid,
+		Actor:       env.actor,
+		Currency:    env.currency,
+		Amount:      1_000_000,
+		Source:      "conformance",
+		SourceID:    &depositSrc,
+		Description: "seed",
 	})
 	require.NoError(t, err, "%s deposit", env.side)
 	r.Deposit = observeTxn(t, env.side+" deposit", dep)
 
 	// 2) Hold 10,000 then capture 8,000.
 	hold, err := c.HoldCredits(ctx, openrails.HoldCreditsRequest{
-		PayerTenantID: &pid,
-		Actor:         env.actor,
-		Currency:      env.currency,
-		Amount:        10_000,
-		Source:        "conformance",
-		SourceID:      "hold-1",
-		ExpiresAt:     time.Now().Add(10 * time.Minute),
+		CustomerID: &pid,
+		Actor:      env.actor,
+		Currency:   env.currency,
+		Amount:     10_000,
+		Source:     "conformance",
+		SourceID:   "hold-1",
+		ExpiresAt:  time.Now().Add(10 * time.Minute),
 	})
 	require.NoError(t, err, "%s hold", env.side)
 	require.NotEqual(t, uuid.Nil, hold.ID, "%s hold id", env.side)
@@ -410,12 +410,12 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// 3) Withdraw 5,000.
 	withdrawSrc := uuid.New()
 	wd, err := c.WithdrawCredits(ctx, openrails.WithdrawCreditsRequest{
-		PayerTenantID: &pid,
-		Actor:         env.actor,
-		Currency:      env.currency,
-		Amount:        5_000,
-		Source:        "conformance",
-		SourceID:      &withdrawSrc,
+		CustomerID: &pid,
+		Actor:      env.actor,
+		Currency:   env.currency,
+		Amount:     5_000,
+		Source:     "conformance",
+		SourceID:   &withdrawSrc,
 	})
 	require.NoError(t, err, "%s withdraw", env.side)
 	r.Withdraw = observeTxn(t, env.side+" withdraw", wd)
@@ -435,7 +435,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// BOTH micro-dollars, 1:1 — the old /10 was the pre-#337 millicent
 	// conversion, fixed as a 10x under-reservation bug).
 	a1, err := c.Admit(ctx, openrails.AdmitRequest{
-		PayerTenantID:  payerID,
+		CustomerID:     payerID,
 		Actor:          env.actor,
 		Tier:           "conf",
 		Resource:       env.resource,
@@ -458,7 +458,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// 7) Admit #2: estimate 6,000 (5,000 already consumed of the 10,000
 	// limit) -> denied on the budget axis.
 	a2, err := c.Admit(ctx, openrails.AdmitRequest{
-		PayerTenantID:  payerID,
+		CustomerID:     payerID,
 		Actor:          env.actor,
 		Tier:           "conf",
 		Resource:       env.resource,
@@ -476,7 +476,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// already consumed by #1+#2 -> denied on the throughput axis (HTTP 429 on
 	// the remote transport; still a verdict).
 	a3, err := c.Admit(ctx, openrails.AdmitRequest{
-		PayerTenantID:  payerID,
+		CustomerID:     payerID,
 		Actor:          env.actor,
 		Tier:           "conf",
 		Resource:       env.resource,
@@ -546,7 +546,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	var decoded struct {
 		Transactions []struct {
 			ID              uuid.UUID `json:"id"`
-			MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
+			CustomerID      uuid.UUID `json:"customer_id"`
 			Actor           string    `json:"actor"`
 			Amount          int64     `json:"amount"`
 			TransactionType string    `json:"transaction_type"`
@@ -560,7 +560,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	r.TxnsTotal = decoded.Total
 	for _, txn := range decoded.Transactions {
 		require.NotEqual(t, uuid.Nil, txn.ID, "%s txn id", env.side)
-		require.Equal(t, env.payer, txn.MerchantSubjectID, "%s txn payer", env.side)
+		require.Equal(t, env.payer, txn.CustomerID, "%s txn payer", env.side)
 		require.False(t, txn.CreatedAt.IsZero(), "%s txn created_at", env.side)
 		r.Txns = append(r.Txns, obsTxn{
 			Amount:          txn.Amount,
@@ -597,34 +597,34 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		c.Release(ctx, "not-a-uuid"))
 
 	_, err = c.HoldCredits(ctx, openrails.HoldCreditsRequest{
-		PayerTenantID: &pid,
-		Actor:         env.actor,
-		Currency:      env.currency,
-		Amount:        10_000_000_000,
-		Source:        "conformance",
-		SourceID:      "hold-too-big",
-		ExpiresAt:     time.Now().Add(10 * time.Minute),
+		CustomerID: &pid,
+		Actor:      env.actor,
+		Currency:   env.currency,
+		Amount:     10_000_000_000,
+		Source:     "conformance",
+		SourceID:   "hold-too-big",
+		ExpiresAt:  time.Now().Add(10 * time.Minute),
 	})
 	r.ErrHoldInsufficient = observeErr(t, env.side+" hold insufficient", err)
 
 	_, err = c.WithdrawCredits(ctx, openrails.WithdrawCreditsRequest{
-		PayerTenantID: &pid,
-		Actor:         env.actor,
-		Currency:      env.currency,
-		Amount:        1,
-		Source:        "conformance",
-		SourceID:      nil, // binding-required on the wire
+		CustomerID: &pid,
+		Actor:      env.actor,
+		Currency:   env.currency,
+		Amount:     1,
+		Source:     "conformance",
+		SourceID:   nil, // binding-required on the wire
 	})
 	r.ErrWithdrawNoSource = observeErr(t, env.side+" withdraw without source_id", err)
 
 	badSrc := uuid.New()
 	_, err = c.DepositCredits(ctx, openrails.DepositCreditsRequest{
-		PayerTenantID: &pid,
-		Actor:         env.actor,
-		Currency:      "conformance_missing_currency",
-		Amount:        1,
-		Source:        "conformance",
-		SourceID:      &badSrc,
+		CustomerID: &pid,
+		Actor:      env.actor,
+		Currency:   "conformance_missing_currency",
+		Amount:     1,
+		Source:     "conformance",
+		SourceID:   &badSrc,
 	})
 	r.ErrDepositBadType = observeErr(t, env.side+" deposit unknown credit type", err)
 
@@ -635,7 +635,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	r.ErrRollupBadGroup = observeErr(t, env.side+" rollup bad group_by", err)
 
 	_, err = c.Admit(ctx, openrails.AdmitRequest{
-		PayerTenantID:  payerID,
+		CustomerID:     payerID,
 		Actor:          env.actor,
 		EstimateMicros: -1,
 		RequestID:      env.side + "-admit-neg",
@@ -646,11 +646,11 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// + over-settle + nil window + unknown window) -> refill -> close ->
 	// settle-after-close.
 	win, err := c.OpenWindow(ctx, openrails.OpenWindowRequest{
-		PayerTenantID: payerID,
-		Actor:         env.actor,
-		Currency:      env.currency,
-		AmountMicros:  50_000,
-		TTLSeconds:    600,
+		CustomerID:   payerID,
+		Actor:        env.actor,
+		Currency:     env.currency,
+		AmountMicros: 50_000,
+		TTLSeconds:   600,
 	})
 	require.NoError(t, err, "%s open-window", env.side)
 	r.WindowOpen = observeWindow(t, env.side+" open-window", win, env.payer)
@@ -690,10 +690,10 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// default) + money-denied + bad payer + negative estimate — per-item
 	// isolation, the batch call itself succeeds.
 	verdicts, err := c.AdmitBatch(ctx, []openrails.AdmitRequest{
-		{PayerTenantID: payerID, Actor: env.actor, EstimateMicros: 1_000, RequestID: env.side + "-batch-1", Source: "admit"},
-		{PayerTenantID: payerID, Actor: env.actor, EstimateMicros: 10_000_000_000, RequestID: env.side + "-batch-2"},
-		{PayerTenantID: "not-a-uuid", Actor: env.actor, EstimateMicros: 1, RequestID: env.side + "-batch-3"},
-		{PayerTenantID: payerID, Actor: env.actor, EstimateMicros: -1, RequestID: env.side + "-batch-4"},
+		{CustomerID: payerID, Actor: env.actor, EstimateMicros: 1_000, RequestID: env.side + "-batch-1", Source: "admit"},
+		{CustomerID: payerID, Actor: env.actor, EstimateMicros: 10_000_000_000, RequestID: env.side + "-batch-2"},
+		{CustomerID: "not-a-uuid", Actor: env.actor, EstimateMicros: 1, RequestID: env.side + "-batch-3"},
+		{CustomerID: payerID, Actor: env.actor, EstimateMicros: -1, RequestID: env.side + "-batch-4"},
 	})
 	require.NoError(t, err, "%s admit-batch", env.side)
 	require.Len(t, verdicts, 4, "%s admit-batch verdicts are positional", env.side)
@@ -703,11 +703,11 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 
 	// 19) Window/batch error parity.
 	_, err = c.OpenWindow(ctx, openrails.OpenWindowRequest{
-		PayerTenantID: payerID, Actor: env.actor, Currency: env.currency, AmountMicros: 10_000_000_000,
+		CustomerID: payerID, Actor: env.actor, Currency: env.currency, AmountMicros: 10_000_000_000,
 	})
 	r.ErrWindowOpenInsufficient = observeErr(t, env.side+" open-window insufficient", err)
 	_, err = c.OpenWindow(ctx, openrails.OpenWindowRequest{
-		PayerTenantID: payerID, Actor: env.actor, Currency: env.currency,
+		CustomerID: payerID, Actor: env.actor, Currency: env.currency,
 	})
 	r.ErrWindowOpenNoAmount = observeErr(t, env.side+" open-window without amount", err)
 	_, err = c.RefillWindow(ctx, unknownWindow, 0, 0)
@@ -788,7 +788,7 @@ func observeAccount(a *openrails.CreditAccount, payerID string) obsAccount {
 		HeldMicros:            a.HeldMicros,
 		AvailableMicros:       a.AvailableMicros,
 		OutstandingOwedMicros: a.OutstandingOwedMicros,
-		PayerMatches:          a.PayerTenantID == payerID,
+		PayerMatches:          a.CustomerID == payerID,
 	}
 }
 
@@ -813,13 +813,13 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 		id := uuid.New()
 		subject := side + "-" + id.String()
 		_, err := pool.Exec(ctx, `
-			INSERT INTO openrails.merchant_subjects (id, merchant_id, issuer, subject, created_at, last_seen_at)
+			INSERT INTO openrails.customers (id, merchant_id, issuer, subject, created_at, last_seen_at)
 			VALUES ($1, $2, $3, $4, now(), now())`,
 			id, dbtest.TestTenantID.UUID(), issuer, subject)
 		require.NoError(t, err)
 		// One active entitlement row for the entitlements steps.
 		_, err = pool.Exec(ctx, `
-			INSERT INTO openrails.entitlements (id, merchant_id, merchant_subject_id, entitlement, start_at, source_id, source_type)
+			INSERT INTO openrails.entitlements (id, merchant_id, customer_id, entitlement, start_at, source_id, source_type)
 			VALUES ($1, $2, $3, 'premium', now() - interval '1 hour', $4, 'admin')`,
 			uuid.New(), dbtest.TestTenantID.UUID(), id, uuid.New())
 		require.NoError(t, err)

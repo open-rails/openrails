@@ -24,11 +24,11 @@ func TestGetUsage_Breakdown(t *testing.T) {
 	// writes, scoped by payer.
 	pool := testPool(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 	})
 
 	_, err := ms.Deposit(ctx, money.DepositParams{
-		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "seed",
+		CustomerID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
@@ -82,27 +82,27 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 
 	pool := testPool(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 	})
 
 	_, err := ms.Deposit(ctx, money.DepositParams{
-		MerchantSubjectID: &payer,
-		Actor:           payer.UUID().String(),
-		Currency:        money.DefaultCurrency,
-		Amount:          10_000,
-		Source:          "seed",
+		CustomerID: &payer,
+		Actor:      payer.UUID().String(),
+		Currency:   money.DefaultCurrency,
+		Amount:     10_000,
+		Source:     "seed",
 	})
 	require.NoError(t, err)
 
 	capture := func(amount int64, holdSource, usageSourceID, actor, resource string, metadata map[string]any) {
 		t.Helper()
 		hold, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
-			MerchantSubjectID: &payer,
-			Actor:           actor,
-			Amount:          amount,
-			Source:          "hold",
-			SourceID:        holdSource,
-			ExpiresAt:       time.Now().Add(time.Hour).UTC(),
+			CustomerID: &payer,
+			Actor:      actor,
+			Amount:     amount,
+			Source:     "hold",
+			SourceID:   holdSource,
+			ExpiresAt:  time.Now().Add(time.Hour).UTC(),
 		})
 		require.NoError(t, err)
 		_, err = svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
@@ -136,21 +136,21 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 
 	var usageEventCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.usage_events WHERE tenant_subject_id = $1 AND event_type = $2",
+		"SELECT count(*) FROM openrails.usage_events WHERE customer_id = $1 AND event_type = $2",
 		payer.UUID(), "endpoint.capture",
 	).Scan(&usageEventCount))
 	require.Equal(t, 2, usageEventCount, "duplicate usage source_id is idempotent")
 
 	var captureCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.money_transactions WHERE tenant_subject_id = $1 AND transaction_type = $2 AND status = $3",
+		"SELECT count(*) FROM openrails.money_transactions WHERE customer_id = $1 AND transaction_type = $2 AND status = $3",
 		payer.UUID(), "hold", "captured",
 	).Scan(&captureCount))
 	require.Equal(t, 3, captureCount)
 
 	var ledgerCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.money_transactions WHERE tenant_subject_id = $1",
+		"SELECT count(*) FROM openrails.money_transactions WHERE customer_id = $1",
 		payer.UUID(),
 	).Scan(&ledgerCount))
 	require.Equal(t, 4, ledgerCount, "usage analytics must not create extra ledger debits")
@@ -158,10 +158,10 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 	assertRollup := func(groupBy string, want map[string]int64) {
 		t.Helper()
 		rows, err := svc.ServiceUsageRollup(ctx, billingservice.ServiceUsageRollupRequest{
-			MerchantSubjectID: &payer,
-			From:            time.Now().Add(-time.Hour),
-			To:              time.Now().Add(time.Hour),
-			GroupBy:         groupBy,
+			CustomerID: &payer,
+			From:       time.Now().Add(-time.Hour),
+			To:         time.Now().Add(time.Hour),
+			GroupBy:    groupBy,
 		})
 		require.NoError(t, err)
 		got := make(map[string]int64, len(rows))

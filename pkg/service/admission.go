@@ -23,10 +23,10 @@ type AdmitBlockCheck struct {
 
 // AdmitInput is the host's admission request: throughput + money + gates.
 type AdmitInput struct {
-	MerchantSubjectID identity.MerchantSubjectID
-	Actor           string
-	Tier            string
-	Resource        string
+	CustomerID identity.CustomerID
+	Actor      string
+	Tier       string
+	Resource   string
 	// Roles are the immutable role UUIDs the actor holds (#473). Each role with a
 	// matching (subject, role) budget policy gates this request's spend. The host
 	// reads them from the delegated JWT/permission set.
@@ -106,8 +106,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	if s.rt.RedisClient == nil {
 		return nil, fmt.Errorf("admission unavailable: redis not configured")
 	}
-	if in.MerchantSubjectID.IsZero() {
-		return nil, fmt.Errorf("tenant_subject_id required")
+	if in.CustomerID.IsZero() {
+		return nil, fmt.Errorf("customer_id required")
 	}
 
 	lim := ratelimit.NewLimiter(s.rt.RedisClient)
@@ -134,7 +134,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 			windows = append(windows, ratelimit.Limit{Unit: unit, Window: time.Duration(w.WindowSeconds) * time.Second, Max: w.Max})
 		}
 		if len(windows) > 0 {
-			tdec, err := lim.Check(ctx, "tenant:"+in.MerchantSubjectID.UUID().String(), ratelimit.Policy{Windows: windows}, map[string]int64{"request": 1})
+			tdec, err := lim.Check(ctx, "tenant:"+in.CustomerID.UUID().String(), ratelimit.Policy{Windows: windows}, map[string]int64{"request": 1})
 			if err != nil {
 				return nil, err
 			}
@@ -169,17 +169,17 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	}
 
 	dec, err := adm.Admit(ctx, admission.AdmitRequest{
-		MerchantSubjectID: in.MerchantSubjectID,
-		Actor:           in.Actor,
-		Tier:            in.Tier,
-		Resource:        in.Resource,
-		Roles:           in.Roles,
-		Amounts:         in.Amounts,
-		EstimateMicros:  in.EstimateMicros,
-		Source:          source,
-		SourceID:        in.SourceID,
-		ExpiresAt:       exp,
-		BlockChecks:     checks,
+		CustomerID:     in.CustomerID,
+		Actor:          in.Actor,
+		Tier:           in.Tier,
+		Resource:       in.Resource,
+		Roles:          in.Roles,
+		Amounts:        in.Amounts,
+		EstimateMicros: in.EstimateMicros,
+		Source:         source,
+		SourceID:       in.SourceID,
+		ExpiresAt:      exp,
+		BlockChecks:    checks,
 	})
 	if err != nil {
 		return nil, err
@@ -223,7 +223,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 // BudgetStatus returns the rolling money-budget windows for (payer, actor) at a
 // tier WITHOUT reserving (issue #304 introspection) — powers a host's /status
 // dashboard (e.g. cozy-art useGenerationBudgetStatus).
-func (s *Service) BudgetStatus(ctx context.Context, payer identity.MerchantSubjectID, actor, tier string) ([]AdmitBudgetWindowDTO, error) {
+func (s *Service) BudgetStatus(ctx context.Context, payer identity.CustomerID, actor, tier string) ([]AdmitBudgetWindowDTO, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -274,7 +274,7 @@ type BudgetCheckWindowInput struct {
 // budget policy and passes the windows; OpenRails owns the spend actuals
 // (openrails.budget_reservations). Powers the tensorhub delegated budget-window
 // display (#410) so it no longer reads tensorhub-local money tables.
-func (s *Service) BudgetCheck(ctx context.Context, payer identity.MerchantSubjectID, actor string, windows []BudgetCheckWindowInput, requestedMicros int64) ([]AdmitBudgetWindowDTO, error) {
+func (s *Service) BudgetCheck(ctx context.Context, payer identity.CustomerID, actor string, windows []BudgetCheckWindowInput, requestedMicros int64) ([]AdmitBudgetWindowDTO, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -335,7 +335,7 @@ func budgetScopeWindowModels(ws []BudgetScopeWindowInput) []models.BudgetWindowP
 // subject's self (subject) cap, a (subject, role) pool, or a (subject, actor)
 // cap. The owner is forced to "subject" — this path can NEVER write a
 // platform-owned cap, so a subject cannot create/loosen one.
-func (s *Service) SetSubjectBudgetPolicy(ctx context.Context, payer identity.MerchantSubjectID, in BudgetScopePolicyInput) error {
+func (s *Service) SetSubjectBudgetPolicy(ctx context.Context, payer identity.CustomerID, in BudgetScopePolicyInput) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -353,7 +353,7 @@ func (s *Service) SetSubjectBudgetPolicy(ctx context.Context, payer identity.Mer
 // platform-admin path (the caller enforces operator authz before invoking this);
 // the subject's own policy surface can never reach it, and the subject's
 // SubjectBudgetPolicies read does not expose it.
-func (s *Service) SetPlatformBudgetPolicy(ctx context.Context, payer identity.MerchantSubjectID, in BudgetScopePolicyInput) error {
+func (s *Service) SetPlatformBudgetPolicy(ctx context.Context, payer identity.CustomerID, in BudgetScopePolicyInput) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -368,7 +368,7 @@ func (s *Service) SetPlatformBudgetPolicy(ctx context.Context, payer identity.Me
 
 // SubjectBudgetPolicies returns ONLY the subject-owned budget-scope policies
 // (#473) — platform-owned caps are deliberately invisible to the subject.
-func (s *Service) SubjectBudgetPolicies(ctx context.Context, payer identity.MerchantSubjectID) ([]BudgetScopePolicyInput, error) {
+func (s *Service) SubjectBudgetPolicies(ctx context.Context, payer identity.CustomerID) ([]BudgetScopePolicyInput, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -426,7 +426,7 @@ type TierPolicyInput struct {
 
 // SetTierPolicy upserts a per-payer tier policy (throughput + entitled endpoints
 // + money-budget windows).
-func (s *Service) SetTierPolicy(ctx context.Context, payer identity.MerchantSubjectID, in TierPolicyInput) error {
+func (s *Service) SetTierPolicy(ctx context.Context, payer identity.CustomerID, in TierPolicyInput) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -470,7 +470,7 @@ type TierScheduleRung struct {
 // the ladder ONCE and OpenRails then AUTO-maintains each payer's tier from
 // cumulative spend (no host cranking). A zero payer sets the tenant-wide default
 // schedule; a non-zero payer sets a per-subject override. owner=platform.
-func (s *Service) SetTierSchedule(ctx context.Context, payer identity.MerchantSubjectID, schedule []TierScheduleRung) error {
+func (s *Service) SetTierSchedule(ctx context.Context, payer identity.CustomerID, schedule []TierScheduleRung) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -489,7 +489,7 @@ func (s *Service) SetTierSchedule(ctx context.Context, payer identity.MerchantSu
 // read the host uses to drive its OWN per-tier capacity decisions (e.g.
 // tensorhub's scheduler in-flight concurrency cap) WITHOUT supplying its own
 // ladder or cranking graduation.
-func (s *Service) GetTier(ctx context.Context, payer identity.MerchantSubjectID) (string, error) {
+func (s *Service) GetTier(ctx context.Context, payer identity.CustomerID) (string, error) {
 	if s == nil || s.rt == nil {
 		return "", fmt.Errorf("service not initialized")
 	}

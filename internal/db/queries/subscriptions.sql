@@ -3,7 +3,7 @@
 
 -- name: CreateSubscription :execrows
 INSERT INTO openrails.subscriptions (
-    id, merchant_id, merchant_subject_id, product_id, price_id, scheduled_price_id,
+    id, merchant_id, customer_id, product_id, price_id, scheduled_price_id,
     entitlements_spec_snapshot, credits_spec_snapshot, status, started_at,
     ended_at, current_period_starts_at, current_period_ends_at, processor,
     processor_subscription_id, user_email, payment_method_id, last_retry_at,
@@ -64,29 +64,29 @@ SELECT * FROM openrails.subscriptions WHERE id = $1;
 -- name: ListSubscriptionsByIDs :many
 SELECT * FROM openrails.subscriptions WHERE id = ANY(sqlc.arg(ids)::uuid[]);
 
--- name: GetLatestSubscriptionByMerchantSubject :one
+-- name: GetLatestSubscriptionByCustomer :one
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.merchant_subject_id = $1
+WHERE sub.customer_id = $1
 ORDER BY sub.created_at DESC
 LIMIT 1;
 
--- name: GetSubscriptionByMerchantSubjectAndPrice :one
+-- name: GetSubscriptionByCustomerAndPrice :one
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.merchant_subject_id = $1 AND sub.price_id = $2
+WHERE sub.customer_id = $1 AND sub.price_id = $2
 LIMIT 1;
 
--- name: GetLifecycleSubscriptionByMerchantSubjectAndProduct :one
+-- name: GetLifecycleSubscriptionByCustomerAndProduct :one
 -- NULLS FIRST prioritizes indefinite subscriptions.
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.merchant_subject_id = $1
+WHERE sub.customer_id = $1
   AND sub.product_id = $2
   AND sub.status IN ('active', 'pending', 'past_due')
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1;
 
--- name: GetActiveSubscriptionByMerchantSubjectAt :one
+-- name: GetActiveSubscriptionByCustomerAt :one
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.merchant_subject_id = $1
+WHERE sub.customer_id = $1
   AND sub.status = 'active'
   AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > sqlc.arg(now)::timestamptz)
 ORDER BY sub.created_at DESC
@@ -103,33 +103,33 @@ WHERE sub.processor = $1
   AND sub.gateway_response ->> sqlc.arg(key)::text = sqlc.arg(value)::text
 LIMIT 1;
 
--- name: ListActiveSubscriptionsByMerchantSubject :many
+-- name: ListActiveSubscriptionsByCustomer :many
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.merchant_subject_id = $1 AND sub.status = 'active'
+WHERE sub.customer_id = $1 AND sub.status = 'active'
 ORDER BY sub.created_at DESC;
 
--- name: ListSubscriptionsByMerchantSubjectProcessor :many
+-- name: ListSubscriptionsByCustomerProcessor :many
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.merchant_subject_id = $1 AND sub.processor = $2
+WHERE sub.customer_id = $1 AND sub.processor = $2
 ORDER BY sub.created_at DESC;
 
 -- name: ListActiveSubscriptionsByProcessor :many
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.processor = $1 AND sub.status = 'active';
 
--- name: CountSubscriptionsByMerchantSubject :one
+-- name: CountSubscriptionsByCustomer :one
 SELECT count(*) FROM openrails.subscriptions sub
-WHERE sub.merchant_subject_id = $1;
+WHERE sub.customer_id = $1;
 
--- name: ListSubscriptionsByMerchantSubjectPaged :many
+-- name: ListSubscriptionsByCustomerPaged :many
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.merchant_subject_id = $1
+WHERE sub.customer_id = $1
 ORDER BY sub.created_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountSubscriptionsFiltered :one
 SELECT count(*) FROM openrails.subscriptions sub
-WHERE (sqlc.narg(merchant_subject_id)::uuid IS NULL OR sub.merchant_subject_id = sqlc.narg(merchant_subject_id)::uuid)
+WHERE (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
   AND (sqlc.narg(processor)::text IS NULL OR sub.processor = sqlc.narg(processor)::text)
@@ -141,7 +141,7 @@ WHERE (sqlc.narg(merchant_subject_id)::uuid IS NULL OR sub.merchant_subject_id =
 
 -- name: ListSubscriptionsFiltered :many
 SELECT * FROM openrails.subscriptions sub
-WHERE (sqlc.narg(merchant_subject_id)::uuid IS NULL OR sub.merchant_subject_id = sqlc.narg(merchant_subject_id)::uuid)
+WHERE (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
   AND (sqlc.narg(processor)::text IS NULL OR sub.processor = sqlc.narg(processor)::text)
@@ -159,10 +159,10 @@ ORDER BY
     CASE WHEN sqlc.arg(sort_by)::text = 'created_at'   AND sqlc.arg(sort_desc)::boolean     THEN sub.created_at END DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
--- name: GetLifecycleSubscriptionByMerchantSubjectAndTierGroup :one
+-- name: GetLifecycleSubscriptionByCustomerAndTierGroup :one
 SELECT sub.* FROM openrails.subscriptions sub
 JOIN openrails.products prod ON prod.id = sub.product_id
-WHERE sub.merchant_subject_id = $1
+WHERE sub.customer_id = $1
   AND sub.status IN ('active', 'pending', 'past_due')
   AND prod.tier_group = $2
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
@@ -181,7 +181,7 @@ SET gateway_response = CASE WHEN jsonb_typeof(gateway_response) = 'object'
         ELSE jsonb_build_object('previous_gateway_response', gateway_response, 'superseded_at', current_timestamp, 'superseded_by_subscription_id', sqlc.narg(superseded_by)::text)
     END,
     updated_at = current_timestamp
-WHERE merchant_subject_id = $1
+WHERE customer_id = $1
   AND product_id = $2
   AND status = 'cancelled'
   AND (sqlc.narg(exclude_id)::uuid IS NULL OR id != sqlc.narg(exclude_id)::uuid);
@@ -235,7 +235,7 @@ WHERE sub.processor = ANY(sqlc.arg(processors)::text[])
 
 -- name: GetLatestResumableCancelledSubscription :one
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.merchant_subject_id = $1
+WHERE sub.customer_id = $1
   AND sub.status = 'cancelled'
   AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > sqlc.arg(now)::timestamptz)
 ORDER BY sub.created_at DESC

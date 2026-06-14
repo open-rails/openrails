@@ -59,16 +59,16 @@ func (s *EntitlementService) IsEntitled(ctx context.Context, userID, entitlement
 	return s.repo.IsEntitled(ctx, userID, entitlement, at)
 }
 
-func (s *EntitlementService) IsMerchantSubjectEntitled(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
-	return s.repo.IsMerchantSubjectEntitled(ctx, tenantSubjectID, entitlement, at)
+func (s *EntitlementService) IsCustomerEntitled(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
+	return s.repo.IsCustomerEntitled(ctx, tenantSubjectID, entitlement, at)
 }
 
 func (s *EntitlementService) HasActiveIndefinite(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
 	return s.repo.HasActiveIndefinite(ctx, userID, entitlement, at)
 }
 
-func (s *EntitlementService) HasActiveIndefiniteByMerchantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
-	return s.repo.HasActiveIndefiniteByMerchantSubject(ctx, tenantSubjectID, entitlement, at)
+func (s *EntitlementService) HasActiveIndefiniteByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
+	return s.repo.HasActiveIndefiniteByCustomer(ctx, tenantSubjectID, entitlement, at)
 }
 
 func (s *EntitlementService) ExistsBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID, entitlement string) (bool, error) {
@@ -79,8 +79,8 @@ func (s *EntitlementService) LatestFiniteWindow(ctx context.Context, userID, ent
 	return s.repo.GetLatestFiniteActive(ctx, userID, entitlement, at)
 }
 
-func (s *EntitlementService) LatestFiniteWindowByMerchantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (*models.Entitlement, error) {
-	return s.repo.GetLatestFiniteActiveByMerchantSubject(ctx, tenantSubjectID, entitlement, at)
+func (s *EntitlementService) LatestFiniteWindowByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (*models.Entitlement, error) {
+	return s.repo.GetLatestFiniteActiveByCustomer(ctx, tenantSubjectID, entitlement, at)
 }
 
 func (s *EntitlementService) ListByUser(ctx context.Context, userID string) ([]models.Entitlement, error) {
@@ -91,8 +91,8 @@ func (s *EntitlementService) ListActiveRecords(ctx context.Context, userID strin
 	return s.repo.ListActiveRecords(ctx, userID, at)
 }
 
-func (s *EntitlementService) ListActiveRecordsByMerchantSubject(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]models.Entitlement, error) {
-	return s.repo.ListActiveRecordsByMerchantSubject(ctx, tenantSubjectID, at)
+func (s *EntitlementService) ListActiveRecordsByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]models.Entitlement, error) {
+	return s.repo.ListActiveRecordsByCustomer(ctx, tenantSubjectID, at)
 }
 
 func (s *EntitlementService) ListActiveRecordsByExternalSubjects(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
@@ -108,8 +108,8 @@ func (s *EntitlementService) ListActiveEntitlements(ctx context.Context, userID 
 	return s.repo.ListActiveEntitlements(ctx, userID, at)
 }
 
-func (s *EntitlementService) ListActiveEntitlementsByMerchantSubject(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]string, error) {
-	return s.repo.ListActiveEntitlementsByMerchantSubject(ctx, tenantSubjectID, at)
+func (s *EntitlementService) ListActiveEntitlementsByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]string, error) {
+	return s.repo.ListActiveEntitlementsByCustomer(ctx, tenantSubjectID, at)
 }
 
 // GetByID retrieves an entitlement by its ID
@@ -118,9 +118,9 @@ func (s *EntitlementService) GetByID(ctx context.Context, id uuid.UUID) (*models
 }
 
 type PushNewEntitlementParams struct {
-	UserID          string
-	MerchantSubjectID uuid.UUID
-	Entitlement     string
+	UserID      string
+	CustomerID  uuid.UUID
+	Entitlement string
 
 	// NotBefore allows callers to delay the start of the new window.
 	// The final start_at is max(NotBefore, tail_end, now).
@@ -180,32 +180,32 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		}
 
 		// Resolve the payable tenant subject for this entitlement when the caller
-		// did not supply one (#317), so every window carries tenant_subject_id
+		// did not supply one (#317), so every window carries customer_id
 		// alongside the legacy user_id. Self-service user UUIDs resolve to a
-		// tenant_subjects row whose id IS that UUID (see repo.EnsureMerchantSubjectID),
+		// customers row whose id IS that UUID (see repo.EnsureCustomerID),
 		// converging with the credits/commerce payable identity.
-		if p.MerchantSubjectID == uuid.Nil {
-			tsid, terr := repo.EnsureMerchantSubjectID(ctx, tx, uuid.Nil, p.UserID)
+		if p.CustomerID == uuid.Nil {
+			tsid, terr := repo.EnsureCustomerID(ctx, tx, uuid.Nil, p.UserID)
 			if terr != nil {
 				return terr
 			}
-			p.MerchantSubjectID = tsid
+			p.CustomerID = tsid
 		}
 
 		// If an indefinite entitlement exists, the timeline is terminal.
-		hasIndefinite, err := repo.TimelineHasIndefinite(ctx, tx, p.MerchantSubjectID, p.Entitlement)
+		hasIndefinite, err := repo.TimelineHasIndefinite(ctx, tx, p.CustomerID, p.Entitlement)
 		if err != nil {
 			return err
 		}
 		if hasIndefinite {
-			created, err = repo.GetTimelineIndefinite(ctx, tx, p.MerchantSubjectID, p.Entitlement)
+			created, err = repo.GetTimelineIndefinite(ctx, tx, p.CustomerID, p.Entitlement)
 			if err != nil {
 				return err
 			}
-			return repo.AttachMerchantSubjectIfMissing(ctx, tx, created, p.MerchantSubjectID, now)
+			return repo.AttachCustomerIfMissing(ctx, tx, created, p.CustomerID, now)
 		}
 
-		tailEnd, err := repo.GetTimelineTailEnd(ctx, tx, p.MerchantSubjectID, p.Entitlement)
+		tailEnd, err := repo.GetTimelineTailEnd(ctx, tx, p.CustomerID, p.Entitlement)
 		if err != nil {
 			return err
 		}
@@ -231,7 +231,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		case p.EndAt != nil:
 			e := p.EndAt.UTC()
 			if !e.After(start) {
-				covered, cerr := repo.GetTimelineCoveringWindow(ctx, tx, p.MerchantSubjectID, p.Entitlement, e)
+				covered, cerr := repo.GetTimelineCoveringWindow(ctx, tx, p.CustomerID, p.Entitlement, e)
 				if cerr != nil {
 					if errors.Is(cerr, pgx.ErrNoRows) {
 						return fmt.Errorf("requested entitlement window is already covered by timeline tail but no covering row was found")
@@ -239,21 +239,21 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 					return cerr
 				}
 				created = covered
-				return repo.AttachMerchantSubjectIfMissing(ctx, tx, created, p.MerchantSubjectID, now)
+				return repo.AttachCustomerIfMissing(ctx, tx, created, p.CustomerID, now)
 			}
 			endAt = &e
 		}
 
 		created = &models.Entitlement{
-			ID:              uuidutil.NewV7(),
-			MerchantSubjectID: p.MerchantSubjectID,
-			Entitlement:     p.Entitlement,
-			StartAt:         start,
-			EndAt:           endAt,
-			SourceType:      p.SourceType,
-			SourceID:        &p.SourceID,
-			CreatedAt:       now,
-			UpdatedAt:       now,
+			ID:          uuidutil.NewV7(),
+			CustomerID:  p.CustomerID,
+			Entitlement: p.Entitlement,
+			StartAt:     start,
+			EndAt:       endAt,
+			SourceType:  p.SourceType,
+			SourceID:    &p.SourceID,
+			CreatedAt:   now,
+			UpdatedAt:   now,
 		}
 		return repo.InsertTimelineWindow(ctx, tx, created)
 	})
@@ -342,7 +342,7 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 			if err != nil {
 				return err
 			}
-			userID = ent.MerchantSubjectID.String()
+			userID = ent.CustomerID.String()
 			entitlement = ent.Entitlement
 			if err := repo.LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
 				return err
@@ -373,7 +373,7 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 
 		// Filter the entitlement timeline by the payable tenant subject (#317);
 		// the lock above still serializes on the userID string key.
-		tsid, terr := repo.ResolveMerchantSubjectID(userID)
+		tsid, terr := repo.ResolveCustomerID(userID)
 		if terr != nil {
 			return terr
 		}

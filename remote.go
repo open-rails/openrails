@@ -21,7 +21,7 @@ type remote struct {
 	baseURL  string
 	currency string
 	client   *http.Client
-	timeout    time.Duration
+	timeout  time.Duration
 	// tokenFn mints the per-call Bearer (e.g. a host-signed AuthKit service JWT,
 	// #411, or an OpenRails-issued service token). It is the SOLE credential; a
 	// mint failure errors the call so the problem surfaces instead of being
@@ -131,13 +131,13 @@ func (c *remote) Authorize(ctx context.Context, req AuthorizeRequest) (*Authoriz
 func (c *remote) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*CreditHold, error) {
 	var out CreditHold
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/hold", map[string]any{
-		"tenant_subject_id": payerTenantIDString(req.PayerTenantID),
-		"actor":             req.Actor,
-		"currency":          req.Currency,
-		"amount":            req.Amount,
-		"source":            req.Source,
-		"source_id":         req.SourceID,
-		"expires_at":        req.ExpiresAt.Unix(),
+		"customer_id": customerIDString(req.CustomerID),
+		"actor":       req.Actor,
+		"currency":    req.Currency,
+		"amount":      req.Amount,
+		"source":      req.Source,
+		"source_id":   req.SourceID,
+		"expires_at":  req.ExpiresAt.Unix(),
 	}, &out)
 	if err != nil {
 		return nil, err
@@ -168,12 +168,12 @@ func (c *remote) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest
 	}
 	var out CreditTransaction
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/withdraw", map[string]any{
-		"tenant_subject_id": payerTenantIDString(req.PayerTenantID),
-		"actor":             req.Actor,
-		"currency":          req.Currency,
-		"amount":            req.Amount,
-		"source":            req.Source,
-		"source_id":         sourceID,
+		"customer_id": customerIDString(req.CustomerID),
+		"actor":       req.Actor,
+		"currency":    req.Currency,
+		"amount":      req.Amount,
+		"source":      req.Source,
+		"source_id":   sourceID,
 	}, &out)
 	if err != nil {
 		return nil, err
@@ -188,12 +188,12 @@ func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 		sourceID = req.SourceID.String()
 	}
 	body := map[string]any{
-		"tenant_subject_id": payerTenantIDString(req.PayerTenantID),
-		"actor":             req.Actor,
-		"currency":          req.Currency,
-		"amount":            req.Amount,
-		"source":            req.Source,
-		"source_id":         sourceID,
+		"customer_id": customerIDString(req.CustomerID),
+		"actor":       req.Actor,
+		"currency":    req.Currency,
+		"amount":      req.Amount,
+		"source":      req.Source,
+		"source_id":   sourceID,
 	}
 	if req.ExpiresAt != nil {
 		body["expires_at"] = req.ExpiresAt.Unix()
@@ -248,9 +248,9 @@ func (c *remote) Release(ctx context.Context, reservationID string) error {
 }
 
 // Balance implements Client (handler ServiceGetCreditsBalance).
-func (c *remote) Balance(ctx context.Context, payerTenantID string) (*BalanceResponse, error) {
+func (c *remote) Balance(ctx context.Context, customerID string) (*BalanceResponse, error) {
 	q := url.Values{}
-	q.Set("tenant_subject_id", strings.TrimSpace(payerTenantID))
+	q.Set("customer_id", strings.TrimSpace(customerID))
 	if c.currency != "" {
 		q.Set("currency", c.currency)
 	}
@@ -262,9 +262,9 @@ func (c *remote) Balance(ctx context.Context, payerTenantID string) (*BalanceRes
 }
 
 // GetCreditAccount implements Client (handler ServiceGetCreditsBalance).
-func (c *remote) GetCreditAccount(ctx context.Context, payerTenantID, currency string) (*CreditAccount, error) {
+func (c *remote) GetCreditAccount(ctx context.Context, customerID, currency string) (*CreditAccount, error) {
 	q := url.Values{}
-	q.Set("tenant_subject_id", strings.TrimSpace(payerTenantID))
+	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", normalizeCurrency(currency))
 	var out CreditAccount
 	if err := c.do(ctx, http.MethodGet, "/v1/service/credits/balance?"+q.Encode(), nil, &out); err != nil {
@@ -275,24 +275,24 @@ func (c *remote) GetCreditAccount(ctx context.Context, payerTenantID, currency s
 
 // SetCreditAccountSettings implements Client (handler
 // ServiceSetCreditAccountSettings), then re-reads the account snapshot.
-func (c *remote) SetCreditAccountSettings(ctx context.Context, payerTenantID, currency string, in AccountSettingsInput) (*CreditAccount, error) {
+func (c *remote) SetCreditAccountSettings(ctx context.Context, customerID, currency string, in AccountSettingsInput) (*CreditAccount, error) {
 	body := map[string]any{
-		"tenant_subject_id": strings.TrimSpace(payerTenantID),
-		"currency":          normalizeCurrency(currency),
+		"customer_id": strings.TrimSpace(customerID),
+		"currency":    normalizeCurrency(currency),
 	}
 	addAccountSettingFields(body, in)
 	if err := c.do(ctx, http.MethodPut, "/v1/service/credits/account-settings", body, nil); err != nil {
 		return nil, err
 	}
-	return c.GetCreditAccount(ctx, payerTenantID, currency)
+	return c.GetCreditAccount(ctx, customerID, currency)
 }
 
 // ListCreditTransactions implements Client (handler
-// ServiceListMerchantSubjectCreditTransactions) and passes the canonical JSON
+// ServiceListCustomerCreditTransactions) and passes the canonical JSON
 // through.
-func (c *remote) ListCreditTransactions(ctx context.Context, payerTenantID, currency string, limit int) (json.RawMessage, error) {
+func (c *remote) ListCreditTransactions(ctx context.Context, customerID, currency string, limit int) (json.RawMessage, error) {
 	q := url.Values{}
-	q.Set("tenant_subject_id", strings.TrimSpace(payerTenantID))
+	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", normalizeCurrency(currency))
 	if limit > 0 {
 		q.Set("limit", fmt.Sprintf("%d", limit))
@@ -305,15 +305,15 @@ func (c *remote) ListCreditTransactions(ctx context.Context, payerTenantID, curr
 }
 
 // UsageRollup implements Client (handler ServiceUsageRollup).
-func (c *remote) UsageRollup(ctx context.Context, payerTenantID string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
+func (c *remote) UsageRollup(ctx context.Context, customerID string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
 	var resp struct {
 		Rows []UsageRollupRow `json:"rows"`
 	}
 	body := map[string]any{
-		"tenant_subject_id": payerTenantID,
-		"from":              from.UTC().Unix(),
-		"to":                to.UTC().Unix(),
-		"group_by":          groupBy,
+		"customer_id": customerID,
+		"from":        from.UTC().Unix(),
+		"to":          to.UTC().Unix(),
+		"group_by":    groupBy,
 	}
 	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/usage/rollup", body, &resp); err != nil {
 		return nil, err
@@ -330,10 +330,10 @@ func (c *remote) BudgetCheck(ctx context.Context, tenantSubjectID, actorID strin
 		Windows []BudgetWindow `json:"windows"`
 	}
 	body := map[string]any{
-		"tenant_subject_id": tenantSubjectID,
-		"actor":             actorID,
-		"windows":           windows,
-		"requested_micros":  requestedMicros,
+		"customer_id":      tenantSubjectID,
+		"actor":            actorID,
+		"windows":          windows,
+		"requested_micros": requestedMicros,
 	}
 	if err := c.do(ctx, http.MethodPost, "/v1/service/budget/check", body, &resp); err != nil {
 		return nil, err
@@ -344,7 +344,7 @@ func (c *remote) BudgetCheck(ctx context.Context, tenantSubjectID, actorID strin
 // BudgetStatus implements Client (handler ServiceGetBudget).
 func (c *remote) BudgetStatus(ctx context.Context, tenantSubjectID, actorID, tier string) ([]BudgetWindow, error) {
 	q := url.Values{}
-	q.Set("tenant_subject_id", strings.TrimSpace(tenantSubjectID))
+	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
 	if actorID != "" {
 		q.Set("actor", actorID)
 	}
@@ -363,7 +363,7 @@ func (c *remote) BudgetStatus(ctx context.Context, tenantSubjectID, actorID, tie
 // SetTierPolicy implements Client (handler ServiceSetTierPolicy).
 func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in TierPolicyInput) error {
 	body := map[string]any{
-		"tenant_subject_id":  strings.TrimSpace(tenantSubjectID),
+		"customer_id":        strings.TrimSpace(tenantSubjectID),
 		"tier":               in.Tier,
 		"windows":            in.Windows,
 		"entitled_resources": in.EntitledResources,
@@ -376,8 +376,8 @@ func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in T
 // SetTierSchedule implements Client (handler ServiceSetTierSchedule, #476).
 func (c *remote) SetTierSchedule(ctx context.Context, tenantSubjectID string, schedule []TierScheduleRung) error {
 	body := map[string]any{
-		"tenant_subject_id": strings.TrimSpace(tenantSubjectID),
-		"schedule":          schedule,
+		"customer_id": strings.TrimSpace(tenantSubjectID),
+		"schedule":    schedule,
 	}
 	return c.do(ctx, http.MethodPut, "/v1/service/tier-schedules", body, nil)
 }
@@ -385,7 +385,7 @@ func (c *remote) SetTierSchedule(ctx context.Context, tenantSubjectID string, sc
 // GetTier implements Client (handler ServiceGetTier, #477).
 func (c *remote) GetTier(ctx context.Context, tenantSubjectID string) (string, error) {
 	q := url.Values{}
-	q.Set("tenant_subject_id", strings.TrimSpace(tenantSubjectID))
+	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
 	var resp struct {
 		Tier string `json:"tier"`
 	}
@@ -398,10 +398,10 @@ func (c *remote) GetTier(ctx context.Context, tenantSubjectID string) (string, e
 // SetSubjectBudgetPolicy implements Client (handler ServiceSetSubjectBudgetPolicy, #473).
 func (c *remote) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in SubjectBudgetPolicyInput) error {
 	body := map[string]any{
-		"tenant_subject_id": strings.TrimSpace(tenantSubjectID),
-		"scope":             in.Scope,
-		"role_id":           in.RoleID,
-		"windows":           in.Windows,
+		"customer_id": strings.TrimSpace(tenantSubjectID),
+		"scope":       in.Scope,
+		"role_id":     in.RoleID,
+		"windows":     in.Windows,
 	}
 	return c.do(ctx, http.MethodPut, "/v1/service/budget-policies/subject", body, nil)
 }
@@ -409,9 +409,9 @@ func (c *remote) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID str
 // SetPlatformBudgetPolicy implements Client (handler ServiceSetPlatformBudgetPolicy, #473).
 func (c *remote) SetPlatformBudgetPolicy(ctx context.Context, tenantSubjectID string, in PlatformBudgetPolicyInput) error {
 	body := map[string]any{
-		"tenant_subject_id": strings.TrimSpace(tenantSubjectID),
-		"scope":             in.Scope,
-		"windows":           in.Windows,
+		"customer_id": strings.TrimSpace(tenantSubjectID),
+		"scope":       in.Scope,
+		"windows":     in.Windows,
 	}
 	return c.do(ctx, http.MethodPut, "/v1/service/budget-policies/platform", body, nil)
 }
@@ -419,7 +419,7 @@ func (c *remote) SetPlatformBudgetPolicy(ctx context.Context, tenantSubjectID st
 // SubjectBudgetPolicies implements Client (handler ServiceGetSubjectBudgetPolicies, #473).
 func (c *remote) SubjectBudgetPolicies(ctx context.Context, tenantSubjectID string) ([]SubjectBudgetPolicy, error) {
 	q := url.Values{}
-	q.Set("tenant_subject_id", strings.TrimSpace(tenantSubjectID))
+	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
 	var resp struct {
 		Policies []SubjectBudgetPolicy `json:"policies"`
 	}
@@ -495,7 +495,7 @@ func (c *remote) ListActiveEntitlements(ctx context.Context, issuer string, subj
 		body["at"] = at.UTC().Format(time.RFC3339)
 	}
 	var out map[string][]EntitlementRecord
-	if err := c.do(ctx, http.MethodPost, "/v1/service/tenant-subjects/by-external-subject/entitlements", body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/service/customers/by-external-subject/entitlements", body, &out); err != nil {
 		return nil, err
 	}
 	if out == nil {
@@ -565,7 +565,7 @@ func normalizeCurrency(currency string) string {
 	return currency
 }
 
-func payerTenantIDString(payer *PayerTenantID) string {
+func customerIDString(payer *CustomerID) string {
 	if payer == nil || payer.IsZero() {
 		return ""
 	}

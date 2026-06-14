@@ -58,21 +58,21 @@ type Client interface {
 	// Release frees the admission/authorize hold reservationID without charging.
 	Release(ctx context.Context, reservationID string) error
 	// Balance returns the payer's balance snapshot.
-	Balance(ctx context.Context, payerTenantID string) (*BalanceResponse, error)
+	Balance(ctx context.Context, customerID string) (*BalanceResponse, error)
 	// GetCreditAccount reads a payer's balance + policy snapshot. currency is
 	// optional (empty defaults to "USD", #476).
-	GetCreditAccount(ctx context.Context, payerTenantID, currency string) (*CreditAccount, error)
+	GetCreditAccount(ctx context.Context, customerID, currency string) (*CreditAccount, error)
 	// SetCreditAccountSettings upserts a payer's billing account settings and
 	// returns the refreshed account snapshot. currency is optional (empty
 	// defaults to "USD", #476).
-	SetCreditAccountSettings(ctx context.Context, payerTenantID, currency string, in AccountSettingsInput) (*CreditAccount, error)
+	SetCreditAccountSettings(ctx context.Context, customerID, currency string, in AccountSettingsInput) (*CreditAccount, error)
 	// ListCreditTransactions reads a payer's transaction history and passes the
 	// canonical JSON through ({"transactions":[...],"total":N}). currency is
 	// optional (empty defaults to "USD", #476).
-	ListCreditTransactions(ctx context.Context, payerTenantID, currency string, limit int) (json.RawMessage, error)
+	ListCreditTransactions(ctx context.Context, customerID, currency string, limit int) (json.RawMessage, error)
 	// UsageRollup returns grouped spend over [from, to). groupBy is
 	// resource|actor|function|tier.
-	UsageRollup(ctx context.Context, payerTenantID string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
+	UsageRollup(ctx context.Context, customerID string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
 	// BudgetCheck computes fixed money-budget windows for (payer, actor) against
 	// CALLER-SUPPLIED windows without reserving (#410, #337 cadence).
 	BudgetCheck(ctx context.Context, tenantSubjectID, actorID string, windows []BudgetWindowInput, requestedMicros int64) ([]BudgetWindow, error)
@@ -146,25 +146,25 @@ type Client interface {
 	AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error)
 }
 
-// SelfIssuer is the issuer keying tenant_subjects rows for self-service
+// SelfIssuer is the issuer keying customers rows for self-service
 // identities whose subject is the user's own UUID — what an embedded host
 // passes to ListActiveEntitlements for its own users (internal/db/repo
-// EnsureMerchantSubjectID materializes rows under it).
+// EnsureCustomerID materializes rows under it).
 const SelfIssuer = "openrails:self"
 
-// PayerTenantID is the OpenRails tenant-subject UUID a charge is billed to.
-type PayerTenantID uuid.UUID
+// CustomerID is the OpenRails customer UUID a charge is billed to.
+type CustomerID uuid.UUID
 
-func (id PayerTenantID) UUID() uuid.UUID { return uuid.UUID(id) }
-func (id PayerTenantID) String() string  { return uuid.UUID(id).String() }
-func (id PayerTenantID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
+func (id CustomerID) UUID() uuid.UUID { return uuid.UUID(id) }
+func (id CustomerID) String() string  { return uuid.UUID(id).String() }
+func (id CustomerID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 
 // AuthorizeRequest is the body for POST /v1/service/credits/authorize. It is the
 // atomic authorize+hold: OpenRails checks the payer's balance and, if allowed,
 // places a hold for EstimateMicros in a single idempotent call keyed on RequestID.
 type AuthorizeRequest struct {
-	PayerTenantID string `json:"tenant_subject_id"`
-	Actor         string `json:"actor"`
+	CustomerID string `json:"customer_id"`
+	Actor      string `json:"actor"`
 	// Currency is the ledger unit; empty defaults to "USD" (#476). A free string
 	// so #475 qualified custom-credit unit codes ride the same field.
 	Currency       string `json:"currency,omitempty"`
@@ -191,8 +191,8 @@ type AuthorizeResponse struct {
 
 // HoldCreditsRequest reserves credits for an estimate.
 type HoldCreditsRequest struct {
-	PayerTenantID *PayerTenantID
-	Actor         string
+	CustomerID *CustomerID
+	Actor      string
 	// Currency is the ledger unit; empty defaults to "USD" (#476).
 	Currency  string
 	Amount    int64
@@ -225,8 +225,8 @@ type CaptureHoldRequest struct {
 
 // WithdrawCreditsRequest debits credits directly.
 type WithdrawCreditsRequest struct {
-	PayerTenantID *PayerTenantID
-	Actor         string
+	CustomerID *CustomerID
+	Actor      string
 	// Currency is the ledger unit; empty defaults to "USD" (#476).
 	Currency string
 	Amount   int64
@@ -238,8 +238,8 @@ type WithdrawCreditsRequest struct {
 // promotions, money-in settlement). Amount is in the currency's ledger unit
 // (micro-dollars for "USD").
 type DepositCreditsRequest struct {
-	PayerTenantID *PayerTenantID
-	Actor         string
+	CustomerID *CustomerID
+	Actor      string
 	// Currency is the ledger unit; empty defaults to "USD" (#476).
 	Currency    string
 	Amount      int64
@@ -251,12 +251,11 @@ type DepositCreditsRequest struct {
 
 // CreditTransaction is the ledger row returned by capture/withdraw/deposit.
 // Field names match the wire exactly (the handler serializes
-// pkg/service.CreditTransaction with Go field names, no json tags). NOTE: the
-// payer field is MerchantSubjectID — go-client's PayerTenantID field name never
-// decoded this and silently stayed zero; fixed here.
+// pkg/service.CreditTransaction with Go field names, no json tags). The
+// customer field is CustomerID, matching the service struct's Go field name.
 type CreditTransaction struct {
 	ID              uuid.UUID
-	MerchantSubjectID uuid.UUID
+	CustomerID      uuid.UUID
 	Actor           string
 	CreditTypeID    uuid.UUID
 	Amount          int64
@@ -283,7 +282,7 @@ type CreditTransaction struct {
 // EstimateMicros is the upper-bound charge to hold. A zero EstimateMicros runs
 // the limit checks without placing a money hold.
 type AdmitRequest struct {
-	PayerTenantID  string           `json:"tenant_subject_id"`
+	CustomerID     string           `json:"customer_id"`
 	Actor          string           `json:"actor"`
 	Tier           string           `json:"tier,omitempty"`
 	Resource       string           `json:"resource,omitempty"`
@@ -369,7 +368,7 @@ type BalanceResponse struct {
 
 // CreditAccount is the OpenRails service balance/policy snapshot.
 type CreditAccount struct {
-	PayerTenantID         string `json:"tenant_subject_id"`
+	CustomerID            string `json:"customer_id"`
 	Currency              string `json:"currency"`
 	BillingMode           string `json:"billing_mode"`
 	BalanceMicros         int64  `json:"balance_micros"`
@@ -448,7 +447,7 @@ type TierQueueLimit struct {
 // TierPolicyInput configures a per-payer tier policy via
 // PUT /v1/service/tier-policies (#298): throughput windows + entitled
 // resources + fixed money-budget windows + flex/batch queue limits
-// (pkg/service.TierPolicyInput on the wire; tenant_subject_id travels alongside
+// (pkg/service.TierPolicyInput on the wire; customer_id travels alongside
 // it).
 type TierPolicyInput struct {
 	Tier              string                 `json:"tier"`
@@ -486,7 +485,7 @@ type BudgetScopeWindow struct {
 // "subject" (the subject's self cap) or "role" (a (subject, role) pool); RoleID
 // is the role uuid when scope=role, empty otherwise. The owner is fixed to
 // "subject" server-side (pkg/service.BudgetScopePolicyInput on the wire;
-// tenant_subject_id travels alongside it).
+// customer_id travels alongside it).
 type SubjectBudgetPolicyInput struct {
 	Scope   string              `json:"scope"`
 	RoleID  string              `json:"role_id,omitempty"`
@@ -524,23 +523,23 @@ type ResourceRevenueResponse struct {
 // EntitlementRecord is one active entitlement row — the handler's
 // ServiceEntitlementRecord wire shape (entitlements.go) verbatim.
 type EntitlementRecord struct {
-	ID              string     `json:"id"`
-	MerchantSubjectID string     `json:"tenant_subject_id,omitempty"`
-	Entitlement     string     `json:"entitlement"`
-	StartAt         time.Time  `json:"start_at"`
-	EndAt           *time.Time `json:"end_at,omitempty"`
-	SourceID        *string    `json:"source_id,omitempty"`
-	SourceType      string     `json:"source_type"`
-	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
-	RevokeReason    *string    `json:"revoke_reason,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID           string     `json:"id"`
+	CustomerID   string     `json:"customer_id,omitempty"`
+	Entitlement  string     `json:"entitlement"`
+	StartAt      time.Time  `json:"start_at"`
+	EndAt        *time.Time `json:"end_at,omitempty"`
+	SourceID     *string    `json:"source_id,omitempty"`
+	SourceType   string     `json:"source_type"`
+	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
+	RevokeReason *string    `json:"revoke_reason,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // OpenWindowRequest is the body for POST /v1/service/credits/windows (#335).
 type OpenWindowRequest struct {
-	PayerTenantID string `json:"tenant_subject_id"`
-	Actor         string `json:"actor"`
+	CustomerID string `json:"customer_id"`
+	Actor      string `json:"actor"`
 	// Currency is the ledger unit; empty defaults to "USD" (#476).
 	Currency     string `json:"currency,omitempty"`
 	AmountMicros int64  `json:"amount"`
@@ -551,7 +550,7 @@ type OpenWindowRequest struct {
 // (pkg/service.CreditWindowDTO on the wire).
 type CreditWindow struct {
 	WindowID      uuid.UUID `json:"window_id"`
-	PayerTenantID uuid.UUID `json:"tenant_subject_id"`
+	CustomerID    uuid.UUID `json:"customer_id"`
 	HeldMicros    int64     `json:"held_amount"`
 	SettledMicros int64     `json:"settled_amount"`
 	Status        string    `json:"status"` // open | closed | expired

@@ -60,7 +60,7 @@ type UserContext struct {
 
 // ValidateSubject enforces the UUID-only payable-identity contract (#364) at
 // the auth boundary: the verified principal's UserID must itself be a UUID,
-// because OpenRails uses it directly as the payable tenant_subject_id. Every
+// because OpenRails uses it directly as the payable customer_id. Every
 // auth middleware (gin and net/http, Required and Optional) calls this after a
 // successful Authenticate — required routes reject the request, optional
 // routes treat it as anonymous. The returned message is client-safe.

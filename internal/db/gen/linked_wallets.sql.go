@@ -12,44 +12,44 @@ import (
 	"github.com/google/uuid"
 )
 
-const deleteLinkedWalletByMerchantSubjectAndChain = `-- name: DeleteLinkedWalletByMerchantSubjectAndChain :execrows
+const deleteLinkedWalletByCustomerAndChain = `-- name: DeleteLinkedWalletByCustomerAndChain :execrows
 DELETE FROM openrails.linked_wallets
-WHERE merchant_subject_id = $1 AND chain = $2
+WHERE customer_id = $1 AND chain = $2
 `
 
-type DeleteLinkedWalletByMerchantSubjectAndChainParams struct {
-	MerchantSubjectID uuid.UUID
-	Chain             string
+type DeleteLinkedWalletByCustomerAndChainParams struct {
+	CustomerID uuid.UUID
+	Chain      string
 }
 
-func (q *Queries) DeleteLinkedWalletByMerchantSubjectAndChain(ctx context.Context, arg DeleteLinkedWalletByMerchantSubjectAndChainParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteLinkedWalletByMerchantSubjectAndChain, arg.MerchantSubjectID, arg.Chain)
+func (q *Queries) DeleteLinkedWalletByCustomerAndChain(ctx context.Context, arg DeleteLinkedWalletByCustomerAndChainParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteLinkedWalletByCustomerAndChain, arg.CustomerID, arg.Chain)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const getLinkedWalletByMerchantSubjectAndChain = `-- name: GetLinkedWalletByMerchantSubjectAndChain :one
+const getLinkedWalletByCustomerAndChain = `-- name: GetLinkedWalletByCustomerAndChain :one
 
-SELECT id, merchant_id, merchant_subject_id, chain, address, verification_provider, verified_at, display_name, metadata, created_at, updated_at FROM openrails.linked_wallets lw
-WHERE lw.merchant_subject_id = $1 AND lw.chain = $2
+SELECT id, merchant_id, customer_id, chain, address, verification_provider, verified_at, display_name, metadata, created_at, updated_at FROM openrails.linked_wallets lw
+WHERE lw.customer_id = $1 AND lw.chain = $2
 LIMIT 1
 `
 
-type GetLinkedWalletByMerchantSubjectAndChainParams struct {
-	MerchantSubjectID uuid.UUID
-	Chain             string
+type GetLinkedWalletByCustomerAndChainParams struct {
+	CustomerID uuid.UUID
+	Chain      string
 }
 
 // openrails.linked_wallets.
-func (q *Queries) GetLinkedWalletByMerchantSubjectAndChain(ctx context.Context, arg GetLinkedWalletByMerchantSubjectAndChainParams) (OpenrailsLinkedWallet, error) {
-	row := q.db.QueryRow(ctx, getLinkedWalletByMerchantSubjectAndChain, arg.MerchantSubjectID, arg.Chain)
+func (q *Queries) GetLinkedWalletByCustomerAndChain(ctx context.Context, arg GetLinkedWalletByCustomerAndChainParams) (OpenrailsLinkedWallet, error) {
+	row := q.db.QueryRow(ctx, getLinkedWalletByCustomerAndChain, arg.CustomerID, arg.Chain)
 	var i OpenrailsLinkedWallet
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 		&i.Chain,
 		&i.Address,
 		&i.VerificationProvider,
@@ -64,7 +64,7 @@ func (q *Queries) GetLinkedWalletByMerchantSubjectAndChain(ctx context.Context, 
 
 const upsertLinkedWallet = `-- name: UpsertLinkedWallet :one
 INSERT INTO openrails.linked_wallets (
-    id, merchant_id, merchant_subject_id, chain, address, verification_provider,
+    id, merchant_id, customer_id, chain, address, verification_provider,
     verified_at, display_name, metadata, created_at, updated_at
 ) VALUES (
     $1,
@@ -73,19 +73,19 @@ INSERT INTO openrails.linked_wallets (
     COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($11::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
-ON CONFLICT (merchant_id, merchant_subject_id, chain) DO UPDATE SET
+ON CONFLICT (merchant_id, customer_id, chain) DO UPDATE SET
     address = EXCLUDED.address,
     verification_provider = EXCLUDED.verification_provider,
     verified_at = EXCLUDED.verified_at,
     display_name = EXCLUDED.display_name,
     metadata = EXCLUDED.metadata,
     updated_at = now()
-RETURNING id, merchant_id, merchant_subject_id, chain, address, verification_provider, verified_at, display_name, metadata, created_at, updated_at
+RETURNING id, merchant_id, customer_id, chain, address, verification_provider, verified_at, display_name, metadata, created_at, updated_at
 `
 
 type UpsertLinkedWalletParams struct {
 	ID                   uuid.UUID
-	MerchantSubjectID    uuid.UUID
+	CustomerID           uuid.UUID
 	Chain                string
 	Address              string
 	VerificationProvider string
@@ -100,7 +100,7 @@ type UpsertLinkedWalletParams struct {
 func (q *Queries) UpsertLinkedWallet(ctx context.Context, arg UpsertLinkedWalletParams) (OpenrailsLinkedWallet, error) {
 	row := q.db.QueryRow(ctx, upsertLinkedWallet,
 		arg.ID,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.Chain,
 		arg.Address,
 		arg.VerificationProvider,
@@ -115,7 +115,7 @@ func (q *Queries) UpsertLinkedWallet(ctx context.Context, arg UpsertLinkedWallet
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 		&i.Chain,
 		&i.Address,
 		&i.VerificationProvider,

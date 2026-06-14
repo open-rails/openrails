@@ -26,15 +26,15 @@ func TestPaymentToAPIStatusAndCaptured(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			payment := &models.Payment{
-				ID:              uuid.New(),
-				MerchantSubjectID: identity.MerchantSubjectIDFromString(uuid.NewString()).UUID(),
-				PriceID:         uuid.New(),
-				Processor:       models.ProcessorMobius,
-				TransactionID:   "txn_123",
-				Amount:          1000,
-				Currency:        "usd",
-				Status:          tt.status,
-				CreatedAt:       time.Unix(100, 0),
+				ID:            uuid.New(),
+				CustomerID:    identity.CustomerIDFromString(uuid.NewString()).UUID(),
+				PriceID:       uuid.New(),
+				Processor:     models.ProcessorMobius,
+				TransactionID: "txn_123",
+				Amount:        1000,
+				Currency:      "usd",
+				Status:        tt.status,
+				CreatedAt:     time.Unix(100, 0),
 			}
 
 			got := PaymentToAPI(payment, nil)
@@ -48,7 +48,7 @@ func TestPaymentToAPIRefundObjectNotCaptured(t *testing.T) {
 	originalID := uuid.New()
 	refund := &models.Payment{
 		ID:                uuid.New(),
-		MerchantSubjectID:   identity.MerchantSubjectIDFromString(uuid.NewString()).UUID(),
+		CustomerID:        identity.CustomerIDFromString(uuid.NewString()).UUID(),
 		PriceID:           uuid.New(),
 		RefundedPaymentID: &originalID,
 		Processor:         models.ProcessorMobius,
@@ -75,7 +75,7 @@ func TestPaymentToAPIRefundObjectPreservesPendingAndFailedStatus(t *testing.T) {
 		t.Run(tt.status, func(t *testing.T) {
 			refund := &models.Payment{
 				ID:                uuid.New(),
-				MerchantSubjectID:   identity.MerchantSubjectIDFromString(uuid.NewString()).UUID(),
+				CustomerID:        identity.CustomerIDFromString(uuid.NewString()).UUID(),
 				PriceID:           uuid.New(),
 				RefundedPaymentID: &originalID,
 				Processor:         models.ProcessorMobius,
@@ -96,20 +96,20 @@ func TestPaymentToAPIRefundObjectPreservesPendingAndFailedStatus(t *testing.T) {
 func TestPaymentToAPIAmountRefundedCountsOnlyCompletedRefunds(t *testing.T) {
 	originalID := uuid.New()
 	payment := &models.Payment{
-		ID:              originalID,
-		MerchantSubjectID: identity.MerchantSubjectIDFromString(uuid.NewString()).UUID(),
-		PriceID:         uuid.New(),
-		Processor:       models.ProcessorMobius,
-		TransactionID:   "txn_123",
-		Amount:          1000,
-		Currency:        "usd",
-		Status:          "completed",
-		CreatedAt:       time.Unix(100, 0),
+		ID:            originalID,
+		CustomerID:    identity.CustomerIDFromString(uuid.NewString()).UUID(),
+		PriceID:       uuid.New(),
+		Processor:     models.ProcessorMobius,
+		TransactionID: "txn_123",
+		Amount:        1000,
+		Currency:      "usd",
+		Status:        "completed",
+		CreatedAt:     time.Unix(100, 0),
 	}
 	refunds := []*models.Payment{
-		{ID: uuid.New(), MerchantSubjectID: payment.MerchantSubjectID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_completed", Amount: -300, Currency: "usd", Status: "completed"},
-		{ID: uuid.New(), MerchantSubjectID: payment.MerchantSubjectID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_pending", Amount: -400, Currency: "usd", Status: "pending"},
-		{ID: uuid.New(), MerchantSubjectID: payment.MerchantSubjectID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_failed", Amount: -500, Currency: "usd", Status: "failed"},
+		{ID: uuid.New(), CustomerID: payment.CustomerID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_completed", Amount: -300, Currency: "usd", Status: "completed"},
+		{ID: uuid.New(), CustomerID: payment.CustomerID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_pending", Amount: -400, Currency: "usd", Status: "pending"},
+		{ID: uuid.New(), CustomerID: payment.CustomerID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_failed", Amount: -500, Currency: "usd", Status: "failed"},
 	}
 
 	got := PaymentToAPI(payment, refunds)

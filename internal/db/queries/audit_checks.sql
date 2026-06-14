@@ -1,7 +1,7 @@
 -- Audit consistency checks (internal/audit). One named query per check
 -- query; SQL carried over essentially verbatim from the bun-era checks.
 -- Options.UserID post-filtering stays in Go (matching the old behavior);
--- only S-E-1 / P-E-1 filter by merchant_subject_id in SQL because the bun
+-- only S-E-1 / P-E-1 filter by customer_id in SQL because the bun
 -- builder queries did.
 
 -- ============================================================================
@@ -14,7 +14,7 @@
 -- name: AuditActiveSubscriptionsWithSpec :many
 SELECT
     sub.id,
-    sub.merchant_subject_id,
+    sub.customer_id,
     prod.id AS product_id,
     prod.slug AS product_slug,
     prod.entitlements_spec
@@ -22,14 +22,14 @@ FROM openrails.subscriptions sub
 JOIN openrails.prices price ON sub.price_id = price.id
 JOIN openrails.products prod ON price.product_id = prod.id
 WHERE sub.status = 'active'
-  AND (sqlc.narg(merchant_subject_id)::uuid IS NULL OR sub.merchant_subject_id = sqlc.narg(merchant_subject_id)::uuid)
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(since)::timestamptz IS NULL OR sub.created_at >= sqlc.narg(since)::timestamptz);
 
 -- S-E-1 (part 2): count currently-active entitlements granted by a
 -- subscription (deleted_at filter was implicit via bun soft delete).
 -- name: AuditActiveSubscriptionEntitlementCount :one
 SELECT count(*) FROM openrails.entitlements ent
-WHERE ent.merchant_subject_id = sqlc.arg(merchant_subject_id)
+WHERE ent.customer_id = sqlc.arg(customer_id)
   AND ent.entitlement = sqlc.arg(entitlement)
   AND ent.source_type = 'subscription'
   AND ent.source_id = sqlc.arg(source_id)
@@ -41,7 +41,7 @@ WHERE ent.merchant_subject_id = sqlc.arg(merchant_subject_id)
 -- name: AuditOrphanSubscriptionEntitlements :many
 SELECT
     ent.id AS entitlement_id,
-    ent.merchant_subject_id::text AS user_id,
+    ent.customer_id::text AS user_id,
     ent.entitlement,
     ent.source_id,
     CASE WHEN sub.id IS NOT NULL THEN sub.status::text END AS sub_status
@@ -57,7 +57,7 @@ WHERE ent.source_type = 'subscription'
 -- name: AuditCancelledSubscriptionActiveEntitlements :many
 SELECT
     sub.id AS sub_id,
-    sub.merchant_subject_id::text AS user_id,
+    sub.customer_id::text AS user_id,
     sub.ended_at::timestamptz AS ended_at,
     ent.id AS ent_id,
     ent.entitlement
@@ -74,7 +74,7 @@ WHERE sub.status = 'cancelled'
 -- name: AuditWrongEntitlementEndDate :many
 SELECT
     sub.id AS sub_id,
-    sub.merchant_subject_id::text AS user_id,
+    sub.customer_id::text AS user_id,
     sub.current_period_ends_at::timestamptz AS period_ends_at,
     ent.id AS ent_id,
     ent.entitlement,
@@ -94,16 +94,16 @@ WHERE sub.status = 'cancelled'
 -- name: AuditEntitlementSourceMismatch :many
 SELECT
     ent.id AS ent_id,
-    ent.merchant_subject_id::text AS ent_user_id,
+    ent.customer_id::text AS ent_user_id,
     ent.entitlement,
     ent.source_id,
-    CASE WHEN sub.id IS NOT NULL THEN sub.merchant_subject_id::text END AS sub_user_id
+    CASE WHEN sub.id IS NOT NULL THEN sub.customer_id::text END AS sub_user_id
 FROM openrails.entitlements ent
 LEFT JOIN openrails.subscriptions sub ON ent.source_id = sub.id
 WHERE ent.source_type = 'subscription'
   AND ent.source_id IS NOT NULL
   AND ent.deleted_at IS NULL
-  AND (sub.id IS NULL OR sub.merchant_subject_id != ent.merchant_subject_id);
+  AND (sub.id IS NULL OR sub.customer_id != ent.customer_id);
 
 -- ============================================================================
 -- Payment-entitlement checks
@@ -113,7 +113,7 @@ WHERE ent.source_type = 'subscription'
 -- name: AuditOneOffPaymentsWithSpec :many
 SELECT
     purch.id,
-    purch.merchant_subject_id,
+    purch.customer_id,
     purch.amount,
     purch.purchased_at,
     prod.id AS product_id,
@@ -124,7 +124,7 @@ JOIN openrails.prices price ON purch.price_id = price.id
 JOIN openrails.products prod ON price.product_id = prod.id
 WHERE purch.subscription_id IS NULL
   AND purch.amount > 0
-  AND (sqlc.narg(merchant_subject_id)::uuid IS NULL OR purch.merchant_subject_id = sqlc.narg(merchant_subject_id)::uuid)
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR purch.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(since)::timestamptz IS NULL OR purch.created_at >= sqlc.narg(since)::timestamptz);
 
 -- P-E-1 (part 2): count entitlements granted by a one-off payment
@@ -139,7 +139,7 @@ WHERE ent.source_type = 'one_off'
 -- name: AuditOrphanOneOffEntitlements :many
 SELECT
     ent.id AS ent_id,
-    ent.merchant_subject_id::text AS user_id,
+    ent.customer_id::text AS user_id,
     ent.entitlement,
     ent.source_id,
     CASE WHEN purch.id IS NOT NULL THEN true ELSE false END AS payment_exists,
@@ -164,7 +164,7 @@ WITH refund_totals AS (
 )
 SELECT
     purch.id AS payment_id,
-    purch.merchant_subject_id::text AS user_id,
+    purch.customer_id::text AS user_id,
     purch.amount AS original_amount,
     COALESCE(rt.total_refunded, 0)::bigint AS refunded_amount,
     ent.id AS ent_id,
@@ -187,12 +187,12 @@ WHERE purch.subscription_id IS NULL
 -- D-1
 -- name: AuditMultipleActiveSubscriptions :many
 SELECT
-    merchant_subject_id::text AS user_id,
+    customer_id::text AS user_id,
     COUNT(*)::int AS count,
     ARRAY_AGG(id ORDER BY created_at DESC)::uuid[] AS sub_ids
 FROM openrails.subscriptions
 WHERE status = 'active'
-GROUP BY merchant_subject_id
+GROUP BY customer_id
 HAVING COUNT(*) > 1;
 
 -- D-2
@@ -200,7 +200,7 @@ HAVING COUNT(*) > 1;
 WITH payment_products AS (
     SELECT
         purch.id,
-        purch.merchant_subject_id,
+        purch.customer_id,
         purch.amount,
         purch.purchased_at,
         price.product_id,
@@ -212,7 +212,7 @@ WITH payment_products AS (
       AND purch.refunded_payment_id IS NULL
 )
 SELECT
-    merchant_subject_id::text AS user_id,
+    customer_id::text AS user_id,
     product_id,
     product_slug,
     COUNT(*)::int AS count,
@@ -221,7 +221,7 @@ SELECT
     MIN(purchased_at)::timestamptz AS first_date,
     MAX(purchased_at)::timestamptz AS last_date
 FROM payment_products
-GROUP BY merchant_subject_id, product_id, product_slug, DATE_TRUNC('month', purchased_at)
+GROUP BY customer_id, product_id, product_slug, DATE_TRUNC('month', purchased_at)
 HAVING COUNT(*) > 1;
 
 -- D-3
@@ -229,7 +229,7 @@ HAVING COUNT(*) > 1;
 WITH active_entitlements AS (
     SELECT
         id,
-        merchant_subject_id,
+        customer_id,
         entitlement,
         start_at,
         COALESCE(end_at, '9999-12-31'::timestamptz) AS end_at
@@ -238,18 +238,18 @@ WITH active_entitlements AS (
       AND deleted_at IS NULL
 )
 SELECT
-    e1.merchant_subject_id::text AS user_id,
+    e1.customer_id::text AS user_id,
     e1.entitlement,
     (COUNT(DISTINCT e1.id) + COUNT(DISTINCT e2.id))::int AS count,
     (ARRAY_AGG(DISTINCT e1.id) || ARRAY_AGG(DISTINCT e2.id))::uuid[] AS ent_ids
 FROM active_entitlements e1
 JOIN active_entitlements e2 ON
-    e1.merchant_subject_id = e2.merchant_subject_id
+    e1.customer_id = e2.customer_id
     AND e1.entitlement = e2.entitlement
     AND e1.id < e2.id
     AND e1.start_at < e2.end_at
     AND e2.start_at < e1.end_at
-GROUP BY e1.merchant_subject_id, e1.entitlement;
+GROUP BY e1.customer_id, e1.entitlement;
 
 -- ============================================================================
 -- Subscription state checks
@@ -257,21 +257,21 @@ GROUP BY e1.merchant_subject_id, e1.entitlement;
 
 -- SS-1
 -- name: AuditActiveSubscriptionPastPeriodEnd :many
-SELECT id, merchant_subject_id::text AS user_id, current_period_ends_at::timestamptz AS current_period_ends_at
+SELECT id, customer_id::text AS user_id, current_period_ends_at::timestamptz AS current_period_ends_at
 FROM openrails.subscriptions
 WHERE status = 'active'
   AND current_period_ends_at < NOW();
 
 -- SS-2
 -- name: AuditCancelledWithoutMetadata :many
-SELECT id, merchant_subject_id::text AS user_id, cancelled_at, cancel_type, updated_at
+SELECT id, customer_id::text AS user_id, cancelled_at, cancel_type, updated_at
 FROM openrails.subscriptions
 WHERE status = 'cancelled'
   AND (cancelled_at IS NULL OR cancel_type IS NULL);
 
 -- SS-3
 -- name: AuditPastDueWithoutRetry :many
-SELECT id, merchant_subject_id::text AS user_id, retry_attempts
+SELECT id, customer_id::text AS user_id, retry_attempts
 FROM openrails.subscriptions
 WHERE status = 'past_due'
   AND next_retry_at IS NULL
@@ -279,7 +279,7 @@ WHERE status = 'past_due'
 
 -- SS-4
 -- name: AuditInvalidPeriodDates :many
-SELECT id, merchant_subject_id::text AS user_id,
+SELECT id, customer_id::text AS user_id,
        current_period_starts_at::timestamptz AS current_period_starts_at,
        current_period_ends_at::timestamptz AS current_period_ends_at
 FROM openrails.subscriptions
@@ -289,7 +289,7 @@ WHERE current_period_starts_at IS NOT NULL
 
 -- SS-5
 -- name: AuditEndedBeforeCancelled :many
-SELECT id, merchant_subject_id::text AS user_id,
+SELECT id, customer_id::text AS user_id,
        ended_at::timestamptz AS ended_at,
        cancelled_at::timestamptz AS cancelled_at
 FROM openrails.subscriptions
@@ -303,7 +303,7 @@ WHERE ended_at IS NOT NULL
 
 -- ES-1
 -- name: AuditRevokedWithoutReason :many
-SELECT id, merchant_subject_id::text AS user_id, entitlement, revoked_at::timestamptz AS revoked_at
+SELECT id, customer_id::text AS user_id, entitlement, revoked_at::timestamptz AS revoked_at
 FROM openrails.entitlements
 WHERE revoked_at IS NOT NULL
   AND revoke_reason IS NULL
@@ -311,7 +311,7 @@ WHERE revoked_at IS NOT NULL
 
 -- ES-2
 -- name: AuditReasonWithoutRevocation :many
-SELECT id, merchant_subject_id::text AS user_id, entitlement, revoke_reason::text AS revoke_reason
+SELECT id, customer_id::text AS user_id, entitlement, revoke_reason::text AS revoke_reason
 FROM openrails.entitlements
 WHERE revoke_reason IS NOT NULL
   AND revoked_at IS NULL
@@ -319,7 +319,7 @@ WHERE revoke_reason IS NOT NULL
 
 -- ES-3
 -- name: AuditInvalidTimeWindow :many
-SELECT id, merchant_subject_id::text AS user_id, entitlement, start_at, end_at::timestamptz AS end_at
+SELECT id, customer_id::text AS user_id, entitlement, start_at, end_at::timestamptz AS end_at
 FROM openrails.entitlements
 WHERE end_at IS NOT NULL
   AND start_at >= end_at
@@ -328,7 +328,7 @@ WHERE end_at IS NOT NULL
 -- ES-5
 -- name: AuditMultipleIndefiniteEntitlements :many
 SELECT
-    merchant_subject_id::text AS user_id,
+    customer_id::text AS user_id,
     entitlement,
     COUNT(*)::int AS count,
     ARRAY_AGG(id ORDER BY created_at DESC)::uuid[] AS ent_ids
@@ -336,7 +336,7 @@ FROM openrails.entitlements
 WHERE end_at IS NULL
   AND revoked_at IS NULL
   AND deleted_at IS NULL
-GROUP BY merchant_subject_id, entitlement
+GROUP BY customer_id, entitlement
 HAVING COUNT(*) > 1;
 
 -- ============================================================================
@@ -347,7 +347,7 @@ HAVING COUNT(*) > 1;
 -- name: AuditActiveSubscriptionFailedPaymentMethod :many
 SELECT
     sub.id AS sub_id,
-    sub.merchant_subject_id::text AS user_id,
+    sub.customer_id::text AS user_id,
     pm.id AS pm_id,
     pm.failure_reason::text AS failure_reason
 FROM openrails.subscriptions sub
@@ -360,7 +360,7 @@ WHERE sub.status = 'active'
 -- name: AuditExpiredCardActiveSubscription :many
 SELECT
     sub.id AS sub_id,
-    sub.merchant_subject_id::text AS user_id,
+    sub.customer_id::text AS user_id,
     pm.id AS pm_id,
     pm.expiry_date::text AS expiry_date,
     pm.last_four,
@@ -373,7 +373,7 @@ WHERE sub.status = 'active'
 
 -- PM-3
 -- name: AuditOrphanPaymentMethodReference :many
-SELECT sub.id AS sub_id, sub.merchant_subject_id::text AS user_id, sub.payment_method_id::uuid AS payment_method_id
+SELECT sub.id AS sub_id, sub.customer_id::text AS user_id, sub.payment_method_id::uuid AS payment_method_id
 FROM openrails.subscriptions sub
 LEFT JOIN openrails.payment_methods pm ON sub.payment_method_id = pm.id
 WHERE sub.payment_method_id IS NOT NULL
@@ -383,7 +383,7 @@ WHERE sub.payment_method_id IS NOT NULL
 -- name: AuditProcessorMismatch :many
 SELECT
     sub.id AS sub_id,
-    sub.merchant_subject_id::text AS user_id,
+    sub.customer_id::text AS user_id,
     sub.processor AS sub_processor,
     pm.processor::text AS pm_processor,
     pm.id AS pm_id
@@ -399,7 +399,7 @@ WHERE sub.processor != pm.processor;
 -- name: AuditOrphanSubscriptionProduct :many
 SELECT
     sub.id AS sub_id,
-    sub.merchant_subject_id::text AS user_id,
+    sub.customer_id::text AS user_id,
     sub.product_id,
     CASE WHEN prod.id IS NOT NULL THEN true ELSE false END AS prod_exists,
     CASE WHEN prod.id IS NOT NULL THEN (prod.status = 'active') END AS prod_active
@@ -411,7 +411,7 @@ WHERE prod.id IS NULL OR prod.status <> 'active';
 -- name: AuditOrphanSubscriptionPrice :many
 SELECT
     sub.id AS sub_id,
-    sub.merchant_subject_id::text AS user_id,
+    sub.customer_id::text AS user_id,
     sub.price_id::uuid AS price_id,
     CASE WHEN price.id IS NOT NULL THEN true ELSE false END AS price_exists,
     CASE WHEN price.id IS NOT NULL THEN (price.status = 'active') END AS price_active
@@ -423,7 +423,7 @@ WHERE price.id IS NULL OR price.status <> 'active';
 -- name: AuditPriceProductMismatch :many
 SELECT
     sub.id AS sub_id,
-    sub.merchant_subject_id::text AS user_id,
+    sub.customer_id::text AS user_id,
     sub.product_id AS sub_product_id,
     price.product_id AS price_product_id
 FROM openrails.subscriptions sub
@@ -434,7 +434,7 @@ WHERE sub.product_id != price.product_id;
 -- name: AuditPaymentOrphanSubscription :many
 SELECT
     purch.id AS payment_id,
-    purch.merchant_subject_id::text AS user_id,
+    purch.customer_id::text AS user_id,
     purch.subscription_id::uuid AS subscription_id
 FROM openrails.payments purch
 LEFT JOIN openrails.subscriptions sub ON purch.subscription_id = sub.id
@@ -445,7 +445,7 @@ WHERE purch.subscription_id IS NOT NULL
 -- name: AuditEntitlementOrphanSubscriptionSource :many
 SELECT
     ent.id AS ent_id,
-    ent.merchant_subject_id::text AS user_id,
+    ent.customer_id::text AS user_id,
     ent.entitlement,
     ent.source_type,
     ent.source_id
@@ -460,7 +460,7 @@ WHERE ent.source_type = 'subscription'
 -- name: AuditEntitlementOrphanPaymentSource :many
 SELECT
     ent.id AS ent_id,
-    ent.merchant_subject_id::text AS user_id,
+    ent.customer_id::text AS user_id,
     ent.entitlement,
     ent.source_type,
     ent.source_id
@@ -487,13 +487,13 @@ WHERE ent.source_type = 'one_off'
 -- name: AuditEntitlementGrantMissingEntitlements :many
 SELECT
     ag.id AS grant_id,
-    ag.merchant_subject_id::text AS user_id,
+    ag.customer_id::text AS user_id,
     ag.reason,
     ag.duration_days,
     ag.created_at AS granted_at
 FROM openrails.entitlement_grants ag
 LEFT JOIN openrails.entitlements ent ON
-    ag.merchant_subject_id = ent.merchant_subject_id
+    ag.customer_id = ent.customer_id
     AND ent.source_type = 'admin'
     AND ent.source_id = ag.id
     AND ent.deleted_at IS NULL
@@ -505,7 +505,7 @@ WHERE (ag.duration_days IS NULL OR ag.duration_days = 0
 -- name: AuditOrphanAdminEntitlements :many
 SELECT
     ent.id AS ent_id,
-    ent.merchant_subject_id::text AS user_id,
+    ent.customer_id::text AS user_id,
     ent.entitlement,
     ent.source_id
 FROM openrails.entitlements ent
@@ -520,7 +520,7 @@ WHERE ent.source_type = 'admin'
 -- name: AuditExpiredEntitlementGrantActiveEntitlement :many
 SELECT
     ent.id AS ent_id,
-    ent.merchant_subject_id::text AS user_id,
+    ent.customer_id::text AS user_id,
     ent.entitlement,
     ag.id AS grant_id,
     (ag.created_at + make_interval(days => ag.duration_days))::timestamptz AS expires_at
@@ -540,7 +540,7 @@ WHERE ent.source_type = 'admin'
 
 -- T-1
 -- name: AuditStalePendingSubscription :many
-SELECT id, merchant_subject_id::text AS user_id,
+SELECT id, customer_id::text AS user_id,
        current_period_starts_at::timestamptz AS current_period_starts_at,
        created_at
 FROM openrails.subscriptions
@@ -550,7 +550,7 @@ WHERE status = 'pending'
 
 -- T-2
 -- name: AuditStalePastDueMaxRetries :many
-SELECT id, merchant_subject_id::text AS user_id,
+SELECT id, customer_id::text AS user_id,
        retry_attempts::int AS retry_attempts,
        current_period_ends_at::timestamptz AS current_period_ends_at
 FROM openrails.subscriptions
@@ -559,13 +559,13 @@ WHERE status = 'past_due'
 
 -- T-3
 -- name: AuditFutureDatedPayment :many
-SELECT id, merchant_subject_id::text AS user_id, purchased_at, amount
+SELECT id, customer_id::text AS user_id, purchased_at, amount
 FROM openrails.payments
 WHERE purchased_at > NOW() + INTERVAL '5 minutes';
 
 -- T-4
 -- name: AuditEntitlementDistantFutureStart :many
-SELECT id, merchant_subject_id::text AS user_id, entitlement, start_at
+SELECT id, customer_id::text AS user_id, entitlement, start_at
 FROM openrails.entitlements
 WHERE start_at > NOW() + INTERVAL '1 year'
   AND deleted_at IS NULL;

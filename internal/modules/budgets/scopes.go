@@ -32,7 +32,7 @@ import (
 //	ScopeSubject -> "@subject"                  (payer total, one per subject)
 //	ScopeRole    -> "@role:<role-uuid>"         (shared pool for a role)
 //
-// The subject id is already carried by tenant_subject_id, so the subject scope
+// The subject id is already carried by customer_id, so the subject scope
 // needs no per-key suffix; the role scope keys on the immutable role uuid
 // (never a slug/name — #475/#476 convention).
 const (
@@ -114,12 +114,12 @@ func MakeScopeReservation(scope, owner, actor string, roleID uuid.UUID, windows 
 // Returns the per-scope statuses (with each scope's reservation id when
 // allowed), the overall allow decision, and the blocking scope index (-1 when
 // allowed or when nothing was reserved on a deny).
-func (s *Service) ReserveScopes(ctx context.Context, payer identity.MerchantSubjectID, scopes []ScopeReservation, amountMicros int64, source, sourceID string, ttl time.Duration) ([]ScopeStatus, bool, int, error) {
+func (s *Service) ReserveScopes(ctx context.Context, payer identity.CustomerID, scopes []ScopeReservation, amountMicros int64, source, sourceID string, ttl time.Duration) ([]ScopeStatus, bool, int, error) {
 	if s == nil || s.db == nil {
 		return nil, false, -1, fmt.Errorf("budgets service not initialized")
 	}
 	if payer.IsZero() {
-		return nil, false, -1, ErrMerchantSubjectRequired
+		return nil, false, -1, ErrCustomerRequired
 	}
 	source = strings.TrimSpace(source)
 	sourceID = strings.TrimSpace(sourceID)
@@ -155,7 +155,7 @@ func (s *Service) ReserveScopes(ctx context.Context, payer identity.MerchantSubj
 
 	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if _, err := repo.EnsureMerchantSubjectID(ctx, tx, tenantID, payerID.String()); err != nil {
+		if _, err := repo.EnsureCustomerID(ctx, tx, tenantID, payerID.String()); err != nil {
 			return err
 		}
 
@@ -174,7 +174,7 @@ func (s *Service) ReserveScopes(ctx context.Context, payer identity.MerchantSubj
 			sc := active[i]
 			// Idempotency: a replay returns the existing reservation for this scope.
 			existing, gerr := q.GetBudgetReservationByCoords(ctx, gen.GetBudgetReservationByCoordsParams{
-				MerchantID: tenantID, MerchantSubjectID: payerID,
+				MerchantID: tenantID, CustomerID: payerID,
 				Actor: sc.Key, Source: source, SourceID: sourceID,
 			})
 			if gerr == nil {
@@ -216,17 +216,17 @@ func (s *Service) ReserveScopes(ctx context.Context, payer identity.MerchantSubj
 			for _, op := range pends[i].opens {
 				if op.insert != nil {
 					if err := q.InsertBudgetWindowStateIfAbsent(ctx, gen.InsertBudgetWindowStateIfAbsentParams{
-						ID:              op.insert.ID,
-						MerchantID:        tenantID,
-						MerchantSubjectID: payerID,
-						Actor:           op.insert.Actor,
-						WindowKey:       op.insert.WindowKey,
-						Cadence:         op.insert.Cadence,
-						WindowSeconds:   op.insert.WindowSeconds,
-						Anchor:          op.insert.Anchor,
-						WindowStart:     op.insert.WindowStart,
-						CreatedAt:       op.insert.CreatedAt,
-						UpdatedAt:       op.insert.UpdatedAt,
+						ID:            op.insert.ID,
+						MerchantID:    tenantID,
+						CustomerID:    payerID,
+						Actor:         op.insert.Actor,
+						WindowKey:     op.insert.WindowKey,
+						Cadence:       op.insert.Cadence,
+						WindowSeconds: op.insert.WindowSeconds,
+						Anchor:        op.insert.Anchor,
+						WindowStart:   op.insert.WindowStart,
+						CreatedAt:     op.insert.CreatedAt,
+						UpdatedAt:     op.insert.UpdatedAt,
 					}); err != nil {
 						return err
 					}
@@ -244,31 +244,31 @@ func (s *Service) ReserveScopes(ctx context.Context, payer identity.MerchantSubj
 			}
 
 			res := &models.BudgetReservation{
-				ID:              uuidutil.NewV7(),
-				MerchantID:        tenantID,
-				MerchantSubjectID: payerID,
-				Actor:           sc.Key,
-				AmountMicros:    amountMicros,
-				Status:          "active",
-				Source:          source,
-				SourceID:        sourceID,
-				CreatedAt:       now,
+				ID:           uuidutil.NewV7(),
+				MerchantID:   tenantID,
+				CustomerID:   payerID,
+				Actor:        sc.Key,
+				AmountMicros: amountMicros,
+				Status:       "active",
+				Source:       source,
+				SourceID:     sourceID,
+				CreatedAt:    now,
 			}
 			if ttl > 0 {
 				exp := now.Add(ttl)
 				res.ExpiresAt = &exp
 			}
 			if err := q.InsertBudgetReservation(ctx, gen.InsertBudgetReservationParams{
-				ID:              res.ID,
-				MerchantID:        res.MerchantID,
-				MerchantSubjectID: res.MerchantSubjectID,
-				Actor:           res.Actor,
-				AmountMicros:    res.AmountMicros,
-				Status:          res.Status,
-				Source:          res.Source,
-				SourceID:        res.SourceID,
-				ExpiresAt:       res.ExpiresAt,
-				CreatedAt:       res.CreatedAt,
+				ID:           res.ID,
+				MerchantID:   res.MerchantID,
+				CustomerID:   res.CustomerID,
+				Actor:        res.Actor,
+				AmountMicros: res.AmountMicros,
+				Status:       res.Status,
+				Source:       res.Source,
+				SourceID:     res.SourceID,
+				ExpiresAt:    res.ExpiresAt,
+				CreatedAt:    res.CreatedAt,
 			}); err != nil {
 				return err
 			}
@@ -290,12 +290,12 @@ func (s *Service) ReserveScopes(ctx context.Context, payer identity.MerchantSubj
 // reserved under one (source, source_id)) to "captured" with actualMicros.
 // Idempotent: a replay (already captured/released rows) is a no-op. Used at
 // settlement so the composed multi-scope hold settles in one call (#473).
-func (s *Service) CaptureByCoords(ctx context.Context, payer identity.MerchantSubjectID, source, sourceID string, actualMicros int64) error {
+func (s *Service) CaptureByCoords(ctx context.Context, payer identity.CustomerID, source, sourceID string, actualMicros int64) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("budgets service not initialized")
 	}
 	if payer.IsZero() {
-		return ErrMerchantSubjectRequired
+		return ErrCustomerRequired
 	}
 	if actualMicros < 0 {
 		return fmt.Errorf("captured amount must be non-negative")
@@ -307,7 +307,7 @@ func (s *Service) CaptureByCoords(ctx context.Context, payer identity.MerchantSu
 	tenantID := tid.UUID()
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		_, err := s.db.Gen(ctx).CaptureBudgetReservationsByCoords(ctx, gen.CaptureBudgetReservationsByCoordsParams{
-			MerchantID: tenantID, MerchantSubjectID: payer.UUID(),
+			MerchantID: tenantID, CustomerID: payer.UUID(),
 			Source: strings.TrimSpace(source), SourceID: strings.TrimSpace(sourceID),
 			CapturedMicros: actualMicros,
 		})
@@ -318,12 +318,12 @@ func (s *Service) CaptureByCoords(ctx context.Context, payer identity.MerchantSu
 // ReleaseByCoords frees ALL active budget reservations for a request across
 // scopes (status -> "released"). Idempotent. Used at settlement when a request
 // fails/aborts so every reserved scope is freed in one call (#473).
-func (s *Service) ReleaseByCoords(ctx context.Context, payer identity.MerchantSubjectID, source, sourceID string) error {
+func (s *Service) ReleaseByCoords(ctx context.Context, payer identity.CustomerID, source, sourceID string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("budgets service not initialized")
 	}
 	if payer.IsZero() {
-		return ErrMerchantSubjectRequired
+		return ErrCustomerRequired
 	}
 	tid, terr := merchant.Require(ctx) // #336/#474: no default tenant
 	if terr != nil {
@@ -332,7 +332,7 @@ func (s *Service) ReleaseByCoords(ctx context.Context, payer identity.MerchantSu
 	tenantID := tid.UUID()
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		_, err := s.db.Gen(ctx).ReleaseBudgetReservationsByCoords(ctx, gen.ReleaseBudgetReservationsByCoordsParams{
-			MerchantID: tenantID, MerchantSubjectID: payer.UUID(),
+			MerchantID: tenantID, CustomerID: payer.UUID(),
 			Source: strings.TrimSpace(source), SourceID: strings.TrimSpace(sourceID),
 		})
 		return err

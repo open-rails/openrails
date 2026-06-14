@@ -14,8 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/query"
 	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/pkg/query"
 )
 
 type PaymentFilters struct {
@@ -81,12 +81,12 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		CreatedAt:                p.CreatedAt,
 		CardBrand:                p.CardBrand,
 		CardLast4:                p.CardLast4,
-		MerchantSubjectID:          p.MerchantSubjectID,
+		CustomerID:               p.CustomerID,
 	}, nil
 }
 
 func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error {
-	if err := ensureMerchantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.MerchantSubjectID); err != nil {
+	if err := ensureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.CustomerID); err != nil {
 		return err
 	}
 	params, err := paymentInsertParams(payment)
@@ -109,7 +109,7 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 }
 
 func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
-	if err := ensureMerchantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.MerchantSubjectID); err != nil {
+	if err := ensureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.CustomerID); err != nil {
 		return false, err
 	}
 	params, err := paymentInsertParams(payment)
@@ -185,11 +185,11 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 }
 
 func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListPaymentsByMerchantSubject(ctx, tsid)
+	rows, err := r.db.Gen(ctx).ListPaymentsByCustomer(ctx, tsid)
 	if err != nil {
 		return nil, err
 	}
@@ -367,21 +367,21 @@ func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemp
 }
 
 func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
 	q := r.db.Gen(ctx)
-	count, err := q.CountPaymentsByMerchantSubject(ctx, tsid)
+	count, err := q.CountPaymentsByCustomer(ctx, tsid)
 	if err != nil {
 		return nil, 0, err
 	}
 	pageSize32, _ := safecast.Convert[int32](pageSize)
 	pageOffset32, _ := safecast.Convert[int32]((page - 1) * pageSize)
-	rows, err := q.ListPaymentsByMerchantSubjectPaged(ctx, gen.ListPaymentsByMerchantSubjectPagedParams{
-		MerchantSubjectID: tsid,
-		PageLimit:       pageSize32,
-		PageOffset:      pageOffset32,
+	rows, err := q.ListPaymentsByCustomerPaged(ctx, gen.ListPaymentsByCustomerPagedParams{
+		CustomerID: tsid,
+		PageLimit:  pageSize32,
+		PageOffset: pageOffset32,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -398,7 +398,7 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 
 	var tsid *uuid.UUID
 	if f.UserID != "" {
-		id, err := ResolveMerchantSubjectID(f.UserID)
+		id, err := ResolveCustomerID(f.UserID)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -424,7 +424,7 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 
 	q := r.db.Gen(ctx)
 	total, err := q.CountPaymentsFiltered(ctx, gen.CountPaymentsFilteredParams{
-		MerchantSubjectID: tsid,
+		CustomerID:      tsid,
 		PriceID:         priceID,
 		SubscriptionID:  subID,
 		Processor:       processor,
@@ -448,7 +448,7 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 	optsLimit32, _ := safecast.Convert[int32](opts.GetLimit())
 	optsOffset32, _ := safecast.Convert[int32](opts.GetOffset())
 	rows, err := q.ListPaymentsFiltered(ctx, gen.ListPaymentsFilteredParams{
-		MerchantSubjectID: tsid,
+		CustomerID:      tsid,
 		PriceID:         priceID,
 		SubscriptionID:  subID,
 		Processor:       processor,
@@ -542,13 +542,13 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 }
 
 func (r *PaymentRepo) GetLatestByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (*models.Payment, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetLatestPaymentByMerchantSubjectProcessor(ctx, gen.GetLatestPaymentByMerchantSubjectProcessorParams{
-		MerchantSubjectID: tsid,
-		Processor:       gen.OpenrailsProcessorType(processor),
+	row, err := r.db.Gen(ctx).GetLatestPaymentByCustomerProcessor(ctx, gen.GetLatestPaymentByCustomerProcessorParams{
+		CustomerID: tsid,
+		Processor:  gen.OpenrailsProcessorType(processor),
 	})
 	if err != nil {
 		return nil, err
@@ -576,13 +576,13 @@ func (r *PaymentRepo) CountByUserAndProcessor(ctx context.Context, userID string
 	if userID == "" {
 		return 0, 0, fmt.Errorf("user_id is required")
 	}
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return 0, 0, err
 	}
 	row, err := r.db.Gen(ctx).CountPaymentOutcomesBySubjectProcessor(ctx, gen.CountPaymentOutcomesBySubjectProcessorParams{
-		MerchantSubjectID: tsid,
-		Processor:       gen.OpenrailsProcessorType(processor),
+		CustomerID: tsid,
+		Processor:  gen.OpenrailsProcessorType(processor),
 	})
 	if err != nil {
 		return 0, 0, err

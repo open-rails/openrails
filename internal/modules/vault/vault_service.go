@@ -189,7 +189,7 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 
 	pm := &models.PaymentMethod{
 		ID:                   uuidutil.NewV7(),
-		MerchantSubjectID:      identity.MerchantSubjectIDFromString(userID).UUID(),
+		CustomerID:           identity.CustomerIDFromString(userID).UUID(),
 		Processor:            models.Processor(processor),
 		VaultID:              nmiResponse.CustomerVaultID,
 		InitialTransactionID: "",
@@ -443,9 +443,9 @@ func sanitizedStringPtr(value *string, sanitize func(string) string) *string {
 
 // DeleteVault deletes the vault remotely after ensuring no active subscriptions use it; deactivates locally
 func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod) error {
-	subs, _, err := s.SubscriptionService.GetPaginatedByUserID(ctx, pm.MerchantSubjectID.String(), 1, 1000)
+	subs, _, err := s.SubscriptionService.GetPaginatedByUserID(ctx, pm.CustomerID.String(), 1, 1000)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"vault_id": pm.VaultID, "user_id": pm.MerchantSubjectID.String()}).Error("Failed to check subscriptions for vault")
+		log.WithError(err).WithFields(log.Fields{"vault_id": pm.VaultID, "user_id": pm.CustomerID.String()}).Error("Failed to check subscriptions for vault")
 		return fmt.Errorf("failed to check vault usage: %w", err)
 	}
 

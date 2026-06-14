@@ -12,7 +12,7 @@ INSERT INTO openrails.payments (
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
-    card_last4, merchant_subject_id
+    card_last4, customer_id
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
     COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
@@ -23,7 +23,7 @@ INSERT INTO openrails.payments (
     sqlc.narg(credits_spec_snapshot), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(merchant_subject_id)
+    sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(customer_id)
 );
 
 -- name: CreatePaymentIfNotExists :execrows
@@ -32,7 +32,7 @@ INSERT INTO openrails.payments (
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
-    card_last4, merchant_subject_id
+    card_last4, customer_id
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
     COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
@@ -43,7 +43,7 @@ INSERT INTO openrails.payments (
     sqlc.narg(credits_spec_snapshot), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(merchant_subject_id)
+    sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(customer_id)
 )
 ON CONFLICT (merchant_id, processor, transaction_id) DO NOTHING;
 
@@ -62,9 +62,9 @@ SELECT * FROM openrails.payments
 WHERE refunded_payment_id = $1
 ORDER BY created_at DESC;
 
--- name: ListPaymentsByMerchantSubject :many
+-- name: ListPaymentsByCustomer :many
 SELECT * FROM openrails.payments purch
-WHERE purch.merchant_subject_id = $1
+WHERE purch.customer_id = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC;
 
@@ -134,21 +134,21 @@ WHERE id = $1
   AND amount > 0
   AND status = 'pending';
 
--- name: CountPaymentsByMerchantSubject :one
+-- name: CountPaymentsByCustomer :one
 SELECT count(*) FROM openrails.payments purch
-WHERE purch.merchant_subject_id = $1
+WHERE purch.customer_id = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = '';
 
--- name: ListPaymentsByMerchantSubjectPaged :many
+-- name: ListPaymentsByCustomerPaged :many
 SELECT * FROM openrails.payments purch
-WHERE purch.merchant_subject_id = $1
+WHERE purch.customer_id = $1
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
--- name: GetLatestPaymentByMerchantSubjectProcessor :one
+-- name: GetLatestPaymentByCustomerProcessor :one
 SELECT * FROM openrails.payments purch
-WHERE purch.merchant_subject_id = $1
+WHERE purch.customer_id = $1
   AND purch.processor = $2
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 ORDER BY purch.purchased_at DESC
@@ -174,7 +174,7 @@ SELECT
         AND COALESCE(purch.status::text, 'completed') = 'completed')::bigint AS successful,
     count(*) FILTER (WHERE COALESCE(purch.status::text, 'completed') = 'failed')::bigint AS failed
 FROM openrails.payments purch
-WHERE purch.merchant_subject_id = $1
+WHERE purch.customer_id = $1
   AND purch.processor = $2
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = '';
 
@@ -184,7 +184,7 @@ UPDATE openrails.payments SET status = 'failed' WHERE id = $1;
 -- name: CountPaymentsFiltered :one
 SELECT count(*) FROM openrails.payments purch
 WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND (sqlc.narg(merchant_subject_id)::uuid IS NULL OR purch.merchant_subject_id = sqlc.narg(merchant_subject_id)::uuid)
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR purch.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(price_id)::uuid IS NULL OR purch.price_id = sqlc.narg(price_id)::uuid)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR purch.subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (sqlc.narg(processor)::text IS NULL OR purch.processor::text = sqlc.narg(processor)::text)
@@ -200,7 +200,7 @@ WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 -- CASE pattern — no identifier interpolation (#334 escape-hatch rule).
 SELECT * FROM openrails.payments purch
 WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND (sqlc.narg(merchant_subject_id)::uuid IS NULL OR purch.merchant_subject_id = sqlc.narg(merchant_subject_id)::uuid)
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR purch.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(price_id)::uuid IS NULL OR purch.price_id = sqlc.narg(price_id)::uuid)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR purch.subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (sqlc.narg(processor)::text IS NULL OR purch.processor::text = sqlc.narg(processor)::text)
@@ -230,7 +230,7 @@ SELECT p.id AS payment_id,
        p.transaction_id AS payment_transaction_id,
        p.subscription_id AS subscription_id,
        COALESCE(sub.processor_subscription_id, '')::text AS processor_subscription_id,
-       p.merchant_subject_id::text AS user_id,
+       p.customer_id::text AS user_id,
        p.amount AS amount_cents,
        p.currency AS currency,
        p.purchased_at AS purchased_at,

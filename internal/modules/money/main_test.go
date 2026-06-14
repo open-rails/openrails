@@ -18,15 +18,15 @@ import (
 // reaper is unavailable (offline/sandboxed runs).
 func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
-// seedMerchantSubject materializes the openrails.merchant_subjects row a direct
-// money-row insert needs to satisfy the merchant_subject_id FK. The id IS the
+// seedCustomer materializes the openrails.customers row a direct
+// money-row insert needs to satisfy the customer_id FK. The id IS the
 // payable subject id (issuer openrails:self); tenant_id is the canonical test
 // tenant (#336: no default tenant).
-func seedMerchantSubject(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tsID uuid.UUID) {
+func seedCustomer(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tsID uuid.UUID) {
 	t.Helper()
 	dbtest.EnsureTestTenant(ctx, t, pool)
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.merchant_subjects (id, merchant_id, issuer, subject)
+		`INSERT INTO openrails.customers (id, merchant_id, issuer, subject)
 		 VALUES ($1, $2, 'openrails:self', $3::text)
 		 ON CONFLICT DO NOTHING`, tsID, dbtest.TestTenantID.UUID(), tsID)
 	require.NoError(t, err)

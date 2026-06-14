@@ -103,7 +103,7 @@ type UserSubscriptionResponse struct {
 func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 	type userSubscriptionJSON struct {
 		ID                    uuid.UUID                 `json:"id,omitempty"`
-		MerchantSubjectID       string                    `json:"tenant_subject_id,omitempty"`
+		CustomerID            string                    `json:"customer_id,omitempty"`
 		ProductID             uuid.UUID                 `json:"product_id,omitempty"`
 		PriceID               uuid.UUID                 `json:"price_id,omitempty"`
 		ScheduledPriceID      *uuid.UUID                `json:"scheduled_price_id,omitempty"`
@@ -137,7 +137,7 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 		now := time.Now().UTC()
 		out := userSubscriptionJSON{
 			ID:                    r.Subscription.ID,
-			MerchantSubjectID:       r.Subscription.MerchantSubjectID.String(),
+			CustomerID:            r.Subscription.CustomerID.String(),
 			ProductID:             r.Subscription.ProductID,
 			PriceID:               r.Subscription.PriceID,
 			ScheduledPriceID:      r.Subscription.ScheduledPriceID,
@@ -343,7 +343,7 @@ func (s *UserSubscriptionService) GetUserSubscriptionByID(ctx context.Context, u
 	}
 
 	// Verify ownership
-	if subscription.MerchantSubjectID.String() != userID {
+	if subscription.CustomerID.String() != userID {
 		return nil, ErrSubscriptionNotFound // Return not found to avoid leaking existence
 	}
 
@@ -449,7 +449,7 @@ func (s *UserSubscriptionService) MarkNotificationRead(ctx context.Context, user
 	}
 
 	// Verify the notification belongs to the user
-	if notification.MerchantSubjectID.String() != userID {
+	if notification.CustomerID.String() != userID {
 		return ErrNotificationAccessDenied
 	}
 
@@ -567,10 +567,10 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 
 	// Add notification
 	notification := &models.NotificationQueue{
-		ID:              uuidutil.NewV7(),
-		MerchantSubjectID: identity.MerchantSubjectIDFromString(userID).UUID(),
-		EventType:       models.NotificationPremiumEnded,
-		Data:            map[string]any{"reason": string(PremiumEndReasonUserCancel)},
+		ID:         uuidutil.NewV7(),
+		CustomerID: identity.CustomerIDFromString(userID).UUID(),
+		EventType:  models.NotificationPremiumEnded,
+		Data:       map[string]any{"reason": string(PremiumEndReasonUserCancel)},
 	}
 	if err := s.NotificationService.Create(ctx, notification); err != nil {
 		log.WithFields(log.Fields{

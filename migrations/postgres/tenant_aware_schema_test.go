@@ -68,7 +68,7 @@ func TestConsolidatedSchemaTenantIDColumns(t *testing.T) {
 	}
 }
 
-func TestConsolidatedSchemaUsesMerchantSubjectUniques(t *testing.T) {
+func TestConsolidatedSchemaUsesCustomerUniques(t *testing.T) {
 	c := loadSchema001(t)
 
 	for _, forbidden := range []string{
@@ -83,12 +83,12 @@ func TestConsolidatedSchemaUsesMerchantSubjectUniques(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"uq_payment_methods_merchant_subject_vault",
-		"uq_subscriptions_merchant_subject_product_lifecycle",
-		"uq_entitlements_merchant_subject_active",
+		"uq_payment_methods_customer_vault",
+		"uq_subscriptions_customer_product_lifecycle",
+		"uq_entitlements_customer_active",
 		"uq_payments_merchant_processor_transaction",
-		"uq_processor_customers_merchant_subject_processor",
-		"entitlements_merchant_subject_no_overlap",
+		"uq_processor_customers_customer_processor",
+		"entitlements_customer_no_overlap",
 	} {
 		if !strings.Contains(c, want) {
 			t.Errorf("001 schema missing final tenant-subject invariant %q", want)

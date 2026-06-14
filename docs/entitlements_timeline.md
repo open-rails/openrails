@@ -11,7 +11,7 @@ Entitlement windows are written via exactly two operations:
 
 `end_at` is treated as immutable after creation: renewals or grace extensions create new windows; they do not modify existing windows.
 
-## Invariants (per `tenant_subject_id` + `entitlement`)
+## Invariants (per `customer_id` + `entitlement`)
 
 For active (not revoked, not soft-deleted) windows:
 

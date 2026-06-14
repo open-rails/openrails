@@ -19,25 +19,25 @@ import (
 // history. These mirror the service-side account-settings routes
 // (service_credits.go, issue #242) but the subject is ALWAYS the delegated
 // principal's subject (r.GetUser()), never caller-supplied: there is no
-// tenant_subject_id parameter anywhere on this surface.
+// customer_id parameter anywhere on this surface.
 //
 // The payer is resolved exactly like the rest of /v1/self
-// (identity.MerchantSubjectIDFromString over the acting subject — see
+// (identity.CustomerIDFromString over the acting subject — see
 // GetMyUsage/GetMyInvoices), and every query runs RLS-scoped to the pinned
 // tenant.
 
 // selfAccountPayer resolves the acting payer from the delegated principal, or
 // writes the error response and returns false.
-func selfAccountPayer(r *httprequest.Request) (identity.MerchantSubjectID, bool) {
+func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 	user := r.GetUser()
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
-		return identity.MerchantSubjectID(uuid.Nil), false
+		return identity.CustomerID(uuid.Nil), false
 	}
-	payer := identity.MerchantSubjectIDFromString(user.ID)
+	payer := identity.CustomerIDFromString(user.ID)
 	if payer.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "payer could not be resolved from subject")
-		return identity.MerchantSubjectID(uuid.Nil), false
+		return identity.CustomerID(uuid.Nil), false
 	}
 	return payer, true
 }
@@ -103,7 +103,7 @@ func GetMyCreditAccount(r *httprequest.Request) {
 
 // selfAccountSettingsRequest is the PUT body for configuring the caller's own
 // credit account. It is the service-side serviceAccountSettingsRequest WITHOUT
-// tenant_subject_id: the subject is always the delegated principal's subject.
+// customer_id: the subject is always the delegated principal's subject.
 type selfAccountSettingsRequest struct {
 	Type                     string  `json:"type"`
 	BillingMode              *string `json:"billing_mode"` // "prepaid" | "arrears"
@@ -198,7 +198,7 @@ func GetMyAccountTransactions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	items, total, err := svc.GetMerchantSubjectCreditTransactions(r.Request.Context(), payer, creditType, limit, offset)
+	items, total, err := svc.GetCustomerCreditTransactions(r.Request.Context(), payer, creditType, limit, offset)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -206,7 +206,7 @@ func GetMyAccountTransactions(r *httprequest.Request) {
 	out := make([]serviceTxnResponse, 0, len(items))
 	for _, t := range items {
 		out = append(out, serviceTxnResponse{
-			ID: t.ID, MerchantSubjectID: t.MerchantSubjectID, Actor: t.Actor, Amount: t.Amount,
+			ID: t.ID, CustomerID: t.CustomerID, Actor: t.Actor, Amount: t.Amount,
 			TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
 			CreatedAt: t.CreatedAt,
 		})

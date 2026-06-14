@@ -20,15 +20,15 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 
 	pool := testPool(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 	})
 
 	_, err := ms.Deposit(ctx, money.DepositParams{
-		MerchantSubjectID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "seed",
+		CustomerID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
-	before, err := ms.GetBalanceForMerchantSubject(ctx, payer, money.DefaultCurrency)
+	before, err := ms.GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 
 	// Two captures on endpoint "alpha" (standard tier), one on "beta" (fast tier).
@@ -42,11 +42,11 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	}
 	for _, e := range events {
 		require.NoError(t, ms.InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
-			MerchantSubjectID: payer.UUID(),
-			Actor:           "user:a",
-			EventType:       "owner/" + e.endpoint,
-			Amount:          e.amount,
-			Resource:        e.endpoint,
+			CustomerID: payer.UUID(),
+			Actor:      "user:a",
+			EventType:  "owner/" + e.endpoint,
+			Amount:     e.amount,
+			Resource:   e.endpoint,
 			Metadata: map[string]any{
 				"function_name":     "gen",
 				"availability_tier": e.tier,
@@ -57,7 +57,7 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	}
 
 	// No second debit: usage-event inserts must NOT move the ledger balance.
-	after, err := ms.GetBalanceForMerchantSubject(ctx, payer, money.DefaultCurrency)
+	after, err := ms.GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, before.Balance, after.Balance, "InsertCaptureUsageEvent must not debit the ledger")
 

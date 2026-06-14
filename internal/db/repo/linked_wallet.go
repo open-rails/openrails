@@ -25,8 +25,8 @@ func NewLinkedWalletRepo(d *db.DB) *LinkedWalletRepo { return &LinkedWalletRepo{
 func linkedWalletFromGen(w gen.OpenrailsLinkedWallet) (*models.LinkedWallet, error) {
 	m := &models.LinkedWallet{
 		ID:                   w.ID,
-		MerchantID:             w.MerchantID,
-		MerchantSubjectID:      w.MerchantSubjectID,
+		MerchantID:           w.MerchantID,
+		CustomerID:           w.CustomerID,
 		Chain:                w.Chain,
 		Address:              w.Address,
 		VerificationProvider: w.VerificationProvider,
@@ -42,16 +42,16 @@ func linkedWalletFromGen(w gen.OpenrailsLinkedWallet) (*models.LinkedWallet, err
 }
 
 func (r *LinkedWalletRepo) GetByUserIDAndChain(ctx context.Context, userID, chain string) (*models.LinkedWallet, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
 	if tsid == uuid.Nil {
 		return nil, ErrLinkedWalletNotFound
 	}
-	row, err := r.db.Gen(ctx).GetLinkedWalletByMerchantSubjectAndChain(ctx, gen.GetLinkedWalletByMerchantSubjectAndChainParams{
-		MerchantSubjectID: tsid,
-		Chain:           strings.ToLower(strings.TrimSpace(chain)),
+	row, err := r.db.Gen(ctx).GetLinkedWalletByCustomerAndChain(ctx, gen.GetLinkedWalletByCustomerAndChainParams{
+		CustomerID: tsid,
+		Chain:      strings.ToLower(strings.TrimSpace(chain)),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrLinkedWalletNotFound
@@ -63,7 +63,7 @@ func (r *LinkedWalletRepo) GetByUserIDAndChain(ctx context.Context, userID, chai
 }
 
 func (r *LinkedWalletRepo) UpsertForUserID(ctx context.Context, userID string, wallet *models.LinkedWallet) (*models.LinkedWallet, error) {
-	tsid, err := EnsureMerchantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := EnsureCustomerID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (r *LinkedWalletRepo) UpsertForUserID(ctx context.Context, userID string, w
 		return nil, err
 	}
 	wallet.MerchantID = tid.UUID()
-	wallet.MerchantSubjectID = tsid
+	wallet.CustomerID = tsid
 	wallet.Chain = strings.ToLower(strings.TrimSpace(wallet.Chain))
 	if wallet.Metadata == nil {
 		wallet.Metadata = map[string]any{}
@@ -83,8 +83,8 @@ func (r *LinkedWalletRepo) UpsertForUserID(ctx context.Context, userID string, w
 	}
 	row, err := r.db.Gen(ctx).UpsertLinkedWallet(ctx, gen.UpsertLinkedWalletParams{
 		ID:                   wallet.ID,
-		MerchantID:             wallet.MerchantID,
-		MerchantSubjectID:      wallet.MerchantSubjectID,
+		MerchantID:           wallet.MerchantID,
+		CustomerID:           wallet.CustomerID,
 		Chain:                wallet.Chain,
 		Address:              wallet.Address,
 		VerificationProvider: wallet.VerificationProvider,
@@ -106,16 +106,16 @@ func (r *LinkedWalletRepo) UpsertForUserID(ctx context.Context, userID string, w
 }
 
 func (r *LinkedWalletRepo) DeleteForUserIDAndChain(ctx context.Context, userID, chain string) error {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return err
 	}
 	if tsid == uuid.Nil {
 		return ErrLinkedWalletNotFound
 	}
-	rows, err := r.db.Gen(ctx).DeleteLinkedWalletByMerchantSubjectAndChain(ctx, gen.DeleteLinkedWalletByMerchantSubjectAndChainParams{
-		MerchantSubjectID: tsid,
-		Chain:           strings.ToLower(strings.TrimSpace(chain)),
+	rows, err := r.db.Gen(ctx).DeleteLinkedWalletByCustomerAndChain(ctx, gen.DeleteLinkedWalletByCustomerAndChainParams{
+		CustomerID: tsid,
+		Chain:      strings.ToLower(strings.TrimSpace(chain)),
 	})
 	if err != nil {
 		return err

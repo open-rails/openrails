@@ -122,12 +122,12 @@ func (h *billingE2EHarness) deposit(userID string, amount int64) {
 	h.t.Helper()
 	srcID := uuid.New()
 	w := h.do(http.MethodPost, "/v1/service/credits/deposit", map[string]any{
-		"merchant_subject_id": personalOwnerID(userID).String(),
-		"actor":             userID,
-		"credit_type":       h.creditType,
-		"amount":            amount,
-		"source":            "e2e_deposit",
-		"source_id":         srcID.String(),
+		"customer_id": personalOwnerID(userID).String(),
+		"actor":       userID,
+		"credit_type": h.creditType,
+		"amount":      amount,
+		"source":      "e2e_deposit",
+		"source_id":   srcID.String(),
 	})
 	require.Equal(h.t, http.StatusOK, w.Code, "deposit body: %s", w.Body.String())
 }
@@ -143,13 +143,13 @@ type holdResult struct {
 func (h *billingE2EHarness) hold(userID, source, sourceID string, amount int64) *httptest.ResponseRecorder {
 	h.t.Helper()
 	return h.do(http.MethodPost, "/v1/service/credits/hold", map[string]any{
-		"merchant_subject_id": personalOwnerID(userID).String(),
-		"actor":             userID,
-		"credit_type":       h.creditType,
-		"amount":            amount,
-		"source":            source,
-		"source_id":         sourceID,
-		"expires_at":        time.Now().Add(15 * time.Minute).Unix(),
+		"customer_id": personalOwnerID(userID).String(),
+		"actor":       userID,
+		"credit_type": h.creditType,
+		"amount":      amount,
+		"source":      source,
+		"source_id":   sourceID,
+		"expires_at":  time.Now().Add(15 * time.Minute).Unix(),
 	})
 }
 
@@ -183,7 +183,7 @@ type balanceView struct {
 
 func (h *billingE2EHarness) balance(userID string) balanceView {
 	h.t.Helper()
-	w := h.do(http.MethodGet, "/v1/service/credits/balance?merchant_subject_id="+personalOwnerID(userID).String()+"&credit_type="+h.creditType, nil)
+	w := h.do(http.MethodGet, "/v1/service/credits/balance?customer_id="+personalOwnerID(userID).String()+"&credit_type="+h.creditType, nil)
 	require.Equal(h.t, http.StatusOK, w.Code, "balance body: %s", w.Body.String())
 	var payload struct {
 		BalanceMicros int64 `json:"balance_micros"`
@@ -199,7 +199,7 @@ func (h *billingE2EHarness) ledgerRows(userID string) []models.MoneyTransaction 
 	h.t.Helper()
 	owner := personalOwnerID(userID)
 	pgRows, err := h.suite.Pool.Query(context.Background(),
-		"SELECT "+moneyTransactionCols+" FROM openrails.money_transactions WHERE merchant_subject_id = $1 AND currency = $2 ORDER BY created_at ASC",
+		"SELECT "+moneyTransactionCols+" FROM openrails.money_transactions WHERE customer_id = $1 AND currency = $2 ORDER BY created_at ASC",
 		owner, "USD")
 	require.NoError(h.t, err)
 	defer pgRows.Close()
@@ -219,11 +219,11 @@ func (h *billingE2EHarness) rawBalanceRow(userID string) *models.MoneyBalance {
 	owner := personalOwnerID(userID)
 	bal := new(models.MoneyBalance)
 	err := h.suite.Pool.QueryRow(context.Background(), `
-		SELECT id, merchant_id, merchant_subject_id, currency, balance, held_balance, created_at, updated_at
+		SELECT id, merchant_id, customer_id, currency, balance, held_balance, created_at, updated_at
 		FROM openrails.money_balances
-		WHERE merchant_subject_id = $1 AND currency = $2
+		WHERE customer_id = $1 AND currency = $2
 		LIMIT 1`, owner, "USD").
-		Scan(&bal.ID, &bal.MerchantID, &bal.MerchantSubjectID, &bal.Currency,
+		Scan(&bal.ID, &bal.MerchantID, &bal.CustomerID, &bal.Currency,
 			&bal.Balance, &bal.HeldBalance, &bal.CreatedAt, &bal.UpdatedAt)
 	if err != nil {
 		return nil
@@ -430,10 +430,10 @@ func TestUnifiedBilling_OwnerScoping(t *testing.T) {
 
 	// Tenant subject A's ledger has no rows belonging to tenant subject B and vice versa.
 	for _, r := range h.ledgerRows(ownerA) {
-		require.Equal(t, personalOwnerID(ownerA), r.MerchantSubjectID)
+		require.Equal(t, personalOwnerID(ownerA), r.CustomerID)
 	}
 	for _, r := range h.ledgerRows(ownerB) {
-		require.Equal(t, personalOwnerID(ownerB), r.MerchantSubjectID)
+		require.Equal(t, personalOwnerID(ownerB), r.CustomerID)
 	}
 }
 

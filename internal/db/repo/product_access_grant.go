@@ -27,19 +27,19 @@ func NewProductAccessGrantRepo(d *db.DB) *ProductAccessGrantRepo {
 
 func productAccessGrantFromGen(g gen.OpenrailsProductAccessGrant) *models.ProductAccessGrant {
 	m := &models.ProductAccessGrant{
-		ID:              g.ID,
-		MerchantID:        g.MerchantID,
-		MerchantSubjectID: g.MerchantSubjectID,
-		ProductID:       g.ProductID,
-		SourceType:      models.ProductAccessSourceType(g.SourceType),
-		SourceID:        g.SourceID,
-		PaymentID:       g.PaymentID,
-		Status:          models.ProductAccessStatus(g.Status),
-		StartsAt:        g.StartsAt,
-		EndsAt:          g.EndsAt,
-		RevokedAt:       g.RevokedAt,
-		CreatedAt:       g.CreatedAt,
-		UpdatedAt:       g.UpdatedAt,
+		ID:         g.ID,
+		MerchantID: g.MerchantID,
+		CustomerID: g.CustomerID,
+		ProductID:  g.ProductID,
+		SourceType: models.ProductAccessSourceType(g.SourceType),
+		SourceID:   g.SourceID,
+		PaymentID:  g.PaymentID,
+		Status:     models.ProductAccessStatus(g.Status),
+		StartsAt:   g.StartsAt,
+		EndsAt:     g.EndsAt,
+		RevokedAt:  g.RevokedAt,
+		CreatedAt:  g.CreatedAt,
+		UpdatedAt:  g.UpdatedAt,
 	}
 	if g.RevokeReason != nil {
 		rr := models.ProductAccessRevokeReason(*g.RevokeReason)
@@ -58,7 +58,7 @@ func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.Produ
 		}
 		grant.MerchantID = tid.UUID()
 	}
-	if err := ensureMerchantSubjectRow(ctx, r.db.Qx(ctx), grant.MerchantID, grant.MerchantSubjectID); err != nil {
+	if err := ensureCustomerRow(ctx, r.db.Qx(ctx), grant.MerchantID, grant.CustomerID); err != nil {
 		return err
 	}
 	var revokeReason *string
@@ -67,20 +67,20 @@ func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.Produ
 		revokeReason = &rr
 	}
 	id, err := r.db.Gen(ctx).CreateProductAccessGrant(ctx, gen.CreateProductAccessGrantParams{
-		ID:              grant.ID,
-		MerchantID:        grant.MerchantID,
-		MerchantSubjectID: grant.MerchantSubjectID,
-		ProductID:       grant.ProductID,
-		SourceType:      string(grant.SourceType),
-		SourceID:        grant.SourceID,
-		PaymentID:       grant.PaymentID,
-		Status:          string(grant.Status),
-		StartsAt:        grant.StartsAt,
-		EndsAt:          grant.EndsAt,
-		RevokedAt:       grant.RevokedAt,
-		RevokeReason:    revokeReason,
-		CreatedAt:       grant.CreatedAt,
-		UpdatedAt:       grant.UpdatedAt,
+		ID:           grant.ID,
+		MerchantID:   grant.MerchantID,
+		CustomerID:   grant.CustomerID,
+		ProductID:    grant.ProductID,
+		SourceType:   string(grant.SourceType),
+		SourceID:     grant.SourceID,
+		PaymentID:    grant.PaymentID,
+		Status:       string(grant.Status),
+		StartsAt:     grant.StartsAt,
+		EndsAt:       grant.EndsAt,
+		RevokedAt:    grant.RevokedAt,
+		RevokeReason: revokeReason,
+		CreatedAt:    grant.CreatedAt,
+		UpdatedAt:    grant.UpdatedAt,
 	})
 	if err != nil {
 		return err
@@ -97,15 +97,15 @@ func (r *ProductAccessGrantRepo) GetBySource(ctx context.Context, userID string,
 		return nil, err
 	}
 	tenantID := tid.UUID()
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
 	row, err := r.db.Gen(ctx).GetProductAccessGrantBySource(ctx, gen.GetProductAccessGrantBySourceParams{
-		MerchantID:        tenantID,
-		MerchantSubjectID: tsid,
-		ProductID:       productID,
-		SourceID:        sourceID,
+		MerchantID: tenantID,
+		CustomerID: tsid,
+		ProductID:  productID,
+		SourceID:   sourceID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -124,15 +124,15 @@ func (r *ProductAccessGrantRepo) HasActiveAccess(ctx context.Context, userID str
 		return false, err
 	}
 	tenantID := tid.UUID()
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return false, err
 	}
 	return r.db.Gen(ctx).HasActiveProductAccess(ctx, gen.HasActiveProductAccessParams{
-		MerchantID:        tenantID,
-		MerchantSubjectID: tsid,
-		ProductID:       productID,
-		At:              at,
+		MerchantID: tenantID,
+		CustomerID: tsid,
+		ProductID:  productID,
+		At:         at,
 	})
 }
 
@@ -143,14 +143,14 @@ func (r *ProductAccessGrantRepo) ListActiveByUser(ctx context.Context, userID st
 		return nil, err
 	}
 	tenantID := tid.UUID()
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListActiveProductAccessGrantsByMerchantSubject(ctx, gen.ListActiveProductAccessGrantsByMerchantSubjectParams{
-		MerchantID:        tenantID,
-		MerchantSubjectID: tsid,
-		At:              at,
+	rows, err := r.db.Gen(ctx).ListActiveProductAccessGrantsByCustomer(ctx, gen.ListActiveProductAccessGrantsByCustomerParams{
+		MerchantID: tenantID,
+		CustomerID: tsid,
+		At:         at,
 	})
 	if err != nil {
 		return nil, err
@@ -170,13 +170,13 @@ func (r *ProductAccessGrantRepo) ListByUser(ctx context.Context, userID string) 
 		return nil, err
 	}
 	tenantID := tid.UUID()
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListProductAccessGrantsByMerchantSubject(ctx, gen.ListProductAccessGrantsByMerchantSubjectParams{
-		MerchantID:        tenantID,
-		MerchantSubjectID: tsid,
+	rows, err := r.db.Gen(ctx).ListProductAccessGrantsByCustomer(ctx, gen.ListProductAccessGrantsByCustomerParams{
+		MerchantID: tenantID,
+		CustomerID: tsid,
 	})
 	if err != nil {
 		return nil, err
@@ -196,7 +196,7 @@ func (r *ProductAccessGrantRepo) GetByID(ctx context.Context, id uuid.UUID) (*mo
 	}
 	row, err := r.db.Gen(ctx).GetProductAccessGrantByID(ctx, gen.GetProductAccessGrantByIDParams{
 		MerchantID: tid.UUID(),
-		ID:       id,
+		ID:         id,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -217,9 +217,9 @@ func (r *ProductAccessGrantRepo) RevokeByID(ctx context.Context, id uuid.UUID, n
 	}
 	return r.db.Gen(ctx).RevokeProductAccessGrantByID(ctx, gen.RevokeProductAccessGrantByIDParams{
 		MerchantID: tid.UUID(),
-		ID:       id,
-		Now:      now,
-		Reason:   &rr,
+		ID:         id,
+		Now:        now,
+		Reason:     &rr,
 	})
 }
 
@@ -232,9 +232,9 @@ func (r *ProductAccessGrantRepo) RevokeByPayment(ctx context.Context, paymentID 
 		return 0, err
 	}
 	return r.db.Gen(ctx).RevokeProductAccessGrantsByPayment(ctx, gen.RevokeProductAccessGrantsByPaymentParams{
-		MerchantID:  tid.UUID(),
-		PaymentID: &paymentID,
-		Now:       now,
-		Reason:    &rr,
+		MerchantID: tid.UUID(),
+		PaymentID:  &paymentID,
+		Now:        now,
+		Reason:     &rr,
 	})
 }

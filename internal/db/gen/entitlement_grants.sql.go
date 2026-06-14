@@ -12,6 +12,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const countEntitlementGrantsByCustomer = `-- name: CountEntitlementGrantsByCustomer :one
+SELECT count(*) FROM openrails.entitlement_grants ag WHERE ag.customer_id = $1
+`
+
+func (q *Queries) CountEntitlementGrantsByCustomer(ctx context.Context, customerID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countEntitlementGrantsByCustomer, customerID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countEntitlementGrantsByGrantedBy = `-- name: CountEntitlementGrantsByGrantedBy :one
 SELECT count(*) FROM openrails.entitlement_grants ag WHERE ag.granted_by = $1
 `
@@ -23,21 +34,10 @@ func (q *Queries) CountEntitlementGrantsByGrantedBy(ctx context.Context, granted
 	return count, err
 }
 
-const countEntitlementGrantsByMerchantSubject = `-- name: CountEntitlementGrantsByMerchantSubject :one
-SELECT count(*) FROM openrails.entitlement_grants ag WHERE ag.merchant_subject_id = $1
-`
-
-func (q *Queries) CountEntitlementGrantsByMerchantSubject(ctx context.Context, merchantSubjectID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countEntitlementGrantsByMerchantSubject, merchantSubjectID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createEntitlementGrant = `-- name: CreateEntitlementGrant :one
 
 INSERT INTO openrails.entitlement_grants (
-    id, merchant_id, merchant_subject_id, price_id, granted_by, reason, payment_id,
+    id, merchant_id, customer_id, price_id, granted_by, reason, payment_id,
     duration_days, created_at
 ) VALUES (
     COALESCE(NULLIF($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
@@ -50,22 +50,22 @@ RETURNING id
 `
 
 type CreateEntitlementGrantParams struct {
-	MerchantSubjectID uuid.UUID
-	GrantedBy         string
-	Reason            string
-	ID                uuid.UUID
-	MerchantID        uuid.UUID
-	PriceID           *uuid.UUID
-	PaymentID         *uuid.UUID
-	DurationDays      *int32
-	CreatedAt         time.Time
+	CustomerID   uuid.UUID
+	GrantedBy    string
+	Reason       string
+	ID           uuid.UUID
+	MerchantID   uuid.UUID
+	PriceID      *uuid.UUID
+	PaymentID    *uuid.UUID
+	DurationDays *int32
+	CreatedAt    time.Time
 }
 
 // openrails.entitlement_grants.
 // RETURNING id matches bun's pk write-back for the uuidv7() default.
 func (q *Queries) CreateEntitlementGrant(ctx context.Context, arg CreateEntitlementGrantParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, createEntitlementGrant,
-		arg.MerchantSubjectID,
+		arg.CustomerID,
 		arg.GrantedBy,
 		arg.Reason,
 		arg.ID,
@@ -81,7 +81,7 @@ func (q *Queries) CreateEntitlementGrant(ctx context.Context, arg CreateEntitlem
 }
 
 const getEntitlementGrantByID = `-- name: GetEntitlementGrantByID :one
-SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, merchant_id, merchant_subject_id FROM openrails.entitlement_grants WHERE id = $1
+SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, merchant_id, customer_id FROM openrails.entitlement_grants WHERE id = $1
 `
 
 func (q *Queries) GetEntitlementGrantByID(ctx context.Context, id uuid.UUID) (OpenrailsEntitlementGrant, error) {
@@ -96,13 +96,56 @@ func (q *Queries) GetEntitlementGrantByID(ctx context.Context, id uuid.UUID) (Op
 		&i.DurationDays,
 		&i.CreatedAt,
 		&i.MerchantID,
-		&i.MerchantSubjectID,
+		&i.CustomerID,
 	)
 	return i, err
 }
 
+const listEntitlementGrantsByCustomer = `-- name: ListEntitlementGrantsByCustomer :many
+SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, merchant_id, customer_id FROM openrails.entitlement_grants ag
+WHERE ag.customer_id = $1
+ORDER BY ag.created_at DESC
+LIMIT NULLIF($3::int, 0) OFFSET $2::int
+`
+
+type ListEntitlementGrantsByCustomerParams struct {
+	CustomerID uuid.UUID
+	PageOffset int32
+	PageLimit  int32
+}
+
+func (q *Queries) ListEntitlementGrantsByCustomer(ctx context.Context, arg ListEntitlementGrantsByCustomerParams) ([]OpenrailsEntitlementGrant, error) {
+	rows, err := q.db.Query(ctx, listEntitlementGrantsByCustomer, arg.CustomerID, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsEntitlementGrant
+	for rows.Next() {
+		var i OpenrailsEntitlementGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.GrantedBy,
+			&i.Reason,
+			&i.PaymentID,
+			&i.DurationDays,
+			&i.CreatedAt,
+			&i.MerchantID,
+			&i.CustomerID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEntitlementGrantsByGrantedBy = `-- name: ListEntitlementGrantsByGrantedBy :many
-SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, merchant_id, merchant_subject_id FROM openrails.entitlement_grants ag
+SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, merchant_id, customer_id FROM openrails.entitlement_grants ag
 WHERE ag.granted_by = $1
 ORDER BY ag.created_at DESC
 LIMIT NULLIF($3::int, 0) OFFSET $2::int
@@ -132,50 +175,7 @@ func (q *Queries) ListEntitlementGrantsByGrantedBy(ctx context.Context, arg List
 			&i.DurationDays,
 			&i.CreatedAt,
 			&i.MerchantID,
-			&i.MerchantSubjectID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listEntitlementGrantsByMerchantSubject = `-- name: ListEntitlementGrantsByMerchantSubject :many
-SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, merchant_id, merchant_subject_id FROM openrails.entitlement_grants ag
-WHERE ag.merchant_subject_id = $1
-ORDER BY ag.created_at DESC
-LIMIT NULLIF($3::int, 0) OFFSET $2::int
-`
-
-type ListEntitlementGrantsByMerchantSubjectParams struct {
-	MerchantSubjectID uuid.UUID
-	PageOffset        int32
-	PageLimit         int32
-}
-
-func (q *Queries) ListEntitlementGrantsByMerchantSubject(ctx context.Context, arg ListEntitlementGrantsByMerchantSubjectParams) ([]OpenrailsEntitlementGrant, error) {
-	rows, err := q.db.Query(ctx, listEntitlementGrantsByMerchantSubject, arg.MerchantSubjectID, arg.PageOffset, arg.PageLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsEntitlementGrant
-	for rows.Next() {
-		var i OpenrailsEntitlementGrant
-		if err := rows.Scan(
-			&i.ID,
-			&i.PriceID,
-			&i.GrantedBy,
-			&i.Reason,
-			&i.PaymentID,
-			&i.DurationDays,
-			&i.CreatedAt,
-			&i.MerchantID,
-			&i.MerchantSubjectID,
+			&i.CustomerID,
 		); err != nil {
 			return nil, err
 		}

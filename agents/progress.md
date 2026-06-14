@@ -7,7 +7,53 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 486
+next_id: 487
+
+---
+
+# #486: Rename the payable identity `merchant_subject` → `customer` (HARD CUT — table + columns + SDK + wire)
+
+Design (Paul, 2026-06-14): `merchant_subject` is abstract; the payable identity is a **customer** (NMI/Stripe's
+own word). It stays MERCHANT-SCOPED (implicit, enforced by `merchant_id` + FORCE RLS) — the same human/card at
+two merchants is two `customer` rows (NMI vault + Stripe Customer are both per-merchant/account; confirmed for
+all rails). Hierarchy reads: **merchant → customer → processor_customer** (the customer's per-processor object;
+`processor_customers` KEEPS its name). HARD CUT, no compat (pre-launch).
+
+## Scope (OpenRails — one breaking change; tag bundled with #484 as v0.28.0)
+- **Migration 019** (idempotent/transactional, lock+statement timeouts): `openrails.merchant_subjects` →
+  `openrails.customers`; the `merchant_subject_id` FK column → `customer_id` on EVERY referencing table
+  (`payment_methods`, `subscriptions`, `payments`, `checkout_sessions`, `usdc_funding_sessions`,
+  `entitlement_grants`, `processor_customers`, …); rename its constraints/indexes
+  (`uq_merchant_subjects_*`→`uq_customers_*`, `*_merchant_subject_fk`→`*_customer_fk`). Keep `UNIQUE(merchant_id,
+  issuer, subject)` + FORCE RLS (scoping stays implicit). `processor_customers` table name unchanged.
+- **sqlc**: regen; `MerchantSubjectID`→`CustomerID`; `GetMerchantSubject…`→`GetCustomer…`.
+- **Go SDK** (public `openrails` pkg): type `PayerTenantID` → `CustomerID` (drops the doubly-stale Payer+Tenant);
+  `payerString`/`payer*` helpers → `customer*`; request/response fields `PayerTenantID`/`MerchantSubjectID` →
+  `CustomerID`.
+- **Wire JSON (HARD CUT)**: `tenant_subject_id` → `customer_id` on every `/v1/service/*` + `/v1/self/*`
+  body/query. No alias.
+- **identity pkg**: `identity.MerchantSubjectID` → `identity.CustomerID`.
+- Tests + `internal/integrationharness` updated (`RegisterRemoteApplication`/etc. that reference the subject).
+
+## Non-goals / notes
+- `processor_customers` stays (now reads customer→processor_customer). `merchant`/`owner_tenant_id` unchanged.
+- Cross-merchant "global customer" (Shop Pay) is explicitly OUT (NMI vault + Stripe Customer are per-merchant);
+  the only cross-merchant link is the `(issuer, subject)` tuple in the host's auth, not an OpenRails entity.
+
+## Consumers (separate per-app issues — bump to v0.28.0, rename refs)
+doujins #409, hentai0 #171, tensorhub #486, cozy-art #148.
+
+**Tasks:**
+- [x] Migration 019: `merchant_subjects`→`customers`, `merchant_subject_id`→`customer_id` (all FK tables) +
+      constraint/index renames; verify it converges to a clean fresh-install baseline + is idempotent.
+      (001 baseline + 015–017 also re-declared `customer`, per the repo's squash-baseline convention; 018
+      left historical. processor_customers' OWN `customer_id` text col disambiguated to `processor_customer_id`
+      to make room for the FK — added as step 2a in 019.)
+- [x] sqlc regen; Go fields/methods `MerchantSubjectID`/`GetMerchantSubject…` → `CustomerID`/`GetCustomer…`.
+- [x] SDK type `PayerTenantID`→`CustomerID` + `customer*` helpers; request/response fields renamed.
+- [x] Wire JSON `tenant_subject_id`→`customer_id` (hard cut, all routes); `/v1/service/tenant-subjects/*` path → `/customers/*`.
+- [x] `identity.MerchantSubjectID`→`identity.CustomerID`; internal refs + comments.
+- [x] Tests + harness updated; `go build`/`vet`/`test ./...` + `-tags=integration ./embed/...` green.
 
 ---
 

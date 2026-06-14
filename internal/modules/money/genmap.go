@@ -31,22 +31,22 @@ func toJSONBC[M ~map[string]V, V any](m M) ([]byte, error) {
 
 func moneyBalanceFromGen(r gen.OpenrailsMoneyBalance) *models.MoneyBalance {
 	return &models.MoneyBalance{
-		ID:              r.ID,
-		MerchantID:        r.MerchantID,
-		MerchantSubjectID: r.MerchantSubjectID,
-		Currency:        r.Currency,
-		Balance:         r.Balance,
-		HeldBalance:     r.HeldBalance,
-		CreatedAt:       r.CreatedAt,
-		UpdatedAt:       r.UpdatedAt,
+		ID:          r.ID,
+		MerchantID:  r.MerchantID,
+		CustomerID:  r.CustomerID,
+		Currency:    r.Currency,
+		Balance:     r.Balance,
+		HeldBalance: r.HeldBalance,
+		CreatedAt:   r.CreatedAt,
+		UpdatedAt:   r.UpdatedAt,
 	}
 }
 
 func moneyTransactionFromGen(r gen.OpenrailsMoneyTransaction) (*models.MoneyTransaction, error) {
 	m := &models.MoneyTransaction{
 		ID:              r.ID,
-		MerchantID:        r.MerchantID,
-		MerchantSubjectID: r.MerchantSubjectID,
+		MerchantID:      r.MerchantID,
+		CustomerID:      r.CustomerID,
 		Currency:        r.Currency,
 		Actor:           r.Actor,
 		Resource:        r.Resource,
@@ -77,8 +77,8 @@ func settingsFromGen(r gen.OpenrailsMoneyAccount) *models.MoneyAccount {
 	}
 	return &models.MoneyAccount{
 		ID:                       r.ID,
-		MerchantID:                 r.MerchantID,
-		MerchantSubjectID:          r.MerchantSubjectID,
+		MerchantID:               r.MerchantID,
+		CustomerID:               r.CustomerID,
 		Currency:                 r.Currency,
 		BillingMode:              r.BillingMode,
 		MaxSpendPerDayMicros:     r.MaxSpendPerDayMicros,
@@ -108,8 +108,8 @@ func settingsFromGen(r gen.OpenrailsMoneyAccount) *models.MoneyAccount {
 func spendLimitFromGen(r gen.OpenrailsMoneySpendLimit) *models.MoneySpendLimit {
 	return &models.MoneySpendLimit{
 		ID:                     r.ID,
-		MerchantID:               r.MerchantID,
-		MerchantSubjectID:        r.MerchantSubjectID,
+		MerchantID:             r.MerchantID,
+		CustomerID:             r.CustomerID,
 		Currency:               r.Currency,
 		Actor:                  r.Actor,
 		MaxSpendPerDayMicros:   r.MaxSpendPerDayMicros,
@@ -122,8 +122,8 @@ func spendLimitFromGen(r gen.OpenrailsMoneySpendLimit) *models.MoneySpendLimit {
 func usageEventFromGen(r gen.OpenrailsUsageEvent) (*models.UsageEvent, error) {
 	m := &models.UsageEvent{
 		ID:                 r.ID,
-		MerchantID:           r.MerchantID,
-		MerchantSubjectID:    r.MerchantSubjectID,
+		MerchantID:         r.MerchantID,
+		CustomerID:         r.CustomerID,
 		Actor:              r.Actor,
 		Resource:           r.Resource,
 		EventType:          r.EventType,
@@ -145,21 +145,21 @@ func usageEventFromGen(r gen.OpenrailsUsageEvent) (*models.UsageEvent, error) {
 
 func invoiceFromGen(r gen.OpenrailsInvoice) (*models.Invoice, error) {
 	m := &models.Invoice{
-		ID:              r.ID,
-		MerchantID:        r.MerchantID,
-		MerchantSubjectID: r.MerchantSubjectID,
-		Currency:        r.Currency,
-		PeriodFrom:      r.PeriodFrom,
-		PeriodTo:        r.PeriodTo,
-		UsageTotal:      r.UsageTotal,
-		DepositsTotal:   r.DepositsTotal,
-		OwedAccrued:     r.OwedAccrued,
-		OwedPaid:        r.OwedPaid,
-		ClosingBalance:  r.ClosingBalance,
-		Status:          r.Status,
-		FinalizedAt:     r.FinalizedAt,
-		CreatedAt:       r.CreatedAt,
-		UpdatedAt:       r.UpdatedAt,
+		ID:             r.ID,
+		MerchantID:     r.MerchantID,
+		CustomerID:     r.CustomerID,
+		Currency:       r.Currency,
+		PeriodFrom:     r.PeriodFrom,
+		PeriodTo:       r.PeriodTo,
+		UsageTotal:     r.UsageTotal,
+		DepositsTotal:  r.DepositsTotal,
+		OwedAccrued:    r.OwedAccrued,
+		OwedPaid:       r.OwedPaid,
+		ClosingBalance: r.ClosingBalance,
+		Status:         r.Status,
+		FinalizedAt:    r.FinalizedAt,
+		CreatedAt:      r.CreatedAt,
+		UpdatedAt:      r.UpdatedAt,
 	}
 	if len(r.LineItems) > 0 {
 		if err := json.Unmarshal(r.LineItems, &m.LineItems); err != nil {

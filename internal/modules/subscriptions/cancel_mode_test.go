@@ -14,10 +14,10 @@ func ptrTime(t time.Time) *time.Time { return &t }
 
 func baseSub(processor models.Processor, status models.SubscriptionStatus) *models.Subscription {
 	return &models.Subscription{
-		ID:              uuid.New(),
-		MerchantSubjectID: identity.MerchantSubjectIDFromString("user_1").UUID(),
-		Processor:       processor,
-		Status:          status,
+		ID:         uuid.New(),
+		CustomerID: identity.CustomerIDFromString("user_1").UUID(),
+		Processor:  processor,
+		Status:     status,
 	}
 }
 

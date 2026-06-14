@@ -25,14 +25,14 @@ func (r *EntitlementRepo) SetEndAtTx(ctx context.Context, tx pgx.Tx, id uuid.UUI
 }
 
 func (r *EntitlementRepo) IsEntitled(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return false, err
 	}
-	return r.IsMerchantSubjectEntitled(ctx, tsid, entitlement, at)
+	return r.IsCustomerEntitled(ctx, tsid, entitlement, at)
 }
 
-func (r *EntitlementRepo) IsMerchantSubjectEntitled(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
+func (r *EntitlementRepo) IsCustomerEntitled(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
 	// Tenant scoping (issue #223): the tenant is resolved from context and is
 	// required — an absent tenant is an error.
 	tid, err := merchant.Require(ctx)
@@ -40,51 +40,51 @@ func (r *EntitlementRepo) IsMerchantSubjectEntitled(ctx context.Context, tenantS
 		return false, err
 	}
 	return r.db.Gen(ctx).EntitlementExistsActive(ctx, gen.EntitlementExistsActiveParams{
-		MerchantID:        tid.UUID(),
-		MerchantSubjectID: tenantSubjectID,
-		Entitlement:     entitlement,
-		At:              at,
+		MerchantID:  tid.UUID(),
+		CustomerID:  tenantSubjectID,
+		Entitlement: entitlement,
+		At:          at,
 	})
 }
 
 func (r *EntitlementRepo) HasActiveIndefinite(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return false, err
 	}
-	return r.HasActiveIndefiniteByMerchantSubject(ctx, tsid, entitlement, at)
+	return r.HasActiveIndefiniteByCustomer(ctx, tsid, entitlement, at)
 }
 
-func (r *EntitlementRepo) HasActiveIndefiniteByMerchantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
+func (r *EntitlementRepo) HasActiveIndefiniteByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
 	}
 	return r.db.Gen(ctx).EntitlementHasActiveIndefinite(ctx, gen.EntitlementHasActiveIndefiniteParams{
-		MerchantID:        tid.UUID(),
-		MerchantSubjectID: tenantSubjectID,
-		Entitlement:     entitlement,
-		At:              at,
+		MerchantID:  tid.UUID(),
+		CustomerID:  tenantSubjectID,
+		Entitlement: entitlement,
+		At:          at,
 	})
 }
 
 func (r *EntitlementRepo) GetLatestActive(ctx context.Context, userID, entitlement string) (*models.Entitlement, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	return r.GetLatestActiveByMerchantSubject(ctx, tsid, entitlement)
+	return r.GetLatestActiveByCustomer(ctx, tsid, entitlement)
 }
 
-func (r *EntitlementRepo) GetLatestActiveByMerchantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string) (*models.Entitlement, error) {
+func (r *EntitlementRepo) GetLatestActiveByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string) (*models.Entitlement, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	row, err := r.db.Gen(ctx).GetLatestActiveEntitlement(ctx, gen.GetLatestActiveEntitlementParams{
-		MerchantID:        tid.UUID(),
-		MerchantSubjectID: tenantSubjectID,
-		Entitlement:     entitlement,
+		MerchantID:  tid.UUID(),
+		CustomerID:  tenantSubjectID,
+		Entitlement: entitlement,
 	})
 	if err != nil {
 		return nil, err
@@ -93,23 +93,23 @@ func (r *EntitlementRepo) GetLatestActiveByMerchantSubject(ctx context.Context, 
 }
 
 func (r *EntitlementRepo) GetLatestFiniteActive(ctx context.Context, userID, entitlement string, at time.Time) (*models.Entitlement, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	return r.GetLatestFiniteActiveByMerchantSubject(ctx, tsid, entitlement, at)
+	return r.GetLatestFiniteActiveByCustomer(ctx, tsid, entitlement, at)
 }
 
-func (r *EntitlementRepo) GetLatestFiniteActiveByMerchantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (*models.Entitlement, error) {
+func (r *EntitlementRepo) GetLatestFiniteActiveByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (*models.Entitlement, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	row, err := r.db.Gen(ctx).GetLatestFiniteActiveEntitlement(ctx, gen.GetLatestFiniteActiveEntitlementParams{
-		MerchantID:        tid.UUID(),
-		MerchantSubjectID: tenantSubjectID,
-		Entitlement:     entitlement,
-		At:              at,
+		MerchantID:  tid.UUID(),
+		CustomerID:  tenantSubjectID,
+		Entitlement: entitlement,
+		At:          at,
 	})
 	if err != nil {
 		return nil, err
@@ -135,18 +135,18 @@ func (r *EntitlementRepo) Insert(ctx context.Context, entitlement *models.Entitl
 	}
 
 	id, err := r.db.Gen(ctx).CreateEntitlement(ctx, gen.CreateEntitlementParams{
-		ID:              entitlement.ID,
-		MerchantID:        entitlement.MerchantID,
-		MerchantSubjectID: entitlement.MerchantSubjectID,
-		Entitlement:     entitlement.Entitlement,
-		StartAt:         entitlement.StartAt,
-		EndAt:           entitlement.EndAt,
-		SourceID:        entitlement.SourceID,
-		SourceType:      string(entitlement.SourceType),
-		RevokedAt:       entitlement.RevokedAt,
-		RevokeReason:    revokeReasonPtr(entitlement.RevokeReason),
-		CreatedAt:       entitlement.CreatedAt,
-		UpdatedAt:       entitlement.UpdatedAt,
+		ID:           entitlement.ID,
+		MerchantID:   entitlement.MerchantID,
+		CustomerID:   entitlement.CustomerID,
+		Entitlement:  entitlement.Entitlement,
+		StartAt:      entitlement.StartAt,
+		EndAt:        entitlement.EndAt,
+		SourceID:     entitlement.SourceID,
+		SourceType:   string(entitlement.SourceType),
+		RevokedAt:    entitlement.RevokedAt,
+		RevokeReason: revokeReasonPtr(entitlement.RevokeReason),
+		CreatedAt:    entitlement.CreatedAt,
+		UpdatedAt:    entitlement.UpdatedAt,
 	})
 	if err != nil {
 		return err
@@ -156,36 +156,36 @@ func (r *EntitlementRepo) Insert(ctx context.Context, entitlement *models.Entitl
 }
 
 func (r *EntitlementRepo) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
 	return r.db.Gen(ctx).ListActiveEntitlementNames(ctx, gen.ListActiveEntitlementNamesParams{
-		MerchantSubjectID: tsid,
-		At:              at,
+		CustomerID: tsid,
+		At:         at,
 	})
 }
 
-func (r *EntitlementRepo) ListActiveEntitlementsByMerchantSubject(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]string, error) {
+func (r *EntitlementRepo) ListActiveEntitlementsByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]string, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return r.db.Gen(ctx).ListActiveEntitlementNamesMerchant(ctx, gen.ListActiveEntitlementNamesMerchantParams{
-		MerchantID:        tid.UUID(),
-		MerchantSubjectID: tenantSubjectID,
-		At:              at,
+		MerchantID: tid.UUID(),
+		CustomerID: tenantSubjectID,
+		At:         at,
 	})
 }
 
 func (r *EntitlementRepo) ListActiveRecords(ctx context.Context, userID string, at time.Time) ([]models.Entitlement, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
 	rows, err := r.db.Gen(ctx).ListActiveEntitlementRecords(ctx, gen.ListActiveEntitlementRecordsParams{
-		MerchantSubjectID: tsid,
-		At:              at,
+		CustomerID: tsid,
+		At:         at,
 	})
 	if err != nil {
 		return nil, err
@@ -193,15 +193,15 @@ func (r *EntitlementRepo) ListActiveRecords(ctx context.Context, userID string, 
 	return entitlementsFromGen(rows), nil
 }
 
-func (r *EntitlementRepo) ListActiveRecordsByMerchantSubject(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]models.Entitlement, error) {
+func (r *EntitlementRepo) ListActiveRecordsByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]models.Entitlement, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	rows, err := r.db.Gen(ctx).ListActiveEntitlementRecordsMerchant(ctx, gen.ListActiveEntitlementRecordsMerchantParams{
-		MerchantID:        tid.UUID(),
-		MerchantSubjectID: tenantSubjectID,
-		At:              at,
+		MerchantID: tid.UUID(),
+		CustomerID: tenantSubjectID,
+		At:         at,
 	})
 	if err != nil {
 		return nil, err
@@ -218,9 +218,9 @@ func (r *EntitlementRepo) ListActiveRecordsByExternalSubjects(ctx context.Contex
 	}
 	rows, err := r.db.Gen(ctx).ListActiveEntitlementRecordsByExternalSubjects(ctx, gen.ListActiveEntitlementRecordsByExternalSubjectsParams{
 		MerchantID: tid.UUID(),
-		Issuer:   issuer,
-		Subjects: subjects,
-		At:       at,
+		Issuer:     issuer,
+		Subjects:   subjects,
+		At:         at,
 	})
 	if err != nil {
 		return nil, err
@@ -229,18 +229,18 @@ func (r *EntitlementRepo) ListActiveRecordsByExternalSubjects(ctx context.Contex
 	for _, row := range rows {
 		sourceID := row.SourceID
 		m := models.Entitlement{
-			ID:              row.ID,
-			MerchantID:        row.MerchantID,
-			MerchantSubjectID: row.MerchantSubjectID,
-			Entitlement:     row.Entitlement,
-			StartAt:         row.StartAt,
-			EndAt:           row.EndAt,
-			SourceID:        &sourceID,
-			SourceType:      models.EntitlementSourceType(row.SourceType),
-			RevokedAt:       row.RevokedAt,
-			CreatedAt:       row.CreatedAt,
-			UpdatedAt:       row.UpdatedAt,
-			DeletedAt:       row.DeletedAt,
+			ID:          row.ID,
+			MerchantID:  row.MerchantID,
+			CustomerID:  row.CustomerID,
+			Entitlement: row.Entitlement,
+			StartAt:     row.StartAt,
+			EndAt:       row.EndAt,
+			SourceID:    &sourceID,
+			SourceType:  models.EntitlementSourceType(row.SourceType),
+			RevokedAt:   row.RevokedAt,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+			DeletedAt:   row.DeletedAt,
 		}
 		if row.RevokeReason != nil {
 			rr := models.EntitlementRevokeReason(*row.RevokeReason)
@@ -322,7 +322,7 @@ func (r *EntitlementRepo) ExtendActiveBySubscription(ctx context.Context, subscr
 				return fmt.Errorf("cannot extend end_at to %v: entitlement start_at=%v would be >= end_at", newEnd, ent.StartAt)
 			}
 
-			if err := LockEntitlementTimeline(ctx, tx, ent.MerchantSubjectID.String(), ent.Entitlement); err != nil {
+			if err := LockEntitlementTimeline(ctx, tx, ent.CustomerID.String(), ent.Entitlement); err != nil {
 				return err
 			}
 
@@ -332,7 +332,7 @@ func (r *EntitlementRepo) ExtendActiveBySubscription(ctx context.Context, subscr
 			// is an IMMEDIATE (non-deferrable) exclusion constraint checked per
 			// statement — so it must never be violated mid-transaction.
 			delta := newEnd.Sub(oldEnd)
-			if err := ShiftEntitlementTimeline(ctx, tx, ent.MerchantSubjectID.String(), ent.Entitlement, oldEnd, delta, now, []uuid.UUID{ent.ID}); err != nil {
+			if err := ShiftEntitlementTimeline(ctx, tx, ent.CustomerID.String(), ent.Entitlement, oldEnd, delta, now, []uuid.UUID{ent.ID}); err != nil {
 				return err
 			}
 
@@ -389,11 +389,11 @@ func (r *EntitlementRepo) ExistsBySource(ctx context.Context, sourceType models.
 }
 
 func (r *EntitlementRepo) ListByUser(ctx context.Context, userID string) ([]models.Entitlement, error) {
-	tsid, err := ResolveMerchantSubjectID(userID)
+	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListEntitlementsByMerchantSubject(ctx, tsid)
+	rows, err := r.db.Gen(ctx).ListEntitlementsByCustomer(ctx, tsid)
 	if err != nil {
 		return nil, err
 	}

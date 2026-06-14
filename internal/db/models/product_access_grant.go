@@ -50,11 +50,11 @@ type ProductAccessGrant struct {
 	// default lets single-tenant inserts fall back to the resolved tenant.
 	MerchantID uuid.UUID `json:"tenant_id"`
 
-	// MerchantSubjectID is the OpenRails payable tenant subject for this row (#317).
+	// CustomerID is the OpenRails payable tenant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
-	// it before user_id is dropped. Join openrails.tenant_subjects for issuer/subject.
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id,omitempty"`
-	ProductID       uuid.UUID `json:"product_id"`
+	// it before user_id is dropped. Join openrails.customers for issuer/subject.
+	CustomerID uuid.UUID `json:"customer_id,omitempty"`
+	ProductID  uuid.UUID `json:"product_id"`
 
 	SourceType ProductAccessSourceType `json:"source_type"`
 	// SourceID is the idempotency key component (payment id, admin grant id,

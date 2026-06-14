@@ -29,7 +29,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	subID := uuid.New()
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 	productID := uuid.New()
@@ -69,7 +69,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      subID,
-		MerchantSubjectID:         tenantSubjectID,
+		CustomerID:              tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 &priceID,
 		Status:                  string(models.StatusActive),
@@ -86,20 +86,20 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	// Paid subscription entitlement window [periodStart, paidEnd)
 	paidEntID := uuid.New()
 	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
-		ID:              paidEntID,
-		MerchantSubjectID: tenantSubjectID,
-		Entitlement:     "premium",
-		StartAt:         periodStart,
-		EndAt:           &paidEnd,
-		SourceType:      string(models.EntitlementSourceSubscription),
-		SourceID:        &subID,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:          paidEntID,
+		CustomerID:  tenantSubjectID,
+		Entitlement: "premium",
+		StartAt:     periodStart,
+		EndAt:       &paidEnd,
+		SourceType:  string(models.EntitlementSourceSubscription),
+		SourceID:    &subID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	})
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -142,7 +142,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	var graceEndAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT start_at, end_at FROM openrails.entitlements
-		 WHERE merchant_subject_id = $1 AND entitlement = $2
+		 WHERE customer_id = $1 AND entitlement = $2
 		   AND source_type = $3
 		   AND source_id = $4
 		   AND revoked_at IS NULL
@@ -172,7 +172,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureMerchantSubjectIDPgx(ctx, t, pool, userID)
+	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	subID := uuid.New()
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 	productID := uuid.New()
@@ -211,7 +211,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      subID,
-		MerchantSubjectID:         tenantSubjectID,
+		CustomerID:              tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 &priceID,
 		Status:                  string(models.StatusActive),
@@ -227,50 +227,50 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 
 	paidEntID := uuid.New()
 	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
-		ID:              paidEntID,
-		MerchantSubjectID: tenantSubjectID,
-		Entitlement:     "premium",
-		StartAt:         periodStart,
-		EndAt:           &paidEnd,
-		SourceType:      string(models.EntitlementSourceSubscription),
-		SourceID:        &subID,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:          paidEntID,
+		CustomerID:  tenantSubjectID,
+		Entitlement: "premium",
+		StartAt:     periodStart,
+		EndAt:       &paidEnd,
+		SourceType:  string(models.EntitlementSourceSubscription),
+		SourceID:    &subID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	})
 	require.NoError(t, err)
 
 	graceEnd := now.Add(2 * 24 * time.Hour)
 	graceActiveID := uuid.New()
 	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
-		ID:              graceActiveID,
-		MerchantSubjectID: tenantSubjectID,
-		Entitlement:     "premium",
-		StartAt:         paidEnd,
-		EndAt:           &graceEnd,
-		SourceType:      string(models.EntitlementSourceGrace),
-		SourceID:        &subID,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:          graceActiveID,
+		CustomerID:  tenantSubjectID,
+		Entitlement: "premium",
+		StartAt:     paidEnd,
+		EndAt:       &graceEnd,
+		SourceType:  string(models.EntitlementSourceGrace),
+		SourceID:    &subID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	})
 	require.NoError(t, err)
 
 	graceFutureEnd := graceEnd.Add(24 * time.Hour)
 	graceFutureID := uuid.New()
 	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
-		ID:              graceFutureID,
-		MerchantSubjectID: tenantSubjectID,
-		Entitlement:     "premium",
-		StartAt:         graceEnd,
-		EndAt:           &graceFutureEnd,
-		SourceType:      string(models.EntitlementSourceGrace),
-		SourceID:        &subID,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:          graceFutureID,
+		CustomerID:  tenantSubjectID,
+		Entitlement: "premium",
+		StartAt:     graceEnd,
+		EndAt:       &graceFutureEnd,
+		SourceType:  string(models.EntitlementSourceGrace),
+		SourceID:    &subID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	})
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE merchant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)

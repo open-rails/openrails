@@ -11,10 +11,10 @@ import (
 // alike. Line items + money movements are rolled up from openrails.usage_events
 // and the credit ledger, snapshotted at finalize for immutability.
 type Invoice struct {
-	ID              uuid.UUID `json:"id"`
-	MerchantID        uuid.UUID `json:"tenant_id"`
-	MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
-	Currency        string    `json:"currency"`
+	ID         uuid.UUID `json:"id"`
+	MerchantID uuid.UUID `json:"tenant_id"`
+	CustomerID uuid.UUID `json:"customer_id"`
+	Currency   string    `json:"currency"`
 
 	PeriodFrom time.Time `json:"period_from"`
 	PeriodTo   time.Time `json:"period_to"`

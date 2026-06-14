@@ -35,8 +35,8 @@ func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry
 	expiredAt := time.Now().Add(-1 * time.Hour).UTC()
 	batch := &models.MoneyBlock{
 		ID:              uuid.New(),
-		MerchantID:        dbtest.TestTenantID.UUID(),
-		MerchantSubjectID: suite.ensureMerchantSubject(ctx, userID),
+		MerchantID:      dbtest.TestTenantID.UUID(),
+		CustomerID:      suite.ensureCustomer(ctx, userID),
 		Currency:        "USD",
 		OriginalAmount:  100,
 		RemainingAmount: 100,
@@ -74,7 +74,7 @@ func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry
 	require.Equal(t, int64(0), balAfter.Balance)
 	require.Equal(t, int64(0), balAfter.HeldBalance)
 
-	owed, err := suite.App.Runtime.MoneyService.GetOutstandingOwed(ctx, identity.MerchantSubjectID(personalOwnerID(userID)), money.DefaultCurrency)
+	owed, err := suite.App.Runtime.MoneyService.GetOutstandingOwed(ctx, identity.CustomerID(personalOwnerID(userID)), money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(50), owed)
 }

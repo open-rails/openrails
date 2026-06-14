@@ -13,16 +13,16 @@ import (
 )
 
 type serviceAdmitRequest struct {
-	MerchantSubjectID string                           `json:"tenant_subject_id"`
-	Actor           string                           `json:"actor"`
-	Tier            string                           `json:"tier"`
-	Resource        string                           `json:"resource"`
-	Amounts         map[string]int64                 `json:"amounts"`
-	EstimateMicros  int64                            `json:"estimate_micros"`
-	RequestID       string                           `json:"request_id"`
-	Source          string                           `json:"source"`
-	ExpiresAt       *int64                           `json:"expires_at"`
-	BlockChecks     []billingservice.AdmitBlockCheck `json:"block_checks"`
+	CustomerID     string                           `json:"customer_id"`
+	Actor          string                           `json:"actor"`
+	Tier           string                           `json:"tier"`
+	Resource       string                           `json:"resource"`
+	Amounts        map[string]int64                 `json:"amounts"`
+	EstimateMicros int64                            `json:"estimate_micros"`
+	RequestID      string                           `json:"request_id"`
+	Source         string                           `json:"source"`
+	ExpiresAt      *int64                           `json:"expires_at"`
+	BlockChecks    []billingservice.AdmitBlockCheck `json:"block_checks"`
 	// Roles are the actor's immutable role UUIDs (#473) — each (subject, role)
 	// budget-scope policy gates this request's spend.
 	Roles []uuid.UUID `json:"roles"`
@@ -44,12 +44,12 @@ func ServiceAdmit(r *httprequest.Request) {
 		return
 	}
 	actor := strings.TrimSpace(req.Actor)
-	payer, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
+	payer, err := parseServiceCustomerID(req.CustomerID)
 	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
-	if !requireServiceMerchantSubjectScope(r, *payer) {
+	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
 
@@ -93,9 +93,9 @@ func ServiceAdmit(r *httprequest.Request) {
 
 // admitInputFromRequest maps one admit body onto the service-facade input —
 // shared by the single /admit route and each /admit/batch item.
-func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.MerchantSubjectID, actor string) billingservice.AdmitInput {
+func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.CustomerID, actor string) billingservice.AdmitInput {
 	in := billingservice.AdmitInput{
-		MerchantSubjectID:  payer,
+		CustomerID:       payer,
 		Actor:            actor,
 		Tier:             req.Tier,
 		Resource:         req.Resource,
@@ -154,7 +154,7 @@ type serviceAdmitVerdict struct {
 func serviceAdmitBatchVerdicts(
 	ctx context.Context,
 	items []serviceAdmitRequest,
-	allows func(billingidentity.MerchantSubjectID) bool,
+	allows func(billingidentity.CustomerID) bool,
 	admit func(context.Context, billingservice.AdmitInput) (*billingservice.AdmitResult, error),
 ) []serviceAdmitVerdict {
 	out := make([]serviceAdmitVerdict, len(items))
@@ -163,9 +163,9 @@ func serviceAdmitBatchVerdicts(
 			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "estimate_micros must be >= 0"}
 			continue
 		}
-		payer, err := parseServiceMerchantSubjectID(item.MerchantSubjectID)
+		payer, err := parseServiceCustomerID(item.CustomerID)
 		if err != nil || payer == nil {
-			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "tenant_subject_id required"}
+			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "customer_id required"}
 			continue
 		}
 		if !allows(*payer) {
@@ -214,22 +214,22 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 	verdicts := serviceAdmitBatchVerdicts(
 		r.Request.Context(),
 		req.Items,
-		func(ts billingidentity.MerchantSubjectID) bool { return resolved.AllowsMerchantSubject(ts.UUID()) },
+		func(ts billingidentity.CustomerID) bool { return resolved.AllowsCustomer(ts.UUID()) },
 		svc.Admit,
 	)
 	r.JSON(http.StatusOK, map[string]any{"items": verdicts})
 }
 
 // ServiceGetBudget returns the actor's fixed money-budget windows (#304
-// introspection) for a host's /status dashboard. tenant_subject_id + actor + tier are
+// introspection) for a host's /status dashboard. customer_id + actor + tier are
 // query params; the tenant is pinned from the service token.
 func ServiceGetBudget(r *httprequest.Request) {
-	payer, err := parseServiceMerchantSubjectID(r.Query("tenant_subject_id"))
+	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
-	if !requireServiceMerchantSubjectScope(r, *payer) {
+	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -248,16 +248,16 @@ func ServiceGetBudget(r *httprequest.Request) {
 
 // ServiceGetTier returns the payer's CURRENT graduated tier (#477): the tier
 // OpenRails auto-maintains from cumulative paid spend against the persisted tier
-// schedule (#476). tenant_subject_id is a query param; the tenant is pinned from
+// schedule (#476). customer_id is a query param; the tenant is pinned from
 // the service token. Empty tier => the payer has never graduated (caller treats
 // it as the lowest/default). Operator service token, credits:read.
 func ServiceGetTier(r *httprequest.Request) {
-	payer, err := parseServiceMerchantSubjectID(r.Query("tenant_subject_id"))
+	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
-	if !requireServiceMerchantSubjectScope(r, *payer) {
+	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -274,7 +274,7 @@ func ServiceGetTier(r *httprequest.Request) {
 }
 
 type serviceBudgetCheckRequest struct {
-	MerchantSubjectID string                                  `json:"tenant_subject_id"`
+	CustomerID      string                                  `json:"customer_id"`
 	Actor           string                                  `json:"actor"`
 	Windows         []billingservice.BudgetCheckWindowInput `json:"windows"`
 	RequestedMicros int64                                   `json:"requested_micros"`
@@ -289,12 +289,12 @@ func ServiceBudgetCheck(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	payer, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
+	payer, err := parseServiceCustomerID(req.CustomerID)
 	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
-	if !requireServiceMerchantSubjectScope(r, *payer) {
+	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -311,13 +311,13 @@ func ServiceBudgetCheck(r *httprequest.Request) {
 }
 
 type serviceTierPolicyRequest struct {
-	MerchantSubjectID string `json:"tenant_subject_id"`
+	CustomerID string `json:"customer_id"`
 	billingservice.TierPolicyInput
 }
 
 // ServiceSetTierPolicy upserts a tier policy (#298 tier admin API): throughput
 // windows + entitled endpoints + queue limits + fixed money-budget windows. An
-// EMPTY tenant_subject_id sets the tenant-wide DEFAULT policy for the tier (#477,
+// EMPTY customer_id sets the tenant-wide DEFAULT policy for the tier (#477,
 // the platform capacity ladder declared once); a non-empty one sets a
 // per-subject override (scope-checked).
 func ServiceSetTierPolicy(r *httprequest.Request) {
@@ -325,14 +325,14 @@ func ServiceSetTierPolicy(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	var payer billingidentity.MerchantSubjectID
-	if strings.TrimSpace(req.MerchantSubjectID) != "" {
-		p, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
+	var payer billingidentity.CustomerID
+	if strings.TrimSpace(req.CustomerID) != "" {
+		p, err := parseServiceCustomerID(req.CustomerID)
 		if err != nil || p == nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid tenant_subject_id")
+			r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 			return
 		}
-		if !requireServiceMerchantSubjectScope(r, *p) {
+		if !requireServiceCustomerScope(r, *p) {
 			return
 		}
 		payer = *p
@@ -350,13 +350,13 @@ func ServiceSetTierPolicy(r *httprequest.Request) {
 }
 
 type serviceTierScheduleRequest struct {
-	MerchantSubjectID string                            `json:"tenant_subject_id"`
-	Schedule        []billingservice.TierScheduleRung `json:"schedule"`
+	CustomerID string                            `json:"customer_id"`
+	Schedule   []billingservice.TierScheduleRung `json:"schedule"`
 }
 
 // ServiceSetTierSchedule persists the tenant's tier SCHEDULE (#476): the host
 // declares the ladder ONCE and OpenRails AUTO-maintains each payer's tier from
-// cumulative spend. An EMPTY tenant_subject_id sets the tenant-wide default
+// cumulative spend. An EMPTY customer_id sets the tenant-wide default
 // schedule (the common case); a non-empty one sets a per-subject override
 // (scope-checked). owner=platform. Operator service token, credits:write.
 func ServiceSetTierSchedule(r *httprequest.Request) {
@@ -364,14 +364,14 @@ func ServiceSetTierSchedule(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	var payer billingidentity.MerchantSubjectID
-	if strings.TrimSpace(req.MerchantSubjectID) != "" {
-		p, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
+	var payer billingidentity.CustomerID
+	if strings.TrimSpace(req.CustomerID) != "" {
+		p, err := parseServiceCustomerID(req.CustomerID)
 		if err != nil || p == nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid tenant_subject_id")
+			r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 			return
 		}
-		if !requireServiceMerchantSubjectScope(r, *p) {
+		if !requireServiceCustomerScope(r, *p) {
 			return
 		}
 		payer = *p
@@ -408,10 +408,10 @@ func budgetScopeWindowInputs(ws []budgetScopeWindow) []billingservice.BudgetScop
 }
 
 type serviceSubjectBudgetPolicyRequest struct {
-	MerchantSubjectID string              `json:"tenant_subject_id"`
-	Scope           string              `json:"scope"`
-	RoleID          string              `json:"role_id"`
-	Windows         []budgetScopeWindow `json:"windows"`
+	CustomerID string              `json:"customer_id"`
+	Scope      string              `json:"scope"`
+	RoleID     string              `json:"role_id"`
+	Windows    []budgetScopeWindow `json:"windows"`
 }
 
 // ServiceSetSubjectBudgetPolicy upserts a SUBJECT-owned hierarchical
@@ -423,12 +423,12 @@ func ServiceSetSubjectBudgetPolicy(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	payer, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
+	payer, err := parseServiceCustomerID(req.CustomerID)
 	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
-	if !requireServiceMerchantSubjectScope(r, *payer) {
+	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -448,9 +448,9 @@ func ServiceSetSubjectBudgetPolicy(r *httprequest.Request) {
 }
 
 type servicePlatformBudgetPolicyRequest struct {
-	MerchantSubjectID string              `json:"tenant_subject_id"`
-	Scope           string              `json:"scope"`
-	Windows         []budgetScopeWindow `json:"windows"`
+	CustomerID string              `json:"customer_id"`
+	Scope      string              `json:"scope"`
+	Windows    []budgetScopeWindow `json:"windows"`
 }
 
 // ServiceSetPlatformBudgetPolicy upserts a PLATFORM-owned budget cap (#473): the
@@ -462,12 +462,12 @@ func ServiceSetPlatformBudgetPolicy(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	payer, err := parseServiceMerchantSubjectID(req.MerchantSubjectID)
+	payer, err := parseServiceCustomerID(req.CustomerID)
 	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
-	if !requireServiceMerchantSubjectScope(r, *payer) {
+	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -487,15 +487,15 @@ func ServiceSetPlatformBudgetPolicy(r *httprequest.Request) {
 
 // ServiceGetSubjectBudgetPolicies returns ONLY the subject-owned budget-scope
 // policies (#473) for host reconciliation — platform-owned caps are invisible.
-// tenant_subject_id is a query param; the tenant is pinned from the service
+// customer_id is a query param; the tenant is pinned from the service
 // token. Operator service token, credits:read.
 func ServiceGetSubjectBudgetPolicies(r *httprequest.Request) {
-	payer, err := parseServiceMerchantSubjectID(r.Query("tenant_subject_id"))
+	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
-	if !requireServiceMerchantSubjectScope(r, *payer) {
+	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
 	svc, err := billingservice.New(r.State)

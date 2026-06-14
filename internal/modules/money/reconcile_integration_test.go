@@ -15,7 +15,7 @@ import (
 func TestReconcile_Clean(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	resetMoneyLedger(t, pool, ctx)
-	_, err := svc.Deposit(ctx, money.DepositParams{MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "seed"})
+	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 	_, err = svc.Hold(ctx, &payer, "user:a", cur, 200, "usage", "h1", time.Now().Add(time.Hour).UTC())
 	require.NoError(t, err)
@@ -30,7 +30,7 @@ func TestReconcile_Clean(t *testing.T) {
 func TestReconcile_OrphanedExpiredHold(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	resetMoneyLedger(t, pool, ctx)
-	_, err := svc.Deposit(ctx, money.DepositParams{MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "seed"})
+	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 	// Active hold already past expiry (HoldExpiryWorker hasn't run).
 	_, err = svc.Hold(ctx, &payer, "user:a", cur, 50, "usage", "h-old", time.Now().Add(-time.Minute).UTC())
@@ -49,14 +49,14 @@ func TestReconcile_OrphanedExpiredHold(t *testing.T) {
 func TestReconcile_HeldBalanceDriftAndRepair(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	resetMoneyLedger(t, pool, ctx)
-	_, err := svc.Deposit(ctx, money.DepositParams{MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "seed"})
+	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 	_, err = svc.Hold(ctx, &payer, "user:a", cur, 200, "usage", "h1", time.Now().Add(time.Hour).UTC())
 	require.NoError(t, err)
 
 	// Corrupt the stored held_balance.
 	_, err = pool.Exec(ctx,
-		"UPDATE openrails.money_balances SET held_balance = $1 WHERE merchant_subject_id = $2",
+		"UPDATE openrails.money_balances SET held_balance = $1 WHERE customer_id = $2",
 		999, payer.UUID())
 	require.NoError(t, err)
 
@@ -78,11 +78,11 @@ func TestReconcile_HeldBalanceDriftAndRepair(t *testing.T) {
 func TestReconcile_BalanceAnomaly(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	resetMoneyLedger(t, pool, ctx)
-	_, err := svc.Deposit(ctx, money.DepositParams{MerchantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 100, Source: "seed"})
+	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 100, Source: "seed"})
 	require.NoError(t, err)
 	// held > balance.
 	_, err = pool.Exec(ctx,
-		"UPDATE openrails.money_balances SET held_balance = $1 WHERE merchant_subject_id = $2",
+		"UPDATE openrails.money_balances SET held_balance = $1 WHERE customer_id = $2",
 		500, payer.UUID())
 	require.NoError(t, err)
 

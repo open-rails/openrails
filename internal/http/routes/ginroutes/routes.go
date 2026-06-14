@@ -71,13 +71,13 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 
 	// Always batch (#354): one issuer, many subjects, one query; a single
 	// lookup is an array of one.
-	group.POST("/tenant-subjects/by-external-subject/entitlements",
+	group.POST("/customers/by-external-subject/entitlements",
 		ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead),
 		wrap(httphandlers.ServiceGetExternalSubjectEntitlements),
 	)
 
-	tenantSubjects := group.Group("/tenant-subjects/:tenant_subject_id")
-	tenantSubjects.GET("/entitlements", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetMerchantSubjectEntitlements))
+	customers := group.Group("/customers/:customer_id")
+	customers.GET("/entitlements", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetCustomerEntitlements))
 
 	users := group.Group("/users/:user_id")
 	users.GET("/product-access", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
@@ -159,7 +159,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	creditsRead := ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead)
 	credits.PUT("/account-settings", creditsWrite, wrap(httphandlers.ServiceSetCreditAccountSettings))
 	credits.GET("/account-settings", creditsRead, wrap(httphandlers.ServiceGetCreditAccountSettings))
-	credits.GET("/transactions", creditsRead, wrap(httphandlers.ServiceListMerchantSubjectCreditTransactions))
+	credits.GET("/transactions", creditsRead, wrap(httphandlers.ServiceListCustomerCreditTransactions))
 	// #472: credit-type definition CRUD removed — money has no credit_type dimension.
 }
 
@@ -193,7 +193,7 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	// Credit ACCOUNT surface (issue #339 gap-fill): the caller's OWN account
 	// settings + balance/outstanding, settings writes, and transaction history.
 	// The subject is ALWAYS the delegated principal's subject — no
-	// tenant_subject_id parameter exists on this surface. Settings writes are
+	// customer_id parameter exists on this surface. Settings writes are
 	// gated by the dedicated self billing:write permission so a read-only token
 	// can inspect but never reconfigure.
 	billingWrite := ginmw.RequireDelegatedPermission(controlplane.PermSelfBillingWrite)
