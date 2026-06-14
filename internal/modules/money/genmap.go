@@ -29,19 +29,6 @@ func toJSONBC[M ~map[string]V, V any](m M) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-func moneyBalanceFromGen(r gen.OpenrailsMoneyBalance) *models.MoneyBalance {
-	return &models.MoneyBalance{
-		ID:          r.ID,
-		MerchantID:  r.MerchantID,
-		CustomerID:  r.CustomerID,
-		Currency:    r.Currency,
-		Balance:     r.Balance,
-		HeldBalance: r.HeldBalance,
-		CreatedAt:   r.CreatedAt,
-		UpdatedAt:   r.UpdatedAt,
-	}
-}
-
 func moneyTransactionFromGen(r gen.OpenrailsMoneyTransaction) (*models.MoneyTransaction, error) {
 	m := &models.MoneyTransaction{
 		ID:              r.ID,

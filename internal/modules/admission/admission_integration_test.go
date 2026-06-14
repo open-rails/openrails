@@ -41,7 +41,6 @@ func admitEnv(t *testing.T) (*admission.Admitter, *money.MoneyService, *admissio
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE customer_id = $1", payerID)
 	})
 
 	rc, err := tcredis.Run(ctx, "redis:7-alpine")

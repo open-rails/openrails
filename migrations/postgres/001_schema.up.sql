@@ -1371,35 +1371,10 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_blocks TO openrails_a
 COMMENT ON TABLE openrails.money_blocks IS 'amounts are integers in the row currency''s minor unit; default µ$ (1e-6 USD).';
 COMMENT ON COLUMN openrails.money_blocks.currency IS 'System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.';
 
--- =============================================================================
--- money_balances
--- =============================================================================
-
-CREATE TABLE openrails.money_balances (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    balance bigint DEFAULT 0 NOT NULL,
-    held_balance bigint DEFAULT 0 NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    merchant_id uuid NOT NULL,
-    customer_id uuid CONSTRAINT money_balances_customer_id_not_null NOT NULL,
-    currency text DEFAULT 'USD'::text NOT NULL,
-    CONSTRAINT money_balances_pkey PRIMARY KEY (id),
-    CONSTRAINT money_balances_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
-);
-
-ALTER TABLE ONLY openrails.money_balances FORCE ROW LEVEL SECURITY;
-
-CREATE INDEX idx_money_balances_merchant_id ON openrails.money_balances USING btree (merchant_id);
-CREATE UNIQUE INDEX uq_money_balances_payer ON openrails.money_balances USING btree (merchant_id, customer_id, currency);
-
-ALTER TABLE openrails.money_balances ENABLE ROW LEVEL SECURITY;
-CREATE POLICY merchant_isolation ON openrails.money_balances USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_balances TO openrails_app;
-
-COMMENT ON TABLE openrails.money_balances IS 'amounts are integers in the row currency''s minor unit; default µ$ (1e-6 USD).';
-COMMENT ON COLUMN openrails.money_balances.currency IS 'System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.';
+-- money_balances was a read-cache roll-up; dropped in #491. available is derived
+-- from money_blocks, held from active holds + open windows. This partial index
+-- keeps the derived-available SUM cheap.
+CREATE INDEX idx_money_blocks_spendable ON openrails.money_blocks USING btree (merchant_id, customer_id, currency) WHERE (remaining_amount > 0);
 
 -- =============================================================================
 -- money_accounts

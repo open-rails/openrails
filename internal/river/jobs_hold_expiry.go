@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
@@ -81,64 +80,13 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 				return nil
 			}
 
-			// Group holds by the BALANCE KEY to batch balance updates. The unified
-			// lifecycle balance row (issue #221/#223) is keyed by
-			// (tenant_id, customer_id) — actor is ACTOR attribution only and is
-			// NOT part of the balance identity, so releasing held_balance must target
-			// the payer's row, not the actor's.
-			type key struct {
-				MerchantID uuid.UUID
-				CustomerID uuid.UUID
-				Currency   string
-			}
-			releasedTotals := make(map[key]int64)
-
+			// Held is DERIVED from active holds (#491): flipping a hold to 'expired'
+			// IS the release — no balance cache to update. Funds become available
+			// again automatically once the hold no longer counts as active.
 			for i := range holds {
-				hold := holds[i]
-				if hold.AuthorizedAmount == nil || *hold.AuthorizedAmount <= 0 {
-					continue
-				}
-				k := key{MerchantID: hold.MerchantID, CustomerID: hold.CustomerID, Currency: hold.Currency}
-				releasedTotals[k] += *hold.AuthorizedAmount
-
-				// Mark hold as expired
-				if err := q.ExpireMoneyHold(ctx, gen.ExpireMoneyHoldParams{ID: hold.ID, UpdatedAt: now}); err != nil {
+				if err := q.ExpireMoneyHold(ctx, gen.ExpireMoneyHoldParams{ID: holds[i].ID, UpdatedAt: now}); err != nil {
 					return err
 				}
-			}
-
-			// Update balances - subtract from held_balance to make credits available again
-			for k, amount := range releasedTotals {
-				if amount <= 0 {
-					continue
-				}
-
-				bal, err := q.LockMoneyBalance(ctx, gen.LockMoneyBalanceParams{
-					MerchantID: k.MerchantID, CustomerID: k.CustomerID, Currency: k.Currency,
-				})
-				if err != nil {
-					return err
-				}
-
-				// Reduce held_balance - funds become available again
-				newHeldBalance := bal.HeldBalance - amount
-				if newHeldBalance < 0 {
-					// Shouldn't happen, but be safe
-					newHeldBalance = 0
-				}
-
-				if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-					MerchantID: k.MerchantID, CustomerID: k.CustomerID, Currency: k.Currency,
-					HeldBalance: newHeldBalance, UpdatedAt: now,
-				}); err != nil {
-					return err
-				}
-
-				logger.WithFields(log.Fields{
-					"tenant_id":   k.MerchantID,
-					"customer_id": k.CustomerID,
-					"amount":      amount,
-				}).Debug("released expired hold funds")
 			}
 			return nil
 		})

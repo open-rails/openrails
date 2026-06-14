@@ -75,21 +75,12 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// credit_type is accepted-and-ignored on the wire; money needs no type row.
 	creditTypeName := "svc_test_credits_" + uuid.NewString()
 
-	// Seed a starting money balance (USD).
-	ucb := &models.MoneyBalance{
-		ID:          uuid.New(),
-		MerchantID:  dbtest.TestTenantID.UUID(),
-		CustomerID:  tenantSubjectID,
-		Currency:    "USD",
-		Balance:     10_000,
-		HeldBalance: 0,
-		CreatedAt:   time.Now().UTC(),
-		UpdatedAt:   time.Now().UTC(),
-	}
+	// Seed a starting money balance (USD) as a spendable block (#491: balance is
+	// derived from money_blocks).
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.money_balances (id, merchant_id, customer_id, currency, balance, held_balance, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		ucb.ID, ucb.MerchantID, ucb.CustomerID, ucb.Currency, ucb.Balance, ucb.HeldBalance, ucb.CreatedAt, ucb.UpdatedAt)
+		INSERT INTO openrails.money_blocks (id, merchant_id, customer_id, currency, original_amount, remaining_amount, created_at)
+		VALUES ($1, $2, $3, 'USD', 10000, 10000, $4)`,
+		uuid.New(), dbtest.TestTenantID.UUID(), tenantSubjectID, time.Now().UTC())
 	require.NoError(t, err)
 
 	// Seed an entitlement. source_id is NOT NULL (the originating

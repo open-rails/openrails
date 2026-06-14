@@ -102,6 +102,38 @@ func (q *Queries) CountMoneyTransactionsByPayer(ctx context.Context, arg CountMo
 	return count, err
 }
 
+const deleteCompactableMoneyBlocks = `-- name: DeleteCompactableMoneyBlocks :execrows
+WITH doomed AS (
+    SELECT id FROM openrails.money_blocks
+    WHERE remaining_amount = 0
+       OR (expires_at IS NOT NULL AND expires_at <= $1::timestamptz)
+    ORDER BY id
+    LIMIT $2::int
+)
+DELETE FROM openrails.money_blocks WHERE id IN (SELECT id FROM doomed)
+`
+
+type DeleteCompactableMoneyBlocksParams struct {
+	Now       time.Time
+	BatchSize int32
+}
+
+// Credit-block COMPACTION (#491): delete fully-spent (remaining_amount = 0) and
+// expired (past expires_at) lots, keeping the spendable-lot table bounded so the
+// derived available SUM stays cheap. Touches money_blocks ONLY — NEVER the
+// money_transactions receipt/ledger or payments (a deleted block's
+// source_transaction_id reference simply goes away; the deposit receipt
+// survives). Cross-tenant; bounded batch via a CTE of ids; the matching FK from
+// money_blocks -> money_transactions is the only inbound reference and it lives
+// ON the block being deleted, so the delete is self-contained.
+func (q *Queries) DeleteCompactableMoneyBlocks(ctx context.Context, arg DeleteCompactableMoneyBlocksParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteCompactableMoneyBlocks, arg.Now, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const expireMoneyHold = `-- name: ExpireMoneyHold :exec
 UPDATE openrails.money_transactions
 SET status = 'expired', updated_at = $2
@@ -116,38 +148,6 @@ type ExpireMoneyHoldParams struct {
 func (q *Queries) ExpireMoneyHold(ctx context.Context, arg ExpireMoneyHoldParams) error {
 	_, err := q.db.Exec(ctx, expireMoneyHold, arg.ID, arg.UpdatedAt)
 	return err
-}
-
-const getMoneyBalance = `-- name: GetMoneyBalance :one
-
-SELECT id, balance, held_balance, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_balances
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
-LIMIT 1
-`
-
-type GetMoneyBalanceParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-}
-
-// The money ledger (modules/money): balances, FIFO blocks, transactions.
-// amounts are integers in the row currency's minor unit (default µ$ = 1e-6 USD).
-// currency is a system code (USD/USDC/EUR/JPY/SOL); the Go registry is authority.
-func (q *Queries) GetMoneyBalance(ctx context.Context, arg GetMoneyBalanceParams) (OpenrailsMoneyBalance, error) {
-	row := q.db.QueryRow(ctx, getMoneyBalance, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var i OpenrailsMoneyBalance
-	err := row.Scan(
-		&i.ID,
-		&i.Balance,
-		&i.HeldBalance,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.Currency,
-	)
-	return i, err
 }
 
 const getMoneyTransactionByCoords = `-- name: GetMoneyTransactionByCoords :one
@@ -275,34 +275,6 @@ func (q *Queries) GetMoneyWindowForUpdate(ctx context.Context, id uuid.UUID) (Op
 		&i.Currency,
 	)
 	return i, err
-}
-
-const insertMoneyBalanceIfAbsent = `-- name: InsertMoneyBalanceIfAbsent :exec
-INSERT INTO openrails.money_balances (
-    id, merchant_id, customer_id, currency, balance, held_balance, created_at, updated_at
-) VALUES ($1, $2, $3, $4, 0, 0, $5, $5)
-ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING
-`
-
-type InsertMoneyBalanceIfAbsentParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	Now        time.Time
-}
-
-// First-touch materialization; ON CONFLICT DO NOTHING targets the
-// (tenant, payer, currency) uniqueness so concurrent first-touch is safe.
-func (q *Queries) InsertMoneyBalanceIfAbsent(ctx context.Context, arg InsertMoneyBalanceIfAbsentParams) error {
-	_, err := q.db.Exec(ctx, insertMoneyBalanceIfAbsent,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Currency,
-		arg.Now,
-	)
-	return err
 }
 
 const insertMoneyBlock = `-- name: InsertMoneyBlock :exec
@@ -545,51 +517,6 @@ func (q *Queries) ListExpiredActiveMoneyHoldsForUpdate(ctx context.Context, arg 
 	return items, nil
 }
 
-const listExpiredMoneyBlocksForUpdate = `-- name: ListExpiredMoneyBlocksForUpdate :many
-SELECT id, original_amount, remaining_amount, expires_at, source_transaction_id, created_at, merchant_id, customer_id, currency FROM openrails.money_blocks
-WHERE remaining_amount > 0
-  AND expires_at IS NOT NULL AND expires_at <= $1::timestamptz
-ORDER BY expires_at ASC
-LIMIT $2::int
-FOR UPDATE SKIP LOCKED
-`
-
-type ListExpiredMoneyBlocksForUpdateParams struct {
-	Now       time.Time
-	BatchSize int32
-}
-
-// Money block expiry sweep (cross-tenant, SKIP LOCKED).
-func (q *Queries) ListExpiredMoneyBlocksForUpdate(ctx context.Context, arg ListExpiredMoneyBlocksForUpdateParams) ([]OpenrailsMoneyBlock, error) {
-	rows, err := q.db.Query(ctx, listExpiredMoneyBlocksForUpdate, arg.Now, arg.BatchSize)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsMoneyBlock
-	for rows.Next() {
-		var i OpenrailsMoneyBlock
-		if err := rows.Scan(
-			&i.ID,
-			&i.OriginalAmount,
-			&i.RemainingAmount,
-			&i.ExpiresAt,
-			&i.SourceTransactionID,
-			&i.CreatedAt,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.Currency,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listExpiredOpenMoneyWindowsForUpdate = `-- name: ListExpiredOpenMoneyWindowsForUpdate :many
 SELECT id, merchant_id, customer_id, held_amount, settled_amount, status, expires_at, created_at, updated_at, currency FROM openrails.money_windows
 WHERE status = 'open' AND expires_at <= $1::timestamptz
@@ -625,102 +552,6 @@ func (q *Queries) ListExpiredOpenMoneyWindowsForUpdate(ctx context.Context, arg 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Currency,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listMoneyBalanceAnomalies = `-- name: ListMoneyBalanceAnomalies :many
-SELECT b.merchant_id, b.customer_id, b.currency, b.balance, b.held_balance
-FROM openrails.money_balances b
-WHERE b.merchant_id = $1
-  AND (b.balance < 0 OR b.held_balance < 0 OR b.held_balance > b.balance)
-`
-
-type ListMoneyBalanceAnomaliesRow struct {
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	Currency    string
-	Balance     int64
-	HeldBalance int64
-}
-
-func (q *Queries) ListMoneyBalanceAnomalies(ctx context.Context, merchantID uuid.UUID) ([]ListMoneyBalanceAnomaliesRow, error) {
-	rows, err := q.db.Query(ctx, listMoneyBalanceAnomalies, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListMoneyBalanceAnomaliesRow
-	for rows.Next() {
-		var i ListMoneyBalanceAnomaliesRow
-		if err := rows.Scan(
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.Currency,
-			&i.Balance,
-			&i.HeldBalance,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listMoneyHeldBalanceDrift = `-- name: ListMoneyHeldBalanceDrift :many
-SELECT b.merchant_id, b.customer_id, b.currency,
-       b.held_balance AS stored,
-       COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0))
-                 FROM openrails.money_transactions t
-                 WHERE t.merchant_id = b.merchant_id
-                   AND t.customer_id = b.customer_id
-                   AND t.currency = b.currency
-                   AND t.transaction_type = 'hold' AND t.status = 'active'), 0)::bigint AS computed
-FROM openrails.money_balances b
-WHERE b.merchant_id = $1
-  AND b.held_balance <> COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0))
-                 FROM openrails.money_transactions t
-                 WHERE t.merchant_id = b.merchant_id
-                   AND t.customer_id = b.customer_id
-                   AND t.currency = b.currency
-                   AND t.transaction_type = 'hold' AND t.status = 'active'), 0)
-`
-
-type ListMoneyHeldBalanceDriftRow struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	Stored     int64
-	Computed   int64
-}
-
-// Balance rows whose stored held_balance disagrees with the sum of their
-// currently-active holds (reconciliation, alert-only).
-func (q *Queries) ListMoneyHeldBalanceDrift(ctx context.Context, merchantID uuid.UUID) ([]ListMoneyHeldBalanceDriftRow, error) {
-	rows, err := q.db.Query(ctx, listMoneyHeldBalanceDrift, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListMoneyHeldBalanceDriftRow
-	for rows.Next() {
-		var i ListMoneyHeldBalanceDriftRow
-		if err := rows.Scan(
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.Currency,
-			&i.Stored,
-			&i.Computed,
 		); err != nil {
 			return nil, err
 		}
@@ -897,32 +728,32 @@ func (q *Queries) ListSpendableMoneyBlocksForUpdate(ctx context.Context, arg Lis
 	return items, nil
 }
 
-const lockMoneyBalance = `-- name: LockMoneyBalance :one
-SELECT id, balance, held_balance, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_balances
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
+const lockCustomerForSpend = `-- name: LockCustomerForSpend :one
+
+SELECT id FROM openrails.customers
+WHERE id = $1 AND merchant_id = $2
 FOR UPDATE
 `
 
-type LockMoneyBalanceParams struct {
+type LockCustomerForSpendParams struct {
+	ID         uuid.UUID
 	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
 }
 
-func (q *Queries) LockMoneyBalance(ctx context.Context, arg LockMoneyBalanceParams) (OpenrailsMoneyBalance, error) {
-	row := q.db.QueryRow(ctx, lockMoneyBalance, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var i OpenrailsMoneyBalance
-	err := row.Scan(
-		&i.ID,
-		&i.Balance,
-		&i.HeldBalance,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.Currency,
-	)
-	return i, err
+// The money ledger (modules/money): FIFO blocks + transactions. There is NO
+// balance cache (#491): available is derived from spendable money_blocks and
+// held from active holds + open windows. The per-customer spend mutex is a
+// FOR UPDATE lock on the customers row.
+// amounts are integers in the row currency's minor unit (default µ$ = 1e-6 USD).
+// currency is a system code (USD/USDC/EUR/JPY/SOL); the Go registry is authority.
+// The per-customer spend mutex (#491): every spend/hold/capture/deposit/expiry
+// path locks this row FOR UPDATE before reading/mutating the customer's blocks,
+// serializing all money mutations per customer. Returns the customer id.
+func (q *Queries) LockCustomerForSpend(ctx context.Context, arg LockCustomerForSpendParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockCustomerForSpend, arg.ID, arg.MerchantID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const releaseMoneyHold = `-- name: ReleaseMoneyHold :exec
@@ -941,31 +772,6 @@ func (q *Queries) ReleaseMoneyHold(ctx context.Context, arg ReleaseMoneyHoldPara
 	return err
 }
 
-const setMoneyBalance = `-- name: SetMoneyBalance :exec
-UPDATE openrails.money_balances
-SET balance = $3, updated_at = $4
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
-`
-
-type SetMoneyBalanceParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Balance    int64
-	UpdatedAt  time.Time
-	Currency   string
-}
-
-func (q *Queries) SetMoneyBalance(ctx context.Context, arg SetMoneyBalanceParams) error {
-	_, err := q.db.Exec(ctx, setMoneyBalance,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Balance,
-		arg.UpdatedAt,
-		arg.Currency,
-	)
-	return err
-}
-
 const setMoneyBlockRemaining = `-- name: SetMoneyBlockRemaining :exec
 UPDATE openrails.money_blocks SET remaining_amount = $2 WHERE id = $1
 `
@@ -977,31 +783,6 @@ type SetMoneyBlockRemainingParams struct {
 
 func (q *Queries) SetMoneyBlockRemaining(ctx context.Context, arg SetMoneyBlockRemainingParams) error {
 	_, err := q.db.Exec(ctx, setMoneyBlockRemaining, arg.ID, arg.RemainingAmount)
-	return err
-}
-
-const setMoneyHeldBalance = `-- name: SetMoneyHeldBalance :exec
-UPDATE openrails.money_balances
-SET held_balance = $3, updated_at = $4
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
-`
-
-type SetMoneyHeldBalanceParams struct {
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	HeldBalance int64
-	UpdatedAt   time.Time
-	Currency    string
-}
-
-func (q *Queries) SetMoneyHeldBalance(ctx context.Context, arg SetMoneyHeldBalanceParams) error {
-	_, err := q.db.Exec(ctx, setMoneyHeldBalance,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.HeldBalance,
-		arg.UpdatedAt,
-		arg.Currency,
-	)
 	return err
 }
 
@@ -1020,6 +801,35 @@ type SetMoneyWindowStatusParams struct {
 func (q *Queries) SetMoneyWindowStatus(ctx context.Context, arg SetMoneyWindowStatusParams) error {
 	_, err := q.db.Exec(ctx, setMoneyWindowStatus, arg.ID, arg.Status, arg.UpdatedAt)
 	return err
+}
+
+const sumActiveMoneyHeld = `-- name: SumActiveMoneyHeld :one
+SELECT (
+    COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0))
+              FROM openrails.money_transactions t
+              WHERE t.merchant_id = $1 AND t.customer_id = $2 AND t.currency = $3
+                AND t.transaction_type = 'hold' AND t.status = 'active'), 0)
+  + COALESCE((SELECT SUM(w.held_amount - w.settled_amount)
+              FROM openrails.money_windows w
+              WHERE w.merchant_id = $1 AND w.customer_id = $2 AND w.currency = $3
+                AND w.status = 'open'), 0)
+)::bigint
+`
+
+type SumActiveMoneyHeldParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// Derived held (#491): active-hold authorizations PLUS open-window unsettled
+// reservations (windows reserve held without a 'hold' row). Replaces the cached
+// money_balances.held_balance.
+func (q *Queries) SumActiveMoneyHeld(ctx context.Context, arg SumActiveMoneyHeldParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumActiveMoneyHeld, arg.MerchantID, arg.CustomerID, arg.Currency)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const sumActiveMoneyHoldAuthorizations = `-- name: SumActiveMoneyHoldAuthorizations :one
@@ -1108,6 +918,36 @@ func (q *Queries) SumMoneyMovementsInPeriodByPayer(ctx context.Context, arg SumM
 		return nil, err
 	}
 	return items, nil
+}
+
+const sumSpendableMoneyBlocks = `-- name: SumSpendableMoneyBlocks :one
+SELECT COALESCE(SUM(remaining_amount), 0)::bigint
+FROM openrails.money_blocks
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
+  AND remaining_amount > 0
+  AND (expires_at IS NULL OR expires_at > $4::timestamptz)
+`
+
+type SumSpendableMoneyBlocksParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Now        time.Time
+}
+
+// Derived balance (#491): the sum of unexpired, unspent FIFO credit lots — the
+// spendable total for a (merchant, customer, currency). Replaces the cached
+// money_balances.balance.
+func (q *Queries) SumSpendableMoneyBlocks(ctx context.Context, arg SumSpendableMoneyBlocksParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumSpendableMoneyBlocks,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.Now,
+	)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const sumSpentInMoneyWindow = `-- name: SumSpentInMoneyWindow :one

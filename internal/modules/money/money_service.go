@@ -109,22 +109,10 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 	}
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
-	row, err := s.db.Gen(ctx).GetMoneyBalance(ctx, gen.GetMoneyBalanceParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-	})
-	if err == nil {
-		return moneyBalanceFromGen(row), nil
-	}
-	if errors.Is(err, pgx.ErrNoRows) {
-		return &models.MoneyBalance{
-			MerchantID:  tenantID,
-			CustomerID:  payerID,
-			Currency:    cur,
-			Balance:     0,
-			HeldBalance: 0,
-		}, nil
-	}
-	return nil, err
+	// Derived read (#491): balance = SUM spendable blocks, held = active holds +
+	// open windows. No lock needed — a stale read can never overdraft (writers
+	// re-derive under the customers-row lock).
+	return s.deriveBalance(ctx, s.db.Gen(ctx), tenantID, payerID, cur)
 }
 
 func (s *MoneyService) GetTransactions(ctx context.Context, actorID string, limit, offset int) ([]models.MoneyTransaction, int, error) {
@@ -345,17 +333,14 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		return nil, err
 	}
 	payerID := payer.UUID()
-	if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
-		return nil, err
-	}
 	bal, err := s.lockBalance(ctx, q, payer, params.Actor, cur)
 	if err != nil {
 		return nil, err
 	}
 
 	// Idempotency: if caller provides SourceID, treat (tenant, payer, source,
-	// source_id) as an idempotency key for deposits. This is safe because
-	// we lock the balance row for UPDATE, serializing deposits per payer.
+	// source_id) as an idempotency key for deposits. This is safe because we hold
+	// the customers-row lock, serializing deposits per customer (#491).
 	sourceIDText := (*string)(nil)
 	if params.SourceID != nil {
 		v := params.SourceID.String()
@@ -372,20 +357,13 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		}
 	}
 
-	// Guard against int64 overflow: a sufficiently large deposit on a user with
-	// a positive balance would wrap the balance negative, permanently bricking
-	// the account. Reject the deposit rather than silently corrupting it.
+	// Guard against int64 overflow: a sufficiently large deposit on a customer
+	// with a positive balance would wrap the derived balance negative. Reject the
+	// deposit rather than corrupt the spendable total.
 	if bal.Balance > math.MaxInt64-params.Amount {
 		return nil, fmt.Errorf("deposit would overflow balance")
 	}
 	newBal := bal.Balance + params.Amount
-
-	if err := q.SetMoneyBalance(ctx, gen.SetMoneyBalanceParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-		Balance: newBal, UpdatedAt: now,
-	}); err != nil {
-		return nil, err
-	}
 
 	trx := &models.MoneyTransaction{
 		ID:              uuidutil.NewV7(),
@@ -532,12 +510,9 @@ func (s *MoneyService) Hold(ctx context.Context, payer *identity.CustomerID, act
 			return rerr
 		}
 		payerID := customerSubject.UUID()
-		if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
-			return err
-		}
 
 		// Idempotency: treat (tenant, payer, source, source_id) as a unique key for
-		// holds. This prevents duplicate held_balance reservations on caller retries.
+		// holds. This prevents duplicate reservations on caller retries.
 		existing, gerr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			TransactionType: "hold", Source: source, SourceID: &sourceID,
@@ -550,6 +525,8 @@ func (s *MoneyService) Hold(ctx context.Context, payer *identity.CustomerID, act
 			return gerr
 		}
 
+		// Lock the customers row, then check derived available. Inserting the active
+		// hold row IS the held reservation (#491): SumActiveMoneyHeld picks it up.
 		bal, lerr := s.lockBalance(ctx, q, customerSubject, actorID, cur)
 		if lerr != nil {
 			return lerr
@@ -557,13 +534,6 @@ func (s *MoneyService) Hold(ctx context.Context, payer *identity.CustomerID, act
 		available := bal.Balance - bal.HeldBalance
 		if available < amount {
 			return ErrInsufficientCredits
-		}
-
-		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			HeldBalance: bal.HeldBalance + amount, UpdatedAt: now,
-		}); err != nil {
-			return err
 		}
 
 		exp := expiresAt.UTC()
@@ -626,27 +596,18 @@ func (s *MoneyService) CaptureHold(ctx context.Context, holdID uuid.UUID, actual
 			return fmt.Errorf("invalid capture amount")
 		}
 
-		tid, terr := merchant.Require(ctx)
-		if terr != nil {
-			return terr
-		}
-		tenantID := tid.UUID()
 		holdPayer := identity.CustomerID(h.CustomerID)
 		cur := normalizeCurrency(h.Currency)
 		bal, lerr := s.lockBalance(ctx, q, holdPayer, h.Actor, cur)
 		if lerr != nil {
 			return lerr
 		}
-		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			MerchantID: tenantID, CustomerID: h.CustomerID, Currency: cur,
-			HeldBalance: bal.HeldBalance - authorized, UpdatedAt: now,
-		}); err != nil {
-			return err
-		}
 
 		// Settle the actual balance-first-then-owed (#302): an arrears hold spills the
-		// uncovered remainder to outstanding_owed instead of failing. availableAfter
-		// reflects this hold's reservation already released above.
+		// uncovered remainder to outstanding_owed instead of failing. The hold is
+		// still 'active' here (CaptureMoneyHold runs below) so bal.HeldBalance still
+		// counts it; availableAfter is the available once THIS hold is released
+		// (#491: releasing held = the status flip to 'captured', no cache write).
 		availableAfter := bal.Balance - (bal.HeldBalance - authorized)
 		newBal, serr := s.captureSettleTx(ctx, q, holdPayer, h.Actor, cur, actualAmount, availableAfter)
 		if serr != nil {
@@ -695,25 +656,14 @@ func (s *MoneyService) ReleaseHold(ctx context.Context, holdID uuid.UUID) (*mode
 		if row.AuthorizedAmount == nil || *row.AuthorizedAmount <= 0 {
 			return fmt.Errorf("hold missing authorized amount")
 		}
-		authorized := *row.AuthorizedAmount
 
 		now := s.now()
-		tid, terr := merchant.Require(ctx)
-		if terr != nil {
-			return terr
-		}
-		tenantID := tid.UUID()
 		holdPayer := identity.CustomerID(row.CustomerID)
 		cur := normalizeCurrency(row.Currency)
-		bal, lerr := s.lockBalance(ctx, q, holdPayer, row.Actor, cur)
-		if lerr != nil {
+		// Lock the customers row to serialize against concurrent spend; the status
+		// flip to 'released' IS the held release (#491), no cache write.
+		if _, lerr := s.lockBalance(ctx, q, holdPayer, row.Actor, cur); lerr != nil {
 			return lerr
-		}
-		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			MerchantID: tenantID, CustomerID: row.CustomerID, Currency: cur,
-			HeldBalance: bal.HeldBalance - authorized, UpdatedAt: now,
-		}); err != nil {
-			return err
 		}
 		if err := q.ReleaseMoneyHold(ctx, gen.ReleaseMoneyHoldParams{ID: row.ID, UpdatedAt: now}); err != nil {
 			return err
@@ -742,12 +692,15 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 	}
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
+	// Lock + serialize. This is a low-level FIFO block-debit primitive: the
+	// available/credit-line gate is the CALLER's job (#491). It draws the spendable
+	// lots and errors only if the blocks physically cannot cover `amount` (a gated
+	// caller never hits that). Returns the derived balance AFTER the debit.
 	bal, err := s.lockBalance(ctx, q, payer, actorID, cur)
 	if err != nil {
 		return 0, err
 	}
-	available := bal.Balance - bal.HeldBalance
-	if available < amount {
+	if bal.Balance < amount {
 		return 0, ErrInsufficientCredits
 	}
 
@@ -776,25 +729,21 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 			return 0, err
 		}
 	}
-
-	newBal := bal.Balance - amount
-	if err := q.SetMoneyBalance(ctx, gen.SetMoneyBalanceParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-		Balance: newBal, UpdatedAt: now,
-	}); err != nil {
-		return 0, err
+	if remaining > 0 {
+		// Blocks couldn't cover it despite the balance check — should be impossible
+		// under the customers-row lock; fail loudly rather than under-debit.
+		return 0, ErrInsufficientCredits
 	}
-	return newBal, nil
+	return bal.Balance - amount, nil
 }
 
-// lockBalance selects-for-update the balance row for an tenant subject (issue #221)
-// within the resolved tenant (issue #223), creating it if absent. The balance
-// is keyed by (tenant, payer); actor is stamped for attribution.
-//
-// The balance row is unique per (tenant_id, customer_id) — the HARDCUT
-// payer+tenant-scoped uniqueness (001_schema.up.sql). ON CONFLICT DO NOTHING
-// targets that constraint to avoid a duplicate-key error on concurrent
-// first-touch, after which the row is re-selected FOR UPDATE.
+// lockBalance is the per-customer spend mutex (#491): it FOR UPDATE-locks the
+// customers row (the serialization point — money_balances is gone), ensuring the
+// row exists first, then returns the DERIVED balance snapshot
+// (Balance = SUM spendable blocks, HeldBalance = active holds + open windows)
+// computed UNDER the lock. Every spend/hold/capture/deposit/expiry path calls
+// this before reading/mutating the customer's blocks so no two mutations on the
+// same customer interleave (no overdraft, atomic hold placement).
 func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.CustomerID, actorID, currency string) (*models.MoneyBalance, error) {
 	cur := normalizeUnit(currency)
 	tid, err := merchant.Require(ctx)
@@ -803,28 +752,41 @@ func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer id
 	}
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
-	key := gen.LockMoneyBalanceParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-	}
-	row, err := q.LockMoneyBalance(ctx, key)
-	if err == nil {
-		return moneyBalanceFromGen(row), nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
 		return nil, err
 	}
-
-	if err := q.InsertMoneyBalanceIfAbsent(ctx, gen.InsertMoneyBalanceIfAbsentParams{
-		ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-		Now: s.now(),
+	if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{
+		ID: payerID, MerchantID: tenantID,
 	}); err != nil {
 		return nil, err
 	}
-	row, err = q.LockMoneyBalance(ctx, key)
+	return s.deriveBalance(ctx, q, tenantID, payerID, cur)
+}
+
+// deriveBalance computes the balance snapshot from the source of truth: balance
+// = SUM(unexpired, unspent money_blocks), held = active holds + open windows. The
+// caller holds the customers-row lock (#491).
+func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string) (*models.MoneyBalance, error) {
+	now := s.now()
+	bal, err := q.SumSpendableMoneyBlocks(ctx, gen.SumSpendableMoneyBlocksParams{
+		MerchantID: tenantID, CustomerID: payerID, Currency: cur, Now: now,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return moneyBalanceFromGen(row), nil
+	held, err := q.SumActiveMoneyHeld(ctx, gen.SumActiveMoneyHeldParams{
+		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &models.MoneyBalance{
+		MerchantID:  tenantID,
+		CustomerID:  payerID,
+		Currency:    cur,
+		Balance:     bal,
+		HeldBalance: held,
+	}, nil
 }
 
 func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params WithdrawParams) (*models.MoneyTransaction, error) {
@@ -843,11 +805,17 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 		return nil, err
 	}
 	payerID := payer.UUID()
+	// Lock + derive once: gate on held-aware available (a withdraw cannot eat into
+	// reserved/held funds), then idempotency, then debit the FIFO blocks (#491).
+	bal, err := s.lockBalance(ctx, q, payer, params.Actor, cur)
+	if err != nil {
+		return nil, err
+	}
+	if bal.Balance-bal.HeldBalance < params.Amount {
+		return nil, ErrInsufficientCredits
+	}
 	sourceIDText := (*string)(nil)
 	if params.SourceID != nil {
-		if _, err := s.lockBalance(ctx, q, payer, params.Actor, cur); err != nil {
-			return nil, err
-		}
 		v := params.SourceID.String()
 		sourceIDText = &v
 		existing, gerr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{

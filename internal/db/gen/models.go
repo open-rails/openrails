@@ -418,19 +418,6 @@ type OpenrailsMerchantSecret struct {
 }
 
 // amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
-type OpenrailsMoneyBalance struct {
-	ID          uuid.UUID
-	Balance     int64
-	HeldBalance int64
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
-	Currency string
-}
-
-// amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
 type OpenrailsMoneyBlock struct {
 	ID                  uuid.UUID
 	OriginalAmount      int64

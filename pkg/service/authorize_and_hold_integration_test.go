@@ -75,20 +75,20 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 			arg   any
 		}{
 			{"openrails.money_transactions", "customer_id = $1", payerID},
-			{"openrails.money_balances", "customer_id = $1", payerID},
+			{"openrails.money_blocks", "customer_id = $1", payerID},
 			{"openrails.tenants", "id = $1", tenantID},
 		} {
 			_, _ = super.Pool().Exec(ctx, "DELETE FROM "+q.tbl+" WHERE "+q.where, q.arg)
 		}
 	})
 
-	// Seed a funded USD balance (1000 cents) as super (bypasses RLS), scoped to the
-	// test tenant. Money is unit-less — one balance per currency (#472).
+	// Seed a funded USD balance (1000 cents) as a spendable block (#491: balance
+	// is derived from money_blocks). Inserted as super (bypasses RLS), test-scoped.
 	_, err = super.Pool().Exec(ctx,
-		`INSERT INTO openrails.money_balances
-		   (id, tenant_id, customer_id, currency, balance, held_balance, created_at, updated_at)
-		 VALUES ($1,$2,$3,'USD',1000,0,$4,$5)`,
-		uuid.New(), tenantID, payerID, now, now)
+		`INSERT INTO openrails.money_blocks
+		   (id, merchant_id, customer_id, currency, original_amount, remaining_amount, created_at)
+		 VALUES ($1,$2,$3,'USD',1000,1000,$4)`,
+		uuid.New(), tenantID, payerID, now)
 	require.NoError(t, err)
 
 	// Billing service as the unprivileged openrails_app role (RLS ENFORCES).

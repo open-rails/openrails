@@ -39,7 +39,6 @@ func windowEnv(t *testing.T, depositMicros int64) (context.Context, *pgxpool.Poo
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_windows WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE customer_id = $1", payerID)
 	})
 
 	if depositMicros > 0 {
@@ -258,7 +257,6 @@ func TestCreditWindows_CrossPayerSettleBatch(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_windows WHERE customer_id = $1", pid)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", pid)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", pid)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE customer_id = $1", pid)
 	})
 	_, err := svc.Deposit(ctx, money.DepositParams{
 		CustomerID: &payerB,

@@ -223,9 +223,9 @@ func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, paye
 		}
 		newBal = nb
 	} else {
-		b, err := q.GetMoneyBalance(ctx, gen.GetMoneyBalanceParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-		})
+		// Nothing drawn from balance (full spill to owed): report the derived
+		// spendable total unchanged (#491).
+		b, err := s.deriveBalance(ctx, q, tenantID, payerID, cur)
 		if err != nil {
 			return 0, err
 		}

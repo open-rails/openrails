@@ -80,80 +80,12 @@ func startOwnerTenantPostgres(t *testing.T) (*db.DB, string, context.Context) {
 	return dbi, dsn, dbtest.WithTestTenant(ctx)
 }
 
-// TestSchema_EnforcesNotNullTenantAndPayer proves the HARDCUT schema enforces NOT
-// NULL on tenant_id and customer_id for money_balances: an insert that
-// omits either is rejected by the database, so there is no path to a tenant-less
-// or payer-less money row.
-func TestSchema_EnforcesNotNullTenantAndPayer(t *testing.T) {
-	dbi, _, ctx := startOwnerTenantPostgres(t)
-	pool := dbi.Pool()
-
-	payer := uuid.New()
-	seedCustomer(t, ctx, pool, payer)
-
-	// customer_id has no default: an insert that leaves it unset must be rejected.
-	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.money_balances (id, currency, balance, held_balance)
-		 VALUES ($1, 'USD', 0, 0)`,
-		uuid.New())
-	require.Error(t, err, "insert with NULL customer_id must violate NOT NULL")
-
-	// tenant_id is NOT NULL but defaulted; an explicit NULL must still be rejected.
-	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.money_balances (id, customer_id, merchant_id, currency, balance, held_balance)
-		 VALUES ($1, $2, NULL, 'USD', 0, 0)`,
-		uuid.New(), payer)
-	require.Error(t, err, "insert with explicit NULL tenant_id must violate NOT NULL")
-
-	// A fully-specified payer+tenant row inserts cleanly. tenant_id must match the
-	// tenant_subject's tenant (seeded by seedCustomer: the test tenant).
-	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.money_balances (id, customer_id, merchant_id, currency, balance, held_balance)
-		 VALUES ($1, $2, $3, 'USD', 0, 0)`,
-		uuid.New(), payer, dbtest.TestTenantID.UUID())
-	require.NoError(t, err, "fully-specified payer+tenant insert must succeed")
-}
-
-// TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness proves the HARDCUT
-// payer+tenant+currency-scoped uniqueness on money_balances: two rows with the
-// same (tenant, payer, currency) collide, while the SAME payer across DISTINCT
-// tenants does NOT collide (tenant is part of the key).
-func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
-	dbi, _, ctx := startOwnerTenantPostgres(t)
-	pool := dbi.Pool()
-
-	payer := uuid.New()
-	seedCustomer(t, ctx, pool, payer)
-
-	// First row in the tenant_subject's tenant (seeded by seedCustomer: the test tenant).
-	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.money_balances (id, customer_id, merchant_id, currency, balance, held_balance)
-		 VALUES ($1, $2, $3, 'USD', 0, 0)`,
-		uuid.New(), payer, dbtest.TestTenantID.UUID())
-	require.NoError(t, err)
-
-	// Duplicate (tenant, payer, currency) -> unique violation. Same tenant as above.
-	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.money_balances (id, customer_id, merchant_id, currency, balance, held_balance)
-		 VALUES ($1, $2, $3, 'USD', 0, 0)`,
-		uuid.New(), payer, dbtest.TestTenantID.UUID())
-	require.Error(t, err, "duplicate (tenant, payer, currency) must violate uniqueness")
-
-	// Same payer + currency in a DIFFERENT tenant -> allowed.
-	otherTenant := uuid.New()
-	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, name, status) VALUES ($1, $2, 'Other', 'active')`,
-		otherTenant, "other_"+uuid.NewString())
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.money_balances (id, customer_id, merchant_id, currency, balance, held_balance)
-		 VALUES ($1, $2, $3, 'USD', 0, 0)`,
-		uuid.New(), payer, otherTenant)
-	require.NoError(t, err, "same payer in a different tenant must NOT collide")
-}
+// money_balances schema constraint tests removed (#491): the cache table is
+// gone — balance + held are derived from money_blocks + active holds/windows, so
+// there is no money_balances row to enforce NOT NULL / uniqueness on.
 
 // seedSpendable deposits `amount` µ$ for a user via the service, creating a
-// block and balance.
+// block (the spendable lot).
 func seedSpendable(t *testing.T, ctx context.Context, svc *money.MoneyService, userID string, amount int64) {
 	t.Helper()
 	src := uuid.New()

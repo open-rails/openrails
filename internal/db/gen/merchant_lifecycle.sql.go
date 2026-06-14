@@ -66,17 +66,6 @@ func (q *Queries) CountMerchantRowsMoneyAccounts(ctx context.Context, merchantID
 	return count, err
 }
 
-const countMerchantRowsMoneyBalances = `-- name: CountMerchantRowsMoneyBalances :one
-SELECT count(*) FROM openrails.money_balances WHERE merchant_id = $1
-`
-
-func (q *Queries) CountMerchantRowsMoneyBalances(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsMoneyBalances, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countMerchantRowsMoneyBlocks = `-- name: CountMerchantRowsMoneyBlocks :one
 SELECT count(*) FROM openrails.money_blocks WHERE merchant_id = $1
 `
@@ -256,15 +245,6 @@ DELETE FROM openrails.money_settings WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsMoneyAccounts(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsMoneyAccounts, merchantID)
-	return err
-}
-
-const purgeMerchantRowsMoneyBalances = `-- name: PurgeMerchantRowsMoneyBalances :exec
-DELETE FROM openrails.money_balances WHERE merchant_id = $1
-`
-
-func (q *Queries) PurgeMerchantRowsMoneyBalances(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsMoneyBalances, merchantID)
 	return err
 }
 

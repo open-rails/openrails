@@ -177,8 +177,10 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, isEntitled)
 
+	// #491: balance is derived from money_blocks. Seed a 25 non-expiring lot (the
+	// surviving balance) + a 75 lot that expires in 1h; hold 25 against it.
 	creditUserID := uuid.New().String()
-	balance := suite.createTestMoneyBalance(creditUserID, 100, 25)
+	balance := suite.createTestMoneyBalance(creditUserID, 25, 0) // 25 non-expiring lot
 	holdExpiry := mockClock.Now().Add(time.Hour)
 	hold := suite.createTestMoneyHold(creditUserID, 25, "active", holdExpiry)
 	blockExpiry := mockClock.Now().Add(time.Hour)
@@ -209,7 +211,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	require.NoError(t, holdWorker.Work(ctx, &river.Job[riverjobs.HoldExpiryArgs]{Args: riverjobs.HoldExpiryArgs{}}))
 	require.NoError(t, creditWorker.Work(ctx, &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
 	assert.Equal(t, "expired", suite.getMoneyHold(hold.ID).Status)
-	updatedBalance := suite.getMoneyBalance(balance.ID)
+	updatedBalance := suite.getMoneyBalance(balance)
 	assert.Equal(t, int64(0), updatedBalance.HeldBalance)
 	assert.Equal(t, int64(25), updatedBalance.Balance)
 	require.NoError(t, suite.Pool.QueryRow(ctx,

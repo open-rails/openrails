@@ -183,19 +183,42 @@ func (q *Queries) InsertMoneyAccountSettingsIfAbsent(ctx context.Context, arg In
 
 const listBelowThresholdMoneyAccounts = `-- name: ListBelowThresholdMoneyAccounts :many
 SELECT s.merchant_id, s.customer_id, s.currency,
-       (COALESCE(b.balance, 0) - COALESCE(b.held_balance, 0))::bigint AS available,
+       (
+         COALESCE((SELECT SUM(mb.remaining_amount) FROM openrails.money_blocks mb
+                   WHERE mb.merchant_id = s.merchant_id AND mb.customer_id = s.customer_id
+                     AND mb.currency = s.currency AND mb.remaining_amount > 0
+                     AND (mb.expires_at IS NULL OR mb.expires_at > $2::timestamptz)), 0)
+       - COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0)) FROM openrails.money_transactions t
+                   WHERE t.merchant_id = s.merchant_id AND t.customer_id = s.customer_id
+                     AND t.currency = s.currency AND t.transaction_type = 'hold' AND t.status = 'active'), 0)
+       - COALESCE((SELECT SUM(w.held_amount - w.settled_amount) FROM openrails.money_windows w
+                   WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
+                     AND w.currency = s.currency AND w.status = 'open'), 0)
+       )::bigint AS available,
        COALESCE(s.low_balance_threshold_micros, 0)::bigint AS threshold,
        s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id,
        s.last_alert_at, s.last_topup_at
 FROM openrails.money_settings s
-LEFT JOIN openrails.money_balances b
-  ON b.merchant_id = s.merchant_id
- AND b.customer_id = s.customer_id
- AND b.currency = s.currency
 WHERE s.merchant_id = $1
   AND s.low_balance_threshold_micros IS NOT NULL
-  AND (COALESCE(b.balance, 0) - COALESCE(b.held_balance, 0)) < s.low_balance_threshold_micros
+  AND (
+         COALESCE((SELECT SUM(mb.remaining_amount) FROM openrails.money_blocks mb
+                   WHERE mb.merchant_id = s.merchant_id AND mb.customer_id = s.customer_id
+                     AND mb.currency = s.currency AND mb.remaining_amount > 0
+                     AND (mb.expires_at IS NULL OR mb.expires_at > $2::timestamptz)), 0)
+       - COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0)) FROM openrails.money_transactions t
+                   WHERE t.merchant_id = s.merchant_id AND t.customer_id = s.customer_id
+                     AND t.currency = s.currency AND t.transaction_type = 'hold' AND t.status = 'active'), 0)
+       - COALESCE((SELECT SUM(w.held_amount - w.settled_amount) FROM openrails.money_windows w
+                   WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
+                     AND w.currency = s.currency AND w.status = 'open'), 0)
+       ) < s.low_balance_threshold_micros
 `
+
+type ListBelowThresholdMoneyAccountsParams struct {
+	MerchantID uuid.UUID
+	Now        time.Time
+}
 
 type ListBelowThresholdMoneyAccountsRow struct {
 	MerchantID               uuid.UUID
@@ -210,10 +233,11 @@ type ListBelowThresholdMoneyAccountsRow struct {
 	LastTopupAt              *time.Time
 }
 
-// Money-in workers (#239/#240): accounts whose available balance
-// (balance - held) is under their configured low-balance threshold.
-func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, merchantID uuid.UUID) ([]ListBelowThresholdMoneyAccountsRow, error) {
-	rows, err := q.db.Query(ctx, listBelowThresholdMoneyAccounts, merchantID)
+// Money-in workers (#239/#240): accounts whose DERIVED available balance
+// (#491: SUM spendable blocks - active holds - open-window unsettled) is under
+// their configured low-balance threshold.
+func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, arg ListBelowThresholdMoneyAccountsParams) ([]ListBelowThresholdMoneyAccountsRow, error) {
+	rows, err := q.db.Query(ctx, listBelowThresholdMoneyAccounts, arg.MerchantID, arg.Now)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +322,7 @@ func (q *Queries) ListChargeableArrearsMoneyAccounts(ctx context.Context, arg Li
 const listMoneyAccountPairs = `-- name: ListMoneyAccountPairs :many
 
 SELECT DISTINCT customer_id, currency
-FROM openrails.money_balances
+FROM openrails.money_transactions
 WHERE merchant_id = $1
 ORDER BY customer_id, currency
 `
@@ -311,9 +335,9 @@ type ListMoneyAccountPairsRow struct {
 // openrails.money_settings: per-(tenant, payer, currency) spend policy + money-in
 // state (#237/#239/#240/#241/#298/#299/#302). amounts are the currency's minor unit
 // (default µ$). currency is a system code; the Go registry is authority.
-// Distinct (payer, currency) pairs to finalize invoices for (#472). Sourced from
-// money_balances — the row every payer with money activity has (a money_settings
-// row only exists once spend settings are configured).
+// Distinct (payer, currency) pairs to finalize invoices for (#472). money_balances
+// is gone (#491); the durable ledger (money_transactions) is now the source of
+// every payer with money activity, in every currency.
 func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUID) ([]ListMoneyAccountPairsRow, error) {
 	rows, err := q.db.Query(ctx, listMoneyAccountPairs, merchantID)
 	if err != nil {

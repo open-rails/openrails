@@ -21,15 +21,14 @@ import (
 )
 
 func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry(t *testing.T) {
-	// #472: CreditExpiryWorker (production internal/river/jobs_credit_expiry.go)
-	// builds its LockMoneyBalance/SetMoneyBalance keys without Currency, so it
-	// decrements a phantom currency='' row and leaves the real 'USD' balance
-	// untouched. Fix is in the worker; un-skip once it threads money.DefaultCurrency.
+	// #491: balance is derived from money_blocks, held from active holds. The sole
+	// spendable lot below EXPIRES, so the (now-compaction) CreditExpiryWorker
+	// deletes it; the still-active hold captures and spills the uncovered amount to
+	// outstanding owed (no cache, no phantom-currency bug).
 	suite := getSharedTestSuite(t)
 	ctx := dbtest.WithTestTenant(context.Background())
 
 	userID := uuid.New().String()
-	_ = suite.createTestMoneyBalance(userID, 100, 80)
 	hold := suite.createTestMoneyHold(userID, 80, "active", time.Now().Add(1*time.Hour).UTC())
 
 	expiredAt := time.Now().Add(-1 * time.Hour).UTC()

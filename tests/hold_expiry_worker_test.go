@@ -18,29 +18,26 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
-// createTestMoneyBalance creates a tenant-subject money balance for testing (USD).
+// createTestMoneyBalance seeds a spendable money_block for the customer (#491:
+// balance is derived from blocks). heldBalance is ignored — held is derived from
+// active holds, which the caller seeds via createTestMoneyHold. Returns a
+// MoneyBalance carrying the customer id for later derived reads.
 func (suite *TestContainerSuite) createTestMoneyBalance(userID string, balance, heldBalance int64) *models.MoneyBalance {
 	ctx := context.Background()
 	now := suite.GetClock().Now()
 	tenantSubjectID := suite.ensureCustomer(ctx, userID)
-	bal := &models.MoneyBalance{
-		ID:          uuid.New(),
-		MerchantID:  dbtest.TestTenantID.UUID(),
-		CustomerID:  tenantSubjectID,
-		Currency:    "USD",
-		Balance:     balance,
-		HeldBalance: heldBalance,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.money_balances (id, merchant_id, customer_id, currency, balance, held_balance, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		bal.ID, bal.MerchantID, bal.CustomerID, bal.Currency, bal.Balance, bal.HeldBalance, bal.CreatedAt, bal.UpdatedAt)
+		INSERT INTO openrails.money_blocks (id, merchant_id, customer_id, currency, original_amount, remaining_amount, created_at)
+		VALUES ($1, $2, $3, 'USD', $4, $4, $5)`,
+		uuid.New(), dbtest.TestTenantID.UUID(), tenantSubjectID, balance, now)
 	if err != nil {
 		panic(err)
 	}
-	return bal
+	return &models.MoneyBalance{
+		MerchantID: dbtest.TestTenantID.UUID(),
+		CustomerID: tenantSubjectID,
+		Currency:   "USD",
+	}
 }
 
 // createTestMoneyHold creates a money hold for testing.
@@ -112,18 +109,28 @@ func (suite *TestContainerSuite) getMoneyHold(id uuid.UUID) *models.MoneyTransac
 	return hold
 }
 
-// getMoneyBalance retrieves a money balance by ID
-func (suite *TestContainerSuite) getMoneyBalance(id uuid.UUID) *models.MoneyBalance {
-	bal := new(models.MoneyBalance)
-	err := suite.Pool.QueryRow(context.Background(), `
-		SELECT id, merchant_id, customer_id, currency, balance, held_balance, created_at, updated_at
-		FROM openrails.money_balances WHERE id = $1`, id).
-		Scan(&bal.ID, &bal.MerchantID, &bal.CustomerID, &bal.Currency,
-			&bal.Balance, &bal.HeldBalance, &bal.CreatedAt, &bal.UpdatedAt)
-	if err != nil {
+// getMoneyBalance derives balance (SUM spendable blocks) + held (SUM active
+// holds) for the customer (#491: no cache).
+func (suite *TestContainerSuite) getMoneyBalance(b *models.MoneyBalance) *models.MoneyBalance {
+	ctx := context.Background()
+	out := &models.MoneyBalance{MerchantID: b.MerchantID, CustomerID: b.CustomerID, Currency: b.Currency}
+	if err := suite.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(remaining_amount), 0)::bigint
+		FROM openrails.money_blocks
+		WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3 AND remaining_amount > 0
+		  AND (expires_at IS NULL OR expires_at > now())`,
+		b.MerchantID, b.CustomerID, b.Currency).Scan(&out.Balance); err != nil {
 		panic(err)
 	}
-	return bal
+	if err := suite.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)::bigint
+		FROM openrails.money_transactions
+		WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
+		  AND transaction_type = 'hold' AND status = 'active'`,
+		b.MerchantID, b.CustomerID, b.Currency).Scan(&out.HeldBalance); err != nil {
+		panic(err)
+	}
+	return out
 }
 
 // TestHoldExpiryWorkerNoExpiredHolds tests that the worker handles no expired holds gracefully
@@ -189,9 +196,8 @@ func TestHoldExpiryWorkerExpiresActiveHolds(t *testing.T) {
 	updatedActiveHold := suite.getMoneyHold(activeHold.ID)
 	assert.Equal(t, "active", updatedActiveHold.Status, "Non-expired hold should still be active")
 
-	// Verify held_balance was reduced by the expired hold amount
-	updatedBalance := suite.getMoneyBalance(balance.ID)
-	// Original held: 50, expired hold: 30, so new held should be 20
+	// Derived held = remaining active holds (#491): the 30 expired, the 20 stays.
+	updatedBalance := suite.getMoneyBalance(balance)
 	assert.Equal(t, int64(20), updatedBalance.HeldBalance, "Held balance should be reduced by expired hold amount")
 }
 
@@ -229,9 +235,10 @@ func TestHoldExpiryWorkerSkipsNonActiveHolds(t *testing.T) {
 	assert.Equal(t, "released", suite.getMoneyHold(releasedHold.ID).Status)
 	assert.Equal(t, "expired", suite.getMoneyHold(alreadyExpiredHold.ID).Status)
 
-	// Held balance should be unchanged
-	updatedBalance := suite.getMoneyBalance(balance.ID)
-	assert.Equal(t, int64(30), updatedBalance.HeldBalance)
+	// No active holds were created (captured/released/expired only), so derived
+	// held is 0 (#491: held = SUM active holds, the seeded 30 was a no-op).
+	updatedBalance := suite.getMoneyBalance(balance)
+	assert.Equal(t, int64(0), updatedBalance.HeldBalance)
 }
 
 // TestHoldExpiryWorkerMultipleUserHolds tests expiring holds for multiple users
@@ -287,9 +294,9 @@ func TestHoldExpiryWorkerMultipleUserHolds(t *testing.T) {
 		updatedHold := suite.getMoneyHold(u.hold.ID)
 		assert.Equal(t, "expired", updatedHold.Status, "User %d hold should be expired", i)
 
-		updatedBalance := suite.getMoneyBalance(u.balance.ID)
-		expectedHeld := u.heldAmt - u.holdAmt
-		assert.Equal(t, expectedHeld, updatedBalance.HeldBalance, "User %d held balance should be reduced", i)
+		// Each user's only active hold just expired, so derived held is 0 (#491).
+		updatedBalance := suite.getMoneyBalance(u.balance)
+		assert.Equal(t, int64(0), updatedBalance.HeldBalance, "User %d held balance should be 0 after expiry", i)
 	}
 }
 
@@ -383,7 +390,7 @@ func TestHoldExpiryWorkerHeldBalanceNeverNegative(t *testing.T) {
 	updatedHold := suite.getMoneyHold(hold.ID)
 	assert.Equal(t, "expired", updatedHold.Status)
 
-	// Held balance should be 0, not negative
-	updatedBalance := suite.getMoneyBalance(balance.ID)
+	// Held balance should be 0, not negative (#491: derived from active holds).
+	updatedBalance := suite.getMoneyBalance(balance)
 	assert.GreaterOrEqual(t, updatedBalance.HeldBalance, int64(0), "Held balance should never be negative")
 }

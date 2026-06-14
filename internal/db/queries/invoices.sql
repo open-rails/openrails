@@ -31,9 +31,9 @@ WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1;
 
 -- name: ListCreditAccountPairs :many
--- Every known payer in the tenant (= has a money balance row), for the
--- due-invoice sweep. One money ledger now: no credit_type dimension.
+-- Every known payer in the tenant (= has any ledger activity), for the
+-- due-invoice sweep. money_balances is gone (#491); the ledger is the source.
 SELECT customer_id
-FROM openrails.money_balances
+FROM openrails.money_transactions
 WHERE merchant_id = $1
 GROUP BY customer_id;

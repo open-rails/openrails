@@ -184,15 +184,11 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			return nil
 		}
 
-		// Place the hold within the SAME tx + held lock.
+		// Place the hold within the SAME tx + customers-row lock. Inserting the
+		// active hold row IS the held reservation (#491): SumActiveMoneyHeld counts
+		// it, so a concurrent authorize on the same customer (serialized behind the
+		// lock) sees this hold's exposure.
 		amount := in.EstimateMicros
-		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			HeldBalance: bal.HeldBalance + amount, UpdatedAt: now,
-		}); err != nil {
-			return err
-		}
-
 		exp := in.ExpiresAt.UTC()
 		auth := amount
 		srcID := in.SourceID

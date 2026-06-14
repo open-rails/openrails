@@ -217,12 +217,9 @@ func (w CreditReconcileWorker) Work(ctx context.Context, _ *river.Job[CreditReco
 	if err != nil {
 		return err
 	}
-	if len(rep.OrphanedHolds) > 0 || len(rep.HeldBalanceDrift) > 0 || len(rep.BalanceAnomalies) > 0 {
-		logger.WithFields(log.Fields{
-			"orphaned_holds":     len(rep.OrphanedHolds),
-			"held_balance_drift": len(rep.HeldBalanceDrift),
-			"balance_anomalies":  len(rep.BalanceAnomalies),
-		}).Warn("credit ledger reconciliation found inconsistencies (alert-only)")
+	if len(rep.OrphanedHolds) > 0 {
+		logger.WithField("orphaned_holds", len(rep.OrphanedHolds)).
+			Warn("credit ledger reconciliation found orphaned expired holds (alert-only)")
 	}
 	return nil
 }

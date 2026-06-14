@@ -86,7 +86,6 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE customer_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -131,12 +130,8 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	require.NotNil(t, dep.SourceID)
 	require.Equal(t, expectedGrantID.String(), *dep.SourceID)
 
-	bal := new(models.MoneyBalance)
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT balance FROM openrails.money_balances
-		 WHERE customer_id = $1 AND currency = 'USD'
-		 LIMIT 1`,
-		tenantSubjectID).Scan(&bal.Balance))
+	bal, err := moneySvc.GetBalance(ctx, tenantSubjectID.String())
+	require.NoError(t, err)
 	require.Equal(t, int64(100), bal.Balance)
 }
 
@@ -221,7 +216,6 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE customer_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -258,9 +252,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	}))
 
 	// Both labels credit the one USD balance: 10 (once) + 100 (renewal), each once.
-	bal := new(models.MoneyBalance)
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT balance FROM openrails.money_balances WHERE customer_id = $1 AND currency = 'USD'",
-		tenantSubjectID).Scan(&bal.Balance))
+	bal, err := moneySvc.GetBalance(ctx, tenantSubjectID.String())
+	require.NoError(t, err)
 	require.Equal(t, int64(110), bal.Balance)
 }

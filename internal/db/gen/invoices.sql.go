@@ -169,13 +169,13 @@ func (q *Queries) InsertInvoice(ctx context.Context, arg InsertInvoiceParams) er
 
 const listCreditAccountPairs = `-- name: ListCreditAccountPairs :many
 SELECT customer_id
-FROM openrails.money_balances
+FROM openrails.money_transactions
 WHERE merchant_id = $1
 GROUP BY customer_id
 `
 
-// Every known payer in the tenant (= has a money balance row), for the
-// due-invoice sweep. One money ledger now: no credit_type dimension.
+// Every known payer in the tenant (= has any ledger activity), for the
+// due-invoice sweep. money_balances is gone (#491); the ledger is the source.
 func (q *Queries) ListCreditAccountPairs(ctx context.Context, merchantID uuid.UUID) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listCreditAccountPairs, merchantID)
 	if err != nil {

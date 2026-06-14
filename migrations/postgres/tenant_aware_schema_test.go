@@ -19,9 +19,8 @@ var tenantOwnedTables = []string{
 	"notification_queue",
 	"processor_customers",
 	"checkout_sessions",
-	// #472: money ledger replaced the credit_* tables.
+	// #472: money ledger replaced the credit_* tables. money_balances dropped (#491).
 	"money_accounts",
-	"money_balances",
 	"money_blocks",
 	"money_transactions",
 	"money_windows",

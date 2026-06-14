@@ -31,7 +31,6 @@ func TestCreditsDepositOverflowGuard(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE customer_id = $1", payerID)
 	})
 
 	moneySvc := money.NewMoneyService(dbi)
@@ -71,7 +70,6 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE customer_id = $1", payerID)
 	})
 
 	moneySvc := money.NewMoneyService(dbi)
@@ -135,15 +133,9 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 }
 
 // TestCreditsLifecycle_HoldExpiryReleasesHeld covers the hold-expiry sweep
-// releasing an expired hold's held_balance.
-//
-// SKIPPED (#472): the HoldExpiryWorker has a production currency bug —
-// internal/river/jobs_hold_expiry.go builds its LockMoneyBalanceParams /
-// SetMoneyHeldBalanceParams keyed by (merchant_id, customer_id) only, with
-// no Currency, so it queries currency=” and never matches the real 'USD'
-// balance row (LockMoneyBalance returns "no rows"). The fix is in the worker
-// (pass money.DefaultCurrency through the release key), which is production code
-// outside this test-parity change. Un-skip once the worker passes currency.
+// releasing an expired hold's held. Under the derived model (#491) the worker
+// just flips the hold to 'expired'; held is re-derived from active holds, so the
+// old currency-keyed-cache bug is gone and this exercises the real release.
 func TestCreditsLifecycle_HoldExpiryReleasesHeld(t *testing.T) {
 
 	dsn := dbtest.SharedPostgresDSN(t)

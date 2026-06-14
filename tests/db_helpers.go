@@ -79,7 +79,7 @@ func (suite *TestContainerSuite) insertMoneyBlock(ctx context.Context, b *models
 	suite.t.Helper()
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.money_blocks (
-			id, tenant_id, customer_id, currency, original_amount,
+			id, merchant_id, customer_id, currency, original_amount,
 			remaining_amount, expires_at, source_transaction_id, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		b.ID, b.MerchantID, b.CustomerID, b.Currency, b.OriginalAmount,

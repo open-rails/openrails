@@ -100,22 +100,15 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 		}
 		tenantID := tid.UUID()
 		payerID := p.Payer.UUID()
-		if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
-			return err
-		}
 
+		// Lock + derive under the customers-row lock; the open window row IS the
+		// held reservation (#491): SumActiveMoneyHeld counts open windows' unsettled.
 		bal, err := s.lockBalance(ctx, q, p.Payer, p.Actor, cur)
 		if err != nil {
 			return err
 		}
 		if bal.Balance-bal.HeldBalance < p.Amount {
 			return ErrInsufficientCredits
-		}
-		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			HeldBalance: bal.HeldBalance + p.Amount, UpdatedAt: now,
-		}); err != nil {
-			return err
 		}
 
 		exp := p.ExpiresAt.UTC()
@@ -278,30 +271,19 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 			return ErrWindowExceeded
 		}
 
-		// Capture mechanics: release this slice of the reservation, then debit the
-		// balance/FIFO blocks for it. Both target the payer's balance row.
-		bal, err := s.lockBalance(ctx, q, payer, actor, cur)
-		if err != nil {
+		// Capture mechanics: bumping settled_amount releases this slice of the
+		// window reservation from the derived held (#491); withdrawBalanceAndBlocks
+		// debits the FIFO blocks for the actual spend. Lock the customers row first.
+		if _, err := s.lockBalance(ctx, q, payer, actor, cur); err != nil {
 			return err
 		}
-		newHeld := bal.HeldBalance - item.Amount
-		if newHeld < 0 {
-			newHeld = 0
-		}
-		if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-			MerchantID: w.MerchantID, CustomerID: w.CustomerID, Currency: cur,
-			HeldBalance: newHeld, UpdatedAt: now,
+		if err := q.AddMoneyWindowSettled(ctx, gen.AddMoneyWindowSettledParams{
+			ID: w.ID, Amount: item.Amount, UpdatedAt: now,
 		}); err != nil {
 			return err
 		}
 		newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, actor, cur, item.Amount)
 		if err != nil {
-			return err
-		}
-
-		if err := q.AddMoneyWindowSettled(ctx, gen.AddMoneyWindowSettledParams{
-			ID: w.ID, Amount: item.Amount, UpdatedAt: now,
-		}); err != nil {
 			return err
 		}
 
@@ -417,18 +399,14 @@ func (s *MoneyService) RefillWindow(ctx context.Context, windowID uuid.UUID, amo
 		cur := normalizeCurrency(w.Currency)
 
 		if amount > 0 {
+			// Bumping the window's held_amount (below) raises its derived-held
+			// contribution (#491); just gate on available under the lock.
 			bal, err := s.lockBalance(ctx, q, payer, actor, cur)
 			if err != nil {
 				return err
 			}
 			if bal.Balance-bal.HeldBalance < amount {
 				return ErrInsufficientCredits
-			}
-			if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-				MerchantID: w.MerchantID, CustomerID: w.CustomerID, Currency: cur,
-				HeldBalance: bal.HeldBalance + amount, UpdatedAt: now,
-			}); err != nil {
-				return err
 			}
 			w.HeldAmount += amount
 		}
@@ -486,21 +464,10 @@ func (s *MoneyService) CloseWindow(ctx context.Context, windowID uuid.UUID) (*mo
 		payer := identity.CustomerID(w.CustomerID)
 		cur := normalizeCurrency(w.Currency)
 
-		if remainder := w.HeldAmount - w.SettledAmount; remainder > 0 {
-			bal, err := s.lockBalance(ctx, q, payer, w.CustomerID.String(), cur)
-			if err != nil {
-				return err
-			}
-			newHeld := bal.HeldBalance - remainder
-			if newHeld < 0 {
-				newHeld = 0
-			}
-			if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-				MerchantID: w.MerchantID, CustomerID: w.CustomerID, Currency: cur,
-				HeldBalance: newHeld, UpdatedAt: now,
-			}); err != nil {
-				return err
-			}
+		// Marking the window closed drops its whole unsettled remainder from the
+		// derived held (#491) — no cache write; lock to serialize concurrent spend.
+		if _, err := s.lockBalance(ctx, q, payer, w.CustomerID.String(), cur); err != nil {
+			return err
 		}
 		w.Status = "closed"
 		w.UpdatedAt = now
@@ -573,38 +540,11 @@ func (s *MoneyService) ExpireWindows(ctx context.Context, batchSize int) (int, e
 				return nil
 			}
 
-			// Group released remainders by balance key (the HoldExpiryWorker pattern).
-			type key struct {
-				MerchantID uuid.UUID
-				CustomerID uuid.UUID
-				Currency   string
-			}
-			released := make(map[key]int64)
+			// Held is derived (#491): marking a window expired drops its unsettled
+			// remainder from SumActiveMoneyHeld automatically — no cache to update.
 			for i := range windows {
-				w := windows[i]
-				if rem := w.HeldAmount - w.SettledAmount; rem > 0 {
-					released[key{w.MerchantID, w.CustomerID, normalizeCurrency(w.Currency)}] += rem
-				}
 				if err := q.SetMoneyWindowStatus(ctx, gen.SetMoneyWindowStatusParams{
-					ID: w.ID, Status: "expired", UpdatedAt: now,
-				}); err != nil {
-					return err
-				}
-			}
-			for k, amount := range released {
-				bal, err := q.LockMoneyBalance(ctx, gen.LockMoneyBalanceParams{
-					MerchantID: k.MerchantID, CustomerID: k.CustomerID, Currency: k.Currency,
-				})
-				if err != nil {
-					return err
-				}
-				newHeld := bal.HeldBalance - amount
-				if newHeld < 0 {
-					newHeld = 0
-				}
-				if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-					MerchantID: k.MerchantID, CustomerID: k.CustomerID, Currency: k.Currency,
-					HeldBalance: newHeld, UpdatedAt: now,
+					ID: windows[i].ID, Status: "expired", UpdatedAt: now,
 				}); err != nil {
 					return err
 				}

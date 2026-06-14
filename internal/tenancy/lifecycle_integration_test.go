@@ -54,10 +54,8 @@ CREATE TABLE IF NOT EXISTS openrails.entitlements (
 );
 
 CREATE TABLE IF NOT EXISTS openrails.customers (
-    id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    merchant_id UUID NOT NULL,
-    issuer    TEXT NOT NULL,
-    subject   TEXT NOT NULL
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    merchant_id UUID NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (

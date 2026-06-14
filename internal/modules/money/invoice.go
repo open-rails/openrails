@@ -118,16 +118,12 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			movements[m.TransactionType] = m.Total
 		}
 
-		// --- closing balance snapshot ---
-		var closing int64
-		bal, balErr := q.GetMoneyBalance(ctx, gen.GetMoneyBalanceParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-		})
-		if balErr == nil {
-			closing = bal.Balance
-		} else if !errors.Is(balErr, pgx.ErrNoRows) {
+		// --- closing balance snapshot (derived, #491) ---
+		bal, balErr := s.deriveBalance(ctx, q, tenantID, payerID, cur)
+		if balErr != nil {
 			return balErr
 		}
+		closing := bal.Balance
 
 		now := s.now()
 		inv = &models.Invoice{

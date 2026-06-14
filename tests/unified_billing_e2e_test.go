@@ -213,21 +213,25 @@ func (h *billingE2EHarness) ledgerRows(userID string) []models.MoneyTransaction 
 	return rows
 }
 
-// rawBalanceRow returns the persisted balance row for a tenant subject, or nil.
+// rawBalanceRow returns the DERIVED balance for a tenant subject (#491: no cache
+// — balance = SUM spendable blocks, held = SUM active holds).
 func (h *billingE2EHarness) rawBalanceRow(userID string) *models.MoneyBalance {
 	h.t.Helper()
 	owner := personalOwnerID(userID)
-	bal := new(models.MoneyBalance)
-	err := h.suite.Pool.QueryRow(context.Background(), `
-		SELECT id, merchant_id, customer_id, currency, balance, held_balance, created_at, updated_at
-		FROM openrails.money_balances
-		WHERE customer_id = $1 AND currency = $2
-		LIMIT 1`, owner, "USD").
-		Scan(&bal.ID, &bal.MerchantID, &bal.CustomerID, &bal.Currency,
-			&bal.Balance, &bal.HeldBalance, &bal.CreatedAt, &bal.UpdatedAt)
-	if err != nil {
-		return nil
-	}
+	bal := &models.MoneyBalance{CustomerID: owner, Currency: "USD"}
+	ctx := context.Background()
+	err := h.suite.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(remaining_amount), 0)::bigint
+		FROM openrails.money_blocks
+		WHERE customer_id = $1 AND currency = $2 AND remaining_amount > 0
+		  AND (expires_at IS NULL OR expires_at > now())`, owner, "USD").Scan(&bal.Balance)
+	require.NoError(h.t, err)
+	err = h.suite.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)::bigint
+		FROM openrails.money_transactions
+		WHERE customer_id = $1 AND currency = $2 AND transaction_type = 'hold' AND status = 'active'`,
+		owner, "USD").Scan(&bal.HeldBalance)
+	require.NoError(h.t, err)
 	return bal
 }
 

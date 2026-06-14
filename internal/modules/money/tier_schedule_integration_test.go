@@ -98,7 +98,6 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_settings WHERE customer_id = $1", p)
 			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", p)
 			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", p)
-			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_balances WHERE customer_id = $1", p)
 		}
 		_, _ = pool.Exec(bg, "DELETE FROM openrails.tier_schedules WHERE merchant_id = $1", tenantB)
 		_, _ = pool.Exec(bg, "DELETE FROM openrails.merchants WHERE id = $1", tenantB)
