@@ -246,6 +246,33 @@ func ServiceGetBudget(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"windows": windows})
 }
 
+// ServiceGetTier returns the payer's CURRENT graduated tier (#477): the tier
+// OpenRails auto-maintains from cumulative paid spend against the persisted tier
+// schedule (#476). tenant_subject_id is a query param; the tenant is pinned from
+// the service token. Empty tier => the payer has never graduated (caller treats
+// it as the lowest/default). Operator service token, credits:read.
+func ServiceGetTier(r *httprequest.Request) {
+	payer, err := parseServiceTenantSubjectID(r.Query("tenant_subject_id"))
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		return
+	}
+	if !requireServiceTenantSubjectScope(r, *payer) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	tier, err := svc.GetTier(r.Request.Context(), *payer)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "tier lookup failed")
+		return
+	}
+	r.SuccessJSON(map[string]any{"tier": tier})
+}
+
 type serviceBudgetCheckRequest struct {
 	TenantSubjectID string                                  `json:"tenant_subject_id"`
 	Actor           string                                  `json:"actor"`

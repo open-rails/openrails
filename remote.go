@@ -382,6 +382,19 @@ func (c *remote) SetTierSchedule(ctx context.Context, tenantSubjectID string, sc
 	return c.do(ctx, http.MethodPut, "/v1/service/tier-schedules", body, nil)
 }
 
+// GetTier implements Client (handler ServiceGetTier, #477).
+func (c *remote) GetTier(ctx context.Context, tenantSubjectID string) (string, error) {
+	q := url.Values{}
+	q.Set("tenant_subject_id", strings.TrimSpace(tenantSubjectID))
+	var resp struct {
+		Tier string `json:"tier"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/service/tier?"+q.Encode(), nil, &resp); err != nil {
+		return "", err
+	}
+	return resp.Tier, nil
+}
+
 // SetSubjectBudgetPolicy implements Client (handler ServiceSetSubjectBudgetPolicy, #473).
 func (c *remote) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in SubjectBudgetPolicyInput) error {
 	body := map[string]any{

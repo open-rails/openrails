@@ -481,3 +481,20 @@ func (s *Service) SetTierSchedule(ctx context.Context, payer identity.TenantSubj
 	}
 	return moneySvc.SetTierSchedule(ctx, payer, rungs)
 }
+
+// GetTier returns the payer's CURRENT graduated tier (#477): the tier OpenRails
+// auto-maintains from cumulative paid spend against the persisted tier schedule
+// (#476), or a manual admin override. Empty when the payer has never graduated
+// (no tier set) — the caller treats that as the lowest/default tier. This is the
+// read the host uses to drive its OWN per-tier capacity decisions (e.g.
+// tensorhub's scheduler in-flight concurrency cap) WITHOUT supplying its own
+// ladder or cranking graduation.
+func (s *Service) GetTier(ctx context.Context, payer identity.TenantSubjectID) (string, error) {
+	if s == nil || s.rt == nil {
+		return "", fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return "", fmt.Errorf("payer required")
+	}
+	return money.NewMoneyService(s.rt.DB).GetTier(ctx, payer)
+}

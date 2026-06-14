@@ -731,6 +731,20 @@ func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID strin
 	return nil
 }
 
+// GetTier transcribes handlers.ServiceGetTier (service_admission.go, #477).
+func (c *localClient) GetTier(ctx context.Context, tenantSubjectID string) (string, error) {
+	ctx = c.ensureTenant(ctx)
+	payer, err := parseTenantSubject(tenantSubjectID, "invalid tenant_subject_id")
+	if err != nil {
+		return "", err
+	}
+	tier, terr := c.svc.GetTier(ctx, payer)
+	if terr != nil {
+		return "", internalErr("tier lookup failed")
+	}
+	return tier, nil
+}
+
 func budgetScopeWindowInputs(ws []openrails.BudgetScopeWindow) []billingservice.BudgetScopeWindowInput {
 	out := make([]billingservice.BudgetScopeWindowInput, 0, len(ws))
 	for _, w := range ws {
