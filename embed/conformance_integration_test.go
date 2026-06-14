@@ -1,18 +1,22 @@
 //go:build integration
 
-// Dual-transport conformance test (#338) — the point of the unified SDK.
+// Dual-transport conformance test (#338/#485) — the point of the unified SDK,
+// now run against TWO REAL servers over REAL HTTP (no stubs).
 //
-// ONE embedded Runtime is built over the migrated dbtest Postgres (+ a Redis
-// testcontainer for admission throughput). Its service-route surface is served
-// via httptest with the REAL ServiceTokenRequired middleware and a permissive
-// stub resolver (the standalone /v1/service/* routes authenticate with service
-// tokens resolved by the control plane, NOT billingauth.Authenticator — so the
-// stub-resolver pattern from tests/service_facade_parity_test.go is used).
+// The reusable integrationharness boots both surfaces over the same migrated
+// dbtest Postgres (+ a shared Redis testcontainer for admission throughput):
 //
-// The SAME operation script then runs through BOTH clients — Runtime.Client()
-// (embedded) and openrails.NewRemote (HTTP) — on separate tenant subjects, and
-// the observable results must be EQUAL after normalizing ids/timestamps. Every
-// divergence is an adapter bug: fix the adapter, never the assertion.
+//   - Server 1, EMBEDDED no-auth HOST (≈ doujins minus auth): embed.New +
+//     the real embedded /v1/service/* surface on httptest, behind the REAL
+//     ServiceTokenRequired middleware wired to a TRUSTING resolver (no auth).
+//   - Server 2, STANDALONE real server + real AuthKit: the actual standalone gin
+//     server with the control plane attached, authenticated by a REAL minted
+//     service token resolved through AuthKit core (#481 role-based authz).
+//
+// The SAME operation script then runs through BOTH clients (openrails.NewRemote
+// against each surface) on separate payer subjects, and the observable results
+// must be EQUAL after normalizing ids/timestamps. Every divergence is an adapter
+// bug: fix the adapter, never the assertion.
 package embed_test
 
 import (
@@ -20,51 +24,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http/httptest"
 	"sort"
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	authcore "github.com/open-rails/authkit/core"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
-	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
-
-const conformanceToken = "openrails_st_conformance_token"
-
-// stubResolver accepts exactly conformanceToken as a tenant-wide PermAdmin
-// service token for the canonical test tenant (the same fixed-principal pattern
-// the parity test uses), so the httptest server runs the REAL service-token
-// middleware without a full AuthKit control plane.
-type stubResolver struct{}
-
-func (stubResolver) LooksLikeServiceToken(token string) bool { return token == conformanceToken }
-
-func (stubResolver) ResolveServiceToken(_ context.Context, token string) (*controlplane.ResolvedServiceToken, error) {
-	if token != conformanceToken {
-		return nil, authcore.ErrInvalidAccessToken
-	}
-	return &controlplane.ResolvedServiceToken{
-		OwnerTenantSlug: "operator",
-		MerchantID:          dbtest.TestTenantID,
-		MerchantSlug:        dbtest.TestTenantSlug,
-		Permissions:       []string{controlplane.PermAdmin},
-		Resources:         []authcore.ServiceTokenResource{controlplane.MerchantResource(dbtest.TestTenantID)},
-	}, nil
-}
 
 // --- normalized observations ------------------------------------------------
 
@@ -821,55 +792,21 @@ func observeAccount(a *openrails.CreditAccount, payerID string) obsAccount {
 	}
 }
 
-func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
+func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
-	appDB := dbtest.OpenAppDB(t, dsn)
-	pool := appDB.Pool()
-	dbtest.EnsureTestTenant(ctx, t, pool)
 
-	// Redis (admission throughput axis).
-	rc, err := tcredis.Run(ctx, "redis:7-alpine")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = rc.Terminate(ctx) })
-	redisURL, err := rc.ConnectionString(ctx)
-	require.NoError(t, err)
-	ropt, err := redis.ParseURL(redisURL)
-	require.NoError(t, err)
-	rdb := redis.NewClient(ropt)
-	t.Cleanup(func() { _ = rdb.Close() })
-	require.NoError(t, rdb.Ping(ctx).Err())
-
-	// ONE embedded runtime; both transports run over this single engine.
-	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}
-	rt, err := embed.New(ctx, embed.Options{Tenant: dbtest.TestTenantSlug, Options: embedded.Options{Config: cfg, Redis: rdb}})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-
-	// Serve the full standalone service-route surface over httptest with the
-	// real service-token middleware + a fixed-principal stub resolver.
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(ginmw.ResolveTenant(dbtest.TestTenantID))
-	ginroutes.RegisterServiceRoutes(
-		router.Group("/v1/service"),
-		rt.Embedded().App().Runtime,
-		ginmw.ServiceTokenRequired(stubResolver{}),
-	)
-	srv := httptest.NewServer(router)
-	t.Cleanup(srv.Close)
-
-	// Shared fixtures: two payers (state must not collide). Currency is the
-	// built-in default after the #476 decouple (money validates the unit).
+	// Currency is the built-in default after the #476 decouple (money validates
+	// the unit); both clients key Balance off it.
 	currency := money.DefaultCurrency
 
-	// Both clients carry the same default currency (Balance keys off it).
-	local := rt.Client(embed.WithCurrency(currency))
-	remote := openrails.NewRemote(srv.URL,
-		openrails.WithTokenProvider(func(context.Context) (string, error) { return conformanceToken, nil }),
-		openrails.WithCurrency(currency),
-		openrails.WithTimeout(30*time.Second),
-	)
+	// Two REAL servers over the same migrated Postgres + shared Redis.
+	h := integrationharness.New(t, ctx)
+	embedded := h.StartEmbeddedHost(currency) // Server 1: embedded no-auth host
+	standalone := h.StartStandalone(currency) // Server 2: real standalone + AuthKit
+
+	pool := h.Pool()
+	embeddedClient := embedded.Client()
+	standaloneClient := standalone.Client()
 
 	const issuer = "conformance"
 	newPayer := func(side string) (uuid.UUID, string) {
@@ -888,42 +825,43 @@ func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
 		require.NoError(t, err)
 		return id, subject
 	}
-	payerLocal, subjectLocal := newPayer("local")
-	payerRemote, subjectRemote := newPayer("remote")
+	payerEmbedded, subjectEmbedded := newPayer("embedded")
+	payerStandalone, subjectStandalone := newPayer("standalone")
 
 	from := time.Now().Add(-time.Hour).UTC()
 	to := time.Now().Add(time.Hour).UTC()
 
-	resLocal := runScript(t, ctx, local, scriptEnv{
-		payer: payerLocal, actor: "user:conf", currency: currency,
-		resource: "ep-local", side: "local", from: from, to: to,
-		issuer: issuer, subject: subjectLocal,
+	resEmbedded := runScript(t, ctx, embeddedClient, scriptEnv{
+		payer: payerEmbedded, actor: "user:conf", currency: currency,
+		resource: "ep-embedded", side: "embedded", from: from, to: to,
+		issuer: issuer, subject: subjectEmbedded,
 	})
-	resRemote := runScript(t, ctx, remote, scriptEnv{
-		payer: payerRemote, actor: "user:conf", currency: currency,
-		resource: "ep-remote", side: "remote", from: from, to: to,
-		issuer: issuer, subject: subjectRemote,
+	resStandalone := runScript(t, ctx, standaloneClient, scriptEnv{
+		payer: payerStandalone, actor: "user:conf", currency: currency,
+		resource: "ep-standalone", side: "standalone", from: from, to: to,
+		issuer: issuer, subject: subjectStandalone,
 	})
 
-	// THE assertion: identical observable behavior across transports.
-	require.Equal(t, resLocal, resRemote,
-		"embedded and remote transports diverged — fix the adapter, never the assertion")
+	// THE assertion: identical observable behavior across the two real surfaces.
+	require.Equal(t, resEmbedded, resStandalone,
+		"embedded and standalone surfaces diverged — fix the adapter, never the assertion")
 
-	// Transport-specific contract: a remote 5xx is ALSO ErrUnreachable (the
-	// fail-policy axis); an embedded engine fault never is (no wire to lose).
-	remoteErr := remote.Release(ctx, uuid.NewString())
-	require.Error(t, remoteErr)
-	require.ErrorIs(t, remoteErr, openrails.ErrUnreachable)
-	require.ErrorIs(t, remoteErr, openrails.ErrInternal)
-	localErr := local.Release(ctx, uuid.NewString())
-	require.Error(t, localErr)
-	require.NotErrorIs(t, localErr, openrails.ErrUnreachable)
-	require.ErrorIs(t, localErr, openrails.ErrInternal)
+	// Both transports are REAL HTTP now, so a 5xx is ErrUnreachable on both (the
+	// fail-policy axis — a wire to lose either way).
+	embeddedErr := embeddedClient.Release(ctx, uuid.NewString())
+	require.Error(t, embeddedErr)
+	require.ErrorIs(t, embeddedErr, openrails.ErrUnreachable)
+	require.ErrorIs(t, embeddedErr, openrails.ErrInternal)
+	standaloneErr := standaloneClient.Release(ctx, uuid.NewString())
+	require.Error(t, standaloneErr)
+	require.ErrorIs(t, standaloneErr, openrails.ErrUnreachable)
+	require.ErrorIs(t, standaloneErr, openrails.ErrInternal)
 
-	// Remote-only: a bad bearer is 401 -> ErrUnauthorized.
-	badRemote := openrails.NewRemote(srv.URL,
-		openrails.WithTokenProvider(func(context.Context) (string, error) { return "wrong-token", nil }),
+	// Standalone real-auth contract: a bad bearer is rejected by the real
+	// ServiceTokenRequired middleware -> 401 -> ErrUnauthorized.
+	badStandalone := standalone.Client(
+		openrails.WithTokenProvider(func(context.Context) (string, error) { return "openrails_st_wrong_token", nil }),
 	)
-	_, err = badRemote.Balance(ctx, payerRemote.String())
+	_, err := badStandalone.Balance(ctx, payerStandalone.String())
 	require.ErrorIs(t, err, openrails.ErrUnauthorized)
 }

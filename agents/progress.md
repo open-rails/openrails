@@ -50,11 +50,21 @@ Heavier/slower than the one-engine stub, but it's a true integration test of the
 explicit requirement). Keep any fast adapter-level unit coverage where it exists; this is the integration layer.
 
 **Tasks:**
-- [ ] A: no-auth embedding-host harness (mirrors openrailsembed; trusting authenticator; mounts the embedded HTTP surface).
-- [ ] B: standalone harness — boot real `cmd/billing` + real AuthKit `core`; apply OpenRails + AuthKit (001–006) migrations;
-      provision tenant + mint a real service token via the real control plane; client auths with it (no stub).
-- [ ] C: re-point the conformance parity script to A (embedded-real) vs B (standalone-real); delete `stubResolver`.
-- [ ] CI: ensure Docker/testcontainers + both migration sets are available; document the harness.
+- [x] A: no-auth embedding-host harness (mirrors openrailsembed; trusting authenticator; mounts the embedded HTTP surface).
+      `internal/integrationharness.Harness.StartEmbeddedHost` — `embed.New` (host-owns-auth) over the shared migrated
+      Postgres + Redis, serving the real embedded `/v1/service/*` on httptest behind the REAL `ServiceTokenRequired`
+      middleware wired to a `trustingResolver` (accepts every token, pins the bound merchant, verifies nothing).
+- [x] B: standalone harness — boot the real standalone server (`ginboot.NewServer` → `internal/http`, the cmd/billing
+      run-server graph) + real AuthKit `core`; OpenRails + AuthKit `profiles.*` migrations applied by
+      `migrate.RunPostgres` (migratekit over `authkit/migrations/postgres`, via `dbtest`); provision via the REAL
+      control-plane bootstrap (`RunBootstrap` links `owner_tenant_id` + mints a real admin service token through
+      AuthKit core); the client auths with that real token resolved by `ServiceTokenRequired` → `ResolveServiceToken`
+      → AuthKit core (#481). No stub. `Harness.StartStandalone`.
+- [x] C: re-pointed the conformance parity script to A (embedded-real) vs B (standalone-real); `stubResolver` DELETED.
+      `embed/conformance_integration_test.go` now drives `openrails.NewRemote` against BOTH harness surfaces and asserts
+      `require.Equal`. The un-stubbed standalone path surfaced NO real parity bug.
+- [x] CI: harness uses Docker/testcontainers (shared Postgres via `dbtest`, Redis testcontainer); both migration sets
+      are applied by the shared migrator. Package doc on `internal/integrationharness` documents the two-server API.
 
 ---
 
