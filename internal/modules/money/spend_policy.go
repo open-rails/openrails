@@ -406,6 +406,27 @@ func (s *MoneyService) activeHoldsTotal(ctx context.Context, tenantID, payerID u
 	})
 }
 
+// ActiveHeldMicros sums a payer's currently-ACTIVE (un-settled) hold $ — the
+// in-flight reservation exposure the #487 max_concurrent_held cap enforces. Pure
+// $ (DefaultCurrency); generic.
+func (s *MoneyService) ActiveHeldMicros(ctx context.Context, payer identity.CustomerID) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("money service not initialized")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	tenantID := tid.UUID()
+	var total int64
+	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		var e error
+		total, e = s.activeHoldsTotal(ctx, tenantID, payer.UUID(), DefaultCurrency)
+		return e
+	})
+	return total, err
+}
+
 // CheckSpendAllowed evaluates the spend policy for (payer, credit_type, actor)
 // against an estimated charge, WITHOUT moving money. It enforces, in order:
 // per-actor daily/monthly caps, org daily/monthly caps, and the outstanding

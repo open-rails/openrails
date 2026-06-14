@@ -41,6 +41,18 @@ ADD/expose these generic primitives.
 ## Pairs with
 tensorhub #486; openrails #488 (failure windows), #489 (arrears), #490 (deposit fraud).
 
+## Outcome
+LANDED. Two generic $-denominated per-tier limits added to the tier policy JSONB (no new column —
+consistent with the existing budget_windows/queue_limits which also live in `policy`): `max_single_charge_micros`
+(per-charge ceiling; deny `single_charge_cap_exceeded` at admit before any hold) and `max_concurrent_held_micros`
+(cap on the SUM of the payer's ACTIVE un-settled hold $; deny `concurrent_held_cap_exceeded`, AND surfaced on every
+AdmitResponse as `max_concurrent_held_micros` + `held_micros` so an occupancy-aware host queues itself). Reused the
+existing `SumActiveMoneyHoldAuthorizations` query via new `MoneyService.ActiveHeldMicros`. KEPT throughput windows /
+queue limits / budgets / SetTierSchedule + auto-graduation unchanged. SDK/wire: AdmitResponse + TierPolicyInput
+extended across client.go/remote.go/embed/client.go + pkg/service; HTTP handler unchanged (serializes the struct).
+Migration 020 is a JSONB-contract COMMENT (sqlc generate/vet clean). Tests: 3 new integration tests; full admission
+integration suite green; build OK.
+
 ---
 
 # #488: $-valued failure/wasted-spend budget windows (per-payer tier + per-invoker flat) + report-failed-charge API
@@ -86,76 +98,6 @@ billing mode; make the credit exposure an explicit, admin-set per-tenant limit.
 
 ## Pairs with
 tensorhub #486 (per-tenant `arrears_allowed` flag + admin surface); openrails #487.
-
----
-
-# #476: Persisted tier SCHEDULE + AUTO-graduation by cumulative spend — host declares the ladder once; OpenRails owns + maintains each tenant-subject's tier (no host cranking)
-
-Today graduation is host-cranked: `GraduateTier(payer, creditType, ladder)` (#298) requires the
-HOST to pass the ladder AND call it on every spend event (or poll). That's wrong ergonomically: the
-host shouldn't have to iterate payers or re-graduate. The ladder is a SCHEDULE that changes rarely;
-graduation should be OpenRails' job, driven off the spend it already records.
-
-## What changes
-1. **Store the schedule once.** New unified-client API `SetTierSchedule(tenantSubjectID-or-tenant, schedule)`
-   where `schedule = ordered [{tier, min_cumulative_paid_micros}]`, persisted per tenant (a
-   `tier_schedules` table; RLS + owner=platform, like the budget-policy owner split #473). Host calls
-   it once on boot / config-change. (HTTP + embedded transports, mirroring `SetTierPolicy`.)
-2. **OpenRails auto-maintains each payer's tier.** Derive `tier = highest schedule rung whose
-   min_cumulative_paid_micros <= payer.cumulative_paid_micros`, monotonic (never silently regresses).
-   Recompute + persist to `credit_account_settings.tier` server-side on the deposit/settlement path
-   (where `cumulative_paid` already changes) — EVENTFUL, O(1) reads. (Lazy derive-at-`GetTier`/admit
-   is the equivalent fallback if a schedule exists but the materialized tier is stale.) No background
-   crank required by the host; an internal worker may sweep for schedule-change re-grades.
-3. **`GetTier` returns the auto-maintained tier**; `Admit` resolves limits by it. The host (tensorhub)
-   only READS the tier (for its scheduler cap) — never writes/cranks it.
-
-## Migrate off host-cranked GraduateTier
-Keep `GraduateTier` working but make the stored-schedule path authoritative: if a `tier_schedule`
-exists for the tenant, OpenRails owns graduation and host `GraduateTier` calls become a no-op/deprecated.
-Manual admin tier override (explicit tier on account settings) still wins over the schedule (#298).
-
-## Tasks
-- [x] `tier_schedules` table (tenant-scoped, owner=platform) + migration + RLS. (migration 016; tenant-wide
-      default = tenant_subject_id NULL, optional per-subject override; rungs jsonb [{tier,min_cumulative_paid_micros}].
-      Also added money_accounts.tier_source ('auto'|'admin') to distinguish auto-graduation from an admin override.)
-- [x] `SetTierSchedule` on the unified client (HTTP route + embedded adapter), mirroring `SetTierPolicy`.
-      (client.go interface + TierScheduleRung; remote.go PUT /v1/service/tier-schedules; embed/client.go local
-      adapter; pkg/service.SetTierSchedule; handler ServiceSetTierSchedule + ginroutes route; money.SetTierSchedule/
-      GetTierSchedule store. Empty tenant_subject_id = tenant-wide default.)
-- [x] Auto-graduation: recompute+persist `money_accounts.tier` from `cumulative_paid` vs the stored schedule
-      on the DEPOSIT path (eventful — money_service.depositTx after the deposit posts, in-band in the same tx);
-      monotonic (rungThreshold guard never regresses); admin-override wins (AutoGraduateMoneyAccountTier guards
-      tier_source<>'admin' at the DB level + an in-code check). DefaultCurrency only.
-- [x] `GetTier`/`Admit` read the auto-maintained tier (unchanged — admitter falls back to money.GetTier which
-      reads money_accounts.tier; auto-graduation now keeps it current). Host-cranked `GraduateTier` short-circuits
-      to a no-op returning the auto-maintained tier when a schedule exists (kept compiling for schedule-less hosts);
-      added SetTierOverride for the explicit admin override.
-- [x] VERIFY: integration tests (internal/modules/money/tier_schedule_integration_test.go) — set a schedule once →
-      deposits crossing thresholds auto-raise the tier with NO host call; GraduateTier no-ops; admin override sticks
-      across further deposits; multi-tenant isolation (tenant A's schedule does not graduate tenant B's payer).
-      Existing TestGraduateTier (schedule-less legacy path) still passes.
-
-## Related
-#298 (host-cranked `GraduateTier` this supersedes), #473 (budget-policy owner=platform store pattern to
-mirror), #472 (per-tier throughput/queue limits resolved by the tier). CONSUMER: tensorhub #477
-(declares the schedule + per-tier capacity limits once, reads the auto-maintained tier for its
-scheduler cap).
-
----
-
-# #477: Finish money/credit decouple at the SDK boundary — CreditType → Currency
-
-**Status:** in progress.
-
-The public client request/response types still carry `CreditType` — vestigial/USD-only after #474's
-internal decouple (the internal money service already speaks `currency`). Rename the consumer-facing
-field `CreditType` → `Currency` (Go field) with wire tag `credit_type` → `currency`, make it OPTIONAL
-(empty → "USD" via the money currency normalizer), and drop the "CreditType required" validations so
-the consumer surface matches the decoupled money ledger. `Currency` is a free string so #475's
-qualified `tenant/name` custom-credit unit codes ride the same field (ledger ResolveUnit/validateUnit
-handles validation — do not hard-restrict here). BREAKING SDK rename: host apps need a follow-up
-`CreditType:`→`Currency:` edit. References #474 (done, internal decouple) + #475 (custom credits).
 
 ---
 

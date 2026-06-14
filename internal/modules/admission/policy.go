@@ -45,6 +45,10 @@ type ResolvedPolicy struct {
 	QueueLimits       []models.QueueLimitPolicy
 	EntitledResources []string
 	BudgetWindows     []budgets.BudgetWindow
+	// MaxConcurrentHeldMicros / MaxSingleChargeMicros are the #487 generic
+	// $-denominated per-tier admit limits (0 = uncapped).
+	MaxConcurrentHeldMicros int64
+	MaxSingleChargeMicros   int64
 }
 
 // ThroughputForRelease returns the throughput policy for an endpoint-release:
@@ -154,11 +158,13 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Cust
 		}
 	}
 	return ResolvedPolicy{
-		Throughput:        toRatelimitPolicy(row.Policy),
-		ReleaseThroughput: releaseTP,
-		QueueLimits:       row.Policy.QueueLimits,
-		EntitledResources: row.Policy.EntitledResources,
-		BudgetWindows:     toBudgetWindows(row.Policy.BudgetWindows),
+		Throughput:              toRatelimitPolicy(row.Policy),
+		ReleaseThroughput:       releaseTP,
+		QueueLimits:             row.Policy.QueueLimits,
+		EntitledResources:       row.Policy.EntitledResources,
+		BudgetWindows:           toBudgetWindows(row.Policy.BudgetWindows),
+		MaxConcurrentHeldMicros: row.Policy.MaxConcurrentHeldMicros,
+		MaxSingleChargeMicros:   row.Policy.MaxSingleChargeMicros,
 	}, nil
 }
 

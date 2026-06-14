@@ -370,6 +370,12 @@ func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in T
 		"budget_windows":     in.BudgetWindows,
 		"queue_limits":       in.QueueLimits,
 	}
+	if in.MaxConcurrentHeldMicros != 0 {
+		body["max_concurrent_held_micros"] = in.MaxConcurrentHeldMicros
+	}
+	if in.MaxSingleChargeMicros != 0 {
+		body["max_single_charge_micros"] = in.MaxSingleChargeMicros
+	}
 	return c.do(ctx, http.MethodPut, "/v1/service/tier-policies", body, nil)
 }
 

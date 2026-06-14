@@ -211,6 +211,10 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 		ReservationID:       res.ReservationID,
 		BudgetReservationID: res.BudgetReservationID,
 		ResolvedTier:        res.ResolvedTier,
+
+		MaxConcurrentHeldMicros: res.MaxConcurrentHeldMicros,
+		HeldMicros:              res.HeldMicros,
+		MaxSingleChargeMicros:   res.MaxSingleChargeMicros,
 	}
 	for _, w := range res.Windows {
 		out.Windows = append(out.Windows, openrails.AdmitWindow{
@@ -693,8 +697,10 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 		}
 	}
 	pol := billingservice.TierPolicyInput{
-		Tier:              in.Tier,
-		EntitledResources: in.EntitledResources,
+		Tier:                    in.Tier,
+		EntitledResources:       in.EntitledResources,
+		MaxConcurrentHeldMicros: in.MaxConcurrentHeldMicros,
+		MaxSingleChargeMicros:   in.MaxSingleChargeMicros,
 	}
 	for _, w := range in.Windows {
 		pol.Windows = append(pol.Windows, billingservice.TierWindowInput{

@@ -1,0 +1,26 @@
+--
+-- Generic $-denominated per-tier admit limits (#487).
+--
+-- Two new GENERIC, $-denominated per-tier limits live alongside the existing
+-- throughput windows / queue limits / budget windows in the tier_policies.policy
+-- JSONB (no new column — the policy is a single JSONB document, exactly like the
+-- budget_windows / queue_limits that preceded these):
+--
+--   policy.max_concurrent_held_micros — cap on the SUM of a payer's currently
+--     ACTIVE (un-settled) hold $ at the tier. Enforced at admit (deny
+--     "concurrent_held_cap_exceeded" when a new hold would push the active-hold
+--     sum past it) AND surfaced on AdmitResponse (max_concurrent_held_micros +
+--     held_micros) so a host that enforces true occupancy itself (e.g.
+--     tensorhub's scheduler, which alone sees live GPU occupancy) can queue
+--     against cap + per-job estimate instead of taking the hard deny.
+--
+--   policy.max_single_charge_micros — per-charge ceiling: an Admit whose
+--     estimate exceeds it is rejected ("single_charge_cap_exceeded"). Generic
+--     runaway guard.
+--
+-- 0 / absent = uncapped (back-compat: existing policies keep behaving as before).
+-- No DDL — this migration documents the JSONB contract for the sqlc schema +
+-- audit trail.
+--
+
+COMMENT ON COLUMN openrails.tier_policies.policy IS 'JSONB tier policy: throughput windows, release_windows, queue_limits, entitled_resources, budget_windows, and (#487) max_concurrent_held_micros (cap on the payer''s active un-settled hold $ sum) + max_single_charge_micros (per-charge ceiling). All generic + $-denominated.';

@@ -48,6 +48,20 @@ type ThroughputPolicy struct {
 	// on completion; deny with BlockedBy="queue" when the in-flight sum would
 	// exceed max. tensorhub's instance is the count form (unit="request").
 	QueueLimits []QueueLimitPolicy `json:"queue_limits,omitempty"`
+
+	// MaxConcurrentHeldMicros caps the SUM of a payer's currently-ACTIVE
+	// (un-settled) hold $ at this tier (#487). 0 = uncapped. OpenRails enforces it
+	// at admit (deny "concurrent_held_cap_exceeded" when a new hold would push the
+	// active-hold sum past it) AND surfaces the resolved value on AdmitResponse so a
+	// host that enforces true occupancy itself (e.g. tensorhub's scheduler, which
+	// alone sees live GPU occupancy) can queue against cap + per-job estimate
+	// instead of taking the hard deny. Generic $-denominated; no host concepts.
+	MaxConcurrentHeldMicros int64 `json:"max_concurrent_held_micros,omitempty"`
+
+	// MaxSingleChargeMicros is the per-charge ceiling at this tier (#487): an Admit
+	// whose EstimateMicros exceeds it is rejected ("single_charge_cap_exceeded").
+	// 0 = uncapped. Generic runaway guard.
+	MaxSingleChargeMicros int64 `json:"max_single_charge_micros,omitempty"`
 }
 
 // QueueLimitPolicy is one batch/queue reservation-pool cap (#472 G2): at most

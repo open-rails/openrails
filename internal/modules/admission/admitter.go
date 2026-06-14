@@ -24,6 +24,16 @@ import (
 // default (#300): start at the lowest tier until graduated.
 const DefaultTier = "free"
 
+// Generic $-denominated admit deny codes (#487).
+const (
+	// DenySingleChargeCap: the request's EstimateMicros exceeds the tier's
+	// max_single_charge_micros per-charge ceiling.
+	DenySingleChargeCap = "single_charge_cap_exceeded"
+	// DenyConcurrentHeldCap: placing this hold would push the payer's active
+	// (un-settled) hold $ sum past the tier's max_concurrent_held_micros.
+	DenyConcurrentHeldCap = "concurrent_held_cap_exceeded"
+)
+
 type Admitter struct {
 	limiter      *ratelimit.Limiter
 	money        *money.MoneyService
@@ -118,6 +128,20 @@ type AdmitDecision struct {
 	// back to drive its own per-tier capacity decisions (e.g. tensorhub's
 	// scheduler in-flight concurrency cap) without a second round-trip.
 	ResolvedTier string
+
+	// MaxConcurrentHeldMicros is the resolved tier's cap on the sum of the payer's
+	// active (un-settled) hold $ (#487; 0 = uncapped). Surfaced on EVERY verdict so
+	// a host that enforces true occupancy itself reads cap + per-job estimate and
+	// queues in its own scheduler rather than relying on OpenRails' hard deny.
+	MaxConcurrentHeldMicros int64
+	// HeldMicros is the payer's active-hold $ sum AS EVALUATED for this verdict
+	// (#487): on an allowed verdict it INCLUDES the hold just placed; on a
+	// concurrent-held deny it is the pre-existing sum the new hold would have
+	// breached. Lets the host reason about remaining headroom = cap - held.
+	HeldMicros int64
+	// MaxSingleChargeMicros is the resolved tier's per-charge ceiling (#487; 0 =
+	// uncapped), surfaced for host introspection.
+	MaxSingleChargeMicros int64
 }
 
 // Admit runs throughput then money and returns the unified decision.
@@ -179,6 +203,16 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	}
 	if len(pol.EntitledResources) > 0 && !contains(pol.EntitledResources, req.Resource) {
 		return AdmitDecision{Allowed: false, BlockedBy: "resource"}, nil
+	}
+
+	// Per-charge ceiling (#487): a single Admit whose estimate exceeds the tier's
+	// max_single_charge_micros is a generic runaway guard — reject up front.
+	if pol.MaxSingleChargeMicros > 0 && req.EstimateMicros > pol.MaxSingleChargeMicros {
+		return AdmitDecision{
+			Allowed: false, BlockedBy: "money", DenyCode: DenySingleChargeCap,
+			ResolvedTier: tier, MaxSingleChargeMicros: pol.MaxSingleChargeMicros,
+			MaxConcurrentHeldMicros: pol.MaxConcurrentHeldMicros,
+		}, nil
 	}
 
 	// --- throughput axis (cheap Redis op; counts even if money later denies) ---
@@ -301,6 +335,35 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}
 	}
 
+	// --- concurrent-held $ cap (#487): the sum of the payer's ACTIVE (un-settled)
+	// hold $ plus this estimate must not exceed the tier's max_concurrent_held.
+	// Read BEFORE the hold is placed so the new hold is the (held + estimate)
+	// projection. A host that enforces true occupancy itself reads the cap value +
+	// estimate off the verdict and queues in its own scheduler instead of taking
+	// this hard deny (so OpenRails' gate is the committed-$ admission backstop). ---
+	var heldMicros int64
+	if req.EstimateMicros > 0 && pol.MaxConcurrentHeldMicros > 0 {
+		held, herr := a.money.ActiveHeldMicros(ctx, req.CustomerID)
+		if herr != nil {
+			return AdmitDecision{}, herr
+		}
+		heldMicros = held
+		if held+req.EstimateMicros > pol.MaxConcurrentHeldMicros {
+			if len(budgetScopeStatuses) > 0 && a.budgets != nil {
+				_ = a.budgets.ReleaseByCoords(ctx, req.CustomerID, req.Source, req.SourceID)
+			}
+			if queueAcquired {
+				_ = a.limiter.ReleaseQueueByRequest(ctx, req.Source, req.SourceID)
+			}
+			return AdmitDecision{
+				Allowed: false, BlockedBy: "money", DenyCode: DenyConcurrentHeldCap,
+				Windows: tp.Windows, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses,
+				ResolvedTier: tier, MaxConcurrentHeldMicros: pol.MaxConcurrentHeldMicros,
+				MaxSingleChargeMicros: pol.MaxSingleChargeMicros, HeldMicros: held,
+			}, nil
+		}
+	}
+
 	// --- money axis (reserve the estimate via the existing ledger gate) ---
 	if req.EstimateMicros > 0 {
 		res, err := a.money.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
@@ -324,12 +387,13 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 			if queueAcquired {
 				_ = a.limiter.ReleaseQueueByRequest(ctx, req.Source, req.SourceID)
 			}
-			return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: res.Decision.DenyCode, Windows: tp.Windows, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses}, nil
+			return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: res.Decision.DenyCode, Windows: tp.Windows, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, ResolvedTier: tier, MaxConcurrentHeldMicros: pol.MaxConcurrentHeldMicros, MaxSingleChargeMicros: pol.MaxSingleChargeMicros, HeldMicros: heldMicros}, nil
 		}
-		return AdmitDecision{Allowed: true, Windows: tp.Windows, Hold: res.Hold, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier}, nil
+		// Allowed: the hold is now placed, so the active-held sum includes it.
+		return AdmitDecision{Allowed: true, Windows: tp.Windows, Hold: res.Hold, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier, MaxConcurrentHeldMicros: pol.MaxConcurrentHeldMicros, MaxSingleChargeMicros: pol.MaxSingleChargeMicros, HeldMicros: heldMicros + req.EstimateMicros}, nil
 	}
 
-	return AdmitDecision{Allowed: true, Windows: tp.Windows, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier}, nil
+	return AdmitDecision{Allowed: true, Windows: tp.Windows, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier, MaxConcurrentHeldMicros: pol.MaxConcurrentHeldMicros, MaxSingleChargeMicros: pol.MaxSingleChargeMicros}, nil
 }
 
 // buildBudgetScopes assembles every budget scope to reserve for this request

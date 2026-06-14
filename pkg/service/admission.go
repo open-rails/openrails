@@ -78,6 +78,17 @@ type AdmitResult struct {
 	// host reads it back to drive its own per-tier capacity decisions (e.g.
 	// tensorhub's scheduler in-flight concurrency cap) without a second round-trip.
 	ResolvedTier string `json:"resolved_tier,omitempty"`
+	// MaxConcurrentHeldMicros is the resolved tier's cap on the sum of the payer's
+	// active (un-settled) hold $ (#487; 0 = uncapped). HeldMicros is the payer's
+	// active-hold $ sum as evaluated for this verdict (includes the hold just placed
+	// on an allow). A host that enforces true occupancy itself reads these to queue
+	// against cap + per-job estimate instead of taking the hard deny.
+	MaxConcurrentHeldMicros int64 `json:"max_concurrent_held_micros,omitempty"`
+	HeldMicros              int64 `json:"held_micros,omitempty"`
+	// MaxSingleChargeMicros is the resolved tier's per-charge ceiling (#487; 0 =
+	// uncapped). An estimate above it is denied with deny_code
+	// "single_charge_cap_exceeded".
+	MaxSingleChargeMicros int64 `json:"max_single_charge_micros,omitempty"`
 }
 
 // AdmitBudgetWindowDTO is a rolling money-budget window's state (#304), for the
@@ -192,6 +203,10 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		DenyCode:          dec.DenyCode,
 		RetryAfterSeconds: int64(dec.RetryAfter / time.Second),
 		ResolvedTier:      dec.ResolvedTier,
+
+		MaxConcurrentHeldMicros: dec.MaxConcurrentHeldMicros,
+		HeldMicros:              dec.HeldMicros,
+		MaxSingleChargeMicros:   dec.MaxSingleChargeMicros,
 	}
 	for _, w := range dec.Windows {
 		res.Windows = append(res.Windows, AdmitWindowDTO{
@@ -422,6 +437,11 @@ type TierPolicyInput struct {
 	ReleaseWindows map[string][]TierWindowInput `json:"release_windows,omitempty"`
 	// QueueLimits are the batch/queue reservation-pool caps (#472 G2).
 	QueueLimits []TierQueueLimitInput `json:"queue_limits,omitempty"`
+	// MaxConcurrentHeldMicros / MaxSingleChargeMicros are the #487 generic
+	// $-denominated per-tier admit limits (0 = uncapped): a cap on the payer's
+	// active (un-settled) hold $ sum, and a per-charge ceiling.
+	MaxConcurrentHeldMicros int64 `json:"max_concurrent_held_micros,omitempty"`
+	MaxSingleChargeMicros   int64 `json:"max_single_charge_micros,omitempty"`
 }
 
 // SetTierPolicy upserts a per-payer tier policy (throughput + entitled endpoints
@@ -436,7 +456,11 @@ func (s *Service) SetTierPolicy(ctx context.Context, payer identity.CustomerID, 
 	if in.Tier == "" {
 		return fmt.Errorf("tier required")
 	}
-	pol := models.ThroughputPolicy{EntitledResources: in.EntitledResources}
+	pol := models.ThroughputPolicy{
+		EntitledResources:       in.EntitledResources,
+		MaxConcurrentHeldMicros: in.MaxConcurrentHeldMicros,
+		MaxSingleChargeMicros:   in.MaxSingleChargeMicros,
+	}
 	for _, w := range in.Windows {
 		pol.Windows = append(pol.Windows, models.ThroughputWindow{Unit: w.Unit, WindowSeconds: w.WindowSeconds, Max: w.Max})
 	}

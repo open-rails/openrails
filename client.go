@@ -257,7 +257,6 @@ type CreditTransaction struct {
 	ID              uuid.UUID
 	CustomerID      uuid.UUID
 	Actor           string
-	CreditTypeID    uuid.UUID
 	Amount          int64
 	BalanceAfter    *int64
 	TransactionType string
@@ -340,6 +339,15 @@ type AdmitResponse struct {
 	// host reads it back to drive its own per-tier capacity decisions (e.g.
 	// tensorhub's scheduler in-flight concurrency cap) without a second round-trip.
 	ResolvedTier string `json:"resolved_tier,omitempty"`
+	// MaxConcurrentHeldMicros is the resolved tier's cap on the sum of the payer's
+	// active (un-settled) hold $ (#487; 0 = uncapped); HeldMicros is the active-hold
+	// $ sum as evaluated for this verdict (includes the hold just placed on an
+	// allow). A host that enforces true occupancy itself reads these to queue
+	// against cap + per-job estimate instead of taking the hard deny. An estimate
+	// above MaxSingleChargeMicros is denied DenyCode="single_charge_cap_exceeded".
+	MaxConcurrentHeldMicros int64 `json:"max_concurrent_held_micros,omitempty"`
+	HeldMicros              int64 `json:"held_micros,omitempty"`
+	MaxSingleChargeMicros   int64 `json:"max_single_charge_micros,omitempty"`
 }
 
 // CaptureUsage carries the analytics dimensions recorded alongside a capture so
@@ -458,6 +466,12 @@ type TierPolicyInput struct {
 	// per-tier in-flight queue ceiling OpenRails enforces at admit (BlockedBy=
 	// "queue" on overflow). Empty = no queue cap for this tier.
 	QueueLimits []TierQueueLimit `json:"queue_limits,omitempty"`
+	// MaxConcurrentHeldMicros / MaxSingleChargeMicros are the #487 generic
+	// $-denominated per-tier admit limits (0 = uncapped): a cap on the payer's
+	// active (un-settled) hold $ sum (surfaced + enforced at admit), and a
+	// per-charge ceiling (an over-limit estimate is rejected at admit).
+	MaxConcurrentHeldMicros int64 `json:"max_concurrent_held_micros,omitempty"`
+	MaxSingleChargeMicros   int64 `json:"max_single_charge_micros,omitempty"`
 }
 
 // TierScheduleRung is one rung of the persisted tier ladder set via
