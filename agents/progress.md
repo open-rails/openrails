@@ -900,6 +900,13 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       identity (persist attribution; abuse counters may stay in Redis but keyed by the real actor id).
 - [ ] SDK + wire: distinguish payer (customer) from actor on Admit/charge; surface per-actor spend
       attribution to the payer.
+- [ ] TOKEN SHAPE (authkit + openrails): today a delegated token carries ONE subject — delegated_sub =
+      the ACTOR (per authkit http/claims.go). When actor == customer (e.g. cozy-art reads its OWN balance)
+      one field suffices. When they DIFFER (a cozy-art end-user generates, billed to cozy-art's balance) the
+      MERCHANT must assert BOTH in the token: customer (payer) + actor. OpenRails is federation-agnostic (no
+      stored actor->customer map), so it must come from the token. Add a first-class `customer`/`payer` claim
+      alongside delegated_sub (PREFERRED — billing-load-bearing; permissions/spend target the customer) — vs
+      riding it in the #75 attributes escape hatch (works but app-opaque). authkit: mint + Claims + verifier.
 - [ ] DROP money_balances (it is a read-cache roll-up): derive available = SUM(unexpired
       money_blocks.remaining_amount) and held = SUM(active-hold authorized_amount in money_transactions).
       Move the FOR UPDATE spend mutex (today LockMoneyBalance) onto the CUSTOMER row (now the account) or a
