@@ -827,10 +827,12 @@ promotes the split to the identity model.
 TERMINOLOGY (decided): **customer = the PAYER** (money account, merchant-scoped, NEVER delegated).
 **actor** (a.k.a. invoker) = the doer (can be a delegated-user, a native user, or the tenant itself).
 
-STRUCTURE (corrected): the MERCHANT is OpenRails's OWN multi-company billing/isolation namespace — one
-OpenRails server/DB hosts MANY merchants (companies). It is NOT a hop between tenant and customer, and is
-NOT resolved from an AuthKit token (merchants.owner_tenant_id is ownership/admin only — the schema comment
-says it is "never used to resolve a merchant from a token"). Within a merchant:
+STRUCTURE (corrected): the MERCHANT is OpenRails's OWN billing/isolation boundary — one OpenRails server/DB
+hosts MANY merchants. The TENANT (authkit) is the OPERATOR that OWNS the merchant — 1:1 tenant<->merchant —
+and owns its ISSUERS (#77). Resolution of a token: issuer -> tenant (#77) -> merchant. NOTE this SUPERSEDES
+the current schema stance (owner_tenant_id "one tenant owns MANY merchants, never used to resolve from a
+token"): owner_tenant_id becomes UNIQUE (1:1) and IS the resolution key. The tenant = operator, NOT the
+customer (an earlier draft wrongly said tenant<->customer). Within a merchant:
 
   customer = the PAYER = a BALANCE / money account — a PURE billing entity: (id, merchant_id). ALL the
     money state already FKs to customers(id): money_balances (balance + held), money_blocks (credit lots),
@@ -847,10 +849,14 @@ The ISSUER is whoever AUTHENTICATED the actor — the HOST in embedded (it prove
 remote_app/JWKS for a federated delegated-user or a tenant self-token. Every request has an actor with an
 (issuer, subject); the customer it bills is just an account id.
 
-A customer needs no tenant and no issuer. EMBEDDED: a native human (actor issuer = host) with its OWN
-balance — actor -> customer 1:1. FEDERATED: the issuer's single designated balance that ALL that issuer's
-actors draw on — actor -> customer many:1. How an actor finds its customer: issuer -> payer-customer
-(issuer registry, one payer per federated issuer); a fresh per-user balance for embedded.
+A customer is the operator's END-USER/payer, NOT a tenant. STANDALONE-individual (doujins/hentai0): each
+end-user is BOTH the payer (customer/balance) and the invoker (actor) — actor -> customer 1:1, many
+customers per merchant. B2B2C (cozy-art): a customer is an ORG whose MANY delegated-users are the actors —
+actor -> customer many:1. EMBEDDED: the host vouches; one merchant, customer ids passed directly.
+
+OPEN (B2B2C only): when a customer-org runs its OWN issuer (cozy-art minting delegated tokens), is that
+issuer owned by the OPERATOR's tenant (cozy-art = just a customer/balance) or does the customer-org get its
+OWN sub-tenant? Doujins standalone never hits this.
 
 EMBEDDED degenerate case (doujins): the end-user genuinely holds money, so end-user = customer(payer) =
 actor (1:1); MANY customers per merchant (one per end-user), one actor each. Unifying rule: actor->customer
@@ -904,9 +910,10 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       `money_transactions` transaction_type='deposit' row — NOT in money_blocks. Compaction must NEVER
       delete money_transactions deposit rows or payments; only the derived spendable lots. (money_blocks
       .source_transaction_id -> money_transactions may dangle/null on block delete; the receipt survives.)
-- [ ] Resolution (authkit#77): issuer -> merchant from the ISSUER REGISTRY (billing namespace); issuer ->
-      payer-customer (one designated balance per federated issuer) gives the actor's customer_id. customer
-      has NO (issuer, subject) and NO tenant — those live on the actor / are resolved at the auth boundary.
+- [ ] Resolution (authkit#77): issuer -> tenant (owns the issuer) -> merchant (1:1 with tenant); make
+      owner_tenant_id UNIQUE + resolution-bearing (supersede "one tenant many merchants / never resolve from
+      token"). The actor's customer = the end-user/payer under that merchant (1:1 individual / many:1 B2B2C).
+      customer has NO (issuer, subject) and NO tenant — those live on the actor / auth boundary.
 - [ ] Tests: federated many-actors-one-payer (spend attributed per actor, money debited from the ONE
       payer, per-actor abuse cap trips before the payer's); embedded actor==customer 1:1; a delegated-user
       has no tier and no money_account.
