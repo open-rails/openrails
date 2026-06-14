@@ -75,7 +75,7 @@ func userContextFromClaims(cl authhttp.Claims) authprovider.UserContext {
 		// Operator-tenant admin authority (#224, hardcut): the tenant slug +
 		// tenant-scoped roles carried in the AuthKit claims are the ONLY admin
 		// authority path now that the legacy global-admin DB fallback is removed.
-		Tenant:      cl.Tenant,
-		TenantRoles: cl.TenantRoles,
+		Tenant:      cl.Org,
+		TenantRoles: cl.OrgRoles,
 	}
 }

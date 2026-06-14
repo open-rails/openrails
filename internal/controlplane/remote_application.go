@@ -80,7 +80,7 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 
 	return &ResolvedServiceToken{
 		OwnerTenantID:   ownerTenantID,
-		OwnerTenantSlug: strings.TrimSpace(cl.Tenant),
+		OwnerTenantSlug: strings.TrimSpace(cl.Org),
 		MerchantID:      mid,
 		MerchantSlug:    mslug,
 		Permissions:     append([]string(nil), cl.Permissions...),
@@ -105,11 +105,11 @@ func (c *ControlPlane) merchantForRemoteApplication(ctx context.Context, cl auth
 	// The principal's assigned tenant slug(s). Claims.Tenant is the first
 	// membership; AuthKit surfaces a single membership as Tenant. Resolve its
 	// AuthKit uuid, then the merchant owned by it.
-	slug := strings.TrimSpace(cl.Tenant)
+	slug := strings.TrimSpace(cl.Org)
 	if slug == "" {
 		return merchant.ID{}, "", "", ErrServiceTokenMerchantUnresolved
 	}
-	t, err := c.Core().ResolveTenantBySlug(ctx, slug)
+	t, err := c.Core().ResolveOrgBySlug(ctx, slug)
 	if err != nil || t == nil {
 		return merchant.ID{}, "", "", ErrServiceTokenMerchantUnresolved
 	}

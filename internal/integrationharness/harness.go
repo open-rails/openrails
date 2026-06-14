@@ -336,8 +336,12 @@ func (s *Surface) RegisterRemoteApplication(slug, ownerTenantSlug, role string) 
 	issuer := authtesting.NewTestIssuerWithAudience("openrails-app")
 	h.t.Cleanup(issuer.Close)
 
+	// #77: a remote_application is owned by exactly one org (org_id NOT NULL).
+	ownerOrg, err := core.ResolveOrgBySlug(h.ctx, ownerTenantSlug)
+	require.NoError(h.t, err, "resolve owner org")
 	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
 		Slug:      slug,
+		OrgID:     ownerOrg.ID,
 		Issuer:    issuer.URL(),
 		JWKSURI:   issuer.URL() + "/.well-known/jwks.json",
 		Mode:      authcore.RemoteAppModeJWKS,

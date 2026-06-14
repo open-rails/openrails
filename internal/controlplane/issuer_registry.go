@@ -62,12 +62,12 @@ func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (me
 
 	// The tenant(s) the remote_application controls (its memberships). Resolve the
 	// first one that owns an active merchant.
-	memberships, err := c.Core().RemoteApplicationTenantRoles(ctx, ra.ID)
+	memberships, err := c.Core().RemoteApplicationOrgRoles(ctx, ra.ID)
 	if err != nil {
 		return merchant.ID{}, "", err
 	}
 	for _, m := range memberships {
-		t, terr := c.Core().ResolveTenantBySlug(ctx, m.Tenant)
+		t, terr := c.Core().ResolveOrgBySlug(ctx, m.Org)
 		if terr != nil || t == nil {
 			continue
 		}

@@ -172,7 +172,7 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 	// #481: authorize by the caller's role on the merchant's owner_tenant_id. The
 	// owning AuthKit tenant administers its merchant(s); resolve the merchant via
 	// that ownership link, never via an identity-equation.
-	mid, mslug, err := c.merchantForOwnerTenant(ctx, resolved.TenantID)
+	mid, mslug, err := c.merchantForOwnerTenant(ctx, resolved.OrgID)
 	if err != nil {
 		return nil, err
 	}
@@ -181,8 +181,8 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 	}
 
 	return &ResolvedServiceToken{
-		OwnerTenantID:   resolved.TenantID,
-		OwnerTenantSlug: resolved.TenantSlug,
+		OwnerTenantID:   resolved.OrgID,
+		OwnerTenantSlug: resolved.OrgSlug,
 		MerchantID:      mid,
 		MerchantSlug:    mslug,
 		Permissions:     resolved.Permissions,

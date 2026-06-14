@@ -9,7 +9,7 @@
 //   - runs with public user registration and public tenant management disabled,
 //   - bootstraps the default tenant's own AuthKit org, OpenRails roles, the
 //     `openrails:*` permission catalog, and an initial deployment admin service
-//     token through in-process AuthKit CORE calls (CreateTenant / DefineRole /
+//     token through in-process AuthKit CORE calls (CreateOrg / DefineRole /
 //     AssignRole / MintServiceToken) — never raw SQL or a private HTTP route.
 //
 // HARDCUT (#312): admin authority is the LIVE openrails:admin permission held in

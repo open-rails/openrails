@@ -130,9 +130,9 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		},
 		// Self-hosted locked-down posture (#47 switches): no public user
 		// self-registration, no public tenant onboarding/management. Embedded
-		// bootstrap/core calls (CreateTenant/AssignRole/MintServiceToken) are unaffected.
+		// bootstrap/core calls (CreateOrg/AssignRole/MintServiceToken) are unaffected.
 		NativeUserRegistrationMode: registrationMode(!cp.UserRegistrationOpen()),
-		TenantRegistrationMode:     registrationMode(!cp.TenantRegistrationOpen()),
+		OrgRegistrationMode:     registrationMode(!cp.TenantRegistrationOpen()),
 	}
 
 	authSvc, err := authhttp.NewService(coreCfg)

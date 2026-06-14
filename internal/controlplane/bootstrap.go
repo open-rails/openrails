@@ -17,7 +17,7 @@ import (
 type BootstrapResult struct {
 	BootstrapTenantSlug string
 	BootstrapTenantID   string
-	// TenantCreated is true if CreateTenant ran (false if the AuthKit tenant already existed).
+	// TenantCreated is true if CreateOrg ran (false if the AuthKit tenant already existed).
 	TenantCreated bool
 	// ServiceTokenMinted is true if an initial admin service token was minted on this run
 	// (false if one already existed). When true, ServiceTokenSecret holds the one-time
@@ -58,7 +58,7 @@ type BootstrapOptions struct {
 // tenant's own org (or carried on the minted admin service token).
 //
 // It runs AFTER migrations / at startup, exclusively through in-process AuthKit
-// CORE calls (CreateTenant / DefineRole / SetRolePermissions / AssignRole /
+// CORE calls (CreateOrg / DefineRole / SetRolePermissions / AssignRole /
 // MintServiceToken) — never raw AuthKit SQL or a private HTTP route. Re-running
 // it is safe: tenant creation, role definition, and catalog seeding are upserts;
 // the service token is minted only when none already exists.
@@ -81,17 +81,17 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 
 	// 1. Ensure the bootstrap (default-tenant) AuthKit org exists (idempotent:
 	//    resolve, else create).
-	authkitTenant, err := core.ResolveTenantBySlug(ctx, slug)
+	authkitTenant, err := core.ResolveOrgBySlug(ctx, slug)
 	if err != nil {
-		if !errors.Is(err, authcore.ErrTenantNotFound) {
+		if !errors.Is(err, authcore.ErrOrgNotFound) {
 			return nil, fmt.Errorf("controlplane: resolve bootstrap tenant %q: %w", slug, err)
 		}
-		created, cerr := core.CreateTenant(ctx, slug)
+		created, cerr := core.CreateOrg(ctx, slug)
 		if cerr != nil {
 			if !errors.Is(cerr, authcore.ErrOwnerSlugTaken) {
 				return nil, fmt.Errorf("controlplane: create bootstrap tenant %q: %w", slug, cerr)
 			}
-			created, cerr = core.ResolveTenantBySlug(ctx, slug)
+			created, cerr = core.ResolveOrgBySlug(ctx, slug)
 			if cerr != nil {
 				return nil, fmt.Errorf("controlplane: resolve concurrently-created bootstrap tenant %q: %w", slug, cerr)
 			}
@@ -182,7 +182,7 @@ type PlatformBootstrapResult struct {
 // openrails:platform:superadmin permission, and (optionally) an initial platform
 // admin user is assigned that role.
 //
-// It runs through in-process AuthKit CORE calls (CreateTenant / DefineRole /
+// It runs through in-process AuthKit CORE calls (CreateOrg / DefineRole /
 // SetRolePermissions / AssignRole) — never raw SQL. Re-running is safe (upserts).
 //
 // No-op (returns nil, nil) when no platform tenant is configured: a single-tenant
@@ -202,17 +202,17 @@ func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstra
 
 	res := &PlatformBootstrapResult{PlatformTenantSlug: slug}
 
-	authkitTenant, err := core.ResolveTenantBySlug(ctx, slug)
+	authkitTenant, err := core.ResolveOrgBySlug(ctx, slug)
 	if err != nil {
-		if !errors.Is(err, authcore.ErrTenantNotFound) {
+		if !errors.Is(err, authcore.ErrOrgNotFound) {
 			return nil, fmt.Errorf("controlplane: resolve platform tenant %q: %w", slug, err)
 		}
-		created, cerr := core.CreateTenant(ctx, slug)
+		created, cerr := core.CreateOrg(ctx, slug)
 		if cerr != nil {
 			if !errors.Is(cerr, authcore.ErrOwnerSlugTaken) {
 				return nil, fmt.Errorf("controlplane: create platform tenant %q: %w", slug, cerr)
 			}
-			created, cerr = core.ResolveTenantBySlug(ctx, slug)
+			created, cerr = core.ResolveOrgBySlug(ctx, slug)
 			if cerr != nil {
 				return nil, fmt.Errorf("controlplane: resolve concurrently-created platform tenant %q: %w", slug, cerr)
 			}

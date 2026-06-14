@@ -147,11 +147,11 @@ func TestDelegatedVerify_RejectsExpired(t *testing.T) {
 }
 
 // HARD CUT (#361, authkit v0.23.0): the issuer-only delegated-token profile.
-// Tenant identity is the validated `iss` ONLY; a token still carrying the
-// legacy `tenant_id` uuid claim is rejected outright — there is no
-// legacy-acceptance window. (MintDelegatedAccessToken can no longer write the
-// claim, so this signs the forbidden shape by hand.)
-func TestDelegatedVerify_RejectsTenantIDClaim(t *testing.T) {
+// Org identity is the validated `iss` ONLY; a token still carrying an `org_id`
+// uuid claim is rejected outright — there is no legacy-acceptance window.
+// (MintDelegatedAccessToken can no longer write the claim, so this signs the
+// forbidden shape by hand.)
+func TestDelegatedVerify_RejectsOrgIDClaim(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	hs := signer.(jwtkit.HeaderSigner)
 	now := time.Now()
@@ -159,7 +159,7 @@ func TestDelegatedVerify_RejectsTenantIDClaim(t *testing.T) {
 		jwt.MapClaims{
 			"iss":           testDelegatedIssuer,
 			"aud":           []string{canonicalAudience},
-			"tenant_id":     testDelegatedTenantID,
+			"org_id":        testDelegatedTenantID,
 			"delegated_sub": testDelegatedSubject,
 			"permissions":   []string{PermSelfBillingRead},
 			"iat":           now.Unix(),
@@ -169,13 +169,12 @@ func TestDelegatedVerify_RejectsTenantIDClaim(t *testing.T) {
 	)
 	require.NoError(t, err)
 	_, _, verr := v.VerifyDelegatedAccess(tok)
-	require.Error(t, verr, "a delegated token carrying a tenant_id claim must be rejected (issuer-only hard cut)")
+	require.Error(t, verr, "a delegated token carrying an org_id claim must be rejected (issuer-only hard cut)")
 }
 
-// Twin of the tenant_id rejection: the `tenant` slug claim is equally
-// forbidden (authkit v0.23.0 `delegated_access_has_tenant`). Tokens carry NO
-// tenant claims of any kind.
-func TestDelegatedVerify_RejectsTenantSlugClaim(t *testing.T) {
+// Twin of the org_id rejection: the `org` slug claim is equally forbidden.
+// Tokens carry NO org claims of any kind.
+func TestDelegatedVerify_RejectsOrgClaim(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	hs := signer.(jwtkit.HeaderSigner)
 	now := time.Now()
@@ -183,7 +182,7 @@ func TestDelegatedVerify_RejectsTenantSlugClaim(t *testing.T) {
 		jwt.MapClaims{
 			"iss":           testDelegatedIssuer,
 			"aud":           []string{canonicalAudience},
-			"tenant":        testDelegatedTenant,
+			"org":           testDelegatedTenant,
 			"delegated_sub": testDelegatedSubject,
 			"permissions":   []string{PermSelfBillingRead},
 			"iat":           now.Unix(),
@@ -193,7 +192,7 @@ func TestDelegatedVerify_RejectsTenantSlugClaim(t *testing.T) {
 	)
 	require.NoError(t, err)
 	_, _, verr := v.VerifyDelegatedAccess(tok)
-	require.Error(t, verr, "a delegated token carrying a tenant slug claim must be rejected (issuer-only hard cut)")
+	require.Error(t, verr, "a delegated token carrying an org slug claim must be rejected (issuer-only hard cut)")
 }
 
 func TestDelegatedVerify_RejectsNoPermissions(t *testing.T) {
