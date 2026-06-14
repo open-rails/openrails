@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/service"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // Options configures the embedded runtime. It wraps pkg/embedded.Options
@@ -85,6 +86,14 @@ type Runtime struct {
 	emb *embedded.Embedded
 	svc *service.Service
 
+	// tenantID is the engine's construction-time bound tenant (#336/#478),
+	// resolved once from Config.Tenant. The unified Client adapter injects it
+	// onto each call's context so an embedded host can call the service-token-
+	// equivalent surface with a plain context (the host IS the principal and is
+	// trusted for its own tenant); the standalone/gin surface still resolves the
+	// tenant from the request/credential instead. Zero when no tenant is bound.
+	tenantID tenant.ID
+
 	workersCancel context.CancelFunc
 	workersDone   chan error
 }
@@ -125,6 +134,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	// The host owns the embed + DB, so auto-create is safe and idempotent. This
 	// runs after migrations (RunMigrations above) so the tenants table exists. A
 	// second New is a no-op (INSERT ... ON CONFLICT DO NOTHING).
+	var boundTenant tenant.ID
 	if opts.Config.Tenant != "" {
 		if a := emb.App(); a != nil && a.Runtime != nil && a.Runtime.DB != nil {
 			ectx := ctx
@@ -132,6 +142,15 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 				_ = emb.Close(ctx)
 				return nil, fmt.Errorf("openrails embed: %w", err)
 			}
+			// Resolve the bound slug to its id once, so the Client adapter can pin
+			// it onto each call's context (the unified Client path has no HTTP
+			// middleware to resolve a tenant; the host is trusted for its own).
+			id, rerr := db.ResolveTenantSlug(ectx, a.Runtime.DB.Qx(ectx), opts.Config.Tenant)
+			if rerr != nil {
+				_ = emb.Close(ctx)
+				return nil, fmt.Errorf("openrails embed: %w", rerr)
+			}
+			boundTenant = id
 		}
 	}
 	svc, err := emb.Service()
@@ -140,7 +159,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, err
 	}
 
-	r := &Runtime{emb: emb, svc: svc}
+	r := &Runtime{emb: emb, svc: svc, tenantID: boundTenant}
 	if opts.RunWorkers {
 		wctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		r.workersCancel = cancel
@@ -156,7 +175,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 // mapping, so it is observably identical to NewRemote against the same engine
 // (enforced by conformance_integration_test.go).
 func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
-	c := &localClient{svc: r.svc}
+	c := &localClient{svc: r.svc, tenantID: r.tenantID}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(c)

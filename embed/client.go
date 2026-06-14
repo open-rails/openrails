@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // localClient adapts pkg/service.Service to openrails.Client (#338).
@@ -36,6 +37,27 @@ type localClient struct {
 	// requests when the request leaves it empty — the client-side counterpart of
 	// openrails.WithCurrency on the remote (#476).
 	currency string
+	// tenantID is the engine's construction-time bound tenant (#336/#478). The
+	// unified Client path has no HTTP middleware to resolve a tenant onto the
+	// context the way the standalone/gin surface does, so the adapter pins the
+	// bound tenant itself (ensureTenant) — the embedded host is the principal and
+	// is trusted for its own tenant. Zero when no tenant is bound (the call then
+	// hard-fails downstream on tenant.Require, exactly as the standalone surface
+	// would for a request with no resolved tenant).
+	tenantID tenant.ID
+}
+
+// ensureTenant pins the engine's bound tenant onto ctx when the caller has not
+// already resolved one. A non-zero tenant already on the context (e.g. a host
+// that resolved a different tenant) is left untouched.
+func (c *localClient) ensureTenant(ctx context.Context) context.Context {
+	if c == nil || c.tenantID.IsZero() {
+		return ctx
+	}
+	if _, ok := tenant.FromContext(ctx); ok {
+		return ctx
+	}
+	return tenant.WithID(ctx, c.tenantID)
 }
 
 // ClientOption configures Runtime.Client.
@@ -137,6 +159,7 @@ func transactionFromService(t *billingservice.CreditTransaction) *openrails.Cred
 // (service_admission.go). All verdict outcomes — allowed, throughput (429),
 // money (402), gated (403) — return (resp, nil), like the remote client.
 func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*openrails.AdmitResponse, error) {
+	ctx = c.ensureTenant(ctx)
 	if req.EstimateMicros < 0 {
 		return nil, invalidErr("estimate_micros must be >= 0")
 	}
@@ -202,6 +225,7 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 
 // Authorize transcribes handlers.ServiceAuthorizeCredits (service_credits.go).
 func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequest) (*openrails.AuthorizeResponse, error) {
+	ctx = c.ensureTenant(ctx)
 	if req.Currency == "" {
 		req.Currency = c.currency
 	}
@@ -253,6 +277,7 @@ func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequ
 
 // HoldCredits transcribes handlers.ServiceHoldCredits (service_credits.go).
 func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCreditsRequest) (*openrails.CreditHold, error) {
+	ctx = c.ensureTenant(ctx)
 	// gin binding (in struct field order): actor, amount, source, source_id,
 	// expires_at are all `binding:"required"`. Currency is optional (#476).
 	switch {
@@ -300,6 +325,7 @@ func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCredits
 // CaptureHold transcribes handlers.ServiceCaptureHold (service_credits.go)
 // without the usage-event extension (see Capture for that).
 func (c *localClient) CaptureHold(ctx context.Context, req openrails.CaptureHoldRequest) (*openrails.CreditTransaction, error) {
+	ctx = c.ensureTenant(ctx)
 	if req.Amount == 0 { // gin binding: amount is `binding:"required"`
 		return nil, bindRequiredErr("Amount")
 	}
@@ -318,6 +344,7 @@ func (c *localClient) CaptureHold(ctx context.Context, req openrails.CaptureHold
 // 500 "release failed"; the embedded transport mirrors that (ErrInternal, not
 // ErrNotFound) so errors.Is agrees across transports.
 func (c *localClient) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
+	ctx = c.ensureTenant(ctx)
 	if err := c.svc.ReleaseHold(ctx, holdID); err != nil {
 		return internalErr("release failed")
 	}
@@ -327,6 +354,7 @@ func (c *localClient) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
 // WithdrawCredits transcribes handlers.ServiceWithdrawCredits
 // (service_credits.go).
 func (c *localClient) WithdrawCredits(ctx context.Context, req openrails.WithdrawCreditsRequest) (*openrails.CreditTransaction, error) {
+	ctx = c.ensureTenant(ctx)
 	// Currency is optional (#476).
 	switch {
 	case strings.TrimSpace(req.Actor) == "":
@@ -359,6 +387,7 @@ func (c *localClient) WithdrawCredits(ctx context.Context, req openrails.Withdra
 // DepositCredits transcribes handlers.ServiceDepositCredits
 // (service_credits.go).
 func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositCreditsRequest) (*openrails.CreditTransaction, error) {
+	ctx = c.ensureTenant(ctx)
 	// Currency is optional (#476).
 	switch {
 	case strings.TrimSpace(req.Actor) == "":
@@ -406,6 +435,7 @@ func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositC
 // Capture transcribes handlers.ServiceCaptureHold (service_credits.go)
 // addressed by reservation id, including the #311 usage-event extension.
 func (c *localClient) Capture(ctx context.Context, reservationID string, capturedMicros int64, usage *openrails.CaptureUsage) error {
+	ctx = c.ensureTenant(ctx)
 	holdID, err := uuid.Parse(strings.TrimSpace(reservationID))
 	if err != nil {
 		return invalidErr("invalid hold id")
@@ -433,6 +463,7 @@ func (c *localClient) Capture(ctx context.Context, reservationID string, capture
 // Release transcribes handlers.ServiceReleaseHold (service_credits.go),
 // addressed by reservation id.
 func (c *localClient) Release(ctx context.Context, reservationID string) error {
+	ctx = c.ensureTenant(ctx)
 	holdID, err := uuid.Parse(strings.TrimSpace(reservationID))
 	if err != nil {
 		return invalidErr("invalid hold id")
@@ -444,6 +475,7 @@ func (c *localClient) Release(ctx context.Context, reservationID string) error {
 // an absent currency defaults to "USD" (#476); the remote client sends its
 // WithCurrency default when set, mirrored here.
 func (c *localClient) Balance(ctx context.Context, payerTenantID string) (*openrails.BalanceResponse, error) {
+	ctx = c.ensureTenant(ctx)
 	payer, err := parseTenantSubject(payerTenantID, "invalid tenant_subject_id")
 	if err != nil {
 		return nil, err
@@ -464,6 +496,7 @@ func (c *localClient) Balance(ctx context.Context, payerTenantID string) (*openr
 // GetCreditAccount transcribes handlers.ServiceGetCreditsBalance
 // (service_credits.go) with the remote client's "USD" normalization (#476).
 func (c *localClient) GetCreditAccount(ctx context.Context, payerTenantID, currency string) (*openrails.CreditAccount, error) {
+	ctx = c.ensureTenant(ctx)
 	payer, err := parseTenantSubject(payerTenantID, "invalid tenant_subject_id")
 	if err != nil {
 		return nil, err
@@ -487,6 +520,7 @@ func (c *localClient) GetCreditAccount(ctx context.Context, payerTenantID, curre
 // (service_credits.go) and then — like the remote client — re-reads the account
 // snapshot via the balance path.
 func (c *localClient) SetCreditAccountSettings(ctx context.Context, payerTenantID, currency string, in openrails.AccountSettingsInput) (*openrails.CreditAccount, error) {
+	ctx = c.ensureTenant(ctx)
 	payer, err := parseTenantSubject(payerTenantID, "tenant_subject_id required")
 	if err != nil {
 		return nil, err
@@ -538,6 +572,7 @@ type serviceTxn struct {
 // handlers.ServiceListTenantSubjectCreditTransactions (service_credits.go),
 // producing the same {"transactions":[...],"total":N} JSON the wire carries.
 func (c *localClient) ListCreditTransactions(ctx context.Context, payerTenantID, currency string, limit int) (json.RawMessage, error) {
+	ctx = c.ensureTenant(ctx)
 	payer, err := parseTenantSubject(payerTenantID, "tenant_subject_id required")
 	if err != nil {
 		return nil, err
@@ -563,6 +598,7 @@ func (c *localClient) ListCreditTransactions(ctx context.Context, payerTenantID,
 
 // UsageRollup transcribes handlers.ServiceUsageRollup (service_credits.go).
 func (c *localClient) UsageRollup(ctx context.Context, payerTenantID string, from, to time.Time, groupBy string) ([]openrails.UsageRollupRow, error) {
+	ctx = c.ensureTenant(ctx)
 	// gin binding: tenant_subject_id, from, to, group_by are all required.
 	switch {
 	case strings.TrimSpace(payerTenantID) == "":
@@ -597,6 +633,7 @@ func (c *localClient) UsageRollup(ctx context.Context, payerTenantID string, fro
 
 // BudgetCheck transcribes handlers.ServiceBudgetCheck (service_admission.go).
 func (c *localClient) BudgetCheck(ctx context.Context, tenantSubjectID, actorID string, windows []openrails.BudgetWindowInput, requestedMicros int64) ([]openrails.BudgetWindow, error) {
+	ctx = c.ensureTenant(ctx)
 	payer, err := parseTenantSubject(tenantSubjectID, "tenant_subject_id required")
 	if err != nil {
 		return nil, err
@@ -620,6 +657,7 @@ func (c *localClient) BudgetCheck(ctx context.Context, tenantSubjectID, actorID 
 
 // BudgetStatus transcribes handlers.ServiceGetBudget (service_admission.go).
 func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, actorID, tier string) ([]openrails.BudgetWindow, error) {
+	ctx = c.ensureTenant(ctx)
 	payer, err := parseTenantSubject(tenantSubjectID, "tenant_subject_id required")
 	if err != nil {
 		return nil, err
@@ -638,6 +676,7 @@ func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, actorID
 // SetTierPolicy transcribes handlers.ServiceSetTierPolicy
 // (service_admission.go).
 func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string, in openrails.TierPolicyInput) error {
+	ctx = c.ensureTenant(ctx)
 	payer, err := parseTenantSubject(tenantSubjectID, "tenant_subject_id required")
 	if err != nil {
 		return err
@@ -671,6 +710,7 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 // (service_admission.go, #476). An empty tenant_subject_id is the tenant-wide
 // default schedule (zero payer); a non-empty one is a per-subject override.
 func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID string, schedule []openrails.TierScheduleRung) error {
+	ctx = c.ensureTenant(ctx)
 	var payer identity.TenantSubjectID
 	if strings.TrimSpace(tenantSubjectID) != "" {
 		var err error
@@ -704,6 +744,7 @@ func budgetScopeWindowInputs(ws []openrails.BudgetScopeWindow) []billingservice.
 // SetSubjectBudgetPolicy transcribes handlers.ServiceSetSubjectBudgetPolicy
 // (service_admission.go, #473). role_id maps onto the facade's ScopeKey.
 func (c *localClient) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in openrails.SubjectBudgetPolicyInput) error {
+	ctx = c.ensureTenant(ctx)
 	payer, err := parseTenantSubject(tenantSubjectID, "tenant_subject_id required")
 	if err != nil {
 		return err
@@ -722,6 +763,7 @@ func (c *localClient) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectI
 // (service_admission.go, #473). The platform-admin route gate is not transcribed
 // — embedded hosts are the principal (the direct call is operator-trusted).
 func (c *localClient) SetPlatformBudgetPolicy(ctx context.Context, tenantSubjectID string, in openrails.PlatformBudgetPolicyInput) error {
+	ctx = c.ensureTenant(ctx)
 	payer, err := parseTenantSubject(tenantSubjectID, "tenant_subject_id required")
 	if err != nil {
 		return err
@@ -739,6 +781,7 @@ func (c *localClient) SetPlatformBudgetPolicy(ctx context.Context, tenantSubject
 // (service_admission.go, #473): subject-owned policies only; ScopeKey maps back
 // onto role_id.
 func (c *localClient) SubjectBudgetPolicies(ctx context.Context, tenantSubjectID string) ([]openrails.SubjectBudgetPolicy, error) {
+	ctx = c.ensureTenant(ctx)
 	payer, err := parseTenantSubject(tenantSubjectID, "tenant_subject_id required")
 	if err != nil {
 		return nil, err
@@ -787,6 +830,7 @@ func wireEntitlementRecords(recs []billingservice.EntitlementRecord) []openrails
 // dedupe, cap, one query, an entry per requested subject. The service-token
 // scope gate is not transcribed — embedded hosts are the principal.
 func (c *localClient) ListActiveEntitlements(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]openrails.EntitlementRecord, error) {
+	ctx = c.ensureTenant(ctx)
 	if strings.TrimSpace(issuer) == "" {
 		return nil, invalidErr("issuer required")
 	}
@@ -826,6 +870,7 @@ func (c *localClient) ListActiveEntitlements(ctx context.Context, issuer string,
 // ResourceRevenueDaily transcribes handlers.ServiceResourceRevenue
 // (service_credits.go), including the handler-side total summation.
 func (c *localClient) ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*openrails.ResourceRevenueResponse, error) {
+	ctx = c.ensureTenant(ctx)
 	resource = strings.TrimSpace(resource) // the remote client trims before sending
 	// gin binding: resource, from, to are all required.
 	switch {
@@ -880,6 +925,7 @@ func mapWindowErr(err error, fallback string) error {
 // OpenWindow transcribes handlers.ServiceOpenCreditWindow
 // (service_credit_window.go, #335).
 func (c *localClient) OpenWindow(ctx context.Context, req openrails.OpenWindowRequest) (*openrails.CreditWindow, error) {
+	ctx = c.ensureTenant(ctx)
 	if req.Currency == "" {
 		req.Currency = c.currency
 	}
@@ -914,6 +960,7 @@ func (c *localClient) OpenWindow(ctx context.Context, req openrails.OpenWindowRe
 // unreachable through typed items (WindowID is a uuid.UUID; a nil one gets the
 // engine's own per-item invalid_item result, same as the wire).
 func (c *localClient) SettleWindowItems(ctx context.Context, items []openrails.WindowSettleItem) ([]openrails.WindowSettleResult, error) {
+	ctx = c.ensureTenant(ctx)
 	if len(items) == 0 {
 		return nil, invalidErr("items required")
 	}
@@ -956,6 +1003,7 @@ func (c *localClient) SettleWindowItems(ctx context.Context, items []openrails.W
 // RefillWindow transcribes handlers.ServiceRefillCreditWindow
 // (service_credit_window.go).
 func (c *localClient) RefillWindow(ctx context.Context, windowID uuid.UUID, amountMicros, ttlSeconds int64) (*openrails.CreditWindow, error) {
+	ctx = c.ensureTenant(ctx)
 	if amountMicros <= 0 && ttlSeconds <= 0 {
 		return nil, invalidErr("amount or ttl_seconds required")
 	}
@@ -969,6 +1017,7 @@ func (c *localClient) RefillWindow(ctx context.Context, windowID uuid.UUID, amou
 // CloseWindow transcribes handlers.ServiceCloseCreditWindow
 // (service_credit_window.go).
 func (c *localClient) CloseWindow(ctx context.Context, windowID uuid.UUID) (*openrails.CreditWindow, error) {
+	ctx = c.ensureTenant(ctx)
 	w, err := c.svc.CloseWindow(ctx, windowID)
 	if err != nil {
 		return nil, mapWindowErr(err, "close failed")
@@ -982,6 +1031,7 @@ func (c *localClient) CloseWindow(ctx context.Context, windowID uuid.UUID) (*ope
 // transcribed — in embedded mode the host IS the principal, exactly like a
 // tenant-wide token (so its `allows` is always true).
 func (c *localClient) AdmitBatch(ctx context.Context, items []openrails.AdmitRequest) ([]openrails.AdmitBatchVerdict, error) {
+	ctx = c.ensureTenant(ctx)
 	if len(items) == 0 {
 		return nil, invalidErr("items required")
 	}
