@@ -9,6 +9,32 @@
 
 ---
 
+# #479: OpenMeter-parity ideas — first-class configurable METERS + priority-based grant burn-down
+
+**Completed:** no — future direction (not blocking). Surfaced comparing OpenRails to OpenMeter
+(openmeterio/openmeter). OpenRails is already a superset (metering + entitlements + its own
+billing/payments/dunning + multi-tenant control plane + admission/rate-limit/fairness-policy +
+spend-graduated tiers), but two OpenMeter concepts are worth adopting:
+
+1. **First-class configurable METERS.** Today usage is recorded as `usage_events` (#289) + dimensions
+   and aggregated implicitly for billing; throughput units (#472) and budget windows (#475/#476) are
+   semi-separate. OpenMeter models a **Meter** as a named, configurable aggregation —
+   `agg(event.field) over window` (sum/count/unique/min/max), e.g. `sum(tokens)`, `count(requests)`,
+   `unique(model)`. Make meters first-class and have limits/entitlements/tiers *reference a meter*
+   instead of hardcoded unit strings (`token`/`image`/`request`). Unifies throughput + budget windows
+   + usage analytics under one substrate; adding a metered dimension becomes config-only.
+
+2. **Priority-based grant burn-down.** OpenMeter's prepaid credits consume grants in a defined
+   PRIORITY order (which grant/credit to spend first) with reset/rollover. OpenRails' credit/grant
+   model could formalize the same — relevant to #475 custom credits + entitlement grants (e.g. spend
+   promotional/expiring grants before purchased balance).
+
+NOT in scope for the rate-limit/tier system (which is done). Build when a real need appears. Reference:
+OpenMeter (metering + entitlements; explicitly has NO request scheduler/fair-queuing — that stays the
+orchestrator's job, confirming OpenRails' boundary: gate/meter/bill, not dispatch-reorder).
+
+---
+
 # #228: admin-analytics-and-billing-dashboard
 
 **Completed:** no
