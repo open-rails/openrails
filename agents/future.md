@@ -9,6 +9,22 @@
 
 ---
 
+# #490: Deposit/chargeback fraud controls — 3-D Secure + processor screening (DEFERRED — build when card-deposit fraud appears)
+
+DEFERRED (Paul, 2026-06-14): real but not urgent, and NOT part of the rate-limit/tier system. Chargeback/stolen-card
+fraud — deposit on a stolen/disputed card, consume irreversible compute, then charge back; the prepaid balance does
+NOT bound it (the deposit reverses AFTER delivery), and the existential risk is the chargeback RATIO terminating the
+merchant account. But the prepaid model + per-charge cap (#487) already bound a lot, and the HEAVY parts (custom
+screening, unseasoned-funds velocity) are overkill until fraud actually shows up.
+
+When it does, the cheap high-leverage version first: turn ON the processor's BUILT-IN tools — **3-D Secure (SCA)** on
+deposits (shifts stolen-card-dispute liability to the issuer) + the processor's fraud screening (Radar / NMI fraud
+tools: risky BIN/AVS/CVC/velocity). Only build custom unseasoned-funds spend-velocity / KYC if those prove
+insufficient. Generic to any card-taking platform. Pairs with #489 (arrears amplifies deposit-fraud exposure — a
+reason arrears stays trust-gated).
+
+---
+
 # #479: OpenMeter-parity ideas — first-class configurable METERS + priority-based grant burn-down
 
 **Completed:** no — future direction (not blocking). Surfaced comparing OpenRails to OpenMeter
