@@ -892,6 +892,18 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       identity (persist attribution; abuse counters may stay in Redis but keyed by the real actor id).
 - [ ] SDK + wire: distinguish payer (customer) from actor on Admit/charge; surface per-actor spend
       attribution to the payer.
+- [ ] DROP money_balances (it is a read-cache roll-up): derive available = SUM(unexpired
+      money_blocks.remaining_amount) and held = SUM(active-hold authorized_amount in money_transactions).
+      Move the FOR UPDATE spend mutex (today LockMoneyBalance) onto the CUSTOMER row (now the account) or a
+      pg_advisory_xact_lock(customer_id). Delete the drift/anomaly reconciliation queries
+      (ListMoneyHeldBalanceDrift / ListMoneyBalanceAnomalies) — no cache, no drift.
+- [ ] Background COMPACTION job (extend the existing credit-block EXPIRY River job) to delete
+      fully-spent (remaining_amount=0) and expired money_blocks, keeping the spendable-lot table bounded so
+      the derived SUM stays O(log n). Touches money_blocks ONLY.
+- [ ] AUDIT-SAFE: the purchase receipt lives in `payments` (the card charge, "bought $10 June 11") + the
+      `money_transactions` transaction_type='deposit' row — NOT in money_blocks. Compaction must NEVER
+      delete money_transactions deposit rows or payments; only the derived spendable lots. (money_blocks
+      .source_transaction_id -> money_transactions may dangle/null on block delete; the receipt survives.)
 - [ ] Resolution (authkit#77): issuer -> merchant from the ISSUER REGISTRY (billing namespace); issuer ->
       payer-customer (one designated balance per federated issuer) gives the actor's customer_id. customer
       has NO (issuer, subject) and NO tenant — those live on the actor / are resolved at the auth boundary.
