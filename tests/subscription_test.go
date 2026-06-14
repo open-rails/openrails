@@ -18,7 +18,7 @@ import (
 
 // TestGetProductsEndpoint tests the public products endpoint returns seeded products
 func TestGetProductsEndpoint(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	// Seed products
 	testProducts := suite.SeedProducts()

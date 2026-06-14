@@ -99,7 +99,7 @@ func configureUSDCFundingProviders(t *testing.T, suite *TestContainerSuite) {
 }
 
 func TestUSDCFundingSelfServiceCreateGetIdempotencyAndIsolation(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	configureUSDCFundingProviders(t, suite)
 
 	userA := uuid.NewString()
@@ -150,7 +150,7 @@ func TestUSDCFundingSelfServiceCreateGetIdempotencyAndIsolation(t *testing.T) {
 }
 
 func TestUSDCFundingSelfServiceRejectsUnsupportedProviderAndNetwork(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	configureUSDCFundingProviders(t, suite)
 
 	router := newUSDCFundingSelfRouter(t, suite, uuid.NewString(), []string{

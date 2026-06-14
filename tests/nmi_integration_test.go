@@ -385,7 +385,7 @@ func TestNMIDemoClientRebill(t *testing.T) {
 // This test creates a past_due subscription with a valid vault and verifies
 // the dunning worker can process it (though without a plan_id the rebill will fail)
 func TestDunningWorkerWithRealNMI(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	// Create vault with real NMI API
 	vaultID := createNMIDemoVault(t)
@@ -459,7 +459,7 @@ func TestDunningWorkerWithRealNMI(t *testing.T) {
 
 // TestNMIRuntimeClientConfigured verifies the test suite has NMI clients configured
 func TestNMIRuntimeClientConfigured(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	require.NotNil(t, suite.App.Runtime.NMIClients, "NMI clients should be configured")
 	require.Contains(t, suite.App.Runtime.NMIClients, "mobius", "Mobius provider should be configured")

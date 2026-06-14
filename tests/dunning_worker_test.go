@@ -24,7 +24,7 @@ import (
 
 // TestDunningWorkerNoDueSubscriptions tests that the worker handles no due subscriptions gracefully
 func TestDunningWorkerNoDueSubscriptions(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	// Create worker without NMI clients (tests skip behavior)
 	worker := &riverjobs.DunningWorker{
@@ -44,7 +44,7 @@ func TestDunningWorkerNoDueSubscriptions(t *testing.T) {
 
 // TestDunningWorkerSkipsWithoutNMIClients tests that the worker logs warning and exits when NMI clients aren't configured
 func TestDunningWorkerSkipsWithoutNMIClients(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	// Seed products first
 	products := suite.SeedProducts()
@@ -90,7 +90,7 @@ func TestDunningWorkerSkipsWithoutNMIClients(t *testing.T) {
 
 // TestDunningWorkerSkipsNonNMISubscriptions tests that the worker skips CCBill/other processor subscriptions
 func TestDunningWorkerSkipsNonNMISubscriptions(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	// Seed products first
 	products := suite.SeedProducts()
@@ -132,7 +132,7 @@ func TestDunningWorkerSkipsNonNMISubscriptions(t *testing.T) {
 
 // TestDunningWorkerQueryFilters tests that the worker only queries correct subscriptions
 func TestDunningWorkerQueryFilters(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	// Seed products first
 	products := suite.SeedProducts()
@@ -210,7 +210,7 @@ func TestDunningWorkerQueryFilters(t *testing.T) {
 
 // TestDunningWorkerMissingPaymentMethod tests that subscriptions without valid payment methods fail gracefully
 func TestDunningWorkerMissingPaymentMethod(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	// Seed products first
 	products := suite.SeedProducts()
@@ -257,7 +257,7 @@ func TestDunningWorkerMissingPaymentMethod(t *testing.T) {
 
 // TestDunningWorkerMissingPaymentMethodVault tests that payment methods with missing vault fail the subscription
 func TestDunningWorkerMissingPaymentMethodVault(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	// Seed products first
 	products := suite.SeedProducts()
@@ -309,7 +309,7 @@ func TestDunningWorkerMissingPaymentMethodVault(t *testing.T) {
 
 // TestDunningWorkerMultipleDueSubscriptions tests processing multiple subscriptions
 func TestDunningWorkerMultipleDueSubscriptions(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	// Seed products first
 	products := suite.SeedProducts()
@@ -362,7 +362,7 @@ func TestDunningWorkerMultipleDueSubscriptions(t *testing.T) {
 // past_due subscription whose missed rebill is older than the window is
 // cancelled + downgraded WITHOUT any charge attempt, instead of being retried.
 func TestDunningWorkerWindowExpiredCancelsWithoutCharge(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
@@ -409,7 +409,7 @@ func TestDunningWorkerWindowExpiredCancelsWithoutCharge(t *testing.T) {
 // TestDunningWorkerWithinWindowIsNotExpired verifies a recent missed rebill is
 // NOT window-cancelled (it proceeds into the normal rebill path).
 func TestDunningWorkerWithinWindowIsNotExpired(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
@@ -474,7 +474,7 @@ func queryManualRebillIntent(t *testing.T, suite *TestContainerSuite, subID uuid
 //     only at mode=full), while the subscription row itself takes no action —
 //     it stays past_due with retry state preserved and is never charged.
 func TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 	rt := suite.App.Runtime
 
@@ -626,7 +626,7 @@ func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cyc
 // one day of slack). A missed rebill older than 3 days is terminal-cancelled
 // without a charge; a fresher one proceeds into the normal rebill path.
 func TestDunningWorkerWeeklyCycleDerivedWindow(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	priceID := createDunningCycleProductPrice(t, suite, 7)
 	pastRetry := time.Now().Add(-1 * time.Hour)
@@ -687,7 +687,7 @@ func TestDunningWorkerWeeklyCycleDerivedWindow(t *testing.T) {
 // a sub-4-day billing cycle derives a ZERO staleness window, so ANY past_due
 // daily subscription is terminal-cancelled by the worker without a charge.
 func TestDunningWorkerDailyCycleImmediatelyTerminal(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	priceID := createDunningCycleProductPrice(t, suite, 1)
 
@@ -730,7 +730,7 @@ func TestDunningWorkerDailyCycleImmediatelyTerminal(t *testing.T) {
 // a 1d-cycle subscription goes straight to the terminal branch — cancelled,
 // no past_due retry state.
 func TestDunningWorkerFailMembershipDailyCycleFirstFailureTerminal(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	rt := suite.App.Runtime
 
 	priceID := createDunningCycleProductPrice(t, suite, 1)
@@ -767,7 +767,7 @@ func TestDunningWorkerFailMembershipDailyCycleFirstFailureTerminal(t *testing.T)
 // retry scheduling in FailMembership (#359): a 7d cycle retries at +1d and
 // +2d after the initial failure and is terminal on the 3rd failure.
 func TestDunningWorkerFailMembershipWeeklyCycleSchedule(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	rt := suite.App.Runtime
 	ctx := context.Background()
 

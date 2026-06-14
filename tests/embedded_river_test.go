@@ -17,7 +17,7 @@ import (
 
 // TestRuntimeAddBillingWorkersTo tests that billing workers can be added to an external registry
 func TestRuntimeAddBillingWorkersTo(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	t.Run("adds workers to external registry", func(t *testing.T) {
@@ -47,7 +47,7 @@ func TestRuntimeAddBillingWorkersTo(t *testing.T) {
 
 // TestRuntimeGetBillingPeriodicJobs tests that billing periodic jobs are returned
 func TestRuntimeGetBillingPeriodicJobs(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	t.Run("returns periodic jobs", func(t *testing.T) {
@@ -64,7 +64,7 @@ func TestRuntimeGetBillingPeriodicJobs(t *testing.T) {
 
 // TestRuntimeExternalRiverClient tests external River client flag
 func TestRuntimeExternalRiverClient(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	t.Run("HasExternalRiverClient is false by default", func(t *testing.T) {
 		// The suite creates its own River client internally, not externally
@@ -77,7 +77,7 @@ func TestRuntimeExternalRiverClient(t *testing.T) {
 
 // TestBillingWorkersProcessJobs tests that billing workers can process jobs
 func TestBillingWorkersProcessJobs(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	suite.ClearJobQueue()
@@ -126,7 +126,7 @@ func TestQueueBillingExport(t *testing.T) {
 
 // TestExternalRiverClientWorkflow tests the documented workflow for external clients
 func TestExternalRiverClientWorkflow(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	t.Run("documented workflow steps work", func(t *testing.T) {

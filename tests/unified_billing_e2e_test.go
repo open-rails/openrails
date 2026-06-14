@@ -267,7 +267,7 @@ func findHold(rows []models.MoneyTransaction, holdID string) *models.MoneyTransa
 // capture the full authorized amount. Balance reduced by the full amount, held
 // returns to 0, hold row captured.
 func TestUnifiedBilling_PrepaidHoldCapture_Full(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
 	user := uuid.NewString()
 
@@ -297,7 +297,7 @@ func TestUnifiedBilling_PrepaidHoldCapture_Full(t *testing.T) {
 // actual). The remainder must be released back to available, held returns to 0,
 // and total credits are conserved (debited == captured actual only).
 func TestUnifiedBilling_PrepaidHoldCapture_Partial(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
 	user := uuid.NewString()
 
@@ -334,7 +334,7 @@ func TestUnifiedBilling_PrepaidHoldCapture_Partial(t *testing.T) {
 // TestUnifiedBilling_InsufficientBalance: holding beyond available is rejected
 // cleanly (402 insufficient_credits) and the balance is untouched.
 func TestUnifiedBilling_InsufficientBalance(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
 	user := uuid.NewString()
 
@@ -352,7 +352,7 @@ func TestUnifiedBilling_InsufficientBalance(t *testing.T) {
 // TestUnifiedBilling_FailureRelease: hold then release (worker failed / zero
 // usage). The full reservation is restored and nothing is debited.
 func TestUnifiedBilling_FailureRelease(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
 	user := uuid.NewString()
 
@@ -377,7 +377,7 @@ func TestUnifiedBilling_FailureRelease(t *testing.T) {
 // TestUnifiedBilling_Idempotency_HoldReplay: replaying the same (source,
 // source_id) hold returns the SAME hold and does not double-reserve.
 func TestUnifiedBilling_Idempotency_HoldReplay(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
 	user := uuid.NewString()
 
@@ -403,7 +403,7 @@ func TestUnifiedBilling_Idempotency_HoldReplay(t *testing.T) {
 // Owners here are the deterministic personal orgs of two distinct user ids,
 // which is exactly how the service routes scope (resolveOwner(nil, userID)).
 func TestUnifiedBilling_OwnerScoping(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
 	ownerA := uuid.NewString()
 	ownerB := uuid.NewString()
@@ -442,7 +442,7 @@ func TestUnifiedBilling_OwnerScoping(t *testing.T) {
 // over the service-token-authenticated public surface, proving the standalone-call contract:
 // fund -> lookup confirms hold -> capture actual -> ledger conserved.
 func TestUnifiedBilling_LifecycleViaPublicServiceTokenRoutes(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
 	user := uuid.NewString()
 

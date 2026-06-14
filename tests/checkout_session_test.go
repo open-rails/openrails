@@ -15,7 +15,7 @@ import (
 )
 
 func TestCheckoutSessionRequiresAuth(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
 
@@ -124,7 +124,7 @@ func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 }
 
 func TestCheckoutSessionCCBillRedirect(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
 

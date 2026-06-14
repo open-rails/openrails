@@ -25,7 +25,7 @@ func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry
 	// builds its LockMoneyBalance/SetMoneyBalance keys without Currency, so it
 	// decrements a phantom currency='' row and leaves the real 'USD' balance
 	// untouched. Fix is in the worker; un-skip once it threads money.DefaultCurrency.
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := dbtest.WithTestTenant(context.Background())
 
 	userID := uuid.New().String()

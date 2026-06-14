@@ -17,7 +17,7 @@ import (
 )
 
 func TestCancelSubscriptionRequiresAuth(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	body := map[string]string{"feedback": "test feedback"}
 	jsonBody, _ := json.Marshal(body)
@@ -121,7 +121,7 @@ func TestCancelSubscriptionAlreadyCancelled(t *testing.T) {
 }
 
 func TestCancelSubscriptionAuthBoundaries(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID

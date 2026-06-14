@@ -129,7 +129,7 @@ func (suite *TestContainerSuite) getMoneyBalance(id uuid.UUID) *models.MoneyBala
 
 // TestHoldExpiryWorkerNoExpiredHolds tests that the worker handles no expired holds gracefully
 func TestHoldExpiryWorkerNoExpiredHolds(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 
 	// Create a fake clock set to "now"
 	fakeClock := clockwork.NewFakeClockAt(time.Now())
@@ -150,7 +150,7 @@ func TestHoldExpiryWorkerNoExpiredHolds(t *testing.T) {
 
 // TestHoldExpiryWorkerExpiresActiveHolds tests that expired active holds are marked as expired
 func TestHoldExpiryWorkerExpiresActiveHolds(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	// Create user with balance and held balance
@@ -198,7 +198,7 @@ func TestHoldExpiryWorkerExpiresActiveHolds(t *testing.T) {
 
 // TestHoldExpiryWorkerSkipsNonActiveHolds tests that non-active holds are not processed
 func TestHoldExpiryWorkerSkipsNonActiveHolds(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	userID := uuid.New().String()
@@ -237,7 +237,7 @@ func TestHoldExpiryWorkerSkipsNonActiveHolds(t *testing.T) {
 
 // TestHoldExpiryWorkerMultipleUserHolds tests expiring holds for multiple users
 func TestHoldExpiryWorkerMultipleUserHolds(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -296,7 +296,7 @@ func TestHoldExpiryWorkerMultipleUserHolds(t *testing.T) {
 
 // TestHoldExpiryWorkerBatching tests that the worker processes in batches
 func TestHoldExpiryWorkerBatching(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	userID := uuid.New().String()
@@ -354,7 +354,7 @@ func TestHoldExpiryWorkerNilDB(t *testing.T) {
 
 // TestHoldExpiryWorkerHeldBalanceNeverNegative tests that held_balance never goes negative
 func TestHoldExpiryWorkerHeldBalanceNeverNegative(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := getSharedTestSuite(t)
 	ctx := context.Background()
 
 	userID := uuid.New().String()
