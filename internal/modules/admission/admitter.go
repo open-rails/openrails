@@ -111,6 +111,13 @@ type AdmitDecision struct {
 	// they were held under, so settlement releases them by request coords.
 	QueueAcquired  bool
 	ThroughputBase string
+
+	// ResolvedTier is the tier this verdict was evaluated under (#477): the
+	// host-supplied req.Tier when explicit, else the auto-graduated tier from
+	// cumulative paid spend (#476), else the lowest default. The host reads it
+	// back to drive its own per-tier capacity decisions (e.g. tensorhub's
+	// scheduler in-flight concurrency cap) without a second round-trip.
+	ResolvedTier string
 }
 
 // Admit runs throughput then money and returns the unified decision.
@@ -319,10 +326,10 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 			}
 			return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: res.Decision.DenyCode, Windows: tp.Windows, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses}, nil
 		}
-		return AdmitDecision{Allowed: true, Windows: tp.Windows, Hold: res.Hold, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base}, nil
+		return AdmitDecision{Allowed: true, Windows: tp.Windows, Hold: res.Hold, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier}, nil
 	}
 
-	return AdmitDecision{Allowed: true, Windows: tp.Windows, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base}, nil
+	return AdmitDecision{Allowed: true, Windows: tp.Windows, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier}, nil
 }
 
 // buildBudgetScopes assembles every budget scope to reserve for this request

@@ -73,6 +73,11 @@ type AdmitResult struct {
 	// Budget (#304): the rolling money-budget reservation + per-window state.
 	BudgetReservationID string                 `json:"budget_reservation_id,omitempty"`
 	BudgetWindows       []AdmitBudgetWindowDTO `json:"budget_windows,omitempty"`
+	// ResolvedTier is the tier this verdict was evaluated under (#477): explicit
+	// req.Tier, else the auto-graduated tier (#476), else the lowest default. The
+	// host reads it back to drive its own per-tier capacity decisions (e.g.
+	// tensorhub's scheduler in-flight concurrency cap) without a second round-trip.
+	ResolvedTier string `json:"resolved_tier,omitempty"`
 }
 
 // AdmitBudgetWindowDTO is a rolling money-budget window's state (#304), for the
@@ -186,6 +191,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		BlockedUnit:       dec.BlockedUnit,
 		DenyCode:          dec.DenyCode,
 		RetryAfterSeconds: int64(dec.RetryAfter / time.Second),
+		ResolvedTier:      dec.ResolvedTier,
 	}
 	for _, w := range dec.Windows {
 		res.Windows = append(res.Windows, AdmitWindowDTO{

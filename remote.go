@@ -368,6 +368,7 @@ func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in T
 		"windows":            in.Windows,
 		"entitled_resources": in.EntitledResources,
 		"budget_windows":     in.BudgetWindows,
+		"queue_limits":       in.QueueLimits,
 	}
 	return c.do(ctx, http.MethodPut, "/v1/service/tier-policies", body, nil)
 }

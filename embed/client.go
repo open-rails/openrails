@@ -187,6 +187,7 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 		RetryAfterSeconds:   res.RetryAfterSeconds,
 		ReservationID:       res.ReservationID,
 		BudgetReservationID: res.BudgetReservationID,
+		ResolvedTier:        res.ResolvedTier,
 	}
 	for _, w := range res.Windows {
 		out.Windows = append(out.Windows, openrails.AdmitWindow{
@@ -653,6 +654,11 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 	for _, b := range in.BudgetWindows {
 		pol.BudgetWindows = append(pol.BudgetWindows, billingservice.TierBudgetWindowInput{
 			Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros, Cadence: b.Cadence,
+		})
+	}
+	for _, q := range in.QueueLimits {
+		pol.QueueLimits = append(pol.QueueLimits, billingservice.TierQueueLimitInput{
+			Unit: q.Unit, Max: q.Max,
 		})
 	}
 	if err := c.svc.SetTierPolicy(ctx, payer, pol); err != nil {

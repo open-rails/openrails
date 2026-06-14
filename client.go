@@ -329,6 +329,11 @@ type AdmitResponse struct {
 	ReservationID       string         `json:"reservation_id,omitempty"`
 	BudgetReservationID string         `json:"budget_reservation_id,omitempty"`
 	BudgetWindows       []BudgetWindow `json:"budget_windows,omitempty"`
+	// ResolvedTier is the tier the verdict was evaluated under (#477): explicit
+	// req.Tier, else the auto-graduated tier (#476), else the lowest default. The
+	// host reads it back to drive its own per-tier capacity decisions (e.g.
+	// tensorhub's scheduler in-flight concurrency cap) without a second round-trip.
+	ResolvedTier string `json:"resolved_tier,omitempty"`
 }
 
 // CaptureUsage carries the analytics dimensions recorded alongside a capture so
@@ -424,15 +429,29 @@ type TierThroughputWindow struct {
 	Max           int64  `json:"max"`
 }
 
+// TierQueueLimit is one batch/queue reservation-pool cap (#472 G2 / #477): at
+// most Max units of Unit in-flight per (payer, endpoint-release). No time
+// window — held while the job is pending, freed at settlement
+// (pkg/service.TierQueueLimitInput on the wire).
+type TierQueueLimit struct {
+	Unit string `json:"unit"`
+	Max  int64  `json:"max"`
+}
+
 // TierPolicyInput configures a per-payer tier policy via
 // PUT /v1/service/tier-policies (#298): throughput windows + entitled
-// resources + fixed money-budget windows (pkg/service.TierPolicyInput on the
-// wire; tenant_subject_id travels alongside it).
+// resources + fixed money-budget windows + flex/batch queue limits
+// (pkg/service.TierPolicyInput on the wire; tenant_subject_id travels alongside
+// it).
 type TierPolicyInput struct {
 	Tier              string                 `json:"tier"`
 	Windows           []TierThroughputWindow `json:"windows"`
 	EntitledResources []string               `json:"entitled_resources"`
 	BudgetWindows     []BudgetWindowInput    `json:"budget_windows"`
+	// QueueLimits are the batch/flex reservation-pool caps (#472 G2 / #477): the
+	// per-tier in-flight queue ceiling OpenRails enforces at admit (BlockedBy=
+	// "queue" on overflow). Empty = no queue cap for this tier.
+	QueueLimits []TierQueueLimit `json:"queue_limits,omitempty"`
 }
 
 // TierScheduleRung is one rung of the persisted tier ladder set via
