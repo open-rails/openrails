@@ -7,7 +7,51 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 476
+next_id: 477
+
+---
+
+# #476: Persisted tier SCHEDULE + AUTO-graduation by cumulative spend — host declares the ladder once; OpenRails owns + maintains each tenant-subject's tier (no host cranking)
+
+Today graduation is host-cranked: `GraduateTier(payer, creditType, ladder)` (#298) requires the
+HOST to pass the ladder AND call it on every spend event (or poll). That's wrong ergonomically: the
+host shouldn't have to iterate payers or re-graduate. The ladder is a SCHEDULE that changes rarely;
+graduation should be OpenRails' job, driven off the spend it already records.
+
+## What changes
+1. **Store the schedule once.** New unified-client API `SetTierSchedule(tenantSubjectID-or-tenant, schedule)`
+   where `schedule = ordered [{tier, min_cumulative_paid_micros}]`, persisted per tenant (a
+   `tier_schedules` table; RLS + owner=platform, like the budget-policy owner split #473). Host calls
+   it once on boot / config-change. (HTTP + embedded transports, mirroring `SetTierPolicy`.)
+2. **OpenRails auto-maintains each payer's tier.** Derive `tier = highest schedule rung whose
+   min_cumulative_paid_micros <= payer.cumulative_paid_micros`, monotonic (never silently regresses).
+   Recompute + persist to `credit_account_settings.tier` server-side on the deposit/settlement path
+   (where `cumulative_paid` already changes) — EVENTFUL, O(1) reads. (Lazy derive-at-`GetTier`/admit
+   is the equivalent fallback if a schedule exists but the materialized tier is stale.) No background
+   crank required by the host; an internal worker may sweep for schedule-change re-grades.
+3. **`GetTier` returns the auto-maintained tier**; `Admit` resolves limits by it. The host (tensorhub)
+   only READS the tier (for its scheduler cap) — never writes/cranks it.
+
+## Migrate off host-cranked GraduateTier
+Keep `GraduateTier` working but make the stored-schedule path authoritative: if a `tier_schedule`
+exists for the tenant, OpenRails owns graduation and host `GraduateTier` calls become a no-op/deprecated.
+Manual admin tier override (explicit tier on account settings) still wins over the schedule (#298).
+
+## Tasks
+- [ ] `tier_schedules` table (tenant-scoped, owner=platform) + migration + RLS.
+- [ ] `SetTierSchedule` on the unified client (HTTP route + embedded adapter), mirroring `SetTierPolicy`.
+- [ ] Auto-graduation: recompute+persist `account_settings.tier` from `cumulative_paid` vs the stored
+      schedule on the deposit/settlement path (eventful); monotonic; admin-override still wins.
+- [ ] `GetTier`/`Admit` read the auto-maintained tier; deprecate/short-circuit host-cranked `GraduateTier`
+      when a schedule exists.
+- [ ] VERIFY: set a schedule once → make deposits crossing thresholds → tier rises automatically with
+      NO host call; admin override sticks; `Admit` enforces the new tier's limits; multi-tenant isolation.
+
+## Related
+#298 (host-cranked `GraduateTier` this supersedes), #473 (budget-policy owner=platform store pattern to
+mirror), #472 (per-tier throughput/queue limits resolved by the tier). CONSUMER: tensorhub #477
+(declares the schedule + per-tier capacity limits once, reads the auto-maintained tier for its
+scheduler cap).
 
 ---
 
