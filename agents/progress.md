@@ -830,21 +830,25 @@ TERMINOLOGY (decided): **customer = the PAYER** (money account, merchant-scoped,
 STRUCTURE (corrected): the MERCHANT is OpenRails's OWN multi-company billing/isolation namespace — one
 OpenRails server/DB hosts MANY merchants (companies). It is NOT a hop between tenant and customer, and is
 NOT resolved from an AuthKit token (merchants.owner_tenant_id is ownership/admin only — the schema comment
-says it is "never used to resolve a merchant from a token"). The customer is merchant-scoped
-(merchant:customer). Within a merchant: customer = the PAYER, an OPAQUE (issuer, subject) row — OpenRails
-does NOT store a tenant link (the subject "may represent a human, company, tenant, service"); actor = the
-invoker (delegated-user) under that customer.
+says it is "never used to resolve a merchant from a token"). Within a merchant:
 
-  merchant(1) -> customers(many);   customer(1) -> actors(many)
+  customer = the PAYER = a BALANCE / money account — a PURE billing entity: (id, merchant_id) + money
+    (money_accounts, tier, payment methods, credit-line). NO issuer, NO subject, NO tenant. It is an
+    ACCOUNT, not a person. A balance does not have an issuer.
+  actor = the AUTHENTICATED identity (merchant_id, issuer, subject) that DRAWS ON a customer's balance,
+    via a customer_id FK. (issuer, subject) is AUTH metadata and lives ONLY here.
 
-A customer does NOT need a tenant: an EMBEDDED payer is a native human with no org/tenant at all; a
-FEDERATED payer merely CORRESPONDS to an AuthKit tenant (its subject = the tenant id, resolved via
-issuer -> tenant, authkit#77) but that is NOT a stored FK. The only NEW relationship to model is
-actor -> payer-customer (FK), not customer -> tenant.
+  merchant(1) -> customers(many);   customer(1) -> actors(many);   actor -> customer (FK)
 
-FEDERATED resolution of a delegated request: issuer -> merchant (issuer registry) selects the billing
-NAMESPACE; the PAYER customer is the (issuer, subject) row whose subject = the issuer's tenant id
-(authkit#77); subject -> actor. An issuer has MANY actors, ALL resolving to the SAME payer customer.
+This finishes the de-conflation at the identity layer: AUTH identity on the actor, MONEY on the customer.
+The ISSUER is whoever AUTHENTICATED the actor — the HOST in embedded (it proves its own users), a
+remote_app/JWKS for a federated delegated-user or a tenant self-token. Every request has an actor with an
+(issuer, subject); the customer it bills is just an account id.
+
+A customer needs no tenant and no issuer. EMBEDDED: a native human (actor issuer = host) with its OWN
+balance — actor -> customer 1:1. FEDERATED: the issuer's single designated balance that ALL that issuer's
+actors draw on — actor -> customer many:1. How an actor finds its customer: issuer -> payer-customer
+(issuer registry, one payer per federated issuer); a fresh per-user balance for embedded.
 
 EMBEDDED degenerate case (doujins): the end-user genuinely holds money, so end-user = customer(payer) =
 actor (1:1); MANY customers per merchant (one per end-user), one actor each. Unifying rule: actor->customer
@@ -864,21 +868,26 @@ tier_schedules (#476), credit-line (#489), money-denominated spend-caps, #487 ma
 max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
 
 **Tasks:**
-- [ ] Promote `actor` to a first-class identity: table keyed (customer_id FK, issuer, subject) holding
-      spend-attribution + per-actor abuse counters. NO money_account, NO tier.
+- [ ] Make `customer` a PURE balance account: DROP (issuer, subject) from customers; customer =
+      (id, merchant_id) + money. The (issuer, subject) auth key moves to the actor. Migrate existing
+      customers rows (the federated ones collapse to one payer per issuer; embedded ones become per-user
+      balances).
+- [ ] Promote `actor` to a first-class identity: table keyed (merchant_id, issuer, subject) with a
+      customer_id FK, holding spend-attribution + per-actor abuse counters. NO money_account, NO tier.
 - [ ] Federated resolution: a delegated request (issuer, subject) resolves to an ACTOR whose customer_id =
-      the issuer's tenant's single payer account — STOP materializing a money_account per delegated-user.
-- [ ] Re-key/confirm money_accounts, processor_customers, tier_schedules, credit-line on customer(payer)
+      the issuer's single designated payer balance (issuer registry) — STOP materializing a money_account
+      per delegated-user.
+- [ ] Re-key/confirm money_accounts, processor_customers, tier_schedules, credit-line on customer(balance)
       only; migrate any per-delegated-user money_accounts created under the old model.
-- [ ] Embedded path: subject -> customer(payer) directly; actor == customer (self); keep per-end-user
-      customers.
+- [ ] Embedded path: actor (issuer = host, subject = end-user) -> a fresh per-user customer balance,
+      actor -> customer 1:1.
 - [ ] Move #488 per-invoker flat wasted-budget + a per-actor concurrent-capacity cap onto the actor
       identity (persist attribution; abuse counters may stay in Redis but keyed by the real actor id).
 - [ ] SDK + wire: distinguish payer (customer) from actor on Admit/charge; surface per-actor spend
       attribution to the payer.
-- [ ] Resolution (authkit#77): issuer -> merchant from the ISSUER REGISTRY (billing namespace); the PAYER
-      customer is the (issuer, subject) row whose subject = the issuer's tenant id (federated) or the
-      end-user (embedded). customer stays OPAQUE — NO tenant_id column. Model actor -> payer-customer (FK).
+- [ ] Resolution (authkit#77): issuer -> merchant from the ISSUER REGISTRY (billing namespace); issuer ->
+      payer-customer (one designated balance per federated issuer) gives the actor's customer_id. customer
+      has NO (issuer, subject) and NO tenant — those live on the actor / are resolved at the auth boundary.
 - [ ] Tests: federated many-actors-one-payer (spend attributed per actor, money debited from the ONE
       payer, per-actor abuse cap trips before the payer's); embedded actor==customer 1:1; a delegated-user
       has no tier and no money_account.
