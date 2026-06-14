@@ -575,7 +575,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	var decoded struct {
 		Transactions []struct {
 			ID              uuid.UUID `json:"id"`
-			MerchantSubjectID uuid.UUID `json:"merchant_subject_id"`
+			MerchantSubjectID uuid.UUID `json:"tenant_subject_id"`
 			Actor           string    `json:"actor"`
 			Amount          int64     `json:"amount"`
 			TransactionType string    `json:"transaction_type"`
@@ -842,7 +842,7 @@ func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
 
 	// ONE embedded runtime; both transports run over this single engine.
 	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, Redis: rdb}})
+	rt, err := embed.New(ctx, embed.Options{Tenant: dbtest.TestTenantSlug, Options: embedded.Options{Config: cfg, Redis: rdb}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
