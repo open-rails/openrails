@@ -677,9 +677,16 @@ func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, actorID
 // (service_admission.go).
 func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string, in openrails.TierPolicyInput) error {
 	ctx = c.ensureTenant(ctx)
-	payer, err := parseTenantSubject(tenantSubjectID, "tenant_subject_id required")
-	if err != nil {
-		return err
+	// An EMPTY tenant_subject_id sets the tenant-wide DEFAULT tier policy (#477,
+	// the platform capacity ladder declared once); a non-empty one is a per-subject
+	// override.
+	var payer identity.TenantSubjectID
+	if strings.TrimSpace(tenantSubjectID) != "" {
+		var err error
+		payer, err = parseTenantSubject(tenantSubjectID, "invalid tenant_subject_id")
+		if err != nil {
+			return err
+		}
 	}
 	pol := billingservice.TierPolicyInput{
 		Tier:              in.Tier,

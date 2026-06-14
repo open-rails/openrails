@@ -315,27 +315,34 @@ type serviceTierPolicyRequest struct {
 	billingservice.TierPolicyInput
 }
 
-// ServiceSetTierPolicy upserts a per-payer tier policy (#298 tier admin API):
-// throughput windows + entitled endpoints + fixed money-budget windows.
+// ServiceSetTierPolicy upserts a tier policy (#298 tier admin API): throughput
+// windows + entitled endpoints + queue limits + fixed money-budget windows. An
+// EMPTY tenant_subject_id sets the tenant-wide DEFAULT policy for the tier (#477,
+// the platform capacity ladder declared once); a non-empty one sets a
+// per-subject override (scope-checked).
 func ServiceSetTierPolicy(r *httprequest.Request) {
 	var req serviceTierPolicyRequest
 	if !r.BindJSON(&req) {
 		return
 	}
-	payer, err := parseServiceTenantSubjectID(req.TenantSubjectID)
-	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
-		return
-	}
-	if !requireServiceTenantSubjectScope(r, *payer) {
-		return
+	var payer billingidentity.TenantSubjectID
+	if strings.TrimSpace(req.TenantSubjectID) != "" {
+		p, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+		if err != nil || p == nil {
+			r.ErrorJSON(http.StatusBadRequest, "invalid tenant_subject_id")
+			return
+		}
+		if !requireServiceTenantSubjectScope(r, *p) {
+			return
+		}
+		payer = *p
 	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	if err := svc.SetTierPolicy(r.Request.Context(), *payer, req.TierPolicyInput); err != nil {
+	if err := svc.SetTierPolicy(r.Request.Context(), payer, req.TierPolicyInput); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set tier policy failed")
 		return
 	}

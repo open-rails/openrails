@@ -62,6 +62,9 @@ func (s *TierPolicyStore) UpsertTierPolicy(ctx context.Context, payer identity.T
 }
 
 // UpsertTierPolicyFull sets the full tier policy (windows + entitled resources).
+// A ZERO payer writes the TENANT-WIDE DEFAULT policy for the tier (#477): the
+// platform capacity ladder declared once, applied to every payer at that tier
+// (selected by GetTierPolicy when the payer has no own override).
 func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identity.TenantSubjectID, tier string, policy models.ThroughputPolicy) error {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -69,35 +72,38 @@ func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identi
 	}
 	tenantID := tid.UUID()
 	now := time.Now().UTC()
-	row := &models.TierPolicy{
-		ID:              uuidutil.NewV7(),
-		TenantID:        tenantID,
-		TenantSubjectID: payer.UUID(),
-		Tier:            tier,
-		Policy:          policy,
-		PolicyVersion:   1,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		// Materialize the payable tenant_subjects row so the tier_policies FK
-		// (migration 076) is satisfied on a subject's first policy write (#317).
-		if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
-			return err
-		}
-		policyJSON, err := json.Marshal(row.Policy)
+		policyJSON, err := json.Marshal(policy)
 		if err != nil {
 			return fmt.Errorf("admission: encode tier policy: %w", err)
 		}
+		// Tenant-wide default (#477): no subject row to materialize, NULL subject.
+		if payer.IsZero() {
+			return s.db.Gen(ctx).UpsertTierPolicyDefault(ctx, gen.UpsertTierPolicyDefaultParams{
+				ID:            uuidutil.NewV7(),
+				TenantID:      tenantID,
+				Tier:          tier,
+				Policy:        policyJSON,
+				PolicyVersion: 1,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			})
+		}
+		// Per-subject override: materialize the payable tenant_subjects row so the
+		// tier_policies FK (migration 076) is satisfied on first write (#317).
+		if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
+			return err
+		}
+		subjectID := payer.UUID()
 		return s.db.Gen(ctx).UpsertTierPolicy(ctx, gen.UpsertTierPolicyParams{
-			ID:              row.ID,
-			TenantID:        row.TenantID,
-			TenantSubjectID: row.TenantSubjectID,
-			Tier:            row.Tier,
+			ID:              uuidutil.NewV7(),
+			TenantID:        tenantID,
+			TenantSubjectID: &subjectID,
+			Tier:            tier,
 			Policy:          policyJSON,
-			PolicyVersion:   int64(row.PolicyVersion),
-			CreatedAt:       row.CreatedAt,
-			UpdatedAt:       row.UpdatedAt,
+			PolicyVersion:   1,
+			CreatedAt:       now,
+			UpdatedAt:       now,
 		})
 	})
 }
@@ -112,9 +118,13 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Tena
 	tenantID := tid.UUID()
 	row := new(models.TierPolicy)
 	found := false
+	// GetTierPolicy resolves the payer's own override else the tenant-wide default
+	// (NULL subject, #477). The query's subject predicate is `= $2 OR IS NULL`, so
+	// passing the payer uuid matches both the override and the default.
+	subjectID := payer.UUID()
 	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		genRow, e := s.db.Gen(ctx).GetTierPolicy(ctx, gen.GetTierPolicyParams{
-			TenantID: tenantID, TenantSubjectID: payer.UUID(), Tier: tier,
+			TenantID: tenantID, TenantSubjectID: &subjectID, Tier: tier,
 		})
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil

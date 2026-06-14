@@ -299,16 +299,21 @@ func (q *Queries) GetEffectiveTierSchedule(ctx context.Context, arg GetEffective
 
 const getTierPolicy = `-- name: GetTierPolicy :one
 SELECT id, tenant_id, tenant_subject_id, tier, policy, policy_version, created_at, updated_at FROM openrails.tier_policies
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND tier = $3
+WHERE tenant_id = $1 AND tier = $3
+  AND (tenant_subject_id = $2 OR tenant_subject_id IS NULL)
+ORDER BY (tenant_subject_id IS NOT NULL) DESC
 LIMIT 1
 `
 
 type GetTierPolicyParams struct {
 	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+	TenantSubjectID *uuid.UUID
 	Tier            string
 }
 
+// The effective policy for a (tenant, subject, tier): the subject's own override
+// if present, else the tenant-wide default (tenant_subject_id IS NULL, #477).
+// Subject-specific rows sort first so LIMIT 1 picks the override.
 func (q *Queries) GetTierPolicy(ctx context.Context, arg GetTierPolicyParams) (OpenrailsTierPolicy, error) {
 	row := q.db.QueryRow(ctx, getTierPolicy, arg.TenantID, arg.TenantSubjectID, arg.Tier)
 	var i OpenrailsTierPolicy
@@ -653,7 +658,7 @@ const upsertTierPolicy = `-- name: UpsertTierPolicy :exec
 INSERT INTO openrails.tier_policies (
     id, tenant_id, tenant_subject_id, tier, policy, policy_version, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-ON CONFLICT (tenant_id, tenant_subject_id, tier) DO UPDATE SET
+ON CONFLICT (tenant_id, tenant_subject_id, tier) WHERE (tenant_subject_id IS NOT NULL) DO UPDATE SET
     policy = EXCLUDED.policy,
     updated_at = EXCLUDED.updated_at
 `
@@ -661,7 +666,7 @@ ON CONFLICT (tenant_id, tenant_subject_id, tier) DO UPDATE SET
 type UpsertTierPolicyParams struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+	TenantSubjectID *uuid.UUID
 	Tier            string
 	Policy          []byte
 	PolicyVersion   int64
@@ -669,11 +674,48 @@ type UpsertTierPolicyParams struct {
 	UpdatedAt       time.Time
 }
 
+// Per-(subject, tier) policy override. ON CONFLICT targets the partial unique
+// index for non-NULL subjects (#477).
 func (q *Queries) UpsertTierPolicy(ctx context.Context, arg UpsertTierPolicyParams) error {
 	_, err := q.db.Exec(ctx, upsertTierPolicy,
 		arg.ID,
 		arg.TenantID,
 		arg.TenantSubjectID,
+		arg.Tier,
+		arg.Policy,
+		arg.PolicyVersion,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertTierPolicyDefault = `-- name: UpsertTierPolicyDefault :exec
+INSERT INTO openrails.tier_policies (
+    id, tenant_id, tenant_subject_id, tier, policy, policy_version, created_at, updated_at
+) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
+ON CONFLICT (tenant_id, tier) WHERE (tenant_subject_id IS NULL) DO UPDATE SET
+    policy = EXCLUDED.policy,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertTierPolicyDefaultParams struct {
+	ID            uuid.UUID
+	TenantID      uuid.UUID
+	Tier          string
+	Policy        []byte
+	PolicyVersion int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// Tenant-wide DEFAULT tier policy (#477): tenant_subject_id IS NULL applies to
+// every payer at this tier — the platform capacity ladder declared once. ON
+// CONFLICT targets the partial unique index for the NULL-subject default.
+func (q *Queries) UpsertTierPolicyDefault(ctx context.Context, arg UpsertTierPolicyDefaultParams) error {
+	_, err := q.db.Exec(ctx, upsertTierPolicyDefault,
+		arg.ID,
+		arg.TenantID,
 		arg.Tier,
 		arg.Policy,
 		arg.PolicyVersion,

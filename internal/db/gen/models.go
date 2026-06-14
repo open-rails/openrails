@@ -858,9 +858,10 @@ type OpenrailsTenantSubject struct {
 
 // Per-tenant-subject tier throughput policies for the admission check (issue #298). MONEY caps stay in money_accounts; rolling money budgets are #304.
 type OpenrailsTierPolicy struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
+	ID       uuid.UUID
+	TenantID uuid.UUID
+	// NULL = tenant-wide default tier policy (#477 platform capacity ladder, declared once); non-NULL = per-subject override taking precedence for that subject.
+	TenantSubjectID *uuid.UUID
 	Tier            string
 	Policy          []byte
 	PolicyVersion   int64

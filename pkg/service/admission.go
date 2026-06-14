@@ -430,9 +430,9 @@ func (s *Service) SetTierPolicy(ctx context.Context, payer identity.TenantSubjec
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
-	}
+	// A ZERO payer writes the TENANT-WIDE DEFAULT tier policy (#477): the platform
+	// capacity ladder declared once, applied to every payer at the tier. A non-zero
+	// payer writes a per-subject override.
 	if in.Tier == "" {
 		return fmt.Errorf("tier required")
 	}
