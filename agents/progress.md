@@ -39,7 +39,7 @@ ADD/expose these generic primitives.
 - Values are tenant-wide defaults (empty subject), auto-applied at the payer's resolved tier.
 
 ## Pairs with
-tensorhub #486; openrails #488 (failure windows), #489 (arrears), #490 (deposit fraud).
+tensorhub #486; openrails #488 (failure windows), #489 (arrears). (#490 deposit-fraud was deleted — not needed.)
 
 ## Outcome
 LANDED. Two generic $-denominated per-tier limits added to the tier policy JSONB (no new column —
