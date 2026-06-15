@@ -842,7 +842,37 @@ Also boot the cutover with `FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIO
 
 # #491: Split CUSTOMER (payer / money account) from ACTOR (invoker / delegated-user) — delegated-users hold no money
 
-**Completed:** yes
+**Completed:** structural split shipped (v0.32.0/v0.33.0); INVOKER-MODEL REVERSAL pending (owner 2026-06-15)
+
+================================================================================
+REVERSAL (owner, 2026-06-15) — invoker is OPAQUE TEXT, no FK; budgets per-invoker only.
+================================================================================
+Two corrections to what shipped, both confirmed by the owner:
+
+1. INVOKER = OPAQUE TEXT, NOT AN FK. The invoker ("under whose authority an action
+   happened") is a POLYMORPHIC principal: native-user | delegated-user | service-token
+   | issuer/JWKS. OpenRails can't FK across authkit's four principal tables (separate
+   schema) or across apps. So migration 027's `invoker_id uuid` + cross-schema FK ->
+   `profiles.delegated_users(id)` is WRONG — change it to `invoker text` (a stable
+   uuidv7 string), NO foreign key. authkit#81 (delegated_users) is being RE-DROPPED in
+   tandem; nothing references it. Usage visibility = aggregate attribution rows by the
+   opaque invoker text; per-invoker limits = budget rows keyed by the invoker text.
+
+2. BUDGETS ARE PER-INVOKER ONLY. Drop the role/subject (#473) scopes. A role/subject
+   never invokes — only an invoker does. tier + role are POLICY TEMPLATES that define
+   which fixed-window $-limits apply to each invoker (e.g. role-A "$100/mo" => each
+   role-A user may spend $100/mo of the org's money, CHARGED TO THAT USER, not a shared
+   role pool). So `budget_window_state`/`budget_reservations.actor` (today a polymorphic
+   scope key: invoker | @subject | @role:uuid) collapses to just the INVOKER. Remove
+   ScopeRole/ScopeSubject from budgets/scopes.go; simplify ReserveScopes to the single
+   invoker scope (or keep the multi-window-per-invoker shape, dropping cross-invoker pools).
+
+ACTION (do it yourself, no sub-agents): new migration changes the three attribution
+tables' `invoker_id uuid` -> `invoker text` (drop the FK + the column, add text), drops
+the role/subject budget scopes, renames `budget_*.actor` -> `invoker`. Update code + sqlc.
+Re-tag synced with authkit. The "lives in authkit / FK anchor" design recorded below is
+HISTORICAL. See [[invoker-opaque-text-polymorphic]].
+================================================================================
 
 Today `customer` (the renamed merchant_subject, #486) is keyed `UNIQUE(merchant_id, issuer, subject)` —
 one row PER DELEGATED-USER — AND owns the money: `money_accounts` (balance, tier, spend-caps),
