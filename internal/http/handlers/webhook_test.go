@@ -53,6 +53,22 @@ func TestReadLimitedWebhookBodyAcceptsWithinLimit(t *testing.T) {
 	}
 }
 
+// The Coinbase USDC-funding webhook now reads through readLimitedWebhookBody
+// with maxCoinbaseWebhookBytes instead of an unbounded io.ReadAll, matching the
+// per-processor cap discipline of the CCBill/Stripe/NMI paths.
+func TestCoinbaseWebhookBodyCapRejectsOversized(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/coinbase", strings.NewReader(strings.Repeat("a", int(maxCoinbaseWebhookBytes)+1)))
+	r := httprequest.NewHTTP(w, req, nil)
+
+	if _, ok := readLimitedWebhookBody(r, maxCoinbaseWebhookBytes); ok {
+		t.Fatalf("expected oversized Coinbase body to be rejected")
+	}
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", w.Code)
+	}
+}
+
 func TestFirstPresentHeader(t *testing.T) {
 	header := http.Header{}
 	header.Set("X-NMI-Signature", "sig-123")

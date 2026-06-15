@@ -39,9 +39,10 @@ import (
 //     line items) and can be tens of KiB, so 256 KiB.
 //   - NMI JSON transaction webhooks are modest; 64 KiB is ample.
 const (
-	maxCCBillWebhookBytes int64 = 16 << 10  // 16 KiB
-	maxStripeWebhookBytes int64 = 256 << 10 // 256 KiB
-	maxNMIWebhookBytes    int64 = 64 << 10  // 64 KiB
+	maxCCBillWebhookBytes   int64 = 16 << 10  // 16 KiB
+	maxStripeWebhookBytes   int64 = 256 << 10 // 256 KiB
+	maxNMIWebhookBytes      int64 = 64 << 10  // 64 KiB
+	maxCoinbaseWebhookBytes int64 = 64 << 10  // 64 KiB; Hook0 USDC-funding events are small JSON
 )
 
 // readLimitedWebhookBody reads the request body capped at maxBytes via
@@ -222,9 +223,8 @@ func applyCoinbaseUSDCFundingWebhook(r *httprequest.Request) bool {
 		r.ErrorJSON(http.StatusServiceUnavailable, "Webhook processing is not configured")
 		return false
 	}
-	body, err := readRequestBody(r.Request.Body)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
+	body, ok := readLimitedWebhookBody(r, maxCoinbaseWebhookBytes)
+	if !ok {
 		return false
 	}
 	cfg := r.State.Config.USDCFunding
