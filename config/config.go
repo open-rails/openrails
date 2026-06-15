@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -219,30 +220,27 @@ func (c *DBConfig) GetConnectionString() string {
 	// 2. Build connection string from atomic parameters if all required fields are present
 	if c.Host != "" && c.Port != "" && c.Database != "" && c.Username != "" {
 		// Format: postgresql://username:password@host:port/database?sslmode=...
-		connStr := fmt.Sprintf(
-			"postgresql://%s:%s@%s:%s/%s",
-			c.Username,
-			c.Password,
-			c.Host,
-			c.Port,
-			c.Database,
-		)
-
-		// Add query parameters
-		params := []string{}
-
-		// Default to TLS when sslmode is omitted. Local compose sets disable explicitly.
+		//
+		// Credentials and the database name are percent-encoded via net/url
+		// rather than interpolated raw. A password containing reserved URL
+		// characters (most dangerously '@' or '/') would otherwise corrupt the
+		// DSN — e.g. a password "p@ss/0" makes the parser read a different host,
+		// which at best fails to connect and at worst silently redirects the
+		// connection to an attacker-influenced endpoint. url.UserPassword +
+		// url.URL.String() escape every component correctly.
 		sslMode := c.SSLMode
 		if sslMode == "" {
+			// Default to TLS when sslmode is omitted. Local compose sets disable explicitly.
 			sslMode = "require"
 		}
-		params = append(params, fmt.Sprintf("sslmode=%s", sslMode))
-
-		if len(params) > 0 {
-			connStr += "?" + strings.Join(params, "&")
+		u := url.URL{
+			Scheme:   "postgresql",
+			User:     url.UserPassword(c.Username, c.Password),
+			Host:     net.JoinHostPort(c.Host, c.Port),
+			Path:     "/" + c.Database,
+			RawQuery: url.Values{"sslmode": {sslMode}}.Encode(),
 		}
-
-		return connStr
+		return u.String()
 	}
 
 	// 3. No URL and incomplete atomic parameters - return empty (caller handles defaults)
