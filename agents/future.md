@@ -586,5 +586,46 @@ Sketch: a `cloudflared` sidecar in the dev compose stack (image exists upstream;
 
 ---
 
+# #493: fold the product catalog into the platform-policy / platform-config umbrella
+
+**Completed:** no
+
+One declarative, CLI-refreshable config per platform. Today the OpenRails product
+catalog (`internal/modules/catalog`: ProductService/PriceService, models.Product/
+models.Price — what's sold + prices) is managed separately from the host's
+platform policy, and tensorhub's `platform-config apply` only pushes the #486
+capacity ladder. Goal: fold the catalog into the same umbrella so one config doc
+(per platform) drives both, pushed idempotently (full-upsert + diff) the same way
+the tier ladder is.
+
+Constraint (Paul, 2026-06-14): doujins, hentai0, cozy-art are NOT API platforms —
+they need NO api-spend platform policy (tiers / wasted-spend / in-flight caps /
+allowed-endpoints / arrears). They need ONLY the product catalog (products +
+prices for subscriptions/checkout). tensorhub IS the API platform and needs both
+halves. So the unified per-platform doc has two parts, the governance half OPTIONAL:
+  - `catalog:` (products + prices) — every platform.
+  - `api_governance:` (capacity ladder #486 + tier/budget policy + allowed
+    endpoints + arrears) — API platforms only (tensorhub).
+
+This supersedes the earlier vague "per-stack config CLI for sibling stacks" idea:
+non-API stacks just run the same `platform-config apply` with a catalog-only doc.
+
+Design questions to resolve before building:
+- Does a generic SDK/client setter exist for hosts to push products + prices
+  (SetCatalog / UpsertProducts)? The catalog module is internal — confirm; if
+  absent, add one mirroring SetTierSchedule/SetTierPolicy (idempotent full-upsert).
+  Keep it generic — products/prices only, no host meaning.
+- Unified config schema (one YAML: `catalog:` + optional `api_governance:`).
+- Push targets: catalog -> OpenRails catalog; governance -> OpenRails admission +
+  tensorhub.platform_policies. Extend `platform-config apply` to push both.
+
+**Tasks:**
+- [ ] Audit the catalog module for an existing host-facing setter; design one if missing
+- [ ] Design the unified per-platform config schema (catalog + optional api_governance)
+- [ ] Extend tensorhub `platform-config apply` to push the catalog section
+- [ ] Author catalog-only configs for doujins/hentai0/cozy-art; full config for tensorhub
+
+---
+
 
 
