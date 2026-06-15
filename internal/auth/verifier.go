@@ -73,6 +73,12 @@ func FormatVerifierError(err error) string {
 	case strings.Contains(msg, "invalid_token"):
 		return "invalid_or_expired_token"
 	default:
-		return msg
+		// Do NOT echo the raw verifier error to unauthenticated callers: it can
+		// carry internal detail (JWKS fetch URLs/failures, key-id lookups, parse
+		// internals) that aids an attacker and leaks deployment topology. The
+		// caller (internal/auth/ginauth) already logs the underlying error
+		// server-side, so collapse anything unrecognised to a single generic,
+		// non-revealing code.
+		return "invalid_or_expired_token"
 	}
 }
