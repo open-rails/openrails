@@ -634,13 +634,49 @@ Design questions to resolve before building:
 
 **Completed:** partial — currency-COLUMN groundwork shipped (v0.36.0, migration 031): added
 `currency text NOT NULL DEFAULT 'USD'` to usage_events / budget_window_state / budget_reservations
-(money_transactions + money_spend_limits already had it). Additive + safe; build + budgets/money/admission
-integration green. `micros` KEPT (it is the currency-NEUTRAL sub-cent unit — millionths of the row's
-`currency`, à la Google Ads; Stripe/NMI use minor-unit `amount` with no sub-cent term, so there's nothing
-to copy there). REMAINING (coupled with the FX converter, deferred per owner): per-currency KEYING of the
-budget engine (currency in the budget UNIQUE keys + thread a currency through admit->budget, which has NO
-currency concept today), the `budget_reservations` -> `budget_inflight_holds` rename, native-currency
-validation, and the converter itself.
+(money_transactions + money_spend_limits already had it). Additive + safe; integration green.
+
+================================================================================
+HANDOFF / CURRENT STATE (2026-06-15) — for the next agent picking up #494.
+================================================================================
+VERSIONS (all pushed, repos clean): authkit v0.34.0; openrails v0.36.0; all 4 consumers
+(doujins/hentai0/cozy-art/tensorhub) pin authkit v0.34.0 + openrails v0.36.0.
+DONE this line of work: #491 reversal (invoker = opaque text, NO FK; per-invoker budgets;
+actor->invoker_id rename + invoker_type column + index — v0.34.0/v0.35.0) and #494 currency
+columns (v0.36.0). LOCKED #494 design (see below): `amount` (int64) + `currency`; OpenRails
+currencies are MICRO-DENOMINATED (USD=microUSD, EUR=micro-euro) — just integer decimal-precision.
+
+REMAINING #494 WORK (in recommended order; each is a migration + dep-bump cascade):
+ 1. RENAME `budget_reservations` -> `budget_inflight_holds` + drop `_micros` -> `amount`/`captured`/
+    `max_spend_per_day`/`max_spend_per_month`. READY-TO-USE migration DDL (I authored it but did NOT
+    wire/commit it — deleted the uncommitted file to keep the tree clean; recreate it as migration 032):
+      ALTER TABLE openrails.budget_reservations RENAME TO budget_inflight_holds;
+      ALTER INDEX openrails.budget_reservations_window_agg_idx RENAME TO budget_inflight_holds_window_agg_idx;
+      ALTER INDEX openrails.ix_budget_reservations_window RENAME TO ix_budget_inflight_holds_window;
+      ALTER INDEX openrails.uq_budget_reservations_idem RENAME TO uq_budget_inflight_holds_idem;
+      ALTER TABLE openrails.budget_inflight_holds RENAME CONSTRAINT budget_reservations_pkey TO budget_inflight_holds_pkey;
+      ALTER TABLE openrails.budget_inflight_holds RENAME CONSTRAINT budget_reservations_status_check TO budget_inflight_holds_status_check;
+      ALTER TABLE openrails.budget_inflight_holds RENAME CONSTRAINT budget_reservations_customer_fk TO budget_inflight_holds_customer_fk;
+      ALTER TABLE openrails.budget_inflight_holds RENAME COLUMN amount_micros TO amount;
+      ALTER TABLE openrails.budget_inflight_holds RENAME COLUMN captured_micros TO captured;
+      ALTER TABLE openrails.money_spend_limits RENAME COLUMN max_spend_per_day_micros TO max_spend_per_day;
+      ALTER TABLE openrails.money_spend_limits RENAME COLUMN max_spend_per_month_micros TO max_spend_per_month;
+    THEN: update queries in internal/db/queries/{admission_support,money_accounts}.sql (table + column
+    refs), `task sqlc`, then `go build ./...` is build-DRIVEN — fix the gen-field renames (AmountMicros->
+    Amount, CapturedMicros->Captured, MaxSpendPerDay(Month)Micros->...) across internal/modules/budgets +
+    internal/modules/money + internal/db/models + pkg/service. The wider Go `*Micros` field/param sweep
+    (EstimateMicros, LimitMicros, MaxConcurrentHeldMicros, etc. — NOT db columns) is SDK-breaking; decide
+    whether to do it in the same pass (consumer code cascade) or keep those Go names. Use plain DDL (NOT
+    DO/EXECUTE blocks) so sqlc's static catalog sees renames (learned the hard way on migration 030).
+ 2. PER-CURRENCY KEYING of the budget engine: add `currency` to the budget UNIQUE keys
+    (`budget_window_state`: (merchant,customer,invoker_id,currency,window_key); `budget_inflight_holds`
+    idem: (merchant,customer,invoker_id,currency,source,source_id)) and thread a currency through
+    admit->budget. NOTE: admit has NO currency concept today (only the money ledger does) — add a
+    currency to the admit/budget path (the spend's currency). Couples with the converter.
+ 3. NATIVE-CURRENCY registry/validation (USD/EUR/JPY…; reject non-native codes; no user-defined here).
+ 4. FX CONVERTER (the capstone): cached exchange rates (~2h refresh), convert at deduction time so a payer
+    can bill in one currency and budget in another. Design details in the sections below.
+================================================================================
 
 Today the money/budget tables hardcode the MICRODOLLAR assumption (`*_micros`) and most are
 NOT keyed by currency. OpenRails should support multiple NATIVE currencies (USD, EUR, JPY, …
