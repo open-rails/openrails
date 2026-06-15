@@ -656,18 +656,23 @@ OpenRails must convert $0.50 USD -> EUR and deduct that from the EUR window/limi
 currency and the BUDGET currency can differ, and conversion happens at deduction time.
 
 ## Schema groundwork (one coherent migration when built)
-- DROP the microdollar assumption from column NAMES. DECIDED TERMS (owner 2026-06-15):
-  use **`amount`** (+ the row's **`currency`**), NOT `*_micros`. Drop the `_micros` suffix on the
-  budget tables + money_spend_limits: `amount_micros` -> `amount`, `captured_micros` -> `captured`,
-  `max_spend_per_day_micros` -> `max_spend_per_day`, `max_spend_per_month_micros` ->
-  `max_spend_per_month`, budgets `LimitMicros` -> `Limit`, etc. NOTE: `money_transactions` ALREADY
-  uses `amount` (no suffix), so this aligns the budget/limit tables to that existing convention.
-  CRITICAL CAVEAT — the VALUE stays MICRO-precision (1e-6 of `currency`), NOT Stripe/NMI minor units
-  (cents): OpenRails needs sub-cent precision for metered billing (tensorhub bills in microdollars; a
-  token can cost $0.000002). So our `amount` != Stripe's `amount` (cents) — a 10,000x difference.
-  MUST document on every such column: "amount in micros (1e-6) of `currency`" so no one (or no
-  consumer) misreads it as minor units. (`usage_events.amount` is a separate concept — metered
-  QUANTITY, e.g. token count — not money; leave it.) Each money/budget row carries its `currency`.
+- DROP the microdollar assumption from column NAMES. LOCKED TERMS (owner 2026-06-15):
+  use **`amount`** (the amount in the row's **`currency`**), NOT `*_micros`. Drop the `_micros`
+  suffix on the budget tables + money_spend_limits: `amount_micros` -> `amount`, `captured_micros`
+  -> `captured`, `max_spend_per_day_micros` -> `max_spend_per_day`, `max_spend_per_month_micros` ->
+  `max_spend_per_month`, budgets `LimitMicros` -> `Limit`, etc. (`money_transactions` ALREADY uses
+  `amount`, so this aligns the budget/limit tables to it. `usage_events.amount` is a separate
+  concept — metered QUANTITY, e.g. token count — not money; leave it.)
+  SCALE MODEL (owner, clean resolution): OpenRails CURRENCIES ARE MICRO-DENOMINATED. "USD" in
+  OpenRails MEANS microUSD (1e-6 USD); "EUR" means micro-euros; etc. So `amount` is simply an
+  integer count of the currency's (micro) unit — the 1e-6 scale lives in the CURRENCY's definition,
+  not a column-name suffix. This is why `amount` + `currency` is sufficient and unambiguous: no
+  `_micros` needed, and it's NOT Stripe/NMI minor-units (those would be a non-micro currency). The
+  native-currency registry documents each code's denomination (USD=microUSD, EUR=micro-euro, ...).
+  Framing (owner): this is SIMPLY how we represent DECIMAL PRECISION — the standard "store money as
+  integers, never floats" pattern, just at 6-decimal (micro) precision per currency rather than the
+  2-decimal (cents) minor unit. `amount int64` + `currency` (6-dp micro denomination) = exact decimal money.
+  Cross-currency comparison/aggregation still needs the FX converter (below).
 - KEY THESE TABLES BY CURRENCY (a window/limit/hold is per-currency). Verified current state:
   - ADD a `currency` column to the 3 tables that have NONE today:
     * `usage_events`        -> add `currency` (+ consider it in the idempotency UNIQUE
