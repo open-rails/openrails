@@ -656,11 +656,18 @@ OpenRails must convert $0.50 USD -> EUR and deduct that from the EUR window/limi
 currency and the BUDGET currency can differ, and conversion happens at deduction time.
 
 ## Schema groundwork (one coherent migration when built)
-- DROP the microdollar assumption: rename the `*_micros` columns to an abstract unit name — the
-  value is in the row CURRENCY's minor unit, not necessarily microdollars. Candidate: `*_units` /
-  `currency_units` (e.g. `amount_micros` -> `amount_units`, `max_spend_per_day_micros` ->
-  `max_spend_per_day_units`, budgets `LimitMicros` -> `LimitUnits`, `captured_micros`, etc.). Pick
-  ONE abstract term fleet-wide. Each row also carries its `currency`.
+- DROP the microdollar assumption from column NAMES. DECIDED TERMS (owner 2026-06-15):
+  use **`amount`** (+ the row's **`currency`**), NOT `*_micros`. Drop the `_micros` suffix on the
+  budget tables + money_spend_limits: `amount_micros` -> `amount`, `captured_micros` -> `captured`,
+  `max_spend_per_day_micros` -> `max_spend_per_day`, `max_spend_per_month_micros` ->
+  `max_spend_per_month`, budgets `LimitMicros` -> `Limit`, etc. NOTE: `money_transactions` ALREADY
+  uses `amount` (no suffix), so this aligns the budget/limit tables to that existing convention.
+  CRITICAL CAVEAT — the VALUE stays MICRO-precision (1e-6 of `currency`), NOT Stripe/NMI minor units
+  (cents): OpenRails needs sub-cent precision for metered billing (tensorhub bills in microdollars; a
+  token can cost $0.000002). So our `amount` != Stripe's `amount` (cents) — a 10,000x difference.
+  MUST document on every such column: "amount in micros (1e-6) of `currency`" so no one (or no
+  consumer) misreads it as minor units. (`usage_events.amount` is a separate concept — metered
+  QUANTITY, e.g. token count — not money; leave it.) Each money/budget row carries its `currency`.
 - KEY THESE TABLES BY CURRENCY (a window/limit/hold is per-currency). Verified current state:
   - ADD a `currency` column to the 3 tables that have NONE today:
     * `usage_events`        -> add `currency` (+ consider it in the idempotency UNIQUE
