@@ -7,27 +7,176 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 495
+next_id: 498
 
 ---
 
-# #492: Operator-configurable FLAT per-actor wasted-spend windows (close the #488 per-invoker gap)
+# #497: Wasted-spend enforcement split: charge direct payer credentials, cut off delegated invokers
+
+Issue #496 fixed the storage/policy shape for payer vs invoker wasted-spend budgets, but the enforcement behavior
+needs one more distinction: whether the invoker is the payer acting directly, or a delegated/third-party principal
+using the payer's billing authority.
+
+## Model
+- PAYER/customer: the billing principal whose account pays for successful work.
+- INVOKER: the principal actually making the request.
+- Delegated invoker (`invoker != payer`): a third party using the payer's billing authority. Examples:
+  - payer is an org, invoker is a native Tensorhub user/member of that org.
+  - payer is an org with a remote application, and the remote application sends delegated/federated users.
+- Direct payer invoker (`invoker == payer`): the payer is making calls with credentials it controls directly. Examples:
+  - payer is an org and the invoker is its JWKS-signed org/application JWT with no delegated subject.
+  - payer is an org and the invoker is one of its own service tokens.
+  - payer is a regular native user using their own user access token.
+
+## Policy
+- Delegated invokers are protected against quickly: once that invoker's flat wasted-spend window is met, deny that
+  invoker until the Redis window resets. This protects the payer from users/employees/federated subjects abusing its
+  billing authority.
+- Direct payer invokers get trust-tier grace: once the payer's tier-graduated wasted-spend allowance is exhausted,
+  OpenRails should charge the payer for additional wasted spend instead of cutting them off. Higher trust tiers get
+  more free/grace waste before charging begins.
+- The payer/customer wasted-spend budget remains trust-tier graduated. The delegated-invoker wasted-spend budget
+  remains flat and stricter.
+
+## Tasks
+- [x] Define the durable request/admission contract that tells OpenRails whether an invoker is a delegated principal
+      or a direct payer credential. Do not rely on arbitrary opaque string equality unless the host canonicalizes
+      direct-payer invokers to the payer identity.
+- [x] Wire the invoker relationship/kind through OpenRails service HTTP, SDK, embed, admission, and
+      usage/report-wasted-spend. Tensorhub caller updates are tracked in tensorhub #491.
+- [x] For delegated invokers, keep the #496 Redis behavior: merchant + payer + invoker counters, flat policy, deny
+      `failure_rate_limited` until the window resets when over limit.
+- [x] For direct payer invokers, stop applying the flat delegated-invoker cutoff. Evaluate only the payer's
+      tier-graduated grace budget for whether wasted spend remains free.
+- [x] Add a charge path for direct payer wasted spend after grace is exhausted. It should create normal money ledger
+      activity in the payer's native currency/precision, not a separate high-volume wasted-spend event log.
+- [x] Define idempotency for charging wasted spend reports beyond grace so retrying a host report cannot double-charge.
+- [x] Decide and implement the amount split when a report crosses the grace boundary: only the over-grace portion
+      should be chargeable, not the already-forgiven portion.
+- [x] Keep Redis as the hot rolling-window state for grace/cutoff checks and Postgres as durable policy/ledger storage.
+- [x] Update denial/charging response semantics so hosts can distinguish delegated-invoker cutoff from direct-payer
+      wasted-spend charging.
+- [x] Add tests for:
+      - delegated invoker over flat limit => denied, payer not charged for that wasted spend.
+      - direct payer under tier grace => not charged.
+      - direct payer over tier grace => overage charged and request/admission flow continues according to normal
+        balance/credit rules.
+      - idempotent report retry does not double-charge.
+      - payer-scoped invoker Redis keys still prevent delegated-user label collisions.
+- [x] Coordinate Tensorhub so org members, remote delegated users, service tokens, JWKS org/application JWTs, and
+      native user self-calls map to the correct OpenRails invoker relationship.
+
+## Acceptance
+- OpenRails protects payers from delegated invoker abuse by cutting off the delegated invoker, not the payer.
+- OpenRails charges direct payer credentials for wasted spend beyond trust-tier grace instead of cutting them off on
+  the delegated-invoker flat budget.
+- The implementation does not add a high-volume wasted-spend event table.
+- Retry/idempotency behavior prevents duplicate charges for the same wasted-spend report.
+
+## Pairs with
+openrails #496 and #491; tensorhub #491 / platform identity mapping.
+
+## Status
+Complete in OpenRails. Tensorhub follow-up tracked in tensorhub #491 for caller-side `invoker_type` mapping and SDK
+pinning.
+
+Verification:
+- `task sqlc`
+- `go test ./pkg/service ./internal/modules/abuse ./internal/modules/admission ./internal/modules/ratelimit ./embed ./internal/http/handlers`
+- `go test -tags=integration ./pkg/service -run 'TestInvokerWastedSpendPolicy|TestWastedSpendDirectPayer' -count=1 -v`
+- `go test -tags=integration ./internal/modules/admission -run 'TestAdmit_WastedSpend' -count=1 -v`
+- `go test ./...`
+- `task build`
+
+---
+
+# #496: Fix wasted-spend policy model: tiered payer budgets + flat invoker backstop
+
+The current `openrails.invoker_wasted_windows` model overfits the per-invoker abuse budget by allowing
+`customer_id`-specific overrides. That conflates two separate controls:
+
+- PAYER/customer wasted-spend budget: trust-tier based, configured by the host/operator through tier policy
+  `bad_spend_windows`, and evaluated against the payer. High-trust payers can tolerate more failed/rejected work;
+  low-trust payers tolerate less.
+- INVOKER/delegated-user wasted-spend budget: flat merchant/platform backstop used to cut off one abusive delegated
+  user under an otherwise legitimate API-platform payer. The limit amount does not vary by payer/customer, and should
+  be materially stricter than the payer/customer allowance because invoker spam is less tolerable than aggregate
+  customer waste.
+
+Example: Cozy Art may be trusted to waste up to about $10/day as the payer/platform, while each delegated user
+invoker under Cozy Art may only get about $0.50/day of wasted spend before OpenRails blocks that invoker.
+
+## Tasks
+- [x] Rename the policy/config table away from `invoker_wasted_windows` to a name that says what it is, e.g.
+      `invoker_wasted_spend_policies` or `merchant_invoker_wasted_spend_policies`.
+- [x] Remove `customer_id` from the invoker wasted-spend policy schema and resolver. The policy should be
+      tenant/merchant scoped only, with one effective flat set of windows per merchant.
+- [x] Rename service/SDK/API wording as needed so callers set an invoker wasted-spend policy, not a per-customer
+      window override. Prefer a hard cut; no legacy actor/customer override compatibility.
+- [x] Keep payer wasted-spend windows in tier policy (`bad_spend_windows`) and continue resolving them by payer trust
+      tier.
+- [x] Set/validate policy expectations so the flat invoker wasted-spend allowance is lower than the payer/customer
+      allowance for normal tiers; OpenRails should be able to block a spammy invoker before the payer-level backstop
+      trips.
+- [x] Keep Redis for live wasted-spend counters if appropriate. Postgres should store durable policy/config; Redis
+      should store fast moving window state.
+- [x] Do not add a durable wasted-spend event log/table for this issue. These reports can be high-volume, and without
+      a concrete audit/analytics/debugging requirement the extra storage has no clear value.
+- [x] Audit Redis keys for delegated-user namespace correctness. If invoker IDs are only unique inside a
+      payer/application, key invoker wasted-spend state by merchant + payer + invoker to avoid cross-payer collisions;
+      if invoker IDs are globally stable, document that assumption.
+- [x] Update sqlc, migrations, service admission/report/usage paths, SDK/embed/remote client calls, HTTP
+      handlers/routes, comments/docs, and tests.
+- [x] Coordinate the Tensorhub push side so `per_invoker_bad_spend` maps to the new flat invoker policy shape, while
+      trust-tier `bad_spend` continues to map to payer tier policy.
+
+## Acceptance
+- No live OpenRails API, DB table, sqlc query, or SDK method implies invoker wasted-spend budgets vary per customer.
+- Payer wasted-spend enforcement remains trust-tier graduated.
+- Invoker wasted-spend enforcement remains separate and can block one abusive delegated user without blocking the payer.
+- Invoker wasted-spend limits are intentionally stricter than payer/customer limits.
+- Tests cover payer-over-budget, invoker-over-budget, and no per-customer invoker-policy override path.
+
+## Pairs with
+openrails #488 and #492; tensorhub #486 / `per_invoker_bad_spend`.
+
+## Status
+DONE on the OpenRails side (2026-06-15). Implemented migration 036 to rename
+`openrails.invoker_wasted_windows` -> `openrails.invoker_wasted_spend_policies`, collapse old customer overrides to
+one merchant policy row, drop `customer_id`, and add unique `(merchant_id)`. sqlc now exposes
+`UpsertInvokerWastedSpendPolicy` / `GetInvokerWastedSpendPolicy`; service/SDK/HTTP/embed/remote use
+`SetInvokerWastedSpendPolicy(ctx, windows)` and route `PUT /v1/service/invoker-wasted-spend-policy` with no
+`customer_id`. Redis invoker counters are keyed by merchant + payer + invoker, while payer counters stay merchant +
+payer. No wasted-spend event log/table was added. Tensorhub coordination recorded as tensorhub #491 because that
+checkout is pinned to OpenRails v0.36.0 and has broader SDK drift (`Actor`, `EstimateMicros`, `LimitMicros`) to update
+with the dependency bump.
+
+## Verification
+- `task sqlc`
+- `go test ./pkg/service ./internal/modules/abuse ./internal/modules/admission ./embed ./internal/http/handlers ./internal/http/routes/ginroutes`
+- `go test -tags=integration ./pkg/service -run 'TestInvokerWastedSpendPolicy' -count=1 -v`
+- `go test ./...`
+- `task build`
+
+---
+
+# #492: Operator-configurable FLAT per-invoker wasted-spend windows (close the #488 per-invoker gap)
 
 Consumer: tensorhub #486. GENERIC — every platform has a flat per-invoker abuse backstop. The #488 per-PAYER
-bad_spend budget was operator-settable via SetTierPolicy, but the per-ACTOR flat budget had NO client setter:
-admit hardcoded `service.DefaultActorWastedWindows()` ($5/15m, $20/5h), so a host's declared per-invoker budget
+bad_spend budget was operator-settable via SetTierPolicy, but the per-INVOKER flat budget had NO client setter:
+admit hardcoded `service.DefaultInvokerWastedWindows()` ($5/15m, $20/5h), so a host's declared per-invoker budget
 (tensorhub `per_invoker_bad_spend` $1/15m, $3/5h) was silently ignored.
 
 ## Scope
-- Migration 028 `openrails.actor_wasted_windows`: tenant-scoped (customer_id NULLABLE; NULL = tenant-wide
+- Migration 028 + hard-cut migration 034 `openrails.invoker_wasted_windows`: tenant-scoped (customer_id NULLABLE; NULL = tenant-wide
   default, non-NULL = per-customer override), windows jsonb + version + timestamps, merchant_id RLS — mirrors
   tier_schedules' "= $2 OR IS NULL" effective resolution.
-- sqlc: UpsertActorWastedWindowsDefault/Customer + GetEffectiveActorWastedWindows (admission_support.sql).
-- Service: `SetActorWastedWindows(ctx, payer, []abuse.WastedWindow)` + `actorWastedWindows(ctx, payer)` resolver
-  (stored else DefaultActorWastedWindows). Wired into ALL 3 hardcoded sites — Admit (WithWastedSpend guard),
-  ReportWastedSpend (guard.Record), AbuseUsage (guard.Usage). DefaultActorWastedWindows kept as the FALLBACK.
-- HTTP `ServiceSetActorWastedWindows` mounted PUT /v1/service/actor-wasted-windows (creditsWrite), same router.
-- SDK `SetActorWastedWindows(ctx, tenantSubjectID string, []BudgetWindowInput) error` — client.go interface +
+- sqlc: UpsertInvokerWastedWindowsDefault/Customer + GetEffectiveInvokerWastedWindows (admission_support.sql).
+- Service: `SetInvokerWastedWindows(ctx, payer, []abuse.WastedWindow)` + `invokerWastedWindows(ctx, payer)` resolver
+  (stored else DefaultInvokerWastedWindows). Wired into ALL 3 hardcoded sites — Admit (WithWastedSpend guard),
+  ReportWastedSpend (guard.Record), AbuseUsage (guard.Usage). DefaultInvokerWastedWindows kept as the FALLBACK.
+- HTTP `ServiceSetInvokerWastedWindows` mounted PUT /v1/service/invoker-wasted-windows (creditsWrite), same router.
+- SDK `SetInvokerWastedWindows(ctx, tenantSubjectID string, []BudgetWindowInput) error` — client.go interface +
   remote.go (PUT) + embed/client.go (localClient -> svc). Reuses BudgetWindowInput.
 
 ## Pairs with
@@ -35,11 +184,12 @@ tensorhub #486 (PushTierLadder now pushes the YAML per_invoker_bad_spend via the
 (per-payer bad_spend), #487 (tier policy template), #476 (tier-schedule end-to-end template).
 
 ## Outcome
-DONE — code complete, tested, and now MERGED ONTO MASTER (consolidation 2026-06-15). Migration 028
-openrails.actor_wasted_windows, sqlc queries, service `SetActorWastedWindows` + `actorWastedWindows` resolver
-wired into ALL 3 sites (Admit guard, ReportWastedSpend, AbuseUsage), HTTP `ServiceSetActorWastedWindows`
-(PUT /v1/service/actor-wasted-windows), SDK `SetActorWastedWindows(ctx, tenantSubjectID, []BudgetWindowInput)`
-(client/remote/embed). DefaultActorWastedWindows() kept as the FALLBACK. 3 service integration tests
+DONE — code complete, tested, and now MERGED ONTO MASTER (consolidation 2026-06-15). Migration 028 introduced
+the config table; migration 034 hard-cuts it to openrails.invoker_wasted_windows. sqlc queries, service
+`SetInvokerWastedWindows` + `invokerWastedWindows` resolver wired into ALL 3 sites (Admit guard,
+ReportWastedSpend, AbuseUsage), HTTP `ServiceSetInvokerWastedWindows`
+(PUT /v1/service/invoker-wasted-windows), SDK `SetInvokerWastedWindows(ctx, tenantSubjectID, []BudgetWindowInput)`
+(client/remote/embed). DefaultInvokerWastedWindows() kept as the FALLBACK. 3 service integration tests
 (configured $1 window denies; unset falls back to $5 default; per-customer override) + extended conformance
 GREEN. HISTORY: originally cut as the orphaned tag v0.31.0 from an isolated worktree (master then held
 uncommitted #491 WIP, so it couldn't be committed there); now reconciled onto master via a real three-way
@@ -63,10 +213,10 @@ ADD/expose these generic primitives.
 - KEEP: SetTierSchedule + auto-graduation by cumulative CAPTURED spend (generic, unchanged); KEEP `ResolvedTier` on
   AdmitResponse; KEEP captured-ledger $ budget windows (#475).
 - ADD two GENERIC $-denominated per-tier limits to the tier policy:
-  - `max_concurrent_held_micros` — cap on the sum of a payer's ACTIVE (un-settled) hold $. Enforce at admit
+  - `max_concurrent_held_amount` — cap on the sum of a payer's ACTIVE (un-settled) hold $. Enforce at admit
     (over-limit signal) AND surface the resolved value on AdmitResponse, so a host that enforces true occupancy
     itself (tensorhub's scheduler — only it sees live GPU occupancy) can use the value + the per-job estimate.
-  - `max_single_charge_micros` — per-charge ceiling; reject an Admit whose estimate exceeds it. Generic runaway guard.
+  - `max_single_charge_amount` — per-charge ceiling; reject an Admit whose estimate exceeds it. Generic runaway guard.
 - Throughput windows + queue limits: keep supported; tensorhub simply stops pushing them.
 
 ## Notes
@@ -80,11 +230,11 @@ tensorhub #486; openrails #488 (failure windows), #489 (arrears). (#490 deposit-
 
 ## Outcome
 LANDED. Two generic $-denominated per-tier limits added to the tier policy JSONB (no new column —
-consistent with the existing budget_windows/queue_limits which also live in `policy`): `max_single_charge_micros`
-(per-charge ceiling; deny `single_charge_cap_exceeded` at admit before any hold) and `max_concurrent_held_micros`
+consistent with the existing budget_windows/queue_limits which also live in `policy`): `max_single_charge_amount`
+(per-charge ceiling; deny `single_charge_cap_exceeded` at admit before any hold) and `max_concurrent_held_amount`
 (cap on the SUM of the payer's ACTIVE un-settled hold $; deny `concurrent_held_cap_exceeded`, AND surfaced on every
-AdmitResponse as `max_concurrent_held_micros` + `held_micros` so an occupancy-aware host queues itself). Reused the
-existing `SumActiveMoneyHoldAuthorizations` query via new `MoneyService.ActiveHeldMicros`. KEPT throughput windows /
+AdmitResponse as `max_concurrent_held_amount` + `held_amount` so an occupancy-aware host queues itself). Reused the
+existing `SumActiveMoneyHoldAuthorizations` query via new `MoneyService.ActiveHeldAmount`. KEPT throughput windows /
 queue limits / budgets / SetTierSchedule + auto-graduation unchanged. SDK/wire: AdmitResponse + TierPolicyInput
 extended across client.go/remote.go/embed/client.go + pkg/service; HTTP handler unchanged (serializes the struct).
 Migration 020 is a JSONB-contract COMMENT (sqlc generate/vet clean). Tests: 3 new integration tests; full admission
@@ -103,7 +253,7 @@ failure_rate_limited codes + /abuse-usage. Generalize to $-VALUED windows so a p
 cheap one.
 
 ## Scope
-- A host API to REPORT a failed/wasted charge: `ReportWastedSpend(payer, actor, micros, reason)` (or a "wasted" flag
+- A host API to REPORT a failed/wasted charge: `ReportWastedSpend(payer, actor, amount, reason)` (or a "wasted" flag
   on the settle/release path) — the host says "this attempt failed and cost $X." (tensorhub reports content-filter
   rejects + inference failures; cheap malformed rejects ≈ $0, not reported.)
 - Track per-PAYER and per-ACTOR (invoker) wasted-spend in $ windows, multi-window (e.g. 15 min + 5 h).
@@ -122,7 +272,7 @@ NOT literally exist in this repo — what existed was the Redis fixed-window lim
 guards. Built the $-valued wasted-spend windows ON THAT proven infra (no new store): new ratelimit value-window
 primitives (AddWindowValue/WindowValue — DECOUPLED record vs read, vs throughput's Check which folds them) + a new
 `abuse.WastedSpendGuard` tracking per-PAYER + per-ACTOR wasted $ in multi-window Redis. Host API
-`ReportWastedSpend(payer, actor, micros, reason)` accrues into both subjects. Per-PAYER budget = tier policy JSONB
+`ReportWastedSpend(payer, actor, amount, reason)` accrues into both subjects. Per-PAYER budget = tier policy JSONB
 `bad_spend_windows` (graduated by tier); per-ACTOR = flat config default `DefaultActorWastedWindows` ($5/15m + $20/5h).
 Admit denies `abuse_rate_limited` (payer over) / `failure_rate_limited` (actor over), BlockedBy="abuse" → 429.
 New `/abuse-usage` read (wasted $, not counts). SDK/wire: ReportWastedSpend + AbuseUsage added to the Client interface
@@ -140,7 +290,7 @@ Consumer: tensorhub #486 (admin-only arrears for trusted tenants). GENERIC — O
 billing mode; make the credit exposure an explicit, admin-set per-tenant limit.
 
 ## Scope
-- Per-tenant `credit_limit_micros` (admin/operator-set, NOT self-serve): under billing_mode=arrears, allow the
+- Per-tenant `credit_limit_amount` (admin/operator-set, NOT self-serve): under billing_mode=arrears, allow the
   balance to go NEGATIVE up to the credit limit; AdmitHold denies (insufficient_credit) when a new hold would
   exceed it.
 - Periodic invoicing of accrued arrears (or expose the arrears balance for the host to invoice) — confirm what the
@@ -153,10 +303,10 @@ billing mode; make the credit exposure an explicit, admin-set per-tenant limit.
 tensorhub #486 (per-tenant `arrears_allowed` flag + admin surface); openrails #487.
 
 ## Outcome
-LANDED. EXISTING vs NEW: the existing arrears mode ALREADY had a credit line — `max_outstanding_owed_micros` (the
+LANDED. EXISTING vs NEW: the existing arrears mode ALREADY had a credit line — `max_outstanding_owed_amount` (the
 existing tests literally name it "credit limit") — but it is (a) SELF-SERVE (set via UpsertAccountSettings) and (b)
 enforced on the SETTLEMENT path (SpendCredits/AccrueOwed); AuthorizeAndHold SKIPPED the balance gate for arrears
-entirely. #489's NEW bits: an explicit OPERATOR-ONLY `credit_limit_micros` column (migration 022) + admit-time
+entirely. #489's NEW bits: an explicit OPERATOR-ONLY `credit_limit_amount` column (migration 022) + admit-time
 enforcement in AuthorizeAndHold (deny `insufficient_credit` when a new hold would push the balance below
 -credit_limit). New `MoneyService.SetCreditLimit/GetCreditLimit` (operator-only, dedicated SQL — NOT on the self-serve
 AccountSettingsInput) + pkg/service + SDK (client/remote/embed) + admin-gated PUT/GET /v1/service/credit-limit routes.
@@ -840,16 +990,18 @@ Also boot the cutover with `FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIO
 
 ---
 
-# #491: Split CUSTOMER (payer / money account) from ACTOR (invoker / delegated-user) — delegated-users hold no money
+# #491: Split CUSTOMER (payer / money account) from INVOKER (delegated-user / caller) — delegated-users hold no money
 
 **Completed:** structural split shipped (v0.32.0/v0.33.0); INVOKER-MODEL REVERSAL shipped (v0.34.0, 2026-06-15) — migration 029 drops invoker_id+FK (opaque `actor` text remains the invoker), buildBudgetScopes is per-invoker only (subject/role pools dropped + their tests removed), authkit dep -> v0.34.0; build/vet/unit + admission/budgets/money/controlplane/embed integration all green.
 COLUMN RENAME DONE (v0.35.0, migration 030): `actor` -> `invoker_id` on all 5 invoker-bearing tables
 (usage_events/money_transactions/money_spend_limits/budget_window_state/budget_reservations) + new nullable
 `invoker_type` discriminator on the 3 attribution tables + a per-invoker index on usage_events. NO FK (the
-invoker is a polymorphic, possibly-cross-DB principal). The in-memory/SDK Go field stays `Actor` (mapped to
-invoker_id at the gen boundary) so consumers need only a dep bump — renaming that public field is a future
-breaking-SDK change if wanted. invoker_type is a column ready for population (the host supplies the kind);
-wiring it through the SDK/wire is a follow-up.
+invoker is a polymorphic, possibly-cross-DB principal). PUBLIC HARD CUT DONE (2026-06-15, migration 034):
+SDK/service fields are `Invoker`, JSON/query params are `invoker`, `actor` request fallbacks were removed,
+`actor_wasted_windows` became `invoker_wasted_windows`, `/actor-wasted-windows` became
+`/invoker-wasted-windows`, and budget scope input no longer accepts `actor`. AuthKit delegated-token comments
+now say delegated subject/principal rather than actor. invoker_type is a column ready for population (the host
+supplies the kind); wiring it through the SDK/wire is a follow-up.
 
 ================================================================================
 REVERSAL (owner, 2026-06-15) — invoker is OPAQUE TEXT, no FK; budgets per-invoker only.
@@ -1063,7 +1215,7 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       the NATURAL-KEY STRING directly in source_id (uuidv7 pk + existing UNIQUE(merchant,customer,currency,
       source,source_id)); DepositParams.SourceID is now *string.
 - [x] Invoker identity = authkit profiles.delegated_users; invoker_id FK + wire json:"actor"->"invoker".
-      Outcome (slice 5): invoker_id uuid added NULLABLE + ADDITIVE (actor text RETAINED) to the THREE true-
+      Outcome (slice 5 + hard cut): invoker_id uuid added NULLABLE + ADDITIVE (actor text later renamed) to the THREE true-
       ATTRIBUTION tables (money_transactions / usage_events / money_spend_limits), FK ->
       profiles.delegated_users(id) cross-schema (guarded). DEVIATION (documented in 027): budget_reservations
       / budget_window_state `actor` is a POLYMORPHIC scope_key (subject|role:<uuid>|<invoker> per
@@ -1071,10 +1223,10 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       it stays opaque text. Populated on the DELEGATED path (ResolveDelegated -> TouchInvoker ->
       TouchDelegatedUser RETURNING id -> ResolvedDelegated.InvokerID, threaded through DepositParams /
       RecordUsageParams / Capture). The EMBEDDED/SERVICE path has NO issuer (host asserts identity per the
-      EMBEDDED SECURITY MODEL) so it cannot call TouchDelegatedUser -> invoker_id NULL there, opaque actor
-      stays the key. Wire: request DTOs gained json:"invoker" (admit/admit-batch, deposit/withdraw/hold,
-      authorize, report-wasted-spend, budget-check, open-window, window-settle-item); pre-#491 json:"actor"
-      still accepted transiently (resolveInvokerField prefers "invoker").
+      EMBEDDED SECURITY MODEL) so it cannot call TouchDelegatedUser -> invoker_id NULL there. Hard cut:
+      request DTOs use only json:"invoker" (admit/admit-batch, deposit/withdraw/hold, authorize,
+      report-wasted-spend, budget-check, open-window, window-settle-item); pre-#491 json:"actor" is not
+      accepted.
 - [x] Migrate existing per-(issuer,subject) money state for ORG-BOUND issuers only.
       Outcome (slice 5): VERIFIED no real federated data to fold — slice-1 (024) already DROPPED the
       (issuer,subject) columns, so no org-bound customer carries a natural key to collapse; 027 re-adds them
@@ -1101,8 +1253,8 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       Admit/charge/spend wire DTOs already carry customer_id (payable uuid) + actor (the invoker opaque
       label) as REQUEST fields (serviceAdmitRequest, service_credits, service_credit_window). No code
       change — the split already exists at the wire. UPDATE (slice 5): the wire field was RENAMED to
-      json:"invoker" on the request DTOs (json:"actor" still accepted transiently via resolveInvokerField);
-      attribution rows additionally carry invoker_id (delegated_users uuid) on the delegated path.
+      json:"invoker" on the request DTOs. HARD CUT (2026-06-15): json:"actor" was removed from request
+      DTOs and resolveInvokerField was deleted; attribution rows carry invoker_id on the delegated path.
 - [x] NO customer-claim-in-token needed. Verified (slice 4): no invoker/actor JWT claim exists anywhere;
       the invoker (actor) arrives ONLY as a merchant-supplied opaque request field on Admit/charge/spend
       (= money_spend_limits.actor). The authenticated subject is always a customer or the merchant
@@ -1140,3 +1292,92 @@ payer-level), #75 (escape-hatch per-delegated-user attributes drive per-actor li
 
 ---
 
+# #494: Multi-currency support — native currencies + abstract units + internal FX converter
+
+**Completed:** native-currency budget groundwork complete in this repo. Migration 031 shipped the additive
+`currency` columns; this pass adds migrations 032/033 and wires the code to the final native-money shape:
+`currency + amount/limit/balance` language, `budget_inflight_holds.amount/captured`, renamed money settings/spend
+cap columns, and budget window/hold keys scoped by currency.
+
+**Outcome (2026-06-15):**
+- [x] Recreated migration 032 as plain DDL so sqlc sees it: `budget_reservations` ->
+      `budget_inflight_holds`; old hold amount/captured columns -> `amount/captured`; per-invoker spend
+      limit columns use amount-language names.
+- [x] Added migration 033 for the deeper native-money rename: money settings columns now use
+      `max_spend_per_day`, `max_spend_per_month`, `max_outstanding_owed_amount`,
+      `low_balance_threshold`, `outstanding_owed_amount`, and `credit_limit_amount`; JSONB policy/schedule
+      documents are migrated to `limit`, `min_cumulative_paid_amount`,
+      `max_concurrent_held_amount`, and `max_single_charge_amount`.
+- [x] Re-keyed budget state and holds by currency:
+      `budget_window_state UNIQUE(merchant_id, customer_id, invoker_id, currency, window_key)` and
+      `budget_inflight_holds UNIQUE(merchant_id, customer_id, invoker_id, currency, source, source_id)`,
+      with matching aggregation indexes.
+- [x] Threaded native currency through admit -> budget reserve -> money hold. Empty currency still resolves
+      to `USD`; budgets now validate against the OpenRails native currency registry and reject custom-credit
+      units for these native-money tables.
+- [x] Settlement by hold now captures/releases budget holds by `(payer, currency, source, source_id)`.
+- [x] Renamed public/service SDK amount fields and wire JSON away from fixed-precision wording:
+      `EstimatedAmount`, `BalanceAmount`, `AvailableAmount`, `OutstandingOwedAmount`, `Limit`,
+      `ReportWastedSpend(... amount ...)`, `threshold_amount`, etc.
+- [x] Regenerated sqlc and updated generated-field call sites (`Amount`, `Captured`,
+      `MaxSpendPerDay`, `MaxSpendPerMonth`, `CreditLimitAmount`).
+
+**Not built here:** the FX converter capstone. The current implementation supports same-currency budget
+deduction and prevents cross-currency row/key collisions. Cross-currency deduction still needs a budget
+currency policy contract plus rate-source/staleness/rounding decisions before conversion can be applied
+correctly.
+
+**Verification:**
+- `task sqlc`
+- `go test ./...`
+
+---
+
+# #495: HARD CUT: finish currency-neutral API/facade and usage reporting
+
+**Completed:** yes
+
+The native-money tables are now keyed by `currency` and use `amount` language, but several public/API paths still
+silently read/write the default USD account or expose `usd_micro`. Hard cut those paths: no compatibility aliases,
+no legacy `usd_micro` balance descriptors, no API that echoes a requested currency while reading USD rows.
+
+## Scope
+- Make service/facade account reads, settings writes, transaction lists, spend policy checks, spend limits, credit
+  limits, authorize/hold, withdraw, hold, self-account, and service-account routes honor the supplied currency.
+- Add `currency` to spend request bodies where it is missing; require/normalize it through the same registry rules
+  as the lower-level ledger.
+- Write `usage_events.currency`, include currency in usage idempotency, and group/filter usage rollups, invoices,
+  and revenue reads by currency so unlike units are never summed together.
+- Replace user-facing `usd_micro` credit descriptors with currency-native account output.
+- Remove stale µ$/micros wording from active comments and JSON contracts.
+
+## Verification
+- Added regression coverage in `pkg/service/credit_facade_rls_integration_test.go`: one payer receives USD and
+  EUR deposits, then `GetCreditAccount(..., "EUR")` must return the EUR account rather than the USD state.
+- Second sweep closed remaining hard-cut leaks: budget check/status now take and return `currency`, admit/budget
+  window DTOs carry `currency`, usage/revenue rollup rows carry `currency`, service invoker balance returns
+  `currency` instead of `type`, and the dead `credit_type_inactive` compatibility sentinel/handlers plus obsolete
+  `internal/db/models` credit-type structs were removed.
+- Third sweep closed the older self-usage rollup row: `UsageRow` / `money.UsageRollupRow` now carry `currency`
+  beside `total_amount`, with regression coverage in `TestGetUsage_Breakdown`.
+- Fourth sweep closed wasted-spend report responses: `WastedSpendResult` / SDK `WastedSpendResponse` now carry
+  `currency` beside `recorded_amount`, `forgiven_amount`, and `charged_amount`; service validates the report
+  currency before recording/charging.
+- Fifth sweep closed `GET /v1/service/credit-limit`: the response now returns `currency` beside
+  `credit_limit_amount`.
+- Sixth sweep closed wasted-spend hot counters and abuse usage introspection: Redis wasted-spend idempotency,
+  payer-grace counters, and delegated-invoker cutoff counters are now keyed by currency; `AbuseUsage` takes/returns
+  `currency`, and each abuse usage window carries `currency`.
+- `task sqlc`
+- `go test ./...`
+- `go test -tags=integration ./pkg/service -run TestGetUsage_Breakdown -count=1`
+- `go test -tags=integration ./pkg/service -run TestWastedSpendDirectPayer_GraceThenChargeIdempotently -count=1`
+- `go test -tags=integration ./internal/modules/admission -run TestAdmit_WastedSpend -count=1`
+- `go test -tags=integration ./pkg/service -run TestCreditFacade_RLS_Under_OpenRailsApp -count=1`
+- `go test -tags=integration ./tests -run TestSelfAccountSurface_HostPrincipalFullLoopAndScoping -count=1`
+- `go test -tags=integration ./embed -run TestConformance_EmbeddedAndStandaloneAreObservablyIdentical -count=1`
+- focused scan: no `usd_micro` / `*_micros` / `credit_type_inactive` / money JSON `type` hits remain in active
+  API, service, SDK, money, or query code. The only remaining `json:"type"` hit is the generic HTTP error envelope
+  in `remote.go`.
+
+---

@@ -25,13 +25,13 @@ const (
 type EntityType string
 
 const (
-	EntitySubscription  EntityType = "subscription"
-	EntityEntitlement   EntityType = "entitlement"
-	EntityPayment       EntityType = "payment"
-	EntityPaymentMethod EntityType = "payment_method"
-	EntityEntitlementGrant    EntityType = "admin_grant"
-	EntityProduct       EntityType = "product"
-	EntityPrice         EntityType = "price"
+	EntitySubscription     EntityType = "subscription"
+	EntityEntitlement      EntityType = "entitlement"
+	EntityPayment          EntityType = "payment"
+	EntityPaymentMethod    EntityType = "payment_method"
+	EntityEntitlementGrant EntityType = "admin_grant"
+	EntityProduct          EntityType = "product"
+	EntityPrice            EntityType = "price"
 )
 
 // Finding represents a single consistency issue found during audit
@@ -172,7 +172,7 @@ func (c *Checker) registerAllChecks() {
 		// the sqlc migration: openrails.admin_grants has no revoked_at column, so
 		// the bun-era check could never have executed.
 		&CheckEntitlementGrantMissingEntitlements{},      // AG-1
-		&CheckOrphanAdminEntitlements{},            // AG-2
+		&CheckOrphanAdminEntitlements{},                  // AG-2
 		&CheckExpiredEntitlementGrantActiveEntitlement{}, // AG-4
 
 		// =====================================================================

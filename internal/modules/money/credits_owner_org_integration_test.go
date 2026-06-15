@@ -90,7 +90,7 @@ func seedSpendable(t *testing.T, ctx context.Context, svc *money.MoneyService, u
 	t.Helper()
 	src := uuid.New().String()
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		Actor:    userID,
+		Invoker:  userID,
 		Amount:   amount,
 		Source:   "test_seed",
 		SourceID: &src,

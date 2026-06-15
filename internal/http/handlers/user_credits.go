@@ -9,12 +9,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 type creditBalanceResponse struct {
-	Type          string `json:"type"`
+	Currency      string `json:"currency"`
 	DisplayName   string `json:"display_name"`
 	Unit          string `json:"unit"`
 	DecimalPlaces int    `json:"decimal_places"`
@@ -29,7 +30,7 @@ func GetMyCredits(r *httprequest.Request) {
 		return
 	}
 
-	// #472: one universal µ$ wallet, no credit_type dimension. Return the single
+	// #472/#495: one native-money account per currency. Return the default account
 	// money balance for the caller's own tenant-subject.
 	bal, err := r.State.MoneyService.GetBalance(r.Request.Context(), user.ID)
 	if err != nil {
@@ -38,26 +39,23 @@ func GetMyCredits(r *httprequest.Request) {
 	}
 
 	r.SuccessJSON([]creditBalanceResponse{{
-		Type:          moneyBalanceType,
-		DisplayName:   moneyBalanceDisplayName,
-		Unit:          moneyBalanceUnit,
-		DecimalPlaces: moneyBalanceDecimals,
+		Currency:      bal.Currency,
+		DisplayName:   bal.Currency,
+		Unit:          bal.Currency,
+		DecimalPlaces: currencyDecimals(bal.Currency),
 		Balance:       bal.Balance,
 		HeldBalance:   bal.HeldBalance,
 	}})
 }
 
-// money*Balance descriptors: the fixed unit metadata for the universal µ$ wallet
-// (#472 — money has no credit_type dimension).
-const (
-	moneyBalanceType        = "usd_micro"
-	moneyBalanceDisplayName = "USD"
-	moneyBalanceUnit        = "usd_micro"
-	moneyBalanceDecimals    = 6
-)
+func currencyDecimals(currency string) int {
+	if decimals, ok := money.CurrencyScale(currency); ok {
+		return decimals
+	}
+	return 0
+}
 
-// GetMyCreditsType returns the caller's money balance (#472: the :type param is
-// vestigial — money is the only unit).
+// GetMyCreditsType returns the caller's money balance for one currency.
 func GetMyCreditsType(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
@@ -65,24 +63,28 @@ func GetMyCreditsType(r *httprequest.Request) {
 		return
 	}
 
-	bal, err := r.State.MoneyService.GetBalance(r.Request.Context(), user.ID)
+	payer := identity.CustomerIDFromString(user.ID)
+	if payer.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "payer could not be resolved from subject")
+		return
+	}
+	bal, err := r.State.MoneyService.GetBalanceForCustomer(r.Request.Context(), payer, r.Param("currency"))
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "balance not found")
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 
 	r.SuccessJSON(creditBalanceResponse{
-		Type:          moneyBalanceType,
-		DisplayName:   moneyBalanceDisplayName,
-		Unit:          moneyBalanceUnit,
-		DecimalPlaces: moneyBalanceDecimals,
+		Currency:      bal.Currency,
+		DisplayName:   bal.Currency,
+		Unit:          bal.Currency,
+		DecimalPlaces: currencyDecimals(bal.Currency),
 		Balance:       bal.Balance,
 		HeldBalance:   bal.HeldBalance,
 	})
 }
 
-// GetMyCreditTransactions lists the caller's money transactions (#472: the :type
-// param is vestigial — money is the only unit).
+// GetMyCreditTransactions lists the caller's money transactions for one currency.
 func GetMyCreditTransactions(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
@@ -99,9 +101,14 @@ func GetMyCreditTransactions(r *httprequest.Request) {
 		offset = 0
 	}
 
-	items, total, err := r.State.MoneyService.GetTransactions(r.Request.Context(), user.ID, limit, offset)
+	payer := identity.CustomerIDFromString(user.ID)
+	if payer.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "payer could not be resolved from subject")
+		return
+	}
+	items, total, err := r.State.MoneyService.GetTransactionsByCustomer(r.Request.Context(), payer, r.Param("currency"), limit, offset)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to load transactions")
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 	r.SuccessJSONPaginated(items, int64(total), limit, offset)
@@ -180,7 +187,7 @@ func GetMyUsage(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	rows, err := svc.GetUsage(r.Request.Context(), payer, from, to)
+	rows, err := svc.GetUsage(r.Request.Context(), payer, r.Request.URL.Query().Get("currency"), from, to)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load usage")
 		return

@@ -24,7 +24,7 @@ type mountTestDelegatedAuthenticator struct{}
 
 func (mountTestDelegatedAuthenticator) AuthenticateDelegated(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 	return &billingauth.DelegatedPrincipal{
-		MerchantID:    dbtest.TestTenantID.String(),
+		MerchantID:  dbtest.TestTenantID.String(),
 		SubjectID:   "11111111-1111-1111-1111-111111111111",
 		Permissions: []string{controlplane.PermSelfBillingRead},
 	}, nil

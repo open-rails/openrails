@@ -132,7 +132,7 @@ func (c *remote) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cred
 	var out CreditHold
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/hold", map[string]any{
 		"customer_id": customerIDString(req.CustomerID),
-		"actor":       req.Actor,
+		"invoker":     req.Invoker,
 		"currency":    req.Currency,
 		"amount":      req.Amount,
 		"source":      req.Source,
@@ -169,7 +169,7 @@ func (c *remote) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest
 	var out CreditTransaction
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/withdraw", map[string]any{
 		"customer_id": customerIDString(req.CustomerID),
-		"actor":       req.Actor,
+		"invoker":     req.Invoker,
 		"currency":    req.Currency,
 		"amount":      req.Amount,
 		"source":      req.Source,
@@ -189,7 +189,7 @@ func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 	}
 	body := map[string]any{
 		"customer_id": customerIDString(req.CustomerID),
-		"actor":       req.Actor,
+		"invoker":     req.Invoker,
 		"currency":    req.Currency,
 		"amount":      req.Amount,
 		"source":      req.Source,
@@ -221,11 +221,11 @@ type captureBody struct {
 
 // Capture implements Client (handler ServiceCaptureHold). Idempotent on the
 // reservation. A nil error means OpenRails accepted the capture.
-func (c *remote) Capture(ctx context.Context, reservationID string, capturedMicros int64, usage *CaptureUsage) error {
+func (c *remote) Capture(ctx context.Context, reservationID string, capturedAmount int64, usage *CaptureUsage) error {
 	if strings.TrimSpace(reservationID) == "" {
 		return fmt.Errorf("openrails: capture requires reservation_id")
 	}
-	body := captureBody{Amount: capturedMicros}
+	body := captureBody{Amount: capturedAmount}
 	if usage != nil && strings.TrimSpace(usage.EventType) != "" {
 		body.EventType = usage.EventType
 		body.Resource = usage.Resource
@@ -305,12 +305,13 @@ func (c *remote) ListCreditTransactions(ctx context.Context, customerID, currenc
 }
 
 // UsageRollup implements Client (handler ServiceUsageRollup).
-func (c *remote) UsageRollup(ctx context.Context, customerID string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
+func (c *remote) UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
 	var resp struct {
 		Rows []UsageRollupRow `json:"rows"`
 	}
 	body := map[string]any{
 		"customer_id": customerID,
+		"currency":    normalizeCurrency(currency),
 		"from":        from.UTC().Unix(),
 		"to":          to.UTC().Unix(),
 		"group_by":    groupBy,
@@ -322,7 +323,7 @@ func (c *remote) UsageRollup(ctx context.Context, customerID string, from, to ti
 }
 
 // BudgetCheck implements Client (handler ServiceBudgetCheck).
-func (c *remote) BudgetCheck(ctx context.Context, tenantSubjectID, actorID string, windows []BudgetWindowInput, requestedMicros int64) ([]BudgetWindow, error) {
+func (c *remote) BudgetCheck(ctx context.Context, tenantSubjectID, invokerID, currency string, windows []BudgetWindowInput, requestedAmount int64) ([]BudgetWindow, error) {
 	if windows == nil {
 		windows = []BudgetWindowInput{}
 	}
@@ -331,9 +332,10 @@ func (c *remote) BudgetCheck(ctx context.Context, tenantSubjectID, actorID strin
 	}
 	body := map[string]any{
 		"customer_id":      tenantSubjectID,
-		"actor":            actorID,
+		"invoker":          invokerID,
+		"currency":         normalizeCurrency(currency),
 		"windows":          windows,
-		"requested_micros": requestedMicros,
+		"requested_amount": requestedAmount,
 	}
 	if err := c.do(ctx, http.MethodPost, "/v1/service/budget/check", body, &resp); err != nil {
 		return nil, err
@@ -342,11 +344,12 @@ func (c *remote) BudgetCheck(ctx context.Context, tenantSubjectID, actorID strin
 }
 
 // BudgetStatus implements Client (handler ServiceGetBudget).
-func (c *remote) BudgetStatus(ctx context.Context, tenantSubjectID, actorID, tier string) ([]BudgetWindow, error) {
+func (c *remote) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]BudgetWindow, error) {
 	q := url.Values{}
 	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
-	if actorID != "" {
-		q.Set("actor", actorID)
+	q.Set("currency", normalizeCurrency(currency))
+	if invokerID != "" {
+		q.Set("invoker", invokerID)
 	}
 	if tier != "" {
 		q.Set("tier", tier)
@@ -370,11 +373,11 @@ func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in T
 		"budget_windows":     in.BudgetWindows,
 		"queue_limits":       in.QueueLimits,
 	}
-	if in.MaxConcurrentHeldMicros != 0 {
-		body["max_concurrent_held_micros"] = in.MaxConcurrentHeldMicros
+	if in.MaxConcurrentHeldAmount != 0 {
+		body["max_concurrent_held_amount"] = in.MaxConcurrentHeldAmount
 	}
-	if in.MaxSingleChargeMicros != 0 {
-		body["max_single_charge_micros"] = in.MaxSingleChargeMicros
+	if in.MaxSingleChargeAmount != 0 {
+		body["max_single_charge_amount"] = in.MaxSingleChargeAmount
 	}
 	if len(in.BadSpendWindows) > 0 {
 		body["bad_spend_windows"] = in.BadSpendWindows
@@ -391,23 +394,22 @@ func (c *remote) SetTierSchedule(ctx context.Context, tenantSubjectID string, sc
 	return c.do(ctx, http.MethodPut, "/v1/service/tier-schedules", body, nil)
 }
 
-// SetActorWastedWindows implements Client (handler ServiceSetActorWastedWindows,
-// #492). The handler reads {key, window_seconds, limit_micros}; cadence is not
-// sent (flat rolling windows).
-func (c *remote) SetActorWastedWindows(ctx context.Context, tenantSubjectID string, windows []BudgetWindowInput) error {
+// SetInvokerWastedSpendPolicy implements Client (handler
+// ServiceSetInvokerWastedSpendPolicy, #496). The handler reads
+// {key, window_seconds, limit}; cadence is not sent (flat rolling windows).
+func (c *remote) SetInvokerWastedSpendPolicy(ctx context.Context, windows []BudgetWindowInput) error {
 	ws := make([]map[string]any, 0, len(windows))
 	for _, w := range windows {
 		ws = append(ws, map[string]any{
 			"key":            w.Key,
 			"window_seconds": w.WindowSeconds,
-			"limit_micros":   w.LimitMicros,
+			"limit":          w.Limit,
 		})
 	}
 	body := map[string]any{
-		"customer_id": strings.TrimSpace(tenantSubjectID),
-		"windows":     ws,
+		"windows": ws,
 	}
-	return c.do(ctx, http.MethodPut, "/v1/service/actor-wasted-windows", body, nil)
+	return c.do(ctx, http.MethodPut, "/v1/service/invoker-wasted-spend-policy", body, nil)
 }
 
 // GetTier implements Client (handler ServiceGetTier, #477).
@@ -424,22 +426,31 @@ func (c *remote) GetTier(ctx context.Context, tenantSubjectID string) (string, e
 }
 
 // ReportWastedSpend implements Client (handler ServiceReportWastedSpend, #488).
-func (c *remote) ReportWastedSpend(ctx context.Context, tenantSubjectID, actor string, micros int64, reason string) error {
+func (c *remote) ReportWastedSpend(ctx context.Context, report WastedSpendReport) (*WastedSpendResponse, error) {
 	body := map[string]any{
-		"customer_id": strings.TrimSpace(tenantSubjectID),
-		"actor":       actor,
-		"micros":      micros,
-		"reason":      reason,
+		"customer_id":  strings.TrimSpace(report.CustomerID),
+		"invoker":      report.Invoker,
+		"invoker_type": report.InvokerType,
+		"currency":     report.Currency,
+		"amount":       report.Amount,
+		"source":       report.Source,
+		"source_id":    report.SourceID,
+		"reason":       report.Reason,
 	}
-	return c.do(ctx, http.MethodPost, "/v1/service/wasted-spend", body, nil)
+	var out WastedSpendResponse
+	if err := c.do(ctx, http.MethodPost, "/v1/service/wasted-spend", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // AbuseUsage implements Client (handler ServiceAbuseUsage, #488).
-func (c *remote) AbuseUsage(ctx context.Context, tenantSubjectID, actor, tier string) (*AbuseUsageResponse, error) {
+func (c *remote) AbuseUsage(ctx context.Context, tenantSubjectID, invoker, currency, tier string) (*AbuseUsageResponse, error) {
 	q := url.Values{}
 	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
-	if actor != "" {
-		q.Set("actor", actor)
+	q.Set("currency", normalizeCurrency(currency))
+	if invoker != "" {
+		q.Set("invoker", invoker)
 	}
 	if tier != "" {
 		q.Set("tier", tier)
@@ -452,25 +463,28 @@ func (c *remote) AbuseUsage(ctx context.Context, tenantSubjectID, actor, tier st
 }
 
 // SetCreditLimit implements Client (handler ServiceSetCreditLimit, #489).
-func (c *remote) SetCreditLimit(ctx context.Context, tenantSubjectID string, creditLimitMicros int64) error {
+func (c *remote) SetCreditLimit(ctx context.Context, tenantSubjectID, currency string, creditLimit int64) error {
 	body := map[string]any{
 		"customer_id":         strings.TrimSpace(tenantSubjectID),
-		"credit_limit_micros": creditLimitMicros,
+		"currency":            normalizeCurrency(currency),
+		"credit_limit_amount": creditLimit,
 	}
 	return c.do(ctx, http.MethodPut, "/v1/service/credit-limit", body, nil)
 }
 
 // GetCreditLimit implements Client (handler ServiceGetCreditLimit, #489).
-func (c *remote) GetCreditLimit(ctx context.Context, tenantSubjectID string) (int64, error) {
+func (c *remote) GetCreditLimit(ctx context.Context, tenantSubjectID, currency string) (int64, error) {
 	q := url.Values{}
 	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
+	q.Set("currency", normalizeCurrency(currency))
 	var resp struct {
-		CreditLimitMicros int64 `json:"credit_limit_micros"`
+		Currency          string `json:"currency"`
+		CreditLimitAmount int64  `json:"credit_limit_amount"`
 	}
 	if err := c.do(ctx, http.MethodGet, "/v1/service/credit-limit?"+q.Encode(), nil, &resp); err != nil {
 		return 0, err
 	}
-	return resp.CreditLimitMicros, nil
+	return resp.CreditLimitAmount, nil
 }
 
 // SetSubjectBudgetPolicy implements Client (handler ServiceSetSubjectBudgetPolicy, #473).
@@ -531,8 +545,8 @@ func (c *remote) SettleWindowItems(ctx context.Context, items []WindowSettleItem
 }
 
 // RefillWindow implements Client (handler ServiceRefillCreditWindow).
-func (c *remote) RefillWindow(ctx context.Context, windowID uuid.UUID, amountMicros, ttlSeconds int64) (*CreditWindow, error) {
-	body := map[string]any{"amount": amountMicros, "ttl_seconds": ttlSeconds}
+func (c *remote) RefillWindow(ctx context.Context, windowID uuid.UUID, amount, ttlSeconds int64) (*CreditWindow, error) {
+	body := map[string]any{"amount": amount, "ttl_seconds": ttlSeconds}
 	var out CreditWindow
 	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/windows/"+windowID.String()+"/refill", body, &out); err != nil {
 		return nil, err
@@ -583,9 +597,10 @@ func (c *remote) ListActiveEntitlements(ctx context.Context, issuer string, subj
 }
 
 // ResourceRevenueDaily implements Client (handler ServiceResourceRevenue).
-func (c *remote) ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error) {
+func (c *remote) ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error) {
 	body := map[string]any{
 		"resource": strings.TrimSpace(resource),
+		"currency": normalizeCurrency(currency),
 		"from":     fromUnix,
 		"to":       toUnix,
 	}
@@ -600,17 +615,17 @@ func addAccountSettingFields(body map[string]any, in AccountSettingsInput) {
 	if in.BillingMode != nil {
 		body["billing_mode"] = *in.BillingMode
 	}
-	if in.MaxSpendPerDayMicros != nil {
-		body["max_spend_per_day_micros"] = *in.MaxSpendPerDayMicros
+	if in.MaxSpendPerDay != nil {
+		body["max_spend_per_day"] = *in.MaxSpendPerDay
 	}
-	if in.MaxSpendPerMonthMicros != nil {
-		body["max_spend_per_month_micros"] = *in.MaxSpendPerMonthMicros
+	if in.MaxSpendPerMonth != nil {
+		body["max_spend_per_month"] = *in.MaxSpendPerMonth
 	}
-	if in.MaxOutstandingOwedMicros != nil {
-		body["max_outstanding_owed_micros"] = *in.MaxOutstandingOwedMicros
+	if in.MaxOutstandingOwedAmount != nil {
+		body["max_outstanding_owed_amount"] = *in.MaxOutstandingOwedAmount
 	}
 	if in.LowBalanceThreshold != nil {
-		body["low_balance_threshold_micros"] = *in.LowBalanceThreshold
+		body["low_balance_threshold"] = *in.LowBalanceThreshold
 	}
 	if in.AutoTopupEnabled != nil {
 		body["auto_topup_enabled"] = *in.AutoTopupEnabled

@@ -6,8 +6,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Money domain types: the universal fractional-USD wallet (µ$ = 1e-6 USD).
-// No credit_type dimension — money is identical for every tenant (#472).
+// Money domain types. Amount precision is implied by Currency (#494).
+// No credit_type dimension — native money is identical for every tenant (#472).
 
 type MoneyBalance struct {
 	ID          uuid.UUID `json:"id"`
@@ -25,7 +25,7 @@ type MoneyTransaction struct {
 	MerchantID      uuid.UUID      `json:"tenant_id"`
 	CustomerID      uuid.UUID      `json:"customer_id"`
 	Currency        string         `json:"currency"`
-	Actor           string         `json:"actor"`
+	Invoker         string         `json:"invoker"`
 	Resource        *string        `json:"resource,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 	Amount          int64          `json:"amount"`
@@ -78,10 +78,10 @@ type MoneyAccount struct {
 	Currency   string    `json:"currency"`
 
 	BillingMode              string     `json:"billing_mode"`
-	MaxSpendPerDayMicros     *int64     `json:"max_spend_per_day_micros,omitempty"`
-	MaxSpendPerMonthMicros   *int64     `json:"max_spend_per_month_micros,omitempty"`
-	MaxOutstandingOwedMicros *int64     `json:"max_outstanding_owed_micros,omitempty"`
-	LowBalanceThreshold      *int64     `json:"low_balance_threshold_micros,omitempty"`
+	MaxSpendPerDay           *int64     `json:"max_spend_per_day,omitempty"`
+	MaxSpendPerMonth         *int64     `json:"max_spend_per_month,omitempty"`
+	MaxOutstandingOwedAmount *int64     `json:"max_outstanding_owed_amount,omitempty"`
+	LowBalanceThreshold      *int64     `json:"low_balance_threshold,omitempty"`
 	AutoTopupEnabled         bool       `json:"auto_topup_enabled"`
 	AutoTopupAmountCents     *int64     `json:"auto_topup_amount_cents,omitempty"`
 	AutoTopupPaymentMethod   *uuid.UUID `json:"auto_topup_payment_method_id,omitempty"`
@@ -89,12 +89,12 @@ type MoneyAccount struct {
 	HardStopOnBreach         bool       `json:"hard_stop_on_breach"`
 	AlertThresholdPct        int        `json:"alert_threshold_pct"`
 
-	OutstandingOwedMicros int64 `json:"outstanding_owed_micros"`
-	// CreditLimitMicros is the admin-set arrears credit line (#489): under
+	OutstandingOwedAmount int64 `json:"outstanding_owed_amount"`
+	// CreditLimitAmount is the admin-set arrears credit line (#489): under
 	// billing_mode=arrears the balance may go negative up to this amount; AdmitHold
 	// denies insufficient_credit when a new hold would exceed it. 0 = off. NOT
 	// self-serve (set via SetCreditLimit, never UpsertAccountSettings).
-	CreditLimitMicros int64      `json:"credit_limit_micros"`
+	CreditLimitAmount int64      `json:"credit_limit_amount"`
 	LastAlertAt       *time.Time `json:"last_alert_at,omitempty"`
 	LastTopupAt       *time.Time `json:"last_topup_at,omitempty"`
 
@@ -111,16 +111,16 @@ type MoneyAccount struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// MoneySpendLimit is an optional per-actor µ$ spend cap under a tenant subject
-// (issue #237). The actor string is matched against money_transactions.actor.
+// MoneySpendLimit is an optional per-invoker µ$ spend cap under a tenant subject
+// (issue #237). The invoker string is matched against money_transactions.invoker.
 type MoneySpendLimit struct {
-	ID                     uuid.UUID `json:"id"`
-	MerchantID             uuid.UUID `json:"tenant_id"`
-	CustomerID             uuid.UUID `json:"customer_id"`
-	Currency               string     `json:"currency"`
-	Actor                  string     `json:"actor"`
-	MaxSpendPerDayMicros   *int64     `json:"max_spend_per_day_micros,omitempty"`
-	MaxSpendPerMonthMicros *int64    `json:"max_spend_per_month_micros,omitempty"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	ID               uuid.UUID `json:"id"`
+	MerchantID       uuid.UUID `json:"tenant_id"`
+	CustomerID       uuid.UUID `json:"customer_id"`
+	Currency         string    `json:"currency"`
+	Invoker          string    `json:"invoker"`
+	MaxSpendPerDay   *int64    `json:"max_spend_per_day,omitempty"`
+	MaxSpendPerMonth *int64    `json:"max_spend_per_month,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }

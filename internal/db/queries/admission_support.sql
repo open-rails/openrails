@@ -2,24 +2,25 @@
 -- blocklist (#300), and per-(payer, tier) throughput policies.
 
 -- name: GetBudgetReservationByCoords :one
-SELECT * FROM openrails.budget_reservations
+SELECT * FROM openrails.budget_inflight_holds
 WHERE merchant_id = $1 AND customer_id = $2
-  AND invoker_id = $3 AND source = $4 AND source_id = $5
+  AND invoker_id = $3 AND currency = sqlc.arg(currency)
+  AND source = $4 AND source_id = $5
 LIMIT 1;
 
 -- name: InsertBudgetReservation :exec
-INSERT INTO openrails.budget_reservations (
-    id, merchant_id, customer_id, invoker_id,
-    amount_micros, status, source, source_id, expires_at, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+INSERT INTO openrails.budget_inflight_holds (
+    id, merchant_id, customer_id, invoker_id, currency,
+    amount, status, source, source_id, expires_at, created_at
+) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, $7, $8, $9, $10);
 
 -- name: CaptureBudgetReservation :execrows
-UPDATE openrails.budget_reservations
-SET status = 'captured', captured_micros = $2
+UPDATE openrails.budget_inflight_holds
+SET status = 'captured', captured = $2
 WHERE id = $1 AND status = 'active';
 
 -- name: ReleaseBudgetReservation :execrows
-UPDATE openrails.budget_reservations
+UPDATE openrails.budget_inflight_holds
 SET status = 'released'
 WHERE id = $1 AND status = 'active';
 
@@ -27,33 +28,37 @@ WHERE id = $1 AND status = 'active';
 -- Settle ALL scopes reserved under one request (#473): every active budget
 -- reservation for (tenant, subject, source, source_id) -> captured. Idempotent
 -- (already-settled rows are skipped by the status filter).
-UPDATE openrails.budget_reservations
-SET status = 'captured', captured_micros = sqlc.arg(captured_micros)::bigint
+UPDATE openrails.budget_inflight_holds
+SET status = 'captured', captured = sqlc.arg(captured)::bigint
 WHERE merchant_id = $1 AND customer_id = $2
+  AND currency = sqlc.arg(currency)
   AND source = $3 AND source_id = $4 AND status = 'active';
 
 -- name: ReleaseBudgetReservationsByCoords :execrows
 -- Free ALL scopes reserved under one request (#473): every active budget
 -- reservation for (tenant, subject, source, source_id) -> released. Idempotent.
-UPDATE openrails.budget_reservations
+UPDATE openrails.budget_inflight_holds
 SET status = 'released'
 WHERE merchant_id = $1 AND customer_id = $2
+  AND currency = sqlc.arg(currency)
   AND source = $3 AND source_id = $4 AND status = 'active';
 
 -- name: AggregateBudgetWindow :one
 -- One fixed window's state since window_start (#337): used = captured sums,
 -- reserved = active sums.
-SELECT COALESCE(SUM(captured_micros) FILTER (WHERE status = 'captured'), 0)::bigint AS used,
-       COALESCE(SUM(amount_micros) FILTER (WHERE status = 'active'), 0)::bigint AS reserved
-FROM openrails.budget_reservations
+SELECT COALESCE(SUM(captured) FILTER (WHERE status = 'captured'), 0)::bigint AS used,
+       COALESCE(SUM(amount) FILTER (WHERE status = 'active'), 0)::bigint AS reserved
+FROM openrails.budget_inflight_holds
 WHERE merchant_id = $1 AND customer_id = $2 AND invoker_id = $3
+  AND currency = sqlc.arg(currency)
   AND created_at >= sqlc.arg(window_start)::timestamptz
   AND status IN ('active','captured');
 
 -- name: GetBudgetWindowState :one
 SELECT * FROM openrails.budget_window_state bws
 WHERE bws.merchant_id = $1 AND bws.customer_id = $2
-  AND bws.invoker_id = $3 AND bws.window_key = $4
+  AND bws.invoker_id = $3 AND bws.currency = sqlc.arg(currency)
+  AND bws.window_key = $4
 LIMIT 1;
 
 -- name: GetBudgetWindowStateForUpdate :one
@@ -61,16 +66,17 @@ LIMIT 1;
 -- concurrent reserves around a window boundary serialize on it (#337).
 SELECT * FROM openrails.budget_window_state bws
 WHERE bws.merchant_id = $1 AND bws.customer_id = $2
-  AND bws.invoker_id = $3 AND bws.window_key = $4
+  AND bws.invoker_id = $3 AND bws.currency = sqlc.arg(currency)
+  AND bws.window_key = $4
 FOR UPDATE;
 
 -- name: InsertBudgetWindowStateIfAbsent :exec
 -- First-ever charge on a window key: open at now, anchor at now.
 INSERT INTO openrails.budget_window_state (
-    id, merchant_id, customer_id, invoker_id, window_key,
+    id, merchant_id, customer_id, invoker_id, currency, window_key,
     cadence, window_seconds, anchor, window_start, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-ON CONFLICT (merchant_id, customer_id, invoker_id, window_key) DO NOTHING;
+) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT (merchant_id, customer_id, invoker_id, currency, window_key) DO NOTHING;
 
 -- name: ReopenBudgetWindowState :exec
 -- Reopen an expired session window (opportunistically refreshing
@@ -187,35 +193,22 @@ WHERE merchant_id = $1 AND owner = $2
 ORDER BY (customer_id IS NOT NULL) DESC
 LIMIT 1;
 
--- name: UpsertActorWastedWindowsDefault :exec
--- Tenant-wide FLAT per-actor wasted-spend windows upsert (#492): customer_id IS
--- NULL is the tenant default backstop. Replaces service.DefaultActorWastedWindows
--- when set.
-INSERT INTO openrails.actor_wasted_windows (
-    id, merchant_id, customer_id, windows, windows_version, created_at, updated_at
-) VALUES ($1, $2, NULL, $3, 1, $4, $5)
-ON CONFLICT (merchant_id) WHERE (customer_id IS NULL) DO UPDATE SET
+-- name: UpsertInvokerWastedSpendPolicy :exec
+-- Merchant-wide FLAT per-invoker wasted-spend policy upsert (#496). Payer wasted
+-- spend is trust-tier graduated in tier_policies.policy.bad_spend_windows; this
+-- policy is the stricter delegated-user backstop and does not vary by customer.
+INSERT INTO openrails.invoker_wasted_spend_policies (
+    id, merchant_id, windows, windows_version, created_at, updated_at
+) VALUES ($1, $2, $3, 1, $4, $5)
+ON CONFLICT (merchant_id) DO UPDATE SET
     windows = EXCLUDED.windows,
-    windows_version = openrails.actor_wasted_windows.windows_version + 1,
+    windows_version = openrails.invoker_wasted_spend_policies.windows_version + 1,
     updated_at = EXCLUDED.updated_at;
 
--- name: UpsertActorWastedWindowsCustomer :exec
--- Per-customer FLAT per-actor wasted-spend windows override (#492): takes
--- precedence over the tenant-wide default for that customer.
-INSERT INTO openrails.actor_wasted_windows (
-    id, merchant_id, customer_id, windows, windows_version, created_at, updated_at
-) VALUES ($1, $2, $3, $4, 1, $5, $6)
-ON CONFLICT (merchant_id, customer_id) WHERE (customer_id IS NOT NULL) DO UPDATE SET
-    windows = EXCLUDED.windows,
-    windows_version = openrails.actor_wasted_windows.windows_version + 1,
-    updated_at = EXCLUDED.updated_at;
-
--- name: GetEffectiveActorWastedWindows :one
--- The effective per-actor wasted-spend windows for a (tenant, customer): the
--- customer's own override if present, else the tenant-wide default (customer_id
--- IS NULL, #492). Customer-specific rows sort first so LIMIT 1 picks the override.
-SELECT * FROM openrails.actor_wasted_windows
+-- name: GetInvokerWastedSpendPolicy :one
+-- Merchant-wide FLAT per-invoker wasted-spend policy (#496). No customer-specific
+-- override exists; callers fall back to service.DefaultInvokerWastedWindows() on
+-- no row or empty windows.
+SELECT * FROM openrails.invoker_wasted_spend_policies
 WHERE merchant_id = $1
-  AND (customer_id = $2 OR customer_id IS NULL)
-ORDER BY (customer_id IS NOT NULL) DESC
 LIMIT 1;

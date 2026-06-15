@@ -17,15 +17,15 @@ import (
 )
 
 // RecordUsageParams is one metered, host-priced usage event (issue #289). The
-// host supplies the final Amount (in the credit type's smallest unit); OpenRails
+// host supplies the final Amount (in the currency's internal precision); OpenRails
 // records the event AND debits the ledger atomically.
 type RecordUsageParams struct {
 	// Payer is the tenant subject BILLED for this usage (the payer). When nil it is
-	// resolved from Actor (self-hosted/personal case), never synthesized.
+	// resolved from Invoker (self-hosted/personal case), never synthesized.
 	Payer     *identity.CustomerID
-	Actor     string     // actor (attribution only)
-	Currency  string     // "" => DefaultCurrency (#472)
-	EventType string     // metered event kind, e.g. "gpt-4o"
+	Invoker   string // invoker (attribution only)
+	Currency  string // "" => DefaultCurrency (#472)
+	EventType string // metered event kind, e.g. "gpt-4o"
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
 	// cached_input_tokens, requests, ...). Used for reporting + #298 throughput.
 	Dimensions map[string]int64
@@ -69,7 +69,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 	if err := ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
-	payer, err := resolveCustomer(params.Payer, params.Actor)
+	payer, err := resolveCustomer(params.Payer, params.Invoker)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 
 		// Serialize per (tenant, payer) so the idempotency check below
 		// can't race a concurrent identical record into a double charge.
-		if _, err := s.lockBalance(ctx, q, payer, params.Actor, cur); err != nil {
+		if _, err := s.lockBalance(ctx, q, payer, params.Invoker, cur); err != nil {
 			return err
 		}
 
@@ -109,7 +109,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		// amount exceeds available balance.
 		var debitID *uuid.UUID
 		if params.Amount > 0 {
-			balID, owedID, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Actor, cur, params.Source, params.SourceID, params.Amount)
+			balID, owedID, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount)
 			if derr != nil {
 				return derr
 			}
@@ -128,7 +128,8 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			ID:                 uuidutil.NewV7(),
 			MerchantID:         tenantID,
 			CustomerID:         payerID,
-			Actor:              params.Actor,
+			Invoker:            params.Invoker,
+			Currency:           cur,
 			EventType:          params.EventType,
 			Dimensions:         params.Dimensions,
 			Amount:             params.Amount,
@@ -151,7 +152,8 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			ID:                 ev.ID,
 			MerchantID:         ev.MerchantID,
 			CustomerID:         ev.CustomerID,
-			InvokerID:              ev.Actor,
+			InvokerID:          ev.Invoker,
+			Currency:           ev.Currency,
 			Resource:           ev.Resource,
 			EventType:          ev.EventType,
 			Dimensions:         dims,
@@ -175,6 +177,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 // usage reporting (GET /v1/me/usage) and #303 invoice line items.
 type UsageRollupRow struct {
 	EventType   string           `json:"event_type"`
+	Currency    string           `json:"currency"`
 	TotalAmount int64            `json:"total_amount"`
 	EventCount  int64            `json:"event_count"`
 	Dimensions  map[string]int64 `json:"dimensions"`
@@ -183,12 +186,16 @@ type UsageRollupRow struct {
 // AggregateUsage rolls up an payer's usage_events over [from, to) grouped by
 // event_type, with summed dimensions. RLS-scoped to the request tenant. This is
 // the rollup layer — it is NEVER called on the per-request admission hot path.
-func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.CustomerID, from, to time.Time) ([]UsageRollupRow, error) {
+func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) ([]UsageRollupRow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
+	}
+	cur := normalizeCurrency(currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -202,7 +209,8 @@ func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.Custom
 		q := s.db.Gen(ctx)
 		totals, err := q.AggregateUsageTotals(ctx, gen.AggregateUsageTotalsParams{
 			MerchantID: tenantID, CustomerID: payerID,
-			FromAt: from.UTC(), ToAt: to.UTC(),
+			Currency: cur,
+			FromAt:   from.UTC(), ToAt: to.UTC(),
 		})
 		if err != nil {
 			return err
@@ -210,6 +218,7 @@ func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.Custom
 		for _, t := range totals {
 			rows[t.EventType] = &UsageRollupRow{
 				EventType:   t.EventType,
+				Currency:    cur,
 				TotalAmount: t.TotalAmount,
 				EventCount:  t.EventCount,
 				Dimensions:  map[string]int64{},
@@ -218,7 +227,8 @@ func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.Custom
 
 		dims, err := q.AggregateUsageDimensions(ctx, gen.AggregateUsageDimensionsParams{
 			MerchantID: tenantID, CustomerID: payerID,
-			FromAt: from.UTC(), ToAt: to.UTC(),
+			Currency: cur,
+			FromAt:   from.UTC(), ToAt: to.UTC(),
 		})
 		if err != nil {
 			return err

@@ -28,8 +28,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/query"
 	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -292,7 +292,7 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 		return nil, 0, adminRefundHTTPError(http.StatusInternalServerError, "no tenant resolved on request")
 	}
 	intent, err := r.State.IntentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
-		MerchantID:       tid.UUID(),
+		MerchantID:     tid.UUID(),
 		Provider:       provider,
 		IntentType:     intentType,
 		SubscriptionID: prepared.payment.SubscriptionID,

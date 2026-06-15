@@ -2,7 +2,7 @@
 -- balance cache (#491): available is derived from spendable money_blocks and
 -- held from active holds + open windows. The per-customer spend mutex is a
 -- FOR UPDATE lock on the customers row.
--- amounts are integers in the row currency's minor unit (default µ$ = 1e-6 USD).
+-- amounts are integers in the row currency's internal precision.
 -- currency is a system code (USD/USDC/EUR/JPY/SOL); the Go registry is authority.
 
 -- name: LockCustomerForSpend :one

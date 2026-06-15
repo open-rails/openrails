@@ -11,7 +11,7 @@ import (
 
 // TenantMetric is the per-tenant aggregate row in the platform metrics view.
 type TenantMetric struct {
-	MerchantID        string `json:"tenant_id"`
+	MerchantID      string `json:"tenant_id"`
 	Slug            string `json:"slug"`
 	Name            string `json:"name"`
 	Status          string `json:"status"`

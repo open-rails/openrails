@@ -10,8 +10,8 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/spool"
 	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/pkg/spool"
 )
 
 func TestLogPaymentEventSpoolsWithDefaultsWhenClickHouseDown(t *testing.T) {

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -49,14 +48,9 @@ func (s *Service) now() time.Time {
 
 var ErrInsufficientCredits = money.ErrInsufficientCredits
 
-// ErrCreditTypeInactive is retained as a facade sentinel (#472): money has a
-// single implicit unit, so it is never returned anymore, but the public error
-// surface (and its handler/embed consumers) is kept stable.
-var ErrCreditTypeInactive = errors.New("credit_type_inactive")
-
 type HoldCreditsRequest struct {
 	CustomerID *identity.CustomerID
-	Actor      string
+	Invoker    string
 	Currency   string // "" => DefaultCurrency (#476)
 	Amount     int64
 	Source     string
@@ -66,7 +60,8 @@ type HoldCreditsRequest struct {
 
 type CreditHold struct {
 	ID        uuid.UUID
-	Actor     string
+	Invoker   string
+	Currency  string
 	Amount    int64
 	Source    string
 	SourceID  string
@@ -78,14 +73,14 @@ type CreditHold struct {
 }
 
 func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*CreditHold, error) {
-	req.Actor = strings.TrimSpace(req.Actor)
+	req.Invoker = strings.TrimSpace(req.Invoker)
 	req.Source = strings.TrimSpace(req.Source)
 	req.SourceID = strings.TrimSpace(req.SourceID)
 	if req.CustomerID == nil || req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
-	if req.Actor == "" {
-		return nil, fmt.Errorf("actor required")
+	if req.Invoker == "" {
+		return nil, fmt.Errorf("invoker required")
 	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
@@ -100,7 +95,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 		return nil, fmt.Errorf("expires_at required")
 	}
 
-	hold, err := s.moneyService().Hold(ctx, req.CustomerID, req.Actor, req.Currency, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
+	hold, err := s.moneyService().Hold(ctx, req.CustomerID, req.Invoker, req.Currency, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +113,8 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 	}
 	return &CreditHold{
 		ID:        hold.ID,
-		Actor:     hold.Actor,
+		Invoker:   hold.Invoker,
+		Currency:  hold.Currency,
 		Amount:    amount,
 		Source:    hold.Source,
 		SourceID:  srcID,
@@ -154,7 +150,8 @@ type CaptureHoldRequest struct {
 type CreditTransaction struct {
 	ID              uuid.UUID
 	CustomerID      uuid.UUID
-	Actor           string
+	Invoker         string
+	Currency        string
 	Amount          int64
 	BalanceAfter    *int64
 	TransactionType string
@@ -171,7 +168,7 @@ type CreditTransaction struct {
 
 type WithdrawCreditsRequest struct {
 	CustomerID *identity.CustomerID
-	Actor      string
+	Invoker    string
 	Currency   string // "" => DefaultCurrency (#476)
 	Amount     int64
 	Source     string
@@ -179,13 +176,13 @@ type WithdrawCreditsRequest struct {
 }
 
 func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error) {
-	req.Actor = strings.TrimSpace(req.Actor)
+	req.Invoker = strings.TrimSpace(req.Invoker)
 	req.Source = strings.TrimSpace(req.Source)
 	if req.CustomerID == nil || req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
-	if req.Actor == "" {
-		return nil, fmt.Errorf("actor required")
+	if req.Invoker == "" {
+		return nil, fmt.Errorf("invoker required")
 	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
@@ -198,7 +195,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	}
 	trx, err := s.moneyService().Withdraw(ctx, money.WithdrawParams{
 		CustomerID: req.CustomerID,
-		Actor:      req.Actor,
+		Invoker:    req.Invoker,
 		Currency:   req.Currency,
 		Amount:     req.Amount,
 		Source:     req.Source,
@@ -210,7 +207,8 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	return &CreditTransaction{
 		ID:              trx.ID,
 		CustomerID:      trx.CustomerID,
-		Actor:           trx.Actor,
+		Invoker:         trx.Invoker,
+		Currency:        trx.Currency,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
 		TransactionType: trx.TransactionType,
@@ -228,7 +226,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 
 type DepositCreditsRequest struct {
 	CustomerID  *identity.CustomerID
-	Actor       string
+	Invoker     string
 	Currency    string // "" => DefaultCurrency (#476)
 	Amount      int64
 	Source      string
@@ -238,13 +236,13 @@ type DepositCreditsRequest struct {
 }
 
 func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
-	req.Actor = strings.TrimSpace(req.Actor)
+	req.Invoker = strings.TrimSpace(req.Invoker)
 	req.Source = strings.TrimSpace(req.Source)
 	if req.CustomerID == nil || req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
-	if req.Actor == "" {
-		return nil, fmt.Errorf("actor required")
+	if req.Invoker == "" {
+		return nil, fmt.Errorf("invoker required")
 	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
@@ -260,7 +258,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	depositSourceID := req.SourceID.String()
 	trx, err := s.moneyService().Deposit(ctx, money.DepositParams{
 		CustomerID:  req.CustomerID,
-		Actor:       req.Actor,
+		Invoker:     req.Invoker,
 		Currency:    req.Currency,
 		Amount:      req.Amount,
 		Source:      req.Source,
@@ -274,7 +272,8 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	return &CreditTransaction{
 		ID:              trx.ID,
 		CustomerID:      trx.CustomerID,
-		Actor:           trx.Actor,
+		Invoker:         trx.Invoker,
+		Currency:        trx.Currency,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
 		TransactionType: trx.TransactionType,
@@ -318,7 +317,8 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 		captureTxnID := trx.ID
 		if uerr := s.moneyService().InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
 			CustomerID:         trx.CustomerID,
-			Actor:              trx.Actor,
+			Invoker:            trx.Invoker,
+			Currency:           trx.Currency,
 			EventType:          req.EventType,
 			Resource:           strings.TrimSpace(req.Resource),
 			Amount:             req.Amount,
@@ -336,7 +336,8 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 	return &CreditTransaction{
 		ID:              trx.ID,
 		CustomerID:      trx.CustomerID,
-		Actor:           trx.Actor,
+		Invoker:         trx.Invoker,
+		Currency:        trx.Currency,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
 		TransactionType: trx.TransactionType,
@@ -356,6 +357,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 // count, summed host-priced amount).
 type ServiceUsageRollupRow struct {
 	Key         string `json:"key"`
+	Currency    string `json:"currency"`
 	EventCount  int64  `json:"event_count"`
 	TotalAmount int64  `json:"total_amount"`
 }
@@ -363,6 +365,7 @@ type ServiceUsageRollupRow struct {
 // ServiceUsageRollupRequest selects a payer + window + grouping dimension.
 type ServiceUsageRollupRequest struct {
 	CustomerID *identity.CustomerID
+	Currency   string
 	From       time.Time
 	To         time.Time
 	GroupBy    string // endpoint | function | tier | user
@@ -375,34 +378,35 @@ func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollup
 	if req.CustomerID == nil || req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
-	rows, err := s.moneyService().ServiceUsageRollup(ctx, *req.CustomerID, req.From, req.To, req.GroupBy)
+	rows, err := s.moneyService().ServiceUsageRollup(ctx, *req.CustomerID, req.Currency, req.From, req.To, req.GroupBy)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]ServiceUsageRollupRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, ServiceUsageRollupRow{Key: r.Key, EventCount: r.EventCount, TotalAmount: r.TotalAmount})
+		out = append(out, ServiceUsageRollupRow{Key: r.Key, Currency: r.Currency, EventCount: r.EventCount, TotalAmount: r.TotalAmount})
 	}
 	return out, nil
 }
 
-// ResourceRevenueDailyRow is one day's revenue (micros) for an endpoint.
+// ResourceRevenueDailyRow is one day's revenue in internal units for an endpoint.
 type ResourceRevenueDailyRow struct {
-	Date         string `json:"date"`
-	AmountMicros int64  `json:"amount_micros"`
+	Date     string `json:"date"`
+	Currency string `json:"currency"`
+	Amount   int64  `json:"amount"`
 }
 
 // ResourceRevenueDaily returns per-day revenue for a resource (typed
 // attribution column) across all payers in the tenant over [from, to) — powers
 // tensorhub endpoint revenue analytics (#410).
-func (s *Service) ResourceRevenueDaily(ctx context.Context, resource string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
-	rows, err := s.moneyService().ResourceRevenueDaily(ctx, resource, from, to)
+func (s *Service) ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
+	rows, err := s.moneyService().ResourceRevenueDaily(ctx, resource, currency, from, to)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]ResourceRevenueDailyRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, ResourceRevenueDailyRow{Date: r.Date, AmountMicros: r.AmountMicros})
+		out = append(out, ResourceRevenueDailyRow{Date: r.Date, Currency: r.Currency, Amount: r.Amount})
 	}
 	return out, nil
 }
@@ -432,7 +436,7 @@ func (s *Service) releaseBudgetScopes(ctx context.Context, trx *models.MoneyTran
 	}
 	payer := identity.CustomerID(trx.CustomerID)
 	bsvc := budgets.NewService(s.rt.DB)
-	if err := bsvc.ReleaseByCoords(ctx, payer, trx.Source, *trx.SourceID); err != nil {
+	if err := bsvc.ReleaseByCoords(ctx, payer, trx.Currency, trx.Source, *trx.SourceID); err != nil {
 		log.Warnf("service release: budget scope release failed (hold %s released): %v", trx.ID, err)
 	}
 	s.releaseQueueUnits(ctx, trx)
@@ -457,13 +461,13 @@ func (s *Service) releaseQueueUnits(ctx context.Context, trx *models.MoneyTransa
 // captureBudgetScopes settles every budget-scope reservation for a captured
 // hold to "captured" with the captured amount by its (payer, source, source_id)
 // coords (#473). Best-effort, mirroring releaseBudgetScopes.
-func (s *Service) captureBudgetScopes(ctx context.Context, trx *models.MoneyTransaction, capturedMicros int64) {
+func (s *Service) captureBudgetScopes(ctx context.Context, trx *models.MoneyTransaction, capturedAmount int64) {
 	if trx == nil || trx.SourceID == nil || strings.TrimSpace(*trx.SourceID) == "" {
 		return
 	}
 	payer := identity.CustomerID(trx.CustomerID)
 	bsvc := budgets.NewService(s.rt.DB)
-	if err := bsvc.CaptureByCoords(ctx, payer, trx.Source, *trx.SourceID, capturedMicros); err != nil {
+	if err := bsvc.CaptureByCoords(ctx, payer, trx.Currency, trx.Source, *trx.SourceID, capturedAmount); err != nil {
 		log.Warnf("service capture: budget scope capture failed (hold %s captured): %v", trx.ID, err)
 	}
 	// A completed (captured) job also frees its queued units (#472 G2c).

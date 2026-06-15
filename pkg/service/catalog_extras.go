@@ -528,7 +528,7 @@ func archiveCatalogExtrasVia(ctx context.Context, exec intentExecutor, tenantID 
 	var failed int
 	enqueue := func(e CatalogExtra, intentType, provider, idempotencyKey string, payload any) {
 		row, err := exec.EnqueueAndExecute(ctx, intents.EnqueueParams{
-			MerchantID:       tenantID,
+			MerchantID:     tenantID,
 			Provider:       provider,
 			IntentType:     intentType,
 			Payload:        payload,

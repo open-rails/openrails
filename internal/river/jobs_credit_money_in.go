@@ -102,21 +102,21 @@ func (w AutoTopupWorker) Work(ctx context.Context, _ *river.Job[AutoTopupArgs]) 
 const KindArrearsCharge = "openrails.arrears_charge"
 
 // Arrears collection cadence (#241/#301). The HOURLY job collects balances at or
-// above ArrearsHourlyThresholdMicros (collect big balances promptly); the MONTHLY
-// sweep collects everything at or above ArrearsMonthlyFloorMicros (the $1 floor,
+// above ArrearsHourlyThresholdAmount (collect big balances promptly); the MONTHLY
+// sweep collects everything at or above ArrearsMonthlyFloorAmount (the $1 floor,
 // so we don't burn processor fees on dust). "Whichever comes first." Charges are
 // idempotent per owed-snapshot, so the two cadences never double-collect.
 // TODO(#301): make these configurable per-tenant; decide calendar-month vs
 // fixed-interval boundary.
 const (
-	ArrearsHourlyThresholdMicros = 50_000_000 // $50
-	ArrearsMonthlyFloorMicros    = 1_000_000  // $1
+	ArrearsHourlyThresholdAmount = 50_000_000 // $50 in USD internal precision
+	ArrearsMonthlyFloorAmount    = 1_000_000  // $1 in USD internal precision
 )
 
 // ArrearsChargeArgs carries the per-run collection threshold so one worker serves
 // both the hourly threshold trigger and the monthly $1-floor sweep.
 type ArrearsChargeArgs struct {
-	ThresholdMicros int64 `json:"threshold_micros"`
+	ThresholdAmount int64 `json:"threshold_amount"`
 }
 
 func (ArrearsChargeArgs) Kind() string { return KindArrearsCharge }
@@ -140,7 +140,7 @@ func (w ArrearsChargeWorker) Work(ctx context.Context, job *river.Job[ArrearsCha
 		logger.Debug("arrears charger not configured; skipping")
 		return nil
 	}
-	n, err := w.Money.ChargeOutstanding(ctx, w.Charger, job.Args.ThresholdMicros)
+	n, err := w.Money.ChargeOutstanding(ctx, w.Charger, job.Args.ThresholdAmount)
 	if err != nil {
 		return err
 	}

@@ -16,8 +16,8 @@ import (
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/open-rails/openrails/pkg/merchant"
+	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 type bootstrapApplyOptions struct {

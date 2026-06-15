@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,23 +25,25 @@ type AdmitBlockCheck struct {
 
 // AdmitInput is the host's admission request: throughput + money + gates.
 type AdmitInput struct {
-	CustomerID identity.CustomerID
-	Actor      string
-	Tier       string
-	Resource   string
-	// Roles are the immutable role UUIDs the actor holds (#473). Each role with a
+	CustomerID  identity.CustomerID
+	Invoker     string
+	InvokerType string
+	Tier        string
+	Resource    string
+	// Roles are the immutable role UUIDs the invoker holds (#473). Each role with a
 	// matching (subject, role) budget policy gates this request's spend. The host
 	// reads them from the delegated JWT/permission set.
-	Roles          []uuid.UUID
-	Amounts        map[string]int64
-	EstimateMicros int64
-	Source         string
-	SourceID       string
-	ExpiresAtUnix  int64
-	BlockChecks    []AdmitBlockCheck
+	Roles           []uuid.UUID
+	Amounts         map[string]int64
+	Currency        string
+	EstimatedAmount int64
+	Source          string
+	SourceID        string
+	ExpiresAtUnix   int64
+	BlockChecks     []AdmitBlockCheck
 	// TenantThroughput is the host's per-TENANT fixed-window throughput policy
 	// (#404). When set, OpenRails enforces these tenant-scoped windows on the
-	// invoke path BEFORE the per-actor policy + any hold, so the host (tensorhub)
+	// invoke path BEFORE the per-invoker policy + any hold, so the host (tensorhub)
 	// no longer rate-limits invokes locally. Empty = no tenant throughput limit.
 	TenantThroughput []AdmitThroughputWindow
 }
@@ -65,6 +68,7 @@ type AdmitWindowDTO struct {
 // AdmitResult is the unified admission decision returned to the host.
 type AdmitResult struct {
 	Allowed           bool             `json:"allowed"`
+	Currency          string           `json:"currency,omitempty"`
 	BlockedBy         string           `json:"blocked_by,omitempty"`
 	BlockedUnit       string           `json:"blocked_unit,omitempty"`
 	DenyCode          string           `json:"deny_code,omitempty"`
@@ -79,23 +83,24 @@ type AdmitResult struct {
 	// host reads it back to drive its own per-tier capacity decisions (e.g.
 	// tensorhub's scheduler in-flight concurrency cap) without a second round-trip.
 	ResolvedTier string `json:"resolved_tier,omitempty"`
-	// MaxConcurrentHeldMicros is the resolved tier's cap on the sum of the payer's
-	// active (un-settled) hold $ (#487; 0 = uncapped). HeldMicros is the payer's
+	// MaxConcurrentHeldAmount is the resolved tier's cap on the sum of the payer's
+	// active (un-settled) hold $ (#487; 0 = uncapped). HeldAmount is the payer's
 	// active-hold $ sum as evaluated for this verdict (includes the hold just placed
 	// on an allow). A host that enforces true occupancy itself reads these to queue
 	// against cap + per-job estimate instead of taking the hard deny.
-	MaxConcurrentHeldMicros int64 `json:"max_concurrent_held_micros,omitempty"`
-	HeldMicros              int64 `json:"held_micros,omitempty"`
-	// MaxSingleChargeMicros is the resolved tier's per-charge ceiling (#487; 0 =
+	MaxConcurrentHeldAmount int64 `json:"max_concurrent_held_amount,omitempty"`
+	HeldAmount              int64 `json:"held_amount,omitempty"`
+	// MaxSingleChargeAmount is the resolved tier's per-charge ceiling (#487; 0 =
 	// uncapped). An estimate above it is denied with deny_code
 	// "single_charge_cap_exceeded".
-	MaxSingleChargeMicros int64 `json:"max_single_charge_micros,omitempty"`
+	MaxSingleChargeAmount int64 `json:"max_single_charge_amount,omitempty"`
 }
 
 // AdmitBudgetWindowDTO is a rolling money-budget window's state (#304), for the
 // host's /status dashboard.
 type AdmitBudgetWindowDTO struct {
 	Key               string `json:"key"`
+	Currency          string `json:"currency"`
 	Limit             int64  `json:"limit"`
 	Used              int64  `json:"used"`
 	Reserved          int64  `json:"reserved"`
@@ -126,19 +131,18 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	store := admission.NewTierPolicyStore(s.rt.DB)
 	bl := abuse.NewBlocklistService(s.rt.DB)
 	bsvc := budgets.NewService(s.rt.DB)
-	// #492: resolve the operator-configured flat per-actor wasted-spend windows
-	// (per-customer override else tenant-wide default), falling back to the
-	// hardcoded DefaultActorWastedWindows() when nothing is stored.
-	actorWindows, err := s.actorWastedWindows(ctx, in.CustomerID)
+	// #496: resolve the operator-configured flat per-invoker wasted-spend policy,
+	// falling back to the hardcoded DefaultInvokerWastedWindows() when unset.
+	invokerWindows, err := s.invokerWastedSpendPolicy(ctx)
 	if err != nil {
 		return nil, err
 	}
 	adm := admission.NewAdmitter(lim, s.moneyService(), store, bl, bsvc).
 		WithBudgetScopes(admission.NewBudgetPolicyStore(s.rt.DB)).
-		WithWastedSpend(abuse.NewWastedSpendGuard(lim), actorWindows)
+		WithWastedSpend(abuse.NewWastedSpendGuard(lim), invokerWindows)
 
 	// #404: tenant-scoped throughput. The host passes its per-tenant RPM/RPD
-	// windows; OpenRails enforces them on the invoke path BEFORE the per-actor
+	// windows; OpenRails enforces them on the invoke path BEFORE the per-invoker
 	// policy + any credit hold, so a tenant breach places no hold and the host
 	// stops rate-limiting invokes locally.
 	if len(in.TenantThroughput) > 0 {
@@ -175,7 +179,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	switch {
 	case in.ExpiresAtUnix > 0:
 		exp = time.Unix(in.ExpiresAtUnix, 0).UTC()
-	case in.EstimateMicros > 0:
+	case in.EstimatedAmount > 0:
 		exp = s.now().Add(time.Hour)
 	}
 	source := in.Source
@@ -189,17 +193,19 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	}
 
 	dec, err := adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID:     in.CustomerID,
-		Actor:          in.Actor,
-		Tier:           in.Tier,
-		Resource:       in.Resource,
-		Roles:          in.Roles,
-		Amounts:        in.Amounts,
-		EstimateMicros: in.EstimateMicros,
-		Source:         source,
-		SourceID:       in.SourceID,
-		ExpiresAt:      exp,
-		BlockChecks:    checks,
+		CustomerID:      in.CustomerID,
+		Invoker:         in.Invoker,
+		InvokerType:     in.InvokerType,
+		Tier:            in.Tier,
+		Resource:        in.Resource,
+		Roles:           in.Roles,
+		Amounts:         in.Amounts,
+		Currency:        in.Currency,
+		EstimatedAmount: in.EstimatedAmount,
+		Source:          source,
+		SourceID:        in.SourceID,
+		ExpiresAt:       exp,
+		BlockChecks:     checks,
 	})
 	if err != nil {
 		return nil, err
@@ -207,15 +213,16 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 
 	res := &AdmitResult{
 		Allowed:           dec.Allowed,
+		Currency:          money.NormalizeCurrency(in.Currency),
 		BlockedBy:         dec.BlockedBy,
 		BlockedUnit:       dec.BlockedUnit,
 		DenyCode:          dec.DenyCode,
 		RetryAfterSeconds: int64(dec.RetryAfter / time.Second),
 		ResolvedTier:      dec.ResolvedTier,
 
-		MaxConcurrentHeldMicros: dec.MaxConcurrentHeldMicros,
-		HeldMicros:              dec.HeldMicros,
-		MaxSingleChargeMicros:   dec.MaxSingleChargeMicros,
+		MaxConcurrentHeldAmount: dec.MaxConcurrentHeldAmount,
+		HeldAmount:              dec.HeldAmount,
+		MaxSingleChargeAmount:   dec.MaxSingleChargeAmount,
 	}
 	for _, w := range dec.Windows {
 		res.Windows = append(res.Windows, AdmitWindowDTO{
@@ -237,23 +244,24 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 			rs = 0
 		}
 		res.BudgetWindows = append(res.BudgetWindows, AdmitBudgetWindowDTO{
-			Key: w.Key, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
+			Key: w.Key, Currency: money.NormalizeCurrency(in.Currency), Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
 			Remaining: w.Remaining, ResetAfterSeconds: rs, Allowed: w.Allowed,
 		})
 	}
 	return res, nil
 }
 
-// BudgetStatus returns the rolling money-budget windows for (payer, actor) at a
+// BudgetStatus returns the rolling money-budget windows for (payer, invoker) at a
 // tier WITHOUT reserving (issue #304 introspection) — powers a host's /status
 // dashboard (e.g. cozy-art useGenerationBudgetStatus).
-func (s *Service) BudgetStatus(ctx context.Context, payer identity.CustomerID, actor, tier string) ([]AdmitBudgetWindowDTO, error) {
+func (s *Service) BudgetStatus(ctx context.Context, payer identity.CustomerID, invoker, currency, tier string) ([]AdmitBudgetWindowDTO, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
+	cur := money.NormalizeCurrency(currency)
 	if tier == "" {
 		tier = admission.DefaultTier
 	}
@@ -263,7 +271,7 @@ func (s *Service) BudgetStatus(ctx context.Context, payer identity.CustomerID, a
 		return nil, err
 	}
 	bsvc := budgets.NewService(s.rt.DB)
-	statuses, _, err := bsvc.Check(ctx, payer, actor, pol.BudgetWindows, 0)
+	statuses, _, err := bsvc.Check(ctx, payer, invoker, cur, pol.BudgetWindows, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +282,7 @@ func (s *Service) BudgetStatus(ctx context.Context, payer identity.CustomerID, a
 			rs = 0
 		}
 		out = append(out, AdmitBudgetWindowDTO{
-			Key: w.Key, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
+			Key: w.Key, Currency: cur, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
 			Remaining: w.Remaining, ResetAfterSeconds: rs, ResetAt: w.ResetAt,
 			Cadence: w.Cadence, Allowed: w.Allowed,
 		})
@@ -287,30 +295,31 @@ func (s *Service) BudgetStatus(ctx context.Context, payer identity.CustomerID, a
 type BudgetCheckWindowInput struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
-	LimitMicros   int64  `json:"limit_micros"`
+	Limit         int64  `json:"limit"`
 	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
 	Cadence string `json:"cadence,omitempty"`
 }
 
-// BudgetCheck computes per-window used/reserved/remaining for (payer, actor)
+// BudgetCheck computes per-window used/reserved/remaining for (payer, invoker)
 // against CALLER-SUPPLIED windows WITHOUT reserving. Unlike BudgetStatus it does
 // NOT read an OpenRails tier policy — the host (tensorhub) owns the platform
 // budget policy and passes the windows; OpenRails owns the spend actuals
-// (openrails.budget_reservations). Powers the tensorhub delegated budget-window
+// (openrails.budget_inflight_holds). Powers the tensorhub delegated budget-window
 // display (#410) so it no longer reads tensorhub-local money tables.
-func (s *Service) BudgetCheck(ctx context.Context, payer identity.CustomerID, actor string, windows []BudgetCheckWindowInput, requestedMicros int64) ([]AdmitBudgetWindowDTO, error) {
+func (s *Service) BudgetCheck(ctx context.Context, payer identity.CustomerID, invoker, currency string, windows []BudgetCheckWindowInput, requestedAmount int64) ([]AdmitBudgetWindowDTO, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
+	cur := money.NormalizeCurrency(currency)
 	bw := make([]budgets.BudgetWindow, 0, len(windows))
 	for _, w := range windows {
-		bw = append(bw, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence})
+		bw = append(bw, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence})
 	}
 	bsvc := budgets.NewService(s.rt.DB)
-	statuses, _, err := bsvc.Check(ctx, payer, actor, bw, requestedMicros)
+	statuses, _, err := bsvc.Check(ctx, payer, invoker, cur, bw, requestedAmount)
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +330,7 @@ func (s *Service) BudgetCheck(ctx context.Context, payer identity.CustomerID, ac
 			rs = 0
 		}
 		out = append(out, AdmitBudgetWindowDTO{
-			Key: w.Key, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
+			Key: w.Key, Currency: cur, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
 			Remaining: w.Remaining, ResetAfterSeconds: rs, ResetAt: w.ResetAt,
 			Cadence: w.Cadence, Allowed: w.Allowed,
 		})
@@ -334,12 +343,12 @@ func (s *Service) BudgetCheck(ctx context.Context, payer identity.CustomerID, ac
 type BudgetScopeWindowInput struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
-	LimitMicros   int64  `json:"limit_micros"`
+	Limit         int64  `json:"limit"`
 	Cadence       string `json:"cadence,omitempty"`
 }
 
 // BudgetScopePolicyInput configures one hierarchical budget-scope policy (#473).
-// Scope is "subject" | "role" | "invoker" ("actor" still accepted, #491);
+// Scope is "subject" | "role" | "invoker" ("invoker" still accepted, #491);
 // ScopeKey is the role uuid (scope=role) or invoker string (scope=invoker),
 // empty for scope=subject.
 type BudgetScopePolicyInput struct {
@@ -351,13 +360,13 @@ type BudgetScopePolicyInput struct {
 func budgetScopeWindowModels(ws []BudgetScopeWindowInput) []models.BudgetWindowPolicy {
 	out := make([]models.BudgetWindowPolicy, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, models.BudgetWindowPolicy{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence})
+		out = append(out, models.BudgetWindowPolicy{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence})
 	}
 	return out
 }
 
 // SetSubjectBudgetPolicy upserts a SUBJECT-owned budget-scope policy (#473): the
-// subject's self (subject) cap, a (subject, role) pool, or a (subject, actor)
+// subject's self (subject) cap, a (subject, role) pool, or a (subject, invoker)
 // cap. The owner is forced to "subject" — this path can NEVER write a
 // platform-owned cap, so a subject cannot create/loosen one.
 func (s *Service) SetSubjectBudgetPolicy(ctx context.Context, payer identity.CustomerID, in BudgetScopePolicyInput) error {
@@ -408,7 +417,7 @@ func (s *Service) SubjectBudgetPolicies(ctx context.Context, payer identity.Cust
 	for _, r := range rows {
 		w := make([]BudgetScopeWindowInput, 0, len(r.Windows))
 		for _, ww := range r.Windows {
-			w = append(w, BudgetScopeWindowInput{Key: ww.Key, WindowSeconds: ww.WindowSeconds, LimitMicros: ww.LimitMicros, Cadence: ww.Cadence})
+			w = append(w, BudgetScopeWindowInput{Key: ww.Key, WindowSeconds: ww.WindowSeconds, Limit: ww.Limit, Cadence: ww.Cadence})
 		}
 		out = append(out, BudgetScopePolicyInput{Scope: r.Scope, ScopeKey: r.ScopeKey, Windows: w})
 	}
@@ -425,7 +434,7 @@ type TierWindowInput struct {
 type TierBudgetWindowInput struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
-	LimitMicros   int64  `json:"limit_micros"`
+	Limit         int64  `json:"limit"`
 	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
 	Cadence string `json:"cadence,omitempty"`
 }
@@ -447,35 +456,34 @@ type TierPolicyInput struct {
 	ReleaseWindows map[string][]TierWindowInput `json:"release_windows,omitempty"`
 	// QueueLimits are the batch/queue reservation-pool caps (#472 G2).
 	QueueLimits []TierQueueLimitInput `json:"queue_limits,omitempty"`
-	// MaxConcurrentHeldMicros / MaxSingleChargeMicros are the #487 generic
+	// MaxConcurrentHeldAmount / MaxSingleChargeAmount are the #487 generic
 	// $-denominated per-tier admit limits (0 = uncapped): a cap on the payer's
 	// active (un-settled) hold $ sum, and a per-charge ceiling.
-	MaxConcurrentHeldMicros int64 `json:"max_concurrent_held_micros,omitempty"`
-	MaxSingleChargeMicros   int64 `json:"max_single_charge_micros,omitempty"`
-	// BadSpendWindows are the #488 per-PAYER $-valued wasted-spend budget windows
-	// for this tier: at most LimitMicros of host-reported wasted $ per window;
-	// admit denies abuse_rate_limited when over.
+	MaxConcurrentHeldAmount int64 `json:"max_concurrent_held_amount,omitempty"`
+	MaxSingleChargeAmount   int64 `json:"max_single_charge_amount,omitempty"`
+	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
+	// windows for this tier: at most Limit of host-reported wasted spend is
+	// forgiven per window; direct-payer overage is charged.
 	BadSpendWindows []TierBudgetWindowInput `json:"bad_spend_windows,omitempty"`
 }
 
-// DefaultActorWastedWindows is the FLAT per-actor wasted-spend budget default
+// DefaultInvokerWastedWindows is the FLAT per-invoker wasted-spend budget default
 // (#488): invokers aren't trusted (an account mints unlimited invokers), so the
-// per-actor budget is a fixed backstop rather than tier-graduated. $5 / 15 min
-// and $20 / 5 h (1 USD = 1_000_000 micros). Generic; a host can tune later.
-func DefaultActorWastedWindows() []abuse.WastedWindow {
+// per-invoker budget is a fixed backstop rather than tier-graduated. $5 / 15 min
+// and $20 / 5 h using USD internal units. Generic; a host can tune later.
+func DefaultInvokerWastedWindows() []abuse.WastedWindow {
 	return []abuse.WastedWindow{
-		{Key: "burst", Window: 15 * time.Minute, LimitMicros: 5_000_000},
-		{Key: "sustained", Window: 5 * time.Hour, LimitMicros: 20_000_000},
+		{Key: "burst", Window: 15 * time.Minute, Limit: 5_000_000},
+		{Key: "sustained", Window: 5 * time.Hour, Limit: 20_000_000},
 	}
 }
 
-// SetActorWastedWindows persists the operator-configurable FLAT per-actor
-// wasted-spend windows (#492). A zero payer sets the tenant-wide default backstop
-// (the common case — one flat budget for every invoker in the tenant); a non-zero
-// payer sets a per-customer override. An empty windows slice clears to the
-// hardcoded DefaultActorWastedWindows() fallback (stores an empty set, so the
-// resolver falls back). Generic billing engine — no host/GPU concepts.
-func (s *Service) SetActorWastedWindows(ctx context.Context, payer identity.CustomerID, windows []abuse.WastedWindow) error {
+// SetInvokerWastedSpendPolicy persists the operator-configurable FLAT per-invoker
+// wasted-spend policy (#496). It is merchant-scoped and intentionally stricter
+// than payer wasted-spend budgets, which remain trust-tier graduated in tier
+// policy. An empty windows slice clears to the hardcoded
+// DefaultInvokerWastedWindows() fallback.
+func (s *Service) SetInvokerWastedSpendPolicy(ctx context.Context, windows []abuse.WastedWindow) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -487,32 +495,32 @@ func (s *Service) SetActorWastedWindows(ctx context.Context, payer identity.Cust
 		wp = append(wp, models.BudgetWindowPolicy{
 			Key:           w.Key,
 			WindowSeconds: int64(w.Window / time.Second),
-			LimitMicros:   w.LimitMicros,
+			Limit:         w.Limit,
 		})
 	}
-	return admission.NewTierPolicyStore(s.rt.DB).UpsertActorWastedWindows(ctx, payer, wp)
+	return admission.NewTierPolicyStore(s.rt.DB).UpsertInvokerWastedSpendPolicy(ctx, wp)
 }
 
-// actorWastedWindows resolves the FLAT per-actor wasted-spend windows for a payer
-// (#492): the operator-configured store (per-customer override else tenant-wide
-// default) if any, else the hardcoded DefaultActorWastedWindows() backstop.
-func (s *Service) actorWastedWindows(ctx context.Context, payer identity.CustomerID) ([]abuse.WastedWindow, error) {
-	stored, err := admission.NewTierPolicyStore(s.rt.DB).GetActorWastedWindows(ctx, payer)
+// invokerWastedSpendPolicy resolves the merchant-wide FLAT per-invoker
+// wasted-spend policy (#496), falling back to DefaultInvokerWastedWindows() when
+// no stored policy exists.
+func (s *Service) invokerWastedSpendPolicy(ctx context.Context) ([]abuse.WastedWindow, error) {
+	stored, err := admission.NewTierPolicyStore(s.rt.DB).GetInvokerWastedSpendPolicy(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if len(stored) == 0 {
-		return DefaultActorWastedWindows(), nil
+		return DefaultInvokerWastedWindows(), nil
 	}
 	out := make([]abuse.WastedWindow, 0, len(stored))
 	for _, w := range stored {
 		if w.WindowSeconds <= 0 {
 			continue
 		}
-		out = append(out, abuse.WastedWindow{Key: w.Key, Window: time.Duration(w.WindowSeconds) * time.Second, LimitMicros: w.LimitMicros})
+		out = append(out, abuse.WastedWindow{Key: w.Key, Window: time.Duration(w.WindowSeconds) * time.Second, Limit: w.Limit})
 	}
 	if len(out) == 0 {
-		return DefaultActorWastedWindows(), nil
+		return DefaultInvokerWastedWindows(), nil
 	}
 	return out, nil
 }
@@ -536,60 +544,158 @@ func (s *Service) payerWastedWindows(ctx context.Context, payer identity.Custome
 		if w.WindowSeconds <= 0 {
 			continue
 		}
-		out = append(out, abuse.WastedWindow{Key: w.Key, Window: time.Duration(w.WindowSeconds) * time.Second, LimitMicros: w.LimitMicros})
+		out = append(out, abuse.WastedWindow{Key: w.Key, Window: time.Duration(w.WindowSeconds) * time.Second, Limit: w.Limit})
 	}
 	return out, nil
 }
 
-// ReportWastedSpend records host-reported WASTED $ (#488): an attempt that FAILED
-// and cost the platform money (a hold released without capture, a content-filter
-// reject, an out-of-band failure). It accrues into BOTH the payer's per-tier
-// bad_spend windows and the actor's flat windows; a later Admit denies when
-// either is over budget. micros<=0 is a no-op (cheap rejects ≈ $0 aren't
-// reported). reason is for the caller's own audit; OpenRails stays generic.
-func (s *Service) ReportWastedSpend(ctx context.Context, payer identity.CustomerID, actor string, micros int64, reason string) error {
+// WastedSpendInput is one host-reported failed attempt that cost the platform
+// money. Source+SourceID are required for retry idempotency.
+type WastedSpendInput struct {
+	CustomerID  identity.CustomerID
+	Invoker     string
+	InvokerType string
+	Currency    string
+	Amount      int64
+	Source      string
+	SourceID    string
+	Reason      string
+}
+
+// WastedSpendResult describes how OpenRails handled one wasted-spend report.
+type WastedSpendResult struct {
+	Currency       string `json:"currency"`
+	RecordedAmount int64  `json:"recorded_amount"`
+	ForgivenAmount int64  `json:"forgiven_amount"`
+	ChargedAmount  int64  `json:"charged_amount"`
+	Action         string `json:"action"`
+	Duplicate      bool   `json:"duplicate,omitempty"`
+}
+
+// ReportWastedSpend records host-reported WASTED $ (#497): delegated invokers
+// accrue against their flat Redis cutoff, while direct payer credentials accrue
+// against tier-graduated payer grace and charge overage through the normal usage
+// ledger. No high-volume Postgres event table is written for free/delegated
+// reports.
+func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*WastedSpendResult, error) {
 	if s == nil || s.rt == nil {
-		return fmt.Errorf("service not initialized")
+		return nil, fmt.Errorf("service not initialized")
 	}
 	if s.rt.RedisClient == nil {
-		return fmt.Errorf("wasted-spend tracking unavailable: redis not configured")
+		return nil, fmt.Errorf("wasted-spend tracking unavailable: redis not configured")
 	}
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
+	if in.CustomerID.IsZero() {
+		return nil, fmt.Errorf("payer required")
 	}
-	if micros <= 0 {
-		return nil
+	if in.Amount < 0 {
+		return nil, fmt.Errorf("amount must be >= 0")
+	}
+	cur := money.NormalizeCurrency(in.Currency)
+	if err := money.ValidateCurrency(cur); err != nil {
+		return nil, err
+	}
+	in.Source = strings.TrimSpace(in.Source)
+	in.SourceID = strings.TrimSpace(in.SourceID)
+	if in.Source == "" || in.SourceID == "" {
+		return nil, fmt.Errorf("source and source_id required")
+	}
+	if in.Amount == 0 {
+		return &WastedSpendResult{Currency: cur, Action: "ignored"}, nil
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	lim := ratelimit.NewLimiter(s.rt.RedisClient)
 	guard := abuse.NewWastedSpendGuard(lim)
-	payerWindows, err := s.payerWastedWindows(ctx, payer, "")
+	payerWindows, err := s.payerWastedWindows(ctx, in.CustomerID, "")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	actorWindows, err := s.actorWastedWindows(ctx, payer)
+	invokerWindows, err := s.invokerWastedSpendPolicy(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return guard.Record(ctx, tid.UUID().String(), payer.UUID().String(), actor, micros, payerWindows, actorWindows)
+	claimed, err := guard.ClaimReport(ctx, tid.UUID().String(), in.CustomerID.UUID().String(), cur, in.Source, in.SourceID, maxWastedWindowTTL(payerWindows, invokerWindows))
+	if err != nil {
+		return nil, err
+	}
+	if !claimed {
+		return &WastedSpendResult{Currency: cur, Action: "duplicate", Duplicate: true}, nil
+	}
+
+	if identity.IsDirectPayerInvoker(in.InvokerType) {
+		chargeable, err := guard.RecordPayerGrace(ctx, tid.UUID().String(), in.CustomerID.UUID().String(), cur, in.Amount, payerWindows)
+		if err != nil {
+			return nil, err
+		}
+		res := &WastedSpendResult{
+			Currency:       cur,
+			RecordedAmount: in.Amount,
+			ForgivenAmount: in.Amount - chargeable,
+			ChargedAmount:  chargeable,
+			Action:         "forgiven",
+		}
+		if chargeable > 0 {
+			_, err = s.moneyService().RecordUsage(ctx, money.RecordUsageParams{
+				Payer:     &in.CustomerID,
+				Invoker:   strings.TrimSpace(in.Invoker),
+				Currency:  cur,
+				EventType: "wasted_spend",
+				Amount:    chargeable,
+				Source:    in.Source,
+				SourceID:  in.SourceID,
+				Metadata: map[string]any{
+					"reason":            in.Reason,
+					"reported_amount":   in.Amount,
+					"forgiven_amount":   res.ForgivenAmount,
+					"invoker_type":      string(identity.InvokerTypePayer),
+					"chargeable_amount": chargeable,
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+			res.Action = "charged"
+		}
+		return res, nil
+	}
+
+	if err := guard.RecordInvokerCutoff(ctx, tid.UUID().String(), in.CustomerID.UUID().String(), in.Invoker, cur, in.Amount, invokerWindows); err != nil {
+		return nil, err
+	}
+	return &WastedSpendResult{Currency: cur, RecordedAmount: in.Amount, Action: "invoker_cutoff_tracked"}, nil
+}
+
+func maxWastedWindowTTL(groups ...[]abuse.WastedWindow) time.Duration {
+	var max time.Duration
+	for _, group := range groups {
+		for _, w := range group {
+			if w.Window > max {
+				max = w.Window
+			}
+		}
+	}
+	if max <= 0 {
+		return time.Hour
+	}
+	return max + time.Second
 }
 
 // AbuseUsageWindow is one wasted-spend window's running $ total for /abuse-usage.
 type AbuseUsageWindow struct {
-	Key         string `json:"key"`
-	Window      string `json:"window"`
-	UsedMicros  int64  `json:"used_micros"`
-	LimitMicros int64  `json:"limit_micros"`
-	OverBudget  bool   `json:"over_budget"`
+	Key        string `json:"key"`
+	Currency   string `json:"currency"`
+	Window     string `json:"window"`
+	Used       int64  `json:"used"`
+	Limit      int64  `json:"limit"`
+	OverBudget bool   `json:"over_budget"`
 }
 
-// AbuseUsage returns the payer's and actor's running wasted-$ totals + budgets
+// AbuseUsage returns the payer's and invoker's running wasted-$ totals + budgets
 // (#488 introspection) for a host's /abuse-usage view — wasted $, not just
-// counts. actor "" omits the actor windows.
-func (s *Service) AbuseUsage(ctx context.Context, payer identity.CustomerID, actor, tier string) (payerWindows, actorWindows []AbuseUsageWindow, err error) {
+// counts. invoker "" omits the invoker windows.
+func (s *Service) AbuseUsage(ctx context.Context, payer identity.CustomerID, invoker, currency, tier string) (payerWindows, invokerWindows []AbuseUsageWindow, err error) {
 	if s == nil || s.rt == nil {
 		return nil, nil, fmt.Errorf("service not initialized")
 	}
@@ -598,6 +704,10 @@ func (s *Service) AbuseUsage(ctx context.Context, payer identity.CustomerID, act
 	}
 	if payer.IsZero() {
 		return nil, nil, fmt.Errorf("payer required")
+	}
+	cur := money.NormalizeCurrency(currency)
+	if err := money.ValidateCurrency(cur); err != nil {
+		return nil, nil, err
 	}
 	tid, terr := merchant.Require(ctx)
 	if terr != nil {
@@ -610,32 +720,32 @@ func (s *Service) AbuseUsage(ctx context.Context, payer identity.CustomerID, act
 	if err != nil {
 		return nil, nil, err
 	}
-	pUsage, err := guard.Usage(ctx, guard.PayerBase(tenant, payer.UUID().String()), pw)
+	pUsage, err := guard.Usage(ctx, guard.PayerBase(tenant, payer.UUID().String(), cur), cur, pw)
 	if err != nil {
 		return nil, nil, err
 	}
 	payerWindows = toAbuseUsageWindows(pUsage)
 
-	if actor != "" {
-		aw, err := s.actorWastedWindows(ctx, payer)
+	if invoker != "" {
+		aw, err := s.invokerWastedSpendPolicy(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
-		aUsage, err := guard.Usage(ctx, guard.ActorBase(tenant, actor), aw)
+		aUsage, err := guard.Usage(ctx, guard.InvokerBase(tenant, payer.UUID().String(), invoker, cur), cur, aw)
 		if err != nil {
 			return nil, nil, err
 		}
-		actorWindows = toAbuseUsageWindows(aUsage)
+		invokerWindows = toAbuseUsageWindows(aUsage)
 	}
-	return payerWindows, actorWindows, nil
+	return payerWindows, invokerWindows, nil
 }
 
 func toAbuseUsageWindows(ws []abuse.WindowUsage) []AbuseUsageWindow {
 	out := make([]AbuseUsageWindow, 0, len(ws))
 	for _, w := range ws {
 		out = append(out, AbuseUsageWindow{
-			Key: w.Key, Window: w.Window, UsedMicros: w.UsedMicros,
-			LimitMicros: w.LimitMicros, OverBudget: w.OverBudget,
+			Key: w.Key, Currency: w.Currency, Window: w.Window, Used: w.Used,
+			Limit: w.Limit, OverBudget: w.OverBudget,
 		})
 	}
 	return out
@@ -655,17 +765,17 @@ func (s *Service) SetTierPolicy(ctx context.Context, payer identity.CustomerID, 
 	}
 	pol := models.ThroughputPolicy{
 		EntitledResources:       in.EntitledResources,
-		MaxConcurrentHeldMicros: in.MaxConcurrentHeldMicros,
-		MaxSingleChargeMicros:   in.MaxSingleChargeMicros,
+		MaxConcurrentHeldAmount: in.MaxConcurrentHeldAmount,
+		MaxSingleChargeAmount:   in.MaxSingleChargeAmount,
 	}
 	for _, w := range in.Windows {
 		pol.Windows = append(pol.Windows, models.ThroughputWindow{Unit: w.Unit, WindowSeconds: w.WindowSeconds, Max: w.Max})
 	}
 	for _, b := range in.BudgetWindows {
-		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros, Cadence: b.Cadence})
+		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Cadence: b.Cadence})
 	}
 	for _, b := range in.BadSpendWindows {
-		pol.BadSpendWindows = append(pol.BadSpendWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros, Cadence: b.Cadence})
+		pol.BadSpendWindows = append(pol.BadSpendWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Cadence: b.Cadence})
 	}
 	if len(in.ReleaseWindows) > 0 {
 		pol.ReleaseWindows = make(map[string][]models.ThroughputWindow, len(in.ReleaseWindows))
@@ -684,10 +794,10 @@ func (s *Service) SetTierPolicy(ctx context.Context, payer identity.CustomerID, 
 }
 
 // TierScheduleRung is one rung of a persisted tier ladder (#476): a payer reaches
-// Tier once its cumulative paid spend is at least MinCumulativePaidMicros.
+// Tier once its cumulative paid spend is at least MinCumulativePaidAmount.
 type TierScheduleRung struct {
 	Tier                    string `json:"tier"`
-	MinCumulativePaidMicros int64  `json:"min_cumulative_paid_micros"`
+	MinCumulativePaidAmount int64  `json:"min_cumulative_paid_amount"`
 }
 
 // SetTierSchedule persists the tenant's tier SCHEDULE (#476): the host declares
@@ -701,7 +811,7 @@ func (s *Service) SetTierSchedule(ctx context.Context, payer identity.CustomerID
 	moneySvc := money.NewMoneyService(s.rt.DB)
 	rungs := make([]money.TierThreshold, 0, len(schedule))
 	for _, r := range schedule {
-		rungs = append(rungs, money.TierThreshold{Tier: r.Tier, MinPaidMicros: r.MinCumulativePaidMicros})
+		rungs = append(rungs, money.TierThreshold{Tier: r.Tier, MinPaidAmount: r.MinCumulativePaidAmount})
 	}
 	return moneySvc.SetTierSchedule(ctx, payer, rungs)
 }

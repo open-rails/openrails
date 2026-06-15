@@ -119,8 +119,8 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	me.Handle(http.MethodGet, "/notifications/unread-count", h(httphandlers.GetUnreadNotificationCount))
 	me.Handle(http.MethodPost, "/notifications/:id/read", h(httphandlers.MarkNotificationRead))
 	me.Handle(http.MethodGet, "/credits", h(httphandlers.GetMyCredits))
-	me.Handle(http.MethodGet, "/credits/:type", h(httphandlers.GetMyCreditsType))
-	me.Handle(http.MethodGet, "/credits/:type/transactions", h(httphandlers.GetMyCreditTransactions))
+	me.Handle(http.MethodGet, "/credits/:currency", h(httphandlers.GetMyCreditsType))
+	me.Handle(http.MethodGet, "/credits/:currency/transactions", h(httphandlers.GetMyCreditTransactions))
 	me.Handle(http.MethodGet, "/products", h(httphandlers.GetMyProducts))
 	me.Handle(http.MethodGet, "/products/:product_id/access", h(httphandlers.GetMyProductAccess))
 

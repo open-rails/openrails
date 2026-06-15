@@ -48,7 +48,7 @@ func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string) (*contr
 	}
 	return &controlplane.ResolvedDelegated{
 		Tenant:           "acme-org",
-		MerchantID:         tenantID,
+		MerchantID:       tenantID,
 		TenantSlug:       "acme-org",
 		DelegatedSubject: "user-42",
 		Permissions:      f.permissions,

@@ -67,7 +67,7 @@ func TestDelegatedSelfRequired_SucceedsAndBindsActingUser(t *testing.T) {
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
 			Tenant:           "operator",
-			MerchantID:         dbtest.TestTenantID,
+			MerchantID:       dbtest.TestTenantID,
 			TenantSlug:       dbtest.TestTenantSlug,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermSelfBillingRead},
@@ -91,7 +91,7 @@ func TestDelegatedSelfRequired_DeniesMissingPermission(t *testing.T) {
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
 			Tenant:           "operator",
-			MerchantID:         dbtest.TestTenantID,
+			MerchantID:       dbtest.TestTenantID,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermSelfBillingRead}, // read only
 		},
@@ -110,7 +110,7 @@ func TestDelegatedSelfRequired_NoAdminOverride(t *testing.T) {
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
 			Tenant:           "operator",
-			MerchantID:         dbtest.TestTenantID,
+			MerchantID:       dbtest.TestTenantID,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermAdmin},
 		},

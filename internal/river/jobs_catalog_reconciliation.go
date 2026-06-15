@@ -503,7 +503,7 @@ func persistCatalogDriftJob(ctx context.Context, database *db.DB, desired []mode
 		}
 		if err := q.InsertCatalogDriftEvent(ctx, gen.InsertCatalogDriftEventParams{
 			ID:                    row.ID,
-			MerchantID:              tid.UUID(),
+			MerchantID:            tid.UUID(),
 			Provider:              string(row.Provider),
 			Kind:                  string(row.Kind),
 			OpenrailsResourceType: string(row.OpenRailsResourceType),

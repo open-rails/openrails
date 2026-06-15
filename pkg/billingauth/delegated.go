@@ -38,10 +38,10 @@ type DelegatedPrincipal struct {
 	// `delegated_sub`.
 	SubjectID string
 
-	// Actor identifies the verifying issuer / host system for audit
+	// Issuer identifies the verifying issuer / host system for audit
 	// (optional; e.g. the host's issuer URL or service name). It fills the
 	// same audit slot as a delegated token's validated `iss`.
-	Actor string
+	Issuer string
 
 	// Permissions are the granted permission strings. They must come from the
 	// delegated catalog (`openrails:self:*` / `openrails:tenant:*`); OpenRails
@@ -99,7 +99,7 @@ type DelegatedAuthenticator interface {
 //			return &billingauth.DelegatedPrincipal{
 //				MerchantID:    deploymentTenantID, // explicit per-deployment mapping
 //				SubjectID:   user.CanonicalID,
-//				Actor:       "https://auth.host.example",
+//				Issuer:      "https://auth.host.example",
 //				Permissions: []string{"openrails:self:billing:read"},
 //			}, nil
 //		})

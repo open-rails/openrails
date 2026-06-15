@@ -57,7 +57,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		src := uuid.New()
 		dep, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
 			CustomerID:  &pid,
-			Actor:       "or484-test",
+			Invoker:     "or484-test",
 			Currency:    "USD",
 			Amount:      500_000,
 			Source:      "or484",
@@ -69,7 +69,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 
 		bal, err := c.Balance(ctx, payer.String())
 		require.NoError(t, err, "authorized JWKS principal balance read")
-		require.Equal(t, int64(500_000), bal.BalanceMicros)
+		require.Equal(t, int64(500_000), bal.BalanceAmount)
 	})
 
 	t.Run("unauthorized principal is denied", func(t *testing.T) {
@@ -81,7 +81,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		src := uuid.New()
 		_, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
 			CustomerID:  &pid,
-			Actor:       "or484-test",
+			Invoker:     "or484-test",
 			Currency:    "USD",
 			Amount:      500_000,
 			Source:      "or484",
@@ -103,7 +103,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		src := uuid.New()
 		_, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
 			CustomerID:  &pid,
-			Actor:       "or484-test",
+			Invoker:     "or484-test",
 			Currency:    "USD",
 			Amount:      1_000,
 			Source:      "or484",

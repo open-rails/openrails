@@ -42,30 +42,24 @@ func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 	return payer, true
 }
 
-// selfAccountCreditType reads the credit type from the given raw value with the
-// same default as the service-side account routes.
-func selfAccountCreditType(raw string) string {
-	creditType := strings.TrimSpace(raw)
-	if creditType == "" {
-		creditType = "api_credits"
-	}
-	return creditType
+func selfAccountCurrency(raw string) string {
+	return money.NormalizeCurrency(raw)
 }
 
 // selfAccountResponse is the caller's account view: the live balance snapshot
 // (balance/held/available/outstanding + billing mode) plus the stored settings.
 type selfAccountResponse struct {
-	Type                  string `json:"type"`
+	Currency              string `json:"currency"`
 	BillingMode           string `json:"billing_mode"`
-	BalanceMicros         int64  `json:"balance_micros"`
-	HeldMicros            int64  `json:"held_micros"`
-	AvailableMicros       int64  `json:"available_micros"`
-	OutstandingOwedMicros int64  `json:"outstanding_owed_micros"`
+	BalanceAmount         int64  `json:"balance_amount"`
+	HeldAmount            int64  `json:"held_amount"`
+	AvailableAmount       int64  `json:"available_amount"`
+	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
 	Settings              any    `json:"settings"`
 }
 
-// GetMyCreditAccount (GET /v1/self/account?type=) returns the authenticated
-// subject's credit-account settings + balance/outstanding for one credit type
+// GetMyCreditAccount (GET /v1/self/account?currency=) returns the authenticated
+// subject's account settings + balance/outstanding for one currency
 // (issue #339). It reuses the service-side GetCreditAccount/settings logic,
 // scoped to the delegated subject.
 func GetMyCreditAccount(r *httprequest.Request) {
@@ -73,30 +67,30 @@ func GetMyCreditAccount(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	creditType := selfAccountCreditType(r.Request.URL.Query().Get("type"))
+	currency := selfAccountCurrency(r.Request.URL.Query().Get("currency"))
 
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	snap, err := svc.GetCreditAccount(r.Request.Context(), payer, creditType)
+	snap, err := svc.GetCreditAccount(r.Request.Context(), payer, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), payer, creditType)
+	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), payer, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 	r.SuccessJSON(selfAccountResponse{
-		Type:                  snap.Currency,
+		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
-		BalanceMicros:         snap.BalanceMicros,
-		HeldMicros:            snap.HeldMicros,
-		AvailableMicros:       snap.AvailableMicros,
-		OutstandingOwedMicros: snap.OutstandingOwedMicros,
+		BalanceAmount:         snap.BalanceAmount,
+		HeldAmount:            snap.HeldAmount,
+		AvailableAmount:       snap.AvailableAmount,
+		OutstandingOwedAmount: snap.OutstandingOwedAmount,
 		Settings:              settings,
 	})
 }
@@ -105,12 +99,12 @@ func GetMyCreditAccount(r *httprequest.Request) {
 // credit account. It is the service-side serviceAccountSettingsRequest WITHOUT
 // customer_id: the subject is always the delegated principal's subject.
 type selfAccountSettingsRequest struct {
-	Type                     string  `json:"type"`
+	Currency                 string  `json:"currency"`
 	BillingMode              *string `json:"billing_mode"` // "prepaid" | "arrears"
-	MaxSpendPerDayMicros     *int64  `json:"max_spend_per_day_micros"`
-	MaxSpendPerMonthMicros   *int64  `json:"max_spend_per_month_micros"`
-	MaxOutstandingOwedMicros *int64  `json:"max_outstanding_owed_micros"`
-	LowBalanceThreshold      *int64  `json:"low_balance_threshold_micros"`
+	MaxSpendPerDay           *int64  `json:"max_spend_per_day"`
+	MaxSpendPerMonth         *int64  `json:"max_spend_per_month"`
+	MaxOutstandingOwedAmount *int64  `json:"max_outstanding_owed_amount"`
+	LowBalanceThreshold      *int64  `json:"low_balance_threshold"`
 	AutoTopupEnabled         *bool   `json:"auto_topup_enabled"`
 	AutoTopupAmountCents     *int64  `json:"auto_topup_amount_cents"`
 	AutoTopupPaymentMethod   *string `json:"auto_topup_payment_method_id"`
@@ -133,13 +127,13 @@ func SetMyCreditAccountSettings(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	creditType := selfAccountCreditType(req.Type)
+	currency := selfAccountCurrency(req.Currency)
 
 	in := money.AccountSettingsInput{
 		BillingMode:              req.BillingMode,
-		MaxSpendPerDayMicros:     req.MaxSpendPerDayMicros,
-		MaxSpendPerMonthMicros:   req.MaxSpendPerMonthMicros,
-		MaxOutstandingOwedMicros: req.MaxOutstandingOwedMicros,
+		MaxSpendPerDay:           req.MaxSpendPerDay,
+		MaxSpendPerMonth:         req.MaxSpendPerMonth,
+		MaxOutstandingOwedAmount: req.MaxOutstandingOwedAmount,
 		LowBalanceThreshold:      req.LowBalanceThreshold,
 		AutoTopupEnabled:         req.AutoTopupEnabled,
 		AutoTopupAmountCents:     req.AutoTopupAmountCents,
@@ -161,11 +155,11 @@ func SetMyCreditAccountSettings(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	if err := svc.SetCreditAccountSettings(r.Request.Context(), payer, creditType, in); err != nil {
+	if err := svc.SetCreditAccountSettings(r.Request.Context(), payer, currency, in); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), payer, creditType)
+	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), payer, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -173,8 +167,8 @@ func SetMyCreditAccountSettings(r *httprequest.Request) {
 	r.SuccessJSON(settings)
 }
 
-// GetMyAccountTransactions (GET /v1/self/account/transactions?type=&limit=&offset=)
-// lists the authenticated subject's credit transactions for one credit type
+// GetMyAccountTransactions (GET /v1/self/account/transactions?currency=&limit=&offset=)
+// lists the authenticated subject's transactions for one currency
 // (issue #339), newest first. Same wire shape as the service-side route, scoped
 // to the delegated subject.
 func GetMyAccountTransactions(r *httprequest.Request) {
@@ -182,7 +176,7 @@ func GetMyAccountTransactions(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	creditType := selfAccountCreditType(r.Request.URL.Query().Get("type"))
+	currency := selfAccountCurrency(r.Request.URL.Query().Get("currency"))
 
 	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 100 {
@@ -198,7 +192,7 @@ func GetMyAccountTransactions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	items, total, err := svc.GetCustomerCreditTransactions(r.Request.Context(), payer, creditType, limit, offset)
+	items, total, err := svc.GetCustomerCreditTransactions(r.Request.Context(), payer, currency, limit, offset)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -206,8 +200,8 @@ func GetMyAccountTransactions(r *httprequest.Request) {
 	out := make([]serviceTxnResponse, 0, len(items))
 	for _, t := range items {
 		out = append(out, serviceTxnResponse{
-			ID: t.ID, CustomerID: t.CustomerID, Actor: t.Actor, Amount: t.Amount,
-			TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
+			ID: t.ID, CustomerID: t.CustomerID, Invoker: t.Invoker, Amount: t.Amount,
+			Currency: t.Currency, TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
 			CreatedAt: t.CreatedAt,
 		})
 	}

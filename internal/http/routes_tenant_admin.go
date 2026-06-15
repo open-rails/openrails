@@ -355,14 +355,14 @@ func (s *Server) tenantErr(c *gin.Context, err error) {
 
 func tenantView(t *tenancy.Tenant) gin.H {
 	return gin.H{
-		"id":                  t.ID.String(),
-		"slug":                t.Slug,
-		"name":                t.Name,
-		"status":              string(t.Status),
-		"owner_tenant_id":     t.OwnerTenantID,
-		"billing_tier":        t.BillingTier,
-		"region":              t.Region,
-		"webhook_host":        t.WebhookHost,
-		"webhook_path":        t.WebhookPath,
+		"id":              t.ID.String(),
+		"slug":            t.Slug,
+		"name":            t.Name,
+		"status":          string(t.Status),
+		"owner_tenant_id": t.OwnerTenantID,
+		"billing_tier":    t.BillingTier,
+		"region":          t.Region,
+		"webhook_host":    t.WebhookHost,
+		"webhook_path":    t.WebhookPath,
 	}
 }

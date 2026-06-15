@@ -35,7 +35,6 @@ func TestConsolidatedSchemaCoversTenantOwnedRLSTables(t *testing.T) {
 		"invoices",
 		"tier_policies",
 		"payment_blocklist",
-		"budget_reservations",
 	)
 	for _, tbl := range tables {
 		if !strings.Contains(c, "CREATE POLICY merchant_isolation ON openrails."+tbl) {

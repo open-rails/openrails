@@ -211,7 +211,7 @@ func resolvedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*controlplane
 		// reject a zero payer.
 		CustomerID:       identity.CustomerIDFromString(subject).UUID(),
 		DelegatedSubject: subject,
-		Issuer:           strings.TrimSpace(p.Actor),
+		Issuer:           strings.TrimSpace(p.Issuer),
 		Permissions:      perms,
 		Email:            p.Email,
 		EmailVerified:    p.EmailVerified,

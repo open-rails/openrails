@@ -491,7 +491,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.ArrearsChargeArgs{ThresholdMicros: riverjobs.ArrearsHourlyThresholdMicros}, &river.InsertOpts{
+			return riverjobs.ArrearsChargeArgs{ThresholdAmount: riverjobs.ArrearsHourlyThresholdAmount}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: time.Hour},
 			}
@@ -505,7 +505,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(30*24*time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.ArrearsChargeArgs{ThresholdMicros: riverjobs.ArrearsMonthlyFloorMicros}, &river.InsertOpts{
+			return riverjobs.ArrearsChargeArgs{ThresholdAmount: riverjobs.ArrearsMonthlyFloorAmount}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: 30 * 24 * time.Hour},
 			}

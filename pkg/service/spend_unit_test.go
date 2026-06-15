@@ -6,9 +6,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
-// TestRemainingTodayMicros picks the daily-cap headroom (org or per-actor) from
+// TestRemainingTodayAmount picks the daily-cap headroom (org or per-invoker) from
 // the evaluated caps for the authorize response, and clamps negatives to zero.
-func TestRemainingTodayMicros(t *testing.T) {
+func TestRemainingTodayAmount(t *testing.T) {
 	if r := remainingTodayCents(nil); r != nil {
 		t.Fatalf("no caps => nil, got %v", *r)
 	}
@@ -29,11 +29,11 @@ func TestRemainingTodayMicros(t *testing.T) {
 		t.Fatalf("org daily remaining = %v, want 300", r)
 	}
 
-	// Per-actor daily cap also counts as "today".
-	inv := []money.CapResult{{Code: money.DenyActorDailyCap, Remaining: 42}}
+	// Per-invoker daily cap also counts as "today".
+	inv := []money.CapResult{{Code: money.DenyInvokerDailyCap, Remaining: 42}}
 	r = remainingTodayCents(inv)
 	if r == nil || *r != 42 {
-		t.Fatalf("actor daily remaining = %v, want 42", r)
+		t.Fatalf("invoker daily remaining = %v, want 42", r)
 	}
 
 	// Negative remaining (over cap) clamps to zero.

@@ -23,8 +23,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// TierPolicyStore loads + stores per-payer, per-tier throughput policies
-// (openrails.tier_policies). The money axis stays in credit_account_settings.
+// TierPolicyStore loads + stores per-payer, per-tier admission policies
+// (openrails.tier_policies). Account money state stays in money_accounts.
 type TierPolicyStore struct {
 	db *db.DB
 }
@@ -45,12 +45,12 @@ type ResolvedPolicy struct {
 	QueueLimits       []models.QueueLimitPolicy
 	EntitledResources []string
 	BudgetWindows     []budgets.BudgetWindow
-	// MaxConcurrentHeldMicros / MaxSingleChargeMicros are the #487 generic
+	// MaxConcurrentHeldAmount / MaxSingleChargeAmount are the #487 generic
 	// $-denominated per-tier admit limits (0 = uncapped).
-	MaxConcurrentHeldMicros int64
-	MaxSingleChargeMicros   int64
-	// BadSpendWindows are the #488 per-PAYER $-valued wasted-spend budget windows
-	// for this tier (deny abuse_rate_limited at admit when over).
+	MaxConcurrentHeldAmount int64
+	MaxSingleChargeAmount   int64
+	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
+	// windows for this tier; direct-payer overage is charged at report time.
 	BadSpendWindows []models.BudgetWindowPolicy
 }
 
@@ -166,17 +166,16 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Cust
 		QueueLimits:             row.Policy.QueueLimits,
 		EntitledResources:       row.Policy.EntitledResources,
 		BudgetWindows:           toBudgetWindows(row.Policy.BudgetWindows),
-		MaxConcurrentHeldMicros: row.Policy.MaxConcurrentHeldMicros,
-		MaxSingleChargeMicros:   row.Policy.MaxSingleChargeMicros,
+		MaxConcurrentHeldAmount: row.Policy.MaxConcurrentHeldAmount,
+		MaxSingleChargeAmount:   row.Policy.MaxSingleChargeAmount,
 		BadSpendWindows:         row.Policy.BadSpendWindows,
 	}, nil
 }
 
-// UpsertActorWastedWindows stores the FLAT per-actor wasted-spend windows (#492):
-// a zero payer writes the tenant-wide default backstop, a non-zero payer a
-// per-customer override. windows is persisted as a JSONB array of
-// {key, window_seconds, limit_micros}.
-func (s *TierPolicyStore) UpsertActorWastedWindows(ctx context.Context, payer identity.CustomerID, windows []models.BudgetWindowPolicy) error {
+// UpsertInvokerWastedSpendPolicy stores the merchant-wide FLAT per-invoker
+// wasted-spend policy (#496). Payer wasted spend is trust-tier graduated in tier
+// policy; this delegated-user backstop does not vary by customer.
+func (s *TierPolicyStore) UpsertInvokerWastedSpendPolicy(ctx context.Context, windows []models.BudgetWindowPolicy) error {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -185,44 +184,28 @@ func (s *TierPolicyStore) UpsertActorWastedWindows(ctx context.Context, payer id
 	now := time.Now().UTC()
 	windowsJSON, err := json.Marshal(windows)
 	if err != nil {
-		return fmt.Errorf("admission: encode actor wasted windows: %w", err)
+		return fmt.Errorf("admission: encode invoker wasted windows: %w", err)
 	}
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		if payer.IsZero() {
-			return s.db.Gen(ctx).UpsertActorWastedWindowsDefault(ctx, gen.UpsertActorWastedWindowsDefaultParams{
-				ID: uuidutil.NewV7(), MerchantID: tenantID, Windows: windowsJSON,
-				CreatedAt: now, UpdatedAt: now,
-			})
-		}
-		// Per-customer override needs the customers FK satisfied.
-		if _, err := repo.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
-			return err
-		}
-		subjectID := payer.UUID()
-		return s.db.Gen(ctx).UpsertActorWastedWindowsCustomer(ctx, gen.UpsertActorWastedWindowsCustomerParams{
-			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: &subjectID, Windows: windowsJSON,
+		return s.db.Gen(ctx).UpsertInvokerWastedSpendPolicy(ctx, gen.UpsertInvokerWastedSpendPolicyParams{
+			ID: uuidutil.NewV7(), MerchantID: tenantID, Windows: windowsJSON,
 			CreatedAt: now, UpdatedAt: now,
 		})
 	})
 }
 
-// GetActorWastedWindows returns the EFFECTIVE flat per-actor wasted-spend windows
-// for a payer (the customer's override if present, else the tenant-wide default),
-// or nil when none is stored (#492). The caller falls back to a hardcoded default
-// on nil.
-func (s *TierPolicyStore) GetActorWastedWindows(ctx context.Context, payer identity.CustomerID) ([]models.BudgetWindowPolicy, error) {
+// GetInvokerWastedSpendPolicy returns the merchant-wide flat per-invoker
+// wasted-spend policy, or nil when none is stored (#496). The caller falls back
+// to a hardcoded default on nil.
+func (s *TierPolicyStore) GetInvokerWastedSpendPolicy(ctx context.Context) ([]models.BudgetWindowPolicy, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	tenantID := tid.UUID()
-	// `= $2 OR IS NULL` matches both the customer override and the tenant default.
-	subjectID := payer.UUID()
 	var out []models.BudgetWindowPolicy
 	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		row, e := s.db.Gen(ctx).GetEffectiveActorWastedWindows(ctx, gen.GetEffectiveActorWastedWindowsParams{
-			MerchantID: tenantID, CustomerID: &subjectID,
-		})
+		row, e := s.db.Gen(ctx).GetInvokerWastedSpendPolicy(ctx, tenantID)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil
 		}
@@ -231,7 +214,7 @@ func (s *TierPolicyStore) GetActorWastedWindows(ctx context.Context, payer ident
 		}
 		if len(row.Windows) > 0 {
 			if uerr := json.Unmarshal(row.Windows, &out); uerr != nil {
-				return fmt.Errorf("admission: decode actor wasted windows: %w", uerr)
+				return fmt.Errorf("admission: decode invoker wasted windows: %w", uerr)
 			}
 		}
 		return nil
@@ -382,7 +365,7 @@ func (s *BudgetPolicyStore) Delete(ctx context.Context, payer identity.CustomerI
 func toBudgetWindows(ws []models.BudgetWindowPolicy) []budgets.BudgetWindow {
 	out := make([]budgets.BudgetWindow, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence})
+		out = append(out, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence})
 	}
 	return out
 }

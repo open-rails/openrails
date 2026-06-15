@@ -12,7 +12,7 @@ import (
 
 func TestAccrueOwed_Idempotent(t *testing.T) {
 	svc, _, payer, cur, ctx := moneyInEnv(t)
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
 
 	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "req1", 300)
@@ -30,15 +30,15 @@ func TestAccrueOwed_Idempotent(t *testing.T) {
 func TestChargeOutstanding_Threshold(t *testing.T) {
 	svc, _, payer, cur, ctx := moneyInEnv(t)
 	pm := uuid.New()
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "r1", 5_000_000) // $5 owed, in ledger micros
+	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "r1", 5_000_000) // $5 owed, in ledger internal units
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}
-	// Below threshold first: owed $5, threshold $10 (both micros) -> no charge.
+	// Below threshold first: owed $5, threshold $10 (both internal amounts) -> no charge.
 	n, err := svc.ChargeOutstanding(ctx, ch, 10_000_000)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
@@ -49,7 +49,7 @@ func TestChargeOutstanding_Threshold(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	require.Len(t, ch.charges, 1)
-	// Card charge is whole cents: ceil(5_000_000 micros / 10_000) = 500 cents.
+	// Card charge is whole cents: ceil(5_000_000 internal units / 10_000) = 500 cents.
 	require.Equal(t, int64(500), ch.charges[0].AmountCents)
 
 	owed, err := svc.GetOutstandingOwed(ctx, payer, cur)
@@ -60,7 +60,7 @@ func TestChargeOutstanding_Threshold(t *testing.T) {
 func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 	svc, _, payer, cur, ctx := moneyInEnv(t)
 	pm := uuid.New()
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
-	// Sub-cent owed rounds UP: ceil(3_000_001 micros / 10_000) = 301 cents.
+	// Sub-cent owed rounds UP: ceil(3_000_001 internal units / 10_000) = 301 cents.
 	require.Equal(t, int64(301), ch.charges[0].AmountCents)
 	owed, err := svc.GetOutstandingOwed(ctx, payer, cur)
 	require.NoError(t, err)
@@ -82,7 +82,7 @@ func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 func TestChargeOutstanding_Declined_LeavesOwed(t *testing.T) {
 	svc, _, payer, cur, ctx := moneyInEnv(t)
 	pm := uuid.New()
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
@@ -101,7 +101,7 @@ func TestChargeOutstanding_Declined_LeavesOwed(t *testing.T) {
 
 func TestChargeOutstanding_NoPaymentMethod_Skipped(t *testing.T) {
 	svc, _, payer, cur, ctx := moneyInEnv(t)
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
 	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "r1", 500)
 	require.NoError(t, err)

@@ -82,8 +82,8 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	users := group.Group("/users/:user_id")
 	users.GET("/product-access", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
 
-	actors := group.Group("/actors/:actor")
-	actors.GET("/credits", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetActorCredits))
+	invokers := group.Group("/invokers/:invoker")
+	invokers.GET("/credits", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
 
 	credits := group.Group("/credits")
 	// SPEND (hot-path billing) operations — authorize/hold/capture draw down a
@@ -112,17 +112,17 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// Tier SCHEDULE admin (#476): declare the cumulative-spend ladder ONCE; OpenRails
 	// then auto-maintains each payer's tier (no host cranking of GraduateTier).
 	group.PUT("/tier-schedules", creditsWrite, wrap(httphandlers.ServiceSetTierSchedule))
-	// Flat per-ACTOR wasted-spend windows admin (#492): operator-configure the
-	// flat per-invoker backstop, replacing the hardcoded DefaultActorWastedWindows.
-	group.PUT("/actor-wasted-windows", creditsWrite, wrap(httphandlers.ServiceSetActorWastedWindows))
+	// Flat per-invoker wasted-spend policy admin (#496): operator-configure the
+	// flat per-invoker backstop, replacing the hardcoded DefaultInvokerWastedWindows.
+	group.PUT("/invoker-wasted-spend-policy", creditsWrite, wrap(httphandlers.ServiceSetInvokerWastedSpendPolicy))
 	// Graduated-tier READ (#477): the payer's current auto-maintained tier, for a
 	// host that drives its OWN per-tier capacity (e.g. tensorhub's scheduler cap).
 	group.GET("/tier", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetTier))
 	// Wasted-spend report (#488): the host reports a FAILED attempt that cost it $
 	// (a refunded hold, a content-filter reject). Accrues into the payer's per-tier
-	// bad_spend windows + the actor's flat windows; admit denies when over.
+	// bad_spend windows + the invoker's flat windows; admit denies when over.
 	group.POST("/wasted-spend", creditsWrite, wrap(httphandlers.ServiceReportWastedSpend))
-	// Wasted-spend usage READ (#488): the payer's + actor's running wasted-$ totals.
+	// Wasted-spend usage READ (#488): the payer's + invoker's running wasted-$ totals.
 	group.GET("/abuse-usage", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceAbuseUsage))
 	// Arrears credit-line admin (#489): operator sets the per-payer negative-balance
 	// ceiling. Admin-gated (openrails:admin) — NOT self-serve. Read is credits:read.
@@ -164,7 +164,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// #410: per-resource daily revenue (by the usage_event resource column, cross-payer).
 	credits.POST("/usage/resource-revenue", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceResourceRevenue))
 	credits.GET("/transactions/lookup", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
-	credits.GET("/actors/:actor", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetActorCredits))
+	credits.GET("/invokers/:invoker", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
 
 	// Tenant billing-account admin surface (issue #242): configure prepaid|arrears
 	// mode + spend caps + auto-top-up, read settings, and list usage. Tensorhub's
@@ -217,8 +217,8 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	// Account + balance/credits read.
 	group.GET("/status", read, wrap(httphandlers.GetMyBillingStatus))
 	group.GET("/credits", read, wrap(httphandlers.GetMyCredits))
-	group.GET("/credits/:type", read, wrap(httphandlers.GetMyCreditsType))
-	group.GET("/credits/:type/transactions", read, wrap(httphandlers.GetMyCreditTransactions))
+	group.GET("/credits/:currency", read, wrap(httphandlers.GetMyCreditsType))
+	group.GET("/credits/:currency/transactions", read, wrap(httphandlers.GetMyCreditTransactions))
 
 	// Usage breakdown (issue #289): the acting user's metered usage rolled up by
 	// event_type (endpoint/model) over a [from, to) window, with summed dimensions.

@@ -767,7 +767,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 			}
 			paymentSourceID := result.PaymentID.String()
 			_, err = s.MoneyService.Deposit(ctx, money.DepositParams{
-				Actor:     userID,
+				Invoker:   userID,
 				Amount:    spec.Amount,
 				Source:    "purchase",
 				SourceID:  &paymentSourceID,

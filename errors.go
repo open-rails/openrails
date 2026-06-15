@@ -45,9 +45,6 @@ var (
 	// ErrInsufficientCredits is the payer-balance deny (HTTP 402 /
 	// "insufficient_credits"). Message kept identical to go-client's sentinel.
 	ErrInsufficientCredits = errors.New("insufficient_credits")
-	// ErrCreditTypeInactive is the inactive/unknown-credit-type rejection
-	// (HTTP 400 + "credit_type_inactive").
-	ErrCreditTypeInactive = errors.New("credit_type_inactive")
 )
 
 // StatusError is the concrete error both transports return for any non-OK
@@ -91,13 +88,11 @@ func newStatusError(status int, code, message string, extra ...error) *StatusErr
 	e := &StatusError{Status: status, Code: code, Message: message}
 
 	// Code/message-specific sentinels first: the handlers signal these as
-	// payload strings ("insufficient_credits" on 402, "credit_type_inactive" on
-	// 400 — see internal/http/handlers/service_credits.go).
+	// payload strings ("insufficient_credits" on 402 — see
+	// internal/http/handlers/service_credits.go).
 	switch pickCode(code, message) {
 	case "insufficient_credits":
 		e.sentinels = append(e.sentinels, ErrInsufficientCredits)
-	case "credit_type_inactive":
-		e.sentinels = append(e.sentinels, ErrCreditTypeInactive)
 	}
 
 	// Status-class sentinel.
@@ -129,7 +124,7 @@ func pickCode(code, message string) string {
 		// The standalone error envelope's "code" is a coarse api.Code* class; the
 		// discriminating string ("insufficient_credits", ...) is the message. Only
 		// honor a specific code.
-		if c == "insufficient_credits" || c == "credit_type_inactive" {
+		if c == "insufficient_credits" {
 			return c
 		}
 	}

@@ -3,32 +3,32 @@
 
 -- name: InsertUsageEvent :exec
 INSERT INTO openrails.usage_events (
-    id, merchant_id, customer_id, invoker_id, resource,
+    id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
     money_transaction_id, metadata, occurred_at, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14);
+) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14);
 
 -- name: InsertUsageEventIfAbsent :exec
 INSERT INTO openrails.usage_events (
-    id, merchant_id, customer_id, invoker_id, resource,
+    id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
     money_transaction_id, metadata, occurred_at, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
-ON CONFLICT (merchant_id, customer_id, event_type, source, source_id) DO NOTHING;
+) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
+ON CONFLICT (merchant_id, customer_id, currency, event_type, source, source_id) DO NOTHING;
 
 -- name: GetUsageEventByCoords :one
 SELECT * FROM openrails.usage_events
-WHERE merchant_id = $1 AND customer_id = $2 AND event_type = $3
-  AND source = $4 AND source_id = $5
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
+  AND event_type = $3 AND source = $4 AND source_id = $5
 LIMIT 1;
 
 -- name: AggregateUsageTotals :many
--- Per-event_type rollup over [from, to).
+-- Per-event_type rollup over [from, to) in one currency.
 SELECT event_type,
        COALESCE(SUM(amount), 0)::bigint AS total_amount,
        COUNT(*)::bigint AS event_count
 FROM openrails.usage_events
-WHERE merchant_id = $1 AND customer_id = $2
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND occurred_at >= sqlc.arg(from_at)::timestamptz
   AND occurred_at < sqlc.arg(to_at)::timestamptz
 GROUP BY event_type;
@@ -41,6 +41,7 @@ SELECT ue.event_type,
 FROM openrails.usage_events ue
 CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d
 WHERE ue.merchant_id = $1 AND ue.customer_id = $2
+  AND ue.currency = sqlc.arg(currency)
   AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
   AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
 GROUP BY ue.event_type, d.key;
@@ -51,29 +52,32 @@ GROUP BY ue.event_type, d.key;
 -- under '' (the CASE yields NULL).
 SELECT COALESCE(CASE sqlc.arg(group_by)::text
            WHEN 'resource' THEN ue.resource
-           WHEN 'actor' THEN ue.invoker_id
+           WHEN 'invoker' THEN ue.invoker_id
            WHEN 'function' THEN ue.metadata->>'function_name'
            WHEN 'tier' THEN ue.metadata->>'availability_tier'
        END, '')::text AS key,
+       ue.currency,
        COUNT(*)::bigint AS event_count,
        COALESCE(SUM(ue.amount), 0)::bigint AS total_amount
 FROM openrails.usage_events ue
 WHERE ue.merchant_id = $1 AND ue.customer_id = $2
+  AND ue.currency = sqlc.arg(currency)
   AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
   AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
-GROUP BY 1
+GROUP BY 1, 2
 ORDER BY total_amount DESC;
 
 -- name: ResourceRevenueDaily :many
 -- Per-day revenue for a resource across ALL payers in the tenant (#410).
--- ue.amount is already micro-dollars (#337/#463): no conversion. The old
--- ceil-divide-by-10 was the micros->millicents conversion and survived the
+-- ue.amount is already in ledger internal precision (#337/#463): no conversion. The old
+-- ceil-divide-by-10 was the internal-units-to-millicents conversion and survived the
 -- rename as a 10x revenue under-report.
 SELECT to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')::text AS date,
-       COALESCE(SUM(ue.amount), 0)::bigint AS amount_micros
+       ue.currency,
+       COALESCE(SUM(ue.amount), 0)::bigint AS amount
 FROM openrails.usage_events ue
-WHERE ue.merchant_id = $1 AND ue.resource = $2
+WHERE ue.merchant_id = $1 AND ue.resource = $2 AND ue.currency = sqlc.arg(currency)
   AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
   AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
-GROUP BY 1
+GROUP BY 1, 2
 ORDER BY 1;

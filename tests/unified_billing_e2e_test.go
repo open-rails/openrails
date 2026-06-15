@@ -123,7 +123,7 @@ func (h *billingE2EHarness) deposit(userID string, amount int64) {
 	srcID := uuid.New()
 	w := h.do(http.MethodPost, "/v1/service/credits/deposit", map[string]any{
 		"customer_id": personalOwnerID(userID).String(),
-		"actor":       userID,
+		"invoker":     userID,
 		"credit_type": h.creditType,
 		"amount":      amount,
 		"source":      "e2e_deposit",
@@ -144,7 +144,7 @@ func (h *billingE2EHarness) hold(userID, source, sourceID string, amount int64) 
 	h.t.Helper()
 	return h.do(http.MethodPost, "/v1/service/credits/hold", map[string]any{
 		"customer_id": personalOwnerID(userID).String(),
-		"actor":       userID,
+		"invoker":     userID,
 		"credit_type": h.creditType,
 		"amount":      amount,
 		"source":      source,
@@ -186,11 +186,11 @@ func (h *billingE2EHarness) balance(userID string) balanceView {
 	w := h.do(http.MethodGet, "/v1/service/credits/balance?customer_id="+personalOwnerID(userID).String()+"&credit_type="+h.creditType, nil)
 	require.Equal(h.t, http.StatusOK, w.Code, "balance body: %s", w.Body.String())
 	var payload struct {
-		BalanceMicros int64 `json:"balance_micros"`
-		HeldMicros    int64 `json:"held_micros"`
+		BalanceAmount int64 `json:"balance_amount"`
+		HeldAmount    int64 `json:"held_amount"`
 	}
 	require.NoError(h.t, json.Unmarshal(w.Body.Bytes(), &payload))
-	return balanceView{Balance: payload.BalanceMicros, HeldBalance: payload.HeldMicros}
+	return balanceView{Balance: payload.BalanceAmount, HeldBalance: payload.HeldAmount}
 }
 
 // ledgerRows returns all money_transactions for a tenant subject (USD), for
@@ -455,7 +455,7 @@ func TestUnifiedBilling_LifecycleViaPublicServiceTokenRoutes(t *testing.T) {
 
 	// Lookup the hold by source the way an orchestrator reconciles state.
 	lookup := h.do(http.MethodGet, fmt.Sprintf(
-		"/v1/service/credits/transactions/lookup?actor=%s&credit_type=%s&transaction_type=hold&source=gen_job&source_id=lifecycle-job-1",
+		"/v1/service/credits/transactions/lookup?invoker=%s&credit_type=%s&transaction_type=hold&source=gen_job&source_id=lifecycle-job-1",
 		user, h.creditType), nil)
 	require.Equal(t, http.StatusOK, lookup.Code, "lookup body: %s", lookup.Body.String())
 	require.Contains(t, lookup.Body.String(), holdID)

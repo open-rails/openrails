@@ -6,9 +6,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// TierPolicy is a per-payer, per-tier THROUGHPUT policy for the admission check
-// (issue #298). The money axis stays in CreditAccountSettings; this holds the
-// rate-limit windows. Rolling money-budget windows (#304) extend this.
+// TierPolicy is a per-payer, per-tier admission policy for throughput and
+// rolling money-budget windows (#298/#304).
 type TierPolicy struct {
 	ID         uuid.UUID `json:"id"`
 	MerchantID uuid.UUID `json:"tenant_id"`
@@ -49,26 +48,24 @@ type ThroughputPolicy struct {
 	// exceed max. tensorhub's instance is the count form (unit="request").
 	QueueLimits []QueueLimitPolicy `json:"queue_limits,omitempty"`
 
-	// MaxConcurrentHeldMicros caps the SUM of a payer's currently-ACTIVE
+	// MaxConcurrentHeldAmount caps the SUM of a payer's currently-ACTIVE
 	// (un-settled) hold $ at this tier (#487). 0 = uncapped. OpenRails enforces it
 	// at admit (deny "concurrent_held_cap_exceeded" when a new hold would push the
 	// active-hold sum past it) AND surfaces the resolved value on AdmitResponse so a
 	// host that enforces true occupancy itself (e.g. tensorhub's scheduler, which
 	// alone sees live GPU occupancy) can queue against cap + per-job estimate
 	// instead of taking the hard deny. Generic $-denominated; no host concepts.
-	MaxConcurrentHeldMicros int64 `json:"max_concurrent_held_micros,omitempty"`
+	MaxConcurrentHeldAmount int64 `json:"max_concurrent_held_amount,omitempty"`
 
-	// MaxSingleChargeMicros is the per-charge ceiling at this tier (#487): an Admit
-	// whose EstimateMicros exceeds it is rejected ("single_charge_cap_exceeded").
+	// MaxSingleChargeAmount is the per-charge ceiling at this tier (#487): an Admit
+	// whose EstimatedAmount exceeds it is rejected ("single_charge_cap_exceeded").
 	// 0 = uncapped. Generic runaway guard.
-	MaxSingleChargeMicros int64 `json:"max_single_charge_micros,omitempty"`
+	MaxSingleChargeAmount int64 `json:"max_single_charge_amount,omitempty"`
 
-	// BadSpendWindows are $-VALUED wasted/failed-spend budget windows for this tier
-	// (#488): at most LimitMicros of host-reported wasted $ per WindowSeconds for
-	// the PAYER. Enforced at admit (deny "abuse_rate_limited" when over). Generic —
-	// every platform has failed work that costs money; the host reports the $ via
-	// ReportWastedSpend. Per-PAYER budget graduated by tier; the per-ACTOR budget is
-	// a flat config default (not stored here).
+	// BadSpendWindows are $-VALUED wasted/failed-spend grace windows for this tier
+	// (#497): at most Limit of direct-payer wasted spend is forgiven per
+	// WindowSeconds. Overage is charged at report time. Delegated invokers use the
+	// separate flat invoker cutoff policy.
 	BadSpendWindows []BudgetWindowPolicy `json:"bad_spend_windows,omitempty"`
 }
 
@@ -82,11 +79,11 @@ type QueueLimitPolicy struct {
 }
 
 // BudgetWindowPolicy is one rolling money-budget window for a tier (#304): at
-// most LimitMicros (the ledger's smallest unit) of spend per WindowSeconds.
+// most Limit (the ledger's smallest unit) of spend per WindowSeconds.
 type BudgetWindowPolicy struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
-	LimitMicros   int64  `json:"limit_micros"`
+	Limit         int64  `json:"limit"`
 	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
 	Cadence string `json:"cadence,omitempty"`
 }

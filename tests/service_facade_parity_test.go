@@ -153,7 +153,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// 1) Create hold via Service facade, release via service HTTP.
 	hold1, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
 		CustomerID: &tenantSubject,
-		Actor:      userID,
+		Invoker:    userID,
 		Amount:     123,
 		Source:     "svc_test",
 		SourceID:   "hold-1",
@@ -171,7 +171,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// 2) Create hold via service HTTP, capture via Service facade.
 	bodyHold, _ := json.Marshal(map[string]any{
 		"customer_id": tenantSubjectID.String(),
-		"actor":       userID,
+		"invoker":     userID,
 		"credit_type": creditTypeName,
 		"amount":      456,
 		"source":      "svc_test",
@@ -249,11 +249,11 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.Equal(t, http.StatusOK, wJWTBalance.Code)
 	var balanceResp struct {
 		CustomerID    string `json:"customer_id"`
-		BalanceMicros int64  `json:"balance_micros"`
-		HeldMicros    int64  `json:"held_micros"`
+		BalanceAmount int64  `json:"balance_amount"`
+		HeldAmount    int64  `json:"held_amount"`
 	}
 	require.NoError(t, json.Unmarshal(wJWTBalance.Body.Bytes(), &balanceResp))
 	require.Equal(t, tenantSubjectID.String(), balanceResp.CustomerID)
-	require.Equal(t, int64(9_889), balanceResp.BalanceMicros)
-	require.Equal(t, int64(0), balanceResp.HeldMicros)
+	require.Equal(t, int64(9_889), balanceResp.BalanceAmount)
+	require.Equal(t, int64(0), balanceResp.HeldAmount)
 }

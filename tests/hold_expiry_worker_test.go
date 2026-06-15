@@ -52,7 +52,7 @@ func (suite *TestContainerSuite) createTestMoneyHold(userID string, amount int64
 		ID:              uuid.New(),
 		CustomerID:      tenantSubjectID,
 		Currency:        "USD",
-		Actor:           userID,
+		Invoker:         userID,
 		Amount:          0,
 		BalanceAfter:    nil,
 		TransactionType: "hold",
@@ -68,11 +68,11 @@ func (suite *TestContainerSuite) createTestMoneyHold(userID string, amount int64
 	}
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.money_transactions (
-			id, merchant_id, customer_id, currency, actor, amount, balance_after,
+			id, merchant_id, customer_id, currency, invoker, amount, balance_after,
 			transaction_type, status, authorized_amount, captured_amount,
 			source, source_id, expires_at, description, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-		hold.ID, dbtest.TestTenantID.UUID(), hold.CustomerID, hold.Currency, hold.Actor, hold.Amount, hold.BalanceAfter,
+		hold.ID, dbtest.TestTenantID.UUID(), hold.CustomerID, hold.Currency, hold.Invoker, hold.Amount, hold.BalanceAfter,
 		hold.TransactionType, hold.Status, hold.Authorized, hold.Captured,
 		hold.Source, hold.SourceID, hold.ExpiresAt, hold.Description, hold.CreatedAt, hold.UpdatedAt)
 	if err != nil {
@@ -82,14 +82,14 @@ func (suite *TestContainerSuite) createTestMoneyHold(userID string, amount int64
 }
 
 // moneyTransactionCols is the column list scanned into models.MoneyTransaction.
-const moneyTransactionCols = `id, merchant_id, customer_id, currency, actor, resource, metadata,
+const moneyTransactionCols = `id, merchant_id, customer_id, currency, invoker, resource, metadata,
 	amount, balance_after, transaction_type, status, authorized_amount,
 	captured_amount, source, source_id, expires_at, description, created_at, updated_at`
 
 func scanMoneyTransaction(row interface{ Scan(...any) error }) (*models.MoneyTransaction, error) {
 	t := new(models.MoneyTransaction)
 	err := row.Scan(
-		&t.ID, &t.MerchantID, &t.CustomerID, &t.Currency, &t.Actor, &t.Resource, &t.Metadata,
+		&t.ID, &t.MerchantID, &t.CustomerID, &t.Currency, &t.Invoker, &t.Resource, &t.Metadata,
 		&t.Amount, &t.BalanceAfter, &t.TransactionType, &t.Status, &t.Authorized,
 		&t.Captured, &t.Source, &t.SourceID, &t.ExpiresAt, &t.Description, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {

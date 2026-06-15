@@ -7,7 +7,7 @@ import (
 
 // System currency registry (#472). Currency is system-fixed, NOT tenant-scoped:
 // the codebase is the authority (there is no DB CHECK). amount columns are
-// integers in the currency's minor unit (Decimals places below the major unit).
+// integers in the currency's registered internal precision.
 
 // DefaultCurrency is assumed wherever a currency is unset ("").
 const DefaultCurrency = "USD"
@@ -15,12 +15,12 @@ const DefaultCurrency = "USD"
 // Currency is a system currency code and its minor-unit scale.
 type Currency struct {
 	Code     string
-	Decimals int    // minor units per major unit = 10^Decimals
+	Decimals int    // internal units per major unit = 10^Decimals
 	Kind     string // "fiat" | "crypto"
 }
 
 var currencies = map[string]Currency{
-	"USD":  {Code: "USD", Decimals: 6, Kind: "fiat"}, // µ$
+	"USD":  {Code: "USD", Decimals: 6, Kind: "fiat"},
 	"USDC": {Code: "USDC", Decimals: 6, Kind: "crypto"},
 	"EUR":  {Code: "EUR", Decimals: 6, Kind: "fiat"},
 	"JPY":  {Code: "JPY", Decimals: 4, Kind: "fiat"},
@@ -37,6 +37,13 @@ func normalizeCurrency(c string) string {
 	return c
 }
 
+// NormalizeCurrency maps "" to the default and upper-cases built-in currency
+// codes. It is exported for sibling modules that key native-money rows by
+// currency but still rely on this package's registry as the source of truth.
+func NormalizeCurrency(c string) string {
+	return normalizeCurrency(c)
+}
+
 // ValidateCurrency errors on an unknown code (after normalizing "").
 func ValidateCurrency(c string) error {
 	if _, ok := currencies[normalizeCurrency(c)]; !ok {
@@ -45,7 +52,7 @@ func ValidateCurrency(c string) error {
 	return nil
 }
 
-// CurrencyScale returns the currency's minor-unit decimals.
+// CurrencyScale returns the currency's internal precision decimals.
 func CurrencyScale(c string) (int, bool) {
 	cur, ok := currencies[normalizeCurrency(c)]
 	return cur.Decimals, ok

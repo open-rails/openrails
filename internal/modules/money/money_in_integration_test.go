@@ -16,8 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// moneyInEnv provisions a fresh payer with NO initial deposit (balance 0). Money
-// has no credit_type dimension (#472); the returned currency is always USD.
+// moneyInEnv provisions a fresh payer with NO initial deposit (balance 0).
 func moneyInEnv(t *testing.T) (*money.MoneyService, *pgxpool.Pool, identity.CustomerID, string, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
@@ -75,7 +74,7 @@ func latestBlock(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payerID 
 func TestDeposit_DefaultExpiry_NoSettingsRow(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1000,
+		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1000,
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
@@ -88,7 +87,7 @@ func TestDeposit_DefaultExpiry_NoSettingsRow(t *testing.T) {
 func TestDeposit_NoFlag_Permanent(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "grant",
+		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1000, Source: "grant",
 	})
 	require.NoError(t, err)
 	b := latestBlock(t, pool, ctx, payer.UUID())
@@ -98,10 +97,10 @@ func TestDeposit_NoFlag_Permanent(t *testing.T) {
 func TestDeposit_ConfiguredExpiryDays(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	days := 30
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{DefaultCreditExpiryDays: &days})
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{DefaultCreditExpiryDays: &days})
 	require.NoError(t, err)
 	_, err = svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1000,
+		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1000,
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
@@ -115,10 +114,10 @@ func TestDeposit_ConfiguredExpiryDays(t *testing.T) {
 func TestRunLowBalanceAlerts(t *testing.T) {
 	svc, _, payer, _, ctx := moneyInEnv(t)
 	thr := int64(1000)
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{LowBalanceThreshold: &thr})
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{LowBalanceThreshold: &thr})
 	require.NoError(t, err)
 	// available 500 < 1000
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	al := &fakeAlerter{}
@@ -141,11 +140,11 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 	thr, amt := int64(1000), int64(5000)
 	pm := uuid.New()
 	enabled := true
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}
@@ -159,7 +158,7 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 
 	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
 	require.NoError(t, err)
-	// Ledger is micros: 500 seed + 5000 cents * 10_000 micros/cent deposited.
+	// Ledger uses internal units: 500 seed + 5000 cents * 10_000 units/cent deposited.
 	require.Equal(t, int64(50_000_500), bal.Balance)
 
 	// Re-run within cooldown: no second charge.
@@ -174,11 +173,11 @@ func TestRunAutoTopups_Declined(t *testing.T) {
 	thr, amt := int64(1000), int64(5000)
 	pm := uuid.New()
 	enabled := true
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	ch := &fakeCharger{declineAll: true}

@@ -44,7 +44,7 @@ func (h hostSeamAuthenticator) AuthenticateDelegated(context.Context, *http.Requ
 		MerchantID:  dbtest.TestTenantID.String(),
 		TenantSlug:  dbtest.TestTenantSlug,
 		SubjectID:   h.subject,
-		Actor:       "https://auth.host.example",
+		Issuer:      "https://auth.host.example",
 		Permissions: h.perms,
 	}, nil
 }
@@ -82,9 +82,7 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
 
-	// credit_type is accepted-and-ignored on the wire (#472); the self/account
-	// surface echoes the requested type back, money needs no type row.
-	ctName := "self_acct_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	currency := "EUR"
 
 	subjectA := uuid.NewString()
 	subjectB := uuid.NewString()
@@ -94,7 +92,8 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	// Fund subject A so its account has a balance and a transaction.
 	_, err = svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
 		CustomerID: &payerA,
-		Actor:      subjectA,
+		Invoker:    subjectA,
+		Currency:   currency,
 		Amount:     7_500_000,
 		Source:     "test_seed",
 		SourceID:   &sourceID,
@@ -107,41 +106,41 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	routerAReadOnly := newHostSeamSelfRouter(t, suite, subjectA, []string{controlplane.PermSelfBillingRead})
 
 	// --- GET /v1/self/account: A sees its own balance. ---
-	w := doHostSeamSelf(routerA, http.MethodGet, "/v1/self/account?type="+ctName, "")
+	w := doHostSeamSelf(routerA, http.MethodGet, "/v1/self/account?currency="+currency, "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	acct := decodeHostSeamBody(t, w)
-	require.Equal(t, ctName, acct["type"])
-	require.EqualValues(t, 7_500_000, acct["balance_micros"])
-	require.EqualValues(t, 7_500_000, acct["available_micros"])
-	require.EqualValues(t, 0, acct["outstanding_owed_micros"])
+	require.Equal(t, currency, acct["currency"])
+	require.EqualValues(t, 7_500_000, acct["balance_amount"])
+	require.EqualValues(t, 7_500_000, acct["available_amount"])
+	require.EqualValues(t, 0, acct["outstanding_owed_amount"])
 	require.Equal(t, "prepaid", acct["billing_mode"])
 	require.NotNil(t, acct["settings"])
 
 	// --- PUT /v1/self/account/settings: A configures its own account. ---
 	settingsBody := fmt.Sprintf(`{
-		"type": %q,
+		"currency": %q,
 		"billing_mode": "arrears",
-		"max_spend_per_day_micros": 1000000,
-		"max_outstanding_owed_micros": 2000000,
+		"max_spend_per_day": 1000000,
+		"max_outstanding_owed_amount": 2000000,
 		"hard_stop_on_breach": true
-	}`, ctName)
+	}`, currency)
 	w = doHostSeamSelf(routerA, http.MethodPut, "/v1/self/account/settings", settingsBody)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	stored := decodeHostSeamBody(t, w)
 	require.Equal(t, "arrears", stored["billing_mode"], w.Body.String())
-	require.EqualValues(t, 1_000_000, stored["max_spend_per_day_micros"])
-	require.EqualValues(t, 2_000_000, stored["max_outstanding_owed_micros"])
+	require.EqualValues(t, 1_000_000, stored["max_spend_per_day"])
+	require.EqualValues(t, 2_000_000, stored["max_outstanding_owed_amount"])
 	require.Equal(t, true, stored["hard_stop_on_breach"])
 	require.Equal(t, payerA.UUID().String(), stored["customer_id"],
 		"settings must be stored under the delegated subject, never caller-supplied")
 
 	// The settings round-trip through the account read.
-	w = doHostSeamSelf(routerA, http.MethodGet, "/v1/self/account?type="+ctName, "")
+	w = doHostSeamSelf(routerA, http.MethodGet, "/v1/self/account?currency="+currency, "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, "arrears", decodeHostSeamBody(t, w)["billing_mode"])
 
 	// --- GET /v1/self/account/transactions: A sees exactly its deposit. ---
-	w = doHostSeamSelf(routerA, http.MethodGet, "/v1/self/account/transactions?type="+ctName+"&limit=10", "")
+	w = doHostSeamSelf(routerA, http.MethodGet, "/v1/self/account/transactions?currency="+currency+"&limit=10", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	txns := decodeHostSeamBody(t, w)
 	require.EqualValues(t, 1, txns["total"], w.Body.String())
@@ -151,16 +150,17 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	first, ok := list[0].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, payerA.UUID().String(), first["customer_id"])
+	require.Equal(t, currency, first["currency"])
 	require.EqualValues(t, 7_500_000, first["amount"])
 
 	// --- SCOPING: subject B sees NONE of A's data. ---
-	w = doHostSeamSelf(routerB, http.MethodGet, "/v1/self/account?type="+ctName, "")
+	w = doHostSeamSelf(routerB, http.MethodGet, "/v1/self/account?currency="+currency, "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	acctB := decodeHostSeamBody(t, w)
-	require.EqualValues(t, 0, acctB["balance_micros"], "B must not see A's balance")
+	require.EqualValues(t, 0, acctB["balance_amount"], "B must not see A's balance")
 	require.Equal(t, "prepaid", acctB["billing_mode"], "B must not see A's arrears settings")
 
-	w = doHostSeamSelf(routerB, http.MethodGet, "/v1/self/account/transactions?type="+ctName, "")
+	w = doHostSeamSelf(routerB, http.MethodGet, "/v1/self/account/transactions?currency="+currency, "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	txnsB := decodeHostSeamBody(t, w)
 	require.EqualValues(t, 0, txnsB["total"], "B must not see A's transactions: %s", w.Body.String())
@@ -169,6 +169,6 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	w = doHostSeamSelf(routerAReadOnly, http.MethodPut, "/v1/self/account/settings", settingsBody)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 	// ...but can still read its account.
-	w = doHostSeamSelf(routerAReadOnly, http.MethodGet, "/v1/self/account?type="+ctName, "")
+	w = doHostSeamSelf(routerAReadOnly, http.MethodGet, "/v1/self/account?currency="+currency, "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }

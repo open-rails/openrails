@@ -45,7 +45,7 @@ const (
 // OpenWindowParams opens a prepaid window for a payer.
 type OpenWindowParams struct {
 	Payer     identity.CustomerID
-	Actor     string // attribution; stamped on the ledger record
+	Invoker   string // attribution; stamped on the ledger record
 	Currency  string // "" => DefaultCurrency (#472)
 	Amount    int64
 	ExpiresAt time.Time
@@ -103,7 +103,7 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 
 		// Lock + derive under the customers-row lock; the open window row IS the
 		// held reservation (#491): SumActiveMoneyHeld counts open windows' unsettled.
-		bal, err := s.lockBalance(ctx, q, p.Payer, p.Actor, cur)
+		bal, err := s.lockBalance(ctx, q, p.Payer, p.Invoker, cur)
 		if err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 		}); err != nil {
 			return err
 		}
-		if err := insertWindowRecordTx(ctx, q, w, txWindowOpen, windowActor(p.Actor, payerID), p.Amount, now); err != nil {
+		if err := insertWindowRecordTx(ctx, q, w, txWindowOpen, windowActor(p.Invoker, payerID), p.Amount, now); err != nil {
 			return err
 		}
 		window = w
@@ -146,7 +146,7 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 // insertWindowRecordTx writes the zero-amount audit ledger row for a window
 // open/refill (amount=0 — no balance movement; authorized records the reserved
 // delta; source_id is the window id).
-func insertWindowRecordTx(ctx context.Context, q *gen.Queries, w *models.MoneyWindow, txType, actor string, amount int64, now time.Time) error {
+func insertWindowRecordTx(ctx context.Context, q *gen.Queries, w *models.MoneyWindow, txType, invoker string, amount int64, now time.Time) error {
 	auth := amount
 	exp := w.ExpiresAt
 	srcID := w.ID.String()
@@ -155,7 +155,7 @@ func insertWindowRecordTx(ctx context.Context, q *gen.Queries, w *models.MoneyWi
 		MerchantID:      w.MerchantID,
 		CustomerID:      w.CustomerID,
 		Currency:        normalizeCurrency(w.Currency),
-		Actor:           actor,
+		Invoker:         invoker,
 		Amount:          0,
 		TransactionType: txType,
 		Status:          "posted",
@@ -169,10 +169,10 @@ func insertWindowRecordTx(ctx context.Context, q *gen.Queries, w *models.MoneyWi
 	return q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(rec))
 }
 
-// windowActor returns the ledger/usage attribution actor: the caller-supplied
-// actor when present, else the payer id string (the AccrueOwed convention).
-func windowActor(actor string, payerID uuid.UUID) string {
-	if a := strings.TrimSpace(actor); a != "" {
+// windowActor returns the ledger/usage attribution invoker: the caller-supplied
+// invoker when present, else the payer id string (the AccrueOwed convention).
+func windowActor(invoker string, payerID uuid.UUID) string {
+	if a := strings.TrimSpace(invoker); a != "" {
 		return a
 	}
 	return payerID.String()
@@ -186,9 +186,9 @@ type WindowSettleItem struct {
 	WindowID  uuid.UUID
 	RequestID string
 	Amount    int64
-	// Actor is optional attribution for the ledger/usage rows; defaults to the
+	// Invoker is optional attribution for the ledger/usage rows; defaults to the
 	// window's payer id.
-	Actor     string
+	Invoker   string
 	EventType string
 	Resource  string
 	Metadata  map[string]any
@@ -246,7 +246,7 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 		}
 		w := creditWindowFromGen(wRow)
 		payer := identity.CustomerID(w.CustomerID)
-		actor := windowActor(item.Actor, w.CustomerID)
+		invoker := windowActor(item.Invoker, w.CustomerID)
 		cur := normalizeCurrency(w.Currency)
 
 		// Replay check FIRST (under the window lock) so a re-sent batch returns
@@ -274,7 +274,7 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 		// Capture mechanics: bumping settled_amount releases this slice of the
 		// window reservation from the derived held (#491); withdrawBalanceAndBlocks
 		// debits the FIFO blocks for the actual spend. Lock the customers row first.
-		if _, err := s.lockBalance(ctx, q, payer, actor, cur); err != nil {
+		if _, err := s.lockBalance(ctx, q, payer, invoker, cur); err != nil {
 			return err
 		}
 		if err := q.AddMoneyWindowSettled(ctx, gen.AddMoneyWindowSettledParams{
@@ -282,7 +282,7 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 		}); err != nil {
 			return err
 		}
-		newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, actor, cur, item.Amount)
+		newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, invoker, cur, item.Amount)
 		if err != nil {
 			return err
 		}
@@ -293,7 +293,7 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 			MerchantID:      w.MerchantID,
 			CustomerID:      w.CustomerID,
 			Currency:        cur,
-			Actor:           actor,
+			Invoker:         invoker,
 			Resource:        nilIfEmpty(strings.TrimSpace(item.Resource)),
 			Amount:          -item.Amount,
 			BalanceAfter:    &newBal,
@@ -319,7 +319,7 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 				ID:                 uuidutil.NewV7(),
 				MerchantID:         w.MerchantID,
 				CustomerID:         w.CustomerID,
-				InvokerID:          actor,
+				InvokerID:          invoker,
 				Resource:           nilIfEmpty(strings.TrimSpace(item.Resource)),
 				EventType:          et,
 				Amount:             item.Amount,
@@ -395,13 +395,13 @@ func (s *MoneyService) RefillWindow(ctx context.Context, windowID uuid.UUID, amo
 			return ErrWindowNotOpen
 		}
 		payer := identity.CustomerID(w.CustomerID)
-		actor := w.CustomerID.String()
+		invoker := w.CustomerID.String()
 		cur := normalizeCurrency(w.Currency)
 
 		if amount > 0 {
 			// Bumping the window's held_amount (below) raises its derived-held
 			// contribution (#491); just gate on available under the lock.
-			bal, err := s.lockBalance(ctx, q, payer, actor, cur)
+			bal, err := s.lockBalance(ctx, q, payer, invoker, cur)
 			if err != nil {
 				return err
 			}
@@ -420,7 +420,7 @@ func (s *MoneyService) RefillWindow(ctx context.Context, windowID uuid.UUID, amo
 			return err
 		}
 		if amount > 0 {
-			if err := insertWindowRecordTx(ctx, q, w, txWindowRefill, actor, amount, now); err != nil {
+			if err := insertWindowRecordTx(ctx, q, w, txWindowRefill, invoker, amount, now); err != nil {
 				return err
 			}
 		}

@@ -45,7 +45,6 @@ type ControlPlane struct {
 	// access tokens. They are the control plane's accepted (expected) audiences, so
 	// every minted token is accepted by delegatedVerifier (and the /v1/self gate).
 	delegatedAudiences []string
-
 }
 
 // delegatedIssuerJWKSCacheTTL is how long the verifier treats a fetched tenant
@@ -132,7 +131,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		// self-registration, no public tenant onboarding/management. Embedded
 		// bootstrap/core calls (CreateOrg/AssignRole/MintServiceToken) are unaffected.
 		NativeUserRegistrationMode: registrationMode(!cp.UserRegistrationOpen()),
-		OrgRegistrationMode:     registrationMode(!cp.TenantRegistrationOpen()),
+		OrgRegistrationMode:        registrationMode(!cp.TenantRegistrationOpen()),
 	}
 
 	authSvc, err := authhttp.NewService(coreCfg)

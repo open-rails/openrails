@@ -24,7 +24,7 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	})
 
 	_, err := ms.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "seed",
+		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
@@ -43,7 +43,7 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	for _, e := range events {
 		require.NoError(t, ms.InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
 			CustomerID: payer.UUID(),
-			Actor:      "user:a",
+			Invoker:    "user:a",
 			EventType:  "owner/" + e.endpoint,
 			Amount:     e.amount,
 			Resource:   e.endpoint,
@@ -64,7 +64,7 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
 
 	// Rollup by resource: alpha=8 over 2 events, beta=4 over 1.
-	byEndpoint, err := ms.ServiceUsageRollup(ctx, payer, from, to, "resource")
+	byEndpoint, err := ms.ServiceUsageRollup(ctx, payer, money.DefaultCurrency, from, to, "resource")
 	require.NoError(t, err)
 	endpoints := map[string]money.ServiceUsageRollupRow{}
 	for _, r := range byEndpoint {
@@ -75,7 +75,7 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	require.Equal(t, int64(4), endpoints["beta"].TotalAmount)
 
 	// Rollup by tier: standard=8, fast=4.
-	byTier, err := ms.ServiceUsageRollup(ctx, payer, from, to, "tier")
+	byTier, err := ms.ServiceUsageRollup(ctx, payer, money.DefaultCurrency, from, to, "tier")
 	require.NoError(t, err)
 	tiers := map[string]int64{}
 	for _, r := range byTier {
@@ -85,6 +85,6 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	require.Equal(t, int64(4), tiers["fast"])
 
 	// Invalid group_by is rejected.
-	_, err = ms.ServiceUsageRollup(ctx, payer, from, to, "bogus")
+	_, err = ms.ServiceUsageRollup(ctx, payer, money.DefaultCurrency, from, to, "bogus")
 	require.Error(t, err)
 }

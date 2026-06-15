@@ -113,7 +113,7 @@ func NewPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rp
 // the canonical, server-resolved values from the price's Solana config (never
 // client-supplied amounts).
 type PrepareSubscribeInput struct {
-	MerchantID         merchant.ID
+	MerchantID       merchant.ID
 	SubscriberWallet string // the connected wallet (signer + fee payer)
 	PlanID           uint64
 	MintSymbol       string

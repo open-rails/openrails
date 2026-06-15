@@ -39,13 +39,13 @@ func (r *EntitlementFeatureRepo) tenantID(ctx context.Context) (uuid.UUID, error
 
 func entitlementFeatureFromGen(f gen.OpenrailsEntitlementFeature) (*models.EntitlementFeature, error) {
 	m := &models.EntitlementFeature{
-		ID:        f.ID,
-		MerchantID:  f.MerchantID,
-		LookupKey: f.LookupKey,
-		Name:      f.Name,
-		Active:    f.Active,
-		CreatedAt: f.CreatedAt,
-		UpdatedAt: f.UpdatedAt,
+		ID:         f.ID,
+		MerchantID: f.MerchantID,
+		LookupKey:  f.LookupKey,
+		Name:       f.Name,
+		Active:     f.Active,
+		CreatedAt:  f.CreatedAt,
+		UpdatedAt:  f.UpdatedAt,
 	}
 	if err := fromJSONB(f.Metadata, &m.Metadata, "entitlement_features.metadata"); err != nil {
 		return nil, err
@@ -56,7 +56,7 @@ func entitlementFeatureFromGen(f gen.OpenrailsEntitlementFeature) (*models.Entit
 func productEntitlementFeatureFromGen(p gen.OpenrailsProductEntitlementFeature) (*models.ProductEntitlementFeature, error) {
 	m := &models.ProductEntitlementFeature{
 		ID:                   p.ID,
-		MerchantID:             p.MerchantID,
+		MerchantID:           p.MerchantID,
 		ProductID:            p.ProductID,
 		EntitlementFeatureID: p.EntitlementFeatureID,
 		DurationDays:         derefIntPtr(p.DurationDays),
@@ -83,14 +83,14 @@ func (r *EntitlementFeatureRepo) CreateFeature(ctx context.Context, f *models.En
 		return err
 	}
 	id, err := r.db.Gen(ctx).CreateEntitlementFeature(ctx, gen.CreateEntitlementFeatureParams{
-		ID:        f.ID,
-		MerchantID:  f.MerchantID,
-		LookupKey: f.LookupKey,
-		Name:      f.Name,
-		Active:    f.Active,
-		Metadata:  meta,
-		CreatedAt: f.CreatedAt,
-		UpdatedAt: f.UpdatedAt,
+		ID:         f.ID,
+		MerchantID: f.MerchantID,
+		LookupKey:  f.LookupKey,
+		Name:       f.Name,
+		Active:     f.Active,
+		Metadata:   meta,
+		CreatedAt:  f.CreatedAt,
+		UpdatedAt:  f.UpdatedAt,
 	})
 	if err != nil {
 		return err
@@ -110,12 +110,12 @@ func (r *EntitlementFeatureRepo) UpdateFeature(ctx context.Context, f *models.En
 		return err
 	}
 	rows, err := r.db.Gen(ctx).UpdateEntitlementFeature(ctx, gen.UpdateEntitlementFeatureParams{
-		ID:        f.ID,
-		Name:      f.Name,
-		Active:    f.Active,
-		Metadata:  meta,
-		UpdatedAt: updateTimestamp(f.UpdatedAt),
-		MerchantID:  tid,
+		ID:         f.ID,
+		Name:       f.Name,
+		Active:     f.Active,
+		Metadata:   meta,
+		UpdatedAt:  updateTimestamp(f.UpdatedAt),
+		MerchantID: tid,
 	})
 	if err != nil {
 		return err
@@ -154,7 +154,7 @@ func (r *EntitlementFeatureRepo) GetFeatureByID(ctx context.Context, id uuid.UUI
 		return nil, err
 	}
 	row, err := r.db.Gen(ctx).GetEntitlementFeatureByID(ctx, gen.GetEntitlementFeatureByIDParams{
-		ID:       id,
+		ID:         id,
 		MerchantID: tid,
 	})
 	if err != nil {
@@ -170,8 +170,8 @@ func (r *EntitlementFeatureRepo) GetFeatureByLookupKey(ctx context.Context, look
 		return nil, err
 	}
 	row, err := r.db.Gen(ctx).GetEntitlementFeatureByLookupKey(ctx, gen.GetEntitlementFeatureByLookupKeyParams{
-		LookupKey: lookupKey,
-		MerchantID:  tid,
+		LookupKey:  lookupKey,
+		MerchantID: tid,
 	})
 	if err != nil {
 		return nil, err
@@ -191,7 +191,7 @@ func (r *EntitlementFeatureRepo) ListFeaturesByLookupKeys(ctx context.Context, k
 		return nil, err
 	}
 	rows, err := r.db.Gen(ctx).ListEntitlementFeaturesByLookupKeys(ctx, gen.ListEntitlementFeaturesByLookupKeysParams{
-		MerchantID:   tid,
+		MerchantID: tid,
 		LookupKeys: keys,
 	})
 	if err != nil {
@@ -228,7 +228,7 @@ func (r *EntitlementFeatureRepo) AttachFeatureToProduct(ctx context.Context, pef
 	}
 	id, err := r.db.Gen(ctx).CreateProductEntitlementFeature(ctx, gen.CreateProductEntitlementFeatureParams{
 		ID:                   pef.ID,
-		MerchantID:             pef.MerchantID,
+		MerchantID:           pef.MerchantID,
 		ProductID:            pef.ProductID,
 		EntitlementFeatureID: pef.EntitlementFeatureID,
 		DurationDays:         intPtrTo32(pef.DurationDays),
@@ -251,7 +251,7 @@ func (r *EntitlementFeatureRepo) DetachFeature(ctx context.Context, productFeatu
 		return err
 	}
 	rows, err := r.db.Gen(ctx).DeleteProductEntitlementFeature(ctx, gen.DeleteProductEntitlementFeatureParams{
-		ID:       productFeatureID,
+		ID:         productFeatureID,
 		MerchantID: tid,
 	})
 	if err != nil {
@@ -271,8 +271,8 @@ func (r *EntitlementFeatureRepo) ListProductFeatures(ctx context.Context, produc
 		return nil, err
 	}
 	rows, err := r.db.Gen(ctx).ListProductEntitlementFeatures(ctx, gen.ListProductEntitlementFeaturesParams{
-		ProductID: productID,
-		MerchantID:  tid,
+		ProductID:  productID,
+		MerchantID: tid,
 	})
 	if err != nil {
 		return nil, err
@@ -300,7 +300,7 @@ func (r *EntitlementFeatureRepo) GetProductFeatureByID(ctx context.Context, id u
 		return nil, err
 	}
 	row, err := r.db.Gen(ctx).GetProductEntitlementFeatureByID(ctx, gen.GetProductEntitlementFeatureByIDParams{
-		ID:       id,
+		ID:         id,
 		MerchantID: tid,
 	})
 	if err != nil {

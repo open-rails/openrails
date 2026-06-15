@@ -32,12 +32,12 @@ func TestCustomCreditConsumeAndInvariant(t *testing.T) {
 
 	// (2) deposit 500 gold, spend 150 -> balance 350.
 	_, err = svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Actor: payer.UUID().String(),
+		CustomerID: &payer, Invoker: payer.UUID().String(),
 		Currency: unit, Amount: 500, Source: "grant",
 	})
 	require.NoError(t, err)
 	_, err = svc.Withdraw(ctx, money.WithdrawParams{
-		CustomerID: &payer, Actor: payer.UUID().String(),
+		CustomerID: &payer, Invoker: payer.UUID().String(),
 		Currency: unit, Amount: 150, Source: "usage",
 	})
 	require.NoError(t, err)

@@ -21,7 +21,7 @@ type Charger interface {
 
 type ChargeRequest struct {
 	Payer           identity.CustomerID
-	Actor           string
+	Invoker         string
 	PaymentMethodID uuid.UUID
 	AmountCents     int64
 	IdempotencyKey  string
@@ -178,7 +178,7 @@ func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r mone
 
 	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
 		Payer:           payer,
-		Actor:           payer.UUID().String(),
+		Invoker:         payer.UUID().String(),
 		PaymentMethodID: *r.PaymentMethodID,
 		AmountCents:     *r.TopupAmount,
 		IdempotencyKey:  episode,
@@ -195,10 +195,10 @@ func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r mone
 	}
 
 	// auto_topup_amount_cents is the card charge in cents; the ledger is
-	// micro-dollars (1 cent = 10,000 micros).
+	// USD internal units (1 cent = 10,000 internal units).
 	if _, err := s.Deposit(ctx, DepositParams{
 		CustomerID:                &payer,
-		Actor:                     payer.UUID().String(),
+		Invoker:                   payer.UUID().String(),
 		Currency:                  r.Currency,
 		Amount:                    *r.TopupAmount * 10_000,
 		Source:                    "auto_topup",

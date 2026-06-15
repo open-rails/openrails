@@ -27,10 +27,10 @@ func TestFinalizeInvoice_PrepaidStatement(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
 
-	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 100_000, Source: "purchase"})
+	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 100_000, Source: "purchase"})
 	require.NoError(t, err)
 	rec := func(et string, amt int64, dims map[string]int64, sid string) {
-		_, e := svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Actor: "u", EventType: et, Dimensions: dims, Amount: amt, Source: "req", SourceID: sid})
+		_, e := svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", EventType: et, Dimensions: dims, Amount: amt, Source: "req", SourceID: sid})
 		require.NoError(t, e)
 	}
 	rec("gpt-4o", 5_000, map[string]int64{"input_tokens": 100, "output_tokens": 50}, "r1")
@@ -74,11 +74,11 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1_000, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000, Source: "seed"})
 	require.NoError(t, err)
-	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Actor: "u", EventType: "gpt-4o", Amount: 1_500, Source: "req", SourceID: "r1"})
+	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", EventType: "gpt-4o", Amount: 1_500, Source: "req", SourceID: "r1"})
 	require.NoError(t, err)
 
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
@@ -100,9 +100,9 @@ func TestFinalizeDueInvoices_EnumeratesAccount(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 5_000, Source: "seed"})
+	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 5_000, Source: "seed"})
 	require.NoError(t, err)
-	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Actor: "u", EventType: "gpt-4o", Amount: 2_000, Source: "req", SourceID: "r1"})
+	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", EventType: "gpt-4o", Amount: 2_000, Source: "req", SourceID: "r1"})
 	require.NoError(t, err)
 
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)

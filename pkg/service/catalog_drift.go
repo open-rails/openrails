@@ -793,7 +793,7 @@ func (s *Service) persistCatalogDrift(ctx context.Context, desired []models.Cata
 		}
 		if err := q.InsertCatalogDriftEvent(ctx, gen.InsertCatalogDriftEventParams{
 			ID:                    row.ID,
-			MerchantID:              tid.UUID(),
+			MerchantID:            tid.UUID(),
 			Provider:              string(row.Provider),
 			Kind:                  string(row.Kind),
 			OpenrailsResourceType: string(row.OpenRailsResourceType),

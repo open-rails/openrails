@@ -49,7 +49,7 @@ func randKeyStr(t *testing.T) string {
 func newTierChangeInput(t *testing.T) PrepareTierChangeInput {
 	t.Helper()
 	return PrepareTierChangeInput{
-		MerchantID:           dbtest.TestTenantID,
+		MerchantID:         dbtest.TestTenantID,
 		SubscriberWallet:   randKeyStr(t),
 		MintSymbol:         "USDC",
 		OldPlanPDA:         randKeyStr(t),

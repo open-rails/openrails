@@ -34,7 +34,7 @@ import (
 // the whole tier-policy -> admit -> reserve -> settle path runs against a
 // deterministic clock.
 
-// $1 = 1_000_000 micros.
+// amounts use USD internal units.
 const usd = int64(1_000_000)
 
 // spendEnv wires an Admitter whose budget engine runs on an injectable fake
@@ -57,7 +57,7 @@ func spendEnv(t *testing.T) (*admission.Admitter, *budgets.Service, *clockwork.F
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_policies WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.tier_policies WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_reservations WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_inflight_holds WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_window_state WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
@@ -78,7 +78,7 @@ func spendEnv(t *testing.T) (*admission.Admitter, *budgets.Service, *clockwork.F
 	cs := money.NewMoneyService(dbi)
 	// Fund the payer well above any test's spend so the money axis never gates;
 	// the budget windows are the unit under test.
-	_, err = cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1_000_000_000_000, Source: "seed"})
+	_, err = cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000_000_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	// Fixed wall clock so window math is deterministic; advance to cross windows.
@@ -98,16 +98,16 @@ func cozyTier1() models.ThroughputPolicy {
 	return models.ThroughputPolicy{
 		Windows: []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 1_000_000}},
 		BudgetWindows: []models.BudgetWindowPolicy{
-			{Key: "5h", WindowSeconds: 5 * 3600, LimitMicros: 5 * usd, Cadence: budgets.CadenceFixed},
-			{Key: "7d", WindowSeconds: 7 * 24 * 3600, LimitMicros: 35 * usd, Cadence: budgets.CadenceFixed},
+			{Key: "5h", WindowSeconds: 5 * 3600, Limit: 5 * usd, Cadence: budgets.CadenceFixed},
+			{Key: "7d", WindowSeconds: 7 * 24 * 3600, Limit: 35 * usd, Cadence: budgets.CadenceFixed},
 		},
 	}
 }
 
-func spendReq(payer identity.CustomerID, invoker, srcID string, micros int64) admission.AdmitRequest {
+func spendReq(payer identity.CustomerID, invoker, srcID string, amount int64) admission.AdmitRequest {
 	return admission.AdmitRequest{
-		CustomerID: payer, Actor: invoker, Tier: "tier_1", Resource: "gpt-4o",
-		Amounts: map[string]int64{"request": 1}, EstimateMicros: micros,
+		CustomerID: payer, Invoker: invoker, Tier: "tier_1", Resource: "gpt-4o",
+		Amounts: map[string]int64{"request": 1}, EstimatedAmount: amount,
 		Source: "gen", SourceID: srcID, ExpiresAt: time.Now().Add(time.Hour),
 	}
 }
@@ -260,10 +260,10 @@ func TestSpend_SettleAccounting_CaptureUnderEstimate(t *testing.T) {
 
 	// Settle the in-flight request at the ACTUAL $1 (it used far less than the $5
 	// estimate). CaptureByCoords settles every scope for the request by coords.
-	require.NoError(t, bsvc.CaptureByCoords(ctx, payer, "gen", "s1", 1*usd))
+	require.NoError(t, bsvc.CaptureByCoords(ctx, payer, money.DefaultCurrency, "gen", "s1", 1*usd))
 
 	// Now the window shows used=$1, reserved=$0, remaining=$4.
-	chk, _, err := bsvc.Check(ctx, payer, "du-019759a1-0aa1-7c31-8f01-000000000a01", tier1Windows(), 0)
+	chk, _, err := bsvc.Check(ctx, payer, "du-019759a1-0aa1-7c31-8f01-000000000a01", money.DefaultCurrency, tier1Windows(), 0)
 	require.NoError(t, err)
 	c5 := byKey(chk, "5h")
 	require.Equal(t, 1*usd, c5.Used, "captured actual replaces the reservation")
@@ -287,9 +287,9 @@ func TestSpend_SettleAccounting_ReleaseFrees(t *testing.T) {
 	require.True(t, d.Allowed)
 
 	// Release the whole in-flight hold across all scopes.
-	require.NoError(t, bsvc.ReleaseByCoords(ctx, payer, "gen", "r1"))
+	require.NoError(t, bsvc.ReleaseByCoords(ctx, payer, money.DefaultCurrency, "gen", "r1"))
 
-	chk, _, err := bsvc.Check(ctx, payer, "du-019759a1-0aa1-7c31-8f01-000000000a01", tier1Windows(), 0)
+	chk, _, err := bsvc.Check(ctx, payer, "du-019759a1-0aa1-7c31-8f01-000000000a01", money.DefaultCurrency, tier1Windows(), 0)
 	require.NoError(t, err)
 	c5 := byKey(chk, "5h")
 	require.Equal(t, int64(0), c5.Used)
@@ -332,8 +332,8 @@ func TestSpend_DenyShape(t *testing.T) {
 // direct Check() introspection (the engine API takes BudgetWindow, not policy).
 func tier1Windows() []budgets.BudgetWindow {
 	return []budgets.BudgetWindow{
-		{Key: "5h", WindowSeconds: 5 * 3600, LimitMicros: 5 * usd, Cadence: budgets.CadenceFixed},
-		{Key: "7d", WindowSeconds: 7 * 24 * 3600, LimitMicros: 35 * usd, Cadence: budgets.CadenceFixed},
+		{Key: "5h", WindowSeconds: 5 * 3600, Limit: 5 * usd, Cadence: budgets.CadenceFixed},
+		{Key: "7d", WindowSeconds: 7 * 24 * 3600, Limit: 35 * usd, Cadence: budgets.CadenceFixed},
 	}
 }
 

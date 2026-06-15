@@ -45,7 +45,7 @@ func (r *ProductRepo) Create(ctx context.Context, product *models.Product) error
 	tierRank32, _ := safecast.Convert[int32](product.TierRank)
 	rows, err := r.db.Gen(ctx).CreateProduct(ctx, gen.CreateProductParams{
 		ID:               product.ID,
-		MerchantID:         product.MerchantID,
+		MerchantID:       product.MerchantID,
 		Slug:             product.Slug,
 		DisplayName:      product.DisplayName,
 		Description:      desc,

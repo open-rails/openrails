@@ -16,13 +16,13 @@ import (
 func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
 	svc, _, payer, cur, ctx := moneyInEnv(t)
 	bm := money.BillingModeArrears
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{BillingMode: &bm})
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: &bm})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 300, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 300, Source: "seed"})
 	require.NoError(t, err)
 
 	res, err := svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-		Payer: payer, Actor: "user:a", EstimateMicros: 1000,
+		Payer: payer, Invoker: "user:a", EstimatedAmount: 1000,
 		Source: "req", SourceID: "h1", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)

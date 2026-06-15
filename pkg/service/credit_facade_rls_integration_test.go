@@ -79,17 +79,32 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	// Deposit 1000 — exercises BeginTenantTx under RLS.
 	depSrc := uuid.New()
 	_, err = svc.DepositCredits(tctx, billingservice.DepositCreditsRequest{
-		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "test", SourceID: &depSrc,
+		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1000, Source: "test", SourceID: &depSrc,
 	})
 	require.NoError(t, err, "DepositCredits must work under openrails_app (GUC set)")
 
 	acct, err := svc.GetCreditAccount(tctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, int64(1000), acct.BalanceMicros)
+	require.Equal(t, int64(1000), acct.BalanceAmount)
+	require.Equal(t, money.DefaultCurrency, acct.Currency)
+
+	eurSrc := uuid.New()
+	_, err = svc.DepositCredits(tctx, billingservice.DepositCreditsRequest{
+		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: "EUR", Amount: 2500, Source: "test", SourceID: &eurSrc,
+	})
+	require.NoError(t, err, "DepositCredits must keep non-USD funds in their requested currency")
+	eurAcct, err := svc.GetCreditAccount(tctx, payer, "EUR")
+	require.NoError(t, err)
+	require.Equal(t, "EUR", eurAcct.Currency)
+	require.Equal(t, int64(2500), eurAcct.BalanceAmount, "EUR account must not read the USD balance")
+
+	acct, err = svc.GetCreditAccount(tctx, payer, money.DefaultCurrency)
+	require.NoError(t, err)
+	require.Equal(t, int64(1000), acct.BalanceAmount, "USD account must stay separate from EUR")
 
 	// Hold 600.
 	hold, err := svc.HoldCredits(tctx, billingservice.HoldCreditsRequest{
-		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 600,
+		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 600,
 		Source: "test", SourceID: uuid.NewString(), ExpiresAt: now.Add(time.Hour),
 	})
 	require.NoError(t, err, "HoldCredits must work under openrails_app")
@@ -97,8 +112,8 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 
 	held, err := svc.GetCreditAccount(tctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, int64(600), held.HeldMicros)
-	require.Equal(t, int64(400), held.AvailableMicros)
+	require.Equal(t, int64(600), held.HeldAmount)
+	require.Equal(t, int64(400), held.AvailableAmount)
 
 	// Capture 400 of the 600 hold.
 	_, err = svc.CaptureHold(tctx, billingservice.CaptureHoldRequest{HoldID: hold.ID, Amount: 400})
@@ -106,15 +121,15 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 
 	final, err := svc.GetCreditAccount(tctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, int64(600), final.BalanceMicros, "1000 - 400 captured = 600")
-	require.Equal(t, int64(0), final.HeldMicros, "hold fully resolved")
+	require.Equal(t, int64(600), final.BalanceAmount, "1000 - 400 captured = 600")
+	require.Equal(t, int64(0), final.HeldAmount, "hold fully resolved")
 
 	// #242 billing-account admin surface under openrails_app: configure arrears
 	// mode + an outstanding cap, read it back, and list the org's usage.
 	arrears := "arrears"
 	var cap int64 = 5000
 	require.NoError(t, svc.SetCreditAccountSettings(tctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: &arrears, MaxOutstandingOwedMicros: &cap,
+		BillingMode: &arrears, MaxOutstandingOwedAmount: &cap,
 	}), "SetCreditAccountSettings must work under openrails_app")
 
 	settings, err := svc.GetCreditAccountSettings(tctx, payer, money.DefaultCurrency)

@@ -97,7 +97,7 @@ func (s *PlanService) ResolveMint(symbol string) (string, int, error) {
 
 // PublishPlanInput describes a recurring plan to publish on-chain.
 type PublishPlanInput struct {
-	MerchantID        merchant.ID
+	MerchantID      merchant.ID
 	PlanID          uint64 // caller-chosen unique id (the plan PDA derives from it)
 	TokenSymbol     string // must be recurring-eligible (USDC/USD1)
 	AmountBaseUnits uint64 // fixed charge per period, in token base units

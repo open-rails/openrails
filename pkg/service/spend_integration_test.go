@@ -66,15 +66,15 @@ func testPool(t *testing.T) *pgxpool.Pool {
 
 func TestAuthorizeSpend_PrepaidBalanceGate(t *testing.T) {
 	svc, ms, payer, ctx := authzEnv(t)
-	_, err := ms.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Source: "seed"})
+	_, err := ms.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 
-	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{CustomerID: payer, Actor: "user:a", EstimateMicros: 500})
+	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{CustomerID: payer, Invoker: "user:a", EstimatedAmount: 500})
 	require.NoError(t, err)
 	require.True(t, ok.Allowed)
-	require.Equal(t, int64(1000), ok.AvailableMicros)
+	require.Equal(t, int64(1000), ok.AvailableAmount)
 
-	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{CustomerID: payer, Actor: "user:a", EstimateMicros: 1500})
+	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{CustomerID: payer, Invoker: "user:a", EstimatedAmount: 1500})
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
 	require.Equal(t, billingservice.DenyInsufficientBalance, deny.DenyCode)
@@ -82,35 +82,35 @@ func TestAuthorizeSpend_PrepaidBalanceGate(t *testing.T) {
 
 func TestAuthorizeSpend_DailyCapDeny(t *testing.T) {
 	svc, ms, payer, ctx := authzEnv(t)
-	_, err := ms.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100000, Source: "seed"})
+	_, err := ms.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100000, Source: "seed"})
 	require.NoError(t, err)
 	cap := int64(1000)
-	require.NoError(t, svc.SetCreditAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{MaxSpendPerDayMicros: &cap}))
-	_, err = ms.Withdraw(ctx, money.WithdrawParams{CustomerID: &payer, Actor: "user:a", Currency: money.DefaultCurrency, Amount: 800, Source: "usage"})
+	require.NoError(t, svc.SetCreditAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{MaxSpendPerDay: &cap}))
+	_, err = ms.Withdraw(ctx, money.WithdrawParams{CustomerID: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, Amount: 800, Source: "usage"})
 	require.NoError(t, err)
 
-	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{CustomerID: payer, Actor: "user:a", EstimateMicros: 300})
+	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{CustomerID: payer, Invoker: "user:a", EstimatedAmount: 300})
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
 	require.Equal(t, money.DenyDailyCap, deny.DenyCode)
 	require.Greater(t, deny.RetryAfterSeconds, int64(0))
 
-	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{CustomerID: payer, Actor: "user:a", EstimateMicros: 100})
+	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{CustomerID: payer, Invoker: "user:a", EstimatedAmount: 100})
 	require.NoError(t, err)
 	require.True(t, ok.Allowed)
 }
 
 func TestGetCreditAccount_Snapshot(t *testing.T) {
 	svc, ms, payer, ctx := authzEnv(t)
-	_, err := ms.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 5000, Source: "seed"})
+	_, err := ms.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 5000, Source: "seed"})
 	require.NoError(t, err)
 	_, err = ms.Hold(ctx, &payer, "user:a", money.DefaultCurrency, 1500, "usage", "h1", time.Now().Add(time.Hour).UTC())
 	require.NoError(t, err)
 
 	snap, err := svc.GetCreditAccount(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, int64(5000), snap.BalanceMicros)
-	require.Equal(t, int64(1500), snap.HeldMicros)
-	require.Equal(t, int64(3500), snap.AvailableMicros)
+	require.Equal(t, int64(5000), snap.BalanceAmount)
+	require.Equal(t, int64(1500), snap.HeldAmount)
+	require.Equal(t, int64(3500), snap.AvailableAmount)
 	require.Equal(t, money.BillingModePrepaid, snap.BillingMode)
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -21,6 +22,7 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
 	"github.com/riverqueue/river"
 )
@@ -776,18 +778,7 @@ func (s *Service) MarkNotificationRead(ctx context.Context, userID string, notif
 
 // -------------------------------- Credits (User-facing) --------------------------------
 
-// moneyBalanceUnit is the implicit unit metadata for the universal µ$ wallet
-// (#472): money has no credit_type dimension, so the legacy CreditBalance shape
-// carries this fixed descriptor.
-const (
-	moneyBalanceType        = "usd_micro"
-	moneyBalanceDisplayName = "USD"
-	moneyBalanceUnit        = "usd_micro"
-	moneyBalanceDecimals    = 6
-)
-
-// GetCredits returns the user's single money balance (#472: one universal µ$
-// wallet, no credit_type dimension).
+// GetCredits returns the user's default native-money balance.
 func (s *Service) GetCredits(ctx context.Context, userID string) ([]CreditBalance, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -798,42 +789,46 @@ func (s *Service) GetCredits(ctx context.Context, userID string) ([]CreditBalanc
 	if err != nil {
 		return nil, fmt.Errorf("get credits: %w", err)
 	}
+	decimals, _ := money.CurrencyScale(bal.Currency)
 	return []CreditBalance{{
-		Type:          moneyBalanceType,
-		DisplayName:   moneyBalanceDisplayName,
-		Unit:          moneyBalanceUnit,
-		DecimalPlaces: moneyBalanceDecimals,
+		Currency:      bal.Currency,
+		DisplayName:   bal.Currency,
+		Unit:          bal.Currency,
+		DecimalPlaces: decimals,
 		Balance:       bal.Balance,
 		HeldBalance:   bal.HeldBalance,
 	}}, nil
 }
 
-// GetCreditsByType returns the user's money balance (#472: the type argument is
-// vestigial — money is the only unit).
-func (s *Service) GetCreditsByType(ctx context.Context, userID, _ string) (*CreditBalance, error) {
+// GetCreditsByType returns the user's money balance for the requested currency.
+func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string) (*CreditBalance, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
 	}
 
-	bal, err := s.moneyService().GetBalance(ctx, userID)
+	payer := identity.CustomerIDFromString(userID)
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer could not be resolved from subject")
+	}
+	bal, err := s.moneyService().GetBalanceForCustomer(ctx, payer, currency)
 	if err != nil {
 		return nil, fmt.Errorf("get credit balance: %w", err)
 	}
+	decimals, _ := money.CurrencyScale(bal.Currency)
 
 	return &CreditBalance{
-		Type:          moneyBalanceType,
-		DisplayName:   moneyBalanceDisplayName,
-		Unit:          moneyBalanceUnit,
-		DecimalPlaces: moneyBalanceDecimals,
+		Currency:      bal.Currency,
+		DisplayName:   bal.Currency,
+		Unit:          bal.Currency,
+		DecimalPlaces: decimals,
 		Balance:       bal.Balance,
 		HeldBalance:   bal.HeldBalance,
 	}, nil
 }
 
-// GetCreditTransactions returns money transactions for a user (#472: the type
-// argument is vestigial — money is the only unit).
-func (s *Service) GetCreditTransactions(ctx context.Context, userID, _ string, opts GetCreditTransactionsOptions) (*PaginatedResult[CreditTransaction], error) {
+// GetCreditTransactions returns money transactions for a user in the requested currency.
+func (s *Service) GetCreditTransactions(ctx context.Context, userID, currency string, opts GetCreditTransactionsOptions) (*PaginatedResult[CreditTransaction], error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -848,7 +843,11 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, _ string, o
 		offset = 0
 	}
 
-	transactions, total, err := s.moneyService().GetTransactions(ctx, userID, limit, offset)
+	payer := identity.CustomerIDFromString(userID)
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer could not be resolved from subject")
+	}
+	transactions, total, err := s.moneyService().GetTransactionsByCustomer(ctx, payer, currency, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("get credit transactions: %w", err)
 	}
@@ -858,7 +857,8 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, _ string, o
 		result = append(result, CreditTransaction{
 			ID:              t.ID,
 			CustomerID:      t.CustomerID,
-			Actor:           t.Actor,
+			Invoker:         t.Invoker,
+			Currency:        t.Currency,
 			Amount:          t.Amount,
 			TransactionType: t.TransactionType,
 			Source:          t.Source,

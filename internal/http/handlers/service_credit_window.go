@@ -18,8 +18,7 @@ import (
 
 type serviceOpenWindowRequest struct {
 	CustomerID string `json:"customer_id"`
-	Invoker    string `json:"invoker"` // #491 (renamed from "actor")
-	Actor      string `json:"actor"`
+	Invoker    string `json:"invoker"`
 	// Currency is optional; empty defaults to "USD" server-side (#476).
 	Currency   string `json:"currency"`
 	Amount     int64  `json:"amount" binding:"required"`
@@ -49,17 +48,13 @@ func ServiceOpenCreditWindow(r *httprequest.Request) {
 	}
 	w, err := svc.OpenWindow(r.Request.Context(), billingservice.OpenWindowRequest{
 		CustomerID: *payer,
-		Actor:      resolveInvokerField(req.Invoker, req.Actor),
+		Invoker:    req.Invoker,
 		Currency:   req.Currency,
 		Amount:     req.Amount,
 		TTL:        time.Duration(req.TTLSeconds) * time.Second,
 	})
 	if errors.Is(err, billingservice.ErrInsufficientCredits) {
 		r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")
-		return
-	}
-	if errors.Is(err, billingservice.ErrCreditTypeInactive) {
-		r.ErrorJSON(http.StatusBadRequest, "credit_type_inactive")
 		return
 	}
 	if err != nil {
@@ -79,8 +74,7 @@ type serviceWindowSettleItem struct {
 	WindowID  string                    `json:"window_id"`
 	RequestID string                    `json:"request_id"`
 	Amount    int64                     `json:"amount"`
-	Invoker   string                    `json:"invoker,omitempty"` // #491 (renamed from "actor")
-	Actor     string                    `json:"actor,omitempty"`
+	Invoker   string                    `json:"invoker,omitempty"`
 	Usage     *serviceWindowSettleUsage `json:"usage,omitempty"`
 }
 
@@ -133,7 +127,7 @@ func ServiceSettleCreditWindows(r *httprequest.Request) {
 			WindowID:  wid,
 			RequestID: it.RequestID,
 			Amount:    it.Amount,
-			Actor:     resolveInvokerField(it.Invoker, it.Actor),
+			Invoker:   it.Invoker,
 		}
 		if it.Usage != nil {
 			item.EventType = it.Usage.EventType

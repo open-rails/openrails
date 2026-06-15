@@ -25,13 +25,13 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 	scopedOutPayer := uuid.NewString()
 
 	items := []serviceAdmitRequest{
-		{CustomerID: allowedPayer, Actor: "user:a", EstimateMicros: 100, RequestID: "r1"},
-		{CustomerID: brokePayer, Actor: "user:b", EstimateMicros: 100, RequestID: "r2"},
-		{CustomerID: "not-a-uuid", Actor: "user:c", RequestID: "r3"},
-		{CustomerID: throttledPayer, Actor: "user:d", RequestID: "r4"},
-		{CustomerID: erroringPayer, Actor: "user:e", RequestID: "r5"},
-		{CustomerID: scopedOutPayer, Actor: "user:f", RequestID: "r6"},
-		{CustomerID: allowedPayer, Actor: "user:g", EstimateMicros: -1, RequestID: "r7"},
+		{CustomerID: allowedPayer, Invoker: "user:a", EstimatedAmount: 100, RequestID: "r1"},
+		{CustomerID: brokePayer, Invoker: "user:b", EstimatedAmount: 100, RequestID: "r2"},
+		{CustomerID: "not-a-uuid", Invoker: "user:c", RequestID: "r3"},
+		{CustomerID: throttledPayer, Invoker: "user:d", RequestID: "r4"},
+		{CustomerID: erroringPayer, Invoker: "user:e", RequestID: "r5"},
+		{CustomerID: scopedOutPayer, Invoker: "user:f", RequestID: "r6"},
+		{CustomerID: allowedPayer, Invoker: "user:g", EstimatedAmount: -1, RequestID: "r7"},
 	}
 
 	allows := func(ts billingidentity.CustomerID) bool {

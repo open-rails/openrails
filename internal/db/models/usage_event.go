@@ -7,8 +7,8 @@ import (
 )
 
 // UsageEvent is one append-only, multi-dimensional record of metered usage
-// (issue #289). The host PRICES the event (Amount, in the credit type's smallest
-// unit) and OpenRails records it AND debits the ledger in the SAME transaction.
+// (issue #289). The host prices the event in Currency's internal precision, and
+// OpenRails records it AND debits the ledger in the SAME transaction.
 // It is the source of truth for usage reporting + #303 invoice line items.
 //
 // Idempotency is enforced by a unique index on
@@ -20,9 +20,11 @@ type UsageEvent struct {
 	MerchantID uuid.UUID `json:"tenant_id"`
 	// CustomerID is the tenant subject BILLED for this usage (issue #221, the payer).
 	CustomerID uuid.UUID `json:"customer_id"`
-	// Actor is the caller-supplied principal string that caused usage
+	// Invoker is the caller-supplied principal string that caused usage
 	// (opaque to OpenRails; attribution + grouping only, not the payer).
-	Actor string `json:"actor"`
+	Invoker string `json:"invoker"`
+	// Currency is the native OpenRails currency this usage amount is denominated in.
+	Currency string `json:"currency"`
 	// Resource is the caller-supplied free-form string for what was metered
 	// (opaque to OpenRails; e.g. tensorhub endpoint slug). Nullable.
 	Resource *string `json:"resource,omitempty"`
@@ -31,7 +33,7 @@ type UsageEvent struct {
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
 	// cached_input_tokens, requests, ...). Host-defined.
 	Dimensions map[string]int64 `json:"dimensions,omitempty"`
-	// Amount is the host-priced cost in the credit type's smallest unit (>= 0).
+	// Amount is the host-priced cost in Currency's internal precision (>= 0).
 	Amount int64 `json:"amount"`
 	// Source + SourceID form the idempotency key (SourceID is typically the request id).
 	Source   string `json:"source"`

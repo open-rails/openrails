@@ -75,7 +75,8 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		// --- usage line items (per event_type) ---
 		totals, terr := q.AggregateUsageTotals(ctx, gen.AggregateUsageTotalsParams{
 			MerchantID: tenantID, CustomerID: payerID,
-			FromAt: pfrom, ToAt: pto,
+			Currency: cur,
+			FromAt:   pfrom, ToAt: pto,
 		})
 		if terr != nil {
 			return terr
@@ -87,7 +88,8 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 
 		dims, derr := q.AggregateUsageDimensions(ctx, gen.AggregateUsageDimensionsParams{
 			MerchantID: tenantID, CustomerID: payerID,
-			FromAt: pfrom, ToAt: pto,
+			Currency: cur,
+			FromAt:   pfrom, ToAt: pto,
 		})
 		if derr != nil {
 			return derr

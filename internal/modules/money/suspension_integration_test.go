@@ -28,7 +28,7 @@ func TestSuspensionAndVerificationState(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, verified, "after SetPaymentMethodVerified(true) it must be verified")
 
-	settings, err := svc.GetAccountSettings(ctx, payer)
+	settings, err := svc.GetAccountSettings(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.NotNil(t, settings.VerifiedAt, "verified_at must be stamped when verified")
 
@@ -44,7 +44,7 @@ func TestSuspensionAndVerificationState(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, suspended, "after Suspend it must be suspended")
 
-	settings, err = svc.GetAccountSettings(ctx, payer)
+	settings, err = svc.GetAccountSettings(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.NotNil(t, settings.SuspendedAt, "suspended_at must be stamped")
 	require.NotNil(t, settings.SuspendReason)
@@ -56,7 +56,7 @@ func TestSuspensionAndVerificationState(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, suspended, "after Resume it must not be suspended")
 
-	settings, err = svc.GetAccountSettings(ctx, payer)
+	settings, err = svc.GetAccountSettings(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Nil(t, settings.SuspendedAt, "suspended_at must be cleared on resume")
 	require.Nil(t, settings.SuspendReason, "suspend_reason must be cleared on resume")

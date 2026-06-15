@@ -23,7 +23,7 @@ const (
 )
 
 // AccrueOwed records postpaid usage against an arrears account: instead of
-// withdrawing prepaid balance, the cost is added to outstanding_owed_micros and a
+// withdrawing prepaid balance, the cost is added to outstanding_owed_amount and a
 // ledger row is written. Idempotent on (payer, source, source_id).
 // The payer's outstanding ceiling is enforced separately at authorize time
 // (CheckSpendAllowed); this is the settlement side. (#241)
@@ -82,7 +82,7 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 		}
 
 		trx = &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: cur, Actor: payerID.String(),
+			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: cur, Invoker: payerID.String(),
 			Amount: amount, TransactionType: txOwedAccrual, Status: "posted",
 			Source: source, SourceID: &sourceID, CreatedAt: now, UpdatedAt: now,
 		}
@@ -110,20 +110,20 @@ func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, 
 }
 
 // SetCreditLimit sets the admin/operator arrears credit line for a payer (#489):
-// under billing_mode=arrears the balance may go negative up to creditLimitMicros;
+// under billing_mode=arrears the balance may go negative up to creditLimit;
 // AdmitHold denies insufficient_credit when a new hold would exceed it. 0 turns
 // the credit line OFF (prepaid/existing-arrears behavior). This is OPERATOR-only
 // — deliberately NOT part of the self-serve UpsertAccountSettings surface. It
 // ensures a settings row exists, then stamps the limit.
-func (s *MoneyService) SetCreditLimit(ctx context.Context, payer identity.CustomerID, creditLimitMicros int64) error {
+func (s *MoneyService) SetCreditLimit(ctx context.Context, payer identity.CustomerID, currency string, creditLimit int64) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	if creditLimitMicros < 0 {
-		return fmt.Errorf("credit_limit_micros must be >= 0")
+	if creditLimit < 0 {
+		return fmt.Errorf("credit_limit_amount must be >= 0")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -131,27 +131,31 @@ func (s *MoneyService) SetCreditLimit(ctx context.Context, payer identity.Custom
 	}
 	tenantID := tid.UUID()
 	now := s.now()
+	cur := normalizeCurrency(currency)
+	if err := RequireBillingCurrency(cur); err != nil {
+		return err
+	}
 	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		// Ensure a settings row exists (arrears mode if creating — a credit line
 		// only matters for arrears; no-op when the row already exists).
-		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payer.UUID(), DefaultCurrency, BillingModeArrears, now); err != nil {
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payer.UUID(), cur, BillingModeArrears, now); err != nil {
 			return err
 		}
 		return q.SetMoneyAccountCreditLimit(ctx, gen.SetMoneyAccountCreditLimitParams{
-			MerchantID: tenantID, CustomerID: payer.UUID(), Currency: DefaultCurrency,
-			CreditLimit: creditLimitMicros, Now: now,
+			MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
+			CreditLimit: creditLimit, Now: now,
 		})
 	})
 }
 
 // GetCreditLimit returns the admin-set arrears credit line for a payer (#489).
-func (s *MoneyService) GetCreditLimit(ctx context.Context, payer identity.CustomerID) (int64, error) {
-	settings, err := s.GetAccountSettings(ctx, payer)
+func (s *MoneyService) GetCreditLimit(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
+	settings, err := s.GetAccountSettings(ctx, payer, currency)
 	if err != nil {
 		return 0, err
 	}
-	return settings.CreditLimitMicros, nil
+	return settings.CreditLimitAmount, nil
 }
 
 // GetOutstandingOwed returns the current outstanding owed for payer in currency.
@@ -160,7 +164,7 @@ func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.Cu
 	if err != nil {
 		return 0, err
 	}
-	return settings.OutstandingOwedMicros, nil
+	return settings.OutstandingOwedAmount, nil
 }
 
 // arrearsAccount is a scanned arrears-account row for the charge job.
@@ -173,13 +177,13 @@ type arrearsAccount struct {
 }
 
 // ChargeOutstanding collects outstanding owed for arrears accounts by charging
-// the card on file. When minThresholdMicros > 0 only accounts owing at least that
-// much are charged (the threshold trigger, e.g. $500); minThresholdMicros <= 0
+// the card on file. When minThreshold > 0 only accounts owing at least that
+// much are charged (the threshold trigger, e.g. $500); minThreshold <= 0
 // charges every account with owed > 0 (the month-end sweep). The charge is
 // idempotent per (payer, owed-snapshot). On success the owed is reduced by the
 // charged amount and an owed_payment row is recorded; declines leave the owed in
 // place for the next run. Returns the number of accounts successfully charged. (#241)
-func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, minThresholdMicros int64) (int, error) {
+func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, minThreshold int64) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
 	}
@@ -192,7 +196,7 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 	}
 	tenantID := tid.UUID()
 	genRows, err := s.db.Gen(ctx).ListChargeableArrearsMoneyAccounts(ctx, gen.ListChargeableArrearsMoneyAccountsParams{
-		MerchantID: tenantID, MinThreshold: minThresholdMicros,
+		MerchantID: tenantID, MinThreshold: minThreshold,
 	})
 	if err != nil {
 		return 0, err
@@ -203,7 +207,7 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 			MerchantID:      r.MerchantID,
 			CustomerID:      r.CustomerID,
 			Currency:        r.Currency,
-			Owed:            r.OutstandingOwedMicros,
+			Owed:            r.OutstandingOwedAmount,
 			PaymentMethodID: r.AutoTopupPaymentMethodID,
 		})
 	}
@@ -233,11 +237,11 @@ func (s *MoneyService) chargeOneOutstanding(ctx context.Context, charger Charger
 	}
 	key := fmt.Sprintf("arrears:%s:%d", r.CustomerID, snapshot)
 
-	// Owed is in ledger micro-dollars; the processor charges whole cents
-	// (1 cent = 10,000 micros). Round up so we never under-collect.
+	// Owed is in the ledger currency's internal precision; the processor charges whole cents
+	// (1 cent = 10,000 internal units). Round up so we never under-collect.
 	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
 		Payer:           payer,
-		Actor:           payer.UUID().String(),
+		Invoker:         payer.UUID().String(),
 		PaymentMethodID: *r.PaymentMethodID,
 		AmountCents:     (snapshot + 9_999) / 10_000,
 		IdempotencyKey:  key,
@@ -272,7 +276,7 @@ func (s *MoneyService) chargeOneOutstanding(ctx context.Context, charger Charger
 
 		sid := key
 		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency), Actor: r.CustomerID.String(),
+			ID: uuidutil.NewV7(), MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency), Invoker: r.CustomerID.String(),
 			Amount: -snapshot, TransactionType: txOwedPayment, Status: "posted",
 			Source: "arrears_charge", SourceID: &sid, CreatedAt: now, UpdatedAt: now,
 		}

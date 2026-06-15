@@ -10,25 +10,26 @@ import (
 	"github.com/google/uuid"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/abuse"
+	"github.com/open-rails/openrails/internal/modules/money"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 type serviceAdmitRequest struct {
 	CustomerID string `json:"customer_id"`
-	// Invoker is the end-user (invoker) attribution/abuse label (#491; renamed from
-	// "actor"). Actor is the pre-#491 wire field, still accepted transiently.
-	Invoker        string                           `json:"invoker"`
-	Actor          string                           `json:"actor"`
-	Tier           string                           `json:"tier"`
-	Resource       string                           `json:"resource"`
-	Amounts        map[string]int64                 `json:"amounts"`
-	EstimateMicros int64                            `json:"estimate_micros"`
-	RequestID      string                           `json:"request_id"`
-	Source         string                           `json:"source"`
-	ExpiresAt      *int64                           `json:"expires_at"`
-	BlockChecks    []billingservice.AdmitBlockCheck `json:"block_checks"`
-	// Roles are the actor's immutable role UUIDs (#473) — each (subject, role)
+	// Invoker is the end-user attribution/abuse label (#491).
+	Invoker         string                           `json:"invoker"`
+	InvokerType     string                           `json:"invoker_type"`
+	Tier            string                           `json:"tier"`
+	Resource        string                           `json:"resource"`
+	Amounts         map[string]int64                 `json:"amounts"`
+	Currency        string                           `json:"currency"`
+	EstimatedAmount int64                            `json:"estimated_amount"`
+	RequestID       string                           `json:"request_id"`
+	Source          string                           `json:"source"`
+	ExpiresAt       *int64                           `json:"expires_at"`
+	BlockChecks     []billingservice.AdmitBlockCheck `json:"block_checks"`
+	// Roles are the invoker's immutable role UUIDs (#473) — each (subject, role)
 	// budget-scope policy gates this request's spend.
 	Roles []uuid.UUID `json:"roles"`
 	// #404: per-tenant fixed-window throughput the host wants OpenRails to enforce.
@@ -44,11 +45,10 @@ func ServiceAdmit(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if req.EstimateMicros < 0 {
-		r.ErrorJSON(http.StatusBadRequest, "estimate_micros must be >= 0")
+	if req.EstimatedAmount < 0 {
+		r.ErrorJSON(http.StatusBadRequest, "estimated_amount must be >= 0")
 		return
 	}
-	actor := resolveInvokerField(req.Invoker, req.Actor)
 	payer, err := parseServiceCustomerID(req.CustomerID)
 	if err != nil || payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
@@ -64,7 +64,7 @@ func ServiceAdmit(r *httprequest.Request) {
 		return
 	}
 
-	in := admitInputFromRequest(req, *payer, actor)
+	in := admitInputFromRequest(req, *payer)
 
 	res, err := svc.Admit(r.Request.Context(), in)
 	if err != nil {
@@ -96,26 +96,18 @@ func ServiceAdmit(r *httprequest.Request) {
 	}
 }
 
-// resolveInvokerField returns the merchant-supplied invoker (end-user) label,
-// preferring the #491 wire field "invoker" and falling back to the pre-#491
-// "actor" field for in-flight consumers (transitional, like budgets.NormalizeScope).
-func resolveInvokerField(invoker, actor string) string {
-	if v := strings.TrimSpace(invoker); v != "" {
-		return v
-	}
-	return strings.TrimSpace(actor)
-}
-
 // admitInputFromRequest maps one admit body onto the service-facade input —
 // shared by the single /admit route and each /admit/batch item.
-func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.CustomerID, actor string) billingservice.AdmitInput {
+func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.CustomerID) billingservice.AdmitInput {
 	in := billingservice.AdmitInput{
 		CustomerID:       payer,
-		Actor:            actor,
+		Invoker:          strings.TrimSpace(req.Invoker),
+		InvokerType:      req.InvokerType,
 		Tier:             req.Tier,
 		Resource:         req.Resource,
 		Amounts:          req.Amounts,
-		EstimateMicros:   req.EstimateMicros,
+		Currency:         req.Currency,
+		EstimatedAmount:  req.EstimatedAmount,
 		Source:           req.Source,
 		SourceID:         req.RequestID,
 		Roles:            req.Roles,
@@ -174,8 +166,8 @@ func serviceAdmitBatchVerdicts(
 ) []serviceAdmitVerdict {
 	out := make([]serviceAdmitVerdict, len(items))
 	for i, item := range items {
-		if item.EstimateMicros < 0 {
-			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "estimate_micros must be >= 0"}
+		if item.EstimatedAmount < 0 {
+			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "estimated_amount must be >= 0"}
 			continue
 		}
 		payer, err := parseServiceCustomerID(item.CustomerID)
@@ -187,7 +179,7 @@ func serviceAdmitBatchVerdicts(
 			out[i] = serviceAdmitVerdict{Status: http.StatusForbidden, Error: "service_token_tenant_subject_scope_denied"}
 			continue
 		}
-		res, err := admit(ctx, admitInputFromRequest(item, *payer, resolveInvokerField(item.Invoker, item.Actor)))
+		res, err := admit(ctx, admitInputFromRequest(item, *payer))
 		if err != nil {
 			out[i] = serviceAdmitVerdict{Status: http.StatusInternalServerError, Error: "admission check failed"}
 			continue
@@ -235,8 +227,8 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 	r.JSON(http.StatusOK, map[string]any{"items": verdicts})
 }
 
-// ServiceGetBudget returns the actor's fixed money-budget windows (#304
-// introspection) for a host's /status dashboard. customer_id + actor + tier are
+// ServiceGetBudget returns the invoker's fixed money-budget windows (#304
+// introspection) for a host's /status dashboard. customer_id + invoker + tier are
 // query params; the tenant is pinned from the service token.
 func ServiceGetBudget(r *httprequest.Request) {
 	payer, err := parseServiceCustomerID(r.Query("customer_id"))
@@ -252,13 +244,14 @@ func ServiceGetBudget(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	actor := r.Query("actor")
-	windows, err := svc.BudgetStatus(r.Request.Context(), *payer, actor, r.Query("tier"))
+	invoker := r.Query("invoker")
+	currency := money.NormalizeCurrency(r.Query("currency"))
+	windows, err := svc.BudgetStatus(r.Request.Context(), *payer, invoker, currency, r.Query("tier"))
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "budget lookup failed")
 		return
 	}
-	r.SuccessJSON(map[string]any{"windows": windows})
+	r.SuccessJSON(map[string]any{"currency": currency, "windows": windows})
 }
 
 // ServiceGetTier returns the payer's CURRENT graduated tier (#477): the tier
@@ -289,24 +282,27 @@ func ServiceGetTier(r *httprequest.Request) {
 }
 
 type serviceReportWastedSpendRequest struct {
-	CustomerID string `json:"customer_id"`
-	Invoker    string `json:"invoker"` // #491 (renamed from "actor")
-	Actor      string `json:"actor"`
-	Micros     int64  `json:"micros"`
-	Reason     string `json:"reason"`
+	CustomerID  string `json:"customer_id"`
+	Invoker     string `json:"invoker"`
+	InvokerType string `json:"invoker_type"`
+	Currency    string `json:"currency"`
+	Amount      int64  `json:"amount"`
+	Source      string `json:"source"`
+	SourceID    string `json:"source_id"`
+	Reason      string `json:"reason"`
 }
 
-// ServiceReportWastedSpend records host-reported WASTED $ (#488): a failed
-// attempt that cost the platform money. Accrues into the payer's per-tier
-// bad_spend windows + the actor's flat windows; a later Admit denies when either
-// is over budget. Operator service token, credits:write.
+// ServiceReportWastedSpend records host-reported WASTED $ (#497): delegated
+// invokers accrue toward their flat cutoff; direct payer credentials use
+// trust-tier grace and then normal ledger charging. Operator service token,
+// credits:write.
 func ServiceReportWastedSpend(r *httprequest.Request) {
 	var req serviceReportWastedSpendRequest
 	if !r.BindJSON(&req) {
 		return
 	}
-	if req.Micros < 0 {
-		r.ErrorJSON(http.StatusBadRequest, "micros must be >= 0")
+	if req.Amount < 0 {
+		r.ErrorJSON(http.StatusBadRequest, "amount must be >= 0")
 		return
 	}
 	payer, err := parseServiceCustomerID(req.CustomerID)
@@ -317,22 +313,36 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
+	if strings.TrimSpace(req.Source) == "" || strings.TrimSpace(req.SourceID) == "" {
+		r.ErrorJSON(http.StatusBadRequest, "source and source_id required")
+		return
+	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	if err := svc.ReportWastedSpend(r.Request.Context(), *payer, resolveInvokerField(req.Invoker, req.Actor), req.Micros, req.Reason); err != nil {
+	res, err := svc.ReportWastedSpend(r.Request.Context(), billingservice.WastedSpendInput{
+		CustomerID:  *payer,
+		Invoker:     strings.TrimSpace(req.Invoker),
+		InvokerType: req.InvokerType,
+		Currency:    req.Currency,
+		Amount:      req.Amount,
+		Source:      req.Source,
+		SourceID:    req.SourceID,
+		Reason:      req.Reason,
+	})
+	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "report wasted spend failed")
 		return
 	}
-	r.SuccessJSONMessage("ok")
+	r.JSON(http.StatusOK, res)
 }
 
-// ServiceAbuseUsage returns the payer's + actor's running WASTED-$ totals +
-// budgets (#488 introspection). customer_id + optional actor + tier are query
-// params; the tenant is pinned from the service token. Operator service token,
-// credits:read.
+// ServiceAbuseUsage returns the payer's + invoker's running WASTED-$ totals +
+// budgets (#488 introspection). customer_id + optional invoker + currency + tier
+// are query params; the tenant is pinned from the service token. Operator service
+// token, credits:read.
 func ServiceAbuseUsage(r *httprequest.Request) {
 	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {
@@ -347,17 +357,19 @@ func ServiceAbuseUsage(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	pw, aw, err := svc.AbuseUsage(r.Request.Context(), *payer, r.Query("actor"), r.Query("tier"))
+	currency := money.NormalizeCurrency(r.Query("currency"))
+	pw, aw, err := svc.AbuseUsage(r.Request.Context(), *payer, r.Query("invoker"), currency, r.Query("tier"))
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "abuse usage lookup failed")
 		return
 	}
-	r.JSON(http.StatusOK, map[string]any{"payer_windows": pw, "actor_windows": aw})
+	r.JSON(http.StatusOK, map[string]any{"currency": currency, "payer_windows": pw, "invoker_windows": aw})
 }
 
 type serviceCreditLimitRequest struct {
 	CustomerID        string `json:"customer_id"`
-	CreditLimitMicros int64  `json:"credit_limit_micros"`
+	Currency          string `json:"currency"`
+	CreditLimitAmount int64  `json:"credit_limit_amount"`
 }
 
 // ServiceSetCreditLimit sets the admin/operator arrears credit line for a payer
@@ -369,8 +381,8 @@ func ServiceSetCreditLimit(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if req.CreditLimitMicros < 0 {
-		r.ErrorJSON(http.StatusBadRequest, "credit_limit_micros must be >= 0")
+	if req.CreditLimitAmount < 0 {
+		r.ErrorJSON(http.StatusBadRequest, "credit_limit_amount must be >= 0")
 		return
 	}
 	payer, err := parseServiceCustomerID(req.CustomerID)
@@ -386,7 +398,7 @@ func ServiceSetCreditLimit(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	if err := svc.SetCreditLimit(r.Request.Context(), *payer, req.CreditLimitMicros); err != nil {
+	if err := svc.SetCreditLimit(r.Request.Context(), *payer, req.Currency, req.CreditLimitAmount); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set credit limit failed")
 		return
 	}
@@ -410,23 +422,24 @@ func ServiceGetCreditLimit(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	v, err := svc.GetCreditLimit(r.Request.Context(), *payer)
+	currency := money.NormalizeCurrency(r.Query("currency"))
+	v, err := svc.GetCreditLimit(r.Request.Context(), *payer, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "credit limit lookup failed")
 		return
 	}
-	r.SuccessJSON(map[string]any{"credit_limit_micros": v})
+	r.SuccessJSON(map[string]any{"currency": currency, "credit_limit_amount": v})
 }
 
 type serviceBudgetCheckRequest struct {
 	CustomerID      string                                  `json:"customer_id"`
-	Invoker         string                                  `json:"invoker"` // #491 (renamed from "actor")
-	Actor           string                                  `json:"actor"`
+	Invoker         string                                  `json:"invoker"`
+	Currency        string                                  `json:"currency"`
 	Windows         []billingservice.BudgetCheckWindowInput `json:"windows"`
-	RequestedMicros int64                                   `json:"requested_micros"`
+	RequestedAmount int64                                   `json:"requested_amount"`
 }
 
-// ServiceBudgetCheck computes fixed money-budget windows for (payer, actor)
+// ServiceBudgetCheck computes fixed money-budget windows for (payer, invoker)
 // against CALLER-SUPPLIED windows (the host owns the budget policy; OpenRails
 // owns the spend actuals) WITHOUT reserving. Powers the tensorhub delegated
 // budget-window display (#410). Operator service token, credits:read.
@@ -448,12 +461,13 @@ func ServiceBudgetCheck(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	windows, err := svc.BudgetCheck(r.Request.Context(), *payer, resolveInvokerField(req.Invoker, req.Actor), req.Windows, req.RequestedMicros)
+	currency := money.NormalizeCurrency(req.Currency)
+	windows, err := svc.BudgetCheck(r.Request.Context(), *payer, strings.TrimSpace(req.Invoker), currency, req.Windows, req.RequestedAmount)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "budget check failed")
 		return
 	}
-	r.SuccessJSON(map[string]any{"windows": windows})
+	r.SuccessJSON(map[string]any{"currency": currency, "windows": windows})
 }
 
 type serviceTierPolicyRequest struct {
@@ -534,40 +548,26 @@ func ServiceSetTierSchedule(r *httprequest.Request) {
 	r.SuccessJSONMessage("ok")
 }
 
-// serviceActorWastedWindow is one flat per-actor wasted-spend window in the
+// serviceInvokerWastedWindow is one flat per-invoker wasted-spend window in the
 // request body (#492) — same shape as TierBudgetWindowInput.
-type serviceActorWastedWindow struct {
+type serviceInvokerWastedWindow struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
-	LimitMicros   int64  `json:"limit_micros"`
+	Limit         int64  `json:"limit"`
 }
 
-type serviceActorWastedWindowsRequest struct {
-	CustomerID string                     `json:"customer_id"`
-	Windows    []serviceActorWastedWindow `json:"windows"`
+type serviceInvokerWastedWindowsRequest struct {
+	Windows []serviceInvokerWastedWindow `json:"windows"`
 }
 
-// ServiceSetActorWastedWindows persists the operator-configurable FLAT per-actor
-// wasted-spend windows (#492). An EMPTY customer_id sets the tenant-wide default
-// backstop (the common case); a non-empty one sets a per-customer override
-// (scope-checked). Replaces the hardcoded DefaultActorWastedWindows() fallback
-// when set. Operator service token, credits:write.
-func ServiceSetActorWastedWindows(r *httprequest.Request) {
-	var req serviceActorWastedWindowsRequest
+// ServiceSetInvokerWastedSpendPolicy persists the operator-configurable FLAT
+// per-invoker wasted-spend policy (#496). The policy is merchant-scoped; payer
+// wasted-spend budgets remain trust-tier graduated in tier policy. Operator
+// service token, credits:write.
+func ServiceSetInvokerWastedSpendPolicy(r *httprequest.Request) {
+	var req serviceInvokerWastedWindowsRequest
 	if !r.BindJSON(&req) {
 		return
-	}
-	var payer billingidentity.CustomerID
-	if strings.TrimSpace(req.CustomerID) != "" {
-		p, err := parseServiceCustomerID(req.CustomerID)
-		if err != nil || p == nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
-			return
-		}
-		if !requireServiceCustomerScope(r, *p) {
-			return
-		}
-		payer = *p
 	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
@@ -577,13 +577,13 @@ func ServiceSetActorWastedWindows(r *httprequest.Request) {
 	windows := make([]abuse.WastedWindow, 0, len(req.Windows))
 	for _, w := range req.Windows {
 		windows = append(windows, abuse.WastedWindow{
-			Key:         w.Key,
-			Window:      time.Duration(w.WindowSeconds) * time.Second,
-			LimitMicros: w.LimitMicros,
+			Key:    w.Key,
+			Window: time.Duration(w.WindowSeconds) * time.Second,
+			Limit:  w.Limit,
 		})
 	}
-	if err := svc.SetActorWastedWindows(r.Request.Context(), payer, windows); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "set actor wasted windows failed")
+	if err := svc.SetInvokerWastedSpendPolicy(r.Request.Context(), windows); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "set invoker wasted-spend policy failed")
 		return
 	}
 	r.SuccessJSONMessage("ok")
@@ -594,7 +594,7 @@ func ServiceSetActorWastedWindows(r *httprequest.Request) {
 type budgetScopeWindow struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
-	LimitMicros   int64  `json:"limit_micros"`
+	Limit         int64  `json:"limit"`
 	Cadence       string `json:"cadence,omitempty"`
 }
 
@@ -602,7 +602,7 @@ func budgetScopeWindowInputs(ws []budgetScopeWindow) []billingservice.BudgetScop
 	out := make([]billingservice.BudgetScopeWindowInput, 0, len(ws))
 	for _, w := range ws {
 		out = append(out, billingservice.BudgetScopeWindowInput{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence,
+			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence,
 		})
 	}
 	return out
@@ -713,7 +713,7 @@ func ServiceGetSubjectBudgetPolicies(r *httprequest.Request) {
 	for _, p := range policies {
 		ws := make([]budgetScopeWindow, 0, len(p.Windows))
 		for _, w := range p.Windows {
-			ws = append(ws, budgetScopeWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence})
+			ws = append(ws, budgetScopeWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence})
 		}
 		out = append(out, map[string]any{"scope": p.Scope, "role_id": p.ScopeKey, "windows": ws})
 	}

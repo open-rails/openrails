@@ -19,8 +19,10 @@ import (
 // AG-1: Admin grant without corresponding entitlement
 type CheckEntitlementGrantMissingEntitlements struct{}
 
-func (c *CheckEntitlementGrantMissingEntitlements) ID() string         { return "AG-1" }
-func (c *CheckEntitlementGrantMissingEntitlements) Name() string       { return "admin_grant_missing_entitlements" }
+func (c *CheckEntitlementGrantMissingEntitlements) ID() string { return "AG-1" }
+func (c *CheckEntitlementGrantMissingEntitlements) Name() string {
+	return "admin_grant_missing_entitlements"
+}
 func (c *CheckEntitlementGrantMissingEntitlements) Category() string   { return "admin_grant" }
 func (c *CheckEntitlementGrantMissingEntitlements) Severity() Severity { return SeverityHigh }
 

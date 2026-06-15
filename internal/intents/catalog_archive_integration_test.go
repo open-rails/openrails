@@ -48,7 +48,7 @@ func (fx *archiveFixture) runnerWith(cfg ModeView) *Runner {
 func (fx *archiveFixture) enqueueArchive(t *testing.T, objectID string, dueAt time.Time) uuid.UUID {
 	t.Helper()
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
-		MerchantID:       dbtest.TestTenantID.UUID(),
+		MerchantID:     dbtest.TestTenantID.UUID(),
 		Provider:       "stripe",
 		IntentType:     TypeStripeArchivePrice,
 		Payload:        StripeArchivePayload{ObjectID: objectID, MarkerKey: "retired.usd.900.30"},
@@ -127,7 +127,7 @@ func TestArchiveIntentSynchronousEnqueueAndExecute(t *testing.T) {
 	fx.api.prices[objectID] = &catalog.StripePrice{ID: objectID, Active: true}
 
 	params := EnqueueParams{
-		MerchantID:       dbtest.TestTenantID.UUID(),
+		MerchantID:     dbtest.TestTenantID.UUID(),
 		Provider:       "stripe",
 		IntentType:     TypeStripeArchivePrice,
 		Payload:        StripeArchivePayload{ObjectID: objectID, MarkerKey: "retired.usd.900.30"},

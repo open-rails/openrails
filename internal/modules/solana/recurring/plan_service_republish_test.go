@@ -84,7 +84,7 @@ func TestPublishPlanIdempotentRepublish(t *testing.T) {
 	svc := NewPlanServiceWithReader(sub, reader, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
-		MerchantID:        merchant.ID{},
+		MerchantID:      merchant.ID{},
 		PlanID:          7,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: amount,
@@ -120,7 +120,7 @@ func TestPublishPlanRepublishDifferingTermsRejected(t *testing.T) {
 	svc := NewPlanServiceWithReader(sub, reader, "devnet", testSolanaTokens())
 
 	_, err := svc.PublishPlan(context.Background(), PublishPlanInput{
-		MerchantID:        merchant.ID{},
+		MerchantID:      merchant.ID{},
 		PlanID:          7,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 10_000_000,
@@ -148,7 +148,7 @@ func TestPublishPlanAbsentPDAProceeds(t *testing.T) {
 	svc := NewPlanServiceWithReader(sub, reader, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
-		MerchantID:        merchant.ID{},
+		MerchantID:      merchant.ID{},
 		PlanID:          7,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 10_000_000,

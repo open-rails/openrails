@@ -133,7 +133,7 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 			grantID := grantKey
 
 			if _, err := s.depositTx(ctx, q, DepositParams{
-				Actor:     sub.CustomerID.String(),
+				Invoker:   sub.CustomerID.String(),
 				Currency:  spec.UnitOrDefault(),
 				Amount:    spec.Amount,
 				Source:    strings.TrimSpace(params.Source),
@@ -203,7 +203,7 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 			grantID := grantKey
 			if _, err := s.depositTx(ctx, q, DepositParams{
 				CustomerID: &payer,
-				Actor:      payer.String(),
+				Invoker:    payer.String(),
 				Currency:   spec.UnitOrDefault(),
 				Amount:     spec.Amount,
 				Source:     strings.TrimSpace(params.Source),

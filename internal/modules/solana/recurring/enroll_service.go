@@ -65,7 +65,7 @@ func NewEnrollService(lifecycle membershipCreator, repo subscriptionStore, rpc a
 
 // EnrollInput describes a confirmed wallet enrollment to activate.
 type EnrollInput struct {
-	MerchantID         merchant.ID
+	MerchantID       merchant.ID
 	UserID           string
 	UserEmail        string
 	PriceID          uuid.UUID

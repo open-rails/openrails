@@ -19,19 +19,16 @@ type CreditAccountSnapshot struct {
 	CustomerID            uuid.UUID `json:"customer_id"`
 	Currency              string    `json:"currency"`
 	BillingMode           string    `json:"billing_mode"`
-	BalanceMicros         int64     `json:"balance_micros"`
-	HeldMicros            int64     `json:"held_micros"`
-	AvailableMicros       int64     `json:"available_micros"`
-	OutstandingOwedMicros int64     `json:"outstanding_owed_micros"`
+	BalanceAmount         int64     `json:"balance_amount"`
+	HeldAmount            int64     `json:"held_amount"`
+	AvailableAmount       int64     `json:"available_amount"`
+	OutstandingOwedAmount int64     `json:"outstanding_owed_amount"`
 }
 
 // GetCreditAccount returns the balance + policy snapshot for an tenant subject.
 func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerID, currency string) (*CreditAccountSnapshot, error) {
 	// #476: the currency is echoed back on the snapshot; empty defaults to "USD".
-	currency = strings.TrimSpace(currency)
-	if currency == "" {
-		currency = money.DefaultCurrency
-	}
+	currency = money.NormalizeCurrency(currency)
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
@@ -41,11 +38,11 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerI
 	// one, so this is safe whether called from a request or directly.
 	var snap *CreditAccountSnapshot
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		bal, err := s.moneyService().GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
+		bal, err := s.moneyService().GetBalanceForCustomer(ctx, payer, currency)
 		if err != nil {
 			return err
 		}
-		settings, err := s.moneyService().GetAccountSettings(ctx, payer)
+		settings, err := s.moneyService().GetAccountSettings(ctx, payer, currency)
 		if err != nil {
 			return err
 		}
@@ -53,10 +50,10 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerI
 			CustomerID:            payer.UUID(),
 			Currency:              currency,
 			BillingMode:           settings.BillingMode,
-			BalanceMicros:         bal.Balance,
-			HeldMicros:            bal.HeldBalance,
-			AvailableMicros:       bal.Balance - bal.HeldBalance,
-			OutstandingOwedMicros: settings.OutstandingOwedMicros,
+			BalanceAmount:         bal.Balance,
+			HeldAmount:            bal.HeldBalance,
+			AvailableAmount:       bal.Balance - bal.HeldBalance,
+			OutstandingOwedAmount: settings.OutstandingOwedAmount,
 		}
 		return nil
 	})
@@ -69,6 +66,7 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerI
 // don't import the internal credits package.
 type UsageRow struct {
 	EventType   string           `json:"event_type"`
+	Currency    string           `json:"currency"`
 	TotalAmount int64            `json:"total_amount"`
 	EventCount  int64            `json:"event_count"`
 	Dimensions  map[string]int64 `json:"dimensions"`
@@ -79,13 +77,13 @@ type UsageRow struct {
 // a tenant-scoped connection so the rollup query runs RLS-scoped under the
 // openrails_app role (#227); RunInTenantConn reuses the request's already-pinned
 // connection when one is set.
-func (s *Service) GetUsage(ctx context.Context, payer identity.CustomerID, from, to time.Time) ([]UsageRow, error) {
+func (s *Service) GetUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) ([]UsageRow, error) {
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
 	var out []UsageRow
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		rows, err := s.moneyService().AggregateUsage(ctx, payer, from, to)
+		rows, err := s.moneyService().AggregateUsage(ctx, payer, currency, from, to)
 		if err != nil {
 			return err
 		}
@@ -93,6 +91,7 @@ func (s *Service) GetUsage(ctx context.Context, payer identity.CustomerID, from,
 		for _, r := range rows {
 			out = append(out, UsageRow{
 				EventType:   r.EventType,
+				Currency:    r.Currency,
 				TotalAmount: r.TotalAmount,
 				EventCount:  r.EventCount,
 				Dimensions:  r.Dimensions,
@@ -219,9 +218,10 @@ func (s *Service) GetInvoice(ctx context.Context, payer identity.CustomerID, id 
 // of the authorize/hold route (issue #235). The hold itself is placed by
 // HoldCredits once this allows it.
 type AuthorizeSpendRequest struct {
-	CustomerID     identity.CustomerID
-	Actor          string
-	EstimateMicros int64
+	CustomerID      identity.CustomerID
+	Invoker         string
+	Currency        string
+	EstimatedAmount int64
 }
 
 // AuthorizeSpendResult is the decision returned to the caller (mirrors the
@@ -230,8 +230,9 @@ type AuthorizeSpendResult struct {
 	Allowed               bool              `json:"allowed"`
 	DenyCode              string            `json:"deny_code,omitempty"`
 	BillingMode           string            `json:"billing_mode"`
-	AvailableMicros       int64             `json:"available_micros"`
-	OutstandingOwedMicros int64             `json:"outstanding_owed_micros"`
+	Currency              string            `json:"currency"`
+	AvailableAmount       int64             `json:"available_amount"`
+	OutstandingOwedAmount int64             `json:"outstanding_owed_amount"`
 	RetryAfterSeconds     int64             `json:"retry_after_seconds,omitempty"`
 	NextAllowedAt         *time.Time        `json:"next_allowed_at,omitempty"`
 	Caps                  []money.CapResult `json:"caps,omitempty"`
@@ -242,21 +243,21 @@ type AuthorizeSpendResult struct {
 const DenyInsufficientBalance = "insufficient_balance"
 
 // AuthorizeSpend evaluates whether an estimated charge is permitted for an
-// payer: the per-account/per-actor spend policy (CheckSpendAllowed) AND, for
+// payer: the per-account/per-invoker spend policy (CheckSpendAllowed) AND, for
 // prepaid accounts, available balance. It does NOT move money. (#235)
 func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest) (*AuthorizeSpendResult, error) {
-	if req.EstimateMicros < 0 {
+	if req.EstimatedAmount < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
 	}
 	if req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
 
-	snap, err := s.GetCreditAccount(ctx, req.CustomerID, "")
+	snap, err := s.GetCreditAccount(ctx, req.CustomerID, req.Currency)
 	if err != nil {
 		return nil, err
 	}
-	dec, err := s.moneyService().CheckSpendAllowed(ctx, req.CustomerID, strings.TrimSpace(req.Actor), req.EstimateMicros)
+	dec, err := s.moneyService().CheckSpendAllowed(ctx, req.CustomerID, req.Currency, strings.TrimSpace(req.Invoker), req.EstimatedAmount)
 	if err != nil {
 		return nil, err
 	}
@@ -265,8 +266,9 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 		Allowed:               dec.Allowed,
 		DenyCode:              dec.DenyCode,
 		BillingMode:           snap.BillingMode,
-		AvailableMicros:       snap.AvailableMicros,
-		OutstandingOwedMicros: snap.OutstandingOwedMicros,
+		Currency:              snap.Currency,
+		AvailableAmount:       snap.AvailableAmount,
+		OutstandingOwedAmount: snap.OutstandingOwedAmount,
 		RetryAfterSeconds:     dec.RetryAfterSeconds,
 		NextAllowedAt:         dec.NextAllowedAt,
 		Caps:                  dec.Caps,
@@ -274,7 +276,7 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 
 	// Prepaid accounts are additionally gated on available balance; arrears
 	// accounts are gated by the outstanding ceiling inside CheckSpendAllowed.
-	if snap.BillingMode != money.BillingModeArrears && req.EstimateMicros > snap.AvailableMicros {
+	if snap.BillingMode != money.BillingModeArrears && req.EstimatedAmount > snap.AvailableAmount {
 		res.Allowed = false
 		if res.DenyCode == "" {
 			res.DenyCode = DenyInsufficientBalance
@@ -285,16 +287,16 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 
 // AuthorizeAndHoldRequest is the input to AuthorizeAndHold — the atomic
 // policy-decision + hold placement that backs POST /v1/service/credits/authorize
-// (issue #235/#247). Payer is the tenant subject billed; Actor is the canonical
-// actor for per-actor sub-budgets; RequestID is the idempotency key for the
+// (issue #235/#247). Payer is the tenant subject billed; Invoker is the canonical
+// invoker for per-invoker sub-budgets; RequestID is the idempotency key for the
 // placed hold.
 type AuthorizeAndHoldRequest struct {
 	CustomerID identity.CustomerID
-	Actor      string
+	Invoker    string
 	// Currency is the ledger unit; empty defaults to "USD" (#476).
-	Currency       string
-	EstimateMicros int64
-	RequestID      string
+	Currency        string
+	EstimatedAmount int64
+	RequestID       string
 	// ExpiresAt bounds the placed hold; when zero a default TTL is applied.
 	ExpiresAt time.Time
 }
@@ -305,9 +307,10 @@ type AuthorizeAndHoldResult struct {
 	Allowed               bool              `json:"allowed"`
 	DenyCode              string            `json:"deny_code,omitempty"`
 	BillingMode           string            `json:"billing_mode"`
-	AvailableMicros       int64             `json:"available_micros"`
-	OutstandingOwedMicros int64             `json:"outstanding_owed_micros"`
-	RemainingTodayMicros  *int64            `json:"remaining_today_micros,omitempty"`
+	Currency              string            `json:"currency"`
+	AvailableAmount       int64             `json:"available_amount"`
+	OutstandingOwedAmount int64             `json:"outstanding_owed_amount"`
+	RemainingTodayAmount  *int64            `json:"remaining_today_amount,omitempty"`
 	RetryAfterSeconds     int64             `json:"retry_after_seconds,omitempty"`
 	ReservationID         *uuid.UUID        `json:"reservation_id,omitempty"`
 	Caps                  []money.CapResult `json:"caps,omitempty"`
@@ -332,7 +335,7 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 	if req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
-	if req.EstimateMicros < 0 {
+	if req.EstimatedAmount < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
 	}
 	req.RequestID = strings.TrimSpace(req.RequestID)
@@ -345,13 +348,13 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 	}
 
 	out, err := s.moneyService().AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-		Payer:          req.CustomerID,
-		Actor:          strings.TrimSpace(req.Actor),
-		Currency:       req.Currency,
-		EstimateMicros: req.EstimateMicros,
-		Source:         authorizeHoldSource,
-		SourceID:       req.RequestID,
-		ExpiresAt:      expires,
+		Payer:           req.CustomerID,
+		Invoker:         strings.TrimSpace(req.Invoker),
+		Currency:        req.Currency,
+		EstimatedAmount: req.EstimatedAmount,
+		Source:          authorizeHoldSource,
+		SourceID:        req.RequestID,
+		ExpiresAt:       expires,
 	})
 	if err != nil {
 		return nil, err
@@ -361,13 +364,14 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 		Allowed:               out.Decision.Allowed,
 		DenyCode:              out.Decision.DenyCode,
 		BillingMode:           out.BillingMode,
-		AvailableMicros:       out.AvailableMicros,
-		OutstandingOwedMicros: out.OutstandingOwedMicros,
+		Currency:              out.Currency,
+		AvailableAmount:       out.AvailableAmount,
+		OutstandingOwedAmount: out.OutstandingOwedAmount,
 		RetryAfterSeconds:     out.Decision.RetryAfterSeconds,
 		Caps:                  out.Decision.Caps,
 	}
 	if r := remainingTodayCents(out.Decision.Caps); r != nil {
-		res.RemainingTodayMicros = r
+		res.RemainingTodayAmount = r
 	}
 	if out.Hold != nil {
 		id := out.Hold.ID
@@ -377,11 +381,11 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 }
 
 // remainingTodayCents extracts the remaining headroom under a daily cap (org or
-// per-actor) from the evaluated caps, for the authorize response's
-// remaining_today_micros field. Returns nil when no daily cap applies.
+// per-invoker) from the evaluated caps, for the authorize response's
+// remaining_today_amount field. Returns nil when no daily cap applies.
 func remainingTodayCents(caps []money.CapResult) *int64 {
 	for _, c := range caps {
-		if c.Code == money.DenyDailyCap || c.Code == money.DenyActorDailyCap {
+		if c.Code == money.DenyDailyCap || c.Code == money.DenyInvokerDailyCap {
 			r := c.Remaining
 			if r < 0 {
 				r = 0
@@ -394,23 +398,23 @@ func remainingTodayCents(caps []money.CapResult) *int64 {
 
 // SetCreditAccountSettings upserts an payer's spend policy (issue #237/#235
 // admin surface). Thin passthrough to the credits service.
-func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, creditType string, in money.AccountSettingsInput) error {
+func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, currency string, in money.AccountSettingsInput) error {
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
 	// Pin a tenant connection so the upsert sets the RLS GUC under openrails_app (#227).
 	return s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		_, err := s.moneyService().UpsertAccountSettings(ctx, payer, in)
+		_, err := s.moneyService().UpsertAccountSettings(ctx, payer, currency, in)
 		return err
 	})
 }
 
 // SetCreditLimit sets the admin/operator arrears credit line for a payer (#489):
-// under billing_mode=arrears the balance may go negative up to creditLimitMicros;
+// under billing_mode=arrears the balance may go negative up to creditLimit;
 // AdmitHold denies insufficient_credit when a new hold would exceed it. 0 = off.
 // OPERATOR-only — deliberately separate from SetCreditAccountSettings (the
 // self-serve surface): a subject cannot raise its own credit line.
-func (s *Service) SetCreditLimit(ctx context.Context, payer identity.CustomerID, creditLimitMicros int64) error {
+func (s *Service) SetCreditLimit(ctx context.Context, payer identity.CustomerID, currency string, creditLimit int64) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -418,34 +422,34 @@ func (s *Service) SetCreditLimit(ctx context.Context, payer identity.CustomerID,
 		return fmt.Errorf("payer required")
 	}
 	return s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		return s.moneyService().SetCreditLimit(ctx, payer, creditLimitMicros)
+		return s.moneyService().SetCreditLimit(ctx, payer, currency, creditLimit)
 	})
 }
 
 // GetCreditLimit returns the admin-set arrears credit line for a payer (#489).
-func (s *Service) GetCreditLimit(ctx context.Context, payer identity.CustomerID) (int64, error) {
+func (s *Service) GetCreditLimit(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
 	if s == nil || s.rt == nil {
 		return 0, fmt.Errorf("service not initialized")
 	}
 	if payer.IsZero() {
 		return 0, fmt.Errorf("payer required")
 	}
-	return s.moneyService().GetCreditLimit(ctx, payer)
+	return s.moneyService().GetCreditLimit(ctx, payer, currency)
 }
 
-// GetCreditAccountSettings returns an payer's stored credit-account settings
+// GetCreditAccountSettings returns a payer's stored account settings
 // (billing mode prepaid|arrears, spend caps, auto-top-up, expiry default) for the
 // org billing-account admin surface (issue #242). RLS-scoped.
-func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, creditType string) (*models.MoneyAccount, error) {
+func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	return s.moneyService().GetAccountSettingsForCustomer(ctx, payer)
+	return s.moneyService().GetAccountSettingsForCustomer(ctx, payer, currency)
 }
 
-// GetCustomerCreditTransactions lists a tenant subject's credit transactions (usage) for
+// GetCustomerCreditTransactions lists a tenant subject's money transactions for
 // the billing-account admin surface (issue #242). RLS-scoped.
-func (s *Service) GetCustomerCreditTransactions(ctx context.Context, payer identity.CustomerID, creditType string, limit, offset int) ([]models.MoneyTransaction, int, error) {
+func (s *Service) GetCustomerCreditTransactions(ctx context.Context, payer identity.CustomerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
 	if payer.IsZero() {
 		return nil, 0, fmt.Errorf("payer required")
 	}
@@ -453,17 +457,17 @@ func (s *Service) GetCustomerCreditTransactions(ctx context.Context, payer ident
 	var total int
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
-		items, total, e = s.moneyService().GetTransactionsByCustomer(ctx, payer, money.DefaultCurrency, limit, offset)
+		items, total, e = s.moneyService().GetTransactionsByCustomer(ctx, payer, currency, limit, offset)
 		return e
 	})
 	return items, total, err
 }
 
-// SetSpendLimit upserts a per-actor spend cap under an payer (issue #237).
-func (s *Service) SetSpendLimit(ctx context.Context, payer identity.CustomerID, creditType, actor string, maxDay, maxMonth *int64) error {
+// SetSpendLimit upserts a per-invoker spend cap under an payer (issue #237).
+func (s *Service) SetSpendLimit(ctx context.Context, payer identity.CustomerID, currency, invoker string, maxDay, maxMonth *int64) error {
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	_, err := s.moneyService().SetSpendLimit(ctx, payer, actor, maxDay, maxMonth)
+	_, err := s.moneyService().SetSpendLimit(ctx, payer, currency, invoker, maxDay, maxMonth)
 	return err
 }

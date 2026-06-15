@@ -29,7 +29,7 @@ func (r *PriceRepo) Create(ctx context.Context, price *models.Price) error {
 	}
 	rows, err := r.db.Gen(ctx).CreatePrice(ctx, gen.CreatePriceParams{
 		ID:               price.ID,
-		MerchantID:         price.MerchantID,
+		MerchantID:       price.MerchantID,
 		ProductID:        price.ProductID,
 		Status:           string(price.Status),
 		Amount:           price.Amount,

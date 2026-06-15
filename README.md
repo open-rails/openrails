@@ -146,8 +146,8 @@ server-to-server with its service token. The high-traffic surface is credits/usa
 # Pre-authorize + place a hold atomically before doing expensive work
 curl -X POST https://openrails.example/v1/service/credits/authorize \
   -H "Authorization: Bearer openrails_st_..." \
-  -d '{"customer_id": "...", "actor": "user-123", "credit_type": "api_credits",
-       "estimate_micros": 50000, "request_id": "req-789"}'
+  -d '{"customer_id": "...", "invoker": "user-123", "credit_type": "api_credits",
+       "estimated_amount": 50000, "request_id": "req-789"}'
 
 # Settle the real cost (or POST .../holds/{id}/release on failure)
 curl -X POST https://openrails.example/v1/service/credits/holds/{id}/capture \
@@ -333,7 +333,7 @@ svc, _ := openrails.Service()
 
 // Pre-authorize before doing expensive work…
 hold, _ := svc.HoldCredits(ctx, service.HoldCreditsRequest{
-    Actor: userID, CreditType: "api_credits", Amount: 100,
+    Invoker: userID, CreditType: "api_credits", Amount: 100,
     Source: "api_call", SourceID: requestID,          // idempotent on (type, source, id)
     ExpiresAt: time.Now().Add(5 * time.Minute),
 })
@@ -364,7 +364,7 @@ opts.DelegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(
             // Single-tenant deployments use the well-known default tenant id.
             TenantID:    "00000000-0000-0000-0000-000000000001",
             SubjectID:   user.ID,                       // the billing subject (= delegated_sub)
-            Actor:       "https://auth.yourapp.com",    // audit: who vouched
+            Issuer:      "https://auth.yourapp.com",    // audit: who vouched
             Permissions: []string{"openrails:self:billing:read",
                                   "openrails:self:checkout:create"},
         }, nil
@@ -675,14 +675,16 @@ task test
 task docker-up / docker-down / docker-logs
 ```
 
-## Money units (#337)
+## Money units (#494)
 
-Integer money fields MUST carry their unit in the name: `_micros` (micro-dollars,
-1e-6 USD — ALL sub-cent amounts: budgets, credits, spend caps, pricing) or
-`_cents` (payment-gateway boundaries ONLY: NMI/CCBill charges, refunds, top-ups).
-Millicents no longer exist anywhere. Human-authored config uses dollar strings
-("$0.05") parsed once at load. Budget windows are FIXED per-user-anchored
-(session or fixed cadence — see internal/modules/budgets), never rolling.
+Native-money integer fields are named as amounts, balances, limits, or thresholds;
+their precision is implied by the row/request currency. USD and EUR use
+micro-units; other currencies use the precision registered for that currency
+(for example JPY uses 1/10,000 yen). `_cents` remains reserved for payment-gateway
+boundaries only: NMI/CCBill charges, refunds, and top-ups. Human-authored config
+uses dollar strings ("$0.05") parsed once at load. Budget windows are FIXED
+per-user-anchored (session or fixed cadence — see internal/modules/budgets),
+never rolling.
 
 ### Database queries (sqlc)
 

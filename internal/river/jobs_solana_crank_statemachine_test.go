@@ -158,7 +158,7 @@ func newCrankHarness(t *testing.T) *crankHarness {
 	id := uuid.New()
 	row := &models.SolanaSubscription{
 		ID:                       id,
-		MerchantID:                 uuid.New(),
+		MerchantID:               uuid.New(),
 		SubscriptionID:           uuid.New(),
 		SubscriptionPDA:          "SUB_PDA",
 		PlanCreatedAtFingerprint: smFingerprint,

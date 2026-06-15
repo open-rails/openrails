@@ -20,14 +20,14 @@ curl -sS -m15 -H "$AUTH" -H "$CT" -X PUT "$B/tier-policies" -d "{\"owner_id\":\"
 curl -sS -m15 -H "$AUTH" -H "$CT" -X POST "$B/credits/deposit" -d "{\"owner_id\":\"$OWNER1\",\"user_id\":\"$OWNER1\",\"credit_type\":\"$CTYPE\",\"amount\":100000,\"source\":\"e2e\",\"source_id\":\"$(uuid)\"}" >/dev/null
 
 adm(){ # owner model estimate -> sets C (code), reads /tmp/b.json
-  C=$(code -H "$AUTH" -H "$CT" -X POST "$B/admit" -d "{\"owner_id\":\"$1\",\"actor\":\"user:e2e\",\"tier\":\"free\",\"model\":\"$2\",\"amounts\":{\"request\":1},\"credit_type\":\"$CTYPE\",\"estimate_cents\":$3,\"request_id\":\"$(uuid)\"}")
+  C=$(code -H "$AUTH" -H "$CT" -X POST "$B/admit" -d "{\"owner_id\":\"$1\",\"invoker\":\"user:e2e\",\"tier\":\"free\",\"model\":\"$2\",\"amounts\":{\"request\":1},\"credit_type\":\"$CTYPE\",\"estimate_cents\":$3,\"request_id\":\"$(uuid)\"}")
 }
 
 echo "--- #298 throughput (max 2/min) ---"
 adm "$OWNER1" gpt-4o 100; ck "admit 1 allowed" 200 "$C" "" "$(cat /tmp/b.json)"
 adm "$OWNER1" gpt-4o 100; ck "admit 2 allowed" 200 "$C" "" "$(cat /tmp/b.json)"
 # 3rd: throughput deny -> 429 + headers
-hdr=$(curl -sS -m15 -D - -o /tmp/b.json -H "$AUTH" -H "$CT" -X POST "$B/admit" -d "{\"owner_id\":\"$OWNER1\",\"actor\":\"user:e2e\",\"tier\":\"free\",\"model\":\"gpt-4o\",\"amounts\":{\"request\":1},\"credit_type\":\"$CTYPE\",\"estimate_cents\":100,\"request_id\":\"$(uuid)\"}" -w '%{http_code}')
+hdr=$(curl -sS -m15 -D - -o /tmp/b.json -H "$AUTH" -H "$CT" -X POST "$B/admit" -d "{\"owner_id\":\"$OWNER1\",\"invoker\":\"user:e2e\",\"tier\":\"free\",\"model\":\"gpt-4o\",\"amounts\":{\"request\":1},\"credit_type\":\"$CTYPE\",\"estimate_cents\":100,\"request_id\":\"$(uuid)\"}" -w '%{http_code}')
 c3=$(printf '%s' "$hdr" | tail -n1)
 ck "admit 3 throughput 429" 429 "$c3" "" "$(cat /tmp/b.json)"
 echo "$hdr" | grep -qi "X-RateLimit-Limit-request: 2" && { echo "PASS: X-RateLimit-Limit-request header"; pass=$((pass+1)); } || { echo "FAIL: missing X-RateLimit-Limit-request header"; fail=$((fail+1)); }
@@ -50,7 +50,7 @@ adm "$OWNER3" gpt-4o 500; ck "money deny 402" 402 "$C" "" "$(cat /tmp/b.json)"
 grep -q '"blocked_by":"money"' /tmp/b.json && { echo "PASS: blocked_by money"; pass=$((pass+1)); } || { echo "FAIL: blocked_by!=money: $(cat /tmp/b.json)"; fail=$((fail+1)); }
 
 echo "--- #304 budget introspection ---"
-C=$(code -H "$AUTH" -H "$CT" "$B/budget?owner_id=$OWNER2&actor=user:e2e&tier=free")
+C=$(code -H "$AUTH" -H "$CT" "$B/budget?owner_id=$OWNER2&invoker=user:e2e&tier=free")
 ck "GET /budget 200" 200 "$C" "" "$(cat /tmp/b.json)"
 grep -q '"limit":500' /tmp/b.json && { echo "PASS: budget window limit present"; pass=$((pass+1)); } || { echo "FAIL: budget windows: $(cat /tmp/b.json)"; fail=$((fail+1)); }
 

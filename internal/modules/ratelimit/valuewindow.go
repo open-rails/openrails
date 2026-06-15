@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -58,4 +59,20 @@ func (l *Limiter) WindowValue(ctx context.Context, base, unit string, window tim
 		return 0, err
 	}
 	return n, nil
+}
+
+// ClaimOnce records a short-lived idempotency key. It returns true only for the
+// first caller while ttl is active.
+func (l *Limiter) ClaimOnce(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	if l == nil || l.rdb == nil {
+		return false, fmt.Errorf("ratelimit: limiter not initialized")
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false, fmt.Errorf("ratelimit: key required")
+	}
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+	return l.rdb.SetNX(ctx, "once:"+key, "1", ttl).Result()
 }

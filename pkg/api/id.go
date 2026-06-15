@@ -10,17 +10,17 @@ import (
 // ID prefixes for different resource types (Stripe-like pattern).
 // These prefixes only appear in the API layer - database stores plain UUIDs.
 const (
-	PrefixProduct         = "prod_"
-	PrefixPrice           = "price_"
-	PrefixSubscription    = "sub_"
-	PrefixPayment         = "pay_"
-	PrefixPaymentMethod   = "pm_"
-	PrefixInvoice         = "inv_"
-	PrefixCheckoutSession = "cs_"
-	PrefixUSDCFunding     = "ufs_"
-	PrefixUser            = "usr_"
-	PrefixEvent           = "evt_"
-	PrefixEntitlementGrant      = "ag_"
+	PrefixProduct          = "prod_"
+	PrefixPrice            = "price_"
+	PrefixSubscription     = "sub_"
+	PrefixPayment          = "pay_"
+	PrefixPaymentMethod    = "pm_"
+	PrefixInvoice          = "inv_"
+	PrefixCheckoutSession  = "cs_"
+	PrefixUSDCFunding      = "ufs_"
+	PrefixUser             = "usr_"
+	PrefixEvent            = "evt_"
+	PrefixEntitlementGrant = "ag_"
 )
 
 // FormatProductID formats a UUID as a product ID (prod_xxx)

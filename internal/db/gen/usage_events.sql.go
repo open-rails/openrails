@@ -19,14 +19,16 @@ SELECT ue.event_type,
 FROM openrails.usage_events ue
 CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d
 WHERE ue.merchant_id = $1 AND ue.customer_id = $2
-  AND ue.occurred_at >= $3::timestamptz
-  AND ue.occurred_at < $4::timestamptz
+  AND ue.currency = $3
+  AND ue.occurred_at >= $4::timestamptz
+  AND ue.occurred_at < $5::timestamptz
 GROUP BY ue.event_type, d.key
 `
 
 type AggregateUsageDimensionsParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
+	Currency   string
 	FromAt     time.Time
 	ToAt       time.Time
 }
@@ -42,6 +44,7 @@ func (q *Queries) AggregateUsageDimensions(ctx context.Context, arg AggregateUsa
 	rows, err := q.db.Query(ctx, aggregateUsageDimensions,
 		arg.MerchantID,
 		arg.CustomerID,
+		arg.Currency,
 		arg.FromAt,
 		arg.ToAt,
 	)
@@ -68,15 +71,16 @@ SELECT event_type,
        COALESCE(SUM(amount), 0)::bigint AS total_amount,
        COUNT(*)::bigint AS event_count
 FROM openrails.usage_events
-WHERE merchant_id = $1 AND customer_id = $2
-  AND occurred_at >= $3::timestamptz
-  AND occurred_at < $4::timestamptz
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
+  AND occurred_at >= $4::timestamptz
+  AND occurred_at < $5::timestamptz
 GROUP BY event_type
 `
 
 type AggregateUsageTotalsParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
+	Currency   string
 	FromAt     time.Time
 	ToAt       time.Time
 }
@@ -87,11 +91,12 @@ type AggregateUsageTotalsRow struct {
 	EventCount  int64
 }
 
-// Per-event_type rollup over [from, to).
+// Per-event_type rollup over [from, to) in one currency.
 func (q *Queries) AggregateUsageTotals(ctx context.Context, arg AggregateUsageTotalsParams) ([]AggregateUsageTotalsRow, error) {
 	rows, err := q.db.Query(ctx, aggregateUsageTotals,
 		arg.MerchantID,
 		arg.CustomerID,
+		arg.Currency,
 		arg.FromAt,
 		arg.ToAt,
 	)
@@ -114,9 +119,9 @@ func (q *Queries) AggregateUsageTotals(ctx context.Context, arg AggregateUsageTo
 }
 
 const getUsageEventByCoords = `-- name: GetUsageEventByCoords :one
-SELECT id, merchant_id, customer_id, invoker_id, resource, event_type, dimensions, amount, source, source_id, money_transaction_id, metadata, occurred_at, created_at, invoker_type, currency FROM openrails.usage_events
-WHERE merchant_id = $1 AND customer_id = $2 AND event_type = $3
-  AND source = $4 AND source_id = $5
+SELECT id, merchant_id, customer_id, invoker_id, invoker_type, currency, resource, event_type, dimensions, amount, source, source_id, money_transaction_id, metadata, occurred_at, created_at FROM openrails.usage_events
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $6
+  AND event_type = $3 AND source = $4 AND source_id = $5
 LIMIT 1
 `
 
@@ -126,6 +131,7 @@ type GetUsageEventByCoordsParams struct {
 	EventType  string
 	Source     string
 	SourceID   string
+	Currency   string
 }
 
 func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventByCoordsParams) (OpenrailsUsageEvent, error) {
@@ -135,6 +141,7 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		arg.EventType,
 		arg.Source,
 		arg.SourceID,
+		arg.Currency,
 	)
 	var i OpenrailsUsageEvent
 	err := row.Scan(
@@ -142,6 +149,8 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.InvokerID,
+		&i.InvokerType,
+		&i.Currency,
 		&i.Resource,
 		&i.EventType,
 		&i.Dimensions,
@@ -152,8 +161,6 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		&i.Metadata,
 		&i.OccurredAt,
 		&i.CreatedAt,
-		&i.InvokerType,
-		&i.Currency,
 	)
 	return i, err
 }
@@ -161,10 +168,10 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 const insertUsageEvent = `-- name: InsertUsageEvent :exec
 
 INSERT INTO openrails.usage_events (
-    id, merchant_id, customer_id, invoker_id, resource,
+    id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
     money_transaction_id, metadata, occurred_at, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
+) VALUES ($1, $2, $3, $4, $7, $5, $6, COALESCE($15, '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
 `
 
 type InsertUsageEventParams struct {
@@ -174,7 +181,7 @@ type InsertUsageEventParams struct {
 	InvokerID          string
 	Resource           *string
 	EventType          string
-	Dimensions         []byte
+	Currency           string
 	Amount             int64
 	Source             string
 	SourceID           string
@@ -182,6 +189,7 @@ type InsertUsageEventParams struct {
 	Metadata           []byte
 	OccurredAt         time.Time
 	CreatedAt          time.Time
+	Dimensions         []byte
 }
 
 // openrails.usage_events: append-only metered usage (#289), idempotent on
@@ -194,7 +202,7 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 		arg.InvokerID,
 		arg.Resource,
 		arg.EventType,
-		arg.Dimensions,
+		arg.Currency,
 		arg.Amount,
 		arg.Source,
 		arg.SourceID,
@@ -202,17 +210,18 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 		arg.Metadata,
 		arg.OccurredAt,
 		arg.CreatedAt,
+		arg.Dimensions,
 	)
 	return err
 }
 
 const insertUsageEventIfAbsent = `-- name: InsertUsageEventIfAbsent :exec
 INSERT INTO openrails.usage_events (
-    id, merchant_id, customer_id, invoker_id, resource,
+    id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
     money_transaction_id, metadata, occurred_at, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
-ON CONFLICT (merchant_id, customer_id, event_type, source, source_id) DO NOTHING
+) VALUES ($1, $2, $3, $4, $7, $5, $6, COALESCE($15, '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
+ON CONFLICT (merchant_id, customer_id, currency, event_type, source, source_id) DO NOTHING
 `
 
 type InsertUsageEventIfAbsentParams struct {
@@ -222,7 +231,7 @@ type InsertUsageEventIfAbsentParams struct {
 	InvokerID          string
 	Resource           *string
 	EventType          string
-	Dimensions         []byte
+	Currency           string
 	Amount             int64
 	Source             string
 	SourceID           string
@@ -230,6 +239,7 @@ type InsertUsageEventIfAbsentParams struct {
 	Metadata           []byte
 	OccurredAt         time.Time
 	CreatedAt          time.Time
+	Dimensions         []byte
 }
 
 func (q *Queries) InsertUsageEventIfAbsent(ctx context.Context, arg InsertUsageEventIfAbsentParams) error {
@@ -240,7 +250,7 @@ func (q *Queries) InsertUsageEventIfAbsent(ctx context.Context, arg InsertUsageE
 		arg.InvokerID,
 		arg.Resource,
 		arg.EventType,
-		arg.Dimensions,
+		arg.Currency,
 		arg.Amount,
 		arg.Source,
 		arg.SourceID,
@@ -248,41 +258,46 @@ func (q *Queries) InsertUsageEventIfAbsent(ctx context.Context, arg InsertUsageE
 		arg.Metadata,
 		arg.OccurredAt,
 		arg.CreatedAt,
+		arg.Dimensions,
 	)
 	return err
 }
 
 const resourceRevenueDaily = `-- name: ResourceRevenueDaily :many
 SELECT to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')::text AS date,
-       COALESCE(SUM(ue.amount), 0)::bigint AS amount_micros
+       ue.currency,
+       COALESCE(SUM(ue.amount), 0)::bigint AS amount
 FROM openrails.usage_events ue
-WHERE ue.merchant_id = $1 AND ue.resource = $2
-  AND ue.occurred_at >= $3::timestamptz
-  AND ue.occurred_at < $4::timestamptz
-GROUP BY 1
+WHERE ue.merchant_id = $1 AND ue.resource = $2 AND ue.currency = $3
+  AND ue.occurred_at >= $4::timestamptz
+  AND ue.occurred_at < $5::timestamptz
+GROUP BY 1, 2
 ORDER BY 1
 `
 
 type ResourceRevenueDailyParams struct {
 	MerchantID uuid.UUID
 	Resource   *string
+	Currency   string
 	FromAt     time.Time
 	ToAt       time.Time
 }
 
 type ResourceRevenueDailyRow struct {
-	Date         string
-	AmountMicros int64
+	Date     string
+	Currency string
+	Amount   int64
 }
 
 // Per-day revenue for a resource across ALL payers in the tenant (#410).
-// ue.amount is already micro-dollars (#337/#463): no conversion. The old
-// ceil-divide-by-10 was the micros->millicents conversion and survived the
+// ue.amount is already in ledger internal precision (#337/#463): no conversion. The old
+// ceil-divide-by-10 was the internal-units-to-millicents conversion and survived the
 // rename as a 10x revenue under-report.
 func (q *Queries) ResourceRevenueDaily(ctx context.Context, arg ResourceRevenueDailyParams) ([]ResourceRevenueDailyRow, error) {
 	rows, err := q.db.Query(ctx, resourceRevenueDaily,
 		arg.MerchantID,
 		arg.Resource,
+		arg.Currency,
 		arg.FromAt,
 		arg.ToAt,
 	)
@@ -293,7 +308,7 @@ func (q *Queries) ResourceRevenueDaily(ctx context.Context, arg ResourceRevenueD
 	var items []ResourceRevenueDailyRow
 	for rows.Next() {
 		var i ResourceRevenueDailyRow
-		if err := rows.Scan(&i.Date, &i.AmountMicros); err != nil {
+		if err := rows.Scan(&i.Date, &i.Currency, &i.Amount); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -307,17 +322,19 @@ func (q *Queries) ResourceRevenueDaily(ctx context.Context, arg ResourceRevenueD
 const serviceUsageRollup = `-- name: ServiceUsageRollup :many
 SELECT COALESCE(CASE $3::text
            WHEN 'resource' THEN ue.resource
-           WHEN 'actor' THEN ue.invoker_id
+           WHEN 'invoker' THEN ue.invoker_id
            WHEN 'function' THEN ue.metadata->>'function_name'
            WHEN 'tier' THEN ue.metadata->>'availability_tier'
        END, '')::text AS key,
+       ue.currency,
        COUNT(*)::bigint AS event_count,
        COALESCE(SUM(ue.amount), 0)::bigint AS total_amount
 FROM openrails.usage_events ue
 WHERE ue.merchant_id = $1 AND ue.customer_id = $2
-  AND ue.occurred_at >= $4::timestamptz
-  AND ue.occurred_at < $5::timestamptz
-GROUP BY 1
+  AND ue.currency = $4
+  AND ue.occurred_at >= $5::timestamptz
+  AND ue.occurred_at < $6::timestamptz
+GROUP BY 1, 2
 ORDER BY total_amount DESC
 `
 
@@ -325,12 +342,14 @@ type ServiceUsageRollupParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	GroupBy    string
+	Currency   string
 	FromAt     time.Time
 	ToAt       time.Time
 }
 
 type ServiceUsageRollupRow struct {
 	Key         string
+	Currency    string
 	EventCount  int64
 	TotalAmount int64
 }
@@ -343,6 +362,7 @@ func (q *Queries) ServiceUsageRollup(ctx context.Context, arg ServiceUsageRollup
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.GroupBy,
+		arg.Currency,
 		arg.FromAt,
 		arg.ToAt,
 	)
@@ -353,7 +373,12 @@ func (q *Queries) ServiceUsageRollup(ctx context.Context, arg ServiceUsageRollup
 	var items []ServiceUsageRollupRow
 	for rows.Next() {
 		var i ServiceUsageRollupRow
-		if err := rows.Scan(&i.Key, &i.EventCount, &i.TotalAmount); err != nil {
+		if err := rows.Scan(
+			&i.Key,
+			&i.Currency,
+			&i.EventCount,
+			&i.TotalAmount,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

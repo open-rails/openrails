@@ -14,7 +14,7 @@ import (
 
 const addMoneyOutstandingOwed = `-- name: AddMoneyOutstandingOwed :exec
 UPDATE openrails.money_settings
-SET outstanding_owed_micros = outstanding_owed_micros + $3::bigint,
+SET outstanding_owed_amount = outstanding_owed_amount + $3::bigint,
     updated_at = $4
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
 `
@@ -69,7 +69,7 @@ func (q *Queries) AutoGraduateMoneyAccountTier(ctx context.Context, arg AutoGrad
 }
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
-SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source, credit_limit_micros FROM openrails.money_settings
+SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day, max_spend_per_month, max_outstanding_owed_amount, low_balance_threshold, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_amount, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, tier_source, currency, credit_limit_amount FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -88,17 +88,17 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.BillingMode,
-		&i.MaxSpendPerDayMicros,
-		&i.MaxSpendPerMonthMicros,
-		&i.MaxOutstandingOwedMicros,
-		&i.LowBalanceThresholdMicros,
+		&i.MaxSpendPerDay,
+		&i.MaxSpendPerMonth,
+		&i.MaxOutstandingOwedAmount,
+		&i.LowBalanceThreshold,
 		&i.AutoTopupEnabled,
 		&i.AutoTopupAmountCents,
 		&i.AutoTopupPaymentMethodID,
 		&i.DefaultCreditExpiryDays,
 		&i.HardStopOnBreach,
 		&i.AlertThresholdPct,
-		&i.OutstandingOwedMicros,
+		&i.OutstandingOwedAmount,
 		&i.LastAlertAt,
 		&i.LastTopupAt,
 		&i.CreatedAt,
@@ -108,15 +108,15 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.SuspendedAt,
 		&i.SuspendReason,
 		&i.Tier,
-		&i.Currency,
 		&i.TierSource,
-		&i.CreditLimitMicros,
+		&i.Currency,
+		&i.CreditLimitAmount,
 	)
 	return i, err
 }
 
 const getMoneySpendLimit = `-- name: GetMoneySpendLimit :one
-SELECT id, merchant_id, customer_id, invoker_id, max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at, currency, invoker_type FROM openrails.money_spend_limits
+SELECT id, merchant_id, customer_id, invoker_id, invoker_type, max_spend_per_day, max_spend_per_month, created_at, updated_at, currency FROM openrails.money_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $4 AND invoker_id = $3
 LIMIT 1
 `
@@ -141,12 +141,12 @@ func (q *Queries) GetMoneySpendLimit(ctx context.Context, arg GetMoneySpendLimit
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.InvokerID,
-		&i.MaxSpendPerDayMicros,
-		&i.MaxSpendPerMonthMicros,
+		&i.InvokerType,
+		&i.MaxSpendPerDay,
+		&i.MaxSpendPerMonth,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Currency,
-		&i.InvokerType,
 	)
 	return i, err
 }
@@ -196,12 +196,12 @@ SELECT s.merchant_id, s.customer_id, s.currency,
                    WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
                      AND w.currency = s.currency AND w.status = 'open'), 0)
        )::bigint AS available,
-       COALESCE(s.low_balance_threshold_micros, 0)::bigint AS threshold,
+       COALESCE(s.low_balance_threshold, 0)::bigint AS threshold,
        s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id,
        s.last_alert_at, s.last_topup_at
 FROM openrails.money_settings s
 WHERE s.merchant_id = $1
-  AND s.low_balance_threshold_micros IS NOT NULL
+  AND s.low_balance_threshold IS NOT NULL
   AND (
          COALESCE((SELECT SUM(mb.remaining_amount) FROM openrails.money_blocks mb
                    WHERE mb.merchant_id = s.merchant_id AND mb.customer_id = s.customer_id
@@ -213,7 +213,7 @@ WHERE s.merchant_id = $1
        - COALESCE((SELECT SUM(w.held_amount - w.settled_amount) FROM openrails.money_windows w
                    WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
                      AND w.currency = s.currency AND w.status = 'open'), 0)
-       ) < s.low_balance_threshold_micros
+       ) < s.low_balance_threshold
 `
 
 type ListBelowThresholdMoneyAccountsParams struct {
@@ -270,13 +270,13 @@ func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, arg ListB
 
 const listChargeableArrearsMoneyAccounts = `-- name: ListChargeableArrearsMoneyAccounts :many
 SELECT s.merchant_id, s.customer_id, s.currency,
-       s.outstanding_owed_micros, s.auto_topup_payment_method_id
+       s.outstanding_owed_amount, s.auto_topup_payment_method_id
 FROM openrails.money_settings s
 WHERE s.merchant_id = $1
   AND s.billing_mode = 'arrears'
-  AND s.outstanding_owed_micros > 0
+  AND s.outstanding_owed_amount > 0
   AND s.auto_topup_payment_method_id IS NOT NULL
-  AND ($2::bigint <= 0 OR s.outstanding_owed_micros >= $2::bigint)
+  AND ($2::bigint <= 0 OR s.outstanding_owed_amount >= $2::bigint)
 `
 
 type ListChargeableArrearsMoneyAccountsParams struct {
@@ -288,7 +288,7 @@ type ListChargeableArrearsMoneyAccountsRow struct {
 	MerchantID               uuid.UUID
 	CustomerID               uuid.UUID
 	Currency                 string
-	OutstandingOwedMicros    int64
+	OutstandingOwedAmount    int64
 	AutoTopupPaymentMethodID *uuid.UUID
 }
 
@@ -307,7 +307,7 @@ func (q *Queries) ListChargeableArrearsMoneyAccounts(ctx context.Context, arg Li
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.Currency,
-			&i.OutstandingOwedMicros,
+			&i.OutstandingOwedAmount,
 			&i.AutoTopupPaymentMethodID,
 		); err != nil {
 			return nil, err
@@ -334,8 +334,8 @@ type ListMoneyAccountPairsRow struct {
 }
 
 // openrails.money_settings: per-(tenant, payer, currency) spend policy + money-in
-// state (#237/#239/#240/#241/#298/#299/#302). amounts are the currency's minor unit
-// (default µ$). currency is a system code; the Go registry is authority.
+// state (#237/#239/#240/#241/#298/#299/#302). amounts use the currency's internal
+// precision. currency is a system code; the Go registry is authority.
 // Distinct (payer, currency) pairs to finalize invoices for (#472). money_balances
 // is gone (#491); the durable ledger (money_transactions) is now the source of
 // every payer with money activity, in every currency.
@@ -360,7 +360,7 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUI
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency, tier_source, credit_limit_micros FROM openrails.money_settings
+SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day, max_spend_per_month, max_outstanding_owed_amount, low_balance_threshold, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_amount, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, tier_source, currency, credit_limit_amount FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -379,17 +379,17 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.BillingMode,
-		&i.MaxSpendPerDayMicros,
-		&i.MaxSpendPerMonthMicros,
-		&i.MaxOutstandingOwedMicros,
-		&i.LowBalanceThresholdMicros,
+		&i.MaxSpendPerDay,
+		&i.MaxSpendPerMonth,
+		&i.MaxOutstandingOwedAmount,
+		&i.LowBalanceThreshold,
 		&i.AutoTopupEnabled,
 		&i.AutoTopupAmountCents,
 		&i.AutoTopupPaymentMethodID,
 		&i.DefaultCreditExpiryDays,
 		&i.HardStopOnBreach,
 		&i.AlertThresholdPct,
-		&i.OutstandingOwedMicros,
+		&i.OutstandingOwedAmount,
 		&i.LastAlertAt,
 		&i.LastTopupAt,
 		&i.CreatedAt,
@@ -399,19 +399,19 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.SuspendedAt,
 		&i.SuspendReason,
 		&i.Tier,
-		&i.Currency,
 		&i.TierSource,
-		&i.CreditLimitMicros,
+		&i.Currency,
+		&i.CreditLimitAmount,
 	)
 	return i, err
 }
 
 const reduceMoneyOutstandingOwedSnapshot = `-- name: ReduceMoneyOutstandingOwedSnapshot :execrows
 UPDATE openrails.money_settings
-SET outstanding_owed_micros = GREATEST(0, outstanding_owed_micros - $3::bigint),
+SET outstanding_owed_amount = GREATEST(0, outstanding_owed_amount - $3::bigint),
     updated_at = $4
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
-  AND outstanding_owed_micros >= $3::bigint
+  AND outstanding_owed_amount >= $3::bigint
 `
 
 type ReduceMoneyOutstandingOwedSnapshotParams struct {
@@ -463,7 +463,7 @@ func (q *Queries) ResumeMoneyAccount(ctx context.Context, arg ResumeMoneyAccount
 
 const setMoneyAccountCreditLimit = `-- name: SetMoneyAccountCreditLimit :exec
 UPDATE openrails.money_settings
-SET credit_limit_micros = $3::bigint, updated_at = $4
+SET credit_limit_amount = $3::bigint, updated_at = $4
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
 `
 
@@ -621,17 +621,17 @@ func (q *Queries) SuspendMoneyAccount(ctx context.Context, arg SuspendMoneyAccou
 const upsertMoneyAccountSettings = `-- name: UpsertMoneyAccountSettings :exec
 INSERT INTO openrails.money_settings (
     id, merchant_id, customer_id, currency, billing_mode,
-    max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros,
-    low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents,
+    max_spend_per_day, max_spend_per_month, max_outstanding_owed_amount,
+    low_balance_threshold, auto_topup_enabled, auto_topup_amount_cents,
     auto_topup_payment_method_id, default_credit_expiry_days,
     hard_stop_on_breach, alert_threshold_pct, created_at, updated_at
 ) VALUES ($1, $2, $3, $17, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     billing_mode = EXCLUDED.billing_mode,
-    max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros,
-    max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros,
-    max_outstanding_owed_micros = EXCLUDED.max_outstanding_owed_micros,
-    low_balance_threshold_micros = EXCLUDED.low_balance_threshold_micros,
+    max_spend_per_day = EXCLUDED.max_spend_per_day,
+    max_spend_per_month = EXCLUDED.max_spend_per_month,
+    max_outstanding_owed_amount = EXCLUDED.max_outstanding_owed_amount,
+    low_balance_threshold = EXCLUDED.low_balance_threshold,
     auto_topup_enabled = EXCLUDED.auto_topup_enabled,
     auto_topup_amount_cents = EXCLUDED.auto_topup_amount_cents,
     auto_topup_payment_method_id = EXCLUDED.auto_topup_payment_method_id,
@@ -642,23 +642,23 @@ ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
 `
 
 type UpsertMoneyAccountSettingsParams struct {
-	ID                        uuid.UUID
-	MerchantID                uuid.UUID
-	CustomerID                uuid.UUID
-	BillingMode               string
-	MaxSpendPerDayMicros      *int64
-	MaxSpendPerMonthMicros    *int64
-	MaxOutstandingOwedMicros  *int64
-	LowBalanceThresholdMicros *int64
-	AutoTopupEnabled          bool
-	AutoTopupAmountCents      *int64
-	AutoTopupPaymentMethodID  *uuid.UUID
-	DefaultCreditExpiryDays   *int32
-	HardStopOnBreach          bool
-	AlertThresholdPct         int32
-	CreatedAt                 time.Time
-	UpdatedAt                 time.Time
-	Currency                  string
+	ID                       uuid.UUID
+	MerchantID               uuid.UUID
+	CustomerID               uuid.UUID
+	BillingMode              string
+	MaxSpendPerDay           *int64
+	MaxSpendPerMonth         *int64
+	MaxOutstandingOwedAmount *int64
+	LowBalanceThreshold      *int64
+	AutoTopupEnabled         bool
+	AutoTopupAmountCents     *int64
+	AutoTopupPaymentMethodID *uuid.UUID
+	DefaultCreditExpiryDays  *int32
+	HardStopOnBreach         bool
+	AlertThresholdPct        int32
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	Currency                 string
 }
 
 func (q *Queries) UpsertMoneyAccountSettings(ctx context.Context, arg UpsertMoneyAccountSettingsParams) error {
@@ -667,10 +667,10 @@ func (q *Queries) UpsertMoneyAccountSettings(ctx context.Context, arg UpsertMone
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.BillingMode,
-		arg.MaxSpendPerDayMicros,
-		arg.MaxSpendPerMonthMicros,
-		arg.MaxOutstandingOwedMicros,
-		arg.LowBalanceThresholdMicros,
+		arg.MaxSpendPerDay,
+		arg.MaxSpendPerMonth,
+		arg.MaxOutstandingOwedAmount,
+		arg.LowBalanceThreshold,
 		arg.AutoTopupEnabled,
 		arg.AutoTopupAmountCents,
 		arg.AutoTopupPaymentMethodID,
@@ -687,24 +687,24 @@ func (q *Queries) UpsertMoneyAccountSettings(ctx context.Context, arg UpsertMone
 const upsertMoneySpendLimit = `-- name: UpsertMoneySpendLimit :exec
 INSERT INTO openrails.money_spend_limits (
     id, merchant_id, customer_id, currency, invoker_id,
-    max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at
+    max_spend_per_day, max_spend_per_month, created_at, updated_at
 ) VALUES ($1, $2, $3, $9, $4, $5, $6, $7, $8)
 ON CONFLICT (merchant_id, customer_id, currency, invoker_id) DO UPDATE SET
-    max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros,
-    max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros,
+    max_spend_per_day = EXCLUDED.max_spend_per_day,
+    max_spend_per_month = EXCLUDED.max_spend_per_month,
     updated_at = EXCLUDED.updated_at
 `
 
 type UpsertMoneySpendLimitParams struct {
-	ID                     uuid.UUID
-	MerchantID             uuid.UUID
-	CustomerID             uuid.UUID
-	InvokerID              string
-	MaxSpendPerDayMicros   *int64
-	MaxSpendPerMonthMicros *int64
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
-	Currency               string
+	ID               uuid.UUID
+	MerchantID       uuid.UUID
+	CustomerID       uuid.UUID
+	InvokerID        string
+	MaxSpendPerDay   *int64
+	MaxSpendPerMonth *int64
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	Currency         string
 }
 
 func (q *Queries) UpsertMoneySpendLimit(ctx context.Context, arg UpsertMoneySpendLimitParams) error {
@@ -713,8 +713,8 @@ func (q *Queries) UpsertMoneySpendLimit(ctx context.Context, arg UpsertMoneySpen
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.InvokerID,
-		arg.MaxSpendPerDayMicros,
-		arg.MaxSpendPerMonthMicros,
+		arg.MaxSpendPerDay,
+		arg.MaxSpendPerMonth,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.Currency,

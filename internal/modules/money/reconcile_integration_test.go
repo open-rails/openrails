@@ -15,7 +15,7 @@ import (
 func TestReconcile_Clean(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	resetMoneyLedger(t, pool, ctx)
-	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "seed"})
+	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 	_, err = svc.Hold(ctx, &payer, "user:a", cur, 200, "usage", "h1", time.Now().Add(time.Hour).UTC())
 	require.NoError(t, err)
@@ -28,7 +28,7 @@ func TestReconcile_Clean(t *testing.T) {
 func TestReconcile_OrphanedExpiredHold(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	resetMoneyLedger(t, pool, ctx)
-	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1000, Source: "seed"})
+	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 	// Active hold already past expiry (HoldExpiryWorker hasn't run).
 	_, err = svc.Hold(ctx, &payer, "user:a", cur, 50, "usage", "h-old", time.Now().Add(-time.Minute).UTC())

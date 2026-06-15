@@ -313,7 +313,7 @@ func (w *DunningWorker) processSubscription(
 		}
 		windowEnd := periodEnd.Add(window)
 		row, err := w.intentRunner().Store.Enqueue(ctx, intents.EnqueueParams{
-			MerchantID:       genSub.MerchantID,
+			MerchantID:     genSub.MerchantID,
 			Provider:       provider,
 			IntentType:     intents.TypeManualRebill,
 			SubscriptionID: &sub.ID,
@@ -385,7 +385,7 @@ func (w *DunningWorker) processSubscription(
 	}
 	windowEnd := periodEnd.Add(window)
 	intent, err := w.intentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
-		MerchantID:       genSub.MerchantID,
+		MerchantID:     genSub.MerchantID,
 		Provider:       provider,
 		IntentType:     intents.TypeManualRebill,
 		SubscriptionID: &sub.ID,

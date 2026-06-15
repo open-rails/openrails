@@ -22,7 +22,7 @@ func testSolanaTokens() map[string]config.SolanaToken {
 // the on-chain effects PublishPlan produces without a live signer/RPC.
 type fakeSubmitter struct {
 	merchantPub solanago.PublicKey
-	submits  [][]solanago.Instruction
+	submits     [][]solanago.Instruction
 }
 
 func (f *fakeSubmitter) MerchantAddress(_ context.Context, _ merchant.ID) (solanago.PublicKey, error) {
@@ -67,7 +67,7 @@ func TestPublishPlanEnsuresMerchantReceivingATA(t *testing.T) {
 	svc := NewPlanService(sub, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
-		MerchantID:        merchant.ID{},
+		MerchantID:      merchant.ID{},
 		PlanID:          1,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 10_000_000,
@@ -110,7 +110,7 @@ func TestPublishPlanEnsuresColdReceivingWalletATA(t *testing.T) {
 	svc := NewPlanService(sub, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
-		MerchantID:        merchant.ID{},
+		MerchantID:      merchant.ID{},
 		PlanID:          2,
 		TokenSymbol:     "USDC",
 		AmountBaseUnits: 5_000_000,

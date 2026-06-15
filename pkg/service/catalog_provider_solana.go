@@ -110,7 +110,7 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	}
 
 	handle, err := plan.PublishPlan(ctx, recurring.PublishPlanInput{
-		MerchantID:         tid,
+		MerchantID:       tid,
 		PlanID:           planID,
 		TokenSymbol:      symbol, // PublishPlan rejects non-allowlisted (non-stablecoin) tokens
 		AmountBaseUnits:  uint64(in.UnitAmount),

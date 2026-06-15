@@ -12,12 +12,12 @@ import (
 func TestGraduateTier_ByCumulativePaid(t *testing.T) {
 	svc, _, payer, _, ctx := moneyInEnv(t)
 	ladder := []money.TierThreshold{
-		{Tier: "free", MinPaidMicros: 0},
-		{Tier: "tier1", MinPaidMicros: 5_000},
-		{Tier: "tier2", MinPaidMicros: 50_000},
+		{Tier: "free", MinPaidAmount: 0},
+		{Tier: "tier1", MinPaidAmount: 5_000},
+		{Tier: "tier2", MinPaidAmount: 50_000},
 	}
 	dep := func(amt int64) {
-		_, e := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 

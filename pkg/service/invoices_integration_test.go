@@ -29,24 +29,24 @@ func TestListInvoices_Statement(t *testing.T) {
 	})
 
 	_, err := ms.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Actor: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "purchase",
+		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "purchase",
 	})
 	require.NoError(t, err)
 
 	_, err = ms.RecordUsage(ctx, money.RecordUsageParams{
-		Payer: &payer, Actor: "user:a", Currency: money.DefaultCurrency, EventType: "gpt-4o",
+		Payer: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 100, "output_tokens": 50},
 		Amount:     5_000, Source: "req", SourceID: "u1",
 	})
 	require.NoError(t, err)
 	_, err = ms.RecordUsage(ctx, money.RecordUsageParams{
-		Payer: &payer, Actor: "user:a", Currency: money.DefaultCurrency, EventType: "gpt-4o",
+		Payer: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 60, "output_tokens": 30},
 		Amount:     3_000, Source: "req", SourceID: "u2",
 	})
 	require.NoError(t, err)
 	_, err = ms.RecordUsage(ctx, money.RecordUsageParams{
-		Payer: &payer, Actor: "user:a", Currency: money.DefaultCurrency, EventType: "embeddings",
+		Payer: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, EventType: "embeddings",
 		Dimensions: map[string]int64{"input_tokens": 200},
 		Amount:     1_000, Source: "req", SourceID: "u3",
 	})

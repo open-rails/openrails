@@ -26,6 +26,16 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	// InvokerTypeDelegated marks an invoker as a third-party/member/federated
+	// principal using the payer's billing authority. Flat invoker waste cutoffs
+	// apply.
+	InvokerTypeDelegated = "delegated"
+	// InvokerTypePayer marks an invoker as a direct payer-controlled credential.
+	// Wasted-spend reports use payer grace, then charge overage.
+	InvokerTypePayer = "payer"
+)
+
 // Client is the unified OpenRails service surface (#338): credits/holds,
 // unified admission, budgets, tier policy, account settings, and usage/revenue
 // analytics. All types are wire types (strings/ints/time) — no internal types.
@@ -54,7 +64,7 @@ type Client interface {
 	DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error)
 	// Capture settles the admission/authorize hold reservationID at the actual
 	// amount, optionally recording a usage analytics event (#311/#410).
-	Capture(ctx context.Context, reservationID string, capturedMicros int64, usage *CaptureUsage) error
+	Capture(ctx context.Context, reservationID string, capturedAmount int64, usage *CaptureUsage) error
 	// Release frees the admission/authorize hold reservationID without charging.
 	Release(ctx context.Context, reservationID string) error
 	// Balance returns the payer's balance snapshot.
@@ -71,33 +81,31 @@ type Client interface {
 	// optional (empty defaults to "USD", #476).
 	ListCreditTransactions(ctx context.Context, customerID, currency string, limit int) (json.RawMessage, error)
 	// UsageRollup returns grouped spend over [from, to). groupBy is
-	// resource|actor|function|tier.
-	UsageRollup(ctx context.Context, customerID string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
-	// BudgetCheck computes fixed money-budget windows for (payer, actor) against
+	// resource|invoker|function|tier.
+	UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
+	// BudgetCheck computes fixed money-budget windows for (payer, invoker) against
 	// CALLER-SUPPLIED windows without reserving (#410, #337 cadence).
-	BudgetCheck(ctx context.Context, tenantSubjectID, actorID string, windows []BudgetWindowInput, requestedMicros int64) ([]BudgetWindow, error)
-	// BudgetStatus returns the actor's fixed money-budget windows under the
+	BudgetCheck(ctx context.Context, tenantSubjectID, invokerID, currency string, windows []BudgetWindowInput, requestedAmount int64) ([]BudgetWindow, error)
+	// BudgetStatus returns the invoker's fixed money-budget windows under the
 	// payer's stored tier policy without reserving (#304 introspection).
-	BudgetStatus(ctx context.Context, tenantSubjectID, actorID, tier string) ([]BudgetWindow, error)
+	BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]BudgetWindow, error)
 	// SetTierPolicy upserts a per-payer tier policy (#298): throughput windows +
 	// entitled resources + fixed money-budget windows.
 	SetTierPolicy(ctx context.Context, tenantSubjectID string, in TierPolicyInput) error
 	// SetTierSchedule persists the tenant's tier SCHEDULE once (#476): the ordered
-	// ladder [{tier, min_cumulative_paid_micros}]. OpenRails then AUTO-maintains
+	// ladder [{tier, min_cumulative_paid_amount}]. OpenRails then AUTO-maintains
 	// each payer's tier from cumulative spend — the host never cranks graduation.
 	// An EMPTY tenantSubjectID sets the tenant-wide default schedule (the common
 	// case); a non-empty one sets a per-subject override. owner=platform (the
 	// subject cannot see/loosen it).
 	SetTierSchedule(ctx context.Context, tenantSubjectID string, schedule []TierScheduleRung) error
-	// SetActorWastedWindows configures the operator-set FLAT per-ACTOR wasted-spend
-	// windows (#492): the fixed per-invoker backstop OpenRails enforces at admit.
-	// An EMPTY tenantSubjectID sets the tenant-wide default (the common case — an
-	// account can mint unlimited invokers, so the per-actor budget is a fixed
-	// backstop, not graduated); a non-empty one sets a per-customer override. When
-	// unset, OpenRails falls back to its hardcoded default. Reuses BudgetWindowInput
-	// (key + window_seconds + limit_micros; cadence ignored — these are flat
-	// rolling windows). OPERATOR-only — NOT self-serve.
-	SetActorWastedWindows(ctx context.Context, tenantSubjectID string, windows []BudgetWindowInput) error
+	// SetInvokerWastedSpendPolicy configures the operator-set FLAT per-INVOKER
+	// wasted-spend policy (#496): the fixed delegated-user backstop OpenRails
+	// enforces at admit. It is merchant-scoped and does not vary by payer/customer.
+	// When unset, OpenRails falls back to its hardcoded default. Reuses
+	// BudgetWindowInput (key + window_seconds + limit; cadence ignored — these are
+	// flat rolling windows). OPERATOR-only — NOT self-serve.
+	SetInvokerWastedSpendPolicy(ctx context.Context, windows []BudgetWindowInput) error
 	// GetTier returns the payer's CURRENT graduated tier (#477): the tier
 	// OpenRails auto-maintains from cumulative paid spend against the persisted
 	// schedule (#476), or a manual admin override. Empty when the payer has never
@@ -105,25 +113,23 @@ type Client interface {
 	// uses to drive its OWN per-tier capacity (e.g. tensorhub's scheduler in-flight
 	// concurrency cap) without re-deriving the ladder or cranking graduation.
 	GetTier(ctx context.Context, tenantSubjectID string) (string, error)
-	// ReportWastedSpend records host-reported WASTED $ (#488): an attempt that
-	// FAILED and cost the platform money (a hold released without capture, a
-	// content-filter reject, an out-of-band failure). It accrues into the payer's
-	// per-tier bad_spend windows AND the actor's flat windows; a later Admit denies
-	// (abuse_rate_limited / failure_rate_limited) when either is over budget.
-	// micros<=0 is a no-op (cheap rejects ≈ $0 aren't reported).
-	ReportWastedSpend(ctx context.Context, tenantSubjectID, actor string, micros int64, reason string) error
-	// AbuseUsage returns the payer's and actor's running WASTED-$ totals + budgets
-	// (#488 introspection) — wasted $, not just counts. Empty actor omits the actor
+	// ReportWastedSpend records host-reported WASTED $ (#497): delegated invokers
+	// accrue toward their flat cutoff; direct payer credentials use trust-tier
+	// grace and charge overage through the normal ledger. Source+SourceID are
+	// required for retry idempotency.
+	ReportWastedSpend(ctx context.Context, report WastedSpendReport) (*WastedSpendResponse, error)
+	// AbuseUsage returns the payer's and invoker's running WASTED-$ totals + budgets
+	// (#488 introspection) in one currency. Empty invoker omits the invoker
 	// windows; empty tier resolves the payer's current tier.
-	AbuseUsage(ctx context.Context, tenantSubjectID, actor, tier string) (*AbuseUsageResponse, error)
+	AbuseUsage(ctx context.Context, tenantSubjectID, invoker, currency, tier string) (*AbuseUsageResponse, error)
 	// SetCreditLimit sets the admin/operator arrears credit line for a payer
 	// (#489): under billing_mode=arrears the balance may go NEGATIVE up to
-	// creditLimitMicros; AdmitHold denies insufficient_credit when a new hold would
+	// creditLimit; AdmitHold denies insufficient_credit when a new hold would
 	// exceed it. 0 = off (prepaid / existing-arrears behavior, unchanged).
 	// OPERATOR-only — NOT self-serve.
-	SetCreditLimit(ctx context.Context, tenantSubjectID string, creditLimitMicros int64) error
+	SetCreditLimit(ctx context.Context, tenantSubjectID, currency string, creditLimit int64) error
 	// GetCreditLimit returns the admin-set arrears credit line for a payer (#489).
-	GetCreditLimit(ctx context.Context, tenantSubjectID string) (int64, error)
+	GetCreditLimit(ctx context.Context, tenantSubjectID, currency string) (int64, error)
 	// SetSubjectBudgetPolicy upserts a SUBJECT-owned hierarchical budget-scope
 	// policy (#473): the subject's self cap (scope=subject) or a (subject, role)
 	// pool (scope=role, RoleID = the role uuid). The owner is forced to "subject"
@@ -139,7 +145,7 @@ type Client interface {
 	SubjectBudgetPolicies(ctx context.Context, tenantSubjectID string) ([]SubjectBudgetPolicy, error)
 	// ResourceRevenueDaily returns per-day revenue for a resource across all
 	// payers in the tenant (#410).
-	ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error)
+	ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error)
 	// ListActiveEntitlements returns the entitlement records active at `at`
 	// for subjects addressed by their EXTERNAL identity — the issuer +
 	// subject ids the host's auth system already holds (the same key a
@@ -160,10 +166,10 @@ type Client interface {
 	// succeeds with per-item results — one item's failure never fails the flush —
 	// and is safe to re-send wholesale (per-item idempotency on RequestID).
 	SettleWindowItems(ctx context.Context, items []WindowSettleItem) ([]WindowSettleResult, error)
-	// RefillWindow extends an open window: amountMicros > 0 reserves more funds
+	// RefillWindow extends an open window: amount > 0 reserves more funds
 	// (ErrInsufficientCredits applies exactly like open), ttlSeconds > 0 pushes
 	// expires_at out. At least one must be positive.
-	RefillWindow(ctx context.Context, windowID uuid.UUID, amountMicros, ttlSeconds int64) (*CreditWindow, error)
+	RefillWindow(ctx context.Context, windowID uuid.UUID, amount, ttlSeconds int64) (*CreditWindow, error)
 	// CloseWindow releases the window's unsettled remainder back to the payer's
 	// available balance. Idempotent: re-closing returns the closed window.
 	CloseWindow(ctx context.Context, windowID uuid.UUID) (*CreditWindow, error)
@@ -189,15 +195,15 @@ func (id CustomerID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 
 // AuthorizeRequest is the body for POST /v1/service/credits/authorize. It is the
 // atomic authorize+hold: OpenRails checks the payer's balance and, if allowed,
-// places a hold for EstimateMicros in a single idempotent call keyed on RequestID.
+// places a hold for EstimatedAmount in a single idempotent call keyed on RequestID.
 type AuthorizeRequest struct {
 	CustomerID string `json:"customer_id"`
-	Actor      string `json:"actor"`
+	Invoker    string `json:"invoker"`
 	// Currency is the ledger unit; empty defaults to "USD" (#476). A free string
 	// so #475 qualified custom-credit unit codes ride the same field.
-	Currency       string `json:"currency,omitempty"`
-	EstimateMicros int64  `json:"estimate_micros"`
-	RequestID      string `json:"request_id"`
+	Currency        string `json:"currency,omitempty"`
+	EstimatedAmount int64  `json:"estimated_amount"`
+	RequestID       string `json:"request_id"`
 	// ExpiresAt (unix seconds) bounds the placed hold; nil applies the engine's
 	// default hold TTL.
 	ExpiresAt *int64 `json:"expires_at,omitempty"`
@@ -207,20 +213,21 @@ type AuthorizeRequest struct {
 // Allowed=false with a DenyCode is a definitive deny; ReservationID is the hold
 // handle to later capture or release.
 type AuthorizeResponse struct {
-	Allowed              bool   `json:"allowed"`
-	DenyCode             string `json:"deny_code,omitempty"`
-	BillingMode          string `json:"billing_mode,omitempty"`
-	AvailableMicros      int64  `json:"available_micros"`
-	OutstandingMicros    int64  `json:"outstanding_micros"`
-	RemainingTodayMicros int64  `json:"remaining_today_micros,omitempty"`
-	RetryAfterSeconds    int64  `json:"retry_after_seconds,omitempty"`
-	ReservationID        string `json:"reservation_id,omitempty"`
+	Allowed               bool   `json:"allowed"`
+	DenyCode              string `json:"deny_code,omitempty"`
+	BillingMode           string `json:"billing_mode,omitempty"`
+	Currency              string `json:"currency"`
+	AvailableAmount       int64  `json:"available_amount"`
+	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
+	RemainingTodayAmount  int64  `json:"remaining_today_amount,omitempty"`
+	RetryAfterSeconds     int64  `json:"retry_after_seconds,omitempty"`
+	ReservationID         string `json:"reservation_id,omitempty"`
 }
 
 // HoldCreditsRequest reserves credits for an estimate.
 type HoldCreditsRequest struct {
 	CustomerID *CustomerID
-	Actor      string
+	Invoker    string
 	// Currency is the ledger unit; empty defaults to "USD" (#476).
 	Currency  string
 	Amount    int64
@@ -234,7 +241,8 @@ type HoldCreditsRequest struct {
 // field names (no json tags).
 type CreditHold struct {
 	ID        uuid.UUID
-	Actor     string
+	Invoker   string
+	Currency  string
 	Amount    int64
 	Source    string
 	SourceID  string
@@ -254,7 +262,7 @@ type CaptureHoldRequest struct {
 // WithdrawCreditsRequest debits credits directly.
 type WithdrawCreditsRequest struct {
 	CustomerID *CustomerID
-	Actor      string
+	Invoker    string
 	// Currency is the ledger unit; empty defaults to "USD" (#476).
 	Currency string
 	Amount   int64
@@ -263,11 +271,11 @@ type WithdrawCreditsRequest struct {
 }
 
 // DepositCreditsRequest mints a credit block for a payer (admin funding,
-// promotions, money-in settlement). Amount is in the currency's ledger unit
-// (micro-dollars for "USD").
+// promotions, money-in settlement). Amount is in the currency's internal
+// precision.
 type DepositCreditsRequest struct {
 	CustomerID *CustomerID
-	Actor      string
+	Invoker    string
 	// Currency is the ledger unit; empty defaults to "USD" (#476).
 	Currency    string
 	Amount      int64
@@ -284,7 +292,8 @@ type DepositCreditsRequest struct {
 type CreditTransaction struct {
 	ID              uuid.UUID
 	CustomerID      uuid.UUID
-	Actor           string
+	Invoker         string
+	Currency        string
 	Amount          int64
 	BalanceAfter    *int64
 	TransactionType string
@@ -306,19 +315,21 @@ type CreditTransaction struct {
 //
 // Tier/Resource select the throughput + budget policy + resource gating;
 // Amounts is the per-request throughput consumption (e.g. {"request":1}).
-// EstimateMicros is the upper-bound charge to hold. A zero EstimateMicros runs
+// EstimatedAmount is the upper-bound charge to hold. A zero EstimatedAmount runs
 // the limit checks without placing a money hold.
 type AdmitRequest struct {
-	CustomerID     string           `json:"customer_id"`
-	Actor          string           `json:"actor"`
-	Tier           string           `json:"tier,omitempty"`
-	Resource       string           `json:"resource,omitempty"`
-	Amounts        map[string]int64 `json:"amounts,omitempty"`
-	EstimateMicros int64            `json:"estimate_micros"`
-	RequestID      string           `json:"request_id"`
-	Source         string           `json:"source,omitempty"`
-	ExpiresAt      *int64           `json:"expires_at,omitempty"`
-	// Roles are the immutable role UUIDs the actor holds (#473). Each role with a
+	CustomerID      string           `json:"customer_id"`
+	Invoker         string           `json:"invoker"`
+	InvokerType     string           `json:"invoker_type,omitempty"`
+	Tier            string           `json:"tier,omitempty"`
+	Resource        string           `json:"resource,omitempty"`
+	Amounts         map[string]int64 `json:"amounts,omitempty"`
+	Currency        string           `json:"currency,omitempty"`
+	EstimatedAmount int64            `json:"estimated_amount"`
+	RequestID       string           `json:"request_id"`
+	Source          string           `json:"source,omitempty"`
+	ExpiresAt       *int64           `json:"expires_at,omitempty"`
+	// Roles are the immutable role UUIDs the invoker holds (#473). Each role with a
 	// matching (subject, role) budget-scope policy gates this request's spend in
 	// the same admit verdict. The host reads them from the delegated
 	// JWT/permission set. Empty = no role-scoped budget applies.
@@ -357,6 +368,7 @@ type AdmitResponse struct {
 	BlockedBy           string         `json:"blocked_by,omitempty"`
 	BlockedUnit         string         `json:"blocked_unit,omitempty"`
 	DenyCode            string         `json:"deny_code,omitempty"`
+	Currency            string         `json:"currency,omitempty"`
 	RetryAfterSeconds   int64          `json:"retry_after_seconds,omitempty"`
 	Windows             []AdmitWindow  `json:"windows,omitempty"`
 	ReservationID       string         `json:"reservation_id,omitempty"`
@@ -367,19 +379,19 @@ type AdmitResponse struct {
 	// host reads it back to drive its own per-tier capacity decisions (e.g.
 	// tensorhub's scheduler in-flight concurrency cap) without a second round-trip.
 	ResolvedTier string `json:"resolved_tier,omitempty"`
-	// MaxConcurrentHeldMicros is the resolved tier's cap on the sum of the payer's
-	// active (un-settled) hold $ (#487; 0 = uncapped); HeldMicros is the active-hold
+	// MaxConcurrentHeldAmount is the resolved tier's cap on the sum of the payer's
+	// active (un-settled) hold $ (#487; 0 = uncapped); HeldAmount is the active-hold
 	// $ sum as evaluated for this verdict (includes the hold just placed on an
 	// allow). A host that enforces true occupancy itself reads these to queue
 	// against cap + per-job estimate instead of taking the hard deny. An estimate
-	// above MaxSingleChargeMicros is denied DenyCode="single_charge_cap_exceeded".
-	MaxConcurrentHeldMicros int64 `json:"max_concurrent_held_micros,omitempty"`
-	HeldMicros              int64 `json:"held_micros,omitempty"`
-	MaxSingleChargeMicros   int64 `json:"max_single_charge_micros,omitempty"`
+	// above MaxSingleChargeAmount is denied DenyCode="single_charge_cap_exceeded".
+	MaxConcurrentHeldAmount int64 `json:"max_concurrent_held_amount,omitempty"`
+	HeldAmount              int64 `json:"held_amount,omitempty"`
+	MaxSingleChargeAmount   int64 `json:"max_single_charge_amount,omitempty"`
 }
 
 // CaptureUsage carries the analytics dimensions recorded alongside a capture so
-// OpenRails can serve per-resource/function/tier/actor spend (#410). Nil = no
+// OpenRails can serve per-resource/function/tier/invoker spend (#410). Nil = no
 // usage event (a plain capture).
 type CaptureUsage struct {
 	EventType string
@@ -391,15 +403,16 @@ type CaptureUsage struct {
 
 // BalanceResponse is the GET /v1/service/credits/balance snapshot (handler
 // serviceBalanceResponse). NOTE: the wire field for the owed amount is
-// outstanding_owed_micros — go-client's BalanceResponse decoded
-// "outstanding_micros"/"remaining_today_micros", which this endpoint never
+// outstanding_owed_amount — go-client's BalanceResponse decoded
+// "outstanding_owed_amount"/"remaining_today_amount", which this endpoint never
 // sends; fixed here to the handler contract.
 type BalanceResponse struct {
+	Currency              string `json:"currency"`
 	BillingMode           string `json:"billing_mode"`
-	BalanceMicros         int64  `json:"balance_micros"`
-	HeldMicros            int64  `json:"held_micros"`
-	AvailableMicros       int64  `json:"available_micros"`
-	OutstandingOwedMicros int64  `json:"outstanding_owed_micros"`
+	BalanceAmount         int64  `json:"balance_amount"`
+	HeldAmount            int64  `json:"held_amount"`
+	AvailableAmount       int64  `json:"available_amount"`
+	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
 }
 
 // CreditAccount is the OpenRails service balance/policy snapshot.
@@ -407,19 +420,19 @@ type CreditAccount struct {
 	CustomerID            string `json:"customer_id"`
 	Currency              string `json:"currency"`
 	BillingMode           string `json:"billing_mode"`
-	BalanceMicros         int64  `json:"balance_micros"`
-	HeldMicros            int64  `json:"held_micros"`
-	AvailableMicros       int64  `json:"available_micros"`
-	OutstandingOwedMicros int64  `json:"outstanding_owed_micros"`
+	BalanceAmount         int64  `json:"balance_amount"`
+	HeldAmount            int64  `json:"held_amount"`
+	AvailableAmount       int64  `json:"available_amount"`
+	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
 }
 
 // AccountSettingsInput patches an OpenRails credit account policy.
 type AccountSettingsInput struct {
 	BillingMode              *string `json:"billing_mode,omitempty"`
-	MaxSpendPerDayMicros     *int64  `json:"max_spend_per_day_micros,omitempty"`
-	MaxSpendPerMonthMicros   *int64  `json:"max_spend_per_month_micros,omitempty"`
-	MaxOutstandingOwedMicros *int64  `json:"max_outstanding_owed_micros,omitempty"`
-	LowBalanceThreshold      *int64  `json:"low_balance_threshold_micros,omitempty"`
+	MaxSpendPerDay           *int64  `json:"max_spend_per_day,omitempty"`
+	MaxSpendPerMonth         *int64  `json:"max_spend_per_month,omitempty"`
+	MaxOutstandingOwedAmount *int64  `json:"max_outstanding_owed_amount,omitempty"`
+	LowBalanceThreshold      *int64  `json:"low_balance_threshold,omitempty"`
 	AutoTopupEnabled         *bool   `json:"auto_topup_enabled,omitempty"`
 	AutoTopupAmountCents     *int64  `json:"auto_topup_amount_cents,omitempty"`
 	AutoTopupPaymentMethod   *string `json:"auto_topup_payment_method_id,omitempty"`
@@ -431,6 +444,7 @@ type AccountSettingsInput struct {
 // UsageRollupRow is one grouped spend bucket from OpenRails.
 type UsageRollupRow struct {
 	Key         string `json:"key"`
+	Currency    string `json:"currency"`
 	EventCount  int64  `json:"event_count"`
 	TotalAmount int64  `json:"total_amount"`
 }
@@ -440,7 +454,7 @@ type UsageRollupRow struct {
 type BudgetWindowInput struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
-	LimitMicros   int64  `json:"limit_micros"`
+	Limit         int64  `json:"limit"`
 	// Cadence is "session" (default) or "fixed" (#337 fixed per-user-anchored
 	// windows): session opens at the user's first charged request and closes
 	// WindowSeconds later; fixed ticks at anchor + k*WindowSeconds forever.
@@ -452,6 +466,7 @@ type BudgetWindowInput struct {
 // (pkg/service.AdmitBudgetWindowDTO on the wire).
 type BudgetWindow struct {
 	Key               string `json:"key"`
+	Currency          string `json:"currency"`
 	Limit             int64  `json:"limit"`
 	Used              int64  `json:"used"`
 	Reserved          int64  `json:"reserved"`
@@ -494,40 +509,64 @@ type TierPolicyInput struct {
 	// per-tier in-flight queue ceiling OpenRails enforces at admit (BlockedBy=
 	// "queue" on overflow). Empty = no queue cap for this tier.
 	QueueLimits []TierQueueLimit `json:"queue_limits,omitempty"`
-	// MaxConcurrentHeldMicros / MaxSingleChargeMicros are the #487 generic
+	// MaxConcurrentHeldAmount / MaxSingleChargeAmount are the #487 generic
 	// $-denominated per-tier admit limits (0 = uncapped): a cap on the payer's
 	// active (un-settled) hold $ sum (surfaced + enforced at admit), and a
 	// per-charge ceiling (an over-limit estimate is rejected at admit).
-	MaxConcurrentHeldMicros int64 `json:"max_concurrent_held_micros,omitempty"`
-	MaxSingleChargeMicros   int64 `json:"max_single_charge_micros,omitempty"`
-	// BadSpendWindows are the #488 per-PAYER $-valued wasted-spend budget windows
-	// for this tier: at most LimitMicros of host-reported wasted $ per window;
-	// admit denies abuse_rate_limited when over.
+	MaxConcurrentHeldAmount int64 `json:"max_concurrent_held_amount,omitempty"`
+	MaxSingleChargeAmount   int64 `json:"max_single_charge_amount,omitempty"`
+	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
+	// windows for this tier: at most Limit of host-reported wasted spend is
+	// forgiven per window; direct-payer overage is charged.
 	BadSpendWindows []BudgetWindowInput `json:"bad_spend_windows,omitempty"`
 }
 
 // AbuseUsageWindow is one wasted-spend window's running $ total (#488).
 type AbuseUsageWindow struct {
-	Key         string `json:"key"`
-	Window      string `json:"window"`
-	UsedMicros  int64  `json:"used_micros"`
-	LimitMicros int64  `json:"limit_micros"`
-	OverBudget  bool   `json:"over_budget"`
+	Key        string `json:"key"`
+	Currency   string `json:"currency"`
+	Window     string `json:"window"`
+	Used       int64  `json:"used"`
+	Limit      int64  `json:"limit"`
+	OverBudget bool   `json:"over_budget"`
 }
 
-// AbuseUsageResponse is the running wasted-$ totals for a payer + actor (#488).
+// AbuseUsageResponse is the running wasted-$ totals for a payer + invoker (#488).
 type AbuseUsageResponse struct {
-	PayerWindows []AbuseUsageWindow `json:"payer_windows"`
-	ActorWindows []AbuseUsageWindow `json:"actor_windows,omitempty"`
+	Currency       string             `json:"currency"`
+	PayerWindows   []AbuseUsageWindow `json:"payer_windows"`
+	InvokerWindows []AbuseUsageWindow `json:"invoker_windows,omitempty"`
+}
+
+// WastedSpendReport is one host-reported failed attempt that cost money.
+type WastedSpendReport struct {
+	CustomerID  string `json:"customer_id"`
+	Invoker     string `json:"invoker"`
+	InvokerType string `json:"invoker_type,omitempty"`
+	Currency    string `json:"currency,omitempty"`
+	Amount      int64  `json:"amount"`
+	Source      string `json:"source"`
+	SourceID    string `json:"source_id"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+// WastedSpendResponse reports how OpenRails handled a wasted-spend report.
+type WastedSpendResponse struct {
+	Currency       string `json:"currency"`
+	RecordedAmount int64  `json:"recorded_amount"`
+	ForgivenAmount int64  `json:"forgiven_amount"`
+	ChargedAmount  int64  `json:"charged_amount"`
+	Action         string `json:"action"`
+	Duplicate      bool   `json:"duplicate,omitempty"`
 }
 
 // TierScheduleRung is one rung of the persisted tier ladder set via
 // PUT /v1/service/tier-schedules (#476): a payer reaches Tier once its
-// cumulative paid spend is at least MinCumulativePaidMicros. Order ascending by
-// MinCumulativePaidMicros (the server sorts defensively regardless).
+// cumulative paid spend is at least MinCumulativePaidAmount. Order ascending by
+// MinCumulativePaidAmount (the server sorts defensively regardless).
 type TierScheduleRung struct {
 	Tier                    string `json:"tier"`
-	MinCumulativePaidMicros int64  `json:"min_cumulative_paid_micros"`
+	MinCumulativePaidAmount int64  `json:"min_cumulative_paid_amount"`
 }
 
 // BudgetScopeWindow is one fixed money-budget window in a hierarchical
@@ -536,7 +575,7 @@ type TierScheduleRung struct {
 type BudgetScopeWindow struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
-	LimitMicros   int64  `json:"limit_micros"`
+	Limit         int64  `json:"limit"`
 	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
 	Cadence string `json:"cadence,omitempty"`
 }
@@ -569,15 +608,17 @@ type SubjectBudgetPolicy struct {
 	Windows []BudgetScopeWindow `json:"windows"`
 }
 
-// ResourceRevenueDailyRow is one day's revenue (micros) for a resource.
+// ResourceRevenueDailyRow is one day's revenue for a resource.
 type ResourceRevenueDailyRow struct {
-	Date         string `json:"date"`
-	AmountMicros int64  `json:"amount_micros"`
+	Date     string `json:"date"`
+	Currency string `json:"currency"`
+	Amount   int64  `json:"amount"`
 }
 
 // ResourceRevenueResponse is the per-resource revenue rollup (#410).
 type ResourceRevenueResponse struct {
-	RevenueMicros int64                     `json:"revenue_micros"`
+	Currency      string                    `json:"currency"`
+	RevenueAmount int64                     `json:"revenue_amount"`
 	Daily         []ResourceRevenueDailyRow `json:"daily"`
 }
 
@@ -600,11 +641,11 @@ type EntitlementRecord struct {
 // OpenWindowRequest is the body for POST /v1/service/credits/windows (#335).
 type OpenWindowRequest struct {
 	CustomerID string `json:"customer_id"`
-	Actor      string `json:"actor"`
+	Invoker    string `json:"invoker"`
 	// Currency is the ledger unit; empty defaults to "USD" (#476).
-	Currency     string `json:"currency,omitempty"`
-	AmountMicros int64  `json:"amount"`
-	TTLSeconds   int64  `json:"ttl_seconds,omitempty"`
+	Currency   string `json:"currency,omitempty"`
+	Amount     int64  `json:"amount"`
+	TTLSeconds int64  `json:"ttl_seconds,omitempty"`
 }
 
 // CreditWindow is the window snapshot returned by open/refill/close
@@ -612,8 +653,9 @@ type OpenWindowRequest struct {
 type CreditWindow struct {
 	WindowID      uuid.UUID `json:"window_id"`
 	CustomerID    uuid.UUID `json:"customer_id"`
-	HeldMicros    int64     `json:"held_amount"`
-	SettledMicros int64     `json:"settled_amount"`
+	Currency      string    `json:"currency"`
+	HeldAmount    int64     `json:"held_amount"`
+	SettledAmount int64     `json:"settled_amount"`
 	Status        string    `json:"status"` // open | closed | expired
 	ExpiresAt     time.Time `json:"expires_at"`
 }
@@ -630,11 +672,11 @@ type WindowSettleUsage struct {
 // may span windows AND payers (the cross-payer flush). RequestID is the
 // per-item idempotency key.
 type WindowSettleItem struct {
-	WindowID     uuid.UUID          `json:"window_id"`
-	RequestID    string             `json:"request_id"`
-	AmountMicros int64              `json:"amount"`
-	Actor        string             `json:"actor,omitempty"`
-	Usage        *WindowSettleUsage `json:"usage,omitempty"`
+	WindowID  uuid.UUID          `json:"window_id"`
+	RequestID string             `json:"request_id"`
+	Amount    int64              `json:"amount"`
+	Invoker   string             `json:"invoker,omitempty"`
+	Usage     *WindowSettleUsage `json:"usage,omitempty"`
 }
 
 // WindowSettleResult is one per-item settle outcome. OK with Replayed=true is

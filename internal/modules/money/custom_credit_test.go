@@ -12,12 +12,12 @@ func TestFormatAmount(t *testing.T) {
 		decimals int
 		want     string
 	}{
-		{100, 2, "1.00"},   // gold (#475 spec example)
+		{100, 2, "1.00"}, // gold (#475 spec example)
 		{1, 2, "0.01"},
 		{12345, 2, "123.45"},
-		{5, 0, "5"},        // tickets
+		{5, 0, "5"}, // tickets
 		{-100, 2, "-1.00"},
-		{1500000, 6, "1.500000"}, // micro-usd
+		{1500000, 6, "1.500000"}, // six-decimal precision
 		{0, 4, "0.0000"},
 	}
 	for _, c := range cases {

@@ -38,12 +38,12 @@ func TestCreditsDepositOverflowGuard(t *testing.T) {
 	// Seed a positive balance, then attempt a MaxInt64 deposit which would wrap
 	// the balance negative without the overflow guard.
 	_, err := moneySvc.Deposit(ctx, money.DepositParams{
-		Actor: userID, Amount: 1, Source: "seed",
+		Invoker: userID, Amount: 1, Source: "seed",
 	})
 	require.NoError(t, err)
 
 	_, err = moneySvc.Deposit(ctx, money.DepositParams{
-		Actor: userID, Amount: math.MaxInt64, Source: "overflow",
+		Invoker: userID, Amount: math.MaxInt64, Source: "overflow",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "overflow")
@@ -77,9 +77,9 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 
 	// Seed spendable money (creates a money block).
 	_, err := moneySvc.Deposit(ctx, money.DepositParams{
-		Actor:  userID,
-		Amount: 1000,
-		Source: "test_deposit",
+		Invoker: userID,
+		Amount:  1000,
+		Source:  "test_deposit",
 	})
 	require.NoError(t, err)
 
@@ -150,7 +150,7 @@ func TestCreditsLifecycle_HoldExpiryReleasesHeld(t *testing.T) {
 	cur := money.DefaultCurrency
 	moneySvc := money.NewMoneyService(dbi)
 
-	_, err := moneySvc.Deposit(ctx, money.DepositParams{Actor: userID, Amount: 880, Source: "seed"})
+	_, err := moneySvc.Deposit(ctx, money.DepositParams{Invoker: userID, Amount: 880, Source: "seed"})
 	require.NoError(t, err)
 
 	hold, err := moneySvc.Hold(ctx, nil, userID, cur, 50, "api_call", "req_exp", now.Add(-1*time.Minute).UTC())

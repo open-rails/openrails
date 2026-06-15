@@ -17,18 +17,18 @@ func TestRecordUsage_DebitsAndAggregates(t *testing.T) {
 	})
 
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 100_000, Source: "seed",
+		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 100_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
 	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{
-		Payer: &payer, Actor: "user:a", EventType: "gpt-4o",
+		Payer: &payer, Invoker: "user:a", EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 100, "output_tokens": 50},
 		Amount:     5_000, Source: "req", SourceID: "r1",
 	})
 	require.NoError(t, err)
 	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{
-		Payer: &payer, Actor: "user:a", EventType: "gpt-4o",
+		Payer: &payer, Invoker: "user:a", EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 60, "output_tokens": 30},
 		Amount:     3_000, Source: "req", SourceID: "r2",
 	})
@@ -40,7 +40,7 @@ func TestRecordUsage_DebitsAndAggregates(t *testing.T) {
 	require.Equal(t, int64(92_000), bal.Balance)
 
 	// Rollup: one event_type, summed amount + dimensions.
-	rows, err := svc.AggregateUsage(ctx, payer, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	rows, err := svc.AggregateUsage(ctx, payer, money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	r := rows[0]
@@ -58,12 +58,12 @@ func TestRecordUsage_Idempotent(t *testing.T) {
 	})
 
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 10_000, Source: "seed",
+		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 10_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
 	p := money.RecordUsageParams{
-		Payer: &payer, Actor: "user:a", EventType: "gpt-4o",
+		Payer: &payer, Invoker: "user:a", EventType: "gpt-4o",
 		Amount: 2_000, Source: "req", SourceID: "dup",
 	}
 	ev1, err := svc.RecordUsage(ctx, p)
@@ -85,12 +85,12 @@ func TestRecordUsage_ZeroCostNoDebit(t *testing.T) {
 	})
 
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Actor: payer.UUID().String(), Amount: 5_000, Source: "seed",
+		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 5_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
 	ev, err := svc.RecordUsage(ctx, money.RecordUsageParams{
-		Payer: &payer, Actor: "user:a", EventType: "cached-hit",
+		Payer: &payer, Invoker: "user:a", EventType: "cached-hit",
 		Dimensions: map[string]int64{"cached_input_tokens": 200, "requests": 1},
 		Amount:     0, Source: "req", SourceID: "z1",
 	})

@@ -52,7 +52,7 @@ func NewPrepareTierChangeService(signer solanaint.Signer, rpc tierChangeRPC, net
 // terms are the canonical, server-resolved values from the new price's config;
 // the old on-chain identifiers come from the stored solana_subscriptions row.
 type PrepareTierChangeInput struct {
-	MerchantID         merchant.ID
+	MerchantID       merchant.ID
 	SubscriberWallet string
 	MintSymbol       string
 

@@ -151,7 +151,7 @@ func (q *Queries) ExpireMoneyHold(ctx context.Context, arg ExpireMoneyHoldParams
 }
 
 const getMoneyTransactionByCoords = `-- name: GetMoneyTransactionByCoords :one
-SELECT id, invoker_id, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_type FROM openrails.money_transactions
+SELECT id, invoker_id, invoker_type, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $6
   AND transaction_type = $3 AND source = $4 AND source_id = $5
 LIMIT 1
@@ -181,6 +181,7 @@ func (q *Queries) GetMoneyTransactionByCoords(ctx context.Context, arg GetMoneyT
 	err := row.Scan(
 		&i.ID,
 		&i.InvokerID,
+		&i.InvokerType,
 		&i.Resource,
 		&i.Metadata,
 		&i.Amount,
@@ -198,13 +199,12 @@ func (q *Queries) GetMoneyTransactionByCoords(ctx context.Context, arg GetMoneyT
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.Currency,
-		&i.InvokerType,
 	)
 	return i, err
 }
 
 const getMoneyTransactionForUpdate = `-- name: GetMoneyTransactionForUpdate :one
-SELECT id, invoker_id, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_type FROM openrails.money_transactions WHERE id = $1 FOR UPDATE
+SELECT id, invoker_id, invoker_type, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetMoneyTransactionForUpdate(ctx context.Context, id uuid.UUID) (OpenrailsMoneyTransaction, error) {
@@ -213,6 +213,7 @@ func (q *Queries) GetMoneyTransactionForUpdate(ctx context.Context, id uuid.UUID
 	err := row.Scan(
 		&i.ID,
 		&i.InvokerID,
+		&i.InvokerType,
 		&i.Resource,
 		&i.Metadata,
 		&i.Amount,
@@ -230,7 +231,6 @@ func (q *Queries) GetMoneyTransactionForUpdate(ctx context.Context, id uuid.UUID
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.Currency,
-		&i.InvokerType,
 	)
 	return i, err
 }
@@ -465,7 +465,7 @@ func (q *Queries) InsertMoneyWindow(ctx context.Context, arg InsertMoneyWindowPa
 }
 
 const listExpiredActiveMoneyHoldsForUpdate = `-- name: ListExpiredActiveMoneyHoldsForUpdate :many
-SELECT id, invoker_id, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_type FROM openrails.money_transactions
+SELECT id, invoker_id, invoker_type, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions
 WHERE transaction_type = 'hold' AND status = 'active'
   AND expires_at IS NOT NULL AND expires_at <= $1::timestamptz
 ORDER BY expires_at ASC
@@ -491,6 +491,7 @@ func (q *Queries) ListExpiredActiveMoneyHoldsForUpdate(ctx context.Context, arg 
 		if err := rows.Scan(
 			&i.ID,
 			&i.InvokerID,
+			&i.InvokerType,
 			&i.Resource,
 			&i.Metadata,
 			&i.Amount,
@@ -508,7 +509,6 @@ func (q *Queries) ListExpiredActiveMoneyHoldsForUpdate(ctx context.Context, arg 
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.Currency,
-			&i.InvokerType,
 		); err != nil {
 			return nil, err
 		}
@@ -567,7 +567,7 @@ func (q *Queries) ListExpiredOpenMoneyWindowsForUpdate(ctx context.Context, arg 
 }
 
 const listMoneyTransactionsByPayer = `-- name: ListMoneyTransactionsByPayer :many
-SELECT id, invoker_id, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_type FROM openrails.money_transactions
+SELECT id, invoker_id, invoker_type, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
 ORDER BY created_at DESC
 LIMIT $3::int OFFSET $4::int
@@ -599,6 +599,7 @@ func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMone
 		if err := rows.Scan(
 			&i.ID,
 			&i.InvokerID,
+			&i.InvokerType,
 			&i.Resource,
 			&i.Metadata,
 			&i.Amount,
@@ -616,7 +617,6 @@ func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMone
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.Currency,
-			&i.InvokerType,
 		); err != nil {
 			return nil, err
 		}
@@ -629,7 +629,7 @@ func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMone
 }
 
 const listOrphanedExpiredMoneyHolds = `-- name: ListOrphanedExpiredMoneyHolds :many
-SELECT id, invoker_id, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_type FROM openrails.money_transactions
+SELECT id, invoker_id, invoker_type, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions
 WHERE merchant_id = $1 AND transaction_type = 'hold' AND status = 'active'
   AND expires_at IS NOT NULL AND expires_at <= $2::timestamptz
 ORDER BY expires_at ASC
@@ -652,6 +652,7 @@ func (q *Queries) ListOrphanedExpiredMoneyHolds(ctx context.Context, arg ListOrp
 		if err := rows.Scan(
 			&i.ID,
 			&i.InvokerID,
+			&i.InvokerType,
 			&i.Resource,
 			&i.Metadata,
 			&i.Amount,
@@ -669,7 +670,6 @@ func (q *Queries) ListOrphanedExpiredMoneyHolds(ctx context.Context, arg ListOrp
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.Currency,
-			&i.InvokerType,
 		); err != nil {
 			return nil, err
 		}
@@ -749,7 +749,7 @@ type LockCustomerForSpendParams struct {
 // balance cache (#491): available is derived from spendable money_blocks and
 // held from active holds + open windows. The per-customer spend mutex is a
 // FOR UPDATE lock on the customers row.
-// amounts are integers in the row currency's minor unit (default µ$ = 1e-6 USD).
+// amounts are integers in the row currency's internal precision.
 // currency is a system code (USD/USDC/EUR/JPY/SOL); the Go registry is authority.
 // The per-customer spend mutex (#491): every spend/hold/capture/deposit/expiry
 // path locks this row FOR UPDATE before reading/mutating the customer's blocks,

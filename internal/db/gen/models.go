@@ -159,26 +159,33 @@ type Migration struct {
 	MigratedAt time.Time
 }
 
-// Operator-configurable FLAT per-actor wasted-spend windows (#492): windows[{key,window_seconds,limit_micros}] declared once per tenant (or per-customer override). Falls back to service.DefaultActorWastedWindows() when no row is stored.
-type OpenrailsActorWastedWindow struct {
+// Per-currency rolling-window budget holds (#494). One row per in-flight/settled charge; used/reserved/remaining are windowed SUM() over created_at within one currency.
+type OpenrailsBudgetInflightHold struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// NULL = tenant-wide default; non-NULL = per-customer override taking precedence for that customer.
-	CustomerID *uuid.UUID
-	// JSONB array of {key, window_seconds, limit_micros}: at most limit_micros of wasted $ per window; admit denies when an actor is over.
-	Windows        []byte
-	WindowsVersion int64
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	CustomerID uuid.UUID
+	// Caller-supplied opaque principal string whose rolling money-budget windows are capped.
+	InvokerID string
+	// Native OpenRails currency code; Go registry is the authority.
+	Currency string
+	// Reserved amount in the row currency internal precision.
+	Amount int64
+	// Captured amount in the row currency internal precision.
+	Captured  int64
+	Status    string
+	Source    string
+	SourceID  string
+	CreatedAt time.Time
+	ExpiresAt *time.Time
 }
 
-// Hierarchical money-budget policies (#473): {scope, owner, windows[]} composed in one admit verdict over the one payer balance. owner=platform rows are writable only via the platform path (the subject cannot see/loosen them); owner=subject rows are the subject's own caps.
+// Hierarchical money-budget policies (#473): {scope, owner, windows[]} composed in one admit verdict over the one payer balance. owner=platform rows are writable only via the platform path; owner=subject rows are the subject's own caps.
 type OpenrailsBudgetPolicy struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Scope      string
-	// platform (set by us; subject cannot edit/see) | subject (the subject's own cap). The write-authz split.
+	// platform (set by us; subject cannot edit/see) | subject (the subject's own cap).
 	Owner string
 	// Immutable scope discriminator: role uuid (scope=role) or invoker string (scope=invoker); empty for scope=subject. Never a slug/name.
 	ScopeKey      string
@@ -188,39 +195,22 @@ type OpenrailsBudgetPolicy struct {
 	UpdatedAt     time.Time
 }
 
-// Rolling-window money-budget reservations (issue #304). One row per in-flight/settled charge against an actor's passed-in windows; used/reserved/remaining are windowed SUM() over created_at. Idempotent on (tenant, tenant subject, actor, source, source_id).
-type OpenrailsBudgetReservation struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	// Caller-supplied principal string whose rolling money-budget windows are capped. Opaque to OpenRails.
-	InvokerID      string
-	AmountMicros   int64
-	CapturedMicros int64
-	Status         string
-	Source         string
-	SourceID       string
-	CreatedAt      time.Time
-	ExpiresAt      *time.Time
-	Currency       string
-}
-
-// Per-(tenant, tenant subject, actor, window_key) fixed-window anchor (#337). session: window_start rewritten on reopen; fixed: window_start derived from anchor. Locked FOR UPDATE in Reserve as the boundary-rollover serialization point.
+// Per-(merchant, customer, invoker, currency, window_key) fixed-window anchor (#337/#494). session: window_start rewritten on reopen; fixed: window_start derived from anchor. Locked FOR UPDATE in Reserve as the boundary-rollover serialization point.
 type OpenrailsBudgetWindowState struct {
 	ID            uuid.UUID
 	MerchantID    uuid.UUID
 	CustomerID    uuid.UUID
 	InvokerID     string
+	Currency      string
 	WindowKey     string
 	Cadence       string
 	WindowSeconds int64
-	// First-ever window open for this (subject, actor, window_key); fixed-cadence boundaries are anchor + k*window_seconds.
+	// First-ever window open for this (customer, invoker, currency, window_key); fixed-cadence boundaries are anchor + k*window_seconds.
 	Anchor time.Time
 	// Start of the most recently OPENED window. Authoritative for session cadence; for fixed cadence the current start is derived from anchor at read time.
 	WindowStart time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-	Currency    string
 }
 
 // Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.
@@ -274,18 +264,18 @@ type OpenrailsCustomCreditType struct {
 	UpdatedAt time.Time
 }
 
-// OpenRails payable identity — a PURE balance account keyed by its UUID id (#491). (id, merchant_id): id is the payable UUID (#364); merchant_id scopes it for RLS. NOT verified by OpenRails (the merchant asserts it). All money_* tables FK customers(id).
+// OpenRails payable identity. id is the payable UUID; org-bound issuers resolve one customer per (merchant, org_id), org-less issuers resolve by (merchant, issuer, subject), and native/embedded callers may materialize the subject UUID directly as id.
 type OpenrailsCustomer struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
+	// #491 org-bound payer natural key: authkit org id. One customer per (merchant, org). NULL for org-less/native payers.
+	OrgID *string
+	// #491 org-less payer natural key part: validated issuer. NULL for org-bound and native payers.
+	Issuer *string
+	// #491 org-less payer natural key part: merchant-supplied stable subject. NULL for org-bound and native payers.
+	Subject    *string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
-	// #491 org-bound payer natural key: authkit org id (issuer is org-bound). One customer per (merchant, org). NULL for org-less/native payers.
-	OrgID *string
-	// #491 org-less payer natural key part: the validated issuer. NULL for org-bound and for native (subject==id) payers.
-	Issuer *string
-	// #491 org-less payer natural key part: the merchant-supplied STABLE subject uuid. NULL for org-bound and native payers.
-	Subject *string
 }
 
 type OpenrailsEntitlement struct {
@@ -353,6 +343,17 @@ type OpenrailsInvoice struct {
 	MoneyMovements []byte
 	Status         string
 	FinalizedAt    *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// Operator-configurable flat per-invoker wasted-spend policy (#496): one windows[{key,window_seconds,limit}] set per merchant. Payer wasted-spend budgets remain tier-graduated in tier_policies.policy.bad_spend_windows.
+type OpenrailsInvokerWastedSpendPolicy struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// JSONB array of {key, window_seconds, limit}: at most limit of wasted spend per invoker window; admit denies when an invoker is over.
+	Windows        []byte
+	WindowsVersion int64
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -438,7 +439,7 @@ type OpenrailsMerchantSecret struct {
 	UpdatedAt  time.Time
 }
 
-// amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
+// Spendable money blocks. Amount values use the row currency internal precision.
 type OpenrailsMoneyBlock struct {
 	ID                  uuid.UUID
 	OriginalAmount      int64
@@ -452,27 +453,32 @@ type OpenrailsMoneyBlock struct {
 	Currency string
 }
 
-// Per-(tenant, tenant subject, currency) money spend policy + money-in config. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD). Tensorhub SETS these; OpenRails STORES + ENFORCES them.
+// Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision.
 type OpenrailsMoneySetting struct {
-	ID                        uuid.UUID
-	MerchantID                uuid.UUID
-	CustomerID                uuid.UUID
-	BillingMode               string
-	MaxSpendPerDayMicros      *int64
-	MaxSpendPerMonthMicros    *int64
-	MaxOutstandingOwedMicros  *int64
-	LowBalanceThresholdMicros *int64
-	AutoTopupEnabled          bool
-	AutoTopupAmountCents      *int64
-	AutoTopupPaymentMethodID  *uuid.UUID
-	DefaultCreditExpiryDays   *int32
-	HardStopOnBreach          bool
-	AlertThresholdPct         int32
-	OutstandingOwedMicros     int64
-	LastAlertAt               *time.Time
-	LastTopupAt               *time.Time
-	CreatedAt                 time.Time
-	UpdatedAt                 time.Time
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	BillingMode string
+	// Optional daily spend cap in the row currency internal precision; NULL = uncapped.
+	MaxSpendPerDay *int64
+	// Optional monthly spend cap in the row currency internal precision; NULL = uncapped.
+	MaxSpendPerMonth *int64
+	// Optional arrears owed ceiling in the row currency internal precision; NULL = uncapped.
+	MaxOutstandingOwedAmount *int64
+	// Optional low-balance trigger in the row currency internal precision.
+	LowBalanceThreshold      *int64
+	AutoTopupEnabled         bool
+	AutoTopupAmountCents     *int64
+	AutoTopupPaymentMethodID *uuid.UUID
+	DefaultCreditExpiryDays  *int32
+	HardStopOnBreach         bool
+	AlertThresholdPct        int32
+	// Current arrears owed amount in the row currency internal precision.
+	OutstandingOwedAmount int64
+	LastAlertAt           *time.Time
+	LastTopupAt           *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 	// True once the account has a verified payment method (set after a successful $1 auth-and-void verification charge — issue #299). The charge itself is a separate slice.
 	VerifiedPaymentMethod bool
 	VerifiedAt            *time.Time
@@ -480,35 +486,36 @@ type OpenrailsMoneySetting struct {
 	SuspendedAt   *time.Time
 	SuspendReason *string
 	Tier          *string
+	// auto = tier maintained by tier_schedule auto-graduation; admin = explicit override that auto-graduation must not overwrite.
+	TierSource string
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
 	Currency string
-	// auto = tier maintained by the tier_schedule auto-graduation (#476); admin = explicit override that auto-graduation must not overwrite.
-	TierSource string
-	// Admin-set per-account arrears credit line (#489): under billing_mode=arrears the balance may go negative up to this amount; AdmitHold denies insufficient_credit when a new hold would exceed it. 0 = off (prepaid/existing-arrears behavior unchanged). NOT self-serve.
-	CreditLimitMicros int64
+	// Admin-set arrears credit line in the row currency internal precision. 0 = off.
+	CreditLimitAmount int64
 }
 
-// Optional per-(actor, currency) money spend caps for a tenant subject. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD). actor is a caller-supplied opaque principal string.
+// Optional per-(invoker, currency) money spend caps for a customer. Amount values use the row currency internal precision.
 type OpenrailsMoneySpendLimit struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	// Caller-supplied principal string whose spend is capped by this row. Opaque to OpenRails.
-	InvokerID              string
-	MaxSpendPerDayMicros   *int64
-	MaxSpendPerMonthMicros *int64
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	// Caller-supplied opaque principal string whose spend is capped by this row.
+	InvokerID        string
+	InvokerType      *string
+	MaxSpendPerDay   *int64
+	MaxSpendPerMonth *int64
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
-	Currency    string
-	InvokerType *string
+	Currency string
 }
 
-// amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
+// Ledger transactions. Amount values use the row currency internal precision.
 type OpenrailsMoneyTransaction struct {
 	ID uuid.UUID
-	// Caller-supplied principal string (e.g. a username slug) that caused this charge. Opaque to OpenRails; used as the per-actor spend-cap grouping key and as attribution.
-	InvokerID string
+	// Caller-supplied principal string that caused this charge. Opaque to OpenRails; used as the per-invoker spend-cap grouping key and as attribution.
+	InvokerID   string
+	InvokerType *string
 	// Caller-supplied free-form string for what the charge was for (charge-A was for resource-B). Opaque to OpenRails; nullable.
 	Resource *string
 	// Optional caller-supplied long-tail attribution. Opaque to OpenRails; joins use source/source_id, never these.
@@ -527,17 +534,16 @@ type OpenrailsMoneyTransaction struct {
 	UpdatedAt        time.Time
 	MerchantID       uuid.UUID
 	CustomerID       uuid.UUID
-	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority. amount is this currency's minor unit.
-	Currency    string
-	InvokerType *string
+	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry defines the amount precision.
+	Currency string
 }
 
-// Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
+// Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. Amount values use the row currency internal precision.
 type OpenrailsMoneyWindow struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	// Total reserved for this window (open + refills). Reflected in money_balances.held_balance while status=open.
+	// Total reserved for this window (open + refills). Held balance is derived from active holds plus open windows.
 	HeldAmount int64
 	// Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.
 	SettledAmount int64
@@ -859,29 +865,29 @@ type OpenrailsSubscription struct {
 	CustomerID          uuid.UUID
 }
 
-// Per-tenant-subject tier throughput policies for the admission check (issue #298). MONEY caps stay in money_accounts; rolling money budgets are #304.
+// Per-tier admission policy. customer_id NULL is the merchant-wide default; non-NULL is a per-customer override. Money values use the request currency internal precision.
 type OpenrailsTierPolicy struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// NULL = tenant-wide default tier policy (#477 platform capacity ladder, declared once); non-NULL = per-subject override taking precedence for that subject.
+	// NULL = merchant-wide default tier policy (#477); non-NULL = per-customer override taking precedence for that customer.
 	CustomerID *uuid.UUID
 	Tier       string
-	// JSONB tier policy: throughput windows, release_windows, queue_limits, entitled_resources, budget_windows, (#487) max_concurrent_held_micros + max_single_charge_micros, and (#488) bad_spend_windows (per-payer $-valued wasted/failed-spend budget windows; admit denies abuse_rate_limited when over). All generic + $-denominated.
+	// JSONB tier policy: throughput windows, release_windows, queue_limits, entitled_resources, budget_windows, max_concurrent_held_amount, max_single_charge_amount, and bad_spend_windows. Money values use the request currency internal precision.
 	Policy        []byte
 	PolicyVersion int64
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
 
-// Persisted tier ladder (#476): rungs[{tier,min_cumulative_paid_micros}] declared once per tenant (or per tenant-subject override). OpenRails auto-maintains money_accounts.tier from cumulative_paid vs this schedule on the deposit path; admin tier override (tier_source=admin) still wins.
+// Persisted tier ladder (#476): rungs declared once per merchant, or as a per-customer override. OpenRails auto-maintains money_settings.tier from cumulative paid spend unless tier_source=admin.
 type OpenrailsTierSchedule struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// NULL = tenant-wide default schedule; non-NULL = per-subject override taking precedence for that subject.
+	// NULL = merchant-wide default schedule; non-NULL = per-customer override taking precedence for that customer.
 	CustomerID *uuid.UUID
-	// platform (set by us; subject cannot edit/see) | subject. Mirrors the #473 budget-policy owner split.
+	// platform (set by us; subject cannot edit/see) | subject.
 	Owner string
-	// Ordered JSONB array of {tier, min_cumulative_paid_micros}; a payer's tier = highest rung whose min_cumulative_paid_micros <= cumulative_paid.
+	// Ordered JSONB array of {tier, min_cumulative_paid_amount}; a payer's tier = highest rung whose min_cumulative_paid_amount <= cumulative_paid.
 	Rungs           []byte
 	ScheduleVersion int64
 	CreatedAt       time.Time
@@ -893,8 +899,11 @@ type OpenrailsUsageEvent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	// Caller-supplied principal string (e.g. a username slug) that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.
-	InvokerID string
+	// Caller-supplied principal string that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.
+	InvokerID   string
+	InvokerType *string
+	// Native OpenRails currency code; amount uses this currency internal precision.
+	Currency string
 	// Caller-supplied free-form string for what was metered (tensorhub: endpoint slug; doujins: plan/item slug). Opaque to OpenRails; nullable, not a FK.
 	Resource           *string
 	EventType          string
@@ -906,8 +915,6 @@ type OpenrailsUsageEvent struct {
 	Metadata           []byte
 	OccurredAt         time.Time
 	CreatedAt          time.Time
-	InvokerType        *string
-	Currency           string
 }
 
 // External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.

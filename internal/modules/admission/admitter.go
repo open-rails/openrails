@@ -26,21 +26,18 @@ const DefaultTier = "free"
 
 // Generic $-denominated admit deny codes (#487).
 const (
-	// DenySingleChargeCap: the request's EstimateMicros exceeds the tier's
-	// max_single_charge_micros per-charge ceiling.
+	// DenySingleChargeCap: the request's EstimatedAmount exceeds the tier's
+	// max_single_charge_amount per-charge ceiling.
 	DenySingleChargeCap = "single_charge_cap_exceeded"
 	// DenyConcurrentHeldCap: placing this hold would push the payer's active
-	// (un-settled) hold $ sum past the tier's max_concurrent_held_micros.
+	// (un-settled) hold $ sum past the tier's max_concurrent_held_amount.
 	DenyConcurrentHeldCap = "concurrent_held_cap_exceeded"
 )
 
-// Wasted-spend deny codes (#488). Reuses the generic abuse/failure rate-limit
-// vocabulary: the PAYER over its tier bad_spend budget is abuse_rate_limited;
-// the ACTOR (invoker) over its flat budget is failure_rate_limited.
-const (
-	DenyAbuseRateLimited   = "abuse_rate_limited"
-	DenyFailureRateLimited = "failure_rate_limited"
-)
+// Wasted-spend deny codes (#488/#497). Payer bad_spend is no longer an admit
+// cutoff; direct-payer overage is charged at report time. The remaining
+// admit-time wasted-spend deny is the delegated invoker flat cutoff.
+const DenyFailureRateLimited = "failure_rate_limited"
 
 type Admitter struct {
 	limiter      *ratelimit.Limiter
@@ -51,10 +48,10 @@ type Admitter struct {
 	budgetScopes *BudgetPolicyStore      // optional; nil disables hierarchical budget scopes (#473)
 
 	// wasted is the optional $-valued wasted-spend guard (#488); nil disables the
-	// wasted-spend admit gate. actorWastedWindows is the FLAT per-actor budget
+	// wasted-spend admit gate. invokerWastedWindows is the FLAT per-invoker budget
 	// default (invokers aren't trusted, so their budget isn't tier-graduated).
-	wasted             *abuse.WastedSpendGuard
-	actorWastedWindows []abuse.WastedWindow
+	wasted               *abuse.WastedSpendGuard
+	invokerWastedWindows []abuse.WastedWindow
 }
 
 func NewAdmitter(limiter *ratelimit.Limiter, moneySvc *money.MoneyService, policies *TierPolicyStore, blocklist *abuse.BlocklistService, budgetSvc *budgets.Service) *Admitter {
@@ -63,21 +60,20 @@ func NewAdmitter(limiter *ratelimit.Limiter, moneySvc *money.MoneyService, polic
 
 // WithBudgetScopes enables hierarchical budget-scope composition (#473): the
 // platform (subject) cap, the subject's self (subject) cap, every (subject,role)
-// cap the actor holds, plus the (subject,actor) cap — all reserved in one
-// verdict. Nil store leaves only the pre-#473 (subject,actor) tier-policy path.
+// cap the invoker holds, plus the (subject,invoker) cap — all reserved in one
+// verdict. Nil store leaves only the pre-#473 (subject,invoker) tier-policy path.
 func (a *Admitter) WithBudgetScopes(store *BudgetPolicyStore) *Admitter {
 	a.budgetScopes = store
 	return a
 }
 
-// WithWastedSpend enables the $-valued wasted-spend admit gate (#488): deny when
-// the PAYER is over its per-tier bad_spend budget (abuse_rate_limited) or the
-// ACTOR is over the flat per-actor wasted budget (failure_rate_limited).
-// actorWindows is the flat per-actor default; the payer windows come from the
-// resolved tier policy. Nil guard leaves the gate off.
-func (a *Admitter) WithWastedSpend(guard *abuse.WastedSpendGuard, actorWindows []abuse.WastedWindow) *Admitter {
+// WithWastedSpend enables the delegated-invoker wasted-spend admit gate (#497):
+// deny delegated invokers when they are over the flat per-invoker wasted budget.
+// Direct payer credentials are not cut off here; their wasted-spend reports use
+// payer grace then normal ledger charging.
+func (a *Admitter) WithWastedSpend(guard *abuse.WastedSpendGuard, invokerWindows []abuse.WastedWindow) *Admitter {
 	a.wasted = guard
-	a.actorWastedWindows = actorWindows
+	a.invokerWastedWindows = invokerWindows
 	return a
 }
 
@@ -90,12 +86,13 @@ type BlockCheck struct {
 
 // AdmitRequest is one admission decision input.
 type AdmitRequest struct {
-	CustomerID identity.CustomerID // the tenant subject
-	Actor      string              // canonical actor: user:<id> / serviceToken:<key_id> / <issuer>:<sub>
-	Tier       string              // the actor's tier (selects the throughput policy)
-	Resource   string              // caller-supplied resource string (namespaces the throughput counters)
+	CustomerID  identity.CustomerID // the tenant subject
+	Invoker     string              // canonical invoker: user:<id> / serviceToken:<key_id> / <issuer>:<sub>
+	InvokerType string              // "payer" for direct payer credential; empty/other = delegated
+	Tier        string              // the invoker's tier (selects the throughput policy)
+	Resource    string              // caller-supplied resource string (namespaces the throughput counters)
 
-	// Roles are the immutable role UUIDs the actor holds (#473). The host reads
+	// Roles are the immutable role UUIDs the invoker holds (#473). The host reads
 	// them from the delegated JWT/permission set. Each role with a matching
 	// (subject, role) budget policy gates this request's spend.
 	Roles []uuid.UUID
@@ -104,11 +101,12 @@ type AdmitRequest struct {
 	// {"request":1,"token":150}.
 	Amounts map[string]int64
 
-	// Money axis (skipped when EstimateMicros == 0). Money is always micro-dollars.
-	EstimateMicros int64
-	Source         string    // idempotency namespace (e.g. "usage")
-	SourceID       string    // idempotency id (e.g. request id)
-	ExpiresAt      time.Time // hold expiry
+	// Money axis (skipped when EstimatedAmount == 0). Amount precision is implied by Currency.
+	Currency        string
+	EstimatedAmount int64
+	Source          string    // idempotency namespace (e.g. "usage")
+	SourceID        string    // idempotency id (e.g. request id)
+	ExpiresAt       time.Time // hold expiry
 
 	// BlockChecks (optional) are payment identifiers to test against the #300
 	// blocklist (card fingerprint, processor customer, email, ip).
@@ -125,7 +123,7 @@ type AdmitDecision struct {
 	Windows     []ratelimit.WindowInfo   // for x-ratelimit-* headers
 	Hold        *models.MoneyTransaction // the placed money hold when allowed
 
-	// BudgetReservationID is the (subject,actor)-scope money-budget reservation
+	// BudgetReservationID is the (subject,invoker)-scope money-budget reservation
 	// placed when allowed (#304, kept for back-compat); BudgetWindows is the
 	// flattened per-window state for introspection.
 	BudgetReservationID uuid.UUID
@@ -133,7 +131,7 @@ type AdmitDecision struct {
 
 	// BudgetScopes is the per-scope state for the composed multi-scope verdict
 	// (#473): platform (subject) + subject (subject) + every (subject,role) +
-	// (subject,actor). On a budget deny, the blocking scope is the one whose
+	// (subject,invoker). On a budget deny, the blocking scope is the one whose
 	// windows contain the breached (Allowed=false) window.
 	BudgetScopes []budgets.ScopeStatus
 	// BudgetSource/BudgetSourceID are the idempotency coords the reservations
@@ -154,19 +152,19 @@ type AdmitDecision struct {
 	// scheduler in-flight concurrency cap) without a second round-trip.
 	ResolvedTier string
 
-	// MaxConcurrentHeldMicros is the resolved tier's cap on the sum of the payer's
+	// MaxConcurrentHeldAmount is the resolved tier's cap on the sum of the payer's
 	// active (un-settled) hold $ (#487; 0 = uncapped). Surfaced on EVERY verdict so
 	// a host that enforces true occupancy itself reads cap + per-job estimate and
 	// queues in its own scheduler rather than relying on OpenRails' hard deny.
-	MaxConcurrentHeldMicros int64
-	// HeldMicros is the payer's active-hold $ sum AS EVALUATED for this verdict
+	MaxConcurrentHeldAmount int64
+	// HeldAmount is the payer's active-hold $ sum AS EVALUATED for this verdict
 	// (#487): on an allowed verdict it INCLUDES the hold just placed; on a
 	// concurrent-held deny it is the pre-existing sum the new hold would have
 	// breached. Lets the host reason about remaining headroom = cap - held.
-	HeldMicros int64
-	// MaxSingleChargeMicros is the resolved tier's per-charge ceiling (#487; 0 =
+	HeldAmount int64
+	// MaxSingleChargeAmount is the resolved tier's per-charge ceiling (#487; 0 =
 	// uncapped), surfaced for host introspection.
-	MaxSingleChargeMicros int64
+	MaxSingleChargeAmount int64
 }
 
 // Admit runs throughput then money and returns the unified decision.
@@ -185,8 +183,8 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	}
 
 	// Suspension (#299): a past_due/suspended account is denied all spend.
-	if req.EstimateMicros > 0 {
-		suspended, err := a.money.IsSuspended(ctx, req.CustomerID)
+	if req.EstimatedAmount > 0 {
+		suspended, err := a.money.IsSuspended(ctx, req.CustomerID, req.Currency)
 		if err != nil {
 			return AdmitDecision{}, err
 		}
@@ -197,8 +195,8 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 
 	// PM-on-file gate (#299): a credit-line (arrears) account must have a verified
 	// payment method before it may spend on credit.
-	if req.EstimateMicros > 0 {
-		needV, err := a.money.ArrearsRequiresVerification(ctx, req.CustomerID)
+	if req.EstimatedAmount > 0 {
+		needV, err := a.money.ArrearsRequiresVerification(ctx, req.CustomerID, req.Currency)
 		if err != nil {
 			return AdmitDecision{}, err
 		}
@@ -211,7 +209,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// spend) > lowest default (#300 new-account low default).
 	tier := req.Tier
 	if tier == "" {
-		if req.EstimateMicros > 0 {
+		if req.EstimatedAmount > 0 {
 			if t, terr := a.money.GetTier(ctx, req.CustomerID); terr == nil && t != "" {
 				tier = t
 			}
@@ -231,17 +229,17 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	}
 
 	// Per-charge ceiling (#487): a single Admit whose estimate exceeds the tier's
-	// max_single_charge_micros is a generic runaway guard — reject up front.
-	if pol.MaxSingleChargeMicros > 0 && req.EstimateMicros > pol.MaxSingleChargeMicros {
+	// max_single_charge_amount is a generic runaway guard — reject up front.
+	if pol.MaxSingleChargeAmount > 0 && req.EstimatedAmount > pol.MaxSingleChargeAmount {
 		return AdmitDecision{
 			Allowed: false, BlockedBy: "money", DenyCode: DenySingleChargeCap,
-			ResolvedTier: tier, MaxSingleChargeMicros: pol.MaxSingleChargeMicros,
-			MaxConcurrentHeldMicros: pol.MaxConcurrentHeldMicros,
+			ResolvedTier: tier, MaxSingleChargeAmount: pol.MaxSingleChargeAmount,
+			MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount,
 		}, nil
 	}
 
 	// --- throughput axis (cheap Redis op; counts even if money later denies) ---
-	// KEY = (tenant, payer, endpoint-release) — #472 G1. The invoker (actor) is
+	// KEY = (tenant, payer, endpoint-release) — #472 G1. The invoker (invoker) is
 	// DELIBERATELY NOT in the key: per-invoker throughput is bypassable (a payer
 	// can register unlimited invokers to multiply its limit), so the capacity
 	// limit AGGREGATES across all of a payer's invokers. `Resource` is the
@@ -252,23 +250,13 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	}
 	tenantID := tid.UUID()
 
-	// --- wasted-spend $ budgets (#488): deny when the PAYER is over its per-tier
-	// bad_spend budget (abuse_rate_limited) or the ACTOR is over the flat per-actor
-	// wasted budget (failure_rate_limited). Cheap Redis reads; a denied request
-	// places no hold. The host reports the wasted $ out-of-band via
-	// ReportWastedSpend. ---
+	// --- wasted-spend $ budgets (#497): delegated invokers are cut off when
+	// their flat per-invoker wasted budget is over. Direct payer credentials are
+	// not denied here; ReportWastedSpend charges over-grace waste through the
+	// normal ledger. ---
 	if a.wasted != nil && a.wasted.Enabled() {
-		if pw := toWastedWindows(pol.BadSpendWindows); len(pw) > 0 {
-			over, _, werr := a.wasted.PayerOverBudget(ctx, tenantID.String(), req.CustomerID.UUID().String(), pw)
-			if werr != nil {
-				return AdmitDecision{}, werr
-			}
-			if over {
-				return AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: DenyAbuseRateLimited, ResolvedTier: tier}, nil
-			}
-		}
-		if req.Actor != "" && len(a.actorWastedWindows) > 0 {
-			over, _, werr := a.wasted.ActorOverBudget(ctx, tenantID.String(), req.Actor, a.actorWastedWindows)
+		if !identity.IsDirectPayerInvoker(req.InvokerType) && req.Invoker != "" && len(a.invokerWastedWindows) > 0 {
+			over, _, werr := a.wasted.InvokerOverBudget(ctx, tenantID.String(), req.CustomerID.UUID().String(), req.Invoker, money.NormalizeCurrency(req.Currency), a.invokerWastedWindows)
 			if werr != nil {
 				return AdmitDecision{}, werr
 			}
@@ -343,7 +331,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	var budgetResID uuid.UUID
 	var budgetWindows []budgets.WindowStatus
 	var budgetScopeStatuses []budgets.ScopeStatus
-	if a.budgets != nil && req.EstimateMicros > 0 {
+	if a.budgets != nil && req.EstimatedAmount > 0 {
 		ttl := time.Hour
 		if !req.ExpiresAt.IsZero() {
 			if d := time.Until(req.ExpiresAt); d > 0 {
@@ -356,9 +344,9 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 			return AdmitDecision{}, err
 		}
 		if len(scopes) > 0 {
-			// Budgets and the ledger are BOTH micro-dollars (#337/#463). The
+			// Budgets and the ledger use the same currency internal precision. The
 			// estimate reserves 1:1 against every matching scope's windows.
-			statuses, ok, blockIdx, err := a.budgets.ReserveScopes(ctx, req.CustomerID, scopes, req.EstimateMicros, req.Source, req.SourceID, ttl)
+			statuses, ok, blockIdx, err := a.budgets.ReserveScopes(ctx, req.CustomerID, scopes, req.Currency, req.EstimatedAmount, req.Source, req.SourceID, ttl)
 			if err != nil {
 				return AdmitDecision{}, err
 			}
@@ -393,16 +381,16 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// projection. A host that enforces true occupancy itself reads the cap value +
 	// estimate off the verdict and queues in its own scheduler instead of taking
 	// this hard deny (so OpenRails' gate is the committed-$ admission backstop). ---
-	var heldMicros int64
-	if req.EstimateMicros > 0 && pol.MaxConcurrentHeldMicros > 0 {
-		held, herr := a.money.ActiveHeldMicros(ctx, req.CustomerID)
+	var heldAmount int64
+	if req.EstimatedAmount > 0 && pol.MaxConcurrentHeldAmount > 0 {
+		held, herr := a.money.ActiveHeldForCurrency(ctx, req.CustomerID, req.Currency)
 		if herr != nil {
 			return AdmitDecision{}, herr
 		}
-		heldMicros = held
-		if held+req.EstimateMicros > pol.MaxConcurrentHeldMicros {
+		heldAmount = held
+		if held+req.EstimatedAmount > pol.MaxConcurrentHeldAmount {
 			if len(budgetScopeStatuses) > 0 && a.budgets != nil {
-				_ = a.budgets.ReleaseByCoords(ctx, req.CustomerID, req.Source, req.SourceID)
+				_ = a.budgets.ReleaseByCoords(ctx, req.CustomerID, req.Currency, req.Source, req.SourceID)
 			}
 			if queueAcquired {
 				_ = a.limiter.ReleaseQueueByRequest(ctx, req.Source, req.SourceID)
@@ -410,21 +398,22 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 			return AdmitDecision{
 				Allowed: false, BlockedBy: "money", DenyCode: DenyConcurrentHeldCap,
 				Windows: tp.Windows, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses,
-				ResolvedTier: tier, MaxConcurrentHeldMicros: pol.MaxConcurrentHeldMicros,
-				MaxSingleChargeMicros: pol.MaxSingleChargeMicros, HeldMicros: held,
+				ResolvedTier: tier, MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount,
+				MaxSingleChargeAmount: pol.MaxSingleChargeAmount, HeldAmount: held,
 			}, nil
 		}
 	}
 
 	// --- money axis (reserve the estimate via the existing ledger gate) ---
-	if req.EstimateMicros > 0 {
+	if req.EstimatedAmount > 0 {
 		res, err := a.money.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-			Payer:          req.CustomerID,
-			Actor:          req.Actor,
-			EstimateMicros: req.EstimateMicros,
-			Source:         req.Source,
-			SourceID:       req.SourceID,
-			ExpiresAt:      req.ExpiresAt,
+			Payer:           req.CustomerID,
+			Invoker:         req.Invoker,
+			Currency:        req.Currency,
+			EstimatedAmount: req.EstimatedAmount,
+			Source:          req.Source,
+			SourceID:        req.SourceID,
+			ExpiresAt:       req.ExpiresAt,
 		})
 		if err != nil {
 			return AdmitDecision{}, err
@@ -433,33 +422,33 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 			// Roll back ALL reserved budget scopes so a money-denied request
 			// doesn't consume any of the payer's budget windows.
 			if len(budgetScopeStatuses) > 0 && a.budgets != nil {
-				_ = a.budgets.ReleaseByCoords(ctx, req.CustomerID, req.Source, req.SourceID)
+				_ = a.budgets.ReleaseByCoords(ctx, req.CustomerID, req.Currency, req.Source, req.SourceID)
 			}
 			// Free any queue units held above (money deny must not leak the queue).
 			if queueAcquired {
 				_ = a.limiter.ReleaseQueueByRequest(ctx, req.Source, req.SourceID)
 			}
-			return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: res.Decision.DenyCode, Windows: tp.Windows, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, ResolvedTier: tier, MaxConcurrentHeldMicros: pol.MaxConcurrentHeldMicros, MaxSingleChargeMicros: pol.MaxSingleChargeMicros, HeldMicros: heldMicros}, nil
+			return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: res.Decision.DenyCode, Windows: tp.Windows, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, ResolvedTier: tier, MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount, MaxSingleChargeAmount: pol.MaxSingleChargeAmount, HeldAmount: heldAmount}, nil
 		}
 		// Allowed: the hold is now placed, so the active-held sum includes it.
-		return AdmitDecision{Allowed: true, Windows: tp.Windows, Hold: res.Hold, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier, MaxConcurrentHeldMicros: pol.MaxConcurrentHeldMicros, MaxSingleChargeMicros: pol.MaxSingleChargeMicros, HeldMicros: heldMicros + req.EstimateMicros}, nil
+		return AdmitDecision{Allowed: true, Windows: tp.Windows, Hold: res.Hold, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier, MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount, MaxSingleChargeAmount: pol.MaxSingleChargeAmount, HeldAmount: heldAmount + req.EstimatedAmount}, nil
 	}
 
-	return AdmitDecision{Allowed: true, Windows: tp.Windows, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier, MaxConcurrentHeldMicros: pol.MaxConcurrentHeldMicros, MaxSingleChargeMicros: pol.MaxSingleChargeMicros}, nil
+	return AdmitDecision{Allowed: true, Windows: tp.Windows, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier, MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount, MaxSingleChargeAmount: pol.MaxSingleChargeAmount}, nil
 }
 
 // buildBudgetScopes assembles every budget scope to reserve for this request
-// (#473): the (subject,actor) windows from the tier policy (the pre-#473 path,
+// (#473): the (subject,invoker) windows from the tier policy (the pre-#473 path,
 // always present) PLUS, when a BudgetPolicyStore is wired, the platform/subject
-// (subject) caps and every (subject,role) cap the actor holds. When no
-// BudgetPolicyStore is wired this returns ONLY the actor scope, exactly
+// (subject) caps and every (subject,role) cap the invoker holds. When no
+// BudgetPolicyStore is wired this returns ONLY the invoker scope, exactly
 // reproducing the pre-#473 single-window behavior.
 func (a *Admitter) buildBudgetScopes(ctx context.Context, req AdmitRequest, pol ResolvedPolicy) ([]budgets.ScopeReservation, error) {
 	var scopes []budgets.ScopeReservation
 
 	// (subject, invoker) — the tier-policy windows; preserves the existing path.
 	if len(pol.BudgetWindows) > 0 {
-		sc, err := budgets.MakeScopeReservation(budgets.ScopeInvoker, "subject", req.Actor, uuid.Nil, pol.BudgetWindows)
+		sc, err := budgets.MakeScopeReservation(budgets.ScopeInvoker, "subject", req.Invoker, uuid.Nil, pol.BudgetWindows)
 		if err != nil {
 			return nil, err
 		}
@@ -477,14 +466,14 @@ func (a *Admitter) buildBudgetScopes(ctx context.Context, req AdmitRequest, pol 
 	// #491 reversal: budgets are PER-INVOKER only. Subject/role POOLS are dropped;
 	// only stored per-invoker overrides matching THIS invoker apply.
 	for _, p := range policies {
-		if budgets.NormalizeScope(p.Scope) != budgets.ScopeInvoker || p.ScopeKey != req.Actor {
+		if budgets.NormalizeScope(p.Scope) != budgets.ScopeInvoker || p.ScopeKey != req.Invoker {
 			continue
 		}
 		windows := toBudgetWindows(p.Windows)
 		if len(windows) == 0 {
 			continue
 		}
-		sc, err := budgets.MakeScopeReservation(budgets.ScopeInvoker, p.Owner, req.Actor, uuid.Nil, windows)
+		sc, err := budgets.MakeScopeReservation(budgets.ScopeInvoker, p.Owner, req.Invoker, uuid.Nil, windows)
 		if err != nil {
 			return nil, err
 		}
@@ -548,9 +537,9 @@ func toWastedWindows(ws []models.BudgetWindowPolicy) []abuse.WastedWindow {
 			continue
 		}
 		out = append(out, abuse.WastedWindow{
-			Key:         w.Key,
-			Window:      time.Duration(w.WindowSeconds) * time.Second,
-			LimitMicros: w.LimitMicros,
+			Key:    w.Key,
+			Window: time.Duration(w.WindowSeconds) * time.Second,
+			Limit:  w.Limit,
 		})
 	}
 	return out

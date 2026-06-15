@@ -70,7 +70,7 @@ func sunsetIntent(t *testing.T, pda string) gen.OpenrailsProviderIntent {
 	}
 	return gen.OpenrailsProviderIntent{
 		ID:             uuid.New(),
-		MerchantID:       dbtest.TestTenantID.UUID(),
+		MerchantID:     dbtest.TestTenantID.UUID(),
 		Provider:       "solana",
 		IntentType:     TypeSolanaSunsetPlan,
 		Payload:        payload,

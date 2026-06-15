@@ -53,31 +53,31 @@ func (s *MoneyService) now() time.Time {
 // the caller and is NOT synthesized — there is no deterministic stand-in
 // derivation. For the
 // self-hosted / single-tenant personal case the tenant subject IS the authenticated
-// user's own account/personal tenant-subject UUID, so a non-UUID actor with no explicit
+// user's own account/personal tenant-subject UUID, so a non-UUID invoker with no explicit
 // payer is a programming error rather than something to paper over.
 var ErrCustomerRequired = errors.New("customer_id required")
 
 // resolveCustomer resolves the tenant subject for a money operation (issue #221, the
 // payer/billing payer). When the caller supplies an explicit tenant subject it is
 // used verbatim. Otherwise, for the self-hosted / single-tenant personal case,
-// the payer is the actor's own account/personal tenant-subject id parsed from its UUID
+// the payer is the invoker's own account/personal tenant-subject id parsed from its UUID
 // subject (identity.CustomerIDFromString). It is NEVER a synthesized stand-in.
 //
-// The actorActorID is the existing free-form actor (who caused usage); it is
-// retained for attribution and is NOT the financial payer. resolveCustomer returns
+// The invokerID is the free-form invoker (who caused usage); it is retained for
+// attribution and is NOT the financial payer. resolveCustomer returns
 // ErrCustomerRequired when no payer can be resolved.
-func resolveCustomer(payer *identity.CustomerID, actorActorID string) (identity.CustomerID, error) {
+func resolveCustomer(payer *identity.CustomerID, invokerID string) (identity.CustomerID, error) {
 	if payer != nil && !payer.IsZero() {
 		return *payer, nil
 	}
-	resolved := identity.CustomerIDFromString(actorActorID)
+	resolved := identity.CustomerIDFromString(invokerID)
 	if resolved.IsZero() {
 		return identity.CustomerID{}, ErrCustomerRequired
 	}
 	return resolved, nil
 }
 
-func (s *MoneyService) GetBalance(ctx context.Context, actorID string) (*models.MoneyBalance, error) {
+func (s *MoneyService) GetBalance(ctx context.Context, invokerID string) (*models.MoneyBalance, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -85,7 +85,7 @@ func (s *MoneyService) GetBalance(ctx context.Context, actorID string) (*models.
 	// single-tenant personal case the payer IS the user's own account/personal tenant-subject
 	// UUID — the same row the tenant-subject-owned writers stamp — so single-user reads return
 	// the right balance. customer_id is never synthesized.
-	payer, err := resolveCustomer(nil, actorID)
+	payer, err := resolveCustomer(nil, invokerID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func (s *MoneyService) GetBalance(ctx context.Context, actorID string) (*models.
 
 // GetBalanceForCustomer reads a balance scoped explicitly by tenant subject (issue
 // #221), for callers that own balances at a team org rather than a personal
-// org. The actor string is not required for an payer-scoped read.
+// org. The invoker string is not required for an payer-scoped read.
 func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyBalance, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -115,11 +115,11 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 	return s.deriveBalance(ctx, s.db.Gen(ctx), tenantID, payerID, cur)
 }
 
-func (s *MoneyService) GetTransactions(ctx context.Context, actorID string, limit, offset int) ([]models.MoneyTransaction, int, error) {
+func (s *MoneyService) GetTransactions(ctx context.Context, invokerID string, limit, offset int) ([]models.MoneyTransaction, int, error) {
 	if s == nil || s.db == nil {
 		return nil, 0, fmt.Errorf("money service not initialized")
 	}
-	payer, err := resolveCustomer(nil, actorID)
+	payer, err := resolveCustomer(nil, invokerID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -128,7 +128,7 @@ func (s *MoneyService) GetTransactions(ctx context.Context, actorID string, limi
 
 // GetTransactionsByCustomer lists money transactions for an EXPLICIT tenant subject
 // (the payer), newest first, paginated. Unlike GetTransactions it does not derive
-// the payer from a actor id — it filters customer_id directly, which is what the
+// the payer from a invoker id — it filters customer_id directly, which is what the
 // org-level billing-account usage view (issue #242) needs. RLS-scoped to the
 // request tenant via Qx(ctx).
 func (s *MoneyService) GetTransactionsByCustomer(ctx context.Context, payer identity.CustomerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
@@ -182,10 +182,10 @@ func (s *MoneyService) GetTransactionsByCustomer(ctx context.Context, payer iden
 // GetAccountSettingsForCustomer returns the stored money-account settings for an
 // payer (billing mode, spend caps, auto-top-up, expiry default), RLS-scoped to
 // the request tenant (issue #242). Never nil — missing rows return the defaults.
-func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, payer identity.CustomerID) (*models.MoneyAccount, error) {
+func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	var out *models.MoneyAccount
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		st, e := s.GetAccountSettings(ctx, payer)
+		st, e := s.GetAccountSettings(ctx, payer, currency)
 		if e != nil {
 			return e
 		}
@@ -198,16 +198,16 @@ func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, payer 
 // GetTransactionBySource looks up a single money transaction by its idempotency key.
 // For usage tracking, this is commonly used with transactionType="hold" and
 // (source, sourceID) = (metering_source, request_id).
-func (s *MoneyService) GetTransactionBySource(ctx context.Context, actorID string, currency string, transactionType string, source string, sourceID string) (*models.MoneyTransaction, error) {
+func (s *MoneyService) GetTransactionBySource(ctx context.Context, invokerID string, currency string, transactionType string, source string, sourceID string) (*models.MoneyTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	actorID = strings.TrimSpace(actorID)
+	invokerID = strings.TrimSpace(invokerID)
 	transactionType = strings.TrimSpace(transactionType)
 	source = strings.TrimSpace(source)
 	sourceID = strings.TrimSpace(sourceID)
-	if actorID == "" {
-		return nil, fmt.Errorf("actor required")
+	if invokerID == "" {
+		return nil, fmt.Errorf("invoker required")
 	}
 	if transactionType == "" {
 		return nil, fmt.Errorf("transaction_type required")
@@ -219,7 +219,7 @@ func (s *MoneyService) GetTransactionBySource(ctx context.Context, actorID strin
 		return nil, fmt.Errorf("source_id required")
 	}
 
-	payer, err := resolveCustomer(nil, actorID)
+	payer, err := resolveCustomer(nil, invokerID)
 	if err != nil {
 		return nil, err
 	}
@@ -247,12 +247,12 @@ func (s *MoneyService) GetTransactionBySource(ctx context.Context, actorID strin
 
 type DepositParams struct {
 	// CustomerID is the tenant subject that owns the deposited balance (issue #221). When
-	// nil, the payer is the actor (Actor)'s own account/personal tenant-subject UUID for the
+	// nil, the payer is the invoker (Invoker)'s own account/personal tenant-subject UUID for the
 	// self-hosted / single-tenant personal case; it is never a synthesized
-	// stand-in, and a non-UUID Actor with no explicit payer is rejected.
+	// stand-in, and a non-UUID Invoker with no explicit payer is rejected.
 	CustomerID *identity.CustomerID
-	Actor      string
-	Currency   string     // "" => DefaultCurrency (#472)
+	Invoker    string
+	Currency   string // "" => DefaultCurrency (#472)
 	Amount     int64
 	Source     string
 	SourceID   *string // #491: natural-key string (uuidv7 pk + UNIQUE natural key), not a derived uuid
@@ -277,8 +277,8 @@ func (s *MoneyService) Deposit(ctx context.Context, params DepositParams) (*mode
 	// Apply the per-account default expiry (issue #240) when requested and the
 	// caller did not set an explicit expiry.
 	if params.ExpiresAt == nil && params.ApplyAccountExpiryDefault {
-		if payer, oerr := resolveCustomer(params.CustomerID, params.Actor); oerr == nil {
-			if settings, serr := s.GetAccountSettings(ctx, payer); serr == nil &&
+		if payer, oerr := resolveCustomer(params.CustomerID, params.Invoker); oerr == nil {
+			if settings, serr := s.GetAccountSettings(ctx, payer, params.Currency); serr == nil &&
 				settings.DefaultCreditExpiryDays != nil && *settings.DefaultCreditExpiryDays > 0 {
 				exp := s.now().AddDate(0, 0, *settings.DefaultCreditExpiryDays)
 				params.ExpiresAt = &exp
@@ -328,12 +328,12 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		return nil, err
 	}
 	tenantID := tid.UUID()
-	payer, err := resolveCustomer(params.CustomerID, params.Actor)
+	payer, err := resolveCustomer(params.CustomerID, params.Invoker)
 	if err != nil {
 		return nil, err
 	}
 	payerID := payer.UUID()
-	bal, err := s.lockBalance(ctx, q, payer, params.Actor, cur)
+	bal, err := s.lockBalance(ctx, q, payer, params.Invoker, cur)
 	if err != nil {
 		return nil, err
 	}
@@ -370,7 +370,7 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		MerchantID:      tenantID,
 		CustomerID:      payerID,
 		Currency:        cur,
-		Actor:           params.Actor,
+		Invoker:         params.Invoker,
 		Amount:          params.Amount,
 		BalanceAfter:    &newBal,
 		TransactionType: "deposit",
@@ -430,7 +430,7 @@ func insertParamsFromTransaction(t *models.MoneyTransaction) gen.InsertMoneyTran
 		MerchantID:       t.MerchantID,
 		CustomerID:       t.CustomerID,
 		Currency:         normalizeCurrency(t.Currency),
-		InvokerID:        t.Actor,
+		InvokerID:        t.Invoker,
 		Resource:         t.Resource,
 		Amount:           t.Amount,
 		BalanceAfter:     t.BalanceAfter,
@@ -449,10 +449,10 @@ func insertParamsFromTransaction(t *models.MoneyTransaction) gen.InsertMoneyTran
 
 type WithdrawParams struct {
 	// CustomerID is the tenant subject to withdraw from (issue #221). When nil, the payer
-	// is the actor (Actor)'s own account/personal tenant-subject UUID for the self-hosted /
+	// is the invoker (Invoker)'s own account/personal tenant-subject UUID for the self-hosted /
 	// single-tenant personal case; it is never a synthesized stand-in.
 	CustomerID *identity.CustomerID
-	Actor      string
+	Invoker    string
 	Currency   string // "" => DefaultCurrency (#472)
 	Amount     int64
 	Source     string
@@ -481,10 +481,10 @@ func (s *MoneyService) Withdraw(ctx context.Context, params WithdrawParams) (*mo
 
 // Hold reserves money for prepay usage (issue #221: Reserve/Hold(payer) ->
 // CaptureHold(actual) -> ReleaseHold(failure/zero)). payer is the tenant subject the
-// reservation is charged against; when nil the payer is the actor (actorID)'s own
+// reservation is charged against; when nil the payer is the invokerID's own
 // account/personal tenant-subject UUID for the self-hosted / single-tenant personal case
 // (never a synthesized stand-in).
-func (s *MoneyService) Hold(ctx context.Context, payer *identity.CustomerID, actorID, currency string, amount int64, source, sourceID string, expiresAt time.Time) (*models.MoneyTransaction, error) {
+func (s *MoneyService) Hold(ctx context.Context, payer *identity.CustomerID, invokerID, currency string, amount int64, source, sourceID string, expiresAt time.Time) (*models.MoneyTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -505,7 +505,7 @@ func (s *MoneyService) Hold(ctx context.Context, payer *identity.CustomerID, act
 			return terr
 		}
 		tenantID := tid.UUID()
-		customerSubject, rerr := resolveCustomer(payer, actorID)
+		customerSubject, rerr := resolveCustomer(payer, invokerID)
 		if rerr != nil {
 			return rerr
 		}
@@ -527,7 +527,7 @@ func (s *MoneyService) Hold(ctx context.Context, payer *identity.CustomerID, act
 
 		// Lock the customers row, then check derived available. Inserting the active
 		// hold row IS the held reservation (#491): SumActiveMoneyHeld picks it up.
-		bal, lerr := s.lockBalance(ctx, q, customerSubject, actorID, cur)
+		bal, lerr := s.lockBalance(ctx, q, customerSubject, invokerID, cur)
 		if lerr != nil {
 			return lerr
 		}
@@ -544,7 +544,7 @@ func (s *MoneyService) Hold(ctx context.Context, payer *identity.CustomerID, act
 			MerchantID:      tenantID,
 			CustomerID:      payerID,
 			Currency:        cur,
-			Actor:           actorID,
+			Invoker:         invokerID,
 			Amount:          0,
 			Source:          source,
 			SourceID:        &srcID,
@@ -598,7 +598,7 @@ func (s *MoneyService) CaptureHold(ctx context.Context, holdID uuid.UUID, actual
 
 		holdPayer := identity.CustomerID(h.CustomerID)
 		cur := normalizeCurrency(h.Currency)
-		bal, lerr := s.lockBalance(ctx, q, holdPayer, h.Actor, cur)
+		bal, lerr := s.lockBalance(ctx, q, holdPayer, h.Invoker, cur)
 		if lerr != nil {
 			return lerr
 		}
@@ -609,7 +609,7 @@ func (s *MoneyService) CaptureHold(ctx context.Context, holdID uuid.UUID, actual
 		// counts it; availableAfter is the available once THIS hold is released
 		// (#491: releasing held = the status flip to 'captured', no cache write).
 		availableAfter := bal.Balance - (bal.HeldBalance - authorized)
-		newBal, serr := s.captureSettleTx(ctx, q, holdPayer, h.Actor, cur, actualAmount, availableAfter)
+		newBal, serr := s.captureSettleTx(ctx, q, holdPayer, h.Invoker, cur, actualAmount, availableAfter)
 		if serr != nil {
 			return serr
 		}
@@ -683,7 +683,7 @@ func (s *MoneyService) ReleaseHold(ctx context.Context, holdID uuid.UUID) (*mode
 	return released, nil
 }
 
-func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.CustomerID, actorID, currency string, amount int64) (int64, error) {
+func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string, amount int64) (int64, error) {
 	now := s.now()
 	cur := normalizeUnit(currency)
 	tid, err := merchant.Require(ctx)
@@ -696,7 +696,7 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 	// available/credit-line gate is the CALLER's job (#491). It draws the spendable
 	// lots and errors only if the blocks physically cannot cover `amount` (a gated
 	// caller never hits that). Returns the derived balance AFTER the debit.
-	bal, err := s.lockBalance(ctx, q, payer, actorID, cur)
+	bal, err := s.lockBalance(ctx, q, payer, invokerID, cur)
 	if err != nil {
 		return 0, err
 	}
@@ -744,7 +744,7 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 // computed UNDER the lock. Every spend/hold/capture/deposit/expiry path calls
 // this before reading/mutating the customer's blocks so no two mutations on the
 // same customer interleave (no overdraft, atomic hold placement).
-func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.CustomerID, actorID, currency string) (*models.MoneyBalance, error) {
+func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string) (*models.MoneyBalance, error) {
 	cur := normalizeUnit(currency)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -800,14 +800,14 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 		return nil, err
 	}
 	tenantID := tid.UUID()
-	payer, err := resolveCustomer(params.CustomerID, params.Actor)
+	payer, err := resolveCustomer(params.CustomerID, params.Invoker)
 	if err != nil {
 		return nil, err
 	}
 	payerID := payer.UUID()
 	// Lock + derive once: gate on held-aware available (a withdraw cannot eat into
 	// reserved/held funds), then idempotency, then debit the FIFO blocks (#491).
-	bal, err := s.lockBalance(ctx, q, payer, params.Actor, cur)
+	bal, err := s.lockBalance(ctx, q, payer, params.Invoker, cur)
 	if err != nil {
 		return nil, err
 	}
@@ -829,7 +829,7 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 			return nil, gerr
 		}
 	}
-	newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, params.Actor, cur, params.Amount)
+	newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, params.Invoker, cur, params.Amount)
 	if err != nil {
 		return nil, err
 	}
@@ -839,7 +839,7 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 		MerchantID:      tenantID,
 		CustomerID:      payerID,
 		Currency:        cur,
-		Actor:           params.Actor,
+		Invoker:         params.Invoker,
 		Amount:          -params.Amount,
 		BalanceAfter:    &newBal,
 		TransactionType: "withdrawal",

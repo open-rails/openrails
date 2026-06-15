@@ -17,9 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// windowEnv provisions a migrated DB + money service + one funded payer. Money
-// has no credit_type dimension (#472); the returned currency is always USD.
-func windowEnv(t *testing.T, depositMicros int64) (context.Context, *pgxpool.Pool, *money.MoneyService, identity.CustomerID, string) {
+// windowEnv provisions a migrated DB + money service + one funded payer.
+func windowEnv(t *testing.T, depositAmount int64) (context.Context, *pgxpool.Pool, *money.MoneyService, identity.CustomerID, string) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -41,11 +40,11 @@ func windowEnv(t *testing.T, depositMicros int64) (context.Context, *pgxpool.Poo
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
 	})
 
-	if depositMicros > 0 {
+	if depositAmount > 0 {
 		_, err := svc.Deposit(ctx, money.DepositParams{
 			CustomerID: &payer,
-			Actor:      payer.UUID().String(),
-			Amount:     depositMicros,
+			Invoker:    payer.UUID().String(),
+			Amount:     depositAmount,
 			Source:     "test_deposit",
 		})
 		require.NoError(t, err)
@@ -69,7 +68,7 @@ func TestCreditWindows_Lifecycle(t *testing.T) {
 
 	// Open: funds leave available immediately (a REAL hold).
 	w, err := svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payer, Actor: "user:alice", Amount: 600,
+		Payer: payer, Invoker: "user:alice", Amount: 600,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.NoError(t, err)
@@ -166,7 +165,7 @@ func TestCreditWindows_OpenInsufficientFunds(t *testing.T) {
 	ctx, _, svc, payer, cur := windowEnv(t, 100)
 
 	_, err := svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payer, Actor: "user:poor", Amount: 200,
+		Payer: payer, Invoker: "user:poor", Amount: 200,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.ErrorIs(t, err, money.ErrInsufficientCredits)
@@ -174,20 +173,20 @@ func TestCreditWindows_OpenInsufficientFunds(t *testing.T) {
 	// A $0 payer cannot open a window at all.
 	broke := identity.CustomerIDFromString(uuid.NewString())
 	_, err = svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: broke, Actor: "user:broke", Amount: 1,
+		Payer: broke, Invoker: "user:broke", Amount: 1,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.ErrorIs(t, err, money.ErrInsufficientCredits)
 
 	// Partial funds work; the SECOND open is gated on what's left available.
 	w, err := svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payer, Actor: "user:poor", Amount: 80,
+		Payer: payer, Invoker: "user:poor", Amount: 80,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.NoError(t, err)
 	requireBalance(t, ctx, svc, payer, cur, 100, 80)
 	_, err = svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payer, Actor: "user:poor", Amount: 50,
+		Payer: payer, Invoker: "user:poor", Amount: 50,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.ErrorIs(t, err, money.ErrInsufficientCredits)
@@ -207,7 +206,7 @@ func TestCreditWindows_ExpiryReleasesRemainder(t *testing.T) {
 
 	// Already past expiry; the sweep hasn't run yet.
 	w, err := svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payer, Actor: "user:exp", Amount: 300,
+		Payer: payer, Invoker: "user:exp", Amount: 300,
 		ExpiresAt: time.Now().Add(-1 * time.Minute).UTC(),
 	})
 	require.NoError(t, err)
@@ -260,29 +259,29 @@ func TestCreditWindows_CrossPayerSettleBatch(t *testing.T) {
 	})
 	_, err := svc.Deposit(ctx, money.DepositParams{
 		CustomerID: &payerB,
-		Actor:      payerB.UUID().String(),
+		Invoker:    payerB.UUID().String(),
 		Amount:     400,
 		Source:     "test_deposit",
 	})
 	require.NoError(t, err)
 
 	wa, err := svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payerA, Actor: "user:a", Amount: 300,
+		Payer: payerA, Invoker: "user:a", Amount: 300,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.NoError(t, err)
 	wb, err := svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payerB, Actor: "user:b", Amount: 200,
+		Payer: payerB, Invoker: "user:b", Amount: 200,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.NoError(t, err)
 
 	results, err := svc.SettleWindowItems(ctx, []money.WindowSettleItem{
-		{WindowID: wa.ID, RequestID: "xp_a1", Amount: 120},               // payer A — ok
-		{WindowID: wb.ID, RequestID: "xp_b1", Amount: 30},                // payer B — ok
-		{WindowID: uuid.New(), RequestID: "xp_missing", Amount: 10},      // unknown window
-		{WindowID: wb.ID, RequestID: "xp_b_over", Amount: 1000},          // over-settle B
-		{WindowID: wa.ID, RequestID: "xp_a2", Amount: 80, Actor: "u:a2"}, // payer A again — ok
+		{WindowID: wa.ID, RequestID: "xp_a1", Amount: 120},                 // payer A — ok
+		{WindowID: wb.ID, RequestID: "xp_b1", Amount: 30},                  // payer B — ok
+		{WindowID: uuid.New(), RequestID: "xp_missing", Amount: 10},        // unknown window
+		{WindowID: wb.ID, RequestID: "xp_b_over", Amount: 1000},            // over-settle B
+		{WindowID: wa.ID, RequestID: "xp_a2", Amount: 80, Invoker: "u:a2"}, // payer A again — ok
 	})
 	require.NoError(t, err)
 	require.Len(t, results, 5)

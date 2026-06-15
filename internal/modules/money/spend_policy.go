@@ -27,20 +27,20 @@ const (
 // Spend deny codes (the shared contract surfaced as the deny_code on
 // authorize/hold and mapped to a 402 by callers — issue #237/#238).
 const (
-	DenyActorDailyCap   = "actor_daily_cap_exceeded"
-	DenyActorMonthlyCap = "actor_monthly_cap_exceeded"
-	DenyDailyCap        = "daily_cap_exceeded"
-	DenyMonthlyCap      = "monthly_cap_exceeded"
-	DenyOutstandingCap  = "outstanding_cap_exceeded"
+	DenyInvokerDailyCap   = "invoker_daily_cap_exceeded"
+	DenyInvokerMonthlyCap = "invoker_monthly_cap_exceeded"
+	DenyDailyCap          = "daily_cap_exceeded"
+	DenyMonthlyCap        = "monthly_cap_exceeded"
+	DenyOutstandingCap    = "outstanding_cap_exceeded"
 )
 
 // CapResult is the evaluation of a single cap for a spend request.
 type CapResult struct {
 	Code           string     `json:"code"`
-	Limit          int64      `json:"limit_micros"`
-	Spent          int64      `json:"spent_micros"`     // spend already counted in the window/exposure
-	Projected      int64      `json:"projected_micros"` // spent + estimate
-	Remaining      int64      `json:"remaining_micros"` // limit - spent (may be negative)
+	Limit          int64      `json:"limit"`
+	Spent          int64      `json:"spent"`     // spend already counted in the window/exposure
+	Projected      int64      `json:"projected"` // spent + estimate
+	Remaining      int64      `json:"remaining"` // limit - spent (may be negative)
 	Allowed        bool       `json:"allowed"`
 	UtilizationPct int        `json:"utilization_pct"` // projected*100/limit, capped at 1000
 	ResetAt        *time.Time `json:"reset_at,omitempty"`
@@ -154,11 +154,11 @@ func DefaultAccountSettings(payer identity.CustomerID) *models.MoneyAccount {
 	}
 }
 
-// GetAccountSettings returns the stored settings for (payer, credit_type), or a
+// GetAccountSettings returns the stored settings for (payer, currency), or a
 // DefaultAccountSettings value when none exists (never nil, never an error for a
 // missing row).
-func (s *MoneyService) GetAccountSettings(ctx context.Context, payer identity.CustomerID) (*models.MoneyAccount, error) {
-	return s.getAccountSettings(ctx, payer, DefaultCurrency)
+func (s *MoneyService) GetAccountSettings(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
+	return s.getAccountSettings(ctx, payer, currency)
 }
 
 // getAccountSettings is the currency-aware form (#472).
@@ -196,9 +196,9 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Cu
 // non-nil fields are written; nil fields keep their default / existing value.
 type AccountSettingsInput struct {
 	BillingMode              *string
-	MaxSpendPerDayMicros     *int64
-	MaxSpendPerMonthMicros   *int64
-	MaxOutstandingOwedMicros *int64
+	MaxSpendPerDay           *int64
+	MaxSpendPerMonth         *int64
+	MaxOutstandingOwedAmount *int64
 	LowBalanceThreshold      *int64
 	AutoTopupEnabled         *bool
 	AutoTopupAmountCents     *int64
@@ -209,8 +209,8 @@ type AccountSettingsInput struct {
 }
 
 // UpsertAccountSettings creates or updates the spend policy for (payer,
-// credit_type). Validates the billing mode and alert threshold.
-func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity.CustomerID, in AccountSettingsInput) (*models.MoneyAccount, error) {
+// currency). Validates the billing mode and alert threshold.
+func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity.CustomerID, currency string, in AccountSettingsInput) (*models.MoneyAccount, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -218,8 +218,8 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 	if err != nil {
 		return nil, err
 	}
-	// Materialize the payable customers row so the credit_account_settings
-	// FK (migration 076) is satisfied on a subject's first settings write (#317).
+	// Materialize the payable customers row before the subject's first settings
+	// write.
 	if err := ensureCustomer(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID()); err != nil {
 		return nil, err
 	}
@@ -236,7 +236,7 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 	tenantID := tid.UUID()
 	now := s.now()
 
-	cur, err := s.GetAccountSettings(ctx, payer)
+	cur, err := s.GetAccountSettings(ctx, payer, currency)
 	if err != nil {
 		return nil, err
 	}
@@ -244,14 +244,14 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 	if in.BillingMode != nil {
 		cur.BillingMode = *in.BillingMode
 	}
-	if in.MaxSpendPerDayMicros != nil {
-		cur.MaxSpendPerDayMicros = nilIfNeg(in.MaxSpendPerDayMicros)
+	if in.MaxSpendPerDay != nil {
+		cur.MaxSpendPerDay = nilIfNeg(in.MaxSpendPerDay)
 	}
-	if in.MaxSpendPerMonthMicros != nil {
-		cur.MaxSpendPerMonthMicros = nilIfNeg(in.MaxSpendPerMonthMicros)
+	if in.MaxSpendPerMonth != nil {
+		cur.MaxSpendPerMonth = nilIfNeg(in.MaxSpendPerMonth)
 	}
-	if in.MaxOutstandingOwedMicros != nil {
-		cur.MaxOutstandingOwedMicros = nilIfNeg(in.MaxOutstandingOwedMicros)
+	if in.MaxOutstandingOwedAmount != nil {
+		cur.MaxOutstandingOwedAmount = nilIfNeg(in.MaxOutstandingOwedAmount)
 	}
 	if in.LowBalanceThreshold != nil {
 		cur.LowBalanceThreshold = nilIfNeg(in.LowBalanceThreshold)
@@ -277,7 +277,7 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 
 	cur.MerchantID = tenantID
 	cur.CustomerID = payer.UUID()
-	cur.Currency = normalizeCurrency(cur.Currency)
+	cur.Currency = normalizeCurrency(currency)
 	// #474 invariant: money_accounts (billing settings) are external-currency-only.
 	if err := RequireBillingCurrency(cur.Currency); err != nil {
 		return nil, err
@@ -295,27 +295,27 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 	}
 	alertPct, _ := safecast.Convert[int32](cur.AlertThresholdPct)
 	if err := s.db.Gen(ctx).UpsertMoneyAccountSettings(ctx, gen.UpsertMoneyAccountSettingsParams{
-		ID:                        cur.ID,
-		MerchantID:                cur.MerchantID,
-		CustomerID:                cur.CustomerID,
-		Currency:                  cur.Currency,
-		BillingMode:               cur.BillingMode,
-		MaxSpendPerDayMicros:      cur.MaxSpendPerDayMicros,
-		MaxSpendPerMonthMicros:    cur.MaxSpendPerMonthMicros,
-		MaxOutstandingOwedMicros:  cur.MaxOutstandingOwedMicros,
-		LowBalanceThresholdMicros: cur.LowBalanceThreshold,
-		AutoTopupEnabled:          cur.AutoTopupEnabled,
-		AutoTopupAmountCents:      cur.AutoTopupAmountCents,
-		AutoTopupPaymentMethodID:  cur.AutoTopupPaymentMethod,
-		DefaultCreditExpiryDays:   expiry,
-		HardStopOnBreach:          cur.HardStopOnBreach,
-		AlertThresholdPct:         alertPct,
-		CreatedAt:                 cur.CreatedAt,
-		UpdatedAt:                 cur.UpdatedAt,
+		ID:                       cur.ID,
+		MerchantID:               cur.MerchantID,
+		CustomerID:               cur.CustomerID,
+		Currency:                 cur.Currency,
+		BillingMode:              cur.BillingMode,
+		MaxSpendPerDay:           cur.MaxSpendPerDay,
+		MaxSpendPerMonth:         cur.MaxSpendPerMonth,
+		MaxOutstandingOwedAmount: cur.MaxOutstandingOwedAmount,
+		LowBalanceThreshold:      cur.LowBalanceThreshold,
+		AutoTopupEnabled:         cur.AutoTopupEnabled,
+		AutoTopupAmountCents:     cur.AutoTopupAmountCents,
+		AutoTopupPaymentMethodID: cur.AutoTopupPaymentMethod,
+		DefaultCreditExpiryDays:  expiry,
+		HardStopOnBreach:         cur.HardStopOnBreach,
+		AlertThresholdPct:        alertPct,
+		CreatedAt:                cur.CreatedAt,
+		UpdatedAt:                cur.UpdatedAt,
 	}); err != nil {
 		return nil, err
 	}
-	return s.GetAccountSettings(ctx, payer)
+	return s.GetAccountSettings(ctx, payer, currency)
 }
 
 func nilIfNeg(v *int64) *int64 {
@@ -325,10 +325,10 @@ func nilIfNeg(v *int64) *int64 {
 	return v
 }
 
-// SetSpendLimit upserts a per-actor sub-limit under (payer, credit_type).
-// A nil day/month cap clears that cap. actor is a canonical actor string
+// SetSpendLimit upserts a per-invoker sub-limit under (payer, currency).
+// A nil day/month cap clears that cap. invoker is a canonical invoker string
 // ('serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>').
-func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.CustomerID, actor string, maxDay, maxMonth *int64) (*models.MoneySpendLimit, error) {
+func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.CustomerID, currency, invoker string, maxDay, maxMonth *int64) (*models.MoneySpendLimit, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -341,42 +341,46 @@ func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.Custome
 	if err := ensureCustomer(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID()); err != nil {
 		return nil, err
 	}
-	actor = strings.TrimSpace(actor)
-	if actor == "" {
-		return nil, fmt.Errorf("actor required")
+	invoker = strings.TrimSpace(invoker)
+	if invoker == "" {
+		return nil, fmt.Errorf("invoker required")
+	}
+	cur := normalizeCurrency(currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
 	}
 	tenantID := tid.UUID()
 	now := s.now()
 	row := &models.MoneySpendLimit{
-		ID:                     uuidutil.NewV7(),
-		MerchantID:             tenantID,
-		CustomerID:             payer.UUID(),
-		Currency:               DefaultCurrency,
-		Actor:                  actor,
-		MaxSpendPerDayMicros:   nilIfNeg(maxDay),
-		MaxSpendPerMonthMicros: nilIfNeg(maxMonth),
-		CreatedAt:              now,
-		UpdatedAt:              now,
+		ID:               uuidutil.NewV7(),
+		MerchantID:       tenantID,
+		CustomerID:       payer.UUID(),
+		Currency:         cur,
+		Invoker:          invoker,
+		MaxSpendPerDay:   nilIfNeg(maxDay),
+		MaxSpendPerMonth: nilIfNeg(maxMonth),
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	if err := s.db.Gen(ctx).UpsertMoneySpendLimit(ctx, gen.UpsertMoneySpendLimitParams{
-		ID:                     row.ID,
-		MerchantID:             row.MerchantID,
-		CustomerID:             row.CustomerID,
-		Currency:               row.Currency,
-		InvokerID:              row.Actor,
-		MaxSpendPerDayMicros:   row.MaxSpendPerDayMicros,
-		MaxSpendPerMonthMicros: row.MaxSpendPerMonthMicros,
-		CreatedAt:              row.CreatedAt,
-		UpdatedAt:              row.UpdatedAt,
+		ID:               row.ID,
+		MerchantID:       row.MerchantID,
+		CustomerID:       row.CustomerID,
+		Currency:         row.Currency,
+		InvokerID:        row.Invoker,
+		MaxSpendPerDay:   row.MaxSpendPerDay,
+		MaxSpendPerMonth: row.MaxSpendPerMonth,
+		CreatedAt:        row.CreatedAt,
+		UpdatedAt:        row.UpdatedAt,
 	}); err != nil {
 		return nil, err
 	}
 	return row, nil
 }
 
-func (s *MoneyService) getSpendLimit(ctx context.Context, tenantID, payerID uuid.UUID, currency, actor string) (*models.MoneySpendLimit, error) {
+func (s *MoneyService) getSpendLimit(ctx context.Context, tenantID, payerID uuid.UUID, currency, invoker string) (*models.MoneySpendLimit, error) {
 	row, err := s.db.Gen(ctx).GetMoneySpendLimit(ctx, gen.GetMoneySpendLimitParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency), InvokerID: actor,
+		MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency), InvokerID: invoker,
 	})
 	if err == nil {
 		return spendLimitFromGen(row), nil
@@ -390,11 +394,11 @@ func (s *MoneyService) getSpendLimit(ctx context.Context, tenantID, payerID uuid
 // spentInWindow sums spend counted against a rate cap since `since`:
 // settled spend (withdrawals + captured holds) PLUS currently-active holds
 // created in the window (so concurrent in-flight holds can't overshoot a cap).
-// When actor is non-empty the sum is scoped to that actor.
-func (s *MoneyService) spentInWindow(ctx context.Context, tenantID, payerID uuid.UUID, currency string, since time.Time, actor string) (int64, error) {
+// When invoker is non-empty the sum is scoped to that invoker.
+func (s *MoneyService) spentInWindow(ctx context.Context, tenantID, payerID uuid.UUID, currency string, since time.Time, invoker string) (int64, error) {
 	return s.db.Gen(ctx).SumSpentInMoneyWindow(ctx, gen.SumSpentInMoneyWindowParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency),
-		Since: since, InvokerID: actor,
+		Since: since, InvokerID: invoker,
 	})
 }
 
@@ -406,12 +410,22 @@ func (s *MoneyService) activeHoldsTotal(ctx context.Context, tenantID, payerID u
 	})
 }
 
-// ActiveHeldMicros sums a payer's currently-ACTIVE (un-settled) hold $ — the
-// in-flight reservation exposure the #487 max_concurrent_held cap enforces. Pure
-// $ (DefaultCurrency); generic.
-func (s *MoneyService) ActiveHeldMicros(ctx context.Context, payer identity.CustomerID) (int64, error) {
+// ActiveHeldAmount sums a payer's currently-ACTIVE (un-settled) hold in the
+// default currency. Prefer ActiveHeldForCurrency for currency-aware admission.
+func (s *MoneyService) ActiveHeldAmount(ctx context.Context, payer identity.CustomerID) (int64, error) {
+	return s.ActiveHeldForCurrency(ctx, payer, DefaultCurrency)
+}
+
+// ActiveHeldForCurrency sums a payer's active hold exposure in one native
+// currency. Caps are enforced per-currency; cross-currency comparison belongs to
+// the FX converter layer.
+func (s *MoneyService) ActiveHeldForCurrency(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
+	}
+	cur := normalizeCurrency(currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return 0, err
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -421,22 +435,25 @@ func (s *MoneyService) ActiveHeldMicros(ctx context.Context, payer identity.Cust
 	var total int64
 	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
-		total, e = s.activeHoldsTotal(ctx, tenantID, payer.UUID(), DefaultCurrency)
+		total, e = s.activeHoldsTotal(ctx, tenantID, payer.UUID(), cur)
 		return e
 	})
 	return total, err
 }
 
-// CheckSpendAllowed evaluates the spend policy for (payer, credit_type, actor)
+// CheckSpendAllowed evaluates the spend policy for (payer, currency, invoker)
 // against an estimated charge, WITHOUT moving money. It enforces, in order:
-// per-actor daily/monthly caps, org daily/monthly caps, and the outstanding
+// per-invoker daily/monthly caps, org daily/monthly caps, and the outstanding
 // exposure ceiling (settled owed + active holds + this estimate). The balance
 // itself is enforced separately by Hold.
-func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.CustomerID, actor string, estimateCents int64) (SpendDecision, error) {
+func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.CustomerID, currency, invoker string, estimateAmount int64) (SpendDecision, error) {
 	if s == nil || s.db == nil {
 		return SpendDecision{}, fmt.Errorf("money service not initialized")
 	}
-	cur := DefaultCurrency
+	cur := normalizeCurrency(currency)
+	if err := RequireBillingCurrency(cur); err != nil {
+		return SpendDecision{}, err
+	}
 	settings, err := s.getAccountSettings(ctx, payer, cur)
 	if err != nil {
 		return SpendDecision{}, err
@@ -453,57 +470,57 @@ func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.Cus
 
 	var caps []capInput
 
-	// Per-actor caps (only when a limit row exists for this actor).
-	actor = strings.TrimSpace(actor)
-	if actor != "" {
-		lim, lerr := s.getSpendLimit(ctx, tenantID, payerID, cur, actor)
+	// Per-invoker caps (only when a limit row exists for this invoker).
+	invoker = strings.TrimSpace(invoker)
+	if invoker != "" {
+		lim, lerr := s.getSpendLimit(ctx, tenantID, payerID, cur, invoker)
 		if lerr != nil {
 			return SpendDecision{}, lerr
 		}
-		if lim != nil && (lim.MaxSpendPerDayMicros != nil || lim.MaxSpendPerMonthMicros != nil) {
-			if lim.MaxSpendPerDayMicros != nil {
-				spent, e := s.spentInWindow(ctx, tenantID, payerID, cur, dayStart, actor)
+		if lim != nil && (lim.MaxSpendPerDay != nil || lim.MaxSpendPerMonth != nil) {
+			if lim.MaxSpendPerDay != nil {
+				spent, e := s.spentInWindow(ctx, tenantID, payerID, cur, dayStart, invoker)
 				if e != nil {
 					return SpendDecision{}, e
 				}
-				caps = append(caps, capInput{DenyActorDailyCap, lim.MaxSpendPerDayMicros, spent, &dayReset})
+				caps = append(caps, capInput{DenyInvokerDailyCap, lim.MaxSpendPerDay, spent, &dayReset})
 			}
-			if lim.MaxSpendPerMonthMicros != nil {
-				spent, e := s.spentInWindow(ctx, tenantID, payerID, cur, monStart, actor)
+			if lim.MaxSpendPerMonth != nil {
+				spent, e := s.spentInWindow(ctx, tenantID, payerID, cur, monStart, invoker)
 				if e != nil {
 					return SpendDecision{}, e
 				}
-				caps = append(caps, capInput{DenyActorMonthlyCap, lim.MaxSpendPerMonthMicros, spent, &monReset})
+				caps = append(caps, capInput{DenyInvokerMonthlyCap, lim.MaxSpendPerMonth, spent, &monReset})
 			}
 		}
 	}
 
 	// Tenant-level daily / monthly caps.
-	if settings.MaxSpendPerDayMicros != nil {
+	if settings.MaxSpendPerDay != nil {
 		spent, e := s.spentInWindow(ctx, tenantID, payerID, cur, dayStart, "")
 		if e != nil {
 			return SpendDecision{}, e
 		}
-		caps = append(caps, capInput{DenyDailyCap, settings.MaxSpendPerDayMicros, spent, &dayReset})
+		caps = append(caps, capInput{DenyDailyCap, settings.MaxSpendPerDay, spent, &dayReset})
 	}
-	if settings.MaxSpendPerMonthMicros != nil {
+	if settings.MaxSpendPerMonth != nil {
 		spent, e := s.spentInWindow(ctx, tenantID, payerID, cur, monStart, "")
 		if e != nil {
 			return SpendDecision{}, e
 		}
-		caps = append(caps, capInput{DenyMonthlyCap, settings.MaxSpendPerMonthMicros, spent, &monReset})
+		caps = append(caps, capInput{DenyMonthlyCap, settings.MaxSpendPerMonth, spent, &monReset})
 	}
 
 	// Outstanding exposure ceiling (settled owed + active holds + this estimate).
-	if settings.MaxOutstandingOwedMicros != nil {
+	if settings.MaxOutstandingOwedAmount != nil {
 		held, e := s.activeHoldsTotal(ctx, tenantID, payerID, cur)
 		if e != nil {
 			return SpendDecision{}, e
 		}
-		exposure := settings.OutstandingOwedMicros + held
-		caps = append(caps, capInput{DenyOutstandingCap, settings.MaxOutstandingOwedMicros, exposure, nil})
+		exposure := settings.OutstandingOwedAmount + held
+		caps = append(caps, capInput{DenyOutstandingCap, settings.MaxOutstandingOwedAmount, exposure, nil})
 	}
 
-	dec := evaluateSpend(caps, estimateCents, settings.HardStopOnBreach, settings.AlertThresholdPct, now)
+	dec := evaluateSpend(caps, estimateAmount, settings.HardStopOnBreach, settings.AlertThresholdPct, now)
 	return dec, nil
 }

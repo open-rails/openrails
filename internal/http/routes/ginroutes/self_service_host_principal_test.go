@@ -49,10 +49,10 @@ func newHostPrincipalSelfRouter(t *testing.T, authn billingauth.DelegatedAuthent
 
 func hostPrincipal(perms ...string) *billingauth.DelegatedPrincipal {
 	return &billingauth.DelegatedPrincipal{
-		MerchantID:    dbtest.TestTenantID.String(),
+		MerchantID:  dbtest.TestTenantID.String(),
 		TenantSlug:  dbtest.TestTenantSlug,
 		SubjectID:   "0d4cdb35-9f3f-4a16-bb83-90a8aa20a2c1",
-		Actor:       "https://auth.host.example",
+		Issuer:      "https://auth.host.example",
 		Permissions: perms,
 	}
 }

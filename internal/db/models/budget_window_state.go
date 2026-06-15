@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// BudgetWindowState is the per-(tenant, tenant subject, actor, window_key)
+// BudgetWindowState is the per-(tenant, tenant subject, invoker, currency, window_key)
 // fixed-window anchor row (#337, migration 005).
 //
 // Budget windows are FIXED with knowable reset boundaries, anchored to each
@@ -30,7 +30,9 @@ type BudgetWindowState struct {
 
 	CustomerID uuid.UUID `json:"customer_id"`
 
-	Actor string `json:"actor"`
+	Invoker string `json:"invoker"`
+
+	Currency string `json:"currency"`
 
 	// WindowKey matches BudgetWindow.Key from the caller (e.g. "5h", "7d").
 	WindowKey string `json:"window_key"`

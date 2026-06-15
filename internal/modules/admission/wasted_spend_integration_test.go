@@ -58,25 +58,26 @@ func wastedEnv(t *testing.T) (*admission.Admitter, *abuse.WastedSpendGuard, *rat
 	store := admission.NewTierPolicyStore(dbi)
 	bl := abuse.NewBlocklistService(dbi)
 	bsvc := budgets.NewService(dbi)
-	actorFlat := []abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, LimitMicros: 5_000}}
+	actorFlat := []abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, Limit: 5_000}}
 	adm := admission.NewAdmitter(lim, cs, store, bl, bsvc).WithWastedSpend(guard, actorFlat)
 	return adm, guard, lim, cs, store, payer, ctx
 }
 
-// #488: PAYER over its per-tier bad_spend budget -> admit denies abuse_rate_limited.
-func TestAdmit_WastedSpend_PayerOverBudget(t *testing.T) {
+// #497: PAYER bad_spend is direct-payer grace for report-time charging, not an
+// admit-time cutoff.
+func TestAdmit_WastedSpend_PayerOverBudgetDoesNotDeny(t *testing.T) {
 	adm, guard, _, cs, store, payer, ctx := wastedEnv(t)
 	require.NoError(t, store.UpsertTierPolicyFull(ctx, payer, "free", models.ThroughputPolicy{
 		Windows:         []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}},
-		BadSpendWindows: []models.BudgetWindowPolicy{{Key: "burst", WindowSeconds: 900, LimitMicros: 1_000}},
+		BadSpendWindows: []models.BudgetWindowPolicy{{Key: "burst", WindowSeconds: 900, Limit: 1_000}},
 	}))
-	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1_000_000, Source: "seed"})
+	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	// Under budget: allowed.
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Actor: "user:a", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimateMicros: 100,
+		CustomerID: payer, Invoker: "user:a", Tier: "free", Resource: "r",
+		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
 		Source: "usage", SourceID: "ok1", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
@@ -84,54 +85,53 @@ func TestAdmit_WastedSpend_PayerOverBudget(t *testing.T) {
 
 	// Report wasted $ that meets/exceeds the payer's per-tier bad_spend budget.
 	tenant := dbtest.TestTenantID.UUID().String()
-	require.NoError(t, guard.Record(ctx, tenant, payer.UUID().String(), "user:a", 1_000,
-		[]abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, LimitMicros: 1_000}},
-		[]abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, LimitMicros: 5_000}}))
+	require.NoError(t, guard.Record(ctx, tenant, payer.UUID().String(), "user:a", money.DefaultCurrency, 1_000,
+		[]abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, Limit: 1_000}},
+		[]abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, Limit: 5_000}}))
 
-	// Now over the payer budget -> deny abuse_rate_limited.
+	// Payer over grace is not an admit deny; direct-payer waste is charged at
+	// report time instead.
 	d, err = adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Actor: "user:a", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimateMicros: 100,
-		Source: "usage", SourceID: "blocked1", ExpiresAt: time.Now().Add(time.Hour),
+		CustomerID: payer, Invoker: "user:a", Tier: "free", Resource: "r",
+		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		Source: "usage", SourceID: "allowed-after-payer-waste", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
-	require.False(t, d.Allowed)
-	require.Equal(t, "abuse", d.BlockedBy)
-	require.Equal(t, admission.DenyAbuseRateLimited, d.DenyCode)
-	require.Nil(t, d.Hold)
+	require.True(t, d.Allowed)
+	require.NotNil(t, d.Hold)
 }
 
-// #488: ACTOR over the flat per-actor wasted budget -> admit denies
+// #488: INVOKER over the flat per-invoker wasted budget -> admit denies
 // failure_rate_limited (independent of the payer budget).
-func TestAdmit_WastedSpend_ActorOverBudget(t *testing.T) {
+func TestAdmit_WastedSpend_InvokerOverBudget(t *testing.T) {
 	adm, guard, _, cs, store, payer, ctx := wastedEnv(t)
-	// No payer bad_spend windows -> only the actor flat budget (5_000) applies.
+	// No payer bad_spend windows -> only the invoker flat budget (5_000) applies.
 	require.NoError(t, store.UpsertTierPolicy(ctx, payer, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
-	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1_000_000, Source: "seed"})
+	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	tenant := dbtest.TestTenantID.UUID().String()
-	// Report 5_000 wasted to the actor's flat burst window (limit 5_000) -> over.
-	require.NoError(t, guard.Record(ctx, tenant, payer.UUID().String(), "user:b", 5_000,
+	// Report 5_000 wasted to the invoker's flat burst window (limit 5_000) -> over.
+	require.NoError(t, guard.Record(ctx, tenant, payer.UUID().String(), "user:b", money.DefaultCurrency, 5_000,
 		nil,
-		[]abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, LimitMicros: 5_000}}))
+		[]abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, Limit: 5_000}}))
 
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Actor: "user:b", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimateMicros: 100,
-		Source: "usage", SourceID: "blocked-actor", ExpiresAt: time.Now().Add(time.Hour),
+		CustomerID: payer, Invoker: "user:b", Tier: "free", Resource: "r",
+		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		Source: "usage", SourceID: "blocked-invoker", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.False(t, d.Allowed)
 	require.Equal(t, "abuse", d.BlockedBy)
 	require.Equal(t, admission.DenyFailureRateLimited, d.DenyCode)
 
-	// A DIFFERENT actor under the same payer is unaffected (per-actor budget).
+	// A DIFFERENT invoker under the same payer is unaffected (per-invoker budget).
 	d, err = adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Actor: "user:c", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimateMicros: 100,
-		Source: "usage", SourceID: "ok-actor", ExpiresAt: time.Now().Add(time.Hour),
+		CustomerID: payer, Invoker: "user:c", Tier: "free", Resource: "r",
+		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		Source: "usage", SourceID: "ok-invoker", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)

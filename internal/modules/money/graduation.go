@@ -17,31 +17,31 @@ import (
 )
 
 // TierThreshold is one rung of the trust ladder: an account reaches Tier once its
-// cumulative PAID spend is at least MinPaidMicros (#298 graduation). Order the
-// ladder ascending by MinPaidMicros. It is also one rung of a persisted
+// cumulative PAID spend is at least MinPaidAmount (#298 graduation). Order the
+// ladder ascending by MinPaidAmount. It is also one rung of a persisted
 // tier_schedule (#476).
 type TierThreshold struct {
 	Tier          string `json:"tier"`
-	MinPaidMicros int64  `json:"min_cumulative_paid_micros"`
+	MinPaidAmount int64  `json:"min_cumulative_paid_amount"`
 }
 
-// tierForCumulative returns the highest rung whose MinPaidMicros the account
+// tierForCumulative returns the highest rung whose MinPaidAmount the account
 // meets ("" if it meets none). The ladder need not be pre-sorted.
 func tierForCumulative(paid int64, ladder []TierThreshold) string {
 	tier := ""
 	var best int64 = -1
 	for _, t := range ladder {
-		if paid >= t.MinPaidMicros && t.MinPaidMicros >= best {
+		if paid >= t.MinPaidAmount && t.MinPaidAmount >= best {
 			tier = t.Tier
-			best = t.MinPaidMicros
+			best = t.MinPaidAmount
 		}
 	}
 	return tier
 }
 
-// CumulativePaidMicros is the total a payer has PAID in (sum of deposit
+// CumulativePaidAmount is the total a payer has PAID in (sum of deposit
 // transactions) — the trust signal that graduates the tier.
-func (s *MoneyService) CumulativePaidMicros(ctx context.Context, payer identity.CustomerID) (int64, error) {
+func (s *MoneyService) CumulativePaidAmount(ctx context.Context, payer identity.CustomerID) (int64, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
@@ -60,7 +60,7 @@ func (s *MoneyService) CumulativePaidMicros(ctx context.Context, payer identity.
 
 // GetTier returns the account's graduated tier ("" if none).
 func (s *MoneyService) GetTier(ctx context.Context, payer identity.CustomerID) (string, error) {
-	settings, err := s.GetAccountSettings(ctx, payer)
+	settings, err := s.GetAccountSettings(ctx, payer, DefaultCurrency)
 	if err != nil {
 		return "", err
 	}
@@ -89,7 +89,7 @@ func (s *MoneyService) GraduateTier(ctx context.Context, payer identity.Customer
 		return s.GetTier(ctx, payer)
 	}
 
-	paid, err := s.CumulativePaidMicros(ctx, payer)
+	paid, err := s.CumulativePaidAmount(ctx, payer)
 	if err != nil {
 		return "", err
 	}
@@ -277,13 +277,13 @@ func subjectPtr(payer identity.CustomerID) *uuid.UUID {
 	return &u
 }
 
-// rungThreshold returns a tier's min_cumulative_paid_micros in the schedule, or
+// rungThreshold returns a tier's min_cumulative_paid_amount in the schedule, or
 // -1 if the tier is not a rung (an unknown/legacy tier — treated as the lowest so
 // any real rung outranks it).
 func rungThreshold(sched []TierThreshold, tier string) int64 {
 	for _, r := range sched {
 		if r.Tier == tier {
-			return r.MinPaidMicros
+			return r.MinPaidAmount
 		}
 	}
 	return -1

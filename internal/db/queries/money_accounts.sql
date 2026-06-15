@@ -1,6 +1,6 @@
 -- openrails.money_settings: per-(tenant, payer, currency) spend policy + money-in
--- state (#237/#239/#240/#241/#298/#299/#302). amounts are the currency's minor unit
--- (default µ$). currency is a system code; the Go registry is authority.
+-- state (#237/#239/#240/#241/#298/#299/#302). amounts use the currency's internal
+-- precision. currency is a system code; the Go registry is authority.
 
 -- name: ListMoneyAccountPairs :many
 -- Distinct (payer, currency) pairs to finalize invoices for (#472). money_balances
@@ -33,17 +33,17 @@ ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
 -- name: UpsertMoneyAccountSettings :exec
 INSERT INTO openrails.money_settings (
     id, merchant_id, customer_id, currency, billing_mode,
-    max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros,
-    low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents,
+    max_spend_per_day, max_spend_per_month, max_outstanding_owed_amount,
+    low_balance_threshold, auto_topup_enabled, auto_topup_amount_cents,
     auto_topup_payment_method_id, default_credit_expiry_days,
     hard_stop_on_breach, alert_threshold_pct, created_at, updated_at
 ) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     billing_mode = EXCLUDED.billing_mode,
-    max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros,
-    max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros,
-    max_outstanding_owed_micros = EXCLUDED.max_outstanding_owed_micros,
-    low_balance_threshold_micros = EXCLUDED.low_balance_threshold_micros,
+    max_spend_per_day = EXCLUDED.max_spend_per_day,
+    max_spend_per_month = EXCLUDED.max_spend_per_month,
+    max_outstanding_owed_amount = EXCLUDED.max_outstanding_owed_amount,
+    low_balance_threshold = EXCLUDED.low_balance_threshold,
     auto_topup_enabled = EXCLUDED.auto_topup_enabled,
     auto_topup_amount_cents = EXCLUDED.auto_topup_amount_cents,
     auto_topup_payment_method_id = EXCLUDED.auto_topup_payment_method_id,
@@ -57,12 +57,12 @@ ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
 -- UpsertMoneyAccountSettings — an operator path calls this. The settings row must
 -- already exist (the caller ensures it).
 UPDATE openrails.money_settings
-SET credit_limit_micros = sqlc.arg(credit_limit)::bigint, updated_at = sqlc.arg(now)
+SET credit_limit_amount = sqlc.arg(credit_limit)::bigint, updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: AddMoneyOutstandingOwed :exec
 UPDATE openrails.money_settings
-SET outstanding_owed_micros = outstanding_owed_micros + sqlc.arg(amount)::bigint,
+SET outstanding_owed_amount = outstanding_owed_amount + sqlc.arg(amount)::bigint,
     updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
@@ -70,10 +70,10 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 -- CAS-style decrement: only applies when owed still covers the snapshot, so
 -- two collection runs racing on the same snapshot can't double-decrement.
 UPDATE openrails.money_settings
-SET outstanding_owed_micros = GREATEST(0, outstanding_owed_micros - sqlc.arg(snapshot)::bigint),
+SET outstanding_owed_amount = GREATEST(0, outstanding_owed_amount - sqlc.arg(snapshot)::bigint),
     updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND outstanding_owed_micros >= sqlc.arg(snapshot)::bigint;
+  AND outstanding_owed_amount >= sqlc.arg(snapshot)::bigint;
 
 -- name: StampMoneyAccountAlertAt :exec
 UPDATE openrails.money_settings
@@ -138,12 +138,12 @@ SELECT s.merchant_id, s.customer_id, s.currency,
                    WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
                      AND w.currency = s.currency AND w.status = 'open'), 0)
        )::bigint AS available,
-       COALESCE(s.low_balance_threshold_micros, 0)::bigint AS threshold,
+       COALESCE(s.low_balance_threshold, 0)::bigint AS threshold,
        s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id,
        s.last_alert_at, s.last_topup_at
 FROM openrails.money_settings s
 WHERE s.merchant_id = $1
-  AND s.low_balance_threshold_micros IS NOT NULL
+  AND s.low_balance_threshold IS NOT NULL
   AND (
          COALESCE((SELECT SUM(mb.remaining_amount) FROM openrails.money_blocks mb
                    WHERE mb.merchant_id = s.merchant_id AND mb.customer_id = s.customer_id
@@ -155,19 +155,19 @@ WHERE s.merchant_id = $1
        - COALESCE((SELECT SUM(w.held_amount - w.settled_amount) FROM openrails.money_windows w
                    WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
                      AND w.currency = s.currency AND w.status = 'open'), 0)
-       ) < s.low_balance_threshold_micros;
+       ) < s.low_balance_threshold;
 
 -- name: ListChargeableArrearsMoneyAccounts :many
 -- Arrears collection (#241): accounts owing with a card on file.
 -- min_threshold <= 0 means "charge every account with owed > 0".
 SELECT s.merchant_id, s.customer_id, s.currency,
-       s.outstanding_owed_micros, s.auto_topup_payment_method_id
+       s.outstanding_owed_amount, s.auto_topup_payment_method_id
 FROM openrails.money_settings s
 WHERE s.merchant_id = $1
   AND s.billing_mode = 'arrears'
-  AND s.outstanding_owed_micros > 0
+  AND s.outstanding_owed_amount > 0
   AND s.auto_topup_payment_method_id IS NOT NULL
-  AND (sqlc.arg(min_threshold)::bigint <= 0 OR s.outstanding_owed_micros >= sqlc.arg(min_threshold)::bigint);
+  AND (sqlc.arg(min_threshold)::bigint <= 0 OR s.outstanding_owed_amount >= sqlc.arg(min_threshold)::bigint);
 
 -- name: GetMoneySpendLimit :one
 SELECT * FROM openrails.money_spend_limits
@@ -177,9 +177,9 @@ LIMIT 1;
 -- name: UpsertMoneySpendLimit :exec
 INSERT INTO openrails.money_spend_limits (
     id, merchant_id, customer_id, currency, invoker_id,
-    max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at
+    max_spend_per_day, max_spend_per_month, created_at, updated_at
 ) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8)
 ON CONFLICT (merchant_id, customer_id, currency, invoker_id) DO UPDATE SET
-    max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros,
-    max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros,
+    max_spend_per_day = EXCLUDED.max_spend_per_day,
+    max_spend_per_month = EXCLUDED.max_spend_per_month,
     updated_at = EXCLUDED.updated_at;

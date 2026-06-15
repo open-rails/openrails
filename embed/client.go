@@ -104,14 +104,11 @@ func parseCustomer(raw, invalidMsg string) (identity.CustomerID, error) {
 // mapCreditErr transcribes the credit-route error switch shared by
 // ServiceHoldCredits / ServiceWithdrawCredits / ServiceCaptureHold /
 // ServiceDepositCredits: ErrInsufficientCredits → 402 "insufficient_credits",
-// ErrCreditTypeInactive → 400 "credit_type_inactive", anything else → 500 with
-// the handler's fallback message.
+// anything else → 500 with the handler's fallback message.
 func mapCreditErr(err error, fallback string) error {
 	switch {
 	case errors.Is(err, billingservice.ErrInsufficientCredits):
 		return openrails.NewStatusError(http.StatusPaymentRequired, "", "insufficient_credits")
-	case errors.Is(err, billingservice.ErrCreditTypeInactive):
-		return invalidErr("credit_type_inactive")
 	default:
 		return internalErr(fallback)
 	}
@@ -120,6 +117,7 @@ func mapCreditErr(err error, fallback string) error {
 func budgetWindowFromDTO(w billingservice.AdmitBudgetWindowDTO) openrails.BudgetWindow {
 	return openrails.BudgetWindow{
 		Key:               w.Key,
+		Currency:          w.Currency,
 		Limit:             w.Limit,
 		Used:              w.Used,
 		Reserved:          w.Reserved,
@@ -138,7 +136,8 @@ func transactionFromService(t *billingservice.CreditTransaction) *openrails.Cred
 	return &openrails.CreditTransaction{
 		ID:              t.ID,
 		CustomerID:      t.CustomerID,
-		Actor:           t.Actor,
+		Invoker:         t.Invoker,
+		Currency:        t.Currency,
 		Amount:          t.Amount,
 		BalanceAfter:    t.BalanceAfter,
 		TransactionType: t.TransactionType,
@@ -161,8 +160,8 @@ func transactionFromService(t *billingservice.CreditTransaction) *openrails.Cred
 // money (402), gated (403) — return (resp, nil), like the remote client.
 func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*openrails.AdmitResponse, error) {
 	ctx = c.ensureTenant(ctx)
-	if req.EstimateMicros < 0 {
-		return nil, invalidErr("estimate_micros must be >= 0")
+	if req.EstimatedAmount < 0 {
+		return nil, invalidErr("estimated_amount must be >= 0")
 	}
 	payer, err := parseCustomer(req.CustomerID, "customer_id required")
 	if err != nil {
@@ -181,15 +180,17 @@ func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*o
 // each AdmitBatch item.
 func admitInputFromSDK(req openrails.AdmitRequest, payer identity.CustomerID) billingservice.AdmitInput {
 	in := billingservice.AdmitInput{
-		CustomerID:     payer,
-		Actor:          strings.TrimSpace(req.Actor),
-		Tier:           req.Tier,
-		Resource:       req.Resource,
-		Amounts:        req.Amounts,
-		EstimateMicros: req.EstimateMicros,
-		Source:         req.Source,
-		SourceID:       req.RequestID,
-		Roles:          req.Roles,
+		CustomerID:      payer,
+		Invoker:         strings.TrimSpace(req.Invoker),
+		InvokerType:     req.InvokerType,
+		Tier:            req.Tier,
+		Resource:        req.Resource,
+		Amounts:         req.Amounts,
+		Currency:        req.Currency,
+		EstimatedAmount: req.EstimatedAmount,
+		Source:          req.Source,
+		SourceID:        req.RequestID,
+		Roles:           req.Roles,
 	}
 	if req.ExpiresAt != nil {
 		in.ExpiresAtUnix = *req.ExpiresAt
@@ -205,6 +206,7 @@ func admitInputFromSDK(req openrails.AdmitRequest, payer identity.CustomerID) bi
 func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitResponse {
 	out := &openrails.AdmitResponse{
 		Allowed:             res.Allowed,
+		Currency:            res.Currency,
 		BlockedBy:           res.BlockedBy,
 		BlockedUnit:         res.BlockedUnit,
 		DenyCode:            res.DenyCode,
@@ -213,9 +215,9 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 		BudgetReservationID: res.BudgetReservationID,
 		ResolvedTier:        res.ResolvedTier,
 
-		MaxConcurrentHeldMicros: res.MaxConcurrentHeldMicros,
-		HeldMicros:              res.HeldMicros,
-		MaxSingleChargeMicros:   res.MaxSingleChargeMicros,
+		MaxConcurrentHeldAmount: res.MaxConcurrentHeldAmount,
+		HeldAmount:              res.HeldAmount,
+		MaxSingleChargeAmount:   res.MaxSingleChargeAmount,
 	}
 	for _, w := range res.Windows {
 		out.Windows = append(out.Windows, openrails.AdmitWindow{
@@ -238,8 +240,8 @@ func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequ
 	if strings.TrimSpace(req.RequestID) == "" {
 		return nil, bindRequiredErr("RequestID")
 	}
-	if req.EstimateMicros < 0 {
-		return nil, invalidErr("estimate_micros must be >= 0")
+	if req.EstimatedAmount < 0 {
+		return nil, invalidErr("estimated_amount must be >= 0")
 	}
 	payer, err := parseCustomer(req.CustomerID, "invalid customer_id")
 	if err != nil {
@@ -250,29 +252,27 @@ func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequ
 		expiresAt = time.Unix(*req.ExpiresAt, 0).UTC()
 	}
 	out, err := c.svc.AuthorizeAndHold(ctx, billingservice.AuthorizeAndHoldRequest{
-		CustomerID:     payer,
-		Actor:          req.Actor,
-		Currency:       req.Currency,
-		EstimateMicros: req.EstimateMicros,
-		RequestID:      req.RequestID,
-		ExpiresAt:      expiresAt,
+		CustomerID:      payer,
+		Invoker:         req.Invoker,
+		Currency:        req.Currency,
+		EstimatedAmount: req.EstimatedAmount,
+		RequestID:       req.RequestID,
+		ExpiresAt:       expiresAt,
 	})
 	if err != nil {
-		if errors.Is(err, billingservice.ErrCreditTypeInactive) {
-			return nil, invalidErr("credit_type_inactive")
-		}
 		return nil, internalErr("authorize failed")
 	}
 	resp := &openrails.AuthorizeResponse{
-		Allowed:           out.Allowed,
-		DenyCode:          out.DenyCode,
-		BillingMode:       out.BillingMode,
-		AvailableMicros:   out.AvailableMicros,
-		OutstandingMicros: out.OutstandingOwedMicros,
-		RetryAfterSeconds: out.RetryAfterSeconds,
+		Allowed:               out.Allowed,
+		DenyCode:              out.DenyCode,
+		BillingMode:           out.BillingMode,
+		Currency:              out.Currency,
+		AvailableAmount:       out.AvailableAmount,
+		OutstandingOwedAmount: out.OutstandingOwedAmount,
+		RetryAfterSeconds:     out.RetryAfterSeconds,
 	}
-	if out.RemainingTodayMicros != nil {
-		resp.RemainingTodayMicros = *out.RemainingTodayMicros
+	if out.RemainingTodayAmount != nil {
+		resp.RemainingTodayAmount = *out.RemainingTodayAmount
 	}
 	if out.ReservationID != nil {
 		resp.ReservationID = out.ReservationID.String()
@@ -283,11 +283,11 @@ func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequ
 // HoldCredits transcribes handlers.ServiceHoldCredits (service_credits.go).
 func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCreditsRequest) (*openrails.CreditHold, error) {
 	ctx = c.ensureTenant(ctx)
-	// gin binding (in struct field order): actor, amount, source, source_id,
+	// gin binding (in struct field order): invoker, amount, source, source_id,
 	// expires_at are all `binding:"required"`. Currency is optional (#476).
 	switch {
-	case strings.TrimSpace(req.Actor) == "":
-		return nil, bindRequiredErr("Actor")
+	case strings.TrimSpace(req.Invoker) == "":
+		return nil, bindRequiredErr("Invoker")
 	case req.Amount == 0:
 		return nil, bindRequiredErr("Amount")
 	case strings.TrimSpace(req.Source) == "":
@@ -301,7 +301,7 @@ func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCredits
 	}
 	hold, err := c.svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
 		CustomerID: &payer,
-		Actor:      req.Actor,
+		Invoker:    req.Invoker,
 		Currency:   req.Currency,
 		Amount:     req.Amount,
 		Source:     req.Source,
@@ -315,7 +315,8 @@ func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCredits
 	}
 	return &openrails.CreditHold{
 		ID:        hold.ID,
-		Actor:     hold.Actor,
+		Invoker:   hold.Invoker,
+		Currency:  hold.Currency,
 		Amount:    hold.Amount,
 		Source:    hold.Source,
 		SourceID:  hold.SourceID,
@@ -362,8 +363,8 @@ func (c *localClient) WithdrawCredits(ctx context.Context, req openrails.Withdra
 	ctx = c.ensureTenant(ctx)
 	// Currency is optional (#476).
 	switch {
-	case strings.TrimSpace(req.Actor) == "":
-		return nil, bindRequiredErr("Actor")
+	case strings.TrimSpace(req.Invoker) == "":
+		return nil, bindRequiredErr("Invoker")
 	case req.Amount == 0:
 		return nil, bindRequiredErr("Amount")
 	case strings.TrimSpace(req.Source) == "":
@@ -377,7 +378,7 @@ func (c *localClient) WithdrawCredits(ctx context.Context, req openrails.Withdra
 	}
 	trx, err := c.svc.WithdrawCredits(ctx, billingservice.WithdrawCreditsRequest{
 		CustomerID: &payer,
-		Actor:      req.Actor,
+		Invoker:    req.Invoker,
 		Currency:   req.Currency,
 		Amount:     req.Amount,
 		Source:     req.Source,
@@ -395,8 +396,8 @@ func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositC
 	ctx = c.ensureTenant(ctx)
 	// Currency is optional (#476).
 	switch {
-	case strings.TrimSpace(req.Actor) == "":
-		return nil, bindRequiredErr("Actor")
+	case strings.TrimSpace(req.Invoker) == "":
+		return nil, bindRequiredErr("Invoker")
 	case req.Amount == 0:
 		return nil, bindRequiredErr("Amount")
 	case strings.TrimSpace(req.Source) == "":
@@ -420,7 +421,7 @@ func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositC
 	}
 	trx, err := c.svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
 		CustomerID:  &payer,
-		Actor:       req.Actor,
+		Invoker:     req.Invoker,
 		Currency:    req.Currency,
 		Amount:      req.Amount,
 		Source:      req.Source,
@@ -429,9 +430,6 @@ func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositC
 		Description: description,
 	})
 	if err != nil {
-		if errors.Is(err, billingservice.ErrCreditTypeInactive) {
-			return nil, invalidErr("credit_type_inactive")
-		}
 		// #483: an unknown/invalid currency is a 400 (parity with the remote handler).
 		if errors.Is(err, money.ErrBillingUnitRequired) || strings.Contains(err.Error(), "unknown currency") {
 			return nil, invalidErr(err.Error())
@@ -443,16 +441,16 @@ func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositC
 
 // Capture transcribes handlers.ServiceCaptureHold (service_credits.go)
 // addressed by reservation id, including the #311 usage-event extension.
-func (c *localClient) Capture(ctx context.Context, reservationID string, capturedMicros int64, usage *openrails.CaptureUsage) error {
+func (c *localClient) Capture(ctx context.Context, reservationID string, capturedAmount int64, usage *openrails.CaptureUsage) error {
 	ctx = c.ensureTenant(ctx)
 	holdID, err := uuid.Parse(strings.TrimSpace(reservationID))
 	if err != nil {
 		return invalidErr("invalid hold id")
 	}
-	if capturedMicros == 0 { // gin binding: amount is `binding:"required"`
+	if capturedAmount == 0 { // gin binding: amount is `binding:"required"`
 		return bindRequiredErr("Amount")
 	}
-	in := billingservice.CaptureHoldRequest{HoldID: holdID, Amount: capturedMicros}
+	in := billingservice.CaptureHoldRequest{HoldID: holdID, Amount: capturedAmount}
 	if usage != nil && strings.TrimSpace(usage.EventType) != "" {
 		in.EventType = usage.EventType
 		in.Resource = usage.Resource
@@ -494,11 +492,12 @@ func (c *localClient) Balance(ctx context.Context, customerID string) (*openrail
 		return nil, invalidErr(err.Error())
 	}
 	return &openrails.BalanceResponse{
+		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
-		BalanceMicros:         snap.BalanceMicros,
-		HeldMicros:            snap.HeldMicros,
-		AvailableMicros:       snap.AvailableMicros,
-		OutstandingOwedMicros: snap.OutstandingOwedMicros,
+		BalanceAmount:         snap.BalanceAmount,
+		HeldAmount:            snap.HeldAmount,
+		AvailableAmount:       snap.AvailableAmount,
+		OutstandingOwedAmount: snap.OutstandingOwedAmount,
 	}, nil
 }
 
@@ -518,10 +517,10 @@ func (c *localClient) GetCreditAccount(ctx context.Context, customerID, currency
 		CustomerID:            snap.CustomerID.String(),
 		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
-		BalanceMicros:         snap.BalanceMicros,
-		HeldMicros:            snap.HeldMicros,
-		AvailableMicros:       snap.AvailableMicros,
-		OutstandingOwedMicros: snap.OutstandingOwedMicros,
+		BalanceAmount:         snap.BalanceAmount,
+		HeldAmount:            snap.HeldAmount,
+		AvailableAmount:       snap.AvailableAmount,
+		OutstandingOwedAmount: snap.OutstandingOwedAmount,
 	}, nil
 }
 
@@ -537,9 +536,9 @@ func (c *localClient) SetCreditAccountSettings(ctx context.Context, customerID, 
 	ct := strings.TrimSpace(currency)
 	settings := money.AccountSettingsInput{
 		BillingMode:              in.BillingMode,
-		MaxSpendPerDayMicros:     in.MaxSpendPerDayMicros,
-		MaxSpendPerMonthMicros:   in.MaxSpendPerMonthMicros,
-		MaxOutstandingOwedMicros: in.MaxOutstandingOwedMicros,
+		MaxSpendPerDay:           in.MaxSpendPerDay,
+		MaxSpendPerMonth:         in.MaxSpendPerMonth,
+		MaxOutstandingOwedAmount: in.MaxOutstandingOwedAmount,
 		LowBalanceThreshold:      in.LowBalanceThreshold,
 		AutoTopupEnabled:         in.AutoTopupEnabled,
 		AutoTopupAmountCents:     in.AutoTopupAmountCents,
@@ -569,7 +568,8 @@ func (c *localClient) SetCreditAccountSettings(ctx context.Context, customerID, 
 type serviceTxn struct {
 	ID              uuid.UUID `json:"id"`
 	CustomerID      uuid.UUID `json:"customer_id"`
-	Actor           string    `json:"actor"`
+	Invoker         string    `json:"invoker"`
+	Currency        string    `json:"currency"`
 	Amount          int64     `json:"amount"`
 	TransactionType string    `json:"transaction_type"`
 	Status          string    `json:"status"`
@@ -593,7 +593,7 @@ func (c *localClient) ListCreditTransactions(ctx context.Context, customerID, cu
 	out := make([]serviceTxn, 0, len(items))
 	for _, t := range items {
 		out = append(out, serviceTxn{
-			ID: t.ID, CustomerID: t.CustomerID, Actor: t.Actor, Amount: t.Amount,
+			ID: t.ID, CustomerID: t.CustomerID, Invoker: t.Invoker, Currency: t.Currency, Amount: t.Amount,
 			TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
 			CreatedAt: t.CreatedAt,
 		})
@@ -606,7 +606,7 @@ func (c *localClient) ListCreditTransactions(ctx context.Context, customerID, cu
 }
 
 // UsageRollup transcribes handlers.ServiceUsageRollup (service_credits.go).
-func (c *localClient) UsageRollup(ctx context.Context, customerID string, from, to time.Time, groupBy string) ([]openrails.UsageRollupRow, error) {
+func (c *localClient) UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]openrails.UsageRollupRow, error) {
 	ctx = c.ensureTenant(ctx)
 	// gin binding: customer_id, from, to, group_by are all required.
 	switch {
@@ -625,6 +625,7 @@ func (c *localClient) UsageRollup(ctx context.Context, customerID string, from, 
 	}
 	rows, err := c.svc.ServiceUsageRollup(ctx, billingservice.ServiceUsageRollupRequest{
 		CustomerID: &payer,
+		Currency:   currency,
 		// The wire carries unix seconds; mirror the handler's re-derivation.
 		From:    time.Unix(from.UTC().Unix(), 0).UTC(),
 		To:      time.Unix(to.UTC().Unix(), 0).UTC(),
@@ -635,13 +636,13 @@ func (c *localClient) UsageRollup(ctx context.Context, customerID string, from, 
 	}
 	out := make([]openrails.UsageRollupRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, openrails.UsageRollupRow{Key: r.Key, EventCount: r.EventCount, TotalAmount: r.TotalAmount})
+		out = append(out, openrails.UsageRollupRow{Key: r.Key, Currency: r.Currency, EventCount: r.EventCount, TotalAmount: r.TotalAmount})
 	}
 	return out, nil
 }
 
 // BudgetCheck transcribes handlers.ServiceBudgetCheck (service_admission.go).
-func (c *localClient) BudgetCheck(ctx context.Context, tenantSubjectID, actorID string, windows []openrails.BudgetWindowInput, requestedMicros int64) ([]openrails.BudgetWindow, error) {
+func (c *localClient) BudgetCheck(ctx context.Context, tenantSubjectID, invokerID, currency string, windows []openrails.BudgetWindowInput, requestedAmount int64) ([]openrails.BudgetWindow, error) {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
 	if err != nil {
@@ -650,10 +651,10 @@ func (c *localClient) BudgetCheck(ctx context.Context, tenantSubjectID, actorID 
 	in := make([]billingservice.BudgetCheckWindowInput, 0, len(windows))
 	for _, w := range windows {
 		in = append(in, billingservice.BudgetCheckWindowInput{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence,
+			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence,
 		})
 	}
-	statuses, err := c.svc.BudgetCheck(ctx, payer, actorID, in, requestedMicros)
+	statuses, err := c.svc.BudgetCheck(ctx, payer, invokerID, currency, in, requestedAmount)
 	if err != nil {
 		return nil, internalErr("budget check failed")
 	}
@@ -665,13 +666,13 @@ func (c *localClient) BudgetCheck(ctx context.Context, tenantSubjectID, actorID 
 }
 
 // BudgetStatus transcribes handlers.ServiceGetBudget (service_admission.go).
-func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, actorID, tier string) ([]openrails.BudgetWindow, error) {
+func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]openrails.BudgetWindow, error) {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
 	if err != nil {
 		return nil, err
 	}
-	statuses, err := c.svc.BudgetStatus(ctx, payer, actorID, tier)
+	statuses, err := c.svc.BudgetStatus(ctx, payer, invokerID, currency, tier)
 	if err != nil {
 		return nil, internalErr("budget lookup failed")
 	}
@@ -700,8 +701,8 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 	pol := billingservice.TierPolicyInput{
 		Tier:                    in.Tier,
 		EntitledResources:       in.EntitledResources,
-		MaxConcurrentHeldMicros: in.MaxConcurrentHeldMicros,
-		MaxSingleChargeMicros:   in.MaxSingleChargeMicros,
+		MaxConcurrentHeldAmount: in.MaxConcurrentHeldAmount,
+		MaxSingleChargeAmount:   in.MaxSingleChargeAmount,
 	}
 	for _, w := range in.Windows {
 		pol.Windows = append(pol.Windows, billingservice.TierWindowInput{
@@ -710,12 +711,12 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 	}
 	for _, b := range in.BudgetWindows {
 		pol.BudgetWindows = append(pol.BudgetWindows, billingservice.TierBudgetWindowInput{
-			Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros, Cadence: b.Cadence,
+			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Cadence: b.Cadence,
 		})
 	}
 	for _, b := range in.BadSpendWindows {
 		pol.BadSpendWindows = append(pol.BadSpendWindows, billingservice.TierBudgetWindowInput{
-			Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros, Cadence: b.Cadence,
+			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Cadence: b.Cadence,
 		})
 	}
 	for _, q := range in.QueueLimits {
@@ -745,7 +746,7 @@ func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID strin
 	rungs := make([]billingservice.TierScheduleRung, 0, len(schedule))
 	for _, r := range schedule {
 		rungs = append(rungs, billingservice.TierScheduleRung{
-			Tier: r.Tier, MinCumulativePaidMicros: r.MinCumulativePaidMicros,
+			Tier: r.Tier, MinCumulativePaidAmount: r.MinCumulativePaidAmount,
 		})
 	}
 	if err := c.svc.SetTierSchedule(ctx, payer, rungs); err != nil {
@@ -754,29 +755,21 @@ func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID strin
 	return nil
 }
 
-// SetActorWastedWindows transcribes handlers.ServiceSetActorWastedWindows
-// (service_admission.go, #492). An empty customer_id is the tenant-wide default
-// backstop (zero payer); a non-empty one is a per-customer override.
-func (c *localClient) SetActorWastedWindows(ctx context.Context, tenantSubjectID string, windows []openrails.BudgetWindowInput) error {
+// SetInvokerWastedSpendPolicy transcribes handlers.ServiceSetInvokerWastedSpendPolicy
+// (service_admission.go, #496). The policy is merchant-scoped; payer-specific
+// invoker overrides do not exist.
+func (c *localClient) SetInvokerWastedSpendPolicy(ctx context.Context, windows []openrails.BudgetWindowInput) error {
 	ctx = c.ensureTenant(ctx)
-	var payer identity.CustomerID
-	if strings.TrimSpace(tenantSubjectID) != "" {
-		var err error
-		payer, err = parseCustomer(tenantSubjectID, "invalid customer_id")
-		if err != nil {
-			return err
-		}
-	}
 	ws := make([]abuse.WastedWindow, 0, len(windows))
 	for _, w := range windows {
 		ws = append(ws, abuse.WastedWindow{
-			Key:         w.Key,
-			Window:      time.Duration(w.WindowSeconds) * time.Second,
-			LimitMicros: w.LimitMicros,
+			Key:    w.Key,
+			Window: time.Duration(w.WindowSeconds) * time.Second,
+			Limit:  w.Limit,
 		})
 	}
-	if err := c.svc.SetActorWastedWindows(ctx, payer, ws); err != nil {
-		return internalErr("set actor wasted windows failed")
+	if err := c.svc.SetInvokerWastedSpendPolicy(ctx, ws); err != nil {
+		return internalErr("set invoker wasted-spend policy failed")
 	}
 	return nil
 }
@@ -795,57 +788,75 @@ func (c *localClient) GetTier(ctx context.Context, tenantSubjectID string) (stri
 	return tier, nil
 }
 
-// ReportWastedSpend transcribes handlers.ServiceReportWastedSpend (#488).
-func (c *localClient) ReportWastedSpend(ctx context.Context, tenantSubjectID, actor string, micros int64, reason string) error {
+// ReportWastedSpend transcribes handlers.ServiceReportWastedSpend (#497).
+func (c *localClient) ReportWastedSpend(ctx context.Context, report openrails.WastedSpendReport) (*openrails.WastedSpendResponse, error) {
 	ctx = c.ensureTenant(ctx)
-	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
+	payer, err := parseCustomer(report.CustomerID, "invalid customer_id")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := c.svc.ReportWastedSpend(ctx, payer, actor, micros, reason); err != nil {
-		return internalErr("report wasted spend failed")
+	res, err := c.svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
+		CustomerID:  payer,
+		Invoker:     report.Invoker,
+		InvokerType: report.InvokerType,
+		Currency:    report.Currency,
+		Amount:      report.Amount,
+		Source:      report.Source,
+		SourceID:    report.SourceID,
+		Reason:      report.Reason,
+	})
+	if err != nil {
+		return nil, internalErr("report wasted spend failed")
 	}
-	return nil
+	return &openrails.WastedSpendResponse{
+		Currency:       res.Currency,
+		RecordedAmount: res.RecordedAmount,
+		ForgivenAmount: res.ForgivenAmount,
+		ChargedAmount:  res.ChargedAmount,
+		Action:         res.Action,
+		Duplicate:      res.Duplicate,
+	}, nil
 }
 
 // AbuseUsage transcribes handlers.ServiceAbuseUsage (#488).
-func (c *localClient) AbuseUsage(ctx context.Context, tenantSubjectID, actor, tier string) (*openrails.AbuseUsageResponse, error) {
+func (c *localClient) AbuseUsage(ctx context.Context, tenantSubjectID, invoker, currency, tier string) (*openrails.AbuseUsageResponse, error) {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
 	if err != nil {
 		return nil, err
 	}
-	pw, aw, uerr := c.svc.AbuseUsage(ctx, payer, actor, tier)
+	pw, aw, uerr := c.svc.AbuseUsage(ctx, payer, invoker, currency, tier)
 	if uerr != nil {
 		return nil, internalErr("abuse usage lookup failed")
 	}
 	return &openrails.AbuseUsageResponse{
-		PayerWindows: abuseUsageWindows(pw),
-		ActorWindows: abuseUsageWindows(aw),
+		Currency:       money.NormalizeCurrency(currency),
+		PayerWindows:   abuseUsageWindows(pw),
+		InvokerWindows: abuseUsageWindows(aw),
 	}, nil
 }
 
 // SetCreditLimit transcribes handlers.ServiceSetCreditLimit (#489).
-func (c *localClient) SetCreditLimit(ctx context.Context, tenantSubjectID string, creditLimitMicros int64) error {
+func (c *localClient) SetCreditLimit(ctx context.Context, tenantSubjectID, currency string, creditLimit int64) error {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
 	if err != nil {
 		return err
 	}
-	if err := c.svc.SetCreditLimit(ctx, payer, creditLimitMicros); err != nil {
+	if err := c.svc.SetCreditLimit(ctx, payer, currency, creditLimit); err != nil {
 		return internalErr("set credit limit failed")
 	}
 	return nil
 }
 
 // GetCreditLimit transcribes handlers.ServiceGetCreditLimit (#489).
-func (c *localClient) GetCreditLimit(ctx context.Context, tenantSubjectID string) (int64, error) {
+func (c *localClient) GetCreditLimit(ctx context.Context, tenantSubjectID, currency string) (int64, error) {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
 	if err != nil {
 		return 0, err
 	}
-	v, gerr := c.svc.GetCreditLimit(ctx, payer)
+	v, gerr := c.svc.GetCreditLimit(ctx, payer, currency)
 	if gerr != nil {
 		return 0, internalErr("get credit limit failed")
 	}
@@ -856,8 +867,8 @@ func abuseUsageWindows(ws []billingservice.AbuseUsageWindow) []openrails.AbuseUs
 	out := make([]openrails.AbuseUsageWindow, 0, len(ws))
 	for _, w := range ws {
 		out = append(out, openrails.AbuseUsageWindow{
-			Key: w.Key, Window: w.Window, UsedMicros: w.UsedMicros,
-			LimitMicros: w.LimitMicros, OverBudget: w.OverBudget,
+			Key: w.Key, Currency: w.Currency, Window: w.Window, Used: w.Used,
+			Limit: w.Limit, OverBudget: w.OverBudget,
 		})
 	}
 	return out
@@ -867,7 +878,7 @@ func budgetScopeWindowInputs(ws []openrails.BudgetScopeWindow) []billingservice.
 	out := make([]billingservice.BudgetScopeWindowInput, 0, len(ws))
 	for _, w := range ws {
 		out = append(out, billingservice.BudgetScopeWindowInput{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence,
+			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence,
 		})
 	}
 	return out
@@ -926,7 +937,7 @@ func (c *localClient) SubjectBudgetPolicies(ctx context.Context, tenantSubjectID
 	for _, p := range policies {
 		ws := make([]openrails.BudgetScopeWindow, 0, len(p.Windows))
 		for _, w := range p.Windows {
-			ws = append(ws, openrails.BudgetScopeWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence})
+			ws = append(ws, openrails.BudgetScopeWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence})
 		}
 		out = append(out, openrails.SubjectBudgetPolicy{Scope: p.Scope, RoleID: p.ScopeKey, Windows: ws})
 	}
@@ -1001,7 +1012,7 @@ func (c *localClient) ListActiveEntitlements(ctx context.Context, issuer string,
 
 // ResourceRevenueDaily transcribes handlers.ServiceResourceRevenue
 // (service_credits.go), including the handler-side total summation.
-func (c *localClient) ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*openrails.ResourceRevenueResponse, error) {
+func (c *localClient) ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*openrails.ResourceRevenueResponse, error) {
 	ctx = c.ensureTenant(ctx)
 	resource = strings.TrimSpace(resource) // the remote client trims before sending
 	// gin binding: resource, from, to are all required.
@@ -1013,14 +1024,14 @@ func (c *localClient) ResourceRevenueDaily(ctx context.Context, resource string,
 	case toUnix == 0:
 		return nil, bindRequiredErr("To")
 	}
-	rows, err := c.svc.ResourceRevenueDaily(ctx, resource, time.Unix(fromUnix, 0).UTC(), time.Unix(toUnix, 0).UTC())
+	rows, err := c.svc.ResourceRevenueDaily(ctx, resource, currency, time.Unix(fromUnix, 0).UTC(), time.Unix(toUnix, 0).UTC())
 	if err != nil {
 		return nil, invalidErr(err.Error())
 	}
-	out := &openrails.ResourceRevenueResponse{Daily: make([]openrails.ResourceRevenueDailyRow, 0, len(rows))}
+	out := &openrails.ResourceRevenueResponse{Currency: money.NormalizeCurrency(currency), Daily: make([]openrails.ResourceRevenueDailyRow, 0, len(rows))}
 	for _, r := range rows {
-		out.RevenueMicros += r.AmountMicros
-		out.Daily = append(out.Daily, openrails.ResourceRevenueDailyRow{Date: r.Date, AmountMicros: r.AmountMicros})
+		out.RevenueAmount += r.Amount
+		out.Daily = append(out.Daily, openrails.ResourceRevenueDailyRow{Date: r.Date, Currency: r.Currency, Amount: r.Amount})
 	}
 	return out, nil
 }
@@ -1033,8 +1044,9 @@ func windowFromDTO(w *billingservice.CreditWindowDTO) *openrails.CreditWindow {
 	return &openrails.CreditWindow{
 		WindowID:      w.WindowID,
 		CustomerID:    w.CustomerID,
-		HeldMicros:    w.HeldAmount,
-		SettledMicros: w.SettledAmount,
+		Currency:      w.Currency,
+		HeldAmount:    w.HeldAmount,
+		SettledAmount: w.SettledAmount,
 		Status:        w.Status,
 		ExpiresAt:     w.ExpiresAt,
 	}
@@ -1062,7 +1074,7 @@ func (c *localClient) OpenWindow(ctx context.Context, req openrails.OpenWindowRe
 		req.Currency = c.currency
 	}
 	// gin binding: amount is `binding:"required"`. Currency is optional (#476).
-	if req.AmountMicros == 0 {
+	if req.Amount == 0 {
 		return nil, bindRequiredErr("Amount")
 	}
 	payer, err := parseCustomer(req.CustomerID, "customer_id required")
@@ -1071,16 +1083,14 @@ func (c *localClient) OpenWindow(ctx context.Context, req openrails.OpenWindowRe
 	}
 	w, serr := c.svc.OpenWindow(ctx, billingservice.OpenWindowRequest{
 		CustomerID: payer,
-		Actor:      req.Actor,
+		Invoker:    req.Invoker,
 		Currency:   req.Currency,
-		Amount:     req.AmountMicros,
+		Amount:     req.Amount,
 		TTL:        time.Duration(req.TTLSeconds) * time.Second,
 	})
 	switch {
 	case errors.Is(serr, billingservice.ErrInsufficientCredits):
 		return nil, openrails.NewStatusError(http.StatusPaymentRequired, "", "insufficient_credits")
-	case errors.Is(serr, billingservice.ErrCreditTypeInactive):
-		return nil, invalidErr("credit_type_inactive")
 	case serr != nil:
 		return nil, internalErr("open window failed")
 	}
@@ -1104,8 +1114,8 @@ func (c *localClient) SettleWindowItems(ctx context.Context, items []openrails.W
 		item := billingservice.WindowSettleItemInput{
 			WindowID:  it.WindowID,
 			RequestID: it.RequestID,
-			Amount:    it.AmountMicros,
-			Actor:     it.Actor,
+			Amount:    it.Amount,
+			Invoker:   it.Invoker,
 		}
 		if it.Usage != nil {
 			item.EventType = it.Usage.EventType
@@ -1134,12 +1144,12 @@ func (c *localClient) SettleWindowItems(ctx context.Context, items []openrails.W
 
 // RefillWindow transcribes handlers.ServiceRefillCreditWindow
 // (service_credit_window.go).
-func (c *localClient) RefillWindow(ctx context.Context, windowID uuid.UUID, amountMicros, ttlSeconds int64) (*openrails.CreditWindow, error) {
+func (c *localClient) RefillWindow(ctx context.Context, windowID uuid.UUID, amount, ttlSeconds int64) (*openrails.CreditWindow, error) {
 	ctx = c.ensureTenant(ctx)
-	if amountMicros <= 0 && ttlSeconds <= 0 {
+	if amount <= 0 && ttlSeconds <= 0 {
 		return nil, invalidErr("amount or ttl_seconds required")
 	}
-	w, err := c.svc.RefillWindow(ctx, windowID, amountMicros, time.Duration(ttlSeconds)*time.Second)
+	w, err := c.svc.RefillWindow(ctx, windowID, amount, time.Duration(ttlSeconds)*time.Second)
 	if err != nil {
 		return nil, mapWindowErr(err, "refill failed")
 	}
@@ -1172,8 +1182,8 @@ func (c *localClient) AdmitBatch(ctx context.Context, items []openrails.AdmitReq
 	}
 	out := make([]openrails.AdmitBatchVerdict, len(items))
 	for i, item := range items {
-		if item.EstimateMicros < 0 {
-			out[i] = openrails.AdmitBatchVerdict{Status: http.StatusBadRequest, Error: "estimate_micros must be >= 0"}
+		if item.EstimatedAmount < 0 {
+			out[i] = openrails.AdmitBatchVerdict{Status: http.StatusBadRequest, Error: "estimated_amount must be >= 0"}
 			continue
 		}
 		payer, perr := parseCustomer(item.CustomerID, "customer_id required")

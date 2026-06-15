@@ -427,9 +427,9 @@ type UnreadNotificationCount struct {
 
 // -------------------------------- Credits --------------------------------
 
-// CreditBalance represents a user's credit balance for a specific type.
+// CreditBalance represents a user's balance for a currency.
 type CreditBalance struct {
-	Type          string
+	Currency      string
 	DisplayName   string
 	Unit          string
 	DecimalPlaces int

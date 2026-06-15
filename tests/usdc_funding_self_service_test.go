@@ -38,7 +38,7 @@ func (r usdcFundingDelegatedResolver) ResolveDelegated(context.Context, string) 
 	}
 	return &controlplane.ResolvedDelegated{
 		Tenant:           dbtest.TestTenantSlug,
-		MerchantID:         tenantID,
+		MerchantID:       tenantID,
 		TenantSlug:       dbtest.TestTenantSlug,
 		DelegatedSubject: r.subject,
 		Permissions:      r.permissions,

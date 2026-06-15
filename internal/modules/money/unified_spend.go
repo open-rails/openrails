@@ -18,8 +18,8 @@ import (
 // Unified credit-line model (issue #302). Credit is ONE dial: an account spends
 // its prepaid balance FIRST, then accrues to outstanding_owed up to its credit
 // limit. Prepay-only = credit limit 0 (cannot go negative). Arrears = credit
-// limit > 0 (a credit line). The limit is BillingMode + MaxOutstandingOwedMicros:
-// prepaid -> 0; arrears -> MaxOutstandingOwedMicros (nil = unlimited line).
+// limit > 0 (a credit line). The limit is BillingMode + MaxOutstandingOwedAmount:
+// prepaid -> 0; arrears -> MaxOutstandingOwedAmount (nil = unlimited line).
 //
 // This unifies the two IMMEDIATE-debit paths (prepaid Withdraw + arrears
 // AccrueOwed) into one balance-first-then-owed spend. The hold->capture path and
@@ -28,7 +28,7 @@ import (
 // SpendParams is a unified immediate spend (balance first, then owed).
 type SpendParams struct {
 	Payer    *identity.CustomerID
-	Actor    string
+	Invoker  string
 	Currency string // "" => DefaultCurrency (#472)
 	Amount   int64
 	Source   string
@@ -36,7 +36,7 @@ type SpendParams struct {
 }
 
 // SpendCredits debits an account balance-first-then-owed in one transaction,
-// gated by the credit line. Idempotent on (tenant, payer, credit_type, source,
+// gated by the credit line. Idempotent on (tenant, payer, currency, source,
 // source_id). Returns ErrInsufficientCredits when balance + remaining credit
 // line cannot cover the amount.
 func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) error {
@@ -52,7 +52,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 	if err := ValidateCurrency(cur); err != nil {
 		return err
 	}
-	payer, err := resolveCustomer(params.Payer, params.Actor)
+	payer, err := resolveCustomer(params.Payer, params.Invoker)
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 		q := gen.New(tx)
 
 		// Serialize per account and guard idempotency on the spend coordinates.
-		if _, err := s.lockBalance(ctx, q, payer, params.Actor, cur); err != nil {
+		if _, err := s.lockBalance(ctx, q, payer, params.Invoker, cur); err != nil {
 			return err
 		}
 		if params.SourceID != "" {
@@ -82,7 +82,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 			}
 		}
 
-		_, _, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Actor, cur, params.Source, params.SourceID, params.Amount)
+		_, _, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount)
 		return serr
 	})
 }
@@ -138,8 +138,8 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		if settings.BillingMode != BillingModeArrears {
 			return nil, nil, ErrInsufficientCredits // prepay-only: credit limit 0
 		}
-		if settings.MaxOutstandingOwedMicros != nil &&
-			settings.OutstandingOwedMicros+fromOwed > *settings.MaxOutstandingOwedMicros {
+		if settings.MaxOutstandingOwedAmount != nil &&
+			settings.OutstandingOwedAmount+fromOwed > *settings.MaxOutstandingOwedAmount {
 			return nil, nil, ErrInsufficientCredits // would exceed the credit line
 		}
 	}
@@ -151,7 +151,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		newBal := bal.Balance - fromBalance
 		neg := -fromBalance
 		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: cur, Actor: userID,
+			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: cur, Invoker: userID,
 			Amount: neg, BalanceAfter: &newBal,
 			TransactionType: "withdrawal", Status: "posted",
 			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
@@ -170,7 +170,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			return nil, nil, err
 		}
 		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: cur, Actor: userID,
+			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: cur, Invoker: userID,
 			Amount: fromOwed, TransactionType: txOwedAccrual, Status: "posted",
 			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
 		}

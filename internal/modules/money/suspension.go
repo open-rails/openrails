@@ -24,7 +24,7 @@ import (
 // admission deny path to reject suspended accounts is a SEPARATE slice; the
 // foreground gates on IsSuspended.
 
-// SetPaymentMethodVerified records whether (payer, credit_type) has a verified
+// SetPaymentMethodVerified records whether (payer, currency) has a verified
 // payment method. When verified is true, verified_at is stamped with now; when
 // false, verified_at is cleared. Upserts the settings row (prepaid default) if
 // one does not yet exist.
@@ -56,7 +56,7 @@ func (s *MoneyService) SetPaymentMethodVerified(ctx context.Context, payer ident
 	})
 }
 
-// Suspend marks (payer, credit_type) suspended: stamps suspended_at=now and
+// Suspend marks (payer, currency) suspended: stamps suspended_at=now and
 // records suspend_reason. Upserts the settings row if one does not yet exist.
 // Admission-deny-on-suspended wiring is a separate slice.
 func (s *MoneyService) Suspend(ctx context.Context, payer identity.CustomerID, reason string) error {
@@ -84,7 +84,7 @@ func (s *MoneyService) Suspend(ctx context.Context, payer identity.CustomerID, r
 	})
 }
 
-// Resume clears the suspension on (payer, credit_type): nulls suspended_at and
+// Resume clears the suspension on (payer, currency): nulls suspended_at and
 // suspend_reason. No-op (other than touching updated_at) if not suspended.
 func (s *MoneyService) Resume(ctx context.Context, payer identity.CustomerID) error {
 	if s == nil || s.db == nil {
@@ -109,20 +109,20 @@ func (s *MoneyService) Resume(ctx context.Context, payer identity.CustomerID) er
 	})
 }
 
-// IsSuspended reports whether (payer, credit_type) is currently suspended
+// IsSuspended reports whether (payer, currency) is currently suspended
 // (suspended_at set). An payer with no settings row is not suspended.
-func (s *MoneyService) IsSuspended(ctx context.Context, payer identity.CustomerID) (bool, error) {
-	settings, err := s.GetAccountSettings(ctx, payer)
+func (s *MoneyService) IsSuspended(ctx context.Context, payer identity.CustomerID, currency string) (bool, error) {
+	settings, err := s.GetAccountSettings(ctx, payer, currency)
 	if err != nil {
 		return false, err
 	}
 	return settings.SuspendedAt != nil, nil
 }
 
-// IsPaymentMethodVerified reports whether (payer, credit_type) has a verified
+// IsPaymentMethodVerified reports whether (payer, currency) has a verified
 // payment method. An payer with no settings row is not verified.
-func (s *MoneyService) IsPaymentMethodVerified(ctx context.Context, payer identity.CustomerID) (bool, error) {
-	settings, err := s.GetAccountSettings(ctx, payer)
+func (s *MoneyService) IsPaymentMethodVerified(ctx context.Context, payer identity.CustomerID, currency string) (bool, error) {
+	settings, err := s.GetAccountSettings(ctx, payer, currency)
 	if err != nil {
 		return false, err
 	}
@@ -132,8 +132,8 @@ func (s *MoneyService) IsPaymentMethodVerified(ctx context.Context, payer identi
 // ArrearsRequiresVerification reports whether an account is on a credit line
 // (arrears) but has NOT verified a payment method (#299 PM-on-file gate). When
 // true, admission should deny credit-line spend until a method is verified.
-func (s *MoneyService) ArrearsRequiresVerification(ctx context.Context, payer identity.CustomerID) (bool, error) {
-	settings, err := s.GetAccountSettings(ctx, payer)
+func (s *MoneyService) ArrearsRequiresVerification(ctx context.Context, payer identity.CustomerID, currency string) (bool, error) {
+	settings, err := s.GetAccountSettings(ctx, payer, currency)
 	if err != nil {
 		return false, err
 	}

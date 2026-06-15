@@ -10,13 +10,26 @@ import (
 
 // CustomerID identifies an openrails.customers row: the OpenRails
 // payable subject whose balance, invoices, reservations, and entitlements are
-// recorded. It is distinct from any actor or operator identity so the compiler
+// recorded. It is distinct from any invoker or operator identity so the compiler
 // rejects passing the wrong one.
 type CustomerID uuid.UUID
 
-// Actor is the user / service token / delegated principal that invoked
+// Invoker is the user / service token / delegated principal that invoked
 // usage. It is attribution + budgeting, never ownership.
-type Actor string
+type Invoker string
+
+// InvokerType classifies whether an invoker is the payer acting directly or a
+// delegated principal using the payer's billing authority.
+type InvokerType string
+
+const (
+	// InvokerTypeDelegated means the invoker is a third-party/member/federated
+	// user under the payer; flat per-invoker abuse cutoffs apply.
+	InvokerTypeDelegated InvokerType = "delegated"
+	// InvokerTypePayer means the invoker is a direct payer-controlled credential;
+	// wasted-spend reports use payer grace then charge overage.
+	InvokerTypePayer InvokerType = "payer"
+)
 
 // String returns the canonical string form of the customer id.
 func (id CustomerID) String() string { return uuid.UUID(id).String() }
@@ -27,11 +40,26 @@ func (id CustomerID) UUID() uuid.UUID { return uuid.UUID(id) }
 // IsZero reports whether the customer id is unset.
 func (id CustomerID) IsZero() bool { return uuid.UUID(id) == uuid.Nil }
 
-// String returns the actor id as a plain string.
-func (a Actor) String() string { return string(a) }
+// String returns the invoker id as a plain string.
+func (i Invoker) String() string { return string(i) }
 
-// IsZero reports whether the actor id is empty.
-func (a Actor) IsZero() bool { return strings.TrimSpace(string(a)) == "" }
+// IsZero reports whether the invoker id is empty.
+func (i Invoker) IsZero() bool { return strings.TrimSpace(string(i)) == "" }
+
+// NormalizeInvokerType treats empty/unknown values as delegated. That fails
+// closed into the stricter abuse cutoff unless the host explicitly marks the
+// request as a direct payer credential.
+func NormalizeInvokerType(s string) InvokerType {
+	if strings.TrimSpace(s) == string(InvokerTypePayer) {
+		return InvokerTypePayer
+	}
+	return InvokerTypeDelegated
+}
+
+// IsDirectPayerInvoker reports whether s is the direct-payer credential type.
+func IsDirectPayerInvoker(s string) bool {
+	return NormalizeInvokerType(s) == InvokerTypePayer
+}
 
 // CustomerIDFromString parses s as a customer id. Empty or non-UUID
 // input yields the zero CustomerID, which callers must reject.

@@ -11,7 +11,7 @@ import (
 // here when they need tenant/issuer/subject.
 type Customer struct {
 	ID         uuid.UUID `json:"id"`
-	MerchantID   uuid.UUID `json:"tenant_id"`
+	MerchantID uuid.UUID `json:"tenant_id"`
 	Issuer     string    `json:"issuer"`
 	Subject    string    `json:"subject"`
 	CreatedAt  time.Time `json:"created_at"`

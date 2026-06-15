@@ -26,7 +26,7 @@ var (
 // OpenWindowRequest opens a prepaid window for one payer.
 type OpenWindowRequest struct {
 	CustomerID identity.CustomerID
-	Actor      string
+	Invoker    string
 	Currency   string // "" => DefaultCurrency (#476)
 	Amount     int64
 	TTL        time.Duration
@@ -36,6 +36,7 @@ type OpenWindowRequest struct {
 type CreditWindowDTO struct {
 	WindowID      uuid.UUID `json:"window_id"`
 	CustomerID    uuid.UUID `json:"customer_id"`
+	Currency      string    `json:"currency"`
 	HeldAmount    int64     `json:"held_amount"`
 	SettledAmount int64     `json:"settled_amount"`
 	Status        string    `json:"status"`
@@ -66,7 +67,7 @@ func (s *Service) OpenWindow(ctx context.Context, req OpenWindowRequest) (*Credi
 	}
 	w, err := s.moneyService().OpenWindow(ctx, money.OpenWindowParams{
 		Payer:     req.CustomerID,
-		Actor:     strings.TrimSpace(req.Actor),
+		Invoker:   strings.TrimSpace(req.Invoker),
 		Currency:  req.Currency,
 		Amount:    req.Amount,
 		ExpiresAt: s.now().Add(ttl).UTC(),
@@ -83,7 +84,7 @@ type WindowSettleItemInput struct {
 	WindowID  uuid.UUID
 	RequestID string
 	Amount    int64
-	Actor     string
+	Invoker   string
 	EventType string
 	Resource  string
 	Metadata  map[string]any
@@ -105,7 +106,7 @@ func (s *Service) SettleWindowItems(ctx context.Context, items []WindowSettleIte
 			WindowID:  it.WindowID,
 			RequestID: strings.TrimSpace(it.RequestID),
 			Amount:    it.Amount,
-			Actor:     strings.TrimSpace(it.Actor),
+			Invoker:   strings.TrimSpace(it.Invoker),
 			EventType: strings.TrimSpace(it.EventType),
 			Resource:  strings.TrimSpace(it.Resource),
 			Metadata:  it.Metadata,
@@ -148,6 +149,7 @@ func windowToDTO(w *models.MoneyWindow) *CreditWindowDTO {
 	return &CreditWindowDTO{
 		WindowID:      w.ID,
 		CustomerID:    w.CustomerID,
+		Currency:      w.Currency,
 		HeldAmount:    w.HeldAmount,
 		SettledAmount: w.SettledAmount,
 		Status:        w.Status,

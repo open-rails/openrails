@@ -1,6 +1,6 @@
 // Package budgets implements the fixed-window money-budget engine (#304, #337).
 //
-// A delegated user (actor) under a tenant subject is capped to a money budget
+// A delegated user (invoker) under a tenant subject is capped to a money budget
 // over one or more FIXED windows with knowable reset boundaries (e.g. "$2 per
 // 5h, $14 per 7d"). Windows are anchored to each user's OWN first charged
 // request, so reset boundaries are naturally staggered across users — there is
@@ -21,16 +21,16 @@
 // admission/tier-policy integration is left to the caller.
 //
 // State:
-//   - openrails.budget_reservations (one row per in-flight or settled charge):
-//     Reserve -> "active" (counts against `reserved` by amount_micros),
-//     Capture -> "captured" (counts against `used` by captured_micros),
+//   - openrails.budget_inflight_holds (one row per in-flight or settled charge):
+//     Reserve -> "active" (counts against `reserved` by amount),
+//     Capture -> "captured" (counts against `used` by captured),
 //     Release -> "released" (counts against neither).
 //     A reservation counts against a window iff created_at >= that window's
 //     current window_start.
-//   - openrails.budget_window_state (one row per tenant/subject/actor/window
-//     key, migration 005): the window anchor. Reserve locks it FOR UPDATE so
-//     concurrent reserves around a boundary serialize; the rolling engine had
-//     no such serialization point.
+//   - openrails.budget_window_state (one row per
+//     tenant/subject/invoker/currency/window key, migration 005/#494): the window
+//     anchor. Reserve locks it FOR UPDATE so concurrent reserves around a
+//     boundary serialize; the rolling engine had no such serialization point.
 package budgets
 
 import (
@@ -49,6 +49,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -81,6 +82,14 @@ func normalizeCadence(c string) (string, error) {
 	}
 }
 
+func normalizeCurrency(c string) (string, error) {
+	cur := money.NormalizeCurrency(c)
+	if err := money.ValidateCurrency(cur); err != nil {
+		return "", err
+	}
+	return cur, nil
+}
+
 // BudgetWindow is one fixed money-budget window, passed in by the caller.
 type BudgetWindow struct {
 	// Key is a stable identifier for the window (e.g. "5h", "7d"). Echoed back
@@ -88,8 +97,8 @@ type BudgetWindow struct {
 	Key string
 	// WindowSeconds is the window length in seconds.
 	WindowSeconds int64
-	// LimitMicros is the spend cap over the window, in micro-dollars.
-	LimitMicros int64
+	// Limit is the spend cap over the window, in the row currency's internal precision.
+	Limit int64
 	// Cadence is "session" (default) or "fixed"; see the package comment.
 	Cadence string
 }
@@ -97,17 +106,17 @@ type BudgetWindow struct {
 // WindowStatus is the computed state of one window for a Check/Reserve.
 //
 // WindowStart/ResetAt are exact boundaries. When no window is active for the
-// actor (nothing charged yet, or a session window expired), WindowStart is the
+// invoker (nothing charged yet, or a session window expired), WindowStart is the
 // zero time and ResetAt reports now+WindowSeconds — the boundary a window
 // opened by a charge right now would have.
 type WindowStatus struct {
 	Key               string    `json:"key"`
 	WindowSeconds     int64     `json:"window_seconds"`
 	Cadence           string    `json:"cadence"`
-	Limit             int64     `json:"limit_micros"`
-	Used              int64     `json:"used_micros"`
-	Reserved          int64     `json:"reserved_micros"`
-	Remaining         int64     `json:"remaining_micros"`
+	Limit             int64     `json:"limit"`
+	Used              int64     `json:"used"`
+	Reserved          int64     `json:"reserved"`
+	Remaining         int64     `json:"remaining"`
 	WindowStart       time.Time `json:"window_start"`
 	ResetAt           time.Time `json:"reset_at"`
 	Allowed           bool      `json:"allowed"`
@@ -149,26 +158,30 @@ func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
 	return clockwork.NewRealClock()
 }
 
-// Check computes per-window used/reserved/remaining for an actor and returns the
-// allow/deny decision for requestedMicros WITHOUT writing anything (window
+// Check computes per-window used/reserved/remaining for an invoker and returns the
+// allow/deny decision for requestedAmount WITHOUT writing anything (window
 // state is derived virtually; expired session windows read as fresh).
-func (s *Service) Check(ctx context.Context, payer identity.CustomerID, actor string, windows []BudgetWindow, requestedMicros int64) ([]WindowStatus, bool, error) {
+func (s *Service) Check(ctx context.Context, payer identity.CustomerID, invoker, currency string, windows []BudgetWindow, requestedAmount int64) ([]WindowStatus, bool, error) {
 	if s == nil || s.db == nil {
 		return nil, false, fmt.Errorf("budgets service not initialized")
 	}
 	if payer.IsZero() {
 		return nil, false, ErrCustomerRequired
 	}
-	actor = strings.TrimSpace(actor)
-	if actor == "" {
-		return nil, false, fmt.Errorf("actor required")
+	invoker = strings.TrimSpace(invoker)
+	if invoker == "" {
+		return nil, false, fmt.Errorf("invoker required")
+	}
+	cur, err := normalizeCurrency(currency)
+	if err != nil {
+		return nil, false, err
 	}
 
 	var statuses []WindowStatus
 	var allowed bool
-	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
-		statuses, allowed, _, e = s.computeWindows(ctx, s.db.Qx(ctx), payer, actor, windows, requestedMicros, false)
+		statuses, allowed, _, e = s.computeWindows(ctx, s.db.Qx(ctx), payer, invoker, cur, windows, requestedAmount, false)
 		return e
 	})
 	if err != nil {
@@ -177,34 +190,38 @@ func (s *Service) Check(ctx context.Context, payer identity.CustomerID, actor st
 	return statuses, allowed, nil
 }
 
-// Reserve idempotently reserves amountMicros against the actor's windows.
+// Reserve idempotently reserves amount against the invoker's windows.
 //
-// It is idempotent on (tenant, payer, actor, source, source_id): if a matching
+// It is idempotent on (tenant, payer, invoker, source, source_id): if a matching
 // reservation row already exists it is returned as-is (allowed=true), regardless
-// of the current window state. Otherwise it locks the actor's window-state rows
+// of the current window state. Otherwise it locks the invoker's window-state rows
 // FOR UPDATE, runs the window computation, and — when every window allows the
 // request — opens/reopens windows as needed (session reopen rewrites
 // window_start; a first-ever charge inserts the state row with anchor=now) and
 // inserts an "active" reservation, all in one transaction. Denied requests
 // write nothing: a denied first request does NOT start a user's window.
-func (s *Service) Reserve(ctx context.Context, payer identity.CustomerID, actor string, windows []BudgetWindow, amountMicros int64, source, sourceID string, ttl time.Duration) (uuid.UUID, []WindowStatus, bool, error) {
+func (s *Service) Reserve(ctx context.Context, payer identity.CustomerID, invoker, currency string, windows []BudgetWindow, amount int64, source, sourceID string, ttl time.Duration) (uuid.UUID, []WindowStatus, bool, error) {
 	if s == nil || s.db == nil {
 		return uuid.Nil, nil, false, fmt.Errorf("budgets service not initialized")
 	}
 	if payer.IsZero() {
 		return uuid.Nil, nil, false, ErrCustomerRequired
 	}
-	actor = strings.TrimSpace(actor)
-	if actor == "" {
-		return uuid.Nil, nil, false, fmt.Errorf("actor required")
+	invoker = strings.TrimSpace(invoker)
+	if invoker == "" {
+		return uuid.Nil, nil, false, fmt.Errorf("invoker required")
 	}
 	source = strings.TrimSpace(source)
 	sourceID = strings.TrimSpace(sourceID)
 	if source == "" || sourceID == "" {
 		return uuid.Nil, nil, false, fmt.Errorf("source and source_id required")
 	}
-	if amountMicros < 0 {
+	if amount < 0 {
 		return uuid.Nil, nil, false, fmt.Errorf("amount must be non-negative")
+	}
+	cur, err := normalizeCurrency(currency)
+	if err != nil {
+		return uuid.Nil, nil, false, err
 	}
 
 	tid, err := merchant.Require(ctx)
@@ -231,12 +248,12 @@ func (s *Service) Reserve(ctx context.Context, payer identity.CustomerID, actor 
 		// Idempotency: a replayed Reserve returns the existing row verbatim.
 		existing, gerr := q.GetBudgetReservationByCoords(ctx, gen.GetBudgetReservationByCoordsParams{
 			MerchantID: tenantID, CustomerID: payerID,
-			InvokerID: actor, Source: source, SourceID: sourceID,
+			InvokerID: invoker, Currency: cur, Source: source, SourceID: sourceID,
 		})
 		if gerr == nil {
 			// Report the current window state alongside the existing reservation; the
 			// reservation already exists, so the decision is allowed.
-			sts, _, _, cerr := s.computeWindows(ctx, tx, payer, actor, windows, amountMicros, false)
+			sts, _, _, cerr := s.computeWindows(ctx, tx, payer, invoker, cur, windows, amount, false)
 			if cerr != nil {
 				return cerr
 			}
@@ -247,7 +264,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.CustomerID, actor 
 			return gerr
 		}
 
-		sts, ok, opens, err := s.computeWindows(ctx, tx, payer, actor, windows, amountMicros, true)
+		sts, ok, opens, err := s.computeWindows(ctx, tx, payer, invoker, cur, windows, amount, true)
 		if err != nil {
 			return err
 		}
@@ -266,7 +283,8 @@ func (s *Service) Reserve(ctx context.Context, payer identity.CustomerID, actor 
 					ID:            op.insert.ID,
 					MerchantID:    tenantID,
 					CustomerID:    payerID,
-					InvokerID:     op.insert.Actor,
+					InvokerID:     op.insert.Invoker,
+					Currency:      op.insert.Currency,
 					WindowKey:     op.insert.WindowKey,
 					Cadence:       op.insert.Cadence,
 					WindowSeconds: op.insert.WindowSeconds,
@@ -291,38 +309,40 @@ func (s *Service) Reserve(ctx context.Context, payer identity.CustomerID, actor 
 		}
 
 		res := &models.BudgetReservation{
-			ID:           uuidutil.NewV7(),
-			MerchantID:   tenantID,
-			CustomerID:   payerID,
-			Actor:        actor,
-			AmountMicros: amountMicros,
-			Status:       "active",
-			Source:       source,
-			SourceID:     sourceID,
-			CreatedAt:    now,
+			ID:         uuidutil.NewV7(),
+			MerchantID: tenantID,
+			CustomerID: payerID,
+			Invoker:    invoker,
+			Currency:   cur,
+			Amount:     amount,
+			Status:     "active",
+			Source:     source,
+			SourceID:   sourceID,
+			CreatedAt:  now,
 		}
 		if ttl > 0 {
 			exp := now.Add(ttl)
 			res.ExpiresAt = &exp
 		}
 		if err := q.InsertBudgetReservation(ctx, gen.InsertBudgetReservationParams{
-			ID:           res.ID,
-			MerchantID:   res.MerchantID,
-			CustomerID:   res.CustomerID,
-			InvokerID:    res.Actor,
-			AmountMicros: res.AmountMicros,
-			Status:       res.Status,
-			Source:       res.Source,
-			SourceID:     res.SourceID,
-			ExpiresAt:    res.ExpiresAt,
-			CreatedAt:    res.CreatedAt,
+			ID:         res.ID,
+			MerchantID: res.MerchantID,
+			CustomerID: res.CustomerID,
+			InvokerID:  res.Invoker,
+			Currency:   res.Currency,
+			Amount:     res.Amount,
+			Status:     res.Status,
+			Source:     res.Source,
+			SourceID:   res.SourceID,
+			ExpiresAt:  res.ExpiresAt,
+			CreatedAt:  res.CreatedAt,
 		}); err != nil {
 			return err
 		}
 		// Recompute so the returned statuses reflect the just-inserted reservation
 		// and the just-opened windows (the caller sees this reservation already
 		// counted against `reserved` and the exact ResetAt of its window).
-		sts, _, _, err = s.computeWindows(ctx, tx, payer, actor, windows, amountMicros, false)
+		sts, _, _, err = s.computeWindows(ctx, tx, payer, invoker, cur, windows, amount, false)
 		if err != nil {
 			return err
 		}
@@ -335,19 +355,19 @@ func (s *Service) Reserve(ctx context.Context, payer identity.CustomerID, actor 
 	return reservationID, statuses, allowed, nil
 }
 
-// Capture settles an active reservation: status -> "captured", captured_micros
-// -> actualMicros. After capture the reservation counts against `used` (by
-// actualMicros) instead of `reserved`.
-func (s *Service) Capture(ctx context.Context, reservationID uuid.UUID, actualMicros int64) error {
+// Capture settles an active reservation: status -> "captured", captured ->
+// actual. After capture the reservation counts against `used` (by actual)
+// instead of `reserved`.
+func (s *Service) Capture(ctx context.Context, reservationID uuid.UUID, actual int64) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("budgets service not initialized")
 	}
-	if actualMicros < 0 {
+	if actual < 0 {
 		return fmt.Errorf("captured amount must be non-negative")
 	}
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		n, err := s.db.Gen(ctx).CaptureBudgetReservation(ctx, gen.CaptureBudgetReservationParams{
-			ID: reservationID, CapturedMicros: actualMicros,
+			ID: reservationID, Captured: actual,
 		})
 		if err != nil {
 			return err
@@ -421,7 +441,8 @@ func windowStateFromGen(r gen.OpenrailsBudgetWindowState) *models.BudgetWindowSt
 		ID:            r.ID,
 		MerchantID:    r.MerchantID,
 		CustomerID:    r.CustomerID,
-		Actor:         r.InvokerID,
+		Invoker:       r.InvokerID,
+		Currency:      r.Currency,
 		WindowKey:     r.WindowKey,
 		Cadence:       r.Cadence,
 		WindowSeconds: r.WindowSeconds,
@@ -442,7 +463,7 @@ func windowStateFromGen(r gen.OpenrailsBudgetWindowState) *models.BudgetWindowSt
 // reserves around a boundary — and the returned []windowOpen describes the
 // state writes to apply if the request proceeds. With lock=false (Check,
 // post-insert echo) nothing is locked and opens is nil.
-func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identity.CustomerID, actor string, windows []BudgetWindow, requestedMicros int64, lock bool) ([]WindowStatus, bool, []windowOpen, error) {
+func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identity.CustomerID, invoker, currency string, windows []BudgetWindow, requested int64, lock bool) ([]WindowStatus, bool, []windowOpen, error) {
 	now := s.now()
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -477,7 +498,7 @@ func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identit
 		var st *models.BudgetWindowState
 		stateKey := gen.GetBudgetWindowStateParams{
 			MerchantID: tenantID, CustomerID: payerID,
-			InvokerID: actor, WindowKey: w.Key,
+			InvokerID: invoker, Currency: currency, WindowKey: w.Key,
 		}
 		var row gen.OpenrailsBudgetWindowState
 		var serr error
@@ -500,8 +521,8 @@ func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identit
 		var used, reserved int64
 		if active {
 			agg, err := q.AggregateBudgetWindow(ctx, gen.AggregateBudgetWindowParams{
-				MerchantID: tenantID, CustomerID: payerID, InvokerID: actor,
-				WindowStart: start,
+				MerchantID: tenantID, CustomerID: payerID, InvokerID: invoker,
+				Currency: currency, WindowStart: start,
 			})
 			if err != nil {
 				return nil, false, nil, err
@@ -509,8 +530,8 @@ func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identit
 			used, reserved = agg.Used, agg.Reserved
 		}
 
-		remaining := w.LimitMicros - used - reserved
-		allowed := requestedMicros <= remaining
+		remaining := w.Limit - used - reserved
+		allowed := requested <= remaining
 
 		// ResetAt is exact: the active window's end, or — with no active
 		// window — the end a window opened by a charge right now would have.
@@ -525,7 +546,7 @@ func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identit
 			Key:           w.Key,
 			WindowSeconds: w.WindowSeconds,
 			Cadence:       cadence,
-			Limit:         w.LimitMicros,
+			Limit:         w.Limit,
 			Used:          used,
 			Reserved:      reserved,
 			Remaining:     remaining,
@@ -535,7 +556,7 @@ func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identit
 		}
 		if !allowed {
 			allAllowed = false
-			if requestedMicros > w.LimitMicros {
+			if requested > w.Limit {
 				// Larger than the whole window: no reset will ever allow it.
 				ws.RetryAfterSeconds = 0
 			} else {
@@ -554,7 +575,8 @@ func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identit
 				// First-ever charge on this key: open at now, anchor at now.
 				opens = append(opens, windowOpen{insert: &models.BudgetWindowState{
 					ID:            uuidutil.NewV7(),
-					Actor:         actor,
+					Invoker:       invoker,
+					Currency:      currency,
 					WindowKey:     w.Key,
 					Cadence:       cadence,
 					WindowSeconds: w.WindowSeconds,

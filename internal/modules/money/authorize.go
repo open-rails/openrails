@@ -16,13 +16,13 @@ import (
 )
 
 // AuthorizeHoldInput is the input to AuthorizeAndHold: the payer (tenant subject), the
-// actor (canonical actor for per-actor caps), the estimated charge, and the
+// invoker (canonical invoker for per-invoker caps), the estimated charge, and the
 // idempotency-keyed source coordinates of the hold.
 type AuthorizeHoldInput struct {
-	Payer          identity.CustomerID
-	Actor          string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
-	Currency       string // "" => DefaultCurrency (#472)
-	EstimateMicros int64
+	Payer           identity.CustomerID
+	Invoker         string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
+	Currency        string // "" => DefaultCurrency (#472)
+	EstimatedAmount int64
 	// Source + SourceID form the idempotency key for the placed hold (typically
 	// the request_id). A retry with the same coordinates returns the same hold.
 	Source   string
@@ -36,11 +36,12 @@ type AuthorizeHoldInput struct {
 type AuthorizeHoldResult struct {
 	Decision    SpendDecision
 	BillingMode string
-	// AvailableMicros/OutstandingOwedMicros are the snapshot AS EVALUATED inside the
+	Currency    string
+	// AvailableAmount/OutstandingOwedAmount are the snapshot AS EVALUATED inside the
 	// transaction (post-lock, pre-hold), so they reflect the balance the decision
 	// was made against.
-	AvailableMicros       int64
-	OutstandingOwedMicros int64
+	AvailableAmount       int64
+	OutstandingOwedAmount int64
 	// Hold is the placed reservation when Decision.Allowed; nil when denied.
 	Hold *models.MoneyTransaction
 }
@@ -52,7 +53,7 @@ type AuthorizeHoldResult struct {
 // separately: the balance row is locked FOR UPDATE at the top of the tx, and the
 // policy evaluation (which counts active holds + windowed spend) and the hold
 // insert both run while that lock is held. Two concurrent authorizes on the same
-// (tenant, payer, credit_type) therefore serialize on the row lock — the second
+// (tenant, payer, currency) therefore serialize on the row lock — the second
 // sees the first's held_balance and active-hold exposure, so they cannot both
 // pass on the same available balance.
 func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInput) (*AuthorizeHoldResult, error) {
@@ -62,7 +63,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 	if in.Payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	if in.EstimateMicros < 0 {
+	if in.EstimatedAmount < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
 	}
 	in.Source = strings.TrimSpace(in.Source)
@@ -112,8 +113,9 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			result = &AuthorizeHoldResult{
 				Decision:              SpendDecision{Allowed: true},
 				BillingMode:           snap.billingMode,
-				AvailableMicros:       snap.available,
-				OutstandingOwedMicros: snap.outstanding,
+				Currency:              cur,
+				AvailableAmount:       snap.available,
+				OutstandingOwedAmount: snap.outstanding,
 				Hold:                  existing,
 			}
 			return nil
@@ -135,15 +137,15 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			return serr
 		}
 
-		// Spend policy (per-actor + org caps + outstanding ceiling).
-		dec, derr := txSvc.CheckSpendAllowed(ctx, in.Payer, strings.TrimSpace(in.Actor), in.EstimateMicros)
+		// Spend policy (per-invoker + org caps + outstanding ceiling).
+		dec, derr := txSvc.CheckSpendAllowed(ctx, in.Payer, cur, strings.TrimSpace(in.Invoker), in.EstimatedAmount)
 		if derr != nil {
 			return derr
 		}
 
 		// Admit-time balance/credit gate. Prepaid accounts gate on available balance
 		// (unchanged). Arrears accounts (#489): when an admin has set a credit line
-		// (credit_limit_micros > 0) the balance may go NEGATIVE only up to it, so a
+		// (credit_limit_amount > 0) the balance may go NEGATIVE only up to it, so a
 		// hold is allowed while estimate <= available + credit_limit and denied
 		// insufficient_credit otherwise. credit_limit=0 (the default) is OFF and
 		// preserves the EXISTING arrears behavior (#302): no admit-time balance gate
@@ -157,14 +159,14 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		// way.
 		switch {
 		case settings.BillingMode != BillingModeArrears:
-			if in.EstimateMicros > available {
+			if in.EstimatedAmount > available {
 				dec.Allowed = false
 				if dec.DenyCode == "" {
 					dec.DenyCode = DenyInsufficientBalance
 				}
 			}
-		case settings.CreditLimitMicros > 0:
-			if in.EstimateMicros > available+settings.CreditLimitMicros {
+		case settings.CreditLimitAmount > 0:
+			if in.EstimatedAmount > available+settings.CreditLimitAmount {
 				dec.Allowed = false
 				if dec.DenyCode == "" {
 					dec.DenyCode = DenyInsufficientCredit
@@ -175,8 +177,9 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		res := &AuthorizeHoldResult{
 			Decision:              dec,
 			BillingMode:           settings.BillingMode,
-			AvailableMicros:       available,
-			OutstandingOwedMicros: settings.OutstandingOwedMicros,
+			Currency:              cur,
+			AvailableAmount:       available,
+			OutstandingOwedAmount: settings.OutstandingOwedAmount,
 		}
 
 		if !dec.Allowed {
@@ -188,7 +191,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		// active hold row IS the held reservation (#491): SumActiveMoneyHeld counts
 		// it, so a concurrent authorize on the same customer (serialized behind the
 		// lock) sees this hold's exposure.
-		amount := in.EstimateMicros
+		amount := in.EstimatedAmount
 		exp := in.ExpiresAt.UTC()
 		auth := amount
 		srcID := in.SourceID
@@ -197,7 +200,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			MerchantID:      tenantID,
 			CustomerID:      payerID,
 			Currency:        cur,
-			Actor:           strings.TrimSpace(in.Actor),
+			Invoker:         strings.TrimSpace(in.Invoker),
 			Amount:          0,
 			Source:          in.Source,
 			SourceID:        &srcID,
@@ -226,7 +229,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 const DenyInsufficientBalance = "insufficient_balance"
 
 // DenyInsufficientCredit is the deny code (#489) when an arrears account with an
-// admin-set credit line would exceed credit_limit_micros (the negative-balance
+// admin-set credit line would exceed credit_limit_amount (the negative-balance
 // ceiling) by placing this hold.
 const DenyInsufficientCredit = "insufficient_credit"
 
@@ -250,6 +253,6 @@ func (s *MoneyService) snapshotTx(ctx context.Context, payer identity.CustomerID
 	return accountSnapshot{
 		billingMode: settings.BillingMode,
 		available:   bal.Balance - bal.HeldBalance,
-		outstanding: settings.OutstandingOwedMicros,
+		outstanding: settings.OutstandingOwedAmount,
 	}, nil
 }

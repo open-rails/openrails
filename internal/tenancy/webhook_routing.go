@@ -19,7 +19,7 @@ var ErrTenantRouteUnresolved = errors.New("tenancy: webhook host/slug maps to no
 // WebhookRoute is the resolved tenant for an inbound webhook, plus its routing
 // metadata.
 type WebhookRoute struct {
-	MerchantID   merchant.ID
+	MerchantID merchant.ID
 	TenantSlug string
 }
 

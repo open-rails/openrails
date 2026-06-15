@@ -18,14 +18,10 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// #491: the invoker (end-user) attribution label is wire field "invoker" (renamed
-// from "actor"). Both are accepted transiently; resolveInvokerField prefers
-// "invoker". The binding:"required" moved off the field to a manual check so an
-// "invoker"-only body validates.
 type serviceWithdrawRequest struct {
 	CustomerID string     `json:"customer_id"`
 	Invoker    string     `json:"invoker"`
-	Actor      string     `json:"actor"`
+	Currency   string     `json:"currency"`
 	Amount     int64      `json:"amount" binding:"required"`
 	Source     string     `json:"source" binding:"required"`
 	SourceID   *uuid.UUID `json:"source_id" binding:"required"`
@@ -34,7 +30,6 @@ type serviceWithdrawRequest struct {
 type serviceDepositRequest struct {
 	CustomerID  string     `json:"customer_id"`
 	Invoker     string     `json:"invoker"`
-	Actor       string     `json:"actor"`
 	Currency    string     `json:"currency"` // "" => DefaultCurrency (#476); #483: must forward so unknown units reject like local
 	Amount      int64      `json:"amount" binding:"required"`
 	Source      string     `json:"source" binding:"required"`
@@ -46,7 +41,7 @@ type serviceDepositRequest struct {
 type serviceHoldRequest struct {
 	CustomerID string `json:"customer_id"`
 	Invoker    string `json:"invoker"`
-	Actor      string `json:"actor"`
+	Currency   string `json:"currency"`
 	Amount     int64  `json:"amount" binding:"required"`
 	Source     string `json:"source" binding:"required"`
 	SourceID   string `json:"source_id" binding:"required"`
@@ -107,30 +102,31 @@ func requireServiceCustomerScope(r *httprequest.Request, tenantSubject billingid
 }
 
 // serviceAuthorizeRequest is the body of POST /v1/service/credits/authorize
-// (issue #235/#247). customer_id is the subject billed; actor is the
-// canonical caller for per-(customer_id, actor) sub-budgets;
-// estimate_micros = the upper-bound charge;
+// (issue #235/#247). customer_id is the subject billed; invoker is the
+// canonical caller for per-(customer_id, invoker) sub-budgets;
+// estimated_amount = the upper-bound charge;
 // request_id = the idempotency key for the placed hold.
 type serviceAuthorizeRequest struct {
-	CustomerID     string `json:"customer_id"`
-	Invoker        string `json:"invoker"` // #491 (renamed from "actor")
-	Actor          string `json:"actor"`
-	EstimateMicros int64  `json:"estimate_micros"`
-	RequestID      string `json:"request_id" binding:"required"`
-	ExpiresAt      *int64 `json:"expires_at"`
+	CustomerID      string `json:"customer_id"`
+	Invoker         string `json:"invoker"`
+	Currency        string `json:"currency"`
+	EstimatedAmount int64  `json:"estimated_amount"`
+	RequestID       string `json:"request_id" binding:"required"`
+	ExpiresAt       *int64 `json:"expires_at"`
 }
 
 // serviceAuthorizeResponse mirrors the unified authorize contract: the policy
 // decision + the tenant subject's real available/outstanding + the placed reservation.
 type serviceAuthorizeResponse struct {
-	Allowed              bool       `json:"allowed"`
-	DenyCode             string     `json:"deny_code,omitempty"`
-	BillingMode          string     `json:"billing_mode"`
-	AvailableMicros      int64      `json:"available_micros"`
-	OutstandingMicros    int64      `json:"outstanding_micros"`
-	RemainingTodayMicros *int64     `json:"remaining_today_micros,omitempty"`
-	RetryAfterSeconds    int64      `json:"retry_after_seconds,omitempty"`
-	ReservationID        *uuid.UUID `json:"reservation_id,omitempty"`
+	Allowed               bool       `json:"allowed"`
+	DenyCode              string     `json:"deny_code,omitempty"`
+	BillingMode           string     `json:"billing_mode"`
+	Currency              string     `json:"currency"`
+	AvailableAmount       int64      `json:"available_amount"`
+	OutstandingOwedAmount int64      `json:"outstanding_owed_amount"`
+	RemainingTodayAmount  *int64     `json:"remaining_today_amount,omitempty"`
+	RetryAfterSeconds     int64      `json:"retry_after_seconds,omitempty"`
+	ReservationID         *uuid.UUID `json:"reservation_id,omitempty"`
 }
 
 // ServiceAuthorizeCredits is the service token-authed policy-decision + ATOMIC hold
@@ -151,8 +147,8 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if req.EstimateMicros < 0 {
-		r.ErrorJSON(http.StatusBadRequest, "estimate_micros must be >= 0")
+	if req.EstimatedAmount < 0 {
+		r.ErrorJSON(http.StatusBadRequest, "estimated_amount must be >= 0")
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -180,30 +176,28 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 	}
 
 	out, err := svc.AuthorizeAndHold(r.Request.Context(), billingservice.AuthorizeAndHoldRequest{
-		CustomerID:     *tenantSubject,
-		Actor:          resolveInvokerField(req.Invoker, req.Actor),
-		EstimateMicros: req.EstimateMicros,
-		RequestID:      req.RequestID,
-		ExpiresAt:      expiresAt,
+		CustomerID:      *tenantSubject,
+		Invoker:         strings.TrimSpace(req.Invoker),
+		Currency:        req.Currency,
+		EstimatedAmount: req.EstimatedAmount,
+		RequestID:       req.RequestID,
+		ExpiresAt:       expiresAt,
 	})
 	if err != nil {
-		if err == billingservice.ErrCreditTypeInactive {
-			r.ErrorJSON(http.StatusBadRequest, "credit_type_inactive")
-			return
-		}
 		r.ErrorJSON(http.StatusInternalServerError, "authorize failed")
 		return
 	}
 
 	r.SuccessJSON(serviceAuthorizeResponse{
-		Allowed:              out.Allowed,
-		DenyCode:             out.DenyCode,
-		BillingMode:          out.BillingMode,
-		AvailableMicros:      out.AvailableMicros,
-		OutstandingMicros:    out.OutstandingOwedMicros,
-		RemainingTodayMicros: out.RemainingTodayMicros,
-		RetryAfterSeconds:    out.RetryAfterSeconds,
-		ReservationID:        out.ReservationID,
+		Allowed:               out.Allowed,
+		DenyCode:              out.DenyCode,
+		BillingMode:           out.BillingMode,
+		Currency:              out.Currency,
+		AvailableAmount:       out.AvailableAmount,
+		OutstandingOwedAmount: out.OutstandingOwedAmount,
+		RemainingTodayAmount:  out.RemainingTodayAmount,
+		RetryAfterSeconds:     out.RetryAfterSeconds,
+		ReservationID:         out.ReservationID,
 	})
 }
 
@@ -213,10 +207,10 @@ type serviceBalanceResponse struct {
 	CustomerID            uuid.UUID `json:"customer_id"`
 	Currency              string    `json:"currency"`
 	BillingMode           string    `json:"billing_mode"`
-	BalanceMicros         int64     `json:"balance_micros"`
-	HeldMicros            int64     `json:"held_micros"`
-	AvailableMicros       int64     `json:"available_micros"`
-	OutstandingOwedMicros int64     `json:"outstanding_owed_micros"`
+	BalanceAmount         int64     `json:"balance_amount"`
+	HeldAmount            int64     `json:"held_amount"`
+	AvailableAmount       int64     `json:"available_amount"`
+	OutstandingOwedAmount int64     `json:"outstanding_owed_amount"`
 }
 
 // ServiceGetCreditsBalance returns the tenant subject's REAL balance snapshot (issue
@@ -253,10 +247,10 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		CustomerID:            snap.CustomerID,
 		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
-		BalanceMicros:         snap.BalanceMicros,
-		HeldMicros:            snap.HeldMicros,
-		AvailableMicros:       snap.AvailableMicros,
-		OutstandingOwedMicros: snap.OutstandingOwedMicros,
+		BalanceAmount:         snap.BalanceAmount,
+		HeldAmount:            snap.HeldAmount,
+		AvailableAmount:       snap.AvailableAmount,
+		OutstandingOwedAmount: snap.OutstandingOwedAmount,
 	})
 }
 
@@ -272,10 +266,10 @@ type serviceAccountSettingsRequest struct {
 	CustomerID               string  `json:"customer_id"`
 	Currency                 string  `json:"currency"`
 	BillingMode              *string `json:"billing_mode"` // "prepaid" | "arrears"
-	MaxSpendPerDayMicros     *int64  `json:"max_spend_per_day_micros"`
-	MaxSpendPerMonthMicros   *int64  `json:"max_spend_per_month_micros"`
-	MaxOutstandingOwedMicros *int64  `json:"max_outstanding_owed_micros"`
-	LowBalanceThreshold      *int64  `json:"low_balance_threshold_micros"`
+	MaxSpendPerDay           *int64  `json:"max_spend_per_day"`
+	MaxSpendPerMonth         *int64  `json:"max_spend_per_month"`
+	MaxOutstandingOwedAmount *int64  `json:"max_outstanding_owed_amount"`
+	LowBalanceThreshold      *int64  `json:"low_balance_threshold"`
 	AutoTopupEnabled         *bool   `json:"auto_topup_enabled"`
 	AutoTopupAmountCents     *int64  `json:"auto_topup_amount_cents"`
 	AutoTopupPaymentMethod   *string `json:"auto_topup_payment_method_id"`
@@ -307,9 +301,9 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 	}
 	in := money.AccountSettingsInput{
 		BillingMode:              req.BillingMode,
-		MaxSpendPerDayMicros:     req.MaxSpendPerDayMicros,
-		MaxSpendPerMonthMicros:   req.MaxSpendPerMonthMicros,
-		MaxOutstandingOwedMicros: req.MaxOutstandingOwedMicros,
+		MaxSpendPerDay:           req.MaxSpendPerDay,
+		MaxSpendPerMonth:         req.MaxSpendPerMonth,
+		MaxOutstandingOwedAmount: req.MaxOutstandingOwedAmount,
 		LowBalanceThreshold:      req.LowBalanceThreshold,
 		AutoTopupEnabled:         req.AutoTopupEnabled,
 		AutoTopupAmountCents:     req.AutoTopupAmountCents,
@@ -398,8 +392,8 @@ func ServiceListCustomerCreditTransactions(r *httprequest.Request) {
 	out := make([]serviceTxnResponse, 0, len(items))
 	for _, t := range items {
 		out = append(out, serviceTxnResponse{
-			ID: t.ID, CustomerID: t.CustomerID, Invoker: t.Actor, Actor: t.Actor, Amount: t.Amount,
-			TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
+			ID: t.ID, CustomerID: t.CustomerID, Invoker: t.Invoker, Amount: t.Amount,
+			Currency: t.Currency, TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
 			CreatedAt: t.CreatedAt,
 		})
 	}
@@ -409,10 +403,8 @@ func ServiceListCustomerCreditTransactions(r *httprequest.Request) {
 type serviceTxnResponse struct {
 	ID              uuid.UUID `json:"id"`
 	CustomerID      uuid.UUID `json:"customer_id"`
-	// Invoker mirrors the opaque attribution label; #491 renamed the wire field
-	// from "actor" (still emitted for back-compat).
 	Invoker         string    `json:"invoker"`
-	Actor           string    `json:"actor"`
+	Currency        string    `json:"currency"`
 	Amount          int64     `json:"amount"`
 	TransactionType string    `json:"transaction_type"`
 	Status          string    `json:"status"`
@@ -422,6 +414,7 @@ type serviceTxnResponse struct {
 
 type serviceUsageRollupRequest struct {
 	CustomerID string `json:"customer_id" binding:"required"`
+	Currency   string `json:"currency"`
 	From       int64  `json:"from" binding:"required"` // unix seconds, inclusive
 	To         int64  `json:"to" binding:"required"`   // unix seconds, exclusive
 	GroupBy    string `json:"group_by" binding:"required"`
@@ -429,6 +422,7 @@ type serviceUsageRollupRequest struct {
 
 type serviceEndpointRevenueRequest struct {
 	Resource string `json:"resource" binding:"required"`
+	Currency string `json:"currency"`
 	From     int64  `json:"from" binding:"required"`
 	To       int64  `json:"to" binding:"required"`
 }
@@ -446,16 +440,16 @@ func ServiceResourceRevenue(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	rows, err := svc.ResourceRevenueDaily(r.Request.Context(), req.Resource, time.Unix(req.From, 0).UTC(), time.Unix(req.To, 0).UTC())
+	rows, err := svc.ResourceRevenueDaily(r.Request.Context(), req.Resource, req.Currency, time.Unix(req.From, 0).UTC(), time.Unix(req.To, 0).UTC())
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 	var total int64
 	for _, x := range rows {
-		total += x.AmountMicros
+		total += x.Amount
 	}
-	r.SuccessJSON(map[string]any{"revenue_micros": total, "daily": rows})
+	r.SuccessJSON(map[string]any{"currency": money.NormalizeCurrency(req.Currency), "revenue_amount": total, "daily": rows})
 }
 
 // ServiceUsageRollup returns per-dimension-value spend for a tenant subject over a
@@ -485,6 +479,7 @@ func ServiceUsageRollup(r *httprequest.Request) {
 	}
 	rows, err := svc.ServiceUsageRollup(r.Request.Context(), billingservice.ServiceUsageRollupRequest{
 		CustomerID: tenantSubjectID,
+		Currency:   req.Currency,
 		From:       time.Unix(req.From, 0).UTC(),
 		To:         time.Unix(req.To, 0).UTC(),
 		GroupBy:    req.GroupBy,
@@ -493,7 +488,7 @@ func ServiceUsageRollup(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	r.SuccessJSON(map[string]any{"rows": rows})
+	r.SuccessJSON(map[string]any{"currency": money.NormalizeCurrency(req.Currency), "rows": rows})
 }
 
 func ServiceDepositCredits(r *httprequest.Request) {
@@ -501,7 +496,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	invoker := resolveInvokerField(req.Invoker, req.Actor)
+	invoker := strings.TrimSpace(req.Invoker)
 	if invoker == "" {
 		r.ErrorJSON(http.StatusBadRequest, "invoker required")
 		return
@@ -533,7 +528,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
 		CustomerID:  tenantSubjectID,
-		Actor:       invoker,
+		Invoker:     invoker,
 		Currency:    req.Currency,
 		Amount:      req.Amount,
 		Source:      req.Source,
@@ -542,10 +537,6 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		Description: req.Description,
 	})
 	if err != nil {
-		if err == billingservice.ErrCreditTypeInactive {
-			r.ErrorJSON(http.StatusBadRequest, "credit_type_inactive")
-			return
-		}
 		// #483: an unknown/invalid currency is a client error (parity with local), not a 500.
 		if errors.Is(err, money.ErrBillingUnitRequired) || strings.Contains(err.Error(), "unknown currency") {
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -562,7 +553,7 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	invoker := resolveInvokerField(req.Invoker, req.Actor)
+	invoker := strings.TrimSpace(req.Invoker)
 	if invoker == "" {
 		r.ErrorJSON(http.StatusBadRequest, "invoker required")
 		return
@@ -586,17 +577,14 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 	}
 	trx, err := svc.WithdrawCredits(r.Request.Context(), billingservice.WithdrawCreditsRequest{
 		CustomerID: tenantSubjectID,
-		Actor:      invoker,
+		Invoker:    invoker,
+		Currency:   req.Currency,
 		Amount:     req.Amount,
 		Source:     req.Source,
 		SourceID:   req.SourceID,
 	})
 	if err == billingservice.ErrInsufficientCredits {
 		r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")
-		return
-	}
-	if err == billingservice.ErrCreditTypeInactive {
-		r.ErrorJSON(http.StatusBadRequest, "credit_type_inactive")
 		return
 	}
 	if err != nil {
@@ -611,7 +599,7 @@ func ServiceHoldCredits(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	invoker := resolveInvokerField(req.Invoker, req.Actor)
+	invoker := strings.TrimSpace(req.Invoker)
 	if invoker == "" {
 		r.ErrorJSON(http.StatusBadRequest, "invoker required")
 		return
@@ -635,7 +623,8 @@ func ServiceHoldCredits(r *httprequest.Request) {
 	}
 	hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
 		CustomerID: tenantSubjectID,
-		Actor:      invoker,
+		Invoker:    invoker,
+		Currency:   req.Currency,
 		Amount:     req.Amount,
 		Source:     req.Source,
 		SourceID:   req.SourceID,
@@ -643,10 +632,6 @@ func ServiceHoldCredits(r *httprequest.Request) {
 	})
 	if err == billingservice.ErrInsufficientCredits {
 		r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")
-		return
-	}
-	if err == billingservice.ErrCreditTypeInactive {
-		r.ErrorJSON(http.StatusBadRequest, "credit_type_inactive")
 		return
 	}
 	if err != nil {
@@ -710,10 +695,10 @@ func ServiceReleaseHold(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"ok": true})
 }
 
-func ServiceGetActorCredits(r *httprequest.Request) {
-	actorID := strings.TrimSpace(r.Param("actor"))
-	if actorID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "actor required")
+func ServiceGetInvokerCredits(r *httprequest.Request) {
+	invokerID := strings.TrimSpace(r.Param("invoker"))
+	if invokerID == "" {
+		r.ErrorJSON(http.StatusBadRequest, "invoker required")
 		return
 	}
 	tenantSubjectID, err := parseServiceCustomerID(r.Request.URL.Query().Get("customer_id"))
@@ -721,20 +706,20 @@ func ServiceGetActorCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	// #472: one universal µ$ wallet, no credit_type dimension.
+	currency := money.NormalizeCurrency(r.Request.URL.Query().Get("currency"))
 	var balance int64
 	var heldBalance int64
 	if tenantSubjectID != nil {
 		if !requireServiceCustomerScope(r, *tenantSubjectID) {
 			return
 		}
-		bal, err := r.State.MoneyService.GetBalanceForCustomer(r.Request.Context(), *tenantSubjectID, money.DefaultCurrency)
+		bal, err := r.State.MoneyService.GetBalanceForCustomer(r.Request.Context(), *tenantSubjectID, r.Request.URL.Query().Get("currency"))
 		if err == nil {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance
 		}
 	} else {
-		bal, err := r.State.MoneyService.GetBalance(r.Request.Context(), actorID)
+		bal, err := r.State.MoneyService.GetBalance(r.Request.Context(), invokerID)
 		if err == nil {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance
@@ -745,16 +730,16 @@ func ServiceGetActorCredits(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(map[string]any{
-		"type":         "usd_micro",
+		"currency":     currency,
 		"balance":      balance,
 		"held_balance": heldBalance,
 	})
 }
 
 func ServiceLookupCreditTransaction(r *httprequest.Request) {
-	actorID := strings.TrimSpace(r.Request.URL.Query().Get("actor"))
-	if actorID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "actor required")
+	invokerID := strings.TrimSpace(r.Request.URL.Query().Get("invoker"))
+	if invokerID == "" {
+		r.ErrorJSON(http.StatusBadRequest, "invoker required")
 		return
 	}
 	source := strings.TrimSpace(r.Request.URL.Query().Get("source"))
@@ -772,7 +757,7 @@ func ServiceLookupCreditTransaction(r *httprequest.Request) {
 		transactionType = "hold"
 	}
 
-	trx, err := r.State.MoneyService.GetTransactionBySource(r.Request.Context(), actorID, money.DefaultCurrency, transactionType, source, sourceID)
+	trx, err := r.State.MoneyService.GetTransactionBySource(r.Request.Context(), invokerID, r.Request.URL.Query().Get("currency"), transactionType, source, sourceID)
 	if err != nil {
 		if repo.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "not found")

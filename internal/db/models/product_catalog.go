@@ -40,7 +40,7 @@ func (s CatalogStatus) Valid() bool {
 // This represents our product catalog concept
 type Product struct {
 	ID          uuid.UUID `json:"id"`
-	MerchantID    uuid.UUID `json:"tenant_id"`
+	MerchantID  uuid.UUID `json:"tenant_id"`
 	Slug        string    `json:"slug"`
 	DisplayName string    `json:"display_name"`
 	Description string    `json:"description"`
@@ -164,12 +164,12 @@ func CloneCreditsSpec(spec CreditsSpec) CreditsSpec {
 // Price represents a specific pricing option for a product
 // This represents pricing options similar to Stripe's pricing model
 type Price struct {
-	ID        uuid.UUID     `json:"id"`
-	MerchantID  uuid.UUID     `json:"tenant_id"`
-	ProductID uuid.UUID     `json:"product_id"`
-	Status    CatalogStatus `json:"status"`
-	Amount    int64         `json:"amount"`
-	Currency  string        `json:"currency"`
+	ID         uuid.UUID     `json:"id"`
+	MerchantID uuid.UUID     `json:"tenant_id"`
+	ProductID  uuid.UUID     `json:"product_id"`
+	Status     CatalogStatus `json:"status"`
+	Amount     int64         `json:"amount"`
+	Currency   string        `json:"currency"`
 
 	// Billing interval in days (nullable for one-time purchases)
 	// 30 = monthly, 365 = yearly, null = one-time purchase

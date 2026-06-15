@@ -26,9 +26,9 @@ func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 	})
 
 	schedule := []money.TierThreshold{
-		{Tier: "free", MinPaidMicros: 0},
-		{Tier: "tier1", MinPaidMicros: 5_000},
-		{Tier: "tier2", MinPaidMicros: 50_000},
+		{Tier: "free", MinPaidAmount: 0},
+		{Tier: "tier1", MinPaidAmount: 5_000},
+		{Tier: "tier2", MinPaidAmount: 50_000},
 	}
 	require.NoError(t, svc.SetTierSchedule(ctx, payer, schedule))
 
@@ -38,7 +38,7 @@ func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 	require.Equal(t, schedule, got)
 
 	dep := func(amt int64) {
-		_, e := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 	tier := func() string {
@@ -57,7 +57,7 @@ func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 
 	// Host-cranked GraduateTier is a NO-OP when a schedule exists (returns the
 	// auto-maintained tier, does not regress it with a bogus ladder).
-	res, err := svc.GraduateTier(ctx, payer, []money.TierThreshold{{Tier: "free", MinPaidMicros: 0}})
+	res, err := svc.GraduateTier(ctx, payer, []money.TierThreshold{{Tier: "free", MinPaidAmount: 0}})
 	require.NoError(t, err)
 	require.Equal(t, "tier2", res, "GraduateTier no-ops to the auto-maintained tier when a schedule exists")
 	require.Equal(t, "tier2", tier())
@@ -106,15 +106,15 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 
 	// Tenant A: a tenant-wide default schedule with a low tier1 threshold.
 	require.NoError(t, svc.SetTierSchedule(ctxA, identity.CustomerID{}, []money.TierThreshold{
-		{Tier: "free", MinPaidMicros: 0}, {Tier: "tier1", MinPaidMicros: 1_000},
+		{Tier: "free", MinPaidAmount: 0}, {Tier: "tier1", MinPaidAmount: 1_000},
 	}))
 
 	depA := func(amt int64) {
-		_, e := svc.Deposit(ctxA, money.DepositParams{CustomerID: &payerA, Actor: payerA.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctxA, money.DepositParams{CustomerID: &payerA, Invoker: payerA.UUID().String(), Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 	depB := func(amt int64) {
-		_, e := svc.Deposit(ctxB, money.DepositParams{CustomerID: &payerB, Actor: payerB.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctxB, money.DepositParams{CustomerID: &payerB, Invoker: payerB.UUID().String(), Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 

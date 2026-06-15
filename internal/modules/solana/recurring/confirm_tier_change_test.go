@@ -78,7 +78,7 @@ func newOldRow() *models.SolanaSubscription {
 	subscriber, _ := solanago.NewRandomPrivateKey()
 	return &models.SolanaSubscription{
 		ID:               uuid.New(),
-		MerchantID:         uuid.New(),
+		MerchantID:       uuid.New(),
 		SubscriptionID:   uuid.New(),
 		SubscriberWallet: subscriber.PublicKey().String(),
 		AuthorityPDA:     subscriber.PublicKey().String(),

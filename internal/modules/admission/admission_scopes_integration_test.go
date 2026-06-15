@@ -40,7 +40,7 @@ func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_policies WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.tier_policies WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_reservations WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_inflight_holds WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_window_state WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
@@ -59,7 +59,7 @@ func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, 
 
 	cs := money.NewMoneyService(dbi)
 	// Fund the payer generously so money never blocks (budgets are the gate here).
-	_, err = cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Actor: payer.UUID().String(), Amount: 1_000_000_000, Source: "seed"})
+	_, err = cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	tierStore := admission.NewTierPolicyStore(dbi)
@@ -70,22 +70,22 @@ func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, 
 	return adm, bpStore, tierStore, payer, ctx
 }
 
-func mustReq(payer identity.CustomerID, actor, srcID string, roles []uuid.UUID, micros int64) admission.AdmitRequest {
+func mustReq(payer identity.CustomerID, invoker, srcID string, roles []uuid.UUID, amount int64) admission.AdmitRequest {
 	return admission.AdmitRequest{
-		CustomerID: payer, Actor: actor, Tier: "free", Resource: "gpt-4o",
+		CustomerID: payer, Invoker: invoker, Tier: "free", Resource: "gpt-4o",
 		Roles: roles, Amounts: map[string]int64{"request": 1},
-		EstimateMicros: micros, Source: "usage", SourceID: srcID, ExpiresAt: time.Now().Add(time.Hour),
+		EstimatedAmount: amount, Source: "usage", SourceID: srcID, ExpiresAt: time.Now().Add(time.Hour),
 	}
 }
 
 // budgetPolicyWindows builds a single 1h fixed-window scope policy capped at
-// limit micros.
+// limit amount.
 func budgetPolicyWindows(limit int64) []models.BudgetWindowPolicy {
-	return []models.BudgetWindowPolicy{{Key: "1h", WindowSeconds: 3600, LimitMicros: limit}}
+	return []models.BudgetWindowPolicy{{Key: "1h", WindowSeconds: 3600, Limit: limit}}
 }
 
 // tierWith builds a tier policy with a generous throughput allowance and a
-// (subject, actor) budget window capped at limit micros (the pre-#473 path).
+// (subject, invoker) budget window capped at limit amount (the pre-#473 path).
 func tierWith(limit int64) models.ThroughputPolicy {
 	return models.ThroughputPolicy{
 		Windows:       []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 1_000_000}},
@@ -95,11 +95,11 @@ func tierWith(limit int64) models.ThroughputPolicy {
 
 // TestScope_PlatformCapDeniesEvenWhenRoleAndInvokerUnder: the platform (subject)
 // cap denies even when the role pool and invoker cap have room.
-// TestScope_InvokerCapIndependent: each invoker's (subject, actor) cap is
+// TestScope_InvokerCapIndependent: each invoker's (subject, invoker) cap is
 // independent — one invoker hitting its cap does not block a different invoker.
 func TestScope_InvokerCapIndependent(t *testing.T) {
 	adm, _, tier, payer, ctx := scopeEnv(t)
-	// (subject, actor) cap via the tier policy budget windows = 400 micros.
+	// (subject, invoker) cap via the tier policy budget windows = 400 internal units.
 	require.NoError(t, tier.UpsertTierPolicyFull(ctx, payer, "free", tierWith(400)))
 
 	// user:a exhausts its own 400 cap.
@@ -110,7 +110,7 @@ func TestScope_InvokerCapIndependent(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, d.Allowed, "user:a is over its own cap")
 
-	// user:b unaffected — independent (subject, actor) bucket.
+	// user:b unaffected — independent (subject, invoker) bucket.
 	d, err = adm.Admit(ctx, mustReq(payer, "user:b", "i3", nil, 400))
 	require.NoError(t, err)
 	require.True(t, d.Allowed, "user:b has its own independent cap")
@@ -125,8 +125,8 @@ func TestThroughput_PayerAggregatesAcrossInvokers(t *testing.T) {
 	require.NoError(t, tier.UpsertTierPolicyFull(ctx, payer, "free", models.ThroughputPolicy{
 		Windows: []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 3}},
 	}))
-	req := func(actor, srcID string) admission.AdmitRequest {
-		r := mustReq(payer, actor, srcID, nil, 0)
+	req := func(invoker, srcID string) admission.AdmitRequest {
+		r := mustReq(payer, invoker, srcID, nil, 0)
 		r.Resource = "rel-A"
 		return r
 	}

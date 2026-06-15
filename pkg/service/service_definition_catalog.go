@@ -156,7 +156,7 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	}
 	p := &models.Product{
 		ID:               uuidutil.NewV7(),
-		MerchantID:         tid.UUID(),
+		MerchantID:       tid.UUID(),
 		Slug:             req.Slug,
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
@@ -435,7 +435,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	now := time.Now().UTC()
 	price := &models.Price{
 		ID:               priceID,
-		MerchantID:         tid.UUID(),
+		MerchantID:       tid.UUID(),
 		ProductID:        req.ProductID,
 		Status:           status,
 		Amount:           req.UnitAmount,
