@@ -629,3 +629,57 @@ Design questions to resolve before building:
 
 
 
+
+# #494: Multi-currency support — native currencies + abstract units + internal FX converter
+
+**Completed:** no
+
+Today the money/budget tables hardcode the MICRODOLLAR assumption (`*_micros`) and most are
+NOT keyed by currency. OpenRails should support multiple NATIVE currencies (USD, EUR, JPY, …
+defined BY OpenRails — NOT user-defined/invented currencies, which stay out of these tables),
+and let a payer bill in one currency while setting budgets/limits in another, with an internal
+FX converter. This is forward-looking groundwork (owner 2026-06-15: "not important now, but lay
+the groundwork"); the converter is the capstone and is NOT needed immediately.
+
+## Motivation / example
+tensorhub bills all its APIs in microdollars (USD). cozy-art deposits $500 USD into its account
+but wants its delegated users capped at 10 EUR/week. When a user spends $0.50 on an invocation,
+OpenRails must convert $0.50 USD -> EUR and deduct that from the EUR window/limit. So the SPEND
+currency and the BUDGET currency can differ, and conversion happens at deduction time.
+
+## Schema groundwork (one coherent migration when built)
+- DROP the microdollar assumption: rename the `*_micros` columns to an abstract unit name — the
+  value is in the row CURRENCY's minor unit, not necessarily microdollars. Candidate: `*_units` /
+  `currency_units` (e.g. `amount_micros` -> `amount_units`, `max_spend_per_day_micros` ->
+  `max_spend_per_day_units`, budgets `LimitMicros` -> `LimitUnits`, `captured_micros`, etc.). Pick
+  ONE abstract term fleet-wide. Each row also carries its `currency`.
+- KEY THESE TABLES BY CURRENCY (a window/limit/hold is per-currency): `usage_events`,
+  `money_transactions`, `budget_window_state`, `budget_inflight_holds` (see rename below).
+  `money_spend_limits` already has `currency`. The budget engine's window-state UNIQUE key becomes
+  `(merchant, customer, invoker_id, currency, window_key)`; aggregation sums within a currency.
+- RENAME `budget_reservations` -> `budget_inflight_holds` (owner: clearer name — these rows are
+  the in-flight/settled holds a budget window aggregates, not generic "reservations"). Carry the
+  dependent indexes/UNIQUE via RENAME.
+- NATIVE-CURRENCY registry/enum (USD, EUR, JPY, …) owned by OpenRails; reject non-native codes on
+  these tables. User-defined/"invented" credit types stay in their own custom-credit tables, NOT here.
+
+## Internal FX converter (the capstone — defer)
+- A converter service holding exchange rates, refreshed every couple hours and CACHED internally
+  (don't hit an FX API per request). Stale-rate policy (max age, fallback) TBD.
+- Convert at DEDUCTION time: a spend in currency A is converted to the target budget/limit's
+  currency B before the window/limit deduction. Decide rounding (round half-up to the target
+  currency's minor unit) and where it happens (admit/reserve + settle), and whether the converted
+  amount or the original is persisted on the attribution row (likely persist original spend +
+  its currency; convert on read/aggregate against a budget's currency, OR persist both).
+- Rate SOURCE (provider) + refresh job (River, ~2h) + a rates table/cache keyed (base, quote, asof).
+
+## Open questions to resolve before building
+- The abstract unit term: `currency_units` vs `amount_units` (one fleet-wide choice).
+- How the spend currency + budget currency are supplied (per-request field? per-budget-window-policy?).
+- Persist original-spend-currency + convert-on-aggregate, vs convert-and-store-in-budget-currency.
+- Rounding + rate staleness + which provider.
+
+## Relates
+openrails#491 (the invoker_id/no-FK precedent + the per-currency `money_spend_limits.currency` already
+present), #476/#487/#488 (tier/budget/wasted-spend windows that become per-currency), the budgets engine
+(internal/modules/budgets) + money ledger (internal/modules/money). NOT urgent — groundwork only.
