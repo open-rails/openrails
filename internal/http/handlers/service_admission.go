@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/abuse"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -527,6 +529,61 @@ func ServiceSetTierSchedule(r *httprequest.Request) {
 	}
 	if err := svc.SetTierSchedule(r.Request.Context(), payer, req.Schedule); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set tier schedule failed")
+		return
+	}
+	r.SuccessJSONMessage("ok")
+}
+
+// serviceActorWastedWindow is one flat per-actor wasted-spend window in the
+// request body (#492) — same shape as TierBudgetWindowInput.
+type serviceActorWastedWindow struct {
+	Key           string `json:"key"`
+	WindowSeconds int64  `json:"window_seconds"`
+	LimitMicros   int64  `json:"limit_micros"`
+}
+
+type serviceActorWastedWindowsRequest struct {
+	CustomerID string                     `json:"customer_id"`
+	Windows    []serviceActorWastedWindow `json:"windows"`
+}
+
+// ServiceSetActorWastedWindows persists the operator-configurable FLAT per-actor
+// wasted-spend windows (#492). An EMPTY customer_id sets the tenant-wide default
+// backstop (the common case); a non-empty one sets a per-customer override
+// (scope-checked). Replaces the hardcoded DefaultActorWastedWindows() fallback
+// when set. Operator service token, credits:write.
+func ServiceSetActorWastedWindows(r *httprequest.Request) {
+	var req serviceActorWastedWindowsRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	var payer billingidentity.CustomerID
+	if strings.TrimSpace(req.CustomerID) != "" {
+		p, err := parseServiceCustomerID(req.CustomerID)
+		if err != nil || p == nil {
+			r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
+			return
+		}
+		if !requireServiceCustomerScope(r, *p) {
+			return
+		}
+		payer = *p
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	windows := make([]abuse.WastedWindow, 0, len(req.Windows))
+	for _, w := range req.Windows {
+		windows = append(windows, abuse.WastedWindow{
+			Key:         w.Key,
+			Window:      time.Duration(w.WindowSeconds) * time.Second,
+			LimitMicros: w.LimitMicros,
+		})
+	}
+	if err := svc.SetActorWastedWindows(r.Request.Context(), payer, windows); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "set actor wasted windows failed")
 		return
 	}
 	r.SuccessJSONMessage("ok")

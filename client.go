@@ -89,6 +89,15 @@ type Client interface {
 	// case); a non-empty one sets a per-subject override. owner=platform (the
 	// subject cannot see/loosen it).
 	SetTierSchedule(ctx context.Context, tenantSubjectID string, schedule []TierScheduleRung) error
+	// SetActorWastedWindows configures the operator-set FLAT per-ACTOR wasted-spend
+	// windows (#492): the fixed per-invoker backstop OpenRails enforces at admit.
+	// An EMPTY tenantSubjectID sets the tenant-wide default (the common case — an
+	// account can mint unlimited invokers, so the per-actor budget is a fixed
+	// backstop, not graduated); a non-empty one sets a per-customer override. When
+	// unset, OpenRails falls back to its hardcoded default. Reuses BudgetWindowInput
+	// (key + window_seconds + limit_micros; cadence ignored — these are flat
+	// rolling windows). OPERATOR-only — NOT self-serve.
+	SetActorWastedWindows(ctx context.Context, tenantSubjectID string, windows []BudgetWindowInput) error
 	// GetTier returns the payer's CURRENT graduated tier (#477): the tier
 	// OpenRails auto-maintains from cumulative paid spend against the persisted
 	// schedule (#476), or a manual admin override. Empty when the payer has never

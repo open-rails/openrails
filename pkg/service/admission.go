@@ -126,9 +126,16 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	store := admission.NewTierPolicyStore(s.rt.DB)
 	bl := abuse.NewBlocklistService(s.rt.DB)
 	bsvc := budgets.NewService(s.rt.DB)
+	// #492: resolve the operator-configured flat per-actor wasted-spend windows
+	// (per-customer override else tenant-wide default), falling back to the
+	// hardcoded DefaultActorWastedWindows() when nothing is stored.
+	actorWindows, err := s.actorWastedWindows(ctx, in.CustomerID)
+	if err != nil {
+		return nil, err
+	}
 	adm := admission.NewAdmitter(lim, s.moneyService(), store, bl, bsvc).
 		WithBudgetScopes(admission.NewBudgetPolicyStore(s.rt.DB)).
-		WithWastedSpend(abuse.NewWastedSpendGuard(lim), DefaultActorWastedWindows())
+		WithWastedSpend(abuse.NewWastedSpendGuard(lim), actorWindows)
 
 	// #404: tenant-scoped throughput. The host passes its per-tenant RPM/RPD
 	// windows; OpenRails enforces them on the invoke path BEFORE the per-actor
@@ -462,6 +469,54 @@ func DefaultActorWastedWindows() []abuse.WastedWindow {
 	}
 }
 
+// SetActorWastedWindows persists the operator-configurable FLAT per-actor
+// wasted-spend windows (#492). A zero payer sets the tenant-wide default backstop
+// (the common case — one flat budget for every invoker in the tenant); a non-zero
+// payer sets a per-customer override. An empty windows slice clears to the
+// hardcoded DefaultActorWastedWindows() fallback (stores an empty set, so the
+// resolver falls back). Generic billing engine — no host/GPU concepts.
+func (s *Service) SetActorWastedWindows(ctx context.Context, payer identity.CustomerID, windows []abuse.WastedWindow) error {
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	wp := make([]models.BudgetWindowPolicy, 0, len(windows))
+	for _, w := range windows {
+		if w.Window <= 0 {
+			continue
+		}
+		wp = append(wp, models.BudgetWindowPolicy{
+			Key:           w.Key,
+			WindowSeconds: int64(w.Window / time.Second),
+			LimitMicros:   w.LimitMicros,
+		})
+	}
+	return admission.NewTierPolicyStore(s.rt.DB).UpsertActorWastedWindows(ctx, payer, wp)
+}
+
+// actorWastedWindows resolves the FLAT per-actor wasted-spend windows for a payer
+// (#492): the operator-configured store (per-customer override else tenant-wide
+// default) if any, else the hardcoded DefaultActorWastedWindows() backstop.
+func (s *Service) actorWastedWindows(ctx context.Context, payer identity.CustomerID) ([]abuse.WastedWindow, error) {
+	stored, err := admission.NewTierPolicyStore(s.rt.DB).GetActorWastedWindows(ctx, payer)
+	if err != nil {
+		return nil, err
+	}
+	if len(stored) == 0 {
+		return DefaultActorWastedWindows(), nil
+	}
+	out := make([]abuse.WastedWindow, 0, len(stored))
+	for _, w := range stored {
+		if w.WindowSeconds <= 0 {
+			continue
+		}
+		out = append(out, abuse.WastedWindow{Key: w.Key, Window: time.Duration(w.WindowSeconds) * time.Second, LimitMicros: w.LimitMicros})
+	}
+	if len(out) == 0 {
+		return DefaultActorWastedWindows(), nil
+	}
+	return out, nil
+}
+
 // payerWastedWindows resolves the PAYER's wasted-spend budget windows from the
 // tier policy's bad_spend windows (#488) at the payer's current tier.
 func (s *Service) payerWastedWindows(ctx context.Context, payer identity.CustomerID, tier string) ([]abuse.WastedWindow, error) {
@@ -515,7 +570,11 @@ func (s *Service) ReportWastedSpend(ctx context.Context, payer identity.Customer
 	if err != nil {
 		return err
 	}
-	return guard.Record(ctx, tid.UUID().String(), payer.UUID().String(), actor, micros, payerWindows, DefaultActorWastedWindows())
+	actorWindows, err := s.actorWastedWindows(ctx, payer)
+	if err != nil {
+		return err
+	}
+	return guard.Record(ctx, tid.UUID().String(), payer.UUID().String(), actor, micros, payerWindows, actorWindows)
 }
 
 // AbuseUsageWindow is one wasted-spend window's running $ total for /abuse-usage.
@@ -558,7 +617,11 @@ func (s *Service) AbuseUsage(ctx context.Context, payer identity.CustomerID, act
 	payerWindows = toAbuseUsageWindows(pUsage)
 
 	if actor != "" {
-		aUsage, err := guard.Usage(ctx, guard.ActorBase(tenant, actor), DefaultActorWastedWindows())
+		aw, err := s.actorWastedWindows(ctx, payer)
+		if err != nil {
+			return nil, nil, err
+		}
+		aUsage, err := guard.Usage(ctx, guard.ActorBase(tenant, actor), aw)
 		if err != nil {
 			return nil, nil, err
 		}

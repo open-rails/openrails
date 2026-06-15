@@ -172,6 +172,73 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Cust
 	}, nil
 }
 
+// UpsertActorWastedWindows stores the FLAT per-actor wasted-spend windows (#492):
+// a zero payer writes the tenant-wide default backstop, a non-zero payer a
+// per-customer override. windows is persisted as a JSONB array of
+// {key, window_seconds, limit_micros}.
+func (s *TierPolicyStore) UpsertActorWastedWindows(ctx context.Context, payer identity.CustomerID, windows []models.BudgetWindowPolicy) error {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tenantID := tid.UUID()
+	now := time.Now().UTC()
+	windowsJSON, err := json.Marshal(windows)
+	if err != nil {
+		return fmt.Errorf("admission: encode actor wasted windows: %w", err)
+	}
+	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		if payer.IsZero() {
+			return s.db.Gen(ctx).UpsertActorWastedWindowsDefault(ctx, gen.UpsertActorWastedWindowsDefaultParams{
+				ID: uuidutil.NewV7(), MerchantID: tenantID, Windows: windowsJSON,
+				CreatedAt: now, UpdatedAt: now,
+			})
+		}
+		// Per-customer override needs the customers FK satisfied.
+		if _, err := repo.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
+			return err
+		}
+		subjectID := payer.UUID()
+		return s.db.Gen(ctx).UpsertActorWastedWindowsCustomer(ctx, gen.UpsertActorWastedWindowsCustomerParams{
+			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: &subjectID, Windows: windowsJSON,
+			CreatedAt: now, UpdatedAt: now,
+		})
+	})
+}
+
+// GetActorWastedWindows returns the EFFECTIVE flat per-actor wasted-spend windows
+// for a payer (the customer's override if present, else the tenant-wide default),
+// or nil when none is stored (#492). The caller falls back to a hardcoded default
+// on nil.
+func (s *TierPolicyStore) GetActorWastedWindows(ctx context.Context, payer identity.CustomerID) ([]models.BudgetWindowPolicy, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
+	// `= $2 OR IS NULL` matches both the customer override and the tenant default.
+	subjectID := payer.UUID()
+	var out []models.BudgetWindowPolicy
+	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		row, e := s.db.Gen(ctx).GetEffectiveActorWastedWindows(ctx, gen.GetEffectiveActorWastedWindowsParams{
+			MerchantID: tenantID, CustomerID: &subjectID,
+		})
+		if errors.Is(e, pgx.ErrNoRows) {
+			return nil
+		}
+		if e != nil {
+			return e
+		}
+		if len(row.Windows) > 0 {
+			if uerr := json.Unmarshal(row.Windows, &out); uerr != nil {
+				return fmt.Errorf("admission: decode actor wasted windows: %w", uerr)
+			}
+		}
+		return nil
+	})
+	return out, err
+}
+
 // BudgetPolicyStore reads/writes hierarchical money-budget policies (#473) —
 // {scope, owner, windows[]} rows in openrails.budget_policies. The OWNER
 // discriminator is the write-authz split: SetSubjectBudgetPolicy may only write

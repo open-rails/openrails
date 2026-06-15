@@ -35,22 +35,16 @@ tensorhub #486 (PushTierLadder now pushes the YAML per_invoker_bad_spend via the
 (per-payer bad_spend), #487 (tier policy template), #476 (tier-schedule end-to-end template).
 
 ## Outcome
-CODE COMPLETE; RELEASE BLOCKED (not tagged). All source done + verified: migration 028, sqlc queries,
-service setter+resolver wired into all 3 sites, HTTP handler + route, SDK (client/remote/embed), 3 service
-integration tests GREEN (configured $1 window denies; unset falls back to $5 default; per-customer override),
-conformance probe extended. go build ./... + unit suite GREEN.
-
-BLOCKER (do not paper over): master HEAD == v0.30.0 EXACTLY, but the entire #491 refactor (migration 027 +
-customers org/issuer/subject natural key + InvokerID columns + identity rename dropping FederatedCustomerID)
-is UNCOMMITTED, ACTIVELY-IN-PROGRESS WIP by a concurrent agent (027 is untracked; ~37 dirty files mtime'd
-within minutes). Consequences: (1) gen/models.go is a shared moving target carrying #491 drift — committing it
-sweeps another agent's WIP (forbidden); reverting the drift makes it reference 027 columns absent from the
-committed tree -> won't build. (2) A v0.31.0 tag would either ship migration 028 WITHOUT 027 (broken) or sweep
-#491. (3) embed/conformance_integration_test.go already does NOT compile on clean v0.30.0 (FederatedCustomerID
-undefined, line 838) — pre-existing, not mine. RESOLUTION NEEDED: once #491 lands (027 + identity committed),
-re-run `task sqlc` (clean gen), commit #492 source with pathspecs, tag v0.31.0, then do the tensorhub bump.
-tensorhub consumer change (PushTierLadder -> SetActorWastedWindows) deferred — it needs the v0.31.0 SDK method
-to exist or tensorhub's build breaks.
+DONE — code complete, tested, and now MERGED ONTO MASTER (consolidation 2026-06-15). Migration 028
+openrails.actor_wasted_windows, sqlc queries, service `SetActorWastedWindows` + `actorWastedWindows` resolver
+wired into ALL 3 sites (Admit guard, ReportWastedSpend, AbuseUsage), HTTP `ServiceSetActorWastedWindows`
+(PUT /v1/service/actor-wasted-windows), SDK `SetActorWastedWindows(ctx, tenantSubjectID, []BudgetWindowInput)`
+(client/remote/embed). DefaultActorWastedWindows() kept as the FALLBACK. 3 service integration tests
+(configured $1 window denies; unset falls back to $5 default; per-customer override) + extended conformance
+GREEN. HISTORY: originally cut as the orphaned tag v0.31.0 from an isolated worktree (master then held
+uncommitted #491 WIP, so it couldn't be committed there); now reconciled onto master via a real three-way
+merge with #491 — the code auto-merged clean (the #491 invoker-rename hunks in service_admission.go were
+byte-identical on both sides). Consolidated version re-tagged at merge time.
 
 ---
 

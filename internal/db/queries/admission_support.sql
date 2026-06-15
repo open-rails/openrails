@@ -186,3 +186,36 @@ WHERE merchant_id = $1 AND owner = $2
   AND (customer_id = $3 OR customer_id IS NULL)
 ORDER BY (customer_id IS NOT NULL) DESC
 LIMIT 1;
+
+-- name: UpsertActorWastedWindowsDefault :exec
+-- Tenant-wide FLAT per-actor wasted-spend windows upsert (#492): customer_id IS
+-- NULL is the tenant default backstop. Replaces service.DefaultActorWastedWindows
+-- when set.
+INSERT INTO openrails.actor_wasted_windows (
+    id, merchant_id, customer_id, windows, windows_version, created_at, updated_at
+) VALUES ($1, $2, NULL, $3, 1, $4, $5)
+ON CONFLICT (merchant_id) WHERE (customer_id IS NULL) DO UPDATE SET
+    windows = EXCLUDED.windows,
+    windows_version = openrails.actor_wasted_windows.windows_version + 1,
+    updated_at = EXCLUDED.updated_at;
+
+-- name: UpsertActorWastedWindowsCustomer :exec
+-- Per-customer FLAT per-actor wasted-spend windows override (#492): takes
+-- precedence over the tenant-wide default for that customer.
+INSERT INTO openrails.actor_wasted_windows (
+    id, merchant_id, customer_id, windows, windows_version, created_at, updated_at
+) VALUES ($1, $2, $3, $4, 1, $5, $6)
+ON CONFLICT (merchant_id, customer_id) WHERE (customer_id IS NOT NULL) DO UPDATE SET
+    windows = EXCLUDED.windows,
+    windows_version = openrails.actor_wasted_windows.windows_version + 1,
+    updated_at = EXCLUDED.updated_at;
+
+-- name: GetEffectiveActorWastedWindows :one
+-- The effective per-actor wasted-spend windows for a (tenant, customer): the
+-- customer's own override if present, else the tenant-wide default (customer_id
+-- IS NULL, #492). Customer-specific rows sort first so LIMIT 1 picks the override.
+SELECT * FROM openrails.actor_wasted_windows
+WHERE merchant_id = $1
+  AND (customer_id = $2 OR customer_id IS NULL)
+ORDER BY (customer_id IS NOT NULL) DESC
+LIMIT 1;

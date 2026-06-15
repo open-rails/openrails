@@ -263,6 +263,37 @@ func (q *Queries) GetBudgetWindowStateForUpdate(ctx context.Context, arg GetBudg
 	return i, err
 }
 
+const getEffectiveActorWastedWindows = `-- name: GetEffectiveActorWastedWindows :one
+SELECT id, merchant_id, customer_id, windows, windows_version, created_at, updated_at FROM openrails.actor_wasted_windows
+WHERE merchant_id = $1
+  AND (customer_id = $2 OR customer_id IS NULL)
+ORDER BY (customer_id IS NOT NULL) DESC
+LIMIT 1
+`
+
+type GetEffectiveActorWastedWindowsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+}
+
+// The effective per-actor wasted-spend windows for a (tenant, customer): the
+// customer's own override if present, else the tenant-wide default (customer_id
+// IS NULL, #492). Customer-specific rows sort first so LIMIT 1 picks the override.
+func (q *Queries) GetEffectiveActorWastedWindows(ctx context.Context, arg GetEffectiveActorWastedWindowsParams) (OpenrailsActorWastedWindow, error) {
+	row := q.db.QueryRow(ctx, getEffectiveActorWastedWindows, arg.MerchantID, arg.CustomerID)
+	var i OpenrailsActorWastedWindow
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.Windows,
+		&i.WindowsVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getEffectiveTierSchedule = `-- name: GetEffectiveTierSchedule :one
 SELECT id, merchant_id, customer_id, owner, rungs, schedule_version, created_at, updated_at FROM openrails.tier_schedules
 WHERE merchant_id = $1 AND owner = $2
@@ -608,6 +639,71 @@ func (q *Queries) ReopenBudgetWindowState(ctx context.Context, arg ReopenBudgetW
 		arg.WindowStart,
 		arg.Cadence,
 		arg.WindowSeconds,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertActorWastedWindowsCustomer = `-- name: UpsertActorWastedWindowsCustomer :exec
+INSERT INTO openrails.actor_wasted_windows (
+    id, merchant_id, customer_id, windows, windows_version, created_at, updated_at
+) VALUES ($1, $2, $3, $4, 1, $5, $6)
+ON CONFLICT (merchant_id, customer_id) WHERE (customer_id IS NOT NULL) DO UPDATE SET
+    windows = EXCLUDED.windows,
+    windows_version = openrails.actor_wasted_windows.windows_version + 1,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertActorWastedWindowsCustomerParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Windows    []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// Per-customer FLAT per-actor wasted-spend windows override (#492): takes
+// precedence over the tenant-wide default for that customer.
+func (q *Queries) UpsertActorWastedWindowsCustomer(ctx context.Context, arg UpsertActorWastedWindowsCustomerParams) error {
+	_, err := q.db.Exec(ctx, upsertActorWastedWindowsCustomer,
+		arg.ID,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Windows,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertActorWastedWindowsDefault = `-- name: UpsertActorWastedWindowsDefault :exec
+INSERT INTO openrails.actor_wasted_windows (
+    id, merchant_id, customer_id, windows, windows_version, created_at, updated_at
+) VALUES ($1, $2, NULL, $3, 1, $4, $5)
+ON CONFLICT (merchant_id) WHERE (customer_id IS NULL) DO UPDATE SET
+    windows = EXCLUDED.windows,
+    windows_version = openrails.actor_wasted_windows.windows_version + 1,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertActorWastedWindowsDefaultParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Windows    []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// Tenant-wide FLAT per-actor wasted-spend windows upsert (#492): customer_id IS
+// NULL is the tenant default backstop. Replaces service.DefaultActorWastedWindows
+// when set.
+func (q *Queries) UpsertActorWastedWindowsDefault(ctx context.Context, arg UpsertActorWastedWindowsDefaultParams) error {
+	_, err := q.db.Exec(ctx, upsertActorWastedWindowsDefault,
+		arg.ID,
+		arg.MerchantID,
+		arg.Windows,
+		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
 	return err
