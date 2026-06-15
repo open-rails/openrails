@@ -194,7 +194,7 @@ type OpenrailsBudgetReservation struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	// Caller-supplied principal string whose rolling money-budget windows are capped. Opaque to OpenRails.
-	Actor          string
+	InvokerID      string
 	AmountMicros   int64
 	CapturedMicros int64
 	Status         string
@@ -209,7 +209,7 @@ type OpenrailsBudgetWindowState struct {
 	ID            uuid.UUID
 	MerchantID    uuid.UUID
 	CustomerID    uuid.UUID
-	Actor         string
+	InvokerID     string
 	WindowKey     string
 	Cadence       string
 	WindowSeconds int64
@@ -492,20 +492,21 @@ type OpenrailsMoneySpendLimit struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	// Caller-supplied principal string whose spend is capped by this row. Opaque to OpenRails.
-	Actor                  string
+	InvokerID              string
 	MaxSpendPerDayMicros   *int64
 	MaxSpendPerMonthMicros *int64
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
-	Currency string
+	Currency    string
+	InvokerType *string
 }
 
 // amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
 type OpenrailsMoneyTransaction struct {
 	ID uuid.UUID
 	// Caller-supplied principal string (e.g. a username slug) that caused this charge. Opaque to OpenRails; used as the per-actor spend-cap grouping key and as attribution.
-	Actor string
+	InvokerID string
 	// Caller-supplied free-form string for what the charge was for (charge-A was for resource-B). Opaque to OpenRails; nullable.
 	Resource *string
 	// Optional caller-supplied long-tail attribution. Opaque to OpenRails; joins use source/source_id, never these.
@@ -525,7 +526,8 @@ type OpenrailsMoneyTransaction struct {
 	MerchantID       uuid.UUID
 	CustomerID       uuid.UUID
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority. amount is this currency's minor unit.
-	Currency string
+	Currency    string
+	InvokerType *string
 }
 
 // Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
@@ -890,7 +892,7 @@ type OpenrailsUsageEvent struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	// Caller-supplied principal string (e.g. a username slug) that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.
-	Actor string
+	InvokerID string
 	// Caller-supplied free-form string for what was metered (tensorhub: endpoint slug; doujins: plan/item slug). Opaque to OpenRails; nullable, not a FK.
 	Resource           *string
 	EventType          string
@@ -902,6 +904,7 @@ type OpenrailsUsageEvent struct {
 	Metadata           []byte
 	OccurredAt         time.Time
 	CreatedAt          time.Time
+	InvokerType        *string
 }
 
 // External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.

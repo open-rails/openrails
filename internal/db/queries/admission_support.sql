@@ -4,12 +4,12 @@
 -- name: GetBudgetReservationByCoords :one
 SELECT * FROM openrails.budget_reservations
 WHERE merchant_id = $1 AND customer_id = $2
-  AND actor = $3 AND source = $4 AND source_id = $5
+  AND invoker_id = $3 AND source = $4 AND source_id = $5
 LIMIT 1;
 
 -- name: InsertBudgetReservation :exec
 INSERT INTO openrails.budget_reservations (
-    id, merchant_id, customer_id, actor,
+    id, merchant_id, customer_id, invoker_id,
     amount_micros, status, source, source_id, expires_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
@@ -46,14 +46,14 @@ WHERE merchant_id = $1 AND customer_id = $2
 SELECT COALESCE(SUM(captured_micros) FILTER (WHERE status = 'captured'), 0)::bigint AS used,
        COALESCE(SUM(amount_micros) FILTER (WHERE status = 'active'), 0)::bigint AS reserved
 FROM openrails.budget_reservations
-WHERE merchant_id = $1 AND customer_id = $2 AND actor = $3
+WHERE merchant_id = $1 AND customer_id = $2 AND invoker_id = $3
   AND created_at >= sqlc.arg(window_start)::timestamptz
   AND status IN ('active','captured');
 
 -- name: GetBudgetWindowState :one
 SELECT * FROM openrails.budget_window_state bws
 WHERE bws.merchant_id = $1 AND bws.customer_id = $2
-  AND bws.actor = $3 AND bws.window_key = $4
+  AND bws.invoker_id = $3 AND bws.window_key = $4
 LIMIT 1;
 
 -- name: GetBudgetWindowStateForUpdate :one
@@ -61,16 +61,16 @@ LIMIT 1;
 -- concurrent reserves around a window boundary serialize on it (#337).
 SELECT * FROM openrails.budget_window_state bws
 WHERE bws.merchant_id = $1 AND bws.customer_id = $2
-  AND bws.actor = $3 AND bws.window_key = $4
+  AND bws.invoker_id = $3 AND bws.window_key = $4
 FOR UPDATE;
 
 -- name: InsertBudgetWindowStateIfAbsent :exec
 -- First-ever charge on a window key: open at now, anchor at now.
 INSERT INTO openrails.budget_window_state (
-    id, merchant_id, customer_id, actor, window_key,
+    id, merchant_id, customer_id, invoker_id, window_key,
     cadence, window_seconds, anchor, window_start, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-ON CONFLICT (merchant_id, customer_id, actor, window_key) DO NOTHING;
+ON CONFLICT (merchant_id, customer_id, invoker_id, window_key) DO NOTHING;
 
 -- name: ReopenBudgetWindowState :exec
 -- Reopen an expired session window (opportunistically refreshing

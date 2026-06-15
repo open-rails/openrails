@@ -231,7 +231,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.CustomerID, actor 
 		// Idempotency: a replayed Reserve returns the existing row verbatim.
 		existing, gerr := q.GetBudgetReservationByCoords(ctx, gen.GetBudgetReservationByCoordsParams{
 			MerchantID: tenantID, CustomerID: payerID,
-			Actor: actor, Source: source, SourceID: sourceID,
+			InvokerID: actor, Source: source, SourceID: sourceID,
 		})
 		if gerr == nil {
 			// Report the current window state alongside the existing reservation; the
@@ -266,7 +266,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.CustomerID, actor 
 					ID:            op.insert.ID,
 					MerchantID:    tenantID,
 					CustomerID:    payerID,
-					Actor:         op.insert.Actor,
+					InvokerID:     op.insert.Actor,
 					WindowKey:     op.insert.WindowKey,
 					Cadence:       op.insert.Cadence,
 					WindowSeconds: op.insert.WindowSeconds,
@@ -309,7 +309,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.CustomerID, actor 
 			ID:           res.ID,
 			MerchantID:   res.MerchantID,
 			CustomerID:   res.CustomerID,
-			Actor:        res.Actor,
+			InvokerID:    res.Actor,
 			AmountMicros: res.AmountMicros,
 			Status:       res.Status,
 			Source:       res.Source,
@@ -421,7 +421,7 @@ func windowStateFromGen(r gen.OpenrailsBudgetWindowState) *models.BudgetWindowSt
 		ID:            r.ID,
 		MerchantID:    r.MerchantID,
 		CustomerID:    r.CustomerID,
-		Actor:         r.Actor,
+		Actor:         r.InvokerID,
 		WindowKey:     r.WindowKey,
 		Cadence:       r.Cadence,
 		WindowSeconds: r.WindowSeconds,
@@ -477,7 +477,7 @@ func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identit
 		var st *models.BudgetWindowState
 		stateKey := gen.GetBudgetWindowStateParams{
 			MerchantID: tenantID, CustomerID: payerID,
-			Actor: actor, WindowKey: w.Key,
+			InvokerID: actor, WindowKey: w.Key,
 		}
 		var row gen.OpenrailsBudgetWindowState
 		var serr error
@@ -500,7 +500,7 @@ func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identit
 		var used, reserved int64
 		if active {
 			agg, err := q.AggregateBudgetWindow(ctx, gen.AggregateBudgetWindowParams{
-				MerchantID: tenantID, CustomerID: payerID, Actor: actor,
+				MerchantID: tenantID, CustomerID: payerID, InvokerID: actor,
 				WindowStart: start,
 			})
 			if err != nil {

@@ -430,7 +430,7 @@ func insertParamsFromTransaction(t *models.MoneyTransaction) gen.InsertMoneyTran
 		MerchantID:       t.MerchantID,
 		CustomerID:       t.CustomerID,
 		Currency:         normalizeCurrency(t.Currency),
-		Actor:            t.Actor,
+		InvokerID:        t.Actor,
 		Resource:         t.Resource,
 		Amount:           t.Amount,
 		BalanceAfter:     t.BalanceAfter,
@@ -662,7 +662,7 @@ func (s *MoneyService) ReleaseHold(ctx context.Context, holdID uuid.UUID) (*mode
 		cur := normalizeCurrency(row.Currency)
 		// Lock the customers row to serialize against concurrent spend; the status
 		// flip to 'released' IS the held release (#491), no cache write.
-		if _, lerr := s.lockBalance(ctx, q, holdPayer, row.Actor, cur); lerr != nil {
+		if _, lerr := s.lockBalance(ctx, q, holdPayer, row.InvokerID, cur); lerr != nil {
 			return lerr
 		}
 		if err := q.ReleaseMoneyHold(ctx, gen.ReleaseMoneyHoldParams{ID: row.ID, UpdatedAt: now}); err != nil {

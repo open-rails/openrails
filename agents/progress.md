@@ -842,7 +842,14 @@ Also boot the cutover with `FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIO
 
 # #491: Split CUSTOMER (payer / money account) from ACTOR (invoker / delegated-user) — delegated-users hold no money
 
-**Completed:** structural split shipped (v0.32.0/v0.33.0); INVOKER-MODEL REVERSAL shipped (v0.34.0, 2026-06-15) — migration 029 drops invoker_id+FK (opaque `actor` text remains the invoker), buildBudgetScopes is per-invoker only (subject/role pools dropped + their tests removed), authkit dep -> v0.34.0; build/vet/unit + admission/budgets/money/controlplane/embed integration all green. DEFERRED (cosmetic, documented): the `actor`->`invoker` column/field rename (36 files; wire already exposes json:"invoker").
+**Completed:** structural split shipped (v0.32.0/v0.33.0); INVOKER-MODEL REVERSAL shipped (v0.34.0, 2026-06-15) — migration 029 drops invoker_id+FK (opaque `actor` text remains the invoker), buildBudgetScopes is per-invoker only (subject/role pools dropped + their tests removed), authkit dep -> v0.34.0; build/vet/unit + admission/budgets/money/controlplane/embed integration all green.
+COLUMN RENAME DONE (v0.35.0, migration 030): `actor` -> `invoker_id` on all 5 invoker-bearing tables
+(usage_events/money_transactions/money_spend_limits/budget_window_state/budget_reservations) + new nullable
+`invoker_type` discriminator on the 3 attribution tables + a per-invoker index on usage_events. NO FK (the
+invoker is a polymorphic, possibly-cross-DB principal). The in-memory/SDK Go field stays `Actor` (mapped to
+invoker_id at the gen boundary) so consumers need only a dep bump — renaming that public field is a future
+breaking-SDK change if wanted. invoker_type is a column ready for population (the host supplies the kind);
+wiring it through the SDK/wire is a follow-up.
 
 ================================================================================
 REVERSAL (owner, 2026-06-15) — invoker is OPAQUE TEXT, no FK; budgets per-invoker only.

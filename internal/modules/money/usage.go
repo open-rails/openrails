@@ -151,7 +151,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			ID:                 ev.ID,
 			MerchantID:         ev.MerchantID,
 			CustomerID:         ev.CustomerID,
-			Actor:              ev.Actor,
+			InvokerID:              ev.Actor,
 			Resource:           ev.Resource,
 			EventType:          ev.EventType,
 			Dimensions:         dims,

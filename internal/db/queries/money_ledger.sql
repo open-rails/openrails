@@ -58,7 +58,7 @@ INSERT INTO openrails.money_blocks (
 
 -- name: InsertMoneyTransaction :exec
 INSERT INTO openrails.money_transactions (
-    id, merchant_id, customer_id, currency, actor, resource, metadata,
+    id, merchant_id, customer_id, currency, invoker_id, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
     expires_at, description, created_at, updated_at
@@ -66,7 +66,7 @@ INSERT INTO openrails.money_transactions (
 
 -- name: InsertMoneyTransactionIfAbsent :exec
 INSERT INTO openrails.money_transactions (
-    id, merchant_id, customer_id, currency, actor, resource, metadata,
+    id, merchant_id, customer_id, currency, invoker_id, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
     expires_at, description, created_at, updated_at
@@ -115,7 +115,7 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 -- name: SumSpentInMoneyWindow :one
 -- Spend counted against a rate cap since `since`: settled spend (withdrawals +
 -- captured holds) PLUS currently-active holds created in the window, so
--- concurrent in-flight holds can't overshoot a cap. Empty actor = all actors.
+-- concurrent in-flight holds can't overshoot a cap. Empty invoker_id = all invokers.
 SELECT COALESCE(SUM(
     CASE
         WHEN transaction_type = 'withdrawal' THEN -amount
@@ -126,7 +126,7 @@ SELECT COALESCE(SUM(
 FROM openrails.money_transactions
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND created_at >= sqlc.arg(since)::timestamptz
-  AND (sqlc.arg(actor)::text = '' OR actor = sqlc.arg(actor)::text);
+  AND (sqlc.arg(invoker_id)::text = '' OR invoker_id = sqlc.arg(invoker_id)::text);
 
 -- name: SumActiveMoneyHoldAuthorizations :one
 SELECT COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)::bigint

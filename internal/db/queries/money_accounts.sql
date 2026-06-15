@@ -171,15 +171,15 @@ WHERE s.merchant_id = $1
 
 -- name: GetMoneySpendLimit :one
 SELECT * FROM openrails.money_spend_limits
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency) AND actor = $3
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency) AND invoker_id = $3
 LIMIT 1;
 
 -- name: UpsertMoneySpendLimit :exec
 INSERT INTO openrails.money_spend_limits (
-    id, merchant_id, customer_id, currency, actor,
+    id, merchant_id, customer_id, currency, invoker_id,
     max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at
 ) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8)
-ON CONFLICT (merchant_id, customer_id, currency, actor) DO UPDATE SET
+ON CONFLICT (merchant_id, customer_id, currency, invoker_id) DO UPDATE SET
     max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros,
     max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros,
     updated_at = EXCLUDED.updated_at;

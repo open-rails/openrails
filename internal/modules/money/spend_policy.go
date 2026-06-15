@@ -363,7 +363,7 @@ func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.Custome
 		MerchantID:             row.MerchantID,
 		CustomerID:             row.CustomerID,
 		Currency:               row.Currency,
-		Actor:                  row.Actor,
+		InvokerID:              row.Actor,
 		MaxSpendPerDayMicros:   row.MaxSpendPerDayMicros,
 		MaxSpendPerMonthMicros: row.MaxSpendPerMonthMicros,
 		CreatedAt:              row.CreatedAt,
@@ -376,7 +376,7 @@ func (s *MoneyService) SetSpendLimit(ctx context.Context, payer identity.Custome
 
 func (s *MoneyService) getSpendLimit(ctx context.Context, tenantID, payerID uuid.UUID, currency, actor string) (*models.MoneySpendLimit, error) {
 	row, err := s.db.Gen(ctx).GetMoneySpendLimit(ctx, gen.GetMoneySpendLimitParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency), Actor: actor,
+		MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency), InvokerID: actor,
 	})
 	if err == nil {
 		return spendLimitFromGen(row), nil
@@ -394,7 +394,7 @@ func (s *MoneyService) getSpendLimit(ctx context.Context, tenantID, payerID uuid
 func (s *MoneyService) spentInWindow(ctx context.Context, tenantID, payerID uuid.UUID, currency string, since time.Time, actor string) (int64, error) {
 	return s.db.Gen(ctx).SumSpentInMoneyWindow(ctx, gen.SumSpentInMoneyWindowParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency),
-		Since: since, Actor: actor,
+		Since: since, InvokerID: actor,
 	})
 }
 

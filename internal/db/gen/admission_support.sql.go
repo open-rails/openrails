@@ -16,7 +16,7 @@ const aggregateBudgetWindow = `-- name: AggregateBudgetWindow :one
 SELECT COALESCE(SUM(captured_micros) FILTER (WHERE status = 'captured'), 0)::bigint AS used,
        COALESCE(SUM(amount_micros) FILTER (WHERE status = 'active'), 0)::bigint AS reserved
 FROM openrails.budget_reservations
-WHERE merchant_id = $1 AND customer_id = $2 AND actor = $3
+WHERE merchant_id = $1 AND customer_id = $2 AND invoker_id = $3
   AND created_at >= $4::timestamptz
   AND status IN ('active','captured')
 `
@@ -24,7 +24,7 @@ WHERE merchant_id = $1 AND customer_id = $2 AND actor = $3
 type AggregateBudgetWindowParams struct {
 	MerchantID  uuid.UUID
 	CustomerID  uuid.UUID
-	Actor       string
+	InvokerID   string
 	WindowStart time.Time
 }
 
@@ -39,7 +39,7 @@ func (q *Queries) AggregateBudgetWindow(ctx context.Context, arg AggregateBudget
 	row := q.db.QueryRow(ctx, aggregateBudgetWindow,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Actor,
+		arg.InvokerID,
 		arg.WindowStart,
 	)
 	var i AggregateBudgetWindowRow
@@ -144,16 +144,16 @@ func (q *Queries) DeletePaymentBlock(ctx context.Context, arg DeletePaymentBlock
 
 const getBudgetReservationByCoords = `-- name: GetBudgetReservationByCoords :one
 
-SELECT id, merchant_id, customer_id, actor, amount_micros, captured_micros, status, source, source_id, created_at, expires_at FROM openrails.budget_reservations
+SELECT id, merchant_id, customer_id, invoker_id, amount_micros, captured_micros, status, source, source_id, created_at, expires_at FROM openrails.budget_reservations
 WHERE merchant_id = $1 AND customer_id = $2
-  AND actor = $3 AND source = $4 AND source_id = $5
+  AND invoker_id = $3 AND source = $4 AND source_id = $5
 LIMIT 1
 `
 
 type GetBudgetReservationByCoordsParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	Actor      string
+	InvokerID  string
 	Source     string
 	SourceID   string
 }
@@ -164,7 +164,7 @@ func (q *Queries) GetBudgetReservationByCoords(ctx context.Context, arg GetBudge
 	row := q.db.QueryRow(ctx, getBudgetReservationByCoords,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Actor,
+		arg.InvokerID,
 		arg.Source,
 		arg.SourceID,
 	)
@@ -173,7 +173,7 @@ func (q *Queries) GetBudgetReservationByCoords(ctx context.Context, arg GetBudge
 		&i.ID,
 		&i.MerchantID,
 		&i.CustomerID,
-		&i.Actor,
+		&i.InvokerID,
 		&i.AmountMicros,
 		&i.CapturedMicros,
 		&i.Status,
@@ -186,16 +186,16 @@ func (q *Queries) GetBudgetReservationByCoords(ctx context.Context, arg GetBudge
 }
 
 const getBudgetWindowState = `-- name: GetBudgetWindowState :one
-SELECT id, merchant_id, customer_id, actor, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM openrails.budget_window_state bws
+SELECT id, merchant_id, customer_id, invoker_id, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM openrails.budget_window_state bws
 WHERE bws.merchant_id = $1 AND bws.customer_id = $2
-  AND bws.actor = $3 AND bws.window_key = $4
+  AND bws.invoker_id = $3 AND bws.window_key = $4
 LIMIT 1
 `
 
 type GetBudgetWindowStateParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	Actor      string
+	InvokerID  string
 	WindowKey  string
 }
 
@@ -203,7 +203,7 @@ func (q *Queries) GetBudgetWindowState(ctx context.Context, arg GetBudgetWindowS
 	row := q.db.QueryRow(ctx, getBudgetWindowState,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Actor,
+		arg.InvokerID,
 		arg.WindowKey,
 	)
 	var i OpenrailsBudgetWindowState
@@ -211,7 +211,7 @@ func (q *Queries) GetBudgetWindowState(ctx context.Context, arg GetBudgetWindowS
 		&i.ID,
 		&i.MerchantID,
 		&i.CustomerID,
-		&i.Actor,
+		&i.InvokerID,
 		&i.WindowKey,
 		&i.Cadence,
 		&i.WindowSeconds,
@@ -224,16 +224,16 @@ func (q *Queries) GetBudgetWindowState(ctx context.Context, arg GetBudgetWindowS
 }
 
 const getBudgetWindowStateForUpdate = `-- name: GetBudgetWindowStateForUpdate :one
-SELECT id, merchant_id, customer_id, actor, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM openrails.budget_window_state bws
+SELECT id, merchant_id, customer_id, invoker_id, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM openrails.budget_window_state bws
 WHERE bws.merchant_id = $1 AND bws.customer_id = $2
-  AND bws.actor = $3 AND bws.window_key = $4
+  AND bws.invoker_id = $3 AND bws.window_key = $4
 FOR UPDATE
 `
 
 type GetBudgetWindowStateForUpdateParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	Actor      string
+	InvokerID  string
 	WindowKey  string
 }
 
@@ -243,7 +243,7 @@ func (q *Queries) GetBudgetWindowStateForUpdate(ctx context.Context, arg GetBudg
 	row := q.db.QueryRow(ctx, getBudgetWindowStateForUpdate,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Actor,
+		arg.InvokerID,
 		arg.WindowKey,
 	)
 	var i OpenrailsBudgetWindowState
@@ -251,7 +251,7 @@ func (q *Queries) GetBudgetWindowStateForUpdate(ctx context.Context, arg GetBudg
 		&i.ID,
 		&i.MerchantID,
 		&i.CustomerID,
-		&i.Actor,
+		&i.InvokerID,
 		&i.WindowKey,
 		&i.Cadence,
 		&i.WindowSeconds,
@@ -363,7 +363,7 @@ func (q *Queries) GetTierPolicy(ctx context.Context, arg GetTierPolicyParams) (O
 
 const insertBudgetReservation = `-- name: InsertBudgetReservation :exec
 INSERT INTO openrails.budget_reservations (
-    id, merchant_id, customer_id, actor,
+    id, merchant_id, customer_id, invoker_id,
     amount_micros, status, source, source_id, expires_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
@@ -372,7 +372,7 @@ type InsertBudgetReservationParams struct {
 	ID           uuid.UUID
 	MerchantID   uuid.UUID
 	CustomerID   uuid.UUID
-	Actor        string
+	InvokerID    string
 	AmountMicros int64
 	Status       string
 	Source       string
@@ -386,7 +386,7 @@ func (q *Queries) InsertBudgetReservation(ctx context.Context, arg InsertBudgetR
 		arg.ID,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Actor,
+		arg.InvokerID,
 		arg.AmountMicros,
 		arg.Status,
 		arg.Source,
@@ -399,17 +399,17 @@ func (q *Queries) InsertBudgetReservation(ctx context.Context, arg InsertBudgetR
 
 const insertBudgetWindowStateIfAbsent = `-- name: InsertBudgetWindowStateIfAbsent :exec
 INSERT INTO openrails.budget_window_state (
-    id, merchant_id, customer_id, actor, window_key,
+    id, merchant_id, customer_id, invoker_id, window_key,
     cadence, window_seconds, anchor, window_start, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-ON CONFLICT (merchant_id, customer_id, actor, window_key) DO NOTHING
+ON CONFLICT (merchant_id, customer_id, invoker_id, window_key) DO NOTHING
 `
 
 type InsertBudgetWindowStateIfAbsentParams struct {
 	ID            uuid.UUID
 	MerchantID    uuid.UUID
 	CustomerID    uuid.UUID
-	Actor         string
+	InvokerID     string
 	WindowKey     string
 	Cadence       string
 	WindowSeconds int64
@@ -425,7 +425,7 @@ func (q *Queries) InsertBudgetWindowStateIfAbsent(ctx context.Context, arg Inser
 		arg.ID,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Actor,
+		arg.InvokerID,
 		arg.WindowKey,
 		arg.Cadence,
 		arg.WindowSeconds,

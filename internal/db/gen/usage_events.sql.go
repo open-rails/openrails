@@ -114,7 +114,7 @@ func (q *Queries) AggregateUsageTotals(ctx context.Context, arg AggregateUsageTo
 }
 
 const getUsageEventByCoords = `-- name: GetUsageEventByCoords :one
-SELECT id, merchant_id, customer_id, actor, resource, event_type, dimensions, amount, source, source_id, money_transaction_id, metadata, occurred_at, created_at FROM openrails.usage_events
+SELECT id, merchant_id, customer_id, invoker_id, resource, event_type, dimensions, amount, source, source_id, money_transaction_id, metadata, occurred_at, created_at, invoker_type FROM openrails.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND event_type = $3
   AND source = $4 AND source_id = $5
 LIMIT 1
@@ -141,7 +141,7 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		&i.ID,
 		&i.MerchantID,
 		&i.CustomerID,
-		&i.Actor,
+		&i.InvokerID,
 		&i.Resource,
 		&i.EventType,
 		&i.Dimensions,
@@ -152,6 +152,7 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		&i.Metadata,
 		&i.OccurredAt,
 		&i.CreatedAt,
+		&i.InvokerType,
 	)
 	return i, err
 }
@@ -159,7 +160,7 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 const insertUsageEvent = `-- name: InsertUsageEvent :exec
 
 INSERT INTO openrails.usage_events (
-    id, merchant_id, customer_id, actor, resource,
+    id, merchant_id, customer_id, invoker_id, resource,
     event_type, dimensions, amount, source, source_id,
     money_transaction_id, metadata, occurred_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
@@ -169,7 +170,7 @@ type InsertUsageEventParams struct {
 	ID                 uuid.UUID
 	MerchantID         uuid.UUID
 	CustomerID         uuid.UUID
-	Actor              string
+	InvokerID          string
 	Resource           *string
 	EventType          string
 	Dimensions         []byte
@@ -189,7 +190,7 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 		arg.ID,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Actor,
+		arg.InvokerID,
 		arg.Resource,
 		arg.EventType,
 		arg.Dimensions,
@@ -206,7 +207,7 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 
 const insertUsageEventIfAbsent = `-- name: InsertUsageEventIfAbsent :exec
 INSERT INTO openrails.usage_events (
-    id, merchant_id, customer_id, actor, resource,
+    id, merchant_id, customer_id, invoker_id, resource,
     event_type, dimensions, amount, source, source_id,
     money_transaction_id, metadata, occurred_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
@@ -217,7 +218,7 @@ type InsertUsageEventIfAbsentParams struct {
 	ID                 uuid.UUID
 	MerchantID         uuid.UUID
 	CustomerID         uuid.UUID
-	Actor              string
+	InvokerID          string
 	Resource           *string
 	EventType          string
 	Dimensions         []byte
@@ -235,7 +236,7 @@ func (q *Queries) InsertUsageEventIfAbsent(ctx context.Context, arg InsertUsageE
 		arg.ID,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Actor,
+		arg.InvokerID,
 		arg.Resource,
 		arg.EventType,
 		arg.Dimensions,
@@ -305,7 +306,7 @@ func (q *Queries) ResourceRevenueDaily(ctx context.Context, arg ResourceRevenueD
 const serviceUsageRollup = `-- name: ServiceUsageRollup :many
 SELECT COALESCE(CASE $3::text
            WHEN 'resource' THEN ue.resource
-           WHEN 'actor' THEN ue.actor
+           WHEN 'actor' THEN ue.invoker_id
            WHEN 'function' THEN ue.metadata->>'function_name'
            WHEN 'tier' THEN ue.metadata->>'availability_tier'
        END, '')::text AS key,

@@ -151,7 +151,7 @@ func (q *Queries) ExpireMoneyHold(ctx context.Context, arg ExpireMoneyHoldParams
 }
 
 const getMoneyTransactionByCoords = `-- name: GetMoneyTransactionByCoords :one
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions
+SELECT id, invoker_id, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_type FROM openrails.money_transactions
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $6
   AND transaction_type = $3 AND source = $4 AND source_id = $5
 LIMIT 1
@@ -180,7 +180,7 @@ func (q *Queries) GetMoneyTransactionByCoords(ctx context.Context, arg GetMoneyT
 	var i OpenrailsMoneyTransaction
 	err := row.Scan(
 		&i.ID,
-		&i.Actor,
+		&i.InvokerID,
 		&i.Resource,
 		&i.Metadata,
 		&i.Amount,
@@ -198,12 +198,13 @@ func (q *Queries) GetMoneyTransactionByCoords(ctx context.Context, arg GetMoneyT
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.Currency,
+		&i.InvokerType,
 	)
 	return i, err
 }
 
 const getMoneyTransactionForUpdate = `-- name: GetMoneyTransactionForUpdate :one
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions WHERE id = $1 FOR UPDATE
+SELECT id, invoker_id, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_type FROM openrails.money_transactions WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetMoneyTransactionForUpdate(ctx context.Context, id uuid.UUID) (OpenrailsMoneyTransaction, error) {
@@ -211,7 +212,7 @@ func (q *Queries) GetMoneyTransactionForUpdate(ctx context.Context, id uuid.UUID
 	var i OpenrailsMoneyTransaction
 	err := row.Scan(
 		&i.ID,
-		&i.Actor,
+		&i.InvokerID,
 		&i.Resource,
 		&i.Metadata,
 		&i.Amount,
@@ -229,6 +230,7 @@ func (q *Queries) GetMoneyTransactionForUpdate(ctx context.Context, id uuid.UUID
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.Currency,
+		&i.InvokerType,
 	)
 	return i, err
 }
@@ -313,7 +315,7 @@ func (q *Queries) InsertMoneyBlock(ctx context.Context, arg InsertMoneyBlockPara
 
 const insertMoneyTransaction = `-- name: InsertMoneyTransaction :exec
 INSERT INTO openrails.money_transactions (
-    id, merchant_id, customer_id, currency, actor, resource, metadata,
+    id, merchant_id, customer_id, currency, invoker_id, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
     expires_at, description, created_at, updated_at
@@ -324,7 +326,7 @@ type InsertMoneyTransactionParams struct {
 	ID               uuid.UUID
 	MerchantID       uuid.UUID
 	CustomerID       uuid.UUID
-	Actor            string
+	InvokerID        string
 	Resource         *string
 	Metadata         []byte
 	Amount           int64
@@ -347,7 +349,7 @@ func (q *Queries) InsertMoneyTransaction(ctx context.Context, arg InsertMoneyTra
 		arg.ID,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Actor,
+		arg.InvokerID,
 		arg.Resource,
 		arg.Metadata,
 		arg.Amount,
@@ -369,7 +371,7 @@ func (q *Queries) InsertMoneyTransaction(ctx context.Context, arg InsertMoneyTra
 
 const insertMoneyTransactionIfAbsent = `-- name: InsertMoneyTransactionIfAbsent :exec
 INSERT INTO openrails.money_transactions (
-    id, merchant_id, customer_id, currency, actor, resource, metadata,
+    id, merchant_id, customer_id, currency, invoker_id, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
     expires_at, description, created_at, updated_at
@@ -381,7 +383,7 @@ type InsertMoneyTransactionIfAbsentParams struct {
 	ID               uuid.UUID
 	MerchantID       uuid.UUID
 	CustomerID       uuid.UUID
-	Actor            string
+	InvokerID        string
 	Resource         *string
 	Metadata         []byte
 	Amount           int64
@@ -404,7 +406,7 @@ func (q *Queries) InsertMoneyTransactionIfAbsent(ctx context.Context, arg Insert
 		arg.ID,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Actor,
+		arg.InvokerID,
 		arg.Resource,
 		arg.Metadata,
 		arg.Amount,
@@ -463,7 +465,7 @@ func (q *Queries) InsertMoneyWindow(ctx context.Context, arg InsertMoneyWindowPa
 }
 
 const listExpiredActiveMoneyHoldsForUpdate = `-- name: ListExpiredActiveMoneyHoldsForUpdate :many
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions
+SELECT id, invoker_id, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_type FROM openrails.money_transactions
 WHERE transaction_type = 'hold' AND status = 'active'
   AND expires_at IS NOT NULL AND expires_at <= $1::timestamptz
 ORDER BY expires_at ASC
@@ -488,7 +490,7 @@ func (q *Queries) ListExpiredActiveMoneyHoldsForUpdate(ctx context.Context, arg 
 		var i OpenrailsMoneyTransaction
 		if err := rows.Scan(
 			&i.ID,
-			&i.Actor,
+			&i.InvokerID,
 			&i.Resource,
 			&i.Metadata,
 			&i.Amount,
@@ -506,6 +508,7 @@ func (q *Queries) ListExpiredActiveMoneyHoldsForUpdate(ctx context.Context, arg 
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.Currency,
+			&i.InvokerType,
 		); err != nil {
 			return nil, err
 		}
@@ -564,7 +567,7 @@ func (q *Queries) ListExpiredOpenMoneyWindowsForUpdate(ctx context.Context, arg 
 }
 
 const listMoneyTransactionsByPayer = `-- name: ListMoneyTransactionsByPayer :many
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions
+SELECT id, invoker_id, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_type FROM openrails.money_transactions
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
 ORDER BY created_at DESC
 LIMIT $3::int OFFSET $4::int
@@ -595,7 +598,7 @@ func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMone
 		var i OpenrailsMoneyTransaction
 		if err := rows.Scan(
 			&i.ID,
-			&i.Actor,
+			&i.InvokerID,
 			&i.Resource,
 			&i.Metadata,
 			&i.Amount,
@@ -613,6 +616,7 @@ func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMone
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.Currency,
+			&i.InvokerType,
 		); err != nil {
 			return nil, err
 		}
@@ -625,7 +629,7 @@ func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMone
 }
 
 const listOrphanedExpiredMoneyHolds = `-- name: ListOrphanedExpiredMoneyHolds :many
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions
+SELECT id, invoker_id, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_type FROM openrails.money_transactions
 WHERE merchant_id = $1 AND transaction_type = 'hold' AND status = 'active'
   AND expires_at IS NOT NULL AND expires_at <= $2::timestamptz
 ORDER BY expires_at ASC
@@ -647,7 +651,7 @@ func (q *Queries) ListOrphanedExpiredMoneyHolds(ctx context.Context, arg ListOrp
 		var i OpenrailsMoneyTransaction
 		if err := rows.Scan(
 			&i.ID,
-			&i.Actor,
+			&i.InvokerID,
 			&i.Resource,
 			&i.Metadata,
 			&i.Amount,
@@ -665,6 +669,7 @@ func (q *Queries) ListOrphanedExpiredMoneyHolds(ctx context.Context, arg ListOrp
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.Currency,
+			&i.InvokerType,
 		); err != nil {
 			return nil, err
 		}
@@ -961,7 +966,7 @@ SELECT COALESCE(SUM(
 FROM openrails.money_transactions
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
   AND created_at >= $4::timestamptz
-  AND ($5::text = '' OR actor = $5::text)
+  AND ($5::text = '' OR invoker_id = $5::text)
 `
 
 type SumSpentInMoneyWindowParams struct {
@@ -969,19 +974,19 @@ type SumSpentInMoneyWindowParams struct {
 	CustomerID uuid.UUID
 	Currency   string
 	Since      time.Time
-	Actor      string
+	InvokerID  string
 }
 
 // Spend counted against a rate cap since `since`: settled spend (withdrawals +
 // captured holds) PLUS currently-active holds created in the window, so
-// concurrent in-flight holds can't overshoot a cap. Empty actor = all actors.
+// concurrent in-flight holds can't overshoot a cap. Empty invoker_id = all invokers.
 func (q *Queries) SumSpentInMoneyWindow(ctx context.Context, arg SumSpentInMoneyWindowParams) (int64, error) {
 	row := q.db.QueryRow(ctx, sumSpentInMoneyWindow,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
 		arg.Since,
-		arg.Actor,
+		arg.InvokerID,
 	)
 	var column_1 int64
 	err := row.Scan(&column_1)

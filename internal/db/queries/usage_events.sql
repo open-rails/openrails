@@ -3,14 +3,14 @@
 
 -- name: InsertUsageEvent :exec
 INSERT INTO openrails.usage_events (
-    id, merchant_id, customer_id, actor, resource,
+    id, merchant_id, customer_id, invoker_id, resource,
     event_type, dimensions, amount, source, source_id,
     money_transaction_id, metadata, occurred_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14);
 
 -- name: InsertUsageEventIfAbsent :exec
 INSERT INTO openrails.usage_events (
-    id, merchant_id, customer_id, actor, resource,
+    id, merchant_id, customer_id, invoker_id, resource,
     event_type, dimensions, amount, source, source_id,
     money_transaction_id, metadata, occurred_at, created_at
 ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
@@ -51,7 +51,7 @@ GROUP BY ue.event_type, d.key;
 -- under '' (the CASE yields NULL).
 SELECT COALESCE(CASE sqlc.arg(group_by)::text
            WHEN 'resource' THEN ue.resource
-           WHEN 'actor' THEN ue.actor
+           WHEN 'actor' THEN ue.invoker_id
            WHEN 'function' THEN ue.metadata->>'function_name'
            WHEN 'tier' THEN ue.metadata->>'availability_tier'
        END, '')::text AS key,

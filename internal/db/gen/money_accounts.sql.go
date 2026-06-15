@@ -116,15 +116,15 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 }
 
 const getMoneySpendLimit = `-- name: GetMoneySpendLimit :one
-SELECT id, merchant_id, customer_id, actor, max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at, currency FROM openrails.money_spend_limits
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $4 AND actor = $3
+SELECT id, merchant_id, customer_id, invoker_id, max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at, currency, invoker_type FROM openrails.money_spend_limits
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $4 AND invoker_id = $3
 LIMIT 1
 `
 
 type GetMoneySpendLimitParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	Actor      string
+	InvokerID  string
 	Currency   string
 }
 
@@ -132,7 +132,7 @@ func (q *Queries) GetMoneySpendLimit(ctx context.Context, arg GetMoneySpendLimit
 	row := q.db.QueryRow(ctx, getMoneySpendLimit,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Actor,
+		arg.InvokerID,
 		arg.Currency,
 	)
 	var i OpenrailsMoneySpendLimit
@@ -140,12 +140,13 @@ func (q *Queries) GetMoneySpendLimit(ctx context.Context, arg GetMoneySpendLimit
 		&i.ID,
 		&i.MerchantID,
 		&i.CustomerID,
-		&i.Actor,
+		&i.InvokerID,
 		&i.MaxSpendPerDayMicros,
 		&i.MaxSpendPerMonthMicros,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Currency,
+		&i.InvokerType,
 	)
 	return i, err
 }
@@ -685,10 +686,10 @@ func (q *Queries) UpsertMoneyAccountSettings(ctx context.Context, arg UpsertMone
 
 const upsertMoneySpendLimit = `-- name: UpsertMoneySpendLimit :exec
 INSERT INTO openrails.money_spend_limits (
-    id, merchant_id, customer_id, currency, actor,
+    id, merchant_id, customer_id, currency, invoker_id,
     max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at
 ) VALUES ($1, $2, $3, $9, $4, $5, $6, $7, $8)
-ON CONFLICT (merchant_id, customer_id, currency, actor) DO UPDATE SET
+ON CONFLICT (merchant_id, customer_id, currency, invoker_id) DO UPDATE SET
     max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros,
     max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros,
     updated_at = EXCLUDED.updated_at
@@ -698,7 +699,7 @@ type UpsertMoneySpendLimitParams struct {
 	ID                     uuid.UUID
 	MerchantID             uuid.UUID
 	CustomerID             uuid.UUID
-	Actor                  string
+	InvokerID              string
 	MaxSpendPerDayMicros   *int64
 	MaxSpendPerMonthMicros *int64
 	CreatedAt              time.Time
@@ -711,7 +712,7 @@ func (q *Queries) UpsertMoneySpendLimit(ctx context.Context, arg UpsertMoneySpen
 		arg.ID,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Actor,
+		arg.InvokerID,
 		arg.MaxSpendPerDayMicros,
 		arg.MaxSpendPerMonthMicros,
 		arg.CreatedAt,

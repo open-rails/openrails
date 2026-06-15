@@ -319,7 +319,7 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 				ID:                 uuidutil.NewV7(),
 				MerchantID:         w.MerchantID,
 				CustomerID:         w.CustomerID,
-				Actor:              actor,
+				InvokerID:          actor,
 				Resource:           nilIfEmpty(strings.TrimSpace(item.Resource)),
 				EventType:          et,
 				Amount:             item.Amount,

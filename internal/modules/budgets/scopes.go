@@ -192,7 +192,7 @@ func (s *Service) ReserveScopes(ctx context.Context, payer identity.CustomerID, 
 			// Idempotency: a replay returns the existing reservation for this scope.
 			existing, gerr := q.GetBudgetReservationByCoords(ctx, gen.GetBudgetReservationByCoordsParams{
 				MerchantID: tenantID, CustomerID: payerID,
-				Actor: sc.Key, Source: source, SourceID: sourceID,
+				InvokerID: sc.Key, Source: source, SourceID: sourceID,
 			})
 			if gerr == nil {
 				sts, _, _, cerr := s.computeWindows(ctx, tx, payer, sc.Key, sc.Windows, amountMicros, false)
@@ -236,7 +236,7 @@ func (s *Service) ReserveScopes(ctx context.Context, payer identity.CustomerID, 
 						ID:            op.insert.ID,
 						MerchantID:    tenantID,
 						CustomerID:    payerID,
-						Actor:         op.insert.Actor,
+						InvokerID:     op.insert.Actor,
 						WindowKey:     op.insert.WindowKey,
 						Cadence:       op.insert.Cadence,
 						WindowSeconds: op.insert.WindowSeconds,
@@ -279,7 +279,7 @@ func (s *Service) ReserveScopes(ctx context.Context, payer identity.CustomerID, 
 				ID:           res.ID,
 				MerchantID:   res.MerchantID,
 				CustomerID:   res.CustomerID,
-				Actor:        res.Actor,
+				InvokerID:    res.Actor,
 				AmountMicros: res.AmountMicros,
 				Status:       res.Status,
 				Source:       res.Source,
