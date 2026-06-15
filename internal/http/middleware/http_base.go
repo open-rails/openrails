@@ -46,12 +46,15 @@ func SecurityHeadersHTTP() HTTPMiddleware {
 	}
 }
 
-// BodyLimitHTTP is the net/http analogue of BodyLimit. Webhook paths are exempt
-// (their bodies are verified by signature, may be large, and must be read raw).
+// BodyLimitHTTP applies the global body-size cap uniformly, including to
+// webhook routes (the per-rail caps in internal/http/handlers/webhook.go bind
+// tighter than this backstop). MaxBytesReader only limits the body; signature
+// verification still reads the raw bytes up to the cap, so legitimate webhook
+// payloads are unaffected.
 func BodyLimitHTTP(maxBytes int64) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if maxBytes > 0 && r.Body != nil && !isWebhookPath(r.URL.Path) {
+			if maxBytes > 0 && r.Body != nil {
 				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 			}
 			next.ServeHTTP(w, r)

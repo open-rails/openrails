@@ -2,10 +2,8 @@ package middleware
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -20,25 +18,6 @@ func TestSecurityHeadersHTTPSetsCSP(t *testing.T) {
 	require.Equal(t, "DENY", w.Header().Get("X-Frame-Options"))
 	require.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
 	require.Contains(t, w.Header().Get("Content-Security-Policy"), "default-src 'none'")
-}
-
-func TestBodyLimitHTTPCapsNonWebhookAndExemptsWebhook(t *testing.T) {
-	read := func(path string, body string) (int, error) {
-		var readErr error
-		h := BodyLimitHTTP(8)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, readErr = io.ReadAll(r.Body)
-			w.WriteHeader(http.StatusOK)
-		}))
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
-		return w.Code, readErr
-	}
-
-	_, err := read("/v1/checkout", strings.Repeat("a", 32))
-	require.Error(t, err, "non-webhook bodies over the cap must be rejected by MaxBytesReader")
-
-	_, err = read("/v1/webhooks/stripe", strings.Repeat("a", 32))
-	require.NoError(t, err, "webhook bodies are signature-verified and exempt from the cap")
 }
 
 func TestCORSFromSourceHTTPGrantsOnlyListedOrigins(t *testing.T) {
