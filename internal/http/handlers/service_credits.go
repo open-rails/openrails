@@ -30,7 +30,7 @@ type serviceWithdrawRequest struct {
 type serviceDepositRequest struct {
 	CustomerID  string     `json:"customer_id"`
 	Invoker     string     `json:"invoker"`
-	Currency    string     `json:"currency"` // "" => DefaultCurrency (#476); #483: must forward so unknown units reject like local
+	Currency    string     `json:"currency"`
 	Amount      int64      `json:"amount" binding:"required"`
 	Source      string     `json:"source" binding:"required"`
 	SourceID    *uuid.UUID `json:"source_id" binding:"required"`
@@ -169,6 +169,10 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 	if !requireServiceCustomerScope(r, *tenantSubject) {
 		return
 	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
 
 	var expiresAt time.Time
 	if req.ExpiresAt != nil {
@@ -178,7 +182,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 	out, err := svc.AuthorizeAndHold(r.Request.Context(), billingservice.AuthorizeAndHoldRequest{
 		CustomerID:      *tenantSubject,
 		Invoker:         strings.TrimSpace(req.Invoker),
-		Currency:        req.Currency,
+		Currency:        currency,
 		EstimatedAmount: req.EstimatedAmount,
 		RequestID:       req.RequestID,
 		ExpiresAt:       expiresAt,
@@ -217,9 +221,9 @@ type serviceBalanceResponse struct {
 // #235/#247): available = balance - held, plus outstanding owed + billing mode.
 // Tenant-bound by the service token (RLS); tenant subject supplied via ?customer_id=.
 func ServiceGetCreditsBalance(r *httprequest.Request) {
-	currency := strings.TrimSpace(r.Request.URL.Query().Get("currency"))
-	if currency == "" {
-		currency = money.DefaultCurrency
+	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
+	if !ok {
+		return
 	}
 	tenantSubject, err := parseServiceCustomerID(r.Request.URL.Query().Get("customer_id"))
 	if err != nil {
@@ -259,6 +263,15 @@ func serviceQueryCustomer(r *httprequest.Request) (*identity.CustomerID, error) 
 	return parseServiceCustomerID(r.Request.URL.Query().Get("customer_id"))
 }
 
+func serviceRequiredCurrency(r *httprequest.Request, raw string) (string, bool) {
+	currency := strings.TrimSpace(raw)
+	if currency == "" {
+		r.ErrorJSON(http.StatusBadRequest, "currency required")
+		return "", false
+	}
+	return currency, true
+}
+
 // serviceAccountSettingsRequest is the PUT body for configuring a tenant subject's credit
 // billing account (issue #242). All settings are optional pointers (only the
 // supplied fields are changed); customer_id + currency identify the account.
@@ -295,9 +308,9 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 	if !requireServiceCustomerScope(r, *tenantSubject) {
 		return
 	}
-	currency := strings.TrimSpace(req.Currency)
-	if currency == "" {
-		currency = money.DefaultCurrency
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
 	}
 	in := money.AccountSettingsInput{
 		BillingMode:              req.BillingMode,
@@ -336,9 +349,9 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 // ServiceGetCreditAccountSettings (GET /v1/service/credits/account-settings)
 // reads a tenant subject's current billing-account settings (issue #242).
 func ServiceGetCreditAccountSettings(r *httprequest.Request) {
-	currency := strings.TrimSpace(r.Request.URL.Query().Get("currency"))
-	if currency == "" {
-		currency = money.DefaultCurrency
+	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
+	if !ok {
+		return
 	}
 	tenantSubject, err := serviceQueryCustomer(r)
 	if err != nil || tenantSubject == nil {
@@ -365,9 +378,9 @@ func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 // lists a tenant subject's credit transactions (usage history) for the billing-account
 // admin surface (issue #242). Query: customer_id, currency, limit, offset.
 func ServiceListCustomerCreditTransactions(r *httprequest.Request) {
-	currency := strings.TrimSpace(r.Request.URL.Query().Get("currency"))
-	if currency == "" {
-		currency = money.DefaultCurrency
+	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
+	if !ok {
+		return
 	}
 	tenantSubject, err := serviceQueryCustomer(r)
 	if err != nil || tenantSubject == nil {
@@ -440,7 +453,11 @@ func ServiceResourceRevenue(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	rows, err := svc.ResourceRevenueDaily(r.Request.Context(), req.Resource, req.Currency, time.Unix(req.From, 0).UTC(), time.Unix(req.To, 0).UTC())
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
+	rows, err := svc.ResourceRevenueDaily(r.Request.Context(), req.Resource, currency, time.Unix(req.From, 0).UTC(), time.Unix(req.To, 0).UTC())
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -449,7 +466,7 @@ func ServiceResourceRevenue(r *httprequest.Request) {
 	for _, x := range rows {
 		total += x.Amount
 	}
-	r.SuccessJSON(map[string]any{"currency": money.NormalizeCurrency(req.Currency), "revenue_amount": total, "daily": rows})
+	r.SuccessJSON(map[string]any{"currency": money.NormalizeCurrency(currency), "revenue_amount": total, "daily": rows})
 }
 
 // ServiceUsageRollup returns per-dimension-value spend for a tenant subject over a
@@ -477,9 +494,13 @@ func ServiceUsageRollup(r *httprequest.Request) {
 	if !requireServiceCustomerScope(r, *tenantSubjectID) {
 		return
 	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
 	rows, err := svc.ServiceUsageRollup(r.Request.Context(), billingservice.ServiceUsageRollupRequest{
 		CustomerID: tenantSubjectID,
-		Currency:   req.Currency,
+		Currency:   currency,
 		From:       time.Unix(req.From, 0).UTC(),
 		To:         time.Unix(req.To, 0).UTC(),
 		GroupBy:    req.GroupBy,
@@ -488,7 +509,7 @@ func ServiceUsageRollup(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	r.SuccessJSON(map[string]any{"currency": money.NormalizeCurrency(req.Currency), "rows": rows})
+	r.SuccessJSON(map[string]any{"currency": money.NormalizeCurrency(currency), "rows": rows})
 }
 
 func ServiceDepositCredits(r *httprequest.Request) {
@@ -519,6 +540,10 @@ func ServiceDepositCredits(r *httprequest.Request) {
 	if !requireServiceCustomerScope(r, *tenantSubjectID) {
 		return
 	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
 
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
@@ -529,7 +554,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
 		CustomerID:  tenantSubjectID,
 		Invoker:     invoker,
-		Currency:    req.Currency,
+		Currency:    currency,
 		Amount:      req.Amount,
 		Source:      req.Source,
 		SourceID:    req.SourceID,
@@ -575,10 +600,14 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 	if !requireServiceCustomerScope(r, *tenantSubjectID) {
 		return
 	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
 	trx, err := svc.WithdrawCredits(r.Request.Context(), billingservice.WithdrawCreditsRequest{
 		CustomerID: tenantSubjectID,
 		Invoker:    invoker,
-		Currency:   req.Currency,
+		Currency:   currency,
 		Amount:     req.Amount,
 		Source:     req.Source,
 		SourceID:   req.SourceID,
@@ -621,10 +650,14 @@ func ServiceHoldCredits(r *httprequest.Request) {
 	if !requireServiceCustomerScope(r, *tenantSubjectID) {
 		return
 	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
 	hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
 		CustomerID: tenantSubjectID,
 		Invoker:    invoker,
-		Currency:   req.Currency,
+		Currency:   currency,
 		Amount:     req.Amount,
 		Source:     req.Source,
 		SourceID:   req.SourceID,
@@ -706,26 +739,34 @@ func ServiceGetInvokerCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	currency := money.NormalizeCurrency(r.Request.URL.Query().Get("currency"))
+	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
+	if !ok {
+		return
+	}
 	var balance int64
 	var heldBalance int64
+	var balanceErr error
 	if tenantSubjectID != nil {
 		if !requireServiceCustomerScope(r, *tenantSubjectID) {
 			return
 		}
-		bal, err := r.State.MoneyService.GetBalanceForCustomer(r.Request.Context(), *tenantSubjectID, r.Request.URL.Query().Get("currency"))
-		if err == nil {
+		bal, err := r.State.MoneyService.GetBalanceForCustomer(r.Request.Context(), *tenantSubjectID, currency)
+		if err != nil {
+			balanceErr = err
+		} else {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance
 		}
 	} else {
-		bal, err := r.State.MoneyService.GetBalance(r.Request.Context(), invokerID)
-		if err == nil {
+		bal, err := r.State.MoneyService.GetBalance(r.Request.Context(), invokerID, currency)
+		if err != nil {
+			balanceErr = err
+		} else {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance
 		}
 	}
-	if err != nil {
+	if balanceErr != nil {
 		r.ErrorJSON(http.StatusNotFound, "balance not found")
 		return
 	}
@@ -756,8 +797,12 @@ func ServiceLookupCreditTransaction(r *httprequest.Request) {
 	if transactionType == "" {
 		transactionType = "hold"
 	}
+	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
+	if !ok {
+		return
+	}
 
-	trx, err := r.State.MoneyService.GetTransactionBySource(r.Request.Context(), invokerID, r.Request.URL.Query().Get("currency"), transactionType, source, sourceID)
+	trx, err := r.State.MoneyService.GetTransactionBySource(r.Request.Context(), invokerID, currency, transactionType, source, sourceID)
 	if err != nil {
 		if repo.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "not found")

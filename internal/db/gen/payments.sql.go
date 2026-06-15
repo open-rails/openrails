@@ -180,7 +180,7 @@ INSERT INTO openrails.payments (
     card_last4, customer_id
 ) VALUES (
     $1, $7::uuid, $2, $3, $4, $5, $6,
-    COALESCE(NULLIF($8::text, ''), 'usd'),
+    $8,
     COALESCE(NULLIF($9::text, ''), 'completed')::openrails.purchase_status,
     $10, $11,
     $12, $13,
@@ -264,7 +264,7 @@ INSERT INTO openrails.payments (
     card_last4, customer_id
 ) VALUES (
     $1, $7::uuid, $2, $3, $4, $5, $6,
-    COALESCE(NULLIF($8::text, ''), 'usd'),
+    $8,
     COALESCE(NULLIF($9::text, ''), 'completed')::openrails.purchase_status,
     $10, $11,
     $12, $13,

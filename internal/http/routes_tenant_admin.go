@@ -10,9 +10,7 @@ import (
 
 	policyginmw "github.com/open-rails/openrails/internal/auth/policy/ginmw"
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -51,46 +49,6 @@ func (s *Server) registerTenantAdminRoutes(e *gin.Engine) {
 		Info("admin-gated tenant provisioning routes registered")
 }
 
-// auditTenantMutation records a cross-tenant platform audit row for a tenant
-// admin mutation (issue #226). Wiring it into the EXISTING /v1/admin/tenants
-// mutations means every cross-tenant tenant-lifecycle change is recorded with
-// actor, target tenant, action, reason, and before/after where applicable.
-//
-// A persisted-audit failure on a real platform deployment is logged but does
-// not fail the request — the mutation already succeeded; platform-superadmin
-// break-glass grants, by contrast, treat audit failure as fatal.
-func (s *Server) auditTenantMutation(c *gin.Context, action string, target *merchant.ID, reason string, before, after any) {
-	if s.platformAudit == nil {
-		return
-	}
-	uc, _ := ginauth.UserContextFromGin(c)
-	if _, err := s.platformAudit.Record(c.Request.Context(), platform.AuditEntry{
-		ActorUserID:    uc.UserID,
-		ActorTenant:    uc.Tenant,
-		Action:         action,
-		TargetTenantID: target,
-		Reason:         reason,
-		Before:         before,
-		After:          after,
-	}); err != nil {
-		log.WithError(err).Warn("failed to record platform audit for tenant mutation")
-	}
-}
-
-// tenantStatusSnapshot returns a small before/after snapshot (status + tier) for
-// audit, tolerating a missing tenant (returns nil so the audit row records a
-// nil before/after rather than failing the mutation).
-func (s *Server) tenantStatusSnapshot(c *gin.Context, id merchant.ID) any {
-	if s.tenancy == nil {
-		return nil
-	}
-	t, err := s.tenancy.Get(c.Request.Context(), id)
-	if err != nil || t == nil {
-		return nil
-	}
-	return gin.H{"status": string(t.Status), "billing_tier": t.BillingTier}
-}
-
 func tenantIDParam(c *gin.Context) (merchant.ID, bool) {
 	id, err := merchant.ParseID(c.Param("id"))
 	if err != nil {
@@ -113,8 +71,6 @@ func (s *Server) tenantProvisionHandler() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		s.auditTenantMutation(c, platform.ActionTenantProvision, &t.ID, "",
-			nil, tenantView(t))
 		c.JSON(http.StatusOK, tenantView(t))
 	}
 }
@@ -140,25 +96,17 @@ func (s *Server) tenantLifecycleHandler(op string) gin.HandlerFunc {
 		if !ok {
 			return
 		}
-		before := s.tenantStatusSnapshot(c, id)
-		var (
-			err    error
-			action string
-		)
+		var err error
 		switch op {
 		case "suspend":
 			err = s.tenancy.Suspend(c.Request.Context(), id)
-			action = platform.ActionTenantSuspend
 		case "resume":
 			err = s.tenancy.Resume(c.Request.Context(), id)
-			action = platform.ActionTenantResume
 		}
 		if err != nil {
 			s.tenantErr(c, err)
 			return
 		}
-		after := s.tenantStatusSnapshot(c, id)
-		s.auditTenantMutation(c, action, &id, "", before, after)
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	}
 }
@@ -176,13 +124,10 @@ func (s *Server) tenantTierHandler() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 			return
 		}
-		before := s.tenantStatusSnapshot(c, id)
 		if err := s.tenancy.TierChange(c.Request.Context(), id, body.Tier); err != nil {
 			s.tenantErr(c, err)
 			return
 		}
-		after := s.tenantStatusSnapshot(c, id)
-		s.auditTenantMutation(c, platform.ActionTenantTierChange, &id, "", before, after)
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	}
 }
@@ -213,7 +158,6 @@ func (s *Server) tenantDeleteHandler() gin.HandlerFunc {
 			Reason  string `json:"reason"`
 		}
 		_ = c.ShouldBindJSON(&body)
-		before := s.tenantStatusSnapshot(c, id)
 		err := s.tenancy.Delete(c.Request.Context(), id, tenancy.DeleteOptions{Confirm: body.Confirm})
 		if err != nil {
 			if errors.Is(err, tenancy.ErrExportRequired) {
@@ -223,8 +167,6 @@ func (s *Server) tenantDeleteHandler() gin.HandlerFunc {
 			s.tenantErr(c, err)
 			return
 		}
-		s.auditTenantMutation(c, platform.ActionTenantDelete, &id, body.Reason,
-			before, gin.H{"status": "deleted"})
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	}
 }
@@ -247,7 +189,7 @@ func (s *Server) tenantPutCredentialHandler() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "credential name is required"})
 			return
 		}
-		sec, err := s.tenancy.RotateCredential(c.Request.Context(), id, name, body.Value, "operator")
+		sec, err := s.tenancy.RotateCredential(c.Request.Context(), id, name, body.Value)
 		if err != nil {
 			s.tenantErr(c, err)
 			return
@@ -282,7 +224,7 @@ func (s *Server) tenantDeleteCredentialHandler() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "credential name is required"})
 			return
 		}
-		if err := s.tenancy.DeleteCredential(c.Request.Context(), id, name, "operator"); err != nil {
+		if err := s.tenancy.DeleteCredential(c.Request.Context(), id, name); err != nil {
 			s.tenantSecretErr(c, err)
 			return
 		}
@@ -305,7 +247,7 @@ func (s *Server) tenantValidateCredentialHandler() gin.HandlerFunc {
 			Value string `json:"value"`
 		}
 		_ = c.ShouldBindJSON(&body)
-		if err := s.tenancy.ValidateCredential(c.Request.Context(), id, name, body.Value, "operator", nil); err != nil {
+		if err := s.tenancy.ValidateCredential(c.Request.Context(), id, name, body.Value, nil); err != nil {
 			s.tenantSecretErr(c, err)
 			return
 		}

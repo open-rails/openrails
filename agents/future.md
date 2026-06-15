@@ -9,6 +9,28 @@
 
 ---
 
+# #498: Deliberate admin audit logging and global break-glass, if needed later
+
+**Completed:** no — future direction only.
+
+The old Postgres-backed `platform_audit`, `platform_break_glass`, and
+`tenant_credential_audit` features were removed as unnecessary platform slop.
+Do not recreate those tables by default.
+
+If OpenRails later needs this capability, design it deliberately:
+
+- Admin action audit logging should probably be structured event logging in
+  ClickHouse or another analytics/audit pipeline, not hot Postgres tables added
+  to the control-plane schema by default.
+- Global break-glass/admin takeover should be a separate, explicit security
+  feature with clear operational controls, expiry, approval/justification model,
+  alerting, and tests. It should not be implied by ordinary platform metrics or
+  tenant-admin routes.
+
+Bring this back only when there is a concrete hosted-operations requirement.
+
+---
+
 # #479: OpenMeter-parity ideas — first-class configurable METERS + priority-based grant burn-down
 
 **Completed:** no — future direction (not blocking). Surfaced comparing OpenRails to OpenMeter

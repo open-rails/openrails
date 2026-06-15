@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -49,10 +48,8 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 	return creds, nil
 }
 
-// PutCredential stores/rotates a single per-tenant credential and writes a
-// credential audit row (issue #225 rotation API + audit log). action is recorded
-// as the audit action (e.g. "put" or "rotate").
-func (s *Service) PutCredential(ctx context.Context, id merchant.ID, name, value, action, actor string) (Secret, error) {
+// PutCredential stores/rotates a single per-tenant credential.
+func (s *Service) PutCredential(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
 	if s.secrets == nil {
 		return Secret{}, errors.New("tenancy: no secret store configured")
 	}
@@ -67,17 +64,12 @@ func (s *Service) PutCredential(ctx context.Context, id merchant.ID, name, value
 	if err != nil {
 		return Secret{}, err
 	}
-	action = strings.TrimSpace(action)
-	if action == "" {
-		action = "put"
-	}
-	s.audit(ctx, id, name, action, actor, fmt.Sprintf("version=%d", sec.Version))
 	return sec, nil
 }
 
 // RotateCredential is PutCredential with action="rotate".
-func (s *Service) RotateCredential(ctx context.Context, id merchant.ID, name, value, actor string) (Secret, error) {
-	return s.PutCredential(ctx, id, name, value, "rotate", actor)
+func (s *Service) RotateCredential(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
+	return s.PutCredential(ctx, id, name, value)
 }
 
 // TestStripeCredential verifies a tenant's stored Stripe secret key works WITHOUT
@@ -85,18 +77,5 @@ func (s *Service) RotateCredential(ctx context.Context, id merchant.ID, name, va
 // verification function (so this stays testable without a live Stripe); when nil,
 // a default real Stripe balance check is used. It records a "test" audit row.
 func (s *Service) TestStripeCredential(ctx context.Context, id merchant.ID, tester func(ctx context.Context, secretKey string) error) error {
-	return s.ValidateCredential(ctx, id, SecretStripeSecretKey, "", "", tester)
-}
-
-// audit best-effort appends a credential audit row. A failure to audit must not
-// fail the underlying operation, so errors are swallowed (the operation already
-// succeeded); a real deployment routes these to its log pipeline.
-func (s *Service) audit(ctx context.Context, id merchant.ID, name, action, actor, detail string) {
-	if s.pool == nil {
-		return
-	}
-	_, _ = s.pool.Exec(ctx, `
-		INSERT INTO openrails.tenant_credential_audit (tenant_id, name, action, actor, detail)
-		VALUES ($1::uuid, $2, $3, NULLIF($4,''), NULLIF($5,''))
-	`, id.String(), name, action, strings.TrimSpace(actor), detail)
+	return s.ValidateCredential(ctx, id, SecretStripeSecretKey, "", tester)
 }

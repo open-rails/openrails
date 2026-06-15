@@ -126,6 +126,10 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	if in.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
+	currency, err := requireCurrency(in.Currency)
+	if err != nil {
+		return nil, err
+	}
 
 	lim := ratelimit.NewLimiter(s.rt.RedisClient)
 	store := admission.NewTierPolicyStore(s.rt.DB)
@@ -200,7 +204,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		Resource:        in.Resource,
 		Roles:           in.Roles,
 		Amounts:         in.Amounts,
-		Currency:        in.Currency,
+		Currency:        currency,
 		EstimatedAmount: in.EstimatedAmount,
 		Source:          source,
 		SourceID:        in.SourceID,
@@ -213,7 +217,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 
 	res := &AdmitResult{
 		Allowed:           dec.Allowed,
-		Currency:          money.NormalizeCurrency(in.Currency),
+		Currency:          money.NormalizeCurrency(currency),
 		BlockedBy:         dec.BlockedBy,
 		BlockedUnit:       dec.BlockedUnit,
 		DenyCode:          dec.DenyCode,
@@ -244,7 +248,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 			rs = 0
 		}
 		res.BudgetWindows = append(res.BudgetWindows, AdmitBudgetWindowDTO{
-			Key: w.Key, Currency: money.NormalizeCurrency(in.Currency), Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
+			Key: w.Key, Currency: money.NormalizeCurrency(currency), Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
 			Remaining: w.Remaining, ResetAfterSeconds: rs, Allowed: w.Allowed,
 		})
 	}
@@ -261,7 +265,11 @@ func (s *Service) BudgetStatus(ctx context.Context, payer identity.CustomerID, i
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	cur := money.NormalizeCurrency(currency)
+	cur, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
+	cur = money.NormalizeCurrency(cur)
 	if tier == "" {
 		tier = admission.DefaultTier
 	}
@@ -313,7 +321,11 @@ func (s *Service) BudgetCheck(ctx context.Context, payer identity.CustomerID, in
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	cur := money.NormalizeCurrency(currency)
+	cur, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
+	cur = money.NormalizeCurrency(cur)
 	bw := make([]budgets.BudgetWindow, 0, len(windows))
 	for _, w := range windows {
 		bw = append(bw, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence})
@@ -527,9 +539,9 @@ func (s *Service) invokerWastedSpendPolicy(ctx context.Context) ([]abuse.WastedW
 
 // payerWastedWindows resolves the PAYER's wasted-spend budget windows from the
 // tier policy's bad_spend windows (#488) at the payer's current tier.
-func (s *Service) payerWastedWindows(ctx context.Context, payer identity.CustomerID, tier string) ([]abuse.WastedWindow, error) {
+func (s *Service) payerWastedWindows(ctx context.Context, payer identity.CustomerID, currency, tier string) ([]abuse.WastedWindow, error) {
 	if tier == "" {
-		if t, err := s.GetTier(ctx, payer); err == nil && t != "" {
+		if t, err := s.GetTier(ctx, payer, currency); err == nil && t != "" {
 			tier = t
 		} else {
 			tier = admission.DefaultTier
@@ -590,7 +602,11 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 	if in.Amount < 0 {
 		return nil, fmt.Errorf("amount must be >= 0")
 	}
-	cur := money.NormalizeCurrency(in.Currency)
+	cur, err := requireCurrency(in.Currency)
+	if err != nil {
+		return nil, err
+	}
+	cur = money.NormalizeCurrency(cur)
 	if err := money.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
@@ -608,7 +624,7 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 	}
 	lim := ratelimit.NewLimiter(s.rt.RedisClient)
 	guard := abuse.NewWastedSpendGuard(lim)
-	payerWindows, err := s.payerWastedWindows(ctx, in.CustomerID, "")
+	payerWindows, err := s.payerWastedWindows(ctx, in.CustomerID, cur, "")
 	if err != nil {
 		return nil, err
 	}
@@ -705,7 +721,11 @@ func (s *Service) AbuseUsage(ctx context.Context, payer identity.CustomerID, inv
 	if payer.IsZero() {
 		return nil, nil, fmt.Errorf("payer required")
 	}
-	cur := money.NormalizeCurrency(currency)
+	cur, err := requireCurrency(currency)
+	if err != nil {
+		return nil, nil, err
+	}
+	cur = money.NormalizeCurrency(cur)
 	if err := money.ValidateCurrency(cur); err != nil {
 		return nil, nil, err
 	}
@@ -716,7 +736,7 @@ func (s *Service) AbuseUsage(ctx context.Context, payer identity.CustomerID, inv
 	tenant := tid.UUID().String()
 	guard := abuse.NewWastedSpendGuard(ratelimit.NewLimiter(s.rt.RedisClient))
 
-	pw, err := s.payerWastedWindows(ctx, payer, tier)
+	pw, err := s.payerWastedWindows(ctx, payer, cur, tier)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -793,42 +813,58 @@ func (s *Service) SetTierPolicy(ctx context.Context, payer identity.CustomerID, 
 	return admission.NewTierPolicyStore(s.rt.DB).UpsertTierPolicyFull(ctx, payer, in.Tier, pol)
 }
 
-// TierScheduleRung is one rung of a persisted tier ladder (#476): a payer reaches
-// Tier once its cumulative paid spend is at least MinCumulativePaidAmount.
+// TierScheduleRung is one rung of a persisted same-currency tier ladder (#476):
+// a payer reaches Tier once its cumulative paid spend in the schedule currency
+// is at least MinCumulativePaidAmount.
 type TierScheduleRung struct {
 	Tier                    string `json:"tier"`
 	MinCumulativePaidAmount int64  `json:"min_cumulative_paid_amount"`
 }
 
 // SetTierSchedule persists the tenant's tier SCHEDULE (#476): the host declares
-// the ladder ONCE and OpenRails then AUTO-maintains each payer's tier from
-// cumulative spend (no host cranking). A zero payer sets the tenant-wide default
-// schedule; a non-zero payer sets a per-subject override. owner=platform.
-func (s *Service) SetTierSchedule(ctx context.Context, payer identity.CustomerID, schedule []TierScheduleRung) error {
+// the same-currency ladder ONCE and OpenRails then AUTO-maintains each payer's
+// tier from cumulative spend (no host cranking). A zero payer sets the
+// tenant-wide default schedule; a non-zero payer sets a per-subject override.
+// owner=platform.
+func (s *Service) SetTierSchedule(ctx context.Context, payer identity.CustomerID, currency string, schedule []TierScheduleRung) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
+	}
+	cur, err := requireCurrency(currency)
+	if err != nil {
+		return err
+	}
+	cur = money.NormalizeCurrency(cur)
+	if err := money.ValidateCurrency(cur); err != nil {
+		return err
 	}
 	moneySvc := money.NewMoneyService(s.rt.DB)
 	rungs := make([]money.TierThreshold, 0, len(schedule))
 	for _, r := range schedule {
 		rungs = append(rungs, money.TierThreshold{Tier: r.Tier, MinPaidAmount: r.MinCumulativePaidAmount})
 	}
-	return moneySvc.SetTierSchedule(ctx, payer, rungs)
+	return moneySvc.SetTierSchedule(ctx, payer, cur, rungs)
 }
 
-// GetTier returns the payer's CURRENT graduated tier (#477): the tier OpenRails
-// auto-maintains from cumulative paid spend against the persisted tier schedule
-// (#476), or a manual admin override. Empty when the payer has never graduated
-// (no tier set) — the caller treats that as the lowest/default tier. This is the
-// read the host uses to drive its OWN per-tier capacity decisions (e.g.
-// tensorhub's scheduler in-flight concurrency cap) WITHOUT supplying its own
-// ladder or cranking graduation.
-func (s *Service) GetTier(ctx context.Context, payer identity.CustomerID) (string, error) {
+// GetTier returns the payer's CURRENT graduated tier (#477) for one currency:
+// the tier OpenRails auto-maintains from same-currency cumulative paid spend
+// against the persisted tier schedule (#476), or a manual admin override. Empty
+// when the payer has never graduated (no tier set) — the caller treats that as
+// the lowest/default tier.
+func (s *Service) GetTier(ctx context.Context, payer identity.CustomerID, currency string) (string, error) {
 	if s == nil || s.rt == nil {
 		return "", fmt.Errorf("service not initialized")
 	}
 	if payer.IsZero() {
 		return "", fmt.Errorf("payer required")
 	}
-	return money.NewMoneyService(s.rt.DB).GetTier(ctx, payer)
+	cur, err := requireCurrency(currency)
+	if err != nil {
+		return "", err
+	}
+	cur = money.NormalizeCurrency(cur)
+	if err := money.ValidateCurrency(cur); err != nil {
+		return "", err
+	}
+	return money.NewMoneyService(s.rt.DB).GetTier(ctx, payer, cur)
 }

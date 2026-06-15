@@ -52,7 +52,7 @@ func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry
 	job := &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}
 	require.NoError(t, worker.Work(ctx, job))
 
-	updatedBal, err := suite.App.Runtime.MoneyService.GetBalance(ctx, userID)
+	updatedBal, err := suite.App.Runtime.MoneyService.GetBalance(ctx, userID, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), updatedBal.Balance)
 	require.Equal(t, int64(80), updatedBal.HeldBalance)
@@ -68,7 +68,7 @@ func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry
 	holdAfter := suite.getMoneyHold(hold.ID)
 	require.Equal(t, "captured", holdAfter.Status)
 
-	balAfter, err := suite.App.Runtime.MoneyService.GetBalance(ctx, userID)
+	balAfter, err := suite.App.Runtime.MoneyService.GetBalance(ctx, userID, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), balAfter.Balance)
 	require.Equal(t, int64(0), balAfter.HeldBalance)

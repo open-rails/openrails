@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/http/response"
 	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -63,23 +62,22 @@ func tenantSecretPutHandler(rt *app.Runtime) gin.HandlerFunc {
 			response.BadRequest(c, "value_required")
 			return
 		}
-		actor := delegatedActor(c)
 		if req.ValidateOnly {
-			if err := svc.ValidateCredential(c.Request.Context(), id, name, req.Value, actor, nil); err != nil {
+			if err := svc.ValidateCredential(c.Request.Context(), id, name, req.Value, nil); err != nil {
 				tenantSecretError(c, err)
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"name": name, "validated": true, "configured": false})
 			return
 		}
-		sec, err := svc.PutCredential(c.Request.Context(), id, name, req.Value, "rotate", actor)
+		sec, err := svc.PutCredential(c.Request.Context(), id, name, req.Value)
 		if err != nil {
 			tenantSecretError(c, err)
 			return
 		}
 		validated := false
 		if req.Validate || req.SaveAndValidate {
-			if err := svc.ValidateCredential(c.Request.Context(), id, name, "", actor, nil); err != nil {
+			if err := svc.ValidateCredential(c.Request.Context(), id, name, "", nil); err != nil {
 				tenantSecretError(c, err)
 				return
 			}
@@ -106,7 +104,7 @@ func tenantSecretValidateHandler(rt *app.Runtime) gin.HandlerFunc {
 		}
 		var req upsertTenantSecretRequest
 		_ = c.ShouldBindJSON(&req)
-		if err := svc.ValidateCredential(c.Request.Context(), id, name, req.Value, delegatedActor(c), nil); err != nil {
+		if err := svc.ValidateCredential(c.Request.Context(), id, name, req.Value, nil); err != nil {
 			tenantSecretError(c, err)
 			return
 		}
@@ -129,7 +127,7 @@ func tenantSecretDeleteHandler(rt *app.Runtime) gin.HandlerFunc {
 			response.ForbiddenWithMessage(c, "tenant_secret_not_writable")
 			return
 		}
-		if err := svc.DeleteCredential(c.Request.Context(), id, name, delegatedActor(c)); err != nil {
+		if err := svc.DeleteCredential(c.Request.Context(), id, name); err != nil {
 			tenantSecretError(c, err)
 			return
 		}
@@ -148,13 +146,6 @@ func tenantSecretContext(c *gin.Context, rt *app.Runtime) (*tenancy.Service, mer
 		return nil, merchant.ID{}, false
 	}
 	return rt.Tenancy, id, true
-}
-
-func delegatedActor(c *gin.Context) string {
-	if resolved, ok := ginmw.DelegatedFromGin(c); ok && resolved != nil {
-		return resolved.DelegatedSubject
-	}
-	return ""
 }
 
 func cleanRouteSecretName(name string) string {

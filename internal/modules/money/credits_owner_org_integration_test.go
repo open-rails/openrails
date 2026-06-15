@@ -84,8 +84,8 @@ func startOwnerTenantPostgres(t *testing.T) (*db.DB, string, context.Context) {
 // gone — balance + held are derived from money_blocks + active holds/windows, so
 // there is no money_balances row to enforce NOT NULL / uniqueness on.
 
-// seedSpendable deposits `amount` µ$ for a user via the service, creating a
-// block (the spendable lot).
+// seedSpendable deposits `amount` in the default currency for a user via the
+// service, creating a spendable lot.
 func seedSpendable(t *testing.T, ctx context.Context, svc *money.MoneyService, userID string, amount int64) {
 	t.Helper()
 	src := uuid.New().String()
@@ -110,7 +110,7 @@ func TestReserveCapturePartial_ConservesTotal(t *testing.T) {
 	const initial = int64(1000)
 	seedSpendable(t, ctx, svc, userID, initial)
 
-	bal0, err := svc.GetBalance(ctx, userID)
+	bal0, err := svc.GetBalance(ctx, userID, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, initial, bal0.Balance)
 	require.Equal(t, int64(0), bal0.HeldBalance)
@@ -119,7 +119,7 @@ func TestReserveCapturePartial_ConservesTotal(t *testing.T) {
 	hold, err := svc.Hold(ctx, nil, userID, money.DefaultCurrency, 400, "api", "req-rc-1", time.Now().Add(time.Hour).UTC())
 	require.NoError(t, err)
 
-	balHeld, err := svc.GetBalance(ctx, userID)
+	balHeld, err := svc.GetBalance(ctx, userID, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, initial, balHeld.Balance)
 	require.Equal(t, int64(400), balHeld.HeldBalance)
@@ -129,7 +129,7 @@ func TestReserveCapturePartial_ConservesTotal(t *testing.T) {
 	_, err = svc.CaptureHold(ctx, hold.ID, 150)
 	require.NoError(t, err)
 
-	balFinal, err := svc.GetBalance(ctx, userID)
+	balFinal, err := svc.GetBalance(ctx, userID, money.DefaultCurrency)
 	require.NoError(t, err)
 	// CONSERVATION: balance dropped by exactly the captured amount, hold released.
 	require.Equal(t, initial-150, balFinal.Balance, "only the captured amount leaves the balance")
@@ -153,7 +153,7 @@ func TestReserveRelease_RestoresFullBalance(t *testing.T) {
 	_, relErr := svc.ReleaseHold(ctx, hold.ID)
 	require.NoError(t, relErr)
 
-	bal, err := svc.GetBalance(ctx, userID)
+	bal, err := svc.GetBalance(ctx, userID, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, initial, bal.Balance, "release must not consume money")
 	require.Equal(t, int64(0), bal.HeldBalance, "release must clear the hold")

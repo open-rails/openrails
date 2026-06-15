@@ -64,7 +64,7 @@ func (c *localClient) ensureTenant(ctx context.Context) context.Context {
 // ClientOption configures Runtime.Client.
 type ClientOption func(*localClient)
 
-// WithCurrency mirrors openrails.WithCurrency for the embedded client (#476).
+// WithCurrency mirrors openrails.WithCurrency for the embedded client.
 func WithCurrency(currency string) ClientOption {
 	return func(c *localClient) { c.currency = strings.TrimSpace(currency) }
 }
@@ -73,6 +73,23 @@ func WithCurrency(currency string) ClientOption {
 
 func invalidErr(msg string) error {
 	return openrails.NewStatusError(http.StatusBadRequest, "", msg)
+}
+
+func requireCurrency(raw string) (string, error) {
+	currency := strings.TrimSpace(raw)
+	if currency == "" {
+		return "", invalidErr("currency required")
+	}
+	return currency, nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func internalErr(msg string) error {
@@ -236,7 +253,11 @@ func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequ
 	if req.Currency == "" {
 		req.Currency = c.currency
 	}
-	// gin binding: request_id is `binding:"required"`. Currency is optional (#476).
+	currency, err := requireCurrency(req.Currency)
+	if err != nil {
+		return nil, err
+	}
+	// gin binding: request_id is `binding:"required"`.
 	if strings.TrimSpace(req.RequestID) == "" {
 		return nil, bindRequiredErr("RequestID")
 	}
@@ -254,7 +275,7 @@ func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequ
 	out, err := c.svc.AuthorizeAndHold(ctx, billingservice.AuthorizeAndHoldRequest{
 		CustomerID:      payer,
 		Invoker:         req.Invoker,
-		Currency:        req.Currency,
+		Currency:        currency,
 		EstimatedAmount: req.EstimatedAmount,
 		RequestID:       req.RequestID,
 		ExpiresAt:       expiresAt,
@@ -283,8 +304,12 @@ func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequ
 // HoldCredits transcribes handlers.ServiceHoldCredits (service_credits.go).
 func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCreditsRequest) (*openrails.CreditHold, error) {
 	ctx = c.ensureTenant(ctx)
+	currency, err := requireCurrency(firstNonEmpty(req.Currency, c.currency))
+	if err != nil {
+		return nil, err
+	}
 	// gin binding (in struct field order): invoker, amount, source, source_id,
-	// expires_at are all `binding:"required"`. Currency is optional (#476).
+	// expires_at are all `binding:"required"`.
 	switch {
 	case strings.TrimSpace(req.Invoker) == "":
 		return nil, bindRequiredErr("Invoker")
@@ -302,7 +327,7 @@ func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCredits
 	hold, err := c.svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
 		CustomerID: &payer,
 		Invoker:    req.Invoker,
-		Currency:   req.Currency,
+		Currency:   currency,
 		Amount:     req.Amount,
 		Source:     req.Source,
 		SourceID:   req.SourceID,
@@ -361,7 +386,10 @@ func (c *localClient) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
 // (service_credits.go).
 func (c *localClient) WithdrawCredits(ctx context.Context, req openrails.WithdrawCreditsRequest) (*openrails.CreditTransaction, error) {
 	ctx = c.ensureTenant(ctx)
-	// Currency is optional (#476).
+	currency, err := requireCurrency(firstNonEmpty(req.Currency, c.currency))
+	if err != nil {
+		return nil, err
+	}
 	switch {
 	case strings.TrimSpace(req.Invoker) == "":
 		return nil, bindRequiredErr("Invoker")
@@ -379,7 +407,7 @@ func (c *localClient) WithdrawCredits(ctx context.Context, req openrails.Withdra
 	trx, err := c.svc.WithdrawCredits(ctx, billingservice.WithdrawCreditsRequest{
 		CustomerID: &payer,
 		Invoker:    req.Invoker,
-		Currency:   req.Currency,
+		Currency:   currency,
 		Amount:     req.Amount,
 		Source:     req.Source,
 		SourceID:   req.SourceID,
@@ -394,7 +422,10 @@ func (c *localClient) WithdrawCredits(ctx context.Context, req openrails.Withdra
 // (service_credits.go).
 func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositCreditsRequest) (*openrails.CreditTransaction, error) {
 	ctx = c.ensureTenant(ctx)
-	// Currency is optional (#476).
+	currency, err := requireCurrency(firstNonEmpty(req.Currency, c.currency))
+	if err != nil {
+		return nil, err
+	}
 	switch {
 	case strings.TrimSpace(req.Invoker) == "":
 		return nil, bindRequiredErr("Invoker")
@@ -422,7 +453,7 @@ func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositC
 	trx, err := c.svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
 		CustomerID:  &payer,
 		Invoker:     req.Invoker,
-		Currency:    req.Currency,
+		Currency:    currency,
 		Amount:      req.Amount,
 		Source:      req.Source,
 		SourceID:    req.SourceID,
@@ -478,16 +509,19 @@ func (c *localClient) Release(ctx context.Context, reservationID string) error {
 	return c.ReleaseHold(ctx, holdID)
 }
 
-// Balance transcribes handlers.ServiceGetCreditsBalance (service_credits.go):
-// an absent currency defaults to "USD" (#476); the remote client sends its
-// WithCurrency default when set, mirrored here.
+// Balance transcribes handlers.ServiceGetCreditsBalance (service_credits.go)
+// using the client-level currency.
 func (c *localClient) Balance(ctx context.Context, customerID string) (*openrails.BalanceResponse, error) {
 	ctx = c.ensureTenant(ctx)
+	currency, err := requireCurrency(c.currency)
+	if err != nil {
+		return nil, err
+	}
 	payer, err := parseCustomer(customerID, "invalid customer_id")
 	if err != nil {
 		return nil, err
 	}
-	snap, err := c.svc.GetCreditAccount(ctx, payer, c.currency)
+	snap, err := c.svc.GetCreditAccount(ctx, payer, currency)
 	if err != nil {
 		return nil, invalidErr(err.Error())
 	}
@@ -501,10 +535,13 @@ func (c *localClient) Balance(ctx context.Context, customerID string) (*openrail
 	}, nil
 }
 
-// GetCreditAccount transcribes handlers.ServiceGetCreditsBalance
-// (service_credits.go) with the remote client's "USD" normalization (#476).
+// GetCreditAccount transcribes handlers.ServiceGetCreditsBalance.
 func (c *localClient) GetCreditAccount(ctx context.Context, customerID, currency string) (*openrails.CreditAccount, error) {
 	ctx = c.ensureTenant(ctx)
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
 	payer, err := parseCustomer(customerID, "invalid customer_id")
 	if err != nil {
 		return nil, err
@@ -533,7 +570,10 @@ func (c *localClient) SetCreditAccountSettings(ctx context.Context, customerID, 
 	if err != nil {
 		return nil, err
 	}
-	ct := strings.TrimSpace(currency)
+	ct, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
 	settings := money.AccountSettingsInput{
 		BillingMode:              in.BillingMode,
 		MaxSpendPerDay:           in.MaxSpendPerDay,
@@ -582,11 +622,15 @@ type serviceTxn struct {
 // producing the same {"transactions":[...],"total":N} JSON the wire carries.
 func (c *localClient) ListCreditTransactions(ctx context.Context, customerID, currency string, limit int) (json.RawMessage, error) {
 	ctx = c.ensureTenant(ctx)
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
 	payer, err := parseCustomer(customerID, "customer_id required")
 	if err != nil {
 		return nil, err
 	}
-	items, total, err := c.svc.GetCustomerCreditTransactions(ctx, payer, strings.TrimSpace(currency), limit, 0)
+	items, total, err := c.svc.GetCustomerCreditTransactions(ctx, payer, currency, limit, 0)
 	if err != nil {
 		return nil, invalidErr(err.Error())
 	}
@@ -618,6 +662,10 @@ func (c *localClient) UsageRollup(ctx context.Context, customerID, currency stri
 		return nil, bindRequiredErr("To")
 	case strings.TrimSpace(groupBy) == "":
 		return nil, bindRequiredErr("GroupBy")
+	}
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
 	}
 	payer, err := parseCustomer(customerID, "invalid customer_id")
 	if err != nil {
@@ -733,7 +781,7 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 // SetTierSchedule transcribes handlers.ServiceSetTierSchedule
 // (service_admission.go, #476). An empty customer_id is the tenant-wide
 // default schedule (zero payer); a non-empty one is a per-subject override.
-func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID string, schedule []openrails.TierScheduleRung) error {
+func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID, currency string, schedule []openrails.TierScheduleRung) error {
 	ctx = c.ensureTenant(ctx)
 	var payer identity.CustomerID
 	if strings.TrimSpace(tenantSubjectID) != "" {
@@ -749,7 +797,7 @@ func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID strin
 			Tier: r.Tier, MinCumulativePaidAmount: r.MinCumulativePaidAmount,
 		})
 	}
-	if err := c.svc.SetTierSchedule(ctx, payer, rungs); err != nil {
+	if err := c.svc.SetTierSchedule(ctx, payer, currency, rungs); err != nil {
 		return internalErr("set tier schedule failed")
 	}
 	return nil
@@ -775,13 +823,13 @@ func (c *localClient) SetInvokerWastedSpendPolicy(ctx context.Context, windows [
 }
 
 // GetTier transcribes handlers.ServiceGetTier (service_admission.go, #477).
-func (c *localClient) GetTier(ctx context.Context, tenantSubjectID string) (string, error) {
+func (c *localClient) GetTier(ctx context.Context, tenantSubjectID, currency string) (string, error) {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
 	if err != nil {
 		return "", err
 	}
-	tier, terr := c.svc.GetTier(ctx, payer)
+	tier, terr := c.svc.GetTier(ctx, payer, currency)
 	if terr != nil {
 		return "", internalErr("tier lookup failed")
 	}
@@ -1024,6 +1072,10 @@ func (c *localClient) ResourceRevenueDaily(ctx context.Context, resource, curren
 	case toUnix == 0:
 		return nil, bindRequiredErr("To")
 	}
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := c.svc.ResourceRevenueDaily(ctx, resource, currency, time.Unix(fromUnix, 0).UTC(), time.Unix(toUnix, 0).UTC())
 	if err != nil {
 		return nil, invalidErr(err.Error())
@@ -1073,7 +1125,11 @@ func (c *localClient) OpenWindow(ctx context.Context, req openrails.OpenWindowRe
 	if req.Currency == "" {
 		req.Currency = c.currency
 	}
-	// gin binding: amount is `binding:"required"`. Currency is optional (#476).
+	currency, err := requireCurrency(req.Currency)
+	if err != nil {
+		return nil, err
+	}
+	// gin binding: amount is `binding:"required"`.
 	if req.Amount == 0 {
 		return nil, bindRequiredErr("Amount")
 	}
@@ -1084,7 +1140,7 @@ func (c *localClient) OpenWindow(ctx context.Context, req openrails.OpenWindowRe
 	w, serr := c.svc.OpenWindow(ctx, billingservice.OpenWindowRequest{
 		CustomerID: payer,
 		Invoker:    req.Invoker,
-		Currency:   req.Currency,
+		Currency:   currency,
 		Amount:     req.Amount,
 		TTL:        time.Duration(req.TTLSeconds) * time.Second,
 	})

@@ -57,6 +57,10 @@ func ServiceAdmit(r *httprequest.Request) {
 	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
 
 	svc, err := billingservice.New(r.State)
 	if err != nil {
@@ -65,6 +69,7 @@ func ServiceAdmit(r *httprequest.Request) {
 	}
 
 	in := admitInputFromRequest(req, *payer)
+	in.Currency = currency
 
 	res, err := svc.Admit(r.Request.Context(), in)
 	if err != nil {
@@ -245,7 +250,11 @@ func ServiceGetBudget(r *httprequest.Request) {
 		return
 	}
 	invoker := r.Query("invoker")
-	currency := money.NormalizeCurrency(r.Query("currency"))
+	currency, ok := serviceRequiredCurrency(r, r.Query("currency"))
+	if !ok {
+		return
+	}
+	currency = money.NormalizeCurrency(currency)
 	windows, err := svc.BudgetStatus(r.Request.Context(), *payer, invoker, currency, r.Query("tier"))
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "budget lookup failed")
@@ -268,17 +277,26 @@ func ServiceGetTier(r *httprequest.Request) {
 	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
+	currency, ok := serviceRequiredCurrency(r, r.Query("currency"))
+	if !ok {
+		return
+	}
+	currency = money.NormalizeCurrency(currency)
+	if err := money.ValidateCurrency(currency); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	tier, err := svc.GetTier(r.Request.Context(), *payer)
+	tier, err := svc.GetTier(r.Request.Context(), *payer, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "tier lookup failed")
 		return
 	}
-	r.SuccessJSON(map[string]any{"tier": tier})
+	r.SuccessJSON(map[string]any{"currency": currency, "tier": tier})
 }
 
 type serviceReportWastedSpendRequest struct {
@@ -317,6 +335,10 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "source and source_id required")
 		return
 	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
@@ -326,7 +348,7 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 		CustomerID:  *payer,
 		Invoker:     strings.TrimSpace(req.Invoker),
 		InvokerType: req.InvokerType,
-		Currency:    req.Currency,
+		Currency:    currency,
 		Amount:      req.Amount,
 		Source:      req.Source,
 		SourceID:    req.SourceID,
@@ -357,7 +379,11 @@ func ServiceAbuseUsage(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	currency := money.NormalizeCurrency(r.Query("currency"))
+	currency, ok := serviceRequiredCurrency(r, r.Query("currency"))
+	if !ok {
+		return
+	}
+	currency = money.NormalizeCurrency(currency)
 	pw, aw, err := svc.AbuseUsage(r.Request.Context(), *payer, r.Query("invoker"), currency, r.Query("tier"))
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "abuse usage lookup failed")
@@ -393,13 +419,17 @@ func ServiceSetCreditLimit(r *httprequest.Request) {
 	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	if err := svc.SetCreditLimit(r.Request.Context(), *payer, req.Currency, req.CreditLimitAmount); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "set credit limit failed")
+	if err := svc.SetCreditLimit(r.Request.Context(), *payer, currency, req.CreditLimitAmount); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 	r.SuccessJSONMessage("ok")
@@ -422,10 +452,14 @@ func ServiceGetCreditLimit(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	currency := money.NormalizeCurrency(r.Query("currency"))
+	currency, ok := serviceRequiredCurrency(r, r.Query("currency"))
+	if !ok {
+		return
+	}
+	currency = money.NormalizeCurrency(currency)
 	v, err := svc.GetCreditLimit(r.Request.Context(), *payer, currency)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "credit limit lookup failed")
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 	r.SuccessJSON(map[string]any{"currency": currency, "credit_limit_amount": v})
@@ -461,7 +495,11 @@ func ServiceBudgetCheck(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	currency := money.NormalizeCurrency(req.Currency)
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
+	currency = money.NormalizeCurrency(currency)
 	windows, err := svc.BudgetCheck(r.Request.Context(), *payer, strings.TrimSpace(req.Invoker), currency, req.Windows, req.RequestedAmount)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "budget check failed")
@@ -511,6 +549,7 @@ func ServiceSetTierPolicy(r *httprequest.Request) {
 
 type serviceTierScheduleRequest struct {
 	CustomerID string                            `json:"customer_id"`
+	Currency   string                            `json:"currency"`
 	Schedule   []billingservice.TierScheduleRung `json:"schedule"`
 }
 
@@ -536,12 +575,21 @@ func ServiceSetTierSchedule(r *httprequest.Request) {
 		}
 		payer = *p
 	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
+	currency = money.NormalizeCurrency(currency)
+	if err := money.ValidateCurrency(currency); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	if err := svc.SetTierSchedule(r.Request.Context(), payer, req.Schedule); err != nil {
+	if err := svc.SetTierSchedule(r.Request.Context(), payer, currency, req.Schedule); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set tier schedule failed")
 		return
 	}

@@ -32,9 +32,13 @@ import (
 // NOTE: this only RECORDS the flag. The actual $1 auth-and-void verification
 // charge (needing a Charger.AuthorizeAndVoid capability) is out of this slice;
 // a caller flips this after running that flow successfully.
-func (s *MoneyService) SetPaymentMethodVerified(ctx context.Context, payer identity.CustomerID, verified bool) error {
+func (s *MoneyService) SetPaymentMethodVerified(ctx context.Context, payer identity.CustomerID, currency string, verified bool) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
+	}
+	cur := normalizeUnit(currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
+		return err
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -46,11 +50,11 @@ func (s *MoneyService) SetPaymentMethodVerified(ctx context.Context, payer ident
 
 	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, DefaultCurrency, BillingModePrepaid, now); err != nil {
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModePrepaid, now); err != nil {
 			return err
 		}
 		return q.SetMoneyAccountPaymentVerified(ctx, gen.SetMoneyAccountPaymentVerifiedParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: DefaultCurrency,
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			Verified: verified, Now: now,
 		})
 	})
@@ -59,9 +63,13 @@ func (s *MoneyService) SetPaymentMethodVerified(ctx context.Context, payer ident
 // Suspend marks (payer, currency) suspended: stamps suspended_at=now and
 // records suspend_reason. Upserts the settings row if one does not yet exist.
 // Admission-deny-on-suspended wiring is a separate slice.
-func (s *MoneyService) Suspend(ctx context.Context, payer identity.CustomerID, reason string) error {
+func (s *MoneyService) Suspend(ctx context.Context, payer identity.CustomerID, currency, reason string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
+	}
+	cur := normalizeUnit(currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
+		return err
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -74,11 +82,11 @@ func (s *MoneyService) Suspend(ctx context.Context, payer identity.CustomerID, r
 
 	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, DefaultCurrency, BillingModePrepaid, now); err != nil {
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModePrepaid, now); err != nil {
 			return err
 		}
 		return q.SuspendMoneyAccount(ctx, gen.SuspendMoneyAccountParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: DefaultCurrency,
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			Now: now, Reason: nilIfEmpty(reason),
 		})
 	})
@@ -86,9 +94,13 @@ func (s *MoneyService) Suspend(ctx context.Context, payer identity.CustomerID, r
 
 // Resume clears the suspension on (payer, currency): nulls suspended_at and
 // suspend_reason. No-op (other than touching updated_at) if not suspended.
-func (s *MoneyService) Resume(ctx context.Context, payer identity.CustomerID) error {
+func (s *MoneyService) Resume(ctx context.Context, payer identity.CustomerID, currency string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
+	}
+	cur := normalizeUnit(currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
+		return err
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -100,11 +112,11 @@ func (s *MoneyService) Resume(ctx context.Context, payer identity.CustomerID) er
 
 	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, DefaultCurrency, BillingModePrepaid, now); err != nil {
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModePrepaid, now); err != nil {
 			return err
 		}
 		return q.ResumeMoneyAccount(ctx, gen.ResumeMoneyAccountParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: DefaultCurrency, UpdatedAt: now,
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur, UpdatedAt: now,
 		})
 	})
 }

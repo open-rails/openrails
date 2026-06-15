@@ -27,8 +27,10 @@ type CreditAccountSnapshot struct {
 
 // GetCreditAccount returns the balance + policy snapshot for an tenant subject.
 func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerID, currency string) (*CreditAccountSnapshot, error) {
-	// #476: the currency is echoed back on the snapshot; empty defaults to "USD".
-	currency = money.NormalizeCurrency(currency)
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
@@ -37,7 +39,7 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerI
 	// reuses the request's already-pinned connection when the HTTP middleware set
 	// one, so this is safe whether called from a request or directly.
 	var snap *CreditAccountSnapshot
-	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
 		bal, err := s.moneyService().GetBalanceForCustomer(ctx, payer, currency)
 		if err != nil {
 			return err
@@ -252,12 +254,16 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 	if req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
-
-	snap, err := s.GetCreditAccount(ctx, req.CustomerID, req.Currency)
+	currency, err := requireCurrency(req.Currency)
 	if err != nil {
 		return nil, err
 	}
-	dec, err := s.moneyService().CheckSpendAllowed(ctx, req.CustomerID, req.Currency, strings.TrimSpace(req.Invoker), req.EstimatedAmount)
+
+	snap, err := s.GetCreditAccount(ctx, req.CustomerID, currency)
+	if err != nil {
+		return nil, err
+	}
+	dec, err := s.moneyService().CheckSpendAllowed(ctx, req.CustomerID, currency, strings.TrimSpace(req.Invoker), req.EstimatedAmount)
 	if err != nil {
 		return nil, err
 	}
@@ -291,9 +297,8 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 // invoker for per-invoker sub-budgets; RequestID is the idempotency key for the
 // placed hold.
 type AuthorizeAndHoldRequest struct {
-	CustomerID identity.CustomerID
-	Invoker    string
-	// Currency is the ledger unit; empty defaults to "USD" (#476).
+	CustomerID      identity.CustomerID
+	Invoker         string
 	Currency        string
 	EstimatedAmount int64
 	RequestID       string
@@ -338,6 +343,10 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 	if req.EstimatedAmount < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
 	}
+	currency, err := requireCurrency(req.Currency)
+	if err != nil {
+		return nil, err
+	}
 	req.RequestID = strings.TrimSpace(req.RequestID)
 	if req.RequestID == "" {
 		return nil, fmt.Errorf("request_id required")
@@ -350,7 +359,7 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 	out, err := s.moneyService().AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
 		Payer:           req.CustomerID,
 		Invoker:         strings.TrimSpace(req.Invoker),
-		Currency:        req.Currency,
+		Currency:        currency,
 		EstimatedAmount: req.EstimatedAmount,
 		Source:          authorizeHoldSource,
 		SourceID:        req.RequestID,
@@ -402,6 +411,10 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.C
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return err
+	}
 	// Pin a tenant connection so the upsert sets the RLS GUC under openrails_app (#227).
 	return s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
 		_, err := s.moneyService().UpsertAccountSettings(ctx, payer, currency, in)
@@ -421,6 +434,10 @@ func (s *Service) SetCreditLimit(ctx context.Context, payer identity.CustomerID,
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return err
+	}
 	return s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
 		return s.moneyService().SetCreditLimit(ctx, payer, currency, creditLimit)
 	})
@@ -434,6 +451,10 @@ func (s *Service) GetCreditLimit(ctx context.Context, payer identity.CustomerID,
 	if payer.IsZero() {
 		return 0, fmt.Errorf("payer required")
 	}
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return 0, err
+	}
 	return s.moneyService().GetCreditLimit(ctx, payer, currency)
 }
 
@@ -444,6 +465,10 @@ func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.C
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
 	return s.moneyService().GetAccountSettingsForCustomer(ctx, payer, currency)
 }
 
@@ -453,9 +478,13 @@ func (s *Service) GetCustomerCreditTransactions(ctx context.Context, payer ident
 	if payer.IsZero() {
 		return nil, 0, fmt.Errorf("payer required")
 	}
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return nil, 0, err
+	}
 	var items []models.MoneyTransaction
 	var total int
-	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
 		items, total, e = s.moneyService().GetTransactionsByCustomer(ctx, payer, currency, limit, offset)
 		return e

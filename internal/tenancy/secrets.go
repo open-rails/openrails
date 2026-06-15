@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -86,12 +85,8 @@ func SecretDefinitionFor(name string) (SecretDefinition, bool) {
 // It never contains plaintext.
 type TenantSecretStatus struct {
 	SecretDefinition
-	Configured    bool       `json:"configured"`
-	Version       int        `json:"version,omitempty"`
-	LastRotatedAt *time.Time `json:"last_rotated_at,omitempty"`
-	ValidatedAt   *time.Time `json:"validated_at,omitempty"`
-	LastErrorCode string     `json:"last_error_code,omitempty"`
-	LastActor     string     `json:"last_actor,omitempty"`
+	Configured bool `json:"configured"`
+	Version    int  `json:"version,omitempty"`
 }
 
 // ErrSecretNotFound is returned by a TenantSecretStore when no secret exists for

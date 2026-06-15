@@ -93,6 +93,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 
 		existingRow, gerr := q.GetUsageEventByCoords(ctx, gen.GetUsageEventByCoordsParams{
 			MerchantID: tenantID, CustomerID: payerID,
+			Currency:  cur,
 			EventType: params.EventType, Source: params.Source, SourceID: params.SourceID,
 		})
 		if gerr == nil {

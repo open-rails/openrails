@@ -51,7 +51,7 @@ var ErrInsufficientCredits = money.ErrInsufficientCredits
 type HoldCreditsRequest struct {
 	CustomerID *identity.CustomerID
 	Invoker    string
-	Currency   string // "" => DefaultCurrency (#476)
+	Currency   string
 	Amount     int64
 	Source     string
 	SourceID   string
@@ -82,6 +82,10 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 	if req.Invoker == "" {
 		return nil, fmt.Errorf("invoker required")
 	}
+	currency, err := requireCurrency(req.Currency)
+	if err != nil {
+		return nil, err
+	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
 	}
@@ -95,7 +99,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 		return nil, fmt.Errorf("expires_at required")
 	}
 
-	hold, err := s.moneyService().Hold(ctx, req.CustomerID, req.Invoker, req.Currency, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
+	hold, err := s.moneyService().Hold(ctx, req.CustomerID, req.Invoker, currency, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +173,7 @@ type CreditTransaction struct {
 type WithdrawCreditsRequest struct {
 	CustomerID *identity.CustomerID
 	Invoker    string
-	Currency   string // "" => DefaultCurrency (#476)
+	Currency   string
 	Amount     int64
 	Source     string
 	SourceID   *uuid.UUID
@@ -184,6 +188,10 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	if req.Invoker == "" {
 		return nil, fmt.Errorf("invoker required")
 	}
+	currency, err := requireCurrency(req.Currency)
+	if err != nil {
+		return nil, err
+	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
 	}
@@ -196,7 +204,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	trx, err := s.moneyService().Withdraw(ctx, money.WithdrawParams{
 		CustomerID: req.CustomerID,
 		Invoker:    req.Invoker,
-		Currency:   req.Currency,
+		Currency:   currency,
 		Amount:     req.Amount,
 		Source:     req.Source,
 		SourceID:   req.SourceID,
@@ -227,7 +235,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 type DepositCreditsRequest struct {
 	CustomerID  *identity.CustomerID
 	Invoker     string
-	Currency    string // "" => DefaultCurrency (#476)
+	Currency    string
 	Amount      int64
 	Source      string
 	SourceID    *uuid.UUID
@@ -244,6 +252,10 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	if req.Invoker == "" {
 		return nil, fmt.Errorf("invoker required")
 	}
+	currency, err := requireCurrency(req.Currency)
+	if err != nil {
+		return nil, err
+	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
 	}
@@ -259,7 +271,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	trx, err := s.moneyService().Deposit(ctx, money.DepositParams{
 		CustomerID:  req.CustomerID,
 		Invoker:     req.Invoker,
-		Currency:    req.Currency,
+		Currency:    currency,
 		Amount:      req.Amount,
 		Source:      req.Source,
 		SourceID:    &depositSourceID,
@@ -378,7 +390,11 @@ func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollup
 	if req.CustomerID == nil || req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
-	rows, err := s.moneyService().ServiceUsageRollup(ctx, *req.CustomerID, req.Currency, req.From, req.To, req.GroupBy)
+	currency, err := requireCurrency(req.Currency)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.moneyService().ServiceUsageRollup(ctx, *req.CustomerID, currency, req.From, req.To, req.GroupBy)
 	if err != nil {
 		return nil, err
 	}
@@ -400,6 +416,10 @@ type ResourceRevenueDailyRow struct {
 // attribution column) across all payers in the tenant over [from, to) — powers
 // tensorhub endpoint revenue analytics (#410).
 func (s *Service) ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.moneyService().ResourceRevenueDaily(ctx, resource, currency, from, to)
 	if err != nil {
 		return nil, err

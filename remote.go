@@ -38,9 +38,8 @@ func WithHTTPClient(hc *http.Client) RemoteOption {
 	return func(r *remote) { r.client = hc }
 }
 
-// WithCurrency sets the default currency applied to Authorize/Balance/window
-// requests when the request leaves it empty (#476). Empty itself defaults to
-// "USD" server-side.
+// WithCurrency sets the client-level currency used by Balance and by requests
+// that leave their currency empty. Empty currency is rejected by service routes.
 func WithCurrency(currency string) RemoteOption {
 	return func(r *remote) { r.currency = strings.TrimSpace(currency) }
 }
@@ -129,11 +128,15 @@ func (c *remote) Authorize(ctx context.Context, req AuthorizeRequest) (*Authoriz
 
 // HoldCredits implements Client (handler ServiceHoldCredits).
 func (c *remote) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*CreditHold, error) {
+	currency := normalizeCurrency(req.Currency)
+	if currency == "" {
+		currency = normalizeCurrency(c.currency)
+	}
 	var out CreditHold
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/hold", map[string]any{
 		"customer_id": customerIDString(req.CustomerID),
 		"invoker":     req.Invoker,
-		"currency":    req.Currency,
+		"currency":    currency,
 		"amount":      req.Amount,
 		"source":      req.Source,
 		"source_id":   req.SourceID,
@@ -162,6 +165,10 @@ func (c *remote) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
 
 // WithdrawCredits implements Client (handler ServiceWithdrawCredits).
 func (c *remote) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error) {
+	currency := normalizeCurrency(req.Currency)
+	if currency == "" {
+		currency = normalizeCurrency(c.currency)
+	}
 	var sourceID any
 	if req.SourceID != nil {
 		sourceID = req.SourceID.String()
@@ -170,7 +177,7 @@ func (c *remote) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/withdraw", map[string]any{
 		"customer_id": customerIDString(req.CustomerID),
 		"invoker":     req.Invoker,
-		"currency":    req.Currency,
+		"currency":    currency,
 		"amount":      req.Amount,
 		"source":      req.Source,
 		"source_id":   sourceID,
@@ -183,6 +190,10 @@ func (c *remote) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest
 
 // DepositCredits implements Client (handler ServiceDepositCredits).
 func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
+	currency := normalizeCurrency(req.Currency)
+	if currency == "" {
+		currency = normalizeCurrency(c.currency)
+	}
 	var sourceID any
 	if req.SourceID != nil {
 		sourceID = req.SourceID.String()
@@ -190,7 +201,7 @@ func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 	body := map[string]any{
 		"customer_id": customerIDString(req.CustomerID),
 		"invoker":     req.Invoker,
-		"currency":    req.Currency,
+		"currency":    currency,
 		"amount":      req.Amount,
 		"source":      req.Source,
 		"source_id":   sourceID,
@@ -386,9 +397,10 @@ func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in T
 }
 
 // SetTierSchedule implements Client (handler ServiceSetTierSchedule, #476).
-func (c *remote) SetTierSchedule(ctx context.Context, tenantSubjectID string, schedule []TierScheduleRung) error {
+func (c *remote) SetTierSchedule(ctx context.Context, tenantSubjectID, currency string, schedule []TierScheduleRung) error {
 	body := map[string]any{
 		"customer_id": strings.TrimSpace(tenantSubjectID),
+		"currency":    strings.TrimSpace(currency),
 		"schedule":    schedule,
 	}
 	return c.do(ctx, http.MethodPut, "/v1/service/tier-schedules", body, nil)
@@ -413,11 +425,13 @@ func (c *remote) SetInvokerWastedSpendPolicy(ctx context.Context, windows []Budg
 }
 
 // GetTier implements Client (handler ServiceGetTier, #477).
-func (c *remote) GetTier(ctx context.Context, tenantSubjectID string) (string, error) {
+func (c *remote) GetTier(ctx context.Context, tenantSubjectID, currency string) (string, error) {
 	q := url.Values{}
 	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
+	q.Set("currency", strings.TrimSpace(currency))
 	var resp struct {
-		Tier string `json:"tier"`
+		Currency string `json:"currency"`
+		Tier     string `json:"tier"`
 	}
 	if err := c.do(ctx, http.MethodGet, "/v1/service/tier?"+q.Encode(), nil, &resp); err != nil {
 		return "", err
@@ -647,15 +661,10 @@ func addAccountSettingFields(body map[string]any, in AccountSettingsInput) {
 	}
 }
 
-// normalizeCurrency defaults an empty currency to "USD" (the money ledger's
-// DefaultCurrency, #476); a non-empty value passes through unchanged so #475
-// qualified custom-credit codes survive (the ledger validates them).
+// normalizeCurrency preserves non-empty currency/unit codes and lets the service
+// reject missing values consistently.
 func normalizeCurrency(currency string) string {
-	currency = strings.TrimSpace(currency)
-	if currency == "" {
-		return "USD"
-	}
-	return currency
+	return strings.TrimSpace(currency)
 }
 
 func customerIDString(payer *CustomerID) string {

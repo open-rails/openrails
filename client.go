@@ -69,16 +69,13 @@ type Client interface {
 	Release(ctx context.Context, reservationID string) error
 	// Balance returns the payer's balance snapshot.
 	Balance(ctx context.Context, customerID string) (*BalanceResponse, error)
-	// GetCreditAccount reads a payer's balance + policy snapshot. currency is
-	// optional (empty defaults to "USD", #476).
+	// GetCreditAccount reads a payer's balance + policy snapshot for one currency.
 	GetCreditAccount(ctx context.Context, customerID, currency string) (*CreditAccount, error)
 	// SetCreditAccountSettings upserts a payer's billing account settings and
-	// returns the refreshed account snapshot. currency is optional (empty
-	// defaults to "USD", #476).
+	// returns the refreshed account snapshot for one currency.
 	SetCreditAccountSettings(ctx context.Context, customerID, currency string, in AccountSettingsInput) (*CreditAccount, error)
 	// ListCreditTransactions reads a payer's transaction history and passes the
-	// canonical JSON through ({"transactions":[...],"total":N}). currency is
-	// optional (empty defaults to "USD", #476).
+	// canonical JSON through ({"transactions":[...],"total":N}) for one currency.
 	ListCreditTransactions(ctx context.Context, customerID, currency string, limit int) (json.RawMessage, error)
 	// UsageRollup returns grouped spend over [from, to). groupBy is
 	// resource|invoker|function|tier.
@@ -93,12 +90,12 @@ type Client interface {
 	// entitled resources + fixed money-budget windows.
 	SetTierPolicy(ctx context.Context, tenantSubjectID string, in TierPolicyInput) error
 	// SetTierSchedule persists the tenant's tier SCHEDULE once (#476): the ordered
-	// ladder [{tier, min_cumulative_paid_amount}]. OpenRails then AUTO-maintains
-	// each payer's tier from cumulative spend — the host never cranks graduation.
-	// An EMPTY tenantSubjectID sets the tenant-wide default schedule (the common
-	// case); a non-empty one sets a per-subject override. owner=platform (the
-	// subject cannot see/loosen it).
-	SetTierSchedule(ctx context.Context, tenantSubjectID string, schedule []TierScheduleRung) error
+	// ladder [{tier, min_cumulative_paid_amount}] for one currency. OpenRails then
+	// AUTO-maintains each payer's same-currency tier from cumulative spend — the
+	// host never cranks graduation. An EMPTY tenantSubjectID sets the tenant-wide
+	// default schedule (the common case); a non-empty one sets a per-subject
+	// override. owner=platform (the subject cannot see/loosen it).
+	SetTierSchedule(ctx context.Context, tenantSubjectID, currency string, schedule []TierScheduleRung) error
 	// SetInvokerWastedSpendPolicy configures the operator-set FLAT per-INVOKER
 	// wasted-spend policy (#496): the fixed delegated-user backstop OpenRails
 	// enforces at admit. It is merchant-scoped and does not vary by payer/customer.
@@ -106,13 +103,12 @@ type Client interface {
 	// BudgetWindowInput (key + window_seconds + limit; cadence ignored — these are
 	// flat rolling windows). OPERATOR-only — NOT self-serve.
 	SetInvokerWastedSpendPolicy(ctx context.Context, windows []BudgetWindowInput) error
-	// GetTier returns the payer's CURRENT graduated tier (#477): the tier
-	// OpenRails auto-maintains from cumulative paid spend against the persisted
-	// schedule (#476), or a manual admin override. Empty when the payer has never
-	// graduated (the host treats that as the lowest/default tier). The read a host
-	// uses to drive its OWN per-tier capacity (e.g. tensorhub's scheduler in-flight
-	// concurrency cap) without re-deriving the ladder or cranking graduation.
-	GetTier(ctx context.Context, tenantSubjectID string) (string, error)
+	// GetTier returns the payer's CURRENT graduated tier (#477) for one currency:
+	// the tier OpenRails auto-maintains from same-currency cumulative paid spend
+	// against the persisted schedule (#476), or a manual admin override. Empty
+	// when the payer has never graduated (the host treats that as the
+	// lowest/default tier).
+	GetTier(ctx context.Context, tenantSubjectID, currency string) (string, error)
 	// ReportWastedSpend records host-reported WASTED $ (#497): delegated invokers
 	// accrue toward their flat cutoff; direct payer credentials use trust-tier
 	// grace and charge overage through the normal ledger. Source+SourceID are
@@ -199,8 +195,8 @@ func (id CustomerID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 type AuthorizeRequest struct {
 	CustomerID string `json:"customer_id"`
 	Invoker    string `json:"invoker"`
-	// Currency is the ledger unit; empty defaults to "USD" (#476). A free string
-	// so #475 qualified custom-credit unit codes ride the same field.
+	// Currency is the ledger unit. A free string so #475 qualified custom-credit
+	// unit codes ride the same field.
 	Currency        string `json:"currency,omitempty"`
 	EstimatedAmount int64  `json:"estimated_amount"`
 	RequestID       string `json:"request_id"`
@@ -228,12 +224,11 @@ type AuthorizeResponse struct {
 type HoldCreditsRequest struct {
 	CustomerID *CustomerID
 	Invoker    string
-	// Currency is the ledger unit; empty defaults to "USD" (#476).
-	Currency  string
-	Amount    int64
-	Source    string
-	SourceID  string
-	ExpiresAt time.Time
+	Currency   string
+	Amount     int64
+	Source     string
+	SourceID   string
+	ExpiresAt  time.Time
 }
 
 // CreditHold is the reservation returned by a successful hold. Field names
@@ -263,20 +258,18 @@ type CaptureHoldRequest struct {
 type WithdrawCreditsRequest struct {
 	CustomerID *CustomerID
 	Invoker    string
-	// Currency is the ledger unit; empty defaults to "USD" (#476).
-	Currency string
-	Amount   int64
-	Source   string
-	SourceID *uuid.UUID
+	Currency   string
+	Amount     int64
+	Source     string
+	SourceID   *uuid.UUID
 }
 
 // DepositCreditsRequest mints a credit block for a payer (admin funding,
 // promotions, money-in settlement). Amount is in the currency's internal
 // precision.
 type DepositCreditsRequest struct {
-	CustomerID *CustomerID
-	Invoker    string
-	// Currency is the ledger unit; empty defaults to "USD" (#476).
+	CustomerID  *CustomerID
+	Invoker     string
 	Currency    string
 	Amount      int64
 	Source      string
@@ -560,10 +553,11 @@ type WastedSpendResponse struct {
 	Duplicate      bool   `json:"duplicate,omitempty"`
 }
 
-// TierScheduleRung is one rung of the persisted tier ladder set via
-// PUT /v1/service/tier-schedules (#476): a payer reaches Tier once its
-// cumulative paid spend is at least MinCumulativePaidAmount. Order ascending by
-// MinCumulativePaidAmount (the server sorts defensively regardless).
+// TierScheduleRung is one rung of the persisted same-currency tier ladder set
+// via PUT /v1/service/tier-schedules (#476): a payer reaches Tier once its
+// cumulative paid spend in the schedule currency is at least
+// MinCumulativePaidAmount. Order ascending by MinCumulativePaidAmount (the
+// server sorts defensively regardless).
 type TierScheduleRung struct {
 	Tier                    string `json:"tier"`
 	MinCumulativePaidAmount int64  `json:"min_cumulative_paid_amount"`
@@ -642,7 +636,6 @@ type EntitlementRecord struct {
 type OpenWindowRequest struct {
 	CustomerID string `json:"customer_id"`
 	Invoker    string `json:"invoker"`
-	// Currency is the ledger unit; empty defaults to "USD" (#476).
 	Currency   string `json:"currency,omitempty"`
 	Amount     int64  `json:"amount"`
 	TTLSeconds int64  `json:"ttl_seconds,omitempty"`

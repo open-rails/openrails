@@ -77,7 +77,7 @@ func resolveCustomer(payer *identity.CustomerID, invokerID string) (identity.Cus
 	return resolved, nil
 }
 
-func (s *MoneyService) GetBalance(ctx context.Context, invokerID string) (*models.MoneyBalance, error) {
+func (s *MoneyService) GetBalance(ctx context.Context, invokerID, currency string) (*models.MoneyBalance, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -89,7 +89,7 @@ func (s *MoneyService) GetBalance(ctx context.Context, invokerID string) (*model
 	if err != nil {
 		return nil, err
 	}
-	return s.GetBalanceForCustomer(ctx, payer, DefaultCurrency)
+	return s.GetBalanceForCustomer(ctx, payer, currency)
 }
 
 // GetBalanceForCustomer reads a balance scoped explicitly by tenant subject (issue
@@ -115,7 +115,7 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 	return s.deriveBalance(ctx, s.db.Gen(ctx), tenantID, payerID, cur)
 }
 
-func (s *MoneyService) GetTransactions(ctx context.Context, invokerID string, limit, offset int) ([]models.MoneyTransaction, int, error) {
+func (s *MoneyService) GetTransactions(ctx context.Context, invokerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
 	if s == nil || s.db == nil {
 		return nil, 0, fmt.Errorf("money service not initialized")
 	}
@@ -123,7 +123,7 @@ func (s *MoneyService) GetTransactions(ctx context.Context, invokerID string, li
 	if err != nil {
 		return nil, 0, err
 	}
-	return s.GetTransactionsByCustomer(ctx, payer, DefaultCurrency, limit, offset)
+	return s.GetTransactionsByCustomer(ctx, payer, currency, limit, offset)
 }
 
 // GetTransactionsByCustomer lists money transactions for an EXPLICIT tenant subject
@@ -399,22 +399,19 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		return nil, err
 	}
 
-	// AUTO-graduation (#476): cumulative_paid just changed, so recompute + persist
-	// the payer's tier from the stored tier_schedule, in-band with the deposit.
-	// Only the trust-signal currency (DefaultCurrency) graduates; a no-op when no
-	// schedule exists or the tier is an admin override. Best-effort within the
-	// tx: a schedule lookup error fails the deposit (consistency), but no schedule
-	// is the common path and costs one indexed read.
-	if cur == DefaultCurrency {
-		cumPaid, perr := q.SumMoneyDeposits(ctx, gen.SumMoneyDepositsParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: DefaultCurrency,
-		})
-		if perr != nil {
-			return nil, perr
-		}
-		if err := s.autoGraduateTierTx(ctx, q, tenantID, payer, cumPaid, now); err != nil {
-			return nil, err
-		}
+	// AUTO-graduation (#476): cumulative_paid in this currency just changed, so
+	// recompute + persist the payer's same-currency tier from the stored
+	// tier_schedule, in-band with the deposit. A schedule lookup error fails the
+	// deposit (consistency), but no schedule is the common path and costs one
+	// indexed read.
+	cumPaid, perr := q.SumMoneyDeposits(ctx, gen.SumMoneyDepositsParams{
+		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+	})
+	if perr != nil {
+		return nil, perr
+	}
+	if err := s.autoGraduateTierTx(ctx, q, tenantID, payer, cur, cumPaid, now); err != nil {
+		return nil, err
 	}
 
 	return trx, nil

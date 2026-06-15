@@ -5,26 +5,27 @@ package money_test
 import (
 	"testing"
 
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/stretchr/testify/require"
 )
 
 // TestSuspensionAndVerificationState exercises the issue #299 suspension +
 // payment-method-verification STATE on the money account (no admission gating).
 func TestSuspensionAndVerificationState(t *testing.T) {
-	svc, _, payer, _, ctx := moneyInEnv(t)
+	svc, _, payer, cur, ctx := moneyInEnv(t)
 
 	// A fresh account (no settings row) is neither suspended nor verified.
-	suspended, err := svc.IsSuspended(ctx, payer)
+	suspended, err := svc.IsSuspended(ctx, payer, cur)
 	require.NoError(t, err)
 	require.False(t, suspended, "fresh account must not be suspended")
 
-	verified, err := svc.IsPaymentMethodVerified(ctx, payer)
+	verified, err := svc.IsPaymentMethodVerified(ctx, payer, cur)
 	require.NoError(t, err)
 	require.False(t, verified, "fresh account must not be payment-method verified")
 
 	// Verify the payment method.
-	require.NoError(t, svc.SetPaymentMethodVerified(ctx, payer, true))
-	verified, err = svc.IsPaymentMethodVerified(ctx, payer)
+	require.NoError(t, svc.SetPaymentMethodVerified(ctx, payer, cur, true))
+	verified, err = svc.IsPaymentMethodVerified(ctx, payer, cur)
 	require.NoError(t, err)
 	require.True(t, verified, "after SetPaymentMethodVerified(true) it must be verified")
 
@@ -33,14 +34,14 @@ func TestSuspensionAndVerificationState(t *testing.T) {
 	require.NotNil(t, settings.VerifiedAt, "verified_at must be stamped when verified")
 
 	// Un-verify clears the flag + timestamp.
-	require.NoError(t, svc.SetPaymentMethodVerified(ctx, payer, false))
-	verified, err = svc.IsPaymentMethodVerified(ctx, payer)
+	require.NoError(t, svc.SetPaymentMethodVerified(ctx, payer, cur, false))
+	verified, err = svc.IsPaymentMethodVerified(ctx, payer, cur)
 	require.NoError(t, err)
 	require.False(t, verified, "after SetPaymentMethodVerified(false) it must not be verified")
 
 	// Suspend.
-	require.NoError(t, svc.Suspend(ctx, payer, "fraud_review"))
-	suspended, err = svc.IsSuspended(ctx, payer)
+	require.NoError(t, svc.Suspend(ctx, payer, cur, "fraud_review"))
+	suspended, err = svc.IsSuspended(ctx, payer, cur)
 	require.NoError(t, err)
 	require.True(t, suspended, "after Suspend it must be suspended")
 
@@ -51,8 +52,8 @@ func TestSuspensionAndVerificationState(t *testing.T) {
 	require.Equal(t, "fraud_review", *settings.SuspendReason)
 
 	// Resume clears suspension.
-	require.NoError(t, svc.Resume(ctx, payer))
-	suspended, err = svc.IsSuspended(ctx, payer)
+	require.NoError(t, svc.Resume(ctx, payer, cur))
+	suspended, err = svc.IsSuspended(ctx, payer, cur)
 	require.NoError(t, err)
 	require.False(t, suspended, "after Resume it must not be suspended")
 

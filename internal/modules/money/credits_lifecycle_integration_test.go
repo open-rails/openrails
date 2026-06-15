@@ -49,7 +49,7 @@ func TestCreditsDepositOverflowGuard(t *testing.T) {
 	require.Contains(t, err.Error(), "overflow")
 
 	// Balance must be unchanged (still 1) after the rejected deposit.
-	bal, err := moneySvc.GetBalance(ctx, userID)
+	bal, err := moneySvc.GetBalance(ctx, userID, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), bal.Balance)
 }
@@ -91,7 +91,7 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, hold1.ID, hold2.ID)
 
-	bal, err := moneySvc.GetBalance(ctx, userID)
+	bal, err := moneySvc.GetBalance(ctx, userID, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(1000), bal.Balance)
 	require.Equal(t, int64(200), bal.HeldBalance)
@@ -99,7 +99,7 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	// 2) Release hold.
 	_, relErr := moneySvc.ReleaseHold(ctx, hold1.ID)
 	require.NoError(t, relErr)
-	bal, err = moneySvc.GetBalance(ctx, userID)
+	bal, err = moneySvc.GetBalance(ctx, userID, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(1000), bal.Balance)
 	require.Equal(t, int64(0), bal.HeldBalance)
@@ -126,7 +126,7 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	require.NotNil(t, trx.BalanceAfter)
 	require.Equal(t, int64(880), *trx.BalanceAfter)
 
-	bal, err = moneySvc.GetBalance(ctx, userID)
+	bal, err = moneySvc.GetBalance(ctx, userID, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(880), bal.Balance)
 	require.Equal(t, int64(0), bal.HeldBalance)
@@ -155,7 +155,7 @@ func TestCreditsLifecycle_HoldExpiryReleasesHeld(t *testing.T) {
 
 	hold, err := moneySvc.Hold(ctx, nil, userID, cur, 50, "api_call", "req_exp", now.Add(-1*time.Minute).UTC())
 	require.NoError(t, err)
-	bal, err := moneySvc.GetBalance(ctx, userID)
+	bal, err := moneySvc.GetBalance(ctx, userID, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(50), bal.HeldBalance)
 
@@ -169,7 +169,7 @@ func TestCreditsLifecycle_HoldExpiryReleasesHeld(t *testing.T) {
 		Scan(&holdAfterExpire.Status))
 	require.Equal(t, "expired", holdAfterExpire.Status)
 
-	bal, err = moneySvc.GetBalance(ctx, userID)
+	bal, err = moneySvc.GetBalance(ctx, userID, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), bal.HeldBalance)
 	require.Equal(t, int64(880), bal.Balance)

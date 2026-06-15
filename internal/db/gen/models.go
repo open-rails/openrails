@@ -624,31 +624,6 @@ type OpenrailsPaymentMethod struct {
 	CustomerID           uuid.UUID
 }
 
-// Append-only cross-tenant platform superadmin audit log (issue #226). Records actor, target tenant, action, reason, and before/after state. CROSS-TENANT control-plane state: NOT purged by tenant delete.
-type OpenrailsPlatformAudit struct {
-	ID               uuid.UUID
-	ActorUserID      string
-	ActorTenant      *string
-	Action           string
-	TargetMerchantID *uuid.UUID
-	Reason           *string
-	BeforeState      []byte
-	AfterState       []byte
-	Detail           []byte
-	CreatedAt        time.Time
-}
-
-// Time-boxed break-glass elevation grants (issue #226). Each grant carries a written justification and an expiry, and is mirrored into platform_audit. CROSS-TENANT control-plane state.
-type OpenrailsPlatformBreakGlass struct {
-	ID               uuid.UUID
-	ActorUserID      string
-	TargetMerchantID *uuid.UUID
-	Justification    string
-	GrantedAt        time.Time
-	ExpiresAt        time.Time
-	RevokedAt        *time.Time
-}
-
 // Pricing tiers for products with processor-specific identifiers
 type OpenrailsPrice struct {
 	ID               uuid.UUID
@@ -879,15 +854,17 @@ type OpenrailsTierPolicy struct {
 	UpdatedAt     time.Time
 }
 
-// Persisted tier ladder (#476): rungs declared once per merchant, or as a per-customer override. OpenRails auto-maintains money_settings.tier from cumulative paid spend unless tier_source=admin.
+// Persisted tier ladder (#476): rungs declared once per merchant and currency, or as a per-customer/currency override. OpenRails auto-maintains money_settings.tier from same-currency cumulative paid spend unless tier_source=admin.
 type OpenrailsTierSchedule struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// NULL = merchant-wide default schedule; non-NULL = per-customer override taking precedence for that customer.
+	// NULL = merchant-wide default schedule for this currency; non-NULL = per-customer override taking precedence for that customer/currency.
 	CustomerID *uuid.UUID
+	// Currency whose cumulative paid amount is compared to this ladder.
+	Currency string
 	// platform (set by us; subject cannot edit/see) | subject.
 	Owner string
-	// Ordered JSONB array of {tier, min_cumulative_paid_amount}; a payer's tier = highest rung whose min_cumulative_paid_amount <= cumulative_paid.
+	// Ordered JSONB array of {tier, min_cumulative_paid_amount}; a payer's tier = highest rung whose min_cumulative_paid_amount <= same-currency cumulative_paid.
 	Rungs           []byte
 	ScheduleVersion int64
 	CreatedAt       time.Time

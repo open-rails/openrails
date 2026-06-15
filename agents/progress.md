@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 498
+next_id: 499
 
 ---
 
@@ -1368,8 +1368,33 @@ no legacy `usd_micro` balance descriptors, no API that echoes a requested curren
 - Sixth sweep closed wasted-spend hot counters and abuse usage introspection: Redis wasted-spend idempotency,
   payer-grace counters, and delegated-invoker cutoff counters are now keyed by currency; `AbuseUsage` takes/returns
   `currency`, and each abuse usage window carries `currency`.
+- Seventh sweep closed tier graduation/schedules: `tier_schedules` is keyed by `currency`, tier schedule and tier
+  reads take currency through SDK/remote/embed/HTTP/service/money paths, deposits auto-graduate the matching currency
+  instead of USD-only, and the stale host-cranked `GraduateTier` compatibility path was removed.
+- Eighth sweep closed the remaining hidden default-currency helpers in money account state: `GetBalance` /
+  `GetTransactions`, payment-method verification, suspend, and resume now require an explicit currency. Also fixed
+  usage-event replay lookup to include currency so idempotent usage does not reattempt the same same-currency debit.
+- Ninth sweep removed the last dead default-currency wrappers/stale queries: deleted `MoneyService.ActiveHeldAmount`,
+  removed the unused old `ListCreditAccountPairs` query, and cleaned active schema/test comments that still taught
+  `usd_micro` / `µ$` terminology.
+- Tenth sweep hard-cut payment/checkout/reconciliation writes: removed SQL fallback from blank currency to `usd`,
+  removed `usd` defaults from the baseline payment/checkout currency columns, and made payment, checkout-session,
+  and reconcile local writers reject missing currency instead of silently writing USD.
+- Eleventh sweep closed product catalog credit grants: service/admin product `credits_spec` and REST subscription/product
+  responses now preserve `unit` beside `amount`, so non-USD bundled grants no longer round-trip as implicit USD.
+- Twelfth sweep hard-cut remaining public blank-currency defaults: service/facade/SDK credit movement, account reads,
+  usage/revenue, admission, budget, tier, credit-limit, wasted-spend, and `/me/credits` paths now require explicit
+  currency (or an explicitly configured SDK currency) instead of silently reading/writing USD.
 - `task sqlc`
 - `go test ./...`
+- `go test -tags=integration ./internal/modules/money -run TestTierSchedule_AutoGraduationByCumulativeSpend -count=1`
+- `go test -tags=integration ./internal/modules/money -run TestSuspensionAndVerificationState -count=1`
+- `go test -tags=integration ./internal/modules/money -run TestRecordUsage_Idempotent -count=1`
+- `go test -tags=integration ./internal/modules/money -count=1`
+- `go test -tags=integration ./internal/modules/admission -count=1`
+- `go test -tags=integration ./pkg/service -count=1`
+- `go test -tags=integration ./embed -count=1`
+- `go test -tags=integration ./internal/modules/payments ./internal/reconcile -count=1`
 - `go test -tags=integration ./pkg/service -run TestGetUsage_Breakdown -count=1`
 - `go test -tags=integration ./pkg/service -run TestWastedSpendDirectPayer_GraceThenChargeIdempotently -count=1`
 - `go test -tags=integration ./internal/modules/admission -run TestAdmit_WastedSpend -count=1`

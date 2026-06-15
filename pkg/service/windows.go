@@ -27,7 +27,7 @@ var (
 type OpenWindowRequest struct {
 	CustomerID identity.CustomerID
 	Invoker    string
-	Currency   string // "" => DefaultCurrency (#476)
+	Currency   string
 	Amount     int64
 	TTL        time.Duration
 }
@@ -58,6 +58,10 @@ func (s *Service) OpenWindow(ctx context.Context, req OpenWindowRequest) (*Credi
 	if req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
+	currency, err := requireCurrency(req.Currency)
+	if err != nil {
+		return nil, err
+	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
 	}
@@ -68,7 +72,7 @@ func (s *Service) OpenWindow(ctx context.Context, req OpenWindowRequest) (*Credi
 	w, err := s.moneyService().OpenWindow(ctx, money.OpenWindowParams{
 		Payer:     req.CustomerID,
 		Invoker:   strings.TrimSpace(req.Invoker),
-		Currency:  req.Currency,
+		Currency:  currency,
 		Amount:    req.Amount,
 		ExpiresAt: s.now().Add(ttl).UTC(),
 	})

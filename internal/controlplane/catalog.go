@@ -130,7 +130,7 @@ const (
 	// (cfg.Auth.ControlPlane.PlatformTenantSlug) and authorizes managed-hosting
 	// platform operators to administer ANY tenant via the control plane:
 	// the cross-tenant `/v1/platform/*` surface, cross-tenant search, platform
-	// metrics, and break-glass elevation. A tenant operator admin does NOT hold
+	// metrics. A tenant operator admin does NOT hold
 	// this permission (it is never seeded into operator tenants), so it cannot pass
 	// the platform-superadmin gate. It is deliberately NOT part of selfCatalog:
 	// a browser delegated token can never carry it.
@@ -300,8 +300,7 @@ func OperatorRolePermissions() []string {
 // PlatformRolePermissions returns the permission names granted to the platform
 // superadmin role: ONLY PermPlatformSuperadmin (issue #226). The platform role
 // is deliberately narrow — it is the cross-tenant admin gate, not a grab-bag of
-// per-tenant capabilities. Per-tenant mutations a superadmin performs go through
-// the control plane and are audited in openrails.platform_audit.
+// per-tenant capabilities.
 func PlatformRolePermissions() []string {
 	return []string{PermPlatformSuperadmin}
 }

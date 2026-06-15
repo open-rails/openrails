@@ -11,10 +11,9 @@ identity is `billing.tenant_subjects`; see
 `docs/authkit-tenant-oidc-glossary.md`.
 
 Migration `041_tenant_provisioning_secrets` extends `billing.tenants` with
-provisioning / routing / tier columns and adds three control-plane tables:
-`billing.tenant_secrets` (DB-backed secret store), `billing.tenant_credential_audit`
-(rotation/test audit log), and `billing.tenant_exports` (export-before-delete
-bookkeeping). It is additive and idempotent.
+provisioning / routing / tier columns and adds two control-plane tables:
+`billing.tenant_secrets` (DB-backed secret store) and `billing.tenant_exports`
+(export-before-delete bookkeeping). It is additive and idempotent.
 
 ## Lifecycle service — `tenancy.Service`
 
@@ -167,8 +166,8 @@ catalogs:
   OpenRails never lets one tenant reach another tenant's resources.
 - Bootstrap YAML does not mint generated opaque service-token secrets and does
   not write service-token material to Vault KV or mounted files. Non-OIDC
-  clients and break-glass/admin scripts must use an explicit operator/admin token
-  minting flow outside bootstrap.
+  clients must use an explicit operator/admin token minting flow outside
+  bootstrap.
 - `catalogs[]` uses the existing catalog-as-code schema. Bootstrap applies it
   additively: missing products/prices are not removed by omission.
 

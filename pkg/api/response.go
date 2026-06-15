@@ -25,6 +25,7 @@ type ProductObject struct {
 
 // CreditGrantSpecObject describes a product-bundled credit grant.
 type CreditGrantSpecObject struct {
+	Unit        string `json:"unit,omitempty"`
 	Amount      int64  `json:"amount"`
 	ExpiresDays *int   `json:"expires_days,omitempty"`
 	Cadence     string `json:"cadence,omitempty"`

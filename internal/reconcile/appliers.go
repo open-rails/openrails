@@ -3,7 +3,9 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -82,6 +84,10 @@ func metadataJSON(m map[string]any) []byte {
 }
 
 func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error) {
+	currency := strings.TrimSpace(a.Currency)
+	if currency == "" {
+		return false, fmt.Errorf("payment currency required")
+	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
@@ -92,7 +98,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 		Processor:      gen.OpenrailsProcessorType(a.Processor),
 		TransactionID:  a.TransactionID,
 		Amount:         a.AmountCents,
-		Currency:       a.Currency,
+		Currency:       currency,
 		SubscriptionID: a.SubscriptionID,
 		Metadata:       metadataJSON(a.Metadata),
 		PurchasedAt:    a.PurchasedAt,
@@ -121,6 +127,10 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	if amount > 0 {
 		amount = -amount // refunds are negative-amount payment rows
 	}
+	currency := strings.TrimSpace(a.Currency)
+	if currency == "" {
+		return false, fmt.Errorf("payment currency required")
+	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
@@ -131,7 +141,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		Processor:         gen.OpenrailsProcessorType(a.Processor),
 		TransactionID:     a.TransactionID,
 		Amount:            amount,
-		Currency:          a.Currency,
+		Currency:          currency,
 		SubscriptionID:    a.SubscriptionID,
 		RefundedPaymentID: a.RefundedPaymentID,
 		Metadata:          metadataJSON(a.Metadata),

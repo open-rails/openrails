@@ -778,26 +778,8 @@ func (s *Service) MarkNotificationRead(ctx context.Context, userID string, notif
 
 // -------------------------------- Credits (User-facing) --------------------------------
 
-// GetCredits returns the user's default native-money balance.
 func (s *Service) GetCredits(ctx context.Context, userID string) ([]CreditBalance, error) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return nil, fmt.Errorf("user_id required")
-	}
-
-	bal, err := s.moneyService().GetBalance(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("get credits: %w", err)
-	}
-	decimals, _ := money.CurrencyScale(bal.Currency)
-	return []CreditBalance{{
-		Currency:      bal.Currency,
-		DisplayName:   bal.Currency,
-		Unit:          bal.Currency,
-		DecimalPlaces: decimals,
-		Balance:       bal.Balance,
-		HeldBalance:   bal.HeldBalance,
-	}}, nil
+	return nil, fmt.Errorf("currency required; use GetCreditsByType")
 }
 
 // GetCreditsByType returns the user's money balance for the requested currency.
@@ -805,6 +787,10 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string)
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
+	}
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
 	}
 
 	payer := identity.CustomerIDFromString(userID)
@@ -974,6 +960,7 @@ func creditsSpecFromModel(in models.CreditsSpec) CreditsSpec {
 	out := make(CreditsSpec, len(in))
 	for k, v := range in {
 		out[k] = CreditGrantSpec{
+			Unit:        v.Unit,
 			Amount:      v.Amount,
 			ExpiresDays: v.ExpiresDays,
 			Cadence:     CreditGrantCadence(v.Cadence),

@@ -44,6 +44,10 @@ func NewPaymentRepo(d *db.DB) *PaymentRepo { return &PaymentRepo{db: d} }
 // paymentInsertParams maps a model onto the insert parameter set shared by
 // CreatePayment and CreatePaymentIfNotExists (identical column lists).
 func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
+	currency := strings.TrimSpace(p.Currency)
+	if currency == "" {
+		return gen.CreatePaymentParams{}, fmt.Errorf("payment currency required")
+	}
 	discountMeta, err := toJSONB(p.DiscountMetadata)
 	if err != nil {
 		return gen.CreatePaymentParams{}, err
@@ -67,7 +71,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		TransactionID:            p.TransactionID,
 		Amount:                   p.Amount,
 		ListAmount:               p.ListAmount,
-		Currency:                 p.Currency,
+		Currency:                 currency,
 		Status:                   p.Status,
 		SubscriptionID:           p.SubscriptionID,
 		RefundedPaymentID:        p.RefundedPaymentID,

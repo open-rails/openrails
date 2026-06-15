@@ -266,11 +266,11 @@ func TestCredentialRotation_WritesAudit(t *testing.T) {
 	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", Name: "Acme"})
 	require.NoError(t, err)
 
-	sec, err := svc.PutCredential(ctx, tn.ID, SecretStripeSecretKey, "sk_1", "put", "operator")
+	sec, err := svc.PutCredential(ctx, tn.ID, SecretStripeSecretKey, "sk_1")
 	require.NoError(t, err)
 	require.Equal(t, 1, sec.Version)
 
-	sec, err = svc.RotateCredential(ctx, tn.ID, SecretStripeSecretKey, "sk_2", "operator")
+	sec, err = svc.RotateCredential(ctx, tn.ID, SecretStripeSecretKey, "sk_2")
 	require.NoError(t, err)
 	require.Equal(t, 2, sec.Version)
 

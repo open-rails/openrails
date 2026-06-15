@@ -30,9 +30,17 @@ func GetMyCredits(r *httprequest.Request) {
 		return
 	}
 
-	// #472/#495: one native-money account per currency. Return the default account
-	// money balance for the caller's own tenant-subject.
-	bal, err := r.State.MoneyService.GetBalance(r.Request.Context(), user.ID)
+	currency := strings.TrimSpace(r.Request.URL.Query().Get("currency"))
+	if currency == "" {
+		r.ErrorJSON(http.StatusBadRequest, "currency required")
+		return
+	}
+	payer := identity.CustomerIDFromString(user.ID)
+	if payer.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "payer could not be resolved from subject")
+		return
+	}
+	bal, err := r.State.MoneyService.GetBalanceForCustomer(r.Request.Context(), payer, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load credits")
 		return
@@ -68,7 +76,12 @@ func GetMyCreditsType(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "payer could not be resolved from subject")
 		return
 	}
-	bal, err := r.State.MoneyService.GetBalanceForCustomer(r.Request.Context(), payer, r.Param("currency"))
+	currency := strings.TrimSpace(r.Param("currency"))
+	if currency == "" {
+		r.ErrorJSON(http.StatusBadRequest, "currency required")
+		return
+	}
+	bal, err := r.State.MoneyService.GetBalanceForCustomer(r.Request.Context(), payer, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -106,7 +119,12 @@ func GetMyCreditTransactions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "payer could not be resolved from subject")
 		return
 	}
-	items, total, err := r.State.MoneyService.GetTransactionsByCustomer(r.Request.Context(), payer, r.Param("currency"), limit, offset)
+	currency := strings.TrimSpace(r.Param("currency"))
+	if currency == "" {
+		r.ErrorJSON(http.StatusBadRequest, "currency required")
+		return
+	}
+	items, total, err := r.State.MoneyService.GetTransactionsByCustomer(r.Request.Context(), payer, currency, limit, offset)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -181,13 +199,17 @@ func GetMyUsage(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "to must be after from")
 		return
 	}
+	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
+	if !ok {
+		return
+	}
 
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	rows, err := svc.GetUsage(r.Request.Context(), payer, r.Request.URL.Query().Get("currency"), from, to)
+	rows, err := svc.GetUsage(r.Request.Context(), payer, currency, from, to)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load usage")
 		return

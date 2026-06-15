@@ -6,8 +6,8 @@
 -- table-constraints). No "default tenant": merchant_id is REQUIRED on every
 -- tenant-scoped table — uuid NOT NULL with NO default. Writers must stamp
 -- merchant_id explicitly; the RLS merchant_isolation policy enforces it against the
--- app.merchant_id GUC. No seed rows are created here: merchants and credit types
--- (incl. usd_micro) are provisioned explicitly per-tenant, not seeded.
+-- app.merchant_id GUC. No seed rows are created here: merchants and custom credit
+-- units are provisioned explicitly per-tenant, not seeded.
 -- =============================================================================
 
 SET statement_timeout = '300s';
@@ -476,7 +476,7 @@ CREATE TABLE openrails.payments (
     transaction_id text NOT NULL,
     amount bigint NOT NULL,
     list_amount bigint NOT NULL,
-    currency text DEFAULT 'usd'::text NOT NULL,
+    currency text NOT NULL,
     status openrails.purchase_status DEFAULT 'completed'::openrails.purchase_status NOT NULL,
     subscription_id uuid,
     refunded_payment_id uuid,
@@ -530,7 +530,7 @@ CREATE TABLE openrails.checkout_sessions (
     processor text NOT NULL,
     status text NOT NULL,
     amount bigint NOT NULL,
-    currency text DEFAULT 'usd'::text NOT NULL,
+    currency text NOT NULL,
     expires_at timestamp with time zone,
     reference text,
     transaction_id text,
@@ -1062,6 +1062,7 @@ CREATE TABLE openrails.tier_schedules (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL DEFAULT COALESCE((NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
     customer_id uuid,
+    currency text DEFAULT 'USD'::text NOT NULL,
     owner text DEFAULT 'platform'::text NOT NULL,
     rungs jsonb DEFAULT '[]'::jsonb NOT NULL,
     schedule_version bigint DEFAULT 1 NOT NULL,
@@ -1074,18 +1075,19 @@ CREATE TABLE openrails.tier_schedules (
 
 ALTER TABLE ONLY openrails.tier_schedules FORCE ROW LEVEL SECURITY;
 
-CREATE UNIQUE INDEX uq_tier_schedules_merchant_default ON openrails.tier_schedules USING btree (merchant_id, owner) WHERE (customer_id IS NULL);
-CREATE UNIQUE INDEX uq_tier_schedules_customer ON openrails.tier_schedules USING btree (merchant_id, customer_id, owner) WHERE (customer_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_tier_schedules_merchant_default ON openrails.tier_schedules USING btree (merchant_id, owner, currency) WHERE (customer_id IS NULL);
+CREATE UNIQUE INDEX uq_tier_schedules_customer ON openrails.tier_schedules USING btree (merchant_id, customer_id, owner, currency) WHERE (customer_id IS NOT NULL);
 
 ALTER TABLE openrails.tier_schedules ENABLE ROW LEVEL SECURITY;
 CREATE POLICY merchant_isolation ON openrails.tier_schedules USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tier_schedules TO openrails_app;
 
-COMMENT ON TABLE openrails.tier_schedules IS 'Persisted tier ladder (#476): rungs declared once per merchant, or as a per-customer override. OpenRails auto-maintains money_settings.tier from cumulative paid spend unless tier_source=admin.';
+COMMENT ON TABLE openrails.tier_schedules IS 'Persisted tier ladder (#476): rungs declared once per merchant and currency, or as a per-customer/currency override. OpenRails auto-maintains money_settings.tier from same-currency cumulative paid spend unless tier_source=admin.';
 COMMENT ON COLUMN openrails.tier_schedules.owner IS 'platform (set by us; subject cannot edit/see) | subject.';
-COMMENT ON COLUMN openrails.tier_schedules.customer_id IS 'NULL = merchant-wide default schedule; non-NULL = per-customer override taking precedence for that customer.';
-COMMENT ON COLUMN openrails.tier_schedules.rungs IS 'Ordered JSONB array of {tier, min_cumulative_paid_amount}; a payer''s tier = highest rung whose min_cumulative_paid_amount <= cumulative_paid.';
+COMMENT ON COLUMN openrails.tier_schedules.customer_id IS 'NULL = merchant-wide default schedule for this currency; non-NULL = per-customer override taking precedence for that customer/currency.';
+COMMENT ON COLUMN openrails.tier_schedules.currency IS 'Currency whose cumulative paid amount is compared to this ladder.';
+COMMENT ON COLUMN openrails.tier_schedules.rungs IS 'Ordered JSONB array of {tier, min_cumulative_paid_amount}; a payer''s tier = highest rung whose min_cumulative_paid_amount <= same-currency cumulative_paid.';
 
 -- =============================================================================
 -- invoker_wasted_spend_policies
@@ -1351,56 +1353,6 @@ COMMENT ON COLUMN openrails.provider_intents.last_failure_reason IS 'Why the mos
 COMMENT ON COLUMN openrails.provider_intents.expires_at IS 'End of the relevance window: past this instant the intent expires with a finding instead of firing stale (NULL = relevance governed solely by the type''s relevance check).';
 COMMENT ON COLUMN openrails.provider_intents.result_evidence IS 'How the terminal status was established (e.g. {"verified_absent": true} for a delete confirmed by a provider read).';
 COMMENT ON COLUMN openrails.provider_intents.account_fingerprint IS 'Fingerprint of the provider account the intent was enqueued against (#365). NULL = pre-guard or unresolvable: executes ungated. Mismatch with the current credentials parks the intent.';
-
--- =============================================================================
--- platform_audit (GLOBAL control-plane)
--- =============================================================================
-
-CREATE TABLE openrails.platform_audit (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    actor_user_id text NOT NULL,
-    actor_tenant text,
-    action text NOT NULL,
-    target_merchant_id uuid,
-    reason text,
-    before_state jsonb,
-    after_state jsonb,
-    detail jsonb,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT platform_audit_pkey PRIMARY KEY (id)
-);
-
-CREATE INDEX idx_platform_audit_action ON openrails.platform_audit USING btree (action, created_at DESC);
-CREATE INDEX idx_platform_audit_actor ON openrails.platform_audit USING btree (actor_user_id, created_at DESC);
-CREATE INDEX idx_platform_audit_target ON openrails.platform_audit USING btree (target_merchant_id, created_at DESC);
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.platform_audit TO openrails_app;
-
-COMMENT ON TABLE openrails.platform_audit IS 'Append-only cross-tenant platform superadmin audit log (issue #226). Records actor, target tenant, action, reason, and before/after state. CROSS-TENANT control-plane state: NOT purged by tenant delete.';
-
--- =============================================================================
--- platform_break_glass (GLOBAL control-plane)
--- =============================================================================
-
-CREATE TABLE openrails.platform_break_glass (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    actor_user_id text NOT NULL,
-    target_merchant_id uuid,
-    justification text NOT NULL,
-    granted_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    expires_at timestamp with time zone NOT NULL,
-    revoked_at timestamp with time zone,
-    CONSTRAINT platform_break_glass_pkey PRIMARY KEY (id),
-    CONSTRAINT chk_break_glass_justified CHECK ((length(btrim(justification)) > 0)),
-    CONSTRAINT chk_break_glass_window CHECK ((expires_at > granted_at))
-);
-
-CREATE INDEX idx_break_glass_active ON openrails.platform_break_glass USING btree (expires_at) WHERE (revoked_at IS NULL);
-CREATE INDEX idx_break_glass_actor ON openrails.platform_break_glass USING btree (actor_user_id, expires_at DESC);
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.platform_break_glass TO openrails_app;
-
-COMMENT ON TABLE openrails.platform_break_glass IS 'Time-boxed break-glass elevation grants (issue #226). Each grant carries a written justification and an expiry, and is mirrored into platform_audit. CROSS-TENANT control-plane state.';
 
 -- =============================================================================
 -- money_transactions

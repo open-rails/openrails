@@ -19,7 +19,7 @@ import (
 // the tier with NO host GraduateTier call; the legacy host crank no-ops; an
 // admin override sticks across deposits; and a second tenant is isolated.
 func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
-	svc, pool, payer, _, ctx := moneyInEnv(t)
+	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
 			"DELETE FROM openrails.tier_schedules WHERE customer_id = $1", payer.UUID())
@@ -30,19 +30,19 @@ func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 		{Tier: "tier1", MinPaidAmount: 5_000},
 		{Tier: "tier2", MinPaidAmount: 50_000},
 	}
-	require.NoError(t, svc.SetTierSchedule(ctx, payer, schedule))
+	require.NoError(t, svc.SetTierSchedule(ctx, payer, cur, schedule))
 
 	// Round-trips.
-	got, err := svc.GetTierSchedule(ctx, payer)
+	got, err := svc.GetTierSchedule(ctx, payer, cur)
 	require.NoError(t, err)
 	require.Equal(t, schedule, got)
 
 	dep := func(amt int64) {
-		_, e := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: cur, Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 	tier := func() string {
-		tr, e := svc.GetTier(ctx, payer)
+		tr, e := svc.GetTier(ctx, payer, cur)
 		require.NoError(t, e)
 		return tr
 	}
@@ -55,16 +55,19 @@ func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 	dep(50_000) // cumulative 56,000
 	require.Equal(t, "tier2", tier(), "deposit auto-raises tier to tier2")
 
-	// Host-cranked GraduateTier is a NO-OP when a schedule exists (returns the
-	// auto-maintained tier, does not regress it with a bogus ladder).
-	res, err := svc.GraduateTier(ctx, payer, []money.TierThreshold{{Tier: "free", MinPaidAmount: 0}})
+	// A different currency has its own ladder and tier state.
+	eurSchedule := []money.TierThreshold{{Tier: "eur1", MinPaidAmount: 1_000}}
+	require.NoError(t, svc.SetTierSchedule(ctx, payer, "EUR", eurSchedule))
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: "EUR", Amount: 2_000, Source: "pay-eur"})
 	require.NoError(t, err)
-	require.Equal(t, "tier2", res, "GraduateTier no-ops to the auto-maintained tier when a schedule exists")
-	require.Equal(t, "tier2", tier())
+	eurTier, err := svc.GetTier(ctx, payer, "EUR")
+	require.NoError(t, err)
+	require.Equal(t, "eur1", eurTier, "EUR deposits graduate the EUR schedule")
+	require.Equal(t, "tier2", tier(), "EUR deposits do not rewrite the USD tier")
 
 	// Admin override sticks — and survives further deposits (auto-graduation must
 	// not overwrite it).
-	require.NoError(t, svc.SetTierOverride(ctx, payer, "vip"))
+	require.NoError(t, svc.SetTierOverride(ctx, payer, cur, "vip"))
 	require.Equal(t, "vip", tier())
 	dep(1_000_000) // huge deposit; would otherwise re-derive tier2
 	require.Equal(t, "vip", tier(), "admin override wins over the schedule")
@@ -105,7 +108,7 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 	_ = tA
 
 	// Tenant A: a tenant-wide default schedule with a low tier1 threshold.
-	require.NoError(t, svc.SetTierSchedule(ctxA, identity.CustomerID{}, []money.TierThreshold{
+	require.NoError(t, svc.SetTierSchedule(ctxA, identity.CustomerID{}, money.DefaultCurrency, []money.TierThreshold{
 		{Tier: "free", MinPaidAmount: 0}, {Tier: "tier1", MinPaidAmount: 1_000},
 	}))
 
@@ -119,13 +122,13 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 	}
 
 	depA(2_000)
-	tierA, err := svc.GetTier(ctxA, payerA)
+	tierA, err := svc.GetTier(ctxA, payerA, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, "tier1", tierA, "tenant A's schedule graduates payer A")
 
 	// Tenant B has NO schedule — a deposit of the same size does NOT graduate.
 	depB(2_000)
-	tierB, err := svc.GetTier(ctxB, payerB)
+	tierB, err := svc.GetTier(ctxB, payerB, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, "", tierB, "tenant B has no schedule — no auto-graduation")
 }

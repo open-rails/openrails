@@ -210,7 +210,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	tier := req.Tier
 	if tier == "" {
 		if req.EstimatedAmount > 0 {
-			if t, terr := a.money.GetTier(ctx, req.CustomerID); terr == nil && t != "" {
+			if t, terr := a.money.GetTier(ctx, req.CustomerID, req.Currency); terr == nil && t != "" {
 				tier = t
 			}
 		}

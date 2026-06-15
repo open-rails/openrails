@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -42,10 +41,6 @@ func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 	return payer, true
 }
 
-func selfAccountCurrency(raw string) string {
-	return money.NormalizeCurrency(raw)
-}
-
 // selfAccountResponse is the caller's account view: the live balance snapshot
 // (balance/held/available/outstanding + billing mode) plus the stored settings.
 type selfAccountResponse struct {
@@ -67,7 +62,10 @@ func GetMyCreditAccount(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	currency := selfAccountCurrency(r.Request.URL.Query().Get("currency"))
+	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
+	if !ok {
+		return
+	}
 
 	svc, err := billingservice.New(r.State)
 	if err != nil {
@@ -127,7 +125,10 @@ func SetMyCreditAccountSettings(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	currency := selfAccountCurrency(req.Currency)
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
 
 	in := money.AccountSettingsInput{
 		BillingMode:              req.BillingMode,
@@ -176,7 +177,10 @@ func GetMyAccountTransactions(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	currency := selfAccountCurrency(r.Request.URL.Query().Get("currency"))
+	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
+	if !ok {
+		return
+	}
 
 	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 100 {

@@ -19,7 +19,6 @@ import (
 type serviceOpenWindowRequest struct {
 	CustomerID string `json:"customer_id"`
 	Invoker    string `json:"invoker"`
-	// Currency is optional; empty defaults to "USD" server-side (#476).
 	Currency   string `json:"currency"`
 	Amount     int64  `json:"amount" binding:"required"`
 	TTLSeconds int64  `json:"ttl_seconds"`
@@ -41,6 +40,10 @@ func ServiceOpenCreditWindow(r *httprequest.Request) {
 	if !requireServiceCustomerScope(r, *payer) {
 		return
 	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
@@ -49,7 +52,7 @@ func ServiceOpenCreditWindow(r *httprequest.Request) {
 	w, err := svc.OpenWindow(r.Request.Context(), billingservice.OpenWindowRequest{
 		CustomerID: *payer,
 		Invoker:    req.Invoker,
-		Currency:   req.Currency,
+		Currency:   currency,
 		Amount:     req.Amount,
 		TTL:        time.Duration(req.TTLSeconds) * time.Second,
 	})

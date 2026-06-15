@@ -53,7 +53,7 @@ func (c *ControlPlane) PlatformTenantSlug() string {
 // HasPlatformSuperadmin reports whether userID holds PermPlatformSuperadmin in
 // the platform tenant (issue #226) according to LIVE AuthKit effective-permission
 // state — NOT in any tenant operator tenant. This is the cross-tenant authority
-// primitive: it is what gates the /v1/platform/* surface and break-glass.
+// primitive: it is what gates the /v1/platform/* surface.
 //
 // It ALWAYS evaluates against the configured platform tenant slug, ignoring the
 // caller's claimed org. This is what makes a tenant operator admin (who holds

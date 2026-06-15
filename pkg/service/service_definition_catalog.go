@@ -22,6 +22,7 @@ const (
 )
 
 type CreditGrantSpec struct {
+	Unit        string             `json:"unit,omitempty"`
 	Amount      int64              `json:"amount"`
 	ExpiresDays *int               `json:"expires_days,omitempty"`
 	Cadence     CreditGrantCadence `json:"cadence,omitempty"`
@@ -37,6 +38,7 @@ func toModelCreditsSpec(in CreditsSpec) models.CreditsSpec {
 	for k, v := range in {
 		cadence := models.CreditGrantCadence(v.Cadence)
 		out[k] = models.CreditGrantSpec{
+			Unit:        v.Unit,
 			Amount:      v.Amount,
 			ExpiresDays: v.ExpiresDays,
 			Cadence:     cadence,
@@ -294,6 +296,7 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 		credits = make(CreditsSpec, len(p.CreditsSpec))
 		for k, v := range p.CreditsSpec {
 			credits[k] = CreditGrantSpec{
+				Unit:        v.Unit,
 				Amount:      v.Amount,
 				ExpiresDays: v.ExpiresDays,
 				Cadence:     CreditGrantCadence(v.Cadence),

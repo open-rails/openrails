@@ -130,7 +130,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	require.NotNil(t, dep.SourceID)
 	require.Equal(t, grantKey, *dep.SourceID)
 
-	bal, err := moneySvc.GetBalance(ctx, tenantSubjectID.String())
+	bal, err := moneySvc.GetBalance(ctx, tenantSubjectID.String(), money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(100), bal.Balance)
 }
@@ -252,7 +252,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	}))
 
 	// Both labels credit the one USD balance: 10 (once) + 100 (renewal), each once.
-	bal, err := moneySvc.GetBalance(ctx, tenantSubjectID.String())
+	bal, err := moneySvc.GetBalance(ctx, tenantSubjectID.String(), money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(110), bal.Balance)
 }

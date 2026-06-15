@@ -303,7 +303,7 @@ INSERT INTO openrails.payments (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(processor)::openrails.processor_type,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
-    COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
+    sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.arg(customer_id)
@@ -321,7 +321,7 @@ INSERT INTO openrails.payments (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(processor)::openrails.processor_type,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
-    COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
+    sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),

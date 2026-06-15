@@ -113,7 +113,7 @@ func TestServiceCredentialManagement_WriteOnlyStatusAndDelete(t *testing.T) {
 	store := NewMemorySecretStore()
 	svc := &Service{secrets: store}
 
-	sec, err := svc.PutCredential(ctx, id, SecretStripeWebhookSigning, "whsec_123", "put", "admin-1")
+	sec, err := svc.PutCredential(ctx, id, SecretStripeWebhookSigning, "whsec_123")
 	if err != nil {
 		t.Fatalf("put credential: %v", err)
 	}
@@ -134,15 +134,12 @@ func TestServiceCredentialManagement_WriteOnlyStatusAndDelete(t *testing.T) {
 		if !st.Configured || st.Version != 1 {
 			t.Fatalf("status = %+v, want configured version 1", st)
 		}
-		if st.LastActor != "" || st.LastErrorCode != "" {
-			t.Fatalf("in-memory status should not invent audit plaintext/detail: %+v", st)
-		}
 	}
 	if !found {
 		t.Fatalf("status for %s not found", SecretStripeWebhookSigning)
 	}
 
-	if err := svc.DeleteCredential(ctx, id, SecretStripeWebhookSigning, "admin-1"); err != nil {
+	if err := svc.DeleteCredential(ctx, id, SecretStripeWebhookSigning); err != nil {
 		t.Fatalf("delete credential: %v", err)
 	}
 	if _, err := store.Get(ctx, id, SecretStripeWebhookSigning); !errors.Is(err, ErrSecretNotFound) {
@@ -157,7 +154,7 @@ func TestServiceCredentialManagement_ValidateOnlyDoesNotSave(t *testing.T) {
 	svc := &Service{secrets: store}
 
 	called := false
-	err := svc.ValidateCredential(ctx, id, SecretStripeSecretKey, "sk_test_123", "admin-1", func(context.Context, string) error {
+	err := svc.ValidateCredential(ctx, id, SecretStripeSecretKey, "sk_test_123", func(context.Context, string) error {
 		called = true
 		return nil
 	})
@@ -176,10 +173,10 @@ func TestServiceCredentialManagement_RejectsUnknownAndInvalidSecrets(t *testing.
 	ctx := context.Background()
 	svc := &Service{secrets: NewMemorySecretStore()}
 
-	if _, err := svc.PutCredential(ctx, dbtest.TestTenantID, "unknown/provider_key", "secret", "put", "admin-1"); err == nil {
+	if _, err := svc.PutCredential(ctx, dbtest.TestTenantID, "unknown/provider_key", "secret"); err == nil {
 		t.Fatal("unknown secret should be rejected")
 	}
-	if _, err := svc.PutCredential(ctx, dbtest.TestTenantID, SecretStripeSecretKey, "not-stripe", "put", "admin-1"); err == nil {
+	if _, err := svc.PutCredential(ctx, dbtest.TestTenantID, SecretStripeSecretKey, "not-stripe"); err == nil {
 		t.Fatal("invalid Stripe secret should be rejected")
 	}
 }

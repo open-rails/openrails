@@ -177,7 +177,7 @@ func TestAdmit_BudgetDeny(t *testing.T) {
 }
 
 func TestAdmit_UnverifiedArrearsDeny(t *testing.T) {
-	adm, cs, store, payer, _, ctx, _ := admitEnv(t)
+	adm, cs, store, payer, cur, ctx, _ := admitEnv(t)
 	require.NoError(t, store.UpsertTierPolicy(ctx, payer, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 1000}}))
 	bm := money.BillingModeArrears
@@ -192,7 +192,7 @@ func TestAdmit_UnverifiedArrearsDeny(t *testing.T) {
 	require.Equal(t, "unverified", d.BlockedBy)
 
 	// verify -> allowed (arrears with unlimited line).
-	require.NoError(t, cs.SetPaymentMethodVerified(ctx, payer, true))
+	require.NoError(t, cs.SetPaymentMethodVerified(ctx, payer, cur, true))
 	d, err = adm.Admit(ctx, admission.AdmitRequest{CustomerID: payer, Invoker: "user:a", Tier: "free", Resource: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100, Source: "usage", SourceID: "u2", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
@@ -200,10 +200,10 @@ func TestAdmit_UnverifiedArrearsDeny(t *testing.T) {
 }
 
 func TestAdmit_SuspendedDeny(t *testing.T) {
-	adm, cs, store, payer, _, ctx, _ := admitEnv(t)
+	adm, cs, store, payer, cur, ctx, _ := admitEnv(t)
 	require.NoError(t, store.UpsertTierPolicy(ctx, payer, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
-	require.NoError(t, cs.Suspend(ctx, payer, "past_due"))
+	require.NoError(t, cs.Suspend(ctx, payer, cur, "past_due"))
 
 	// The suspension axis runs only on the money path (EstimatedAmount > 0, #299).
 	d, err := adm.Admit(ctx, admission.AdmitRequest{CustomerID: payer, Invoker: "user:a", Tier: "free",

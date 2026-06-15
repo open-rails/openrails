@@ -5,9 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -42,14 +39,13 @@ func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]Ten
 				}
 			}
 		}
-		s.applyLatestAudit(ctx, id, &st)
 		out = append(out, st)
 	}
 	return out, nil
 }
 
-// DeleteCredential deletes a tenant secret and writes a non-plaintext audit row.
-func (s *Service) DeleteCredential(ctx context.Context, id merchant.ID, name, actor string) error {
+// DeleteCredential deletes a tenant secret.
+func (s *Service) DeleteCredential(ctx context.Context, id merchant.ID, name string) error {
 	if s.secrets == nil {
 		return errors.New("tenancy: no secret store configured")
 	}
@@ -60,13 +56,12 @@ func (s *Service) DeleteCredential(ctx context.Context, id merchant.ID, name, ac
 	if err := s.secrets.Delete(ctx, id, name); err != nil {
 		return err
 	}
-	s.audit(ctx, id, name, "delete", actor, "deleted")
 	return nil
 }
 
 // ValidateCredential validates a supplied or stored credential value without
 // returning it. When value is empty, the current stored value is loaded.
-func (s *Service) ValidateCredential(ctx context.Context, id merchant.ID, name, value, actor string, stripeTester func(context.Context, string) error) error {
+func (s *Service) ValidateCredential(ctx context.Context, id merchant.ID, name, value string, stripeTester func(context.Context, string) error) error {
 	name = cleanSecretName(name)
 	if _, ok := SecretDefinitionFor(name); !ok {
 		return fmt.Errorf("tenancy: unknown tenant secret %q", name)
@@ -82,13 +77,7 @@ func (s *Service) ValidateCredential(ctx context.Context, id merchant.ID, name, 
 		value = sec.Value
 	}
 
-	err := validateSecretValue(ctx, name, value, stripeTester)
-	detail := "ok"
-	if err != nil {
-		detail = "failed:" + validationErrorCode(err)
-	}
-	s.audit(ctx, id, name, "test", actor, detail)
-	return err
+	return validateSecretValue(ctx, name, value, stripeTester)
 }
 
 func validateSecretValue(ctx context.Context, name, value string, stripeTester func(context.Context, string) error) error {
@@ -122,52 +111,4 @@ func validateSecretValueLocal(name, value string) error {
 		}
 	}
 	return nil
-}
-
-func validationErrorCode(err error) string {
-	if err == nil {
-		return ""
-	}
-	code := strings.TrimSpace(err.Error())
-	if code == "" {
-		return "failed"
-	}
-	code = strings.ReplaceAll(code, " ", "_")
-	if len(code) > 64 {
-		code = code[:64]
-	}
-	return code
-}
-
-func (s *Service) applyLatestAudit(ctx context.Context, id merchant.ID, st *TenantSecretStatus) {
-	if s == nil || s.pool == nil || st == nil {
-		return
-	}
-	var action, actor, detail string
-	var created time.Time
-	err := s.pool.QueryRow(ctx, `
-		SELECT action, COALESCE(actor,''), COALESCE(detail,''), created_at
-		  FROM openrails.tenant_credential_audit
-		 WHERE tenant_id = $1::uuid AND name = $2
-		 ORDER BY created_at DESC
-		 LIMIT 1
-	`, id.String(), st.Name).Scan(&action, &actor, &detail, &created)
-	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			st.LastErrorCode = "audit_unavailable"
-		}
-		return
-	}
-	if actor != "" {
-		st.LastActor = actor
-	}
-	switch action {
-	case "put", "rotate", "delete":
-		st.LastRotatedAt = &created
-	case "test":
-		st.ValidatedAt = &created
-	}
-	if strings.HasPrefix(detail, "failed:") {
-		st.LastErrorCode = strings.TrimPrefix(detail, "failed:")
-	}
 }

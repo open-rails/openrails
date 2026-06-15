@@ -551,7 +551,7 @@ INSERT INTO openrails.payments (
     $1::uuid,
     $2, $3::openrails.processor_type,
     $4, $5, $5,
-    COALESCE(NULLIF($6::text, ''), 'usd'),
+    $6,
     'completed', $7, $8,
     COALESCE(NULLIF($9::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     $10
@@ -1100,7 +1100,7 @@ INSERT INTO openrails.payments (
     $1::uuid,
     $2, $3::openrails.processor_type,
     $4, $5, $5,
-    COALESCE(NULLIF($6::text, ''), 'usd'),
+    $6,
     'completed', $7, $8,
     $9,
     COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),

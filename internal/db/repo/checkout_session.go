@@ -36,6 +36,10 @@ func checkoutSessionJSONB(s *models.CheckoutSession) (meta, fields, state []byte
 }
 
 func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.CheckoutSession) error {
+	currency := strings.TrimSpace(session.Currency)
+	if currency == "" {
+		return fmt.Errorf("checkout session currency required")
+	}
 	if err := ensureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, session.CustomerID); err != nil {
 		return err
 	}
@@ -56,7 +60,7 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 		Processor:       string(session.Processor),
 		Status:          string(session.Status),
 		Amount:          session.Amount,
-		Currency:        session.Currency,
+		Currency:        currency,
 		ExpiresAt:       session.ExpiresAt,
 		Reference:       session.Reference,
 		TransactionID:   session.TransactionID,

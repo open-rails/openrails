@@ -40,6 +40,7 @@ func creditGrantSpecsToAPI(specs models.CreditsSpec) map[string]api.CreditGrantS
 	out := make(map[string]api.CreditGrantSpecObject, len(specs))
 	for creditType, spec := range specs {
 		out[creditType] = api.CreditGrantSpecObject{
+			Unit:        spec.Unit,
 			Amount:      spec.Amount,
 			ExpiresDays: spec.ExpiresDays,
 			Cadence:     string(spec.Cadence),

@@ -164,9 +164,9 @@ WHERE merchant_id = $1 AND customer_id = $2 AND owner = $3;
 -- Tenant-wide tier schedule upsert (#476): customer_id IS NULL is the
 -- tenant's default ladder. owner is supplied by the caller's authz path.
 INSERT INTO openrails.tier_schedules (
-    id, merchant_id, customer_id, owner, rungs, schedule_version, created_at, updated_at
-) VALUES ($1, $2, NULL, $3, $4, 1, $5, $6)
-ON CONFLICT (merchant_id, owner) WHERE (customer_id IS NULL) DO UPDATE SET
+    id, merchant_id, customer_id, currency, owner, rungs, schedule_version, created_at, updated_at
+) VALUES ($1, $2, NULL, sqlc.arg(currency), $3, $4, 1, $5, $6)
+ON CONFLICT (merchant_id, owner, currency) WHERE (customer_id IS NULL) DO UPDATE SET
     rungs = EXCLUDED.rungs,
     schedule_version = openrails.tier_schedules.schedule_version + 1,
     updated_at = EXCLUDED.updated_at;
@@ -175,9 +175,9 @@ ON CONFLICT (merchant_id, owner) WHERE (customer_id IS NULL) DO UPDATE SET
 -- Per-subject tier schedule override upsert (#476): takes precedence over the
 -- tenant-wide default for that subject.
 INSERT INTO openrails.tier_schedules (
-    id, merchant_id, customer_id, owner, rungs, schedule_version, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, 1, $6, $7)
-ON CONFLICT (merchant_id, customer_id, owner) WHERE (customer_id IS NOT NULL) DO UPDATE SET
+    id, merchant_id, customer_id, currency, owner, rungs, schedule_version, created_at, updated_at
+) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, 1, $6, $7)
+ON CONFLICT (merchant_id, customer_id, owner, currency) WHERE (customer_id IS NOT NULL) DO UPDATE SET
     rungs = EXCLUDED.rungs,
     schedule_version = openrails.tier_schedules.schedule_version + 1,
     updated_at = EXCLUDED.updated_at;
@@ -189,6 +189,7 @@ ON CONFLICT (merchant_id, customer_id, owner) WHERE (customer_id IS NOT NULL) DO
 -- rows sort first so LIMIT 1 picks the override.
 SELECT * FROM openrails.tier_schedules
 WHERE merchant_id = $1 AND owner = $2
+  AND currency = sqlc.arg(currency)
   AND (customer_id = $3 OR customer_id IS NULL)
 ORDER BY (customer_id IS NOT NULL) DESC
 LIMIT 1;

@@ -78,14 +78,10 @@ type Server struct {
 	tenancy *tenancy.Service
 
 	// Platform superadmin layer (issue #226), DISTINCT from per-tenant operator
-	// admin, sharing the openrails.* control-plane pool. platformAudit records
-	// every cross-tenant superadmin mutation; platformBreakGlass manages
-	// time-boxed elevation; platformMetrics aggregates platform-wide tenant
-	// metrics. The /v1/platform/* surface itself is mounted only when a
-	// platform tenant is configured.
-	platformAudit      *platform.AuditLog
-	platformBreakGlass *platform.BreakGlass
-	platformMetrics    *platform.Metrics
+	// admin, sharing the openrails.* control-plane pool. platformMetrics
+	// aggregates platform-wide tenant metrics. The /v1/platform/* surface itself
+	// is mounted only when a platform tenant is configured.
+	platformMetrics *platform.Metrics
 
 	// configuredTenant is the construction-time tenant this engine is bound to
 	// (#336), resolved ONCE at boot from cfg.Tenant (a SLUG) → internal
@@ -402,22 +398,11 @@ func New(deps Dependencies) (*Server, error) {
 			}
 		}
 
-		// Platform superadmin layer (issue #226): cross-tenant audit, break-glass,
-		// and platform metrics over the same control-plane pool.
-		auditLog, aerr := platform.NewAuditLog(deps.ControlPlane.Pool())
-		if aerr != nil {
-			return nil, fmt.Errorf("build platform audit log: %w", aerr)
-		}
-		breakGlass, berr := platform.NewBreakGlass(deps.ControlPlane.Pool(), auditLog)
-		if berr != nil {
-			return nil, fmt.Errorf("build platform break-glass: %w", berr)
-		}
+		// Platform superadmin layer: platform metrics over the control-plane pool.
 		metrics, merr := platform.NewMetrics(deps.ControlPlane.Pool())
 		if merr != nil {
 			return nil, fmt.Errorf("build platform metrics: %w", merr)
 		}
-		s.platformAudit = auditLog
-		s.platformBreakGlass = breakGlass
 		s.platformMetrics = metrics
 	}
 

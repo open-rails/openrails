@@ -120,3 +120,17 @@ func TestPaymentToAPIAmountRefundedCountsOnlyCompletedRefunds(t *testing.T) {
 	require.Equal(t, "pending", got.Refunds.Data[1].Status)
 	require.Equal(t, "failed", got.Refunds.Data[2].Status)
 }
+
+func TestProductToAPIPreservesCreditGrantUnit(t *testing.T) {
+	product := &models.Product{
+		ID:          uuid.New(),
+		DisplayName: "Premium",
+		CreditsSpec: models.CreditsSpec{
+			"monthly_eur": {Unit: "EUR", Amount: 2500},
+		},
+	}
+
+	got := ProductToAPI(product, nil)
+	require.Equal(t, "EUR", got.CreditsSpec["monthly_eur"].Unit)
+	require.Equal(t, int64(2500), got.CreditsSpec["monthly_eur"].Amount)
+}

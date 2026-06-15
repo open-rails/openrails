@@ -442,6 +442,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		Tier:            "conf",
 		Resource:        env.resource,
 		Amounts:         map[string]int64{"request": 1},
+		Currency:        env.currency,
 		EstimatedAmount: 5_000,
 		RequestID:       env.side + "-admit-1",
 		Source:          "admit",
@@ -465,6 +466,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		Tier:            "conf",
 		Resource:        env.resource,
 		Amounts:         map[string]int64{"request": 1},
+		Currency:        env.currency,
 		EstimatedAmount: 6_000,
 		RequestID:       env.side + "-admit-2",
 		Source:          "admit",
@@ -483,6 +485,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		Tier:            "conf",
 		Resource:        env.resource,
 		Amounts:         map[string]int64{"request": 1},
+		Currency:        env.currency,
 		EstimatedAmount: 100,
 		RequestID:       env.side + "-admit-3",
 		Source:          "admit",
@@ -493,7 +496,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 
 	// 9) Budget check against caller-supplied windows: fixed + session cadence
 	// round-trip (#337).
-	bw, err := c.BudgetCheck(ctx, payerID, env.invoker, money.DefaultCurrency, []openrails.BudgetWindowInput{
+	bw, err := c.BudgetCheck(ctx, payerID, env.invoker, env.currency, []openrails.BudgetWindowInput{
 		{Key: "hourly", WindowSeconds: 3600, Limit: 10_000, Cadence: "fixed"},
 		{Key: "sess", WindowSeconds: 600, Limit: 2_000, Cadence: "session"},
 	}, 0)
@@ -639,6 +642,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	_, err = c.Admit(ctx, openrails.AdmitRequest{
 		CustomerID:      payerID,
 		Invoker:         env.invoker,
+		Currency:        env.currency,
 		EstimatedAmount: -1,
 		RequestID:       env.side + "-admit-neg",
 	})
@@ -688,14 +692,13 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.NoError(t, err, "%s settle after close", env.side)
 	r.SettleClosed = observeSettles(afterClose, win.WindowID)
 
-	// 18) Cross-payer batch admission (#335): allowed (client-side credit-type
-	// default) + money-denied + bad payer + negative estimate — per-item
+	// 18) Cross-payer batch admission (#335): allowed + money-denied + bad payer + negative estimate — per-item
 	// isolation, the batch call itself succeeds.
 	verdicts, err := c.AdmitBatch(ctx, []openrails.AdmitRequest{
-		{CustomerID: payerID, Invoker: env.invoker, EstimatedAmount: 1_000, RequestID: env.side + "-batch-1", Source: "admit"},
-		{CustomerID: payerID, Invoker: env.invoker, EstimatedAmount: 10_000_000_000, RequestID: env.side + "-batch-2"},
-		{CustomerID: "not-a-uuid", Invoker: env.invoker, EstimatedAmount: 1, RequestID: env.side + "-batch-3"},
-		{CustomerID: payerID, Invoker: env.invoker, EstimatedAmount: -1, RequestID: env.side + "-batch-4"},
+		{CustomerID: payerID, Invoker: env.invoker, Currency: env.currency, EstimatedAmount: 1_000, RequestID: env.side + "-batch-1", Source: "admit"},
+		{CustomerID: payerID, Invoker: env.invoker, Currency: env.currency, EstimatedAmount: 10_000_000_000, RequestID: env.side + "-batch-2"},
+		{CustomerID: "not-a-uuid", Invoker: env.invoker, Currency: env.currency, EstimatedAmount: 1, RequestID: env.side + "-batch-3"},
+		{CustomerID: payerID, Invoker: env.invoker, Currency: env.currency, EstimatedAmount: -1, RequestID: env.side + "-batch-4"},
 	})
 	require.NoError(t, err, "%s admit-batch", env.side)
 	require.Len(t, verdicts, 4, "%s admit-batch verdicts are positional", env.side)

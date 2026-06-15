@@ -410,12 +410,6 @@ func (s *MoneyService) activeHoldsTotal(ctx context.Context, tenantID, payerID u
 	})
 }
 
-// ActiveHeldAmount sums a payer's currently-ACTIVE (un-settled) hold in the
-// default currency. Prefer ActiveHeldForCurrency for currency-aware admission.
-func (s *MoneyService) ActiveHeldAmount(ctx context.Context, payer identity.CustomerID) (int64, error) {
-	return s.ActiveHeldForCurrency(ctx, payer, DefaultCurrency)
-}
-
 // ActiveHeldForCurrency sums a payer's active hold exposure in one native
 // currency. Caps are enforced per-currency; cross-currency comparison belongs to
 // the FX converter layer.

@@ -29,8 +29,8 @@ import (
 )
 
 const platformSchemaDDL = `
-CREATE SCHEMA IF NOT EXISTS billing;
-CREATE TABLE IF NOT EXISTS openrails.merchants (
+CREATE SCHEMA IF NOT EXISTS openrails;
+CREATE TABLE IF NOT EXISTS openrails.tenants (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug         TEXT NOT NULL UNIQUE,
     name         TEXT NOT NULL,
@@ -44,19 +44,7 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
 );
 CREATE TABLE IF NOT EXISTS openrails.subscriptions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID, status TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS openrails.payments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID, amount BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'completed');
-CREATE TABLE IF NOT EXISTS openrails.platform_audit (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), actor_user_id TEXT NOT NULL, actor_tenant TEXT,
-    action TEXT NOT NULL, target_tenant_id UUID, reason TEXT,
-    before_state JSONB, after_state JSONB, detail JSONB,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
-);
-CREATE TABLE IF NOT EXISTS openrails.platform_break_glass (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), actor_user_id TEXT NOT NULL, target_tenant_id UUID,
-    justification TEXT NOT NULL, granted_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ,
-    CONSTRAINT chk_break_glass_window CHECK (expires_at > granted_at)
-);
-INSERT INTO openrails.merchants (slug, name, status, billing_tier) VALUES ('acme','Acme','active','pro') ON CONFLICT DO NOTHING;
+INSERT INTO openrails.tenants (slug, name, status, billing_tier) VALUES ('acme','Acme','active','pro') ON CONFLICT DO NOTHING;
 `
 
 func newPlatformTestPool(t *testing.T) *pgxpool.Pool {
@@ -111,30 +99,21 @@ func newPlatformExternalPostgresPool(t *testing.T, ctx context.Context, adminDSN
 	return pool
 }
 
-// fakeSuperadminChecker stands in for the control-plane platform-superadmin
-// check so the HTTP layer can be exercised without a live AuthKit.
 type fakeSuperadminChecker struct{ allow map[string]bool }
 
 func (f fakeSuperadminChecker) HasPlatformSuperadmin(_ context.Context, userID string) (bool, error) {
 	return f.allow[userID], nil
 }
 
-// newPlatformServer builds a minimal *Server with just the platform deps wired.
 func newPlatformServer(t *testing.T, pool *pgxpool.Pool) *Server {
 	t.Helper()
 	tsvc, err := tenancy.NewService(pool, tenancy.NewMemorySecretStore())
 	require.NoError(t, err)
-	audit, err := platform.NewAuditLog(pool)
-	require.NoError(t, err)
-	bg, err := platform.NewBreakGlass(pool, audit)
-	require.NoError(t, err)
 	metrics, err := platform.NewMetrics(pool)
 	require.NoError(t, err)
-	return &Server{tenancy: tsvc, platformAudit: audit, platformBreakGlass: bg, platformMetrics: metrics}
+	return &Server{tenancy: tsvc, platformMetrics: metrics}
 }
 
-// doReq builds a fresh engine seeding uc (as the auth middleware would) behind
-// the REAL superadmin gate, then serves one request.
 func doReq(t *testing.T, s *Server, checker authpolicy.PlatformSuperadminChecker, method, path string, uc authprovider.UserContext, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -145,8 +124,6 @@ func doReq(t *testing.T, s *Server, checker authpolicy.PlatformSuperadminChecker
 	g.GET("/tenants", s.platformListTenantsHandler())
 	g.GET("/search", s.platformSearchHandler())
 	g.GET("/metrics", s.platformMetricsHandler())
-	g.GET("/audit", s.platformAuditHandler())
-	g.POST("/break-glass", s.platformBreakGlassGrantHandler())
 
 	var req *http.Request
 	if body != "" {
@@ -160,50 +137,27 @@ func doReq(t *testing.T, s *Server, checker authpolicy.PlatformSuperadminChecker
 	return rr
 }
 
-func TestPlatformAPI_GateAndAudit(t *testing.T) {
+func TestPlatformAPI_GateSearchAndMetrics(t *testing.T) {
 	pool := newPlatformTestPool(t)
 	checker := fakeSuperadminChecker{allow: map[string]bool{"platform-admin": true}}
 	s := newPlatformServer(t, pool)
 
 	base := StandaloneV1Prefix + PlatformPrefix
-
 	platformUC := authprovider.UserContext{UserID: "platform-admin", Tenant: "openrails-platform"}
 	tenantAdminUC := authprovider.UserContext{UserID: "tenant-admin", Tenant: "tenant-acme", TenantRoles: []string{"admin"}}
 
-	// 1. A tenant operator admin is DENIED the platform surface.
 	rr := doReq(t, s, checker, http.MethodGet, base+"/tenants", tenantAdminUC, "")
 	require.Equal(t, http.StatusForbidden, rr.Code, "tenant operator admin must be denied")
 
-	// 2. A platform identity is ALLOWED.
 	rr = doReq(t, s, checker, http.MethodGet, base+"/tenants", platformUC, "")
 	require.Equal(t, http.StatusOK, rr.Code, "platform identity must pass: %s", rr.Body.String())
 
-	// 3. Cross-tenant search writes an audit row.
 	rr = doReq(t, s, checker, http.MethodGet, base+"/search?q=acme", platformUC, "")
 	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 
-	var searchCount int
-	require.NoError(t, pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM openrails.platform_audit WHERE action = $1 AND reason = 'acme'`,
-		platform.ActionTenantSearch).Scan(&searchCount))
-	require.Equal(t, 1, searchCount, "cross-tenant search must write an audit row")
-
-	// 4. Metrics aggregates and is audited.
 	rr = doReq(t, s, checker, http.MethodGet, base+"/metrics", platformUC, "")
 	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 	var m platform.PlatformMetrics
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &m))
 	require.Equal(t, 1, m.TenantCount)
-
-	// 5. Break-glass requires a justification.
-	rr = doReq(t, s, checker, http.MethodPost, base+"/break-glass", platformUC, `{"justification":""}`)
-	require.Equal(t, http.StatusBadRequest, rr.Code)
-
-	rr = doReq(t, s, checker, http.MethodPost, base+"/break-glass", platformUC, `{"justification":"incident 7","ttl_seconds":600}`)
-	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
-
-	var grantCount int
-	require.NoError(t, pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM openrails.platform_break_glass WHERE actor_user_id='platform-admin'`).Scan(&grantCount))
-	require.Equal(t, 1, grantCount, "break-glass grant must be persisted")
 }

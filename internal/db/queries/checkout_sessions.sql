@@ -8,7 +8,7 @@ INSERT INTO openrails.checkout_sessions (
     idempotency_key, created_at, updated_at
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6, $7,
-    COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
+    sqlc.arg(currency),
     sqlc.narg(expires_at), sqlc.narg(reference), sqlc.narg(transaction_id),
     sqlc.narg(payment_id), sqlc.narg(subscription_id), sqlc.narg(metadata),
     sqlc.narg(processor_fields), sqlc.narg(processor_state),

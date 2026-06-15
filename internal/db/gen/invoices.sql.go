@@ -167,35 +167,6 @@ func (q *Queries) InsertInvoice(ctx context.Context, arg InsertInvoiceParams) er
 	return err
 }
 
-const listCreditAccountPairs = `-- name: ListCreditAccountPairs :many
-SELECT customer_id
-FROM openrails.money_transactions
-WHERE merchant_id = $1
-GROUP BY customer_id
-`
-
-// Every known payer in the tenant (= has any ledger activity), for the
-// due-invoice sweep. money_balances is gone (#491); the ledger is the source.
-func (q *Queries) ListCreditAccountPairs(ctx context.Context, merchantID uuid.UUID) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listCreditAccountPairs, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var customer_id uuid.UUID
-		if err := rows.Scan(&customer_id); err != nil {
-			return nil, err
-		}
-		items = append(items, customer_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listInvoicesByPayer = `-- name: ListInvoicesByPayer :many
 SELECT id, merchant_id, customer_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2

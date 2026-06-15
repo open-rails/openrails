@@ -222,13 +222,10 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 		}
 	}
 
-	// Purge secret store rows + credential audit (DB-backed secret store lives in
-	// openrails.tenant_secrets; the Vault-backed store is purged separately below).
+	// Purge DB-backed secret store rows; the Vault-backed store is purged
+	// separately below.
 	if _, err := tx.Exec(ctx, `DELETE FROM openrails.tenant_secrets WHERE tenant_id = $1::uuid`, id.String()); err != nil {
 		return fmt.Errorf("tenancy: purge tenant secrets: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM openrails.tenant_credential_audit WHERE tenant_id = $1::uuid`, id.String()); err != nil {
-		return fmt.Errorf("tenancy: purge credential audit: %w", err)
 	}
 
 	// Tombstone the directory row.

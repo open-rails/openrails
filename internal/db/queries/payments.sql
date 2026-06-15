@@ -15,7 +15,7 @@ INSERT INTO openrails.payments (
     card_last4, customer_id
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
-    COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
+    sqlc.arg(currency),
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'completed')::openrails.purchase_status,
     sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(discount_code), sqlc.narg(discount_reason),
@@ -35,7 +35,7 @@ INSERT INTO openrails.payments (
     card_last4, customer_id
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
-    COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
+    sqlc.arg(currency),
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'completed')::openrails.purchase_status,
     sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(discount_code), sqlc.narg(discount_reason),

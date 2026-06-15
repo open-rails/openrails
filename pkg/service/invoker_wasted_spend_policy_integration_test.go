@@ -64,7 +64,7 @@ func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, i
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payerID)
 	})
 	ms := money.NewMoneyService(dbi)
-	_, err = ms.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 100_000_000, Source: "seed"})
+	_, err = ms.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000_000, Source: "seed"})
 	require.NoError(t, err)
 	return svc, ms, payer, ctx
 }
@@ -83,14 +83,14 @@ func TestInvokerWastedSpendPolicy_ConfiguredDenies(t *testing.T) {
 
 	// $2 wasted by the invoker — over the configured $1 window, UNDER the $5 default.
 	_, err := svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
-		CustomerID: payer, Invoker: "user:configured", Amount: 2_000_000,
+		CustomerID: payer, Invoker: "user:configured", Currency: money.DefaultCurrency, Amount: 2_000_000,
 		Source: "test", SourceID: "configured", Reason: "test",
 	})
 	require.NoError(t, err)
 
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:configured", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-configured",
 	})
 	require.NoError(t, err)
@@ -106,14 +106,14 @@ func TestInvokerWastedSpendPolicy_UnsetFallsBackToDefault(t *testing.T) {
 
 	// No SetInvokerWastedSpendPolicy call -> hardcoded $5/15m default applies.
 	_, err := svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
-		CustomerID: payer, Invoker: "user:default", Amount: 2_000_000,
+		CustomerID: payer, Invoker: "user:default", Currency: money.DefaultCurrency, Amount: 2_000_000,
 		Source: "test", SourceID: "default", Reason: "test",
 	})
 	require.NoError(t, err)
 
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:default", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "ok-default",
 	})
 	require.NoError(t, err)
@@ -132,7 +132,7 @@ func TestInvokerWastedSpendPolicy_MerchantWidePolicyPayerScopedUsage(t *testing.
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_account_settings WHERE customer_id = $1", payerBID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerBID)
 	})
-	_, err := ms.Deposit(ctx, money.DepositParams{CustomerID: &payerB, Invoker: payerB.UUID().String(), Amount: 100_000_000, Source: "seed"})
+	_, err := ms.Deposit(ctx, money.DepositParams{CustomerID: &payerB, Invoker: payerB.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	require.NoError(t, svc.SetInvokerWastedSpendPolicy(ctx, []abuse.WastedWindow{
@@ -141,14 +141,14 @@ func TestInvokerWastedSpendPolicy_MerchantWidePolicyPayerScopedUsage(t *testing.
 
 	const invoker = "user:same-delegated-id"
 	_, err = svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
-		CustomerID: payerA, Invoker: invoker, Amount: 2_000_000,
+		CustomerID: payerA, Invoker: invoker, Currency: money.DefaultCurrency, Amount: 2_000_000,
 		Source: "test", SourceID: "payer-a", Reason: "test",
 	})
 	require.NoError(t, err)
 
 	resA, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payerA, Invoker: invoker, Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-payer-a",
 	})
 	require.NoError(t, err)
@@ -156,20 +156,20 @@ func TestInvokerWastedSpendPolicy_MerchantWidePolicyPayerScopedUsage(t *testing.
 
 	resB, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payerB, Invoker: invoker, Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "allowed-payer-b",
 	})
 	require.NoError(t, err)
 	require.True(t, resB.Allowed, "same invoker label under payer B must not inherit payer A's Redis usage")
 
 	_, err = svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
-		CustomerID: payerB, Invoker: invoker, Amount: 2_000_000,
+		CustomerID: payerB, Invoker: invoker, Currency: money.DefaultCurrency, Amount: 2_000_000,
 		Source: "test", SourceID: "payer-b", Reason: "test",
 	})
 	require.NoError(t, err)
 	resB, err = svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payerB, Invoker: invoker, Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-payer-b",
 	})
 	require.NoError(t, err)
@@ -188,7 +188,7 @@ func TestWastedSpendDirectPayer_GraceThenChargeIdempotently(t *testing.T) {
 
 	res, err := svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
 		CustomerID: payer, Invoker: payer.UUID().String(), InvokerType: string(identity.InvokerTypePayer),
-		Amount: 500_000, Source: "waste", SourceID: "under-grace", Reason: "test",
+		Currency: money.DefaultCurrency, Amount: 500_000, Source: "waste", SourceID: "under-grace", Reason: "test",
 	})
 	require.NoError(t, err)
 	require.Equal(t, money.DefaultCurrency, res.Currency)
@@ -198,7 +198,7 @@ func TestWastedSpendDirectPayer_GraceThenChargeIdempotently(t *testing.T) {
 
 	res, err = svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
 		CustomerID: payer, Invoker: payer.UUID().String(), InvokerType: string(identity.InvokerTypePayer),
-		Amount: 1_500_000, Source: "waste", SourceID: "over-grace", Reason: "test",
+		Currency: money.DefaultCurrency, Amount: 1_500_000, Source: "waste", SourceID: "over-grace", Reason: "test",
 	})
 	require.NoError(t, err)
 	require.Equal(t, money.DefaultCurrency, res.Currency)
@@ -208,7 +208,7 @@ func TestWastedSpendDirectPayer_GraceThenChargeIdempotently(t *testing.T) {
 
 	res, err = svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
 		CustomerID: payer, Invoker: payer.UUID().String(), InvokerType: string(identity.InvokerTypePayer),
-		Amount: 1_500_000, Source: "waste", SourceID: "over-grace", Reason: "retry",
+		Currency: money.DefaultCurrency, Amount: 1_500_000, Source: "waste", SourceID: "over-grace", Reason: "retry",
 	})
 	require.NoError(t, err)
 	require.Equal(t, money.DefaultCurrency, res.Currency)
@@ -245,14 +245,14 @@ func TestWastedSpendDirectPayer_DoesNotHitDelegatedInvokerCutoff(t *testing.T) {
 
 	_, err := svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
 		CustomerID: payer, Invoker: "service-token:payer-owned", InvokerType: string(identity.InvokerTypePayer),
-		Amount: 2_000_000, Source: "waste", SourceID: "direct-over-flat", Reason: "test",
+		Currency: money.DefaultCurrency, Amount: 2_000_000, Source: "waste", SourceID: "direct-over-flat", Reason: "test",
 	})
 	require.NoError(t, err)
 
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "service-token:payer-owned", InvokerType: string(identity.InvokerTypePayer),
 		Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "direct-admit",
 	})
 	require.NoError(t, err)
