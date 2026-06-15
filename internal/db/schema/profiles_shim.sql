@@ -19,10 +19,3 @@ CREATE TABLE profiles.users (
     email_verified boolean NOT NULL DEFAULT false,
     deleted_at timestamp with time zone
 );
-
--- #491: cross-schema FK target for openrails invoker_id columns (authkit#81).
--- authkit owns/migrates the real table; declared here only so sqlc can resolve
--- the FK added in migration 027.
-CREATE TABLE profiles.delegated_users (
-    id uuid PRIMARY KEY
-);

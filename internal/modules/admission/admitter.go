@@ -474,43 +474,21 @@ func (a *Admitter) buildBudgetScopes(ctx context.Context, req AdmitRequest, pol 
 	if err != nil {
 		return nil, err
 	}
-	roleSet := make(map[uuid.UUID]bool, len(req.Roles))
-	for _, r := range req.Roles {
-		roleSet[r] = true
-	}
+	// #491 reversal: budgets are PER-INVOKER only. Subject/role POOLS are dropped;
+	// only stored per-invoker overrides matching THIS invoker apply.
 	for _, p := range policies {
+		if budgets.NormalizeScope(p.Scope) != budgets.ScopeInvoker || p.ScopeKey != req.Actor {
+			continue
+		}
 		windows := toBudgetWindows(p.Windows)
 		if len(windows) == 0 {
 			continue
 		}
-		switch budgets.NormalizeScope(p.Scope) {
-		case budgets.ScopeSubject:
-			sc, err := budgets.MakeScopeReservation(budgets.ScopeSubject, p.Owner, "", uuid.Nil, windows)
-			if err != nil {
-				return nil, err
-			}
-			scopes = append(scopes, sc)
-		case budgets.ScopeRole:
-			rid, perr := uuid.Parse(p.ScopeKey)
-			if perr != nil || !roleSet[rid] {
-				continue // not a role this invoker holds (or a malformed key)
-			}
-			sc, err := budgets.MakeScopeReservation(budgets.ScopeRole, p.Owner, "", rid, windows)
-			if err != nil {
-				return nil, err
-			}
-			scopes = append(scopes, sc)
-		case budgets.ScopeInvoker:
-			// A stored (subject,invoker) override applies only to the matching invoker.
-			if p.ScopeKey != req.Actor {
-				continue
-			}
-			sc, err := budgets.MakeScopeReservation(budgets.ScopeInvoker, p.Owner, req.Actor, uuid.Nil, windows)
-			if err != nil {
-				return nil, err
-			}
-			scopes = append(scopes, sc)
+		sc, err := budgets.MakeScopeReservation(budgets.ScopeInvoker, p.Owner, req.Actor, uuid.Nil, windows)
+		if err != nil {
+			return nil, err
 		}
+		scopes = append(scopes, sc)
 	}
 	return scopes, nil
 }

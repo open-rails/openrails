@@ -23,9 +23,6 @@ type UsageEvent struct {
 	// Actor is the caller-supplied principal string that caused usage
 	// (opaque to OpenRails; attribution + grouping only, not the payer).
 	Actor string `json:"actor"`
-	// InvokerID is the end-user's stable authkit delegated_users id (#491); nil on
-	// the embedded/service path (no issuer to resolve).
-	InvokerID *uuid.UUID `json:"invoker,omitempty"`
 	// Resource is the caller-supplied free-form string for what was metered
 	// (opaque to OpenRails; e.g. tensorhub endpoint slug). Nullable.
 	Resource *string `json:"resource,omitempty"`

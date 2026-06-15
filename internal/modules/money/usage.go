@@ -24,7 +24,6 @@ type RecordUsageParams struct {
 	// resolved from Actor (self-hosted/personal case), never synthesized.
 	Payer     *identity.CustomerID
 	Actor     string     // actor (attribution only)
-	InvokerID *uuid.UUID // #491 end-user delegated_users(id); nil on the embedded/service path
 	Currency  string     // "" => DefaultCurrency (#472)
 	EventType string     // metered event kind, e.g. "gpt-4o"
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
@@ -130,7 +129,6 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			MerchantID:         tenantID,
 			CustomerID:         payerID,
 			Actor:              params.Actor,
-			InvokerID:          params.InvokerID,
 			EventType:          params.EventType,
 			Dimensions:         params.Dimensions,
 			Amount:             params.Amount,
@@ -154,7 +152,6 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			MerchantID:         ev.MerchantID,
 			CustomerID:         ev.CustomerID,
 			Actor:              ev.Actor,
-			InvokerID:          ev.InvokerID,
 			Resource:           ev.Resource,
 			EventType:          ev.EventType,
 			Dimensions:         dims,

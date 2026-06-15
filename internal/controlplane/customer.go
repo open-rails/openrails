@@ -58,26 +58,3 @@ func (c *ControlPlane) TouchCustomer(ctx context.Context, tenantID merchant.ID, 
 		Subject:    &subject,
 	})
 }
-
-// TouchInvoker resolves the delegated end-user (issuer, subject) to its stable
-// authkit profiles.delegated_users id (#491), upserting via authkit's
-// TouchDelegatedUser. The returned id is what attribution rows stamp into
-// invoker_id (FK -> profiles.delegated_users). Returns uuid.Nil when no authkit
-// core is wired (degraded/embedded) — callers leave invoker_id NULL and keep the
-// opaque actor label.
-func (c *ControlPlane) TouchInvoker(ctx context.Context, issuer, subject string) (uuid.UUID, error) {
-	issuer = strings.TrimSpace(issuer)
-	subject = strings.TrimSpace(subject)
-	if issuer == "" || subject == "" {
-		return uuid.Nil, ErrCustomerInvalid
-	}
-	core := c.Core()
-	if core == nil {
-		return uuid.Nil, nil
-	}
-	idStr, err := core.TouchDelegatedUser(ctx, issuer, subject)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	return uuid.Parse(idStr)
-}

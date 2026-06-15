@@ -25,7 +25,6 @@ type CaptureUsageEventParams struct {
 	// Actor is the caller-supplied principal string attributable to this usage
 	// (opaque to OpenRails). Required.
 	Actor     string
-	InvokerID *uuid.UUID // #491 end-user delegated_users(id); nil on the embedded/service path
 	EventType string     // the metered event kind, e.g. "owner/endpoint"
 	Amount    int64  // host-priced captured amount (>= 0)
 	// Resource is the caller-supplied free-form string for what was metered
@@ -73,7 +72,6 @@ func (s *MoneyService) InsertCaptureUsageEvent(ctx context.Context, p CaptureUsa
 			MerchantID:         tid.UUID(),
 			CustomerID:         p.CustomerID,
 			Actor:              p.Actor,
-			InvokerID:          p.InvokerID,
 			Resource:           nilIfEmpty(p.Resource),
 			EventType:          p.EventType,
 			Dimensions:         p.Dimensions,
@@ -98,7 +96,6 @@ func (s *MoneyService) InsertCaptureUsageEvent(ctx context.Context, p CaptureUsa
 			MerchantID:         ev.MerchantID,
 			CustomerID:         ev.CustomerID,
 			Actor:              ev.Actor,
-			InvokerID:          ev.InvokerID,
 			Resource:           ev.Resource,
 			EventType:          ev.EventType,
 			Dimensions:         dims,

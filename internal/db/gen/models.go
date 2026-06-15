@@ -499,8 +499,6 @@ type OpenrailsMoneySpendLimit struct {
 	UpdatedAt              time.Time
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
 	Currency string
-	// #491 the end-user (invoker) this per-invoker cap applies to -> authkit profiles.delegated_users(id), cross-schema. NULL when keyed by the opaque actor label.
-	InvokerID *uuid.UUID
 }
 
 // amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
@@ -528,8 +526,6 @@ type OpenrailsMoneyTransaction struct {
 	CustomerID       uuid.UUID
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority. amount is this currency's minor unit.
 	Currency string
-	// #491 the end-user (invoker) that triggered this charge -> authkit profiles.delegated_users(id), cross-schema. NULL on the embedded/service path (no issuer to resolve); `actor` is the opaque attribution label there.
-	InvokerID *uuid.UUID
 }
 
 // Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
@@ -906,8 +902,6 @@ type OpenrailsUsageEvent struct {
 	Metadata           []byte
 	OccurredAt         time.Time
 	CreatedAt          time.Time
-	// #491 the end-user (invoker) that fired this usage -> authkit profiles.delegated_users(id), cross-schema. NULL on the embedded/service path.
-	InvokerID *uuid.UUID
 }
 
 // External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.
@@ -931,10 +925,6 @@ type OpenrailsUsdcFundingSession struct {
 	ExpiresAt         *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
-}
-
-type ProfilesDelegatedUser struct {
-	ID uuid.UUID
 }
 
 type ProfilesUser struct {

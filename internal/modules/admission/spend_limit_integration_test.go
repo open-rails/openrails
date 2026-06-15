@@ -236,61 +236,6 @@ func TestSpend_MultiWindow_TighterBinds_ThroughAdmit(t *testing.T) {
 	require.True(t, d.Allowed, "weekly window reset -> spend allowed again")
 }
 
-// TestSpend_ComposedScopes_AllOrNothing: invoker cap (tier_1 $5/5h) composed
-// with a payer-total subject cap. A breach in EITHER scope denies the whole
-// admit and reserves NOTHING — verified by the blocking scope being reported AND
-// by a follow-up under-cap request from the OTHER scope still seeing full room.
-func TestSpend_ComposedScopes_AllOrNothing(t *testing.T) {
-	adm, _, _, tier, bp, payer, pool, ctx := spendEnv(t)
-	require.NoError(t, tier.UpsertTierPolicyFull(ctx, payer, "tier_1", cozyTier1()))
-	// Payer-total (subject) cap: $8 / 1h across ALL invokers.
-	require.NoError(t, bp.Upsert(ctx, payer, admission.BudgetScopePolicy{
-		Scope: budgets.ScopeSubject, Owner: "platform",
-		Windows: []models.BudgetWindowPolicy{{Key: "1h", WindowSeconds: 3600, LimitMicros: 8 * usd, Cadence: budgets.CadenceFixed}},
-	}))
-
-	// A spends $4 (under both its $5 invoker cap and the $8 subject cap).
-	d, err := adm.Admit(ctx, spendReq(payer, "du-019759a1-0aa1-7c31-8f01-000000000a01", "c1", 4*usd))
-	require.NoError(t, err)
-	require.True(t, d.Allowed)
-
-	// B tries $5: B's own invoker window has room ($5/5h), but the SUBJECT cap is
-	// at $4 and $4+$5=$9 > $8 -> the subject scope breaches. All-or-nothing: the
-	// admit denies and B's invoker window must reserve NOTHING.
-	d, err = adm.Admit(ctx, spendReq(payer, "du-019759a1-0aa1-7c31-8f01-000000000b02", "c2", 5*usd))
-	require.NoError(t, err)
-	require.False(t, d.Allowed)
-	require.Equal(t, "budget", d.BlockedBy)
-
-	// The blocking scope is the subject (payer-total) cap.
-	var subjectBlocked bool
-	for _, sc := range d.BudgetScopes {
-		if sc.Scope == budgets.ScopeSubject {
-			for _, w := range sc.Windows {
-				if !w.Allowed {
-					subjectBlocked = true
-				}
-			}
-		}
-	}
-	require.True(t, subjectBlocked, "the subject (payer-total) scope is the blocking scope")
-
-	// All-or-nothing proof: B's invoker scope reserved nothing on the denied
-	// admit. There must be NO active budget_reservations row for B (actor=du-019759a1-0aa1-7c31-8f01-000000000b02).
-	var bRows int
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.budget_reservations WHERE customer_id=$1 AND actor='du-019759a1-0aa1-7c31-8f01-000000000b02' AND status='active'",
-		payer.UUID()).Scan(&bRows))
-	require.Equal(t, 0, bRows, "a denied composed admit reserves NOTHING for the breaching request")
-
-	// And B's invoker window still reads as fully available: a $3 request (under
-	// the now-$8-occupied... wait, subject is at $4, $4+$3=$7<=$8) succeeds,
-	// proving B's window was never partially consumed by the denied $5.
-	d, err = adm.Admit(ctx, spendReq(payer, "du-019759a1-0aa1-7c31-8f01-000000000b02", "c3", 3*usd))
-	require.NoError(t, err)
-	require.True(t, d.Allowed, "B's invoker window was not consumed by the denied $5 (all-or-nothing)")
-}
-
 // TestSpend_SettleAccounting_CaptureUnderEstimate: Reserve(estimate) ->
 // Capture(actual < estimate) reduces the window's used to the ACTUAL, freeing
 // the difference back into the same window. Verified end-to-end: a reserve that

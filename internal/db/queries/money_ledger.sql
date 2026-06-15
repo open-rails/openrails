@@ -61,16 +61,16 @@ INSERT INTO openrails.money_transactions (
     id, merchant_id, customer_id, currency, actor, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
-    expires_at, description, created_at, updated_at, invoker_id
-) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, sqlc.narg(invoker_id));
+    expires_at, description, created_at, updated_at
+) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18);
 
 -- name: InsertMoneyTransactionIfAbsent :exec
 INSERT INTO openrails.money_transactions (
     id, merchant_id, customer_id, currency, actor, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
-    expires_at, description, created_at, updated_at, invoker_id
-) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, sqlc.narg(invoker_id))
+    expires_at, description, created_at, updated_at
+) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 ON CONFLICT DO NOTHING;
 
 -- name: GetMoneyTransactionByCoords :one

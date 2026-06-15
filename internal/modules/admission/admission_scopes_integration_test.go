@@ -95,63 +95,6 @@ func tierWith(limit int64) models.ThroughputPolicy {
 
 // TestScope_PlatformCapDeniesEvenWhenRoleAndInvokerUnder: the platform (subject)
 // cap denies even when the role pool and invoker cap have room.
-func TestScope_PlatformCapDeniesEvenWhenRoleAndInvokerUnder(t *testing.T) {
-	adm, bp, tier, payer, ctx := scopeEnv(t)
-	role := uuid.New()
-	// Platform (subject) cap = $0.0004 (400 micros); generous role + invoker caps.
-	require.NoError(t, bp.Upsert(ctx, payer, admission.BudgetScopePolicy{Scope: budgets.ScopeSubject, Owner: "platform", Windows: budgetPolicyWindows(400)}))
-	require.NoError(t, bp.Upsert(ctx, payer, admission.BudgetScopePolicy{Scope: budgets.ScopeRole, Owner: "subject", ScopeKey: role.String(), Windows: budgetPolicyWindows(1_000_000)}))
-	require.NoError(t, tier.UpsertTierPolicyFull(ctx, payer, "free", tierWith(1_000_000)))
-
-	// First request 300 micros: under all caps -> allow.
-	d, err := adm.Admit(ctx, mustReq(payer, "user:a", "s1", []uuid.UUID{role}, 300))
-	require.NoError(t, err)
-	require.True(t, d.Allowed)
-
-	// Second request 200 micros: platform window 300+200=500 > 400 -> deny on platform.
-	d, err = adm.Admit(ctx, mustReq(payer, "user:a", "s2", []uuid.UUID{role}, 200))
-	require.NoError(t, err)
-	require.False(t, d.Allowed)
-	require.Equal(t, "budget", d.BlockedBy)
-	// The blocking scope is the platform (subject) cap.
-	var blockedPlatform bool
-	for _, sc := range d.BudgetScopes {
-		if sc.Scope == budgets.ScopeSubject && sc.Owner == "platform" {
-			for _, w := range sc.Windows {
-				if !w.Allowed {
-					blockedPlatform = true
-				}
-			}
-		}
-	}
-	require.True(t, blockedPlatform, "platform (subject) cap should be the blocking scope")
-}
-
-// TestScope_RolePoolSharedAcrossTwoUsers: a (subject, role) cap is a SHARED pool
-// — two different actors holding the same role draw from the same budget.
-func TestScope_RolePoolSharedAcrossTwoUsers(t *testing.T) {
-	adm, bp, tier, payer, ctx := scopeEnv(t)
-	role := uuid.New()
-	require.NoError(t, bp.Upsert(ctx, payer, admission.BudgetScopePolicy{Scope: budgets.ScopeRole, Owner: "subject", ScopeKey: role.String(), Windows: budgetPolicyWindows(500)}))
-	require.NoError(t, tier.UpsertTierPolicyFull(ctx, payer, "free", tierWith(1_000_000)))
-
-	// user:a spends 300 of the shared 500 role pool.
-	d, err := adm.Admit(ctx, mustReq(payer, "user:a", "r1", []uuid.UUID{role}, 300))
-	require.NoError(t, err)
-	require.True(t, d.Allowed)
-
-	// user:b (same role) spends 200 -> pool now 500, still allowed.
-	d, err = adm.Admit(ctx, mustReq(payer, "user:b", "r2", []uuid.UUID{role}, 200))
-	require.NoError(t, err)
-	require.True(t, d.Allowed)
-
-	// user:b again, 100 -> pool 600 > 500 -> deny (shared across both users).
-	d, err = adm.Admit(ctx, mustReq(payer, "user:b", "r3", []uuid.UUID{role}, 100))
-	require.NoError(t, err)
-	require.False(t, d.Allowed)
-	require.Equal(t, "budget", d.BlockedBy)
-}
-
 // TestScope_InvokerCapIndependent: each invoker's (subject, actor) cap is
 // independent — one invoker hitting its cap does not block a different invoker.
 func TestScope_InvokerCapIndependent(t *testing.T) {
@@ -171,26 +114,6 @@ func TestScope_InvokerCapIndependent(t *testing.T) {
 	d, err = adm.Admit(ctx, mustReq(payer, "user:b", "i3", nil, 400))
 	require.NoError(t, err)
 	require.True(t, d.Allowed, "user:b has its own independent cap")
-}
-
-// TestScope_SettleReleasesAllScopes: a money-denied composed reserve frees ALL
-// scopes (verified by a follow-up request succeeding up to the full caps).
-func TestScope_OverSubscriptionFlooredByBalanceNotBudget(t *testing.T) {
-	adm, bp, tier, payer, ctx := scopeEnv(t)
-	role := uuid.New()
-	// Sub-budgets MAY over-subscribe: role cap 1M + invoker cap 1M, both well
-	// above any single request; the request is allowed by budgets (balance is the
-	// hard floor, tested elsewhere). Here we assert composition allows when every
-	// scope has room.
-	require.NoError(t, bp.Upsert(ctx, payer, admission.BudgetScopePolicy{Scope: budgets.ScopeRole, Owner: "subject", ScopeKey: role.String(), Windows: budgetPolicyWindows(1_000_000)}))
-	require.NoError(t, bp.Upsert(ctx, payer, admission.BudgetScopePolicy{Scope: budgets.ScopeSubject, Owner: "subject", Windows: budgetPolicyWindows(1_000_000)}))
-	require.NoError(t, tier.UpsertTierPolicyFull(ctx, payer, "free", tierWith(1_000_000)))
-
-	d, err := adm.Admit(ctx, mustReq(payer, "user:a", "o1", []uuid.UUID{role}, 500_000))
-	require.NoError(t, err)
-	require.True(t, d.Allowed)
-	// All four scopes reserved (platform absent here): subject(subject), role, actor.
-	require.GreaterOrEqual(t, len(d.BudgetScopes), 3)
 }
 
 // TestThroughput_PayerAggregatesAcrossInvokers (#472 G1): the throughput counter

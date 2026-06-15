@@ -842,7 +842,7 @@ Also boot the cutover with `FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIO
 
 # #491: Split CUSTOMER (payer / money account) from ACTOR (invoker / delegated-user) — delegated-users hold no money
 
-**Completed:** structural split shipped (v0.32.0/v0.33.0); INVOKER-MODEL REVERSAL pending (owner 2026-06-15)
+**Completed:** structural split shipped (v0.32.0/v0.33.0); INVOKER-MODEL REVERSAL shipped (v0.34.0, 2026-06-15) — migration 029 drops invoker_id+FK (opaque `actor` text remains the invoker), buildBudgetScopes is per-invoker only (subject/role pools dropped + their tests removed), authkit dep -> v0.34.0; build/vet/unit + admission/budgets/money/controlplane/embed integration all green. DEFERRED (cosmetic, documented): the `actor`->`invoker` column/field rename (36 files; wire already exposes json:"invoker").
 
 ================================================================================
 REVERSAL (owner, 2026-06-15) — invoker is OPAQUE TEXT, no FK; budgets per-invoker only.

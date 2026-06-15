@@ -26,7 +26,6 @@ type MoneyTransaction struct {
 	CustomerID      uuid.UUID      `json:"customer_id"`
 	Currency        string         `json:"currency"`
 	Actor           string         `json:"actor"`
-	InvokerID       *uuid.UUID     `json:"invoker,omitempty"` // #491 delegated_users(id); nil on the embedded/service path
 	Resource        *string        `json:"resource,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 	Amount          int64          `json:"amount"`
@@ -120,7 +119,6 @@ type MoneySpendLimit struct {
 	CustomerID             uuid.UUID `json:"customer_id"`
 	Currency               string     `json:"currency"`
 	Actor                  string     `json:"actor"`
-	InvokerID              *uuid.UUID `json:"invoker,omitempty"` // #491 delegated_users(id)
 	MaxSpendPerDayMicros   *int64     `json:"max_spend_per_day_micros,omitempty"`
 	MaxSpendPerMonthMicros *int64    `json:"max_spend_per_month_micros,omitempty"`
 	CreatedAt              time.Time `json:"created_at"`

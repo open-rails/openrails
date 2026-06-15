@@ -252,7 +252,6 @@ type DepositParams struct {
 	// stand-in, and a non-UUID Actor with no explicit payer is rejected.
 	CustomerID *identity.CustomerID
 	Actor      string
-	InvokerID  *uuid.UUID // #491 end-user delegated_users(id); nil on the embedded/service path
 	Currency   string     // "" => DefaultCurrency (#472)
 	Amount     int64
 	Source     string
@@ -372,7 +371,6 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		CustomerID:      payerID,
 		Currency:        cur,
 		Actor:           params.Actor,
-		InvokerID:       params.InvokerID,
 		Amount:          params.Amount,
 		BalanceAfter:    &newBal,
 		TransactionType: "deposit",
@@ -433,7 +431,6 @@ func insertParamsFromTransaction(t *models.MoneyTransaction) gen.InsertMoneyTran
 		CustomerID:       t.CustomerID,
 		Currency:         normalizeCurrency(t.Currency),
 		Actor:            t.Actor,
-		InvokerID:        t.InvokerID,
 		Resource:         t.Resource,
 		Amount:           t.Amount,
 		BalanceAfter:     t.BalanceAfter,
