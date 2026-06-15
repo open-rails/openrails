@@ -653,10 +653,18 @@ currency and the BUDGET currency can differ, and conversion happens at deduction
   `currency_units` (e.g. `amount_micros` -> `amount_units`, `max_spend_per_day_micros` ->
   `max_spend_per_day_units`, budgets `LimitMicros` -> `LimitUnits`, `captured_micros`, etc.). Pick
   ONE abstract term fleet-wide. Each row also carries its `currency`.
-- KEY THESE TABLES BY CURRENCY (a window/limit/hold is per-currency): `usage_events`,
-  `money_transactions`, `budget_window_state`, `budget_inflight_holds` (see rename below).
-  `money_spend_limits` already has `currency`. The budget engine's window-state UNIQUE key becomes
-  `(merchant, customer, invoker_id, currency, window_key)`; aggregation sums within a currency.
+- KEY THESE TABLES BY CURRENCY (a window/limit/hold is per-currency). Verified current state:
+  - ADD a `currency` column to the 3 tables that have NONE today:
+    * `usage_events`        -> add `currency` (+ consider it in the idempotency UNIQUE
+      `(merchant, customer, event_type, source, source_id)` if a metered event can recur per-currency).
+    * `budget_window_state` -> add `currency`; window-state UNIQUE becomes
+      `(merchant, customer, invoker_id, currency, window_key)` (the anchor/window is per-currency).
+    * `budget_inflight_holds` (renamed from budget_reservations) -> add `currency`; idempotency UNIQUE
+      becomes `(merchant, customer, invoker_id, currency, source, source_id)` and the window-aggregation
+      index `(merchant, customer, invoker_id, currency, created_at)`. Aggregation sums WITHIN a currency.
+  - ALREADY have `currency` (NO column add — just confirm it's in the relevant keys):
+    * `money_transactions` (currency present + in the deposit/hold/withdrawal idempotency UNIQUEs).
+    * `money_spend_limits` (currency present + in `UNIQUE(merchant, customer, currency, invoker_id)`).
 - RENAME `budget_reservations` -> `budget_inflight_holds` (owner: clearer name — these rows are
   the in-flight/settled holds a budget window aggregates, not generic "reservations"). Carry the
   dependent indexes/UNIQUE via RENAME.
