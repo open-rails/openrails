@@ -80,7 +80,10 @@ func requireCurrency(raw string) (string, error) {
 	if currency == "" {
 		return "", invalidErr("currency required")
 	}
-	return currency, nil
+	if money.IsQualifiedUnit(currency) {
+		return currency, nil
+	}
+	return money.NormalizeCurrency(currency), nil
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -184,6 +187,11 @@ func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*o
 	if err != nil {
 		return nil, err
 	}
+	currency, err := requireCurrency(req.Currency)
+	if err != nil {
+		return nil, err
+	}
+	req.Currency = currency
 
 	res, err := c.svc.Admit(ctx, admitInputFromSDK(req, payer))
 	if err != nil {
@@ -696,6 +704,10 @@ func (c *localClient) BudgetCheck(ctx context.Context, tenantSubjectID, invokerI
 	if err != nil {
 		return nil, err
 	}
+	currency, err = requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
 	in := make([]billingservice.BudgetCheckWindowInput, 0, len(windows))
 	for _, w := range windows {
 		in = append(in, billingservice.BudgetCheckWindowInput{
@@ -717,6 +729,10 @@ func (c *localClient) BudgetCheck(ctx context.Context, tenantSubjectID, invokerI
 func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]openrails.BudgetWindow, error) {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
+	if err != nil {
+		return nil, err
+	}
+	currency, err = requireCurrency(currency)
 	if err != nil {
 		return nil, err
 	}
@@ -783,9 +799,12 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 // default schedule (zero payer); a non-empty one is a per-subject override.
 func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID, currency string, schedule []openrails.TierScheduleRung) error {
 	ctx = c.ensureTenant(ctx)
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return err
+	}
 	var payer identity.CustomerID
 	if strings.TrimSpace(tenantSubjectID) != "" {
-		var err error
 		payer, err = parseCustomer(tenantSubjectID, "invalid customer_id")
 		if err != nil {
 			return err
@@ -803,21 +822,21 @@ func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID, curr
 	return nil
 }
 
-// SetInvokerWastedSpendPolicy transcribes handlers.ServiceSetInvokerWastedSpendPolicy
-// (service_admission.go, #496). The policy is merchant-scoped; payer-specific
-// invoker overrides do not exist.
-func (c *localClient) SetInvokerWastedSpendPolicy(ctx context.Context, windows []openrails.BudgetWindowInput) error {
+// SetMerchantConfiguration transcribes handlers.ServiceSetMerchantConfiguration.
+func (c *localClient) SetMerchantConfiguration(ctx context.Context, in openrails.MerchantConfigurationInput) error {
 	ctx = c.ensureTenant(ctx)
-	ws := make([]abuse.WastedWindow, 0, len(windows))
-	for _, w := range windows {
+	ws := make([]abuse.WastedWindow, 0, len(in.DelegatedInvokerWastedSpendWindows))
+	for _, w := range in.DelegatedInvokerWastedSpendWindows {
 		ws = append(ws, abuse.WastedWindow{
 			Key:    w.Key,
 			Window: time.Duration(w.WindowSeconds) * time.Second,
 			Limit:  w.Limit,
 		})
 	}
-	if err := c.svc.SetInvokerWastedSpendPolicy(ctx, ws); err != nil {
-		return internalErr("set invoker wasted-spend policy failed")
+	if err := c.svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{
+		DelegatedInvokerWastedSpendWindows: ws,
+	}); err != nil {
+		return internalErr("set merchant configuration failed")
 	}
 	return nil
 }
@@ -826,6 +845,10 @@ func (c *localClient) SetInvokerWastedSpendPolicy(ctx context.Context, windows [
 func (c *localClient) GetTier(ctx context.Context, tenantSubjectID, currency string) (string, error) {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "invalid customer_id")
+	if err != nil {
+		return "", err
+	}
+	currency, err = requireCurrency(currency)
 	if err != nil {
 		return "", err
 	}
@@ -843,11 +866,15 @@ func (c *localClient) ReportWastedSpend(ctx context.Context, report openrails.Wa
 	if err != nil {
 		return nil, err
 	}
+	currency, err := requireCurrency(report.Currency)
+	if err != nil {
+		return nil, err
+	}
 	res, err := c.svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
 		CustomerID:  payer,
 		Invoker:     report.Invoker,
 		InvokerType: report.InvokerType,
-		Currency:    report.Currency,
+		Currency:    currency,
 		Amount:      report.Amount,
 		Source:      report.Source,
 		SourceID:    report.SourceID,
@@ -873,12 +900,16 @@ func (c *localClient) AbuseUsage(ctx context.Context, tenantSubjectID, invoker, 
 	if err != nil {
 		return nil, err
 	}
+	currency, err = requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
 	pw, aw, uerr := c.svc.AbuseUsage(ctx, payer, invoker, currency, tier)
 	if uerr != nil {
 		return nil, internalErr("abuse usage lookup failed")
 	}
 	return &openrails.AbuseUsageResponse{
-		Currency:       money.NormalizeCurrency(currency),
+		Currency:       currency,
 		PayerWindows:   abuseUsageWindows(pw),
 		InvokerWindows: abuseUsageWindows(aw),
 	}, nil
@@ -891,8 +922,12 @@ func (c *localClient) SetCreditLimit(ctx context.Context, tenantSubjectID, curre
 	if err != nil {
 		return err
 	}
+	currency, err = requireCurrency(currency)
+	if err != nil {
+		return err
+	}
 	if err := c.svc.SetCreditLimit(ctx, payer, currency, creditLimit); err != nil {
-		return internalErr("set credit limit failed")
+		return invalidErr(err.Error())
 	}
 	return nil
 }
@@ -904,9 +939,13 @@ func (c *localClient) GetCreditLimit(ctx context.Context, tenantSubjectID, curre
 	if err != nil {
 		return 0, err
 	}
+	currency, err = requireCurrency(currency)
+	if err != nil {
+		return 0, err
+	}
 	v, gerr := c.svc.GetCreditLimit(ctx, payer, currency)
 	if gerr != nil {
-		return 0, internalErr("get credit limit failed")
+		return 0, invalidErr(gerr.Error())
 	}
 	return v, nil
 }
@@ -1080,7 +1119,7 @@ func (c *localClient) ResourceRevenueDaily(ctx context.Context, resource, curren
 	if err != nil {
 		return nil, invalidErr(err.Error())
 	}
-	out := &openrails.ResourceRevenueResponse{Currency: money.NormalizeCurrency(currency), Daily: make([]openrails.ResourceRevenueDailyRow, 0, len(rows))}
+	out := &openrails.ResourceRevenueResponse{Currency: currency, Daily: make([]openrails.ResourceRevenueDailyRow, 0, len(rows))}
 	for _, r := range rows {
 		out.RevenueAmount += r.Amount
 		out.Daily = append(out.Daily, openrails.ResourceRevenueDailyRow{Date: r.Date, Currency: r.Currency, Amount: r.Amount})
@@ -1247,6 +1286,12 @@ func (c *localClient) AdmitBatch(ctx context.Context, items []openrails.AdmitReq
 			out[i] = openrails.AdmitBatchVerdict{Status: http.StatusBadRequest, Error: "customer_id required"}
 			continue
 		}
+		currency, cerr := requireCurrency(item.Currency)
+		if cerr != nil {
+			out[i] = openrails.AdmitBatchVerdict{Status: http.StatusBadRequest, Error: "currency required"}
+			continue
+		}
+		item.Currency = currency
 		res, err := c.svc.Admit(ctx, admitInputFromSDK(item, payer))
 		if err != nil {
 			out[i] = openrails.AdmitBatchVerdict{Status: http.StatusInternalServerError, Error: "admission check failed"}

@@ -224,7 +224,7 @@ type scriptResult struct {
 	// Hierarchical budget-scope policies on the unified client (#473).
 	SubjectBudgetPolicies []obsBudgetPolicy
 
-	// Operator-configured flat per-invoker wasted-spend policy (#496): the
+	// Merchant-configured flat delegated-invoker wasted-spend windows: the
 	// configured limit + over-budget state observed via AbuseUsage.
 	InvokerWastedUsage []openrails.AbuseUsageWindow
 
@@ -782,14 +782,16 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	r.SubjectBudgetPolicies = observeBudgetPolicies(pols)
 	require.Len(t, r.SubjectBudgetPolicies, 2, "%s subject-budget-policies: platform cap must stay invisible", env.side)
 
-	// 22) Operator-configured flat per-invoker wasted-spend policy (#496): set the
-	// merchant policy ($1/15m), report $2 wasted, then observe via AbuseUsage that
+	// 22) Merchant-configured flat delegated-invoker wasted-spend window (#499): set
+	// the merchant config ($1/15m), report $2 wasted, then observe via AbuseUsage that
 	// the CONFIGURED limit is enforced (not DefaultInvokerWastedWindows). embed and
 	// remote must produce identical observable state.
 	wastedActor := "user:wasted-" + env.side
-	require.NoError(t, c.SetInvokerWastedSpendPolicy(ctx, []openrails.BudgetWindowInput{
-		{Key: "burst", WindowSeconds: 900, Limit: 1_000_000},
-	}), "%s set-invoker-wasted-spend-policy", env.side)
+	require.NoError(t, c.SetMerchantConfiguration(ctx, openrails.MerchantConfigurationInput{
+		DelegatedInvokerWastedSpendWindows: []openrails.BudgetWindowInput{
+			{Key: "burst", WindowSeconds: 900, Limit: 1_000_000},
+		},
+	}), "%s set-merchant-configuration", env.side)
 	_, err = c.ReportWastedSpend(ctx, openrails.WastedSpendReport{
 		CustomerID: payerID,
 		Invoker:    wastedActor,

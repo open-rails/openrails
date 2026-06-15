@@ -23,9 +23,8 @@ type GrantSubscriptionCreditsParams struct {
 
 // validateCreditGrantSpec validates one credit/currency grant spec (#472). The
 // grant key is just a label; a non-empty key scopes per-grant idempotency. Unit
-// defaults to usd; it must be a built-in currency OR an active qualified custom
-// credit unit (#475). expiry_days==0 means never-expire (only an explicit
-// negative is invalid).
+// must be a built-in currency OR an active qualified custom-credit unit (#475).
+// expiry_days==0 means never-expire (only an explicit negative is invalid).
 func (s *MoneyService) validateCreditGrantSpec(ctx context.Context, grantKey string, spec models.CreditGrantSpec) error {
 	if strings.TrimSpace(grantKey) == "" {
 		return fmt.Errorf("grant key is empty")
@@ -33,7 +32,7 @@ func (s *MoneyService) validateCreditGrantSpec(ctx context.Context, grantKey str
 	if spec.Amount <= 0 {
 		return fmt.Errorf("invalid credits_spec: %s amount must be > 0", grantKey)
 	}
-	if err := s.validateUnit(ctx, spec.UnitOrDefault()); err != nil {
+	if err := s.validateUnit(ctx, spec.UnitCode()); err != nil {
 		return fmt.Errorf("invalid credits_spec: %s %w", grantKey, err)
 	}
 	if spec.ExpiryDays != nil && *spec.ExpiryDays < 0 {
@@ -63,8 +62,8 @@ func grantExpiry(now time.Time, spec models.CreditGrantSpec) *time.Time {
 	return &t
 }
 
-// GrantSubscriptionCredits grants the promo MONEY (µ$) defined in
-// product.credits_spec for a subscription event. Each spec entry is a money
+// GrantSubscriptionCredits grants the balances defined in product.credits_spec
+// for a subscription event. Each spec entry is a money
 // deposit (the spec key is a label, not a credit_type — #472). Idempotent per
 // (subscription_id, grant key, period_end) via a deterministic deposit SourceID.
 func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params GrantSubscriptionCreditsParams) error {
@@ -134,7 +133,7 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 
 			if _, err := s.depositTx(ctx, q, DepositParams{
 				Invoker:   sub.CustomerID.String(),
-				Currency:  spec.UnitOrDefault(),
+				Currency:  spec.UnitCode(),
 				Amount:    spec.Amount,
 				Source:    strings.TrimSpace(params.Source),
 				SourceID:  &grantID,
@@ -147,7 +146,7 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 				"subscription_id": sub.ID,
 				"period_end":      params.PeriodEnd.UTC(),
 				"grant_label":     label,
-				"unit":            spec.UnitOrDefault(),
+				"unit":            spec.UnitCode(),
 				"amount":          spec.Amount,
 				"expiry_days":     spec.EffectiveExpiryDays(),
 				"cadence":         cadence,
@@ -204,7 +203,7 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 			if _, err := s.depositTx(ctx, q, DepositParams{
 				CustomerID: &payer,
 				Invoker:    payer.String(),
-				Currency:   spec.UnitOrDefault(),
+				Currency:   spec.UnitCode(),
 				Amount:     spec.Amount,
 				Source:     strings.TrimSpace(params.Source),
 				SourceID:   &grantID,
@@ -215,7 +214,7 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 			log.WithContext(ctx).WithFields(log.Fields{
 				"payment_id":  params.PaymentID,
 				"grant_label": label,
-				"unit":        spec.UnitOrDefault(),
+				"unit":        spec.UnitCode(),
 				"amount":      spec.Amount,
 				"expiry_days": spec.EffectiveExpiryDays(),
 				"grant_id":    grantID,

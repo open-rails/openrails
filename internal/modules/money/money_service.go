@@ -252,7 +252,7 @@ type DepositParams struct {
 	// stand-in, and a non-UUID Invoker with no explicit payer is rejected.
 	CustomerID *identity.CustomerID
 	Invoker    string
-	Currency   string // "" => DefaultCurrency (#472)
+	Currency   string
 	Amount     int64
 	Source     string
 	SourceID   *string // #491: natural-key string (uuidv7 pk + UNIQUE natural key), not a derived uuid
@@ -450,7 +450,7 @@ type WithdrawParams struct {
 	// single-tenant personal case; it is never a synthesized stand-in.
 	CustomerID *identity.CustomerID
 	Invoker    string
-	Currency   string // "" => DefaultCurrency (#472)
+	Currency   string
 	Amount     int64
 	Source     string
 	SourceID   *uuid.UUID

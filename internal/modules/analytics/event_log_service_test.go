@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/pkg/spool"
 )
 
-func TestLogPaymentEventSpoolsWithDefaultsWhenClickHouseDown(t *testing.T) {
+func TestLogPaymentEventSpoolsWithoutCurrencyDefaultWhenClickHouseDown(t *testing.T) {
 	sp, err := spool.New(t.TempDir())
 	if err != nil {
 		t.Fatalf("create spool: %v", err)
@@ -67,8 +67,27 @@ func TestLogPaymentEventSpoolsWithDefaultsWhenClickHouseDown(t *testing.T) {
 	if !event.Timestamp.Equal(now) {
 		t.Fatalf("timestamp = %s, want %s", event.Timestamp, now)
 	}
-	if event.Currency != "usd" {
-		t.Fatalf("currency = %q, want usd", event.Currency)
+	if event.Currency != "" {
+		t.Fatalf("currency = %q, want blank", event.Currency)
+	}
+}
+
+func TestLogPaymentEventRequiresCurrencyWithAmount(t *testing.T) {
+	sp, err := spool.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create spool: %v", err)
+	}
+	amount := 1.23
+	svc := &EventLogService{
+		config: &config.ClickHouseConfig{HTTPAddr: "127.0.0.1:1", ClientAddr: "127.0.0.1:1", Database: "analytics"},
+		spool:  sp,
+		clock:  clockwork.NewFakeClockAt(time.Date(2026, 5, 12, 10, 30, 0, 0, time.UTC)),
+	}
+	ctx, cancel := context.WithTimeout(dbtest.WithTestTenant(context.Background()), 50*time.Millisecond)
+	defer cancel()
+	err = svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "user-1", EventType: PaymentEventChargeSuccess, Processor: "test", Amount: &amount})
+	if err == nil {
+		t.Fatal("expected missing currency error")
 	}
 }
 

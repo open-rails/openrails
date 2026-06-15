@@ -1104,6 +1104,13 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 	// plain insert: no entitlements/credits are granted for a failed payment.
 	if s.PaymentService != nil {
 		amount := inv.AmountDue
+		currency := normalize.FirstNonEmpty(inv.Currency)
+		if currency == "" && sub.Price != nil {
+			currency = strings.TrimSpace(sub.Price.Currency)
+		}
+		if amount > 0 && currency == "" {
+			return fmt.Errorf("stripe failed payment currency required")
+		}
 		txnID := failedPaymentTransactionID(inv)
 		subID := sub.ID
 		failed := &models.Payment{
@@ -1115,7 +1122,7 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 			TransactionID:  txnID,
 			Amount:         amount,
 			ListAmount:     amount,
-			Currency:       normalize.FirstNonEmpty(inv.Currency, "usd"),
+			Currency:       currency,
 			Status:         "failed",
 			PurchasedAt:    s.now(),
 		}
@@ -1170,9 +1177,6 @@ func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub 
 	}
 	priceAmount := 0.0
 	priceCurrency := strings.ToLower(strings.TrimSpace(inv.Currency))
-	if priceCurrency == "" {
-		priceCurrency = "usd"
-	}
 	billingCycleDays := uint32(0)
 	var productID *uuid.UUID
 	priceID := sub.PriceID

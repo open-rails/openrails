@@ -74,7 +74,7 @@ func latestBlock(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payerID 
 func TestDeposit_DefaultExpiry_NoSettingsRow(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1000,
+		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000,
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
@@ -87,7 +87,7 @@ func TestDeposit_DefaultExpiry_NoSettingsRow(t *testing.T) {
 func TestDeposit_NoFlag_Permanent(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1000, Source: "grant",
+		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Source: "grant",
 	})
 	require.NoError(t, err)
 	b := latestBlock(t, pool, ctx, payer.UUID())
@@ -100,7 +100,7 @@ func TestDeposit_ConfiguredExpiryDays(t *testing.T) {
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{DefaultCreditExpiryDays: &days})
 	require.NoError(t, err)
 	_, err = svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1000,
+		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000,
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestRunLowBalanceAlerts(t *testing.T) {
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{LowBalanceThreshold: &thr})
 	require.NoError(t, err)
 	// available 500 < 1000
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	al := &fakeAlerter{}
@@ -144,7 +144,7 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}
@@ -177,7 +177,7 @@ func TestRunAutoTopups_Declined(t *testing.T) {
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	ch := &fakeCharger{declineAll: true}

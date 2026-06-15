@@ -29,7 +29,7 @@ import (
 type SpendParams struct {
 	Payer    *identity.CustomerID
 	Invoker  string
-	Currency string // "" => DefaultCurrency (#472)
+	Currency string
 	Amount   int64
 	Source   string
 	SourceID string

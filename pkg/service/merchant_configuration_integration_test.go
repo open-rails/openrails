@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/merchant"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -58,8 +59,8 @@ func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, i
 	payer := identity.CustomerIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoker_wasted_spend_policies")
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_account_settings WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.merchant_configurations")
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payerID)
 	})
@@ -69,16 +70,18 @@ func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, i
 	return svc, ms, payer, ctx
 }
 
-// #496: with a merchant-wide invoker policy SMALLER than the hardcoded default
+// #499: with merchant config SMALLER than the hardcoded default
 // ($1/15m vs $5/15m), an invoker that exceeds the CONFIGURED window is denied at
-// admit — proving the operator-configured window (not DefaultInvokerWastedWindows)
+// admit — proving the merchant-configured window (not DefaultInvokerWastedWindows)
 // is the enforced budget.
-func TestInvokerWastedSpendPolicy_ConfiguredDenies(t *testing.T) {
+func TestMerchantConfiguration_ConfiguredDelegatedInvokerWindowDenies(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
 
-	// Configure the tenant-wide default: $1 / 15 min (tighter than the $5 default).
-	require.NoError(t, svc.SetInvokerWastedSpendPolicy(ctx, []abuse.WastedWindow{
-		{Key: "burst", Window: 15 * time.Minute, Limit: 1_000_000},
+	// Configure the merchant default: $1 / 15 min (tighter than the $5 default).
+	require.NoError(t, svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{
+		DelegatedInvokerWastedSpendWindows: []abuse.WastedWindow{
+			{Key: "burst", Window: 15 * time.Minute, Limit: 1_000_000},
+		},
 	}))
 
 	// $2 wasted by the invoker — over the configured $1 window, UNDER the $5 default.
@@ -98,13 +101,13 @@ func TestInvokerWastedSpendPolicy_ConfiguredDenies(t *testing.T) {
 	require.Equal(t, "abuse", res.BlockedBy)
 }
 
-// #496: with NO invoker policy stored, the resolver falls back to
+// #499: with no merchant config stored, the resolver falls back to
 // DefaultInvokerWastedWindows ($5/15m). $2 wasted is UNDER $5 -> still allowed,
 // proving the default is the fallback and the $1 config above was load-bearing.
-func TestInvokerWastedSpendPolicy_UnsetFallsBackToDefault(t *testing.T) {
+func TestMerchantConfiguration_UnsetFallsBackToDefault(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
 
-	// No SetInvokerWastedSpendPolicy call -> hardcoded $5/15m default applies.
+	// No SetMerchantConfiguration call -> hardcoded $5/15m default applies.
 	_, err := svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
 		CustomerID: payer, Invoker: "user:default", Currency: money.DefaultCurrency, Amount: 2_000_000,
 		Source: "test", SourceID: "default", Reason: "test",
@@ -120,23 +123,61 @@ func TestInvokerWastedSpendPolicy_UnsetFallsBackToDefault(t *testing.T) {
 	require.True(t, res.Allowed, "$2 wasted is under the $5 default backstop -> allowed")
 }
 
-// #496: the invoker wasted-spend policy is merchant-wide, while Redis usage for
+func TestMerchantConfiguration_EmptyConfigFallsBackToDefault(t *testing.T) {
+	svc, _, payer, ctx := wastedSvcEnv(t)
+
+	require.NoError(t, svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{}))
+	_, err := svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
+		CustomerID: payer, Invoker: "user:empty-config", Currency: money.DefaultCurrency, Amount: 2_000_000,
+		Source: "test", SourceID: "empty-config", Reason: "test",
+	})
+	require.NoError(t, err)
+
+	res, err := svc.Admit(ctx, billingservice.AdmitInput{
+		CustomerID: payer, Invoker: "user:empty-config", Tier: "free", Resource: "r",
+		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
+		Source: "usage", SourceID: "ok-empty-config",
+	})
+	require.NoError(t, err)
+	require.True(t, res.Allowed, "$2 wasted is under the $5 default backstop -> allowed")
+}
+
+func TestMerchantConfiguration_InvalidJSONShapeReturnsError(t *testing.T) {
+	svc, _, payer, ctx := wastedSvcEnv(t)
+	tid, err := merchant.Require(ctx)
+	require.NoError(t, err)
+	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO openrails.merchant_configurations (merchant_id, config)
+		VALUES ($1, '{"delegated_invoker_wasted_spend_windows":[{"key":"bad","window_seconds":"oops","limit":1}]}'::jsonb)
+		ON CONFLICT (merchant_id) DO UPDATE SET config = EXCLUDED.config
+	`, tid.UUID())
+	require.NoError(t, err)
+
+	_, _, err = svc.AbuseUsage(ctx, payer, "user:bad-config", money.DefaultCurrency, "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "merchant config: decode config")
+}
+
+// #499: the delegated-invoker wasted-spend config is merchant-wide, while Redis usage for
 // a delegated-user invoker is namespaced by payer to avoid cross-platform
 // collisions for common delegated IDs like "user:123".
-func TestInvokerWastedSpendPolicy_MerchantWidePolicyPayerScopedUsage(t *testing.T) {
+func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsage(t *testing.T) {
 	svc, ms, payerA, ctx := wastedSvcEnv(t)
 	payerB := identity.CustomerIDFromString(uuid.NewString())
 	payerBID := payerB.UUID()
 	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_account_settings WHERE customer_id = $1", payerBID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerBID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerBID)
 	})
 	_, err := ms.Deposit(ctx, money.DepositParams{CustomerID: &payerB, Invoker: payerB.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000_000, Source: "seed"})
 	require.NoError(t, err)
 
-	require.NoError(t, svc.SetInvokerWastedSpendPolicy(ctx, []abuse.WastedWindow{
-		{Key: "burst", Window: 15 * time.Minute, Limit: 1_000_000},
+	require.NoError(t, svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{
+		DelegatedInvokerWastedSpendWindows: []abuse.WastedWindow{
+			{Key: "burst", Window: 15 * time.Minute, Limit: 1_000_000},
+		},
 	}))
 
 	const invoker = "user:same-delegated-id"
@@ -239,8 +280,10 @@ func TestWastedSpendDirectPayer_DoesNotHitDelegatedInvokerCutoff(t *testing.T) {
 			{Key: "burst", WindowSeconds: int64((15 * time.Minute) / time.Second), Limit: 10_000_000},
 		},
 	}))
-	require.NoError(t, svc.SetInvokerWastedSpendPolicy(ctx, []abuse.WastedWindow{
-		{Key: "burst", Window: 15 * time.Minute, Limit: 1_000_000},
+	require.NoError(t, svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{
+		DelegatedInvokerWastedSpendWindows: []abuse.WastedWindow{
+			{Key: "burst", Window: 15 * time.Minute, Limit: 1_000_000},
+		},
 	}))
 
 	_, err := svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{

@@ -7,7 +7,172 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 499
+next_id: 501
+
+---
+
+# #500: Make merchant ownership AuthKit-org anchored
+
+**Completed:** no
+
+OpenRails merchants should have one durable administrative owner: an AuthKit org.
+Users, service tokens, and remote applications are not owners. They are credentials/principals that receive authority
+through the owning org and then act on the OpenRails merchant owned by that org.
+
+## Model
+- `merchant -> owner_org_id`: exactly one AuthKit org owns/administers a merchant in standalone/control-plane mode.
+- `org -> users/service_tokens/remote_applications`: AuthKit controls membership, roles, service tokens, and JWKS
+  remote applications.
+- `credential -> org authority -> merchant`: a user session, service token, or remote-application self-token gets
+  OpenRails merchant control only through AuthKit org grants.
+- `org 1 -> many merchants`; `merchant -> one owner org`.
+- Embedded/no-AuthKit mode may keep out-of-band ownership, but it should be explicit and should not create a second
+  general ownership model.
+
+## Decisions
+- Do not make merchants ownable by bare users.
+- Do not make merchants ownable by service tokens.
+- Do not make merchants ownable by remote applications/JWKS issuers.
+- Keep service tokens and remote applications as grantable authentication factors under the owning org.
+- Prefer a bootstrap-created owner org for standalone merchants, even when the issuer/merchant is provisioned from
+  manifest/bootstrap files. This keeps later admin UI, token rotation, JWKS rotation, and permission changes on the
+  same path as normal merchants.
+
+## Tasks
+- [ ] Rename OpenRails terminology from `owner_tenant_id` to `owner_org_id` in schema comments, Go structs, generated
+      query names, route payloads, tests, and docs. Keep a migration-safe rollout; do not change AuthKit org semantics.
+- [ ] Decide nullability:
+      - standalone/control-plane merchants require `owner_org_id`.
+      - embedded/no-AuthKit merchants may have `owner_org_id NULL` only when OpenRails delegates security entirely to
+        the embedding host.
+- [ ] Add or tighten DB constraints/indexes:
+      - keep `idx_merchants_owner_org_id` for owner lookup.
+      - consider `NOT NULL` only if embedded rows are split or explicitly marked, otherwise use application-level
+        validation for standalone provisioning.
+      - preserve `org 1 -> many merchants`; do not add unique owner constraint.
+- [ ] Update merchant provisioning/bootstrap:
+      - standalone bootstrap creates or resolves the AuthKit owner org first.
+      - merchant provisioning records that org id as `owner_org_id`.
+      - manifest bootstrap can still create issuer + merchant, but should also bind both to the same owner org.
+- [ ] Update service-token merchant control:
+      - resolve service token through AuthKit.
+      - use the token's owning org id as the authority anchor.
+      - authorize named merchant access by checking `merchant.owner_org_id == token.org_id`.
+      - keep merchant/customer resource scopes as OpenRails resource constraints, not ownership.
+- [ ] Update remote-application merchant control:
+      - resolve JWKS self-token through AuthKit remote application.
+      - use AuthKit-stored org membership/permissions as authority.
+      - authorize named merchant access through the owning org; do not treat the issuer itself as merchant owner.
+      - decide whether the common path should use `remote_application.org_id` owner directly or the RA's granted org
+        membership. Prefer one documented path and fail closed when missing.
+- [ ] Add/confirm required AuthKit permissions:
+      - org owners/admins can administer merchants by default through `*`.
+      - narrower roles can grant OpenRails merchant permissions without making a user/token/RA the owner.
+      - remote-application management remains AuthKit-side (`org:remote_applications:manage`), separate from
+        OpenRails merchant permissions.
+- [ ] Update HTTP/control-plane authorization:
+      - admin/service routes that name a merchant verify caller authority against `owner_org_id`.
+      - routes that infer a single merchant from the caller fail closed if the org owns zero or multiple active
+        merchants unless the route names a merchant explicitly.
+      - unowned/bootstrap-only merchants are not controllable by arbitrary credentials.
+- [ ] Update docs/progress comments that currently say tenant-owned merchant or `owner_tenant_id`.
+- [ ] Add migration/schema tests proving:
+      - `merchants` has the owner-org column/comment/index.
+      - many merchants can share one owner org.
+      - standalone provisioning rejects/does not create a controllable merchant without an owner org.
+- [ ] Add control-plane tests proving:
+      - user/service token/JWKS principal with org permission can administer that org's merchant.
+      - same credentials cannot administer a merchant owned by another org.
+      - service token resource scope can narrow access but cannot expand ownership.
+      - remote application without the required org authority cannot control a merchant.
+      - embedded/no-AuthKit path remains explicitly out-of-band.
+- [ ] Run `task sqlc`, targeted control-plane/tenancy tests, `go test ./...`, and `task build`.
+
+## Acceptance
+- Merchant ownership has exactly one durable in-band model: AuthKit org ownership.
+- Users, service tokens, and remote applications control merchants only through grants on that org.
+- Standalone/bootstrap OpenRails creates or binds an owner org instead of relying on ownerless merchants.
+- Existing embedded mode remains possible, but its out-of-band security boundary is explicit.
+- No code path treats issuer, service token, or user id as the durable owner of a merchant.
+
+---
+
+# #499: Consolidate merchant-wide configuration into one merchant_configurations row
+
+OpenRails had a dedicated merchant-scoped table that only stored flat delegated-invoker wasted-spend windows. That
+belongs in a general merchant configuration row instead; live per-invoker counters remain in Redis.
+
+Introduce a general one-row-per-merchant configuration table and move the delegated-invoker wasted-spend windows into
+it as the first value. Missing config keys should keep using hardcoded service defaults, so a merchant with no
+configuration row behaves exactly like today.
+
+## Proposed schema
+- `openrails.merchant_configurations`
+  - `merchant_id uuid PRIMARY KEY REFERENCES openrails.merchants(id)`
+  - `config jsonb NOT NULL DEFAULT '{}'`
+  - `config_version bigint NOT NULL DEFAULT 1`
+  - `created_at timestamptz NOT NULL DEFAULT now()`
+  - `updated_at timestamptz NOT NULL DEFAULT now()`
+
+First config key:
+
+```json
+{
+  "delegated_invoker_wasted_spend_windows": [
+    { "key": "burst", "window_seconds": 900, "limit": 500000 }
+  ]
+}
+```
+
+Amounts use the request currency's internal precision. The config supplies limits; Redis keeps the hot counters by
+merchant + payer + invoker + currency + window.
+
+## Candidates Found
+- Move now: delegated-invoker wasted-spend windows -> `merchant_configurations.config.delegated_invoker_wasted_spend_windows`.
+- Evaluate later: deployment-wide feature flags that have merchant-visible behavior, especially dunning mode,
+  processor-subscription-deletion kill switch, and entitlement-expiration kill switch. If made merchant-specific,
+  global config should probably remain an emergency floor/override, not disappear.
+- Evaluate later: processor routing/fallback policy (#288). If implemented as merchant-level policy, prefer this
+  config table over a new one-off table unless query shape demands relational storage.
+- Do not move by default: `money_settings` is per payer/customer/currency, not merchant config.
+- Do not move by default: `tier_policies` and `tier_schedules` have tier/currency/customer override semantics and
+  should stay relational unless we deliberately simplify those policy models.
+- Do not move by default: merchant secrets/DEKs, payment blocklists, catalog/product/price rows, reconciliation
+  state, provider intents, ledger rows, and custom credit types are state/catalog/secrets, not general config.
+
+## Tasks
+- [x] Add `openrails.merchant_configurations` to the Postgres baseline with merchant RLS and sqlc queries for get/upsert.
+- [x] Add a typed Go config model for the JSON payload; start with
+      `delegated_invoker_wasted_spend_windows`.
+- [x] Replace old dedicated-table reads/writes with merchant configuration reads/writes.
+- [x] Delete the old dedicated table, its sqlc queries, generated model, and narrowly named store methods.
+- [x] Rename service/API/internal names to the general merchant configuration setter.
+- [x] Preserve fallback behavior: missing row, missing key, or empty windows uses `DefaultInvokerWastedWindows()`.
+- [x] Update comments/docs so this is described as merchant configuration, not a separate policy table.
+- [x] Add tests for configured windows, missing config fallback, empty config fallback, and JSON decode validation.
+- [x] Run `task sqlc`.
+- [x] Run targeted admission/service tests, `go test ./...`, and `task build`.
+
+## Acceptance
+- There is one general-purpose merchant configuration row per merchant.
+- Delegated-invoker wasted-spend windows are the first stored value in that config.
+- The old one-off table and API naming are gone.
+- Missing merchant config falls back to hardcoded defaults.
+- No payer/customer/currency-scoped state is collapsed into merchant config accidentally.
+
+## Status
+Complete in OpenRails. The Postgres baseline now has `openrails.merchant_configurations`; the delegated-invoker
+wasted-spend windows live under `config.delegated_invoker_wasted_spend_windows`; the old dedicated table, sqlc
+queries/model, store methods, SDK method, HTTP route, and stale test filename are gone. The public service route is
+now `PUT /v1/service/merchant-configuration`, and the SDK method is `SetMerchantConfiguration`.
+
+Verification:
+- `task sqlc`
+- `go test ./pkg/service ./internal/modules/merchantconfig ./internal/modules/admission ./embed ./internal/http/handlers ./internal/http/routes/ginroutes ./migrations/postgres`
+- `go test -tags=integration ./pkg/service -run 'TestMerchantConfiguration|TestWastedSpendDirectPayer' -count=1 -v`
+- `go test -tags=integration ./embed -run Conformance -count=1 -v`
+- `go test ./...`
+- `task build`
 
 ---
 
@@ -83,7 +248,7 @@ pinning.
 Verification:
 - `task sqlc`
 - `go test ./pkg/service ./internal/modules/abuse ./internal/modules/admission ./internal/modules/ratelimit ./embed ./internal/http/handlers`
-- `go test -tags=integration ./pkg/service -run 'TestInvokerWastedSpendPolicy|TestWastedSpendDirectPayer' -count=1 -v`
+- `go test -tags=integration ./pkg/service -run 'TestMerchantConfiguration|TestWastedSpendDirectPayer' -count=1 -v`
 - `go test -tags=integration ./internal/modules/admission -run 'TestAdmit_WastedSpend' -count=1 -v`
 - `go test ./...`
 - `task build`
@@ -92,8 +257,8 @@ Verification:
 
 # #496: Fix wasted-spend policy model: tiered payer budgets + flat invoker backstop
 
-The current `openrails.invoker_wasted_windows` model overfits the per-invoker abuse budget by allowing
-`customer_id`-specific overrides. That conflates two separate controls:
+The previous dedicated per-invoker abuse-budget table overfit the model by allowing `customer_id`-specific overrides.
+That conflated two separate controls:
 
 - PAYER/customer wasted-spend budget: trust-tier based, configured by the host/operator through tier policy
   `bad_spend_windows`, and evaluated against the payer. High-trust payers can tolerate more failed/rejected work;
@@ -107,8 +272,7 @@ Example: Cozy Art may be trusted to waste up to about $10/day as the payer/platf
 invoker under Cozy Art may only get about $0.50/day of wasted spend before OpenRails blocks that invoker.
 
 ## Tasks
-- [x] Rename the policy/config table away from `invoker_wasted_windows` to a name that says what it is, e.g.
-      `invoker_wasted_spend_policies` or `merchant_invoker_wasted_spend_policies`.
+- [x] Rename the dedicated policy/config table away from the customer-override model.
 - [x] Remove `customer_id` from the invoker wasted-spend policy schema and resolver. The policy should be
       tenant/merchant scoped only, with one effective flat set of windows per merchant.
 - [x] Rename service/SDK/API wording as needed so callers set an invoker wasted-spend policy, not a per-customer
@@ -141,20 +305,16 @@ invoker under Cozy Art may only get about $0.50/day of wasted spend before OpenR
 openrails #488 and #492; tensorhub #486 / `per_invoker_bad_spend`.
 
 ## Status
-DONE on the OpenRails side (2026-06-15). Implemented migration 036 to rename
-`openrails.invoker_wasted_windows` -> `openrails.invoker_wasted_spend_policies`, collapse old customer overrides to
-one merchant policy row, drop `customer_id`, and add unique `(merchant_id)`. sqlc now exposes
-`UpsertInvokerWastedSpendPolicy` / `GetInvokerWastedSpendPolicy`; service/SDK/HTTP/embed/remote use
-`SetInvokerWastedSpendPolicy(ctx, windows)` and route `PUT /v1/service/invoker-wasted-spend-policy` with no
-`customer_id`. Redis invoker counters are keyed by merchant + payer + invoker, while payer counters stay merchant +
-payer. No wasted-spend event log/table was added. Tensorhub coordination recorded as tensorhub #491 because that
+DONE on the OpenRails side (2026-06-15). The older implementation collapsed customer overrides to one merchant policy
+row, dropped `customer_id`, and keyed Redis invoker counters by merchant + payer + invoker while payer counters stayed
+merchant + payer. No wasted-spend event log/table was added. Tensorhub coordination recorded as tensorhub #491 because that
 checkout is pinned to OpenRails v0.36.0 and has broader SDK drift (`Actor`, `EstimateMicros`, `LimitMicros`) to update
 with the dependency bump.
 
 ## Verification
 - `task sqlc`
 - `go test ./pkg/service ./internal/modules/abuse ./internal/modules/admission ./embed ./internal/http/handlers ./internal/http/routes/ginroutes`
-- `go test -tags=integration ./pkg/service -run 'TestInvokerWastedSpendPolicy' -count=1 -v`
+- `go test -tags=integration ./pkg/service -run 'TestMerchantConfiguration' -count=1 -v`
 - `go test ./...`
 - `task build`
 
@@ -168,31 +328,22 @@ admit hardcoded `service.DefaultInvokerWastedWindows()` ($5/15m, $20/5h), so a h
 (tensorhub `per_invoker_bad_spend` $1/15m, $3/5h) was silently ignored.
 
 ## Scope
-- Migration 028 + hard-cut migration 034 `openrails.invoker_wasted_windows`: tenant-scoped (customer_id NULLABLE; NULL = tenant-wide
-  default, non-NULL = per-customer override), windows jsonb + version + timestamps, merchant_id RLS — mirrors
-  tier_schedules' "= $2 OR IS NULL" effective resolution.
-- sqlc: UpsertInvokerWastedWindowsDefault/Customer + GetEffectiveInvokerWastedWindows (admission_support.sql).
-- Service: `SetInvokerWastedWindows(ctx, payer, []abuse.WastedWindow)` + `invokerWastedWindows(ctx, payer)` resolver
-  (stored else DefaultInvokerWastedWindows). Wired into ALL 3 hardcoded sites — Admit (WithWastedSpend guard),
-  ReportWastedSpend (guard.Record), AbuseUsage (guard.Usage). DefaultInvokerWastedWindows kept as the FALLBACK.
-- HTTP `ServiceSetInvokerWastedWindows` mounted PUT /v1/service/invoker-wasted-windows (creditsWrite), same router.
-- SDK `SetInvokerWastedWindows(ctx, tenantSubjectID string, []BudgetWindowInput) error` — client.go interface +
-  remote.go (PUT) + embed/client.go (localClient -> svc). Reuses BudgetWindowInput.
+- Earlier implementation added a tenant-scoped per-invoker window table with optional per-customer overrides, windows
+  JSON, version, timestamps, and merchant RLS.
+- sqlc/service/HTTP/SDK exposed setter and resolver paths for those windows.
+- The later #496/#499 work replaced this intermediate shape with a merchant-wide configuration key and removed
+  customer-specific invoker-window overrides.
 
 ## Pairs with
 tensorhub #486 (PushTierLadder now pushes the YAML per_invoker_bad_spend via the new setter); openrails #488
 (per-payer bad_spend), #487 (tier policy template), #476 (tier-schedule end-to-end template).
 
 ## Outcome
-DONE — code complete, tested, and now MERGED ONTO MASTER (consolidation 2026-06-15). Migration 028 introduced
-the config table; migration 034 hard-cuts it to openrails.invoker_wasted_windows. sqlc queries, service
-`SetInvokerWastedWindows` + `invokerWastedWindows` resolver wired into ALL 3 sites (Admit guard,
-ReportWastedSpend, AbuseUsage), HTTP `ServiceSetInvokerWastedWindows`
-(PUT /v1/service/invoker-wasted-windows), SDK `SetInvokerWastedWindows(ctx, tenantSubjectID, []BudgetWindowInput)`
-(client/remote/embed). DefaultInvokerWastedWindows() kept as the FALLBACK. 3 service integration tests
-(configured $1 window denies; unset falls back to $5 default; per-customer override) + extended conformance
-GREEN. HISTORY: originally cut as the orphaned tag v0.31.0 from an isolated worktree (master then held
-uncommitted #491 WIP, so it couldn't be committed there); now reconciled onto master via a real three-way
+DONE — code complete, tested, and merged onto master as an intermediate implementation. Superseded by #496/#499,
+which removed customer-specific invoker-window overrides and stores the current delegated-invoker windows in merchant
+configuration. DefaultInvokerWastedWindows() remains the fallback. HISTORY: originally cut as the orphaned tag
+v0.31.0 from an isolated worktree (master then held uncommitted #491 WIP, so it couldn't be committed there); now
+reconciled onto master via a real three-way
 merge with #491 — the code auto-merged clean (the #491 invoker-rename hunks in service_admission.go were
 byte-identical on both sides). Consolidated version re-tagged at merge time.
 
@@ -998,8 +1149,8 @@ COLUMN RENAME DONE (v0.35.0, migration 030): `actor` -> `invoker_id` on all 5 in
 `invoker_type` discriminator on the 3 attribution tables + a per-invoker index on usage_events. NO FK (the
 invoker is a polymorphic, possibly-cross-DB principal). PUBLIC HARD CUT DONE (2026-06-15, migration 034):
 SDK/service fields are `Invoker`, JSON/query params are `invoker`, `actor` request fallbacks were removed,
-`actor_wasted_windows` became `invoker_wasted_windows`, `/actor-wasted-windows` became
-`/invoker-wasted-windows`, and budget scope input no longer accepts `actor`. AuthKit delegated-token comments
+old wasted-window actor terminology moved to invoker terminology, and budget scope input no longer accepts `actor`.
+AuthKit delegated-token comments
 now say delegated subject/principal rather than actor. invoker_type is a column ready for population (the host
 supplies the kind); wiring it through the SDK/wire is a follow-up.
 
@@ -1385,6 +1536,19 @@ no legacy `usd_micro` balance descriptors, no API that echoes a requested curren
 - Twelfth sweep hard-cut remaining public blank-currency defaults: service/facade/SDK credit movement, account reads,
   usage/revenue, admission, budget, tier, credit-limit, wasted-spend, and `/me/credits` paths now require explicit
   currency (or an explicitly configured SDK currency) instead of silently reading/writing USD.
+- Thirteenth sweep closed the remaining public edge fallbacks: self-account, self-usage, service invoker-balance,
+  service transaction lookup, and embedded admission/budget/tier/wasted-spend/credit-limit helpers now require an
+  explicit currency instead of normalizing a blank request to USD. Admin off-channel payments and catalog price
+  creation also now trim/validate currency before writing money terms.
+- Fourteenth sweep folded require+normalize together: service, HTTP, and embedded currency helpers now reject blank
+  first, then return canonical built-in currency while preserving qualified custom-credit units.
+- Fifteenth sweep removed the remaining database-level currency fallbacks: Postgres money/budget/usage/invoice/tier
+  tables and ClickHouse analytics currency columns no longer default missing currency to USD or empty string. Analytics
+  and provider webhook logging also no longer stamp missing event currency as USD; amount-bearing analytics events now
+  require a currency.
+- Sixteenth sweep removed the last internal blank-currency fallback: `money.NormalizeCurrency("")` now stays blank,
+  `ValidateCurrency("")` / `RequireBillingCurrency("")` reject it, and product credit grant specs require an explicit
+  `unit` instead of defaulting missing grant units to USD.
 - `task sqlc`
 - `go test ./...`
 - `go test -tags=integration ./internal/modules/money -run TestTierSchedule_AutoGraduationByCumulativeSpend -count=1`

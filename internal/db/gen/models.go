@@ -347,17 +347,6 @@ type OpenrailsInvoice struct {
 	UpdatedAt      time.Time
 }
 
-// Operator-configurable flat per-invoker wasted-spend policy (#496): one windows[{key,window_seconds,limit}] set per merchant. Payer wasted-spend budgets remain tier-graduated in tier_policies.policy.bad_spend_windows.
-type OpenrailsInvokerWastedSpendPolicy struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	// JSONB array of {key, window_seconds, limit}: at most limit of wasted spend per invoker window; admit denies when an invoker is over.
-	Windows        []byte
-	WindowsVersion int64
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
-
 // Verified user wallet links for browser self-service billing identity. The wallet must come from trusted delegated-token claims, not request body input.
 type OpenrailsLinkedWallet struct {
 	ID                   uuid.UUID
@@ -395,6 +384,16 @@ type OpenrailsMerchant struct {
 	WebhookHost   *string
 	WebhookPath   *string
 	ProvisionedAt *time.Time
+}
+
+// One merchant-scoped JSON configuration row. Missing keys use service defaults.
+type OpenrailsMerchantConfiguration struct {
+	MerchantID uuid.UUID
+	// JSONB merchant config. delegated_invoker_wasted_spend_windows is an array of {key, window_seconds, limit}; amount values use the request currency internal precision.
+	Config        []byte
+	ConfigVersion int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // Append-only audit log of per-tenant credential put/rotate/delete/test events (issue #225).

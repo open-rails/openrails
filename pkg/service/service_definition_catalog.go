@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -393,13 +394,17 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	if req.ProductID == uuid.Nil {
 		return nil, fmt.Errorf("product_id required")
 	}
-	req.Currency = strings.ToLower(strings.TrimSpace(req.Currency))
+	req.Currency = strings.TrimSpace(req.Currency)
 	if req.UnitAmount <= 0 {
 		return nil, fmt.Errorf("unit_amount must be positive")
 	}
 	if req.Currency == "" {
 		return nil, fmt.Errorf("currency required")
 	}
+	if err := money.ValidateCurrency(req.Currency); err != nil {
+		return nil, err
+	}
+	req.Currency = strings.ToLower(req.Currency)
 
 	// Validate product exists.
 	product, err := products.GetByID(ctx, req.ProductID)

@@ -112,9 +112,8 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// Tier SCHEDULE admin (#476): declare the cumulative-spend ladder ONCE; OpenRails
 	// then auto-maintains each payer's tier (no host cranking of GraduateTier).
 	group.PUT("/tier-schedules", creditsWrite, wrap(httphandlers.ServiceSetTierSchedule))
-	// Flat per-invoker wasted-spend policy admin (#496): operator-configure the
-	// flat per-invoker backstop, replacing the hardcoded DefaultInvokerWastedWindows.
-	group.PUT("/invoker-wasted-spend-policy", creditsWrite, wrap(httphandlers.ServiceSetInvokerWastedSpendPolicy))
+	// Merchant-scoped configuration. Missing keys use hardcoded service defaults.
+	group.PUT("/merchant-configuration", creditsWrite, wrap(httphandlers.ServiceSetMerchantConfiguration))
 	// Graduated-tier READ (#477): the payer's current auto-maintained tier, for a
 	// host that drives its OWN per-tier capacity (e.g. tensorhub's scheduler cap).
 	group.GET("/tier", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetTier))

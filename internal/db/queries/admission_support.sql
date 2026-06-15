@@ -193,23 +193,3 @@ WHERE merchant_id = $1 AND owner = $2
   AND (customer_id = $3 OR customer_id IS NULL)
 ORDER BY (customer_id IS NOT NULL) DESC
 LIMIT 1;
-
--- name: UpsertInvokerWastedSpendPolicy :exec
--- Merchant-wide FLAT per-invoker wasted-spend policy upsert (#496). Payer wasted
--- spend is trust-tier graduated in tier_policies.policy.bad_spend_windows; this
--- policy is the stricter delegated-user backstop and does not vary by customer.
-INSERT INTO openrails.invoker_wasted_spend_policies (
-    id, merchant_id, windows, windows_version, created_at, updated_at
-) VALUES ($1, $2, $3, 1, $4, $5)
-ON CONFLICT (merchant_id) DO UPDATE SET
-    windows = EXCLUDED.windows,
-    windows_version = openrails.invoker_wasted_spend_policies.windows_version + 1,
-    updated_at = EXCLUDED.updated_at;
-
--- name: GetInvokerWastedSpendPolicy :one
--- Merchant-wide FLAT per-invoker wasted-spend policy (#496). No customer-specific
--- override exists; callers fall back to service.DefaultInvokerWastedWindows() on
--- no row or empty windows.
-SELECT * FROM openrails.invoker_wasted_spend_policies
-WHERE merchant_id = $1
-LIMIT 1;

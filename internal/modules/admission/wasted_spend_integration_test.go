@@ -71,12 +71,12 @@ func TestAdmit_WastedSpend_PayerOverBudgetDoesNotDeny(t *testing.T) {
 		Windows:         []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}},
 		BadSpendWindows: []models.BudgetWindowPolicy{{Key: "burst", WindowSeconds: 900, Limit: 1_000}},
 	}))
-	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000_000, Source: "seed"})
+	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	// Under budget: allowed.
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Invoker: "user:a", Tier: "free", Resource: "r",
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:a", Tier: "free", Resource: "r",
 		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
 		Source: "usage", SourceID: "ok1", ExpiresAt: time.Now().Add(time.Hour),
 	})
@@ -92,7 +92,7 @@ func TestAdmit_WastedSpend_PayerOverBudgetDoesNotDeny(t *testing.T) {
 	// Payer over grace is not an admit deny; direct-payer waste is charged at
 	// report time instead.
 	d, err = adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Invoker: "user:a", Tier: "free", Resource: "r",
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:a", Tier: "free", Resource: "r",
 		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
 		Source: "usage", SourceID: "allowed-after-payer-waste", ExpiresAt: time.Now().Add(time.Hour),
 	})
@@ -108,7 +108,7 @@ func TestAdmit_WastedSpend_InvokerOverBudget(t *testing.T) {
 	// No payer bad_spend windows -> only the invoker flat budget (5_000) applies.
 	require.NoError(t, store.UpsertTierPolicy(ctx, payer, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
-	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000_000, Source: "seed"})
+	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	tenant := dbtest.TestTenantID.UUID().String()
@@ -118,7 +118,7 @@ func TestAdmit_WastedSpend_InvokerOverBudget(t *testing.T) {
 		[]abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, Limit: 5_000}}))
 
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Invoker: "user:b", Tier: "free", Resource: "r",
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:b", Tier: "free", Resource: "r",
 		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-invoker", ExpiresAt: time.Now().Add(time.Hour),
 	})
@@ -129,7 +129,7 @@ func TestAdmit_WastedSpend_InvokerOverBudget(t *testing.T) {
 
 	// A DIFFERENT invoker under the same payer is unaffected (per-invoker budget).
 	d, err = adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Invoker: "user:c", Tier: "free", Resource: "r",
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:c", Tier: "free", Resource: "r",
 		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
 		Source: "usage", SourceID: "ok-invoker", ExpiresAt: time.Now().Add(time.Hour),
 	})

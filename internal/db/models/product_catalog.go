@@ -92,7 +92,7 @@ const (
 const DefaultCreditGrantExpiryDays = 365
 
 type CreditGrantSpec struct {
-	// Unit is the currency code of the granted balance (#472). "" => "usd".
+	// Unit is the currency code of the granted balance (#472). Required.
 	// Unqualified = built-in currency; a future tenant/name = custom credit (#473).
 	Unit   string `json:"unit,omitempty"`
 	Amount int64  `json:"amount"`
@@ -104,11 +104,8 @@ type CreditGrantSpec struct {
 	Cadence     CreditGrantCadence `json:"cadence,omitempty"` // once|per_renewal (default once)
 }
 
-// UnitOrDefault returns the grant's currency code, defaulting to "usd" (#472).
-func (g CreditGrantSpec) UnitOrDefault() string {
-	if g.Unit == "" {
-		return "usd"
-	}
+// UnitCode returns the grant's currency/custom-credit unit code.
+func (g CreditGrantSpec) UnitCode() string {
 	return g.Unit
 }
 

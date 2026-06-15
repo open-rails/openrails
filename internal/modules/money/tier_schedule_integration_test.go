@@ -113,11 +113,11 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 	}))
 
 	depA := func(amt int64) {
-		_, e := svc.Deposit(ctxA, money.DepositParams{CustomerID: &payerA, Invoker: payerA.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctxA, money.DepositParams{CustomerID: &payerA, Invoker: payerA.UUID().String(), Currency: money.DefaultCurrency, Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 	depB := func(amt int64) {
-		_, e := svc.Deposit(ctxB, money.DepositParams{CustomerID: &payerB, Invoker: payerB.UUID().String(), Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctxB, money.DepositParams{CustomerID: &payerB, Invoker: payerB.UUID().String(), Currency: money.DefaultCurrency, Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 

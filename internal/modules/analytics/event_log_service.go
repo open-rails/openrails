@@ -283,8 +283,12 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
-			if d.Currency == "" {
-				d.Currency = "usd"
+			if cur, cerr := analyticsCurrency(d.Currency, d.Amount); cerr != nil {
+				log.WithError(cerr).Warn("payment currency")
+				dead(p)
+				continue
+			} else {
+				d.Currency = cur
 			}
 			pays = append(pays, d)
 			paysFiles = append(paysFiles, fileRec{p})
@@ -306,8 +310,12 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
-			if d.Currency == "" {
-				d.Currency = "usd"
+			if cur, cerr := analyticsCurrency(d.Currency, d.Amount); cerr != nil {
+				log.WithError(cerr).Warn("transaction currency")
+				dead(p)
+				continue
+			} else {
+				d.Currency = cur
 			}
 			// Map to PaymentEventData as in LogTransactionEvent
 			userID := ""
@@ -368,8 +376,12 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
-			if d.Currency == "" {
-				d.Currency = "usd"
+			if cur, cerr := analyticsCurrency(d.Currency, d.Amount); cerr != nil {
+				log.WithError(cerr).Warn("chargeback currency")
+				dead(p)
+				continue
+			} else {
+				d.Currency = cur
 			}
 			chgs = append(chgs, d)
 			chgsFiles = append(chgsFiles, fileRec{p})
@@ -582,6 +594,14 @@ func redactPII(s string) string {
 	return redactAndTruncate(s, 1024)
 }
 
+func analyticsCurrency(currency string, amount *float64) (string, error) {
+	currency = strings.TrimSpace(currency)
+	if amount != nil && currency == "" {
+		return "", fmt.Errorf("currency required when amount is set")
+	}
+	return currency, nil
+}
+
 func redactAndTruncate(s string, max int) string {
 	// Simple, safe redactions (best-effort)
 	// Email-like patterns
@@ -658,12 +678,14 @@ func (s *EventLogService) LogPaymentEvent(ctx context.Context, data PaymentEvent
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}
-	if data.Currency == "" {
-		data.Currency = "usd"
+	currency, err := analyticsCurrency(data.Currency, data.Amount)
+	if err != nil {
+		return err
 	}
+	data.Currency = currency
 
 	s.mu.Lock()
-	err := s.ensureConnLocked(ctx)
+	err = s.ensureConnLocked(ctx)
 	if err == nil {
 		err = s.insertPayment(ctx, data)
 	}
@@ -708,9 +730,11 @@ func (s *EventLogService) LogTransactionEvent(ctx context.Context, data Transact
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}
-	if data.Currency == "" {
-		data.Currency = "usd"
+	currency, err := analyticsCurrency(data.Currency, data.Amount)
+	if err != nil {
+		return err
 	}
+	data.Currency = currency
 	if err := s.ensureConn(ctx); err != nil {
 		if err := s.enqueue("transaction", data); err != nil {
 			return fmt.Errorf("failed to enqueue transaction event: %w", err)
@@ -848,9 +872,11 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}
-	if data.Currency == "" {
-		data.Currency = "usd"
+	currency, err := analyticsCurrency(data.Currency, data.Amount)
+	if err != nil {
+		return err
 	}
+	data.Currency = currency
 
 	query := `
 		INSERT INTO chargeback_events (
@@ -861,7 +887,7 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 	`
 
 	s.mu.Lock()
-	err := s.ensureConnLocked(ctx)
+	err = s.ensureConnLocked(ctx)
 	if err == nil {
 		err = s.clickhouseConn.Exec(ctx, query,
 			data.EventID,
@@ -948,7 +974,7 @@ func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, 
 	}
 
 	var priceAmount float64
-	priceCurrency := "usd"
+	priceCurrency := ""
 	var billingDays uint32
 	var productID *uuid.UUID
 	var priceID *uuid.UUID
@@ -993,8 +1019,9 @@ func (s *EventLogService) LogLifecycleChargeSuccess(ctx context.Context, sub *mo
 	if transactionID != "" {
 		txnID = &transactionID
 	}
-	if currency == "" {
-		currency = "usd"
+	currency = strings.TrimSpace(currency)
+	if amount > 0 && currency == "" {
+		return fmt.Errorf("currency required when amount is set")
 	}
 	if metadata == nil {
 		metadata = map[string]interface{}{}
@@ -1052,7 +1079,7 @@ func (s *EventLogService) LogLifecycleFailure(ctx context.Context, subscriptionI
 		UserID:         userID,
 		EventType:      eventType,
 		Processor:      string(processor),
-		Currency:       "usd",
+		Currency:       "",
 		BillingInfo:    "{}",
 		WebhookSource:  "lifecycle",
 		Metadata:       CreateMetadataJSON(metadata),

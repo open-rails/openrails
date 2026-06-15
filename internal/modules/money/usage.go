@@ -24,7 +24,7 @@ type RecordUsageParams struct {
 	// resolved from Invoker (self-hosted/personal case), never synthesized.
 	Payer     *identity.CustomerID
 	Invoker   string // invoker (attribution only)
-	Currency  string // "" => DefaultCurrency (#472)
+	Currency  string
 	EventType string // metered event kind, e.g. "gpt-4o"
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
 	// cached_input_tokens, requests, ...). Used for reporting + #298 throughput.

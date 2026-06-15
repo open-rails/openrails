@@ -9,7 +9,7 @@ import (
 // the codebase is the authority (there is no DB CHECK). amount columns are
 // integers in the currency's registered internal precision.
 
-// DefaultCurrency is assumed wherever a currency is unset ("").
+// DefaultCurrency is the explicit USD currency code used by callers that want USD.
 const DefaultCurrency = "USD"
 
 // Currency is a system currency code and its minor-unit scale.
@@ -27,24 +27,20 @@ var currencies = map[string]Currency{
 	"SOL":  {Code: "SOL", Decimals: 9, Kind: "crypto"},
 }
 
-// normalizeCurrency maps "" to the default and upper-cases the code, so built-in
-// currency codes are case-insensitive ("usd" == "USD"). Registry keys are upper.
+// normalizeCurrency upper-cases the code, so built-in currency codes are
+// case-insensitive ("usd" == "USD"). Registry keys are upper.
 func normalizeCurrency(c string) string {
-	c = strings.ToUpper(strings.TrimSpace(c))
-	if c == "" {
-		return DefaultCurrency
-	}
-	return c
+	return strings.ToUpper(strings.TrimSpace(c))
 }
 
-// NormalizeCurrency maps "" to the default and upper-cases built-in currency
-// codes. It is exported for sibling modules that key native-money rows by
-// currency but still rely on this package's registry as the source of truth.
+// NormalizeCurrency upper-cases built-in currency codes. It is exported for
+// sibling modules that key native-money rows by currency but still rely on this
+// package's registry as the source of truth.
 func NormalizeCurrency(c string) string {
 	return normalizeCurrency(c)
 }
 
-// ValidateCurrency errors on an unknown code (after normalizing "").
+// ValidateCurrency errors on a blank or unknown code.
 func ValidateCurrency(c string) error {
 	if _, ok := currencies[normalizeCurrency(c)]; !ok {
 		return fmt.Errorf("money: unknown currency %q", c)

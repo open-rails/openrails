@@ -59,7 +59,7 @@ func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, 
 
 	cs := money.NewMoneyService(dbi)
 	// Fund the payer generously so money never blocks (budgets are the gate here).
-	_, err = cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000_000_000, Source: "seed"})
+	_, err = cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	tierStore := admission.NewTierPolicyStore(dbi)
@@ -72,7 +72,7 @@ func scopeEnv(t *testing.T) (*admission.Admitter, *admission.BudgetPolicyStore, 
 
 func mustReq(payer identity.CustomerID, invoker, srcID string, roles []uuid.UUID, amount int64) admission.AdmitRequest {
 	return admission.AdmitRequest{
-		CustomerID: payer, Invoker: invoker, Tier: "free", Resource: "gpt-4o",
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: invoker, Tier: "free", Resource: "gpt-4o",
 		Roles: roles, Amounts: map[string]int64{"request": 1},
 		EstimatedAmount: amount, Source: "usage", SourceID: srcID, ExpiresAt: time.Now().Add(time.Hour),
 	}

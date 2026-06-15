@@ -768,7 +768,7 @@ CREATE TABLE openrails.invoices (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     customer_id uuid CONSTRAINT invoices_customer_id_not_null NOT NULL,
-    currency text DEFAULT ''::text NOT NULL,
+    currency text NOT NULL,
     period_from timestamp with time zone NOT NULL,
     period_to timestamp with time zone NOT NULL,
     usage_total bigint DEFAULT 0 NOT NULL,
@@ -925,7 +925,7 @@ CREATE TABLE openrails.budget_inflight_holds (
     merchant_id uuid NOT NULL,
     customer_id uuid CONSTRAINT budget_inflight_holds_customer_id_not_null NOT NULL,
     invoker_id text CONSTRAINT budget_inflight_holds_invoker_id_not_null NOT NULL,
-    currency text DEFAULT 'USD'::text NOT NULL,
+    currency text NOT NULL,
     amount bigint NOT NULL,
     captured bigint DEFAULT 0 NOT NULL,
     status text DEFAULT 'active'::text NOT NULL,
@@ -964,7 +964,7 @@ CREATE TABLE openrails.budget_window_state (
     merchant_id uuid NOT NULL,
     customer_id uuid CONSTRAINT budget_window_state_customer_id_not_null NOT NULL,
     invoker_id text CONSTRAINT budget_window_state_invoker_id_not_null NOT NULL,
-    currency text DEFAULT 'USD'::text NOT NULL,
+    currency text NOT NULL,
     window_key text CONSTRAINT budget_window_state_window_key_not_null NOT NULL,
     cadence text NOT NULL,
     window_seconds bigint NOT NULL,
@@ -1062,7 +1062,7 @@ CREATE TABLE openrails.tier_schedules (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL DEFAULT COALESCE((NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
     customer_id uuid,
-    currency text DEFAULT 'USD'::text NOT NULL,
+    currency text NOT NULL,
     owner text DEFAULT 'platform'::text NOT NULL,
     rungs jsonb DEFAULT '[]'::jsonb NOT NULL,
     schedule_version bigint DEFAULT 1 NOT NULL,
@@ -1090,30 +1090,28 @@ COMMENT ON COLUMN openrails.tier_schedules.currency IS 'Currency whose cumulativ
 COMMENT ON COLUMN openrails.tier_schedules.rungs IS 'Ordered JSONB array of {tier, min_cumulative_paid_amount}; a payer''s tier = highest rung whose min_cumulative_paid_amount <= same-currency cumulative_paid.';
 
 -- =============================================================================
--- invoker_wasted_spend_policies
+-- merchant_configurations
 -- =============================================================================
 
-CREATE TABLE openrails.invoker_wasted_spend_policies (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL DEFAULT COALESCE((NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
-    windows jsonb DEFAULT '[]'::jsonb NOT NULL,
-    windows_version bigint DEFAULT 1 NOT NULL,
+CREATE TABLE openrails.merchant_configurations (
+    merchant_id uuid NOT NULL,
+    config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT invoker_wasted_spend_policies_pkey PRIMARY KEY (id)
+    CONSTRAINT merchant_configurations_pkey PRIMARY KEY (merchant_id),
+    CONSTRAINT merchant_configurations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id)
 );
 
-ALTER TABLE ONLY openrails.invoker_wasted_spend_policies FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.merchant_configurations FORCE ROW LEVEL SECURITY;
 
-CREATE UNIQUE INDEX uq_invoker_wasted_spend_policies_merchant ON openrails.invoker_wasted_spend_policies USING btree (merchant_id);
+ALTER TABLE openrails.merchant_configurations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.merchant_configurations USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-ALTER TABLE openrails.invoker_wasted_spend_policies ENABLE ROW LEVEL SECURITY;
-CREATE POLICY merchant_isolation ON openrails.invoker_wasted_spend_policies USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_configurations TO openrails_app;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoker_wasted_spend_policies TO openrails_app;
-
-COMMENT ON TABLE openrails.invoker_wasted_spend_policies IS 'Operator-configurable flat per-invoker wasted-spend policy (#496): one windows[{key,window_seconds,limit}] set per merchant. Payer wasted-spend budgets remain tier-graduated in tier_policies.policy.bad_spend_windows.';
-COMMENT ON COLUMN openrails.invoker_wasted_spend_policies.windows IS 'JSONB array of {key, window_seconds, limit}: at most limit of wasted spend per invoker window; admit denies when an invoker is over.';
+COMMENT ON TABLE openrails.merchant_configurations IS 'One merchant-scoped JSON configuration row. Missing keys use service defaults.';
+COMMENT ON COLUMN openrails.merchant_configurations.config IS 'JSONB merchant config. delegated_invoker_wasted_spend_windows is an array of {key, window_seconds, limit}; amount values use the request currency internal precision.';
 
 -- =============================================================================
 -- usage_events
@@ -1125,7 +1123,7 @@ CREATE TABLE openrails.usage_events (
     customer_id uuid CONSTRAINT usage_events_customer_id_not_null NOT NULL,
     invoker_id text CONSTRAINT usage_events_invoker_id_not_null NOT NULL,
     invoker_type text,
-    currency text DEFAULT 'USD'::text NOT NULL,
+    currency text NOT NULL,
     resource text,
     event_type text NOT NULL,
     dimensions jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -1378,7 +1376,7 @@ CREATE TABLE openrails.money_transactions (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     merchant_id uuid NOT NULL,
     customer_id uuid CONSTRAINT money_transactions_customer_id_not_null NOT NULL,
-    currency text DEFAULT 'USD'::text NOT NULL,
+    currency text NOT NULL,
     CONSTRAINT money_transactions_pkey PRIMARY KEY (id),
     CONSTRAINT money_transactions_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
 );
@@ -1417,7 +1415,7 @@ CREATE TABLE openrails.money_blocks (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     merchant_id uuid NOT NULL,
     customer_id uuid CONSTRAINT money_blocks_customer_id_not_null NOT NULL,
-    currency text DEFAULT 'USD'::text NOT NULL,
+    currency text NOT NULL,
     CONSTRAINT money_blocks_pkey PRIMARY KEY (id),
     CONSTRAINT money_blocks_source_transaction_id_fkey FOREIGN KEY (source_transaction_id) REFERENCES openrails.money_transactions(id),
     CONSTRAINT money_blocks_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
@@ -1471,7 +1469,7 @@ CREATE TABLE openrails.money_settings (
     suspend_reason text,
     tier text,
     tier_source text DEFAULT 'auto'::text NOT NULL,
-    currency text DEFAULT 'USD'::text NOT NULL,
+    currency text NOT NULL,
     credit_limit_amount bigint DEFAULT 0 NOT NULL,
     CONSTRAINT money_settings_pkey PRIMARY KEY (id),
     CONSTRAINT money_settings_alert_pct_chk CHECK (((alert_threshold_pct >= 0) AND (alert_threshold_pct <= 100))),
@@ -1517,7 +1515,7 @@ CREATE TABLE openrails.money_spend_limits (
     max_spend_per_month bigint,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    currency text DEFAULT 'USD'::text NOT NULL,
+    currency text NOT NULL,
     CONSTRAINT money_spend_limits_pkey PRIMARY KEY (id),
     CONSTRAINT money_spend_limits_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
 );
@@ -1549,7 +1547,7 @@ CREATE TABLE openrails.money_windows (
     expires_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    currency text DEFAULT 'USD'::text NOT NULL,
+    currency text NOT NULL,
     CONSTRAINT money_windows_pkey PRIMARY KEY (id),
     CONSTRAINT money_windows_status_chk CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text, 'expired'::text]))),
     CONSTRAINT money_windows_held_nonneg_chk CHECK ((held_amount >= 0)),

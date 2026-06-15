@@ -78,7 +78,7 @@ func spendEnv(t *testing.T) (*admission.Admitter, *budgets.Service, *clockwork.F
 	cs := money.NewMoneyService(dbi)
 	// Fund the payer well above any test's spend so the money axis never gates;
 	// the budget windows are the unit under test.
-	_, err = cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000_000_000_000, Source: "seed"})
+	_, err = cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	// Fixed wall clock so window math is deterministic; advance to cross windows.
@@ -106,7 +106,7 @@ func cozyTier1() models.ThroughputPolicy {
 
 func spendReq(payer identity.CustomerID, invoker, srcID string, amount int64) admission.AdmitRequest {
 	return admission.AdmitRequest{
-		CustomerID: payer, Invoker: invoker, Tier: "tier_1", Resource: "gpt-4o",
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: invoker, Tier: "tier_1", Resource: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, EstimatedAmount: amount,
 		Source: "gen", SourceID: srcID, ExpiresAt: time.Now().Add(time.Hour),
 	}

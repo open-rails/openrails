@@ -41,7 +41,7 @@ func spendTestEnv(t *testing.T) (*money.MoneyService, *pgxpool.Pool, identity.Cu
 	svc := money.NewMoneyService(dbi)
 	// Fund the payer generously so balance is never the binding constraint here.
 	_, err := svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Invoker: payerID.String(), Amount: 1_000_000, Source: "test_seed",
+		CustomerID: &payer, Invoker: payerID.String(), Currency: money.DefaultCurrency, Amount: 1_000_000, Source: "test_seed",
 	})
 	require.NoError(t, err)
 	return svc, pool, payer, money.DefaultCurrency, ctx
@@ -70,7 +70,7 @@ func TestSpendPolicy_DailyCap(t *testing.T) {
 	require.NoError(t, err)
 
 	// Spend 500 (settled withdrawal).
-	_, err = svc.Withdraw(ctx, money.WithdrawParams{CustomerID: &payer, Invoker: "user:a", Amount: 500, Source: "usage"})
+	_, err = svc.Withdraw(ctx, money.WithdrawParams{CustomerID: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, Amount: 500, Source: "usage"})
 	require.NoError(t, err)
 
 	allow, err := svc.CheckSpendAllowed(ctx, payer, money.DefaultCurrency, "user:a", 400) // 500+400 <= 1000
@@ -102,9 +102,9 @@ func TestSpendPolicy_PerInvokerCap(t *testing.T) {
 	require.NoError(t, err)
 
 	// alice spends 80; bob spends 80 (bob has no limit).
-	_, err = svc.Withdraw(ctx, money.WithdrawParams{CustomerID: &payer, Invoker: "user:alice", Amount: 80, Source: "usage"})
+	_, err = svc.Withdraw(ctx, money.WithdrawParams{CustomerID: &payer, Invoker: "user:alice", Currency: money.DefaultCurrency, Amount: 80, Source: "usage"})
 	require.NoError(t, err)
-	_, err = svc.Withdraw(ctx, money.WithdrawParams{CustomerID: &payer, Invoker: "user:bob", Amount: 80, Source: "usage"})
+	_, err = svc.Withdraw(ctx, money.WithdrawParams{CustomerID: &payer, Invoker: "user:bob", Currency: money.DefaultCurrency, Amount: 80, Source: "usage"})
 	require.NoError(t, err)
 
 	deny, err := svc.CheckSpendAllowed(ctx, payer, money.DefaultCurrency, "user:alice", 30) // 80+30 > 100
@@ -153,7 +153,7 @@ func TestSpendPolicy_WarnOnlyDoesNotBlock(t *testing.T) {
 		MaxSpendPerDay: &cap, HardStopOnBreach: &hard,
 	})
 	require.NoError(t, err)
-	_, err = svc.Withdraw(ctx, money.WithdrawParams{CustomerID: &payer, Invoker: "user:a", Amount: 100, Source: "usage"})
+	_, err = svc.Withdraw(ctx, money.WithdrawParams{CustomerID: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, Amount: 100, Source: "usage"})
 	require.NoError(t, err)
 
 	dec, err := svc.CheckSpendAllowed(ctx, payer, money.DefaultCurrency, "user:a", 50) // over cap but warn-only

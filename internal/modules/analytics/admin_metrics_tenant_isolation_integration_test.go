@@ -216,7 +216,7 @@ func createMinimalDailyMetrics(t *testing.T, ctx context.Context, conn driver.Co
 	ddl := `
 CREATE TABLE daily_metrics (
     snapshot_date Date,
-    currency LowCardinality(String) DEFAULT 'usd',
+    currency LowCardinality(String),
     tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
     subscription_revenue_cents Int64,
     one_time_revenue_cents Int64,

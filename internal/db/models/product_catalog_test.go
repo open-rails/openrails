@@ -8,8 +8,8 @@ import (
 func TestCreditsSpec_UnmarshalJSON_V2(t *testing.T) {
 	var cs CreditsSpec
 	raw := []byte(`{
-		"api_credits": {"amount": 1000, "expires_days": 30, "cadence": "once"},
-		"gpu_minutes": {"amount": 6000, "expires_days": 7, "cadence": "per_renewal"},
+		"api_credits": {"amount": 1000, "unit": "USD", "expires_days": 30, "cadence": "once"},
+		"gpu_minutes": {"amount": 6000, "unit": "USD", "expires_days": 7, "cadence": "per_renewal"},
 		"eur_promo":   {"amount": 500, "unit": "EUR", "expiry_days": 90}
 	}`)
 	if err := json.Unmarshal(raw, &cs); err != nil {
@@ -24,24 +24,24 @@ func TestCreditsSpec_UnmarshalJSON_V2(t *testing.T) {
 	if cs["gpu_minutes"].Cadence != CreditGrantCadencePerRenewal {
 		t.Fatalf("unexpected gpu_minutes cadence: %s", cs["gpu_minutes"].Cadence)
 	}
-	// new fields: unit + expiry_days parse; backward-compat entries default usd/365-on-omit.
-	if got := cs["eur_promo"].UnitOrDefault(); got != "EUR" {
+	// new fields: unit + expiry_days parse.
+	if got := cs["eur_promo"].UnitCode(); got != "EUR" {
 		t.Fatalf("eur_promo unit = %q, want EUR", got)
 	}
 	if got := cs["eur_promo"].EffectiveExpiryDays(); got != 90 {
 		t.Fatalf("eur_promo expiry = %d, want 90", got)
 	}
-	if got := cs["api_credits"].UnitOrDefault(); got != "usd" {
-		t.Fatalf("api_credits (no unit) = %q, want usd default", got)
+	if got := cs["api_credits"].UnitCode(); got != "USD" {
+		t.Fatalf("api_credits unit = %q, want USD", got)
 	}
 }
 
 func TestCreditGrantSpec_UnitAndExpiryDefaults(t *testing.T) {
-	// unit defaults to usd; explicit unit preserved.
-	if got := (CreditGrantSpec{}).UnitOrDefault(); got != "usd" {
-		t.Fatalf("default unit = %q, want usd", got)
+	// unit has no default; explicit unit preserved.
+	if got := (CreditGrantSpec{}).UnitCode(); got != "" {
+		t.Fatalf("blank unit = %q, want empty", got)
 	}
-	if got := (CreditGrantSpec{Unit: "EUR"}).UnitOrDefault(); got != "EUR" {
+	if got := (CreditGrantSpec{Unit: "EUR"}).UnitCode(); got != "EUR" {
 		t.Fatalf("explicit unit = %q, want EUR", got)
 	}
 	// expiry: omitted => 365; explicit 0 => never (0); legacy expires_days honored.

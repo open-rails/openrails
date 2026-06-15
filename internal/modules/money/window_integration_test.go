@@ -44,6 +44,7 @@ func windowEnv(t *testing.T, depositAmount int64) (context.Context, *pgxpool.Poo
 		_, err := svc.Deposit(ctx, money.DepositParams{
 			CustomerID: &payer,
 			Invoker:    payer.UUID().String(),
+			Currency:   money.DefaultCurrency,
 			Amount:     depositAmount,
 			Source:     "test_deposit",
 		})
@@ -68,7 +69,7 @@ func TestCreditWindows_Lifecycle(t *testing.T) {
 
 	// Open: funds leave available immediately (a REAL hold).
 	w, err := svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payer, Invoker: "user:alice", Amount: 600,
+		Payer: payer, Invoker: "user:alice", Currency: money.DefaultCurrency, Amount: 600,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.NoError(t, err)
@@ -165,7 +166,7 @@ func TestCreditWindows_OpenInsufficientFunds(t *testing.T) {
 	ctx, _, svc, payer, cur := windowEnv(t, 100)
 
 	_, err := svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payer, Invoker: "user:poor", Amount: 200,
+		Payer: payer, Invoker: "user:poor", Currency: money.DefaultCurrency, Amount: 200,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.ErrorIs(t, err, money.ErrInsufficientCredits)
@@ -173,20 +174,20 @@ func TestCreditWindows_OpenInsufficientFunds(t *testing.T) {
 	// A $0 payer cannot open a window at all.
 	broke := identity.CustomerIDFromString(uuid.NewString())
 	_, err = svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: broke, Invoker: "user:broke", Amount: 1,
+		Payer: broke, Invoker: "user:broke", Currency: money.DefaultCurrency, Amount: 1,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.ErrorIs(t, err, money.ErrInsufficientCredits)
 
 	// Partial funds work; the SECOND open is gated on what's left available.
 	w, err := svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payer, Invoker: "user:poor", Amount: 80,
+		Payer: payer, Invoker: "user:poor", Currency: money.DefaultCurrency, Amount: 80,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.NoError(t, err)
 	requireBalance(t, ctx, svc, payer, cur, 100, 80)
 	_, err = svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payer, Invoker: "user:poor", Amount: 50,
+		Payer: payer, Invoker: "user:poor", Currency: money.DefaultCurrency, Amount: 50,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.ErrorIs(t, err, money.ErrInsufficientCredits)
@@ -206,7 +207,7 @@ func TestCreditWindows_ExpiryReleasesRemainder(t *testing.T) {
 
 	// Already past expiry; the sweep hasn't run yet.
 	w, err := svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payer, Invoker: "user:exp", Amount: 300,
+		Payer: payer, Invoker: "user:exp", Currency: money.DefaultCurrency, Amount: 300,
 		ExpiresAt: time.Now().Add(-1 * time.Minute).UTC(),
 	})
 	require.NoError(t, err)
@@ -260,18 +261,19 @@ func TestCreditWindows_CrossPayerSettleBatch(t *testing.T) {
 	_, err := svc.Deposit(ctx, money.DepositParams{
 		CustomerID: &payerB,
 		Invoker:    payerB.UUID().String(),
+		Currency:   money.DefaultCurrency,
 		Amount:     400,
 		Source:     "test_deposit",
 	})
 	require.NoError(t, err)
 
 	wa, err := svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payerA, Invoker: "user:a", Amount: 300,
+		Payer: payerA, Invoker: "user:a", Currency: money.DefaultCurrency, Amount: 300,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.NoError(t, err)
 	wb, err := svc.OpenWindow(ctx, money.OpenWindowParams{
-		Payer: payerB, Invoker: "user:b", Amount: 200,
+		Payer: payerB, Invoker: "user:b", Currency: money.DefaultCurrency, Amount: 200,
 		ExpiresAt: time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.NoError(t, err)

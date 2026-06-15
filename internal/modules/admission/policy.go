@@ -172,56 +172,6 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Cust
 	}, nil
 }
 
-// UpsertInvokerWastedSpendPolicy stores the merchant-wide FLAT per-invoker
-// wasted-spend policy (#496). Payer wasted spend is trust-tier graduated in tier
-// policy; this delegated-user backstop does not vary by customer.
-func (s *TierPolicyStore) UpsertInvokerWastedSpendPolicy(ctx context.Context, windows []models.BudgetWindowPolicy) error {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	tenantID := tid.UUID()
-	now := time.Now().UTC()
-	windowsJSON, err := json.Marshal(windows)
-	if err != nil {
-		return fmt.Errorf("admission: encode invoker wasted windows: %w", err)
-	}
-	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		return s.db.Gen(ctx).UpsertInvokerWastedSpendPolicy(ctx, gen.UpsertInvokerWastedSpendPolicyParams{
-			ID: uuidutil.NewV7(), MerchantID: tenantID, Windows: windowsJSON,
-			CreatedAt: now, UpdatedAt: now,
-		})
-	})
-}
-
-// GetInvokerWastedSpendPolicy returns the merchant-wide flat per-invoker
-// wasted-spend policy, or nil when none is stored (#496). The caller falls back
-// to a hardcoded default on nil.
-func (s *TierPolicyStore) GetInvokerWastedSpendPolicy(ctx context.Context) ([]models.BudgetWindowPolicy, error) {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	tenantID := tid.UUID()
-	var out []models.BudgetWindowPolicy
-	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		row, e := s.db.Gen(ctx).GetInvokerWastedSpendPolicy(ctx, tenantID)
-		if errors.Is(e, pgx.ErrNoRows) {
-			return nil
-		}
-		if e != nil {
-			return e
-		}
-		if len(row.Windows) > 0 {
-			if uerr := json.Unmarshal(row.Windows, &out); uerr != nil {
-				return fmt.Errorf("admission: decode invoker wasted windows: %w", uerr)
-			}
-		}
-		return nil
-	})
-	return out, err
-}
-
 // BudgetPolicyStore reads/writes hierarchical money-budget policies (#473) —
 // {scope, owner, windows[]} rows in openrails.budget_policies. The OWNER
 // discriminator is the write-authz split: SetSubjectBudgetPolicy may only write

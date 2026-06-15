@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/modules/money"
 )
 
 func requireCurrency(currency string) (string, error) {
@@ -10,5 +12,8 @@ func requireCurrency(currency string) (string, error) {
 	if currency == "" {
 		return "", fmt.Errorf("currency required")
 	}
-	return currency, nil
+	if money.IsQualifiedUnit(currency) {
+		return currency, nil
+	}
+	return money.NormalizeCurrency(currency), nil
 }

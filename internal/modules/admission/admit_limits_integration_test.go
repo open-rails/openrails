@@ -20,12 +20,12 @@ func TestAdmit_SingleChargeCapDeny(t *testing.T) {
 		Windows:               []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}},
 		MaxSingleChargeAmount: 1_000,
 	}))
-	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000_000, Source: "seed"})
+	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	// Over the per-charge ceiling -> deny (even though the balance covers it).
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Invoker: "user:a", Tier: "free", Resource: "gpt-4o",
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:a", Tier: "free", Resource: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 1_001,
 		Source: "usage", SourceID: "big1", ExpiresAt: time.Now().Add(time.Hour),
 	})
@@ -38,7 +38,7 @@ func TestAdmit_SingleChargeCapDeny(t *testing.T) {
 
 	// At the ceiling -> allowed; the resolved cap is surfaced.
 	d, err = adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Invoker: "user:a", Tier: "free", Resource: "gpt-4o",
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:a", Tier: "free", Resource: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 1_000,
 		Source: "usage", SourceID: "ok1", ExpiresAt: time.Now().Add(time.Hour),
 	})
@@ -55,12 +55,12 @@ func TestAdmit_ConcurrentHeldCapDeny(t *testing.T) {
 		Windows:                 []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}},
 		MaxConcurrentHeldAmount: 1_500,
 	}))
-	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000_000, Source: "seed"})
+	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	// First hold (1000) is well under the cap; surfaced held == the placed hold.
 	d1, err := adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Invoker: "user:a", Tier: "free", Resource: "gpt-4o",
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:a", Tier: "free", Resource: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 1_000,
 		Source: "usage", SourceID: "h1", ExpiresAt: time.Now().Add(time.Hour),
 	})
@@ -71,7 +71,7 @@ func TestAdmit_ConcurrentHeldCapDeny(t *testing.T) {
 
 	// Second hold (1000) would push active-held to 2000 > 1500 -> deny.
 	d2, err := adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Invoker: "user:a", Tier: "free", Resource: "gpt-4o",
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:a", Tier: "free", Resource: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 1_000,
 		Source: "usage", SourceID: "h2", ExpiresAt: time.Now().Add(time.Hour),
 	})
@@ -89,11 +89,11 @@ func TestAdmit_NoAdmitLimits_Unchanged(t *testing.T) {
 	adm, cs, store, payer, _, ctx, _ := admitEnv(t)
 	require.NoError(t, store.UpsertTierPolicy(ctx, payer, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
-	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000_000, Source: "seed"})
+	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
-		CustomerID: payer, Invoker: "user:a", Tier: "free", Resource: "gpt-4o",
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:a", Tier: "free", Resource: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 900_000,
 		Source: "usage", SourceID: "big", ExpiresAt: time.Now().Add(time.Hour),
 	})

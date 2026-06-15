@@ -96,13 +96,10 @@ type Client interface {
 	// default schedule (the common case); a non-empty one sets a per-subject
 	// override. owner=platform (the subject cannot see/loosen it).
 	SetTierSchedule(ctx context.Context, tenantSubjectID, currency string, schedule []TierScheduleRung) error
-	// SetInvokerWastedSpendPolicy configures the operator-set FLAT per-INVOKER
-	// wasted-spend policy (#496): the fixed delegated-user backstop OpenRails
-	// enforces at admit. It is merchant-scoped and does not vary by payer/customer.
-	// When unset, OpenRails falls back to its hardcoded default. Reuses
-	// BudgetWindowInput (key + window_seconds + limit; cadence ignored — these are
-	// flat rolling windows). OPERATOR-only — NOT self-serve.
-	SetInvokerWastedSpendPolicy(ctx context.Context, windows []BudgetWindowInput) error
+	// SetMerchantConfiguration configures merchant-scoped OpenRails behavior.
+	// Missing keys fall back to hardcoded service defaults. OPERATOR-only — NOT
+	// self-serve.
+	SetMerchantConfiguration(ctx context.Context, in MerchantConfigurationInput) error
 	// GetTier returns the payer's CURRENT graduated tier (#477) for one currency:
 	// the tier OpenRails auto-maintains from same-currency cumulative paid spend
 	// against the persisted schedule (#476), or a manual admin override. Empty
@@ -452,6 +449,14 @@ type BudgetWindowInput struct {
 	// windows): session opens at the user's first charged request and closes
 	// WindowSeconds later; fixed ticks at anchor + k*WindowSeconds forever.
 	Cadence string `json:"cadence,omitempty"`
+}
+
+// MerchantConfigurationInput is the public SDK shape for
+// PUT /v1/service/merchant-configuration.
+type MerchantConfigurationInput struct {
+	// DelegatedInvokerWastedSpendWindows configures the flat delegated-invoker
+	// abuse backstop. Amounts use the request currency's internal precision.
+	DelegatedInvokerWastedSpendWindows []BudgetWindowInput `json:"delegated_invoker_wasted_spend_windows,omitempty"`
 }
 
 // BudgetWindow is one computed window from POST /v1/service/budget/check,

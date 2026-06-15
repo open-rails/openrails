@@ -1504,7 +1504,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		}
 
 		priceAmount := 0.0
-		priceCurrency := "usd"
+		priceCurrency := ""
 		billingCycleDays := uint32(0)
 		var productID *uuid.UUID
 		var priceID *uuid.UUID
@@ -2648,7 +2648,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 
 	// Log renewal failure event to ClickHouse - standardized with NMI-backed processors
 	if s.EventLogService != nil {
-		failureCurrency := "usd"
+		failureCurrency := ""
 		if subscription.Price != nil {
 			if curr := strings.ToLower(strings.TrimSpace(subscription.Price.Currency)); curr != "" {
 				failureCurrency = curr

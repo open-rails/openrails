@@ -323,29 +323,6 @@ func (q *Queries) GetEffectiveTierSchedule(ctx context.Context, arg GetEffective
 	return i, err
 }
 
-const getInvokerWastedSpendPolicy = `-- name: GetInvokerWastedSpendPolicy :one
-SELECT id, merchant_id, windows, windows_version, created_at, updated_at FROM openrails.invoker_wasted_spend_policies
-WHERE merchant_id = $1
-LIMIT 1
-`
-
-// Merchant-wide FLAT per-invoker wasted-spend policy (#496). No customer-specific
-// override exists; callers fall back to service.DefaultInvokerWastedWindows() on
-// no row or empty windows.
-func (q *Queries) GetInvokerWastedSpendPolicy(ctx context.Context, merchantID uuid.UUID) (OpenrailsInvokerWastedSpendPolicy, error) {
-	row := q.db.QueryRow(ctx, getInvokerWastedSpendPolicy, merchantID)
-	var i OpenrailsInvokerWastedSpendPolicy
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Windows,
-		&i.WindowsVersion,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getTierPolicy = `-- name: GetTierPolicy :one
 SELECT id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at FROM openrails.tier_policies
 WHERE merchant_id = $1 AND tier = $3
@@ -704,38 +681,6 @@ func (q *Queries) UpsertBudgetPolicy(ctx context.Context, arg UpsertBudgetPolicy
 		arg.ScopeKey,
 		arg.Windows,
 		arg.PolicyVersion,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-	)
-	return err
-}
-
-const upsertInvokerWastedSpendPolicy = `-- name: UpsertInvokerWastedSpendPolicy :exec
-INSERT INTO openrails.invoker_wasted_spend_policies (
-    id, merchant_id, windows, windows_version, created_at, updated_at
-) VALUES ($1, $2, $3, 1, $4, $5)
-ON CONFLICT (merchant_id) DO UPDATE SET
-    windows = EXCLUDED.windows,
-    windows_version = openrails.invoker_wasted_spend_policies.windows_version + 1,
-    updated_at = EXCLUDED.updated_at
-`
-
-type UpsertInvokerWastedSpendPolicyParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Windows    []byte
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
-// Merchant-wide FLAT per-invoker wasted-spend policy upsert (#496). Payer wasted
-// spend is trust-tier graduated in tier_policies.policy.bad_spend_windows; this
-// policy is the stricter delegated-user backstop and does not vary by customer.
-func (q *Queries) UpsertInvokerWastedSpendPolicy(ctx context.Context, arg UpsertInvokerWastedSpendPolicyParams) error {
-	_, err := q.db.Exec(ctx, upsertInvokerWastedSpendPolicy,
-		arg.ID,
-		arg.MerchantID,
-		arg.Windows,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)

@@ -27,10 +27,10 @@ func TestFinalizeInvoice_PrepaidStatement(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
 
-	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 100_000, Source: "purchase"})
+	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "purchase"})
 	require.NoError(t, err)
 	rec := func(et string, amt int64, dims map[string]int64, sid string) {
-		_, e := svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", EventType: et, Dimensions: dims, Amount: amt, Source: "req", SourceID: sid})
+		_, e := svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", Currency: money.DefaultCurrency, EventType: et, Dimensions: dims, Amount: amt, Source: "req", SourceID: sid})
 		require.NoError(t, e)
 	}
 	rec("gpt-4o", 5_000, map[string]int64{"input_tokens": 100, "output_tokens": 50}, "r1")
@@ -38,7 +38,7 @@ func TestFinalizeInvoice_PrepaidStatement(t *testing.T) {
 	rec("dall-e-3", 2_000, map[string]int64{"images": 4}, "r3")
 
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
-	inv, err := svc.FinalizeInvoice(ctx, payer, "", from, to)
+	inv, err := svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, from, to)
 	require.NoError(t, err)
 	require.Equal(t, "finalized", inv.Status)
 	require.NotNil(t, inv.FinalizedAt)
@@ -63,7 +63,7 @@ func TestFinalizeInvoice_PrepaidStatement(t *testing.T) {
 	require.Equal(t, int64(100_000), inv.MoneyMovements["deposit"])
 
 	// Idempotent.
-	inv2, err := svc.FinalizeInvoice(ctx, payer, "", from, to)
+	inv2, err := svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, from, to)
 	require.NoError(t, err)
 	require.Equal(t, inv.ID, inv2.ID)
 }
@@ -76,13 +76,13 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 	})
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1_000, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000, Source: "seed"})
 	require.NoError(t, err)
-	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", EventType: "gpt-4o", Amount: 1_500, Source: "req", SourceID: "r1"})
+	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", Currency: money.DefaultCurrency, EventType: "gpt-4o", Amount: 1_500, Source: "req", SourceID: "r1"})
 	require.NoError(t, err)
 
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
-	inv, err := svc.FinalizeInvoice(ctx, payer, "", from, to)
+	inv, err := svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, from, to)
 	require.NoError(t, err)
 	require.Equal(t, int64(1_500), inv.UsageTotal)
 	require.Equal(t, int64(500), inv.OwedAccrued, "credit-line-funded usage shows as owed")
@@ -100,9 +100,9 @@ func TestFinalizeDueInvoices_EnumeratesAccount(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 5_000, Source: "seed"})
+	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 5_000, Source: "seed"})
 	require.NoError(t, err)
-	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", EventType: "gpt-4o", Amount: 2_000, Source: "req", SourceID: "r1"})
+	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", Currency: money.DefaultCurrency, EventType: "gpt-4o", Amount: 2_000, Source: "req", SourceID: "r1"})
 	require.NoError(t, err)
 
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
@@ -111,7 +111,7 @@ func TestFinalizeDueInvoices_EnumeratesAccount(t *testing.T) {
 	require.GreaterOrEqual(t, n, 1, "the depositing payer must be enumerated and finalized")
 
 	// the payer's invoice for the period is now persisted
-	inv, err := svc.FinalizeInvoice(ctx, payer, "", from, to)
+	inv, err := svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, from, to)
 	require.NoError(t, err)
 	require.Equal(t, int64(2_000), inv.UsageTotal)
 	require.Equal(t, "finalized", inv.Status)

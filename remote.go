@@ -406,12 +406,10 @@ func (c *remote) SetTierSchedule(ctx context.Context, tenantSubjectID, currency 
 	return c.do(ctx, http.MethodPut, "/v1/service/tier-schedules", body, nil)
 }
 
-// SetInvokerWastedSpendPolicy implements Client (handler
-// ServiceSetInvokerWastedSpendPolicy, #496). The handler reads
-// {key, window_seconds, limit}; cadence is not sent (flat rolling windows).
-func (c *remote) SetInvokerWastedSpendPolicy(ctx context.Context, windows []BudgetWindowInput) error {
-	ws := make([]map[string]any, 0, len(windows))
-	for _, w := range windows {
+// SetMerchantConfiguration implements Client.
+func (c *remote) SetMerchantConfiguration(ctx context.Context, in MerchantConfigurationInput) error {
+	ws := make([]map[string]any, 0, len(in.DelegatedInvokerWastedSpendWindows))
+	for _, w := range in.DelegatedInvokerWastedSpendWindows {
 		ws = append(ws, map[string]any{
 			"key":            w.Key,
 			"window_seconds": w.WindowSeconds,
@@ -419,9 +417,9 @@ func (c *remote) SetInvokerWastedSpendPolicy(ctx context.Context, windows []Budg
 		})
 	}
 	body := map[string]any{
-		"windows": ws,
+		"delegated_invoker_wasted_spend_windows": ws,
 	}
-	return c.do(ctx, http.MethodPut, "/v1/service/invoker-wasted-spend-policy", body, nil)
+	return c.do(ctx, http.MethodPut, "/v1/service/merchant-configuration", body, nil)
 }
 
 // GetTier implements Client (handler ServiceGetTier, #477).

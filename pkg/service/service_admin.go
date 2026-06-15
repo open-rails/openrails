@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	entitlementmod "github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -231,8 +232,12 @@ func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCre
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be positive")
 	}
-	if req.Currency == "" {
+	currency := strings.TrimSpace(req.Currency)
+	if currency == "" {
 		return nil, fmt.Errorf("currency required")
+	}
+	if err := money.ValidateCurrency(currency); err != nil {
+		return nil, err
 	}
 	if req.TransactionID == "" {
 		return nil, fmt.Errorf("transaction_id required")
@@ -257,7 +262,7 @@ func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCre
 		CustomerID:    identity.CustomerIDFromString(req.UserID).UUID(),
 		Amount:        req.Amount,
 		ListAmount:    req.Amount,
-		Currency:      strings.ToLower(req.Currency),
+		Currency:      strings.ToLower(currency),
 		TransactionID: req.TransactionID,
 		Processor:     models.Processor(req.Processor),
 		PurchasedAt:   now,

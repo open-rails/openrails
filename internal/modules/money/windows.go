@@ -46,7 +46,7 @@ const (
 type OpenWindowParams struct {
 	Payer     identity.CustomerID
 	Invoker   string // attribution; stamped on the ledger record
-	Currency  string // "" => DefaultCurrency (#472)
+	Currency  string
 	Amount    int64
 	ExpiresAt time.Time
 }

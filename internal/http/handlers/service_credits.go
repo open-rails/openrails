@@ -269,7 +269,10 @@ func serviceRequiredCurrency(r *httprequest.Request, raw string) (string, bool) 
 		r.ErrorJSON(http.StatusBadRequest, "currency required")
 		return "", false
 	}
-	return currency, true
+	if money.IsQualifiedUnit(currency) {
+		return currency, true
+	}
+	return money.NormalizeCurrency(currency), true
 }
 
 // serviceAccountSettingsRequest is the PUT body for configuring a tenant subject's credit
@@ -466,7 +469,7 @@ func ServiceResourceRevenue(r *httprequest.Request) {
 	for _, x := range rows {
 		total += x.Amount
 	}
-	r.SuccessJSON(map[string]any{"currency": money.NormalizeCurrency(currency), "revenue_amount": total, "daily": rows})
+	r.SuccessJSON(map[string]any{"currency": currency, "revenue_amount": total, "daily": rows})
 }
 
 // ServiceUsageRollup returns per-dimension-value spend for a tenant subject over a
@@ -509,7 +512,7 @@ func ServiceUsageRollup(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	r.SuccessJSON(map[string]any{"currency": money.NormalizeCurrency(currency), "rows": rows})
+	r.SuccessJSON(map[string]any{"currency": currency, "rows": rows})
 }
 
 func ServiceDepositCredits(r *httprequest.Request) {

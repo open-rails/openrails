@@ -11,6 +11,14 @@ func TestRequireCurrency(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "EUR", got)
 
+	got, err = requireCurrency(" usd ")
+	require.NoError(t, err)
+	require.Equal(t, "USD", got)
+
+	got, err = requireCurrency("tenant/gold")
+	require.NoError(t, err)
+	require.Equal(t, "tenant/gold", got)
+
 	_, err = requireCurrency(" ")
 	require.EqualError(t, err, "currency required")
 }

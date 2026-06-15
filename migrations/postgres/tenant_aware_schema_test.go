@@ -28,7 +28,7 @@ var tenantOwnedTables = []string{
 	"budget_inflight_holds",
 	"budget_policies",
 	"tier_schedules",
-	"invoker_wasted_spend_policies",
+	"merchant_configurations",
 }
 
 func loadSchema001(t *testing.T) string {

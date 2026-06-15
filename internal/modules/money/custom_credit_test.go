@@ -40,12 +40,24 @@ func TestRequireBillingCurrencyRejectsCustom(t *testing.T) {
 	if err := RequireBillingCurrency("usd"); err != nil {
 		t.Errorf("built-in usd must pass billing: %v", err)
 	}
-	if err := RequireBillingCurrency(""); err != nil {
-		t.Errorf("empty (default) must pass billing: %v", err)
+	if err := RequireBillingCurrency(""); err == nil {
+		t.Error("empty currency must be rejected")
 	}
 	err := RequireBillingCurrency("tensorhub/gold")
 	if !errors.Is(err, ErrBillingUnitRequired) {
 		t.Errorf("qualified custom unit must be rejected at billing, got %v", err)
+	}
+}
+
+func TestCurrencyRegistryRejectsBlank(t *testing.T) {
+	if got := NormalizeCurrency(""); got != "" {
+		t.Fatalf("NormalizeCurrency(\"\") = %q, want empty", got)
+	}
+	if err := ValidateCurrency(""); err == nil {
+		t.Fatal("ValidateCurrency(\"\") must reject blank")
+	}
+	if _, ok := CurrencyScale(""); ok {
+		t.Fatal("CurrencyScale(\"\") must reject blank")
 	}
 }
 

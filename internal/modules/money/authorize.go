@@ -21,7 +21,7 @@ import (
 type AuthorizeHoldInput struct {
 	Payer           identity.CustomerID
 	Invoker         string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
-	Currency        string // "" => DefaultCurrency (#472)
+	Currency        string
 	EstimatedAmount int64
 	// Source + SourceID form the idempotency key for the placed hold (typically
 	// the request_id). A retry with the same coordinates returns the same hold.

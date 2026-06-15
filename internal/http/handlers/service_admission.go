@@ -254,7 +254,6 @@ func ServiceGetBudget(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	currency = money.NormalizeCurrency(currency)
 	windows, err := svc.BudgetStatus(r.Request.Context(), *payer, invoker, currency, r.Query("tier"))
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "budget lookup failed")
@@ -281,7 +280,6 @@ func ServiceGetTier(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	currency = money.NormalizeCurrency(currency)
 	if err := money.ValidateCurrency(currency); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -383,7 +381,6 @@ func ServiceAbuseUsage(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	currency = money.NormalizeCurrency(currency)
 	pw, aw, err := svc.AbuseUsage(r.Request.Context(), *payer, r.Query("invoker"), currency, r.Query("tier"))
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "abuse usage lookup failed")
@@ -456,7 +453,6 @@ func ServiceGetCreditLimit(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	currency = money.NormalizeCurrency(currency)
 	v, err := svc.GetCreditLimit(r.Request.Context(), *payer, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -499,7 +495,6 @@ func ServiceBudgetCheck(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	currency = money.NormalizeCurrency(currency)
 	windows, err := svc.BudgetCheck(r.Request.Context(), *payer, strings.TrimSpace(req.Invoker), currency, req.Windows, req.RequestedAmount)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "budget check failed")
@@ -579,7 +574,6 @@ func ServiceSetTierSchedule(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	currency = money.NormalizeCurrency(currency)
 	if err := money.ValidateCurrency(currency); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -596,24 +590,22 @@ func ServiceSetTierSchedule(r *httprequest.Request) {
 	r.SuccessJSONMessage("ok")
 }
 
-// serviceInvokerWastedWindow is one flat per-invoker wasted-spend window in the
-// request body (#492) — same shape as TierBudgetWindowInput.
-type serviceInvokerWastedWindow struct {
+// serviceMerchantConfigWindow is one amount window in the merchant configuration
+// request body.
+type serviceMerchantConfigWindow struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
 }
 
-type serviceInvokerWastedWindowsRequest struct {
-	Windows []serviceInvokerWastedWindow `json:"windows"`
+type serviceMerchantConfigurationRequest struct {
+	DelegatedInvokerWastedSpendWindows []serviceMerchantConfigWindow `json:"delegated_invoker_wasted_spend_windows"`
 }
 
-// ServiceSetInvokerWastedSpendPolicy persists the operator-configurable FLAT
-// per-invoker wasted-spend policy (#496). The policy is merchant-scoped; payer
-// wasted-spend budgets remain trust-tier graduated in tier policy. Operator
-// service token, credits:write.
-func ServiceSetInvokerWastedSpendPolicy(r *httprequest.Request) {
-	var req serviceInvokerWastedWindowsRequest
+// ServiceSetMerchantConfiguration persists the merchant-scoped configuration
+// row. Operator service token, credits:write.
+func ServiceSetMerchantConfiguration(r *httprequest.Request) {
+	var req serviceMerchantConfigurationRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -622,16 +614,18 @@ func ServiceSetInvokerWastedSpendPolicy(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	windows := make([]abuse.WastedWindow, 0, len(req.Windows))
-	for _, w := range req.Windows {
+	windows := make([]abuse.WastedWindow, 0, len(req.DelegatedInvokerWastedSpendWindows))
+	for _, w := range req.DelegatedInvokerWastedSpendWindows {
 		windows = append(windows, abuse.WastedWindow{
 			Key:    w.Key,
 			Window: time.Duration(w.WindowSeconds) * time.Second,
 			Limit:  w.Limit,
 		})
 	}
-	if err := svc.SetInvokerWastedSpendPolicy(r.Request.Context(), windows); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "set invoker wasted-spend policy failed")
+	if err := svc.SetMerchantConfiguration(r.Request.Context(), billingservice.MerchantConfiguration{
+		DelegatedInvokerWastedSpendWindows: windows,
+	}); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "set merchant configuration failed")
 		return
 	}
 	r.SuccessJSONMessage("ok")

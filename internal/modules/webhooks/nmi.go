@@ -300,7 +300,7 @@ func normalizeNMICurrencyValue(primary string, fallbacks ...string) string {
 			return normalized
 		}
 	}
-	return "usd"
+	return ""
 }
 
 func getOriginalTransactionID(body *NMITransactionEventBody) string {
@@ -373,7 +373,7 @@ func newNMIBillingError(errorType string, message string, context map[string]int
 
 func priceSnapshotFromSubscription(sub *models.Subscription) (float64, string, uint32, *uuid.UUID, *uuid.UUID) {
 	var priceAmount float64
-	priceCurrency := "usd"
+	priceCurrency := ""
 	var billingDays uint32
 	var productID *uuid.UUID
 	var priceID *uuid.UUID

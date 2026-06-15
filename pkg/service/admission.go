@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/budgets"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -135,8 +136,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	store := admission.NewTierPolicyStore(s.rt.DB)
 	bl := abuse.NewBlocklistService(s.rt.DB)
 	bsvc := budgets.NewService(s.rt.DB)
-	// #496: resolve the operator-configured flat per-invoker wasted-spend policy,
-	// falling back to the hardcoded DefaultInvokerWastedWindows() when unset.
+	// Resolve the merchant-configured flat delegated-invoker wasted-spend windows,
+	// falling back to DefaultInvokerWastedWindows() when unset.
 	invokerWindows, err := s.invokerWastedSpendPolicy(ctx)
 	if err != nil {
 		return nil, err
@@ -217,7 +218,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 
 	res := &AdmitResult{
 		Allowed:           dec.Allowed,
-		Currency:          money.NormalizeCurrency(currency),
+		Currency:          currency,
 		BlockedBy:         dec.BlockedBy,
 		BlockedUnit:       dec.BlockedUnit,
 		DenyCode:          dec.DenyCode,
@@ -248,7 +249,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 			rs = 0
 		}
 		res.BudgetWindows = append(res.BudgetWindows, AdmitBudgetWindowDTO{
-			Key: w.Key, Currency: money.NormalizeCurrency(currency), Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
+			Key: w.Key, Currency: currency, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
 			Remaining: w.Remaining, ResetAfterSeconds: rs, Allowed: w.Allowed,
 		})
 	}
@@ -269,7 +270,6 @@ func (s *Service) BudgetStatus(ctx context.Context, payer identity.CustomerID, i
 	if err != nil {
 		return nil, err
 	}
-	cur = money.NormalizeCurrency(cur)
 	if tier == "" {
 		tier = admission.DefaultTier
 	}
@@ -325,7 +325,6 @@ func (s *Service) BudgetCheck(ctx context.Context, payer identity.CustomerID, in
 	if err != nil {
 		return nil, err
 	}
-	cur = money.NormalizeCurrency(cur)
 	bw := make([]budgets.BudgetWindow, 0, len(windows))
 	for _, w := range windows {
 		bw = append(bw, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence})
@@ -479,10 +478,10 @@ type TierPolicyInput struct {
 	BadSpendWindows []TierBudgetWindowInput `json:"bad_spend_windows,omitempty"`
 }
 
-// DefaultInvokerWastedWindows is the FLAT per-invoker wasted-spend budget default
-// (#488): invokers aren't trusted (an account mints unlimited invokers), so the
-// per-invoker budget is a fixed backstop rather than tier-graduated. $5 / 15 min
-// and $20 / 5 h using USD internal units. Generic; a host can tune later.
+// DefaultInvokerWastedWindows is the flat delegated-invoker wasted-spend default:
+// invokers aren't trusted (an account mints unlimited invokers), so the
+// per-invoker budget is a fixed backstop rather than tier-graduated. Amounts use
+// the request currency's internal precision.
 func DefaultInvokerWastedWindows() []abuse.WastedWindow {
 	return []abuse.WastedWindow{
 		{Key: "burst", Window: 15 * time.Minute, Limit: 5_000_000},
@@ -490,42 +489,48 @@ func DefaultInvokerWastedWindows() []abuse.WastedWindow {
 	}
 }
 
-// SetInvokerWastedSpendPolicy persists the operator-configurable FLAT per-invoker
-// wasted-spend policy (#496). It is merchant-scoped and intentionally stricter
-// than payer wasted-spend budgets, which remain trust-tier graduated in tier
-// policy. An empty windows slice clears to the hardcoded
-// DefaultInvokerWastedWindows() fallback.
-func (s *Service) SetInvokerWastedSpendPolicy(ctx context.Context, windows []abuse.WastedWindow) error {
+// MerchantConfiguration is the service-level representation of a merchant's
+// one-row configuration payload.
+type MerchantConfiguration struct {
+	DelegatedInvokerWastedSpendWindows []abuse.WastedWindow
+}
+
+// SetMerchantConfiguration persists the merchant-scoped configuration row. An
+// empty DelegatedInvokerWastedSpendWindows slice clears that key to the
+// DefaultInvokerWastedWindows fallback.
+func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfiguration) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	wp := make([]models.BudgetWindowPolicy, 0, len(windows))
-	for _, w := range windows {
+	cfg := models.MerchantConfiguration{
+		DelegatedInvokerWastedSpendWindows: make([]models.BudgetWindowPolicy, 0, len(in.DelegatedInvokerWastedSpendWindows)),
+	}
+	for _, w := range in.DelegatedInvokerWastedSpendWindows {
 		if w.Window <= 0 {
 			continue
 		}
-		wp = append(wp, models.BudgetWindowPolicy{
+		cfg.DelegatedInvokerWastedSpendWindows = append(cfg.DelegatedInvokerWastedSpendWindows, models.BudgetWindowPolicy{
 			Key:           w.Key,
 			WindowSeconds: int64(w.Window / time.Second),
 			Limit:         w.Limit,
 		})
 	}
-	return admission.NewTierPolicyStore(s.rt.DB).UpsertInvokerWastedSpendPolicy(ctx, wp)
+	return merchantconfig.NewStore(s.rt.DB).Upsert(ctx, cfg)
 }
 
-// invokerWastedSpendPolicy resolves the merchant-wide FLAT per-invoker
-// wasted-spend policy (#496), falling back to DefaultInvokerWastedWindows() when
-// no stored policy exists.
+// invokerWastedSpendPolicy resolves the merchant-configured flat delegated
+// invoker wasted-spend windows, falling back to DefaultInvokerWastedWindows()
+// when no stored config exists.
 func (s *Service) invokerWastedSpendPolicy(ctx context.Context) ([]abuse.WastedWindow, error) {
-	stored, err := admission.NewTierPolicyStore(s.rt.DB).GetInvokerWastedSpendPolicy(ctx)
+	cfg, _, err := merchantconfig.NewStore(s.rt.DB).Get(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if len(stored) == 0 {
+	if len(cfg.DelegatedInvokerWastedSpendWindows) == 0 {
 		return DefaultInvokerWastedWindows(), nil
 	}
-	out := make([]abuse.WastedWindow, 0, len(stored))
-	for _, w := range stored {
+	out := make([]abuse.WastedWindow, 0, len(cfg.DelegatedInvokerWastedSpendWindows))
+	for _, w := range cfg.DelegatedInvokerWastedSpendWindows {
 		if w.WindowSeconds <= 0 {
 			continue
 		}
@@ -606,7 +611,6 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 	if err != nil {
 		return nil, err
 	}
-	cur = money.NormalizeCurrency(cur)
 	if err := money.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
@@ -725,7 +729,6 @@ func (s *Service) AbuseUsage(ctx context.Context, payer identity.CustomerID, inv
 	if err != nil {
 		return nil, nil, err
 	}
-	cur = money.NormalizeCurrency(cur)
 	if err := money.ValidateCurrency(cur); err != nil {
 		return nil, nil, err
 	}
@@ -834,7 +837,6 @@ func (s *Service) SetTierSchedule(ctx context.Context, payer identity.CustomerID
 	if err != nil {
 		return err
 	}
-	cur = money.NormalizeCurrency(cur)
 	if err := money.ValidateCurrency(cur); err != nil {
 		return err
 	}
@@ -862,7 +864,6 @@ func (s *Service) GetTier(ctx context.Context, payer identity.CustomerID, curren
 	if err != nil {
 		return "", err
 	}
-	cur = money.NormalizeCurrency(cur)
 	if err := money.ValidateCurrency(cur); err != nil {
 		return "", err
 	}
