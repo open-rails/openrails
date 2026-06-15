@@ -385,6 +385,20 @@ func TestProductionTestEnvValidation(t *testing.T) {
 		assert.NoError(t, Validate(cfg))
 	})
 
+	t.Run("prod env rejects http auth issuer", func(t *testing.T) {
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "prod"
+		cfg.Mode = ModeFull
+		cfg.DB.Username = "billing_app"
+		cfg.DB.Password = "production-db-password"
+		cfg.Auth.Issuers = []string{"http://issuer.example.com"}
+		cfg.CorsOrigins = []string{"https://app.example.com"}
+		cfg.ClickHouse.Username = "prod_analytics"
+		cfg.ClickHouse.Password = "production-clickhouse-password"
+		assembleDBURL(cfg)
+		assert.ErrorContains(t, Validate(cfg), "must use https outside development")
+	})
+
 	t.Run("prod env rejects missing auth audience", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"

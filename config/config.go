@@ -1099,6 +1099,13 @@ func Validate(cfg *Config) error {
 			if issuer == "" || issuer == "http://localhost:8080" || issuer == "http://api:2052" || issuer == "http://issuer:8080" {
 				return fmt.Errorf("default auth issuer is not allowed outside development")
 			}
+			// The issuer is the root of trust: the verifier derives the JWKS URI
+			// from it and fetches signing keys over its scheme. A plaintext-HTTP
+			// issuer lets an on-path attacker serve forged keys and mint accepted
+			// JWTs, so require https outside development.
+			if !strings.HasPrefix(strings.ToLower(issuer), "https://") {
+				return fmt.Errorf("auth issuer %q must use https outside development", issuer)
+			}
 		}
 		if len(cfg.CorsOrigins) == 0 {
 			return fmt.Errorf("cors_origins must be configured outside development")
