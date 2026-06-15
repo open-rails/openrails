@@ -202,6 +202,7 @@ type OpenrailsBudgetReservation struct {
 	SourceID       string
 	CreatedAt      time.Time
 	ExpiresAt      *time.Time
+	Currency       string
 }
 
 // Per-(tenant, tenant subject, actor, window_key) fixed-window anchor (#337). session: window_start rewritten on reopen; fixed: window_start derived from anchor. Locked FOR UPDATE in Reserve as the boundary-rollover serialization point.
@@ -219,6 +220,7 @@ type OpenrailsBudgetWindowState struct {
 	WindowStart time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	Currency    string
 }
 
 // Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.
@@ -905,6 +907,7 @@ type OpenrailsUsageEvent struct {
 	OccurredAt         time.Time
 	CreatedAt          time.Time
 	InvokerType        *string
+	Currency           string
 }
 
 // External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.

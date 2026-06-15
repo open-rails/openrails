@@ -114,7 +114,7 @@ func (q *Queries) AggregateUsageTotals(ctx context.Context, arg AggregateUsageTo
 }
 
 const getUsageEventByCoords = `-- name: GetUsageEventByCoords :one
-SELECT id, merchant_id, customer_id, invoker_id, resource, event_type, dimensions, amount, source, source_id, money_transaction_id, metadata, occurred_at, created_at, invoker_type FROM openrails.usage_events
+SELECT id, merchant_id, customer_id, invoker_id, resource, event_type, dimensions, amount, source, source_id, money_transaction_id, metadata, occurred_at, created_at, invoker_type, currency FROM openrails.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND event_type = $3
   AND source = $4 AND source_id = $5
 LIMIT 1
@@ -153,6 +153,7 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		&i.OccurredAt,
 		&i.CreatedAt,
 		&i.InvokerType,
+		&i.Currency,
 	)
 	return i, err
 }

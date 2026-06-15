@@ -144,7 +144,7 @@ func (q *Queries) DeletePaymentBlock(ctx context.Context, arg DeletePaymentBlock
 
 const getBudgetReservationByCoords = `-- name: GetBudgetReservationByCoords :one
 
-SELECT id, merchant_id, customer_id, invoker_id, amount_micros, captured_micros, status, source, source_id, created_at, expires_at FROM openrails.budget_reservations
+SELECT id, merchant_id, customer_id, invoker_id, amount_micros, captured_micros, status, source, source_id, created_at, expires_at, currency FROM openrails.budget_reservations
 WHERE merchant_id = $1 AND customer_id = $2
   AND invoker_id = $3 AND source = $4 AND source_id = $5
 LIMIT 1
@@ -181,12 +181,13 @@ func (q *Queries) GetBudgetReservationByCoords(ctx context.Context, arg GetBudge
 		&i.SourceID,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.Currency,
 	)
 	return i, err
 }
 
 const getBudgetWindowState = `-- name: GetBudgetWindowState :one
-SELECT id, merchant_id, customer_id, invoker_id, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM openrails.budget_window_state bws
+SELECT id, merchant_id, customer_id, invoker_id, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at, currency FROM openrails.budget_window_state bws
 WHERE bws.merchant_id = $1 AND bws.customer_id = $2
   AND bws.invoker_id = $3 AND bws.window_key = $4
 LIMIT 1
@@ -219,12 +220,13 @@ func (q *Queries) GetBudgetWindowState(ctx context.Context, arg GetBudgetWindowS
 		&i.WindowStart,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Currency,
 	)
 	return i, err
 }
 
 const getBudgetWindowStateForUpdate = `-- name: GetBudgetWindowStateForUpdate :one
-SELECT id, merchant_id, customer_id, invoker_id, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at FROM openrails.budget_window_state bws
+SELECT id, merchant_id, customer_id, invoker_id, window_key, cadence, window_seconds, anchor, window_start, created_at, updated_at, currency FROM openrails.budget_window_state bws
 WHERE bws.merchant_id = $1 AND bws.customer_id = $2
   AND bws.invoker_id = $3 AND bws.window_key = $4
 FOR UPDATE
@@ -259,6 +261,7 @@ func (q *Queries) GetBudgetWindowStateForUpdate(ctx context.Context, arg GetBudg
 		&i.WindowStart,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Currency,
 	)
 	return i, err
 }

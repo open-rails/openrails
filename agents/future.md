@@ -632,7 +632,15 @@ Design questions to resolve before building:
 
 # #494: Multi-currency support — native currencies + abstract units + internal FX converter
 
-**Completed:** no
+**Completed:** partial — currency-COLUMN groundwork shipped (v0.36.0, migration 031): added
+`currency text NOT NULL DEFAULT 'USD'` to usage_events / budget_window_state / budget_reservations
+(money_transactions + money_spend_limits already had it). Additive + safe; build + budgets/money/admission
+integration green. `micros` KEPT (it is the currency-NEUTRAL sub-cent unit — millionths of the row's
+`currency`, à la Google Ads; Stripe/NMI use minor-unit `amount` with no sub-cent term, so there's nothing
+to copy there). REMAINING (coupled with the FX converter, deferred per owner): per-currency KEYING of the
+budget engine (currency in the budget UNIQUE keys + thread a currency through admit->budget, which has NO
+currency concept today), the `budget_reservations` -> `budget_inflight_holds` rename, native-currency
+validation, and the converter itself.
 
 Today the money/budget tables hardcode the MICRODOLLAR assumption (`*_micros`) and most are
 NOT keyed by currency. OpenRails should support multiple NATIVE currencies (USD, EUR, JPY, …
