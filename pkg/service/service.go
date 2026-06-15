@@ -255,13 +255,16 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	if req.SourceID == nil || *req.SourceID == uuid.Nil {
 		return nil, fmt.Errorf("source_id required")
 	}
+	// #491: DepositParams.SourceID is the natural-key string (uuidv7 pk + UNIQUE
+	// natural key); the SDK request carries a uuid, so stringify it.
+	depositSourceID := req.SourceID.String()
 	trx, err := s.moneyService().Deposit(ctx, money.DepositParams{
 		CustomerID:  req.CustomerID,
 		Actor:       req.Actor,
 		Currency:    req.Currency,
 		Amount:      req.Amount,
 		Source:      req.Source,
-		SourceID:    req.SourceID,
+		SourceID:    &depositSourceID,
 		ExpiresAt:   req.ExpiresAt,
 		Description: req.Description,
 	})

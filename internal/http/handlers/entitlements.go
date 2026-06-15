@@ -271,16 +271,15 @@ func tenantSubjectForEntitlementGrantTarget(r *httprequest.Request, subject stri
 	if resolved.MerchantID.IsZero() || issuer == "" || subject == "" {
 		return uuid.Nil, controlplane.ErrCustomerInvalid
 	}
-	// customers is UUID-only (#491): the federated (issuer, subject) pair maps to
-	// a deterministic customer id; materialize the FK-target row before the grant.
-	id := identity.FederatedCustomerID(resolved.MerchantID.UUID(), issuer, subject).UUID()
-	if err := r.State.DB.Gen(r.Request.Context()).EnsureCustomerRow(r.Request.Context(), gen.EnsureCustomerRowParams{
-		ID:         id,
+	// #491: resolve the federated (issuer, subject) payer by its natural key (the
+	// re-added org-less unique key); uuidv7 pk minted once, looked up + materialized.
+	// The org-bound switch lives on the delegated request path (TouchCustomer); an
+	// admin grant TARGET is an org-less external subject here.
+	return r.State.DB.Gen(r.Request.Context()).UpsertCustomerByIssuerSubject(r.Request.Context(), gen.UpsertCustomerByIssuerSubjectParams{
 		MerchantID: resolved.MerchantID.UUID(),
-	}); err != nil {
-		return uuid.Nil, err
-	}
-	return id, nil
+		Issuer:     &issuer,
+		Subject:    &subject,
+	})
 }
 
 func RevokeAdminEntitlement(r *httprequest.Request) {

@@ -151,7 +151,7 @@ func (q *Queries) ExpireMoneyHold(ctx context.Context, arg ExpireMoneyHoldParams
 }
 
 const getMoneyTransactionByCoords = `-- name: GetMoneyTransactionByCoords :one
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions
+SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_id FROM openrails.money_transactions
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $6
   AND transaction_type = $3 AND source = $4 AND source_id = $5
 LIMIT 1
@@ -198,12 +198,13 @@ func (q *Queries) GetMoneyTransactionByCoords(ctx context.Context, arg GetMoneyT
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.Currency,
+		&i.InvokerID,
 	)
 	return i, err
 }
 
 const getMoneyTransactionForUpdate = `-- name: GetMoneyTransactionForUpdate :one
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions WHERE id = $1 FOR UPDATE
+SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_id FROM openrails.money_transactions WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetMoneyTransactionForUpdate(ctx context.Context, id uuid.UUID) (OpenrailsMoneyTransaction, error) {
@@ -229,6 +230,7 @@ func (q *Queries) GetMoneyTransactionForUpdate(ctx context.Context, id uuid.UUID
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.Currency,
+		&i.InvokerID,
 	)
 	return i, err
 }
@@ -316,8 +318,8 @@ INSERT INTO openrails.money_transactions (
     id, merchant_id, customer_id, currency, actor, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
-    expires_at, description, created_at, updated_at
-) VALUES ($1, $2, $3, $19, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+    expires_at, description, created_at, updated_at, invoker_id
+) VALUES ($1, $2, $3, $19, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $20)
 `
 
 type InsertMoneyTransactionParams struct {
@@ -340,6 +342,7 @@ type InsertMoneyTransactionParams struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	Currency         string
+	InvokerID        *uuid.UUID
 }
 
 func (q *Queries) InsertMoneyTransaction(ctx context.Context, arg InsertMoneyTransactionParams) error {
@@ -363,6 +366,7 @@ func (q *Queries) InsertMoneyTransaction(ctx context.Context, arg InsertMoneyTra
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.Currency,
+		arg.InvokerID,
 	)
 	return err
 }
@@ -372,8 +376,8 @@ INSERT INTO openrails.money_transactions (
     id, merchant_id, customer_id, currency, actor, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
-    expires_at, description, created_at, updated_at
-) VALUES ($1, $2, $3, $19, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+    expires_at, description, created_at, updated_at, invoker_id
+) VALUES ($1, $2, $3, $19, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $20)
 ON CONFLICT DO NOTHING
 `
 
@@ -397,6 +401,7 @@ type InsertMoneyTransactionIfAbsentParams struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	Currency         string
+	InvokerID        *uuid.UUID
 }
 
 func (q *Queries) InsertMoneyTransactionIfAbsent(ctx context.Context, arg InsertMoneyTransactionIfAbsentParams) error {
@@ -420,6 +425,7 @@ func (q *Queries) InsertMoneyTransactionIfAbsent(ctx context.Context, arg Insert
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.Currency,
+		arg.InvokerID,
 	)
 	return err
 }
@@ -463,7 +469,7 @@ func (q *Queries) InsertMoneyWindow(ctx context.Context, arg InsertMoneyWindowPa
 }
 
 const listExpiredActiveMoneyHoldsForUpdate = `-- name: ListExpiredActiveMoneyHoldsForUpdate :many
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions
+SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_id FROM openrails.money_transactions
 WHERE transaction_type = 'hold' AND status = 'active'
   AND expires_at IS NOT NULL AND expires_at <= $1::timestamptz
 ORDER BY expires_at ASC
@@ -506,6 +512,7 @@ func (q *Queries) ListExpiredActiveMoneyHoldsForUpdate(ctx context.Context, arg 
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.Currency,
+			&i.InvokerID,
 		); err != nil {
 			return nil, err
 		}
@@ -564,7 +571,7 @@ func (q *Queries) ListExpiredOpenMoneyWindowsForUpdate(ctx context.Context, arg 
 }
 
 const listMoneyTransactionsByPayer = `-- name: ListMoneyTransactionsByPayer :many
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions
+SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_id FROM openrails.money_transactions
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
 ORDER BY created_at DESC
 LIMIT $3::int OFFSET $4::int
@@ -613,6 +620,7 @@ func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMone
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.Currency,
+			&i.InvokerID,
 		); err != nil {
 			return nil, err
 		}
@@ -625,7 +633,7 @@ func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMone
 }
 
 const listOrphanedExpiredMoneyHolds = `-- name: ListOrphanedExpiredMoneyHolds :many
-SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency FROM openrails.money_transactions
+SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, merchant_id, customer_id, currency, invoker_id FROM openrails.money_transactions
 WHERE merchant_id = $1 AND transaction_type = 'hold' AND status = 'active'
   AND expires_at IS NOT NULL AND expires_at <= $2::timestamptz
 ORDER BY expires_at ASC
@@ -665,6 +673,7 @@ func (q *Queries) ListOrphanedExpiredMoneyHolds(ctx context.Context, arg ListOrp
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.Currency,
+			&i.InvokerID,
 		); err != nil {
 			return nil, err
 		}

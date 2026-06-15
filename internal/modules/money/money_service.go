@@ -252,10 +252,11 @@ type DepositParams struct {
 	// stand-in, and a non-UUID Actor with no explicit payer is rejected.
 	CustomerID *identity.CustomerID
 	Actor      string
-	Currency   string // "" => DefaultCurrency (#472)
+	InvokerID  *uuid.UUID // #491 end-user delegated_users(id); nil on the embedded/service path
+	Currency   string     // "" => DefaultCurrency (#472)
 	Amount     int64
 	Source     string
-	SourceID   *uuid.UUID
+	SourceID   *string // #491: natural-key string (uuidv7 pk + UNIQUE natural key), not a derived uuid
 	ExpiresAt  *time.Time
 	// ApplyAccountExpiryDefault, when true and ExpiresAt is nil, sets the deposit's
 	// expiry to now + the payer's money_accounts.default_credit_expiry_days
@@ -343,7 +344,7 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 	// the customers-row lock, serializing deposits per customer (#491).
 	sourceIDText := (*string)(nil)
 	if params.SourceID != nil {
-		v := params.SourceID.String()
+		v := *params.SourceID
 		sourceIDText = &v
 		existing, gerr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
@@ -371,6 +372,7 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		CustomerID:      payerID,
 		Currency:        cur,
 		Actor:           params.Actor,
+		InvokerID:       params.InvokerID,
 		Amount:          params.Amount,
 		BalanceAfter:    &newBal,
 		TransactionType: "deposit",
@@ -431,6 +433,7 @@ func insertParamsFromTransaction(t *models.MoneyTransaction) gen.InsertMoneyTran
 		CustomerID:       t.CustomerID,
 		Currency:         normalizeCurrency(t.Currency),
 		Actor:            t.Actor,
+		InvokerID:        t.InvokerID,
 		Resource:         t.Resource,
 		Amount:           t.Amount,
 		BalanceAfter:     t.BalanceAfter,

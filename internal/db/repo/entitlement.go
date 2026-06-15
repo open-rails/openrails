@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -212,24 +211,35 @@ func (r *EntitlementRepo) ListActiveRecordsByCustomer(ctx context.Context, tenan
 
 // ListActiveRecordsByExternalSubjects (#354/#491): one query, grouped by the
 // caller-supplied subject; subjects with no active rows are absent from the map.
-// customers is UUID-only (#491): each (issuer, subject) maps to a deterministic
-// FederatedCustomerID, so we derive the ids, query by id, and map results back
-// to the original subject string.
+// #491 replaced the deterministic FederatedCustomerID derivation with the re-added
+// (merchant, issuer, subject) natural key: we LOOK UP the org-less customer ids for
+// the batch, then query by id and map results back to the original subject string.
 func (r *EntitlementRepo) ListActiveRecordsByExternalSubjects(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	merchantID := tid.UUID()
-	subjectByCustomerID := make(map[uuid.UUID]string, len(subjects))
-	customerIDs := make([]uuid.UUID, 0, len(subjects))
-	for _, subj := range subjects {
-		cid := identity.FederatedCustomerID(merchantID, issuer, subj).UUID()
-		if _, dup := subjectByCustomerID[cid]; dup {
-			continue
+	resolved, err := r.db.Gen(ctx).LookupCustomerIDsByIssuerSubjects(ctx, gen.LookupCustomerIDsByIssuerSubjectsParams{
+		MerchantID: merchantID,
+		Issuer:     &issuer,
+		Subjects:   subjects,
+	})
+	if err != nil {
+		return nil, err
+	}
+	subjectByCustomerID := make(map[uuid.UUID]string, len(resolved))
+	customerIDs := make([]uuid.UUID, 0, len(resolved))
+	for _, row := range resolved {
+		subj := ""
+		if row.Subject != nil {
+			subj = *row.Subject
 		}
-		subjectByCustomerID[cid] = subj
-		customerIDs = append(customerIDs, cid)
+		subjectByCustomerID[row.ID] = subj
+		customerIDs = append(customerIDs, row.ID)
+	}
+	if len(customerIDs) == 0 {
+		return map[string][]models.Entitlement{}, nil
 	}
 	rows, err := r.db.Gen(ctx).ListActiveEntitlementRecordsByCustomerIDs(ctx, gen.ListActiveEntitlementRecordsByCustomerIDsParams{
 		MerchantID:  merchantID,

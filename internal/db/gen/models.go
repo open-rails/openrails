@@ -159,6 +159,19 @@ type Migration struct {
 	MigratedAt time.Time
 }
 
+// Operator-configurable FLAT per-actor wasted-spend windows (#492): windows[{key,window_seconds,limit_micros}] declared once per tenant (or per-customer override). Falls back to service.DefaultActorWastedWindows() when no row is stored.
+type OpenrailsActorWastedWindow struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// NULL = tenant-wide default; non-NULL = per-customer override taking precedence for that customer.
+	CustomerID *uuid.UUID
+	// JSONB array of {key, window_seconds, limit_micros}: at most limit_micros of wasted $ per window; admit denies when an actor is over.
+	Windows        []byte
+	WindowsVersion int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 // Hierarchical money-budget policies (#473): {scope, owner, windows[]} composed in one admit verdict over the one payer balance. owner=platform rows are writable only via the platform path (the subject cannot see/loosen them); owner=subject rows are the subject's own caps.
 type OpenrailsBudgetPolicy struct {
 	ID         uuid.UUID
@@ -265,6 +278,12 @@ type OpenrailsCustomer struct {
 	MerchantID uuid.UUID
 	CreatedAt  time.Time
 	LastSeenAt time.Time
+	// #491 org-bound payer natural key: authkit org id (issuer is org-bound). One customer per (merchant, org). NULL for org-less/native payers.
+	OrgID *string
+	// #491 org-less payer natural key part: the validated issuer. NULL for org-bound and for native (subject==id) payers.
+	Issuer *string
+	// #491 org-less payer natural key part: the merchant-supplied STABLE subject uuid. NULL for org-bound and native payers.
+	Subject *string
 }
 
 type OpenrailsEntitlement struct {
@@ -480,6 +499,8 @@ type OpenrailsMoneySpendLimit struct {
 	UpdatedAt              time.Time
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
 	Currency string
+	// #491 the end-user (invoker) this per-invoker cap applies to -> authkit profiles.delegated_users(id), cross-schema. NULL when keyed by the opaque actor label.
+	InvokerID *uuid.UUID
 }
 
 // amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
@@ -507,6 +528,8 @@ type OpenrailsMoneyTransaction struct {
 	CustomerID       uuid.UUID
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority. amount is this currency's minor unit.
 	Currency string
+	// #491 the end-user (invoker) that triggered this charge -> authkit profiles.delegated_users(id), cross-schema. NULL on the embedded/service path (no issuer to resolve); `actor` is the opaque attribution label there.
+	InvokerID *uuid.UUID
 }
 
 // Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
@@ -883,6 +906,8 @@ type OpenrailsUsageEvent struct {
 	Metadata           []byte
 	OccurredAt         time.Time
 	CreatedAt          time.Time
+	// #491 the end-user (invoker) that fired this usage -> authkit profiles.delegated_users(id), cross-schema. NULL on the embedded/service path.
+	InvokerID *uuid.UUID
 }
 
 // External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.
@@ -906,6 +931,10 @@ type OpenrailsUsdcFundingSession struct {
 	ExpiresAt         *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+type ProfilesDelegatedUser struct {
+	ID uuid.UUID
 }
 
 type ProfilesUser struct {

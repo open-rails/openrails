@@ -33,6 +33,10 @@ type ResolvedDelegated struct {
 	// CustomerID is the durable OpenRails payable subject for
 	// (MerchantID, Issuer, DelegatedSubject).
 	CustomerID uuid.UUID
+	// InvokerID is the end-user's stable authkit profiles.delegated_users id
+	// (#491), stamped on spend-attribution rows (invoker_id). uuid.Nil when no
+	// authkit core is wired (degraded) — attribution falls back to the actor label.
+	InvokerID uuid.UUID
 	// DelegatedSubject is the acting end-user id (`delegated_sub`). This is the
 	// user the self-service handlers scope every read/write to. There is NEVER a
 	// normal `sub` on a delegated access token.
@@ -218,11 +222,17 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 		return nil, err
 	}
 
+	// #491: resolve the end-user's stable delegated_users id for invoker_id
+	// attribution. Best-effort: a degraded/unknown-issuer resolution leaves it nil
+	// (attribution then rides the opaque actor label) rather than failing the request.
+	invokerID, _ := c.TouchInvoker(ctx, issuer, subject)
+
 	return &ResolvedDelegated{
 		Tenant:               tslug,
 		MerchantID:           tid,
 		TenantSlug:           tslug,
 		CustomerID:           tenantSubjectID,
+		InvokerID:            invokerID,
 		DelegatedSubject:     subject,
 		Issuer:               issuer,
 		Permissions:          append([]string(nil), principal.Permissions...),

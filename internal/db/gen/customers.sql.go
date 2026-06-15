@@ -52,3 +52,89 @@ func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowPa
 	_, err := q.db.Exec(ctx, ensureCustomerRow, arg.ID, arg.MerchantID)
 	return err
 }
+
+const lookupCustomerIDsByIssuerSubjects = `-- name: LookupCustomerIDsByIssuerSubjects :many
+SELECT id, subject FROM openrails.customers
+WHERE merchant_id = $1 AND org_id IS NULL AND issuer = $2
+  AND subject = ANY($3::text[])
+`
+
+type LookupCustomerIDsByIssuerSubjectsParams struct {
+	MerchantID uuid.UUID
+	Issuer     *string
+	Subjects   []string
+}
+
+type LookupCustomerIDsByIssuerSubjectsRow struct {
+	ID      uuid.UUID
+	Subject *string
+}
+
+// #491: resolve (merchant, issuer, subject) -> id for a batch of org-less
+// subjects. Replaces the dropped deterministic FederatedCustomerID derivation
+// with a real lookup against the re-added natural key. Absent subjects are simply
+// not returned.
+func (q *Queries) LookupCustomerIDsByIssuerSubjects(ctx context.Context, arg LookupCustomerIDsByIssuerSubjectsParams) ([]LookupCustomerIDsByIssuerSubjectsRow, error) {
+	rows, err := q.db.Query(ctx, lookupCustomerIDsByIssuerSubjects, arg.MerchantID, arg.Issuer, arg.Subjects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LookupCustomerIDsByIssuerSubjectsRow
+	for rows.Next() {
+		var i LookupCustomerIDsByIssuerSubjectsRow
+		if err := rows.Scan(&i.ID, &i.Subject); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const upsertCustomerByIssuerSubject = `-- name: UpsertCustomerByIssuerSubject :one
+INSERT INTO openrails.customers (merchant_id, issuer, subject)
+VALUES ($1, $2, $3)
+ON CONFLICT (merchant_id, issuer, subject) WHERE org_id IS NULL AND issuer IS NOT NULL AND subject IS NOT NULL
+DO UPDATE SET last_seen_at = now()
+RETURNING id
+`
+
+type UpsertCustomerByIssuerSubjectParams struct {
+	MerchantID uuid.UUID
+	Issuer     *string
+	Subject    *string
+}
+
+// #491 org-less/standalone-federated payer: per (merchant, issuer, subject).
+// uuidv7 pk minted once, looked up by the natural key.
+func (q *Queries) UpsertCustomerByIssuerSubject(ctx context.Context, arg UpsertCustomerByIssuerSubjectParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, upsertCustomerByIssuerSubject, arg.MerchantID, arg.Issuer, arg.Subject)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const upsertCustomerByOrg = `-- name: UpsertCustomerByOrg :one
+INSERT INTO openrails.customers (merchant_id, org_id)
+VALUES ($1, $2)
+ON CONFLICT (merchant_id, org_id) WHERE org_id IS NOT NULL
+DO UPDATE SET last_seen_at = now()
+RETURNING id
+`
+
+type UpsertCustomerByOrgParams struct {
+	MerchantID uuid.UUID
+	OrgID      *string
+}
+
+// #491 org-bound payer: ONE customer per (merchant, org). uuidv7 pk minted once,
+// looked up by the natural key (no derived uuidv5). Returns the stable id.
+func (q *Queries) UpsertCustomerByOrg(ctx context.Context, arg UpsertCustomerByOrgParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, upsertCustomerByOrg, arg.MerchantID, arg.OrgID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}

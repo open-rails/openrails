@@ -18,6 +18,7 @@ import (
 
 type serviceOpenWindowRequest struct {
 	CustomerID string `json:"customer_id"`
+	Invoker    string `json:"invoker"` // #491 (renamed from "actor")
 	Actor      string `json:"actor"`
 	// Currency is optional; empty defaults to "USD" server-side (#476).
 	Currency   string `json:"currency"`
@@ -48,7 +49,7 @@ func ServiceOpenCreditWindow(r *httprequest.Request) {
 	}
 	w, err := svc.OpenWindow(r.Request.Context(), billingservice.OpenWindowRequest{
 		CustomerID: *payer,
-		Actor:      req.Actor,
+		Actor:      resolveInvokerField(req.Invoker, req.Actor),
 		Currency:   req.Currency,
 		Amount:     req.Amount,
 		TTL:        time.Duration(req.TTLSeconds) * time.Second,
@@ -78,6 +79,7 @@ type serviceWindowSettleItem struct {
 	WindowID  string                    `json:"window_id"`
 	RequestID string                    `json:"request_id"`
 	Amount    int64                     `json:"amount"`
+	Invoker   string                    `json:"invoker,omitempty"` // #491 (renamed from "actor")
 	Actor     string                    `json:"actor,omitempty"`
 	Usage     *serviceWindowSettleUsage `json:"usage,omitempty"`
 }
@@ -131,7 +133,7 @@ func ServiceSettleCreditWindows(r *httprequest.Request) {
 			WindowID:  wid,
 			RequestID: it.RequestID,
 			Amount:    it.Amount,
-			Actor:     it.Actor,
+			Actor:     resolveInvokerField(it.Invoker, it.Actor),
 		}
 		if it.Usage != nil {
 			item.EventType = it.Usage.EventType

@@ -7,7 +7,50 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 492
+next_id: 493
+
+---
+
+# #492: Operator-configurable FLAT per-actor wasted-spend windows (close the #488 per-invoker gap)
+
+Consumer: tensorhub #486. GENERIC — every platform has a flat per-invoker abuse backstop. The #488 per-PAYER
+bad_spend budget was operator-settable via SetTierPolicy, but the per-ACTOR flat budget had NO client setter:
+admit hardcoded `service.DefaultActorWastedWindows()` ($5/15m, $20/5h), so a host's declared per-invoker budget
+(tensorhub `per_invoker_bad_spend` $1/15m, $3/5h) was silently ignored.
+
+## Scope
+- Migration 028 `openrails.actor_wasted_windows`: tenant-scoped (customer_id NULLABLE; NULL = tenant-wide
+  default, non-NULL = per-customer override), windows jsonb + version + timestamps, merchant_id RLS — mirrors
+  tier_schedules' "= $2 OR IS NULL" effective resolution.
+- sqlc: UpsertActorWastedWindowsDefault/Customer + GetEffectiveActorWastedWindows (admission_support.sql).
+- Service: `SetActorWastedWindows(ctx, payer, []abuse.WastedWindow)` + `actorWastedWindows(ctx, payer)` resolver
+  (stored else DefaultActorWastedWindows). Wired into ALL 3 hardcoded sites — Admit (WithWastedSpend guard),
+  ReportWastedSpend (guard.Record), AbuseUsage (guard.Usage). DefaultActorWastedWindows kept as the FALLBACK.
+- HTTP `ServiceSetActorWastedWindows` mounted PUT /v1/service/actor-wasted-windows (creditsWrite), same router.
+- SDK `SetActorWastedWindows(ctx, tenantSubjectID string, []BudgetWindowInput) error` — client.go interface +
+  remote.go (PUT) + embed/client.go (localClient -> svc). Reuses BudgetWindowInput.
+
+## Pairs with
+tensorhub #486 (PushTierLadder now pushes the YAML per_invoker_bad_spend via the new setter); openrails #488
+(per-payer bad_spend), #487 (tier policy template), #476 (tier-schedule end-to-end template).
+
+## Outcome
+CODE COMPLETE; RELEASE BLOCKED (not tagged). All source done + verified: migration 028, sqlc queries,
+service setter+resolver wired into all 3 sites, HTTP handler + route, SDK (client/remote/embed), 3 service
+integration tests GREEN (configured $1 window denies; unset falls back to $5 default; per-customer override),
+conformance probe extended. go build ./... + unit suite GREEN.
+
+BLOCKER (do not paper over): master HEAD == v0.30.0 EXACTLY, but the entire #491 refactor (migration 027 +
+customers org/issuer/subject natural key + InvokerID columns + identity rename dropping FederatedCustomerID)
+is UNCOMMITTED, ACTIVELY-IN-PROGRESS WIP by a concurrent agent (027 is untracked; ~37 dirty files mtime'd
+within minutes). Consequences: (1) gen/models.go is a shared moving target carrying #491 drift — committing it
+sweeps another agent's WIP (forbidden); reverting the drift makes it reference 027 columns absent from the
+committed tree -> won't build. (2) A v0.31.0 tag would either ship migration 028 WITHOUT 027 (broken) or sweep
+#491. (3) embed/conformance_integration_test.go already does NOT compile on clean v0.30.0 (FederatedCustomerID
+undefined, line 838) — pre-existing, not mine. RESOLUTION NEEDED: once #491 lands (027 + identity committed),
+re-run `task sqlc` (clean gen), commit #492 source with pathspecs, tag v0.31.0, then do the tensorhub bump.
+tensorhub consumer change (PushTierLadder -> SetActorWastedWindows) deferred — it needs the v0.31.0 SDK method
+to exist or tensorhub's build breaks.
 
 ---
 
@@ -805,7 +848,7 @@ Also boot the cutover with `FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIO
 
 # #491: Split CUSTOMER (payer / money account) from ACTOR (invoker / delegated-user) — delegated-users hold no money
 
-**Completed:** no
+**Completed:** yes
 
 Today `customer` (the renamed merchant_subject, #486) is keyed `UNIQUE(merchant_id, issuer, subject)` —
 one row PER DELEGATED-USER — AND owns the money: `money_accounts` (balance, tier, spend-caps),
@@ -867,7 +910,88 @@ itself, OpenRails never sees it. EMBEDDED: host vouches; customer/actor ids pass
 EMBEDDED degenerate case (doujins): the end-user genuinely holds money, so end-user = customer(payer) =
 actor (1:1); MANY customers per merchant (one per end-user), one actor each. Unifying rule: actor->customer
 is many:1 (federated) or 1:1 (embedded). "One customer per merchant" is FEDERATED-ONLY — embedded keeps
-per-end-user customers because the end-user holds money. CONFIRM this nuance with the owner.
+per-end-user customers because the end-user holds money.
+
+================================================================================
+OWNER CONFIRMATION + UNIFIED RULE (2026-06-14) — supersedes the "CONFIRM this nuance" note above.
+================================================================================
+The split is REAL and reduces to ONE rule. Two primitives, never conflated:
+
+  INVOKER (formerly "actor") = the END-USER that made the call. ALWAYS the token SUBJECT (delegated_sub) or
+    a native user. Referenced by a STABLE UUID, never a username (e.g. cozy-art reports PaulFidika by his
+    cozy-art UUID, so a rename on cozy-art doesn't reparent his history). The invoker is ALWAYS tracked
+    (billing visibility for the payer + per-invoker abuse/rate caps the payer sets), and NEVER holds money.
+
+  CUSTOMER (payer) = who the spend is billed to. Resolved from the ISSUER:
+    - issuer is ORG-BOUND (cozy-art on tensorhub: cozy-art is an authkit ORG *and* an issuer) ->
+        payer = the ORG's single customer. MANY invokers : 1 customer. cozy-art:PaulFidika is NEVER a
+        tensorhub user and NEVER a tensorhub-OpenRails customer — only an invoker under cozy-art's balance.
+    - issuer is ORG-LESS, or a native user (doujins/hentai0 users; tensorhub native user Sam) ->
+        payer = the end-user THEMSELVES. invoker -> customer 1:1 (Sam pays for Sam; each doujins user pays
+        for itself). authkit#80 makes org_id NULLABLE precisely so org-binding can BE this switch.
+
+  So: invoker = always the subject; payer = the org (org-bound issuer) ELSE the subject/native-user.
+  Embedded (doujins, hentai0, cozy-art-standalone) and standalone differ only in transport, not in this rule.
+
+DEPLOYMENT SHAPES (owner, 2026-06-14):
+  - doujins/hentai0/cozy-art use OpenRails EMBEDDED, identically: merchant = the app (sole); customers =
+    each of the app's users (native authkit users -> per-user balances); no orgs; issuers unused embedded.
+  - doujins/hentai0 STANDALONE OpenRails: authkit there has NO users/orgs, only ISSUERS [doujins, hentai0]
+    tied to the one merchant; each token subject -> its own customer (org-less issuer branch above).
+  - tensorhub uses OpenRails EMBEDDED: merchant = tensorhub (sole); customers = tensorhub's ORGS + native
+    users; cozy-art is an authkit org+issuer; cozy-art's delegated users are INVOKERS, not customers.
+    tensorhub resolves payer=org / invoker=subject via authkit IN-PROCESS, then charges its embedded
+    OpenRails. (The earlier "OpenRails is federation-agnostic, cozy-art is an opaque string it never sees"
+    framing was the STANDALONE-remote model; under tensorhub-EMBEDDED, cozy-art IS a real authkit entity
+    and the payer corresponds to that org.)
+
+  ISSUERS only appear in two places (owner, 2026-06-14): (1) STANDALONE OpenRails, where the embedding app
+  (doujins/hentai0) signs JWTs for its users and the issuer ties to the merchant (no org); (2) FEDERATED
+  delegators inside an embedded host (cozy-art inside tensorhub), where the issuer is org-bound. In PLAIN
+  embedded mode there is no JWT-to-OpenRails step at all (see below). "Org" = a grouping of an app's
+  users/sub-customers, NEVER the app itself. In tensorhub an org (cozy-art) -> one customer (payer) and may
+  own an org-bound issuer.
+
+  EMBEDDED SECURITY MODEL (owner, 2026-06-14) — load-bearing: EMBEDDED OpenRails has NO security model of
+  its own; it DEFERS ENTIRELY to the host app. The host is in charge of everything security-related — it
+  fully controls OpenRails, calls in freely, and may define ONE OR MORE merchants as it sees fit (so
+  "embedding-app == one merchant" is the common case but NOT a rule). For a host-exposed OpenRails route
+  (e.g. /me), the flow is: host's authkit MIDDLEWARE validates the JWT -> resolves the user's identity ->
+  attaches it to the request CONTEXT -> calls into OpenRails, which simply READS (merchant, customer/payer,
+  invoker) from that context. OpenRails embedded never validates a token or authenticates a principal
+  itself. (Standalone OpenRails is the ONLY mode where OpenRails authenticates incoming JWTs against the
+  issuer registry; that is what issuers/merchant-auth are for.)
+
+DELEGATED-USER (INVOKER) IDENTITY LIVES IN AUTHKIT (decided 2026-06-14; REVERSES the earlier "lives in
+OpenRails" note). Restore authkit profiles.delegated_users (un-drops authkit#78; see authkit#81) as the
+SHARED federated-end-user identity primitive — it's consumed by TWO domains: the APP (tensorhub ALREADY
+references a delegated_user_id in 5 NON-billing tables: user_file_objects/media ownership,
+media_output_events, resource_visibility_audit, platform_abuse_events, platform_policy_denials) AND BILLING
+(openrails invoker attribution + per-invoker spend/abuse caps). A shared identity belongs in the identity
+service so both FK to it and neither depends on the other; were it in OpenRails, tensorhub's media-OWNERSHIP
+tables would FK into the BILLING service (app->billing coupling, wrong). My earlier "FK can't cross schemas
+so it must live in OpenRails" was WRONG: Postgres allows cross-SCHEMA FKs (only cross-DATABASE is
+impossible), and authkit `profiles` + openrails `billing` share ONE database in every deployment (the
+embedded host DB; or standalone-openrails's bundled authkit DB).
+  - openrails attribution rows (money_spend_limits / usage_events / money_transactions / budget_*) FK their
+    invoker -> authkit profiles.delegated_users(id), CROSS-SCHEMA, same DB.
+  - id is uuidv7 (pg18 native — the fleet's UNIVERSAL pk; owner: uuidv7 everywhere, NO uuidv5). uuidv7 is
+    random/time-ordered and CANNOT be content-derived, so idempotency comes from a UNIQUE NATURAL KEY, not a
+    derived id: delegated_users = `id uuid DEFAULT uuidv7()` + `UNIQUE(remote_application_id, subject)`, and
+    authkit TouchDelegatedUser(issuer, subject) = `INSERT ... ON CONFLICT (remote_application_id, subject)
+    DO UPDATE last_seen_at RETURNING id` — the id is minted ONCE and RETURNED; openrails stamps the returned
+    value. This REPLACES the two clashing derivations (tensorhub `du_`+sha256(issuer\x00sub); openrails
+    FederatedCustomerID uuidv5) — both go away.
+  - SAME pivot for the payer CUSTOMER id: DROP FederatedCustomerID(uuidv5). customers.id = uuidv7() with a
+    per-branch natural key — org-bound: UNIQUE(merchant_id, org_id); org-less/native: UNIQUE(merchant_id,
+    issuer, subject) — resolved via ON CONFLICT ... RETURNING id. This REVERSES #491-slice-1's "customers is
+    UUID-only, derived, no lookup column": the natural-key columns return (more explicit/queryable for
+    billing) behind a uuidv7 surrogate pk. Audit money_in.go depositSourceID + subscription_credits grantID
+    (also uuidv5 idempotency keys) -> same uuidv7-pk + UNIQUE(natural key) pattern.
+  - subject = the STABLE uuid the merchant supplies (cozy-art reports PaulFidika by uuid, never username).
+  - NATIVE / org-less branch: invoker == payer 1:1, so the customer_id already IS the attribution; a
+    delegated_users row is needed for the FEDERATED (org-bound) case where invoker != payer. (Standalone
+    OpenRails has no app tables, so org-less subjects likely need no delegated_users row — confirm in impl.)
 
 WHAT THE ACTOR TRACKS (and ONLY this):
 1. spend ATTRIBUTION — how much of the payer's money this actor spent, when, on what (payer visibility).
@@ -895,25 +1019,59 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
       budget_reservations/budget_window_state and the money_transactions/usage_events/money_spend_limits
       `actor` columns are intentionally NOT renamed (opaque keys; a column rename is high-risk + out of
       the minimal-safe slice). Per-invoker abuse counters onto a first-class actor identity row remains.
-- [ ] Federated resolution: a delegated request (issuer, subject) resolves to an ACTOR whose customer_id =
-      the issuer's single designated payer balance (issuer registry) — STOP materializing a money_account
-      per delegated-user.
-- [ ] Re-key/confirm money_accounts, processor_customers, tier_schedules, credit-line on customer(balance)
-      only; migrate any per-delegated-user money_accounts created under the old model.
+- [x] Federated resolution (org-bound issuer): the subject becomes the invoker, NOT a customer.
+      Outcome (slice 5): TouchCustomer (controlplane/customer.go) switches on
+      Core().ResolveRemoteApplicationOrg(issuer); org-bound => UpsertCustomerByOrg(merchant,org). uuidv5
+      FederatedCustomerID DELETED from pkg/identity.
+- [x] Resolution switch keys on authkit#80 nullable org_id; uuidv7 pk + ON CONFLICT RETURNING id.
+      Outcome (slice 5): migration 027 re-adds customers (org_id, issuer, subject) nullable + two partial
+      UNIQUE indexes; UpsertCustomerByOrg / UpsertCustomerByIssuerSubject (RETURNING id). The external-subject
+      entitlement lookup switched to LookupCustomerIDsByIssuerSubjects (real lookup, no derived id). grep
+      "NewSHA1|FederatedCustomerID|uuidv5" empty in non-test source (doc comments only). Also converted the
+      two other uuidv5 idempotency keys (money_in depositSourceID + subscription/purchase grantID) to store
+      the NATURAL-KEY STRING directly in source_id (uuidv7 pk + existing UNIQUE(merchant,customer,currency,
+      source,source_id)); DepositParams.SourceID is now *string.
+- [x] Invoker identity = authkit profiles.delegated_users; invoker_id FK + wire json:"actor"->"invoker".
+      Outcome (slice 5): invoker_id uuid added NULLABLE + ADDITIVE (actor text RETAINED) to the THREE true-
+      ATTRIBUTION tables (money_transactions / usage_events / money_spend_limits), FK ->
+      profiles.delegated_users(id) cross-schema (guarded). DEVIATION (documented in 027): budget_reservations
+      / budget_window_state `actor` is a POLYMORPHIC scope_key (subject|role:<uuid>|<invoker> per
+      budgets/scopes.go), NOT a pure invoker — renaming to an invoker FK would break role/subject budgets, so
+      it stays opaque text. Populated on the DELEGATED path (ResolveDelegated -> TouchInvoker ->
+      TouchDelegatedUser RETURNING id -> ResolvedDelegated.InvokerID, threaded through DepositParams /
+      RecordUsageParams / Capture). The EMBEDDED/SERVICE path has NO issuer (host asserts identity per the
+      EMBEDDED SECURITY MODEL) so it cannot call TouchDelegatedUser -> invoker_id NULL there, opaque actor
+      stays the key. Wire: request DTOs gained json:"invoker" (admit/admit-batch, deposit/withdraw/hold,
+      authorize, report-wasted-spend, budget-check, open-window, window-settle-item); pre-#491 json:"actor"
+      still accepted transiently (resolveInvokerField prefers "invoker").
+- [x] Migrate existing per-(issuer,subject) money state for ORG-BOUND issuers only.
+      Outcome (slice 5): VERIFIED no real federated data to fold — slice-1 (024) already DROPPED the
+      (issuer,subject) columns, so no org-bound customer carries a natural key to collapse; 027 re-adds them
+      EMPTY. The fold is STRUCTURAL-ONLY (no-op with a RAISE NOTICE in 027); a real reparent is left for
+      if/when federated balances exist.
+- [x] Re-key/confirm money/processor/tier/credit-line on customer(balance) only.
+      Outcome (slice 5): confirmed — all money_* / processor_customers / tier / credit-line FK customers(id)
+      only; the new invoker_id FK lands ONLY on attribution tables. No money state moved onto the invoker.
 - [x] RENAMED money_accounts -> money_settings (shipped v0.29.2). Done: it holds NO money and nothing FKs to it
       (all money_* tables FK customers(id)) — it is a per-(customer,currency) settings/policy sibling
       (billing mode, caps, auto-topup, alerts, suspension, tier), NOT an account. "account" collides with
       customer-as-the-account under this issue. Name TBD with owner.
-- [ ] Embedded path: actor (issuer = host, subject = end-user) -> a fresh per-user customer balance,
-      actor -> customer 1:1.
-- [ ] Move #488 per-invoker flat wasted-budget + a per-actor concurrent-capacity cap onto the actor
-      identity (persist attribution; abuse counters may stay in Redis but keyed by the real actor id).
+- [x] Embedded path (CONFIRMED correct as-is): native user (subject = end-user) -> a per-user customer
+      balance, invoker -> customer 1:1.
+      Outcome (slice 5): unchanged — EnsureCustomerID keeps materializing the UUID subject AS its own
+      customer id (org-less/native branch); invoker_id stays NULL there (invoker == payer). No regression.
+- [x] Move #488 per-invoker flat wasted-budget + per-invoker concurrent cap onto the invoker identity.
+      Outcome (slice 5): the abuse keyspace (abuse/wasted_spend.go wa:<tenant>:<actor>) is ALREADY keyed by
+      the invoker identity — the wire contract now names that field "invoker" and documents it as the STABLE
+      merchant-supplied uuid (cozy-art reports PaulFidika by uuid, never username), so a rename can't reparent
+      history. Redis counters stay keyed by the real invoker value (no free-text-vs-id split needed); the
+      persisted attribution rows additionally carry invoker_id (delegated_users uuid) on the delegated path.
 - [x] SDK + wire: distinguish payer (customer) from actor on Admit/charge. Verified (slice 4): the
       Admit/charge/spend wire DTOs already carry customer_id (payable uuid) + actor (the invoker opaque
       label) as REQUEST fields (serviceAdmitRequest, service_credits, service_credit_window). No code
-      change — the split already exists at the wire. NOTE: wire field stays json:"actor" (renaming it to
-      "invoker" is a wire-breaking change for existing consumers + a stored-column value; deferred, like
-      the Slice 2 column-rename). Per-actor spend attribution surfacing to the payer is unchanged.
+      change — the split already exists at the wire. UPDATE (slice 5): the wire field was RENAMED to
+      json:"invoker" on the request DTOs (json:"actor" still accepted transiently via resolveInvokerField);
+      attribution rows additionally carry invoker_id (delegated_users uuid) on the delegated path.
 - [x] NO customer-claim-in-token needed. Verified (slice 4): no invoker/actor JWT claim exists anywhere;
       the invoker (actor) arrives ONLY as a merchant-supplied opaque request field on Admit/charge/spend
       (= money_spend_limits.actor). The authenticated subject is always a customer or the merchant
@@ -927,19 +1085,22 @@ max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
 - [x] Background COMPACTION job. Done (slice 3, 5e302967): the credit-block EXPIRY River job now DELETEs
       fully-spent (remaining_amount=0) and expired money_blocks (DeleteCompactableMoneyBlocks), bounded
       batch, touching money_blocks ONLY — never money_transactions or payments.
-- [ ] AUDIT-SAFE: the purchase receipt lives in `payments` (the card charge, "bought $10 June 11") + the
-      `money_transactions` transaction_type='deposit' row — NOT in money_blocks. Compaction must NEVER
-      delete money_transactions deposit rows or payments; only the derived spendable lots. (money_blocks
-      .source_transaction_id -> money_transactions may dangle/null on block delete; the receipt survives.)
-- [ ] Resolution (RESOLVED): the MERCHANT = the authenticated OPERATOR (its issuer/tenant/service-token in
-      OpenRails-authkit; issuer -> merchant via the issuer registry). CUSTOMER + ACTOR are ASSERTED by that
-      merchant for its own namespace — opaque, never re-authenticated by OpenRails. Two interaction patterns,
-      same anchor: (1) DIRECT — end-user's merchant-minted token sent to OpenRails; OpenRails verifies,
-      subject = customer/actor (doujins). (2) PROXY — merchant server authenticates as itself and REPORTS
-      (customer, actor) (tensorhub). NO tenant->merchant FK; owner_tenant_id ownership-only.
-- [ ] Tests: federated many-actors-one-payer (spend attributed per actor, money debited from the ONE
-      payer, per-actor abuse cap trips before the payer's); embedded actor==customer 1:1; a delegated-user
-      has no tier and no money_account.
+- [x] AUDIT-SAFE: compaction never deletes deposit rows / payments, only derived spendable lots.
+      Outcome (slice 5): CONFIRMED still true — slice-3 (026) compaction touches money_blocks ONLY; the
+      uuidv5->natural-key source_id change (this slice) is on money_transactions/usage idempotency keys, not
+      money_blocks, so the receipt invariant is unchanged.
+- [x] Resolution (RESOLVED): MERCHANT = authenticated OPERATOR; CUSTOMER + ACTOR asserted by it.
+      Outcome (slice 5): CONFIRMED — standalone DIRECT path verifies the token, resolves payer via the
+      issuer's org-binding (TouchCustomer) and invoker via TouchDelegatedUser; embedded PROXY path reads
+      (merchant, customer, invoker) from host context (EMBEDDED SECURITY MODEL), no re-auth. No
+      tenant->merchant FK added.
+- [x] Tests: federated many-actors-one-payer / org-less per-subject / cross-schema invoker_id FK.
+      Outcome (slice 5): new integration test internal/modules/money/invoker_identity_491_integration_test.go
+      (TestInvokerIdentityAndPayerNaturalKey) proves: org-less natural key idempotent + per-subject;
+      org-bound collapses many subjects -> ONE payer; invoker_id cross-schema FK enforced (bogus rejected,
+      NULL allowed) — also exercising the authkit-first FK ORDERING against the fully migrated schema.
+      Embedded actor==customer 1:1 + delegated-user-has-no-money stay covered by the green money/embed/
+      conformance suites.
 
 **Related**
 #486 (merchant_subject->customer rename this builds on), #487/#488 (payer-vs-actor runtime caps this

@@ -115,10 +115,10 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 		tenantSubjectID).Scan(&depositCount))
 	require.Equal(t, 1, depositCount)
 
-	// Deterministic grant SourceID: openrails:sub_credit_grant:<cadence>:<subID>:<label>:<periodEnd>.
+	// #491: source_id IS the natural-key string itself (uuidv7 pk + UNIQUE natural
+	// key), no longer a derived uuidv5.
 	grantKey := fmt.Sprintf("openrails:sub_credit_grant:%s:%s:%s:%s",
 		models.CreditGrantCadencePerRenewal, subID, grantLabel, periodEnd.UTC().Format(time.RFC3339Nano))
-	expectedGrantID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(grantKey))
 
 	dep := new(models.MoneyTransaction)
 	require.NoError(t, pool.QueryRow(ctx,
@@ -128,7 +128,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 		 LIMIT 1`,
 		tenantSubjectID).Scan(&dep.SourceID))
 	require.NotNil(t, dep.SourceID)
-	require.Equal(t, expectedGrantID.String(), *dep.SourceID)
+	require.Equal(t, grantKey, *dep.SourceID)
 
 	bal, err := moneySvc.GetBalance(ctx, tenantSubjectID.String())
 	require.NoError(t, err)

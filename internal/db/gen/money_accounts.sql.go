@@ -116,7 +116,7 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 }
 
 const getMoneySpendLimit = `-- name: GetMoneySpendLimit :one
-SELECT id, merchant_id, customer_id, actor, max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at, currency FROM openrails.money_spend_limits
+SELECT id, merchant_id, customer_id, actor, max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at, currency, invoker_id FROM openrails.money_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $4 AND actor = $3
 LIMIT 1
 `
@@ -146,6 +146,7 @@ func (q *Queries) GetMoneySpendLimit(ctx context.Context, arg GetMoneySpendLimit
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Currency,
+		&i.InvokerID,
 	)
 	return i, err
 }
@@ -686,11 +687,12 @@ func (q *Queries) UpsertMoneyAccountSettings(ctx context.Context, arg UpsertMone
 const upsertMoneySpendLimit = `-- name: UpsertMoneySpendLimit :exec
 INSERT INTO openrails.money_spend_limits (
     id, merchant_id, customer_id, currency, actor,
-    max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at
-) VALUES ($1, $2, $3, $9, $4, $5, $6, $7, $8)
+    max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at, invoker_id
+) VALUES ($1, $2, $3, $9, $4, $5, $6, $7, $8, $10)
 ON CONFLICT (merchant_id, customer_id, currency, actor) DO UPDATE SET
     max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros,
     max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros,
+    invoker_id = COALESCE(EXCLUDED.invoker_id, openrails.money_spend_limits.invoker_id),
     updated_at = EXCLUDED.updated_at
 `
 
@@ -704,6 +706,7 @@ type UpsertMoneySpendLimitParams struct {
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 	Currency               string
+	InvokerID              *uuid.UUID
 }
 
 func (q *Queries) UpsertMoneySpendLimit(ctx context.Context, arg UpsertMoneySpendLimitParams) error {
@@ -717,6 +720,7 @@ func (q *Queries) UpsertMoneySpendLimit(ctx context.Context, arg UpsertMoneySpen
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.Currency,
+		arg.InvokerID,
 	)
 	return err
 }

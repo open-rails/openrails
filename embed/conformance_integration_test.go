@@ -35,7 +35,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // --- normalized observations ------------------------------------------------
@@ -226,6 +225,10 @@ type scriptResult struct {
 
 	// Hierarchical budget-scope policies on the unified client (#473).
 	SubjectBudgetPolicies []obsBudgetPolicy
+
+	// Operator-configured flat per-actor wasted-spend windows (#492): the
+	// configured limit + over-budget state observed via AbuseUsage.
+	ActorWastedUsage []openrails.AbuseUsageWindow
 
 	SettingsAccount obsAccount
 
@@ -778,6 +781,22 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	r.SubjectBudgetPolicies = observeBudgetPolicies(pols)
 	require.Len(t, r.SubjectBudgetPolicies, 2, "%s subject-budget-policies: platform cap must stay invisible", env.side)
 
+	// 22) Operator-configured flat per-actor wasted-spend windows (#492): set a
+	// per-customer override ($1/15m), report $2 wasted, then observe via AbuseUsage
+	// that the CONFIGURED limit is enforced (not DefaultActorWastedWindows). embed
+	// and remote must produce identical observable state.
+	wastedActor := "user:wasted-" + env.side
+	require.NoError(t, c.SetActorWastedWindows(ctx, payerID, []openrails.BudgetWindowInput{
+		{Key: "burst", WindowSeconds: 900, LimitMicros: 1_000_000},
+	}), "%s set-actor-wasted-windows", env.side)
+	require.NoError(t, c.ReportWastedSpend(ctx, payerID, wastedActor, 2_000_000, "conformance"), "%s report-wasted-spend", env.side)
+	au, err := c.AbuseUsage(ctx, payerID, wastedActor, "")
+	require.NoError(t, err, "%s abuse-usage", env.side)
+	r.ActorWastedUsage = au.ActorWindows
+	require.Len(t, r.ActorWastedUsage, 1, "%s actor-wasted-usage: configured single window", env.side)
+	require.Equal(t, int64(1_000_000), r.ActorWastedUsage[0].LimitMicros, "%s actor-wasted-usage: CONFIGURED limit, not default", env.side)
+	require.True(t, r.ActorWastedUsage[0].OverBudget, "%s actor-wasted-usage: $2 over the configured $1", env.side)
+
 	return r
 }
 
@@ -812,14 +831,15 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	const issuer = "conformance"
 	newPayer := func(side string) (uuid.UUID, string) {
 		subject := side + "-" + uuid.New().String()
-		// customers is UUID-only (#491): the external (issuer, subject) maps to a
-		// deterministic customer id, so seed the row at that id for the
-		// external-subject entitlements lookup to resolve.
-		id := identity.FederatedCustomerID(dbtest.TestTenantID.UUID(), issuer, subject).UUID()
-		_, err := pool.Exec(ctx, `
-			INSERT INTO openrails.customers (id, merchant_id, created_at, last_seen_at)
-			VALUES ($1, $2, now(), now())`,
-			id, dbtest.TestTenantID.UUID())
+		// #491: customers carries the (merchant, issuer, subject) org-less natural
+		// key behind a uuidv7 surrogate id; seed by the natural key and read the
+		// minted id back so the external-subject entitlements lookup resolves.
+		var id uuid.UUID
+		err := pool.QueryRow(ctx, `
+			INSERT INTO openrails.customers (merchant_id, issuer, subject, created_at, last_seen_at)
+			VALUES ($1, $2, $3, now(), now())
+			RETURNING id`,
+			dbtest.TestTenantID.UUID(), issuer, subject).Scan(&id)
 		require.NoError(t, err)
 		// One active entitlement row for the entitlements steps.
 		_, err = pool.Exec(ctx, `

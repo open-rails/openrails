@@ -765,11 +765,12 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 				t := s.now().UTC().Add(time.Duration(*spec.ExpiresDays) * 24 * time.Hour)
 				expiresAt = &t
 			}
+			paymentSourceID := result.PaymentID.String()
 			_, err = s.MoneyService.Deposit(ctx, money.DepositParams{
 				Actor:     userID,
 				Amount:    spec.Amount,
 				Source:    "purchase",
-				SourceID:  &result.PaymentID,
+				SourceID:  &paymentSourceID,
 				ExpiresAt: expiresAt,
 			})
 			if err != nil {

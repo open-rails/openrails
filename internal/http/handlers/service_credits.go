@@ -18,9 +18,14 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
+// #491: the invoker (end-user) attribution label is wire field "invoker" (renamed
+// from "actor"). Both are accepted transiently; resolveInvokerField prefers
+// "invoker". The binding:"required" moved off the field to a manual check so an
+// "invoker"-only body validates.
 type serviceWithdrawRequest struct {
 	CustomerID string     `json:"customer_id"`
-	Actor      string     `json:"actor" binding:"required"`
+	Invoker    string     `json:"invoker"`
+	Actor      string     `json:"actor"`
 	Amount     int64      `json:"amount" binding:"required"`
 	Source     string     `json:"source" binding:"required"`
 	SourceID   *uuid.UUID `json:"source_id" binding:"required"`
@@ -28,7 +33,8 @@ type serviceWithdrawRequest struct {
 
 type serviceDepositRequest struct {
 	CustomerID  string     `json:"customer_id"`
-	Actor       string     `json:"actor" binding:"required"`
+	Invoker     string     `json:"invoker"`
+	Actor       string     `json:"actor"`
 	Currency    string     `json:"currency"` // "" => DefaultCurrency (#476); #483: must forward so unknown units reject like local
 	Amount      int64      `json:"amount" binding:"required"`
 	Source      string     `json:"source" binding:"required"`
@@ -39,7 +45,8 @@ type serviceDepositRequest struct {
 
 type serviceHoldRequest struct {
 	CustomerID string `json:"customer_id"`
-	Actor      string `json:"actor" binding:"required"`
+	Invoker    string `json:"invoker"`
+	Actor      string `json:"actor"`
 	Amount     int64  `json:"amount" binding:"required"`
 	Source     string `json:"source" binding:"required"`
 	SourceID   string `json:"source_id" binding:"required"`
@@ -106,6 +113,7 @@ func requireServiceCustomerScope(r *httprequest.Request, tenantSubject billingid
 // request_id = the idempotency key for the placed hold.
 type serviceAuthorizeRequest struct {
 	CustomerID     string `json:"customer_id"`
+	Invoker        string `json:"invoker"` // #491 (renamed from "actor")
 	Actor          string `json:"actor"`
 	EstimateMicros int64  `json:"estimate_micros"`
 	RequestID      string `json:"request_id" binding:"required"`
@@ -173,7 +181,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 
 	out, err := svc.AuthorizeAndHold(r.Request.Context(), billingservice.AuthorizeAndHoldRequest{
 		CustomerID:     *tenantSubject,
-		Actor:          req.Actor,
+		Actor:          resolveInvokerField(req.Invoker, req.Actor),
 		EstimateMicros: req.EstimateMicros,
 		RequestID:      req.RequestID,
 		ExpiresAt:      expiresAt,
@@ -390,7 +398,7 @@ func ServiceListCustomerCreditTransactions(r *httprequest.Request) {
 	out := make([]serviceTxnResponse, 0, len(items))
 	for _, t := range items {
 		out = append(out, serviceTxnResponse{
-			ID: t.ID, CustomerID: t.CustomerID, Actor: t.Actor, Amount: t.Amount,
+			ID: t.ID, CustomerID: t.CustomerID, Invoker: t.Actor, Actor: t.Actor, Amount: t.Amount,
 			TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
 			CreatedAt: t.CreatedAt,
 		})
@@ -401,6 +409,9 @@ func ServiceListCustomerCreditTransactions(r *httprequest.Request) {
 type serviceTxnResponse struct {
 	ID              uuid.UUID `json:"id"`
 	CustomerID      uuid.UUID `json:"customer_id"`
+	// Invoker mirrors the opaque attribution label; #491 renamed the wire field
+	// from "actor" (still emitted for back-compat).
+	Invoker         string    `json:"invoker"`
 	Actor           string    `json:"actor"`
 	Amount          int64     `json:"amount"`
 	TransactionType string    `json:"transaction_type"`
@@ -490,6 +501,11 @@ func ServiceDepositCredits(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
+	invoker := resolveInvokerField(req.Invoker, req.Actor)
+	if invoker == "" {
+		r.ErrorJSON(http.StatusBadRequest, "invoker required")
+		return
+	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
@@ -517,7 +533,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
 		CustomerID:  tenantSubjectID,
-		Actor:       req.Actor,
+		Actor:       invoker,
 		Currency:    req.Currency,
 		Amount:      req.Amount,
 		Source:      req.Source,
@@ -546,6 +562,11 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
+	invoker := resolveInvokerField(req.Invoker, req.Actor)
+	if invoker == "" {
+		r.ErrorJSON(http.StatusBadRequest, "invoker required")
+		return
+	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
@@ -565,7 +586,7 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 	}
 	trx, err := svc.WithdrawCredits(r.Request.Context(), billingservice.WithdrawCreditsRequest{
 		CustomerID: tenantSubjectID,
-		Actor:      req.Actor,
+		Actor:      invoker,
 		Amount:     req.Amount,
 		Source:     req.Source,
 		SourceID:   req.SourceID,
@@ -590,6 +611,11 @@ func ServiceHoldCredits(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
+	invoker := resolveInvokerField(req.Invoker, req.Actor)
+	if invoker == "" {
+		r.ErrorJSON(http.StatusBadRequest, "invoker required")
+		return
+	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
@@ -609,7 +635,7 @@ func ServiceHoldCredits(r *httprequest.Request) {
 	}
 	hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
 		CustomerID: tenantSubjectID,
-		Actor:      req.Actor,
+		Actor:      invoker,
 		Amount:     req.Amount,
 		Source:     req.Source,
 		SourceID:   req.SourceID,

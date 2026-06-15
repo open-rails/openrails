@@ -166,10 +166,12 @@ func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r mone
 	}
 	bucket := now.Truncate(max(cooldown, time.Minute)).Unix()
 	episode := fmt.Sprintf("autotopup:%s:%d", r.CustomerID, bucket)
-	depositSourceID := uuid.NewSHA1(uuid.Nil, []byte(episode))
+	// #491: source_id is the natural key string itself (uuidv7 pk + UNIQUE
+	// (merchant,customer,currency,source,source_id)); no uuidv5 derivation.
+	depositSourceID := episode
 
 	// If this episode already deposited, we're done (idempotent).
-	existing, err := s.GetTransactionBySource(ctx, payer.UUID().String(), r.Currency, "deposit", "auto_topup", depositSourceID.String())
+	existing, err := s.GetTransactionBySource(ctx, payer.UUID().String(), r.Currency, "deposit", "auto_topup", depositSourceID)
 	if err == nil && existing != nil {
 		return false, nil
 	}

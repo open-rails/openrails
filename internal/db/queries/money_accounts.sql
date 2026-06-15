@@ -177,9 +177,10 @@ LIMIT 1;
 -- name: UpsertMoneySpendLimit :exec
 INSERT INTO openrails.money_spend_limits (
     id, merchant_id, customer_id, currency, actor,
-    max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at
-) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8)
+    max_spend_per_day_micros, max_spend_per_month_micros, created_at, updated_at, invoker_id
+) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, sqlc.narg(invoker_id))
 ON CONFLICT (merchant_id, customer_id, currency, actor) DO UPDATE SET
     max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros,
     max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros,
+    invoker_id = COALESCE(EXCLUDED.invoker_id, openrails.money_spend_limits.invoker_id),
     updated_at = EXCLUDED.updated_at;

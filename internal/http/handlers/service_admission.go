@@ -13,7 +13,10 @@ import (
 )
 
 type serviceAdmitRequest struct {
-	CustomerID     string                           `json:"customer_id"`
+	CustomerID string `json:"customer_id"`
+	// Invoker is the end-user (invoker) attribution/abuse label (#491; renamed from
+	// "actor"). Actor is the pre-#491 wire field, still accepted transiently.
+	Invoker        string                           `json:"invoker"`
 	Actor          string                           `json:"actor"`
 	Tier           string                           `json:"tier"`
 	Resource       string                           `json:"resource"`
@@ -43,7 +46,7 @@ func ServiceAdmit(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "estimate_micros must be >= 0")
 		return
 	}
-	actor := strings.TrimSpace(req.Actor)
+	actor := resolveInvokerField(req.Invoker, req.Actor)
 	payer, err := parseServiceCustomerID(req.CustomerID)
 	if err != nil || payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
@@ -89,6 +92,16 @@ func ServiceAdmit(r *httprequest.Request) {
 	default: // suspended, blocked, endpoint
 		r.JSON(http.StatusForbidden, res)
 	}
+}
+
+// resolveInvokerField returns the merchant-supplied invoker (end-user) label,
+// preferring the #491 wire field "invoker" and falling back to the pre-#491
+// "actor" field for in-flight consumers (transitional, like budgets.NormalizeScope).
+func resolveInvokerField(invoker, actor string) string {
+	if v := strings.TrimSpace(invoker); v != "" {
+		return v
+	}
+	return strings.TrimSpace(actor)
 }
 
 // admitInputFromRequest maps one admit body onto the service-facade input —
@@ -172,7 +185,7 @@ func serviceAdmitBatchVerdicts(
 			out[i] = serviceAdmitVerdict{Status: http.StatusForbidden, Error: "service_token_tenant_subject_scope_denied"}
 			continue
 		}
-		res, err := admit(ctx, admitInputFromRequest(item, *payer, strings.TrimSpace(item.Actor)))
+		res, err := admit(ctx, admitInputFromRequest(item, *payer, resolveInvokerField(item.Invoker, item.Actor)))
 		if err != nil {
 			out[i] = serviceAdmitVerdict{Status: http.StatusInternalServerError, Error: "admission check failed"}
 			continue
@@ -275,6 +288,7 @@ func ServiceGetTier(r *httprequest.Request) {
 
 type serviceReportWastedSpendRequest struct {
 	CustomerID string `json:"customer_id"`
+	Invoker    string `json:"invoker"` // #491 (renamed from "actor")
 	Actor      string `json:"actor"`
 	Micros     int64  `json:"micros"`
 	Reason     string `json:"reason"`
@@ -306,7 +320,7 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	if err := svc.ReportWastedSpend(r.Request.Context(), *payer, strings.TrimSpace(req.Actor), req.Micros, req.Reason); err != nil {
+	if err := svc.ReportWastedSpend(r.Request.Context(), *payer, resolveInvokerField(req.Invoker, req.Actor), req.Micros, req.Reason); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "report wasted spend failed")
 		return
 	}
@@ -404,6 +418,7 @@ func ServiceGetCreditLimit(r *httprequest.Request) {
 
 type serviceBudgetCheckRequest struct {
 	CustomerID      string                                  `json:"customer_id"`
+	Invoker         string                                  `json:"invoker"` // #491 (renamed from "actor")
 	Actor           string                                  `json:"actor"`
 	Windows         []billingservice.BudgetCheckWindowInput `json:"windows"`
 	RequestedMicros int64                                   `json:"requested_micros"`
@@ -431,7 +446,7 @@ func ServiceBudgetCheck(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	windows, err := svc.BudgetCheck(r.Request.Context(), *payer, req.Actor, req.Windows, req.RequestedMicros)
+	windows, err := svc.BudgetCheck(r.Request.Context(), *payer, resolveInvokerField(req.Invoker, req.Actor), req.Windows, req.RequestedMicros)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "budget check failed")
 		return

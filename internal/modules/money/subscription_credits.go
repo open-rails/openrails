@@ -129,7 +129,8 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 			if cadence == models.CreditGrantCadencePerRenewal {
 				grantKey = fmt.Sprintf("%s:%s", grantKey, params.PeriodEnd.UTC().Format(time.RFC3339Nano))
 			}
-			grantID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(grantKey))
+			// #491: source_id is the natural-key string (uuidv7 pk + UNIQUE natural key); no uuidv5.
+			grantID := grantKey
 
 			if _, err := s.depositTx(ctx, q, DepositParams{
 				Actor:     sub.CustomerID.String(),
@@ -198,7 +199,8 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 				return err
 			}
 			grantKey := fmt.Sprintf("openrails:purchase_credit_grant:%s:%s", params.PaymentID, label)
-			grantID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(grantKey))
+			// #491: source_id is the natural-key string (uuidv7 pk + UNIQUE natural key); no uuidv5.
+			grantID := grantKey
 			if _, err := s.depositTx(ctx, q, DepositParams{
 				CustomerID: &payer,
 				Actor:      payer.String(),

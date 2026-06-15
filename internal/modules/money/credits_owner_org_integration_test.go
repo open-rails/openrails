@@ -88,7 +88,7 @@ func startOwnerTenantPostgres(t *testing.T) (*db.DB, string, context.Context) {
 // block (the spendable lot).
 func seedSpendable(t *testing.T, ctx context.Context, svc *money.MoneyService, userID string, amount int64) {
 	t.Helper()
-	src := uuid.New()
+	src := uuid.New().String()
 	_, err := svc.Deposit(ctx, money.DepositParams{
 		Actor:    userID,
 		Amount:   amount,
