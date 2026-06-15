@@ -159,6 +159,19 @@ type Migration struct {
 	MigratedAt time.Time
 }
 
+// Operator-configurable FLAT per-actor wasted-spend windows (#492): windows[{key,window_seconds,limit_micros}] declared once per tenant (or per-customer override). Falls back to service.DefaultActorWastedWindows() when no row is stored.
+type OpenrailsActorWastedWindow struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// NULL = tenant-wide default; non-NULL = per-customer override taking precedence for that customer.
+	CustomerID *uuid.UUID
+	// JSONB array of {key, window_seconds, limit_micros}: at most limit_micros of wasted $ per window; admit denies when an actor is over.
+	Windows        []byte
+	WindowsVersion int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 // Hierarchical money-budget policies (#473): {scope, owner, windows[]} composed in one admit verdict over the one payer balance. owner=platform rows are writable only via the platform path (the subject cannot see/loosen them); owner=subject rows are the subject's own caps.
 type OpenrailsBudgetPolicy struct {
 	ID         uuid.UUID

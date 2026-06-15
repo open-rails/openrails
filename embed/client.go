@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -749,6 +750,33 @@ func (c *localClient) SetTierSchedule(ctx context.Context, tenantSubjectID strin
 	}
 	if err := c.svc.SetTierSchedule(ctx, payer, rungs); err != nil {
 		return internalErr("set tier schedule failed")
+	}
+	return nil
+}
+
+// SetActorWastedWindows transcribes handlers.ServiceSetActorWastedWindows
+// (service_admission.go, #492). An empty customer_id is the tenant-wide default
+// backstop (zero payer); a non-empty one is a per-customer override.
+func (c *localClient) SetActorWastedWindows(ctx context.Context, tenantSubjectID string, windows []openrails.BudgetWindowInput) error {
+	ctx = c.ensureTenant(ctx)
+	var payer identity.CustomerID
+	if strings.TrimSpace(tenantSubjectID) != "" {
+		var err error
+		payer, err = parseCustomer(tenantSubjectID, "invalid customer_id")
+		if err != nil {
+			return err
+		}
+	}
+	ws := make([]abuse.WastedWindow, 0, len(windows))
+	for _, w := range windows {
+		ws = append(ws, abuse.WastedWindow{
+			Key:         w.Key,
+			Window:      time.Duration(w.WindowSeconds) * time.Second,
+			LimitMicros: w.LimitMicros,
+		})
+	}
+	if err := c.svc.SetActorWastedWindows(ctx, payer, ws); err != nil {
+		return internalErr("set actor wasted windows failed")
 	}
 	return nil
 }

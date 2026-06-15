@@ -391,6 +391,25 @@ func (c *remote) SetTierSchedule(ctx context.Context, tenantSubjectID string, sc
 	return c.do(ctx, http.MethodPut, "/v1/service/tier-schedules", body, nil)
 }
 
+// SetActorWastedWindows implements Client (handler ServiceSetActorWastedWindows,
+// #492). The handler reads {key, window_seconds, limit_micros}; cadence is not
+// sent (flat rolling windows).
+func (c *remote) SetActorWastedWindows(ctx context.Context, tenantSubjectID string, windows []BudgetWindowInput) error {
+	ws := make([]map[string]any, 0, len(windows))
+	for _, w := range windows {
+		ws = append(ws, map[string]any{
+			"key":            w.Key,
+			"window_seconds": w.WindowSeconds,
+			"limit_micros":   w.LimitMicros,
+		})
+	}
+	body := map[string]any{
+		"customer_id": strings.TrimSpace(tenantSubjectID),
+		"windows":     ws,
+	}
+	return c.do(ctx, http.MethodPut, "/v1/service/actor-wasted-windows", body, nil)
+}
+
 // GetTier implements Client (handler ServiceGetTier, #477).
 func (c *remote) GetTier(ctx context.Context, tenantSubjectID string) (string, error) {
 	q := url.Values{}
