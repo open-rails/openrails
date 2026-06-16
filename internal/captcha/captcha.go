@@ -3,7 +3,6 @@ package captcha
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -15,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
 const (
@@ -127,7 +127,9 @@ func (v *siteVerifyVerifier) Verify(ctx context.Context, req VerifyRequest) (*Ve
 		Hostname   string   `json:"hostname"`
 		ErrorCodes []string `json:"error-codes"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	// Cap the upstream body even though siteverify is normally a trusted provider:
+	// defence-in-depth against a compromised/MITM'd endpoint exhausting memory.
+	if err := httpx.DecodeJSONLimited(resp.Body, 0, &payload); err != nil {
 		return nil, fmt.Errorf("decode captcha verify response: %w", err)
 	}
 
