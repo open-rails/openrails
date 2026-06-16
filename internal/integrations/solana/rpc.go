@@ -270,6 +270,37 @@ func (c *RPCClient) GetTokenBalanceForMint(ctx context.Context, owner solanago.P
 	return balance, nil
 }
 
+// GetTokenBalanceForMintAtSlot is GetTokenBalanceForMint gated on minContextSlot:
+// the balance is read only against a node that has reached minSlot (the slot a
+// preceding write confirmed at), so a lagging RPC node returns a retryable error
+// instead of a stale balance. minSlot == 0 behaves exactly like
+// GetTokenBalanceForMint. Returns 0 when the ATA does not exist.
+func (c *RPCClient) GetTokenBalanceForMintAtSlot(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey, minSlot uint64) (uint64, error) {
+	if minSlot == 0 {
+		return c.GetTokenBalanceForMint(ctx, owner, mint)
+	}
+	ata, _, err := solanago.FindAssociatedTokenAddress(owner, mint)
+	if err != nil {
+		return 0, fmt.Errorf("failed to derive ATA for mint %s: %w", mint.String(), err)
+	}
+	resp, err := c.fallback.GetTokenAccountBalanceAtSlot(ctx, ata, minSlot)
+	if err != nil {
+		if strings.Contains(err.Error(), "could not find account") ||
+			strings.Contains(err.Error(), "Invalid param") {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("failed to get token balance: %w", err)
+	}
+	if resp.Value == nil {
+		return 0, nil
+	}
+	balance, err := strconv.ParseUint(resp.Value.Amount, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse token balance %q: %w", resp.Value.Amount, err)
+	}
+	return balance, nil
+}
+
 // GetTokenBalances returns token balances for multiple mints owned by a wallet.
 // Mints that don't exist or have zero balance are included with Balance=0.
 func (c *RPCClient) GetTokenBalances(ctx context.Context, owner solanago.PublicKey, mints []string) ([]TokenAccountInfo, error) {

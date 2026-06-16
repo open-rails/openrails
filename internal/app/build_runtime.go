@@ -600,7 +600,8 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 
 	// Note: solanaPayService and SolanaPayPoller need checkoutService, which is created later
 	// We'll create solanaPayService with nil checkoutService and set it after checkoutService is created
-	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, priceService, productService, nil, fxProvider, solanaPriceProvider, clock)
+	// Meter is nil here (no-op); it's swapped for a real meter after InitTelemetry via SetMeter.
+	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, priceService, productService, nil, fxProvider, solanaPriceProvider, nil, clock)
 	var solanaRPC *solana.RPCClient
 	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
 		solanaNetwork := effectiveSolanaNetwork(cfg, solanaProc)

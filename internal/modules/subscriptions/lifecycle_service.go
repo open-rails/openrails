@@ -71,9 +71,10 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 	}
 }
 
-// NewSubscriptionLifecycleService creates a new instance of SubscriptionLifecycleService
+// NewSubscriptionLifecycleService creates a new instance of SubscriptionLifecycleService.
+// Uses a no-op meter by default. Call SetMeter() after InitTelemetry() to activate real metrics.
 func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService NotificationEmailSender, paymentService *payments.PaymentService, eventLogService LifecycleEventLogger, clocks ...clockwork.Clock) *SubscriptionLifecycleService {
-	om := observability.NewMeter("subscription")
+	meter := observability.NewNoopMeter()
 	return &SubscriptionLifecycleService{
 		DB:                  db,
 		Config:              nil,                            // Set via SetConfig if feature flags are needed
@@ -84,9 +85,18 @@ func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductS
 		NotificationService: notificationService,
 		PaymentService:      paymentService,
 		EventLogService:     eventLogService,
-		latency:             om.Latency,
-		errCounter:          om.ErrCounter,
+		latency:             meter.Latency,
+		errCounter:          meter.ErrCounter,
 	}
+}
+
+// SetMeter updates the meter after construction (called after InitTelemetry).
+func (s *SubscriptionLifecycleService) SetMeter(meter *observability.Meter) {
+	if meter == nil {
+		return
+	}
+	s.latency = meter.Latency
+	s.errCounter = meter.ErrCounter
 }
 
 // SetClock allows replacing the clock for testing

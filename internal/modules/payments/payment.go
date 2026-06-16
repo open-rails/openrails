@@ -45,14 +45,24 @@ func (s *PaymentService) now() time.Time {
 type GetPaymentsFilters = repo.PaymentFilters
 
 func NewPaymentService(db *db.DB, clocks ...clockwork.Clock) *PaymentService {
-	om := observability.NewMeter("payments")
+	meter := observability.NewNoopMeter()
 	return &PaymentService{
 		repo:        repo.NewPaymentRepo(db),
 		clock:       timeutil.FirstClock(clocks...),
-		latency:     om.Latency,
-		errCounter:  om.ErrCounter,
-		memoryUsage: om.MemoryUsage,
+		latency:     meter.Latency,
+		errCounter:  meter.ErrCounter,
+		memoryUsage: meter.MemoryUsage,
 	}
+}
+
+// SetMeter updates the meter after construction (called after InitTelemetry).
+func (s *PaymentService) SetMeter(meter *observability.Meter) {
+	if meter == nil {
+		return
+	}
+	s.latency = meter.Latency
+	s.errCounter = meter.ErrCounter
+	s.memoryUsage = meter.MemoryUsage
 }
 
 func (s *PaymentService) SetClock(c clockwork.Clock) {

@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
@@ -111,9 +114,9 @@ func (om *ObservabilityManager) Close(ctx context.Context) error {
 }
 
 // HTTPMiddleware returns the HTTP metrics Gin middleware.
-func (om *ObservabilityManager) HTTPMiddleware() interface{} {
+func (om *ObservabilityManager) HTTPMiddleware() gin.HandlerFunc {
 	if om == nil || om.http == nil {
-		return nil
+		return func(c *gin.Context) { c.Next() }
 	}
 	return om.http.Middleware()
 }
@@ -158,26 +161,53 @@ type Meter struct {
 	MemoryUsage metric.Float64Gauge
 }
 
+// Meter returns a new *Meter bound to this manager's meter provider.
+// Call this AFTER NewObservabilityManager to get instruments that actually
+// send data to the configured provider.
+func (om *ObservabilityManager) Meter(name string) *Meter {
+	if om == nil || om.meter == nil {
+		return NewNoopMeter()
+	}
+	return newMeter(om.meter, name)
+}
+
 // NewMeter creates a new Meter and initializes its core instruments.
+// Deprecated: Use ObservabilityManager.Meter(name) instead. This function
+// captures otel.GetMeterProvider() at call time, which is the no-op provider
+// before InitTelemetry runs, resulting in silent metric loss.
 func NewMeter(name string) *Meter {
 	m := otel.GetMeterProvider().Meter(name)
+	return newMeter(m, name)
+}
 
-	latency, _ := m.Float64Histogram(
+// newMeter builds a *Meter from a concrete metric.Meter instance.
+// This is the shared implementation that both Meter() and NewMeter use.
+func newMeter(m metric.Meter, name string) *Meter {
+	latency, err := m.Float64Histogram(
 		"core_function_latency_seconds",
 		metric.WithDescription("Latency of critical core functions"),
 		metric.WithUnit("s"),
 	)
+	if err != nil {
+		log.WithError(err).WithField("instrument", "core_function_latency_seconds").Error("failed to create OTel histogram")
+	}
 
-	errCounter, _ := m.Int64Counter(
+	errCounter, err := m.Int64Counter(
 		"core_function_errors_total",
 		metric.WithDescription("Total count of errors in critical core functions"),
 	)
+	if err != nil {
+		log.WithError(err).WithField("instrument", "core_function_errors_total").Error("failed to create OTel counter")
+	}
 
-	memoryUsage, _ := m.Float64Gauge(
+	memoryUsage, err := m.Float64Gauge(
 		"core_function_memory_usage_bytes",
 		metric.WithDescription("Memory usage of critical core functions"),
 		metric.WithUnit("B"),
 	)
+	if err != nil {
+		log.WithError(err).WithField("instrument", "core_function_memory_usage_bytes").Error("failed to create OTel gauge")
+	}
 
 	return &Meter{
 		meter:       m,
@@ -185,6 +215,12 @@ func NewMeter(name string) *Meter {
 		ErrCounter:  errCounter,
 		MemoryUsage: memoryUsage,
 	}
+}
+
+// NewNoopMeter returns a Meter backed by the no-op provider.
+// Used when the ObservabilityManager is nil or metrics are disabled.
+func NewNoopMeter() *Meter {
+	return newMeter(noop.Meter{}, "noop")
 }
 
 // InitMetrics initializes the OpenTelemetry metrics provider.

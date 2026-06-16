@@ -450,9 +450,7 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	e.Use(ginmw.BodyLimit(middleware.DefaultMaxBodyBytes))
 	// OpenTelemetry HTTP metrics middleware (Phase 1).
 	if s.observability != nil {
-		if mw := s.observability.HTTPMiddleware(); mw != nil {
-			e.Use(mw.(gin.HandlerFunc))
-		}
+		e.Use(s.observability.HTTPMiddleware())
 	}
 	// Resolve the tenant / billing namespace before authorization and before any
 	// tenant-owned DB access (issue #223). Defaults to the single default tenant.

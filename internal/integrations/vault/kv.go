@@ -32,11 +32,24 @@ import (
 type KVv2Adapter struct {
 	client *vaultapi.Client
 	mount  string
+	meter  *observability.Meter
 }
 
 // NewKVv2Adapter builds a KV-v2 adapter for the given mount (e.g. "secret").
+// Uses a no-op meter by default. Call SetMeter() after InitTelemetry() to activate real metrics.
 func NewKVv2Adapter(client *vaultapi.Client, mount string) *KVv2Adapter {
-	return &KVv2Adapter{client: client, mount: strings.Trim(strings.TrimSpace(mount), "/")}
+	return &KVv2Adapter{
+		client: client,
+		mount:  strings.Trim(strings.TrimSpace(mount), "/"),
+		meter:  observability.NewNoopMeter(),
+	}
+}
+
+// SetMeter updates the meter after construction (called after InitTelemetry).
+func (a *KVv2Adapter) SetMeter(meter *observability.Meter) {
+	if meter != nil {
+		a.meter = meter
+	}
 }
 
 // rest strips the leading "<mount>/" the tenancy store prepended.
@@ -59,8 +72,8 @@ func (a *KVv2Adapter) metadataPath(full string) string {
 func (a *KVv2Adapter) ReadSecret(ctx context.Context, path string) (map[string]string, error) {
 	start := time.Now()
 	defer func() {
-		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
-			m.Latency.Record(ctx, time.Since(start).Seconds())
+		if a.meter != nil {
+			a.meter.Latency.Record(ctx, time.Since(start).Seconds())
 		}
 	}()
 
@@ -88,8 +101,8 @@ func (a *KVv2Adapter) ReadSecret(ctx context.Context, path string) (map[string]s
 func (a *KVv2Adapter) WriteSecret(ctx context.Context, path string, data map[string]string) error {
 	start := time.Now()
 	defer func() {
-		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
-			m.Latency.Record(ctx, time.Since(start).Seconds())
+		if a.meter != nil {
+			a.meter.Latency.Record(ctx, time.Since(start).Seconds())
 		}
 	}()
 
@@ -108,8 +121,8 @@ func (a *KVv2Adapter) WriteSecret(ctx context.Context, path string, data map[str
 func (a *KVv2Adapter) DeleteSecret(ctx context.Context, path string) error {
 	start := time.Now()
 	defer func() {
-		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
-			m.Latency.Record(ctx, time.Since(start).Seconds())
+		if a.meter != nil {
+			a.meter.Latency.Record(ctx, time.Since(start).Seconds())
 		}
 	}()
 
@@ -123,8 +136,8 @@ func (a *KVv2Adapter) DeleteSecret(ctx context.Context, path string) error {
 func (a *KVv2Adapter) ListSecrets(ctx context.Context, path string) ([]string, error) {
 	start := time.Now()
 	defer func() {
-		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
-			m.Latency.Record(ctx, time.Since(start).Seconds())
+		if a.meter != nil {
+			a.meter.Latency.Record(ctx, time.Since(start).Seconds())
 		}
 	}()
 

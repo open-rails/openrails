@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -29,7 +30,7 @@ func NewHTTPMetrics(meter metric.Meter) *HTTPMetrics {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
-		return h
+		log.WithError(err).WithField("instrument", "http_requests_total").Error("failed to create OTel counter")
 	}
 
 	h.requestDuration, err = meter.Float64Histogram(
@@ -39,7 +40,7 @@ func NewHTTPMetrics(meter metric.Meter) *HTTPMetrics {
 		metric.WithExplicitBucketBoundaries(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
 	)
 	if err != nil {
-		return h
+		log.WithError(err).WithField("instrument", "http_request_duration_seconds").Error("failed to create OTel histogram")
 	}
 
 	h.activeGauge, err = meter.Int64Gauge(
@@ -48,7 +49,7 @@ func NewHTTPMetrics(meter metric.Meter) *HTTPMetrics {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
-		return h
+		log.WithError(err).WithField("instrument", "http_active_connections").Error("failed to create OTel gauge")
 	}
 
 	h.requestBodySize, err = meter.Float64Histogram(
@@ -58,7 +59,7 @@ func NewHTTPMetrics(meter metric.Meter) *HTTPMetrics {
 		metric.WithExplicitBucketBoundaries(100, 1000, 10000, 100000, 1000000),
 	)
 	if err != nil {
-		return h
+		log.WithError(err).WithField("instrument", "http_request_size_bytes").Error("failed to create OTel histogram")
 	}
 
 	h.responseBodySize, err = meter.Float64Histogram(
@@ -68,7 +69,7 @@ func NewHTTPMetrics(meter metric.Meter) *HTTPMetrics {
 		metric.WithExplicitBucketBoundaries(100, 1000, 10000, 100000, 1000000),
 	)
 	if err != nil {
-		return h
+		log.WithError(err).WithField("instrument", "http_response_size_bytes").Error("failed to create OTel histogram")
 	}
 
 	return h
@@ -97,7 +98,10 @@ func (h *HTTPMetrics) Middleware() gin.HandlerFunc {
 		// Determine the route pattern (not the raw path with params)
 		route := c.FullPath()
 		if route == "" {
-			route = c.Request.URL.Path
+			// Unmatched route — collapse to "/unknown" to prevent cardinality
+			// explosions from user-controlled paths (e.g. /api/users/123,
+			// /api/users/456, /uploads/abc123.jpg, etc.).
+			route = "/unknown"
 		}
 
 		// Record metrics

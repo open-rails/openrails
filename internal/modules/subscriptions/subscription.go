@@ -93,6 +93,8 @@ const (
 	StatusMessagePending = "pending"
 )
 
+// NewSubscriptionService creates a new SubscriptionService with a no-op meter.
+// Call SetMeter() after InitTelemetry() to activate real metrics.
 func NewSubscriptionService(
 	db *db.DB,
 	priceService *catalog.PriceService,
@@ -102,7 +104,7 @@ func NewSubscriptionService(
 	paymentMethodService *vault.PaymentMethodService,
 	clocks ...clockwork.Clock,
 ) *SubscriptionService {
-	om := observability.NewMeter("subscriptions")
+	meter := observability.NewNoopMeter()
 	return &SubscriptionService{
 		subscriptionRepo:     repo.NewSubscriptionRepo(db),
 		notificationRepo:     repo.NewNotificationQueueRepo(db),
@@ -113,10 +115,20 @@ func NewSubscriptionService(
 		NMIClients:           nmiClients,
 		PaymentMethodService: paymentMethodService,
 		VaultService:         nil,
-		latency:              om.Latency,
-		errCounter:           om.ErrCounter,
-		memory:               om.MemoryUsage,
+		latency:              meter.Latency,
+		errCounter:           meter.ErrCounter,
+		memory:               meter.MemoryUsage,
 	}
+}
+
+// SetMeter updates the meter after construction (called after InitTelemetry).
+func (s *SubscriptionService) SetMeter(meter *observability.Meter) {
+	if meter == nil {
+		return
+	}
+	s.latency = meter.Latency
+	s.errCounter = meter.ErrCounter
+	s.memory = meter.MemoryUsage
 }
 
 func (s *SubscriptionService) GetUserSubscription(ctx context.Context, userID string) (*models.Subscription, error) {

@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/audit"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/migrate"
+	"github.com/open-rails/openrails/internal/observability"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
@@ -200,6 +201,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 		log.WithError(err).Error("failed to init telemetry")
 	} else if om != nil {
 		embeddedApp.SetObservability(om)
+		// Wire real meters into services after InitTelemetry (fixes meter capture order bug).
+		// Services start with no-op meters; this swaps them for real ones.
+		wireServiceMeters(embeddedApp.App(), om)
 		defer func() {
 			if err := om.Close(context.Background()); err != nil {
 				log.WithError(err).Error("telemetry shutdown failed")
@@ -451,4 +455,30 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// wireServiceMeters swaps no-op meters for real meters after InitTelemetry.
+// This fixes the meter capture order bug where services were constructed before
+// telemetry was initialized, causing metrics to use no-op implementations.
+func wireServiceMeters(a *app.App, om *observability.ObservabilityManager) {
+	if a == nil || a.Runtime == nil || om == nil {
+		return
+	}
+	rt := a.Runtime
+	// Subscription lifecycle
+	if rt.SubscriptionLifecycleService != nil {
+		rt.SubscriptionLifecycleService.SetMeter(om.Meter("subscription"))
+	}
+	// Subscription service
+	if rt.SubscriptionService != nil {
+		rt.SubscriptionService.SetMeter(om.Meter("subscriptions"))
+	}
+	// Payment service
+	if rt.PaymentService != nil {
+		rt.PaymentService.SetMeter(om.Meter("payments"))
+	}
+	// Solana pay service
+	if rt.SolanaPayService != nil {
+		rt.SolanaPayService.SetMeter(om.Meter("solana"))
+	}
 }

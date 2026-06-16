@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/observability"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	redis "github.com/redis/go-redis/v9"
@@ -91,9 +92,12 @@ func NewSolanaPayService(
 	eligibilityChecker purchaseEligibilityChecker,
 	fxProvider fx.Provider,
 	priceProvider TokenPriceProvider,
+	meter *observability.Meter,
 	clocks ...clockwork.Clock,
 ) *SolanaPayService {
-	om := observability.NewMeter("solana_pay")
+	if meter == nil {
+		meter = observability.NewNoopMeter()
+	}
 	return &SolanaPayService{
 		db:                 db,
 		redis:              redis,
@@ -104,9 +108,18 @@ func NewSolanaPayService(
 		fxProvider:         fxProvider,
 		priceProvider:      priceProvider,
 		clock:              timeutil.FirstClock(clocks...),
-		latency:            om.Latency,
-		errors:             om.ErrCounter,
+		latency:            meter.Latency,
+		errors:             meter.ErrCounter,
 	}
+}
+
+// SetMeter updates the meter after construction (called after InitTelemetry).
+func (s *SolanaPayService) SetMeter(meter *observability.Meter) {
+	if meter == nil {
+		return
+	}
+	s.latency = meter.Latency
+	s.errors = meter.ErrCounter
 }
 
 func (s *SolanaPayService) SetEligibilityChecker(checker purchaseEligibilityChecker) {
@@ -430,12 +443,47 @@ func (s *SolanaPayService) MarkReferenceConsumed(ctx context.Context, reference,
 }
 
 func (s *SolanaPayService) ConsumeAndRemovePending(ctx context.Context, reference, transactionID string) error {
-	reference = strings.TrimSpace(reference)
+	references := strings.TrimSpace(reference)
 	if reference == "" {
 		return nil
 	}
-	if _, err := s.MarkReferenceConsumed(ctx, reference, transactionID); err != nil {
+	if _, err := s.MarkReferenceConsumed(ctx, references, transactionID); err != nil {
+		return err
+	}
+	if err := s.RemovePendingPayment(ctx, references); err != nil {
 		return err
 	}
 	return nil
+}
+
+// GetPaymentStatus checks if a payment is pending, confirmed, or expired
+func (s *SolanaPayService) GetPaymentStatus(ctx context.Context, reference string) (status string, payment *models.Payment, err error) {
+	// First check Postgres for confirmed payment
+	payment, err = s.getPaymentByReference(ctx, reference)
+	if err == nil && payment != nil {
+		return "confirmed", payment, nil
+	}
+
+	// Check Redis for pending payment
+	pending, err := s.GetPendingPayment(ctx, reference)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to check pending payment: %w", err)
+	}
+
+	if pending == nil {
+		return "expired", nil, nil
+	}
+
+	return "pending", nil, nil
+}
+
+// getPaymentByReference looks up a payment by its Solana reference.
+// Note: Reference-based lookup is not currently supported since payments
+// are identified by their transaction signature (stored in Payment.TransactionID).
+// The reference is only used during the checkout flow for on-chain matching.
+func (s *SolanaPayService) getPaymentByReference(ctx context.Context, reference string) (*models.Payment, error) {
+	// References are ephemeral and used only during checkout flow for on-chain matching.
+	// Once a payment is confirmed, it's identified by its transaction signature.
+	// Return not found - callers should check Redis for pending status.
+	return nil, fmt.Errorf("payment not found for reference")
 }

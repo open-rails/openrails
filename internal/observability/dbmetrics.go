@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -37,7 +38,7 @@ func NewDBMetrics(meter metric.Meter) *DBMetrics {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
-		return d
+		log.WithError(err).WithField("instrument", "db_pool_open_connections").Error("failed to create OTel gauge")
 	}
 
 	d.poolIdleConns, err = meter.Int64Gauge(
@@ -46,7 +47,7 @@ func NewDBMetrics(meter metric.Meter) *DBMetrics {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
-		return d
+		log.WithError(err).WithField("instrument", "db_pool_idle_connections").Error("failed to create OTel gauge")
 	}
 
 	d.poolInUseConns, err = meter.Int64Gauge(
@@ -55,7 +56,7 @@ func NewDBMetrics(meter metric.Meter) *DBMetrics {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
-		return d
+		log.WithError(err).WithField("instrument", "db_pool_inuse_connections").Error("failed to create OTel gauge")
 	}
 
 	d.poolWaitCount, err = meter.Int64Counter(
@@ -64,7 +65,7 @@ func NewDBMetrics(meter metric.Meter) *DBMetrics {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
-		return d
+		log.WithError(err).WithField("instrument", "db_pool_wait_count_total").Error("failed to create OTel counter")
 	}
 
 	d.poolWaitDur, err = meter.Float64Counter(
@@ -73,7 +74,7 @@ func NewDBMetrics(meter metric.Meter) *DBMetrics {
 		metric.WithUnit("s"),
 	)
 	if err != nil {
-		return d
+		log.WithError(err).WithField("instrument", "db_pool_wait_duration_seconds").Error("failed to create OTel counter")
 	}
 
 	d.poolMaxIdleClosed, err = meter.Int64Counter(
@@ -82,7 +83,7 @@ func NewDBMetrics(meter metric.Meter) *DBMetrics {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
-		return d
+		log.WithError(err).WithField("instrument", "db_pool_closed_max_idle_total").Error("failed to create OTel counter")
 	}
 
 	d.poolMaxLifeClosed, err = meter.Int64Counter(
@@ -91,7 +92,7 @@ func NewDBMetrics(meter metric.Meter) *DBMetrics {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
-		return d
+		log.WithError(err).WithField("instrument", "db_pool_closed_max_lifetime_total").Error("failed to create OTel counter")
 	}
 
 	// Query metrics
@@ -102,7 +103,7 @@ func NewDBMetrics(meter metric.Meter) *DBMetrics {
 		metric.WithExplicitBucketBoundaries(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
 	)
 	if err != nil {
-		return d
+		log.WithError(err).WithField("instrument", "db_query_duration_seconds").Error("failed to create OTel histogram")
 	}
 
 	d.queryErrors, err = meter.Int64Counter(
@@ -110,6 +111,9 @@ func NewDBMetrics(meter metric.Meter) *DBMetrics {
 		metric.WithDescription("Total number of database query errors"),
 		metric.WithUnit("1"),
 	)
+	if err != nil {
+		log.WithError(err).WithField("instrument", "db_query_errors_total").Error("failed to create OTel counter")
+	}
 
 	return d
 }
@@ -218,11 +222,12 @@ func (h *dbQueryHook) AfterQuery(ctx context.Context, event *bun.QueryEvent) {
 		return
 	}
 
-	// Use built-in Operation() method
+	// Use built-in Operation() method for the SQL operation type
 	op := event.Operation()
 
-	// Extract table name
-	table := extractTableName(event.Query)
+	// Extract table name from bun's model information (reliable) rather than SQL parsing.
+	// This avoids breaking on CTEs, subqueries, and multi-table joins.
+	table := extractTableNameFromEvent(event)
 
 	attrs := []attribute.KeyValue{
 		attribute.String("operation", op),
@@ -245,24 +250,139 @@ func (h *dbQueryHook) AfterQuery(ctx context.Context, event *bun.QueryEvent) {
 	}
 }
 
-func extractTableName(query string) string {
-	// Very rough extraction - works for common cases
-	parts := strings.Fields(strings.ToLower(query))
-	for i, part := range parts {
-		for _, keyword := range []string{"from", "into", "update", "join", "table", "truncate"} {
-			if part == keyword && i+1 < len(parts) {
-				// Next field is likely the table name
-				table := parts[i+1]
-				// Clean up quotes and schema prefix
-				table = strings.Trim(table, "\"'")
-				if idx := strings.Index(table, "."); idx >= 0 {
-					table = table[idx+1:]
+// extractTableNameFromEvent extracts the table name from a bun QueryEvent using
+// the model information rather than SQL parsing. This is reliable for CTEs,
+// subqueries, and multi-table joins where string parsing would fail.
+func extractTableNameFromEvent(event *bun.QueryEvent) string {
+	// Try to get the table name from the model first (most reliable).
+	if event.Model != nil {
+		if tableName, ok := tableNameFromModel(event.Model); ok {
+			return tableName
+		}
+	}
+	// Fallback: try to extract from the SQL query for ad-hoc queries without a model.
+	return extractTableNameFromQuery(event.Query)
+}
+
+// tableNameFromModel attempts to extract a table name from a bun model value.
+func tableNameFromModel(model bun.Model) (string, bool) {
+	// bun.TableModel exposes the underlying schema.Table which has the name.
+	var tm bun.TableModel
+	var ok bool
+	if tm, ok = model.(bun.TableModel); !ok {
+		return "", false
+	}
+	table := tm.Table()
+	if table == nil {
+		return "", false
+	}
+	name := table.Name
+	if name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+// extractTableNameFromQuery extracts a table name from SQL as a last resort.
+// Uses regex-like positional matching that handles CTEs and subqueries better
+// than naive field splitting.
+func extractTableNameFromQuery(query string) string {
+	lower := strings.ToLower(query)
+
+	// Skip CTEs — find the main FROM clause after any WITH ... AS (...) block.
+	// Count parentheses to skip subqueries in CTE definitions.
+	startIdx := 0
+	if strings.HasPrefix(lower, "with ") {
+		depth := 0
+		for i := 0; i < len(lower); i++ {
+			switch lower[i] {
+			case '(':
+				depth++
+			case ')':
+				if depth > 0 {
+					depth--
 				}
-				return table
+			}
+			// Look for "from " after CTE body closes (depth returns to 0).
+			if depth == 0 && i > 0 {
+				remaining := strings.TrimLeft(lower[i:], " 	\n\r,")
+				if strings.HasPrefix(remaining, "from ") {
+					startIdx = i + len(remaining) - len(strings.TrimPrefix(remaining, "from "))
+					break
+				}
 			}
 		}
 	}
+
+	// Search for FROM <table> after the start index.
+	fromIdx := strings.Index(lower[startIdx:], "from ")
+	if fromIdx >= 0 {
+		afterFrom := strings.TrimSpace(lower[startIdx+fromIdx+5:])
+		// Skip subquery: if it starts with "(", the table is not here.
+		if len(afterFrom) > 0 && afterFrom[0] != '(' {
+			return cleanTableName(extractIdentifier(afterFrom))
+		}
+	}
+
+	// Fallback: UPDATE <table> SET ...
+	updateIdx := strings.Index(lower[startIdx:], "update ")
+	if updateIdx >= 0 {
+		afterUpdate := strings.TrimSpace(lower[startIdx+updateIdx+7:])
+		if len(afterUpdate) > 0 && afterUpdate[0] != '(' {
+			return cleanTableName(extractIdentifier(afterUpdate))
+		}
+	}
+
+	// INSERT INTO <table>
+	insertIdx := strings.Index(lower[startIdx:], "insert into ")
+	if insertIdx >= 0 {
+		afterInsert := strings.TrimSpace(lower[startIdx+insertIdx+12:])
+		if len(afterInsert) > 0 && afterInsert[0] != '(' {
+			return cleanTableName(extractIdentifier(afterInsert))
+		}
+	}
+
 	return "unknown"
+}
+
+// extractIdentifier extracts the first SQL identifier (table/column name) from a string.
+func extractIdentifier(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) == 0 {
+		return ""
+	}
+	// Handle quoted identifiers.
+	if s[0] == '"' {
+		end := strings.Index(s[1:], "\"")
+		if end >= 0 {
+			return s[1 : end+1]
+		}
+		return s[1:]
+	}
+	// Unquoted identifier: alphanumeric + underscore, stops at space/comma/etc.
+	var result strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '.' || c == '"' {
+			result.WriteByte(c)
+		} else {
+			break
+		}
+	}
+	return result.String()
+}
+
+// cleanTableName removes quotes and schema prefix from a table name.
+func cleanTableName(name string) string {
+	name = strings.Trim(name, "\"'")
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		name = name[idx+1:]
+	}
+	if name == "" {
+		return "unknown"
+	}
+	return name
 }
 
 func classifyError(err error) string {

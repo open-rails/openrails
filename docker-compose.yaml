@@ -247,11 +247,11 @@ services:
       CLICKHOUSE_DB: "analytics"
       CLICKHOUSE_USER: "${CLICKHOUSE_USER:-analytics_user}"
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-analytics_password}"
-    command: ["server"]
-    volumes:
-      - openrails_spool:/var/lib/openrails/spool
-    networks:
-      - local-openrails
+      OTEL_METRICS_ENABLED: true
+      OTEL_SERVICE_NAME: openrails-test
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_ENVIRONMENT: test
 
   # ---------------------------------------------------------------------------
   # E2E SANDBOX: Local AuthKit issuer for minting JWTs (optional)

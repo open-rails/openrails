@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -34,7 +35,7 @@ func NewRuntimeMetrics(meter metric.Meter) *RuntimeMetrics {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
-		return r
+		log.WithError(err).WithField("instrument", "go_goroutines").Error("failed to create OTel gauge")
 	}
 
 	r.memAlloc, err = meter.Int64Gauge(
@@ -43,7 +44,7 @@ func NewRuntimeMetrics(meter metric.Meter) *RuntimeMetrics {
 		metric.WithUnit("By"),
 	)
 	if err != nil {
-		return r
+		log.WithError(err).WithField("instrument", "go_memstats_alloc_bytes").Error("failed to create OTel gauge")
 	}
 
 	r.memHeapInUse, err = meter.Int64Gauge(
@@ -52,7 +53,7 @@ func NewRuntimeMetrics(meter metric.Meter) *RuntimeMetrics {
 		metric.WithUnit("By"),
 	)
 	if err != nil {
-		return r
+		log.WithError(err).WithField("instrument", "go_memstats_heap_inuse_bytes").Error("failed to create OTel gauge")
 	}
 
 	r.memHeapSys, err = meter.Int64Gauge(
@@ -61,7 +62,7 @@ func NewRuntimeMetrics(meter metric.Meter) *RuntimeMetrics {
 		metric.WithUnit("By"),
 	)
 	if err != nil {
-		return r
+		log.WithError(err).WithField("instrument", "go_memstats_heap_sys_bytes").Error("failed to create OTel gauge")
 	}
 
 	r.memStackInUse, err = meter.Int64Gauge(
@@ -70,7 +71,7 @@ func NewRuntimeMetrics(meter metric.Meter) *RuntimeMetrics {
 		metric.WithUnit("By"),
 	)
 	if err != nil {
-		return r
+		log.WithError(err).WithField("instrument", "go_memstats_stack_inuse_bytes").Error("failed to create OTel gauge")
 	}
 
 	r.gcPauseTotal, err = meter.Float64Counter(
@@ -79,7 +80,7 @@ func NewRuntimeMetrics(meter metric.Meter) *RuntimeMetrics {
 		metric.WithUnit("s"),
 	)
 	if err != nil {
-		return r
+		log.WithError(err).WithField("instrument", "go_memstats_gc_pause_total_seconds").Error("failed to create OTel counter")
 	}
 
 	r.gcCycles, err = meter.Int64Counter(
@@ -87,6 +88,9 @@ func NewRuntimeMetrics(meter metric.Meter) *RuntimeMetrics {
 		metric.WithDescription("Number of GC cycles"),
 		metric.WithUnit("1"),
 	)
+	if err != nil {
+		log.WithError(err).WithField("instrument", "go_memstats_num_gc_cycles_total").Error("failed to create OTel counter")
+	}
 
 	return r
 }
