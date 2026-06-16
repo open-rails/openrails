@@ -12,8 +12,8 @@ import (
 // This file holds the gin-free net/http analogues of the global engine
 // middleware (issue #282). The embedded surface (server.NewHTTPHandler) wraps its
 // ServeMux with these so it can run security headers, body limits, CORS, and
-// tenant resolution WITHOUT importing gin. The standalone gin server keeps using
-// the gin versions in security.go / tenant.go.
+// merchant resolution WITHOUT importing gin. The standalone gin server keeps using
+// the gin versions in security.go / merchant.go.
 //
 // NOTE: rate-limiting + the captcha challenge flow (RateLimitWithChallengeStore)
 // are intentionally NOT ported here. They are gin- and captcha-flow-coupled, and
@@ -122,15 +122,15 @@ func CORSHTTP(allowedOrigins []string) HTTPMiddleware {
 	}
 }
 
-// ResolveTenantHTTP is the net/http analogue of ResolveTenant. It pins the
-// engine's CONSTRUCTION-TIME tenant (`configured`) onto the request context
-// BEFORE any tenant-owned DB access, so TenantDBConnMW pins the connection to
-// the correct tenant (issue #223/#227). An OpenRails engine is bound to a single
-// tenant at construction — there is NO default tenant (#336).
+// ResolveMerchantHTTP is the net/http analogue of ResolveMerchant. It pins the
+// engine's CONSTRUCTION-TIME merchant (`configured`) onto the request context
+// BEFORE any merchant-owned DB access, so MerchantDBConnMW pins the connection to
+// the correct merchant (issue #223/#227). An OpenRails engine is bound to a single
+// merchant at construction — there is NO default merchant (#336).
 //
 // If `configured` is zero, NOTHING is pinned: downstream merchant.Require fails,
-// so a missing tenant is a hard error rather than a silent default.
-func ResolveTenantHTTP(configured merchant.ID) HTTPMiddleware {
+// so a missing merchant is a hard error rather than a silent default.
+func ResolveMerchantHTTP(configured merchant.ID) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if configured.IsZero() {

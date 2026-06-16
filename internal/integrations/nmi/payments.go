@@ -76,7 +76,7 @@ func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 		return nil, err
 	}
 	if !isDirectResponseApproved(output) {
-		return nil, fmt.Errorf("sale failed: %s", responseText(output, response))
+		return nil, newSaleError(response, output)
 	}
 
 	return &SaleResponse{

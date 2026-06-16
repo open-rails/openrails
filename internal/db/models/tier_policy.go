@@ -10,9 +10,9 @@ import (
 // rolling money-budget windows (#298/#304).
 type TierPolicy struct {
 	ID         uuid.UUID `json:"id"`
-	MerchantID uuid.UUID `json:"tenant_id"`
+	MerchantID uuid.UUID `json:"merchant_id"`
 	// CustomerID the policy belongs to. The all-zero uuid is the reserved sentinel
-	// for tenant-wide defaults; a real payer id scopes policy to that payer.
+	// for merchant-wide defaults; a real payer id scopes policy to that payer.
 	CustomerID uuid.UUID `json:"customer_id"`
 	// Tier name (e.g. "free", "tier_1"); the policy applies to actors at this tier.
 	Tier string `json:"tier"`
@@ -33,6 +33,9 @@ type ThroughputPolicy struct {
 	Windows           []ThroughputWindow   `json:"windows"`
 	EntitledResources []string             `json:"entitled_resources,omitempty"`
 	BudgetWindows     []BudgetWindowPolicy `json:"budget_windows,omitempty"`
+	// PolicyCurrency is the currency used for money policy checks whose window
+	// does not carry its own Currency. Blank means same currency as the request.
+	PolicyCurrency string `json:"policy_currency,omitempty"`
 
 	// ReleaseWindows holds per-(endpoint-release) throughput window VALUES (#472
 	// G1): the map key is the endpoint-release uuid (the host's releaseID, never a
@@ -84,6 +87,7 @@ type BudgetWindowPolicy struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
+	Currency      string `json:"currency,omitempty"`
 	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
 	Cadence string `json:"cadence,omitempty"`
 }

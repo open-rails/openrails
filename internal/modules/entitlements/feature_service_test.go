@@ -11,7 +11,7 @@ import (
 
 // These unit tests cover the FeatureService input-validation paths, which all
 // run BEFORE any database access — so a service over a nil DB exercises them
-// without a live Postgres. The DB-backed behaviour (tenant isolation, real
+// without a live Postgres. The DB-backed behaviour (merchant isolation, real
 // inserts/reads) is covered by the //go:build integration repo test.
 
 func newValidationService() *FeatureService {

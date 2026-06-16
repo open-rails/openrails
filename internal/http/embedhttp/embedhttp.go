@@ -148,18 +148,18 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		middleware.SecurityHeadersHTTP(),
 		middleware.CORSHTTP(origins),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.ResolveTenantHTTP(configured),
+		middleware.ResolveMerchantHTTP(configured),
 	)
 }
 
 // resolveConfiguredTenant resolves the construction-time tenant SLUG
-// (Cfg.Tenant) to the internal merchant.ID via the Runtime's pool (#336). An
+// (Cfg.Merchant) to the internal merchant.ID via the Runtime's pool (#336). An
 // empty slug yields the zero id (no tenant pinned; tenant-owned ops hard-fail
 // downstream by design); a non-empty-but-unknown slug is an error.
 func (s *Assembler) resolveConfiguredTenant() (merchant.ID, error) {
 	var slug string
 	if s.Cfg != nil {
-		slug = s.Cfg.Tenant
+		slug = s.Cfg.Merchant
 	}
 	if slug == "" || s.Runtime == nil || s.Runtime.DB == nil {
 		return merchant.ID{}, nil

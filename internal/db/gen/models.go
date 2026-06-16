@@ -326,12 +326,13 @@ type OpenrailsEntitlementGrant struct {
 	CustomerID   uuid.UUID
 }
 
-// Monthly itemized statements (issue #303). Line items rolled up from openrails.usage_events; money movements from the money ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.
+// Period invoices/statements. For arrears, an open invoice is the receivable and payments are allocated to it. Prepaid invoices remain informational receipts/statements.
 type OpenrailsInvoice struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
 	CustomerID     uuid.UUID
 	Currency       string
+	InvoiceNumber  *string
 	PeriodFrom     time.Time
 	PeriodTo       time.Time
 	UsageTotal     int64
@@ -339,12 +340,67 @@ type OpenrailsInvoice struct {
 	OwedAccrued    int64
 	OwedPaid       int64
 	ClosingBalance int64
-	LineItems      []byte
-	MoneyMovements []byte
-	Status         string
-	FinalizedAt    *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	SubtotalAmount int64
+	TotalAmount    int64
+	AmountPaid     int64
+	// Outstanding amount for this invoice in the row currency internal precision. Open arrears balance is derived from open/past-due invoices.
+	AmountDue         int64
+	LineItems         []byte
+	MoneyMovements    []byte
+	Status            string
+	CollectionMethod  string
+	IssuedAt          *time.Time
+	DueAt             *time.Time
+	PaidAt            *time.Time
+	VoidedAt          *time.Time
+	UncollectibleAt   *time.Time
+	SentAt            *time.Time
+	FinalizedAt       *time.Time
+	ExternalInvoiceID *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+// Pending and invoiced billable items. Arrears usage creates pending items; invoice creation attaches them to a draft/open invoice.
+type OpenrailsInvoiceItem struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	InvoiceID  *uuid.UUID
+	SourceType string
+	SourceID   string
+	EventType  *string
+	PeriodFrom time.Time
+	PeriodTo   time.Time
+	InvoiceAt  time.Time
+	Quantity   int64
+	UnitAmount int64
+	Amount     int64
+	Status     string
+	Metadata   []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// Payment attempts and settled payments allocated to a specific invoice.
+type OpenrailsInvoicePayment struct {
+	ID                 uuid.UUID
+	MerchantID         uuid.UUID
+	CustomerID         uuid.UUID
+	InvoiceID          uuid.UUID
+	MoneyTransactionID *uuid.UUID
+	Currency           string
+	Amount             int64
+	Status             string
+	Processor          *string
+	ProcessorPaymentID *string
+	FailureCode        *string
+	FailureMessage     *string
+	AttemptedAt        time.Time
+	SettledAt          *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // Verified user wallet links for browser self-service billing identity. The wallet must come from trusted delegated-token claims, not request body input.
@@ -369,14 +425,14 @@ type OpenrailsMerchant struct {
 	Slug   string
 	Name   string
 	Status string
-	// OWNERSHIP (not identity) FK to the AuthKit tenant (org) that owns/administers this merchant (#481). NULL in embedded (no AuthKit). One tenant owns MANY merchants; never used to resolve a merchant from a token.
-	OwnerTenantID *string
-	Plan          *string
-	Region        *string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	SuspendedAt   *time.Time
-	DeletedAt     *time.Time
+	// OWNERSHIP (not identity) FK to the AuthKit org that owns/administers this merchant (#481). NULL in embedded (no AuthKit). One org owns MANY merchants; never used to resolve a merchant from a token.
+	OwnerOrgID  *string
+	Plan        *string
+	Region      *string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	SuspendedAt *time.Time
+	DeletedAt   *time.Time
 	// The platform's OWN billing tier for this merchant (eats own dogfood, issue #225). Distinct from plan (free-form hosting metadata).
 	BillingTier     *string
 	StripeAccountID *string
@@ -396,7 +452,7 @@ type OpenrailsMerchantConfiguration struct {
 	UpdatedAt     time.Time
 }
 
-// Append-only audit log of per-tenant credential put/rotate/delete/test events (issue #225).
+// Append-only audit log of per-merchant credential put/rotate/delete/test events (issue #225). Merchant-owned and RLS protected.
 type OpenrailsMerchantCredentialAudit struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -407,17 +463,17 @@ type OpenrailsMerchantCredentialAudit struct {
 	CreatedAt  time.Time
 }
 
-// Wrapped per-tenant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = tenant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. GLOBAL control-plane table.
+// Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned and RLS protected.
 type OpenrailsMerchantDek struct {
 	MerchantID uuid.UUID
-	// AES-256-GCM(master_key, tenant_dek): nonce(12) || ciphertext(32) || tag(16).
+	// AES-256-GCM(master_key, merchant_dek): nonce(12) || ciphertext(32) || tag(16).
 	WrappedDek []byte
 	KeyVersion int32
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
 
-// Tenant logical-export bookkeeping (issue #225). Tenant deletion is gated on a completed export row (export-before-delete).
+// Merchant logical-export bookkeeping (issue #225). Merchant deletion is gated on a completed export row (export-before-delete). Merchant-owned and RLS protected.
 type OpenrailsMerchantExport struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -428,7 +484,7 @@ type OpenrailsMerchantExport struct {
 	CompletedAt *time.Time
 }
 
-// DB-backed per-tenant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. GLOBAL control-plane table.
+// DB-backed per-merchant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned and RLS protected.
 type OpenrailsMerchantSecret struct {
 	MerchantID uuid.UUID
 	Name       string
@@ -489,7 +545,7 @@ type OpenrailsMoneySetting struct {
 	TierSource string
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
 	Currency string
-	// Admin-set arrears credit line in the row currency internal precision. 0 = off.
+	// Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.
 	CreditLimitAmount int64
 }
 
@@ -534,7 +590,8 @@ type OpenrailsMoneyTransaction struct {
 	MerchantID       uuid.UUID
 	CustomerID       uuid.UUID
 	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry defines the amount precision.
-	Currency string
+	Currency  string
+	InvoiceID *uuid.UUID
 }
 
 // Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. Amount values use the row currency internal precision.

@@ -40,7 +40,7 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 	admit := func(_ context.Context, in billingservice.AdmitInput) (*billingservice.AdmitResult, error) {
 		switch in.CustomerID.UUID().String() {
 		case allowedPayer:
-			return &billingservice.AdmitResult{Allowed: true, ReservationID: uuid.NewString()}, nil
+			return &billingservice.AdmitResult{Allowed: true}, nil
 		case brokePayer:
 			return &billingservice.AdmitResult{Allowed: false, BlockedBy: "money", DenyCode: "insufficient_balance"}, nil
 		case throttledPayer:

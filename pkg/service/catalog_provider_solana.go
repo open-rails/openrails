@@ -19,12 +19,12 @@ import (
 // solanaAdapter implements providerAdapter for the official Solana Subscriptions
 // program (solana-program/subscriptions, De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44).
 // A recurring Solana price is a merchant-published on-chain Plan: AutoCreate signs
-// create_plan with the tenant's key (via the runtime's SolanaPlanService) and
+// create_plan with the merchant's key (via the runtime's SolanaPlanService) and
 // stores the plan handle in processors["solana"]. Verify reads the Plan account
 // back and diffs its immutable terms (amount / period / mint) for drift.
 //
 //   - AutoCreate: publish (or idempotently attach to) the on-chain plan. Requires a
-//     tenant-scoped context, a configured SolanaPlanService, a recurring interval,
+//     merchant-scoped context, a configured SolanaPlanService, a recurring interval,
 //     and a stablecoin currency (USDC/USD1). Unconfigured -> pending_manual_link.
 //   - Attach: store an operator-supplied existing plan handle (plan_pda required).
 //   - Verify: GetAccountData(plan_pda) -> DecodePlanAccount -> diff vs the stored
@@ -52,12 +52,12 @@ func (a *solanaAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	return PendingAction{
 		Provider: "solana",
 		Action:   "configure_solana_recurring",
-		Hint:     "Configure the tenant's Solana signer (secret solana/private_key) and set this price's currency to an allowlisted recurring stablecoin (USDC/USD1), then re-apply to publish the on-chain plan for price " + priceID.String(),
+		Hint:     "Configure the merchant's Solana signer (secret solana/private_key) and set this price's currency to an allowlisted recurring stablecoin (USDC/USD1), then re-apply to publish the on-chain plan for price " + priceID.String(),
 	}
 }
 
 // planService returns the runtime's SolanaPlanService, or false when Solana
-// recurring is not configured on this deployment/tenant.
+// recurring is not configured on this deployment/merchant.
 func (a *solanaAdapter) planService() (*recurring.PlanService, bool) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaPlanService == nil {
 		return nil, false
@@ -86,7 +86,7 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	}
 	tid, ok := merchant.FromContext(ctx)
 	if !ok {
-		return nil, fmt.Errorf("solana create-mode requires a tenant-scoped context")
+		return nil, fmt.Errorf("solana create-mode requires a merchant-scoped context")
 	}
 	if in.BillingCycleDays == nil || *in.BillingCycleDays <= 0 {
 		return nil, fmt.Errorf("solana create-mode requires billing_cycle_days (recurring plans need a fixed on-chain period)")
@@ -165,7 +165,7 @@ func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.Pl
 // Solana RPC is available the plan account is read back and its IMMUTABLE terms
 // are verified against the OpenRails price: the account must exist and match
 // amount (base units), period (billing cycle * 24h), mint (resolved from the
-// price currency), and — when a tenant is in context — the merchant/owner. A
+// price currency), and — when a merchant is in context — the merchant/owner. A
 // missing or mismatched plan is a loud error. On a successful read the verified
 // on-chain terms are stamped onto the stored ids so Verify has a snapshot. When
 // RPC is unavailable the operator-supplied fields are stored as-is.
@@ -211,7 +211,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 		}
 	}
 	// Mint + merchant validation requires the plan service (mint allowlist +
-	// tenant merchant resolution); skip gracefully when it is unconfigured.
+	// merchant merchant resolution); skip gracefully when it is unconfigured.
 	if plan, ok := a.planService(); ok {
 		if symbol := strings.ToUpper(strings.TrimSpace(in.Currency)); symbol != "" {
 			if mint, _, err := plan.ResolveMint(symbol); err == nil && !strings.EqualFold(acct.Mint.String(), strings.TrimSpace(mint)) {
@@ -220,7 +220,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 		}
 		if tid, ok := merchant.FromContext(ctx); ok {
 			if merchant, err := plan.MerchantAddress(ctx, tid); err == nil && !strings.EqualFold(acct.Owner.String(), merchant.String()) {
-				return nil, fmt.Errorf("solana plan %q merchant (%s) does not match this tenant's merchant (%s)", pda, acct.Owner, merchant)
+				return nil, fmt.Errorf("solana plan %q merchant (%s) does not match this merchant's merchant (%s)", pda, acct.Owner, merchant)
 			}
 		}
 	}

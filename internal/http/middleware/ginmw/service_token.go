@@ -15,34 +15,34 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Gin context keys for a resolved OpenRails-issued tenant service token (issue #222).
+// Gin context keys for a resolved OpenRails-issued merchant service token (issue #222).
 const (
 	// ServiceTokenContextKey holds the *controlplane.ResolvedServiceToken for the request.
 	ServiceTokenContextKey = "openrails.service_token"
-	// ServiceTokenOwnerTenantSlugContextKey holds the owning AuthKit tenant slug.
-	ServiceTokenOwnerTenantSlugContextKey = "openrails.service_token_authkit_tenant_slug"
+	// ServiceTokenOwnerOrgSlugContextKey holds the owning AuthKit org slug.
+	ServiceTokenOwnerOrgSlugContextKey = "openrails.service_token_authkit_org_slug"
 )
 
 // ServiceTokenResolver validates a presented OpenRails-issued service token against live AuthKit +
-// tenant-directory state. The control plane implements it; tests can inject a
+// merchant-directory state. The control plane implements it; tests can inject a
 // fake. A nil resolver is a wiring bug (#469: the standalone always has a
 // control plane) and the middleware fails closed.
 type ServiceTokenResolver interface {
 	// LooksLikeServiceToken reports whether token carries this deployment's service token marker.
 	LooksLikeServiceToken(token string) bool
-	// ResolveServiceToken validates the service token and resolves its tenant + permissions.
+	// ResolveServiceToken validates the service token and resolves its merchant + permissions.
 	ResolveServiceToken(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
 }
 
 // ServiceJWTResolver validates first-party OIDC service JWTs from registered
-// tenant issuers. Implemented by the control plane when service-JWT grants are
+// merchant issuers. Implemented by the control plane when service-JWT grants are
 // available.
 type ServiceJWTResolver interface {
 	ResolveServiceJWT(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
 }
 
 // RemoteApplicationResolver validates a JWKS-principal SELF-token (#76/#484): a
-// remote_application acting AS ITSELF, granted STORED tenant-role/permissions —
+// remote_application acting AS ITSELF, granted STORED merchant-role/permissions —
 // a SECOND programmatic credential type alongside service tokens. The control
 // plane implements it. ResolveRemoteApplication returns the SAME
 // *ResolvedServiceToken shape, so the existing #481 role-based merchant authz
@@ -52,16 +52,16 @@ type RemoteApplicationResolver interface {
 	ResolveRemoteApplication(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
 }
 
-// ServiceTokenRequired authenticates a tenant-scoped public route with an OpenRails-issued
-// tenant service token (issue #222). It REPLACES the retired private/mTLS/api-key service
+// ServiceTokenRequired authenticates a merchant-scoped public route with an OpenRails-issued
+// merchant service token (issue #222). It REPLACES the retired private/mTLS/api-key service
 // surface: machine/server callers (HostApps/Tensorhub reserving credits,
 // reading entitlements, etc.) present `Authorization: Bearer <openrails_st_...>`
-// against public tenant routes.
+// against public merchant routes.
 //
-// On success it pins the resolved tenant onto the request context (overriding the
-// default single-tenant resolution) and records the service token's permissions for
+// On success it pins the resolved merchant onto the request context (overriding the
+// default single-merchant resolution) and records the service token's permissions for
 // downstream RequireServiceTokenPermission gates. Expired, revoked, unknown, or
-// cross-tenant/unmapped service tokens are rejected.
+// cross-merchant/unmapped service tokens are rejected.
 //
 // resolver must be non-nil; routes are only mounted with this middleware when the
 // control plane is configured.
@@ -87,7 +87,7 @@ func ServiceTokenRequired(resolver ServiceTokenResolver) gin.HandlerFunc {
 			case errors.Is(err, authcore.ErrAccessTokenRevoked):
 				response.UnauthorizedWithMessage(c, "service_token_revoked")
 			case errors.Is(err, controlplane.ErrServiceTokenMerchantUnresolved):
-				// Owning AuthKit tenant maps to no active OpenRails tenant.
+				// Owning AuthKit org maps to no active OpenRails merchant.
 				response.ForbiddenWithMessage(c, "service_token_merchant_unresolved")
 			case errors.Is(err, controlplane.ErrServiceTokenScopeDenied):
 				response.ForbiddenWithMessage(c, "service_token_resource_scope_denied")
@@ -103,13 +103,13 @@ func ServiceTokenRequired(resolver ServiceTokenResolver) gin.HandlerFunc {
 			return
 		}
 
-		// Pin the resolved tenant for tenant-owned DB access (issue #223). This
-		// OVERRIDES the default single-tenant resolution from ResolveTenant.
+		// Pin the resolved merchant for merchant-owned DB access (issue #223). This
+		// OVERRIDES the default single-merchant resolution from ResolveMerchant.
 		ctx := merchant.WithID(c.Request.Context(), resolved.MerchantID)
 		c.Request = c.Request.WithContext(ctx)
-		c.Set("openrails.tenant_id", resolved.MerchantID)
+		c.Set("openrails.merchant_id", resolved.MerchantID)
 		c.Set(ServiceTokenContextKey, resolved)
-		c.Set(ServiceTokenOwnerTenantSlugContextKey, resolved.OwnerTenantSlug)
+		c.Set(ServiceTokenOwnerOrgSlugContextKey, resolved.OwnerOrgSlug)
 
 		c.Next()
 	}
@@ -141,8 +141,8 @@ func resolveServiceCredential(ctx context.Context, resolver ServiceTokenResolver
 }
 
 // RequireServiceTokenCustomerScope gates a route on the resolved service token's payer resource
-// scope. It must run after ServiceTokenRequired; tenant-wide service tokens pass, payer-scoped service tokens
-// pass only for their exact tenant subject id.
+// scope. It must run after ServiceTokenRequired; merchant-wide service tokens pass, payer-scoped service tokens
+// pass only for their exact merchant subject id.
 func RequireServiceTokenCustomerScope(c *gin.Context, payer uuid.UUID) bool {
 	resolved, ok := ServiceTokenFromGin(c)
 	if !ok || resolved == nil {

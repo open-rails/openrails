@@ -17,7 +17,7 @@ import (
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
-// mintOperatorJWT mints a real, JWKS-verifiable, tenant-scoped user access token
+// mintOperatorJWT mints a real, JWKS-verifiable, org-scoped user access token
 // (NOT an opaque service token) for the legacy bootstrap authority bridge, so
 // that the standalone server's JWT verifier accepts it on the /v1/admin/*
 // surface (OperatorAdminRequired checks the legacy `org` + `org_roles` claims).
@@ -25,10 +25,10 @@ import (
 // the admin catalog/price/solana-plan routes are gated by a JWT claim check,
 // while mint-operator-service-token only produces an opaque service token usable on /v1/service/*.
 //
-// It idempotently ensures the bootstrap authority tenant + role exist
+// It idempotently ensures the bootstrap authority org + role exist
 // (control-plane bootstrap), creates (or reuses) a test user, makes them a
 // legacy bridge member, assigns them the operator role, then issues a
-// tenant-scoped JWT via AuthKit core. The result verifies against the control
+// org-scoped JWT via AuthKit core. The result verifies against the control
 // plane's own JWKS when the control-plane issuer is in the server's
 // auth.issuers.
 func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
@@ -50,11 +50,11 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 	}
 	core := cp.Core()
 
-	authorityTenantSlug, _ := cmd.Flags().GetString("org")
-	authorityTenantSlug = strings.ToLower(strings.TrimSpace(authorityTenantSlug))
-	if authorityTenantSlug == "" {
-		// No default tenant (#336): the authority tenant must be named explicitly.
-		return fmt.Errorf("--org is required (the AuthKit tenant slug hosting the admin authority)")
+	authorityOrgSlug, _ := cmd.Flags().GetString("org")
+	authorityOrgSlug = strings.ToLower(strings.TrimSpace(authorityOrgSlug))
+	if authorityOrgSlug == "" {
+		// No default merchant (#336): the authority org must be named explicitly.
+		return fmt.Errorf("--org is required (the AuthKit org slug hosting the admin authority)")
 	}
 
 	email, _ := cmd.Flags().GetString("email")
@@ -73,10 +73,10 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 		role = controlplane.OperatorRole
 	}
 
-	// 1. Ensure the bootstrap (default-tenant) AuthKit org + admin role exist
+	// 1. Ensure the bootstrap (default-merchant) AuthKit org + admin role exist
 	//    (idempotent bootstrap).
 	if _, berr := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
-		BootstrapTenantSlug:     authorityTenantSlug,
+		BootstrapOrgSlug:        authorityOrgSlug,
 		MintInitialServiceToken: false,
 	}); berr != nil {
 		return fmt.Errorf("bootstrap authority/role: %w", berr)
@@ -89,21 +89,21 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 	}
 
 	// 3. Make them a legacy bridge member + assign the operator role.
-	if err := core.AddMember(ctx, authorityTenantSlug, userID); err != nil {
+	if err := core.AddMember(ctx, authorityOrgSlug, userID); err != nil {
 		return fmt.Errorf("add member: %w", err)
 	}
-	if err := core.AssignRole(ctx, authorityTenantSlug, userID, role); err != nil {
+	if err := core.AssignRole(ctx, authorityOrgSlug, userID, role); err != nil {
 		return fmt.Errorf("assign role %q: %w", role, err)
 	}
 
-	// 4. Issue the tenant-scoped JWT (carries tenant + tenant_roles claims).
-	token, exp, err := core.IssueServiceToken(ctx, userID, email, authorityTenantSlug, nil)
+	// 4. Issue the org-scoped JWT (carries org + org_roles claims).
+	token, exp, err := core.IssueServiceToken(ctx, userID, email, authorityOrgSlug, nil)
 	if err != nil {
-		return fmt.Errorf("issue tenant access token: %w", err)
+		return fmt.Errorf("issue org access token: %w", err)
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"org":        authorityTenantSlug,
+		"org":        authorityOrgSlug,
 		"user_id":    userID,
 		"email":      email,
 		"role":       role,

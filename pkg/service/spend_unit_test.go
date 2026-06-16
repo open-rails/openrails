@@ -19,12 +19,12 @@ func TestRemainingTodayAmount(t *testing.T) {
 		t.Fatalf("monthly-only => nil, got %v", *r)
 	}
 
-	// Tenant daily cap: report its remaining.
-	tenant := []money.CapResult{
+	// Merchant daily cap: report its remaining.
+	merchant := []money.CapResult{
 		{Code: money.DenyMonthlyCap, Remaining: 9000},
 		{Code: money.DenyDailyCap, Remaining: 300},
 	}
-	r := remainingTodayCents(tenant)
+	r := remainingTodayCents(merchant)
 	if r == nil || *r != 300 {
 		t.Fatalf("org daily remaining = %v, want 300", r)
 	}

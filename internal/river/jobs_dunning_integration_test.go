@@ -145,7 +145,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	}
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      sub.ID,
-		MerchantID:              dbtest.TestTenantID.UUID(),
+		MerchantID:              dbtest.TestMerchantID.UUID(),
 		CustomerID:              sub.CustomerID,
 		ProductID:               sub.ProductID,
 		PriceID:                 &priceID,
@@ -201,7 +201,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
-	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, moneySvc, false))
+	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, false))
 
 	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -268,7 +268,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	nextRetry := now.Add(-30 * time.Second)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: subID, MerchantID: dbtest.TestTenantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
+		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Processor: "mobius",
 		ProcessorSubscriptionID: "sub_test_" + uuid.New().String(),
 		PaymentMethodID:         &paymentMethodID,
@@ -291,7 +291,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		VALUES ('mobius', $1, $2, $3, $4, 'succeeded', 'system', now(), $5, $6)`,
 		intents.TypeManualRebill, subID, payloadJSON,
 		intents.ManualRebillIdempotencyKey(subID, periodEnd, "mobius", orderRef, 0),
-		fmt.Sprintf(`{"transaction_id": %q}`, durableTxn), dbtest.TestTenantID.UUID())
+		fmt.Sprintf(`{"transaction_id": %q}`, durableTxn), dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -334,7 +334,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	sub, err := repo.NewSubscriptionRepo(dbi).GetByID(ctx, subID)
 	require.NoError(t, err)
 
-	outcome := worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, moneySvc, false)
+	outcome := worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, false)
 	require.Equal(t, dunningOutcomeSucceeded, outcome)
 	assert.Zero(t, saleAttempts, "the durable success must be repaired, never re-charged")
 

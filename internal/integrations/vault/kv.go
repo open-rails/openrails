@@ -1,15 +1,15 @@
 // Package vault provides the live HashiCorp Vault adapters for OpenRails'
-// per-tenant secret store (issue #251). It implements two interfaces declared
+// per-merchant secret store (issue #251). It implements two interfaces declared
 // elsewhere, so the rest of the codebase never imports hashicorp/vault/api:
 //
-//   - tenancy.VaultKV  — KV-v2 backend for the per-tenant secret store
-//     (tenancy.NewVaultSecretStore wraps it; addressing is unchanged).
+//   - merchants.VaultKV  — KV-v2 backend for the per-merchant secret store
+//     (merchants.NewVaultSecretStore wraps it; addressing is unchanged).
 //   - solana.TransitClient — Vault Transit sign-as-a-service for the
-//     non-extractable per-tenant Solana key.
+//     non-extractable per-merchant Solana key.
 //
-// Tenant isolation is enforced by the (tenant, name) addressing in the tenancy
-// layer; this package authenticates ONCE as the OpenRails process (AppRole / K8s)
-// — see auth.go — and is the trusted broker.
+// Merchant isolation is enforced by the (merchant, name) addressing in the
+// merchants layer; this package authenticates ONCE as the OpenRails process
+// (AppRole / K8s) — see auth.go — and is the trusted broker.
 package vault
 
 import (
@@ -20,10 +20,10 @@ import (
 	vaultapi "github.com/hashicorp/vault/api"
 )
 
-// KVv2Adapter implements tenancy.VaultKV over a KV-v2 mount.
+// KVv2Adapter implements merchants.VaultKV over a KV-v2 mount.
 //
-// The tenancy store passes FULL logical paths that already include the mount
-// (e.g. "secret/openrails/tenants/<id>/<name>"). KV-v2's HTTP API addresses data
+// The merchant store passes FULL logical paths that already include the mount
+// (e.g. "secret/openrails/merchants/<id>/<name>"). KV-v2's HTTP API addresses data
 // at "<mount>/data/<rest>" and metadata at "<mount>/metadata/<rest>", so this
 // adapter strips the mount prefix and re-inserts the right segment per operation.
 // Stored values live under the KV-v2 "data" envelope.
@@ -37,7 +37,7 @@ func NewKVv2Adapter(client *vaultapi.Client, mount string) *KVv2Adapter {
 	return &KVv2Adapter{client: client, mount: strings.Trim(strings.TrimSpace(mount), "/")}
 }
 
-// rest strips the leading "<mount>/" the tenancy store prepended.
+// rest strips the leading "<mount>/" the merchant store prepended.
 func (a *KVv2Adapter) rest(full string) string {
 	return strings.TrimPrefix(strings.TrimPrefix(full, a.mount), "/")
 }

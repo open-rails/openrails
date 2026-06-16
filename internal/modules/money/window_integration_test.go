@@ -25,8 +25,8 @@ func windowEnv(t *testing.T, depositAmount int64) (context.Context, *pgxpool.Poo
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
-	dbtest.EnsureTestTenant(ctx, t, pool)
-	ctx = dbtest.WithTestTenant(ctx)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	ctx = dbtest.WithTestMerchant(ctx)
 
 	svc := money.NewMoneyService(dbi)
 

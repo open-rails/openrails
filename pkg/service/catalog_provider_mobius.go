@@ -135,7 +135,7 @@ func (a *mobiusAdapter) createPlan(client *nmi.NMIClient, planID string, in auto
 // not change it. Dots in the content key become hyphens to stay within NMI's
 // plan_id charset, e.g. "premium-usd-2300-30".
 //
-// The plan_id carries NO "openrails-"/tenant/application prefix: the content key
+// The plan_id carries NO "openrails-"/merchant/application prefix: the content key
 // is the whole id. Operator-supplied (Attach) plan_ids are owned by the operator
 // and never renamed by OpenRails, even when this template changes.
 func mobiusDeterministicPlanID(productSlug, currency string, unitAmount int64, billingCycleDays *int) string {

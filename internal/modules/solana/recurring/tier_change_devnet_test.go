@@ -70,7 +70,7 @@ func TestDevnetTierChange(t *testing.T) {
 
 		const prorated = uint64(1_000_000) // new_full(2) - old_unused(1) = 1 USDC, Model-B
 		res, err := tierSvc.Prepare(ctx, PrepareTierChangeInput{
-			MerchantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(), MintSymbol: "USDC",
+			MerchantID: dbtest.TestMerchantID, SubscriberWallet: sub.PublicKey().String(), MintSymbol: "USDC",
 			OldPlanPDA: planA.PlanPDA, OldSubscriptionPDA: oldSubPDA.String(),
 			NewPlanID: planB.PlanID, NewAmountBaseUnits: highTier, NewPeriodHours: 720, NewPlanCreatedAt: planB.CreatedAt,
 			IsUpgrade: true, FirstChargeBaseUnits: prorated,
@@ -103,7 +103,7 @@ func TestDevnetTierChange(t *testing.T) {
 		require.NoError(t, err)
 
 		res, err := tierSvc.Prepare(ctx, PrepareTierChangeInput{
-			MerchantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(), MintSymbol: "USDC",
+			MerchantID: dbtest.TestMerchantID, SubscriberWallet: sub.PublicKey().String(), MintSymbol: "USDC",
 			OldPlanPDA: planHigh.PlanPDA, OldSubscriptionPDA: oldSubPDA.String(),
 			NewPlanID: planLow.PlanID, NewAmountBaseUnits: lowTier, NewPeriodHours: 720, NewPlanCreatedAt: planLow.CreatedAt,
 			IsUpgrade: false,

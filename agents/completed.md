@@ -1776,11 +1776,11 @@ billing.RegisterAdminRoutes(r.Group("/billing/admin"))
 - [x] Define exported API package (`pkg/service`) with stable types
 - [x] Extract exported service facade for credits holds/capture/release/withdraw + entitlements listing
 - [x] Extend `pkg/embedded` to expose the exported facade via `Embedded.Service()`
-- 
+-
 - PHASE 1 - Types:
 - [x] Create `pkg/service/types.go` with exported request/response structs for all operations
 - [x] Ensure types don't import from `internal/*`
-- 
+-
 - PHASE 2 - User Operations:
 - [x] Add `GetProducts(ctx, opts)` and `GetPrices(ctx, opts)`
 - [x] Add checkout operations: `CreateCheckoutSession`, `GetCheckoutSession`, `ConfirmCheckoutSession`
@@ -1791,20 +1791,20 @@ billing.RegisterAdminRoutes(r.Group("/billing/admin"))
 - [x] Add notification operations: `GetUserNotifications`, `GetUnreadNotificationCount`, `MarkNotificationRead`
 - [x] Add credits read operations: `GetUserCredits`, `GetUserCreditsByType`, `GetUserCreditTransactions`
 - [x] Add processor-specific operations: `GetSupportedTokens` (GET /v1/solana/tokens), `CreateStripePortalSession` (POST /v1/stripe/portal)
-- 
+-
 - PHASE 3 - Admin Operations:
 - [x] Add admin subscription operations: `AdminGetSubscriptions`, `AdminGetSubscription`, `AdminCancelSubscription`
 - [x] Add admin payment operations: `AdminGetPayments`, `AdminGetPayment`, `AdminRefundPayment`, `AdminGetUserPayments`, `AdminCreateOffChannelPayment`
 - [x] Add admin user operations: `AdminGetUserBillingProfile`, `AdminGetUserEntitlements`, `AdminGrantEntitlement`, `AdminRevokeEntitlement`
 - [x] Add admin metrics operations: `AdminGetMetricsSummary`, `AdminGetMetricsRevenue`, `AdminGetMetricsSubscriptions`, `AdminGetMetricsProcessors`, `AdminGetMetricsChurn`
-- 
+-
 - PHASE 4 - Webhook Operations:
 - [x] Add `HandleWebhook(ctx, provider, payload, headers)` that returns structured result
-- 
+-
 - PHASE 5 - Refactor HTTP Handlers:
 - [x] Handlers use `Service` methods via existing `billingservice.New(r.State)` pattern
 - [x] Route registration functions created in `pkg/routes/` for embedded hosts
-- 
+-
 - PHASE 6 - Change Embedded API:
 - [x] Created `RegisterUserRoutes(group *gin.RouterGroup)` in pkg/routes
 - [x] Created `RegisterAdminRoutes(group *gin.RouterGroup)` in pkg/routes
@@ -1812,7 +1812,7 @@ billing.RegisterAdminRoutes(r.Group("/billing/admin"))
 - [x] Created `RegisterHealthRoutes(e *gin.Engine)` in pkg/routes
 - [x] Created `RegisterServiceRoutes(group *gin.RouterGroup)` in pkg/routes
 - [ ] Update standalone main.go to use the new Register* pattern (optional - existing handlers still work)
-- 
+-
 - PHASE 7 - Clean Up:
 - [ ] Remove deprecated Handler methods from `pkg/embedded` (optional - backward compatible)
 - [x] Update README embedding docs with new pattern
@@ -2185,23 +2185,23 @@ For checkout-session-based Solana flows, store in `checkout_sessions.processor_s
 - [x] Implement ExchangeAPIProvider using CC0 exchange-api (latest.currency-api.pages.dev; no API key needed)
 - [x] Add caching layer (5-minute TTL) to avoid hammering the FX API
 - [x] Create mock FXProvider for tests
-- 
+-
 - PHASE 2 - Update Token Quote:
 - [x] Create TokenQuote struct with Units, Decimal, TokenPriceUSD, FXRate, FXCurrency, QuotedAt fields
 - [x] Update calculateTokenQuote signature to accept currency and FXProvider
 - [x] Implement FX conversion logic (if currency != usd, fetch rate and convert)
 - [x] Use ceiling rounding for token amount to avoid underpayment
-- 
+-
 - PHASE 3 - Update Callers:
 - [x] Update GeneratePayment() in solana_pay.go to pass price.Currency
 - [x] Update BuildPaymentTransaction() in solana_transaction.go to pass price.Currency
 - [x] Update initializeSolanaSession() in checkout_session_service.go to pass session.Currency
 - [x] Wire FXProvider through SolanaPayService and SolanaTransactionService constructors
-- 
+-
 - PHASE 4 - Quote Snapshot:
 - [x] Store full quote snapshot in checkout_sessions.processor_state (fx_rate_to_usd, fx_currency, token_price_usd, quoted_at, quote_expires_at)
 - [x] Update confirmSolanaSession to verify quote hasn't expired (covered by session expiry check)
-- 
+-
 - PHASE 5 - Tests & Docs:
 - [x] Add unit tests for FX conversion path (mock FX provider + mock Jupiter price)
 - [x] Add integration test for non-USD price (e.g., EUR) that asserts token quote uses FX rate
@@ -2304,27 +2304,27 @@ GET /v1/solana/tokens?price_id=price_xxx&wallet=6Ew...abc
 **Tasks:**
 - PREREQUISITE:
 - [x] Complete Issue #113 (FX conversion) first - this issue is BLOCKED until then
-- 
+-
 - PHASE 1 - Query Params:
 - [x] Add price_id, checkout_session_id, wallet query params to handler
 - [x] Validate params (price exists, session exists and belongs to user if authenticated)
-- 
+-
 - PHASE 2 - Quote Output:
 - [x] Create TokenQuoteResponse struct for API response (TokenQuote in responses.go)
 - [x] For each supported token, call CalculateTokenQuote with price amount/currency
 - [x] Include full quote metadata (token_price_usd, fx_rate, fx_currency, quoted_at, expires_at)
-- 
+-
 - PHASE 3 - Balance Output:
 - [x] Create TokenBalanceResponse struct for API response (TokenBalance in responses.go)
 - [x] Implement getSOLBalance(wallet) via RPC getBalance
 - [x] Implement getSPLTokenBalance(wallet, mint) via RPC GetTokenBalanceForMint with ATA derivation
 - [x] Add sufficient boolean (balance >= quote.units when both present)
-- 
+-
 - PHASE 4 - Performance:
 - [x] Parallelize balance RPC requests using goroutines and channels
 - [x] Add 10s timeout for entire request (balances included)
 - [ ] Consider adding balance cache (30s TTL per wallet+mint) - deferred for later
-- 
+-
 - PHASE 5 - Tests:
 - [x] Existing unit tests for token quote function pass
 - [x] Backward compatibility maintained (no params = unchanged response)
@@ -2625,7 +2625,7 @@ Expose a public embedded-server API so OpenRails can be used as a library inside
 - [ ] Expose Runtime or lifecycle hooks if host needs background workers
 - [ ] Update main.go to call the new public API (no behavior change)
 - [ ] Add doc snippet in README for embedding usage
-  
+
 ## Notes
 
 - Keep internal/* private; embedding must not import internal packages.
@@ -3108,7 +3108,7 @@ Add feature flags to disable destructive background operations in case of bugs
 -     - DisableEntitlementExpiration bool (default false)
 - [x] Add DunningMode constants and validation in config package
 - [x] Update config.example.yaml with feature_flags section and documentation
-- 
+-
 - DUNNING_MODE IMPLEMENTATION:
 - [x] Update DunningWorker.Work():
 -     - If 'off': return early (FailMembership handles immediate cancel)
@@ -3117,22 +3117,22 @@ Add feature flags to disable destructive background operations in case of bugs
 - [x] Update FailMembership in lifecycle_service.go:
 -     - If dunning_mode='off': skip past_due, go straight to cancelled
 -     - If dunning_mode='on' or 'dry_run_only': normal past_due flow
-- 
+-
 - ENTITLEMENT_EXPIRATION IMPLEMENTATION:
 - [x] Update CreditExpiryWorker to check disable_entitlement_expiration flag
 - [x] Update HoldExpiryWorker to check disable_entitlement_expiration flag
 - [x] Update FailMembership: check flag before EndActiveBySubscription (still cancel, just don't revoke)
-- 
+-
 - LOGGING:
 - [x] Log when dunning_mode causes behavior change:
 -     - 'Dunning mode is dry_run_only, skipping charge for N subscriptions'
 -     - 'Dunning mode is off, subscription will be cancelled immediately'
 - [x] Log when entitlement expiration is disabled:
 -     - 'Entitlement expiration disabled, skipping N expired batches'
-- 
+-
 - TESTING:
 - [x] Test FeatureFlags config methods (config/config_test.go)
-- 
+-
 - DOCUMENTATION:
 - [x] Document flags in README with example scenarios and use cases
 
@@ -3167,7 +3167,7 @@ The Solana integration had unnecessary configuration options and a redundant sol
 - [x] Removed from config.example.yaml solana section
 - [x] Removed from .env.example
 - [x] Updated tests to not set these unused fields
-- 
+-
 - PHASE 2 - Remove solana_transactions table:
 - [x] Removed SolanaTransaction creation from solana_pay_poller.go (Payment already stores signature)
 - [x] Updated getPaymentByReference() to return not-found (reference is ephemeral)
@@ -3175,12 +3175,12 @@ The Solana integration had unnecessary configuration options and a redundant sol
 - [x] Removed DROP TABLE from 001_setup_billing_tables.down.sql
 - [x] Deleted internal/db/models/billing_models.go (only contained SolanaTransaction)
 - [x] Removed SolanaTransaction from models.go ModelRegistry
-- 
+-
 - PHASE 3 - Remove cleanup job code:
 - [x] Removed cleanupSolanaTransactions() from jobs_cleanup.go
 - [x] Removed SolanaTransactionRetention from CleanupConfig
 - [x] Removed SolanaTransactions from CleanupResult
-- 
+-
 - PHASE 4 - Verification:
 - [x] Build passes
 - [x] Config tests pass
@@ -3213,7 +3213,7 @@ Remove deprecated legacy processor config fields (NMI, CCBill, Solana, Stripe) f
 - [x] Verify Get*Processor() methods work correctly without legacy fallbacks
 - [x] Verify To*Config() conversion methods are complete
 - [x] Identify any code using NMIConfig.Providers directly
-- 
+-
 - === PHASE 2: UPDATE SOLANA CONSUMING CODE (~15 locations) ===
 - [x] internal/services/checkout_session_service.go - replace cfg.Solana with GetSolanaProcessor()
 - [x] internal/services/solana_pay.go - replace cfg.Solana
@@ -3223,12 +3223,12 @@ Remove deprecated legacy processor config fields (NMI, CCBill, Solana, Stripe) f
 - [x] internal/app/build_runtime.go - replace cfg.Solana (6 locations)
 - [x] internal/app/runtime.go - replace cfg.Solana
 - [x] pkg/service/service_user.go - replace cfg.Solana
-- 
+-
 - === PHASE 3: UPDATE CCBILL CONSUMING CODE ===
 - [x] internal/app/build_runtime.go - buildCCBillClient, buildCCBillRESTClient, buildCCBillDataLink
 - [x] internal/services/checkout_service.go - GenerateCCBillPaymentURL, GenerateCCBillOneTimeURL
 - Note: ccbill integration takes *config.CCBillConfig - use GetCCBillProcessor().ToCCBillConfig()
-- 
+-
 - === PHASE 4: UPDATE STRIPE CONSUMING CODE ===
 - [x] internal/services/stripe_subscriptions.go - 4 methods
 - [x] internal/services/stripe_portal.go - CreateBillingPortalSession
@@ -3236,13 +3236,13 @@ Remove deprecated legacy processor config fields (NMI, CCBill, Solana, Stripe) f
 - [x] internal/services/checkout_service.go - 3 stripe methods
 - [x] internal/handlers/webhook.go - HandleStripeWebhook
 - [x] pkg/service/service_webhooks.go - HandleStripeWebhook
-- 
+-
 - === PHASE 5: UPDATE NMI CONFIG HANDLING ===
 - [x] NMI handling already uses GetNMIProcessors() via createNMIClients() - no changes needed
 - [x] Removed legacy NMI initialization block from Load()
 - [x] Removed legacy fallback from GetNMIProcessors()
 - [x] Removed validateNMI() function
-- 
+-
 - === PHASE 6: REMOVE LEGACY FIELDS FROM CONFIG STRUCT ===
 - [x] Remove NMI, CCBill, Solana, Stripe fields from Config struct
 - [x] Remove legacy fallbacks from Get*Processor() methods
@@ -3250,22 +3250,22 @@ Remove deprecated legacy processor config fields (NMI, CCBill, Solana, Stripe) f
 - [x] Remove validateStripe(), validateCCBill() functions
 - [x] Remove Solana: &SolanaConfig{} from GetDefaultBillingConfig()
 - [x] Update validateStripeKeyForTestMode() to only check Processors map
-- 
+-
 - === PHASE 7: REMOVE LEGACY TYPES ===
 - [x] Remove NMIConfig struct
 - [x] Remove NMIProviderConfig struct
 - [x] Remove (cfg *NMIConfig) ProviderSettings() method
 - Keep: SolanaConfig, CCBillConfig, StripeConfig (used as DTOs)
-- 
+-
 - === PHASE 8: UPDATE TESTS ===
 - [x] tests/testcontainer_suite.go - use Processors map
 - [x] tests/solana_payment_test.go - use Processors['solana']
 - [x] internal/services/stripe_refunds_test.go - use Processors['stripe']
-- 
+-
 - === PHASE 9: CLEAN UP DOCUMENTATION ===
 - [x] Remove LEGACY PROCESSOR CONFIG section from config.example.yaml
 - [x] Remove deprecated env var examples from .env.example
-- 
+-
 - === PHASE 10: VERIFY & TEST ===
 - [x] Run go build - ensure no compile errors
 - [x] Run go vet - ensure no issues
@@ -3359,21 +3359,21 @@ Replace "host-app" / "OpenRails" branding in docs, strings, paths, and comments 
 - PHASE 1 - Decide naming rules:
 - [x] Decide when to use `openrails` vs `Open Rails` (CLI help text, docs titles, config comments)
 - [x] Decide whether service name should be "Open Rails Billing" or just "Open Rails"
-- 
+-
 - PHASE 2 - Update user-facing strings:
 - [x] Update CLI/service descriptions (e.g. `main.go` Short/Long strings)
 - [x] Update any processor metadata strings (e.g. NMI `order_description`) to remove "HostApp"
-- 
+-
 - PHASE 3 - Update paths safely:
 - [x] Replace `/var/lib/OpenRails/...` with `/var/lib/openrails-billing/...`
 - [x] Add backwards-compatible fallback behavior (prefer new path; fall back to legacy path if it exists)
 - [x] Update docker-compose volumes and docs accordingly
-- 
+-
 - PHASE 4 - Docs/comments/tests:
 - [x] Update docs under `docs/` and package READMEs to remove "OpenRails" references
 - [x] Update SQL migration comments to remove "OpenRails" wording
 - [x] Update test issuer/audience and fixture emails to use `openrails` equivalents
-- 
+-
 - VERIFY:
 - [x] `rg -n "\\bOpenRails\\b|\\bhost-app\\b"` has no remaining *branding* hits (allowlist: dependency import paths, `Dockerfile` GOPRIVATE/GONOSUMDB, `agents/*` historical docs, legacy spool dir constant)
 - [x] `go test ./...` passes
@@ -3442,23 +3442,23 @@ Example:
 - [x] Decide final credits_spec v2 JSON schema (required/optional fields)
 - [x] Decide grant events (initial/renewal/both) and enforcement points
 - [x] Decide how credit_types.is_active affects list + withdraw/hold/deposit
-- 
+-
 - PHASE 1 - Implement credits_spec v2:
 - [x] Replace `Product.CreditsSpec` with a map-based type (JSONB)
 - [x] Add tolerant parsing for legacy credits_spec during migration window
 - [x] Update grant paths to iterate credit grants (remove hardcoded api_credits)
 - [x] Add tests: multiple credit types + expiry behavior
-- 
+-
 - PHASE 2 - Credit types definition surface:
 - [x] Private API (port 8060): list/create/update/deactivate credit types
 - [x] Embedded Go API (`pkg/service`): same operations
 - [x] Decide naming rules + immutability (e.g. forbid renames; allow display_name/unit/decimal_places updates?)
-- 
+-
 - PHASE 3 - Credits funding surface:
 - [x] Private API (port 8060): `POST /v1/credits/deposit`
 - [x] Embedded Go API: `Service.DepositCredits(...)`
 - [x] Define idempotency story for deposits (source + source_id)
-- 
+-
 - PHASE 4 - Catalog definition surface (products/prices):
 - [x] Define API for products (create/update/deactivate) and which fields are mutable
 - [x] Define API for prices (create/update/deactivate) and which fields are immutable (amount/currency/cycle)
@@ -3466,7 +3466,7 @@ Example:
 - [x] Private API (port 8060): create/update/deactivate products
 - [x] Private API (port 8060): create/update/deactivate prices + processor mapping validation
 - [x] Embedded Go API equivalents
-- 
+-
 - PHASE 5 - Processor mapping modes (link vs auto-create):
 - [x] Add request shape for price creation supporting per-processor: { link: {...ids...} | create: {...params...} }
 - [x] Stripe: implement auto-create (create remote product/price) and persist returned IDs
@@ -3474,13 +3474,13 @@ Example:
 - [x] CCBill: research whether product/price creation is possible via API; if not, enforce link-only with explicit error message
 - [x] Add optional remote verification mode: validate provided IDs exist at processor (config-gated, avoid hard dependency in tests)
 - [x] Ensure idempotency for auto-create (idempotency keys / deterministic identifiers) and safe retries
-- 
+-
 - PHASE 6 - Docs:
 - [x] Document required host-defined rows for checkout (products/prices + processor mapping)
 - [x] Document credits_spec v2 schema + migration from legacy
 - [x] Document processor mapping: which processors support auto-create vs link-only
 - [x] Update API docs for new private endpoints
-- 
+-
 - VERIFY:
 - [x] `go test ./...` passes
 - [x] Integration tests seed catalog/credit types explicitly (no implicit seeds)
@@ -3505,14 +3505,14 @@ Support recurring credit allocations for subscriptions (monthly stipend-style gr
 - [x] Define idempotency period key (prefer `subscriptions.current_period_ends_at` / CCBill nextRenewalDate)
 - [x] Define behavior on plan change mid-cycle (upgrade/downgrade): grant immediately vs next renewal only
 - [x] Define behavior on proration/partial refunds: clawback vs keep credits (policy)
-- 
+-
 - DATA MODEL:
 - [x] Update `internal/db/models/product_catalog.go` credits spec type to `credits_spec` v2 map schema
 - [x] Write migration plan for existing `billing.products.credits_spec` values (legacy -> v2; or keep backward compatibility)
 - [x] Add `billing.subscription_credit_grants` table for idempotency (subscription_id, credit_type_id, period_end, created_at)
 - [x] Add unique constraint on `(subscription_id, credit_type_id, period_end)`
 - [x] Add model/repo helpers for `subscription_credit_grants` (insert-if-not-exists flow)
-- 
+-
 - IMPLEMENTATION:
 - [x] Implement credits_spec v2 parsing + validation (unknown credit type name => error)
 - [x] Implement `GrantSubscriptionCredits(ctx, subscriptionID, periodEnd, source)` helper that:
@@ -3525,7 +3525,7 @@ Support recurring credit allocations for subscriptions (monthly stipend-style gr
 - [x] Wire into NMI/Mobius renewal success handler (including dunning worker success path)
 - [x] Wire into CCBill `handleRenewalSuccess`
 - [x] Add observability: log credit grant attempts and idempotent skips (source, subscription_id, period_end)
-- 
+-
 - TESTS:
 - [x] Unit test: credits_spec v2 validation (unknown credit type, negative amounts, etc.)
 - [x] Unit test: idempotency key computation for a subscription period
@@ -3533,7 +3533,7 @@ Support recurring credit allocations for subscriptions (monthly stipend-style gr
 - [x] Integration test: NMI dunning rebill success grants exactly once
 - [x] Integration test: CCBill RenewalSuccess grants exactly once
 - [x] Integration test: mixed cadence (once + per_renewal) behaves correctly
-- 
+-
 - DOCS:
 - [x] Document `credits_spec` v2 schema + cadence semantics
 - [x] Document idempotency behavior (period key, webhook replay safety)
@@ -3555,11 +3555,11 @@ Simplify `billing.user_credit_balances` to store only total `balance` + `held_ba
 - [x] - Option A: holds do not reserve specific lots; expiry can make holds un-coverable; capture can fail; release remains allowed
 - [ ] - Option B: holds must reserve expiring lots (requires mapping holds -> batches and preventing those lots from expiring)
 - [x] Pick one option and document behavior
-- 
+-
 - DB MIGRATIONS (Postgres):
 - [x] Add migration to drop columns from `billing.user_credit_balances`: `permanent_balance`, `expiring_balance`, `earliest_expiry`
 - [x] Ensure all code paths tolerate existing DBs during rolling deploys (expand/contract plan if needed)
-- 
+-
 - CODE CHANGES:
 - [x] Update `internal/db/models/credits.go` UserCreditBalance model to remove Permanent/Expiring/EarliestExpiry fields
 - [x] Update `internal/services/credits_service.go`:
@@ -3570,14 +3570,14 @@ Simplify `billing.user_credit_balances` to store only total `balance` + `held_ba
 - [x] Update handlers and service/embedded DTOs that currently expose permanent/expiring balances:
 - [x] - `internal/handlers/credits.go`
 - [x] - `pkg/service/service_user.go` and `pkg/service/types.go`
-- 
+-
 - TESTS:
 - [x] Update/replace tests that assert permanent/expiring fields
 - [x] Add regression test for holds + expiry under chosen policy
-- 
+-
 - DOCS:
 - [x] Update `docs/api/endpoints.md` to remove permanent/expiring/earliest fields and describe expiry semantics
-- 
+-
 - VERIFY:
 - [x] `go test ./... -run '^$'` (build-only) passes
 - [x] Run full test suite in an environment where `httptest.NewServer` is permitted
@@ -3648,28 +3648,28 @@ For api-credits usage, we want **one stable ID per request** that starts as a ho
 - [x] Define statuses (e.g., pending/held/captured/released/expired) and required fields per status
 - [x] Decide whether deposits/expiry are also modeled as lifecycle rows, or remain as ledger-only events
 - [x] Eliminate `billing.subscription_credit_grants`: use a deterministic grant ID (UUIDv5) derived from (subscription_id, credit_type_id, period_end) and rely on deposit idempotency
-- 
+-
 - MIGRATIONS:
 - [x] Add new tables/columns + constraints (including idempotency unique index)
 - [x] Add a partial unique index for deposit idempotency: (user_id, credit_type_id, source, source_id) WHERE transaction_type='deposit' AND source_id IS NOT NULL
 - [x] Drop `billing.subscription_credit_grants` after switching to deterministic grant IDs
 - [x] Data migration/backfill from `billing.credit_holds` and existing `billing.credit_transactions` if needed
 - [x] Keep backwards-compat views (optional) or provide a clean cutover plan
-- 
+-
 - IMPLEMENTATION:
 - [x] Refactor `internal/services/credits_service.go` to use the new lifecycle transaction record
 - [x] Update `GrantSubscriptionCredits` to compute the deterministic grant ID and pass it as the deposit `SourceID` (no extra idempotency table)
 - [x] Ensure invariants: balance >= held_balance, no double-capture, no capture after release/expire
 - [x] Ensure concurrency safety with row locks (`FOR UPDATE`) on lifecycle + balances
-- 
+-
 - WORKERS:
 - [x] Update hold-expiry logic to expire lifecycle records
 - [x] Update credit expiry logic as needed (still block-based)
-- 
+-
 - API / UX:
 - [x] Update list transactions endpoint(s) to show lifecycle transactions (per API request)
 - [x] Consider adding GET by (source, source_id) for direct lookup
-- 
+-
 - TESTS:
 - [x] Idempotent hold creation under retry (same source/source_id)
 - [x] Hold->capture with partial capture, and ensure unused amount is released
@@ -3721,36 +3721,36 @@ OpenRails already has the right basic shape: services use `clockwork.Clock`, int
 - [x] Inventory all `time.Now()`, `clockwork.NewRealClock()`, SQL `NOW()`, `CURRENT_TIMESTAMP`, and DB default timestamp usages in `internal/`, `pkg/service/`, and migrations
 - [x] Classify each usage as `business_time`, `infrastructure_time`, `db_audit_timestamp`, or `external_protocol_time`
 - [x] Document the classification rule in README or AGENTS.md: billing/domain logic uses injected business clock; infra/security/cache/metrics may use wall clock
-- 
+-
 - RUNTIME / CONSTRUCTION:
 - [x] Add runtime/app construction option like `WithClock(clockwork.Clock)` or equivalent config path
 - [x] Ensure runtime construction always has a non-nil clock, defaulting to `clockwork.NewRealClock()` at the boundary only
 - [x] Change test setup to build suites with `setupTestSuite(t, WithClock(fakeClock))` so fake time exists before service construction and seed data
 - [x] Deprecate `SetMockClock` as a post-construction patch helper; keep a compatibility wrapper only if needed while migrating tests
-- 
+-
 - SERVICE INJECTION:
 - [x] Convert billing/domain services from public mutable `Clock` fields to private required clocks set by constructors where practical
 - [x] Update `createServices(...)` and runtime wiring so every time-sensitive service receives the same runtime clock during construction
 - [x] Ensure River workers that make business-time decisions receive the runtime clock at registration time
 - [x] Ensure services created inside other services propagate the parent clock explicitly instead of falling back to real time
-- 
+-
 - REPOSITORY / QUERY CLEANUP:
 - [x] Replace business-time SQL `NOW()` in subscription, entitlement, credit, checkout, and dunning queries with parameters derived from the injected clock
 - [x] Prefer service-computed `now := clock.Now().UTC()` passed into repos for cancellation, renewal, expiry, and entitlement timestamp writes
 - [x] Leave DB-managed audit timestamps alone only when they are truly persistence audit time rather than business state time
-- 
+-
 - GUARDRAILS:
 - [x] Add a small script/test that scans business/domain paths for new `time.Now()`, SQL `NOW()`, and `CURRENT_TIMESTAMP` usages
 - [x] Add an allowlist file or inline comments for approved infrastructure-time usages
 - [x] Wire the guardrail into CI or the normal test/check command so accidental business-time leaks are caught
-- 
+-
 - TEST COVERAGE:
 - [x] Add integration test: build runtime with fake clock before seeding, create subscription, advance one billing period, verify renewal/expiry behavior uses fake time
 - [x] Add integration test: cancellation at period end revokes access only after fake time advances past period end
 - [x] Add integration test: dunning retries are not due before `next_retry_at`, become due exactly when fake time reaches it, and remain due afterward
 - [x] Add integration test: credit expiry and hold expiry workers use injected fake clock from runtime construction
 - [x] Add regression test proving no service created during runtime boot keeps a real clock when a fake clock is supplied
-- 
+-
 - DOCS:
 - [x] Document how OpenRails app time relates to processor test clocks/sandboxes: Stripe test clocks control Stripe objects; OpenRails fake clock controls app-side business logic
 - [x] Add examples for advancing fake time in tests without sleeps
@@ -4873,7 +4873,7 @@ Two follow-up issues are anticipated:
 - [x] In set mode: read `Claims.Org` + `Claims.TenantRoles` from JWT via `pkg/authprovider`; reject on missing claims, mismatched org, or missing admin role; do not hit OpenRails DB
 - [x] Apply the new policy to all `/admin/*` routes, not just `/admin/catalog/*`
 - [x] Stable error codes: `admin_required`, `operator_tenant_required`, `operator_tenant_mismatch`, `operator_tenant_role_required`
-- 
+-
 - API CONTRACT:
 - [x] One canonical request/response shape per operation in `pkg/service` (or a new `pkg/service/admincatalog` package), shared by HTTP handlers and embedded callers
 - [x] Product operations: `CreateProduct`, `UpdateProduct`, `GetProduct`, `GetProductBySlug`, `ListProducts` (filter by `tier_group`, `active`, pagination), `ActivateProduct`, `DeactivateProduct`
@@ -4883,20 +4883,20 @@ Two follow-up issues are anticipated:
 - [x] Add `skip_processor_sync bool` field to write requests for DB-only edits (default false)
 - [x] Add `processor_state` field to response shapes so callers see Stripe IDs without re-reading DB
 - [x] Document that direct SQL edits to `billing.products`/`billing.prices` and direct use of `catalog.ProductService`/`catalog.PriceService` from outside OpenRails are unsupported once this API ships
-- 
+-
 - EXTEND pkg/service FACADE:
 - [x] Audit existing `pkg/service/service_definition_catalog.go` against the freeze list; fill read + lifecycle gaps
 - [x] Add missing reads (`GetProduct`, `GetProductBySlug`, `ListProducts`, `GetPrice`, `ListPricesByProduct`) backed by `runtime.ProductService` / `runtime.PriceService`
 - [x] Add missing lifecycle (`ActivateProduct`, `DeactivateProduct`, `ActivatePrice`, `DeactivatePrice`)
 - [x] Backfill Stripe reconciliation inside Create/Update via `catalog.StripeCatalogService` (find-or-create by deterministic lookup-key; honor explicit `stripe_price_id` as escape hatch)
-- 
+-
 - LOOKUP-KEY CONTRACT:
 - [x] Format: `<app_namespace>.<tier_group>.<product>.<price>.<currency>.<amount>.<interval>.<count>`
 - [x] Configurable per deployment via `OPENRAILS_APP_NAMESPACE` (default value documented)
 - [x] Admin request also accepts `app_namespace` field; runtime default applies when omitted
 - [x] Regression test pinning the format
 - [x] Issue #206 (YAML sync) reuses the same contract so both code paths produce identical Stripe lookup keys
-- 
+-
 - HTTP ROUTES:
 - [x] Mount under `RegisterAdminRoutes` (`internal/http/routes/routes.go`), guarded by `policy.OperatorAdminRequired`
 - [x] `POST /admin/catalog/products`, `GET /admin/catalog/products`, `GET /admin/catalog/products/:id`, `GET /admin/catalog/products/by-slug/:slug`, `PATCH /admin/catalog/products/:id`
@@ -4904,37 +4904,37 @@ Two follow-up issues are anticipated:
 - [x] Symmetric set for `/admin/catalog/prices`
 - [x] Handlers are thin shims: bind JSON -> call `pkg/service` -> return JSON (matches existing `service_catalog.go` pattern)
 - [x] Stable error codes: `product_not_found`, `price_not_found`, `slug_taken`, `price_financials_immutable`, `stripe_sync_failed`, `processor_misconfigured`
-- 
+-
 - SERVICE-AUTH ROUTE OVERLAP:
 - [x] Current `POST/PATCH /catalog/products` and `/catalog/prices` (under `RegisterServiceRoutes` with service-auth) overlap with the new admin routes
 - [x] Decide: keep service-auth routes alongside (recommended) or deprecate
 - [x] If kept, both go through the same `pkg/service` facade for consistent behavior
-- 
+-
 - RELEASE:
 - [ ] Coordinate version bump with issue #206 (both land in the same release)
 - [ ] README/docs: explain the two orthogonal axes (transport: embedded vs standalone; AuthKit: single-org vs multi-org); show the `OPENRAILS_OPERATOR_ORG_SLUG` setting needed for each AuthKit mode and worked examples of host apps in each combination (cozy.art = embedded + single-org / host-app+consumer-app = standalone + single-org / tensorhub = embedded + multi-org / hosted OpenRails = standalone + multi-org)
 - [ ] Worked examples for both HTTP and embedded surfaces
 - [ ] Explicitly document that true multi-tenant SaaS is out of open-source scope (tracked by future #201)
 - [ ] Run `go test ./...` before tagging; no local replace directives in host repos
-- 
+-
 - TESTS:
 - [ ] Unit tests for every admin API operation, every error code, immutability rejection, Stripe sync on/off, idempotent reruns
 - [ ] Symmetric-shape guarantee: HTTP and embedded return identical payloads for the same operation
 - [x] Middleware tests covering both AuthKit modes (unset+global-admin allowed, unset+non-admin rejected, set+correct-org+admin-role allowed, set+wrong-org rejected, set+correct-org+wrong-role rejected, set+missing-claims rejected); transport axis is invariant for these checks
 - [ ] Route-mount tests proving `OperatorAdminRequired` is wired on every `/admin/*` route
-- 
+-
 - USERCONTEXT SURFACE (DISCOVERED REQUIREMENT):
 - [x] Add `Org string` and `TenantRoles []string` fields to `pkg/authprovider.UserContext`
 - [x] Add `HasAnyTenantRole(want ...string)` helper that is case-insensitive and returns false when Org is empty or want is empty
 - [x] Document that host apps populate these fields in their auth middleware: standalone openrails-using-authkit fills them directly from the AuthKit JWT; embedded hosts (cozy.art, tensorhub) fill them in their AuthKit-bridge middleware before invoking openrails handlers
 - [x] Verify backwards-compat: existing single-org callers leave both fields zero-valued and see no behavior change
-- 
+-
 - STRIPE INTERACTIONS MUST BE IDEMPOTENT (DISCOVERED REQUIREMENT):
 - [x] Extend `catalog.StripeCatalogService` with `UpdateProduct`, `UpdatePrice`, `RetrieveProduct`, `RetrievePrice`, `SearchProductByMetadata`, `SearchPriceByLookupKey` — none exist today, only Create + bare VerifyPriceExists
 - [x] All Create paths set `metadata['openrails_product_id']` / `metadata['openrails_price_id']` and (for Price) `lookup_key = <app_namespace>.<tier_group>.<product>.<price>.<currency>.<amount>.<interval>.<count>`
 - [x] Replace the existing `openrails-product-<uuid>` / `openrails-price-<uuid>` idempotency-key shortcut in `pkg/service.resolveProcessorMappings`: find-or-attach by metadata/lookup_key first, only create with deterministic key as last resort
 - [x] Document that all Stripe writes from OpenRails must be replayable: rerunning a Create call against an already-synced row attaches to the existing Stripe object instead of duplicating
-- 
+-
 - RECONCILIATION MODEL (LAZY DRIFT, EXPLICIT RECONCILE):
 - [x] Add typed `ProcessorState` struct to response shapes: `{ stripe: { product_id, price_id, lookup_key, last_synced_at, sync_status, drift?[] } }`
 - [x] `sync_status` values: `unknown` (default, not computed), `in_sync`, `drifted`, `missing`, `never_synced`, `sync_disabled`
@@ -4946,16 +4946,16 @@ Two follow-up issues are anticipated:
 - [ ] Audit log entry on every reconcile + every drift-resolving mutation (actor, resource id, before/after diff)
 - [x] Document loudly: editing catalog directly in the Stripe Dashboard will be reverted on next reconcile (OpenRails-authoritative contract)
 - [x] No background reconciler / no periodic poll — on-demand only
-- 
+-
 - FOLLOW-UP SCOPE (OUT OF #205, FILE SEPARATELY):
 - [ ] File `stripe-catalog-drift-observer`: handlers for `product.created/updated/deleted` and `price.created/updated/deleted` Stripe webhooks; alert-only, never auto-mutate; new `catalog_drift_event` table
 - [ ] File `stripe-catalog-orphan-discovery`: add Stripe `List` methods + `GET /admin/catalog/stripe/orphans` for operator import/archive flow
-- 
+-
 - NEW ERROR CODES FROM RECONCILIATION MODEL:
 - [x] `stripe_ambiguous_match` — find-or-create discovered multiple matching Stripe objects
 - [x] `stripe_drift_detected` — returned by reconcile with `?dry_run=true`
 - [x] `stripe_object_missing` — referenced Stripe ID returns 404; reconcile without `?recreate=true` refuses to recreate
-- 
+-
 - [x] Hard-cut decision: legacy `/catalog/*` service-auth routes + `ServiceCreate*`/`ServiceUpdate*` handlers + deprecated `AdminRequired` middleware deleted entirely; no backwards-compat shim. The `/admin/catalog/*` admin surface is the only catalog mutation path.
 
 ---
@@ -5007,7 +5007,7 @@ NMI becomes a first-class create-capable provider in the admin catalog API, alon
 - [ ] Add `DeleteRecurringPlan(planID)` for cleanup paths
 - [ ] Add `GetRecurringPlanByID(planID)` (or extend `GetRecurringPlanData` to filter) so find-or-attach has a strongly-consistent lookup
 - [ ] Unit tests for each new client method (request body shape, response parsing, error surfacing)
-- 
+-
 - PROCESSOR FACADE INTEGRATION:
 - [ ] In `pkg/service.resolveProcessorMappings`, add a `mobius` create-mode branch that mirrors the Stripe pattern: find-or-attach by deterministic plan_id, fall back to create
 - [ ] Deterministic plan_id format: `openrails-<openrails_price_uuid>` (NMI plan_id is operator-chosen and stable, so use the OpenRails price UUID as the identity)
@@ -5015,21 +5015,21 @@ NMI becomes a first-class create-capable provider in the admin catalog API, alon
 - [ ] Reject create-mode for NMI when `billing_cycle_days` is nil (NMI requires a frequency for recurring plans)
 - [ ] On UpdatePrice with `skip_processor_sync=false`, propagate mutable fields (`display_name`, `unit_amount`-rejected-as-immutable) to NMI via `EditRecurringPlan`
 - [ ] On DeactivatePrice, do NOT call `DeleteRecurringPlan` (active subscriptions still need the plan); document this divergence from Stripe (Stripe Price `active:false` is more lenient)
-- 
+-
 - RECONCILIATION PARITY:
 - [ ] Add NMI verify path: live `GetRecurringPlanByID` + diff against the OpenRails row; populate `ProviderState.mobius.sync_status` + drift fields
 - [ ] Add NMI to ReconcilePrice: re-apply OpenRails values to NMI via `EditRecurringPlan` (mutable fields only); for missing plans, support `?recreate=true` analogous to Stripe
 - [ ] Generalize the per-provider state container so adding more create-capable providers later (e.g. Paddle, Chargebee) is additive, not a separate Verify*/Reconcile* method per provider
-- 
+-
 - DOCS:
 - [ ] Update README admin catalog section: NMI now supports `providers: ["mobius"]` create-mode; CCBill remains link-only forever (no upstream API)
 - [ ] Document the immutable-fields contract for NMI plans (frequency, payments) — parallel to Stripe Price immutability
 - [ ] Document the deactivate divergence (NMI delete_recurring_plan affects active subscriptions; OpenRails does not call it)
-- 
+-
 - TESTS:
 - [ ] Facade tests for the new mobius create-mode branch: fresh create, no-op rerun, mutable update, immutable update rejected, missing plan recreate
 - [ ] Regression test pinning the deterministic plan_id format
-- 
+-
 - EXIT CRITERIA:
 - [ ] Admin can declare `providers: ["mobius"]` on CreatePrice and OpenRails auto-creates the matching NMI plan
 - [ ] Rerunning the create attaches to the existing NMI plan (no duplicates)
@@ -5161,43 +5161,43 @@ Document this clearly in the README: "Reconciliation is a price-level operation.
 - [x] Add `CatalogPrice.Providers map[string]ProviderState` and `CatalogPrice.PendingManualActions []PendingAction`
 - [x] Same shape on `CatalogProduct` (or a `Providers` field at the product level if product-level provider attachment becomes a thing)
 - [x] Remove `ProcessorMappingMode`, `CatalogPrice.Processors` (loose map), and the existing `ProcessorState`/`StripeProcessorState` types
-- 
+-
 - BEHAVIOR REWRITE:
 - [x] Rewrite `pkg/service.resolveProcessorMappings` as `pkg/service.resolveProviders`
 - [x] Per-provider dispatch table: `{stripe: stripeProvider, ccbill: ccbillProvider, mobius: mobiusProvider}`
 - [x] Each provider implements a small interface: `Attach(ctx, link) -> error`, `AutoCreate(ctx, price) -> (ids, error)`, `Verify(ctx, ids) -> (driftFields, error)`, `Update(ctx, ids, mutable) -> error`
 - [x] Providers that don't support AutoCreate return a sentinel error that the dispatcher converts to `pending_manual_link` (today: ccbill, mobius; after #207: ccbill only)
 - [x] Don't hard-fail CreatePrice when one provider is `pending_manual_link` — succeed with the row created and the action list populated
-- 
+-
 - PENDING-ACTION SURFACE:
 - [x] Define `PendingAction` struct: `{provider, action, hint, patch_required (shape of the PATCH that would resolve it)}`
 - [ ] Aggregate per-create across providers; surface in CreatePrice + GetPrice + reconcile responses
 - [x] Document that PATCH /admin/catalog/prices/:id with `provider_links.<provider>.<key>: <value>` resolves a pending action (no separate endpoint)
-- 
+-
 - RECONCILE PARITY:
 - [x] Generalize `VerifyPriceStripeSync` / `VerifyProductStripeSync` to walk each attached provider through its Verify implementation
 - [x] Generalize `ReconcilePrice` / `ReconcileProduct` to dispatch per provider
 - [x] Reconcile of a `pending_manual_link` provider does nothing (no IDs to verify); a follow-up issue can add discovery (e.g. CCBill DataLink fuzzy match)
-- 
+-
 - CALL-SITE UPDATES (HARD CUT):
 - [ ] Update `cmd/billing/seed_dev_catalog.go` to use the new shape
 - [x] Update OpenRails README admin catalog section with the new request/response shapes + behavior matrix + worked examples for each provider
 - [ ] Update issue #205 spec to mark the `processors` shape as superseded by this issue
 - [ ] Update issue #207 spec: NMI auto-create just means adding `mobius` to the AutoCreate-capable list; no separate code path
 - [ ] Audit any host-app code (cozy.art, tensorhub) that calls `CreatePrice` programmatically and update in their respective repos (track in cozy.art issue #33 + tensorhub equivalent)
-- 
+-
 - TESTS:
 - [x] Per-provider provider-interface unit tests
 - [x] CreatePrice integration tests: all linked, mixed linked+pending, all pending, stripe-auto-create + ccbill-pending
 - [x] PendingAction surfacing tests (CreatePrice + GetPrice + reconcile responses)
 - [x] Reconcile dispatch tests across providers
-- 
+-
 - EXIT CRITERIA:
 - [x] Old `processors[name].{link|create}` shape is gone from the codebase entirely
 - [x] Admin can declare `providers: ["stripe", "ccbill"]` on CreatePrice without pre-providing CCBill IDs and the call succeeds with a clear pending_manual_link action
 - [x] Stripe auto-create + reconcile behavior unchanged from issue #205
 - [ ] cozy.art #33 migration uses the new shape (no transitional code)
-- 
+-
 - PRODUCT-LEVEL CLEANUP (HARD REQUIREMENT — products have NO direct provider linkage):
 - [x] Do NOT add `Providers` field to `CatalogProduct` response shape
 - [x] Delete `VerifyProductStripeSync` / `VerifyProductSync` facade method
@@ -5207,7 +5207,7 @@ Document this clearly in the README: "Reconciliation is a price-level operation.
 - [x] Delete `?verify=true` query handling on product GET handlers (only prices support verify)
 - [x] Keep `lookupStripeProductID` as a private helper for internal UpdateProduct → Stripe propagation
 - [x] README must explicitly state: 'Reconciliation is a price-level operation; products are OpenRails-only concepts'
-- 
+-
 - [x] FIELD MINIMIZATION (post-landing): removed LookupKey from CreatePriceRequest (Stripe lookup_key now generated internally as openrails_<price_uuid> in the provider dispatcher); removed IsActive from CreatePriceRequest (prices always create active; use /deactivate to stage); SkipProcessorSync was never on create (Update-only). Wired mobiusAdapter{svc} so #207 NMI create-mode dispatches live. README + examples updated.
 
 ---
@@ -5247,36 +5247,36 @@ The user is mid-consolidation of migrations into `001_schema.up.sql`. Do NOT cre
 - [ ] Add a `CatalogStatus` string type with consts `draft`, `active`, `archived` in internal/db/models
 - [ ] Replace `Product.IsActive bool` with `Product.Status CatalogStatus`; same for `Price`
 - [ ] Add helpers: `IsPurchasable()` (status==active), `IsBillable()` (status!=draft — archived still bills)
-- 
+-
 - DDL (hand to user — do NOT create a migration file):
 - [ ] Provide the DDL replacing `is_active boolean` with `status text NOT NULL DEFAULT 'active' CHECK (status IN ('draft','active','archived'))` on billing.products + billing.prices, including the data-migration clause mapping existing is_active=true→'active', false→'archived'
-- 
+-
 - REPO + CATALOG SERVICES:
 - [ ] Update repo/product.go + repo/price.go queries: `WHERE is_active = true` → `WHERE status = 'active'`; pagination/active-list helpers operate on status='active'
 - [ ] catalog/product.go + price.go: `Activate` → set status=active; `Deactivate` → set status=archived; add `SetStatus(id, status)` for explicit transitions (incl. archive)
 - [ ] Keep `GetByID` status-agnostic (renewal depends on it)
-- 
+-
 - FACADE (pkg/service):
 - [ ] CreateProductRequest + CreatePriceRequest accept optional `status` (default `active`); allow creating `draft` or `archived` directly
 - [ ] CatalogProduct + CatalogPrice responses expose `status` (replace the `is_active` field)
 - [ ] ActivateProduct/Price → status=active; DeactivateProduct/Price → status=archived; consider an explicit Archive vs Draft transition
 - [ ] Reconciliation/drift + Stripe propagation: archived → Stripe active=false; active → Stripe active=true; draft → do NOT create in Stripe (or create inactive)
-- 
+-
 - CHECKOUT + PUBLIC CATALOG (purchasability gate):
 - [ ] Public GetProducts/GetPrices: non-admins see only status=active; admins can filter by status
 - [ ] Checkout/new-subscription path: reject purchase of non-active (draft or archived) prices with a clear error
 - [ ] Renewal/rebill path: confirm it still bills archived prices (load-by-id, no status filter) — add a regression test
-- 
+-
 - TESTS:
 - [ ] Renewal of a subscription on an archived price still bills (grandfather regression test)
 - [ ] New purchase of an archived price is rejected
 - [ ] Draft price is hidden from public catalog and not purchasable
 - [ ] Create-as-archived in one step works (migration use case)
 - [ ] status round-trips through facade create/get/list
-- 
+-
 - DOCS:
 - [ ] README admin catalog section: document the status lifecycle + grandfather guarantee
-- 
+-
 - EXIT CRITERIA:
 - [ ] `is_active` is gone from product/price model + catalog code (other tables unaffected)
 - [ ] Archived price bills existing subs, rejects new purchases, hidden from public catalog
@@ -5369,7 +5369,7 @@ Implement a credits/balance system for consumable purchases (API credits, GPU ti
 - [x] PHASE 5 - User Endpoints: GET /v1/me/credits, /credits/:type, /credits/:type/transactions
 - [x] PHASE 7 - Service-to-Service Endpoints: POST /v1/credits/withdraw, /hold, /hold/:id/capture, /hold/:id/release
 - [x] Product.CreditsSpec integration for bundled promo credits
-- 
+-
 - [x] PHASE 4b - Hold Expiry Job:
 - [x] Created River job: internal/river/jobs_hold_expiry.go
 - [x] Registered HoldExpiryWorker in internal/app/river_register.go
@@ -5377,7 +5377,7 @@ Implement a credits/balance system for consumable purchases (API credits, GPU ti
 - [x] Logic: Find credit_holds WHERE status='active' AND expires_at <= NOW()
 - [x] For each expired hold: Lock row, set status='expired', subtract from held_balance
 - [x] Batch processing with configurable batch size
-- 
+-
 - [x] PHASE 8 - Hold Expiry Testing:
 - [x] tests/hold_expiry_worker_test.go with comprehensive tests:
 - [x]   - TestHoldExpiryWorkerNoExpiredHolds
@@ -5387,15 +5387,15 @@ Implement a credits/balance system for consumable purchases (API credits, GPU ti
 - [x]   - TestHoldExpiryWorkerBatching
 - [x]   - TestHoldExpiryWorkerNilDB
 - [x]   - TestHoldExpiryWorkerHeldBalanceNeverNegative
-- 
+-
 - === REMAINING (OPTIONAL/DEFERRED) ===
-- 
+-
 - PHASE 6 - Admin Endpoints (nice-to-have, can manage via DB for now):
 - [x] POST /v1/admin/users/:id/credits - admin grant/adjust credits
 - [x] GET /v1/admin/users/:id/credits - view user's credit balances
 - [x] GET /v1/admin/credit-types - list all credit types
 - [x] POST /v1/admin/credit-types - create new credit type
-- 
+-
 - PHASE 4c - Low Balance Alerts (DEFERRED - requires schema changes):
 - [x] Add alert_threshold column to credit_types table (missing from migration)
 - [x] Add last_alert_at column to user_credit_balances table (missing from migration)
@@ -5404,7 +5404,7 @@ Implement a credits/balance system for consumable purchases (API credits, GPU ti
 - [x] Logic: Find users where balance < credit_type.alert_threshold AND (last_alert_at IS NULL OR last_alert_at < NOW() - 24h)
 - [x] Send notification via NotificationService, update last_alert_at
 - [x] Note: Requires notification templates for low balance alerts
-- 
+-
 - PHASE 8b - Low Balance Alert Testing (when implemented):
 - [x] Write tests for low balance alerts
 
@@ -6578,18 +6578,18 @@ A developer can run a documented flow to:
 - DOCS (SINGLE RUNBOOK):
 - [x] Add `docs/e2e-mobius-sandbox.md` with exact env vars + step-by-step commands
 - [x] Include Mobius portal setup: webhook URL + signing secret + plan creation/IDs
-- 
+-
 - LOCAL STACK + CLOUDFARED ROUTING:
 - [x] Ensure `task docker-up` starts: Postgres + ClickHouse + Redis/Garnet + billing-migrate + billing (with embedded workers)
 - [x] Add `task tunnel-webhooks` to run `cloudflared tunnel run --token $CLOUDFLARED_TUNNEL_TOKEN` (foreground)
 - [x] Add `task verify-webhook-tunnel` that curls `https://$CLOUDFLARED_PUBLIC_HOSTNAME/health/live` and `/health/ready`
-- 
+-
 - LOCAL JWT ISSUER (FOR E2E API CALLS):
 - [x] Add `e2e-sandbox` profile service for AuthKit devserver (build from `../authkit`) as `issuer:8080` (Postgres-backed)
 - [x] Configure billing to trust issuer (`AUTH_ISSUERS='["http://issuer:8080"]'`) and set `AUTH_EXPECTED_AUDIENCE`
 - [x] Add `task mint-jwt` (or `scripts/mint-jwt.sh`) that calls `POST http://issuer:8080/auth/dev/mint` and prints a token
 - [x] Ensure issuer signing keys persist across restarts (DB table or volume-backed file)
-- 
+-
 - DATA HYGIENE (REPEATABLE RUNS / NO SANDBOX WIPE REQUIRED):
 - [x] Standardize a per-run `E2E_RUN_ID` (uuid/ts) used in metadata, idempotency keys, and processor order IDs
 - [x] Update `task mint-jwt`/script to generate a fresh random user id (`sub`) per run (and optionally unique email/username claims)
@@ -6598,26 +6598,26 @@ A developer can run a documented flow to:
 - [x] Ensure NMI/Mobius requests include an order/invoice identifier containing `E2E_RUN_ID` so Query API lookups are deterministic
 - [x] Prefer creating a fresh vault/payment method per run (or namespace vault IDs with `E2E_RUN_ID`) to avoid cross-run coupling
 - [x] Document optional cleanup (NMI portal flush + wiping local docker volumes) but keep the harness runnable without cleanup
-- 
+-
 - CATALOG SEED (LOCAL DB) + PLAN PARITY (SANDBOX):
 - [x] Add `scripts/seed_e2e_mobius.sql` to insert 1 product + 1 price (with `prices.processors.mobius.plan_id`)
 - [x] Add `task seed-e2e-mobius` to run the SQL against the compose Postgres container
 - [x] Document which sandbox plan id(s) must exist and how to create them (incl. 1-day cadence for rebill tests)
-- 
+-
 - DEV-ONLY COLLECT.JS TOKENIZATION HARNESS:
 - [x] Add a gated route `GET /debug/mobius/tokenization` that loads Collect.js from configured URL + uses the public tokenization key
 - [x] Page flow: enter card -> tokenize -> display `payment_token` + copy-to-clipboard
 - [x] Include copy/paste API snippets on the page (add payment method, create checkout, confirm)
-- 
+-
 - E2E VERIFICATION (LOCAL + REMOTE):
 - [x] Add helper script/task to dump local rows (`billing.subscriptions`, `billing.payments`, `billing.payment_methods`) for the test run
 - [x] Add `scripts/nmi_query.sh` (or Taskfile target) that hits `processors.mobius.query_url` to confirm remote transaction/subscription
 - [ ] Validate webhooks: billing logs show signature verified + DB transitions match expected webhook type(s)
-- 
+-
 - RECURRING / CANCEL FLOWS:
 - [x] Add cancellation runbook (billing cancel endpoint -> NMI query -> webhook -> local state)
 - [x] Document rebill testing approach (no time travel; use 1-day plans or portal-triggered rebills if supported)
-- 
+-
 - ENDPOINT SELECTION FIX (CURRENT LIMITATION):
 - [x] Update NMI integration: if processor provides `direct_post_url`/`query_url`, use them even when `test_mode=true`
 - [x] Add unit test for endpoint selection (override vs default sandbox/prod)
@@ -6640,23 +6640,23 @@ Replace the current entitlement-write APIs with a minimal, stack-like model: ent
 - [x] Decide policy for revocation vs deletion: revoke active windows (revoked_at + reason), soft-delete future scheduled windows to prevent access resuming
 - [x] Decide idempotency rules for PushNewEntitlement (recommended: when pushing with absolute end_at, treat end_at <= computed start_at as a no-op)
 - [x] Decide whether to support sub-day durations explicitly (recommended: accept time.Duration and/or absolute end_at; store TIMESTAMPTZ)
-- 
+-
 - DATA MODEL / CONSTRAINTS:
 - [x] Add `source_type='grace'` support (model + DB CHECK constraint migration)
 - [x] (Optional) Enforce no-overlap at the DB layer with an exclusion constraint for non-revoked/non-deleted rows (end_at NULL handled via sentinel); only after existing writers stop mutating windows
-- 
+-
 - IMPLEMENTATION:
 - [x] Replace `internal/services/entitlement_service.go` write methods with only:
 - [x] - `PushNewEntitlement(ctx, params)` (append window; can be indefinite; supports duration or absolute end_at)
 - [x] - `RevokeExistingEntitlement(ctx, params)` (revoke active + delete future; no end_at mutation)
 - [x] Remove/stop exporting older write APIs that mutate or shift timelines (GrantWindow/Append*/PushUntil/SetEndAt/PopNow/ClearNow/End*/Extend*) and delete/adjust unused repo helpers
-- 
+-
 - INTEGRATION (refactor call sites to only use Push/Revoke):
 - [x] Update subscription lifecycle entitlements (create/renew/downgrade/cancel/expire) to use PushNewEntitlement/RevokeExistingEntitlement only
 - [x] Update CCBill dunning/recovery: RenewalFailure appends grace windows via PushNewEntitlement; RenewalSuccess revokes grace windows via RevokeExistingEntitlement (reason=superseded) and then pushes remaining paid time if needed
 - [x] Update admin entitlement grant/revoke endpoints to use PushNewEntitlement/RevokeExistingEntitlement
 - [x] Update one-off purchase entitlement grants to use PushNewEntitlement
-- 
+-
 - TESTS:
 - [x] Integration test: state-machine style dunning (advance fake time; multiple CCBill failures append grace; success clears grace + pushes paid remainder)
 - [x] Unit test: PushNewEntitlement schedules after active window and supports duration + absolute endAt idempotency
@@ -6664,10 +6664,10 @@ Replace the current entitlement-write APIs with a minimal, stack-like model: ent
 - [x] Regression test: no code path updates entitlements.end_at after creation (grep + targeted integration tests)
 - [x] Integration test: CCBill RenewalFailure appends grace entitlement windows without changing paid subscription entitlement end_at
 - [x] Integration test: CCBill RenewalSuccess revokes grace windows (not soft-delete) and does not leave overlap
-- 
+-
 - DOCS:
 - [x] Update docs to describe the two-operation API and immutable windows (remove mentions of shifting/extend/setEndAt)
-- 
+-
 - VERIFY:
 - [x] `go test ./...` passes
 
@@ -6695,39 +6695,39 @@ Add an idiomatic “catalog as code + idempotent apply” workflow for hosts emb
 - [ ] Define processor mapping schema (link-only baseline): per price `processors` map with per-processor required fields; validate known processors/keys
 - [ ] Define conflict + safety rails: reject forbidden edits unless `force=true`; support `dry_run` + structured diff output
 - [ ] Define apply results format: planned/applied/updated/unchanged/skipped/errors with stable machine-readable JSON for CI
-- 
+-
 - DATA MODEL / MIGRATIONS:
 - [ ] Add a stable price upsert key (recommended: `billing.prices.code TEXT UNIQUE`); add migration + backfill plan
 - [ ] Ensure any needed additional uniqueness constraints exist (credit_types.name, products.slug already unique)
 - [ ] Decide if we need a catalog-level “applied manifest history” table for observability/audit (optional)
-- 
+-
 - CORE APPLY ENGINE (shared):
 - [ ] Add a `catalog` package (manifest types + validation + diff planning) used by both embedded and standalone
 - [ ] Implement `PlanCatalog(ctx, manifest)` (diff) and `ApplyCatalog(ctx, manifest, opts)` (execute) with optional advisory lock
 - [ ] Ensure apply is idempotent (running twice yields no changes) and order-insensitive within each section
-- 
+-
 - EMBEDDED GO API:
 - [ ] Add `Service.ApplyCatalog(ctx, manifest, opts)` and `Service.DiffCatalog(ctx, manifest)` public methods
 - [ ] Expose granular errors (path to offending manifest field) for good host-deploy UX
-- 
+-
 - STANDALONE PRIVATE API (port 8060):
 - [ ] Add `POST /v1/catalog/apply` accepting JSON (client may submit YAML -> JSON) with `dry_run=true` support
 - [ ] Add `POST /v1/catalog/diff` (or `dry_run=true`) returning the plan without writes
 - [ ] Keep existing single-resource endpoints (`/v1/credit-types`, `/v1/catalog/products`, `/v1/catalog/prices`) for incremental ops
-- 
+-
 - CLI / TOOLING:
 - [ ] Add `openrails catalog apply --file billing_catalog.yaml --api-key ... --addr ...` (standalone)
 - [ ] Add `--dry-run` and `--json` output; exit non-zero on diff/apply errors (CI-friendly)
-- 
+-
 - TESTS:
 - [ ] Unit tests: manifest validation (missing keys, unknown processors, forbidden price edits), diff determinism
 - [ ] DB integration tests: apply idempotency; allowed updates; forbidden mutations; price code uniqueness
 - [ ] HTTP integration tests: apply endpoint end-to-end (with API key); single-resource endpoints still work
-- 
+-
 - DOCS:
 - [ ] Add an example `billing_catalog.yaml` (credit types + products + prices + processors mappings)
 - [ ] Document recommended workflow: manage processor objects elsewhere (IaC), link IDs here; use new prices for pricing changes
-- 
+-
 - VERIFY:
 - [ ] `go test ./...` passes
 - [ ] `docker compose --profile all up --build` boots and applying the example manifest succeeds (no manual SQL)
@@ -6793,13 +6793,13 @@ DEFERRED (low value, NOT done): making db.schema actually RELOCATE billing table
 - [ ] Add config surface for OpenRails Postgres schema: `db.schema` (koanf + env var like `DB_SCHEMA`) with default `billing`
 - [ ] Decide embedded override mechanism for billing schema (prefer `embedded.Options` field; config still works too)
 - [ ] Validate schema identifier (letters/numbers/underscore; no quotes/spaces) and normalise (trim; optionally lower-case)
-- 
+-
 - IMPLEMENTATION:
 - [ ] Update all Postgres SQL/migrations to use configured schema instead of assuming `billing`
 - [ ] Update Postgres migrator: run River migrations in schema = `db.schema` (standalone rule)
 - [ ] Update runtime builder: when OpenRails constructs River, set River schema = `db.schema` (standalone rule)
 - [ ] Ensure embedded `SetRiverClient` path never assumes/overwrites schema (host client owns it)
-- 
+-
 - TESTS / DOCS:
 - [ ] Update tests to stop hardcoding `billing.river_job` (derive schema from config; add coverage for non-default schema)
 - [ ] Add regression test: set `db.schema=custom` → billing tables under `custom.*` and standalone River tables under `custom.river_*`
@@ -6858,7 +6858,7 @@ The `catalog_drift_events` table and admin endpoints generalize across providers
 - STRIPE CLIENT EXTENSIONS:
 - [ ] Add `ListProducts(ctx, cursor) ([]StripeProduct, nextCursor, err)` and `ListPrices(ctx, cursor)` to `internal/modules/catalog/stripe_catalog.go` (Stripe List API with pagination via `starting_after`)
 - [ ] Tests for the new list methods with mocked Stripe pagination
-- 
+-
 - RECONCILIATION JOB:
 - [ ] New River job: `catalog_reconciliation_pull`
 - [ ] Configurable schedule via existing job-scheduling pattern (default: every 1h, set interval=0 to disable)
@@ -6866,39 +6866,39 @@ The `catalog_drift_events` table and admin endpoints generalize across providers
 - [ ] For each Stripe Price: same, keyed on `metadata['openrails_price_id']`
 - [ ] For each OpenRails row with a stored stripe_*_id: verify presence in the pulled Stripe list; if absent → log as `missing_in_stripe`
 - [ ] Idempotent: rerunning produces the same drift_event rows (dedupe by (resource_id, kind, field))
-- 
+-
 - DATA MODEL:
 - [ ] Migration: `billing.catalog_drift_events` table — `(id, kind, openrails_resource_type, openrails_resource_id, stripe_resource_id, field, openrails_value, stripe_value, detected_at, resolved_at)`
 - [ ] kind ∈ `orphan_in_stripe`, `missing_in_stripe`, `field_drift`
 - [ ] Index on `(resolved_at NULL)` for the active-drift list view
-- 
+-
 - ADMIN SURFACE:
 - [ ] `GET /admin/catalog/drift` — list open (unresolved) drift events with pagination + filters (kind, resource_type)
 - [ ] `GET /admin/catalog/stripe/orphans` — alias for `GET /admin/catalog/drift?kind=orphan_in_stripe` (operator-friendly URL)
 - [ ] `POST /admin/catalog/drift/reconcile-all` (idempotent on-demand trigger) — runs the pull job synchronously and returns the new drift set
 - [ ] Existing `POST .../reconcile` endpoint on individual resources continues to be the way to resolve drift; resolving auto-closes matching drift_event rows
-- 
+-
 - ALERTING + OBSERVABILITY:
 - [ ] Emit structured log per drift event with stable fields for downstream alerting
 - [ ] Optional: webhook callout to a configurable URL when new drift events appear (deferred; cron + admin endpoint sufficient for v1)
 - [ ] Metric: `openrails_catalog_drift_open_count{kind}` for Prometheus-style scraping
-- 
+-
 - DOCS:
 - [ ] README admin catalog section: document the loop, default schedule, how to disable, how drift events appear, how to resolve them
 - [ ] Operator runbook: "there's drift in production, what do I do?" — short walkthrough using `GET /admin/catalog/drift` + per-resource `reconcile`
 - [ ] Document that this loop never auto-mutates either side
-- 
+-
 - TESTS:
 - [ ] Unit tests for the pull-and-diff logic with fixture Stripe responses
 - [ ] Idempotency test: run twice, second run produces no new drift_event rows
 - [ ] Drift kind coverage: orphan, missing-in-stripe, field-drift
-- 
+-
 - EXIT CRITERIA:
 - [ ] Loop runs on the configured schedule and populates `catalog_drift_events`
 - [ ] `GET /admin/catalog/drift` and `/admin/catalog/stripe/orphans` return the populated table
 - [ ] Resolving a drift event via the per-resource reconcile endpoint clears it from the active list
 - [ ] Disabling the loop (interval=0) is supported and tested
-- 
+-
 - NMI RECONCILER (extended scope):
 - [ ] Add a `provider` column to the `catalog_drift_events` model + DDL (values: 'stripe', 'nmi')
 - [ ] NMI pull: enumerate plans via the existing nmi client `GetRecurringPlanData()` (do NOT add new nmi client methods — #207 already added what's needed; if a list helper is missing, note it as a deferral rather than editing internal/integrations/nmi/)
@@ -7043,16 +7043,16 @@ Stop depending on the removed `github.com/open-rails/authkit/adapters/gin` packa
 - PHASE 1 - Remove `authkit/adapters/gin` imports:
 - [x] Update `internal/auth/verifier.go` to use `github.com/open-rails/authkit/http` (authhttp) for verifier construction
 - [x] Remove `authgin` usage from `internal/server/admin_authkit.go` and `internal/server/server.go` (remove `adminAuth *authgin.Auth` field)
-- 
+-
 - PHASE 2 - Replace admin role gate:
 - [x] Implement admin gate in Billing using `internal/auth/policy.AdminRequired` (live Postgres check against roles/users)
 - [x] Update `internal/server/routes_admin.go` to use the new admin gate middleware (instead of `authkit/adapters/gin` RequireAdmin)
-- 
+-
 - PHASE 3 - Optional: adopt `http` middleware fully:
 - [ ] Decide if Billing should keep current error response envelope or adopt AuthKit's `{"error":"code"}` responses
 - [ ] If keeping current envelope: keep Billing-owned Gin middleware for Required/Optional but use `authhttp.Verifier.Verify` for verification
 - [ ] If adopting AuthKit middleware: add a small Gin adapter for net/http middleware and update error handling docs/tests accordingly
-- 
+-
 - VERIFY:
 - [x] Run `go mod tidy` and ensure there are no imports of `github.com/open-rails/authkit/adapters/gin`
 - [ ] Add targeted tests for the new admin gate (admin/non-admin/banned/deleted cases) if the repo has a testing pattern for middleware
@@ -7417,7 +7417,7 @@ OpenRails (tenant=tensorhub, owner=cozy [OwnerOrgID, the payer], actor=Paul [Act
 
 ## Decisions
 - ROLLING vs FIXED windows: tensorhub uses rolling/aligned windows for budgets; the #298 limiter is fixed-window. Budgets need a ROLLING mode (port alignedIntervalStart).
-- Storage: new RLS-scoped tier_policies table (per owner) + a windowed usage/reservation store (Redis hot counters for used+reserved per the #298 hot-path rule, Postgres for durable reservations) vs extending credit_spend_limits. 
+- Storage: new RLS-scoped tier_policies table (per owner) + a windowed usage/reservation store (Redis hot counters for used+reserved per the #298 hot-path rule, Postgres for durable reservations) vs extending credit_spend_limits.
 - Migration: does tensorhub's platform_policies MOVE into OpenRails (one source of truth) or does OpenRails offer it and tensorhub migrate over time?
 
 OUT OF SCOPE: tensorhub-specific endpoint/function override controls (model_override/lora) stay in tensorhub; OpenRails models the generic 'entitled endpoints' set.
@@ -8247,19 +8247,19 @@ The NMI adapter only forwards optional billing fields when present, but the HTTP
 - [x] Accept billing country as ISO 3166 alpha-2 and postal code as country-aware metadata rather than US ZIP-only data.
 - [x] Use authenticated user/account email as metadata when the request omits billing email; do not force host apps to ask for email again.
 - [x] Define processor/capability policy hooks for fields that become conditionally required by a connector, AVS rule, risk rule, or region.
-- 
+-
 - EXISTING PAYMENTMETHOD PATH:
 - [x] Use the existing `billing.payment_methods` / `models.PaymentMethod` / `PaymentMethodService` path; do not add a duplicate payment-method table.
 - [x] Map new non-sensitive fields (`name_on_card`, billing country, postal code, provider-returned display metadata) into existing fields and metadata JSON where appropriate.
 - [x] Ensure PAN, CVV, raw card data, and raw tokenization payloads remain absent from normal OpenRails saved-card APIs, logs, metadata, and DB columns.
 - [x] Normalize card display metadata from NMI/Mobius tokenization responses and future Hyperswitch responses: brand/network, last4, expiry month/year, card type, issuer country/fingerprint/PAR when available.
 - [x] Store saved-card consent/audit metadata needed for recurring/off-session use without storing sensitive card data.
-- 
+-
 - PROVIDER SUPPORT:
 - [x] Preserve current NMI/Mobius Collect.js token flow: frontend receives `payment_token`, OpenRails exchanges/stores the provider vault reference.
 - [x] Design the same contract to support future Hyperswitch hosted/card-element flows using Hyperswitch `payment_method_id` or equivalent vault reference.
 - [x] Keep Hyperswitch as planned/future support; do not require it to be implemented before the NMI/Mobius API relaxation lands.
-- 
+-
 - VERIFY:
 - [x] Add API tests for saved-card creation with only token/reference, name_on_card, billing_country, optional postal code, and account email metadata.
 - [x] Add tests for international metadata: US, DE, ES, JP, KR, CN, and one South/Central American country.
@@ -8302,7 +8302,7 @@ Turn the existing Mobius/NMI sandbox runbook into a self-verifying compose-backe
 - [x] Confirmed existing mocked app-level tests cover `POST /v1/me/payment-methods` and `/v1/checkout` with mocked NMI.
 - [x] Confirmed existing live NMI tests cover configured-account sale and demo customer-vault sale/rebill direct against NMI.
 - [x] Confirmed existing `scripts/mobius_sandbox_e2e.sh` / `docs/e2e-mobius-sandbox.md` start the stack/tunnel and describe manual saved-card + checkout steps, but do not self-verify the lifecycle.
-- 
+-
 - HARNESS REQUIREMENTS:
 - [x] Provide one repeatable command that starts the docker-compose E2E stack, waits for OpenRails readiness, applies migrations, seeds the Mobius sandbox catalog, mints a user JWT, and drives the flow against the running HTTP server.
 - [x] Use real Mobius/NMI test credentials from `.env` / CI secrets; fail fast if tokenization key, security key, webhook secret, or required public HTTPS origin are missing, and create a per-run sandbox recurring plan when no plan id is supplied.
@@ -8314,7 +8314,7 @@ Turn the existing Mobius/NMI sandbox runbook into a self-verifying compose-backe
 - [x] Verify signed Mobius/NMI webhook ingestion through `/v1/webhooks/mobius`, including signature verification and idempotent replay behavior.
 - [x] Cancel the subscription through OpenRails, verify local state transition, and verify remote cancellation/query state where the sandbox supports it.
 - [x] Emit a concise machine-readable result summary with run id, local ids, provider ids, and pass/fail checks while redacting tokens, API keys, vault ids when appropriate, and any PAN/CVV/tokenization payload.
-- 
+-
 - CI / OPERATIONALIZATION:
 - [x] Keep the normal unit suite independent from this live harness; gate it behind an explicit task/build tag/env such as `task e2e-mobius-live`.
 - [x] Document exact CI secret names and local `.env` variables; ensure missing live credentials skip or fail with a clear message depending on explicit live mode.
@@ -9590,3 +9590,1287 @@ Internal sqlc-generated `credit_*` models keep their generated names (not the SD
 
 No sqlc query changed. go build ./..., go vet ./..., go test ./... all green after the removal.
 
+---
+
+# #499: Consolidate merchant-wide configuration into one merchant_configurations row
+
+OpenRails had a dedicated merchant-scoped table that only stored flat delegated-invoker wasted-spend windows. That
+belongs in a general merchant configuration row instead; live per-invoker counters remain in Redis.
+
+Introduce a general one-row-per-merchant configuration table and move the delegated-invoker wasted-spend windows into
+it as the first value. Missing config keys should keep using hardcoded service defaults, so a merchant with no
+configuration row behaves exactly like today.
+
+## Proposed schema
+- `openrails.merchant_configurations`
+  - `merchant_id uuid PRIMARY KEY REFERENCES openrails.merchants(id)`
+  - `config jsonb NOT NULL DEFAULT '{}'`
+  - `config_version bigint NOT NULL DEFAULT 1`
+  - `created_at timestamptz NOT NULL DEFAULT now()`
+  - `updated_at timestamptz NOT NULL DEFAULT now()`
+
+First config key:
+
+```json
+{
+  "delegated_invoker_wasted_spend_windows": [
+    { "key": "burst", "window_seconds": 900, "limit": 500000 }
+  ]
+}
+```
+
+Amounts use the request currency's internal precision. The config supplies limits; Redis keeps the hot counters by
+merchant + payer + invoker + currency + window.
+
+## Candidates Found
+- Move now: delegated-invoker wasted-spend windows -> `merchant_configurations.config.delegated_invoker_wasted_spend_windows`.
+- Evaluate later: deployment-wide feature flags that have merchant-visible behavior, especially dunning mode,
+  processor-subscription-deletion kill switch, and entitlement-expiration kill switch. If made merchant-specific,
+  global config should probably remain an emergency floor/override, not disappear.
+- Evaluate later: processor routing/fallback policy (#288). If implemented as merchant-level policy, prefer this
+  config table over a new one-off table unless query shape demands relational storage.
+- Do not move by default: `money_settings` is per payer/customer/currency, not merchant config.
+- Do not move by default: `tier_policies` and `tier_schedules` have tier/currency/customer override semantics and
+  should stay relational unless we deliberately simplify those policy models.
+- Do not move by default: merchant secrets/DEKs, payment blocklists, catalog/product/price rows, reconciliation
+  state, provider intents, ledger rows, and custom credit types are state/catalog/secrets, not general config.
+
+## Tasks
+- [x] Add `openrails.merchant_configurations` to the Postgres baseline with merchant RLS and sqlc queries for get/upsert.
+- [x] Add a typed Go config model for the JSON payload; start with
+      `delegated_invoker_wasted_spend_windows`.
+- [x] Replace old dedicated-table reads/writes with merchant configuration reads/writes.
+- [x] Delete the old dedicated table, its sqlc queries, generated model, and narrowly named store methods.
+- [x] Rename service/API/internal names to the general merchant configuration setter.
+- [x] Preserve fallback behavior: missing row, missing key, or empty windows uses `DefaultInvokerWastedWindows()`.
+- [x] Update comments/docs so this is described as merchant configuration, not a separate policy table.
+- [x] Add tests for configured windows, missing config fallback, empty config fallback, and JSON decode validation.
+- [x] Run `task sqlc`.
+- [x] Run targeted admission/service tests, `go test ./...`, and `task build`.
+
+## Acceptance
+- There is one general-purpose merchant configuration row per merchant.
+- Delegated-invoker wasted-spend windows are the first stored value in that config.
+- The old one-off table and API naming are gone.
+- Missing merchant config falls back to hardcoded defaults.
+- No payer/customer/currency-scoped state is collapsed into merchant config accidentally.
+
+## Status
+Complete in OpenRails. The Postgres baseline now has `openrails.merchant_configurations`; the delegated-invoker
+wasted-spend windows live under `config.delegated_invoker_wasted_spend_windows`; the old dedicated table, sqlc
+queries/model, store methods, SDK method, HTTP route, and stale test filename are gone. The public service route is
+now `PUT /v1/service/merchant-configuration`, and the SDK method is `SetMerchantConfiguration`.
+
+Verification:
+- `task sqlc`
+- `go test ./pkg/service ./internal/modules/merchantconfig ./internal/modules/admission ./embed ./internal/http/handlers ./internal/http/routes/ginroutes ./migrations/postgres`
+- `go test -tags=integration ./pkg/service -run 'TestMerchantConfiguration|TestWastedSpendDirectPayer' -count=1 -v`
+- `go test -tags=integration ./embed -run Conformance -count=1 -v`
+- `go test ./...`
+- `task build`
+
+---
+
+# #497: Wasted-spend enforcement split: charge direct payer credentials, cut off delegated invokers
+
+Issue #496 fixed the storage/policy shape for payer vs invoker wasted-spend budgets, but the enforcement behavior
+needs one more distinction: whether the invoker is the payer acting directly, or a delegated/third-party principal
+using the payer's billing authority.
+
+## Model
+- PAYER/customer: the billing principal whose account pays for successful work.
+- INVOKER: the principal actually making the request.
+- Delegated invoker (`invoker != payer`): a third party using the payer's billing authority. Examples:
+  - payer is an org, invoker is a native Tensorhub user/member of that org.
+  - payer is an org with a remote application, and the remote application sends delegated/federated users.
+- Direct payer invoker (`invoker == payer`): the payer is making calls with credentials it controls directly. Examples:
+  - payer is an org and the invoker is its JWKS-signed org/application JWT with no delegated subject.
+  - payer is an org and the invoker is one of its own service tokens.
+  - payer is a regular native user using their own user access token.
+
+## Policy
+- Delegated invokers are protected against quickly: once that invoker's flat wasted-spend window is met, deny that
+  invoker until the Redis window resets. This protects the payer from users/employees/federated subjects abusing its
+  billing authority.
+- Direct payer invokers get trust-tier grace: once the payer's tier-graduated wasted-spend allowance is exhausted,
+  OpenRails should charge the payer for additional wasted spend instead of cutting them off. Higher trust tiers get
+  more free/grace waste before charging begins.
+- The payer/customer wasted-spend budget remains trust-tier graduated. The delegated-invoker wasted-spend budget
+  remains flat and stricter.
+
+## Tasks
+- [x] Define the durable request/admission contract that tells OpenRails whether an invoker is a delegated principal
+      or a direct payer credential. Do not rely on arbitrary opaque string equality unless the host canonicalizes
+      direct-payer invokers to the payer identity.
+- [x] Wire the invoker relationship/kind through OpenRails service HTTP, SDK, embed, admission, and
+      usage/report-wasted-spend. Tensorhub caller updates are tracked in tensorhub #491.
+- [x] For delegated invokers, keep the #496 Redis behavior: merchant + payer + invoker counters, flat policy, deny
+      `failure_rate_limited` until the window resets when over limit.
+- [x] For direct payer invokers, stop applying the flat delegated-invoker cutoff. Evaluate only the payer's
+      tier-graduated grace budget for whether wasted spend remains free.
+- [x] Add a charge path for direct payer wasted spend after grace is exhausted. It should create normal money ledger
+      activity in the payer's native currency/precision, not a separate high-volume wasted-spend event log.
+- [x] Define idempotency for charging wasted spend reports beyond grace so retrying a host report cannot double-charge.
+- [x] Decide and implement the amount split when a report crosses the grace boundary: only the over-grace portion
+      should be chargeable, not the already-forgiven portion.
+- [x] Keep Redis as the hot rolling-window state for grace/cutoff checks and Postgres as durable policy/ledger storage.
+- [x] Update denial/charging response semantics so hosts can distinguish delegated-invoker cutoff from direct-payer
+      wasted-spend charging.
+- [x] Add tests for:
+      - delegated invoker over flat limit => denied, payer not charged for that wasted spend.
+      - direct payer under tier grace => not charged.
+      - direct payer over tier grace => overage charged and request/admission flow continues according to normal
+        balance/credit rules.
+      - idempotent report retry does not double-charge.
+      - payer-scoped invoker Redis keys still prevent delegated-user label collisions.
+- [x] Coordinate Tensorhub so org members, remote delegated users, service tokens, JWKS org/application JWTs, and
+      native user self-calls map to the correct OpenRails invoker relationship.
+
+## Acceptance
+- OpenRails protects payers from delegated invoker abuse by cutting off the delegated invoker, not the payer.
+- OpenRails charges direct payer credentials for wasted spend beyond trust-tier grace instead of cutting them off on
+  the delegated-invoker flat budget.
+- The implementation does not add a high-volume wasted-spend event table.
+- Retry/idempotency behavior prevents duplicate charges for the same wasted-spend report.
+
+## Pairs with
+openrails #496 and #491; tensorhub #491 / platform identity mapping.
+
+## Status
+Complete in OpenRails. Tensorhub follow-up tracked in tensorhub #491 for caller-side `invoker_type` mapping and SDK
+pinning.
+
+Verification:
+- `task sqlc`
+- `go test ./pkg/service ./internal/modules/abuse ./internal/modules/admission ./internal/modules/ratelimit ./embed ./internal/http/handlers`
+- `go test -tags=integration ./pkg/service -run 'TestMerchantConfiguration|TestWastedSpendDirectPayer' -count=1 -v`
+- `go test -tags=integration ./internal/modules/admission -run 'TestAdmit_WastedSpend' -count=1 -v`
+- `go test ./...`
+- `task build`
+
+---
+
+# #496: Fix wasted-spend policy model: tiered payer budgets + flat invoker backstop
+
+The previous dedicated per-invoker abuse-budget table overfit the model by allowing `customer_id`-specific overrides.
+That conflated two separate controls:
+
+- PAYER/customer wasted-spend budget: trust-tier based, configured by the host/operator through tier policy
+  `bad_spend_windows`, and evaluated against the payer. High-trust payers can tolerate more failed/rejected work;
+  low-trust payers tolerate less.
+- INVOKER/delegated-user wasted-spend budget: flat merchant/platform backstop used to cut off one abusive delegated
+  user under an otherwise legitimate API-platform payer. The limit amount does not vary by payer/customer, and should
+  be materially stricter than the payer/customer allowance because invoker spam is less tolerable than aggregate
+  customer waste.
+
+Example: Cozy Art may be trusted to waste up to about $10/day as the payer/platform, while each delegated user
+invoker under Cozy Art may only get about $0.50/day of wasted spend before OpenRails blocks that invoker.
+
+## Tasks
+- [x] Rename the dedicated policy/config table away from the customer-override model.
+- [x] Remove `customer_id` from the invoker wasted-spend policy schema and resolver. The policy should be
+      tenant/merchant scoped only, with one effective flat set of windows per merchant.
+- [x] Rename service/SDK/API wording as needed so callers set an invoker wasted-spend policy, not a per-customer
+      window override. Prefer a hard cut; no legacy actor/customer override compatibility.
+- [x] Keep payer wasted-spend windows in tier policy (`bad_spend_windows`) and continue resolving them by payer trust
+      tier.
+- [x] Set/validate policy expectations so the flat invoker wasted-spend allowance is lower than the payer/customer
+      allowance for normal tiers; OpenRails should be able to block a spammy invoker before the payer-level backstop
+      trips.
+- [x] Keep Redis for live wasted-spend counters if appropriate. Postgres should store durable policy/config; Redis
+      should store fast moving window state.
+- [x] Do not add a durable wasted-spend event log/table for this issue. These reports can be high-volume, and without
+      a concrete audit/analytics/debugging requirement the extra storage has no clear value.
+- [x] Audit Redis keys for delegated-user namespace correctness. If invoker IDs are only unique inside a
+      payer/application, key invoker wasted-spend state by merchant + payer + invoker to avoid cross-payer collisions;
+      if invoker IDs are globally stable, document that assumption.
+- [x] Update sqlc, migrations, service admission/report/usage paths, SDK/embed/remote client calls, HTTP
+      handlers/routes, comments/docs, and tests.
+- [x] Coordinate the Tensorhub push side so `per_invoker_bad_spend` maps to the new flat invoker policy shape, while
+      trust-tier `bad_spend` continues to map to payer tier policy.
+
+## Acceptance
+- No live OpenRails API, DB table, sqlc query, or SDK method implies invoker wasted-spend budgets vary per customer.
+- Payer wasted-spend enforcement remains trust-tier graduated.
+- Invoker wasted-spend enforcement remains separate and can block one abusive delegated user without blocking the payer.
+- Invoker wasted-spend limits are intentionally stricter than payer/customer limits.
+- Tests cover payer-over-budget, invoker-over-budget, and no per-customer invoker-policy override path.
+
+## Pairs with
+openrails #488 and #492; tensorhub #486 / `per_invoker_bad_spend`.
+
+## Status
+DONE on the OpenRails side (2026-06-15). The older implementation collapsed customer overrides to one merchant policy
+row, dropped `customer_id`, and keyed Redis invoker counters by merchant + payer + invoker while payer counters stayed
+merchant + payer. No wasted-spend event log/table was added. Tensorhub coordination recorded as tensorhub #491 because that
+checkout is pinned to OpenRails v0.36.0 and has broader SDK drift (`Actor`, `EstimateMicros`, `LimitMicros`) to update
+with the dependency bump.
+
+## Verification
+- `task sqlc`
+- `go test ./pkg/service ./internal/modules/abuse ./internal/modules/admission ./embed ./internal/http/handlers ./internal/http/routes/ginroutes`
+- `go test -tags=integration ./pkg/service -run 'TestMerchantConfiguration' -count=1 -v`
+- `go test ./...`
+- `task build`
+
+---
+
+# #492: Operator-configurable FLAT per-invoker wasted-spend windows (close the #488 per-invoker gap)
+
+Consumer: tensorhub #486. GENERIC — every platform has a flat per-invoker abuse backstop. The #488 per-PAYER
+bad_spend budget was operator-settable via SetTierPolicy, but the per-INVOKER flat budget had NO client setter:
+admit hardcoded `service.DefaultInvokerWastedWindows()` ($5/15m, $20/5h), so a host's declared per-invoker budget
+(tensorhub `per_invoker_bad_spend` $1/15m, $3/5h) was silently ignored.
+
+## Scope
+- Earlier implementation added a tenant-scoped per-invoker window table with optional per-customer overrides, windows
+  JSON, version, timestamps, and merchant RLS.
+- sqlc/service/HTTP/SDK exposed setter and resolver paths for those windows.
+- The later #496/#499 work replaced this intermediate shape with a merchant-wide configuration key and removed
+  customer-specific invoker-window overrides.
+
+## Pairs with
+tensorhub #486 (PushTierLadder now pushes the YAML per_invoker_bad_spend via the new setter); openrails #488
+(per-payer bad_spend), #487 (tier policy template), #476 (tier-schedule end-to-end template).
+
+## Outcome
+DONE — code complete, tested, and merged onto master as an intermediate implementation. Superseded by #496/#499,
+which removed customer-specific invoker-window overrides and stores the current delegated-invoker windows in merchant
+configuration. DefaultInvokerWastedWindows() remains the fallback. HISTORY: originally cut as the orphaned tag
+v0.31.0 from an isolated worktree (master then held uncommitted #491 WIP, so it couldn't be committed there); now
+reconciled onto master via a real three-way
+merge with #491 — the code auto-merged clean (the #491 invoker-rename hunks in service_admission.go were
+byte-identical on both sides). Consolidated version re-tagged at merge time.
+
+---
+
+# #487: Generic spend-graduated tier policy + $-denominated admit limits (in-flight held-$ cap + per-charge cap)
+
+Consumer: tensorhub #486 (platform rate-limiting/tier redesign). MUST stay GENERIC — OpenRails sees only $, tiers,
+holds, and host-reported events; no host-domain concepts (GPU/tokens/images) leak in. The $-denomination is what
+keeps it reusable by other platforms.
+
+Today OpenRails has SetTierSchedule (cumulative-spend thresholds → auto-graduation) + SetTierPolicy carrying
+unit-based throughput windows (rpm/tpm/ipm) + queue limits. The tensorhub consumer no longer needs the throughput
+dimensions; it needs two $-denominated per-tier limits. KEEP the throughput capability (other hosts may use it);
+ADD/expose these generic primitives.
+
+## Scope
+- KEEP: SetTierSchedule + auto-graduation by cumulative CAPTURED spend (generic, unchanged); KEEP `ResolvedTier` on
+  AdmitResponse; KEEP captured-ledger $ budget windows (#475).
+- ADD two GENERIC $-denominated per-tier limits to the tier policy:
+  - `max_concurrent_held_amount` — cap on the sum of a payer's ACTIVE (un-settled) hold $. Enforce at admit
+    (over-limit signal) AND surface the resolved value on AdmitResponse, so a host that enforces true occupancy
+    itself (tensorhub's scheduler — only it sees live GPU occupancy) can use the value + the per-job estimate.
+  - `max_single_charge_amount` — per-charge ceiling; reject an Admit whose estimate exceeds it. Generic runaway guard.
+- Throughput windows + queue limits: keep supported; tensorhub simply stops pushing them.
+
+## Notes
+- "held $" = running + queued (admitted-not-settled). OpenRails' own enforcement is a committed-$ admission gate; a
+  host wanting work-conserving QUEUEING reads the cap value + per-job estimate and queues in its scheduler instead
+  (tensorhub does this) rather than getting a hard deny.
+- Values are tenant-wide defaults (empty subject), auto-applied at the payer's resolved tier.
+
+## Pairs with
+tensorhub #486; openrails #488 (failure windows), #489 (arrears). (#490 deposit-fraud was deleted — not needed.)
+
+## Outcome
+LANDED. Two generic $-denominated per-tier limits added to the tier policy JSONB (no new column —
+consistent with the existing budget_windows/queue_limits which also live in `policy`): `max_single_charge_amount`
+(per-charge ceiling; deny `single_charge_cap_exceeded` at admit before any hold) and `max_concurrent_held_amount`
+(cap on the SUM of the payer's ACTIVE un-settled hold $; deny `concurrent_held_cap_exceeded`, AND surfaced on every
+AdmitResponse as `max_concurrent_held_amount` + `held_amount` so an occupancy-aware host queues itself). Reused the
+existing `SumActiveMoneyHoldAuthorizations` query via new `MoneyService.ActiveHeldAmount`. KEPT throughput windows /
+queue limits / budgets / SetTierSchedule + auto-graduation unchanged. SDK/wire: AdmitResponse + TierPolicyInput
+extended across client.go/remote.go/embed/client.go + pkg/service; HTTP handler unchanged (serializes the struct).
+Migration 020 is a JSONB-contract COMMENT (sqlc generate/vet clean). Tests: 3 new integration tests; full admission
+integration suite green; build OK.
+
+---
+
+# #488: $-valued failure/wasted-spend budget windows (per-payer tier + per-invoker flat) + report-failed-charge API
+
+Consumer: tensorhub #486. GENERIC — every platform has failed/refunded work that costs it money (a hold released
+without capture, or a host-reported out-of-band cost). Rate-limit that "wasted spend" so a low-trust account can't
+abuse expensive failures for free (the prepaid balance can't bound this — failures are refunded).
+
+Today there are event-COUNT AbuseWindows (LimitEvents) + abuse_rate_limited / moderation_rate_limited /
+failure_rate_limited codes + /abuse-usage. Generalize to $-VALUED windows so a pricey failure weighs more than a
+cheap one.
+
+## Scope
+- A host API to REPORT a failed/wasted charge: `ReportWastedSpend(payer, actor, amount, reason)` (or a "wasted" flag
+  on the settle/release path) — the host says "this attempt failed and cost $X." (tensorhub reports content-filter
+  rejects + inference failures; cheap malformed rejects ≈ $0, not reported.)
+- Track per-PAYER and per-ACTOR (invoker) wasted-spend in $ windows, multi-window (e.g. 15 min + 5 h).
+- Budgets: per-PAYER window graduated by the tier policy (#487) — a `bad_spend` $ budget per tier; per-ACTOR window
+  a flat config default (invokers aren't trusted — an account mints unlimited).
+- Enforce at admit: deny when EITHER the payer or the actor is over its wasted-$ budget (reuse
+  abuse_rate_limited / failure_rate_limited). Surface wasted $ (not just counts) on /abuse-usage.
+
+## Pairs with
+tensorhub #486 (reports the failures + defines the $ amounts); openrails #487 (per-tier bad_spend budget lives in the
+tier policy).
+
+## Outcome
+LANDED. NOTE: the spec's "existing event-COUNT AbuseWindows / LimitEvents / abuse_rate_limited / /abuse-usage" did
+NOT literally exist in this repo — what existed was the Redis fixed-window limiter + count-based card-failure velocity
+guards. Built the $-valued wasted-spend windows ON THAT proven infra (no new store): new ratelimit value-window
+primitives (AddWindowValue/WindowValue — DECOUPLED record vs read, vs throughput's Check which folds them) + a new
+`abuse.WastedSpendGuard` tracking per-PAYER + per-ACTOR wasted $ in multi-window Redis. Host API
+`ReportWastedSpend(payer, actor, amount, reason)` accrues into both subjects. Per-PAYER budget = tier policy JSONB
+`bad_spend_windows` (graduated by tier); per-ACTOR = flat config default `DefaultActorWastedWindows` ($5/15m + $20/5h).
+Admit denies `abuse_rate_limited` (payer over) / `failure_rate_limited` (actor over), BlockedBy="abuse" → 429.
+New `/abuse-usage` read (wasted $, not counts). SDK/wire: ReportWastedSpend + AbuseUsage added to the Client interface
+(client/remote/embed) + pkg/service + 2 HTTP handlers + routes. Migration 021 = JSONB-contract COMMENT. Tests: 2 new
+integration tests (payer-over → abuse_rate_limited; actor-over → failure_rate_limited + per-actor isolation); admission
++ abuse + ratelimit integration suites green; build + sqlc vet OK.
+GOTCHA fixed: a helper file named `*_windows.go` is silently treated by Go as a Windows-GOOS build constraint
+(excluded from the build); renamed to `valuewindow.go`.
+
+---
+
+# #489: Per-tenant arrears credit-line (admin-set credit limit; negative-balance-up-to-limit)
+
+Consumer: tensorhub #486 (admin-only arrears for trusted tenants). GENERIC — OpenRails already supports an arrears
+billing mode; make the credit exposure an explicit, admin-set per-tenant limit.
+
+## Scope
+- Per-tenant `credit_limit_amount` (admin/operator-set, NOT self-serve): under billing_mode=arrears, allow the
+  balance to go NEGATIVE up to the credit limit; AdmitHold denies (insufficient_credit) when a new hold would
+  exceed it.
+- Periodic invoicing of accrued arrears (or expose the arrears balance for the host to invoice) — confirm what the
+  existing arrears mode already does vs new.
+- Default OFF: prepaid, credit_limit = 0 unless an operator sets it.
+- Capacity (#487 held-$ cap) for an arrears tenant scales from the credit limit (the trust signal) rather than a
+  positive balance.
+
+## Pairs with
+tensorhub #486 (per-tenant `arrears_allowed` flag + admin surface); openrails #487.
+
+## Outcome
+LANDED. EXISTING vs NEW: the existing arrears mode ALREADY had a credit line — `max_outstanding_owed_amount` (the
+existing tests literally name it "credit limit") — but it is (a) SELF-SERVE (set via UpsertAccountSettings) and (b)
+enforced on the SETTLEMENT path (SpendCredits/AccrueOwed); AuthorizeAndHold SKIPPED the balance gate for arrears
+entirely. #489's NEW bits: an explicit OPERATOR-ONLY `credit_limit_amount` column (migration 022) + admit-time
+enforcement in AuthorizeAndHold (deny `insufficient_credit` when a new hold would push the balance below
+-credit_limit). New `MoneyService.SetCreditLimit/GetCreditLimit` (operator-only, dedicated SQL — NOT on the self-serve
+AccountSettingsInput) + pkg/service + SDK (client/remote/embed) + admin-gated PUT/GET /v1/service/credit-limit routes.
+DESIGN CHOICE / spec deviation: the spec's literal "credit_limit=0 ⇒ prepaid behavior" would REGRESS the existing #302
+arrears-spill-past-balance (a hold may exceed the balance and spill to owed at capture). So credit_limit=0 = OFF
+(existing arrears behavior UNCHANGED; bounded by the outstanding ceiling), and credit_limit>0 = the new admit-time
+ceiling. Prepaid is unaffected either way. Tests: 3 new integration tests (credit-line allow up to limit +
+insufficient_credit deny; 0=existing-arrears-behavior; prepaid-unaffected); money + admission + pkg/service integration
+suites green (incl. the pre-existing #302 spill test); build + sqlc generate/vet OK.
+
+---
+
+# #469: HARD CUT: control plane mandatory in standalone — remove verifier-only mode entirely
+
+**Completed:** yes (verified 2026-06-15)
+
+Standalone OpenRails always runs its own AuthKit control plane. The "verifier-only" /
+"pure JWT verifier" deployment mode (control plane omitted/disabled) is REMOVED, not
+deprecated: delete the code, config knobs, conditional branches, and docs that exist
+only to support it. No legacy deployments exist; no compatibility shims.
+
+Rationale: OpenRails' product model is a Stripe-like multi-tenant billing server —
+users register accounts (native AuthKit users), create tenants (merchants), and
+tenants' customers exist as tenant-subjects. The control plane IS that model; the
+self-service browser surface (/v1/self/* delegated tokens), runtime tenant/issuer
+management, and the admin API all already live behind it. Verifier-only survives only
+as a topology fork that every auth-adjacent feature must branch on (e.g. the
+"nil resolver => self-service surface not mounted" fork in ginmw/delegated.go), doubling
+the test matrix and muddying the docs. Private/self-hosted posture is expressed by the
+existing registration axes (public_user_registration / public_tenant_registration,
+both default false) — NOT by amputating the control plane.
+
+The minimal "billing sidecar with no auth state" trust model remains available where it
+belongs: pkg/embedded (host-authenticated, in-process, one trust domain). Standalone is
+the multi-tenant server and always owns its AuthKit instance + profiles schema in its
+own database.
+
+Scope (survey for completeness; this list is the known surface, not the boundary):
+- Standalone boot always runs controlplane.Attach; remove auth.control_plane.enabled /
+  ControlPlaneEnabled() and every `cp == nil` / nil-resolver / "verifier-only" branch
+  (route mounting, ginmw/delegated.go DelegatedResolver nil contract, admin gating).
+  Control-plane construction failure is fatal at boot, not a silent downgrade.
+- Remove the static-config trust root that exists only for verifier-only standalone
+  (auth.issuers as the sole issuer allowlist + internal/auth/verifier.go wiring), in
+  favor of the control plane's live issuer registry. Where first-party service-JWT
+  verification still needs config-declared issuers, keep that as an explicit
+  control-plane input, not a parallel auth mode.
+- config.example.yaml / README / DEVSERVER docs: delete the "pure JWT verifier"
+  narrative and the optional-control-plane decision tree; the standalone auth story is
+  one model (control plane, registration axes closed by default).
+- pkg/embedded is unaffected in its core (authkit-free, host-authenticated). Evaluate
+  pkg/embedded/authkit + pkg/embedded/controlplane opt-in helpers: keep what embedded
+  hosts and the standalone binary genuinely use, delete what existed only to make the
+  control plane optional in standalone.
+- Tests: collapse the dual-topology matrix; delete verifier-only fixtures/harness paths
+  (tests/openrails_harness.go in consumers may pin public_tenant_registration etc. —
+  those knobs stay; the enabled/disabled fork goes).
+- Migrations/bootstrap: control-plane bootstrap (default tenant org, bootstrap admin
+  service token, manifest apply) becomes the unconditional standalone boot path.
+
+NOTE: next_id above was stale (365) while issues up to #468 already exist across
+progress/future/completed; this issue took #469 and reset next_id to 470.
+
+**Tasks:**
+- [x] Inventory every control-plane-optional branch (`ControlPlaneEnabled`, nil cp/resolver checks, "verifier-only" mentions) across internal/, pkg/, cmd/, config/, docs
+- [x] Make controlplane.Attach unconditional in standalone boot; fail-fast on error
+- [x] Remove auth.control_plane.enabled knob + ControlPlaneEnabled()/OperatorTenantEnabled() shims
+- [x] Remove/fold internal/auth/verifier.go static-issuer mode into control-plane issuer config — auth.issuers KEPT as the first-party user/admin JWT input (doujins AUTH_ISSUERS keeps working); parallel-mode framing deleted; delegated/service creds stay on the control plane's live issuer registry
+- [x] Delete nil-resolver fork in ginmw/delegated.go (+ equivalent forks elsewhere); self-service surface always mounted
+- [x] Prune pkg/embedded/authkit + pkg/embedded/controlplane to what's actually used post-cut — both kept (used by standalone wiring + embedded opt-in); only the enabled-check/nil-tolerant paths inside them were cut
+- [x] Docs hard cut: README auth-model section, config.example.yaml, principal-boundary-audit.md (no DEVSERVER.md exists)
+- [x] Collapse test matrix; go build/vet/test green — build/vet/unit suites green. Integration suite (`-tags=integration ./tests/`): verbose run completed all #469-relevant tests green; ONE failure, `TestDunningWorkerLimitedModeTakesNoAction`, confirmed PRE-EXISTING (encodes pre-#366 "takes no action" semantics; behavior changed in a67cc3f5 — filed as #470; clean HEAD can't even build the integration tests, fixed in this tree). Suite also exceeded a 45m wall under heavy concurrent machine load (3 sibling agent runs + dev compose); re-run on a quiet machine before tagging.
+
+---
+
+# #491: Split CUSTOMER (payer / money account) from INVOKER (delegated-user / caller) — delegated-users hold no money
+
+**Completed:** structural split shipped (v0.32.0/v0.33.0); INVOKER-MODEL REVERSAL shipped (v0.34.0, 2026-06-15) — migration 029 drops invoker_id+FK (opaque `actor` text remains the invoker), buildBudgetScopes is per-invoker only (subject/role pools dropped + their tests removed), authkit dep -> v0.34.0; build/vet/unit + admission/budgets/money/controlplane/embed integration all green.
+COLUMN RENAME DONE (v0.35.0, migration 030): `actor` -> `invoker_id` on all 5 invoker-bearing tables
+(usage_events/money_transactions/money_spend_limits/budget_window_state/budget_reservations) + new nullable
+`invoker_type` discriminator on the 3 attribution tables + a per-invoker index on usage_events. NO FK (the
+invoker is a polymorphic, possibly-cross-DB principal). PUBLIC HARD CUT DONE (2026-06-15, migration 034):
+SDK/service fields are `Invoker`, JSON/query params are `invoker`, `actor` request fallbacks were removed,
+old wasted-window actor terminology moved to invoker terminology, and budget scope input no longer accepts `actor`.
+AuthKit delegated-token comments
+now say delegated subject/principal rather than actor. invoker_type is a column ready for population (the host
+supplies the kind); wiring it through the SDK/wire is a follow-up.
+
+================================================================================
+REVERSAL (owner, 2026-06-15) — invoker is OPAQUE TEXT, no FK; budgets per-invoker only.
+================================================================================
+Two corrections to what shipped, both confirmed by the owner:
+
+1. INVOKER = OPAQUE TEXT, NOT AN FK. The invoker ("under whose authority an action
+   happened") is a POLYMORPHIC principal: native-user | delegated-user | service-token
+   | issuer/JWKS. OpenRails can't FK across authkit's four principal tables (separate
+   schema) or across apps. So migration 027's `invoker_id uuid` + cross-schema FK ->
+   `profiles.delegated_users(id)` is WRONG — change it to `invoker text` (a stable
+   uuidv7 string), NO foreign key. authkit#81 (delegated_users) is being RE-DROPPED in
+   tandem; nothing references it. Usage visibility = aggregate attribution rows by the
+   opaque invoker text; per-invoker limits = budget rows keyed by the invoker text.
+
+2. BUDGETS ARE PER-INVOKER ONLY. Drop the role/subject (#473) scopes. A role/subject
+   never invokes — only an invoker does. tier + role are POLICY TEMPLATES that define
+   which fixed-window $-limits apply to each invoker (e.g. role-A "$100/mo" => each
+   role-A user may spend $100/mo of the org's money, CHARGED TO THAT USER, not a shared
+   role pool). So `budget_window_state`/`budget_reservations.actor` (today a polymorphic
+   scope key: invoker | @subject | @role:uuid) collapses to just the INVOKER. Remove
+   ScopeRole/ScopeSubject from budgets/scopes.go; simplify ReserveScopes to the single
+   invoker scope (or keep the multi-window-per-invoker shape, dropping cross-invoker pools).
+
+ACTION (do it yourself, no sub-agents): new migration changes the three attribution
+tables' `invoker_id uuid` -> `invoker text` (drop the FK + the column, add text), drops
+the role/subject budget scopes, renames `budget_*.actor` -> `invoker`. Update code + sqlc.
+Re-tag synced with authkit. The "lives in authkit / FK anchor" design recorded below is
+HISTORICAL. See [[invoker-opaque-text-polymorphic]].
+================================================================================
+
+Today `customer` (the renamed merchant_subject, #486) is keyed `UNIQUE(merchant_id, issuer, subject)` —
+one row PER DELEGATED-USER — AND owns the money: `money_accounts` (balance, tier, spend-caps),
+`processor_customers` (Stripe cus_*/payment methods), credit-line (#489), tier_schedules (#476). That
+conflates two different things:
+
+- The PAYER: the account that actually holds money / a payment method / a balance — we have a real
+  financial relationship with it. FEDERATED: this is the TENANT (e.g. cozy-art). EMBEDDED: it's the
+  host's end-user (doujins end-users buy their own credits via the host's processor).
+- The ACTOR (invoker): the individual performing an action. FEDERATED: a DELEGATED-USER — ephemeral, NO
+  payment method, NO balance, NO money relationship with us; we know it only via (issuer, subject).
+
+The RUNTIME layer already distinguishes these (#487 caps the PAYER's active held-$; #488 has per-payer
+TIER budgets + per-ACTOR "invokers aren't trusted" FLAT budgets), but the IDENTITY/data model does NOT:
+`internal/modules/admission` types the payer as `identity.CustomerID`, and `actor` exists only as an
+ephemeral Redis budget-scope STRING (budgets scope=actor), not a first-class identity. This issue
+promotes the split to the identity model.
+
+TERMINOLOGY (decided): **customer = the PAYER** (money account, merchant-scoped, NEVER delegated).
+**actor** (a.k.a. invoker) = the doer (can be a delegated-user, a native user, or the tenant itself).
+
+STRUCTURE (corrected, per cozy-art->tensorhub->openrails walkthrough): the MERCHANT is the OPERATOR that
+authenticates to OpenRails — its issuer/tenant/service-token in OpenRails's mounted authkit IS the merchant
+(e.g. tensorhub). OpenRails hosts MANY merchants. The merchant is the ONLY party OpenRails authenticates; it
+ASSERTS, for its OWN namespace only, who the CUSTOMER (payer) and ACTOR (invoker) are — opaque strings
+OpenRails records but does NOT independently authenticate. OpenRails is FEDERATION-AGNOSTIC: it does not
+care whether the merchant's end-user is native or delegated; the merchant runs its OWN end-user auth (e.g.
+tensorhub's internal cozy-art federation, invisible to OpenRails) and just reports (customer, actor).
+cozy-art is a CUSTOMER STRING, not an OpenRails-authkit entity. NO tenant<->merchant schema link: the
+operator's authkit tenant/issuer CORRESPONDS to its merchant (same real entity), and issuer -> merchant is
+the issuer registry. owner_tenant_id stays ownership/admin-only. Within a merchant:
+
+  customer = the PAYER = a BALANCE / money account — a PURE billing entity: (id, merchant_id). ALL the
+    money state already FKs to customers(id): money_balances (balance + held), money_blocks (credit lots),
+    money_transactions (ledger), money_accounts (policy/config + tier), processor_customers (Stripe cus_*),
+    payment_methods. NO issuer, NO subject, NO tenant. It is an ACCOUNT, not a person; a balance has no
+    issuer.
+  actor (invoker) = a MERCHANT-SUPPLIED, OPAQUE label for the end-user that triggered a charge — NOT
+    authenticated by OpenRails (exactly money_spend_limits.actor today: "a caller-supplied opaque principal
+    string"). DRAWS ON a customer's balance via a customer_id FK; used ONLY for spend-attribution +
+    per-actor abuse caps. NO money, NO tier. End-users NEVER present a token to OpenRails.
+
+  merchant(1) -> customers(many);   customer(1) -> actors(many);   actor -> customer (FK)
+
+This finishes the de-conflation: MONEY on the customer, ATTRIBUTION/abuse on the (unbilled) invoker. The
+AUTHENTICATED token subject (delegated_sub, or a merchant self-token) is ALWAYS a CUSTOMER (has a balance)
+or the merchant itself — NEVER an unbilled end-user. End-users have no balance and never present a token to
+OpenRails; the merchant reports them as the actor label on charges. TERMINOLOGY collision to avoid: authkit
+comments delegated_sub as "the actor", but in BILLING terms that authenticated subject is a CUSTOMER —
+#491's actor is the unbilled end-user label, so call it the INVOKER in code.
+
+A customer is a payer/balance scoped to a merchant, ASSERTED by the merchant. STANDALONE-individual
+(doujins): each end-user is BOTH payer (customer) and invoker (actor) — actor -> customer 1:1; the end-user's
+merchant-minted token is sent straight to OpenRails, which verifies it (subject = customer/actor). B2B2C
+(cozy-art via tensorhub): the MERCHANT = tensorhub; cozy-art = a CUSTOMER STRING tensorhub reports (NOT an
+OpenRails-authkit entity); cozy-art's users = the ACTORS (many:1); tensorhub runs the cozy-art federation
+itself, OpenRails never sees it. EMBEDDED: host vouches; customer/actor ids passed directly.
+
+EMBEDDED degenerate case (doujins): the end-user genuinely holds money, so end-user = customer(payer) =
+actor (1:1); MANY customers per merchant (one per end-user), one actor each. Unifying rule: actor->customer
+is many:1 (federated) or 1:1 (embedded). "One customer per merchant" is FEDERATED-ONLY — embedded keeps
+per-end-user customers because the end-user holds money.
+
+================================================================================
+OWNER CONFIRMATION + UNIFIED RULE (2026-06-14) — supersedes the "CONFIRM this nuance" note above.
+================================================================================
+The split is REAL and reduces to ONE rule. Two primitives, never conflated:
+
+  INVOKER (formerly "actor") = the END-USER that made the call. ALWAYS the token SUBJECT (delegated_sub) or
+    a native user. Referenced by a STABLE UUID, never a username (e.g. cozy-art reports PaulFidika by his
+    cozy-art UUID, so a rename on cozy-art doesn't reparent his history). The invoker is ALWAYS tracked
+    (billing visibility for the payer + per-invoker abuse/rate caps the payer sets), and NEVER holds money.
+
+  CUSTOMER (payer) = who the spend is billed to. Resolved from the ISSUER:
+    - issuer is ORG-BOUND (cozy-art on tensorhub: cozy-art is an authkit ORG *and* an issuer) ->
+        payer = the ORG's single customer. MANY invokers : 1 customer. cozy-art:PaulFidika is NEVER a
+        tensorhub user and NEVER a tensorhub-OpenRails customer — only an invoker under cozy-art's balance.
+    - issuer is ORG-LESS, or a native user (doujins/hentai0 users; tensorhub native user Sam) ->
+        payer = the end-user THEMSELVES. invoker -> customer 1:1 (Sam pays for Sam; each doujins user pays
+        for itself). authkit#80 makes org_id NULLABLE precisely so org-binding can BE this switch.
+
+  So: invoker = always the subject; payer = the org (org-bound issuer) ELSE the subject/native-user.
+  Embedded (doujins, hentai0, cozy-art-standalone) and standalone differ only in transport, not in this rule.
+
+DEPLOYMENT SHAPES (owner, 2026-06-14):
+  - doujins/hentai0/cozy-art use OpenRails EMBEDDED, identically: merchant = the app (sole); customers =
+    each of the app's users (native authkit users -> per-user balances); no orgs; issuers unused embedded.
+  - doujins/hentai0 STANDALONE OpenRails: authkit there has NO users/orgs, only ISSUERS [doujins, hentai0]
+    tied to the one merchant; each token subject -> its own customer (org-less issuer branch above).
+  - tensorhub uses OpenRails EMBEDDED: merchant = tensorhub (sole); customers = tensorhub's ORGS + native
+    users; cozy-art is an authkit org+issuer; cozy-art's delegated users are INVOKERS, not customers.
+    tensorhub resolves payer=org / invoker=subject via authkit IN-PROCESS, then charges its embedded
+    OpenRails. (The earlier "OpenRails is federation-agnostic, cozy-art is an opaque string it never sees"
+    framing was the STANDALONE-remote model; under tensorhub-EMBEDDED, cozy-art IS a real authkit entity
+    and the payer corresponds to that org.)
+
+  ISSUERS only appear in two places (owner, 2026-06-14): (1) STANDALONE OpenRails, where the embedding app
+  (doujins/hentai0) signs JWTs for its users and the issuer ties to the merchant (no org); (2) FEDERATED
+  delegators inside an embedded host (cozy-art inside tensorhub), where the issuer is org-bound. In PLAIN
+  embedded mode there is no JWT-to-OpenRails step at all (see below). "Org" = a grouping of an app's
+  users/sub-customers, NEVER the app itself. In tensorhub an org (cozy-art) -> one customer (payer) and may
+  own an org-bound issuer.
+
+  EMBEDDED SECURITY MODEL (owner, 2026-06-14) — load-bearing: EMBEDDED OpenRails has NO security model of
+  its own; it DEFERS ENTIRELY to the host app. The host is in charge of everything security-related — it
+  fully controls OpenRails, calls in freely, and may define ONE OR MORE merchants as it sees fit (so
+  "embedding-app == one merchant" is the common case but NOT a rule). For a host-exposed OpenRails route
+  (e.g. /me), the flow is: host's authkit MIDDLEWARE validates the JWT -> resolves the user's identity ->
+  attaches it to the request CONTEXT -> calls into OpenRails, which simply READS (merchant, customer/payer,
+  invoker) from that context. OpenRails embedded never validates a token or authenticates a principal
+  itself. (Standalone OpenRails is the ONLY mode where OpenRails authenticates incoming JWTs against the
+  issuer registry; that is what issuers/merchant-auth are for.)
+
+DELEGATED-USER (INVOKER) IDENTITY LIVES IN AUTHKIT (decided 2026-06-14; REVERSES the earlier "lives in
+OpenRails" note). Restore authkit profiles.delegated_users (un-drops authkit#78; see authkit#81) as the
+SHARED federated-end-user identity primitive — it's consumed by TWO domains: the APP (tensorhub ALREADY
+references a delegated_user_id in 5 NON-billing tables: user_file_objects/media ownership,
+media_output_events, resource_visibility_audit, platform_abuse_events, platform_policy_denials) AND BILLING
+(openrails invoker attribution + per-invoker spend/abuse caps). A shared identity belongs in the identity
+service so both FK to it and neither depends on the other; were it in OpenRails, tensorhub's media-OWNERSHIP
+tables would FK into the BILLING service (app->billing coupling, wrong). My earlier "FK can't cross schemas
+so it must live in OpenRails" was WRONG: Postgres allows cross-SCHEMA FKs (only cross-DATABASE is
+impossible), and authkit `profiles` + openrails `billing` share ONE database in every deployment (the
+embedded host DB; or standalone-openrails's bundled authkit DB).
+  - openrails attribution rows (money_spend_limits / usage_events / money_transactions / budget_*) FK their
+    invoker -> authkit profiles.delegated_users(id), CROSS-SCHEMA, same DB.
+  - id is uuidv7 (pg18 native — the fleet's UNIVERSAL pk; owner: uuidv7 everywhere, NO uuidv5). uuidv7 is
+    random/time-ordered and CANNOT be content-derived, so idempotency comes from a UNIQUE NATURAL KEY, not a
+    derived id: delegated_users = `id uuid DEFAULT uuidv7()` + `UNIQUE(remote_application_id, subject)`, and
+    authkit TouchDelegatedUser(issuer, subject) = `INSERT ... ON CONFLICT (remote_application_id, subject)
+    DO UPDATE last_seen_at RETURNING id` — the id is minted ONCE and RETURNED; openrails stamps the returned
+    value. This REPLACES the two clashing derivations (tensorhub `du_`+sha256(issuer\x00sub); openrails
+    FederatedCustomerID uuidv5) — both go away.
+  - SAME pivot for the payer CUSTOMER id: DROP FederatedCustomerID(uuidv5). customers.id = uuidv7() with a
+    per-branch natural key — org-bound: UNIQUE(merchant_id, org_id); org-less/native: UNIQUE(merchant_id,
+    issuer, subject) — resolved via ON CONFLICT ... RETURNING id. This REVERSES #491-slice-1's "customers is
+    UUID-only, derived, no lookup column": the natural-key columns return (more explicit/queryable for
+    billing) behind a uuidv7 surrogate pk. Audit money_in.go depositSourceID + subscription_credits grantID
+    (also uuidv5 idempotency keys) -> same uuidv7-pk + UNIQUE(natural key) pattern.
+  - subject = the STABLE uuid the merchant supplies (cozy-art reports PaulFidika by uuid, never username).
+  - NATIVE / org-less branch: invoker == payer 1:1, so the customer_id already IS the attribution; a
+    delegated_users row is needed for the FEDERATED (org-bound) case where invoker != payer. (Standalone
+    OpenRails has no app tables, so org-less subjects likely need no delegated_users row — confirm in impl.)
+
+WHAT THE ACTOR TRACKS (and ONLY this):
+1. spend ATTRIBUTION — how much of the payer's money this actor spent, when, on what (payer visibility).
+2. abuse caps — per-actor concurrent-capacity cap + per-actor wasted-money budget (#488 per-invoker flat),
+   so one bad delegated-user can't burn the payer's whole rate-limit / wasted-money budget or make the
+   payer look bad. Rate-limit the actor FIRST (protects the payer).
+NO trust-tier — tiers are cumulative-spend/age based (#476); a delegated-user spends none of its own money
+and is ephemeral, so a tier is meaningless for it. Tiers stay PAYER-level.
+
+WHAT STAYS ON CUSTOMER (payer): money_accounts, processor_customers (payment methods), tier +
+tier_schedules (#476), credit-line (#489), money-denominated spend-caps, #487 max_concurrent_held /
+max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
+
+**Tasks:**
+- [x] Make `customer` a PURE balance account: DROP (issuer, subject) from customers; customer =
+      (id, merchant_id) + money. Done (slice 1, 53f8fb37): migration 024 drops the columns/constraint
+      idempotently; the three upserts fold into one EnsureCustomer(id, merchant_id); federated (issuer,
+      subject) -> customer maps to a deterministic UUIDv5 (identity.FederatedCustomerID) instead of a
+      lookup column. NOTE: existing-row collapse (federated -> one payer per issuer) is NOT migrated —
+      each existing UUID id stays its own balance; a separate data-collapse migration if/when needed.
+- [x] Track the `actor` (invoker) as a MERCHANT-SUPPLIED opaque label scoped under a customer. Partial
+      (slice 2, c290de39): the BUDGET SCOPE actor->invoker is renamed (Go ScopeInvoker; canonical stored
+      value 'invoker' via migration 025 + NormalizeScope accepting 'actor' transiently), scoped
+      (merchant_id, customer_id, invoker_string). NOTE: the opaque KEY column (`actor`) on
+      budget_reservations/budget_window_state and the money_transactions/usage_events/money_spend_limits
+      `actor` columns are intentionally NOT renamed (opaque keys; a column rename is high-risk + out of
+      the minimal-safe slice). Per-invoker abuse counters onto a first-class actor identity row remains.
+- [x] Federated resolution (org-bound issuer): the subject becomes the invoker, NOT a customer.
+      Outcome (slice 5): TouchCustomer (controlplane/customer.go) switches on
+      Core().ResolveRemoteApplicationOrg(issuer); org-bound => UpsertCustomerByOrg(merchant,org). uuidv5
+      FederatedCustomerID DELETED from pkg/identity.
+- [x] Resolution switch keys on authkit#80 nullable org_id; uuidv7 pk + ON CONFLICT RETURNING id.
+      Outcome (slice 5): migration 027 re-adds customers (org_id, issuer, subject) nullable + two partial
+      UNIQUE indexes; UpsertCustomerByOrg / UpsertCustomerByIssuerSubject (RETURNING id). The external-subject
+      entitlement lookup switched to LookupCustomerIDsByIssuerSubjects (real lookup, no derived id). grep
+      "NewSHA1|FederatedCustomerID|uuidv5" empty in non-test source (doc comments only). Also converted the
+      two other uuidv5 idempotency keys (money_in depositSourceID + subscription/purchase grantID) to store
+      the NATURAL-KEY STRING directly in source_id (uuidv7 pk + existing UNIQUE(merchant,customer,currency,
+      source,source_id)); DepositParams.SourceID is now *string.
+- [x] Invoker identity = authkit profiles.delegated_users; invoker_id FK + wire json:"actor"->"invoker".
+      Outcome (slice 5 + hard cut): invoker_id uuid added NULLABLE + ADDITIVE (actor text later renamed) to the THREE true-
+      ATTRIBUTION tables (money_transactions / usage_events / money_spend_limits), FK ->
+      profiles.delegated_users(id) cross-schema (guarded). DEVIATION (documented in 027): budget_reservations
+      / budget_window_state `actor` is a POLYMORPHIC scope_key (subject|role:<uuid>|<invoker> per
+      budgets/scopes.go), NOT a pure invoker — renaming to an invoker FK would break role/subject budgets, so
+      it stays opaque text. Populated on the DELEGATED path (ResolveDelegated -> TouchInvoker ->
+      TouchDelegatedUser RETURNING id -> ResolvedDelegated.InvokerID, threaded through DepositParams /
+      RecordUsageParams / Capture). The EMBEDDED/SERVICE path has NO issuer (host asserts identity per the
+      EMBEDDED SECURITY MODEL) so it cannot call TouchDelegatedUser -> invoker_id NULL there. Hard cut:
+      request DTOs use only json:"invoker" (admit/admit-batch, deposit/withdraw/hold, authorize,
+      report-wasted-spend, budget-check, open-window, window-settle-item); pre-#491 json:"actor" is not
+      accepted.
+- [x] Migrate existing per-(issuer,subject) money state for ORG-BOUND issuers only.
+      Outcome (slice 5): VERIFIED no real federated data to fold — slice-1 (024) already DROPPED the
+      (issuer,subject) columns, so no org-bound customer carries a natural key to collapse; 027 re-adds them
+      EMPTY. The fold is STRUCTURAL-ONLY (no-op with a RAISE NOTICE in 027); a real reparent is left for
+      if/when federated balances exist.
+- [x] Re-key/confirm money/processor/tier/credit-line on customer(balance) only.
+      Outcome (slice 5): confirmed — all money_* / processor_customers / tier / credit-line FK customers(id)
+      only; the new invoker_id FK lands ONLY on attribution tables. No money state moved onto the invoker.
+- [x] RENAMED money_accounts -> money_settings (shipped v0.29.2). Done: it holds NO money and nothing FKs to it
+      (all money_* tables FK customers(id)) — it is a per-(customer,currency) settings/policy sibling
+      (billing mode, caps, auto-topup, alerts, suspension, tier), NOT an account. "account" collides with
+      customer-as-the-account under this issue. Name TBD with owner.
+- [x] Embedded path (CONFIRMED correct as-is): native user (subject = end-user) -> a per-user customer
+      balance, invoker -> customer 1:1.
+      Outcome (slice 5): unchanged — EnsureCustomerID keeps materializing the UUID subject AS its own
+      customer id (org-less/native branch); invoker_id stays NULL there (invoker == payer). No regression.
+- [x] Move #488 per-invoker flat wasted-budget + per-invoker concurrent cap onto the invoker identity.
+      Outcome (slice 5): the abuse keyspace (abuse/wasted_spend.go wa:<tenant>:<actor>) is ALREADY keyed by
+      the invoker identity — the wire contract now names that field "invoker" and documents it as the STABLE
+      merchant-supplied uuid (cozy-art reports PaulFidika by uuid, never username), so a rename can't reparent
+      history. Redis counters stay keyed by the real invoker value (no free-text-vs-id split needed); the
+      persisted attribution rows additionally carry invoker_id (delegated_users uuid) on the delegated path.
+- [x] SDK + wire: distinguish payer (customer) from actor on Admit/charge. Verified (slice 4): the
+      Admit/charge/spend wire DTOs already carry customer_id (payable uuid) + actor (the invoker opaque
+      label) as REQUEST fields (serviceAdmitRequest, service_credits, service_credit_window). No code
+      change — the split already exists at the wire. UPDATE (slice 5): the wire field was RENAMED to
+      json:"invoker" on the request DTOs. HARD CUT (2026-06-15): json:"actor" was removed from request
+      DTOs and resolveInvokerField was deleted; attribution rows carry invoker_id on the delegated path.
+- [x] NO customer-claim-in-token needed. Verified (slice 4): no invoker/actor JWT claim exists anywhere;
+      the invoker (actor) arrives ONLY as a merchant-supplied opaque request field on Admit/charge/spend
+      (= money_spend_limits.actor). The authenticated subject is always a customer or the merchant
+      self-token. Confirmed in serviceAdmitRequest + the service_credits/window handlers; no change needed.
+- [x] DROP money_balances (read-cache roll-up). Done (slice 3, 5e302967): available = SUM(unexpired
+      money_blocks.remaining_amount), held = SUM(active-hold authorized_amount) + open-window unsettled
+      (windows reserve held without a hold row). Spend mutex moved to FOR UPDATE on the customers row
+      (LockCustomerForSpend). Drift/anomaly queries + GetMoneyBalance/Set*/Insert* deleted. Migration 026
+      DROP TABLE money_balances + partial index money_blocks(merchant,customer,currency) WHERE
+      remaining_amount>0. Money integration + conformance + controlplane integration gates GREEN.
+- [x] Background COMPACTION job. Done (slice 3, 5e302967): the credit-block EXPIRY River job now DELETEs
+      fully-spent (remaining_amount=0) and expired money_blocks (DeleteCompactableMoneyBlocks), bounded
+      batch, touching money_blocks ONLY — never money_transactions or payments.
+- [x] AUDIT-SAFE: compaction never deletes deposit rows / payments, only derived spendable lots.
+      Outcome (slice 5): CONFIRMED still true — slice-3 (026) compaction touches money_blocks ONLY; the
+      uuidv5->natural-key source_id change (this slice) is on money_transactions/usage idempotency keys, not
+      money_blocks, so the receipt invariant is unchanged.
+- [x] Resolution (RESOLVED): MERCHANT = authenticated OPERATOR; CUSTOMER + ACTOR asserted by it.
+      Outcome (slice 5): CONFIRMED — standalone DIRECT path verifies the token, resolves payer via the
+      issuer's org-binding (TouchCustomer) and invoker via TouchDelegatedUser; embedded PROXY path reads
+      (merchant, customer, invoker) from host context (EMBEDDED SECURITY MODEL), no re-auth. No
+      tenant->merchant FK added.
+- [x] Tests: federated many-actors-one-payer / org-less per-subject / cross-schema invoker_id FK.
+      Outcome (slice 5): new integration test internal/modules/money/invoker_identity_491_integration_test.go
+      (TestInvokerIdentityAndPayerNaturalKey) proves: org-less natural key idempotent + per-subject;
+      org-bound collapses many subjects -> ONE payer; invoker_id cross-schema FK enforced (bogus rejected,
+      NULL allowed) — also exercising the authkit-first FK ORDERING against the fully migrated schema.
+      Embedded actor==customer 1:1 + delegated-user-has-no-money stay covered by the green money/embed/
+      conformance suites.
+
+**Related**
+#486 (merchant_subject->customer rename this builds on), #487/#488 (payer-vs-actor runtime caps this
+formalizes at the identity layer), #476 (tier-schedule stays payer-level), #489 (credit-line stays
+payer-level), #75 (escape-hatch per-delegated-user attributes drive per-actor limits). DEPENDS: authkit#77.
+
+---
+
+# #495: HARD CUT: finish currency-neutral API/facade and usage reporting
+
+**Completed:** yes
+
+The native-money tables are now keyed by `currency` and use `amount` language, but several public/API paths still
+silently read/write the default USD account or expose `usd_micro`. Hard cut those paths: no compatibility aliases,
+no legacy `usd_micro` balance descriptors, no API that echoes a requested currency while reading USD rows.
+
+## Scope
+- Make service/facade account reads, settings writes, transaction lists, spend policy checks, spend limits, credit
+  limits, authorize/hold, withdraw, hold, self-account, and service-account routes honor the supplied currency.
+- Add `currency` to spend request bodies where it is missing; require/normalize it through the same registry rules
+  as the lower-level ledger.
+- Write `usage_events.currency`, include currency in usage idempotency, and group/filter usage rollups, invoices,
+  and revenue reads by currency so unlike units are never summed together.
+- Replace user-facing `usd_micro` credit descriptors with currency-native account output.
+- Remove stale µ$/micros wording from active comments and JSON contracts.
+
+## Verification
+- Added regression coverage in `pkg/service/credit_facade_rls_integration_test.go`: one payer receives USD and
+  EUR deposits, then `GetCreditAccount(..., "EUR")` must return the EUR account rather than the USD state.
+- Second sweep closed remaining hard-cut leaks: budget check/status now take and return `currency`, admit/budget
+  window DTOs carry `currency`, usage/revenue rollup rows carry `currency`, service invoker balance returns
+  `currency` instead of `type`, and the dead `credit_type_inactive` compatibility sentinel/handlers plus obsolete
+  `internal/db/models` credit-type structs were removed.
+- Third sweep closed the older self-usage rollup row: `UsageRow` / `money.UsageRollupRow` now carry `currency`
+  beside `total_amount`, with regression coverage in `TestGetUsage_Breakdown`.
+- Fourth sweep closed wasted-spend report responses: `WastedSpendResult` / SDK `WastedSpendResponse` now carry
+  `currency` beside `recorded_amount`, `forgiven_amount`, and `charged_amount`; service validates the report
+  currency before recording/charging.
+- Fifth sweep closed `GET /v1/service/credit-limit`: the response now returns `currency` beside
+  `credit_limit_amount`.
+- Sixth sweep closed wasted-spend hot counters and abuse usage introspection: Redis wasted-spend idempotency,
+  payer-grace counters, and delegated-invoker cutoff counters are now keyed by currency; `AbuseUsage` takes/returns
+  `currency`, and each abuse usage window carries `currency`.
+- Seventh sweep closed tier graduation/schedules: `tier_schedules` is keyed by `currency`, tier schedule and tier
+  reads take currency through SDK/remote/embed/HTTP/service/money paths, deposits auto-graduate the matching currency
+  instead of USD-only, and the stale host-cranked `GraduateTier` compatibility path was removed.
+- Eighth sweep closed the remaining hidden default-currency helpers in money account state: `GetBalance` /
+  `GetTransactions`, payment-method verification, suspend, and resume now require an explicit currency. Also fixed
+  usage-event replay lookup to include currency so idempotent usage does not reattempt the same same-currency debit.
+- Ninth sweep removed the last dead default-currency wrappers/stale queries: deleted `MoneyService.ActiveHeldAmount`,
+  removed the unused old `ListCreditAccountPairs` query, and cleaned active schema/test comments that still taught
+  `usd_micro` / `µ$` terminology.
+- Tenth sweep hard-cut payment/checkout/reconciliation writes: removed SQL fallback from blank currency to `usd`,
+  removed `usd` defaults from the baseline payment/checkout currency columns, and made payment, checkout-session,
+  and reconcile local writers reject missing currency instead of silently writing USD.
+- Eleventh sweep closed product catalog credit grants: service/admin product `credits_spec` and REST subscription/product
+  responses now preserve `unit` beside `amount`, so non-USD bundled grants no longer round-trip as implicit USD.
+- Twelfth sweep hard-cut remaining public blank-currency defaults: service/facade/SDK credit movement, account reads,
+  usage/revenue, admission, budget, tier, credit-limit, wasted-spend, and `/me/credits` paths now require explicit
+  currency (or an explicitly configured SDK currency) instead of silently reading/writing USD.
+- Thirteenth sweep closed the remaining public edge fallbacks: self-account, self-usage, service invoker-balance,
+  service transaction lookup, and embedded admission/budget/tier/wasted-spend/credit-limit helpers now require an
+  explicit currency instead of normalizing a blank request to USD. Admin off-channel payments and catalog price
+  creation also now trim/validate currency before writing money terms.
+- Fourteenth sweep folded require+normalize together: service, HTTP, and embedded currency helpers now reject blank
+  first, then return canonical built-in currency while preserving qualified custom-credit units.
+- Fifteenth sweep removed the remaining database-level currency fallbacks: Postgres money/budget/usage/invoice/tier
+  tables and ClickHouse analytics currency columns no longer default missing currency to USD or empty string. Analytics
+  and provider webhook logging also no longer stamp missing event currency as USD; amount-bearing analytics events now
+  require a currency.
+- Sixteenth sweep removed the last internal blank-currency fallback: `money.NormalizeCurrency("")` now stays blank,
+  `ValidateCurrency("")` / `RequireBillingCurrency("")` reject it, and product credit grant specs require an explicit
+  `unit` instead of defaulting missing grant units to USD.
+- `task sqlc`
+- `go test ./...`
+- `go test -tags=integration ./internal/modules/money -run TestTierSchedule_AutoGraduationByCumulativeSpend -count=1`
+- `go test -tags=integration ./internal/modules/money -run TestSuspensionAndVerificationState -count=1`
+- `go test -tags=integration ./internal/modules/money -run TestRecordUsage_Idempotent -count=1`
+- `go test -tags=integration ./internal/modules/money -count=1`
+- `go test -tags=integration ./internal/modules/admission -count=1`
+- `go test -tags=integration ./pkg/service -count=1`
+- `go test -tags=integration ./embed -count=1`
+- `go test -tags=integration ./internal/modules/payments ./internal/reconcile -count=1`
+- `go test -tags=integration ./pkg/service -run TestGetUsage_Breakdown -count=1`
+- `go test -tags=integration ./pkg/service -run TestWastedSpendDirectPayer_GraceThenChargeIdempotently -count=1`
+- `go test -tags=integration ./internal/modules/admission -run TestAdmit_WastedSpend -count=1`
+- `go test -tags=integration ./pkg/service -run TestCreditFacade_RLS_Under_OpenRailsApp -count=1`
+- `go test -tags=integration ./tests -run TestSelfAccountSurface_HostPrincipalFullLoopAndScoping -count=1`
+- `go test -tags=integration ./embed -run TestConformance_EmbeddedAndStandaloneAreObservablyIdentical -count=1`
+- focused scan: no `usd_micro` / `*_micros` / `credit_type_inactive` / money JSON `type` hits remain in active
+  API, service, SDK, money, or query code. The only remaining `json:"type"` hit is the generic HTTP error envelope
+  in `remote.go`.
+
+---
+
+# #504: Make merchant RLS isolation consistent across merchant-owned tables
+
+**Completed:** yes
+
+OpenRails' intended storage boundary is merchant isolation:
+
+- merchant-owned rows carry `merchant_id`.
+- request/job code pins `app.merchant_id` via `WithMerchantConn`, `RunInMerchantConn`, or `MerchantTx`.
+- merchant-owned tables enforce `merchant_id = current_setting('app.merchant_id')` with RLS.
+- `openrails_app` must not bypass RLS.
+
+The core money/admission tables already follow this pattern, including `money_transactions`, `usage_events`,
+`money_blocks`, `money_settings`, `money_spend_limits`, `money_windows`, budget tables, tier tables, and
+`merchant_configurations`. However, the baseline still has merchant-keyed tables without RLS, so the invariant is not
+consistent enough.
+
+## Findings
+- `merchant_configurations` exists and already has `FORCE ROW LEVEL SECURITY`, `ENABLE ROW LEVEL SECURITY`, and the
+  `merchant_isolation` policy.
+- No live `merchant_settings` table was found in the current baseline; verify whether that name is stale terminology,
+  a planned rename, or a generated/downstream reference. If a real `merchant_settings` table exists or is added later,
+  it must use the same RLS policy as `merchant_configurations`.
+- `merchants` is global/control-plane by design, but access to it must remain authorization-gated in Go.
+- `probe_verdicts` is intentionally RLS-exempt because it is instance-level credential-probe cache, not merchant data.
+- Merchant-keyed tables currently needing review/RLS hardening include:
+  - `customers`
+  - `linked_wallets`
+  - `usdc_funding_sessions`
+  - `solana_subscriptions`
+  - `merchant_deks`
+  - `merchant_secrets`
+  - `merchant_exports`
+  - `merchant_credential_audit`
+
+## Tasks
+- [x] Define the exact table classification in the schema comments/tests:
+      - global control-plane, no RLS: `merchants`, `probe_verdicts`.
+      - merchant-owned, RLS required: every table with tenant/business data and a `merchant_id`.
+      - elevated/control-plane-only exceptions, if any, must be explicit and tested.
+- [x] Verify whether `merchant_settings` exists under another name. If it means `merchant_configurations`, keep the
+      current RLS and document that naming. If a separate table exists or is introduced, add RLS to it.
+- [x] Add RLS to `customers`; this is the payable identity/account root and should not rely only on query discipline.
+- [x] Add RLS to `linked_wallets`, `usdc_funding_sessions`, and `solana_subscriptions`.
+- [x] Add RLS to `merchant_deks`, `merchant_secrets`, `merchant_exports`, and `merchant_credential_audit`, or move any
+      truly platform-only access behind an explicit elevated/control-plane DB path instead of broad app-role access.
+- [x] Update `migrations/postgres/*schema*_test.go` so every merchant-owned table is listed and must have:
+      - `merchant_id` column.
+      - `FORCE ROW LEVEL SECURITY`.
+      - `ENABLE ROW LEVEL SECURITY`.
+      - `CREATE POLICY merchant_isolation`.
+- [x] Add a negative schema test that fails when a table has `merchant_id` but is neither RLS-protected nor explicitly
+      allowlisted as global/control-plane.
+- [x] Audit query paths for newly protected tables and ensure they run under `RunInMerchantConn`, `MerchantTx`, a request
+      merchant connection, or an explicit merchant-pinned `db.Pool.MerchantTx` before enabling RLS.
+- [x] Add/extend integration tests using the unprivileged `openrails_app` role proving merchant A cannot read/write
+      merchant B rows for customers, wallets, funding sessions, Solana subscriptions, and merchant config.
+- [x] Run `task sqlc`, RLS/schema tests, targeted integration tests, `go test ./...`, and `task build`.
+
+## Validation
+- `task sqlc`
+- `go test ./migrations/postgres`
+- `go test -tags integration ./internal/db -run 'TestRLS_AppRoleCannotCrossMerchantBoundariesForIssue504Tables|TestRLS_AppRoleCannotSeeOtherTenantRows|TestRLS_GUCScopesCorrectly|TestMerchantTx_ScopesGUC' -count=1`
+- `go test ./internal/db ./internal/crypto ./internal/merchants ./migrations/postgres`
+- `go test -tags integration ./internal/crypto ./internal/merchants -run 'DEK|Secret|Merchant|Lifecycle|Export|Delete' -count=1`
+- `go test ./internal/db/repo ./internal/river ./internal/modules/solana/recurring`
+- `go test -tags integration ./internal/modules/subscriptions -run 'SolanaCancel|Solana' -count=1`
+- `go test ./...`
+- `task build`
+
+## Acceptance
+- Every important merchant-owned table is RLS-enforced, not merely filtered by application convention.
+- Any RLS-exempt table is explicitly documented as global/control-plane and covered by an allowlist test.
+- `merchant_configurations` / any future `merchant_settings` table is covered by the same merchant isolation invariant.
+- Merchant-crossing tests prove the DB boundary fails closed under the app role.
+
+---
+
+# #500: Make merchant ownership AuthKit-org anchored
+
+**Completed:** yes
+
+OpenRails merchants should have one durable administrative owner: an AuthKit org.
+Users, service tokens, and remote applications are not owners. They are credentials/principals that receive authority
+through the owning org and then act on the OpenRails merchant owned by that org.
+
+## Model
+- `merchant -> owner_org_id`: exactly one AuthKit org owns/administers a merchant in standalone/control-plane mode.
+- `org -> users/service_tokens/remote_applications`: AuthKit controls membership, roles, service tokens, and JWKS
+  remote applications.
+- `credential -> org authority -> merchant`: a user session, service token, or remote-application self-token gets
+  OpenRails merchant control only through AuthKit org grants.
+- `org 1 -> many merchants`; `merchant -> one owner org`.
+- Embedded/no-AuthKit mode may keep out-of-band ownership, but it should be explicit and should not create a second
+  general ownership model.
+
+## Decisions
+- Do not make merchants ownable by bare users.
+- Do not make merchants ownable by service tokens.
+- Do not make merchants ownable by remote applications/JWKS issuers.
+- Keep service tokens and remote applications as grantable authentication factors under the owning org.
+- Prefer a bootstrap-created owner org for standalone merchants, even when the issuer/merchant is provisioned from
+  manifest/bootstrap files. This keeps later admin UI, token rotation, JWKS rotation, and permission changes on the
+  same path as normal merchants.
+
+## Tasks
+- [x] Rename OpenRails terminology from the legacy owner-tenant field to `owner_org_id` in schema comments, Go structs,
+      generated query models, route payloads, tests, and docs. AuthKit org semantics are unchanged.
+- [x] Decide nullability:
+      - standalone/control-plane merchants require `owner_org_id`.
+      - embedded/no-AuthKit merchants may have `owner_org_id NULL` only when OpenRails delegates security entirely to
+        the embedding host.
+- [x] Add or tighten DB constraints/indexes:
+      - keep `idx_merchants_owner_org_id` for owner lookup.
+      - keep the column nullable in the baseline for embedded/no-AuthKit rows, and enforce standalone ownership in
+        application-level provisioning.
+      - preserve `org 1 -> many merchants`; do not add unique owner constraint.
+- [x] Update merchant provisioning/bootstrap:
+      - standalone bootstrap creates or resolves the AuthKit owner org first.
+      - merchant provisioning records that org id as `owner_org_id`.
+      - manifest bootstrap creates/resolves an owner org when omitted, then binds the merchant namespace to it.
+- [x] Update service-token merchant control:
+      - resolve service token through AuthKit.
+      - use the token's owning org id as the authority anchor.
+      - authorize named merchant access by checking `merchant.owner_org_id == token.org_id`.
+      - keep merchant/customer resource scopes as OpenRails resource constraints, not ownership.
+- [x] Update remote-application merchant control:
+      - resolve JWKS self-token through AuthKit remote application.
+      - use AuthKit-stored org membership/permissions as authority.
+      - authorize named merchant access through the owning org; do not treat the issuer itself as merchant owner.
+      - common path uses the RA's granted org membership, not RA ownership; fail closed when missing.
+- [x] Add/confirm required AuthKit permissions:
+      - org owners/admins can administer merchants by default through `*`.
+      - narrower roles can grant OpenRails merchant permissions without making a user/token/RA the owner.
+      - remote-application management remains AuthKit-side (`org:remote_applications:manage`), separate from
+        OpenRails merchant permissions.
+- [x] Update HTTP/control-plane authorization:
+      - admin/service routes that name a merchant verify caller authority against `owner_org_id`.
+      - routes that infer a single merchant from the caller fail closed if the org owns zero or multiple active
+        merchants unless the route names a merchant explicitly.
+      - unowned/bootstrap-only merchants are not controllable by arbitrary credentials.
+- [x] Update active docs/progress comments that referred to owner-tenant merchant ownership.
+- [x] Add migration/schema tests proving:
+      - `merchants` has the owner-org column/comment/index.
+      - many merchants can share one owner org.
+      - standalone provisioning rejects/does not create a controllable merchant without an owner org.
+- [x] Add control-plane tests proving:
+      - user/service token/JWKS principal with org permission can administer that org's merchant.
+      - same credentials cannot administer a merchant owned by another org.
+      - service token resource scope can narrow access but cannot expand ownership.
+      - remote application without the required org authority cannot control a merchant.
+      - embedded/no-AuthKit path remains explicitly out-of-band.
+- [x] Run `task sqlc`, targeted control-plane/tenancy tests, `go test ./...`, and `task build`.
+
+## Status
+Complete. `openrails.merchants.owner_org_id` is the durable owner anchor for standalone/control-plane merchant
+namespaces. Control-plane provisioning rejects ownerless merchants; manifest bootstrap creates/resolves the owner org
+when omitted; service-token, service-JWT, and JWKS remote-application control all resolve through AuthKit org authority;
+and inferred org->merchant resolution now fails closed when an org owns zero or multiple active merchants.
+
+Verification:
+- `task sqlc`
+- `go test ./internal/controlplane ./internal/tenancy ./internal/bootstrap ./internal/http/middleware/ginmw ./migrations/postgres ./tests`
+- `go test -tags=integration ./internal/controlplane -run 'TestBootstrap|TestMerchantForOwnerOrg' -count=1`
+- `go test -tags=integration ./internal/tenancy -run '^TestProvision_Idempotent$' -count=1`
+- `go test -tags=integration ./internal/bootstrap -run 'TestReconcileTenantManifest' -count=1`
+- `go test -tags=integration ./embed -run '^TestStandaloneRemoteApplicationAuth$' -count=1`
+- `go test ./...`
+- `task build`
+
+## Acceptance
+- Merchant ownership has exactly one durable in-band model: AuthKit org ownership.
+- Users, service tokens, and remote applications control merchants only through grants on that org.
+- Standalone/bootstrap OpenRails creates or binds an owner org instead of relying on ownerless merchants.
+- Existing embedded mode remains possible, but its out-of-band security boundary is explicit.
+- No code path treats issuer, service token, or user id as the durable owner of a merchant.
+
+---
+
+# #502: Real-HTTP integration tests for org-owned merchant control boundaries
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-15: added `embed/TestStandaloneMerchantControlBoundaries`, a real standalone HTTP
+integration suite over the AuthKit-backed control plane. It exercises service tokens, first-party service JWTs,
+JWKS remote-application self tokens, ordinary user-token rejection, no-merchant-org denial, cross-resource 403s, and
+the multi-merchant implicit-inference fail-closed case.
+
+Add dedicated integration coverage proving that merchant control flows through:
+
+`credential -> AuthKit org authority -> OpenRails merchant.owner_org_id`
+
+and never through bare user id, service token id, remote application id, issuer, or self-claimed token contents.
+
+## Current coverage
+
+- `embed/TestStandaloneMerchantControlBoundaries` starts the real standalone OpenRails HTTP server and proves:
+  - org A's service token administers merchant A, and org B's service token administers merchant B;
+  - org B credentials cannot expand to merchant A by claiming merchant A's resource scope;
+  - an AuthKit org with no active OpenRails merchant is rejected with `403`;
+  - a normal AuthKit user access token is rejected with `401` on the server-to-server merchant-control surface;
+  - a JWKS remote-application self-token with stored org role/permissions can administer its org's merchant;
+  - a JWKS remote-application self-token registered without org role/permissions is rejected with `403`;
+  - a registered service-JWT issuer can administer only the merchant owned by its AuthKit org;
+  - a service-JWT claiming another merchant's resource is rejected with `403`;
+  - once an org owns multiple active merchants, implicit merchant inference fails closed with `403`.
+- `embed/TestStandaloneRemoteApplicationAuth` starts the real standalone OpenRails HTTP server with the AuthKit control
+  plane attached and proves:
+  - a JWKS remote-application self-token with an org role can administer the org's merchant;
+  - a JWKS remote-application self-token without org authority is denied;
+  - the real service-token path still works.
+- `embed/TestDualTransportConformance` drives the real standalone HTTP `/v1/service/*` surface with a real AuthKit
+  service token and rejects a bad bearer.
+- `internal/controlplane/TestMerchantForOwnerOrg` proves the owner-org lookup and cross-org denial at the control-plane
+  service layer, including one org owning multiple merchants.
+
+## Gap
+
+There is no single real-HTTP integration suite that exercises the full boundary matrix across multiple AuthKit orgs,
+multiple OpenRails merchants, service tokens, service JWTs, and remote applications. Some important denials are covered
+only below HTTP or only as a narrow one-credential case.
+
+## Tasks
+
+- [x] Add a dedicated integration test package/test using `integrationharness.StartStandalone` or an equivalent real
+      standalone HTTP server.
+- [x] Fixture at least two AuthKit orgs and at least three OpenRails merchants, including one org with multiple active
+      merchants so implicit merchant inference is proven to fail closed.
+- [x] Prove service-token control over HTTP:
+      - org A service token can administer merchant A;
+      - org B service token can administer merchant B;
+      - org B service token cannot claim merchant A's resource scope;
+      - an org owning multiple merchants cannot rely on implicit merchant inference.
+- [x] Prove first-party service-JWT control over HTTP with the same owner-org and scope boundaries as service tokens.
+- [x] Prove JWKS remote-application control over HTTP:
+      - remote application with role/permission on org B can administer merchant B;
+      - remote application registered but not granted org role is denied;
+      - token self-claims cannot create authority beyond AuthKit-stored org membership/permissions.
+- [x] Prove user/admin session control over HTTP if the standalone admin route surface is intended to support merchant
+      administration directly; otherwise document that user control is intentionally through AuthKit org grants used to
+      mint/manage service credentials. Current server-to-server surface rejects ordinary user access tokens with `401`.
+- [x] Assert HTTP status/error mapping for every deny case (`401` for unauthenticated/unresolved credentials, `403` for
+      resolved-but-not-authorized credentials) rather than checking only Go errors.
+- [x] Run the new test with `go test -tags=integration` and add the exact command to this issue's verification notes.
+
+## Verification
+
+- `go test -tags=integration ./embed -run TestStandaloneMerchantControlBoundaries -count=1`
+
+## Acceptance
+
+- A maintainer can run one focused integration command and see the full org/merchant/remote-application/service-token
+  control model exercised over real OpenRails HTTP.
+- The test fails if any credential can control a merchant not owned by its authorized AuthKit org.
+- The test fails if a remote application is treated as a merchant owner instead of a credential controlled by org RBAC.
+- The test fails if service-token resource scopes expand authority beyond the owning org or named merchant.
+
+---
+
+# #503: Hard-cut remaining OpenRails `tenant` terminology to `merchant`
+
+**Completed:** yes
+**Status:** COMPLETED 2026-06-15: active Go/API/schema/docs/config/test surfaces are cut to merchant/org vocabulary,
+including merchant-owned storage names (`merchant_secrets`, `merchant_deks`, `merchant_exports`), `merchant_cors`,
+merchant Vault paths, merchant secret getters, and route/resource strings. Added `TestNoActiveTenantVocabularyResidue`
+as the active-surface guard. Verified with `task sqlc`, `go test ./...`, focused integration coverage, and `task build`.
+
+## Rule
+
+- OpenRails billing/isolation namespace: `merchant`.
+- AuthKit organization/ownership authority: `org`.
+- Do not rename OpenRails merchant concepts to `org`.
+- Do not rename AuthKit org ownership anchors to `merchant`.
+- Preserve `owner_org_id` on `openrails.merchants`: that column is the AuthKit org that controls the merchant.
+
+## Current evidence
+
+Remaining `tenant` hits are limited to historical tracker/planning text, the still-valid payable `tenant_subject`
+identity history, and local variable names where a broad internal churn would not change a public/API/schema contract.
+The active public/config/schema/resource/storage guard rejects old merchant-namespace tokens.
+
+## Scope
+
+Hard-cut active OpenRails code, schema, generated code, public API, docs, and tests from "tenant" to "merchant" where
+the word means the OpenRails namespace/billing bucket.
+
+## Non-goals
+
+- Do not rename AuthKit `org` concepts to merchant.
+- Do not change the ownership model from #500.
+- Do not rename historical issue text in `agents/completed.md` unless a stale active reference would mislead current
+  work.
+- Do not preserve compatibility aliases unless an existing production migration path genuinely requires a temporary
+  bridge. Prefer hard cuts in pre-prod contracts.
+
+## Tasks
+
+- [x] Inventory every active `tenant` hit and classify it as:
+      - OpenRails merchant namespace -> rename to `merchant`;
+      - AuthKit org/ownership -> rename to `org` or leave as `owner_org_id`;
+      - historical migration/issue text -> leave with comment if forced;
+      - third-party/library wording -> leave.
+- [x] Rename construction-time config/embed entry points:
+      - `Config.Tenant` -> `Config.Merchant`.
+      - `embed.Options.Tenant` -> `embed.Options.Merchant`.
+      - integration harness/config examples use `merchant` / `MERCHANT`.
+- [x] Rename HTTP middleware entry points for merchant context:
+      - `ResolveTenant` / `ResolveTenantHTTP` -> `ResolveMerchant` / `ResolveMerchantHTTP`.
+      - `TenantDBConn` / `TenantDBConnMW` -> `MerchantDBConn` / `MerchantDBConnMW`.
+- [x] Rename merchant lifecycle package and exported OpenRails namespace symbols:
+      - `internal/tenancy` -> `internal/merchants`.
+      - exported lifecycle/secret/webhook `Tenant*` symbols -> merchant names.
+      - runtime/server service fields use `Merchants`.
+- [x] Rename test fixture helper names:
+      - `TestTenantID` / `TestTenantSlug` -> `TestMerchantID` / `TestMerchantSlug`.
+      - `EnsureTestTenant` / `WithTestTenant` -> `EnsureTestMerchant` / `WithTestMerchant`.
+- [x] Rename compatibility DTO fields like `TenantSlug` where they represent the OpenRails merchant namespace.
+- [x] Rename Postgres/RLS schema vocabulary where it represents the merchant namespace:
+      - Postgres `tenant_id` columns on merchant-scoped OpenRails tables -> `merchant_id`.
+      - RLS settings such as `app.tenant_id` -> `app.merchant_id`.
+      - DB helper functions `WithTenantConn` / `RunInTenantConn` / `TenantTx` -> merchant equivalents.
+      - consolidated baseline and sqlc query inputs use merchant vocabulary.
+- [x] Rename ClickHouse analytics fields and rollups from `tenant_id` to `merchant_id`, or document any forced
+      external compatibility remnant.
+- [x] Rename OpenRails resource and permission contracts:
+      - `openrails.tenant` -> `openrails.merchant`.
+      - `openrails.tenant_subject` -> `openrails.customer`.
+      - `openrails:tenant:*` -> `openrails:merchant:*`.
+      - update AuthKit permission catalogs/tests that intentionally carry OpenRails-owned resource strings.
+- [x] Rename HTTP route files and route/helper names where they expose tenant wording:
+      - `routes_tenant_admin.go` -> `routes_merchant_admin.go`.
+      - `routes_tenant_webhook.go` -> `routes_merchant_webhook.go`.
+      - merchant webhook surface is now `/v1/m/:merchant/webhooks/:provider`.
+      - self-service merchant secret helpers use merchant naming and `merchant_secret_*` errors.
+- [x] Rename remaining SDK/embed DTO labels where they expose tenant wording, especially `TenantSlug` compatibility fields.
+- [x] Rename bootstrap/manifest vocabulary:
+      - `tenant_manifest` -> merchant manifest.
+      - manifest YAML keys and examples from tenant to merchant, unless a compatibility bridge is explicitly needed.
+      - bootstrap-created AuthKit org remains `owner_org_id`.
+- [x] Remove stale AuthKit-tenant identity columns/fixtures in OpenRails tests, e.g. `authkit_tenant_id` /
+      `authkit_tenant_slug`, replacing them with `owner_org_id` or deleting them if unused.
+- [x] Regenerate sqlc and update all generated call sites.
+- [x] Update docs:
+      - explain the final vocabulary: AuthKit org controls OpenRails merchant.
+      - replace tenant provisioning/RLS docs with merchant namespace docs.
+      - keep a short migration note for operators crossing the hard cut.
+- [x] Add tests proving:
+      - no active OpenRails code/docs/API fixtures still use `tenant` for the merchant namespace;
+      - migrations expose `merchant_id` / `merchant` names and reject legacy owner-tenant artifacts;
+      - service-token/JWKS/resource-scope authorization still works with `openrails.merchant` strings;
+      - RLS still isolates by merchant id after the rename.
+- [x] Run `task sqlc`, `go test ./...`, targeted integration suites for control-plane/bootstrap/RLS/embed, and
+      `task build`.
+
+## Acceptance
+
+- In active OpenRails surfaces, `tenant` no longer means merchant/billing namespace.
+- AuthKit ownership remains visibly `org` through `owner_org_id` and org-granted credentials.
+- OpenRails permissions/resources use merchant vocabulary.
+- Existing #500 ownership/control behavior is unchanged after the rename.
+
+---
+
+# #501: Cross-currency FX spend enforcement
+
+**Completed:** yes
+
+#494 finished native multi-currency accounting: ledger rows, usage, budgets, invoices, limits, and reports are keyed
+by explicit `currency + amount`. This issue is the missing FX layer: enforce money policies declared in one currency
+against spend reported in another currency.
+
+## Current state
+- Cross-currency admission and wasted-spend enforcement are wired through the FX provider/cache.
+- Budget and wasted-spend counters are keyed by policy currency; ledger/usage rows remain in the original request
+  currency.
+- Same-currency enforcement does not require an FX provider or cached rate.
+- Missing/stale Redis FX rates fail closed for cross-currency enforcement.
+
+## Goal
+Support policies like: "this payer/invoker may spend at most 100 EUR/day" while individual admitted charges may be
+reported in USD, EUR, JPY, or another supported native money currency.
+
+## Decisions
+- The ledger stays native. A USD charge writes USD money/usage rows; an EUR charge writes EUR rows. Do not create
+  synthetic converted ledger rows.
+- FX is only for policy comparison, counters, and explanatory output.
+- Custom credit units are excluded. Qualified units like `tenant/gold` have no FX and must remain same-unit only.
+- Exchange rates are fetched out-of-band and cached, not fetched live on every admission request.
+- Missing or stale FX rates fail closed for cross-currency enforcement. Same-currency paths must not call FX.
+- No implicit USD fallback. Every charge currency and every FX policy currency is explicit.
+- Use integer math for converted policy amounts. Pick one rounding rule and document it before implementation;
+  default should be conservative for limit enforcement.
+
+## Rate cache model
+- Maintain a small OpenRails-owned Redis FX rate cache for registered native currencies only.
+- Refresh rates on a background cadence, initially every 2 hours, with jitter so replicas do not stampede the
+  provider.
+- Store each rate with `base_currency`, `quote_currency`, `rate`, `provider`, `as_of`, `fetched_at`, and
+  `expires_at`.
+- Keep the hot read path local: admission/rate-limit checks read the latest non-expired cached rate from Redis,
+  never from the external provider.
+- Redis is the source of truth for cached rates across replicas; no Postgres table is needed for rates.
+- If Redis is unavailable, same-currency enforcement keeps working and cross-currency enforcement fails closed.
+- Use one canonical provider first. If a second provider is added later, it should be for fallback/health, not a
+  pluggable abstraction until a real operator need exists.
+- Same-currency conversion is exact 1:1 and does not require a cached row.
+- Startup behavior: same-currency works immediately; cross-currency enforcement is unavailable until a fresh rate is
+  loaded.
+
+## Contract
+- Add an explicit policy currency where money policy is declared:
+  - tier budget windows / `bad_spend_windows`
+  - `max_concurrent_held_amount`
+  - `max_single_charge_amount`
+  - per-invoker delegated wasted-spend windows
+  - spend limits and account-level spend caps if they should become policy-currency caps
+- Preserve same-currency behavior when policy currency equals request currency.
+- Admission/check responses should include both:
+  - request currency/amount
+  - policy currency/converted amount used for the decision
+- Store the cached rate metadata used for a durable charge decision on existing money/usage metadata where available:
+  source currency, policy currency, rate, provider/as_of, and rounded converted amount.
+
+## Implementation Tasks
+- [x] Extend the FX provider interface beyond `QuoteToUSD` so it can quote supported `from -> to` currency pairs, or
+      add the smallest wrapper that composes via USD without leaking USD as a default.
+- [x] Add an ephemeral FX rate cache backed by Redis; refresh every 2 hours with jitter.
+- [x] Add a background refresh job/service that fetches rates for all registered native currency pairs needed by
+      active policies, records `as_of/fetched_at/expires_at`, and exposes health/last-refresh state.
+- [x] Add policy-currency fields to the tier/merchant policy structs and wire JSON/SDK/remote/embed/HTTP handlers.
+- [x] Convert estimated charge amounts into policy currency before evaluating budget windows, concurrent-held caps,
+      single-charge caps, direct-payer wasted-spend grace, and delegated-invoker wasted-spend cutoffs.
+- [x] Key FX policy counters by `(merchant, payer, invoker, policy_currency, window_key)`, not request currency, so
+      mixed USD/EUR spend contributes to the same EUR policy budget.
+- [x] Keep settlement/ledger capture in the original request currency; release/capture should close the original
+      same-currency hold, not reprice it later.
+- [x] Define stale-rate handling: max rate age, cache TTL, and whether a stale rate denies admission or returns a
+      retryable provider-unavailable error.
+- [x] Define rounding per currency scale and add tests for JPY/EUR/USD scale differences.
+- [x] Add integration tests for:
+      - [x] USD charge counted against an EUR daily budget.
+      - [x] EUR charge counted against a USD per-invoker wasted-spend cutoff.
+      - [x] stale/missing cached rate fails closed.
+      - [x] custom credit unit cannot be FX-converted.
+      - [x] same-currency path still works without FX provider.
+
+## Acceptance
+- A host can declare an EUR-denominated policy and have USD usage consume that EUR policy budget via a recorded FX
+  rate.
+- Cross-currency admission decisions use cached rates refreshed by OpenRails, not external provider calls on the hot
+  path.
+- Cross-currency enforcement never mutates the native ledger currency.
+- Unlike currencies are not summed in usage/invoice/revenue reports unless a caller explicitly asks for an FX policy
+  view.
+- Missing currency, missing rate, stale rate, or custom-credit units never silently fall back to USD.
+
+## Verification
+- `go test ./internal/app ./internal/integrations/fx ./pkg/service ./internal/modules/admission`
+- `go test -tags integration ./internal/modules/admission ./pkg/service`

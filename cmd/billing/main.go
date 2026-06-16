@@ -158,7 +158,7 @@ func main() {
 	}
 	mintOperatorServiceTokenCmd.Flags().String("name", "openrails-operator-manual", "service token display name")
 	mintOperatorServiceTokenCmd.Flags().String("org", "", "Bootstrap authority slug for the legacy AuthKit --org bridge (defaults to config/operator)")
-	mintOperatorServiceTokenCmd.Flags().String("tenant", "", "OpenRails tenant slug or id (defaults to default)")
+	mintOperatorServiceTokenCmd.Flags().String("merchant", "", "OpenRails merchant slug or id (defaults to default merchant)")
 	mintOperatorServiceTokenCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to full operator permissions")
 
 	mintCustomerServiceTokenCmd := &cobra.Command{
@@ -168,7 +168,7 @@ func main() {
 	}
 	mintCustomerServiceTokenCmd.Flags().String("name", "", "service token display name")
 	mintCustomerServiceTokenCmd.Flags().String("org", "", "Bootstrap authority slug for the legacy AuthKit --org bridge that owns the service token (defaults to config/operator)")
-	mintCustomerServiceTokenCmd.Flags().String("tenant", "", "OpenRails tenant slug or id (defaults to default)")
+	mintCustomerServiceTokenCmd.Flags().String("merchant", "", "OpenRails merchant slug or id (defaults to default merchant)")
 	mintCustomerServiceTokenCmd.Flags().String("customer", "", "OpenRails customer UUID to scope the service token to")
 	mintCustomerServiceTokenCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to openrails:credits:spend")
 
@@ -180,7 +180,7 @@ func main() {
 	mintOperatorJWTCmd.Flags().String("org", "", "Bootstrap authority slug for the legacy AuthKit --org bridge (defaults to config/operator)")
 	mintOperatorJWTCmd.Flags().String("email", "", "Test user email (default e2e-operator@openrails.test)")
 	mintOperatorJWTCmd.Flags().String("username", "", "Test user username (default e2e-operator)")
-	mintOperatorJWTCmd.Flags().String("role", "", "Tenant role to assign (default openrails-operator)")
+	mintOperatorJWTCmd.Flags().String("role", "", "Merchant role to assign (default openrails-operator)")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
 	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, newBootstrapCmd(), mintOperatorServiceTokenCmd, mintCustomerServiceTokenCmd, mintOperatorJWTCmd, newCatalogCmd(), newReconcileCmd(), newIntentsCmd())
@@ -227,11 +227,10 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// runs after migrations have been applied (migrations are a separate
 	// `billing migrate` step) and at startup.
 	//
-	// TODO(#336): no default tenant — startup bootstrap must resolve/configure a
-	// real tenant slug to seed. This previously relied on the (now removed) default
-	// tenant; with an empty BootstrapTenantSlug, RunBootstrap now errors. A
-	// deployment-level config field (e.g. auth.control_plane.bootstrap_tenant_slug)
-	// must supply it before standalone startup can bootstrap a tenant.
+	// TODO(#336): no default merchant — startup bootstrap must resolve/configure a
+	// real merchant slug to seed. This previously relied on the (now removed) default merchant; with an empty BootstrapOrgSlug, RunBootstrap now errors. A
+	// deployment-level config field (e.g. auth.control_plane.bootstrap_org_slug)
+	// must supply it before standalone startup can bootstrap an org.
 	if res, err := embcp.RunBootstrap(context.Background(), embeddedApp.App(), controlplane.BootstrapOptions{MintInitialServiceToken: true}); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("control plane bootstrap: %w", err)
@@ -274,7 +273,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Issue #222: there is no separate private/service listener. Server-to-server
-	// callers authenticate with OpenRails-issued tenant service tokens against the SAME
+	// callers authenticate with OpenRails-issued merchant service tokens against the SAME
 	// public API surface (publicSrv); embedded hosts use the in-process facade.
 
 	// Start public server in a goroutine

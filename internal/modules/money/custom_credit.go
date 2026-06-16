@@ -11,9 +11,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Custom credits (#475): tenant-defined consumable units (api-credits, gold-coins)
+// Custom credits (#475): merchant-defined consumable units (api-credits, gold-coins)
 // with NO fixed FX, NEVER billed in. They reuse the money ledger primitives and
-// the `currency` column, addressed by a QUALIFIED code `tenant-slug/name`.
+// the `currency` column, addressed by a QUALIFIED code `merchant-slug/name`.
 // Unqualified codes (`usd`) remain built-in currencies (#474).
 
 // ErrBillingUnitRequired is returned when a billing-layer path (invoice / owed /
@@ -22,7 +22,7 @@ import (
 var ErrBillingUnitRequired = errors.New("money: billing requires a built-in currency, not a custom credit unit")
 
 // IsQualifiedUnit reports whether a unit code is a qualified custom-credit code
-// (`tenant-slug/name`) rather than an unqualified built-in currency.
+// (`merchant-slug/name`) rather than an unqualified built-in currency.
 func IsQualifiedUnit(code string) bool {
 	return strings.Contains(code, "/")
 }
@@ -42,9 +42,9 @@ func splitQualified(code string) (slug, name string, ok bool) {
 
 // ResolveUnit resolves a ledger unit code to its minor-unit decimals.
 // Unqualified codes resolve against the built-in currency registry (#474).
-// Qualified codes (`tenant-slug/name`) resolve against the ctx tenant's
-// custom_credit_types: the slug must name the ctx tenant and the type must be
-// active. Unknown / cross-tenant / inactive units are rejected.
+// Qualified codes (`merchant-slug/name`) resolve against the ctx merchant's
+// custom_credit_types: the slug must name the ctx merchant and the type must be
+// active. Unknown / cross-merchant / inactive units are rejected.
 func (s *MoneyService) ResolveUnit(ctx context.Context, code string) (decimals int, builtin bool, err error) {
 	if !IsQualifiedUnit(code) {
 		d, ok := CurrencyScale(code)
@@ -64,14 +64,14 @@ func (s *MoneyService) ResolveUnit(ctx context.Context, code string) (decimals i
 	if err != nil {
 		return 0, false, err
 	}
-	// The qualifying slug must name the ctx tenant — a custom unit is only valid
-	// in its owning tenant's ledger (RLS scopes the lookup too).
+	// The qualifying slug must name the ctx merchant — a custom unit is only valid
+	// in its owning merchant's ledger (RLS scopes the lookup too).
 	tr, err := s.db.Gen(ctx).GetMerchantBySlug(ctx, slug)
 	if err != nil {
 		return 0, false, fmt.Errorf("money: unknown custom credit unit %q: %w", code, err)
 	}
 	if tr.ID != tid.UUID() {
-		return 0, false, fmt.Errorf("money: custom credit unit %q not owned by ctx tenant", code)
+		return 0, false, fmt.Errorf("money: custom credit unit %q not owned by ctx merchant", code)
 	}
 	ct, err := s.db.Gen(ctx).GetCustomCreditType(ctx, gen.GetCustomCreditTypeParams{MerchantID: tid.UUID(), Name: name})
 	if err != nil {
@@ -128,9 +128,9 @@ func FormatAmount(minor int64, decimals int) string {
 	return fmt.Sprintf("%s%d.%0*d", sign, whole, decimals, frac)
 }
 
-// --- Registry CRUD (tenant-scoped; RLS enforced) ---
+// --- Registry CRUD (merchant-scoped; RLS enforced) ---
 
-// DefineCustomCreditType upserts a custom credit unit for the ctx tenant
+// DefineCustomCreditType upserts a custom credit unit for the ctx merchant
 // (idempotent on name; reactivates + updates decimals).
 func (s *MoneyService) DefineCustomCreditType(ctx context.Context, name string, decimals int) (gen.OpenrailsCustomCreditType, error) {
 	tid, err := merchant.Require(ctx)
@@ -149,7 +149,7 @@ func (s *MoneyService) DefineCustomCreditType(ctx context.Context, name string, 
 	})
 }
 
-// ListCustomCreditTypes lists the ctx tenant's custom credit units.
+// ListCustomCreditTypes lists the ctx merchant's custom credit units.
 func (s *MoneyService) ListCustomCreditTypes(ctx context.Context) ([]gen.OpenrailsCustomCreditType, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -158,7 +158,7 @@ func (s *MoneyService) ListCustomCreditTypes(ctx context.Context) ([]gen.Openrai
 	return s.db.Gen(ctx).ListCustomCreditTypes(ctx, tid.UUID())
 }
 
-// SetCustomCreditTypeActive activates/deactivates a ctx-tenant custom credit unit.
+// SetCustomCreditTypeActive activates/deactivates a ctx-merchant custom credit unit.
 func (s *MoneyService) SetCustomCreditTypeActive(ctx context.Context, name string, active bool) (gen.OpenrailsCustomCreditType, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {

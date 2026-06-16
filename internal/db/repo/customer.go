@@ -23,7 +23,7 @@ var SystemCustomerID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 // ids, no string subjects. The auth boundary rejects non-UUID subjects before
 // they reach handlers; this repo-layer error is defense in depth.
 func errNonUUIDSubject(userID string) error {
-	return fmt.Errorf("tenant subject %q is not a UUID: payable identities are UUID-only (#364)", userID)
+	return fmt.Errorf("merchant subject %q is not a UUID: payable identities are UUID-only (#364)", userID)
 }
 
 // EnsureCustomerID materializes (or refreshes) the openrails.customers
@@ -32,11 +32,11 @@ func errNonUUIDSubject(userID string) error {
 // returns the zero id without touching the database (documented no-op for
 // callers with optional identity).
 //
-// A zero tenantID falls back to the request's tenant context (required — an
-// absent tenant is an error) — the same source the commerce tables use to stamp
-// their own tenant_id column — so the resolved subject lands under the exact
-// tenant the row itself belongs to. Multi-tenant writers that already hold an
-// explicit tenant may pass it directly.
+// A zero tenantID falls back to the request's merchant context (required — an
+// absent merchant is an error) — the same source the commerce tables use to stamp
+// their own merchant_id column — so the resolved subject lands under the exact
+// merchant the row itself belongs to. Multi-merchant writers that already hold an
+// explicit merchant may pass it directly.
 func EnsureCustomerID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, userID string) (uuid.UUID, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -59,7 +59,7 @@ func EnsureCustomerID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, user
 	})
 }
 
-// ResolveCustomerID derives the payable tenant subject id for a userID
+// ResolveCustomerID derives the payable merchant subject id for a userID
 // WITHOUT touching the database. Payable identities are UUID-only (#364), so a
 // UUID subject IS its own id — pure derivation, no lookup. An empty userID
 // yields the zero id (matches no rows, which callers translate to an empty

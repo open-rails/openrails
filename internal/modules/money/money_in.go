@@ -20,17 +20,24 @@ type Charger interface {
 }
 
 type ChargeRequest struct {
+	MerchantID      uuid.UUID
 	Payer           identity.CustomerID
 	Invoker         string
+	InvoiceID       *uuid.UUID
 	PaymentMethodID uuid.UUID
 	AmountCents     int64
+	Currency        string
 	IdempotencyKey  string
 	Description     string
 }
 
 type ChargeResult struct {
-	TransactionID string
-	Declined      bool // true = hard decline (don't keep retrying); false+err = transient
+	Processor         string
+	TransactionID     string
+	ExternalInvoiceID string
+	Declined          bool // true = hard decline (don't keep retrying); false+err = transient
+	FailureCode       *string
+	FailureMessage    *string
 }
 
 // Alerter delivers a low-balance notification. Implemented by the notification
@@ -177,10 +184,12 @@ func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r mone
 	}
 
 	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
+		MerchantID:      r.MerchantID,
 		Payer:           payer,
 		Invoker:         payer.UUID().String(),
 		PaymentMethodID: *r.PaymentMethodID,
 		AmountCents:     *r.TopupAmount,
+		Currency:        normalizeCurrency(r.Currency),
 		IdempotencyKey:  episode,
 		Description:     "auto top-up",
 	})

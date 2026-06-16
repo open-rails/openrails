@@ -620,19 +620,19 @@ func TestGetDefaultBillingConfig_FeatureFlags(t *testing.T) {
 	})
 }
 
-func TestAllowedCORSOrigins_UnionsGlobalAndTenantOrigins(t *testing.T) {
+func TestAllowedCORSOrigins_UnionsGlobalAndMerchantOrigins(t *testing.T) {
 	cfg := &Config{
 		CorsOrigins: []string{"https://admin.example.com", "https://admin.example.com"}, // dup
-		TenantCORS: map[string]*TenantCORSConfig{
-			"tenant-a": {AllowedOrigins: []string{"https://media.example.com", "https://admin.example.com"}}, // dup w/ global
-			"tenant-b": {AllowedOrigins: []string{"https://app.example.com", "https://portal.example.com"}},
-			"empty":    nil,
+		MerchantCORS: map[string]*MerchantCORSConfig{
+			"merchant-a": {AllowedOrigins: []string{"https://media.example.com", "https://admin.example.com"}}, // dup w/ global
+			"merchant-b": {AllowedOrigins: []string{"https://app.example.com", "https://portal.example.com"}},
+			"empty":      nil,
 		},
 	}
 
 	got := cfg.AllowedCORSOrigins()
 
-	// Global origin first, de-duplicated; tenant origins follow in slug order.
+	// Global origin first, de-duplicated; merchant origins follow in slug order.
 	assert.Equal(t, []string{
 		"https://admin.example.com",
 		"https://media.example.com",
@@ -642,7 +642,7 @@ func TestAllowedCORSOrigins_UnionsGlobalAndTenantOrigins(t *testing.T) {
 }
 
 func TestAllowedCORSOrigins_NoWildcardWhenConfigured(t *testing.T) {
-	cfg := &Config{TenantCORS: map[string]*TenantCORSConfig{
+	cfg := &Config{MerchantCORS: map[string]*MerchantCORSConfig{
 		"t": {AllowedOrigins: []string{"https://t.example.com"}},
 	}}
 	got := cfg.AllowedCORSOrigins()

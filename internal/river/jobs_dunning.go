@@ -208,7 +208,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		// #336: pin the subscription's tenant so writes in processSubscription
 		// (payment inserts, lifecycle updates) carry the app.tenant_id GUC.
 		outcome := dunningOutcomeFailed
-		if err := w.DB.RunInTenantConn(merchant.WithID(ctx, merchant.ID(sub.MerchantID)), func(tctx context.Context) error {
+		if err := w.DB.RunInMerchantConn(merchant.WithID(ctx, merchant.ID(sub.MerchantID)), func(tctx context.Context) error {
 			outcome = w.processSubscription(tctx, &sub, lifecycle, priceSvc, moneySvc, materialize)
 			return nil
 		}); err != nil {

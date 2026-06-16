@@ -26,7 +26,7 @@ func (f fakeAdminChecker) HasAdminPermission(_ context.Context, tenantSlug, user
 // plane there is no admin authority — IsLiveAdmin returns false and never panics
 // on a nil checker. There is no operator-tenant or global-admin DB fallback.
 func TestIsLiveAdmin_NilCheckerDenies(t *testing.T) {
-	got, err := IsLiveAdmin(context.Background(), nil, authprovider.UserContext{UserID: "u1", Tenant: "acme"})
+	got, err := IsLiveAdmin(context.Background(), nil, authprovider.UserContext{UserID: "u1", Org: "acme"})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -50,9 +50,9 @@ func TestIsLiveAdmin_LivePermission(t *testing.T) {
 		want bool
 	}{
 		{name: "no tenant -> false", uc: authprovider.UserContext{UserID: "u1"}, want: false},
-		{name: "no user -> false", uc: authprovider.UserContext{Tenant: "acme"}, want: false},
-		{name: "different tenant -> false", uc: authprovider.UserContext{UserID: "u1", Tenant: "globex"}, want: false},
-		{name: "own tenant, holds admin -> true", uc: authprovider.UserContext{UserID: "u1", Tenant: "acme"}, want: true},
+		{name: "no user -> false", uc: authprovider.UserContext{Org: "acme"}, want: false},
+		{name: "different tenant -> false", uc: authprovider.UserContext{UserID: "u1", Org: "globex"}, want: false},
+		{name: "own tenant, holds admin -> true", uc: authprovider.UserContext{UserID: "u1", Org: "acme"}, want: true},
 	}
 
 	for _, tc := range cases {
@@ -73,7 +73,7 @@ func TestIsLiveAdmin_LivePermission(t *testing.T) {
 // swallow it silently at this layer).
 func TestIsLiveAdmin_PropagatesError(t *testing.T) {
 	checker := fakeAdminChecker{err: errors.New("authkit down")}
-	got, err := IsLiveAdmin(context.Background(), checker, authprovider.UserContext{UserID: "u1", Tenant: "acme"})
+	got, err := IsLiveAdmin(context.Background(), checker, authprovider.UserContext{UserID: "u1", Org: "acme"})
 	if err == nil {
 		t.Fatal("expected error to propagate")
 	}

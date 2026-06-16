@@ -20,14 +20,14 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
 // seedCustomer materializes the openrails.customers row a direct money-row
 // insert needs to satisfy the customer_id FK. customers is UUID-only (#491): the
-// id IS the payable customer id; tenant_id is the canonical test tenant (#336:
-// no default tenant).
+// id IS the payable customer id; merchant_id is the canonical test merchant (#336:
+// no default merchant).
 func seedCustomer(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tsID uuid.UUID) {
 	t.Helper()
-	dbtest.EnsureTestTenant(ctx, t, pool)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
 	_, err := pool.Exec(ctx,
 		`INSERT INTO openrails.customers (id, merchant_id)
 		 VALUES ($1, $2)
-		 ON CONFLICT DO NOTHING`, tsID, dbtest.TestTenantID.UUID())
+		 ON CONFLICT DO NOTHING`, tsID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 }

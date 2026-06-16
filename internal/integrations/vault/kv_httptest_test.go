@@ -101,7 +101,7 @@ func TestKVv2Adapter_RoundTrip_HTTPMock(t *testing.T) {
 	defer srv.Close()
 	a := adapterAgainst(t, srv.URL, mount)
 
-	const full = "secret/openrails/tenants/00000000-0000-0000-0000-000000000001/stripe/secret_key"
+	const full = "secret/openrails/merchants/00000000-0000-0000-0000-000000000001/stripe/secret_key"
 
 	// Set
 	if err := a.WriteSecret(ctx, full, map[string]string{"value": "sk_live_x"}); err != nil {
@@ -116,8 +116,8 @@ func TestKVv2Adapter_RoundTrip_HTTPMock(t *testing.T) {
 		t.Fatalf("round-trip value = %q, want sk_live_x", got["value"])
 	}
 
-	// Path layout: the data write/read must hit /v1/secret/data/openrails/tenants/<id>/stripe/secret_key
-	wantData := "/v1/secret/data/openrails/tenants/00000000-0000-0000-0000-000000000001/stripe/secret_key"
+	// Path layout: the data write/read must hit /v1/secret/data/openrails/merchants/<id>/stripe/secret_key
+	wantData := "/v1/secret/data/openrails/merchants/00000000-0000-0000-0000-000000000001/stripe/secret_key"
 	f := srv.Config.Handler.(*fakeKVv2)
 	f.mu.Lock()
 	_, putSeen := f.seen["PUT "+wantData]
@@ -134,7 +134,7 @@ func TestKVv2Adapter_RoundTrip_HTTPMock(t *testing.T) {
 	if err := a.DeleteSecret(ctx, full); err != nil {
 		t.Fatalf("DeleteSecret: %v", err)
 	}
-	wantMeta := "/v1/secret/metadata/openrails/tenants/00000000-0000-0000-0000-000000000001/stripe/secret_key"
+	wantMeta := "/v1/secret/metadata/openrails/merchants/00000000-0000-0000-0000-000000000001/stripe/secret_key"
 	f.mu.Lock()
 	_, delSeen := f.seen["DELETE "+wantMeta]
 	f.mu.Unlock()
@@ -157,7 +157,7 @@ func TestKVv2Adapter_List_HTTPMock(t *testing.T) {
 	defer srv.Close()
 	a := adapterAgainst(t, srv.URL, mount)
 
-	names, err := a.ListSecrets(ctx, "secret/openrails/tenants/tenant-x")
+	names, err := a.ListSecrets(ctx, "secret/openrails/merchants/tenant-x")
 	if err != nil {
 		t.Fatalf("ListSecrets: %v", err)
 	}

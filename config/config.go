@@ -82,15 +82,15 @@ type Config struct {
 	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 2053)
 	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
 
-	// Tenant is the construction-time tenant this OpenRails engine is bound to
-	// (#336): a tenant SLUG (the public-surface identifier; the UUID is an
-	// internal detail resolved once at bootstrap via db.ResolveTenantSlug).
-	// There is NO default tenant — every tenant-owned write resolves its tenant
-	// from here (later: per-request resolution). When empty, no tenant is
-	// pinned and tenant-owned operations hard-fail (tenant.Require →
-	// ErrNoTenant), by design. Embedded hosts set it via embed.Options.Tenant;
-	// standalone via `tenant:` / TENANT.
-	Tenant string `koanf:"tenant,omitempty"`
+	// Merchant is the construction-time merchant this OpenRails engine is bound
+	// to (#336): a merchant SLUG (the public-surface identifier; the UUID is an
+	// internal detail resolved once at bootstrap via db.ResolveMerchantSlug).
+	// There is NO default merchant — every merchant-owned write resolves its
+	// merchant from here (later: per-request resolution). When empty, no
+	// merchant is pinned and merchant-owned operations hard-fail by design.
+	// Embedded hosts set it via embed.Options.Merchant; standalone via
+	// `merchant:` / MERCHANT.
+	Merchant string `koanf:"merchant,omitempty"`
 
 	// Mode is the pure-behavior operating dial (#346, #355): how much OpenRails
 	// is allowed to do against the payment providers. It applies identically in
@@ -164,20 +164,20 @@ type Config struct {
 	Logger      *LoggerConfig     `koanf:"logger,omitempty"`
 	SendGrid    *SendGridConfig   `koanf:"sendgrid,omitempty"`
 	CorsOrigins []string          `koanf:"cors_origins,omitempty"`
-	// TenantCORS configures per-tenant browser-direct allowed origins (issue #222
-	// browser tier). It is keyed by tenant slug; each entry lists the exact
-	// origins a browser on that tenant's domain may use to call OpenRails
+	// MerchantCORS configures per-merchant browser-direct allowed origins (issue #222
+	// browser tier). It is keyed by merchant slug; each entry lists the exact
+	// origins a browser on that merchant's domain may use to call OpenRails
 	// directly (e.g. the /v1/self/* self-service surface with a delegated access
 	// token). These origins are added to the allow-list ALONGSIDE CorsOrigins —
 	// they are an additive union, never a wildcard. Preflight succeeds for any
 	// listed origin and is denied for any origin that is not listed in either
-	// CorsOrigins or some tenant's allowed origins.
-	TenantCORS   map[string]*TenantCORSConfig `koanf:"tenant_cors,omitempty"`
-	RateLimits   *RateLimitsConfig            `koanf:"rate_limits,omitempty"`
-	Captcha      *CaptchaConfig               `koanf:"captcha,omitempty"`
-	FeatureFlags *FeatureFlags                `koanf:"feature_flags,omitempty"`
-	Encryption   *EncryptionConfig            `koanf:"encryption,omitempty"`
-	Vault        *VaultConfig                 `koanf:"vault,omitempty"`
+	// CorsOrigins or some merchant's allowed origins.
+	MerchantCORS map[string]*MerchantCORSConfig `koanf:"merchant_cors,omitempty"`
+	RateLimits   *RateLimitsConfig              `koanf:"rate_limits,omitempty"`
+	Captcha      *CaptchaConfig                 `koanf:"captcha,omitempty"`
+	FeatureFlags *FeatureFlags                  `koanf:"feature_flags,omitempty"`
+	Encryption   *EncryptionConfig              `koanf:"encryption,omitempty"`
+	Vault        *VaultConfig                   `koanf:"vault,omitempty"`
 	// BillingHotPath configures the degraded-mode behavior of the per-invocation
 	// billing authorize call (issue #248). EXPLICIT, never a silent default.
 	BillingHotPath *BillingHotPathConfig `koanf:"billing_hot_path,omitempty"`
@@ -232,25 +232,25 @@ func (c *BillingHotPathConfig) EffectiveFailPolicy() string {
 	return p
 }
 
-// EncryptionConfig configures per-tenant encryption-at-rest (issue #227). The
-// master key wraps each tenant's Data Encryption Key (envelope encryption); the
-// DEK encrypts sensitive at-rest field values (e.g. per-tenant processor
-// credentials in openrails.tenant_secrets).
+// EncryptionConfig configures per-merchant encryption-at-rest (issue #227). The
+// master key wraps each merchant's Data Encryption Key (envelope encryption); the
+// DEK encrypts sensitive at-rest field values (e.g. per-merchant processor
+// credentials in openrails.merchant_secrets).
 //
 // Self-hosted / dev: supply MasterKey (base64 of 32 raw bytes) via config or the
 // ENCRYPTION_MASTER_KEY env var. PRODUCTION: the master key should come from a
-// KMS (the wrapped DEKs in openrails.tenant_deks stay in the DB; the master key
+// KMS (the wrapped DEKs in openrails.merchant_deks stay in the DB; the master key
 // that unwraps them never does). When MasterKey is empty, encryption is disabled
 // and values are stored in plaintext (back-compat with pre-#227 deployments).
 type EncryptionConfig struct {
 	// MasterKey is the base64-encoded 32-byte AES-256 master key that wraps
-	// per-tenant DEKs. Empty disables at-rest encryption.
+	// per-merchant DEKs. Empty disables at-rest encryption.
 	MasterKey string `koanf:"master_key,omitempty"`
 }
 
-// VaultConfig selects a HashiCorp Vault backend for per-tenant secrets (issue
-// #251). When Enabled, the tenant secret store resolves to Vault KV-v2 (same
-// (tenant, name) addressing) instead of DB+envelope, and Solana signing can use
+// VaultConfig selects a HashiCorp Vault backend for per-merchant secrets (issue
+// #251). When Enabled, the merchant secret store resolves to Vault KV-v2 (same
+// (merchant, name) addressing) instead of DB+envelope, and Solana signing can use
 // Vault Transit (the key never leaves Vault). Disabled by default; self-hosted
 // uses the DB+envelope store.
 type VaultConfig struct {
@@ -509,7 +509,7 @@ type ProcessorConfig struct {
 
 	// PrivateKey is the merchant/cranker Solana signing keypair (base58) for a
 	// SINGLE-TENANT install that configures Solana via global config rather than
-	// the per-tenant secret store. At boot it is seeded into the default tenant's
+	// the per-tenant secret store. At boot it is seeded into the default merchant's
 	// secret store as solana/private_key (idempotently, never overwriting an
 	// existing secret) so recurring Solana can sign (issue #253). Leave empty in
 	// multi-tenant / Vault deployments, where each tenant supplies its own key.
@@ -628,21 +628,21 @@ type RedisConfig struct {
 
 // AuthConfig holds JWT verification configuration for OpenRails.
 // Billing is a JWT verifier (not issuer) - it validates tokens issued by your IdP.
-// TenantCORSConfig holds the browser-direct CORS policy for a single tenant
+// MerchantCORSConfig holds the browser-direct CORS policy for a single merchant
 // (issue #222 browser tier).
-type TenantCORSConfig struct {
+type MerchantCORSConfig struct {
 	// AllowedOrigins is the exact set of browser origins (scheme+host+port) on
-	// this tenant's domain that may call OpenRails directly. Exact-match only; no
+	// this merchant's domain that may call OpenRails directly. Exact-match only; no
 	// wildcards. Example: ["https://app.example.com", "https://portal.example.com"].
 	AllowedOrigins []string `koanf:"allowed_origins,omitempty"`
 }
 
 // AllowedCORSOrigins returns the de-duplicated union of the global CorsOrigins
-// and every tenant's per-tenant allowed origins (issue #222 browser tier). This
+// and every merchant's per-merchant allowed origins (issue #222 browser tier). This
 // is the explicit allow-list handed to the CORS middleware so browsers on a
-// configured tenant domain can call OpenRails directly without weakening CORS to
-// a wildcard. Order is stable (global origins first, then tenant origins in
-// tenant-slug order) so the allow-list is deterministic.
+// configured merchant domain can call OpenRails directly without weakening CORS
+// to a wildcard. Order is stable (global origins first, then merchant origins in
+// merchant-slug order) so the allow-list is deterministic.
 func (c *Config) AllowedCORSOrigins() []string {
 	if c == nil {
 		return nil
@@ -663,13 +663,13 @@ func (c *Config) AllowedCORSOrigins() []string {
 	for _, o := range c.CorsOrigins {
 		add(o)
 	}
-	slugs := make([]string, 0, len(c.TenantCORS))
-	for slug := range c.TenantCORS {
+	slugs := make([]string, 0, len(c.MerchantCORS))
+	for slug := range c.MerchantCORS {
 		slugs = append(slugs, slug)
 	}
 	sort.Strings(slugs)
 	for _, slug := range slugs {
-		tc := c.TenantCORS[slug]
+		tc := c.MerchantCORS[slug]
 		if tc == nil {
 			continue
 		}
@@ -694,7 +694,7 @@ type AuthConfig struct {
 	// `auth.operator_tenant_admin_roles`. Admin authority is the LIVE
 	// openrails:admin permission held in the caller's OWN tenant (or carried on a
 	// deployment-minted admin service token) — deployment authority, not
-	// membership in a separate "operator" AuthKit tenant. Load rejects the
+	// membership in a separate "operator" AuthKit org. Load rejects the
 	// deprecated keys.
 
 	// ControlPlane configures OpenRails' OpenRails-owned AuthKit control plane
@@ -746,26 +746,26 @@ type ControlPlaneConfig struct {
 	// "openrails-bootstrap-admin".
 	BootstrapAdminServiceTokenName string `koanf:"bootstrap_admin_service_token_name,omitempty"`
 
-	// PlatformTenantSlug is the AuthKit tenant slug for the managed-hosting PLATFORM
-	// superadmin org (issue #226), DISTINCT from any tenant operator tenant. The
-	// platform tenant holds the openrails-platform-superadmin role with the
+	// PlatformOrgSlug is the AuthKit org slug for the managed-hosting PLATFORM
+	// superadmin org (issue #226), DISTINCT from any org operator org. The
+	// platform org holds the openrails-platform-superadmin role with the
 	// openrails:platform:superadmin permission and gates the cross-tenant
 	// /v1/platform/* surface. When empty (the default), platform-superadmin
 	// bootstrap and the /v1/platform/* routes are NOT enabled — a single-tenant
 	// or non-managed deployment never grows a cross-tenant superadmin.
-	PlatformTenantSlug string `koanf:"platform_tenant_slug,omitempty"`
+	PlatformOrgSlug string `koanf:"platform_org_slug,omitempty"`
 
 	// PlatformAdminUserID, when set, is assigned the platform-superadmin role in
-	// the platform tenant at bootstrap (issue #226). Optional: the platform tenant can
+	// the platform org at bootstrap (issue #226). Optional: the platform org can
 	// be seeded empty and admins added later.
 	PlatformAdminUserID string `koanf:"platform_admin_user_id,omitempty"`
 }
 
-// PlatformTenantEnabled reports whether a managed-hosting platform-superadmin org
+// PlatformOrgEnabled reports whether a managed-hosting platform-superadmin org
 // is configured (issue #226). When false, the cross-tenant /v1/platform/*
 // surface is not mounted and no platform-superadmin is bootstrapped.
-func (cp *ControlPlaneConfig) PlatformTenantEnabled() bool {
-	return cp != nil && strings.TrimSpace(cp.PlatformTenantSlug) != ""
+func (cp *ControlPlaneConfig) PlatformOrgEnabled() bool {
+	return cp != nil && strings.TrimSpace(cp.PlatformOrgSlug) != ""
 }
 
 // UserRegistrationOpen reports whether public native-user self-registration is

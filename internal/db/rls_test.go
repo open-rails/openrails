@@ -7,7 +7,7 @@ import (
 )
 
 // TestRLSPostureError pins the startup gate decision (issue #227): managed
-// multi-tenant deployments (require=true) MUST fail fast if the connected role
+// multi-merchant deployments (require=true) MUST fail fast if the connected role
 // bypasses RLS, while self-hosted (require=false) only warns.
 func TestRLSPostureError(t *testing.T) {
 	cases := []struct {

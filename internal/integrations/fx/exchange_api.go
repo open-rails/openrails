@@ -36,39 +36,47 @@ func NewExchangeAPIProvider() *ExchangeAPIProvider {
 	}
 }
 
-// QuoteToUSD fetches the conversion rate from the given currency to USD.
-func (p *ExchangeAPIProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
-	currency = normalizeCurrency(currency)
+// Quote fetches the conversion rate from one currency to another.
+func (p *ExchangeAPIProvider) Quote(ctx context.Context, fromCurrency, toCurrency string) (*Quote, error) {
+	fromCurrency = normalizeCurrency(fromCurrency)
+	toCurrency = normalizeCurrency(toCurrency)
+	if fromCurrency == "" || toCurrency == "" {
+		return nil, fmt.Errorf("from_currency and to_currency are required")
+	}
 
-	// Short-circuit for USD
-	if currency == "usd" {
+	if fromCurrency == toCurrency {
 		return &Quote{
-			FromCurrency: "usd",
-			ToCurrency:   "usd",
+			FromCurrency: fromCurrency,
+			ToCurrency:   toCurrency,
 			Rate:         1.0,
 			AsOf:         time.Now(),
 		}, nil
 	}
 
 	// Try primary URL first, then fallback
-	rate, asOf, err := p.fetchRate(ctx, p.baseURL, currency)
+	rate, asOf, err := p.fetchRate(ctx, p.baseURL, fromCurrency, toCurrency)
 	if err != nil {
 		// Try fallback
-		rate, asOf, err = p.fetchRate(ctx, fallbackBaseURL, currency)
+		rate, asOf, err = p.fetchRate(ctx, fallbackBaseURL, fromCurrency, toCurrency)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch FX rate for %s: %w", currency, err)
+			return nil, fmt.Errorf("failed to fetch FX rate for %s -> %s: %w", fromCurrency, toCurrency, err)
 		}
 	}
 
 	return &Quote{
-		FromCurrency: currency,
-		ToCurrency:   "usd",
+		FromCurrency: fromCurrency,
+		ToCurrency:   toCurrency,
 		Rate:         rate,
 		AsOf:         asOf,
 	}, nil
 }
 
-func (p *ExchangeAPIProvider) fetchRate(ctx context.Context, baseURL, currency string) (float64, time.Time, error) {
+// QuoteToUSD fetches the conversion rate from the given currency to USD.
+func (p *ExchangeAPIProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
+	return p.Quote(ctx, currency, "usd")
+}
+
+func (p *ExchangeAPIProvider) fetchRate(ctx context.Context, baseURL, currency, target string) (float64, time.Time, error) {
 	url := fmt.Sprintf("%s/%s.json", baseURL, currency)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -118,14 +126,14 @@ func (p *ExchangeAPIProvider) fetchRate(ctx context.Context, baseURL, currency s
 		return 0, time.Time{}, fmt.Errorf("failed to parse rates: %w", err)
 	}
 
-	usdRate, ok := rates["usd"]
+	rate, ok := rates[target]
 	if !ok {
-		return 0, time.Time{}, fmt.Errorf("USD rate not found for currency %s", currency)
+		return 0, time.Time{}, fmt.Errorf("%s rate not found for currency %s", target, currency)
 	}
 
-	if usdRate <= 0 {
-		return 0, time.Time{}, fmt.Errorf("invalid USD rate for currency %s: %f", currency, usdRate)
+	if rate <= 0 {
+		return 0, time.Time{}, fmt.Errorf("invalid %s rate for currency %s: %f", target, currency, rate)
 	}
 
-	return usdRate, asOf, nil
+	return rate, asOf, nil
 }

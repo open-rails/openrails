@@ -52,7 +52,7 @@ type CreateFeatureParams struct {
 	Metadata  map[string]any
 }
 
-// CreateFeature defines a new entitlement feature for the active tenant.
+// CreateFeature defines a new entitlement feature for the active merchant.
 func (s *FeatureService) CreateFeature(ctx context.Context, p CreateFeatureParams) (*models.EntitlementFeature, error) {
 	if s == nil || s.repo == nil {
 		return nil, fmt.Errorf("feature service not initialized")
@@ -84,7 +84,7 @@ func (s *FeatureService) CreateFeature(ctx context.Context, p CreateFeatureParam
 	return f, nil
 }
 
-// ListFeatures returns all features for the active tenant.
+// ListFeatures returns all features for the active merchant.
 func (s *FeatureService) ListFeatures(ctx context.Context) ([]models.EntitlementFeature, error) {
 	if s == nil || s.repo == nil {
 		return nil, fmt.Errorf("feature service not initialized")

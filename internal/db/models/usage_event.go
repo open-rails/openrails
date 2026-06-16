@@ -12,13 +12,13 @@ import (
 // It is the source of truth for usage reporting + #303 invoice line items.
 //
 // Idempotency is enforced by a unique index on
-// (tenant_id, customer_id, event_type, source, source_id): a replayed metered
+// (merchant_id, customer_id, event_type, source, source_id): a replayed metered
 // request neither double-records nor double-charges.
 type UsageEvent struct {
 	ID uuid.UUID `json:"id"`
-	// MerchantID scopes this row to a tenant / billing namespace (issue #223/#227).
-	MerchantID uuid.UUID `json:"tenant_id"`
-	// CustomerID is the tenant subject BILLED for this usage (issue #221, the payer).
+	// MerchantID scopes this row to a merchant / billing namespace (issue #223/#227).
+	MerchantID uuid.UUID `json:"merchant_id"`
+	// CustomerID is the merchant subject BILLED for this usage (issue #221, the payer).
 	CustomerID uuid.UUID `json:"customer_id"`
 	// Invoker is the caller-supplied principal string that caused usage
 	// (opaque to OpenRails; attribution + grouping only, not the payer).

@@ -7,11 +7,11 @@ import (
 )
 
 // Money domain types. Amount precision is implied by Currency (#494).
-// No credit_type dimension — native money is identical for every tenant (#472).
+// No credit_type dimension — native money is identical for every merchant (#472).
 
 type MoneyBalance struct {
 	ID          uuid.UUID `json:"id"`
-	MerchantID  uuid.UUID `json:"tenant_id"`
+	MerchantID  uuid.UUID `json:"merchant_id"`
 	CustomerID  uuid.UUID `json:"customer_id"`
 	Currency    string    `json:"currency"`
 	Balance     int64     `json:"balance"`
@@ -22,7 +22,7 @@ type MoneyBalance struct {
 
 type MoneyTransaction struct {
 	ID              uuid.UUID      `json:"id"`
-	MerchantID      uuid.UUID      `json:"tenant_id"`
+	MerchantID      uuid.UUID      `json:"merchant_id"`
 	CustomerID      uuid.UUID      `json:"customer_id"`
 	Currency        string         `json:"currency"`
 	Invoker         string         `json:"invoker"`
@@ -36,6 +36,7 @@ type MoneyTransaction struct {
 	Captured        *int64         `json:"captured_amount,omitempty"`
 	Source          string         `json:"source"`
 	SourceID        *string        `json:"source_id,omitempty"`
+	InvoiceID       *uuid.UUID     `json:"invoice_id,omitempty"`
 	ExpiresAt       *time.Time     `json:"expires_at,omitempty"`
 	Description     *string        `json:"description,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
@@ -44,7 +45,7 @@ type MoneyTransaction struct {
 
 type MoneyBlock struct {
 	ID                  uuid.UUID  `json:"id"`
-	MerchantID          uuid.UUID  `json:"tenant_id"`
+	MerchantID          uuid.UUID  `json:"merchant_id"`
 	CustomerID          uuid.UUID  `json:"customer_id"`
 	Currency            string     `json:"currency"`
 	OriginalAmount      int64      `json:"original_amount"`
@@ -58,7 +59,7 @@ type MoneyBlock struct {
 // host admits requests against locally. See CreditWindow for the mechanics.
 type MoneyWindow struct {
 	ID            uuid.UUID `json:"id"`
-	MerchantID    uuid.UUID `json:"tenant_id"`
+	MerchantID    uuid.UUID `json:"merchant_id"`
 	CustomerID    uuid.UUID `json:"customer_id"`
 	Currency      string    `json:"currency"`
 	HeldAmount    int64     `json:"held_amount"`
@@ -69,11 +70,11 @@ type MoneyWindow struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// MoneyAccount is the per-(tenant, tenant subject) spend policy and money-in
+// MoneyAccount is the per-(merchant, merchant subject) spend policy and money-in
 // configuration (issue #237). NULL cap columns mean "no cap".
 type MoneyAccount struct {
 	ID         uuid.UUID `json:"id"`
-	MerchantID uuid.UUID `json:"tenant_id"`
+	MerchantID uuid.UUID `json:"merchant_id"`
 	CustomerID uuid.UUID `json:"customer_id"`
 	Currency   string    `json:"currency"`
 
@@ -111,11 +112,11 @@ type MoneyAccount struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// MoneySpendLimit is an optional per-invoker µ$ spend cap under a tenant subject
+// MoneySpendLimit is an optional per-invoker µ$ spend cap under a merchant subject
 // (issue #237). The invoker string is matched against money_transactions.invoker.
 type MoneySpendLimit struct {
 	ID               uuid.UUID `json:"id"`
-	MerchantID       uuid.UUID `json:"tenant_id"`
+	MerchantID       uuid.UUID `json:"merchant_id"`
 	CustomerID       uuid.UUID `json:"customer_id"`
 	Currency         string    `json:"currency"`
 	Invoker          string    `json:"invoker"`

@@ -134,13 +134,15 @@ func (c *remote) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cred
 	}
 	var out CreditHold
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/hold", map[string]any{
-		"customer_id": customerIDString(req.CustomerID),
-		"invoker":     req.Invoker,
-		"currency":    currency,
-		"amount":      req.Amount,
-		"source":      req.Source,
-		"source_id":   req.SourceID,
-		"expires_at":  req.ExpiresAt.Unix(),
+		"customer_id":  customerIDString(req.CustomerID),
+		"invoker":      req.Invoker,
+		"invoker_type": req.InvokerType,
+		"currency":     currency,
+		"amount":       req.Amount,
+		"source":       req.Source,
+		"request_id":   req.RequestID,
+		"resource":     req.Resource,
+		"expires_at":   req.ExpiresAt.Unix(),
 	}, &out)
 	if err != nil {
 		return nil, err
@@ -151,7 +153,7 @@ func (c *remote) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cred
 // CaptureHold implements Client (handler ServiceCaptureHold).
 func (c *remote) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*CreditTransaction, error) {
 	var out CreditTransaction
-	path := "/v1/service/credits/holds/" + req.HoldID.String() + "/capture"
+	path := "/v1/service/credits/holds/" + url.PathEscape(strings.TrimSpace(req.RequestID)) + "/capture"
 	if err := c.do(ctx, http.MethodPost, path, map[string]any{"amount": req.Amount}, &out); err != nil {
 		return nil, err
 	}
@@ -159,8 +161,8 @@ func (c *remote) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cred
 }
 
 // ReleaseHold implements Client (handler ServiceReleaseHold).
-func (c *remote) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
-	return c.do(ctx, http.MethodPost, "/v1/service/credits/holds/"+holdID.String()+"/release", map[string]any{}, nil)
+func (c *remote) ReleaseHold(ctx context.Context, requestID string) error {
+	return c.do(ctx, http.MethodPost, "/v1/service/credits/holds/"+url.PathEscape(strings.TrimSpace(requestID))+"/release", map[string]any{}, nil)
 }
 
 // WithdrawCredits implements Client (handler ServiceWithdrawCredits).
@@ -231,10 +233,10 @@ type captureBody struct {
 }
 
 // Capture implements Client (handler ServiceCaptureHold). Idempotent on the
-// reservation. A nil error means OpenRails accepted the capture.
-func (c *remote) Capture(ctx context.Context, reservationID string, capturedAmount int64, usage *CaptureUsage) error {
-	if strings.TrimSpace(reservationID) == "" {
-		return fmt.Errorf("openrails: capture requires reservation_id")
+// request_id. A nil error means OpenRails accepted the capture.
+func (c *remote) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) error {
+	if strings.TrimSpace(requestID) == "" {
+		return fmt.Errorf("openrails: capture requires request_id")
 	}
 	body := captureBody{Amount: capturedAmount}
 	if usage != nil && strings.TrimSpace(usage.EventType) != "" {
@@ -244,17 +246,17 @@ func (c *remote) Capture(ctx context.Context, reservationID string, capturedAmou
 		body.Source = usage.Source
 		body.SourceID = usage.SourceID
 	}
-	path := "/v1/service/credits/holds/" + url.PathEscape(strings.TrimSpace(reservationID)) + "/capture"
+	path := "/v1/service/credits/holds/" + url.PathEscape(strings.TrimSpace(requestID)) + "/capture"
 	return c.do(ctx, http.MethodPost, path, body, nil)
 }
 
 // Release implements Client (handler ServiceReleaseHold). Idempotent on the
-// reservation. Used when the work fails after a successful authorize/admit.
-func (c *remote) Release(ctx context.Context, reservationID string) error {
-	if strings.TrimSpace(reservationID) == "" {
-		return fmt.Errorf("openrails: release requires reservation_id")
+// request_id. Used when the work fails after a successful authorize/admit.
+func (c *remote) Release(ctx context.Context, requestID string) error {
+	if strings.TrimSpace(requestID) == "" {
+		return fmt.Errorf("openrails: release requires request_id")
 	}
-	path := "/v1/service/credits/holds/" + url.PathEscape(strings.TrimSpace(reservationID)) + "/release"
+	path := "/v1/service/credits/holds/" + url.PathEscape(strings.TrimSpace(requestID)) + "/release"
 	return c.do(ctx, http.MethodPost, path, nil, nil)
 }
 
@@ -382,6 +384,7 @@ func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in T
 		"windows":            in.Windows,
 		"entitled_resources": in.EntitledResources,
 		"budget_windows":     in.BudgetWindows,
+		"policy_currency":    in.PolicyCurrency,
 		"queue_limits":       in.QueueLimits,
 	}
 	if in.MaxConcurrentHeldAmount != 0 {
@@ -414,6 +417,8 @@ func (c *remote) SetMerchantConfiguration(ctx context.Context, in MerchantConfig
 			"key":            w.Key,
 			"window_seconds": w.WindowSeconds,
 			"limit":          w.Limit,
+			"currency":       w.Currency,
+			"cadence":        w.Cadence,
 		})
 	}
 	body := map[string]any{

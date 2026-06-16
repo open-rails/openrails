@@ -66,7 +66,7 @@ func TestReleaseUnits_FloorsAtZero(t *testing.T) {
 // frees by request coords at settlement (#472 G2b/G2c).
 func TestAcquireQueue_HoldAndReleaseByRequest(t *testing.T) {
 	l, ctx := newLimiter(t)
-	base := uuid.NewString() // stands in for tenant:payer:release
+	base := uuid.NewString() // stands in for merchant:payer:release
 	limits := []ratelimit.QueueLimit{{Unit: "request", Max: 2}}
 	ttl := time.Minute
 

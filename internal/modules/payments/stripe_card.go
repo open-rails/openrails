@@ -213,9 +213,9 @@ func UpsertStripeCardForCustomer(
 		if card.Expiry != "" {
 			pm.ExpiryDate = &card.Expiry
 		}
-		// Stamp the payable tenant subject alongside the legacy user_id (#317).
+		// Stamp the payable merchant subject alongside the legacy user_id (#317).
 		if pm.CustomerID, err = repo.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, userID); err != nil {
-			return fmt.Errorf("resolve tenant subject for stripe payment method: %w", err)
+			return fmt.Errorf("resolve merchant subject for stripe payment method: %w", err)
 		}
 		if err := methods.Create(ctx, pm); err != nil {
 			return fmt.Errorf("insert stripe payment method: %w", err)

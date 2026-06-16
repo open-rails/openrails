@@ -70,7 +70,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	nextRetry := now.Add(-time.Minute)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: subID, MerchantID: dbtest.TestTenantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
+		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Processor: string(models.ProcessorMobius),
 		ProcessorSubscriptionID: "sub_mat_" + uuid.New().String(), PaymentMethodID: &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
@@ -118,7 +118,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	sub, err := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(ctx, subID)
 	require.NoError(t, err)
 
-	outcome := worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
+	outcome := worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	assert.Zero(t, nmiMutations.Load(), "materialize must not send a provider mutation")
 
@@ -149,7 +149,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Nil(t, lastRetryAt, "materialize must not write last_retry_at (dunning forensics evidence)")
 
 	// Idempotent: a second materialize pass refreshes the same pending intent.
-	outcome = worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
+	outcome = worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	var intentCount int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -191,7 +191,7 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	nextRetry := now.Add(-time.Minute)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: subID, MerchantID: dbtest.TestTenantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
+		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Processor: string(models.ProcessorMobius),
 		ProcessorSubscriptionID: "sub_wexp_" + uuid.New().String(),
 		CurrentPeriodStartsAt:   &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
@@ -235,7 +235,7 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	sub, err := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(ctx, subID)
 	require.NoError(t, err)
 
-	outcome := worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
+	outcome := worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
 	assert.Equal(t, dunningOutcomeWindowExpired, outcome)
 	assert.Zero(t, nmiMutations.Load(), "window expiry never charges")
 

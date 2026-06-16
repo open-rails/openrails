@@ -29,12 +29,12 @@ func (suite *TestContainerSuite) createTestMoneyBalance(userID string, balance, 
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.money_blocks (id, merchant_id, customer_id, currency, original_amount, remaining_amount, created_at)
 		VALUES ($1, $2, $3, 'USD', $4, $4, $5)`,
-		uuid.New(), dbtest.TestTenantID.UUID(), tenantSubjectID, balance, now)
+		uuid.New(), dbtest.TestMerchantID.UUID(), tenantSubjectID, balance, now)
 	if err != nil {
 		panic(err)
 	}
 	return &models.MoneyBalance{
-		MerchantID: dbtest.TestTenantID.UUID(),
+		MerchantID: dbtest.TestMerchantID.UUID(),
 		CustomerID: tenantSubjectID,
 		Currency:   "USD",
 	}
@@ -72,7 +72,7 @@ func (suite *TestContainerSuite) createTestMoneyHold(userID string, amount int64
 			transaction_type, status, authorized_amount, captured_amount,
 			source, source_id, expires_at, description, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-		hold.ID, dbtest.TestTenantID.UUID(), hold.CustomerID, hold.Currency, hold.Invoker, hold.Amount, hold.BalanceAfter,
+		hold.ID, dbtest.TestMerchantID.UUID(), hold.CustomerID, hold.Currency, hold.Invoker, hold.Amount, hold.BalanceAfter,
 		hold.TransactionType, hold.Status, hold.Authorized, hold.Captured,
 		hold.Source, hold.SourceID, hold.ExpiresAt, hold.Description, hold.CreatedAt, hold.UpdatedAt)
 	if err != nil {
@@ -123,10 +123,10 @@ func (suite *TestContainerSuite) getMoneyBalance(b *models.MoneyBalance) *models
 		panic(err)
 	}
 	if err := suite.Pool.QueryRow(ctx, `
-		SELECT COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)::bigint
-		FROM openrails.money_transactions
+		SELECT COALESCE(SUM(held_amount - settled_amount), 0)::bigint
+		FROM openrails.money_windows
 		WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
-		  AND transaction_type = 'hold' AND status = 'active'`,
+		  AND status = 'open'`,
 		b.MerchantID, b.CustomerID, b.Currency).Scan(&out.HeldBalance); err != nil {
 		panic(err)
 	}

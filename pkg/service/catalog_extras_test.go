@@ -63,7 +63,7 @@ func TestComputeStripeExtras_MarkerClassification(t *testing.T) {
 		// OpenRails-marked but slug unknown locally: OWNED extra.
 		{ID: "prod_ours_extra", Name: "Old Tier", Active: true, Metadata: map[string]string{catalog.StripeMetadataOpenRailsProductKey: "retired"}},
 		// No marker at all: FOREIGN extra (logged, never archived).
-		{ID: "prod_foreign", Name: "Tenant Native", Active: true},
+		{ID: "prod_foreign", Name: "Merchant Native", Active: true},
 	}
 	prices := []catalog.StripePrice{
 		// Matched by content key via lookup_key: NOT an extra.
@@ -75,7 +75,7 @@ func TestComputeStripeExtras_MarkerClassification(t *testing.T) {
 		// OpenRails-marked via lookup_key, already inactive: OWNED extra, Active=false.
 		{ID: "price_ours_inactive", Active: false, LookupKey: "openrails.retired.usd.500.30"},
 		// No marker: FOREIGN extra.
-		{ID: "price_foreign", Active: true, Nickname: "tenant price"},
+		{ID: "price_foreign", Active: true, Nickname: "merchant price"},
 	}
 
 	extras := computeStripeExtras(products, prices, snap)
@@ -255,7 +255,7 @@ func TestArchiveCatalogExtrasVia_EnqueuesOnlyOwnedActiveObjects(t *testing.T) {
 		{Provider: "mobius", ObjectType: "plan", ExternalID: "legacy-vip-plan", Owned: false, Active: true},
 		{Provider: "solana", ObjectType: "plan", ExternalID: "5tzFkiKscXHK5ZXCGbXZxdw7gTfCvqSGpHGxVJD6oxBd", Owned: true, Active: true},
 	}
-	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, dbtest.TestTenantID.UUID(), time.Now().UTC(), extras)
+	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, dbtest.TestMerchantID.UUID(), time.Now().UTC(), extras)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -273,8 +273,8 @@ func TestArchiveCatalogExtrasVia_EnqueuesOnlyOwnedActiveObjects(t *testing.T) {
 		if c.Origin != intents.OriginAdmin {
 			t.Errorf("%s: archive intents must be ADMIN-origin (the --exhaustive flag is a human request), got %q", c.IntentType, c.Origin)
 		}
-		if c.MerchantID != dbtest.TestTenantID.UUID() {
-			t.Errorf("%s: tenant not stamped", c.IntentType)
+		if c.MerchantID != dbtest.TestMerchantID.UUID() {
+			t.Errorf("%s: merchant not stamped", c.IntentType)
 		}
 	}
 	if c, ok := byType[intents.TypeStripeArchivePrice]; !ok {
@@ -328,9 +328,9 @@ func TestArchiveCatalogExtrasVia_ForeignNeverTouchedEvenOnExhaustive(t *testing.
 	extras := []CatalogExtra{
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_foreign", Owned: false, Active: true},
 		{Provider: "stripe", ObjectType: "product", ExternalID: "prod_foreign", Owned: false, Active: true},
-		{Provider: "mobius", ObjectType: "plan", ExternalID: "tenant-plan", Owned: false, Active: true},
+		{Provider: "mobius", ObjectType: "plan", ExternalID: "merchant-plan", Owned: false, Active: true},
 	}
-	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, dbtest.TestTenantID.UUID(), time.Now().UTC(), extras)
+	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, dbtest.TestMerchantID.UUID(), time.Now().UTC(), extras)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestArchiveCatalogExtrasVia_ParkedIsDurableNotError(t *testing.T) {
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_a", Owned: true, Active: true},
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_b", Owned: true, Active: true},
 	}
-	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, dbtest.TestTenantID.UUID(), time.Now().UTC(), extras)
+	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, dbtest.TestMerchantID.UUID(), time.Now().UTC(), extras)
 	if err != nil {
 		t.Fatalf("parked outcomes are NOT an error, got: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestArchiveCatalogExtrasVia_TerminalFailuresAggregate(t *testing.T) {
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_a", Owned: true, Active: true},
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_b", Owned: true, Active: true},
 	}
-	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, dbtest.TestTenantID.UUID(), time.Now().UTC(), extras)
+	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, dbtest.TestMerchantID.UUID(), time.Now().UTC(), extras)
 	if err == nil {
 		t.Fatal("expected an aggregate error when archive intents fail terminally")
 	}

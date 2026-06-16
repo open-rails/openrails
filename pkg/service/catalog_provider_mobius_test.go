@@ -39,7 +39,7 @@ func TestMobiusAdapter_DeterministicPlanIDFormat(t *testing.T) {
 	if got != want {
 		t.Fatalf("plan_id format drift: got %q want %q", got, want)
 	}
-	// No "openrails-"/tenant/application prefix: the content key IS the whole id.
+	// No "openrails-"/merchant/application prefix: the content key IS the whole id.
 	if strings.HasPrefix(got, "openrails-") {
 		t.Fatalf("generated plan_id must not carry an openrails- prefix: %q", got)
 	}

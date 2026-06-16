@@ -22,9 +22,9 @@ import (
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/platform"
-	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -48,7 +48,7 @@ type Dependencies struct {
 	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
 	// the browser-direct self-service surface (issue #339). When set, the host
 	// verifies the incoming credential itself and supplies the explicitly
-	// mapped principal for /v1/self/* + /v1/tenant-admin/*, OVERRIDING the
+	// mapped principal for /v1/self/* + /v1/merchant-admin/*, OVERRIDING the
 	// control plane's default delegated-token verifier.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 }
@@ -71,11 +71,11 @@ type Server struct {
 	controlPlane           *controlplane.ControlPlane
 	captchaStore           *captcha.ChallengeStore
 
-	// tenancy is the tenant provisioning + lifecycle + per-tenant secret service
+	// tenancy is the tenant provisioning + lifecycle + per-merchant secret service
 	// (issue #225). It reuses the control plane's pgx pool (the openrails.*
 	// control-plane DB) and operator-tenant provisioner, and is always built
 	// (#469: the control plane is mandatory on this surface).
-	tenancy *tenancy.Service
+	merchants *merchants.Service
 
 	// Platform superadmin layer (issue #226), DISTINCT from per-tenant operator
 	// admin, sharing the openrails.* control-plane pool. platformMetrics
@@ -83,12 +83,12 @@ type Server struct {
 	// is mounted only when a platform tenant is configured.
 	platformMetrics *platform.Metrics
 
-	// configuredTenant is the construction-time tenant this engine is bound to
-	// (#336), resolved ONCE at boot from cfg.Tenant (a SLUG) → internal
-	// merchant.ID. Zero when no tenant is configured (tenant-owned operations
-	// then hard-fail downstream by design — there is no default tenant). The
+	// configuredMerchant is the construction-time tenant this engine is bound to
+	// (#336), resolved ONCE at boot from cfg.Merchant (a SLUG) → internal
+	// merchant.ID. Zero when no tenant is configured (merchant-owned operations
+	// then hard-fail downstream by design — there is no default merchant). The
 	// gin tenant-resolution middleware and the Solana-secret seed pin it.
-	configuredTenant merchant.ID
+	configuredMerchant merchant.ID
 
 	// publicHandler is the single "full surface" HTTP handler. It includes
 	// health + debug (dev only) + user + admin + webhook routes AND the
@@ -174,17 +174,17 @@ func New(deps Dependencies) (*Server, error) {
 		captchaStore:           captcha.NewChallengeStore(deps.Redis),
 	}
 
-	// Resolve the construction-time tenant SLUG (cfg.Tenant) → internal
+	// Resolve the construction-time tenant SLUG (cfg.Merchant) → internal
 	// merchant.ID exactly once at boot (#336). An empty slug yields the zero id
-	// (no tenant pinned; tenant-owned ops hard-fail downstream by design — no
-	// default tenant); a non-empty-but-unknown slug fails boot.
+	// (no tenant pinned; merchant-owned ops hard-fail downstream by design — no
+	// default merchant); a non-empty-but-unknown slug fails boot.
 	{
 		ctx := context.Background()
-		configured, terr := db.ResolveMerchantSlug(ctx, deps.Runtime.DB.Qx(ctx), deps.Config.Tenant)
+		configured, terr := db.ResolveMerchantSlug(ctx, deps.Runtime.DB.Qx(ctx), deps.Config.Merchant)
 		if terr != nil {
 			return nil, fmt.Errorf("resolve configured tenant: %w", terr)
 		}
-		s.configuredTenant = configured
+		s.configuredMerchant = configured
 	}
 
 	// Wire the live admin-permission checker onto the runtime so mixed
@@ -198,7 +198,7 @@ func New(deps Dependencies) (*Server, error) {
 	// store is the self-hosted default and needs no live Vault; a managed
 	// deployment swaps in the Vault-backed store with the same addressing.
 	{
-		var secretStore tenancy.TenantSecretStore
+		var secretStore merchants.MerchantSecretStore
 		var solanaTransit solanaint.TransitClient
 
 		if deps.Config != nil && deps.Config.Vault != nil && deps.Config.Vault.Enabled {
@@ -217,7 +217,7 @@ func New(deps Dependencies) (*Server, error) {
 			if verr != nil {
 				return nil, fmt.Errorf("vault login: %w", verr)
 			}
-			secretStore = tenancy.NewVaultSecretStore(kvMount, vault.NewKVv2Adapter(vclient, kvMount), tenancy.NewDBTenantSlugResolver(deps.ControlPlane.Pool()))
+			secretStore = merchants.NewVaultSecretStore(kvMount, vault.NewKVv2Adapter(vclient, kvMount), merchants.NewDBMerchantSlugResolver(deps.ControlPlane.Pool()))
 			if vc.UseTransitForSolana {
 				tMount := vc.TransitMount
 				if tMount == "" {
@@ -230,7 +230,7 @@ func New(deps Dependencies) (*Server, error) {
 			// (issue #227). With no master key, most secrets keep the legacy
 			// plaintext behavior, but Solana private keys are write-blocked below so
 			// recurring signing keys are never newly stored plaintext.
-			dbStore, sserr := tenancy.NewDBSecretStore(deps.ControlPlane.Pool())
+			dbStore, sserr := merchants.NewDBSecretStore(deps.ControlPlane.Pool())
 			if sserr != nil {
 				return nil, fmt.Errorf("build tenant secret store: %w", sserr)
 			}
@@ -246,51 +246,51 @@ func New(deps Dependencies) (*Server, error) {
 			if encerr != nil {
 				return nil, fmt.Errorf("build tenant encryptor: %w", encerr)
 			}
-			secretStore, sserr = tenancy.NewEncryptedSecretStore(dbStore, enc)
+			secretStore, sserr = merchants.NewEncryptedSecretStore(dbStore, enc)
 			if sserr != nil {
 				return nil, fmt.Errorf("wrap tenant secret store with encryption: %w", sserr)
 			}
 			if !enc.Enabled() {
-				secretStore = tenancy.NewWriteRestrictedSecretStore(secretStore, map[string]string{
+				secretStore = merchants.NewWriteRestrictedSecretStore(secretStore, map[string]string{
 					solanaint.SecretSolanaPrivateKey: "ENCRYPTION_MASTER_KEY is required before storing DB-backed Solana private keys",
 				})
 			}
 		}
 
 		// Front the chosen store with an in-process TTL cache (#251/#322) so workers
-		// and hot paths resolve a tenant's secret once per window instead of per row /
+		// and hot paths resolve a merchant's secret once per window instead of per row /
 		// request. Default ~15m; a rotation through this node invalidates immediately.
 		// Negative TTL disables it (NewCachedSecretStore returns the store unchanged).
-		secretCacheTTL := tenancy.DefaultSecretCacheTTL
+		secretCacheTTL := merchants.DefaultSecretCacheTTL
 		if deps.Config != nil && deps.Config.Vault != nil && deps.Config.Vault.SecretCacheTTLSeconds != 0 {
 			secretCacheTTL = time.Duration(deps.Config.Vault.SecretCacheTTLSeconds) * time.Second
 		}
-		secretStore = tenancy.NewCachedSecretStore(secretStore, secretCacheTTL)
+		secretStore = merchants.NewCachedSecretStore(secretStore, secretCacheTTL)
 
-		tsvc, terr := tenancy.NewService(deps.ControlPlane.Pool(), secretStore)
+		tsvc, terr := merchants.NewService(deps.ControlPlane.Pool(), secretStore)
 		if terr != nil {
-			return nil, fmt.Errorf("build tenancy service: %w", terr)
+			return nil, fmt.Errorf("build merchants service: %w", terr)
 		}
-		s.tenancy = tsvc
+		s.merchants = tsvc
 		if deps.Runtime != nil {
-			deps.Runtime.Tenancy = tsvc
+			deps.Runtime.Merchants = tsvc
 			if deps.Runtime.CheckoutService != nil {
-				deps.Runtime.CheckoutService.SetTenantSecretStore(secretStore)
+				deps.Runtime.CheckoutService.SetMerchantSecretStore(secretStore)
 			}
 			if deps.Runtime.VaultService != nil {
-				deps.Runtime.VaultService.SetTenantSecretStore(secretStore)
+				deps.Runtime.VaultService.SetMerchantSecretStore(secretStore)
 			}
 		}
 
 		// Single-install bridge (#253): a global-config Solana private key is seeded
-		// only into the CONFIGURED tenant's secret store as solana/private_key
-		// (#336: no default tenant — the seed no-ops when no tenant is configured).
+		// only into the CONFIGURED merchant's secret store as solana/private_key
+		// (#336: no default merchant — the seed no-ops when no tenant is configured).
 		// Named tenants must be configured explicitly by an operator credential
 		// rotation. Idempotent; never overwrites an existing secret. No-op when
 		// Solana is unconfigured or uses Vault Transit (non-extractable key, so no
 		// global private key is set).
 		if pc := deps.Config.GetSolanaProcessor(); pc != nil {
-			if err := recurring.SeedConfiguredTenantSolanaSecret(context.Background(), secretStore, s.configuredTenant, pc.PrivateKey); err != nil {
+			if err := recurring.SeedConfiguredTenantSolanaSecret(context.Background(), secretStore, s.configuredMerchant, pc.PrivateKey); err != nil {
 				return nil, fmt.Errorf("seed configured tenant solana secret: %w", err)
 			}
 		}
@@ -431,15 +431,15 @@ func New(deps Dependencies) (*Server, error) {
 	// delegated-token verifier (#339).
 	s.registerSelfServiceRoutes(s.publicHandler)
 
-	// Tenant-scoped webhook routing (issue #225): /v1/t/:tenant/webhooks/:provider
-	// resolves the tenant from the path slug, then loads THAT tenant's signing
-	// secret and verifies the signature AFTER tenant resolution.
-	s.registerTenantWebhookRoutes(s.publicHandler)
+	// Merchant-scoped webhook routing (issue #225): /v1/m/:merchant/webhooks/:provider
+	// resolves the merchant from the path slug, then loads THAT merchant's signing
+	// secret and verifies the signature AFTER merchant resolution.
+	s.registerMerchantWebhookRoutes(s.publicHandler)
 
-	// Operator-gated tenant provisioning/lifecycle admin API (issue #225).
-	s.registerTenantAdminRoutes(s.publicHandler)
+	// Operator-gated merchant provisioning/lifecycle admin API (issue #225).
+	s.registerMerchantAdminRoutes(s.publicHandler)
 
-	// Platform-superadmin cross-tenant admin API (issue #226), gated by
+	// Platform-superadmin cross-merchant admin API (issue #226), gated by
 	// openrails:platform:superadmin in the SEPARATE platform tenant. No-op without
 	// the control plane / platform tenant configured.
 	s.registerPlatformRoutes(s.publicHandler)
@@ -455,17 +455,17 @@ func (s *Server) newPublicEngine() *gin.Engine {
 		SkipPaths: []string{"/health/live", "/health/ready", "/healthz", "/readyz", "/health"},
 	}))
 	e.Use(ginmw.SecurityHeaders())
-	// Allow-list = global CorsOrigins UNION every tenant's browser-direct
+	// Allow-list = global CorsOrigins UNION every merchant's browser-direct
 	// allowed origins (issue #222 browser tier). Preflight from a configured
 	// tenant origin succeeds; unlisted origins are denied (never a wildcard
 	// outside development).
 	e.Use(ginmw.CORS(s.cfg.AllowedCORSOrigins()))
 	e.Use(ginmw.BodyLimit(middleware.DefaultMaxBodyBytes))
 	// Resolve the tenant / billing namespace before authorization and before any
-	// tenant-owned DB access (issue #223). Pins the construction-time configured
+	// merchant-owned DB access (issue #223). Pins the construction-time configured
 	// tenant resolved once at boot (#336); zero when none is configured, in
-	// which case tenant-owned operations hard-fail (there is no default tenant).
-	e.Use(ginmw.ResolveTenant(s.configuredTenant))
+	// which case merchant-owned operations hard-fail (there is no default merchant).
+	e.Use(ginmw.ResolveMerchant(s.configuredMerchant))
 	if s.authProvider != nil {
 		e.Use(s.authProvider.Optional())
 	}

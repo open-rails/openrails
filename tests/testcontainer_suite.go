@@ -337,17 +337,17 @@ func (suite *TestContainerSuite) runDatabaseMigrations() {
 	err = migrate.RunClickHouse(suite.ctx, suite.Config)
 	require.NoError(suite.t, err)
 
-	// #336: no default tenant — seed the tenant this suite's engine binds to,
-	// then configure it (slug) so ResolveTenant pins it.
+	// #336: no default merchant — seed the tenant this suite's engine binds to,
+	// then configure it (slug) so ResolveMerchant pins it.
 	seedPool, perr := pgxpool.New(suite.ctx, suite.Config.DB.URL)
 	require.NoError(suite.t, perr)
 	_, perr = seedPool.Exec(suite.ctx,
 		`INSERT INTO openrails.merchants (id, slug, name, status)
 		 VALUES ($1, $2, 'Test Merchant', 'active') ON CONFLICT (slug) DO NOTHING`,
-		dbtest.TestTenantID.UUID(), dbtest.TestTenantSlug)
+		dbtest.TestMerchantID.UUID(), dbtest.TestMerchantSlug)
 	seedPool.Close()
 	require.NoError(suite.t, perr)
-	suite.Config.Tenant = dbtest.TestTenantSlug
+	suite.Config.Merchant = dbtest.TestMerchantSlug
 }
 
 func envOrDefault(key, fallback string) string {
@@ -435,13 +435,13 @@ func (suite *TestContainerSuite) initializeServer() {
 	suite.Server = assembled.Server
 
 	// Bootstrap the control plane exactly like the standalone serve path (#312):
-	// ensure the test tenant's AuthKit org exists with the operator role holding
+	// ensure the test merchant's AuthKit org exists with the operator role holding
 	// the full openrails:* catalog, so admin identities created by the test
 	// helpers carry LIVE openrails:admin authority. Idempotent; runs after
 	// migrations (profiles.* + openrails.merchants exist). #336: bootstrap is
 	// pinned to an explicit merchant slug (no default merchant).
 	_, err = embcp.RunBootstrap(suite.ctx, suite.App, controlplane.BootstrapOptions{
-		BootstrapTenantSlug:     dbtest.TestTenantSlug,
+		BootstrapOrgSlug:        dbtest.TestMerchantSlug,
 		MintInitialServiceToken: false,
 	})
 	require.NoError(suite.t, err, "control plane bootstrap")

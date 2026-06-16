@@ -2,10 +2,11 @@ package money
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
-// System currency registry (#472). Currency is system-fixed, NOT tenant-scoped:
+// System currency registry (#472). Currency is system-fixed, NOT merchant-scoped:
 // the codebase is the authority (there is no DB CHECK). amount columns are
 // integers in the currency's registered internal precision.
 
@@ -54,9 +55,19 @@ func CurrencyScale(c string) (int, bool) {
 	return cur.Decimals, ok
 }
 
+// CurrencyCodes returns the registered native currencies in deterministic order.
+func CurrencyCodes() []string {
+	out := make([]string, 0, len(currencies))
+	for code := range currencies {
+		out = append(out, code)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // RequireBillingCurrency enforces the #474/#475 invariant at the billing layer:
 // billing (invoice/owed/charge/auto-topup/account-settings) is external-currency-
-// only, so a qualified custom-credit code (tenant/name, #475) is REJECTED here.
+// only, so a qualified custom-credit code (merchant/name, #475) is REJECTED here.
 // Ledger primitives (Deposit/Withdraw/Hold) keep using the looser ValidateCurrency.
 func RequireBillingCurrency(code string) error {
 	if IsQualifiedUnit(code) {

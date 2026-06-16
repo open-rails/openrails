@@ -12,13 +12,13 @@ import (
 // active access; this row just names a feature and pins its stable LookupKey.
 //
 // LookupKey is the value carried in AuthKit JWT entitlements and host-app
-// checks (e.g. "premium", "api_access"). It is unique per tenant.
+// checks (e.g. "premium", "api_access"). It is unique per merchant.
 type EntitlementFeature struct {
 	ID uuid.UUID `json:"id"`
 
-	// MerchantID scopes this row to a tenant (issue #223/#227). Nullzero + DB
-	// default: inserts that leave it zero fall back to the default tenant.
-	MerchantID uuid.UUID `json:"tenant_id"`
+	// MerchantID scopes this row to a merchant (issue #223/#227). Nullzero + DB
+	// default: inserts that leave it zero fall back to the default merchant.
+	MerchantID uuid.UUID `json:"merchant_id"`
 
 	LookupKey string         `json:"lookup_key"`
 	Name      string         `json:"name"`
@@ -35,7 +35,7 @@ type EntitlementFeature struct {
 type ProductEntitlementFeature struct {
 	ID uuid.UUID `json:"id"`
 
-	MerchantID uuid.UUID `json:"tenant_id"`
+	MerchantID uuid.UUID `json:"merchant_id"`
 
 	ProductID            uuid.UUID `json:"product_id"`
 	EntitlementFeatureID uuid.UUID `json:"entitlement_feature_id"`

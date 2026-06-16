@@ -27,14 +27,14 @@ import (
 )
 
 // This suite proves the consolidated product_access_grants table + its RLS
-// policy enforce durable ownership AND tenant isolation
+// policy enforce durable ownership AND merchant isolation
 // when the app connects as the unprivileged openrails_app role (issue #227/#250).
 // It runs the REAL consolidated Postgres migrations, then drives
-// the productaccess.Service through db.RunInTenantTx (which pins app.merchant_id),
+// the productaccess.Service through db.RunInMerchantTx (which pins app.merchant_id),
 // so it validates the real schema, the real policy, and the GUC plumbing.
 //
 // Asserts: purchase -> grant created; duplicate purchase -> still one grant;
-// refund -> grant revoked; tenant isolation (tenant A's grant invisible to B).
+// refund -> grant revoked; merchant isolation (merchant A's grant invisible to B).
 
 var (
 	pagTenantA = mustTenant("00000000-0000-0000-0000-0000000000a1")
@@ -120,7 +120,7 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 	for _, tt := range []struct {
 		id   merchant.ID
 		slug string
-	}{{pagTenantA, "tenant-a"}, {pagTenantB, "tenant-b"}} {
+	}{{pagTenantA, "merchant-a"}, {pagTenantB, "merchant-b"}} {
 		_, err = superPool.Exec(ctx,
 			`INSERT INTO openrails.merchants (id, slug, name, status) VALUES ($1, $2, $3, 'active') ON CONFLICT (slug) DO NOTHING`,
 			tt.id.UUID(), tt.slug, tt.slug,
@@ -128,7 +128,7 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Seed a product per tenant (superuser bypasses RLS so it can write any tenant).
+	// Seed a product per merchant (superuser bypasses RLS so it can write any merchant).
 	productA := uuid.New()
 	productB := uuid.New()
 	for _, p := range []struct {
@@ -158,7 +158,7 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 	ctxA := merchant.WithID(ctx, pagTenantA)
 	ctxB := merchant.WithID(ctx, pagTenantB)
 
-	// (1) Purchase -> grant created (tenant A).
+	// (1) Purchase -> grant created (merchant A).
 	_, created, err := svc.GrantProductAccess(ctxA, GrantParams{
 		UserID:     userID,
 		ProductID:  productA,
@@ -187,18 +187,18 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, grantsA, 1, "duplicate purchase must yield exactly one grant")
 
-	// (3) Tenant isolation: tenant B cannot see tenant A's grant.
+	// (3) Merchant isolation: merchant B cannot see merchant A's grant.
 	hasB, err := svc.HasProductAccess(ctxB, userID, productA)
 	require.NoError(t, err)
-	require.False(t, hasB, "tenant B must not see tenant A's grant")
+	require.False(t, hasB, "merchant B must not see merchant A's grant")
 	grantsB, err := svc.ListAccessibleProducts(ctxB, userID)
 	require.NoError(t, err)
-	require.Len(t, grantsB, 0, "tenant B's library must be empty")
+	require.Len(t, grantsB, 0, "merchant B's library must be empty")
 
-	// (4) Refund -> grant revoked (tenant A). And it is invisible to B's revoke.
+	// (4) Refund -> grant revoked (merchant A). And it is invisible to B's revoke.
 	nB, err := svc.RevokeProductAccessByPayment(ctxB, paymentID, models.ProductAccessRevokeRefund)
 	require.NoError(t, err)
-	require.Equal(t, int64(0), nB, "tenant B cannot revoke tenant A's grant")
+	require.Equal(t, int64(0), nB, "merchant B cannot revoke merchant A's grant")
 
 	nA, err := svc.RevokeProductAccessByPayment(ctxA, paymentID, models.ProductAccessRevokeRefund)
 	require.NoError(t, err)
@@ -206,5 +206,5 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 
 	hasAfter, err := svc.HasProductAccess(ctxA, userID, productA)
 	require.NoError(t, err)
-	require.False(t, hasAfter, "after refund tenant A has no access")
+	require.False(t, hasAfter, "after refund merchant A has no access")
 }

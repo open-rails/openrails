@@ -26,7 +26,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	require.NotNil(t, rt.SubscriptionService)
 	require.NotNil(t, rt.SubscriptionLifecycleService)
 
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-120 * 24 * time.Hour)
@@ -193,7 +193,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	require.NotNil(t, rt.SubscriptionService)
 	require.NotNil(t, rt.SubscriptionLifecycleService)
 
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-120 * 24 * time.Hour)
 	clock := suite.SetMockClock(t0)

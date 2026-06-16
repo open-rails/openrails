@@ -44,8 +44,8 @@ func TestVaultKVRoundTripAndIsolation(t *testing.T) {
 	ctx := context.Background()
 	kv := NewKVv2Adapter(liveClient(t), "secret")
 
-	pathA := "secret/openrails/tenants/tenant-a/solana/private_key"
-	pathB := "secret/openrails/tenants/tenant-b/solana/private_key"
+	pathA := "secret/openrails/merchants/tenant-a/solana/private_key"
+	pathB := "secret/openrails/merchants/tenant-b/solana/private_key"
 
 	if err := kv.WriteSecret(ctx, pathA, map[string]string{"value": "keyA"}); err != nil {
 		t.Fatalf("write A: %v", err)
@@ -64,7 +64,7 @@ func TestVaultKVRoundTripAndIsolation(t *testing.T) {
 		t.Fatalf("tenant A value = %q, want keyA (isolation/round-trip broken)", got["value"])
 	}
 
-	missing, err := kv.ReadSecret(ctx, "secret/openrails/tenants/tenant-a/does/not/exist")
+	missing, err := kv.ReadSecret(ctx, "secret/openrails/merchants/tenant-a/does/not/exist")
 	if err != nil {
 		t.Fatalf("read missing: %v", err)
 	}

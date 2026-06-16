@@ -5,7 +5,6 @@ package money_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,8 +23,8 @@ func spendTestEnv(t *testing.T) (*money.MoneyService, *pgxpool.Pool, identity.Cu
 
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
-	dbtest.EnsureTestTenant(ctx, t, pool)
-	ctx = dbtest.WithTestTenant(ctx)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	ctx = dbtest.WithTestMerchant(ctx)
 
 	payer := identity.CustomerIDFromString(uuid.NewString())
 	require.False(t, payer.IsZero())
@@ -64,7 +63,7 @@ func TestSpendPolicy_DefaultsAllow(t *testing.T) {
 }
 
 func TestSpendPolicy_DailyCap(t *testing.T) {
-	svc, _, payer, currency, ctx := spendTestEnv(t)
+	svc, _, payer, _, ctx := spendTestEnv(t)
 	cap := int64(1000)
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{MaxSpendPerDay: &cap})
 	require.NoError(t, err)
@@ -83,9 +82,7 @@ func TestSpendPolicy_DailyCap(t *testing.T) {
 	require.Equal(t, money.DenyDailyCap, deny.DenyCode)
 	require.Greater(t, deny.RetryAfterSeconds, int64(0))
 
-	// Active hold counts toward the window too (in-flight exposure).
-	exp := time.Now().Add(time.Hour).UTC()
-	_, err = svc.Hold(ctx, &payer, "user:a", currency, 300, "usage", "req-hold-1", exp) // window now 800
+	_, err = svc.Withdraw(ctx, money.WithdrawParams{CustomerID: &payer, Invoker: "user:a", Currency: money.DefaultCurrency, Amount: 300, Source: "usage"})
 	require.NoError(t, err)
 	deny2, err := svc.CheckSpendAllowed(ctx, payer, money.DefaultCurrency, "user:a", 300) // 800+300 > 1000
 	require.NoError(t, err)
@@ -123,16 +120,14 @@ func TestSpendPolicy_PerInvokerCap(t *testing.T) {
 }
 
 func TestSpendPolicy_OutstandingCeiling(t *testing.T) {
-	svc, _, payer, currency, ctx := spendTestEnv(t)
+	svc, _, payer, _, ctx := spendTestEnv(t)
 	ceil := int64(1000)
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), MaxOutstandingOwedAmount: &ceil,
 	})
 	require.NoError(t, err)
 
-	// Reserve 800 in active holds -> exposure 800.
-	exp := time.Now().Add(time.Hour).UTC()
-	_, err = svc.Hold(ctx, &payer, "user:a", currency, 800, "usage", "req-out-1", exp)
+	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "req-out-1", 800)
 	require.NoError(t, err)
 
 	deny, err := svc.CheckSpendAllowed(ctx, payer, money.DefaultCurrency, "user:a", 300) // 800+300 > 1000

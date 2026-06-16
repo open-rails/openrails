@@ -2,7 +2,7 @@ OpenRails is a self-hostable billing server that makes adding billing to your vi
 
 OpenRails is perfect for:
 
-- SaaS products: Your tenants buy a plan, and we bill them per seat. Tenants can upgrade/downgrade their plan-tier with proration.
+- SaaS products: Your merchants buy a plan, and we bill them per seat. Merchants can upgrade/downgrade their plan-tier with proration.
 - Adult sites: Your users buy recurring subscriptions; we handle the subscription-lifecycle (prevent duplicate subscriptions, cancellation, manual-dunning, etc.) Build your own OnlyFans, Pornhub, etc.
 - Digital Storefronts: Your users buy videos / courses / downloads individually. Define your own products + prices; we manage ownership-records. Build your own Shopify, Gumroad, etc.
 - Video Games: in-game transactions.
@@ -50,7 +50,7 @@ As a result, self-hosted instances only need to meet PCI compliance requirements
 | Database | Owns its schema (can share your Postgres instance) | Shares your `pgx` pool (or connects itself) |
 
 Pick **standalone** when OpenRails should be its own service, when non-Go services need it,
-or when one OpenRails instance serves multiple applications (multi-tenant). Pick **embedded**
+or when one OpenRails instance serves multiple applications (multi-merchant). Pick **embedded**
 for one-binary deployments where your app is the only consumer. The two modes expose the
 same billing engine and the same route surface; the difference is **where the trust boundary
 sits**, which is also what decides how authentication works in each mode — read the next
@@ -68,7 +68,7 @@ The rule across both modes is: **one credential per trust domain.**
   **One token.** OpenRails never parses your credential at all.
 - **Standalone:** OpenRails is a separate system across a network boundary, and it always
   runs its own AuthKit control plane — the in-process authority that issues and verifies
-  these credentials, holds the runtime tenant/issuer registry, and gates admin routes.
+  these credentials, holds the runtime merchant/issuer registry, and gates admin routes.
   (There is no control-plane-less "verifier-only" standalone; a private deployment keeps
   `public_user_registration` / `public_tenant_registration` closed, which is the default.)
   Identity claims that cross that boundary must be independently verifiable, so each caller
@@ -134,7 +134,7 @@ curl http://localhost:2053/health
 The public API listens on `:2053`: user routes, the self-service surface, admin routes,
 webhooks, and the server-to-server `/v1/service/*` routes all share the port. See
 [docs/api/endpoints.md](docs/api/endpoints.md) for the full HTTP reference and
-[docs/tenant-provisioning.md](docs/tenant-provisioning.md) for creating your tenant and
+[docs/merchant-provisioning.md](docs/merchant-provisioning.md) for creating your merchant and
 its first service token.
 
 ### 2. Backend integration (service tokens)
@@ -156,31 +156,31 @@ curl -X POST https://openrails.example/v1/service/credits/holds/{id}/capture \
 ```
 
 Service tokens carry explicit permissions (`openrails:credits:write`,
-`openrails:credits:read`, `openrails:catalog:write`, …) and are bound to your tenant —
-a token can never act on another tenant's data. Other `/v1/service/*` groups cover
+`openrails:credits:read`, `openrails:catalog:write`, …) and are bound to your merchant —
+a token can never act on another merchant's data. Other `/v1/service/*` groups cover
 admission/rate-limiting (`/admit`, `/budget`, `/tier-policies`), account settings, credit
 windows, usage rollups, and the issuer registry used in the next step.
 
 ### 3. Frontend integration (delegated tokens)
 
-Your users are not OpenRails users — they are *subjects of your tenant*. The browser talks
+Your users are not OpenRails users — they are *subjects of your merchant*. The browser talks
 to OpenRails directly using a short-lived delegated token that **your backend signs**.
 
 **3a. Register your issuer (one-time setup).** Tell OpenRails which signing keys speak for
-your tenant. Publish a JWKS endpoint (you almost certainly already have one for your own
+your merchant. Publish a JWKS endpoint (you almost certainly already have one for your own
 auth) and register it:
 
 ```bash
-curl -X POST https://openrails.example/v1/service/tenant/issuers \
+curl -X POST https://openrails.example/v1/service/merchant/issuers \
   -H "Authorization: Bearer openrails_st_..." \
   -d '{"issuer": "https://api.yourapp.com",
        "jwks_uri": "https://api.yourapp.com/.well-known/jwks.json",
        "audiences": ["openrails"]}'
 ```
 
-The tenant is bound from your service token, so you can only register issuers for your own
-tenant; issuer strings are globally unique, which is what makes cross-tenant token forgery
-impossible. `POST /v1/service/tenant/issuers/disable` is the per-issuer kill switch;
+The merchant is bound from your service token, so you can only register issuers for your own
+merchant; issuer strings are globally unique, which is what makes cross-merchant token forgery
+impossible. `POST /v1/service/merchant/issuers/disable` is the per-issuer kill switch;
 key *rotation* is just re-`POST`ing with the new JWKS.
 
 **3b. Mint delegated tokens on your backend.** Add one endpoint to your API that exchanges
@@ -242,8 +242,8 @@ POST /v1/self/checkout                    hosted/tokenized checkout session
 
 There is no `:user_id` anywhere on this surface — every route is scoped to the token's
 `delegated_sub`, so a browser token can only ever act on its own subject. CORS origins for
-browser-direct calls are configured per tenant. A parallel `/v1/tenant-admin/*` surface
-exists for your staff, using the same token mechanism with `openrails:tenant:*` permissions.
+browser-direct calls are configured per merchant. A parallel `/v1/merchant-admin/*` surface
+exists for your staff, using the same token mechanism with `openrails:merchant:*` permissions.
 
 ### 4. Webhooks
 
@@ -274,8 +274,9 @@ var myAuth billingauth.Authenticator = billingauth.AuthenticatorFunc(
             UserID:       claims.Subject,      // required: the payer/principal (opaque to OpenRails)
             Email:        claims.Email,        // optional
             Username:     claims.Username,     // optional
-            Tenant:       claims.Tenant,       // optional: empty if you have no tenant model
-            Roles:        claims.Roles,        // optional
+            Org:          claims.Org,          // optional: AuthKit org context
+            OrgRoles:     claims.OrgRoles,     // optional: roles within Org
+            Roles:        claims.Roles,        // optional host-level roles
             Entitlements: claims.Entitlements, // optional
         }, nil
     })
@@ -348,7 +349,7 @@ ents, _ := svc.ListActiveEntitlements(ctx, userID, time.Now())
 
 ### 4. Browser self-service in embedded mode (one credential)
 
-The browser-direct self-service surface (`/v1/self/*`, `/v1/tenant-admin/*`) exists in
+The browser-direct self-service surface (`/v1/self/*`, `/v1/merchant-admin/*`) exists in
 embedded mode too — authenticated by **your** credential, not a delegated token. Implement
 `billingauth.DelegatedAuthenticator`: verify the request however you like, then return the
 explicitly mapped principal:
@@ -361,7 +362,7 @@ opts.DelegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(
             return nil, billingauth.ErrUnauthenticated
         }
         return &billingauth.DelegatedPrincipal{
-            // Single-tenant deployments use the well-known default tenant id.
+            // Single-merchant deployments use the well-known default merchant id.
             TenantID:    "00000000-0000-0000-0000-000000000001",
             SubjectID:   user.ID,                       // the billing subject (= delegated_sub)
             Issuer:      "https://auth.yourapp.com",    // audit: who vouched
@@ -371,8 +372,8 @@ opts.DelegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(
     })
 ```
 
-The mapping is **explicit and fail-closed**: an empty tenant or subject is rejected with
-401, and a principal carrying any non-`self`/`tenant` permission is refused — the same
+The mapping is **explicit and fail-closed**: an empty merchant or subject is rejected with
+401, and a principal carrying any non-`self`/`merchant` permission is refused — the same
 catalog gate real delegated tokens pass through. This interface is the in-process twin of
 the standalone delegated token: same translation, no wire credential, because there is no
 wire. The self surface is mounted by the gin/standalone handler (`embgin.Handler`); the
@@ -380,7 +381,7 @@ plain `NewHTTPHandler` mux carries the user/admin/webhook groups.
 
 ### 5. Admin routes
 
-Admin authority is the **live `openrails:admin` permission in the caller's own tenant**,
+Admin authority is the **live `openrails:admin` permission in the caller's own org**,
 checked per request against the control plane — OpenRails never interprets your role names,
 and there is no role-string fallback. The standalone service always runs the control plane;
 for embedded hosts it is opt-in
@@ -399,7 +400,7 @@ or your own tooling instead — admin routes without a permission checker fail c
   keys billing state to it verbatim. Identity attributes (email, username) are optional,
   non-authoritative metadata for things like checkout prefill.
 - **Admin authority:** the live `openrails:admin` permission evaluated at request time in
-  the caller's own tenant (see embedded guide §5). Never derived from role names.
+  the caller's own org (see embedded guide §5). Never derived from role names.
 - **Sandbox vs live:** `TEST_ENV=true` routes every processor to its test/sandbox
   environment and enforces sandbox credentials so you can't accidentally charge a real
   card. It is **off by default — including in dev** — and is rejected outside
@@ -580,14 +581,14 @@ Pulls the payment processor's records and compares to OpenRails local records, l
 Reports error codes from PS-1...PS-10.
 
 ```bash
-openrails reconcile check --tenant=<slug>                 # advisory: fetch + diff + persist findings, zero writes
-openrails reconcile fix --tenant=<slug>                   # enforce: same diff + local convergence writes; every applied change is logged and recorded on the finding
-openrails reconcile report --tenant=<slug>                # latest run: summary, open findings, dunning forensics
-openrails reconcile report --tenant=<slug> --run=<uuid>   # a specific run
+openrails reconcile check --merchant=<slug>                 # advisory: fetch + diff + persist findings, zero writes
+openrails reconcile fix --merchant=<slug>                   # enforce: same diff + local convergence writes; every applied change is logged and recorded on the finding
+openrails reconcile report --merchant=<slug>                # latest run: summary, open findings, dunning forensics
+openrails reconcile report --merchant=<slug> --run=<uuid>   # a specific run
 
 # common flags:
-#   --tenant=<slug-or-id>                 (default: the seeded "default" tenant —
-#                                          on multi-tenant installs you almost always want this set)
+#   --merchant=<slug-or-id>                 (default: the seeded "default" merchant —
+#                                          on multi-merchant installs you almost always want this set)
 #   --provider=nmi,ccbill,stripe,solana   (default: all configured)
 #   --since=2026-01-01 --until=2026-06-01 (transaction window)
 #   --format=table|json
@@ -604,9 +605,9 @@ intents execute under `limited`, system-origin only under `full`, nothing under
 `readonly`.
 
 ```bash
-openrails intents --tenant=<slug>                         # pending intents + drain forecast by mode
-openrails intents --tenant=<slug> --status=all            # full ledger history
-openrails intents --tenant=<slug> --type=nmi_delete_subscription --format=json
+openrails intents --merchant=<slug>                         # pending intents + drain forecast by mode
+openrails intents --merchant=<slug> --status=all            # full ledger history
+openrails intents --merchant=<slug> --type=nmi_delete_subscription --format=json
 
 # also: GET /v1/admin/intents?status=&processor=&type=&subscription_id=
 ```
@@ -615,7 +616,7 @@ Intents are bound to the provider ACCOUNT they were enqueued against (an
 account fingerprint stamped at enqueue): swapping credentials to a different
 NMI/Stripe account parks the pending queue instead of executing it against the
 wrong account. After a confirmed same-account credential change, re-stamp with
-`openrails intents refingerprint --provider=<name> --tenant=<slug> --yes`.
+`openrails intents refingerprint --provider=<name> --merchant=<slug> --yes`.
 See docs/operations.md ("Account guard / credential rotation").
 
 ### The two pending-work queues
@@ -629,7 +630,7 @@ current mode is parked here as `pending`, and the executor drains it the moment 
 mode allows. This is the dry run for "what happens when we let it loose":
 
 ```bash
-openrails intents --tenant=<slug>          # pending rows + the drain forecast footer:
+openrails intents --merchant=<slug>          # pending rows + the drain forecast footer:
                                            #   "N execute under mode=limited, M require mode=full"
 # HTTP: GET /v1/admin/intents              (each row carries executes_under: limited|full)
 ```
@@ -645,7 +646,7 @@ queued for a human and stay `admin_pending` forever until acted on. Raising the 
 does nothing to this queue — that is the safety design, not an oversight:
 
 ```bash
-openrails reconcile report --tenant=<slug>   # open findings of the latest run, incl. the admin queue
+openrails reconcile report --merchant=<slug>   # open findings of the latest run, incl. the admin queue
 
 # HTTP, filterable across runs:
 #   GET  /v1/admin/reconcile/findings?admin_queue=true&status=admin_pending
@@ -662,7 +663,7 @@ The next reconcile run independently verifies reality converged.
 - **HTTP API reference:** [docs/api/endpoints.md](docs/api/endpoints.md)
 - **Operations manual:** [docs/operations.md](docs/operations.md) — provider consistency, the durability model, dunning, safety levers, and `billing reconcile check|fix|report`: the manual batch truth-pull that diffs and (on `fix`) converges local state to the payment processors (#107; never writes to a provider).
 - **Entitlements model:** [docs/entitlements_timeline.md](docs/entitlements_timeline.md)
-- **Tenant provisioning & service tokens:** [docs/tenant-provisioning.md](docs/tenant-provisioning.md)
+- **Merchant provisioning & service tokens:** [docs/merchant-provisioning.md](docs/merchant-provisioning.md)
 - **Testing with business time:** [docs/business-time.md](docs/business-time.md)
 - More runbooks (Solana, NMI/Mobius sandbox, vault secrets, reconciliation) under `docs/`.
 

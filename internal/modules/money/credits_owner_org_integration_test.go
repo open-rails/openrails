@@ -12,12 +12,12 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for migratekit
-	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -76,8 +76,8 @@ func startOwnerTenantPostgres(t *testing.T) (*db.DB, string, context.Context) {
 	require.NoError(t, m.ApplyMigrations(ctx, migrations))
 
 	dbi := dbtest.OpenAppDB(t, dsn)
-	dbtest.EnsureTestTenant(ctx, t, dbi.Pool())
-	return dbi, dsn, dbtest.WithTestTenant(ctx)
+	dbtest.EnsureTestMerchant(ctx, t, dbi.Pool())
+	return dbi, dsn, dbtest.WithTestMerchant(ctx)
 }
 
 // money_balances schema constraint tests removed (#491): the cache table is
@@ -99,13 +99,9 @@ func seedSpendable(t *testing.T, ctx context.Context, svc *money.MoneyService, u
 	require.NoError(t, err)
 }
 
-// TestReserveCapturePartial_ConservesTotal proves Reserve(Hold) ->
-// CaptureHold(partial) -> remainder released conserves the payer's total:
-// available + held returns to (initial - captured), with the unused reservation
-// fully released back to available.
-func TestReserveCapturePartial_ConservesTotal(t *testing.T) {
+func TestPostedSpend_ConservesTotal(t *testing.T) {
 	dbi, _, ctx := startOwnerTenantPostgres(t)
-	svc := money.NewMoneyService(dbi, clockwork.NewRealClock())
+	svc := money.NewMoneyService(dbi)
 
 	userID := uuid.NewString()
 	const initial = int64(1000)
@@ -116,47 +112,54 @@ func TestReserveCapturePartial_ConservesTotal(t *testing.T) {
 	require.Equal(t, initial, bal0.Balance)
 	require.Equal(t, int64(0), bal0.HeldBalance)
 
-	// Reserve 400.
-	hold, err := svc.Hold(ctx, nil, userID, money.DefaultCurrency, 400, "api", "req-rc-1", time.Now().Add(time.Hour).UTC())
-	require.NoError(t, err)
-
-	balHeld, err := svc.GetBalance(ctx, userID, money.DefaultCurrency)
-	require.NoError(t, err)
-	require.Equal(t, initial, balHeld.Balance)
-	require.Equal(t, int64(400), balHeld.HeldBalance)
-	require.Equal(t, initial, balHeld.Balance-balHeld.HeldBalance+400) // available + held == initial
-
-	// Capture only 150 of the 400; the remaining 250 reservation is released.
-	_, err = svc.CaptureHold(ctx, hold.ID, 150)
+	payer := identity.CustomerIDFromString(userID)
+	err = svc.SpendCredits(ctx, money.SpendParams{
+		Payer:    &payer,
+		Invoker:  userID,
+		Currency: money.DefaultCurrency,
+		Amount:   150,
+		Source:   "api",
+		SourceID: "req-spend-1",
+	})
 	require.NoError(t, err)
 
 	balFinal, err := svc.GetBalance(ctx, userID, money.DefaultCurrency)
 	require.NoError(t, err)
-	// CONSERVATION: balance dropped by exactly the captured amount, hold released.
-	require.Equal(t, initial-150, balFinal.Balance, "only the captured amount leaves the balance")
-	require.Equal(t, int64(0), balFinal.HeldBalance, "unused reservation fully released")
+	require.Equal(t, initial-150, balFinal.Balance, "only the posted spend leaves the balance")
+	require.Equal(t, int64(0), balFinal.HeldBalance, "request holds are Redis state, not durable money held")
 	require.Equal(t, initial-150, balFinal.Balance-balFinal.HeldBalance, "available == initial - captured")
 }
 
-// TestReserveRelease_RestoresFullBalance proves Reserve(Hold) -> ReleaseHold
-// restores the full available balance: no money consumed.
-func TestReserveRelease_RestoresFullBalance(t *testing.T) {
+func TestSpendIdempotency_RestoresSameBalanceOnReplay(t *testing.T) {
 	dbi, _, ctx := startOwnerTenantPostgres(t)
-	svc := money.NewMoneyService(dbi, clockwork.NewRealClock())
+	svc := money.NewMoneyService(dbi)
 
 	userID := uuid.NewString()
 	const initial = int64(500)
 	seedSpendable(t, ctx, svc, userID, initial)
 
-	hold, err := svc.Hold(ctx, nil, userID, money.DefaultCurrency, 300, "api", "req-rr-1", time.Now().Add(time.Hour).UTC())
+	payer := identity.CustomerIDFromString(userID)
+	err := svc.SpendCredits(ctx, money.SpendParams{
+		Payer:    &payer,
+		Invoker:  userID,
+		Currency: money.DefaultCurrency,
+		Amount:   300,
+		Source:   "api",
+		SourceID: "req-replay-1",
+	})
 	require.NoError(t, err)
-
-	_, relErr := svc.ReleaseHold(ctx, hold.ID)
-	require.NoError(t, relErr)
+	err = svc.SpendCredits(ctx, money.SpendParams{
+		Payer:    &payer,
+		Invoker:  userID,
+		Currency: money.DefaultCurrency,
+		Amount:   300,
+		Source:   "api",
+		SourceID: "req-replay-1",
+	})
+	require.NoError(t, err)
 
 	bal, err := svc.GetBalance(ctx, userID, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, initial, bal.Balance, "release must not consume money")
-	require.Equal(t, int64(0), bal.HeldBalance, "release must clear the hold")
-	require.Equal(t, initial, bal.Balance-bal.HeldBalance, "full available balance restored")
+	require.Equal(t, initial-300, bal.Balance, "replaying the same source/source_id must not spend twice")
+	require.Equal(t, int64(0), bal.HeldBalance)
 }

@@ -104,6 +104,37 @@ func (q *Queries) CaptureBudgetReservationsByCoords(ctx context.Context, arg Cap
 	return result.RowsAffected(), nil
 }
 
+const captureBudgetReservationsByCoordsReservedAmount = `-- name: CaptureBudgetReservationsByCoordsReservedAmount :execrows
+UPDATE openrails.budget_inflight_holds
+SET status = 'captured', captured = amount
+WHERE merchant_id = $1 AND customer_id = $2
+  AND currency = $5
+  AND source = $3 AND source_id = $4 AND status = 'active'
+`
+
+type CaptureBudgetReservationsByCoordsReservedAmountParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Source     string
+	SourceID   string
+	Currency   string
+}
+
+// Settle ALL scopes reserved under one request at their own reserved amount.
+func (q *Queries) CaptureBudgetReservationsByCoordsReservedAmount(ctx context.Context, arg CaptureBudgetReservationsByCoordsReservedAmountParams) (int64, error) {
+	result, err := q.db.Exec(ctx, captureBudgetReservationsByCoordsReservedAmount,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Source,
+		arg.SourceID,
+		arg.Currency,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteBudgetPolicy = `-- name: DeleteBudgetPolicy :execrows
 DELETE FROM openrails.budget_policies
 WHERE merchant_id = $1 AND customer_id = $2

@@ -1,6 +1,6 @@
 // Package budgets implements the fixed-window money-budget engine (#304, #337).
 //
-// A delegated user (invoker) under a tenant subject is capped to a money budget
+// A delegated user (invoker) under a merchant subject is capped to a money budget
 // over one or more FIXED windows with knowable reset boundaries (e.g. "$2 per
 // 5h, $14 per 7d"). Windows are anchored to each user's OWN first charged
 // request, so reset boundaries are naturally staggered across users — there is
@@ -28,7 +28,7 @@
 //     A reservation counts against a window iff created_at >= that window's
 //     current window_start.
 //   - openrails.budget_window_state (one row per
-//     tenant/subject/invoker/currency/window key, migration 005/#494): the window
+//     merchant/subject/invoker/currency/window key, migration 005/#494): the window
 //     anchor. Reserve locks it FOR UPDATE so concurrent reserves around a
 //     boundary serialize; the rolling engine had no such serialization point.
 package budgets
@@ -55,13 +55,13 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// ErrCustomerRequired is returned when a budget operation is given a zero tenant subject
+// ErrCustomerRequired is returned when a budget operation is given a zero merchant subject
 // id. Like the credits engine, the payer is supplied by the caller and is never
 // synthesized.
 var ErrCustomerRequired = errors.New("customer_id required")
 
 // ErrReservationNotFound is returned by Capture/Release when no active
-// reservation with the given id exists for the request tenant.
+// reservation with the given id exists for the request merchant.
 var ErrReservationNotFound = errors.New("budget_reservation_not_found")
 
 // Window cadences. Empty defaults to session.
@@ -99,6 +99,10 @@ type BudgetWindow struct {
 	WindowSeconds int64
 	// Limit is the spend cap over the window, in the row currency's internal precision.
 	Limit int64
+	// Currency is the policy currency for callers composing cross-currency
+	// enforcement. The budget engine still receives the effective currency as a
+	// method argument; this field lets admission validate mixed policies.
+	Currency string
 	// Cadence is "session" (default) or "fixed"; see the package comment.
 	Cadence string
 }
@@ -123,7 +127,7 @@ type WindowStatus struct {
 	RetryAfterSeconds int64     `json:"retry_after_seconds,omitempty"`
 }
 
-// Service is the fixed-window money-budget engine over a tenant-scoped DB. The
+// Service is the fixed-window money-budget engine over a merchant-scoped DB. The
 // clock is injectable so tests can advance time past a window.
 type Service struct {
 	db    *db.DB
@@ -179,7 +183,7 @@ func (s *Service) Check(ctx context.Context, payer identity.CustomerID, invoker,
 
 	var statuses []WindowStatus
 	var allowed bool
-	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
 		statuses, allowed, _, e = s.computeWindows(ctx, s.db.Qx(ctx), payer, invoker, cur, windows, requestedAmount, false)
 		return e
@@ -192,7 +196,7 @@ func (s *Service) Check(ctx context.Context, payer identity.CustomerID, invoker,
 
 // Reserve idempotently reserves amount against the invoker's windows.
 //
-// It is idempotent on (tenant, payer, invoker, source, source_id): if a matching
+// It is idempotent on (merchant, payer, invoker, source, source_id): if a matching
 // reservation row already exists it is returned as-is (allowed=true), regardless
 // of the current window state. Otherwise it locks the invoker's window-state rows
 // FOR UPDATE, runs the window computation, and — when every window allows the
@@ -236,7 +240,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.CustomerID, invoke
 		statuses      []WindowStatus
 		allowed       bool
 	)
-	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 
 		// Materialize the payable customers row so the budget_reservations /
@@ -365,7 +369,7 @@ func (s *Service) Capture(ctx context.Context, reservationID uuid.UUID, actual i
 	if actual < 0 {
 		return fmt.Errorf("captured amount must be non-negative")
 	}
-	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		n, err := s.db.Gen(ctx).CaptureBudgetReservation(ctx, gen.CaptureBudgetReservationParams{
 			ID: reservationID, Captured: actual,
 		})
@@ -385,7 +389,7 @@ func (s *Service) Release(ctx context.Context, reservationID uuid.UUID) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("budgets service not initialized")
 	}
-	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		n, err := s.db.Gen(ctx).ReleaseBudgetReservation(ctx, reservationID)
 		if err != nil {
 			return err
@@ -455,7 +459,7 @@ func windowStateFromGen(r gen.OpenrailsBudgetWindowState) *models.BudgetWindowSt
 
 // computeWindows runs the per-window state resolution + aggregation on the
 // supplied queryable handle (a tx during Reserve, the pinned conn during
-// Check). qx must already be tenant-scoped (TenantTx / RunInTenantConn) so
+// Check). qx must already be merchant-scoped (MerchantTx / RunInMerchantConn) so
 // RLS constrains the rows.
 //
 // With lock=true (Reserve) the window-state rows are read FOR UPDATE in

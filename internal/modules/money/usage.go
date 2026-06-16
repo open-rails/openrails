@@ -20,7 +20,7 @@ import (
 // host supplies the final Amount (in the currency's internal precision); OpenRails
 // records the event AND debits the ledger atomically.
 type RecordUsageParams struct {
-	// Payer is the tenant subject BILLED for this usage (the payer). When nil it is
+	// Payer is the merchant subject BILLED for this usage (the payer). When nil it is
 	// resolved from Invoker (self-hosted/personal case), never synthesized.
 	Payer     *identity.CustomerID
 	Invoker   string // invoker (attribution only)
@@ -41,7 +41,7 @@ type RecordUsageParams struct {
 
 // RecordUsage durably records a metered usage event AND debits the credit ledger
 // in ONE transaction (issue #289). Idempotent on
-// (tenant, payer, event_type, source, source_id): a replayed request returns the
+// (merchant, payer, event_type, source, source_id): a replayed request returns the
 // existing event and never double-charges. Concurrency-safe: the balance row is
 // locked FOR UPDATE before the idempotency check, so two concurrent identical
 // records serialize and the second sees the first's event.
@@ -75,7 +75,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 	}
 
 	var ev *models.UsageEvent
-	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		tid, terr := merchant.Require(ctx)
 		if terr != nil {
@@ -85,7 +85,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		payerID := payer.UUID()
 		now := s.now()
 
-		// Serialize per (tenant, payer) so the idempotency check below
+		// Serialize per (merchant, payer) so the idempotency check below
 		// can't race a concurrent identical record into a double charge.
 		if _, err := s.lockBalance(ctx, q, payer, params.Invoker, cur); err != nil {
 			return err
@@ -185,7 +185,7 @@ type UsageRollupRow struct {
 }
 
 // AggregateUsage rolls up an payer's usage_events over [from, to) grouped by
-// event_type, with summed dimensions. RLS-scoped to the request tenant. This is
+// event_type, with summed dimensions. RLS-scoped to the request merchant. This is
 // the rollup layer — it is NEVER called on the per-request admission hot path.
 func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) ([]UsageRollupRow, error) {
 	if s == nil || s.db == nil {
@@ -206,7 +206,7 @@ func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.Custom
 	payerID := payer.UUID()
 
 	rows := map[string]*UsageRollupRow{}
-	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
 		totals, err := q.AggregateUsageTotals(ctx, gen.AggregateUsageTotalsParams{
 			MerchantID: tenantID, CustomerID: payerID,

@@ -26,7 +26,7 @@ import (
 func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -44,7 +44,7 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 	solRepo := dbrepo.NewSolanaSubscriptionRepo(dbi)
 	solRow := &models.SolanaSubscription{
 		ID:                       uuid.New(),
-		MerchantID:               uuid.New(),
+		MerchantID:               dbtest.TestMerchantID.UUID(),
 		SubscriptionID:           subID,
 		SubscriberWallet:         "wallet_" + uuid.NewString(),
 		AuthorityPDA:             "auth_" + uuid.NewString(),
@@ -97,7 +97,7 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -141,6 +141,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 		ID:               productID,
 		Slug:             "test_product_" + uuid.NewString(),
 		DisplayName:      "Test Product",
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		Description:      &desc,
 		EntitlementsSpec: entSpec,
 		Status:           string(models.CatalogStatusActive),
@@ -156,6 +157,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 		Status:           string(models.CatalogStatusActive),
 		Amount:           999,
 		Currency:         "usd",
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		BillingCycleDays: &cycleDays,
 		CreatedAt:        now,
 		UpdatedAt:        now,
@@ -168,6 +170,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time
 		CustomerID:            dbtest.EnsureCustomerIDPgx(ctx, t, dbi.Pool(), userID),
 		ProductID:             productID,
 		PriceID:               &subPriceID,
+		MerchantID:            dbtest.TestMerchantID.UUID(),
 		Status:                string(models.StatusActive),
 		Processor:             string(models.ProcessorSolana),
 		CurrentPeriodStartsAt: &periodStart,

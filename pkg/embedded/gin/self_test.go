@@ -14,7 +14,7 @@ import (
 )
 
 // These tests pin the EMBEDDED mount of the host-pluggable self surface
-// (#339/#467): newSelfHandler serves /billing/v1/self/* (and tenant-admin)
+// (#339/#467): newSelfHandler serves /billing/v1/self/* (and merchant-admin)
 // at the canonical embedded paths, authenticated by the host-supplied
 // DelegatedAuthenticator, with the per-route permission gates intact.
 // They mirror the ginroutes host-principal tests but assert the EMBEDDED
@@ -31,11 +31,11 @@ func (s stubSelfAuthenticator) AuthenticateDelegated(context.Context, *http.Requ
 
 func selfPrincipal(perms ...string) *billingauth.DelegatedPrincipal {
 	return &billingauth.DelegatedPrincipal{
-		MerchantID:  dbtest.TestTenantID.String(),
-		TenantSlug:  dbtest.TestTenantSlug,
-		SubjectID:   "0d4cdb35-9f3f-4a16-bb83-90a8aa20a2c1",
-		Issuer:      "platform:host",
-		Permissions: perms,
+		MerchantID:   dbtest.TestMerchantID.String(),
+		MerchantSlug: dbtest.TestMerchantSlug,
+		SubjectID:    "0d4cdb35-9f3f-4a16-bb83-90a8aa20a2c1",
+		Issuer:       "platform:host",
+		Permissions:  perms,
 	}
 }
 
@@ -81,9 +81,9 @@ func TestSelfHandler_EmbeddedPathsMountedAndGated(t *testing.T) {
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 
-	// The tenant-admin subtree is mounted on the same handler (read perm
+	// The merchant-admin subtree is mounted on the same handler (read perm
 	// missing => 403 proves mount + auth, not 404).
-	w = doSelf(readOnly, http.MethodGet, "/billing/v1/tenant-admin/subscriptions")
+	w = doSelf(readOnly, http.MethodGet, "/billing/v1/merchant-admin/subscriptions")
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }
 

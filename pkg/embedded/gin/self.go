@@ -19,7 +19,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// SelfHandler returns the mountable browser-direct SELF-SERVICE + TENANT-ADMIN
+// SelfHandler returns the mountable browser-direct SELF-SERVICE + MERCHANT-ADMIN
 // surface for an embedded host (issues #339/#467), authenticated by the
 // host-supplied billingauth.DelegatedAuthenticator from Options — one system,
 // one credential: the host verifies its own token and returns the explicitly
@@ -30,7 +30,7 @@ import (
 // NewHTTPHandler surface:
 //
 //	/billing/v1/self/*          (RegisterSelfServiceRoutes — openrails:self:*)
-//	/billing/v1/tenant-admin/*  (RegisterTenantAdminRoutes — openrails:tenant:*)
+//	/billing/v1/merchant-admin/*  (RegisterMerchantAdminRoutes — openrails:merchant:*)
 //
 // so a host that mounts NewHTTPHandler under /billing without prefix stripping
 // can route these two subtrees to this handler and everything else to the
@@ -59,7 +59,7 @@ func SelfHandler(e *embedded.Embedded) (http.Handler, error) {
 	return newSelfHandler(a.Config, a.Runtime, a.DelegatedAuthenticator), nil
 }
 
-// newSelfHandler assembles the self + tenant-admin gin engine and wraps it in
+// newSelfHandler assembles the self + merchant-admin gin engine and wraps it in
 // the neutral net/http base middleware stack (the gin-free analogue embedhttp
 // uses). Split from SelfHandler so the routing/auth behavior is unit-testable
 // without a live app graph.
@@ -70,7 +70,7 @@ func newSelfHandler(cfg *config.Config, rt *app.Runtime, authn billingauth.Deleg
 	delegatedMW := ginmw.DelegatedPrincipalRequired(authn)
 	base := engine.Group(embedhttp.EmbeddedV1Prefix)
 	ginroutes.RegisterSelfServiceRoutes(base.Group(ginroutes.SelfRoutePrefix), rt, delegatedMW)
-	ginroutes.RegisterTenantAdminRoutes(base.Group(ginroutes.TenantAdminRoutePrefix), rt, delegatedMW)
+	ginroutes.RegisterMerchantAdminRoutes(base.Group(ginroutes.MerchantAdminRoutePrefix), rt, delegatedMW)
 
 	var origins []string
 	if cfg != nil {
@@ -86,9 +86,9 @@ func newSelfHandler(cfg *config.Config, rt *app.Runtime, authn billingauth.Deleg
 		configured merchant.ID
 		err        error
 	)
-	if cfg != nil && cfg.Tenant != "" && rt != nil && rt.DB != nil {
+	if cfg != nil && cfg.Merchant != "" && rt != nil && rt.DB != nil {
 		ctx := context.Background()
-		configured, err = db.ResolveMerchantSlug(ctx, rt.DB.Qx(ctx), cfg.Tenant)
+		configured, err = db.ResolveMerchantSlug(ctx, rt.DB.Qx(ctx), cfg.Merchant)
 		if err != nil {
 			msg := fmt.Sprintf("embedded billing self handler: %v", err)
 			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -102,6 +102,6 @@ func newSelfHandler(cfg *config.Config, rt *app.Runtime, authn billingauth.Deleg
 		middleware.SecurityHeadersHTTP(),
 		middleware.CORSHTTP(origins),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.ResolveTenantHTTP(configured),
+		middleware.ResolveMerchantHTTP(configured),
 	)
 }

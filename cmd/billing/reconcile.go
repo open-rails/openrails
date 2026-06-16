@@ -33,26 +33,26 @@ func newReconcileCmd() *cobra.Command {
 	}
 
 	var (
-		providers  []string
-		since      string
-		until      string
-		format     string
-		tenantSlug string
-		runIDStr   string
+		providers    []string
+		since        string
+		until        string
+		format       string
+		merchantSlug string
+		runIDStr     string
 	)
 	addRunFlags := func(c *cobra.Command) {
 		c.Flags().StringSliceVar(&providers, "provider", nil, "Provider(s) to reconcile: nmi, ccbill, stripe, solana (default: all configured)")
 		c.Flags().StringVar(&since, "since", "", "Transaction window start (RFC3339 or YYYY-MM-DD)")
 		c.Flags().StringVar(&until, "until", "", "Transaction window end (RFC3339 or YYYY-MM-DD)")
 		c.Flags().StringVar(&format, "format", "table", "Output format: table, json")
-		c.Flags().StringVar(&tenantSlug, "tenant", "", "Tenant slug or id (required)")
+		c.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (required)")
 	}
 
 	checkCmd := &cobra.Command{
 		Use:   "check",
 		Short: "Advisory reconcile: fetch + diff + persist findings, ZERO local writes",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runReconcileCLI(c, reconcile.ModeAdvisory, providers, since, until, format, tenantSlug)
+			return runReconcileCLI(c, reconcile.ModeAdvisory, providers, since, until, format, merchantSlug)
 		},
 	}
 	addRunFlags(checkCmd)
@@ -61,29 +61,29 @@ func newReconcileCmd() *cobra.Command {
 		Use:   "fix",
 		Short: "Enforce reconcile: fetch + diff + apply idempotent LOCAL convergence writes (never touches a processor); PS-1 findings whose identity AND plan resolve unambiguously are materialized as local subscriptions, the rest stay admin_pending",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runReconcileCLI(c, reconcile.ModeEnforce, providers, since, until, format, tenantSlug)
+			return runReconcileCLI(c, reconcile.ModeEnforce, providers, since, until, format, merchantSlug)
 		},
 	}
 	addRunFlags(fixCmd)
 
 	reportCmd := &cobra.Command{
 		Use:   "report",
-		Short: "Show a run's summary, open findings, and dunning forensics (latest run by default)",
+		Short: "Show a run's summary, open findings, and dunning forensics (latest run by default merchant)",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runReconcileReport(c, runIDStr, format, tenantSlug)
+			return runReconcileReport(c, runIDStr, format, merchantSlug)
 		},
 	}
 	reportCmd.Flags().StringVar(&runIDStr, "run", "", "Run ID (default: the latest run)")
 	reportCmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
-	reportCmd.Flags().StringVar(&tenantSlug, "tenant", "", "Tenant slug or id (required)")
+	reportCmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (required)")
 
 	cmd.AddCommand(checkCmd, fixCmd, reportCmd)
 	return cmd
 }
 
-// withReconcileApp bootstraps the application, resolves the tenant, and runs
-// fn on a tenant-pinned connection so every engine read/write is RLS-scoped.
-func withReconcileApp(cmd *cobra.Command, tenantSlug string, fn func(ctx context.Context, application *app.App) error) error {
+// withReconcileApp bootstraps the application, resolves the merchant, and runs
+// fn on a merchant-pinned connection so every engine read/write is RLS-scoped.
+func withReconcileApp(cmd *cobra.Command, merchantSlug string, fn func(ctx context.Context, application *app.App) error) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	application, err := app.Bootstrap(cfg)
 	if err != nil {
@@ -95,30 +95,30 @@ func withReconcileApp(cmd *cobra.Command, tenantSlug string, fn func(ctx context
 		}
 	}()
 
-	tid, err := resolveReconcileTenant(cmd.Context(), application, tenantSlug)
+	tid, err := resolveReconcileMerchant(cmd.Context(), application, merchantSlug)
 	if err != nil {
 		return err
 	}
 	ctx := merchant.WithID(cmd.Context(), tid)
-	return application.Runtime.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+	return application.Runtime.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		return fn(ctx, application)
 	})
 }
 
-func resolveReconcileTenant(ctx context.Context, application *app.App, slug string) (merchant.ID, error) {
+func resolveReconcileMerchant(ctx context.Context, application *app.App, slug string) (merchant.ID, error) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
-		// No default tenant (#336): reconciliation must target a named tenant.
-		return merchant.ID{}, fmt.Errorf("--tenant is required (slug or id of the tenant to reconcile)")
+		// No default merchant (#336): reconciliation must target a named merchant.
+		return merchant.ID{}, fmt.Errorf("--merchant is required (slug or id of the merchant to reconcile)")
 	}
 	if tid, err := merchant.ParseID(slug); err == nil {
 		return tid, nil
 	}
 	var id string
 	if err := application.Runtime.DB.DataPool().
-		QueryRow(ctx, `SELECT id::text FROM openrails.tenants WHERE lower(slug) = lower($1)`, slug).
+		QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1)`, slug).
 		Scan(&id); err != nil {
-		return merchant.ID{}, fmt.Errorf("resolve tenant %q: %w", slug, err)
+		return merchant.ID{}, fmt.Errorf("resolve merchant %q: %w", slug, err)
 	}
 	return merchant.ParseID(id)
 }
@@ -138,7 +138,7 @@ func parseReconcileCLITime(s, name string) (time.Time, error) {
 	return t, nil
 }
 
-func runReconcileCLI(cmd *cobra.Command, mode reconcile.Mode, providerNames []string, sinceStr, untilStr, format, tenantSlug string) error {
+func runReconcileCLI(cmd *cobra.Command, mode reconcile.Mode, providerNames []string, sinceStr, untilStr, format, merchantSlug string) error {
 	sinceT, err := parseReconcileCLITime(sinceStr, "since")
 	if err != nil {
 		return err
@@ -152,7 +152,7 @@ func runReconcileCLI(cmd *cobra.Command, mode reconcile.Mode, providerNames []st
 		provs = append(provs, reconcile.Provider(strings.ToLower(strings.TrimSpace(p))))
 	}
 
-	return withReconcileApp(cmd, tenantSlug, func(ctx context.Context, application *app.App) error {
+	return withReconcileApp(cmd, merchantSlug, func(ctx context.Context, application *app.App) error {
 		rt := application.Runtime
 		fetchers := reconcile.BuildFetchers(rt.Config, reconcile.FetcherClients{
 			NMIClients:     rt.NMIClients,
@@ -190,8 +190,8 @@ func runReconcileCLI(cmd *cobra.Command, mode reconcile.Mode, providerNames []st
 	})
 }
 
-func runReconcileReport(cmd *cobra.Command, runIDStr, format, tenantSlug string) error {
-	return withReconcileApp(cmd, tenantSlug, func(ctx context.Context, application *app.App) error {
+func runReconcileReport(cmd *cobra.Command, runIDStr, format, merchantSlug string) error {
+	return withReconcileApp(cmd, merchantSlug, func(ctx context.Context, application *app.App) error {
 		store := &reconcile.PGStore{DB: application.Runtime.DB}
 
 		var (

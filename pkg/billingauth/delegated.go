@@ -8,29 +8,29 @@ import (
 )
 
 // DelegatedPrincipal is the resolved identity a host supplies for the
-// browser-direct SELF-SERVICE surface (/v1/self/* and /v1/tenant-admin/*,
+// browser-direct SELF-SERVICE surface (/v1/self/* and /v1/merchant-admin/*,
 // issue #339). It is the framework-neutral counterpart of the control plane's
 // resolved delegated token: the host verifies the incoming credential however
 // it likes (its own federated-issuer registry, a session, a gateway header)
 // and returns the EXPLICITLY mapped {tenant, subject, permissions} principal.
 //
 // EXPLICIT SUBSYSTEM MAPPING — NO FALLBACKS: the host must resolve BOTH the
-// OpenRails tenant and the acting subject itself. OpenRails performs no
-// try-tenant-then-subject (or any other implicit) resolution on a
+// OpenRails merchant and the acting subject itself. OpenRails performs no
+// try-merchant-then-subject (or any other implicit) resolution on a
 // host-supplied principal; a principal with an empty/invalid tenant or
 // subject is rejected with 401 (fail closed).
 type DelegatedPrincipal struct {
-	// MerchantID is the resolved OpenRails tenant id in UUID string form
-	// (REQUIRED). The mapping from the host's credential to this tenant is
+	// MerchantID is the resolved OpenRails merchant id in UUID string form
+	// (REQUIRED). The mapping from the host's credential to this merchant is
 	// per-deployment configuration owned by the host — explicit, never inferred.
-	// There is no default tenant to fall back to (#336): a deployment must
-	// resolve a real tenant id here.
+	// There is no default merchant to fall back to (#336): a deployment must
+	// resolve a real merchant id here.
 	MerchantID string
 
-	// TenantSlug is the tenant's display/audit slug (optional).
-	TenantSlug string
+	// MerchantSlug is the merchant's display/audit slug (optional).
+	MerchantSlug string
 
-	// SubjectID is the acting tenant_subject: the canonical end-user /
+	// SubjectID is the acting customer: the canonical end-user /
 	// subject id every self-service read and write is scoped to (REQUIRED).
 	// The host is responsible for presenting the CANONICAL id (the shared
 	// subject across all of its issuers) — OpenRails uses this value verbatim
@@ -44,7 +44,7 @@ type DelegatedPrincipal struct {
 	Issuer string
 
 	// Permissions are the granted permission strings. They must come from the
-	// delegated catalog (`openrails:self:*` / `openrails:tenant:*`); OpenRails
+	// delegated catalog (`openrails:self:*` / `openrails:merchant:*`); OpenRails
 	// rejects a principal carrying any service/operator grant, mirroring the
 	// verify-time catalog gate on real delegated tokens. At least one
 	// permission is required.
@@ -63,7 +63,7 @@ type DelegatedPrincipal struct {
 var ErrDelegatedPrincipalInvalid = errors.New("delegated principal requires an explicit tenant and subject")
 
 // Validate enforces the explicit-mapping contract: a usable principal carries
-// a non-empty tenant id and subject. (Tenant-id FORMAT and the permission
+// a non-empty merchant id and subject. (Merchant-id FORMAT and the permission
 // catalog are enforced by the adapting middleware, which owns those types.)
 func (p *DelegatedPrincipal) Validate() error {
 	if p == nil || strings.TrimSpace(p.MerchantID) == "" || strings.TrimSpace(p.SubjectID) == "" {

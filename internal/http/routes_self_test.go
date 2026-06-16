@@ -24,7 +24,7 @@ type mountTestDelegatedAuthenticator struct{}
 
 func (mountTestDelegatedAuthenticator) AuthenticateDelegated(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 	return &billingauth.DelegatedPrincipal{
-		MerchantID:  dbtest.TestTenantID.String(),
+		MerchantID:  dbtest.TestMerchantID.String(),
 		SubjectID:   "11111111-1111-1111-1111-111111111111",
 		Permissions: []string{controlplane.PermSelfBillingRead},
 	}, nil
@@ -47,8 +47,8 @@ func TestRegisterSelfServiceRoutes_MountedWithHostDelegatedAuthenticatorOnly(t *
 	e.ServeHTTP(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 
-	// The tenant-admin surface mounts alongside, gated the same way.
-	req = httptest.NewRequest(http.MethodGet, "/v1/tenant-admin/subscriptions", nil)
+	// The merchant-admin surface mounts alongside, gated the same way.
+	req = httptest.NewRequest(http.MethodGet, "/v1/merchant-admin/subscriptions", nil)
 	w = httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())

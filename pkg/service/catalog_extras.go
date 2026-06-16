@@ -62,7 +62,7 @@ import (
 // Stripe objects must carry the openrails_product_key / openrails_price_key
 // metadata or an "openrails."-prefixed lookup_key; NMI plans must match the
 // content-addressed "<slug>-<currency>-<amount>-<cycle>" plan_id shape; Solana
-// sunset candidates come from our own stored plan handles. Foreign (tenant-
+// sunset candidates come from our own stored plan handles. Foreign (merchant-
 // owned, unrelated) provider objects are LISTED in the report but NEVER
 // touched, even under --exhaustive.
 //

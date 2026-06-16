@@ -503,7 +503,7 @@ func TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites(t *testing.T)
 	// later IsEntitled(now)==false unambiguously proves window-expiry revoked it.
 	entStart := time.Now().Add(-30 * 24 * time.Hour).UTC()
 	entEnd := time.Now().Add(30 * 24 * time.Hour).UTC()
-	suite.InsertEntitlement(dbtest.WithTestTenant(ctx), &models.Entitlement{
+	suite.InsertEntitlement(dbtest.WithTestMerchant(ctx), &models.Entitlement{
 		ID:          uuid.New(),
 		CustomerID:  suite.ensureCustomer(ctx, expiredUser),
 		Entitlement: "premium",
@@ -557,7 +557,7 @@ func TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites(t *testing.T)
 	assert.Nil(t, expired.NextRetryAt)
 	assert.Nil(t, expired.RetryAttempts)
 
-	entitled, err := rt.EntitlementService.IsEntitled(dbtest.WithTestTenant(ctx), expiredUser, "premium", time.Now().UTC())
+	entitled, err := rt.EntitlementService.IsEntitled(dbtest.WithTestMerchant(ctx), expiredUser, "premium", time.Now().UTC())
 	require.NoError(t, err)
 	assert.False(t, entitled, "window-expiry cancellation revokes entitlements")
 

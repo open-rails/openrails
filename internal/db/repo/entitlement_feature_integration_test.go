@@ -21,7 +21,7 @@ import (
 // (including 050 RLS + the openrails_app role, and 062 which puts FORCE RLS on the
 // entitlement-feature tables), and returns a *db.DB connected AS the unprivileged
 // openrails_app role — the only role for which RLS actually enforces. Driving the
-// feature repo through this DB + TenantTx exercises the SAME tenant-scoping
+// feature repo through this DB + MerchantTx exercises the SAME merchant-scoping
 // chokepoint as production (GUC pinned per tx) on real tables.
 func startFeatureRLSPostgres(t *testing.T) (appDB *db.DB, ctx context.Context) {
 	t.Helper()
@@ -40,11 +40,11 @@ func startFeatureRLSPostgres(t *testing.T) (appDB *db.DB, ctx context.Context) {
 	return appDB, ctx
 }
 
-// seedTenantAndProduct inserts a tenant + one product (super-owned would bypass
-// RLS, but here we run everything as the app role inside the correct tenant tx).
+// seedTenantAndProduct inserts a merchant + one product (super-owned would bypass
+// RLS, but here we run everything as the app role inside the correct merchant tx).
 func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid merchant.ID, productID uuid.UUID, slug string) {
 	t.Helper()
-	require.NoError(t, appDB.TenantTx(merchant.WithID(ctx, tid), func(ctx context.Context, tx pgx.Tx) error {
+	require.NoError(t, appDB.MerchantTx(merchant.WithID(ctx, tid), func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO openrails.merchants (id, slug, name, status) VALUES ($1, $2, $2, 'active') ON CONFLICT (id) DO NOTHING`,
 			tid.UUID(), "t-"+tid.String()[:8],
@@ -60,7 +60,7 @@ func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid m
 }
 
 // TestEntitlementFeatureRepo_TenantIsolation proves that a feature created in
-// tenant A is NOT visible, attachable, or detachable from tenant B. It exercises
+// merchant A is NOT visible, attachable, or detachable from merchant B. It exercises
 // the real repo against real RLS-enforced tables (app role + per-tx GUC).
 func TestEntitlementFeatureRepo_TenantIsolation(t *testing.T) {
 	appDB, ctx := startFeatureRLSPostgres(t)
@@ -76,39 +76,39 @@ func TestEntitlementFeatureRepo_TenantIsolation(t *testing.T) {
 	ctxA := merchant.WithID(ctx, tA)
 	ctxB := merchant.WithID(ctx, tB)
 
-	// (1) Create a feature in tenant A.
+	// (1) Create a feature in merchant A.
 	var featureA *models.EntitlementFeature
-	require.NoError(t, appDB.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
+	require.NoError(t, appDB.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
 		featureA = &models.EntitlementFeature{LookupKey: "premium", Name: "Premium"}
 		return NewEntitlementFeatureRepo(db.NewWithPgxTx(tx)).CreateFeature(ctx, featureA)
 	}))
 	require.NotEqual(t, uuid.UUID{}, featureA.ID)
 	require.Equal(t, tA.UUID(), featureA.MerchantID)
 
-	// (2) Tenant A lists exactly its one feature; tenant B sees none.
-	require.NoError(t, appDB.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
+	// (2) Merchant A lists exactly its one feature; merchant B sees none.
+	require.NoError(t, appDB.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
 		got, err := NewEntitlementFeatureRepo(db.NewWithPgxTx(tx)).ListFeatures(ctx)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		require.Equal(t, "premium", got[0].LookupKey)
 		return nil
 	}))
-	require.NoError(t, appDB.TenantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
+	require.NoError(t, appDB.MerchantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
 		got, err := NewEntitlementFeatureRepo(db.NewWithPgxTx(tx)).ListFeatures(ctx)
 		require.NoError(t, err)
-		require.Len(t, got, 0, "tenant B must not see tenant A's feature")
+		require.Len(t, got, 0, "merchant B must not see merchant A's feature")
 		return nil
 	}))
 
-	// (3) Tenant B cannot fetch tenant A's feature by id (RLS + explicit filter).
-	require.NoError(t, appDB.TenantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
+	// (3) Merchant B cannot fetch merchant A's feature by id (RLS + explicit filter).
+	require.NoError(t, appDB.MerchantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := NewEntitlementFeatureRepo(db.NewWithPgxTx(tx)).GetFeatureByID(ctx, featureA.ID)
-		require.Error(t, err, "tenant B must not read tenant A's feature by id")
+		require.Error(t, err, "merchant B must not read merchant A's feature by id")
 		return nil
 	}))
 
-	// (4) Attach the feature to product A within tenant A; then list it back.
-	require.NoError(t, appDB.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
+	// (4) Attach the feature to product A within merchant A; then list it back.
+	require.NoError(t, appDB.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
 		rr := NewEntitlementFeatureRepo(db.NewWithPgxTx(tx))
 		days := 30
 		require.NoError(t, rr.AttachFeatureToProduct(ctx, &models.ProductEntitlementFeature{
@@ -126,22 +126,22 @@ func TestEntitlementFeatureRepo_TenantIsolation(t *testing.T) {
 		return nil
 	}))
 
-	// (5) Tenant B sees no product features on its own product, and cannot attach
-	//     tenant A's feature (the feature id is invisible/foreign under RLS).
-	require.NoError(t, appDB.TenantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
+	// (5) Merchant B sees no product features on its own product, and cannot attach
+	//     merchant A's feature (the feature id is invisible/foreign under RLS).
+	require.NoError(t, appDB.MerchantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
 		rr := NewEntitlementFeatureRepo(db.NewWithPgxTx(tx))
 		pfs, err := rr.ListProductFeatures(ctx, productB)
 		require.NoError(t, err)
 		require.Len(t, pfs, 0)
 
-		// Attaching tenant A's feature id from tenant B must fail: the FK target
-		// row is invisible to tenant B (RLS) and the FK enforces against the row,
+		// Attaching merchant A's feature id from merchant B must fail: the FK target
+		// row is invisible to merchant B (RLS) and the FK enforces against the row,
 		// so the insert is rejected.
 		err = rr.AttachFeatureToProduct(ctx, &models.ProductEntitlementFeature{
 			ProductID:            productB,
 			EntitlementFeatureID: featureA.ID,
 		})
-		require.Error(t, err, "tenant B must not attach tenant A's feature")
+		require.Error(t, err, "merchant B must not attach merchant A's feature")
 		return nil
 	}))
 }

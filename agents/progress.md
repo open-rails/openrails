@@ -7,529 +7,587 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 501
+next_id: 510
 
 ---
 
-# #500: Make merchant ownership AuthKit-org anchored
+# #508: Processor-backed invoice collection
 
-**Completed:** no
+**Status:** COMPLETE 2026-06-16: OpenRails can collect finalized/open invoices through the supported saved-payment
+rails: Stripe test-mode invoices and NMI/Mobius stored-vault sales. The collection router validates
+merchant/customer/payment-method scope, rejects locally failed payment methods, excludes CCBill/Solana from arbitrary
+invoice collection, records settled/failed `invoice_payments`, applies settled payments to invoices and the owed ledger,
+persists Stripe `in_...` ids, and is wired into `ArrearsChargeWorker`.
 
-OpenRails merchants should have one durable administrative owner: an AuthKit org.
-Users, service tokens, and remote applications are not owners. They are credentials/principals that receive authority
-through the owning org and then act on the OpenRails merchant owned by that org.
-
-## Model
-- `merchant -> owner_org_id`: exactly one AuthKit org owns/administers a merchant in standalone/control-plane mode.
-- `org -> users/service_tokens/remote_applications`: AuthKit controls membership, roles, service tokens, and JWKS
-  remote applications.
-- `credential -> org authority -> merchant`: a user session, service token, or remote-application self-token gets
-  OpenRails merchant control only through AuthKit org grants.
-- `org 1 -> many merchants`; `merchant -> one owner org`.
-- Embedded/no-AuthKit mode may keep out-of-band ownership, but it should be explicit and should not create a second
-  general ownership model.
-
-## Decisions
-- Do not make merchants ownable by bare users.
-- Do not make merchants ownable by service tokens.
-- Do not make merchants ownable by remote applications/JWKS issuers.
-- Keep service tokens and remote applications as grantable authentication factors under the owning org.
-- Prefer a bootstrap-created owner org for standalone merchants, even when the issuer/merchant is provisioned from
-  manifest/bootstrap files. This keeps later admin UI, token rotation, JWKS rotation, and permission changes on the
-  same path as normal merchants.
+The remaining provider-platform items that were previously listed here were pruned as over-broad for this issue:
+async Stripe webhook repair, Connect routing, manual/admin retry UI, out-of-band payment recording, support reporting,
+and generalized provider capability matrices belong in future operational/provider-hardening issues if needed.
 
 ## Tasks
-- [ ] Rename OpenRails terminology from `owner_tenant_id` to `owner_org_id` in schema comments, Go structs, generated
-      query names, route payloads, tests, and docs. Keep a migration-safe rollout; do not change AuthKit org semantics.
-- [ ] Decide nullability:
-      - standalone/control-plane merchants require `owner_org_id`.
-      - embedded/no-AuthKit merchants may have `owner_org_id NULL` only when OpenRails delegates security entirely to
-        the embedding host.
-- [ ] Add or tighten DB constraints/indexes:
-      - keep `idx_merchants_owner_org_id` for owner lookup.
-      - consider `NOT NULL` only if embedded rows are split or explicitly marked, otherwise use application-level
-        validation for standalone provisioning.
-      - preserve `org 1 -> many merchants`; do not add unique owner constraint.
-- [ ] Update merchant provisioning/bootstrap:
-      - standalone bootstrap creates or resolves the AuthKit owner org first.
-      - merchant provisioning records that org id as `owner_org_id`.
-      - manifest bootstrap can still create issuer + merchant, but should also bind both to the same owner org.
-- [ ] Update service-token merchant control:
-      - resolve service token through AuthKit.
-      - use the token's owning org id as the authority anchor.
-      - authorize named merchant access by checking `merchant.owner_org_id == token.org_id`.
-      - keep merchant/customer resource scopes as OpenRails resource constraints, not ownership.
-- [ ] Update remote-application merchant control:
-      - resolve JWKS self-token through AuthKit remote application.
-      - use AuthKit-stored org membership/permissions as authority.
-      - authorize named merchant access through the owning org; do not treat the issuer itself as merchant owner.
-      - decide whether the common path should use `remote_application.org_id` owner directly or the RA's granted org
-        membership. Prefer one documented path and fail closed when missing.
-- [ ] Add/confirm required AuthKit permissions:
-      - org owners/admins can administer merchants by default through `*`.
-      - narrower roles can grant OpenRails merchant permissions without making a user/token/RA the owner.
-      - remote-application management remains AuthKit-side (`org:remote_applications:manage`), separate from
-        OpenRails merchant permissions.
-- [ ] Update HTTP/control-plane authorization:
-      - admin/service routes that name a merchant verify caller authority against `owner_org_id`.
-      - routes that infer a single merchant from the caller fail closed if the org owns zero or multiple active
-        merchants unless the route names a merchant explicitly.
-      - unowned/bootstrap-only merchants are not controllable by arbitrary credentials.
-- [ ] Update docs/progress comments that currently say tenant-owned merchant or `owner_tenant_id`.
-- [ ] Add migration/schema tests proving:
-      - `merchants` has the owner-org column/comment/index.
-      - many merchants can share one owner org.
-      - standalone provisioning rejects/does not create a controllable merchant without an owner org.
-- [ ] Add control-plane tests proving:
-      - user/service token/JWKS principal with org permission can administer that org's merchant.
-      - same credentials cannot administer a merchant owned by another org.
-      - service token resource scope can narrow access but cannot expand ownership.
-      - remote application without the required org authority cannot control a merchant.
-      - embedded/no-AuthKit path remains explicitly out-of-band.
-- [ ] Run `task sqlc`, targeted control-plane/tenancy tests, `go test ./...`, and `task build`.
+- [x] Inventory current invoice collection tables and saved-method data:
+      `invoices`, `invoice_items`, `invoice_payments`, `money_transactions`, `money_settings`,
+      `payment_methods`, and `processor_customers`.
+- [x] Implement `money.ScopedCharger` to validate merchant/customer/payment-method scope before provider dispatch.
+- [x] Reject locally failed/stale payment methods before provider dispatch.
+- [x] Exclude CCBill and Solana from arbitrary invoice collection.
+- [x] Route NMI/Mobius invoice collection through stored customer-vault sales.
+- [x] Route Stripe invoice collection through Stripe invoice item/create/finalize/pay against a saved `pm_...`.
+- [x] Persist Stripe external invoice ids on OpenRails invoices.
+- [x] Record successful invoice collection as settled `invoice_payments` plus invoice-linked `owed_payment` ledger rows.
+- [x] Record hard declines as failed `invoice_payments` without reducing the receivable.
+- [x] Keep transient adapter errors retryable without creating local settled payments.
+- [x] Wire `ArrearsChargeWorker` to the configured runtime collection router.
+- [x] Add guarded live processor tests for Stripe test mode and NMI/Mobius sandbox, requiring
+      `TEST_ENV=true OPENRAILS_LIVE_PROCESSOR_TESTS=1`.
 
 ## Acceptance
-- Merchant ownership has exactly one durable in-band model: AuthKit org ownership.
-- Users, service tokens, and remote applications control merchants only through grants on that org.
-- Standalone/bootstrap OpenRails creates or binds an owner org instead of relying on ownerless merchants.
-- Existing embedded mode remains possible, but its out-of-band security boundary is explicit.
-- No code path treats issuer, service token, or user id as the durable owner of a merchant.
+- [x] Open invoices with a valid saved Stripe payment method can be collected and marked paid.
+- [x] Open invoices with a valid saved NMI/Mobius vault payment method can be collected and marked paid.
+- [x] A repeated collection job cannot double-apply a paid invoice.
+- [x] A hard decline leaves the invoice receivable intact and records failure metadata.
+- [x] CCBill/Solana cannot be selected for arbitrary invoice collection.
+- [x] A merchant/customer cannot collect with another merchant/customer's saved payment method.
+- [x] A locally failed payment method cannot be used for invoice collection.
+
+## Validation
+- [x] `task sqlc`
+- [x] Fake-adapter success/failure/retry integration tests.
+- [x] Stripe fake-server success/failure integration tests.
+- [x] NMI fake-provider success/failure integration tests.
+- [x] Guarded Stripe test-account integration:
+      `TEST_ENV=true OPENRAILS_LIVE_PROCESSOR_TESTS=1 go test -tags integration ./internal/modules/money -run 'TestLive(Stripe|NMI)InvoiceCollection' -count=1 -v`
+- [x] Guarded NMI/Mobius sandbox integration:
+      `TEST_ENV=true OPENRAILS_LIVE_PROCESSOR_TESTS=1 go test -tags integration ./internal/modules/money -run 'TestLive(Stripe|NMI)InvoiceCollection' -count=1 -v`
+- [x] Full money integration suite: `go test -tags integration ./internal/modules/money -count=1`
+- [x] `go test ./...`
+- [x] `task build`
 
 ---
 
-# #499: Consolidate merchant-wide configuration into one merchant_configurations row
+# #507: Remove legacy non-money gates from service admit
 
-OpenRails had a dedicated merchant-scoped table that only stored flat delegated-invoker wasted-spend windows. That
-belongs in a general merchant configuration row instead; live per-invoker counters remain in Redis.
+OpenRails still carries a legacy hot-path throughput layer from the earlier Tensorhub design:
 
-Introduce a general one-row-per-merchant configuration table and move the delegated-invoker wasted-spend windows into
-it as the first value. Missing config keys should keep using hardcoded service defaults, so a merchant with no
-configuration row behaves exactly like today.
+- `tenant_throughput` lets the host send rate-limit policy in every admit request.
+- `amounts` drives request/token/image/unit windows in OpenRails.
+- tier policy `throughput` / `release_windows` and queue-unit reservations enforce RPM/TPM/IPM/RPD-style limits.
+- `block_checks` runs an unrelated blocklist gate before the real prepaid/money admission logic.
+- tier-policy `entitled_resources` / resource allowlist denies invokes for reasons that belong in Tensorhub's own
+  endpoint authorization layer, not OpenRails' billing admission.
+- `max_single_charge_amount` / per-job cost cap is an arbitrary service-admit denial that duplicates the real
+  affordability check and should not be part of the generic billing gate.
 
-## Proposed schema
-- `openrails.merchant_configurations`
-  - `merchant_id uuid PRIMARY KEY REFERENCES openrails.merchants(id)`
-  - `config jsonb NOT NULL DEFAULT '{}'`
-  - `config_version bigint NOT NULL DEFAULT 1`
-  - `created_at timestamptz NOT NULL DEFAULT now()`
-  - `updated_at timestamptz NOT NULL DEFAULT now()`
+That model is wrong for the current billing architecture. The payer/customer is the subject being governed, and
+OpenRails' hot admit path should answer a narrower money question: can this customer afford this estimated request after
+existing holds and delegated-spend reservations? Admit-time requests should not carry rate-limit policy, and OpenRails
+should not enforce old request/token/image throughput limits or a separate max-in-flight-dollar cap for Tensorhub-style
+admission. Prepaid balance + computed credit capacity + active holds already bound spend; Tensorhub can still use
+in-flight-dollar policy as a scheduler fairness/reordering signal outside OpenRails' admit gate.
 
-First config key:
-
-```json
-{
-  "delegated_invoker_wasted_spend_windows": [
-    { "key": "burst", "window_seconds": 900, "limit": 500000 }
-  ]
-}
-```
-
-Amounts use the request currency's internal precision. The config supplies limits; Redis keeps the hot counters by
-merchant + payer + invoker + currency + window.
-
-## Candidates Found
-- Move now: delegated-invoker wasted-spend windows -> `merchant_configurations.config.delegated_invoker_wasted_spend_windows`.
-- Evaluate later: deployment-wide feature flags that have merchant-visible behavior, especially dunning mode,
-  processor-subscription-deletion kill switch, and entitlement-expiration kill switch. If made merchant-specific,
-  global config should probably remain an emergency floor/override, not disappear.
-- Evaluate later: processor routing/fallback policy (#288). If implemented as merchant-level policy, prefer this
-  config table over a new one-off table unless query shape demands relational storage.
-- Do not move by default: `money_settings` is per payer/customer/currency, not merchant config.
-- Do not move by default: `tier_policies` and `tier_schedules` have tier/currency/customer override semantics and
-  should stay relational unless we deliberately simplify those policy models.
-- Do not move by default: merchant secrets/DEKs, payment blocklists, catalog/product/price rows, reconciliation
-  state, provider intents, ledger rows, and custom credit types are state/catalog/secrets, not general config.
+## Target Model
+- Trust-tier policy is configured out of band by the merchant/operator and stored in OpenRails.
+- Admit requests report only stable identity and billing facts: `customer_id`, `invoker`, `invoker_type`, `resource`,
+  `currency`, `estimated_amount`, `request_id`, `source`, and expiry.
+- OpenRails no longer accepts host-supplied throughput policy on the hot path.
+- OpenRails no longer uses `amounts` to enforce request/token/image throughput windows.
+- OpenRails no longer enforces tier-policy `throughput`, per-release throughput overrides, or queue-unit reservations.
+- OpenRails no longer enforces `max_concurrent_held_amount` / Tensorhub `max_inflight_micros` as a hard admit gate.
+  If Tensorhub keeps a max-in-flight-dollar policy, it is a scheduler fairness/reordering signal, not a second
+  affordability check in OpenRails.
+- Other money controls remain admission/accounting controls, not payer throughput limits: prepaid balance, Redis holds,
+  optional arrears credit capacity, and wasted-spend abuse windows for refunded/costly failures.
+- Name the money gate as `start_capacity` everywhere practical:
+  `prepaid_available + remaining_arrears_credit - active_holds`. Admit only when the estimated charge fits that
+  capacity.
+- Arrears exposure should follow the redesigned invoice model. The final gate should derive owed exposure from pending
+  unbilled invoice items plus open/past-due invoice receivables, not from a live account-level
+  `outstanding_owed_amount` counter. Any use of that counter is transition-only and should disappear with #506.
+- The DB capacity snapshot and Redis hold placement must remain race-safe. Redis protects admit-vs-admit races by
+  atomically summing active holds, but tests should prove that balance/credit changes cannot slip between the DB
+  snapshot and Redis hold placement and admit work beyond real capacity.
+- The blocklist gate is also wrong here. Tensorhub/OpenRails prepaid job admission is not a payment-instrument fraud
+  flow, and there is no current requirement to block arbitrary identifiers before an invoke. Remove the layer from
+  service admit rather than preserving or relocating it in this path.
+- Gate #6 is two concerns mixed together. Keep tier resolution only where service admit still needs the payer's resolved
+  trust tier to load retained money policy such as wasted-spend windows. Remove the `entitled_resources` / resource
+  allowlist denial from service admit. Endpoint/resource authorization belongs to the host application before billing
+  admit.
+- Current tier resolution also loads `max_single_charge_amount`, but Gate #7 removes that arbitrary per-job cost cap
+  from the final service-admit policy surface.
+- The per-job cost cap should be removed from service admit. If a request is too expensive, prepaid/arrears
+  `start_capacity` already denies it; if the host wants endpoint-specific pricing or product policy, that belongs in
+  Tensorhub before billing admit.
+- Gate #8 should stay as a wasted-spend abuse backstop, not a normal throughput limit. It has two distinct policies:
+  payer/customer wasted spend gets a grace budget and is charged through report-time accounting beyond that point;
+  delegated-invoker wasted spend is an admit-time hard cutoff when the invoker is already over budget.
+- Remove the manual payer/customer suspension gate from service admit. `suspended_at` is a vague manual policy override
+  that does not belong in the hot billing admission path. A payer should be denied because money capacity, delegated-spend
+  policy, wasted-spend cutoff, or in-flight exposure says no, not because an operator toggled a generic frozen state.
+- Move arrears/payment-method eligibility out of the hot admit path. Admit should consume a precomputed credit capacity:
+  "how much can this customer borrow right now?" That separate credit-policy path can consider trust tier, invoice
+  receivables, functioning payment method, collection status, and risk. The hot path should then compare
+  `prepaid_available + remaining_credit_capacity - active_holds` against the estimate, the same shape as prepaid.
+- Tensorhub's current target is credit capacity `0`, so Tensorhub-style admit is effectively prepaid-only plus active
+  holds.
+- After this cleanup, the intended OpenRails service-admit policy gates are only:
+  1. Payer/customer affordability and hold placement: compare `estimated_amount` against `start_capacity` after local FX
+     conversion where needed, then place the idempotent request hold if allowed.
+  2. Customer-funded invoker spend authorization and budget: when `invoker != customer`, OpenRails must find an explicit
+     payer-configured delegated-spend grant for that invoker, role, invoker tier, or other configured scope, then reserve
+     against its money-denominated spend windows. This applies equally to Tensorhub-native users, such as org members
+     spending an org/customer balance, and to remote-application delegated users, such as Cozy-Art JWKS users spending
+     Cozy-Art's customer balance. No matching delegated-spend grant means deny; a missing policy is not unlimited spend.
+  3. Delegated-invoker wasted-spend cutoff: when `invoker != customer`, deny if the invoker is already past the
+     platform-imposed wasted-spend budget for the relevant window. Direct customer credentials are not hard-denied here;
+     customer wasted spend is handled by report-time accounting/charging beyond the grace budget.
+  Merchant/service authentication, request idempotency, Redis hold atomicity, and FX conversion are required mechanics,
+  but they are not additional Tensorhub user-governance gates.
+- Gate #9 and Gate #10 are the old request/token/image throughput idea and should be removed: no per-payer/per-resource
+  unit windows, no Tensorhub `amounts` enforcement, and no queue/batch unit reservations in OpenRails admission.
+- The retained delegated-spend gate is the generalized "customer lets invoker spend his money" policy surface:
+  money-denominated authorization + budget windows/reservations over estimated spend, not RPM/TPM/IPM/image counters. It
+  must work for Cozy-Art-style org + remote-application/JWKS users spending the Cozy-Art customer balance, for Tensorhub
+  native org members whose role allows them to spend an org/customer's money, and for Tensorhub-native delegated users.
+  The payer/customer principal decides the spend policy: windows such as max spend per 5 hours, 7 days, month, or any
+  overlapping configured period. Tensorhub owns credential validation and endpoint/resource authorization; OpenRails owns
+  the billing authorization question "may this invoker spend this customer's money?" Current `buildBudgetScopes` behavior
+  is per-invoker only and does not fail closed when no matching delegated-spend policy exists; fix that instead of treating
+  missing policy as unlimited spend. If role, invoker-tier, group, org-membership, remote-application, or other
+  customer-funded scopes are supported, they must be explicit delegated-spend policy scopes rather than stale implicit
+  subject/role pools. These reservations should follow the same idempotency and release/capture lifecycle as the request
+  hold so denied, failed, retried, and settled work cannot leak allocated-spend capacity.
+- Cross-repo audit finding: Tensorhub currently has multiple overlapping surfaces for this idea. It defines delegated-user
+  tier budget windows, role budgets, and tenant self-caps in `platformpolicy.Document`; syncs tier windows to OpenRails
+  `TierPolicy.BudgetWindows`; syncs role/self caps to OpenRails budget policies; sends delegated roles on admit; and also
+  exposes a Tensorhub-side `/platforms/me/generation-budget/check` preflight that passes caller-supplied windows into
+  OpenRails `BudgetCheck`. OpenRails has scope primitives for `invoker`, `role`, and `subject`, but current
+  `buildBudgetScopes` applies only per-invoker scopes. The implementation pass must collapse this into one intentional
+  customer-funded invoker-spend model rather than preserving all of these partially-overlapping paths.
+- Remove the payer-level max-in-flight-dollar gate from OpenRails admit. Affordability is already covered by
+  `start_capacity`; Tensorhub may keep in-flight-dollar fairness in its scheduler to queue or reorder work, but
+  OpenRails should not deny solely because a customer is over a fairness cap.
+- Capture/usage reporting can still record operational metadata, but it must not reintroduce an admission-time
+  rate-limit policy surface.
 
 ## Tasks
-- [x] Add `openrails.merchant_configurations` to the Postgres baseline with merchant RLS and sqlc queries for get/upsert.
-- [x] Add a typed Go config model for the JSON payload; start with
-      `delegated_invoker_wasted_spend_windows`.
-- [x] Replace old dedicated-table reads/writes with merchant configuration reads/writes.
-- [x] Delete the old dedicated table, its sqlc queries, generated model, and narrowly named store methods.
-- [x] Rename service/API/internal names to the general merchant configuration setter.
-- [x] Preserve fallback behavior: missing row, missing key, or empty windows uses `DefaultInvokerWastedWindows()`.
-- [x] Update comments/docs so this is described as merchant configuration, not a separate policy table.
-- [x] Add tests for configured windows, missing config fallback, empty config fallback, and JSON decode validation.
-- [x] Run `task sqlc`.
-- [x] Run targeted admission/service tests, `go test ./...`, and `task build`.
+- [ ] Inventory the legacy throughput admission surface:
+      `AdmitRequest.TenantThroughput`, `AdmitInput.TenantThroughput`, `Amounts`, `admission.ResolvedPolicy.Throughput`,
+      `ReleaseThroughput`, `QueueLimits`, `ThroughputForRelease`, Redis limiter calls in `Admitter.Admit`, SDK structs,
+      embed/remote clients, HTTP handlers, tests, docs, and generated examples.
+- [ ] Inventory the blocklist admit surface:
+      `block_checks`, `AdmitBlockCheck`, `admission.BlockCheck`, `abuse.BlocklistService` dependency construction in
+      `pkg/service.Admit`, `BlockedBy="blocked"`, service admit/batch wire shape, SDK structs, docs, and tests.
+- [ ] Remove `tenant_throughput` from service admit and admit-batch request/response/client contracts.
+- [ ] Remove the gate #3 implementation from `pkg/service.Admit`: the pre-admitter
+      `TenantThroughput` Redis check must disappear rather than be renamed or moved.
+- [ ] Remove admit-time `amounts` consumption from OpenRails policy enforcement. If a field remains for telemetry, rename
+      and route it only to durable usage metadata/capture, not to admission gates.
+- [ ] Delete per-(merchant, payer, resource) unit-throughput checks from `Admitter.Admit`.
+- [ ] Delete queue-unit reservation acquire/release from admission settlement paths.
+- [ ] Remove tier-policy `throughput`, `release_windows`, and `queue_limits` from the enforceable policy model, schema JSON
+      parsing/writing, SDK types, docs, and tests unless another non-Tensorhub host has a live use case.
+- [ ] Remove `block_checks` / blocklist evaluation from the service admit contract. Do not keep a blocklist dependency in
+      this path; any future fraud control must be introduced separately with an explicit current requirement.
+- [ ] Remove `entitled_resources` / `BlockedBy="resource"` evaluation from service admit. Preserve `resource` only as a
+      stable reporting/provenance key unless another current billing requirement justifies it.
+- [ ] Keep tier resolution only for retained money policy that truly belongs in OpenRails admit, such as payer
+      wasted-spend windows. It must not imply endpoint authorization or max-in-flight-dollar admission denial.
+- [ ] Remove `max_single_charge_amount` / per-job cost cap from service admit, tier policy SDK/wire structs, docs, and
+      tests unless another current non-Tensorhub billing requirement justifies it.
+- [ ] Keep the wasted-spend abuse gate, but make the contract explicit: payer/customer wasted spend has a grace budget
+      and is charged through report-time accounting beyond that point; delegated invokers are hard-cut from admit when
+      they are already over their wasted-spend budget.
+- [ ] Keep and verify delegated-spend budget windows as money-denominated reservations over `estimated_amount`. They must
+      not depend on Tensorhub `amounts`, request/token/image units, or endpoint resources.
+- [ ] Make delegated-spend fail closed: if `invoker != customer`, OpenRails must require at least one matching
+      payer-configured delegated-spend grant/scope before placing a money hold. A missing matching policy denies rather
+      than allowing unlimited delegated spend.
+- [ ] Define the generalized customer-funded invoker spend model for "customer lets invoker spend his money": direct
+      invoker, delegated user, verified org role, invoker tier, or another explicit configured scope. Keep payer/customer
+      trust tier separate from invoker/delegated-user spend tier.
+- [ ] Ensure the delegated-spend model is source-agnostic: Tensorhub-native org users and remote-application delegated
+      users are both just invokers spending a payer/customer principal's money under that principal's configured
+      overlapping money windows.
+- [ ] Decide the canonical OpenRails storage surface for delegated-spend policy. Prefer explicit budget-scope policies
+      (`scope=invoker`, `scope=role`, and optionally a named invoker-tier/group scope if needed) over hiding
+      customer-funded invoker-spend windows inside payer trust-tier `TierPolicy.BudgetWindows`.
+- [ ] Reconcile Tensorhub policy sync with OpenRails enforcement: either make synced `RoleBudgets` / tenant self-caps
+      actually participate in `Admitter.buildBudgetScopes`, or remove the sync/API fields if they are not part of the
+      final customer-funded invoker-spend model.
+- [ ] Revisit Tensorhub `/platforms/me/generation-budget/check`: it should be a read/preflight view over the same stored
+      OpenRails delegated-spend policy used by admit, not a second path where Tensorhub passes ad hoc budget windows for
+      OpenRails to evaluate.
+- [ ] Verify delegated-spend reservations use request-level idempotency and are released or settled alongside the money
+      hold lifecycle, including admit denial rollback, post-admit failure release, retry, and capture.
+- [ ] Clean stale budget comments/fields that describe subject/role pools as accidental behavior. Role or invoker-tier
+      support is allowed only if it is intentionally modeled as delegated-spend policy.
+- [ ] Remove `max_concurrent_held_amount` / Tensorhub `max_inflight_micros` as an OpenRails hard admit gate, including
+      deny codes, response fields that exist only for hard-denial scheduling, tier policy SDK/wire fields, docs, and
+      tests unless another current non-Tensorhub billing requirement justifies them.
+- [ ] If Tensorhub keeps max-in-flight-dollar fairness, keep it in Tensorhub's scheduler/configuration surface and make it
+      explicitly soft/work-conserving: it reorders or queues requests, but affordability is still decided by OpenRails
+      `start_capacity`.
+- [ ] Keep and verify FX conversion for retained money policies: if the admit estimate is in EUR and a delegated-spend or
+      wasted-spend policy is in USD (or any other configured policy currency), convert locally before evaluating it. All
+      values remain integer micros in their respective currencies.
+- [ ] Remove manual payer/customer suspension from service admit and delete or quarantine the `suspended_at` /
+      `suspend_reason` account-freeze surface if no other current product requirement uses it.
+- [ ] Move arrears/payment-method eligibility out of service admit. The hot path should consume already-computed
+      `remaining_credit_capacity` and should not perform payment-method setup checks itself.
+- [ ] For Tensorhub configuration, set credit capacity to `0` until a real arrears product is deliberately enabled.
+- [ ] Keep and verify non-throughput admit/accounting gates: prepaid/credit capacity, Redis hold placement, and
+      wasted-spend gates.
+- [ ] Rename/refactor the solvency gate around the explicit `start_capacity` model:
+      `prepaid_available + remaining_arrears_credit - active_holds`, with denial when `estimated_amount` exceeds it.
+- [ ] Align arrears capacity with the invoice-receivables redesign (#506): derive exposure from pending invoice items and
+      open/past-due invoice balances; remove or clearly quarantine any remaining `outstanding_owed_amount` dependency as
+      transition-only.
+- [ ] Add regression coverage for the DB-snapshot/Redis-hold race boundary: concurrent admits, captures/releases,
+      deposits/withdrawals/collections, and credit-line changes must not allow active holds to exceed current start
+      capacity.
+- [ ] Keep the Tensorhub prepaid admit gate narrow: no daily/monthly spend caps, blocklists, token/request rates,
+      arbitrary per-job caps, max-in-flight-dollar hard denials, or other user-governance policy in this path. The normal
+      payer controls are prepaid reserve, computed credit capacity, active holds, and costly-failure backstops.
+- [ ] Update Tensorhub integration guidance: Tensorhub must stop sending `tenant_throughput` and `amounts` for admission.
+      Any `max_inflight_micros` style policy belongs in Tensorhub scheduler fairness, not OpenRails service admit.
+- [ ] Remove or update stale comments that describe OpenRails as enforcing Tensorhub RPM/RPD/TPM/IPM on admit.
+- [ ] Slim the admit response contract after the removals: do not return resolved scheduling policy such as
+      `max_concurrent_held_amount` or per-job charge caps once they no longer drive OpenRails denial. Keep only the
+      admit decision, deny reason, hold/capacity facts, policy currency/amount, and retained delegated-spend or
+      wasted-spend window status that a caller can legitimately display or act on.
+- [ ] Coordinate the Tensorhub sibling cleanup: Tensorhub must remove stale #486 assumptions about OpenRails-owned
+      `max_inflight_micros`, per-job caps, request/token/image `amounts`, host-supplied `tenant_throughput`, and ad hoc
+      generation-budget checks. Tensorhub should retain endpoint authorization and scheduler fairness locally, while
+      OpenRails owns affordability, delegated-spend authorization/budget, and delegated wasted-spend cutoff.
 
 ## Acceptance
-- There is one general-purpose merchant configuration row per merchant.
-- Delegated-invoker wasted-spend windows are the first stored value in that config.
-- The old one-off table and API naming are gone.
-- Missing merchant config falls back to hardcoded defaults.
-- No payer/customer/currency-scoped state is collapsed into merchant config accidentally.
+- `POST /v1/service/admit` and `/v1/service/admit/batch` have no host-supplied throughput-policy field.
+- OpenRails admit decisions cannot be affected by request/token/image `amounts`.
+- No Redis throughput or queue-unit reservation is created during admit; Redis is used for money holds and any remaining
+  explicitly money-denominated windows only.
+- OpenRails service admit has no hard max-in-flight-dollar denial; in-flight-dollar fairness, if retained, is a
+  Tensorhub scheduler concern.
+- Cross-currency admits compare policy-currency micros after local FX conversion for retained delegated-spend and
+  wasted-spend policies; no retained money policy silently assumes USD-only request amounts.
+- Payer/customer wasted spend is charged beyond its grace budget through report-time accounting, not by an admit denial.
+- Delegated-invoker wasted spend remains an admit-time hard cutoff when the invoker is already over budget.
+- Tensorhub-style admit has no manual customer suspension gate and no prepaid payment-setup gate.
+- Arrears/payment-method eligibility is not checked inline by service admit; admit consumes a computed credit-capacity
+  value. Tensorhub sets that capacity to `0` for now.
+- Delegated-spend budget windows are retained only as money-denominated estimated-spend reservations.
+- Delegated-spend authorization fails closed: `invoker != customer` cannot spend customer money unless a matching
+  payer-configured delegated-spend grant/scope exists.
+- Delegated-spend policy supports explicit customer-funded invoker scopes such as direct invoker, delegated user,
+  verified org role, org membership, remote-application user, or invoker tier without confusing those invoker scopes with
+  the payer/customer trust tier.
+- Tensorhub and OpenRails have one delegated-spend contract: Tensorhub authors/syncs policy, OpenRails stores/enforces
+  reservations and actuals, and preflight reads the same policy admit will enforce.
+- Delegated-spend reservations are idempotent and cannot leak capacity across denied, failed, retried, or
+  captured requests.
+- The OpenRails admit response no longer exposes removed scheduling/capacity policy fields whose only purpose was
+  Tensorhub's old hard or soft max-in-flight-dollar design.
+- Tensorhub-style admit does not accept or evaluate blocklist identifiers.
+- Tensorhub-style admit does not deny on resource allowlists; endpoint/resource authorization is host-owned and happens
+  before billing admit.
+- Tensorhub-style admit does not deny on an arbitrary per-job cost cap; affordability is handled by `start_capacity`.
+- Tier resolution still happens before money policy evaluation and is not treated as resource authorization.
+- The solvency gate is documented and implemented as `start_capacity`; prepaid and arrears paths share the same final
+  admit predicate.
+- Arrears exposure is invoice-derived after #506, with no live account-level owed counter required for correctness.
+- Tests cover concurrent DB balance/credit changes around Redis hold placement and prove no stale capacity admit.
+- Payer trust-tier policy is represented as stored OpenRails configuration, not request payload.
+- Tensorhub-style admission remains protected by money-denominated controls and the hold lifecycle.
+- Docs clearly state that host applications configure payer/customer policy ahead of time and report billable estimates at
+  admit time.
 
-## Status
-Complete in OpenRails. The Postgres baseline now has `openrails.merchant_configurations`; the delegated-invoker
-wasted-spend windows live under `config.delegated_invoker_wasted_spend_windows`; the old dedicated table, sqlc
-queries/model, store methods, SDK method, HTTP route, and stale test filename are gone. The public service route is
-now `PUT /v1/service/merchant-configuration`, and the SDK method is `SetMerchantConfiguration`.
-
-Verification:
+## Validation
 - `task sqlc`
-- `go test ./pkg/service ./internal/modules/merchantconfig ./internal/modules/admission ./embed ./internal/http/handlers ./internal/http/routes/ginroutes ./migrations/postgres`
-- `go test -tags=integration ./pkg/service -run 'TestMerchantConfiguration|TestWastedSpendDirectPayer' -count=1 -v`
-- `go test -tags=integration ./embed -run Conformance -count=1 -v`
+- `go test ./internal/modules/admission ./internal/modules/ratelimit ./pkg/service ./internal/http/handlers`
 - `go test ./...`
 - `task build`
 
 ---
 
-# #497: Wasted-spend enforcement split: charge direct payer credentials, cut off delegated invokers
+# #506: Redesign arrears billing around invoice receivables
 
-Issue #496 fixed the storage/policy shape for payer vs invoker wasted-spend budgets, but the enforcement behavior
-needs one more distinction: whether the invoker is the payer acting directly, or a delegated/third-party principal
-using the payer's billing authority.
+OpenRails currently models arrears by writing `owed_accrual` money transactions as usage is spent and by incrementing
+`money_settings.outstanding_owed_amount`. Invoices are period statements that summarize usage and money movements after
+the fact. That is not how Stripe/OpenMeter-style arrears invoicing works: billable items accumulate, an invoice is
+created in draft, finalization turns it into an open receivable, and payments are applied to that invoice.
 
-## Model
-- PAYER/customer: the billing principal whose account pays for successful work.
-- INVOKER: the principal actually making the request.
-- Delegated invoker (`invoker != payer`): a third party using the payer's billing authority. Examples:
-  - payer is an org, invoker is a native Tensorhub user/member of that org.
-  - payer is an org with a remote application, and the remote application sends delegated/federated users.
-- Direct payer invoker (`invoker == payer`): the payer is making calls with credentials it controls directly. Examples:
-  - payer is an org and the invoker is its JWKS-signed org/application JWT with no delegated subject.
-  - payer is an org and the invoker is one of its own service tokens.
-  - payer is a regular native user using their own user access token.
+The target model:
 
-## Policy
-- Delegated invokers are protected against quickly: once that invoker's flat wasted-spend window is met, deny that
-  invoker until the Redis window resets. This protects the payer from users/employees/federated subjects abusing its
-  billing authority.
-- Direct payer invokers get trust-tier grace: once the payer's tier-graduated wasted-spend allowance is exhausted,
-  OpenRails should charge the payer for additional wasted spend instead of cutting them off. Higher trust tiers get
-  more free/grace waste before charging begins.
-- The payer/customer wasted-spend budget remains trust-tier graduated. The delegated-invoker wasted-spend budget
-  remains flat and stricter.
+- OpenMeter inspiration: gathering/pending invoice lines provide visibility into accruing usage before the final invoice.
+- Stripe inspiration: invoices move through `draft -> open -> paid` or `void/uncollectible`; an open invoice is the
+  receivable, and payments/attempts belong to that invoice.
+- OpenRails should keep the implementation simpler than either system, but copy the core accounting boundaries.
 
-## Tasks
-- [x] Define the durable request/admission contract that tells OpenRails whether an invoker is a delegated principal
-      or a direct payer credential. Do not rely on arbitrary opaque string equality unless the host canonicalizes
-      direct-payer invokers to the payer identity.
-- [x] Wire the invoker relationship/kind through OpenRails service HTTP, SDK, embed, admission, and
-      usage/report-wasted-spend. Tensorhub caller updates are tracked in tensorhub #491.
-- [x] For delegated invokers, keep the #496 Redis behavior: merchant + payer + invoker counters, flat policy, deny
-      `failure_rate_limited` until the window resets when over limit.
-- [x] For direct payer invokers, stop applying the flat delegated-invoker cutoff. Evaluate only the payer's
-      tier-graduated grace budget for whether wasted spend remains free.
-- [x] Add a charge path for direct payer wasted spend after grace is exhausted. It should create normal money ledger
-      activity in the payer's native currency/precision, not a separate high-volume wasted-spend event log.
-- [x] Define idempotency for charging wasted spend reports beyond grace so retrying a host report cannot double-charge.
-- [x] Decide and implement the amount split when a report crosses the grace boundary: only the over-grace portion
-      should be chargeable, not the already-forgiven portion.
-- [x] Keep Redis as the hot rolling-window state for grace/cutoff checks and Postgres as durable policy/ledger storage.
-- [x] Update denial/charging response semantics so hosts can distinguish delegated-invoker cutoff from direct-payer
-      wasted-spend charging.
-- [x] Add tests for:
-      - delegated invoker over flat limit => denied, payer not charged for that wasted spend.
-      - direct payer under tier grace => not charged.
-      - direct payer over tier grace => overage charged and request/admission flow continues according to normal
-        balance/credit rules.
-      - idempotent report retry does not double-charge.
-      - payer-scoped invoker Redis keys still prevent delegated-user label collisions.
-- [x] Coordinate Tensorhub so org members, remote delegated users, service tokens, JWKS org/application JWTs, and
-      native user self-calls map to the correct OpenRails invoker relationship.
+References:
+- OpenMeter gathering invoices: https://openmeter.io/docs/billing/invoicing/gathering-invoices
+- OpenMeter invoice structure: https://openmeter.io/docs/billing/invoicing/invoices
+- Stripe invoice lifecycle: https://docs.stripe.com/invoicing/overview
+- Stripe subscription invoices: https://docs.stripe.com/billing/invoices/subscription
+
+## Target Model
+- `usage_events` remains the durable usage/audit source.
+- pending billable charges are represented as first-class invoice items/lines before invoicing. These rows have
+  `invoice_id NULL` while pending, similar to Stripe pending invoice items and OpenMeter gathering lines.
+- invoice creation collects pending billable items for a period into a `draft` invoice.
+- invoice finalization snapshots line items, totals, customer/billing context, invoice number, and due dates, then moves
+  the invoice to `open`.
+- an `open` invoice is the receivable. It has `total_amount`, `amount_paid`, `amount_due`, `currency`, `issued_at`,
+  `due_at`, and collection metadata.
+- payment attempts target a specific invoice. Successful settled payments create invoice-linked payment rows and reduce
+  that invoice's `amount_due`.
+- invoice state, not an account-level live owed counter, answers whether the customer paid the bill.
+- current customer debt is derived from open/past-due invoices, optionally through a rebuildable projection.
+- unbilled usage is never called "owed"; "owed" means an issued/open invoice receivable.
+- arrears credit is a customer policy: for example, a customer may accrue up to $200 of unbilled/open arrears before
+  OpenRails must generate/collect an invoice or deny further arrears spend.
+- invoice generation is triggered by either period close, manual/admin action, or a credit-line threshold/cap hit.
+- failed collection must feed back into admission/dunning so a customer cannot continue building a large in-arrears
+  balance after payment cannot be collected.
+- the motivating hot path is Tensorhub-style admission: before accepting a work request, OpenRails must decide whether
+  the payer/customer/org has enough prepaid balance or remaining arrears capacity, then place a Redis hold for the
+  estimated charge.
+
+## Schema Tasks
+- [x] Inventory current arrears paths:
+      `AccrueOwed`, `ChargeOutstanding`, `SpendCredits`, capture/settle paths, invoice finalization, dunning, tests, and
+      SQL queries that read or write `money_settings.outstanding_owed_amount`.
+- [x] Add a first-class `invoice_items` or `invoice_lines` table:
+      `id`, `merchant_id`, `customer_id`, `currency`, nullable `invoice_id`, `source_type`, `source_id`, `event_type`,
+      `period_from`, `period_to`, `invoice_at`, `quantity`, `unit_amount`, `amount`, `status`, `metadata`,
+      `created_at`, `updated_at`.
+- [x] Add idempotency constraints so one usage/charge fact cannot create duplicate pending invoice items.
+- [x] Update `openrails.invoices` to become the receivable table:
+      `invoice_number`, `subtotal_amount`, `total_amount`, `amount_paid`, `amount_due`, `status`, `collection_method`,
+      `issued_at`, `due_at`, `paid_at`, `voided_at`, `uncollectible_at`, `sent_at`, `finalized_at`, `external_invoice_id`.
+- [x] Fix the invoice uniqueness key to include `currency` if OpenRails continues to create one invoice per
+      `(merchant, customer, period, currency)`.
+- [x] Add invoice payment/attempt storage, either as a new `invoice_payments` table or invoice-linked
+      `money_transactions`:
+      `invoice_id`, `amount`, `currency`, `status`, `processor`, `processor_payment_id`, `attempted_at`,
+      `settled_at`, `failure_code`, `failure_message`.
+- [x] Decide whether credit notes/voids are first-class now or represented initially as negative invoice items on a
+      replacement invoice. Explicit `voided` and `uncollectible` invoice states are implemented first; credit notes are
+      deferred until a real adjustment/refund workflow requires them.
+- [ ] Remove `money_settings.outstanding_owed_amount` or convert it into a clearly documented rebuildable projection
+      such as `open_invoice_balance_amount`.
+- [x] Keep or replace `credit_limit_amount` as the arrears credit-line policy:
+      it caps pending unbilled invoice items plus open/past-due invoice balances for a customer/currency.
+- [ ] Add fields needed for collection/admission policy, such as `collection_failed_at`, `last_payment_attempt_at`,
+      `next_payment_attempt_at`, `arrears_blocked_at`, or equivalent invoice/account state if the current tables already
+      have a better home.
+
+## Workflow Tasks
+- [ ] Change usage/capture settlement so arrears usage creates pending invoice items, not immediate receivables.
+      Pending invoice item creation is implemented for `AccrueOwed`, usage spends that spill into owed, and hold captures
+      that spill into owed. The legacy `outstanding_owed_amount` counter still exists as a transition projection, so the
+      "not immediate receivables" half remains open.
+- [x] Define the Tensorhub/OpenRails admission decision explicitly:
+      - if arrears credit line is `$250` and pending/open owed exposure is already `>= $250`, reject new work until
+        payment collection succeeds or an admin raises/unblocks the line.
+      - if arrears credit line is `$0`, prepaid balance is `$10`, and estimated charge is `$0.50`, admit the request and
+        place a `$0.50` Redis hold against prepaid balance.
+      - if prepaid balance is insufficient but arrears capacity remains, admit only up to
+        `credit_limit_amount - pending_unbilled_arrears - open_invoice_amount_due - active_holds`.
+      Current code enforces the decision against the existing hold mechanism; the Redis hold migration remains #505.
+- [ ] Add invoice draft creation for a period:
+      collect pending invoice items where `invoice_at <= cutoff`, attach them to one draft invoice per
+      `(merchant, customer, currency, period)`, and snapshot line details.
+- [ ] Add threshold-triggered invoice creation:
+      when pending unbilled arrears plus open invoice balance reaches the customer credit line or configured threshold,
+      create/finalize an invoice immediately instead of waiting for month end.
+- [x] Add invoice finalization:
+      validate draft totals, assign invoice number, freeze editable monetary fields, set `status = open`, set `issued_at`
+      and `due_at`, and book receivable ledger movement if the ledger needs invoice-issued entries.
+- [x] Add invoice collection:
+      for `collection_method = charge_automatically`, create a payment attempt for the open invoice and charge the saved
+      payment method; for `send_invoice`, leave the invoice open until manual/out-of-band payment is recorded.
+- [ ] Replace customer-level `ChargeOutstanding` sweeps with invoice-level collection over open/past-due invoices.
+- [x] Apply payments to invoices:
+      successful settled payment increments `amount_paid`, decrements `amount_due`, links the payment/transaction to
+      `invoice_id`, and marks the invoice `paid` when `amount_due = 0`.
+- [x] On failed payment, keep the invoice `open` or transition it to `past_due` based on due date/retry policy; do not
+      erase or reduce the receivable.
+- [x] On failed automatic collection, tighten admission:
+      block or reduce further arrears spend until payment succeeds, an admin intervenes, or the customer adds a usable
+      payment method.
+- [x] Add `void` and `mark uncollectible` flows for open invoices. Voids should reverse or neutralize the receivable;
+      uncollectible should preserve the debt history as bad debt.
+- [ ] Rework dunning/admission checks to derive outstanding debt from open/past-due invoices, not from usage-time owed
+      accruals.
+- [x] Admission should compute arrears capacity as:
+      `credit_limit_amount - pending_unbilled_arrears - open_invoice_amount_due - active_holds`, with failed-payment
+      and suspension state able to force capacity to zero.
+- [ ] Admission should compute total available start capacity as prepaid spendable balance plus remaining arrears
+      capacity, minus active Redis holds. Holds must be created before admitting work and released/captured by the
+      caller's stable Tensorhub request id as tracked in #505.
+- [ ] Keep prepaid balance spending separate: prepaid invoices can remain receipts/statements, but arrears invoices are
+      receivables with payment state.
+
+## API and Reporting Tasks
+- [x] Expose invoice list/detail with invoice status, totals, due dates, payment state, and line items.
+- [ ] Add service/admin endpoints or jobs to create draft invoices, finalize invoices, collect an invoice, void an
+      invoice, mark uncollectible, and record out-of-band payment.
+- [ ] Add statement/reporting queries that can answer:
+      "What did this customer owe for March 2026?", "What was paid against that invoice?", "What is still due?", and
+      "What is the customer's current open invoice balance?"
+- [ ] Add payment allocation reporting so support/admin can see exactly which payment paid which invoice.
+- [ ] Update docs/comments so "invoice" means bill/receivable for arrears, while "statement" means historical
+      informational summary where no payment is due.
+
+## Test Tasks
+- [ ] Add integration tests for the real arrears timeline:
+      March usage accumulates as pending invoice items, April invoice generation creates a March draft/open invoice,
+      April payment reduces that invoice, and the March invoice still reports March charges correctly.
+- [ ] Add integration tests for automatic collection success, automatic collection failure, manual/out-of-band payment,
+      partial payment, past-due transition, void, and uncollectible handling.
+      Coverage now exists for automatic collection success, failed collection staying open/blocking arrears,
+      manual/out-of-band payment, partial payment, void, and uncollectible. Past-due transition coverage remains open.
+- [ ] Add integration tests for a $200 arrears credit line:
+      usage can accrue below the line, reaching the line triggers invoice generation/collection, successful collection
+      restores arrears capacity, and failed collection blocks further arrears growth.
+- [ ] Add admission integration tests for the Tensorhub use case:
+      owed exposure over limit rejects; `$0` arrears line with enough prepaid balance admits and creates a Redis hold;
+      mixed prepaid-plus-arrears capacity admits only when the estimated charge fits remaining capacity.
+      Partial coverage exists for owed exposure and zero-line/prepaid behavior; Redis-specific coverage waits for #505.
+- [ ] Add regression tests proving usage-time admission/spend does not create invoice receivables until an invoice is
+      finalized/open.
+- [ ] Add tests proving current open balance is derived from open/past-due invoices and can be rebuilt from invoice and
+      payment rows.
+- [ ] Add RLS/cross-merchant tests for invoices, invoice lines, and invoice payments.
+      HTTP-level self-service coverage now proves an authenticated delegated subject sees its own invoice payment state
+      and another subject cannot read that invoice through `/v1/self/invoices`.
+- [x] Run `task sqlc`, targeted money/invoice integration tests, `go test ./...`, and `task build`.
 
 ## Acceptance
-- OpenRails protects payers from delegated invoker abuse by cutting off the delegated invoker, not the payer.
-- OpenRails charges direct payer credentials for wasted spend beyond trust-tier grace instead of cutting them off on
-  the delegated-invoker flat budget.
-- The implementation does not add a high-volume wasted-spend event table.
-- Retry/idempotency behavior prevents duplicate charges for the same wasted-spend report.
+- A period bill is represented by an invoice and its line-item snapshot, not by filtering usage-time owed payments.
+- Pending usage/charges can be inspected before invoicing without being treated as issued debt.
+- A customer credit line caps the sum of pending unbilled arrears, open invoice balances, and active admit holds.
+- Admission for Tensorhub-style work requests uses prepaid balance first, then remaining arrears capacity, and rejects
+  when the payer/customer/org is already over its allowed owed exposure.
+- Hitting the configured arrears cap can trigger immediate invoice generation and collection instead of waiting for the
+  scheduled month-end run.
+- Finalizing a draft invoice creates an open receivable with immutable totals and due dates.
+- Payments are allocated to invoices and reduce invoice due state without changing the historical charge total.
+- A customer is considered to have paid a bill because the invoice is `paid` or `amount_due = 0`, not because a
+  customer-level owed counter happened to drop.
+- Failed collection can suspend or cap further arrears spend so unpaid customers cannot keep growing the balance.
+- Open current owed balance is derived from open/past-due invoice receivables.
+- `money_settings.outstanding_owed_amount` is removed or explicitly downgraded to a rebuildable projection.
+- March 2026 statements can show prior balance, new charges, payments/credits, ending balance, and remaining amount due.
+- Admission and dunning behavior continue to work without treating unbilled usage as already-issued debt.
 
-## Pairs with
-openrails #496 and #491; tensorhub #491 / platform identity mapping.
-
-## Status
-Complete in OpenRails. Tensorhub follow-up tracked in tensorhub #491 for caller-side `invoker_type` mapping and SDK
-pinning.
-
-Verification:
+## Validation
 - `task sqlc`
-- `go test ./pkg/service ./internal/modules/abuse ./internal/modules/admission ./internal/modules/ratelimit ./embed ./internal/http/handlers`
-- `go test -tags=integration ./pkg/service -run 'TestMerchantConfiguration|TestWastedSpendDirectPayer' -count=1 -v`
-- `go test -tags=integration ./internal/modules/admission -run 'TestAdmit_WastedSpend' -count=1 -v`
+- `go test -tags integration ./internal/modules/money -run 'TestFinalizeInvoice|TestAuthorizeAndHold_Arrears|TestChargeOutstanding' -count=1`
+- `go test -tags integration ./pkg/service -run 'TestListInvoices|TestAuthorizeAndHold|CreditLine|Invoice' -count=1`
+- `go test ./migrations/postgres`
+- `go test -tags integration ./internal/modules/money -count=1`
+- `go test ./internal/modules/money ./pkg/service ./migrations/postgres`
 - `go test ./...`
 - `task build`
+- `go test -tags integration ./internal/modules/money -run 'TestFinalizeInvoice|TestInvoiceCollectionDecline|TestAuthorizeAndHold_Arrears|TestChargeOutstanding|TestCaptureHold_ArrearsSpillsToOwed' -count=1`
+- `go test -tags integration ./internal/modules/money -count=1`
+- `go test ./internal/modules/money ./pkg/service ./internal/http/handlers -run TestNonExistent -count=0`
+- `go test -tags integration ./pkg/service -run 'TestListInvoices|TestAuthorizeAndHold|CreditLine|Invoice|TestCreditFacade_RLS_Under_OpenRailsApp|TestGetUsage_Breakdown' -count=1`
+- `go test -tags integration ./internal/modules/money -run 'TestFinalizeInvoice|TestInvoiceCollectionDecline|TestRecordOutOfBandInvoicePayment|TestInvoiceVoidAndUncollectibleLifecycle' -count=1`
+- `go test -tags integration ./internal/modules/money -count=1`
+- `go test -tags integration ./tests -run TestSelfInvoicesHTTP_ReflectsReceivablePaymentsAndScopesToSubject -count=1`
 
 ---
 
-# #496: Fix wasted-spend policy model: tiered payer budgets + flat invoker backstop
+# #505: Move admit-time holds out of the durable money ledger
 
-The previous dedicated per-invoker abuse-budget table overfit the model by allowing `customer_id`-specific overrides.
-That conflated two separate controls:
+**Completed:** 2026-06-16
 
-- PAYER/customer wasted-spend budget: trust-tier based, configured by the host/operator through tier policy
-  `bad_spend_windows`, and evaluated against the payer. High-trust payers can tolerate more failed/rejected work;
-  low-trust payers tolerate less.
-- INVOKER/delegated-user wasted-spend budget: flat merchant/platform backstop used to cut off one abusive delegated
-  user under an otherwise legitimate API-platform payer. The limit amount does not vary by payer/customer, and should
-  be materially stricter than the payer/customer allowance because invoker spam is less tolerable than aggregate
-  customer waste.
+OpenRails hard-cut request lifecycle holds to Redis state keyed by caller `request_id`.
+`money_transactions` no longer stores admit/release/expiry hold rows; capture posts only real debit / owed-accrual
+transactions and optional usage events. Tensorhub-side naming/resource follow-through is tracked in Tensorhub's own
+progress file.
 
-Example: Cozy Art may be trusted to waste up to about $10/day as the payer/platform, while each delegated user
-invoker under Cozy Art may only get about $0.50/day of wasted spend before OpenRails blocks that invoker.
+OpenRails currently uses `money_transactions` for both actual money movement and pre-work hold/reservation state.
+That makes the ledger harder to reason about: admit-time holds, releases, and expirations are not money events.
+
+The target model is:
+
+- `money_transactions` records only durable money movement: deposits, debits/captures, owed accruals, withdrawals,
+  refunds/credits if added later.
+- `usage_events` records durable metered usage/reporting events.
+- admit-time holds are ephemeral Redis reservations used only to prevent concurrent overspend while work is in flight.
+- reservation identity is caller-supplied and stable. OpenRails should not generate a separate reservation id. The
+  caller must provide a merchant-scoped `request_id` for the request/hold lifecycle, and capture/release must refer to
+  that same request id.
+- the admit contract should be explicit about identity: `payer/customer_id` is who pays, `invoker` is who caused the
+  request, and `invoker_type` tells OpenRails whether the invoker is a payer-controlled credential or a delegated user.
+- `resource` should be a stable policy/reporting key when possible, not a mutable display name. Tensorhub can still put
+  endpoint/function display names in usage metadata.
+- `source` remains durable provenance/idempotency namespace for ledger/usage rows, but it is not the hold identity.
+
+The admission check should effectively be:
+
+`available_to_start = spendable_balance + allowed_owed_amount - active_redis_holds`
+
+If `available_to_start >= estimated_amount`, OpenRails creates a TTL-bound Redis hold at
+`merchant + request_id` and admits the request. The hold value stores payer/customer, invoker, invoker type, currency,
+estimated amount, source/provenance, resource, created time, and expiry. Completion captures by `merchant + request_id`,
+releases the hold, and records the actual usage/charge in Postgres. Cancel/failure releases by the same request id when
+possible, and TTL expiry handles worker crashes.
 
 ## Tasks
-- [x] Rename the dedicated policy/config table away from the customer-override model.
-- [x] Remove `customer_id` from the invoker wasted-spend policy schema and resolver. The policy should be
-      tenant/merchant scoped only, with one effective flat set of windows per merchant.
-- [x] Rename service/SDK/API wording as needed so callers set an invoker wasted-spend policy, not a per-customer
-      window override. Prefer a hard cut; no legacy actor/customer override compatibility.
-- [x] Keep payer wasted-spend windows in tier policy (`bad_spend_windows`) and continue resolving them by payer trust
-      tier.
-- [x] Set/validate policy expectations so the flat invoker wasted-spend allowance is lower than the payer/customer
-      allowance for normal tiers; OpenRails should be able to block a spammy invoker before the payer-level backstop
-      trips.
-- [x] Keep Redis for live wasted-spend counters if appropriate. Postgres should store durable policy/config; Redis
-      should store fast moving window state.
-- [x] Do not add a durable wasted-spend event log/table for this issue. These reports can be high-volume, and without
-      a concrete audit/analytics/debugging requirement the extra storage has no clear value.
-- [x] Audit Redis keys for delegated-user namespace correctness. If invoker IDs are only unique inside a
-      payer/application, key invoker wasted-spend state by merchant + payer + invoker to avoid cross-payer collisions;
-      if invoker IDs are globally stable, document that assumption.
-- [x] Update sqlc, migrations, service admission/report/usage paths, SDK/embed/remote client calls, HTTP
-      handlers/routes, comments/docs, and tests.
-- [x] Coordinate the Tensorhub push side so `per_invoker_bad_spend` maps to the new flat invoker policy shape, while
-      trust-tier `bad_spend` continues to map to payer tier policy.
+- [x] Inventory every current hold path: authorize/admit, capture, release, expiry, settlement, tests, SDK/API payloads,
+      and generated SQL.
+- [x] Hard-cut the hold API contract so `request_id` is a required stable caller-assigned identifier for admit,
+      capture, and release; remove OpenRails-generated reservation ids from admit/capture/release semantics.
+- [x] Change the admit/capture/release response and SDK types to stop exposing `reservation_id`; return hold metadata
+      such as `hold_expires_at` when useful, but require the caller to settle by `request_id`.
+- [x] Define Redis hold keys as `openrails:hold:{merchant_id}:{request_id}`.
+- [x] Define Redis hold values with payer/customer, invoker identity/type, currency, estimated amount, source,
+      resource, created time, expiry, and TTL. For Tensorhub, `request_id` is the Tensorhub request id and
+      `source = "invoke"` remains provenance for durable ledger/usage rows.
+- [x] Require and validate `invoker_type` on money-bearing admits so OpenRails can distinguish direct payer credentials
+      from delegated users without guessing from invoker string shape.
+- [x] Audit Tensorhub/OpenRails integration naming and remove remaining request-lifecycle `actor` vocabulary in favor of
+      `invoker` / `invoker_type` on the admit path. Tensorhub follow-through is tracked in its own progress issue.
+- [x] Decide the stable `resource` identity Tensorhub should send for OpenRails gates and reports. Prefer a stable
+      endpoint/release/function id over mutable `tenant/endpointName`; keep human-readable names in usage metadata.
+- [x] Keep `source` as provenance for durable rows (`invoke`, `training`, `wasted_spend`, etc.) while ensuring Redis
+      hold lookup uses only `merchant_id + request_id`.
+- [x] Change admission to subtract active Redis holds from spendable balance plus allowed owed amount before admitting
+      new work.
+- [x] Create Redis holds during admit/authorize instead of inserting `money_transactions` rows with `transaction_type =
+      'hold'`.
+- [x] Capture and release Redis holds by `merchant + request_id`, not by a generated reservation handle and not by
+      resource/payer/currency key material.
+- [x] Release Redis holds on capture, cancel, explicit release, and failed work; rely on TTL as the crash fallback.
+- [x] On successful completion, record only the actual durable charge: `usage_events` plus `money_transactions` debit /
+      owed-accrual rows as needed.
+- [x] Remove hold/release/expiry transaction states from `money_transactions` schema, queries, models, tests, and API
+      semantics.
+- [x] Keep `money_transactions` focused on posted money movement and update comments/docs to make that invariant clear.
+- [x] Decide whether any long-running job class needs longer TTLs or periodic hold refresh; keep this in Redis unless a
+      concrete recovery/reconciliation need proves Postgres reservations are required.
+- [x] Add concurrency tests proving a payer with low remaining balance cannot start enough simultaneous estimated work
+      to overspend available balance.
+- [x] Add cancellation/failure tests proving released/expired Redis holds make capacity available again without creating
+      ledger rows.
+- [x] Add ledger tests proving admit/release/expiry without completed work creates no `money_transactions` rows.
+- [x] Run `task sqlc`, targeted admission/money integration tests, `go test ./...`, and `task build`.
 
 ## Acceptance
-- No live OpenRails API, DB table, sqlc query, or SDK method implies invoker wasted-spend budgets vary per customer.
-- Payer wasted-spend enforcement remains trust-tier graduated.
-- Invoker wasted-spend enforcement remains separate and can block one abusive delegated user without blocking the payer.
-- Invoker wasted-spend limits are intentionally stricter than payer/customer limits.
-- Tests cover payer-over-budget, invoker-over-budget, and no per-customer invoker-policy override path.
-
-## Pairs with
-openrails #488 and #492; tensorhub #486 / `per_invoker_bad_spend`.
-
-## Status
-DONE on the OpenRails side (2026-06-15). The older implementation collapsed customer overrides to one merchant policy
-row, dropped `customer_id`, and keyed Redis invoker counters by merchant + payer + invoker while payer counters stayed
-merchant + payer. No wasted-spend event log/table was added. Tensorhub coordination recorded as tensorhub #491 because that
-checkout is pinned to OpenRails v0.36.0 and has broader SDK drift (`Actor`, `EstimateMicros`, `LimitMicros`) to update
-with the dependency bump.
-
-## Verification
-- `task sqlc`
-- `go test ./pkg/service ./internal/modules/abuse ./internal/modules/admission ./embed ./internal/http/handlers ./internal/http/routes/ginroutes`
-- `go test -tags=integration ./pkg/service -run 'TestMerchantConfiguration' -count=1 -v`
-- `go test ./...`
-- `task build`
-
----
-
-# #492: Operator-configurable FLAT per-invoker wasted-spend windows (close the #488 per-invoker gap)
-
-Consumer: tensorhub #486. GENERIC — every platform has a flat per-invoker abuse backstop. The #488 per-PAYER
-bad_spend budget was operator-settable via SetTierPolicy, but the per-INVOKER flat budget had NO client setter:
-admit hardcoded `service.DefaultInvokerWastedWindows()` ($5/15m, $20/5h), so a host's declared per-invoker budget
-(tensorhub `per_invoker_bad_spend` $1/15m, $3/5h) was silently ignored.
-
-## Scope
-- Earlier implementation added a tenant-scoped per-invoker window table with optional per-customer overrides, windows
-  JSON, version, timestamps, and merchant RLS.
-- sqlc/service/HTTP/SDK exposed setter and resolver paths for those windows.
-- The later #496/#499 work replaced this intermediate shape with a merchant-wide configuration key and removed
-  customer-specific invoker-window overrides.
-
-## Pairs with
-tensorhub #486 (PushTierLadder now pushes the YAML per_invoker_bad_spend via the new setter); openrails #488
-(per-payer bad_spend), #487 (tier policy template), #476 (tier-schedule end-to-end template).
-
-## Outcome
-DONE — code complete, tested, and merged onto master as an intermediate implementation. Superseded by #496/#499,
-which removed customer-specific invoker-window overrides and stores the current delegated-invoker windows in merchant
-configuration. DefaultInvokerWastedWindows() remains the fallback. HISTORY: originally cut as the orphaned tag
-v0.31.0 from an isolated worktree (master then held uncommitted #491 WIP, so it couldn't be committed there); now
-reconciled onto master via a real three-way
-merge with #491 — the code auto-merged clean (the #491 invoker-rename hunks in service_admission.go were
-byte-identical on both sides). Consolidated version re-tagged at merge time.
-
----
-
-# #487: Generic spend-graduated tier policy + $-denominated admit limits (in-flight held-$ cap + per-charge cap)
-
-Consumer: tensorhub #486 (platform rate-limiting/tier redesign). MUST stay GENERIC — OpenRails sees only $, tiers,
-holds, and host-reported events; no host-domain concepts (GPU/tokens/images) leak in. The $-denomination is what
-keeps it reusable by other platforms.
-
-Today OpenRails has SetTierSchedule (cumulative-spend thresholds → auto-graduation) + SetTierPolicy carrying
-unit-based throughput windows (rpm/tpm/ipm) + queue limits. The tensorhub consumer no longer needs the throughput
-dimensions; it needs two $-denominated per-tier limits. KEEP the throughput capability (other hosts may use it);
-ADD/expose these generic primitives.
-
-## Scope
-- KEEP: SetTierSchedule + auto-graduation by cumulative CAPTURED spend (generic, unchanged); KEEP `ResolvedTier` on
-  AdmitResponse; KEEP captured-ledger $ budget windows (#475).
-- ADD two GENERIC $-denominated per-tier limits to the tier policy:
-  - `max_concurrent_held_amount` — cap on the sum of a payer's ACTIVE (un-settled) hold $. Enforce at admit
-    (over-limit signal) AND surface the resolved value on AdmitResponse, so a host that enforces true occupancy
-    itself (tensorhub's scheduler — only it sees live GPU occupancy) can use the value + the per-job estimate.
-  - `max_single_charge_amount` — per-charge ceiling; reject an Admit whose estimate exceeds it. Generic runaway guard.
-- Throughput windows + queue limits: keep supported; tensorhub simply stops pushing them.
-
-## Notes
-- "held $" = running + queued (admitted-not-settled). OpenRails' own enforcement is a committed-$ admission gate; a
-  host wanting work-conserving QUEUEING reads the cap value + per-job estimate and queues in its scheduler instead
-  (tensorhub does this) rather than getting a hard deny.
-- Values are tenant-wide defaults (empty subject), auto-applied at the payer's resolved tier.
-
-## Pairs with
-tensorhub #486; openrails #488 (failure windows), #489 (arrears). (#490 deposit-fraud was deleted — not needed.)
-
-## Outcome
-LANDED. Two generic $-denominated per-tier limits added to the tier policy JSONB (no new column —
-consistent with the existing budget_windows/queue_limits which also live in `policy`): `max_single_charge_amount`
-(per-charge ceiling; deny `single_charge_cap_exceeded` at admit before any hold) and `max_concurrent_held_amount`
-(cap on the SUM of the payer's ACTIVE un-settled hold $; deny `concurrent_held_cap_exceeded`, AND surfaced on every
-AdmitResponse as `max_concurrent_held_amount` + `held_amount` so an occupancy-aware host queues itself). Reused the
-existing `SumActiveMoneyHoldAuthorizations` query via new `MoneyService.ActiveHeldAmount`. KEPT throughput windows /
-queue limits / budgets / SetTierSchedule + auto-graduation unchanged. SDK/wire: AdmitResponse + TierPolicyInput
-extended across client.go/remote.go/embed/client.go + pkg/service; HTTP handler unchanged (serializes the struct).
-Migration 020 is a JSONB-contract COMMENT (sqlc generate/vet clean). Tests: 3 new integration tests; full admission
-integration suite green; build OK.
-
----
-
-# #488: $-valued failure/wasted-spend budget windows (per-payer tier + per-invoker flat) + report-failed-charge API
-
-Consumer: tensorhub #486. GENERIC — every platform has failed/refunded work that costs it money (a hold released
-without capture, or a host-reported out-of-band cost). Rate-limit that "wasted spend" so a low-trust account can't
-abuse expensive failures for free (the prepaid balance can't bound this — failures are refunded).
-
-Today there are event-COUNT AbuseWindows (LimitEvents) + abuse_rate_limited / moderation_rate_limited /
-failure_rate_limited codes + /abuse-usage. Generalize to $-VALUED windows so a pricey failure weighs more than a
-cheap one.
-
-## Scope
-- A host API to REPORT a failed/wasted charge: `ReportWastedSpend(payer, actor, amount, reason)` (or a "wasted" flag
-  on the settle/release path) — the host says "this attempt failed and cost $X." (tensorhub reports content-filter
-  rejects + inference failures; cheap malformed rejects ≈ $0, not reported.)
-- Track per-PAYER and per-ACTOR (invoker) wasted-spend in $ windows, multi-window (e.g. 15 min + 5 h).
-- Budgets: per-PAYER window graduated by the tier policy (#487) — a `bad_spend` $ budget per tier; per-ACTOR window
-  a flat config default (invokers aren't trusted — an account mints unlimited).
-- Enforce at admit: deny when EITHER the payer or the actor is over its wasted-$ budget (reuse
-  abuse_rate_limited / failure_rate_limited). Surface wasted $ (not just counts) on /abuse-usage.
-
-## Pairs with
-tensorhub #486 (reports the failures + defines the $ amounts); openrails #487 (per-tier bad_spend budget lives in the
-tier policy).
-
-## Outcome
-LANDED. NOTE: the spec's "existing event-COUNT AbuseWindows / LimitEvents / abuse_rate_limited / /abuse-usage" did
-NOT literally exist in this repo — what existed was the Redis fixed-window limiter + count-based card-failure velocity
-guards. Built the $-valued wasted-spend windows ON THAT proven infra (no new store): new ratelimit value-window
-primitives (AddWindowValue/WindowValue — DECOUPLED record vs read, vs throughput's Check which folds them) + a new
-`abuse.WastedSpendGuard` tracking per-PAYER + per-ACTOR wasted $ in multi-window Redis. Host API
-`ReportWastedSpend(payer, actor, amount, reason)` accrues into both subjects. Per-PAYER budget = tier policy JSONB
-`bad_spend_windows` (graduated by tier); per-ACTOR = flat config default `DefaultActorWastedWindows` ($5/15m + $20/5h).
-Admit denies `abuse_rate_limited` (payer over) / `failure_rate_limited` (actor over), BlockedBy="abuse" → 429.
-New `/abuse-usage` read (wasted $, not counts). SDK/wire: ReportWastedSpend + AbuseUsage added to the Client interface
-(client/remote/embed) + pkg/service + 2 HTTP handlers + routes. Migration 021 = JSONB-contract COMMENT. Tests: 2 new
-integration tests (payer-over → abuse_rate_limited; actor-over → failure_rate_limited + per-actor isolation); admission
-+ abuse + ratelimit integration suites green; build + sqlc vet OK.
-GOTCHA fixed: a helper file named `*_windows.go` is silently treated by Go as a Windows-GOOS build constraint
-(excluded from the build); renamed to `valuewindow.go`.
-
----
-
-# #489: Per-tenant arrears credit-line (admin-set credit limit; negative-balance-up-to-limit)
-
-Consumer: tensorhub #486 (admin-only arrears for trusted tenants). GENERIC — OpenRails already supports an arrears
-billing mode; make the credit exposure an explicit, admin-set per-tenant limit.
-
-## Scope
-- Per-tenant `credit_limit_amount` (admin/operator-set, NOT self-serve): under billing_mode=arrears, allow the
-  balance to go NEGATIVE up to the credit limit; AdmitHold denies (insufficient_credit) when a new hold would
-  exceed it.
-- Periodic invoicing of accrued arrears (or expose the arrears balance for the host to invoice) — confirm what the
-  existing arrears mode already does vs new.
-- Default OFF: prepaid, credit_limit = 0 unless an operator sets it.
-- Capacity (#487 held-$ cap) for an arrears tenant scales from the credit limit (the trust signal) rather than a
-  positive balance.
-
-## Pairs with
-tensorhub #486 (per-tenant `arrears_allowed` flag + admin surface); openrails #487.
-
-## Outcome
-LANDED. EXISTING vs NEW: the existing arrears mode ALREADY had a credit line — `max_outstanding_owed_amount` (the
-existing tests literally name it "credit limit") — but it is (a) SELF-SERVE (set via UpsertAccountSettings) and (b)
-enforced on the SETTLEMENT path (SpendCredits/AccrueOwed); AuthorizeAndHold SKIPPED the balance gate for arrears
-entirely. #489's NEW bits: an explicit OPERATOR-ONLY `credit_limit_amount` column (migration 022) + admit-time
-enforcement in AuthorizeAndHold (deny `insufficient_credit` when a new hold would push the balance below
--credit_limit). New `MoneyService.SetCreditLimit/GetCreditLimit` (operator-only, dedicated SQL — NOT on the self-serve
-AccountSettingsInput) + pkg/service + SDK (client/remote/embed) + admin-gated PUT/GET /v1/service/credit-limit routes.
-DESIGN CHOICE / spec deviation: the spec's literal "credit_limit=0 ⇒ prepaid behavior" would REGRESS the existing #302
-arrears-spill-past-balance (a hold may exceed the balance and spill to owed at capture). So credit_limit=0 = OFF
-(existing arrears behavior UNCHANGED; bounded by the outstanding ceiling), and credit_limit>0 = the new admit-time
-ceiling. Prepaid is unaffected either way. Tests: 3 new integration tests (credit-line allow up to limit +
-insufficient_credit deny; 0=existing-arrears-behavior; prepaid-unaffected); money + admission + pkg/service integration
-suites green (incl. the pre-existing #302 spill test); build + sqlc generate/vet OK.
-
----
-
-# #469: HARD CUT: control plane mandatory in standalone — remove verifier-only mode entirely
-
-**Completed:** no
-
-Standalone OpenRails always runs its own AuthKit control plane. The "verifier-only" /
-"pure JWT verifier" deployment mode (control plane omitted/disabled) is REMOVED, not
-deprecated: delete the code, config knobs, conditional branches, and docs that exist
-only to support it. No legacy deployments exist; no compatibility shims.
-
-Rationale: OpenRails' product model is a Stripe-like multi-tenant billing server —
-users register accounts (native AuthKit users), create tenants (merchants), and
-tenants' customers exist as tenant-subjects. The control plane IS that model; the
-self-service browser surface (/v1/self/* delegated tokens), runtime tenant/issuer
-management, and the admin API all already live behind it. Verifier-only survives only
-as a topology fork that every auth-adjacent feature must branch on (e.g. the
-"nil resolver => self-service surface not mounted" fork in ginmw/delegated.go), doubling
-the test matrix and muddying the docs. Private/self-hosted posture is expressed by the
-existing registration axes (public_user_registration / public_tenant_registration,
-both default false) — NOT by amputating the control plane.
-
-The minimal "billing sidecar with no auth state" trust model remains available where it
-belongs: pkg/embedded (host-authenticated, in-process, one trust domain). Standalone is
-the multi-tenant server and always owns its AuthKit instance + profiles schema in its
-own database.
-
-Scope (survey for completeness; this list is the known surface, not the boundary):
-- Standalone boot always runs controlplane.Attach; remove auth.control_plane.enabled /
-  ControlPlaneEnabled() and every `cp == nil` / nil-resolver / "verifier-only" branch
-  (route mounting, ginmw/delegated.go DelegatedResolver nil contract, admin gating).
-  Control-plane construction failure is fatal at boot, not a silent downgrade.
-- Remove the static-config trust root that exists only for verifier-only standalone
-  (auth.issuers as the sole issuer allowlist + internal/auth/verifier.go wiring), in
-  favor of the control plane's live issuer registry. Where first-party service-JWT
-  verification still needs config-declared issuers, keep that as an explicit
-  control-plane input, not a parallel auth mode.
-- config.example.yaml / README / DEVSERVER docs: delete the "pure JWT verifier"
-  narrative and the optional-control-plane decision tree; the standalone auth story is
-  one model (control plane, registration axes closed by default).
-- pkg/embedded is unaffected in its core (authkit-free, host-authenticated). Evaluate
-  pkg/embedded/authkit + pkg/embedded/controlplane opt-in helpers: keep what embedded
-  hosts and the standalone binary genuinely use, delete what existed only to make the
-  control plane optional in standalone.
-- Tests: collapse the dual-topology matrix; delete verifier-only fixtures/harness paths
-  (tests/openrails_harness.go in consumers may pin public_tenant_registration etc. —
-  those knobs stay; the enabled/disabled fork goes).
-- Migrations/bootstrap: control-plane bootstrap (default tenant org, bootstrap admin
-  service token, manifest apply) becomes the unconditional standalone boot path.
-
-NOTE: next_id above was stale (365) while issues up to #468 already exist across
-progress/future/completed; this issue took #469 and reset next_id to 470.
-
-**Tasks:**
-- [x] Inventory every control-plane-optional branch (`ControlPlaneEnabled`, nil cp/resolver checks, "verifier-only" mentions) across internal/, pkg/, cmd/, config/, docs
-- [x] Make controlplane.Attach unconditional in standalone boot; fail-fast on error
-- [x] Remove auth.control_plane.enabled knob + ControlPlaneEnabled()/OperatorTenantEnabled() shims
-- [x] Remove/fold internal/auth/verifier.go static-issuer mode into control-plane issuer config — auth.issuers KEPT as the first-party user/admin JWT input (doujins AUTH_ISSUERS keeps working); parallel-mode framing deleted; delegated/service creds stay on the control plane's live issuer registry
-- [x] Delete nil-resolver fork in ginmw/delegated.go (+ equivalent forks elsewhere); self-service surface always mounted
-- [x] Prune pkg/embedded/authkit + pkg/embedded/controlplane to what's actually used post-cut — both kept (used by standalone wiring + embedded opt-in); only the enabled-check/nil-tolerant paths inside them were cut
-- [x] Docs hard cut: README auth-model section, config.example.yaml, principal-boundary-audit.md (no DEVSERVER.md exists)
-- [x] Collapse test matrix; go build/vet/test green — build/vet/unit suites green. Integration suite (`-tags=integration ./tests/`): verbose run completed all #469-relevant tests green; ONE failure, `TestDunningWorkerLimitedModeTakesNoAction`, confirmed PRE-EXISTING (encodes pre-#366 "takes no action" semantics; behavior changed in a67cc3f5 — filed as #470; clean HEAD can't even build the integration tests, fixed in this tree). Suite also exceeded a 45m wall under heavy concurrent machine load (3 sibling agent runs + dev compose); re-run on a quiet machine before tagging.
+- Admit-time reservations are Redis enforcement state, not durable ledger rows.
+- Reservation identity is the caller's stable merchant-scoped `request_id`.
+- OpenRails does not mint or require a separate reservation id for Tensorhub-style request lifecycles.
+- Admit/capture/release APIs and SDKs settle by `request_id`, not `reservation_id`.
+- Money-bearing admits require explicit `invoker_type`, and direct-payer vs delegated policy no longer depends on
+  parsing `invoker`.
+- Tensorhub sends a stable OpenRails `resource` key for policy/reporting, with mutable names preserved as metadata.
+- `money_transactions` contains only real money movement.
+- Successful completed work still creates the expected usage event and ledger debit/owed rows.
+- Failed/cancelled/pre-work requests do not create money ledger entries.
+- Concurrent admits are bounded by `balance + allowed owed - active holds` for the request currency.
 
 ---
 
@@ -615,36 +673,36 @@ Plan and implement OpenRails-owned USDC funding sessions for host apps that need
 - [x] Define Solana-only compatibility rules for USDC funding.
 - [x] Decide whether funding amount comes from the checkout-session shortfall, an explicit requested amount, or both with server-side validation. Implemented explicit requested amount with optional checkout_session_id context.
 - [x] Decide how provider ranking is configured per tenant: Robinhood preferred, Coinbase fallback. Implemented default provider order with Robinhood first and Coinbase second.
-- 
+-
 - DATA MODEL:
 - [x] Add a funding/onramp session table with tenant_id, user_id, checkout_session_id, provider, wallet_address, asset, network, requested_amount, provider_session_id, provider_url, status, return_url, idempotency key, timestamps, and provider metadata.
 - [x] Add indexes for tenant/user lookup, checkout_session_id lookup, provider_session_id lookup, and idempotency.
 - [x] Store provider secrets/config in OpenRails config, never in host apps.
-- 
+-
 - API:
 - [x] Add `POST /v1/self/usdc-funding-sessions` to create a Robinhood/Coinbase funding session for the authenticated browser user.
 - [x] Add `GET /v1/self/usdc-funding-sessions/:id` to return normalized funding status and provider URL/status details safe for frontend polling.
 - [x] Add `GET /v1/self/usdc-funding-options` to list eligible Robinhood/Coinbase options for wallet, network, asset, amount, and optional checkout_session_id.
 - [x] Add provider webhook/status callback endpoints where Coinbase supports them. Implemented signed Coinbase Onramp webhook ingestion on the existing provider webhook route; Robinhood remains blocked on partner docs/access.
 - [x] Enforce self-service auth, tenant boundaries, and idempotency on funding-session create/read routes.
-- 
+-
 - PROVIDERS:
 - [x] Implement a Coinbase provider adapter that creates a hosted onramp URL/session with destination wallet, network, asset, amount, return URL, and partner/user reference, including short-lived CDP JWT bearer generation from Coinbase secret API keys.
 - [x] Implement Coinbase status/webhook handling and map provider lifecycle into OpenRails funding-session status. Coinbase success maps to pending_settlement; only live Solana wallet-balance verification can mark funded.
 - [ ] Implement a Robinhood provider adapter after partner docs/access are available, supporting external handoff into Robinhood Connect and funding into the user's live wallet.
 - [ ] Implement Robinhood status/webhook handling if exposed by partner API; otherwise rely on return handling plus on-chain wallet-balance verification.
 - [x] Add provider availability checks so unsupported network/asset combinations are hidden rather than offered.
-- 
+-
 - WALLET VERIFICATION:
 - [x] Reuse existing Solana USDC balance-checking code where possible to verify the funded wallet before marking a session funded for Solana checkout.
 - [x] Do not add Base/EVM balance verification for this issue; Solana is the only supported chain.
 - [x] Ensure returning from a provider only triggers polling/checking; it must not mark the session funded by itself.
-- 
+-
 - CHECKOUT INTEGRATION:
 - [x] Allow a funding session to reference the checkout session that produced an insufficient-USDC state.
 - [x] Ensure insufficient-USDC API errors expose enough structured amount/network/wallet context for host apps to create a funding session. Added `error.metadata.usdc_funding` with Solana network, USDC asset, wallet, decimal amount/balance/shortfall, and base-unit values.
 - [x] Keep final subscription/payment creation in the existing checkout confirmation path after the wallet is funded.
-- 
+-
 - VERIFY:
 - [x] Add unit tests for provider eligibility and network compatibility gates.
 - [x] Add API tests for create/get funding session, tenant isolation, idempotency, and unsupported-provider/network rejection.
@@ -803,19 +861,19 @@ Adjust CCBill subscription entitlement logic to model paid term + retries (dunni
 - [ ] Verify CCBill webhook sequence in sandbox: cancel mid-term -> Expiration at end-of-term (and timing)
 - [ ] Decide grace policy during retries: disabled vs enabled; cap strategy (extend-to-nextRetryDate vs fixed extra days)
 - [ ] Decide policy for CCBill `Cancellation.source=failedRB`: treat as terminal end (no more retries) vs still paid-through end-of-term
-- 
+-
 - DATA MODEL:
 - [x] Ensure we can store current_period_ends_at (from nextRenewalDate) for CCBill subscriptions
 - [x] Store next_retry_at (from nextRetryDate) and optional grace_ends_at (policy derived)
 - [x] Decide whether to reuse existing `subscriptions.next_retry_at` fields for CCBill (recommended) vs add CCBill-specific columns
-- 
+-
 - WEBHOOK -> STATE MACHINE:
 - [x] NewSaleSuccess: set paid-term end; grant entitlements for [now, paid_term_end)
 - [x] RenewalSuccess: extend paid-term end; extend entitlement windows
 - [x] RenewalFailure: set past_due/dunning; persist next_retry_at from webhook; optionally extend entitlements within grace cap
 - [x] Cancellation: mark cancelled but keep access until paid_term_end (do NOT revoke immediately)
 - [x] Expiration: mark ended/expired and end/revoke entitlements
-- 
+-
 - CODE CHANGES (expected touch points):
 - [x] `internal/services/webhook_ccbill.go`: parse and apply `nextRenewalDate` on `NewSaleSuccess` and `RenewalSuccess` (don’t rely solely on `price.billing_cycle_days`)
 - [x] `internal/services/webhook_ccbill.go`: on `RenewalFailure`, parse `nextRetryDate` and update `subscriptions.status=past_due` + `subscriptions.next_retry_at` (avoid calling `SubscriptionLifecycleService.FailMembership`, which schedules NMI-style retries)
@@ -824,10 +882,10 @@ Adjust CCBill subscription entitlement logic to model paid term + retries (dunni
 - [x] `internal/services/lifecycle_service.go`: update `RenewMembership` for CCBill to extend entitlements to match the new `current_period_ends_at` (today renewal doesn’t extend entitlements at all unless a downgrade changes entitlement set)
 - [x] `internal/db/repo/entitlement.go`: make `IsEntitled` / “active entitlement” queries explicitly exclude `deleted_at` (don’t rely on implicit soft-delete behavior)
 - [x] `config/config.go`: add a feature flag / config for CCBill grace behavior (enable/disable + max cap)
-- 
+-
 - ANALYTICS:
 - [x] Ensure ClickHouse subscription_events reflect dunning/cancelled/expired transitions for CCBill
-- 
+-
 - TESTS:
 - [x] Add integration test: NewSaleSuccess -> RenewalFailure(nextRetryDate) keeps access until paid_term_end (+ optional grace) -> RenewalSuccess extends window
 - [x] Add integration test: Cancellation mid-term does NOT revoke immediately; entitlement ends at paid_term_end; verify Expiration handling if CCBill sends it
@@ -866,20 +924,20 @@ Make `Config.Cloudflared` an actual supported dev feature: OpenRails can (option
 - DESIGN:
 - [ ] Decide opt-in mechanism: (A) standalone CLI subcommand `openrails cloudflared up` that supervises both OpenRails + cloudflared, or (B) OpenRails spawns cloudflared when `cloudflared.tunnel_token` is set and `env=dev`
 - [ ] Decide what constitutes “success”: tunnel established + /health/ready reachable via public hostname
-- 
+-
 - IMPLEMENTATION (if spawning subprocess):
 - [ ] Add a small `pkg/cloudflared` supervisor that starts `cloudflared tunnel run` with the configured token and captures stdout/stderr into structured logs
 - [ ] Ensure clean shutdown: propagate SIGINT/SIGTERM, kill child process group, avoid zombies
 - [ ] Add a readiness check that probes the configured `cloudflared.public_hostname` (or local route) and reports status
-- 
+-
 - CONFIG / DOCS:
 - [ ] Clarify config semantics in config.example.yaml (token is secret; hostname is non-secret; tunnel name optional)
 - [ ] Document a phone-access workflow in docs (prereqs: cloudflared installed or image available; set APIURL/CORS origins appropriately)
-- 
+-
 - SECURITY / SAFETY:
 - [ ] Ensure the service API (port 8060) is not accidentally exposed publicly by default; only expose the public API unless explicitly configured
 - [ ] Ensure `api_key` and auth verification are still required for protected routes
-- 
+-
 - VERIFY:
 - [ ] Add a lightweight unit test for supervisor command construction (no subprocess exec)
 - [ ] Manual dev verification: start stack + tunnel and hit /health/ready from an external device
@@ -915,18 +973,18 @@ Add deterministic processor selection and fallback policy so checkout can choose
 - [ ] Define routing outputs: selected processor, fallback candidates, reason, and policy version.
 - [ ] Decide precedence: explicit price/provider config > tenant policy > product/tier_group policy > global default.
 - [ ] Decide failure classes that can trigger fallback before checkout finalization: processor unavailable, unsupported capability, credential missing, sandbox/live mismatch, hard validation failure. Do not fallback after a successful charge.
-- 
+-
 - DATA MODEL / CONFIG:
 - [ ] Add routing policy representation in DB or catalog manifest: allowed processors, preferred order, disabled processors, and optional per-tier overrides.
 - [ ] Extend catalog-as-code manifest only if needed; prefer using existing provider lists as the first version.
 - [ ] Record selected processor and routing reason on checkout_sessions for auditability.
-- 
+-
 - IMPLEMENTATION:
 - [ ] Add a ProcessorRouter service used before checkout session creation and legacy checkout flows.
 - [ ] Integrate with processor health/capability metadata so unsupported processors are filtered with explicit errors.
 - [ ] Add dry-run endpoint/CLI to explain routing for a price/user/tenant without creating a checkout.
 - [ ] Ensure idempotency keys bind to the resolved processor/policy so retries do not unexpectedly switch rails.
-- 
+-
 - VERIFY:
 - [ ] Unit-test policy precedence and fallback filtering.
 - [ ] Integration-test Stripe primary -> Mobius fallback when Stripe is disabled/unavailable before charge.
@@ -956,18 +1014,18 @@ Publish and maintain a provider certification matrix for Stripe, NMI/Mobius, CCB
 - [ ] Define provider capabilities and certification statuses: not_supported, manual_only, unit_tested, integration_tested, sandbox_certified, live_test_mode_certified, devnet_certified, production_certified.
 - [ ] Define flows to track: catalog/product push, price/recurring-plan push, one-time checkout, recurring checkout, vault/tokenization, rebill, cancellation, deferred cancellation, refund, dispute/chargeback, webhook handling, subscription sync/backfill, catalog drift detection.
 - [ ] Include processor-specific notes: NMI product/prices are local while recurring prices push as NMI recurring plans; CCBill catalog actions may be manual; Solana recurring requires on-chain readback/devnet certification.
-- 
+-
 - DOCS:
 - [ ] Add docs/providers.md or equivalent with the current matrix and exact tested commands.
 - [ ] Add NMI-compatible gateway guidance: required security_key, Collect.js/tokenization key if needed, direct/query endpoints, test_mode behavior, and how Mobius/NMI white-label accounts map to the same interface.
 - [ ] Add troubleshooting for common provider failures: bad endpoint, key belongs to different gateway user, sandbox URL not supported, recurring plan query mismatch, webhook signature failure.
-- 
+-
 - EXECUTABLE CERTIFICATION:
 - [ ] Add or formalize focused integration tests for NMI/Mobius sale, vault, recurring plan create/readback, and query API.
 - [ ] Add Stripe test-mode catalog apply + subscription sync certification steps.
 - [ ] Add Solana devnet read-back certification for plan accounts and recurring lifecycle.
 - [ ] Add CCBill manual-action verification path so unsupported remote catalog operations surface as pending_manual_actions rather than errors.
-- 
+-
 - PROCESS:
 - [ ] Make certification matrix updates part of provider-related PRs.
 - [ ] Record last verified date, environment, and command for each provider flow without exposing secrets.
@@ -995,17 +1053,17 @@ Expose processor capability metadata in code, APIs, catalog planning, checkout v
 - [ ] Define ProcessorCapabilities with booleans/enums for recurring, one_time, vault/tokenization, hosted checkout, redirect checkout, direct sale, catalog push, recurring plan push, refund, dispute, cancel immediate, cancel deferred, remote subscription listing, remote dedup check, webhooks, drift enumeration, and manual actions.
 - [ ] Add capability details for current processors: stripe, mobius/NMI-backed, ccbill, solana.
 - [ ] Distinguish processor class capabilities (NMI-backed) from named provider overrides (Mobius).
-- 
+-
 - INTEGRATION POINTS:
 - [ ] Use capabilities in checkout validation instead of hard-coded processor switches where practical.
 - [ ] Use capabilities in catalog apply/plan to decide provider actions and pending_manual_actions.
 - [ ] Use capabilities in routing/fallback policy (#288) so unsupported rails are filtered before checkout.
 - [ ] Surface capabilities through admin/provider status endpoints and docs.
-- 
+-
 - ERRORS / UX:
 - [ ] Return structured unsupported-capability errors with processor, capability, and suggested alternative when possible.
 - [ ] Ensure user-facing errors are clean while admin/debug surfaces retain processor detail.
-- 
+-
 - VERIFY:
 - [ ] Unit-test capability metadata for each supported processor.
 - [ ] Regression-test known special cases: CCBill manual catalog actions, NMI recurring plan push, Stripe remote dedup check, Solana one-off/recurring distinction.
@@ -1016,7 +1074,7 @@ Expose processor capability metadata in code, APIs, catalog planning, checkout v
 
 **Completed:** no
 
-Add Hyperswitch as an optional OpenRails payment provider and payment-method vault integration, covering both Hyperswitch Cloud and self-hosted Hyperswitch. This is payment vaulting/tokenization, not HashiCorp Vault tenant-secret storage. OpenRails should store only opaque Hyperswitch customer/payment-method identifiers plus non-sensitive metadata, while PAN/card collection stays in Hyperswitch-hosted/client-side tokenization flows or equivalent PCI-scoped Hyperswitch surfaces.
+Add Hyperswitch as an optional OpenRails payment provider and payment-method vault integration, covering both Hyperswitch Cloud and self-hosted Hyperswitch. This is payment vaulting/tokenization, not HashiCorp Vault merchant-secret storage. OpenRails should store only opaque Hyperswitch customer/payment-method identifiers plus non-sensitive metadata, while PAN/card collection stays in Hyperswitch-hosted/client-side tokenization flows or equivalent PCI-scoped Hyperswitch surfaces.
 
 This issue must reconcile with future issue #297 (`deplatforming-resilient-card-vault`): Hyperswitch should not be positioned as the default adult/high-risk deplatforming-resilient vault until its contractual/export/compliance posture is explicitly certified. Hyperswitch Cloud may still be useful for lower-risk deployments or as an optional provider, and self-hosted Hyperswitch may be a break-glass/advanced deployment path if the operator accepts and satisfies the PCI requirements.
 
@@ -1141,311 +1199,9 @@ Also boot the cutover with `FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIO
 
 ---
 
-# #491: Split CUSTOMER (payer / money account) from INVOKER (delegated-user / caller) — delegated-users hold no money
-
-**Completed:** structural split shipped (v0.32.0/v0.33.0); INVOKER-MODEL REVERSAL shipped (v0.34.0, 2026-06-15) — migration 029 drops invoker_id+FK (opaque `actor` text remains the invoker), buildBudgetScopes is per-invoker only (subject/role pools dropped + their tests removed), authkit dep -> v0.34.0; build/vet/unit + admission/budgets/money/controlplane/embed integration all green.
-COLUMN RENAME DONE (v0.35.0, migration 030): `actor` -> `invoker_id` on all 5 invoker-bearing tables
-(usage_events/money_transactions/money_spend_limits/budget_window_state/budget_reservations) + new nullable
-`invoker_type` discriminator on the 3 attribution tables + a per-invoker index on usage_events. NO FK (the
-invoker is a polymorphic, possibly-cross-DB principal). PUBLIC HARD CUT DONE (2026-06-15, migration 034):
-SDK/service fields are `Invoker`, JSON/query params are `invoker`, `actor` request fallbacks were removed,
-old wasted-window actor terminology moved to invoker terminology, and budget scope input no longer accepts `actor`.
-AuthKit delegated-token comments
-now say delegated subject/principal rather than actor. invoker_type is a column ready for population (the host
-supplies the kind); wiring it through the SDK/wire is a follow-up.
-
-================================================================================
-REVERSAL (owner, 2026-06-15) — invoker is OPAQUE TEXT, no FK; budgets per-invoker only.
-================================================================================
-Two corrections to what shipped, both confirmed by the owner:
-
-1. INVOKER = OPAQUE TEXT, NOT AN FK. The invoker ("under whose authority an action
-   happened") is a POLYMORPHIC principal: native-user | delegated-user | service-token
-   | issuer/JWKS. OpenRails can't FK across authkit's four principal tables (separate
-   schema) or across apps. So migration 027's `invoker_id uuid` + cross-schema FK ->
-   `profiles.delegated_users(id)` is WRONG — change it to `invoker text` (a stable
-   uuidv7 string), NO foreign key. authkit#81 (delegated_users) is being RE-DROPPED in
-   tandem; nothing references it. Usage visibility = aggregate attribution rows by the
-   opaque invoker text; per-invoker limits = budget rows keyed by the invoker text.
-
-2. BUDGETS ARE PER-INVOKER ONLY. Drop the role/subject (#473) scopes. A role/subject
-   never invokes — only an invoker does. tier + role are POLICY TEMPLATES that define
-   which fixed-window $-limits apply to each invoker (e.g. role-A "$100/mo" => each
-   role-A user may spend $100/mo of the org's money, CHARGED TO THAT USER, not a shared
-   role pool). So `budget_window_state`/`budget_reservations.actor` (today a polymorphic
-   scope key: invoker | @subject | @role:uuid) collapses to just the INVOKER. Remove
-   ScopeRole/ScopeSubject from budgets/scopes.go; simplify ReserveScopes to the single
-   invoker scope (or keep the multi-window-per-invoker shape, dropping cross-invoker pools).
-
-ACTION (do it yourself, no sub-agents): new migration changes the three attribution
-tables' `invoker_id uuid` -> `invoker text` (drop the FK + the column, add text), drops
-the role/subject budget scopes, renames `budget_*.actor` -> `invoker`. Update code + sqlc.
-Re-tag synced with authkit. The "lives in authkit / FK anchor" design recorded below is
-HISTORICAL. See [[invoker-opaque-text-polymorphic]].
-================================================================================
-
-Today `customer` (the renamed merchant_subject, #486) is keyed `UNIQUE(merchant_id, issuer, subject)` —
-one row PER DELEGATED-USER — AND owns the money: `money_accounts` (balance, tier, spend-caps),
-`processor_customers` (Stripe cus_*/payment methods), credit-line (#489), tier_schedules (#476). That
-conflates two different things:
-
-- The PAYER: the account that actually holds money / a payment method / a balance — we have a real
-  financial relationship with it. FEDERATED: this is the TENANT (e.g. cozy-art). EMBEDDED: it's the
-  host's end-user (doujins end-users buy their own credits via the host's processor).
-- The ACTOR (invoker): the individual performing an action. FEDERATED: a DELEGATED-USER — ephemeral, NO
-  payment method, NO balance, NO money relationship with us; we know it only via (issuer, subject).
-
-The RUNTIME layer already distinguishes these (#487 caps the PAYER's active held-$; #488 has per-payer
-TIER budgets + per-ACTOR "invokers aren't trusted" FLAT budgets), but the IDENTITY/data model does NOT:
-`internal/modules/admission` types the payer as `identity.CustomerID`, and `actor` exists only as an
-ephemeral Redis budget-scope STRING (budgets scope=actor), not a first-class identity. This issue
-promotes the split to the identity model.
-
-TERMINOLOGY (decided): **customer = the PAYER** (money account, merchant-scoped, NEVER delegated).
-**actor** (a.k.a. invoker) = the doer (can be a delegated-user, a native user, or the tenant itself).
-
-STRUCTURE (corrected, per cozy-art->tensorhub->openrails walkthrough): the MERCHANT is the OPERATOR that
-authenticates to OpenRails — its issuer/tenant/service-token in OpenRails's mounted authkit IS the merchant
-(e.g. tensorhub). OpenRails hosts MANY merchants. The merchant is the ONLY party OpenRails authenticates; it
-ASSERTS, for its OWN namespace only, who the CUSTOMER (payer) and ACTOR (invoker) are — opaque strings
-OpenRails records but does NOT independently authenticate. OpenRails is FEDERATION-AGNOSTIC: it does not
-care whether the merchant's end-user is native or delegated; the merchant runs its OWN end-user auth (e.g.
-tensorhub's internal cozy-art federation, invisible to OpenRails) and just reports (customer, actor).
-cozy-art is a CUSTOMER STRING, not an OpenRails-authkit entity. NO tenant<->merchant schema link: the
-operator's authkit tenant/issuer CORRESPONDS to its merchant (same real entity), and issuer -> merchant is
-the issuer registry. owner_tenant_id stays ownership/admin-only. Within a merchant:
-
-  customer = the PAYER = a BALANCE / money account — a PURE billing entity: (id, merchant_id). ALL the
-    money state already FKs to customers(id): money_balances (balance + held), money_blocks (credit lots),
-    money_transactions (ledger), money_accounts (policy/config + tier), processor_customers (Stripe cus_*),
-    payment_methods. NO issuer, NO subject, NO tenant. It is an ACCOUNT, not a person; a balance has no
-    issuer.
-  actor (invoker) = a MERCHANT-SUPPLIED, OPAQUE label for the end-user that triggered a charge — NOT
-    authenticated by OpenRails (exactly money_spend_limits.actor today: "a caller-supplied opaque principal
-    string"). DRAWS ON a customer's balance via a customer_id FK; used ONLY for spend-attribution +
-    per-actor abuse caps. NO money, NO tier. End-users NEVER present a token to OpenRails.
-
-  merchant(1) -> customers(many);   customer(1) -> actors(many);   actor -> customer (FK)
-
-This finishes the de-conflation: MONEY on the customer, ATTRIBUTION/abuse on the (unbilled) invoker. The
-AUTHENTICATED token subject (delegated_sub, or a merchant self-token) is ALWAYS a CUSTOMER (has a balance)
-or the merchant itself — NEVER an unbilled end-user. End-users have no balance and never present a token to
-OpenRails; the merchant reports them as the actor label on charges. TERMINOLOGY collision to avoid: authkit
-comments delegated_sub as "the actor", but in BILLING terms that authenticated subject is a CUSTOMER —
-#491's actor is the unbilled end-user label, so call it the INVOKER in code.
-
-A customer is a payer/balance scoped to a merchant, ASSERTED by the merchant. STANDALONE-individual
-(doujins): each end-user is BOTH payer (customer) and invoker (actor) — actor -> customer 1:1; the end-user's
-merchant-minted token is sent straight to OpenRails, which verifies it (subject = customer/actor). B2B2C
-(cozy-art via tensorhub): the MERCHANT = tensorhub; cozy-art = a CUSTOMER STRING tensorhub reports (NOT an
-OpenRails-authkit entity); cozy-art's users = the ACTORS (many:1); tensorhub runs the cozy-art federation
-itself, OpenRails never sees it. EMBEDDED: host vouches; customer/actor ids passed directly.
-
-EMBEDDED degenerate case (doujins): the end-user genuinely holds money, so end-user = customer(payer) =
-actor (1:1); MANY customers per merchant (one per end-user), one actor each. Unifying rule: actor->customer
-is many:1 (federated) or 1:1 (embedded). "One customer per merchant" is FEDERATED-ONLY — embedded keeps
-per-end-user customers because the end-user holds money.
-
-================================================================================
-OWNER CONFIRMATION + UNIFIED RULE (2026-06-14) — supersedes the "CONFIRM this nuance" note above.
-================================================================================
-The split is REAL and reduces to ONE rule. Two primitives, never conflated:
-
-  INVOKER (formerly "actor") = the END-USER that made the call. ALWAYS the token SUBJECT (delegated_sub) or
-    a native user. Referenced by a STABLE UUID, never a username (e.g. cozy-art reports PaulFidika by his
-    cozy-art UUID, so a rename on cozy-art doesn't reparent his history). The invoker is ALWAYS tracked
-    (billing visibility for the payer + per-invoker abuse/rate caps the payer sets), and NEVER holds money.
-
-  CUSTOMER (payer) = who the spend is billed to. Resolved from the ISSUER:
-    - issuer is ORG-BOUND (cozy-art on tensorhub: cozy-art is an authkit ORG *and* an issuer) ->
-        payer = the ORG's single customer. MANY invokers : 1 customer. cozy-art:PaulFidika is NEVER a
-        tensorhub user and NEVER a tensorhub-OpenRails customer — only an invoker under cozy-art's balance.
-    - issuer is ORG-LESS, or a native user (doujins/hentai0 users; tensorhub native user Sam) ->
-        payer = the end-user THEMSELVES. invoker -> customer 1:1 (Sam pays for Sam; each doujins user pays
-        for itself). authkit#80 makes org_id NULLABLE precisely so org-binding can BE this switch.
-
-  So: invoker = always the subject; payer = the org (org-bound issuer) ELSE the subject/native-user.
-  Embedded (doujins, hentai0, cozy-art-standalone) and standalone differ only in transport, not in this rule.
-
-DEPLOYMENT SHAPES (owner, 2026-06-14):
-  - doujins/hentai0/cozy-art use OpenRails EMBEDDED, identically: merchant = the app (sole); customers =
-    each of the app's users (native authkit users -> per-user balances); no orgs; issuers unused embedded.
-  - doujins/hentai0 STANDALONE OpenRails: authkit there has NO users/orgs, only ISSUERS [doujins, hentai0]
-    tied to the one merchant; each token subject -> its own customer (org-less issuer branch above).
-  - tensorhub uses OpenRails EMBEDDED: merchant = tensorhub (sole); customers = tensorhub's ORGS + native
-    users; cozy-art is an authkit org+issuer; cozy-art's delegated users are INVOKERS, not customers.
-    tensorhub resolves payer=org / invoker=subject via authkit IN-PROCESS, then charges its embedded
-    OpenRails. (The earlier "OpenRails is federation-agnostic, cozy-art is an opaque string it never sees"
-    framing was the STANDALONE-remote model; under tensorhub-EMBEDDED, cozy-art IS a real authkit entity
-    and the payer corresponds to that org.)
-
-  ISSUERS only appear in two places (owner, 2026-06-14): (1) STANDALONE OpenRails, where the embedding app
-  (doujins/hentai0) signs JWTs for its users and the issuer ties to the merchant (no org); (2) FEDERATED
-  delegators inside an embedded host (cozy-art inside tensorhub), where the issuer is org-bound. In PLAIN
-  embedded mode there is no JWT-to-OpenRails step at all (see below). "Org" = a grouping of an app's
-  users/sub-customers, NEVER the app itself. In tensorhub an org (cozy-art) -> one customer (payer) and may
-  own an org-bound issuer.
-
-  EMBEDDED SECURITY MODEL (owner, 2026-06-14) — load-bearing: EMBEDDED OpenRails has NO security model of
-  its own; it DEFERS ENTIRELY to the host app. The host is in charge of everything security-related — it
-  fully controls OpenRails, calls in freely, and may define ONE OR MORE merchants as it sees fit (so
-  "embedding-app == one merchant" is the common case but NOT a rule). For a host-exposed OpenRails route
-  (e.g. /me), the flow is: host's authkit MIDDLEWARE validates the JWT -> resolves the user's identity ->
-  attaches it to the request CONTEXT -> calls into OpenRails, which simply READS (merchant, customer/payer,
-  invoker) from that context. OpenRails embedded never validates a token or authenticates a principal
-  itself. (Standalone OpenRails is the ONLY mode where OpenRails authenticates incoming JWTs against the
-  issuer registry; that is what issuers/merchant-auth are for.)
-
-DELEGATED-USER (INVOKER) IDENTITY LIVES IN AUTHKIT (decided 2026-06-14; REVERSES the earlier "lives in
-OpenRails" note). Restore authkit profiles.delegated_users (un-drops authkit#78; see authkit#81) as the
-SHARED federated-end-user identity primitive — it's consumed by TWO domains: the APP (tensorhub ALREADY
-references a delegated_user_id in 5 NON-billing tables: user_file_objects/media ownership,
-media_output_events, resource_visibility_audit, platform_abuse_events, platform_policy_denials) AND BILLING
-(openrails invoker attribution + per-invoker spend/abuse caps). A shared identity belongs in the identity
-service so both FK to it and neither depends on the other; were it in OpenRails, tensorhub's media-OWNERSHIP
-tables would FK into the BILLING service (app->billing coupling, wrong). My earlier "FK can't cross schemas
-so it must live in OpenRails" was WRONG: Postgres allows cross-SCHEMA FKs (only cross-DATABASE is
-impossible), and authkit `profiles` + openrails `billing` share ONE database in every deployment (the
-embedded host DB; or standalone-openrails's bundled authkit DB).
-  - openrails attribution rows (money_spend_limits / usage_events / money_transactions / budget_*) FK their
-    invoker -> authkit profiles.delegated_users(id), CROSS-SCHEMA, same DB.
-  - id is uuidv7 (pg18 native — the fleet's UNIVERSAL pk; owner: uuidv7 everywhere, NO uuidv5). uuidv7 is
-    random/time-ordered and CANNOT be content-derived, so idempotency comes from a UNIQUE NATURAL KEY, not a
-    derived id: delegated_users = `id uuid DEFAULT uuidv7()` + `UNIQUE(remote_application_id, subject)`, and
-    authkit TouchDelegatedUser(issuer, subject) = `INSERT ... ON CONFLICT (remote_application_id, subject)
-    DO UPDATE last_seen_at RETURNING id` — the id is minted ONCE and RETURNED; openrails stamps the returned
-    value. This REPLACES the two clashing derivations (tensorhub `du_`+sha256(issuer\x00sub); openrails
-    FederatedCustomerID uuidv5) — both go away.
-  - SAME pivot for the payer CUSTOMER id: DROP FederatedCustomerID(uuidv5). customers.id = uuidv7() with a
-    per-branch natural key — org-bound: UNIQUE(merchant_id, org_id); org-less/native: UNIQUE(merchant_id,
-    issuer, subject) — resolved via ON CONFLICT ... RETURNING id. This REVERSES #491-slice-1's "customers is
-    UUID-only, derived, no lookup column": the natural-key columns return (more explicit/queryable for
-    billing) behind a uuidv7 surrogate pk. Audit money_in.go depositSourceID + subscription_credits grantID
-    (also uuidv5 idempotency keys) -> same uuidv7-pk + UNIQUE(natural key) pattern.
-  - subject = the STABLE uuid the merchant supplies (cozy-art reports PaulFidika by uuid, never username).
-  - NATIVE / org-less branch: invoker == payer 1:1, so the customer_id already IS the attribution; a
-    delegated_users row is needed for the FEDERATED (org-bound) case where invoker != payer. (Standalone
-    OpenRails has no app tables, so org-less subjects likely need no delegated_users row — confirm in impl.)
-
-WHAT THE ACTOR TRACKS (and ONLY this):
-1. spend ATTRIBUTION — how much of the payer's money this actor spent, when, on what (payer visibility).
-2. abuse caps — per-actor concurrent-capacity cap + per-actor wasted-money budget (#488 per-invoker flat),
-   so one bad delegated-user can't burn the payer's whole rate-limit / wasted-money budget or make the
-   payer look bad. Rate-limit the actor FIRST (protects the payer).
-NO trust-tier — tiers are cumulative-spend/age based (#476); a delegated-user spends none of its own money
-and is ephemeral, so a tier is meaningless for it. Tiers stay PAYER-level.
-
-WHAT STAYS ON CUSTOMER (payer): money_accounts, processor_customers (payment methods), tier +
-tier_schedules (#476), credit-line (#489), money-denominated spend-caps, #487 max_concurrent_held /
-max_single_charge tier caps, #488 per-PAYER bad_spend_windows.
-
-**Tasks:**
-- [x] Make `customer` a PURE balance account: DROP (issuer, subject) from customers; customer =
-      (id, merchant_id) + money. Done (slice 1, 53f8fb37): migration 024 drops the columns/constraint
-      idempotently; the three upserts fold into one EnsureCustomer(id, merchant_id); federated (issuer,
-      subject) -> customer maps to a deterministic UUIDv5 (identity.FederatedCustomerID) instead of a
-      lookup column. NOTE: existing-row collapse (federated -> one payer per issuer) is NOT migrated —
-      each existing UUID id stays its own balance; a separate data-collapse migration if/when needed.
-- [x] Track the `actor` (invoker) as a MERCHANT-SUPPLIED opaque label scoped under a customer. Partial
-      (slice 2, c290de39): the BUDGET SCOPE actor->invoker is renamed (Go ScopeInvoker; canonical stored
-      value 'invoker' via migration 025 + NormalizeScope accepting 'actor' transiently), scoped
-      (merchant_id, customer_id, invoker_string). NOTE: the opaque KEY column (`actor`) on
-      budget_reservations/budget_window_state and the money_transactions/usage_events/money_spend_limits
-      `actor` columns are intentionally NOT renamed (opaque keys; a column rename is high-risk + out of
-      the minimal-safe slice). Per-invoker abuse counters onto a first-class actor identity row remains.
-- [x] Federated resolution (org-bound issuer): the subject becomes the invoker, NOT a customer.
-      Outcome (slice 5): TouchCustomer (controlplane/customer.go) switches on
-      Core().ResolveRemoteApplicationOrg(issuer); org-bound => UpsertCustomerByOrg(merchant,org). uuidv5
-      FederatedCustomerID DELETED from pkg/identity.
-- [x] Resolution switch keys on authkit#80 nullable org_id; uuidv7 pk + ON CONFLICT RETURNING id.
-      Outcome (slice 5): migration 027 re-adds customers (org_id, issuer, subject) nullable + two partial
-      UNIQUE indexes; UpsertCustomerByOrg / UpsertCustomerByIssuerSubject (RETURNING id). The external-subject
-      entitlement lookup switched to LookupCustomerIDsByIssuerSubjects (real lookup, no derived id). grep
-      "NewSHA1|FederatedCustomerID|uuidv5" empty in non-test source (doc comments only). Also converted the
-      two other uuidv5 idempotency keys (money_in depositSourceID + subscription/purchase grantID) to store
-      the NATURAL-KEY STRING directly in source_id (uuidv7 pk + existing UNIQUE(merchant,customer,currency,
-      source,source_id)); DepositParams.SourceID is now *string.
-- [x] Invoker identity = authkit profiles.delegated_users; invoker_id FK + wire json:"actor"->"invoker".
-      Outcome (slice 5 + hard cut): invoker_id uuid added NULLABLE + ADDITIVE (actor text later renamed) to the THREE true-
-      ATTRIBUTION tables (money_transactions / usage_events / money_spend_limits), FK ->
-      profiles.delegated_users(id) cross-schema (guarded). DEVIATION (documented in 027): budget_reservations
-      / budget_window_state `actor` is a POLYMORPHIC scope_key (subject|role:<uuid>|<invoker> per
-      budgets/scopes.go), NOT a pure invoker — renaming to an invoker FK would break role/subject budgets, so
-      it stays opaque text. Populated on the DELEGATED path (ResolveDelegated -> TouchInvoker ->
-      TouchDelegatedUser RETURNING id -> ResolvedDelegated.InvokerID, threaded through DepositParams /
-      RecordUsageParams / Capture). The EMBEDDED/SERVICE path has NO issuer (host asserts identity per the
-      EMBEDDED SECURITY MODEL) so it cannot call TouchDelegatedUser -> invoker_id NULL there. Hard cut:
-      request DTOs use only json:"invoker" (admit/admit-batch, deposit/withdraw/hold, authorize,
-      report-wasted-spend, budget-check, open-window, window-settle-item); pre-#491 json:"actor" is not
-      accepted.
-- [x] Migrate existing per-(issuer,subject) money state for ORG-BOUND issuers only.
-      Outcome (slice 5): VERIFIED no real federated data to fold — slice-1 (024) already DROPPED the
-      (issuer,subject) columns, so no org-bound customer carries a natural key to collapse; 027 re-adds them
-      EMPTY. The fold is STRUCTURAL-ONLY (no-op with a RAISE NOTICE in 027); a real reparent is left for
-      if/when federated balances exist.
-- [x] Re-key/confirm money/processor/tier/credit-line on customer(balance) only.
-      Outcome (slice 5): confirmed — all money_* / processor_customers / tier / credit-line FK customers(id)
-      only; the new invoker_id FK lands ONLY on attribution tables. No money state moved onto the invoker.
-- [x] RENAMED money_accounts -> money_settings (shipped v0.29.2). Done: it holds NO money and nothing FKs to it
-      (all money_* tables FK customers(id)) — it is a per-(customer,currency) settings/policy sibling
-      (billing mode, caps, auto-topup, alerts, suspension, tier), NOT an account. "account" collides with
-      customer-as-the-account under this issue. Name TBD with owner.
-- [x] Embedded path (CONFIRMED correct as-is): native user (subject = end-user) -> a per-user customer
-      balance, invoker -> customer 1:1.
-      Outcome (slice 5): unchanged — EnsureCustomerID keeps materializing the UUID subject AS its own
-      customer id (org-less/native branch); invoker_id stays NULL there (invoker == payer). No regression.
-- [x] Move #488 per-invoker flat wasted-budget + per-invoker concurrent cap onto the invoker identity.
-      Outcome (slice 5): the abuse keyspace (abuse/wasted_spend.go wa:<tenant>:<actor>) is ALREADY keyed by
-      the invoker identity — the wire contract now names that field "invoker" and documents it as the STABLE
-      merchant-supplied uuid (cozy-art reports PaulFidika by uuid, never username), so a rename can't reparent
-      history. Redis counters stay keyed by the real invoker value (no free-text-vs-id split needed); the
-      persisted attribution rows additionally carry invoker_id (delegated_users uuid) on the delegated path.
-- [x] SDK + wire: distinguish payer (customer) from actor on Admit/charge. Verified (slice 4): the
-      Admit/charge/spend wire DTOs already carry customer_id (payable uuid) + actor (the invoker opaque
-      label) as REQUEST fields (serviceAdmitRequest, service_credits, service_credit_window). No code
-      change — the split already exists at the wire. UPDATE (slice 5): the wire field was RENAMED to
-      json:"invoker" on the request DTOs. HARD CUT (2026-06-15): json:"actor" was removed from request
-      DTOs and resolveInvokerField was deleted; attribution rows carry invoker_id on the delegated path.
-- [x] NO customer-claim-in-token needed. Verified (slice 4): no invoker/actor JWT claim exists anywhere;
-      the invoker (actor) arrives ONLY as a merchant-supplied opaque request field on Admit/charge/spend
-      (= money_spend_limits.actor). The authenticated subject is always a customer or the merchant
-      self-token. Confirmed in serviceAdmitRequest + the service_credits/window handlers; no change needed.
-- [x] DROP money_balances (read-cache roll-up). Done (slice 3, 5e302967): available = SUM(unexpired
-      money_blocks.remaining_amount), held = SUM(active-hold authorized_amount) + open-window unsettled
-      (windows reserve held without a hold row). Spend mutex moved to FOR UPDATE on the customers row
-      (LockCustomerForSpend). Drift/anomaly queries + GetMoneyBalance/Set*/Insert* deleted. Migration 026
-      DROP TABLE money_balances + partial index money_blocks(merchant,customer,currency) WHERE
-      remaining_amount>0. Money integration + conformance + controlplane integration gates GREEN.
-- [x] Background COMPACTION job. Done (slice 3, 5e302967): the credit-block EXPIRY River job now DELETEs
-      fully-spent (remaining_amount=0) and expired money_blocks (DeleteCompactableMoneyBlocks), bounded
-      batch, touching money_blocks ONLY — never money_transactions or payments.
-- [x] AUDIT-SAFE: compaction never deletes deposit rows / payments, only derived spendable lots.
-      Outcome (slice 5): CONFIRMED still true — slice-3 (026) compaction touches money_blocks ONLY; the
-      uuidv5->natural-key source_id change (this slice) is on money_transactions/usage idempotency keys, not
-      money_blocks, so the receipt invariant is unchanged.
-- [x] Resolution (RESOLVED): MERCHANT = authenticated OPERATOR; CUSTOMER + ACTOR asserted by it.
-      Outcome (slice 5): CONFIRMED — standalone DIRECT path verifies the token, resolves payer via the
-      issuer's org-binding (TouchCustomer) and invoker via TouchDelegatedUser; embedded PROXY path reads
-      (merchant, customer, invoker) from host context (EMBEDDED SECURITY MODEL), no re-auth. No
-      tenant->merchant FK added.
-- [x] Tests: federated many-actors-one-payer / org-less per-subject / cross-schema invoker_id FK.
-      Outcome (slice 5): new integration test internal/modules/money/invoker_identity_491_integration_test.go
-      (TestInvokerIdentityAndPayerNaturalKey) proves: org-less natural key idempotent + per-subject;
-      org-bound collapses many subjects -> ONE payer; invoker_id cross-schema FK enforced (bogus rejected,
-      NULL allowed) — also exercising the authkit-first FK ORDERING against the fully migrated schema.
-      Embedded actor==customer 1:1 + delegated-user-has-no-money stay covered by the green money/embed/
-      conformance suites.
-
-**Related**
-#486 (merchant_subject->customer rename this builds on), #487/#488 (payer-vs-actor runtime caps this
-formalizes at the identity layer), #476 (tier-schedule stays payer-level), #489 (credit-line stays
-payer-level), #75 (escape-hatch per-delegated-user attributes drive per-actor limits). DEPENDS: authkit#77.
-
----
-
 # #494: Multi-currency support — native currencies + abstract units + internal FX converter
 
-**Completed:** native-currency budget groundwork complete in this repo. Migration 031 shipped the additive
+**Completed:** partial — native-currency budget groundwork complete in this repo; FX converter capstone not built. Migration 031 shipped the additive
 `currency` columns; this pass adds migrations 032/033 and wires the code to the final native-money shape:
 `currency + amount/limit/balance` language, `budget_inflight_holds.amount/captured`, renamed money settings/spend
 cap columns, and budget window/hold keys scoped by currency.
@@ -1473,7 +1229,7 @@ cap columns, and budget window/hold keys scoped by currency.
 - [x] Regenerated sqlc and updated generated-field call sites (`Amount`, `Captured`,
       `MaxSpendPerDay`, `MaxSpendPerMonth`, `CreditLimitAmount`).
 
-**Not built here:** the FX converter capstone. The current implementation supports same-currency budget
+**Not built here:** the FX converter capstone, now tracked as #501. The current implementation supports same-currency budget
 deduction and prevents cross-currency row/key collisions. Cross-currency deduction still needs a budget
 currency policy contract plus rate-source/staleness/rounding decisions before conversion can be applied
 correctly.
@@ -1481,92 +1237,5 @@ correctly.
 **Verification:**
 - `task sqlc`
 - `go test ./...`
-
----
-
-# #495: HARD CUT: finish currency-neutral API/facade and usage reporting
-
-**Completed:** yes
-
-The native-money tables are now keyed by `currency` and use `amount` language, but several public/API paths still
-silently read/write the default USD account or expose `usd_micro`. Hard cut those paths: no compatibility aliases,
-no legacy `usd_micro` balance descriptors, no API that echoes a requested currency while reading USD rows.
-
-## Scope
-- Make service/facade account reads, settings writes, transaction lists, spend policy checks, spend limits, credit
-  limits, authorize/hold, withdraw, hold, self-account, and service-account routes honor the supplied currency.
-- Add `currency` to spend request bodies where it is missing; require/normalize it through the same registry rules
-  as the lower-level ledger.
-- Write `usage_events.currency`, include currency in usage idempotency, and group/filter usage rollups, invoices,
-  and revenue reads by currency so unlike units are never summed together.
-- Replace user-facing `usd_micro` credit descriptors with currency-native account output.
-- Remove stale µ$/micros wording from active comments and JSON contracts.
-
-## Verification
-- Added regression coverage in `pkg/service/credit_facade_rls_integration_test.go`: one payer receives USD and
-  EUR deposits, then `GetCreditAccount(..., "EUR")` must return the EUR account rather than the USD state.
-- Second sweep closed remaining hard-cut leaks: budget check/status now take and return `currency`, admit/budget
-  window DTOs carry `currency`, usage/revenue rollup rows carry `currency`, service invoker balance returns
-  `currency` instead of `type`, and the dead `credit_type_inactive` compatibility sentinel/handlers plus obsolete
-  `internal/db/models` credit-type structs were removed.
-- Third sweep closed the older self-usage rollup row: `UsageRow` / `money.UsageRollupRow` now carry `currency`
-  beside `total_amount`, with regression coverage in `TestGetUsage_Breakdown`.
-- Fourth sweep closed wasted-spend report responses: `WastedSpendResult` / SDK `WastedSpendResponse` now carry
-  `currency` beside `recorded_amount`, `forgiven_amount`, and `charged_amount`; service validates the report
-  currency before recording/charging.
-- Fifth sweep closed `GET /v1/service/credit-limit`: the response now returns `currency` beside
-  `credit_limit_amount`.
-- Sixth sweep closed wasted-spend hot counters and abuse usage introspection: Redis wasted-spend idempotency,
-  payer-grace counters, and delegated-invoker cutoff counters are now keyed by currency; `AbuseUsage` takes/returns
-  `currency`, and each abuse usage window carries `currency`.
-- Seventh sweep closed tier graduation/schedules: `tier_schedules` is keyed by `currency`, tier schedule and tier
-  reads take currency through SDK/remote/embed/HTTP/service/money paths, deposits auto-graduate the matching currency
-  instead of USD-only, and the stale host-cranked `GraduateTier` compatibility path was removed.
-- Eighth sweep closed the remaining hidden default-currency helpers in money account state: `GetBalance` /
-  `GetTransactions`, payment-method verification, suspend, and resume now require an explicit currency. Also fixed
-  usage-event replay lookup to include currency so idempotent usage does not reattempt the same same-currency debit.
-- Ninth sweep removed the last dead default-currency wrappers/stale queries: deleted `MoneyService.ActiveHeldAmount`,
-  removed the unused old `ListCreditAccountPairs` query, and cleaned active schema/test comments that still taught
-  `usd_micro` / `µ$` terminology.
-- Tenth sweep hard-cut payment/checkout/reconciliation writes: removed SQL fallback from blank currency to `usd`,
-  removed `usd` defaults from the baseline payment/checkout currency columns, and made payment, checkout-session,
-  and reconcile local writers reject missing currency instead of silently writing USD.
-- Eleventh sweep closed product catalog credit grants: service/admin product `credits_spec` and REST subscription/product
-  responses now preserve `unit` beside `amount`, so non-USD bundled grants no longer round-trip as implicit USD.
-- Twelfth sweep hard-cut remaining public blank-currency defaults: service/facade/SDK credit movement, account reads,
-  usage/revenue, admission, budget, tier, credit-limit, wasted-spend, and `/me/credits` paths now require explicit
-  currency (or an explicitly configured SDK currency) instead of silently reading/writing USD.
-- Thirteenth sweep closed the remaining public edge fallbacks: self-account, self-usage, service invoker-balance,
-  service transaction lookup, and embedded admission/budget/tier/wasted-spend/credit-limit helpers now require an
-  explicit currency instead of normalizing a blank request to USD. Admin off-channel payments and catalog price
-  creation also now trim/validate currency before writing money terms.
-- Fourteenth sweep folded require+normalize together: service, HTTP, and embedded currency helpers now reject blank
-  first, then return canonical built-in currency while preserving qualified custom-credit units.
-- Fifteenth sweep removed the remaining database-level currency fallbacks: Postgres money/budget/usage/invoice/tier
-  tables and ClickHouse analytics currency columns no longer default missing currency to USD or empty string. Analytics
-  and provider webhook logging also no longer stamp missing event currency as USD; amount-bearing analytics events now
-  require a currency.
-- Sixteenth sweep removed the last internal blank-currency fallback: `money.NormalizeCurrency("")` now stays blank,
-  `ValidateCurrency("")` / `RequireBillingCurrency("")` reject it, and product credit grant specs require an explicit
-  `unit` instead of defaulting missing grant units to USD.
-- `task sqlc`
-- `go test ./...`
-- `go test -tags=integration ./internal/modules/money -run TestTierSchedule_AutoGraduationByCumulativeSpend -count=1`
-- `go test -tags=integration ./internal/modules/money -run TestSuspensionAndVerificationState -count=1`
-- `go test -tags=integration ./internal/modules/money -run TestRecordUsage_Idempotent -count=1`
-- `go test -tags=integration ./internal/modules/money -count=1`
-- `go test -tags=integration ./internal/modules/admission -count=1`
-- `go test -tags=integration ./pkg/service -count=1`
-- `go test -tags=integration ./embed -count=1`
-- `go test -tags=integration ./internal/modules/payments ./internal/reconcile -count=1`
-- `go test -tags=integration ./pkg/service -run TestGetUsage_Breakdown -count=1`
-- `go test -tags=integration ./pkg/service -run TestWastedSpendDirectPayer_GraceThenChargeIdempotently -count=1`
-- `go test -tags=integration ./internal/modules/admission -run TestAdmit_WastedSpend -count=1`
-- `go test -tags=integration ./pkg/service -run TestCreditFacade_RLS_Under_OpenRailsApp -count=1`
-- `go test -tags=integration ./tests -run TestSelfAccountSurface_HostPrincipalFullLoopAndScoping -count=1`
-- `go test -tags=integration ./embed -run TestConformance_EmbeddedAndStandaloneAreObservablyIdentical -count=1`
-- focused scan: no `usd_micro` / `*_micros` / `credit_type_inactive` / money JSON `type` hits remain in active
-  API, service, SDK, money, or query code. The only remaining `json:"type"` hit is the generic HTTP error envelope
-  in `remote.go`.
 
 ---

@@ -34,6 +34,14 @@ WHERE merchant_id = $1 AND customer_id = $2
   AND currency = sqlc.arg(currency)
   AND source = $3 AND source_id = $4 AND status = 'active';
 
+-- name: CaptureBudgetReservationsByCoordsReservedAmount :execrows
+-- Settle ALL scopes reserved under one request at their own reserved amount.
+UPDATE openrails.budget_inflight_holds
+SET status = 'captured', captured = amount
+WHERE merchant_id = $1 AND customer_id = $2
+  AND currency = sqlc.arg(currency)
+  AND source = $3 AND source_id = $4 AND status = 'active';
+
 -- name: ReleaseBudgetReservationsByCoords :execrows
 -- Free ALL scopes reserved under one request (#473): every active budget
 -- reservation for (tenant, subject, source, source_id) -> released. Idempotent.

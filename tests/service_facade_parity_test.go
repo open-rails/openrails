@@ -26,7 +26,7 @@ import (
 )
 
 // stubServiceTokenResolver is a test resolver (issue #222) that accepts any non-empty
-// bearer token as a valid service token for the test tenant with the given
+// bearer token as a valid service token for the test merchant with the given
 // permissions, so the parity test can exercise the service-token-authenticated
 // public service routes without standing up a full AuthKit control plane.
 type stubServiceTokenResolver struct {
@@ -55,11 +55,11 @@ func (s stubServiceTokenResolver) ResolveServiceJWT(_ context.Context, token str
 
 func (s stubServiceTokenResolver) resolved() (*controlplane.ResolvedServiceToken, error) {
 	return &controlplane.ResolvedServiceToken{
-		OwnerTenantSlug: "operator",
-		MerchantID:      dbtest.TestTenantID,
-		MerchantSlug:    dbtest.TestTenantSlug,
-		Permissions:     s.permissions,
-		Resources:       s.resources,
+		OwnerOrgSlug: "operator",
+		MerchantID:   dbtest.TestMerchantID,
+		MerchantSlug: dbtest.TestMerchantSlug,
+		Permissions:  s.permissions,
+		Resources:    s.resources,
 	}, nil
 }
 
@@ -67,7 +67,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	suite := getSharedTestSuite(t)
 	// In-process facade calls require the tenant pinned in context (the raw
 	// Service has no default tenant; the HTTP path below pins it via middleware).
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	userID := uuid.NewString()
 	tenantSubjectID := suite.ensureCustomer(ctx, userID)
@@ -80,7 +80,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.money_blocks (id, merchant_id, customer_id, currency, original_amount, remaining_amount, created_at)
 		VALUES ($1, $2, $3, 'USD', 10000, 10000, $4)`,
-		uuid.New(), dbtest.TestTenantID.UUID(), tenantSubjectID, time.Now().UTC())
+		uuid.New(), dbtest.TestMerchantID.UUID(), tenantSubjectID, time.Now().UTC())
 	require.NoError(t, err)
 
 	// Seed an entitlement. source_id is NOT NULL (the originating
@@ -88,7 +88,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	entSourceID := uuid.New()
 	ent := &models.Entitlement{
 		ID:          uuid.New(),
-		MerchantID:  dbtest.TestTenantID.UUID(),
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		CustomerID:  tenantSubjectID,
 		Entitlement: "premium-1",
 		StartAt:     time.Now().Add(-1 * time.Hour).UTC(),
@@ -103,13 +103,13 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	_, err = suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.customers (id, merchant_id, issuer, subject, created_at, last_seen_at)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
-		legacyOnlyCustomerID, dbtest.TestTenantID.UUID(),
+		legacyOnlyCustomerID, dbtest.TestMerchantID.UUID(),
 		"service-facade-parity-other", userID+"-other",
 		time.Now().UTC(), time.Now().UTC())
 	require.NoError(t, err)
 	legacyOnlyEnt := &models.Entitlement{
 		ID:          uuid.New(),
-		MerchantID:  dbtest.TestTenantID.UUID(),
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		CustomerID:  legacyOnlyCustomerID,
 		Entitlement: "legacy-user-only",
 		StartAt:     time.Now().Add(-1 * time.Hour).UTC(),
@@ -130,7 +130,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// is the same surface registered on the public handler at /v1/service/*.
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(ginmw.ResolveTenant(dbtest.TestTenantID))
+	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
 	group := router.Group("/v1/service")
 	resolver := stubServiceTokenResolver{
 		permissions: []string{
@@ -140,7 +140,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 			controlplane.PermEntitlementsRead,
 		},
 		resources: []authcore.ServiceTokenResource{
-			controlplane.MerchantResource(dbtest.TestTenantID),
+			controlplane.MerchantResource(dbtest.TestMerchantID),
 			controlplane.CustomerResource(tenantSubjectID),
 		},
 	}
@@ -152,17 +152,18 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 
 	// 1) Create hold via Service facade, release via service HTTP.
 	hold1, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
-		CustomerID: &tenantSubject,
-		Invoker:    userID,
-		Amount:     123,
-		Source:     "svc_test",
-		SourceID:   "hold-1",
-		ExpiresAt:  time.Now().Add(10 * time.Minute).UTC(),
+		CustomerID:  &tenantSubject,
+		Invoker:     userID,
+		InvokerType: string(identity.InvokerTypeDelegated),
+		Amount:      123,
+		Source:      "svc_test",
+		RequestID:   "hold-1",
+		ExpiresAt:   time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.NoError(t, err)
-	require.NotEqual(t, uuid.Nil, hold1.ID)
+	require.Equal(t, "hold-1", hold1.RequestID)
 
-	reqRelease := httptest.NewRequest(http.MethodPost, "/v1/service/credits/hold/"+hold1.ID.String()+"/release", nil)
+	reqRelease := httptest.NewRequest(http.MethodPost, "/v1/service/credits/hold/"+hold1.RequestID+"/release", nil)
 	withServiceToken(reqRelease)
 	wRelease := httptest.NewRecorder()
 	router.ServeHTTP(wRelease, reqRelease)
@@ -170,13 +171,14 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 
 	// 2) Create hold via service HTTP, capture via Service facade.
 	bodyHold, _ := json.Marshal(map[string]any{
-		"customer_id": tenantSubjectID.String(),
-		"invoker":     userID,
-		"credit_type": creditTypeName,
-		"amount":      456,
-		"source":      "svc_test",
-		"source_id":   "hold-2",
-		"expires_at":  time.Now().Add(10 * time.Minute).Unix(),
+		"customer_id":  tenantSubjectID.String(),
+		"invoker":      userID,
+		"invoker_type": string(identity.InvokerTypeDelegated),
+		"credit_type":  creditTypeName,
+		"amount":       456,
+		"source":       "svc_test",
+		"request_id":   "hold-2",
+		"expires_at":   time.Now().Add(10 * time.Minute).Unix(),
 	})
 	reqHold := httptest.NewRequest(http.MethodPost, "/v1/service/credits/hold", bytes.NewReader(bodyHold))
 	withServiceToken(reqHold)
@@ -186,14 +188,12 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.Equal(t, http.StatusOK, wHold.Code)
 
 	var holdResp struct {
-		ID string `json:"id"`
+		RequestID string `json:"RequestID"`
 	}
 	require.NoError(t, json.Unmarshal(wHold.Body.Bytes(), &holdResp))
-	holdID, err := uuid.Parse(holdResp.ID)
-	require.NoError(t, err)
-	require.NotEqual(t, uuid.Nil, holdID)
+	require.Equal(t, "hold-2", holdResp.RequestID)
 
-	trx, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{HoldID: holdID, Amount: 111})
+	trx, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{RequestID: "hold-2", Amount: 111})
 	require.NoError(t, err)
 	require.Equal(t, int64(-111), trx.Amount)
 
@@ -226,7 +226,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// 4) The same real service routes accept a resolved first-party service JWT
 	// principal; no OpenRails-generated runtime token is needed on these paths.
 	jwtRouter := gin.New()
-	jwtRouter.Use(ginmw.ResolveTenant(dbtest.TestTenantID))
+	jwtRouter.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
 	jwtGroup := jwtRouter.Group("/v1/service")
 	jwtResolver := resolver
 	jwtResolver.serviceJWT = true

@@ -45,7 +45,7 @@ func newServiceTokenTestRouter(resolver ServiceTokenResolver, perm string) *gin.
 	r.GET("/svc", ServiceTokenRequired(resolver), RequireServiceTokenPermission(perm), func(c *gin.Context) {
 		resolved, _ := ServiceTokenFromGin(c)
 		tid, _ := merchant.FromContext(c.Request.Context())
-		c.JSON(http.StatusOK, gin.H{"authkit_tenant": resolved.OwnerTenantSlug, "tenant": tid.String()})
+		c.JSON(http.StatusOK, gin.H{"authkit_org": resolved.OwnerOrgSlug, "merchant": tid.String()})
 	})
 	return r
 }
@@ -65,11 +65,11 @@ func TestRequireServiceTokenCustomerScope(t *testing.T) {
 	resolver := fakeServiceTokenResolver{
 		looksLikeServiceToken: true,
 		resolved: &controlplane.ResolvedServiceToken{
-			OwnerTenantSlug: "operator",
-			MerchantID:      dbtest.TestTenantID,
-			Permissions:     []string{controlplane.PermCreditsSpend},
+			OwnerOrgSlug: "operator",
+			MerchantID:   dbtest.TestMerchantID,
+			Permissions:  []string{controlplane.PermCreditsSpend},
 			Resources: []authcore.ServiceTokenResource{
-				controlplane.MerchantResource(dbtest.TestTenantID),
+				controlplane.MerchantResource(dbtest.TestMerchantID),
 				controlplane.CustomerResource(payer),
 			},
 		},
@@ -102,41 +102,41 @@ func TestServiceTokenRequired_SucceedsForCorrectTenantAndPermission(t *testing.T
 	resolver := fakeServiceTokenResolver{
 		looksLikeServiceToken: true,
 		resolved: &controlplane.ResolvedServiceToken{
-			OwnerTenantSlug: "operator",
-			MerchantID:      dbtest.TestTenantID,
-			MerchantSlug:    dbtest.TestTenantSlug,
-			Permissions:     []string{controlplane.PermCreditsWrite},
+			OwnerOrgSlug: "operator",
+			MerchantID:   dbtest.TestMerchantID,
+			MerchantSlug: dbtest.TestMerchantSlug,
+			Permissions:  []string{controlplane.PermCreditsWrite},
 		},
 	}
 	r := newServiceTokenTestRouter(resolver, controlplane.PermCreditsWrite)
 	w := doServiceTokenRequest(r, true)
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Contains(t, w.Body.String(), dbtest.TestTenantID.String())
+	require.Contains(t, w.Body.String(), dbtest.TestMerchantID.String())
 }
 
 func TestServiceTokenRequired_SucceedsForServiceJWT(t *testing.T) {
 	resolver := fakeServiceTokenResolver{
 		looksLikeServiceToken: false,
 		serviceJWTResolved: &controlplane.ResolvedServiceToken{
-			OwnerTenantSlug: "cozy-art",
-			MerchantID:      dbtest.TestTenantID,
-			MerchantSlug:    dbtest.TestTenantSlug,
-			Permissions:     []string{controlplane.PermCreditsWrite},
+			OwnerOrgSlug: "cozy-art",
+			MerchantID:   dbtest.TestMerchantID,
+			MerchantSlug: dbtest.TestMerchantSlug,
+			Permissions:  []string{controlplane.PermCreditsWrite},
 		},
 	}
 	r := newServiceTokenTestRouter(resolver, controlplane.PermCreditsWrite)
 	w := doServiceTokenRequest(r, true)
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Contains(t, w.Body.String(), dbtest.TestTenantID.String())
+	require.Contains(t, w.Body.String(), dbtest.TestMerchantID.String())
 }
 
 func TestServiceTokenRequired_AdminPermissionSatisfiesAnyGate(t *testing.T) {
 	resolver := fakeServiceTokenResolver{
 		looksLikeServiceToken: true,
 		resolved: &controlplane.ResolvedServiceToken{
-			OwnerTenantSlug: "operator",
-			MerchantID:      dbtest.TestTenantID,
-			Permissions:     []string{controlplane.PermAdmin},
+			OwnerOrgSlug: "operator",
+			MerchantID:   dbtest.TestMerchantID,
+			Permissions:  []string{controlplane.PermAdmin},
 		},
 	}
 	r := newServiceTokenTestRouter(resolver, controlplane.PermCreditsWrite)
@@ -148,9 +148,9 @@ func TestServiceTokenRequired_DeniesMissingPermission(t *testing.T) {
 	resolver := fakeServiceTokenResolver{
 		looksLikeServiceToken: true,
 		resolved: &controlplane.ResolvedServiceToken{
-			OwnerTenantSlug: "operator",
-			MerchantID:      dbtest.TestTenantID,
-			Permissions:     []string{controlplane.PermCreditsRead}, // read only
+			OwnerOrgSlug: "operator",
+			MerchantID:   dbtest.TestMerchantID,
+			Permissions:  []string{controlplane.PermCreditsRead}, // read only
 		},
 	}
 	r := newServiceTokenTestRouter(resolver, controlplane.PermCreditsWrite)
@@ -163,9 +163,9 @@ func TestServiceTokenRequired_DeniesUnknownPermissionSet(t *testing.T) {
 	resolver := fakeServiceTokenResolver{
 		looksLikeServiceToken: true,
 		resolved: &controlplane.ResolvedServiceToken{
-			OwnerTenantSlug: "operator",
-			MerchantID:      dbtest.TestTenantID,
-			Permissions:     []string{"openrails:something:unknown"},
+			OwnerOrgSlug: "operator",
+			MerchantID:   dbtest.TestMerchantID,
+			Permissions:  []string{"openrails:something:unknown"},
 		},
 	}
 	r := newServiceTokenTestRouter(resolver, controlplane.PermCreditsWrite)
@@ -198,7 +198,7 @@ func TestServiceTokenRequired_DeniesUnknownServiceToken(t *testing.T) {
 }
 
 func TestServiceTokenRequired_DeniesCrossTenantServiceToken(t *testing.T) {
-	// Owning AuthKit tenant maps to no active OpenRails tenant for this deployment.
+	// Owning AuthKit org maps to no active OpenRails merchant for this deployment.
 	resolver := fakeServiceTokenResolver{looksLikeServiceToken: true, err: controlplane.ErrServiceTokenMerchantUnresolved}
 	r := newServiceTokenTestRouter(resolver, controlplane.PermCreditsWrite)
 	w := doServiceTokenRequest(r, true)

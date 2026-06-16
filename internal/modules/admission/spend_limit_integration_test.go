@@ -41,7 +41,7 @@ const usd = int64(1_000_000)
 // clock, plus the tier-policy store + budget-policy store (for composed scopes)
 // and a generously funded balance so only the budget axis gates. Returns the
 // admitter, the fake clock, both policy stores, a fresh payer (the cozy-art
-// customer) and a cleanup-scoped tenant context.
+// customer) and a cleanup-scoped merchant context.
 func spendEnv(t *testing.T) (*admission.Admitter, *budgets.Service, *clockwork.FakeClock, *admission.TierPolicyStore, *admission.BudgetPolicyStore, identity.CustomerID, *pgxpool.Pool, context.Context) {
 	t.Helper()
 	ctx := context.Background()
@@ -49,8 +49,8 @@ func spendEnv(t *testing.T) (*admission.Admitter, *budgets.Service, *clockwork.F
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
-	dbtest.EnsureTestTenant(ctx, t, pool)
-	ctx = dbtest.WithTestTenant(ctx)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	ctx = dbtest.WithTestMerchant(ctx)
 
 	payer := identity.CustomerIDFromString(uuid.NewString())
 	payerID := payer.UUID()

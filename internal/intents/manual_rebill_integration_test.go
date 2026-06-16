@@ -111,7 +111,7 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	tenantID := dbtest.TestTenantID.UUID()
+	tenantID := dbtest.TestMerchantID.UUID()
 	exec(`INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "rebill-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id)
@@ -143,7 +143,7 @@ func (fx rebillFixture) enqueueParams(attempt int) EnqueueParams {
 	subID := fx.subID
 	windowEnd := fx.periodEnd.Add(14 * 24 * time.Hour)
 	return EnqueueParams{
-		MerchantID:     dbtest.TestTenantID.UUID(),
+		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeManualRebill,
 		SubscriptionID: &subID,

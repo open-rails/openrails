@@ -25,7 +25,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	require.NotNil(t, rt.SubscriptionService)
 	require.NotNil(t, rt.SubscriptionLifecycleService)
 
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Keep simulated times in the past relative to the DB server's NOW() to avoid
 	// constraints like chk_payment_not_future during RenewalSuccess.

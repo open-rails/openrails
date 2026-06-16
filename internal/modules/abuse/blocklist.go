@@ -1,6 +1,6 @@
 // Package abuse holds payment-fraud / abuse controls (issue #300).
 //
-// This slice provides ONLY the blocklist primitive: a tenant-scoped list of
+// This slice provides ONLY the blocklist primitive: a merchant-scoped list of
 // known-bad payment identifiers (card fingerprints, processor customer ids,
 // emails, IPs) that checkout/admission can later consult to DENY a payment.
 //
@@ -51,9 +51,9 @@ func validKind(kind string) bool {
 	}
 }
 
-// BlocklistService manages the tenant-scoped payment blocklist (issue #300).
-// All operations are RLS-scoped to the request tenant
-// (merchant.Require) via the db.DB tenant-connection helpers, exactly
+// BlocklistService manages the merchant-scoped payment blocklist (issue #300).
+// All operations are RLS-scoped to the request merchant
+// (merchant.Require) via the db.DB merchant-connection helpers, exactly
 // like the credits service.
 type BlocklistService struct {
 	db *db.DB
@@ -65,10 +65,10 @@ func NewBlocklistService(database *db.DB) *BlocklistService {
 }
 
 // Add records a block for (kind, value). When the payer subject is nil (or zero) the block
-// is tenant-wide (applies to every tenant subject in the tenant); when set the block
-// is scoped to that tenant subject. reason is an optional free-form note.
+// is merchant-wide (applies to every merchant subject in the merchant); when set the block
+// is scoped to that merchant subject. reason is an optional free-form note.
 //
-// Add is idempotent on (tenant, kind, value): re-adding the same identifier is a
+// Add is idempotent on (merchant, kind, value): re-adding the same identifier is a
 // no-op (the existing row and its payer scoping are left untouched).
 func (s *BlocklistService) Add(ctx context.Context, payer *identity.CustomerID, kind, value, reason string) error {
 	if s == nil || s.db == nil {
@@ -108,8 +108,8 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.CustomerID, 
 		CreatedAt:  time.Now().UTC(),
 	}
 
-	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		// Owner-scoped blocks reference a payable tenant subject; materialize its
+	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		// Owner-scoped blocks reference a payable merchant subject; materialize its
 		// customers row so the payment_blocklist FK (migration 076) holds (#317).
 		if customerID != nil {
 			if _, err := repo.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, customerID.String()); err != nil {
@@ -128,7 +128,7 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.CustomerID, 
 	})
 }
 
-// Remove deletes the block for (kind, value) in the request tenant, if present.
+// Remove deletes the block for (kind, value) in the request merchant, if present.
 // Removing a non-existent entry is a no-op.
 func (s *BlocklistService) Remove(ctx context.Context, kind, value string) error {
 	if s == nil || s.db == nil {
@@ -148,14 +148,14 @@ func (s *BlocklistService) Remove(ctx context.Context, kind, value string) error
 		return err
 	}
 	tenantID := tid.UUID()
-	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		return s.db.Gen(ctx).DeletePaymentBlock(ctx, gen.DeletePaymentBlockParams{
 			MerchantID: tenantID, Kind: kind, Value: value,
 		})
 	})
 }
 
-// IsBlocked reports whether (kind, value) is blocked in the request tenant. It
+// IsBlocked reports whether (kind, value) is blocked in the request merchant. It
 // returns true if a matching TENANT-WIDE row (customer_id IS NULL) OR ANY
 // subject-scoped row exists for that (kind, value).
 func (s *BlocklistService) IsBlocked(ctx context.Context, kind, value string) (bool, error) {
@@ -177,7 +177,7 @@ func (s *BlocklistService) IsBlocked(ctx context.Context, kind, value string) (b
 	}
 	tenantID := tid.UUID()
 	var blocked bool
-	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		exists, err := s.db.Gen(ctx).PaymentBlockExists(ctx, gen.PaymentBlockExistsParams{
 			MerchantID: tenantID, Kind: kind, Value: value,
 		})

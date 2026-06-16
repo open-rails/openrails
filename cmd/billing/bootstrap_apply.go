@@ -34,7 +34,7 @@ func newBootstrapCmd() *cobra.Command {
 	}
 	apply := &cobra.Command{
 		Use:   "apply",
-		Short: "Apply tenants and catalog from a unified bootstrap YAML file",
+		Short: "Apply merchants and catalog from a unified bootstrap YAML file",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runBootstrapApply(cmd, opts)
 		},
@@ -96,7 +96,7 @@ func runBootstrapApply(cmd *cobra.Command, opts bootstrapApplyOptions) error {
 const startupBootstrapLockKey = int64(0x6f72_626f_6f74) // "orboot"
 
 // applyStartupBootstrap applies the unified bootstrap manifest on EVERY server
-// start (#327). The apply is idempotent + additive — tenant data is reconciled
+// start (#327). The apply is idempotent + additive — merchant data is reconciled
 // (upsert; issuers/principals are registered if missing) and catalogs plan with
 // ArchiveMissingProducts:false, so nothing is ever removed — so reapplying on
 // every boot is safe and lets a mounted bootstrap file converge an existing
@@ -152,8 +152,8 @@ func resolveBootstrapManifestPath(_ *config.Config) string {
 	return ""
 }
 
-// applyBootstrapManifest provisions the tenants (issuers + service principals)
-// and catalog declared by a unified bootstrap manifest. It is the single apply
+// applyBootstrapManifest provisions the merchants and catalog declared by a
+// unified bootstrap manifest. It is the single apply
 // path shared by the `bootstrap apply` CLI and the server's first-run startup
 // bootstrap (#327), so both consume the same one manifest schema.
 //
@@ -165,18 +165,18 @@ func resolveBootstrapManifestPath(_ *config.Config) string {
 // (#358): Stripe active=false; Solana plans sunset on-chain; NMI/CCBill
 // surface pending manual actions. Foreign provider objects are never touched.
 func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BootstrapManifest, out io.Writer, dryRun bool, exhaustive bool) error {
-	if len(manifest.Tenants) > 0 {
+	if len(manifest.Merchants) > 0 {
 		if dryRun {
-			fmt.Fprintf(out, "tenants: %d declared (dry-run: no tenant mutations)\n", len(manifest.Tenants))
+			fmt.Fprintf(out, "merchants: %d declared (dry-run: no merchant mutations)\n", len(manifest.Merchants))
 		} else {
 			cp := embcp.Get(a)
 			if cp == nil {
-				return fmt.Errorf("tenant bootstrap: control plane not attached")
+				return fmt.Errorf("merchant bootstrap: control plane not attached")
 			}
-			if err := bootstrap.ReconcileTenantManifestData(ctx, cfg, cp, manifest.TenantManifest(), bootstrap.TenantManifestReconcileOptions{}); err != nil {
-				return fmt.Errorf("tenant bootstrap: %w", err)
+			if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, cp, manifest.MerchantManifest(), bootstrap.MerchantManifestReconcileOptions{}); err != nil {
+				return fmt.Errorf("merchant bootstrap: %w", err)
 			}
-			fmt.Fprintf(out, "tenants: %d reconciled\n", len(manifest.Tenants))
+			fmt.Fprintf(out, "merchants: %d reconciled\n", len(manifest.Merchants))
 		}
 	}
 
@@ -225,7 +225,7 @@ func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App,
 	}
 
 	// #357: extras pass. Gated on the manifest actually declaring catalogs —
-	// an empty/tenants-only manifest makes no exhaustiveness claim about the
+	// an empty/merchants-only manifest makes no exhaustiveness claim about the
 	// provider accounts, so nothing is scanned (and nothing could ever be
 	// archived) for it.
 	return reportCatalogExtras(ctx, svc, out, dryRun, exhaustive)
@@ -318,15 +318,15 @@ func contextForBootstrapCatalog(ctx context.Context, a *app.App, catalogName str
 	}
 	cp := embcp.Get(a)
 	if cp == nil || cp.Pool() == nil {
-		return nil, fmt.Errorf("catalog %q declares a tenant name but the control plane is not attached", catalogName)
+		return nil, fmt.Errorf("catalog %q declares a merchant name but the control plane is not attached", catalogName)
 	}
 	var id string
-	if err := cp.Pool().QueryRow(ctx, `SELECT id::text FROM openrails.tenants WHERE lower(slug) = lower($1)`, slug).Scan(&id); err != nil {
-		return nil, fmt.Errorf("resolve catalog tenant %q: %w", slug, err)
+	if err := cp.Pool().QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1)`, slug).Scan(&id); err != nil {
+		return nil, fmt.Errorf("resolve catalog merchant %q: %w", slug, err)
 	}
 	tid, err := merchant.ParseID(id)
 	if err != nil {
-		return nil, fmt.Errorf("parse catalog tenant %q id: %w", slug, err)
+		return nil, fmt.Errorf("parse catalog merchant %q id: %w", slug, err)
 	}
 	return merchant.WithID(ctx, tid), nil
 }

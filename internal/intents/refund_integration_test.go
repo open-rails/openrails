@@ -90,7 +90,7 @@ type refundFixture struct {
 // charge) plus the open admin refund reservation the intent finalizes.
 func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	t.Helper()
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
@@ -109,7 +109,7 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	tenantID := dbtest.TestTenantID.UUID()
+	tenantID := dbtest.TestMerchantID.UUID()
 	exec(`INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "refund-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 1000, 'usd', $3)`,
@@ -145,7 +145,7 @@ func (fx refundFixture) payload(amountCents int64) RefundPayload {
 func (fx refundFixture) enqueueParams(amountCents int64) EnqueueParams {
 	paymentID := fx.paymentID
 	return EnqueueParams{
-		MerchantID:     dbtest.TestTenantID.UUID(),
+		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
 		IntentType:     TypeNMIRefund,
 		PaymentID:      &paymentID,

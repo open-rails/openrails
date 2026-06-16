@@ -91,18 +91,18 @@ cors_origins:
   - "http://localhost:3000"
   - "https://your-frontend-domain.com"
 
-# Per-tenant browser-direct allowed origins (issue #222 browser tier).
-# Keyed by tenant slug. Each tenant lists the exact browser origins on its own
+# Per-merchant browser-direct allowed origins (issue #222 browser tier).
+# Keyed by merchant slug. Each merchant lists the exact browser origins on its own
 # domain that may call OpenRails directly (e.g. the /v1/self/* self-service
 # surface with a delegated access token). These are added to the CORS allow-list
 # ALONGSIDE cors_origins (additive union, exact-match only — never a wildcard).
 # A browser preflight from any listed origin succeeds; unlisted origins are denied.
-# tenant_cors:
-#   tenant-a:
+# merchant_cors:
+#   merchant-a:
 #     allowed_origins:
 #       - "https://app.example.com"
 #       - "https://portal.example.com"
-#   tenant-b:
+#   merchant-b:
 #     allowed_origins:
 #       - "https://media.example.com"
 
@@ -162,7 +162,7 @@ redis:
 # user/admin JWT surface: host-app-issued JWTs verify against each issuer's
 # {issuer}/.well-known/jwks.json (OIDC). It is an input to the auth stack, not
 # an alternative mode. Delegated/service credentials use the control plane's
-# live issuer registry instead (register via POST /v1/service/tenant/issuers
+# live issuer registry instead (register via POST /v1/service/merchant/issuers
 # or the bootstrap manifest).
 
 auth:
@@ -206,22 +206,17 @@ auth:
 #   billing bootstrap apply -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
 #   billing run-server -c /etc/openrails/config.yaml
 #
-# The mounted bootstrap file uses the unified manifest shape: tenants, OIDC
-# issuers and top-level catalogs. Registration is purely "this tenant, these
-# issuers, these JWKS URIs": a tenant has full authority over its own resources,
-# so there is no per-issuer permission grant. A validly-signed token from a
-# registered issuer self-asserts its permissions and is scoped to its own tenant.
+# The mounted bootstrap file uses the unified manifest shape: merchants and
+# top-level catalogs. Issuer/JWKS trust belongs in AuthKit remote_applications;
+# this manifest binds OpenRails merchant namespaces to owner orgs and billing
+# metadata.
 #
 # Example /etc/openrails/bootstrap.yaml:
 # version: 1
-# tenants:
+# merchants:
 #   - slug: local-stack
 #     name: Local Stack
-#     issuers:
-#       - issuer: "http://doujins:8080"
-#         jwks_uri: "http://doujins:8080/.well-known/jwks.json"
-#       - issuer: "http://hentai0:8081"
-#         jwks_uri: "http://hentai0:8081/.well-known/jwks.json"
+#     owner_org_id: 11111111-1111-1111-1111-111111111111
 # catalogs:
 #   - name: default
 #     tier_groups: []   # each price declares its own `currency`
@@ -251,9 +246,9 @@ auth:
 # =============================================================================
 # ENCRYPTION AT REST (issue #227)
 # =============================================================================
-# Per-tenant envelope encryption. The master key wraps each tenant's Data
-# Encryption Key (DEK); the DEK encrypts sensitive at-rest values (e.g. per-tenant
-# processor credentials in openrails.tenant_secrets). The wrapped DEKs live in the
+# Per-merchant envelope encryption. The master key wraps each merchant's Data
+# Encryption Key (DEK); the DEK encrypts sensitive at-rest values (e.g. per-merchant
+# processor credentials in openrails.merchant_secrets). The wrapped DEKs live in the
 # DB; the master key NEVER does.
 #
 # Self-hosted/dev: set ENCRYPTION_MASTER_KEY (base64 of 32 random bytes).

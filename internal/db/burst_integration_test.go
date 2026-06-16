@@ -16,14 +16,14 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// TestTenantConn_BurstDoesNotWedge guards against the #334 Phase-0 twin-pinning
-// regression class: a burst of concurrent requests, each pinning a tenant
+// TestMerchantConn_BurstDoesNotWedge guards against the #334 Phase-0 twin-pinning
+// regression class: a burst of concurrent requests, each pinning a merchant
 // connection and running queries, against a pool capped far below the
 // concurrency (pool_max_conns=5). The original failure mode was hold-and-wait
 // across two per-request acquisitions on one pool; with a single LAZY
 // per-request connection, requests queue on one acquisition and the burst must
 // drain quickly.
-func TestTenantConn_BurstDoesNotWedge(t *testing.T) {
+func TestMerchantConn_BurstDoesNotWedge(t *testing.T) {
 	ctx := context.Background()
 	superDSN, _ := startRLSContainer(t)
 
@@ -48,8 +48,8 @@ func TestTenantConn_BurstDoesNotWedge(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = d.RunInTenantConn(tctx, func(ctx context.Context) error {
-				// Two queries on the pinned tenant connection.
+			errs[i] = d.RunInMerchantConn(tctx, func(ctx context.Context) error {
+				// Two queries on the pinned merchant connection.
 				var one int
 				if err := d.Qx(ctx).QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
 					return fmt.Errorf("first query: %w", err)
@@ -74,11 +74,11 @@ func TestTenantConn_BurstDoesNotWedge(t *testing.T) {
 	t.Logf("burst of %d pinned-connection requests drained in %s", burst, elapsed)
 }
 
-// TestTenantConn_LazyConnNotAcquiredWithoutUse proves the lazy pin costs zero
+// TestMerchantConn_LazyConnNotAcquiredWithoutUse proves the lazy pin costs zero
 // pool connections for requests that never touch the database: many more
 // concurrent pinned requests than pool connections succeed because nothing is
 // acquired until first use.
-func TestTenantConn_LazyConnNotAcquiredWithoutUse(t *testing.T) {
+func TestMerchantConn_LazyConnNotAcquiredWithoutUse(t *testing.T) {
 	ctx := context.Background()
 	superDSN, _ := startRLSContainer(t)
 
@@ -103,7 +103,7 @@ func TestTenantConn_LazyConnNotAcquiredWithoutUse(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = d.RunInTenantConn(tctx, func(ctx context.Context) error {
+			errs[i] = d.RunInMerchantConn(tctx, func(ctx context.Context) error {
 				<-gate // hold the pin open until every request has one
 				return nil
 			})

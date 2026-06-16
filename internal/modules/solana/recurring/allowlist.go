@@ -1,7 +1,7 @@
 // Package recurring holds the OpenRails service layer for Solana recurring
 // subscriptions (issues #254/#255/#256/#257): plan publishing, enrollment, the
 // cyclical pull, and dunning — built on the on-chain instruction builders in
-// internal/integrations/solana/subscriptions and the per-tenant Signer.
+// internal/integrations/solana/subscriptions and the per-merchant Signer.
 //
 // It is intentionally separate from the one-off Solana Pay flow in
 // internal/modules/solana so the two payment shapes evolve independently.

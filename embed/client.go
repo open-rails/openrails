@@ -232,11 +232,14 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 	out := &openrails.AdmitResponse{
 		Allowed:             res.Allowed,
 		Currency:            res.Currency,
+		EstimatedAmount:     res.EstimatedAmount,
+		PolicyCurrency:      res.PolicyCurrency,
+		PolicyAmount:        res.PolicyAmount,
 		BlockedBy:           res.BlockedBy,
 		BlockedUnit:         res.BlockedUnit,
 		DenyCode:            res.DenyCode,
 		RetryAfterSeconds:   res.RetryAfterSeconds,
-		ReservationID:       res.ReservationID,
+		HoldExpiresAt:       res.HoldExpiresAt,
 		BudgetReservationID: res.BudgetReservationID,
 		ResolvedTier:        res.ResolvedTier,
 
@@ -303,8 +306,9 @@ func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequ
 	if out.RemainingTodayAmount != nil {
 		resp.RemainingTodayAmount = *out.RemainingTodayAmount
 	}
-	if out.ReservationID != nil {
-		resp.ReservationID = out.ReservationID.String()
+	if out.HoldExpiresAt != nil {
+		v := out.HoldExpiresAt.Unix()
+		resp.HoldExpiresAt = &v
 	}
 	return resp, nil
 }
@@ -321,24 +325,28 @@ func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCredits
 	switch {
 	case strings.TrimSpace(req.Invoker) == "":
 		return nil, bindRequiredErr("Invoker")
+	case strings.TrimSpace(req.InvokerType) == "":
+		return nil, bindRequiredErr("InvokerType")
 	case req.Amount == 0:
 		return nil, bindRequiredErr("Amount")
 	case strings.TrimSpace(req.Source) == "":
 		return nil, bindRequiredErr("Source")
-	case strings.TrimSpace(req.SourceID) == "":
-		return nil, bindRequiredErr("SourceID")
+	case strings.TrimSpace(req.RequestID) == "":
+		return nil, bindRequiredErr("RequestID")
 	}
 	payer, err := parseCustomer(customerString(req.CustomerID), "invalid customer_id")
 	if err != nil {
 		return nil, err
 	}
 	hold, err := c.svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
-		CustomerID: &payer,
-		Invoker:    req.Invoker,
-		Currency:   currency,
-		Amount:     req.Amount,
-		Source:     req.Source,
-		SourceID:   req.SourceID,
+		CustomerID:  &payer,
+		Invoker:     req.Invoker,
+		InvokerType: req.InvokerType,
+		Currency:    currency,
+		Amount:      req.Amount,
+		Source:      req.Source,
+		RequestID:   req.RequestID,
+		Resource:    req.Resource,
 		// The wire carries unix seconds; mirror the handler's re-derivation so
 		// sub-second precision is dropped identically on both transports.
 		ExpiresAt: time.Unix(req.ExpiresAt.Unix(), 0).UTC(),
@@ -347,17 +355,14 @@ func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCredits
 		return nil, mapCreditErr(err, "hold failed")
 	}
 	return &openrails.CreditHold{
-		ID:        hold.ID,
+		RequestID: hold.RequestID,
 		Invoker:   hold.Invoker,
 		Currency:  hold.Currency,
 		Amount:    hold.Amount,
 		Source:    hold.Source,
-		SourceID:  hold.SourceID,
-		Status:    hold.Status,
+		Resource:  hold.Resource,
 		ExpiresAt: hold.ExpiresAt,
-		Captured:  hold.Captured,
 		CreatedAt: hold.CreatedAt,
-		UpdatedAt: hold.UpdatedAt,
 	}, nil
 }
 
@@ -368,7 +373,7 @@ func (c *localClient) CaptureHold(ctx context.Context, req openrails.CaptureHold
 	if req.Amount == 0 { // gin binding: amount is `binding:"required"`
 		return nil, bindRequiredErr("Amount")
 	}
-	trx, err := c.svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{HoldID: req.HoldID, Amount: req.Amount})
+	trx, err := c.svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{RequestID: req.RequestID, Amount: req.Amount})
 	if err != nil {
 		if errors.Is(err, billingservice.ErrInsufficientCredits) {
 			return nil, openrails.NewStatusError(http.StatusPaymentRequired, "", "insufficient_credits")
@@ -382,9 +387,9 @@ func (c *localClient) CaptureHold(ctx context.Context, req openrails.CaptureHold
 // NOTE the handler maps EVERY release failure — including an unknown hold — to
 // 500 "release failed"; the embedded transport mirrors that (ErrInternal, not
 // ErrNotFound) so errors.Is agrees across transports.
-func (c *localClient) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
+func (c *localClient) ReleaseHold(ctx context.Context, requestID string) error {
 	ctx = c.ensureTenant(ctx)
-	if err := c.svc.ReleaseHold(ctx, holdID); err != nil {
+	if err := c.svc.ReleaseHold(ctx, requestID); err != nil {
 		return internalErr("release failed")
 	}
 	return nil
@@ -479,17 +484,16 @@ func (c *localClient) DepositCredits(ctx context.Context, req openrails.DepositC
 }
 
 // Capture transcribes handlers.ServiceCaptureHold (service_credits.go)
-// addressed by reservation id, including the #311 usage-event extension.
-func (c *localClient) Capture(ctx context.Context, reservationID string, capturedAmount int64, usage *openrails.CaptureUsage) error {
+// addressed by request_id, including the #311 usage-event extension.
+func (c *localClient) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *openrails.CaptureUsage) error {
 	ctx = c.ensureTenant(ctx)
-	holdID, err := uuid.Parse(strings.TrimSpace(reservationID))
-	if err != nil {
-		return invalidErr("invalid hold id")
+	if strings.TrimSpace(requestID) == "" {
+		return invalidErr("request_id required")
 	}
 	if capturedAmount == 0 { // gin binding: amount is `binding:"required"`
 		return bindRequiredErr("Amount")
 	}
-	in := billingservice.CaptureHoldRequest{HoldID: holdID, Amount: capturedAmount}
+	in := billingservice.CaptureHoldRequest{RequestID: requestID, Amount: capturedAmount}
 	if usage != nil && strings.TrimSpace(usage.EventType) != "" {
 		in.EventType = usage.EventType
 		in.Resource = usage.Resource
@@ -507,14 +511,13 @@ func (c *localClient) Capture(ctx context.Context, reservationID string, capture
 }
 
 // Release transcribes handlers.ServiceReleaseHold (service_credits.go),
-// addressed by reservation id.
-func (c *localClient) Release(ctx context.Context, reservationID string) error {
+// addressed by request_id.
+func (c *localClient) Release(ctx context.Context, requestID string) error {
 	ctx = c.ensureTenant(ctx)
-	holdID, err := uuid.Parse(strings.TrimSpace(reservationID))
-	if err != nil {
-		return invalidErr("invalid hold id")
+	if strings.TrimSpace(requestID) == "" {
+		return invalidErr("request_id required")
 	}
-	return c.ReleaseHold(ctx, holdID)
+	return c.ReleaseHold(ctx, requestID)
 }
 
 // Balance transcribes handlers.ServiceGetCreditsBalance (service_credits.go)
@@ -711,7 +714,7 @@ func (c *localClient) BudgetCheck(ctx context.Context, tenantSubjectID, invokerI
 	in := make([]billingservice.BudgetCheckWindowInput, 0, len(windows))
 	for _, w := range windows {
 		in = append(in, billingservice.BudgetCheckWindowInput{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence,
+			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence,
 		})
 	}
 	statuses, err := c.svc.BudgetCheck(ctx, payer, invokerID, currency, in, requestedAmount)
@@ -765,6 +768,7 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 	pol := billingservice.TierPolicyInput{
 		Tier:                    in.Tier,
 		EntitledResources:       in.EntitledResources,
+		PolicyCurrency:          in.PolicyCurrency,
 		MaxConcurrentHeldAmount: in.MaxConcurrentHeldAmount,
 		MaxSingleChargeAmount:   in.MaxSingleChargeAmount,
 	}
@@ -775,12 +779,12 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 	}
 	for _, b := range in.BudgetWindows {
 		pol.BudgetWindows = append(pol.BudgetWindows, billingservice.TierBudgetWindowInput{
-			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Cadence: b.Cadence,
+			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency, Cadence: b.Cadence,
 		})
 	}
 	for _, b := range in.BadSpendWindows {
 		pol.BadSpendWindows = append(pol.BadSpendWindows, billingservice.TierBudgetWindowInput{
-			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Cadence: b.Cadence,
+			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency, Cadence: b.Cadence,
 		})
 	}
 	for _, q := range in.QueueLimits {
@@ -884,12 +888,16 @@ func (c *localClient) ReportWastedSpend(ctx context.Context, report openrails.Wa
 		return nil, internalErr("report wasted spend failed")
 	}
 	return &openrails.WastedSpendResponse{
-		Currency:       res.Currency,
-		RecordedAmount: res.RecordedAmount,
-		ForgivenAmount: res.ForgivenAmount,
-		ChargedAmount:  res.ChargedAmount,
-		Action:         res.Action,
-		Duplicate:      res.Duplicate,
+		Currency:             res.Currency,
+		PolicyCurrency:       res.PolicyCurrency,
+		RecordedAmount:       res.RecordedAmount,
+		PolicyRecordedAmount: res.PolicyRecordedAmount,
+		ForgivenAmount:       res.ForgivenAmount,
+		PolicyForgivenAmount: res.PolicyForgivenAmount,
+		ChargedAmount:        res.ChargedAmount,
+		PolicyChargedAmount:  res.PolicyChargedAmount,
+		Action:               res.Action,
+		Duplicate:            res.Duplicate,
 	}, nil
 }
 
@@ -965,7 +973,7 @@ func budgetScopeWindowInputs(ws []openrails.BudgetScopeWindow) []billingservice.
 	out := make([]billingservice.BudgetScopeWindowInput, 0, len(ws))
 	for _, w := range ws {
 		out = append(out, billingservice.BudgetScopeWindowInput{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence,
+			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence,
 		})
 	}
 	return out
@@ -1024,7 +1032,7 @@ func (c *localClient) SubjectBudgetPolicies(ctx context.Context, tenantSubjectID
 	for _, p := range policies {
 		ws := make([]openrails.BudgetScopeWindow, 0, len(p.Windows))
 		for _, w := range p.Windows {
-			ws = append(ws, openrails.BudgetScopeWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence})
+			ws = append(ws, openrails.BudgetScopeWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence})
 		}
 		out = append(out, openrails.SubjectBudgetPolicy{Scope: p.Scope, RoleID: p.ScopeKey, Windows: ws})
 	}

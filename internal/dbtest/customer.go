@@ -25,12 +25,12 @@ func EnsureCustomerIDPgx(ctx context.Context, t testing.TB, qx gen.DBTX, userID 
 	uid, err := uuid.Parse(userID)
 	require.NoError(t, err, "test user id must be a UUID (#364): %q", userID)
 
-	// No default tenant (#336): materialize the canonical test tenant first so
+	// No default tenant (#336): materialize the canonical test merchant first so
 	// the customers FK resolves, then pin the customer under it.
-	EnsureTestTenant(ctx, t, qx)
+	EnsureTestMerchant(ctx, t, qx)
 	id, err := gen.New(qx).EnsureCustomer(ctx, gen.EnsureCustomerParams{
 		ID:         uid,
-		MerchantID: TestTenantID.UUID(),
+		MerchantID: TestMerchantID.UUID(),
 	})
 	require.NoError(t, err, "ensure customer")
 	return id

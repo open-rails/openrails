@@ -38,46 +38,46 @@ func (c *ControlPlane) ReloadRemoteApplications(ctx context.Context) error {
 
 // merchantForIssuer resolves the OpenRails MERCHANT a VALIDATED token issuer may
 // act on (#481). The chain is role-based, never identity: validated `iss` ->
-// AuthKit remote_application -> the tenant(s) it controls (its tenant
-// memberships) -> the merchant owned by that tenant (merchants.owner_tenant_id).
-// A remote_application controls a tenant and a tenant owns merchants, so this is
+// AuthKit remote_application -> the org(s) it controls (its org memberships) ->
+// the merchant namespace owned by that org (merchants.owner_org_id).
+// A remote_application controls an org and an org owns merchant namespaces, so this is
 // the runtime billing-authz path: the remote_application is authorized to bill
-// the merchant its owning tenant owns.
+// the merchant namespace its owning org owns.
 //
 // Returns ErrDelegatedIssuerUnknown when the issuer is unregistered, controls no
-// tenant, or that tenant owns no active merchant (fail closed).
-func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (merchant.ID, string, error) {
+// org, or that org owns no active merchant (fail closed).
+func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (merchantID merchant.ID, merchantSlug, ownerOrgID, ownerOrgSlug string, err error) {
 	issuer = strings.TrimSpace(issuer)
 	if issuer == "" {
-		return merchant.ID{}, "", ErrDelegatedIssuerUnknown
+		return merchant.ID{}, "", "", "", ErrDelegatedIssuerUnknown
 	}
 	if c == nil || c.Core() == nil || c.pool == nil {
-		return merchant.ID{}, "", errors.New("controlplane: control plane unavailable for issuer resolution")
+		return merchant.ID{}, "", "", "", errors.New("controlplane: control plane unavailable for issuer resolution")
 	}
 
 	ra, err := c.Core().GetRemoteApplication(ctx, issuer)
 	if err != nil || ra == nil || !ra.Enabled {
-		return merchant.ID{}, "", ErrDelegatedIssuerUnknown
+		return merchant.ID{}, "", "", "", ErrDelegatedIssuerUnknown
 	}
 
-	// The tenant(s) the remote_application controls (its memberships). Resolve the
-	// first one that owns an active merchant.
+	// The org(s) the remote_application controls (its memberships). Resolve the
+	// first one that owns exactly one active merchant namespace.
 	memberships, err := c.Core().RemoteApplicationOrgRoles(ctx, ra.ID)
 	if err != nil {
-		return merchant.ID{}, "", err
+		return merchant.ID{}, "", "", "", err
 	}
 	for _, m := range memberships {
 		t, terr := c.Core().ResolveOrgBySlug(ctx, m.Org)
 		if terr != nil || t == nil {
 			continue
 		}
-		mid, mslug, merr := c.merchantDirectoryRow(ctx, `owner_tenant_id = $1`, t.ID)
+		mid, mslug, merr := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, t.ID)
 		if merr == nil {
-			return mid, mslug, nil
+			return mid, mslug, t.ID, t.Slug, nil
 		}
 		if !errors.Is(merr, pgx.ErrNoRows) {
-			return merchant.ID{}, "", merr
+			return merchant.ID{}, "", "", "", merr
 		}
 	}
-	return merchant.ID{}, "", ErrDelegatedIssuerUnknown
+	return merchant.ID{}, "", "", "", ErrDelegatedIssuerUnknown
 }

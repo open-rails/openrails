@@ -45,7 +45,7 @@ func TestBuildPartiallySignedTx_WalletCompletes(t *testing.T) {
 		system.NewTransferInstruction(1, merchant.PublicKey(), dest.PublicKey()).Build(),
 	}
 
-	b64, err := BuildPartiallySignedTx(context.Background(), dbtest.TestTenantID, cosigner, zeroBlockhash{}, subscriber.PublicKey(), ixs)
+	b64, err := BuildPartiallySignedTx(context.Background(), dbtest.TestMerchantID, cosigner, zeroBlockhash{}, subscriber.PublicKey(), ixs)
 	require.NoError(t, err)
 
 	raw, err := base64.StdEncoding.DecodeString(b64)
@@ -83,6 +83,6 @@ func TestBuildPartiallySignedTx_RejectsNonSigner(t *testing.T) {
 	ixs := []solanago.Instruction{
 		system.NewTransferInstruction(1, subscriber.PublicKey(), dest.PublicKey()).Build(),
 	}
-	_, err = BuildPartiallySignedTx(context.Background(), dbtest.TestTenantID, cosigner, zeroBlockhash{}, subscriber.PublicKey(), ixs)
+	_, err = BuildPartiallySignedTx(context.Background(), dbtest.TestMerchantID, cosigner, zeroBlockhash{}, subscriber.PublicKey(), ixs)
 	require.Error(t, err, "must reject when the cosigner is not a required signer")
 }

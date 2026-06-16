@@ -30,11 +30,11 @@ func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Con
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
 	}
-	// Run inside a tenant-scoped transaction so the migration-050 RLS policies
-	// constrain every entitlement query to the request's tenant (db.TenantTx
-	// sets the app.tenant_id GUC from the context as the first statement). This is
-	// the shared chokepoint for tenant-owned entitlement writes/reads.
-	return s.db.TenantTx(ctx, fn)
+	// Run inside a merchant-scoped transaction so the migration-050 RLS policies
+	// constrain every entitlement query to the request's merchant (db.MerchantTx
+	// sets the app.merchant_id GUC from the context as the first statement). This is
+	// the shared chokepoint for merchant-owned entitlement writes/reads.
+	return s.db.MerchantTx(ctx, fn)
 }
 
 // SetClock sets the clock for this service. Used for testing.
@@ -179,7 +179,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			return err
 		}
 
-		// Resolve the payable tenant subject for this entitlement when the caller
+		// Resolve the payable merchant subject for this entitlement when the caller
 		// did not supply one (#317), so every window carries customer_id
 		// alongside the legacy user_id. Self-service user UUIDs resolve to a
 		// customers row whose id IS that UUID (see repo.EnsureCustomerID),
@@ -371,7 +371,7 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 			return err
 		}
 
-		// Filter the entitlement timeline by the payable tenant subject (#317);
+		// Filter the entitlement timeline by the payable merchant subject (#317);
 		// the lock above still serializes on the userID string key.
 		tsid, terr := repo.ResolveCustomerID(userID)
 		if terr != nil {

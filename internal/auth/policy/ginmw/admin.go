@@ -45,7 +45,7 @@ func PlatformSuperadminRequired(checker policy.PlatformSuperadminChecker) gin.Ha
 			return
 		}
 		if !allowed {
-			log.WithFields(log.Fields{"user_id": uc.UserID, "caller_org": uc.Tenant}).
+			log.WithFields(log.Fields{"user_id": uc.UserID, "caller_org": uc.Org}).
 				Warn("platform superadmin denied")
 			response.ForbiddenWithMessage(c, "platform_superadmin_required")
 			c.Abort()
@@ -80,7 +80,7 @@ func AdminPermissionRequired(checker policy.AdminPermissionChecker, perm string)
 			c.Abort()
 			return
 		}
-		allowed, err := checker.HasAdminPermission(c.Request.Context(), uc.Tenant, uc.UserID, perm)
+		allowed, err := checker.HasAdminPermission(c.Request.Context(), uc.Org, uc.UserID, perm)
 		if err != nil {
 			log.WithError(err).Error("failed to evaluate admin permission")
 			response.InternalError(c, "failed to check permission")

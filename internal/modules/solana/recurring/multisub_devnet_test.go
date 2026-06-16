@@ -72,7 +72,7 @@ func TestDevnetMultiSub(t *testing.T) {
 		// DUPLICATE SAME PLAN: re-subscribing plan A must NOT succeed (the Subscription
 		// PDA already exists). Either Prepare refuses, or the tx reverts on-chain.
 		dupRes, dupErr := prepSvc.Prepare(ctx, PrepareSubscribeInput{
-			MerchantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(),
+			MerchantID: dbtest.TestMerchantID, SubscriberWallet: sub.PublicKey().String(),
 			PlanID: hA.PlanID, MintSymbol: "USDC", AmountBaseUnits: amount, PeriodHours: 720, PlanCreatedAt: hA.CreatedAt,
 		})
 		if dupErr != nil {
@@ -140,14 +140,14 @@ func TestDevnetMultiSub(t *testing.T) {
 		// terminal/closed failure. B's period 1 was just paid by its subscribe, so an
 		// immediate crank is AlreadyPaid (Custom:400) — that is success for B: it is
 		// still a LIVE, billable subscription, unaffected by A's cancel.
-		_, errA := crankSvc.Crank(ctx, dbtest.TestTenantID, rowA, amount)
+		_, errA := crankSvc.Crank(ctx, dbtest.TestMerchantID, rowA, amount)
 		require.Error(t, errA, "crank on the CANCELLED subscription A must fail on-chain")
 		cfA := ClassifyCrankError(errA)
 		require.NotEqual(t, onchainCapReached, cfA.OnChainCode,
 			"A's failure must be from the cancel/close (508/revoked/closed), NOT an in-period cap — got %+v", cfA)
 		t.Logf("crank A (cancelled): Custom:%d -> %s", cfA.OnChainCode, cfA.Category)
 
-		_, errB := crankSvc.Crank(ctx, dbtest.TestTenantID, rowB, amount)
+		_, errB := crankSvc.Crank(ctx, dbtest.TestMerchantID, rowB, amount)
 		require.Error(t, errB, "B's period 1 was paid by subscribe, so an immediate crank is AlreadyPaid")
 		cfB := ClassifyCrankError(errB)
 		require.Equalf(t, onchainCapReached, cfB.OnChainCode,

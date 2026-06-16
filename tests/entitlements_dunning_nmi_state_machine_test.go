@@ -25,7 +25,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	require.NotNil(t, rt.DB)
 	require.NotNil(t, rt.IdempotencyService)
 
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-120 * 24 * time.Hour)
@@ -149,7 +149,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 	rt := suite.App.Runtime
 	require.NotNil(t, rt)
 
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-120 * 24 * time.Hour)
 	clock := suite.SetMockClock(t0)

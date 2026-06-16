@@ -35,7 +35,7 @@ func newDelegatedTestRouter(resolver DelegatedResolver, perm string) *gin.Engine
 		tid, _ := merchant.FromContext(c.Request.Context())
 		uc, _ := ginauth.UserContextFromGin(c)
 		c.JSON(http.StatusOK, gin.H{
-			"tenant":         tid.String(),
+			"merchant":       tid.String(),
 			"subject":        resolved.DelegatedSubject,
 			"user_id":        uc.UserID,
 			"email":          uc.Email,
@@ -66,9 +66,9 @@ func doDelegatedBearerRequest(r *gin.Engine, token string) *httptest.ResponseRec
 func TestDelegatedSelfRequired_SucceedsAndBindsActingUser(t *testing.T) {
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
-			Tenant:           "operator",
-			MerchantID:       dbtest.TestTenantID,
-			TenantSlug:       dbtest.TestTenantSlug,
+			Merchant:         "operator",
+			MerchantID:       dbtest.TestMerchantID,
+			MerchantSlug:     dbtest.TestMerchantSlug,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermSelfBillingRead},
 			Email:            "user@example.test",
@@ -79,9 +79,9 @@ func TestDelegatedSelfRequired_SucceedsAndBindsActingUser(t *testing.T) {
 	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusOK, w.Code)
-	// Tenant pinned + acting user bound to delegated_sub so reused `me` handlers
+	// Merchant pinned + acting user bound to delegated_sub so reused `me` handlers
 	// scope to this user.
-	require.Contains(t, w.Body.String(), dbtest.TestTenantID.String())
+	require.Contains(t, w.Body.String(), dbtest.TestMerchantID.String())
 	require.Contains(t, w.Body.String(), "user-123")
 	require.Contains(t, w.Body.String(), "user@example.test")
 	require.Contains(t, w.Body.String(), "user123")
@@ -90,8 +90,8 @@ func TestDelegatedSelfRequired_SucceedsAndBindsActingUser(t *testing.T) {
 func TestDelegatedSelfRequired_DeniesMissingPermission(t *testing.T) {
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
-			Tenant:           "operator",
-			MerchantID:       dbtest.TestTenantID,
+			Merchant:         "operator",
+			MerchantID:       dbtest.TestMerchantID,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermSelfBillingRead}, // read only
 		},
@@ -109,8 +109,8 @@ func TestDelegatedSelfRequired_NoAdminOverride(t *testing.T) {
 	// asserted here for the gate itself) does not satisfy a self permission gate.
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
-			Tenant:           "operator",
-			MerchantID:       dbtest.TestTenantID,
+			Merchant:         "operator",
+			MerchantID:       dbtest.TestMerchantID,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermAdmin},
 		},
@@ -155,7 +155,7 @@ func TestDelegatedSelfRequired_DeniesServiceTokenCredential(t *testing.T) {
 }
 
 func TestDelegatedSelfRequired_DeniesCrossTenant(t *testing.T) {
-	// Token's tenant maps to no active tenant for this deployment.
+	// Token's merchant maps to no active merchant for this deployment.
 	resolver := fakeDelegatedResolver{err: controlplane.ErrServiceTokenMerchantUnresolved}
 	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
 	w := doDelegatedRequest(r, true)

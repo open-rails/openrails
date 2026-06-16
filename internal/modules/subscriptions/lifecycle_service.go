@@ -213,7 +213,7 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 		"currency":                  params.Currency,
 	}).Info("Starting membership creation flow")
 
-	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		dbb := db.NewWithPgxTx(tx)
 		var err error
 		subscription, notifications, err = s.createMembershipCore(ctx, dbb, params)
@@ -613,7 +613,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		"allow_terminal_reactivate": params.AllowTerminalReactivation,
 	}).Info("Starting membership renewal flow")
 
-	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
@@ -998,7 +998,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 
 	var reactivated *models.Subscription
 
-	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
@@ -1139,7 +1139,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		"cancel_feedback_provided":  cancelFeedback != "",
 	}).Info("Starting membership cancellation flow")
 
-	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
@@ -1213,7 +1213,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		// puller of recurring Solana subscriptions; the hourly cranker's ListDue
 		// query filters status = active, so flipping the linked solana_subscriptions
 		// row to cancelled stops it from ever pulling again. Runs inside the same
-		// tenant tx (via the tx-bound db handle) so the cascade commits atomically
+		// merchant tx (via the tx-bound db handle) so the cascade commits atomically
 		// with the lifecycle cancellation. Idempotent and tolerant of a missing row
 		// (a Solana sub that was never enrolled): we log and continue rather than
 		// failing the cancel. No-op for non-Solana processors.
@@ -1338,7 +1338,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 
 	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Starting membership expiration flow")
 
-	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
@@ -1480,7 +1480,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		"dunning_mode":              dunningMode,
 	}).Warn("Starting membership failure flow")
 
-	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)

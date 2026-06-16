@@ -704,7 +704,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 		return err
 	}
 
-	if err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		userID, err := s.resolveUserID(ctx, data.Username)
 		if err != nil {
 			return err
@@ -856,7 +856,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		}
 	}
 
-	if err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
@@ -1208,7 +1208,7 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 		return err
 	}
 
-	if err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		userID, err := s.resolveUserID(ctx, data.Username)
 		if err != nil {
 			return err
@@ -1289,7 +1289,7 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 	pSubscriptionID := data.SubscriptionID
 	nextRenewalDate := data.NextRenewalDate
 
-	if err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
@@ -1373,7 +1373,7 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 
 	pSubscriptionID := data.SubscriptionID
 
-	if err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
@@ -1593,7 +1593,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 
 	var refundLedgerErr error
 	var refundRepairAlert *ledgerRepairAlert
-	if err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
@@ -1831,7 +1831,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 	}
 	var voidedSubscriptionID *uuid.UUID
 
-	if err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
@@ -2015,7 +2015,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 	var ledgerErr error
 	var chargebackRepairAlert *ledgerRepairAlert
 
-	if err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
@@ -2523,7 +2523,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 	var subForLogs *models.Subscription
 	ignoredRenewalFailure := false
 
-	if err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)

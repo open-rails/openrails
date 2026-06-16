@@ -41,11 +41,11 @@ type hostSeamAuthenticator struct {
 
 func (h hostSeamAuthenticator) AuthenticateDelegated(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 	return &billingauth.DelegatedPrincipal{
-		MerchantID:  dbtest.TestTenantID.String(),
-		TenantSlug:  dbtest.TestTenantSlug,
-		SubjectID:   h.subject,
-		Issuer:      "https://auth.host.example",
-		Permissions: h.perms,
+		MerchantID:   dbtest.TestMerchantID.String(),
+		MerchantSlug: dbtest.TestMerchantSlug,
+		SubjectID:    h.subject,
+		Issuer:       "https://auth.host.example",
+		Permissions:  h.perms,
 	}, nil
 }
 
@@ -77,7 +77,7 @@ func decodeHostSeamBody(t *testing.T, w *httptest.ResponseRecorder) map[string]a
 
 func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)

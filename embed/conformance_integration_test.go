@@ -184,7 +184,7 @@ func observeAdmit(res *openrails.AdmitResponse) obsAdmit {
 		BlockedUnit:          res.BlockedUnit,
 		DenyCode:             res.DenyCode,
 		HasRetry:             res.RetryAfterSeconds > 0,
-		HasReservation:       res.ReservationID != "",
+		HasReservation:       res.HoldExpiresAt != nil,
 		HasBudgetReservation: res.BudgetReservationID != "",
 		Budget:               observeBudgets(res.BudgetWindows),
 	}
@@ -392,20 +392,21 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 
 	// 2) Hold 10,000 then capture 8,000.
 	hold, err := c.HoldCredits(ctx, openrails.HoldCreditsRequest{
-		CustomerID: &pid,
-		Invoker:    env.invoker,
-		Currency:   env.currency,
-		Amount:     10_000,
-		Source:     "conformance",
-		SourceID:   "hold-1",
-		ExpiresAt:  time.Now().Add(10 * time.Minute),
+		CustomerID:  &pid,
+		Invoker:     env.invoker,
+		InvokerType: "delegated",
+		Currency:    env.currency,
+		Amount:      10_000,
+		Source:      "conformance",
+		RequestID:   "hold-1",
+		ExpiresAt:   time.Now().Add(10 * time.Minute),
 	})
 	require.NoError(t, err, "%s hold", env.side)
-	require.NotEqual(t, uuid.Nil, hold.ID, "%s hold id", env.side)
+	require.Equal(t, "hold-1", hold.RequestID, "%s hold request id", env.side)
 	require.Equal(t, int64(10_000), hold.Amount, "%s hold amount", env.side)
-	r.HoldOK = hold.Status == "active"
+	r.HoldOK = hold.ExpiresAt.After(time.Now())
 
-	cap1, err := c.CaptureHold(ctx, openrails.CaptureHoldRequest{HoldID: hold.ID, Amount: 8_000})
+	cap1, err := c.CaptureHold(ctx, openrails.CaptureHoldRequest{RequestID: hold.RequestID, Amount: 8_000})
 	require.NoError(t, err, "%s capture-hold", env.side)
 	r.Capture = observeTxn(t, env.side+" capture", cap1)
 
@@ -450,10 +451,10 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.NoError(t, err, "%s admit#1", env.side)
 	r.Admit1 = observeAdmit(a1)
 	require.True(t, a1.Allowed, "%s admit#1 must be allowed", env.side)
-	require.NotEmpty(t, a1.ReservationID, "%s admit#1 reservation", env.side)
+	require.NotNil(t, a1.HoldExpiresAt, "%s admit#1 hold expiry", env.side)
 
 	// 6) Settle the admission hold at the full estimate, recording usage (#311).
-	require.NoError(t, c.Capture(ctx, a1.ReservationID, 5_000, &openrails.CaptureUsage{
+	require.NoError(t, c.Capture(ctx, env.side+"-admit-1", 5_000, &openrails.CaptureUsage{
 		EventType: "invoke",
 		Resource:  env.resource,
 	}), "%s capture admission hold", env.side)
@@ -602,13 +603,14 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		c.Release(ctx, "not-a-uuid"))
 
 	_, err = c.HoldCredits(ctx, openrails.HoldCreditsRequest{
-		CustomerID: &pid,
-		Invoker:    env.invoker,
-		Currency:   env.currency,
-		Amount:     10_000_000_000,
-		Source:     "conformance",
-		SourceID:   "hold-too-big",
-		ExpiresAt:  time.Now().Add(10 * time.Minute),
+		CustomerID:  &pid,
+		Invoker:     env.invoker,
+		InvokerType: "delegated",
+		Currency:    env.currency,
+		Amount:      10_000_000_000,
+		Source:      "conformance",
+		RequestID:   "hold-too-big",
+		ExpiresAt:   time.Now().Add(10 * time.Minute),
 	})
 	r.ErrHoldInsufficient = observeErr(t, env.side+" hold insufficient", err)
 
@@ -704,7 +706,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.Len(t, verdicts, 4, "%s admit-batch verdicts are positional", env.side)
 	r.BatchVerdicts = observeBatchVerdicts(verdicts)
 	require.True(t, verdicts[0].Allowed(), "%s admit-batch item 0 must be admitted", env.side)
-	require.NoError(t, c.Release(ctx, verdicts[0].Result.ReservationID), "%s release batch hold", env.side)
+	require.NoError(t, c.Release(ctx, env.side+"-batch-1"), "%s release batch hold", env.side)
 
 	// 19) Window/batch error parity.
 	_, err = c.OpenWindow(ctx, openrails.OpenWindowRequest{
@@ -852,13 +854,13 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 			INSERT INTO openrails.customers (merchant_id, issuer, subject, created_at, last_seen_at)
 			VALUES ($1, $2, $3, now(), now())
 			RETURNING id`,
-			dbtest.TestTenantID.UUID(), issuer, subject).Scan(&id)
+			dbtest.TestMerchantID.UUID(), issuer, subject).Scan(&id)
 		require.NoError(t, err)
 		// One active entitlement row for the entitlements steps.
 		_, err = pool.Exec(ctx, `
 			INSERT INTO openrails.entitlements (id, merchant_id, customer_id, entitlement, start_at, source_id, source_type)
 			VALUES ($1, $2, $3, 'premium', now() - interval '1 hour', $4, 'admin')`,
-			uuid.New(), dbtest.TestTenantID.UUID(), id, uuid.New())
+			uuid.New(), dbtest.TestMerchantID.UUID(), id, uuid.New())
 		require.NoError(t, err)
 		return id, subject
 	}

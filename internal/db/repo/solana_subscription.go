@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // SolanaSubscriptionRepo persists the on-chain state of recurring Solana
@@ -100,9 +101,41 @@ func (r *SolanaSubscriptionRepo) GetBySubscriptionID(ctx context.Context, subscr
 }
 
 // ListDue returns active subscriptions whose next_pull_at is at/before `now`,
-// ordered by tenant so the worker can load each tenant's signer once. `limit`
+// ordered by merchant so the worker can load each merchant's signer once. `limit`
 // caps the batch (0 = no limit).
 func (r *SolanaSubscriptionRepo) ListDue(ctx context.Context, now time.Time, limit int) ([]*models.SolanaSubscription, error) {
+	if _, ok := merchant.FromContext(ctx); ok {
+		return r.listDueScoped(ctx, now, limit)
+	}
+	merchantIDs, err := r.activeMerchantIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*models.SolanaSubscription, 0)
+	for _, id := range merchantIDs {
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+		remaining := limit
+		if remaining > 0 {
+			remaining -= len(out)
+		}
+		err := r.db.RunInMerchantConn(merchant.WithID(ctx, merchant.ID(id)), func(ctx context.Context) error {
+			rows, err := r.listDueScoped(ctx, now, remaining)
+			if err != nil {
+				return err
+			}
+			out = append(out, rows...)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (r *SolanaSubscriptionRepo) listDueScoped(ctx context.Context, now time.Time, limit int) ([]*models.SolanaSubscription, error) {
 	limit32, _ := safecast.Convert[int32](limit)
 	rows, err := r.db.Gen(ctx).ListDueSolanaSubscriptions(ctx, gen.ListDueSolanaSubscriptionsParams{
 		Now:       now.UTC(),
@@ -144,7 +177,7 @@ func (r *SolanaSubscriptionRepo) SetNextPullAt(ctx context.Context, id uuid.UUID
 	})
 }
 
-// MerchantWallet is a distinct (tenant, cranker wallet) pair with active subs.
+// MerchantWallet is a distinct (merchant, cranker wallet) pair with active subs.
 type MerchantWallet struct {
 	MerchantID      uuid.UUID
 	MerchantAddress string
@@ -154,6 +187,31 @@ type MerchantWallet struct {
 // have at least one active subscription — the wallets whose SOL float the
 // gas-alert worker monitors (#258).
 func (r *SolanaSubscriptionRepo) ListActiveMerchantWallets(ctx context.Context) ([]MerchantWallet, error) {
+	if _, ok := merchant.FromContext(ctx); ok {
+		return r.listActiveMerchantWalletsScoped(ctx)
+	}
+	merchantIDs, err := r.activeMerchantIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MerchantWallet, 0)
+	for _, id := range merchantIDs {
+		err := r.db.RunInMerchantConn(merchant.WithID(ctx, merchant.ID(id)), func(ctx context.Context) error {
+			rows, err := r.listActiveMerchantWalletsScoped(ctx)
+			if err != nil {
+				return err
+			}
+			out = append(out, rows...)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (r *SolanaSubscriptionRepo) listActiveMerchantWalletsScoped(ctx context.Context) ([]MerchantWallet, error) {
 	rows, err := r.db.Gen(ctx).ListActiveSolanaMerchantWallets(ctx)
 	if err != nil {
 		return nil, err
@@ -170,6 +228,38 @@ func (r *SolanaSubscriptionRepo) ListActiveMerchantWallets(ctx context.Context) 
 // worker cross-checks against openrails.payments (#258). `limit` caps the batch
 // (0 = no limit).
 func (r *SolanaSubscriptionRepo) ListActiveWithSignature(ctx context.Context, limit int) ([]*models.SolanaSubscription, error) {
+	if _, ok := merchant.FromContext(ctx); ok {
+		return r.listActiveWithSignatureScoped(ctx, limit)
+	}
+	merchantIDs, err := r.activeMerchantIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*models.SolanaSubscription, 0)
+	for _, id := range merchantIDs {
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+		remaining := limit
+		if remaining > 0 {
+			remaining -= len(out)
+		}
+		err := r.db.RunInMerchantConn(merchant.WithID(ctx, merchant.ID(id)), func(ctx context.Context) error {
+			rows, err := r.listActiveWithSignatureScoped(ctx, remaining)
+			if err != nil {
+				return err
+			}
+			out = append(out, rows...)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (r *SolanaSubscriptionRepo) listActiveWithSignatureScoped(ctx context.Context, limit int) ([]*models.SolanaSubscription, error) {
 	limit32, _ := safecast.Convert[int32](limit)
 	rows, err := r.db.Gen(ctx).ListActiveSolanaSubscriptionsWithSignature(ctx, limit32)
 	if err != nil {
@@ -189,4 +279,28 @@ func (r *SolanaSubscriptionRepo) SetStatus(ctx context.Context, id uuid.UUID, st
 		Status:    status,
 		UpdatedAt: time.Now().UTC(),
 	})
+}
+
+func (r *SolanaSubscriptionRepo) activeMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := r.db.Qx(ctx).Query(ctx, `
+		SELECT id FROM openrails.merchants
+		 WHERE status = 'active' AND deleted_at IS NULL
+		 ORDER BY id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }

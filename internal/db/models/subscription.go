@@ -33,10 +33,10 @@ const (
 
 type Subscription struct {
 	ID uuid.UUID `json:"id"`
-	// MerchantID is the owning tenant (#336): lets workers pin app.tenant_id when
+	// MerchantID is the owning merchant (#336): lets workers pin app.merchant_id when
 	// writing on this subscription's behalf.
-	MerchantID uuid.UUID `json:"tenant_id"`
-	// CustomerID is the OpenRails payable tenant subject for this row (#317).
+	MerchantID uuid.UUID `json:"merchant_id"`
+	// CustomerID is the OpenRails payable merchant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
 	// it before user_id is dropped. Join openrails.customers for issuer/subject.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`

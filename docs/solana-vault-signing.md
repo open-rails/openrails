@@ -6,7 +6,7 @@ Code blocks are illustrative (the `hashicorp/vault/api` dependency is not yet
 added); they show interfaces, file layout, and the Solana/Ed25519-specific
 details that are easy to get wrong.
 
-Covers issues **#253** (tenant signer + tx builder) and **#251** (Vault KV adapter).
+Covers issues **#253** (merchant signer + tx builder) and **#251** (Vault KV adapter).
 
 ---
 
@@ -15,7 +15,7 @@ Covers issues **#253** (tenant signer + tx builder) and **#251** (Vault KV adapt
 ```
                      solana.Signer  (one interface, two impls)
                      ├── keypairSigner   "give me the key"  — works EVERYWHERE
-                     │     loads solana/private_key from tenancy.TenantSecretStore
+                     │     loads solana/private_key from merchants.MerchantSecretStore
                      │     (DB+envelope self-hosted, or Vault KV managed), signs in-proc
                      └── transitSigner   "sign this"        — RECOMMENDED in prod
                            calls Vault transit/sign/<tenant-key>; key never leaves Vault
@@ -42,11 +42,11 @@ import (
     "github.com/open-rails/openrails/pkg/tenant"
 )
 
-// Signer produces Solana signatures for a tenant's merchant key WITHOUT
+// Signer produces Solana signatures for a merchant key WITHOUT
 // exposing the private key to callers. Resolved per tenant; there is no
 // process-global signer.
 type Signer interface {
-    // PublicKey is the tenant's merchant address (also the fee payer / required
+    // PublicKey is the merchant address (also the fee payer / required
     // signer on every plan + pull transaction).
     PublicKey(ctx context.Context, tenantID tenant.ID) (solanago.PublicKey, error)
 
@@ -99,14 +99,14 @@ func signAndSubmit(ctx context.Context, tid tenant.ID, s Signer, rpc *RPCClient,
 
 ## 2. `keypairSigner` — the everywhere path (`signer_keypair.go`)
 
-Loads `solana/private_key` from the **existing** `tenancy.TenantSecretStore`
+Loads `solana/private_key` from the **existing** `merchants.MerchantSecretStore`
 (whatever backend is wired — DB+envelope, or Vault KV), parses the Ed25519 key,
 signs locally. Caches the parsed key per tenant with a short TTL so we don't hit
 the store per signature.
 
 ```go
 type keypairSigner struct {
-    secrets tenancy.TenantSecretStore
+    secrets merchants.MerchantSecretStore
     cache   *ttlCache[tenant.ID, solanago.PrivateKey] // 60s TTL (decided), configurable; invalidate on Secret.Version bump
 }
 
@@ -209,7 +209,7 @@ needs no new infra.
 Implements the **existing** `tenancy.VaultKV` interface (`secrets_vault.go`) over
 KV-v2, plus app-level auth + token renewal. This is the only missing piece to
 turn on Vault KV; `vaultSecretStore`'s addressing
-(`secret/openrails/tenants/<id>/<name>`) is already done.
+(`secret/openrails/merchants/<id>/<name>`) is already done.
 
 ### 5a. `kv.go` — KV-v2 adapter
 
@@ -226,7 +226,7 @@ import (
 )
 
 // KVv2Adapter satisfies tenancy.VaultKV. The tenancy store passes FULL logical
-// paths that already include the mount (e.g. "secret/openrails/tenants/<id>/<name>");
+// paths that already include the mount (e.g. "secret/openrails/merchants/<id>/<name>");
 // KV-v2's HTTP API needs a "/data/" (read/write) or "/metadata/" (list/delete)
 // segment inserted after the mount, which the typed KVv2 helper handles for us.
 type KVv2Adapter struct {

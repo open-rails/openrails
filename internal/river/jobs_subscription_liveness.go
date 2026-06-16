@@ -183,7 +183,7 @@ func (w *SubscriptionLivenessWorker) Work(ctx context.Context, job *river.Job[Su
 		// #336: pin the subscription's tenant so the lifecycle convergence
 		// writes (renew/fail/adopt) carry the app.tenant_id GUC.
 		outcome := livenessOutcomeUnreachable
-		if err := w.DB.RunInTenantConn(merchant.WithID(ctx, merchant.ID(cohort[i].MerchantID)), func(tctx context.Context) error {
+		if err := w.DB.RunInMerchantConn(merchant.WithID(ctx, merchant.ID(cohort[i].MerchantID)), func(tctx context.Context) error {
 			outcome = w.processSubscription(tctx, &cohort[i], deps)
 			return nil
 		}); err != nil {

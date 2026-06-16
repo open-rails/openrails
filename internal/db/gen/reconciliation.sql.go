@@ -113,9 +113,9 @@ type CreateReconciliationRunParams struct {
 }
 
 // #107 phase 2: reconciliation runs + findings persistence, the engine's
-// tenant-scoped local-state reads, and the enforce appliers' idempotent local
-// writes. merchant_id is stamped explicitly (multi-tenant writer pattern); all
-// statements run on a tenant-pinned connection so RLS double-checks the stamp.
+// merchant-scoped local-state reads, and the enforce appliers' idempotent local
+// writes. merchant_id is stamped explicitly (multi-merchant writer pattern); all
+// statements run on a merchant-pinned connection so RLS double-checks the stamp.
 // ============================================================================
 // Run lifecycle
 // ============================================================================
@@ -573,7 +573,7 @@ type ReconcileBackfillPaymentParams struct {
 }
 
 // PS-4: backfill a processor charge that has no local payment record.
-// Dedupe rides the uq_payments_tenant_processor_transaction identity.
+// Dedupe rides the uq_payments_merchant_processor_transaction identity.
 func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBackfillPaymentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileBackfillPayment,
 		arg.MerchantID,
@@ -1235,7 +1235,7 @@ type UpsertReconciliationFindingParams struct {
 // ============================================================================
 // Findings: stable-identity upsert + lifecycle
 // ============================================================================
-// Re-runs UPDATE the standing finding for (tenant, provider, finding_type,
+// Re-runs UPDATE the standing finding for (merchant, provider, finding_type,
 // subject_key). A previously resolved/auto_fixed finding that reappears is
 // REOPENED with the freshly computed status; a dismissed finding stays
 // dismissed (an admin explicitly silenced this identity) but keeps counting

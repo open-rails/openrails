@@ -11,8 +11,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// dbDEKStore persists wrapped per-tenant DEKs in openrails.tenant_deks (migration
-// 050). This is the self-hosted / dev default. A managed deployment can swap in a
+// dbDEKStore persists wrapped per-merchant DEKs in openrails.merchant_deks.
+// This is the self-hosted / dev default. A managed deployment can swap in a
 // KMS-backed DEKStore with the same interface and no caller change.
 type dbDEKStore struct {
 	pool *db.Pool
@@ -27,11 +27,13 @@ func NewDBDEKStore(pool *db.Pool) (DEKStore, error) {
 	return &dbDEKStore{pool: pool}, nil
 }
 
-func (s *dbDEKStore) GetWrappedDEK(ctx context.Context, tenantID merchant.ID) ([]byte, bool, error) {
+func (s *dbDEKStore) GetWrappedDEK(ctx context.Context, merchantID merchant.ID) ([]byte, bool, error) {
 	var wrapped []byte
-	err := s.pool.QueryRow(ctx, `
-		SELECT wrapped_dek FROM openrails.tenant_deks WHERE tenant_id = $1::uuid
-	`, tenantID.String()).Scan(&wrapped)
+	err := s.pool.MerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT wrapped_dek FROM openrails.merchant_deks WHERE merchant_id = $1::uuid
+		`, merchantID.String()).Scan(&wrapped)
+	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, false, nil
@@ -42,18 +44,20 @@ func (s *dbDEKStore) GetWrappedDEK(ctx context.Context, tenantID merchant.ID) ([
 }
 
 // PutWrappedDEK inserts the wrapped DEK, or — if a row already exists for the
-// tenant (concurrent first-use) — keeps the existing wrapped DEK and returns it.
+// merchant (concurrent first-use) — keeps the existing wrapped DEK and returns it.
 // The ON CONFLICT ... DO UPDATE with the no-op assignment guarantees RETURNING
 // yields the row that actually persists, so racing creators converge.
-func (s *dbDEKStore) PutWrappedDEK(ctx context.Context, tenantID merchant.ID, wrapped []byte) ([]byte, error) {
+func (s *dbDEKStore) PutWrappedDEK(ctx context.Context, merchantID merchant.ID, wrapped []byte) ([]byte, error) {
 	var stored []byte
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO openrails.tenant_deks (tenant_id, wrapped_dek)
-		VALUES ($1::uuid, $2)
-		ON CONFLICT (tenant_id) DO UPDATE
-		   SET tenant_id = openrails.tenant_deks.tenant_id
-		RETURNING wrapped_dek
-	`, tenantID.String(), wrapped).Scan(&stored)
+	err := s.pool.MerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			INSERT INTO openrails.merchant_deks (merchant_id, wrapped_dek)
+			VALUES ($1::uuid, $2)
+			ON CONFLICT (merchant_id) DO UPDATE
+			   SET merchant_id = openrails.merchant_deks.merchant_id
+			RETURNING wrapped_dek
+		`, merchantID.String(), wrapped).Scan(&stored)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("crypto: put wrapped DEK: %w", err)
 	}

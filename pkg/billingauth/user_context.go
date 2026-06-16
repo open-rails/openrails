@@ -49,13 +49,13 @@ type UserContext struct {
 	// "premium", "pro").
 	Entitlements []string
 
-	// Tenant is the slug of the user's active tenant context
-	// (optional). Empty when the host has no tenant model or no tenant is active.
-	Tenant string
+	// Org is the slug of the user's active AuthKit org context (optional).
+	// Empty when the host has no org model or no org is active.
+	Org string
 
-	// TenantRoles is the list of roles the user holds within Tenant. Only meaningful
-	// when Tenant is non-empty.
-	TenantRoles []string
+	// OrgRoles is the list of roles the user holds within Org. Only meaningful
+	// when Org is non-empty.
+	OrgRoles []string
 }
 
 // ValidateSubject enforces the UUID-only payable-identity contract (#364) at
@@ -91,13 +91,13 @@ func (uc UserContext) HasEntitlement(ent string) bool {
 	return false
 }
 
-// HasAnyTenantRole returns true if the user holds any of the listed roles within
-// Tenant (case-insensitive). Always returns false when Tenant is empty or want is empty.
-func (uc UserContext) HasAnyTenantRole(want ...string) bool {
-	if uc.Tenant == "" || len(want) == 0 {
+// HasAnyOrgRole returns true if the user holds any of the listed roles within
+// Org (case-insensitive). Always returns false when Org is empty or want is empty.
+func (uc UserContext) HasAnyOrgRole(want ...string) bool {
+	if uc.Org == "" || len(want) == 0 {
 		return false
 	}
-	for _, r := range uc.TenantRoles {
+	for _, r := range uc.OrgRoles {
 		for _, w := range want {
 			if strings.EqualFold(r, w) {
 				return true

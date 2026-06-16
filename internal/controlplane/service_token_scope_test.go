@@ -15,15 +15,15 @@ func TestResolvedServiceTokenAllowsCustomerScopes(t *testing.T) {
 	other := uuid.New()
 
 	tenantWide := &ResolvedServiceToken{
-		MerchantID: dbtest.TestTenantID,
-		Resources:  []authcore.ServiceTokenResource{MerchantResource(dbtest.TestTenantID)},
+		MerchantID: dbtest.TestMerchantID,
+		Resources:  []authcore.ServiceTokenResource{MerchantResource(dbtest.TestMerchantID)},
 	}
 	require.True(t, tenantWide.AllowsCustomer(subject))
 
 	subjectScoped := &ResolvedServiceToken{
-		MerchantID: dbtest.TestTenantID,
+		MerchantID: dbtest.TestMerchantID,
 		Resources: []authcore.ServiceTokenResource{
-			MerchantResource(dbtest.TestTenantID),
+			MerchantResource(dbtest.TestMerchantID),
 			CustomerResource(subject),
 		},
 	}
@@ -32,16 +32,16 @@ func TestResolvedServiceTokenAllowsCustomerScopes(t *testing.T) {
 }
 
 func TestValidateServiceTokenResourcesRequiresTenantAndKnownKinds(t *testing.T) {
-	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestTenantID, nil), ErrServiceTokenScopeDenied)
-	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
+	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestMerchantID, nil), ErrServiceTokenScopeDenied)
+	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestMerchantID, []authcore.ServiceTokenResource{
 		CustomerResource(uuid.New()),
 	}), ErrServiceTokenScopeDenied)
-	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
-		MerchantResource(dbtest.TestTenantID),
+	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestMerchantID, []authcore.ServiceTokenResource{
+		MerchantResource(dbtest.TestMerchantID),
 		{Kind: "openrails.unknown", ID: "x"},
 	}), ErrServiceTokenScopeDenied)
-	require.NoError(t, validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
-		MerchantResource(dbtest.TestTenantID),
+	require.NoError(t, validateServiceTokenResources(dbtest.TestMerchantID, []authcore.ServiceTokenResource{
+		MerchantResource(dbtest.TestMerchantID),
 		CustomerResource(uuid.New()),
 	}))
 }

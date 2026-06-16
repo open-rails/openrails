@@ -14,12 +14,12 @@ import (
 // EntitlementFeatureRepo persists Stripe-shaped feature definitions and product
 // feature attachments (issue #245).
 //
-// Tenant isolation is enforced two ways, matching the existing entitlement repo
-// in this package: (1) every query filters explicitly on tenant_id from the
+// Merchant isolation is enforced two ways, matching the existing entitlement repo
+// in this package: (1) every query filters explicitly on merchant_id from the
 // request context (merchant.Require), and (2) migration 062 puts FORCE
 // ROW LEVEL SECURITY on both tables so that — when the app connects as the
-// unprivileged openrails_app role inside a tenant-scoped transaction (the
-// app.tenant_id GUC set via TenantTx) — Postgres rejects any cross-tenant row
+// unprivileged openrails_app role inside a merchant-scoped transaction (the
+// app.merchant_id GUC set via MerchantTx) — Postgres rejects any cross-merchant row
 // regardless of the WHERE clause (issue #227 defense-in-depth).
 type EntitlementFeatureRepo struct {
 	db *db.DB
@@ -69,7 +69,7 @@ func productEntitlementFeatureFromGen(p gen.OpenrailsProductEntitlementFeature) 
 	return m, nil
 }
 
-// CreateFeature inserts a new entitlement feature, stamping the request tenant.
+// CreateFeature inserts a new entitlement feature, stamping the request merchant.
 func (r *EntitlementFeatureRepo) CreateFeature(ctx context.Context, f *models.EntitlementFeature) error {
 	if (f.MerchantID == uuid.UUID{}) {
 		tid, err := r.tenantID(ctx)
@@ -126,7 +126,7 @@ func (r *EntitlementFeatureRepo) UpdateFeature(ctx context.Context, f *models.En
 	return nil
 }
 
-// ListFeatures returns all features for the request tenant, newest first.
+// ListFeatures returns all features for the request merchant, newest first.
 func (r *EntitlementFeatureRepo) ListFeatures(ctx context.Context) ([]models.EntitlementFeature, error) {
 	tid, err := r.tenantID(ctx)
 	if err != nil {
@@ -147,7 +147,7 @@ func (r *EntitlementFeatureRepo) ListFeatures(ctx context.Context) ([]models.Ent
 	return out, nil
 }
 
-// GetFeatureByID returns a single feature by id within the request tenant.
+// GetFeatureByID returns a single feature by id within the request merchant.
 func (r *EntitlementFeatureRepo) GetFeatureByID(ctx context.Context, id uuid.UUID) (*models.EntitlementFeature, error) {
 	tid, err := r.tenantID(ctx)
 	if err != nil {
@@ -163,7 +163,7 @@ func (r *EntitlementFeatureRepo) GetFeatureByID(ctx context.Context, id uuid.UUI
 	return entitlementFeatureFromGen(row)
 }
 
-// GetFeatureByLookupKey returns a single feature by its tenant-unique lookup_key.
+// GetFeatureByLookupKey returns a single feature by its merchant-unique lookup_key.
 func (r *EntitlementFeatureRepo) GetFeatureByLookupKey(ctx context.Context, lookupKey string) (*models.EntitlementFeature, error) {
 	tid, err := r.tenantID(ctx)
 	if err != nil {
@@ -180,7 +180,7 @@ func (r *EntitlementFeatureRepo) GetFeatureByLookupKey(ctx context.Context, look
 }
 
 // ListFeaturesByLookupKeys returns features whose lookup_key is in keys, scoped to
-// the request tenant.
+// the request merchant.
 func (r *EntitlementFeatureRepo) ListFeaturesByLookupKeys(ctx context.Context, keys []string) ([]models.EntitlementFeature, error) {
 	out := []models.EntitlementFeature{}
 	if len(keys) == 0 {
@@ -216,11 +216,11 @@ func (r *EntitlementFeatureRepo) AttachFeatureToProduct(ctx context.Context, pef
 		}
 		pef.MerchantID = tid
 	}
-	// Same-tenant guard: Postgres FK checks BYPASS RLS, so without this an attacker
-	// who knows another tenant's feature UUID could attach it. Verify the feature is
-	// visible under the CURRENT tenant's RLS/tenant scope before inserting.
+	// Same-merchant guard: Postgres FK checks BYPASS RLS, so without this an attacker
+	// who knows another merchant's feature UUID could attach it. Verify the feature is
+	// visible under the CURRENT merchant's RLS/merchant scope before inserting.
 	if _, err := r.GetFeatureByID(ctx, pef.EntitlementFeatureID); err != nil {
-		return errors.New("entitlement feature not found in tenant")
+		return errors.New("entitlement feature not found in merchant")
 	}
 	meta, err := toJSONB(pef.Metadata)
 	if err != nil {
@@ -244,7 +244,7 @@ func (r *EntitlementFeatureRepo) AttachFeatureToProduct(ctx context.Context, pef
 }
 
 // DetachFeature removes a single product_feature attachment by id, scoped to the
-// request tenant.
+// request merchant.
 func (r *EntitlementFeatureRepo) DetachFeature(ctx context.Context, productFeatureID uuid.UUID) error {
 	tid, err := r.tenantID(ctx)
 	if err != nil {
@@ -264,7 +264,7 @@ func (r *EntitlementFeatureRepo) DetachFeature(ctx context.Context, productFeatu
 }
 
 // ListProductFeatures returns the feature attachments for a product (with the
-// joined feature definition), scoped to the request tenant.
+// joined feature definition), scoped to the request merchant.
 func (r *EntitlementFeatureRepo) ListProductFeatures(ctx context.Context, productID uuid.UUID) ([]models.ProductEntitlementFeature, error) {
 	tid, err := r.tenantID(ctx)
 	if err != nil {
@@ -293,7 +293,7 @@ func (r *EntitlementFeatureRepo) ListProductFeatures(ctx context.Context, produc
 	return out, nil
 }
 
-// GetProductFeatureByID returns a single attachment by id within the request tenant.
+// GetProductFeatureByID returns a single attachment by id within the request merchant.
 func (r *EntitlementFeatureRepo) GetProductFeatureByID(ctx context.Context, id uuid.UUID) (*models.ProductEntitlementFeature, error) {
 	tid, err := r.tenantID(ctx)
 	if err != nil {

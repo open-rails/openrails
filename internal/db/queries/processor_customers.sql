@@ -13,6 +13,11 @@ SELECT processor_customer_id FROM openrails.processor_customers
 WHERE customer_id = $1 AND processor = $2
 LIMIT 1;
 
+-- name: GetProcessorCustomerIDForMerchant :one
+SELECT processor_customer_id FROM openrails.processor_customers
+WHERE merchant_id = $1 AND customer_id = $2 AND processor = $3
+LIMIT 1;
+
 -- name: GetProcessorCustomerSubject :one
 SELECT customer_id::text FROM openrails.processor_customers
 WHERE processor_customer_id = $1 AND processor = $2

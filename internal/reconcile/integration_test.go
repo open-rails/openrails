@@ -85,23 +85,23 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB) seed
 		entName := fmt.Sprintf("premium-%d", i)
 		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
-			productID, fmt.Sprintf("reconcile-prod-%d-%s", i, suffix), fmt.Sprintf("reconcile-tier-%d-%s", i, suffix), entName, dbtest.TestTenantID.UUID())
+			productID, fmt.Sprintf("reconcile-prod-%d-%s", i, suffix), fmt.Sprintf("reconcile-tier-%d-%s", i, suffix), entName, dbtest.TestMerchantID.UUID())
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id)
-		      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, dbtest.TestTenantID.UUID())
+		      VALUES ($1, $2, 999, 'usd', 30, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, processor, processor_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, jsonb_build_object($8::text, null), $7, $9)`,
 			subID, priceID, productID, fmt.Sprintf("it-%d-%s", i, suffix),
-			periodStart, periodEnd, s.subjectID, entName, dbtest.TestTenantID.UUID())
+			periodStart, periodEnd, s.subjectID, entName, dbtest.TestMerchantID.UUID())
 		entID := uuid.New()
 		if subID == s.subDead {
 			entID = s.entDeadID
 		}
 		exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 		      VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7)`,
-			entID, s.subjectID, entName, periodStart, periodEnd, subID, dbtest.TestTenantID.UUID())
+			entID, s.subjectID, entName, periodStart, periodEnd, subID, dbtest.TestMerchantID.UUID())
 	}
 	return s
 }
@@ -144,10 +144,10 @@ func reconcileSnapshot(t *testing.T, ctx context.Context, appDB *db.DB, seeded s
 
 func TestReconcileEngineIntegration(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestTenantID)
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 
 	var seeded seededState
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		seeded = seedReconcileFixtures(t, ctx, appDB)
 		return nil
 	}))
@@ -163,14 +163,14 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	}
 
 	var snap *RemoteSnapshot
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		snap = reconcileSnapshot(t, ctx, appDB, seeded)
 		return nil
 	}))
 
 	// ---- advisory: findings persisted, zero local writes -------------------
 	var advisory *RunResult
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
 		advisory = res
 		return err
@@ -188,7 +188,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	assert.Equal(t, 1, byType[FindingDuplicateSubscriptions], "PS-8 remote duplicates")
 
 	// Advisory persisted the run + findings...
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		run, err := store.GetRun(ctx, advisory.RunID)
 		require.NoError(t, err)
 		assert.Equal(t, "completed", run.Status)
@@ -201,7 +201,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	}))
 
 	// ...but wrote nothing to billing state.
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id = $1`, seeded.subDead).Scan(&status))
 		assert.Equal(t, "active", status, "advisory must not cancel anything")
@@ -213,7 +213,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 
 	// ---- enforce: local state converges, findings auto_fixed ---------------
 	var enforce *RunResult
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		enforce = res
 		return err
@@ -221,7 +221,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	assert.Equal(t, "completed", enforce.Status)
 	assert.GreaterOrEqual(t, enforce.Summary.Providers["nmi"].AutoFixed, 2, "PS-2 + PS-4 applied")
 
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		// PS-2: subDead cancelled locally with cancel_type=expired, retry
 		// schedule cleared, entitlement revoked.
 		var status, cancelType string
@@ -260,7 +260,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 
 	// ---- rerun enforce: stable -----------------------------------------------
 	var rerun *RunResult
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		rerun = res
 		return err
@@ -278,7 +278,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 
 	// Identity is stable: the PS-1 record accumulated occurrences instead of
 	// duplicating rows.
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		all, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", Type: string(FindingRemoteSubMissingLocal)})
 		require.NoError(t, err)
 		require.Len(t, all, 3, "three PS-1 identities (ghost + two unmatched duplicates), one row each")
@@ -308,7 +308,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	// ---- drift vanishes: auto-resolve ---------------------------------------
 	fixedSnap := *snap
 	fixedSnap.Subscriptions = snap.Subscriptions[:1] // ghosts + dups disappear
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := newEngine(&fixedSnap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, res.Summary.Providers["nmi"].AutoResolved, int64(1), "PS-8 vanished")
@@ -331,7 +331,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 // unresolvable one stays admin_pending.
 func TestReconcileMaterializeIntegration(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestTenantID)
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	store := &PGStore{DB: appDB}
 
 	suffix := uuid.NewString()[:8]
@@ -343,7 +343,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	planID := "mat-plan-" + suffix
 	entName := "premium-mat-" + suffix
 
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		subjectIDHolder = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 		exec := func(sql string, args ...any) {
 			t.Helper()
@@ -354,13 +354,13 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		// provider_links blob carries the NMI plan id.
 		exec(`INSERT INTO openrails.products (id, slug, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
-			productID, "mat-prod-"+suffix, "mat-tier-"+suffix, entName, dbtest.TestTenantID.UUID())
+			productID, "mat-prod-"+suffix, "mat-tier-"+suffix, entName, dbtest.TestMerchantID.UUID())
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, processors, merchant_id)
 		      VALUES ($1, $2, 1499, 'usd', 30, jsonb_build_object('nmi', jsonb_build_object('plan_id', $3::text)), $4)`,
-			priceID, productID, planID, dbtest.TestTenantID.UUID())
+			priceID, productID, planID, dbtest.TestMerchantID.UUID())
 		// Identity anchor: a stored payment method holding the remote vault id.
 		exec(`INSERT INTO openrails.payment_methods (id, customer_id, processor, vault_id, initial_transaction_id, last_four, expiry_date, merchant_id)
-		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029', $5)`, pmID, subjectIDHolder, vaultID, suffix, dbtest.TestTenantID.UUID())
+		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029', $5)`, pmID, subjectIDHolder, vaultID, suffix, dbtest.TestMerchantID.UUID())
 		return nil
 	}))
 	subjectID := subjectIDHolder
@@ -414,7 +414,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	}
 
 	// ---- advisory: both PS-1 stay admin_pending, nothing is created ----------
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 		for _, f := range res.Findings {
@@ -431,7 +431,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 
 	// ---- enforce: resolvable PS-1 materializes automatically ------------------
 	var matRun *RunResult
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		matRun = res
 		return err
@@ -439,7 +439,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	require.NotNil(t, matRun)
 	assert.Equal(t, "completed", matRun.Status)
 
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		// Resolvable: subscription created with remote status/periods.
 		var subID uuid.UUID
 		var status, processor string
@@ -501,7 +501,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	}))
 
 	// ---- re-run: idempotent, no duplicate subscription ------------------------
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 		for _, f := range res.Findings {
@@ -524,7 +524,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 // touches the intent rows, and a recovered intent's finding auto-resolves.
 func TestReconcileStuckIntentIntegration(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestTenantID)
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	store := &PGStore{DB: appDB}
 
 	suffix := uuid.NewString()[:8]
@@ -534,7 +534,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 	oldUnknown := uuid.New()    // unknown_needs_verify 3h -> admin-queued
 	subscriptionID := uuid.New()
 
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		seed := func(id uuid.UUID, status string, age time.Duration, reason *string) {
 			t.Helper()
 			_, err := appDB.Qx(ctx).Exec(ctx,
@@ -543,7 +543,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 				    status, attempts, next_attempt_at, origin, last_failure_reason, created_at, merchant_id)
 				 VALUES ($1, 'mobius', 'nmi_delete_subscription', $2, $3, $4, 2, now(), 'system', $5, now() - make_interval(mins => $6), $7)`,
 				id, subscriptionID, fmt.Sprintf("stuck-%s-%s", id.String()[:8], suffix),
-				status, reason, int(age.Minutes()), dbtest.TestTenantID.UUID())
+				status, reason, int(age.Minutes()), dbtest.TestMerchantID.UUID())
 			require.NoError(t, err)
 		}
 		failure := "nmi error: connection refused"
@@ -569,7 +569,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 
 	// ---- check: stuck intents surface, fresh ones do not --------------------
 	var check *RunResult
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory})
 		check = res
 		return err
@@ -612,7 +612,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 	assert.Equal(t, 3, stuckRep.ByIntentType["nmi_delete_subscription"])
 
 	// Admin queue carries the genuine stuck intents, not the parked one.
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		queue, err := store.ListFindings(ctx, FindingFilter{Type: string(FindingStuckIntent), OnlyAdminQueue: true})
 		require.NoError(t, err)
 		assert.Len(t, queue, 2)
@@ -620,7 +620,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 	}))
 
 	// ---- fix: identical emission, intents untouched --------------------------
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce})
 		require.NoError(t, err)
 		require.NotNil(t, res.Summary.StuckIntents)
@@ -645,7 +645,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 	}))
 
 	// ---- recovery: succeeded/superseded intents auto-resolve -----------------
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, err := appDB.Qx(ctx).Exec(ctx,
 			`UPDATE openrails.provider_intents SET status = 'succeeded', executed_at = now() WHERE id = $1`, oldPending)
 		require.NoError(t, err)
@@ -654,7 +654,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 		require.NoError(t, err)
 		return nil
 	}))
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory})
 		require.NoError(t, err)
 		require.NotNil(t, res.Summary.StuckIntents)
@@ -675,7 +675,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 // with its error instead of half-applying.
 func TestReconcileRunRecordsFailure(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestTenantID)
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	store := &PGStore{DB: appDB}
 	eng := &Engine{
 		Fetchers: map[Provider]ProcessorFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, err: fmt.Errorf("query.php unreachable")}},
@@ -684,14 +684,14 @@ func TestReconcileRunRecordsFailure(t *testing.T) {
 		Writer:   &PGLocalWriter{DB: appDB},
 	}
 	var res *RunResult
-	err := appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	err := appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		r, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
 		res = r
 		return err
 	})
 	require.Error(t, err)
 	require.NotNil(t, res)
-	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		run, err := store.GetRun(ctx, res.RunID)
 		require.NoError(t, err)
 		assert.Equal(t, "failed", run.Status)

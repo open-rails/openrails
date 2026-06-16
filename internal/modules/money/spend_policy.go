@@ -402,12 +402,11 @@ func (s *MoneyService) spentInWindow(ctx context.Context, tenantID, payerID uuid
 	})
 }
 
-// activeHoldsTotal sums all currently-active hold authorizations for an payer
-// (current reservation exposure, regardless of window).
+// activeHoldsTotal returns request-hold exposure known to the money ledger.
+// Request holds moved to Redis in #505, so the money module no longer has
+// Postgres hold authorizations to count here.
 func (s *MoneyService) activeHoldsTotal(ctx context.Context, tenantID, payerID uuid.UUID, currency string) (int64, error) {
-	return s.db.Gen(ctx).SumActiveMoneyHoldAuthorizations(ctx, gen.SumActiveMoneyHoldAuthorizationsParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency),
-	})
+	return 0, nil
 }
 
 // ActiveHeldForCurrency sums a payer's active hold exposure in one native
@@ -427,7 +426,7 @@ func (s *MoneyService) ActiveHeldForCurrency(ctx context.Context, payer identity
 	}
 	tenantID := tid.UUID()
 	var total int64
-	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
 		total, e = s.activeHoldsTotal(ctx, tenantID, payer.UUID(), cur)
 		return e
@@ -489,7 +488,7 @@ func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.Cus
 		}
 	}
 
-	// Tenant-level daily / monthly caps.
+	// Merchant-level daily / monthly caps.
 	if settings.MaxSpendPerDay != nil {
 		spent, e := s.spentInWindow(ctx, tenantID, payerID, cur, dayStart, "")
 		if e != nil {

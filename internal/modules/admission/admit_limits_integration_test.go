@@ -34,7 +34,6 @@ func TestAdmit_SingleChargeCapDeny(t *testing.T) {
 	require.Equal(t, "money", d.BlockedBy)
 	require.Equal(t, admission.DenySingleChargeCap, d.DenyCode)
 	require.Equal(t, int64(1_000), d.MaxSingleChargeAmount)
-	require.Nil(t, d.Hold, "a rejected single-charge places no hold")
 
 	// At the ceiling -> allowed; the resolved cap is surfaced.
 	d, err = adm.Admit(ctx, admission.AdmitRequest{
@@ -81,7 +80,6 @@ func TestAdmit_ConcurrentHeldCapDeny(t *testing.T) {
 	require.Equal(t, admission.DenyConcurrentHeldCap, d2.DenyCode)
 	require.Equal(t, int64(1_500), d2.MaxConcurrentHeldAmount)
 	require.Equal(t, int64(1_000), d2.HeldAmount, "deny surfaces the pre-existing held sum")
-	require.Nil(t, d2.Hold)
 }
 
 // #487: a tier with no $-limits keeps the pre-#487 behavior (0 = uncapped).

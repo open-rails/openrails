@@ -14,10 +14,10 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
@@ -27,7 +27,7 @@ type VaultService struct {
 	PaymentMethodService paymentMethodStore
 	SubscriptionService  subscriptionReader
 	NMIClients           map[string]*nmi.NMIClient
-	TenantSecrets        tenantSecretGetter
+	MerchantSecrets      merchantSecretGetter
 	Config               *config.Config
 	DB                   *db.DB
 	clock                clockwork.Clock
@@ -45,8 +45,8 @@ type paymentMethodStore interface {
 	GetByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error)
 }
 
-type tenantSecretGetter interface {
-	Get(ctx context.Context, tenantID merchant.ID, name string) (tenancy.Secret, error)
+type merchantSecretGetter interface {
+	Get(ctx context.Context, merchantID merchant.ID, name string) (merchants.Secret, error)
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -57,11 +57,11 @@ func (s *VaultService) now() time.Time {
 	return time.Now()
 }
 
-func (s *VaultService) SetTenantSecretStore(store tenantSecretGetter) {
+func (s *VaultService) SetMerchantSecretStore(store merchantSecretGetter) {
 	if s == nil {
 		return
 	}
-	s.TenantSecrets = store
+	s.MerchantSecrets = store
 }
 
 func (s *VaultService) SetClock(c clockwork.Clock) {
@@ -220,17 +220,17 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*
 
 	secretName := ""
 	if provider == "mobius" {
-		secretName = tenancy.SecretNMIMobiusProductionKey
+		secretName = merchants.SecretNMIMobiusProductionKey
 	}
-	if secretName != "" && s != nil && s.TenantSecrets != nil {
+	if secretName != "" && s != nil && s.MerchantSecrets != nil {
 		tid, err := merchant.Require(ctx)
 		if err != nil {
 			return nil, err
 		}
-		sec, err := s.TenantSecrets.Get(ctx, tid, secretName)
+		sec, err := s.MerchantSecrets.Get(ctx, tid, secretName)
 		if err != nil {
-			if !errors.Is(err, tenancy.ErrSecretNotFound) {
-				return nil, fmt.Errorf("load tenant NMI secret: %w", err)
+			if !errors.Is(err, merchants.ErrSecretNotFound) {
+				return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 			}
 		} else if value := strings.TrimSpace(sec.Value); value != "" {
 			proc := cloneProcessorConfig(s.processorConfig(provider))

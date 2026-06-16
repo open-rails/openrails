@@ -28,10 +28,10 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 		return nil, err
 	}
 
-	// The validated issuer (remote_application) resolves, via the tenant it
-	// controls, to the merchant that tenant owns (#481). That merchant is the
-	// token's only reachable resource scope.
-	mid, mslug, err := c.merchantForIssuer(ctx, principal.Issuer)
+	// The validated issuer (remote_application) resolves, via the org it
+	// controls, to the merchant namespace that org owns (#500). That merchant is
+	// the token's only reachable resource scope.
+	mid, mslug, ownerOrgID, ownerOrgSlug, err := c.merchantForIssuer(ctx, principal.Issuer)
 	if err != nil {
 		return nil, err
 	}
@@ -54,11 +54,12 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 	}
 
 	return &ResolvedServiceToken{
-		OwnerTenantSlug: mslug,
-		MerchantID:      mid,
-		MerchantSlug:    mslug,
-		Permissions:     permissions,
-		Resources:       resources,
+		OwnerOrgID:   ownerOrgID,
+		OwnerOrgSlug: ownerOrgSlug,
+		MerchantID:   mid,
+		MerchantSlug: mslug,
+		Permissions:  permissions,
+		Resources:    resources,
 	}, nil
 }
 

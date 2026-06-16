@@ -81,6 +81,64 @@ func TestMockProvider_QuoteToUSD(t *testing.T) {
 	}
 }
 
+func TestMockProvider_QuotePair_ComposesViaUSD(t *testing.T) {
+	p := NewMockProvider(map[string]float64{"eur": 1.08, "jpy": 0.0067})
+
+	quote, err := p.Quote(context.Background(), "eur", "jpy")
+	if err != nil {
+		t.Fatalf("Quote() unexpected error: %v", err)
+	}
+	want := 1.08 / 0.0067
+	if quote.Rate != want {
+		t.Fatalf("Quote() rate = %v, want %v", quote.Rate, want)
+	}
+	if quote.FromCurrency != "eur" || quote.ToCurrency != "jpy" {
+		t.Fatalf("Quote() pair = %s -> %s, want eur -> jpy", quote.FromCurrency, quote.ToCurrency)
+	}
+}
+
+func TestConvertAmount_RoundsUpAcrossCurrencyScales(t *testing.T) {
+	p := NewMockProvider(map[string]float64{"eur": 1.25, "jpy": 0.01})
+
+	tests := []struct {
+		name string
+		from string
+		to   string
+		amt  int64
+		want int64
+	}{
+		{name: "usd to eur same scale", from: "USD", to: "EUR", amt: 1_000_000, want: 800_000},
+		{name: "usd to jpy lower scale rounds up", from: "USD", to: "JPY", amt: 123_456, want: 123_456},
+		{name: "jpy to usd higher scale", from: "JPY", to: "USD", amt: 123, want: 123},
+		{name: "same currency no provider needed", from: "USD", to: "USD", amt: 42, want: 42},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _, err := ConvertAmount(context.Background(), p, tt.from, tt.to, tt.amt)
+			if err != nil {
+				t.Fatalf("ConvertAmount() unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("ConvertAmount() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConvertAmount_CrossCurrencyRequiresProvider(t *testing.T) {
+	if _, _, err := ConvertAmount(context.Background(), nil, "USD", "EUR", 1); err == nil {
+		t.Fatal("ConvertAmount() expected missing provider error")
+	}
+	got, _, err := ConvertAmount(context.Background(), nil, "USD", "USD", 1)
+	if err != nil {
+		t.Fatalf("ConvertAmount() same-currency unexpected error: %v", err)
+	}
+	if got != 1 {
+		t.Fatalf("ConvertAmount() same-currency = %d, want 1", got)
+	}
+}
+
 func TestMockProvider_CallTracking(t *testing.T) {
 	p := NewMockProvider(map[string]float64{"eur": 1.08})
 

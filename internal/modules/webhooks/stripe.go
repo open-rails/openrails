@@ -409,7 +409,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	// DIFFERENT transaction-id key than the one we resolved above. The reconcile
 	// backfill (reconcile.ensureChargePayment) keys subscription payments by the
 	// charge id, while the 2026-04-22.preview invoice.paid payload omits the
-	// charge and falls back to the invoice id. Because the (tenant, processor,
+	// charge and falls back to the invoice id. Because the (merchant, processor,
 	// transaction_id) unique index can't see across those keys, a backfill-then-
 	// webhook ordering would otherwise insert a duplicate row. If a row for this
 	// invoice already exists under any of its ids (charge/payment_intent/invoice)
@@ -1646,7 +1646,7 @@ func stripeInvoiceIsProration(inv stripeInvoice) bool {
 // linker write. It lets handleInvoicePaid avoid inserting a second row for a
 // payment already recorded under a different key (e.g. the backfill keyed by
 // charge id vs the preview webhook keyed by invoice id), which the
-// (tenant, processor, transaction_id) unique index cannot dedupe on its own.
+// (merchant, processor, transaction_id) unique index cannot dedupe on its own.
 //
 // Failed-attempt rows never match: their transaction ids are "failed:"-prefixed
 // and they carry no stripe_invoice_id metadata, so a prior failure does not

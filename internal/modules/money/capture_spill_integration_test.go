@@ -18,18 +18,29 @@ func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
 	bm := money.BillingModeArrears
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: &bm})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 1000))
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 300, Source: "seed"})
 	require.NoError(t, err)
 
-	res, err := svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-		Payer: payer, Invoker: "user:a", Currency: money.DefaultCurrency, EstimatedAmount: 1000,
-		Source: "req", SourceID: "h1", ExpiresAt: time.Now().Add(time.Hour),
+	_, err = svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
+		Payer:           payer,
+		Invoker:         "user:a",
+		Currency:        money.DefaultCurrency,
+		EstimatedAmount: 800,
+		Source:          "req",
+		SourceID:        "h1",
+		ExpiresAt:       time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
-	require.True(t, res.Decision.Allowed)
-	require.NotNil(t, res.Hold)
 
-	_, err = svc.CaptureHold(ctx, res.Hold.ID, 800)
+	_, err = svc.CaptureAuthorized(ctx, money.SpendParams{
+		Payer:    &payer,
+		Invoker:  "user:a",
+		Currency: money.DefaultCurrency,
+		Amount:   800,
+		Source:   "req",
+		SourceID: "h1",
+	})
 	require.NoError(t, err, "arrears capture past balance must not error")
 
 	bal, _ := svc.GetBalanceForCustomer(ctx, payer, cur)

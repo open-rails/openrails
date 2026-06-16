@@ -33,8 +33,8 @@ func (r *EntitlementRepo) IsEntitled(ctx context.Context, userID, entitlement st
 }
 
 func (r *EntitlementRepo) IsCustomerEntitled(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
-	// Tenant scoping (issue #223): the tenant is resolved from context and is
-	// required — an absent tenant is an error.
+	// Merchant scoping (issue #223): the merchant is resolved from context and is
+	// required — an absent merchant is an error.
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
@@ -123,9 +123,9 @@ func (r *EntitlementRepo) Insert(ctx context.Context, entitlement *models.Entitl
 		return fmt.Errorf("invalid entitlement: end_at (%v) must be after start_at (%v)", entitlement.EndAt, entitlement.StartAt)
 	}
 
-	// Stamp the resolved tenant (issue #223) when the caller did not set one,
-	// so new rows are tenant-scoped consistently with reads. The tenant is
-	// required from context — an absent tenant is an error.
+	// Stamp the resolved merchant (issue #223) when the caller did not set one,
+	// so new rows are merchant-scoped consistently with reads. The merchant is
+	// required from context — an absent merchant is an error.
 	if (entitlement.MerchantID == uuid.UUID{}) {
 		tid, err := merchant.Require(ctx)
 		if err != nil {

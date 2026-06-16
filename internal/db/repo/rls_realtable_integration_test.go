@@ -19,7 +19,7 @@ import (
 // through a REAL repo: it runs the actual migrations (so 001_schema.up.sql applies
 // its policies + creates openrails_app), connects as openrails_app, and drives
 // ProductRepo.GetAll — a no-filter read — to show it returns ONLY the pinned
-// tenant's rows. This is the request-path chain (middleware pins conn -> repo
+// merchant's rows. This is the request-path chain (middleware pins conn -> repo
 // uses db.Q(ctx) -> Postgres RLS) exercised on production code.
 //
 // Requires OPENRAILS_TEST_DB_DSN (a SUPER/admin DSN). Run against a --network host
@@ -37,7 +37,7 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	superDSN, appDSN := dbtest.SharedRLSPostgres(t)
 
 	// Idempotently seed two tenants' products as super (super bypasses RLS, so it
-	// can write any tenant's rows). Slugs carry a unique suffix so this test's
+	// can write any merchant's rows). Slugs carry a unique suffix so this test's
 	// fixtures never collide with sibling tests sharing the DB on the global
 	// products.slug / tenants.slug UNIQUE constraints.
 	suffix := uuid.NewString()[:8]
@@ -52,7 +52,7 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	defer super.Close()
 	for _, stmt := range []string{
 		`INSERT INTO openrails.merchants (id, slug, name) VALUES
-		   ('` + tenantA + `','tenant-` + suffix + `-a','A'), ('` + tenantB + `','tenant-` + suffix + `-b','B')
+		   ('` + tenantA + `','merchant-` + suffix + `-a','A'), ('` + tenantB + `','merchant-` + suffix + `-b','B')
 		 ON CONFLICT (id) DO NOTHING`,
 		`INSERT INTO openrails.products (id, merchant_id, slug, display_name) VALUES
 		   ('` + productA + `','` + tenantA + `','` + slugA + `','Product A'),
@@ -73,25 +73,25 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 
 	repo := NewProductRepo(app)
 
-	// (1) Without a pinned tenant connection: fail-closed (GetAll sees nothing).
+	// (1) Without a pinned merchant connection: fail-closed (GetAll sees nothing).
 	bare, err := repo.GetAll(ctx)
 	require.NoError(t, err)
-	require.Len(t, bare, 0, "no pinned tenant conn => RLS fail-closed, repo sees nothing")
+	require.Len(t, bare, 0, "no pinned merchant conn => RLS fail-closed, repo sees nothing")
 
-	// (2) Pinned to tenant A: the real repo's no-filter GetAll returns ONLY
-	// tenant A's product — Postgres enforced it, not a WHERE clause in the repo.
+	// (2) Pinned to merchant A: the real repo's no-filter GetAll returns ONLY
+	// merchant A's product — Postgres enforced it, not a WHERE clause in the repo.
 	ctxA := merchant.WithID(ctx, mustTID(tenantA))
-	connA, releaseA, err := app.WithTenantConn(ctxA)
+	connA, releaseA, err := app.WithMerchantConn(ctxA)
 	require.NoError(t, err)
 	gotA, err := repo.GetAll(connA)
 	require.NoError(t, err)
-	require.Len(t, gotA, 1, "tenant A sees exactly its own product")
+	require.Len(t, gotA, 1, "merchant A sees exactly its own product")
 	require.Equal(t, slugA, gotA[0].Slug)
 	releaseA()
 
-	// (3) Pinned to tenant B: sees only tenant B's product. No cross-tenant bleed.
+	// (3) Pinned to merchant B: sees only merchant B's product. No cross-merchant bleed.
 	ctxB := merchant.WithID(ctx, mustTID(tenantB))
-	connB, releaseB, err := app.WithTenantConn(ctxB)
+	connB, releaseB, err := app.WithMerchantConn(ctxB)
 	require.NoError(t, err)
 	gotB, err := repo.GetAll(connB)
 	require.NoError(t, err)

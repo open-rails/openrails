@@ -16,7 +16,7 @@ type UserIdentity struct {
 	Roles    []string
 }
 
-// customerIDFromUser derives the payable tenant subject id from the verified
+// customerIDFromUser derives the payable merchant subject id from the verified
 // caller's user id. Payable identities are UUID-only (#364) — the auth boundary
 // already rejects non-UUID subjects, so a zero derivation here means a broken
 // or bypassed boundary, and the write must not proceed (it would attribute

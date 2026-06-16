@@ -31,7 +31,7 @@ func TestLogPaymentEventSpoolsWithoutCurrencyDefaultWhenClickHouseDown(t *testin
 		clock: clockwork.NewFakeClockAt(now),
 	}
 
-	ctx, cancel := context.WithTimeout(dbtest.WithTestTenant(context.Background()), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(dbtest.WithTestMerchant(context.Background()), 50*time.Millisecond)
 	defer cancel()
 	if err := svc.LogPaymentEvent(ctx, PaymentEventData{
 		UserID:    "user-1",
@@ -83,7 +83,7 @@ func TestLogPaymentEventRequiresCurrencyWithAmount(t *testing.T) {
 		spool:  sp,
 		clock:  clockwork.NewFakeClockAt(time.Date(2026, 5, 12, 10, 30, 0, 0, time.UTC)),
 	}
-	ctx, cancel := context.WithTimeout(dbtest.WithTestTenant(context.Background()), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(dbtest.WithTestMerchant(context.Background()), 50*time.Millisecond)
 	defer cancel()
 	err = svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "user-1", EventType: PaymentEventChargeSuccess, Processor: "test", Amount: &amount})
 	if err == nil {
@@ -92,7 +92,7 @@ func TestLogPaymentEventRequiresCurrencyWithAmount(t *testing.T) {
 }
 
 // TestLogPaymentEventStampsResolvedTenant proves the spooled analytics event is
-// tenant-scoped to the tenant resolved on the context (issue #232).
+// merchant-scoped to the merchant resolved on the context (issue #232).
 func TestLogPaymentEventStampsResolvedTenant(t *testing.T) {
 	sp, err := spool.New(t.TempDir())
 	if err != nil {
@@ -104,20 +104,20 @@ func TestLogPaymentEventStampsResolvedTenant(t *testing.T) {
 		clock:  clockwork.NewFakeClockAt(time.Date(2026, 5, 12, 10, 30, 0, 0, time.UTC)),
 	}
 
-	ctx, cancel := context.WithTimeout(dbtest.WithTestTenant(context.Background()), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(dbtest.WithTestMerchant(context.Background()), 50*time.Millisecond)
 	defer cancel()
 	if err := svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "user-1", EventType: PaymentEventChargeSuccess, Processor: "test"}); err != nil {
 		t.Fatalf("log payment event: %v", err)
 	}
 
 	event := readOnlySpooledPayment(t, sp)
-	if event.MerchantID != dbtest.TestTenantID.String() {
-		t.Fatalf("tenant_id = %q, want %q", event.MerchantID, dbtest.TestTenantID.String())
+	if event.MerchantID != dbtest.TestMerchantID.String() {
+		t.Fatalf("merchant_id = %q, want %q", event.MerchantID, dbtest.TestMerchantID.String())
 	}
 }
 
 // TestLogPaymentEventCarriesResolvedTenant proves the event is scoped to the
-// tenant resolved onto the request context, not the default (issue #232).
+// merchant resolved onto the request context, not the default (issue #232).
 func TestLogPaymentEventCarriesResolvedTenant(t *testing.T) {
 	sp, err := spool.New(t.TempDir())
 	if err != nil {
@@ -138,11 +138,11 @@ func TestLogPaymentEventCarriesResolvedTenant(t *testing.T) {
 
 	event := readOnlySpooledPayment(t, sp)
 	if event.MerchantID != tenantID.String() {
-		t.Fatalf("tenant_id = %q, want %q", event.MerchantID, tenantID.String())
+		t.Fatalf("merchant_id = %q, want %q", event.MerchantID, tenantID.String())
 	}
 }
 
-// TestLogSubscriptionEventStampsTenant proves subscription events are tenant-scoped.
+// TestLogSubscriptionEventStampsTenant proves subscription events are merchant-scoped.
 func TestLogSubscriptionEventStampsTenant(t *testing.T) {
 	sp, err := spool.New(t.TempDir())
 	if err != nil {
@@ -154,7 +154,7 @@ func TestLogSubscriptionEventStampsTenant(t *testing.T) {
 		clock:  clockwork.NewFakeClockAt(time.Date(2026, 5, 12, 10, 30, 0, 0, time.UTC)),
 	}
 
-	ctx, cancel := context.WithTimeout(dbtest.WithTestTenant(context.Background()), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(dbtest.WithTestMerchant(context.Background()), 50*time.Millisecond)
 	defer cancel()
 	if err := svc.LogSubscriptionEvent(ctx, SubscriptionEventData{SubscriptionID: uuid.New(), UserID: "user-1", EventType: PaymentEventSubscriptionCreated, Processor: "test"}); err != nil {
 		t.Fatalf("log subscription event: %v", err)
@@ -175,8 +175,8 @@ func TestLogSubscriptionEventStampsTenant(t *testing.T) {
 	if err := json.Unmarshal(rec.Data, &event); err != nil {
 		t.Fatalf("unmarshal event: %v", err)
 	}
-	if event.MerchantID != dbtest.TestTenantID.String() {
-		t.Fatalf("tenant_id = %q, want %q", event.MerchantID, dbtest.TestTenantID.String())
+	if event.MerchantID != dbtest.TestMerchantID.String() {
+		t.Fatalf("merchant_id = %q, want %q", event.MerchantID, dbtest.TestMerchantID.String())
 	}
 }
 

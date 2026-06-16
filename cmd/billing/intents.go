@@ -17,7 +17,7 @@ import (
 
 // newIntentsCmd wires the read-only provider-intent-ledger (#358) CLI:
 //
-//	billing intents [--status=pending|all|...] [--provider=...] [--type=...] [--tenant=...]
+//	billing intents [--status=pending|all|...] [--provider=...] [--type=...] [--merchant=...]
 //
 // Under mode=limited/readonly this is the dry-run view: the pending rows are
 // exactly the provider writes the executor will drain when the mode lifts —
@@ -25,47 +25,47 @@ import (
 // mode=full, nothing under readonly.
 func newIntentsCmd() *cobra.Command {
 	var (
-		status     string
-		provider   string
-		intentType string
-		format     string
-		tenantSlug string
-		limit      int
+		status       string
+		provider     string
+		intentType   string
+		format       string
+		merchantSlug string
+		limit        int
 	)
 	cmd := &cobra.Command{
 		Use:   "intents",
 		Short: "List the provider intent ledger (#358): queued outbound provider mutations and which mode executes them (read-only)",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runIntentsList(c, status, provider, intentType, format, tenantSlug, limit)
+			return runIntentsList(c, status, provider, intentType, format, merchantSlug, limit)
 		},
 	}
 	cmd.Flags().StringVar(&status, "status", "pending", "Status filter: pending, in_flight, succeeded, failed_retryable, failed (terminal), unknown, superseded, expired, all")
 	cmd.Flags().StringVar(&provider, "provider", "", "Provider filter (e.g. mobius, stripe)")
 	cmd.Flags().StringVar(&intentType, "type", "", "Intent type filter (e.g. nmi_delete_subscription, manual_rebill, stripe_refund)")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
-	cmd.Flags().StringVar(&tenantSlug, "tenant", "", "Tenant slug or id (default: the default tenant)")
+	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (default: the default merchant)")
 	cmd.Flags().IntVar(&limit, "limit", 500, "Maximum rows to list")
 
 	var (
 		rfProvider string
-		rfTenant   string
+		rfMerchant string
 		rfYes      bool
 	)
 	refingerprintCmd := &cobra.Command{
 		Use:   "refingerprint",
 		Short: "Re-stamp LIVE intents of a provider to the CURRENT account fingerprint (#365 escape hatch after a confirmed same-account credential change)",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runIntentsRefingerprint(c, rfProvider, rfTenant, rfYes)
+			return runIntentsRefingerprint(c, rfProvider, rfMerchant, rfYes)
 		},
 	}
 	refingerprintCmd.Flags().StringVar(&rfProvider, "provider", "", "Provider whose live intents to re-stamp (required)")
-	refingerprintCmd.Flags().StringVar(&rfTenant, "tenant", "", "Tenant slug or id (default: the default tenant)")
+	refingerprintCmd.Flags().StringVar(&rfMerchant, "merchant", "", "Merchant slug or id (default: the default merchant)")
 	refingerprintCmd.Flags().BoolVar(&rfYes, "yes", false, "Confirm: the current credentials point at the same (or deliberately adopted) provider account")
 	cmd.AddCommand(refingerprintCmd)
 	return cmd
 }
 
-func runIntentsRefingerprint(cmd *cobra.Command, provider, tenantSlug string, yes bool) error {
+func runIntentsRefingerprint(cmd *cobra.Command, provider, merchantSlug string, yes bool) error {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
 		return fmt.Errorf("--provider is required")
@@ -73,7 +73,7 @@ func runIntentsRefingerprint(cmd *cobra.Command, provider, tenantSlug string, ye
 	if !yes {
 		return fmt.Errorf("refingerprint re-stamps every live %s intent to the CURRENT account fingerprint; intents will then execute against the CURRENT credentials. Confirm with --yes after verifying the credential change does not point at a different provider account", provider)
 	}
-	return withReconcileApp(cmd, tenantSlug, func(ctx context.Context, application *app.App) error {
+	return withReconcileApp(cmd, merchantSlug, func(ctx context.Context, application *app.App) error {
 		rt := application.Runtime
 		fp, ok := rt.AccountFingerprints().AccountFingerprint(ctx, provider)
 		if !ok || fp == "" {
@@ -111,7 +111,7 @@ func executesUnder(origin string) string {
 	return "limited"
 }
 
-func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, tenantSlug string, limit int) error {
+func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, merchantSlug string, limit int) error {
 	var statusFilter *string
 	status = strings.ToLower(strings.TrimSpace(status))
 	if status != "all" {
@@ -133,7 +133,7 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, te
 		limit = 500
 	}
 
-	return withReconcileApp(cmd, tenantSlug, func(ctx context.Context, application *app.App) error {
+	return withReconcileApp(cmd, merchantSlug, func(ctx context.Context, application *app.App) error {
 		q := application.Runtime.DB.Gen(ctx)
 		total, err := q.CountProviderIntents(ctx, gen.CountProviderIntentsParams{
 			Status: statusFilter, Provider: providerFilter, IntentType: typeFilter,

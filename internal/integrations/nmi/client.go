@@ -301,6 +301,27 @@ func newAddSubscriptionError(rawResponse string, output url.Values) error {
 	}
 }
 
+func newSaleError(rawResponse string, output url.Values) error {
+	message := output.Get("response_message")
+	if message == "" {
+		message = output.Get("responsetext")
+	}
+	if message == "" {
+		message = rawResponse
+	}
+	message = fmt.Sprintf("sale failed: %s", message)
+
+	responseCode := parseMobiusResponseCode(output)
+
+	return &CustomerVaultError{
+		Message:        message,
+		ResponseCode:   responseCode,
+		LocalizationID: mobiusLocalizationID(responseCode),
+		Detail:         mobiusResponseDetail(responseCode),
+		RawResponse:    rawResponse,
+	}
+}
+
 func parseMobiusResponseCode(output url.Values) int {
 	codeStr := strings.TrimSpace(output.Get("response_code"))
 	if codeStr == "2" {

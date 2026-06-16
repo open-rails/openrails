@@ -46,11 +46,11 @@ const (
 type ProductAccessGrant struct {
 	ID uuid.UUID `json:"id"`
 
-	// MerchantID scopes this row to a tenant (issue #223/#227). Nullzero + DB
-	// default lets single-tenant inserts fall back to the resolved tenant.
-	MerchantID uuid.UUID `json:"tenant_id"`
+	// MerchantID scopes this row to a merchant (issue #223/#227). Nullzero + DB
+	// default lets single-merchant inserts fall back to the resolved merchant.
+	MerchantID uuid.UUID `json:"merchant_id"`
 
-	// CustomerID is the OpenRails payable tenant subject for this row (#317).
+	// CustomerID is the OpenRails payable merchant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
 	// it before user_id is dropped. Join openrails.customers for issuer/subject.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`

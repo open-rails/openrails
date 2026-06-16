@@ -83,7 +83,7 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 		return fmt.Errorf("source required")
 	}
 
-	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		now := s.now()
 
@@ -160,7 +160,7 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 
 // GrantPurchaseCreditsParams grants a one-off purchase's credit/currency balances
 // (#472) — the other half of "what you get" alongside entitlements. Payer is the
-// payment owner's tenant subject; PaymentID scopes idempotency per (payment, label).
+// payment owner's merchant subject; PaymentID scopes idempotency per (payment, label).
 type GrantPurchaseCreditsParams struct {
 	Payer     identity.CustomerID
 	PaymentID uuid.UUID
@@ -189,7 +189,7 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 	}
 
 	payer := params.Payer
-	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		now := s.now()
 		for label, spec := range params.Spec {

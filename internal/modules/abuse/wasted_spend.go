@@ -18,8 +18,8 @@ import (
 // delegated invokers are cut off at admit when their flat counter is over.
 //
 // Two independent subjects, each multi-window and currency-scoped:
-//   - PAYER ("wp:<tenant>:<payer>:<currency>") — direct-payer grace graduated by tier.
-//   - INVOKER ("wa:<tenant>:<payer>:<invoker>:<currency>") — a flat config default (invokers
+//   - PAYER ("wp:<merchant>:<payer>:<currency>") — direct-payer grace graduated by tier.
+//   - INVOKER ("wa:<merchant>:<payer>:<invoker>:<currency>") — a flat config default (invokers
 //     aren't trusted: an account can mint unlimited invokers, so the per-invoker
 //     budget is a fixed backstop, not graduated). Payer is part of the key because
 //     delegated-user IDs are only guaranteed unique inside the payer/platform.
@@ -41,9 +41,10 @@ func (g *WastedSpendGuard) Enabled() bool { return g != nil && g.lim != nil }
 // WastedWindow is one $-valued wasted-spend budget window: at most Limit of
 // reported wasted $ per Window. Mirrors a money-budget window but for FAILED spend.
 type WastedWindow struct {
-	Key    string
-	Window time.Duration
-	Limit  int64
+	Key      string
+	Window   time.Duration
+	Limit    int64
+	Currency string
 }
 
 // WindowUsage is the running wasted-$ total + budget for one window (introspection
@@ -57,17 +58,17 @@ type WindowUsage struct {
 	OverBudget bool   `json:"over_budget"`
 }
 
-func payerBase(tenant, payer, currency string) string {
-	return fmt.Sprintf("wp:%s:%s:%s", tenant, payer, currency)
+func payerBase(merchant, payer, currency string) string {
+	return fmt.Sprintf("wp:%s:%s:%s", merchant, payer, currency)
 }
-func invokerBase(tenant, payer, invoker, currency string) string {
-	return fmt.Sprintf("wa:%s:%s:%s:%s", tenant, payer, invoker, currency)
+func invokerBase(merchant, payer, invoker, currency string) string {
+	return fmt.Sprintf("wa:%s:%s:%s:%s", merchant, payer, invoker, currency)
 }
 
 // ClaimReport records short-lived idempotency for a host-reported wasted-spend
 // event. The TTL should be the largest active wasted-spend window so retries do
 // not double-add hot counters while the report can affect enforcement.
-func (g *WastedSpendGuard) ClaimReport(ctx context.Context, tenant, payer, currency, source, sourceID string, ttl time.Duration) (bool, error) {
+func (g *WastedSpendGuard) ClaimReport(ctx context.Context, merchant, payer, currency, source, sourceID string, ttl time.Duration) (bool, error) {
 	if !g.Enabled() {
 		return false, nil
 	}
@@ -76,19 +77,19 @@ func (g *WastedSpendGuard) ClaimReport(ctx context.Context, tenant, payer, curre
 	if source == "" || sourceID == "" {
 		return false, fmt.Errorf("wasted-spend source and source_id required")
 	}
-	return g.lim.ClaimOnce(ctx, fmt.Sprintf("wasted:%s:%s:%s:%s:%s", tenant, payer, currency, source, sourceID), ttl)
+	return g.lim.ClaimOnce(ctx, fmt.Sprintf("wasted:%s:%s:%s:%s:%s", merchant, payer, currency, source, sourceID), ttl)
 }
 
 // Record adds an amount of wasted spend to BOTH the payer's and the invoker's windows
 // (whichever window lists are supplied). The unit is the window Key, so multiple
 // windows of one subject are distinct Redis counters. A no-op for amount <= 0
 // (cheap rejects are not reported).
-func (g *WastedSpendGuard) Record(ctx context.Context, tenant, payer, invoker, currency string, amount int64, payerWindows, invokerWindows []WastedWindow) error {
+func (g *WastedSpendGuard) Record(ctx context.Context, merchant, payer, invoker, currency string, amount int64, payerWindows, invokerWindows []WastedWindow) error {
 	if !g.Enabled() || amount <= 0 {
 		return nil
 	}
 	if payer != "" {
-		base := payerBase(tenant, payer, currency)
+		base := payerBase(merchant, payer, currency)
 		for _, w := range payerWindows {
 			if _, err := g.lim.AddWindowValue(ctx, base, w.Key, w.Window, amount); err != nil {
 				return err
@@ -96,7 +97,7 @@ func (g *WastedSpendGuard) Record(ctx context.Context, tenant, payer, invoker, c
 		}
 	}
 	if invoker != "" {
-		base := invokerBase(tenant, payer, invoker, currency)
+		base := invokerBase(merchant, payer, invoker, currency)
 		for _, w := range invokerWindows {
 			if _, err := g.lim.AddWindowValue(ctx, base, w.Key, w.Window, amount); err != nil {
 				return err
@@ -109,11 +110,11 @@ func (g *WastedSpendGuard) Record(ctx context.Context, tenant, payer, invoker, c
 // RecordPayerGrace records direct-payer wasted spend against payer grace windows
 // and returns the amount that exceeds the strictest remaining grace window. No
 // windows means no configured grace policy and no chargeable overage.
-func (g *WastedSpendGuard) RecordPayerGrace(ctx context.Context, tenant, payer, currency string, amount int64, windows []WastedWindow) (int64, error) {
+func (g *WastedSpendGuard) RecordPayerGrace(ctx context.Context, merchant, payer, currency string, amount int64, windows []WastedWindow) (int64, error) {
 	if !g.Enabled() || amount <= 0 || payer == "" {
 		return 0, nil
 	}
-	base := payerBase(tenant, payer, currency)
+	base := payerBase(merchant, payer, currency)
 	hasWindow := false
 	freeRemaining := int64(0)
 	for _, w := range windows {
@@ -149,11 +150,11 @@ func (g *WastedSpendGuard) RecordPayerGrace(ctx context.Context, tenant, payer, 
 
 // RecordInvokerCutoff records delegated-invoker wasted spend against the flat
 // per-invoker cutoff windows.
-func (g *WastedSpendGuard) RecordInvokerCutoff(ctx context.Context, tenant, payer, invoker, currency string, amount int64, windows []WastedWindow) error {
+func (g *WastedSpendGuard) RecordInvokerCutoff(ctx context.Context, merchant, payer, invoker, currency string, amount int64, windows []WastedWindow) error {
 	if !g.Enabled() || amount <= 0 || invoker == "" {
 		return nil
 	}
-	base := invokerBase(tenant, payer, invoker, currency)
+	base := invokerBase(merchant, payer, invoker, currency)
 	for _, w := range windows {
 		if w.Window <= 0 {
 			continue
@@ -167,8 +168,8 @@ func (g *WastedSpendGuard) RecordInvokerCutoff(ctx context.Context, tenant, paye
 
 // InvokerOverBudget reports whether the invoker's running wasted-$ total is at/over
 // ANY of its budget windows (the admit gate for failure_rate_limited).
-func (g *WastedSpendGuard) InvokerOverBudget(ctx context.Context, tenant, payer, invoker, currency string, windows []WastedWindow) (bool, string, error) {
-	return g.overBudget(ctx, invokerBase(tenant, payer, invoker, currency), windows)
+func (g *WastedSpendGuard) InvokerOverBudget(ctx context.Context, merchant, payer, invoker, currency string, windows []WastedWindow) (bool, string, error) {
+	return g.overBudget(ctx, invokerBase(merchant, payer, invoker, currency), windows)
 }
 
 func (g *WastedSpendGuard) overBudget(ctx context.Context, base string, windows []WastedWindow) (bool, string, error) {
@@ -212,9 +213,9 @@ func (g *WastedSpendGuard) Usage(ctx context.Context, base, currency string, win
 
 // PayerBase / InvokerBase expose the keyspace prefixes so a caller (the service
 // facade /abuse-usage) can read Usage for either subject.
-func (g *WastedSpendGuard) PayerBase(tenant, payer, currency string) string {
-	return payerBase(tenant, payer, currency)
+func (g *WastedSpendGuard) PayerBase(merchant, payer, currency string) string {
+	return payerBase(merchant, payer, currency)
 }
-func (g *WastedSpendGuard) InvokerBase(tenant, payer, invoker, currency string) string {
-	return invokerBase(tenant, payer, invoker, currency)
+func (g *WastedSpendGuard) InvokerBase(merchant, payer, invoker, currency string) string {
+	return invokerBase(merchant, payer, invoker, currency)
 }

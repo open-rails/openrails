@@ -17,12 +17,12 @@ import (
 )
 
 // MerchantGUC is the Postgres run-time configuration parameter (GUC) that carries
-// the active tenant id for Row Level Security. Migration 050 enables RLS on every
-// tenant-owned table with a policy of the form
+// the active merchant id for Row Level Security. Migration 050 enables RLS on every
+// merchant-owned table with a policy of the form
 //
-//	tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+//	merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid
 //
-// so a transaction that has set this GUC sees ONLY its own tenant's rows, and a
+// so a transaction that has set this GUC sees ONLY its own merchant's rows, and a
 // transaction that forgot to set it sees NOTHING (fail-closed). For RLS to
 // actually enforce, the application must connect as a non-superuser,
 // non-BYPASSRLS role (openrails_app, created by 001_schema.up.sql).
@@ -34,10 +34,10 @@ const MerchantGUC = "app.merchant_id"
 //
 // Resolution order:
 //  1. an open pgx transaction this DB is scoped to (NewWithPgxTx),
-//  2. the request's pinned tenant-scoped connection (WithTenantConn) — it
-//     carries the app.tenant_id GUC, so RLS fail-closed semantics apply,
+//  2. the request's pinned merchant-scoped connection (WithMerchantConn) — it
+//     carries the app.merchant_id GUC, so RLS fail-closed semantics apply,
 //  3. the base pool (control-plane access to GLOBAL non-RLS tables, or
-//     single-tenant/self-hosted before the connection middleware runs).
+//     single-merchant/self-hosted before the connection middleware runs).
 
 func (d *DB) Qx(ctx context.Context) gen.DBTX {
 	if d == nil {
@@ -45,11 +45,11 @@ func (d *DB) Qx(ctx context.Context) gen.DBTX {
 	}
 	// d.pgtx is created via pgxBegin / Pool.Begin, which already return a
 	// schema-rewriting tx, so it is returned as-is (no double wrap). The pool and
-	// the lazy tenant connection are raw handles, so wrap them here (#471).
+	// the lazy merchant connection are raw handles, so wrap them here (#471).
 	if d.pgtx != nil {
 		return d.pgtx
 	}
-	if lc, ok := ctx.Value(tenantPgxConnKey{}).(*lazyTenantPgxConn); ok {
+	if lc, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn); ok {
 		return d.rw.wrapDBTX(lc)
 	}
 	if d.pool != nil {
@@ -64,7 +64,7 @@ func (d *DB) Gen(ctx context.Context) *gen.Queries {
 	return gen.New(d.Qx(ctx))
 }
 
-// pgxBeginner abstracts where a transaction starts: the pinned tenant
+// pgxBeginner abstracts where a transaction starts: the pinned merchant
 // connection when one is in flight (so the tx inherits its session GUC), the
 // base pool otherwise.
 type pgxBeginner interface {
@@ -76,14 +76,14 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 		return nil, fmt.Errorf("db: transaction on nil DB")
 	}
 	// Every branch wraps the returned tx so hand-written SQL run on it inside the
-	// RunInTx/TenantTx callback is schema-rewritten (#471). d.pgtx is already a
+	// RunInTx/MerchantTx callback is schema-rewritten (#471). d.pgtx is already a
 	// schema-rewriting tx; its nested Begin re-wraps idempotently.
 	if d.pgtx != nil {
 		// Nested: pgx models nesting as savepoints via tx.Begin.
 		return d.pgtx.Begin(ctx)
 	}
-	if lc, ok := ctx.Value(tenantPgxConnKey{}).(*lazyTenantPgxConn); ok {
-		// Begin on the pinned tenant connection (acquiring it now if this is
+	if lc, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn); ok {
+		// Begin on the pinned merchant connection (acquiring it now if this is
 		// the request's first sqlc touch) so the tx inherits the session GUC.
 		conn, err := lc.get(ctx)
 		if err != nil {
@@ -105,9 +105,9 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 	return nil, fmt.Errorf("db: no pgx handle available to begin transaction (issue #334)")
 }
 
-// RunInTx runs fn inside a pgx transaction (no tenant GUC — for control-plane
-// and privileged background work that uses explicit tenant_id predicates).
-// Begins on the pinned tenant connection
+// RunInTx runs fn inside a pgx transaction (no merchant GUC — for control-plane
+// and privileged background work that uses explicit merchant_id predicates).
+// Begins on the pinned merchant connection
 // when one is in flight, so request-path transactions stay RLS-scoped via the
 // connection's session GUC.
 func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
@@ -122,11 +122,11 @@ func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx
 	return tx.Commit(ctx)
 }
 
-// TenantTx runs fn inside a pgx transaction with the RLS tenant GUC pinned
+// MerchantTx runs fn inside a pgx transaction with the RLS merchant GUC pinned
 // from the context via set_config(..., is_local=true). Request-path
-// tenant-owned writes go through this (or run on a connection pinned by
-// WithTenantConn).
-func (d *DB) TenantTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
+// merchant-owned writes go through this (or run on a connection pinned by
+// WithMerchantConn).
+func (d *DB) MerchantTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	id, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -136,7 +136,7 @@ func (d *DB) TenantTx(ctx context.Context, fn func(ctx context.Context, tx pgx.T
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if err := setTenantLocalGUCPgx(ctx, tx, id); err != nil {
+	if err := setMerchantLocalGUCPgx(ctx, tx, id); err != nil {
 		return err
 	}
 	if err := fn(ctx, tx); err != nil {
@@ -145,23 +145,23 @@ func (d *DB) TenantTx(ctx context.Context, fn func(ctx context.Context, tx pgx.T
 	return tx.Commit(ctx)
 }
 
-// SetTenantGUCPgx pins the RLS tenant GUC (from the context) onto an
+// SetMerchantGUCPgx pins the RLS merchant GUC (from the context) onto an
 // already-open pgx transaction — for callbacks that already received a
 // pgx.Tx.
-func SetTenantGUCPgx(ctx context.Context, tx pgx.Tx) error {
+func SetMerchantGUCPgx(ctx context.Context, tx pgx.Tx) error {
 	id, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	return setTenantLocalGUCPgx(ctx, tx, id)
+	return setMerchantLocalGUCPgx(ctx, tx, id)
 }
 
-// setTenantLocalGUCPgx sets the tenant GUC transaction-locally
+// setMerchantLocalGUCPgx sets the merchant GUC transaction-locally
 // (set_config is_local=true) so it reverts when the tx ends and can never
 // leak onto a pooled connection.
-func setTenantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
+func setMerchantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	if id.IsZero() {
-		return fmt.Errorf("db: cannot set %s GUC for a zero tenant id", MerchantGUC)
+		return fmt.Errorf("db: cannot set %s GUC for a zero merchant id", MerchantGUC)
 	}
 	var out string
 	if err := tx.QueryRow(ctx,
@@ -172,16 +172,16 @@ func setTenantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id merchant.ID) error 
 	return nil
 }
 
-// lazyTenantPgxConn is the request's tenant-scoped connection, acquired
-// LAZILY on the first query instead of eagerly in WithTenantConn, so requests
+// lazyMerchantPgxConn is the request's merchant-scoped connection, acquired
+// LAZILY on the first query instead of eagerly in WithMerchantConn, so requests
 // that never touch the database cost zero pool connections (the eager variant
 // collapsed under burst during the #334 transition — see that issue's status
 // for the post-mortem).
 //
 // It satisfies gen.DBTX directly: the first Exec/Query/QueryRow (or
-// pgxBegin) acquires a pool connection, sets the app.tenant_id session GUC
+// pgxBegin) acquires a pool connection, sets the app.merchant_id session GUC
 // on it, and pins it until release().
-type lazyTenantPgxConn struct {
+type lazyMerchantPgxConn struct {
 	pool     *pgxpool.Pool
 	tenantID string
 
@@ -189,28 +189,28 @@ type lazyTenantPgxConn struct {
 	conn *pgxpool.Conn
 }
 
-// lazyTenantAcquireTimeout bounds the lazy acquisition (same rationale as
+// lazyMerchantAcquireTimeout bounds the lazy acquisition (same rationale as
 // tenantConnAcquireTimeout: never park forever on a pool when client aborts
 // don't propagate).
-const lazyTenantAcquireTimeout = 4 * time.Second
+const lazyMerchantAcquireTimeout = 4 * time.Second
 
-func (l *lazyTenantPgxConn) get(ctx context.Context) (*pgxpool.Conn, error) {
+func (l *lazyMerchantPgxConn) get(ctx context.Context) (*pgxpool.Conn, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.conn != nil {
 		return l.conn, nil
 	}
-	acqCtx, cancel := context.WithTimeout(ctx, lazyTenantAcquireTimeout)
+	acqCtx, cancel := context.WithTimeout(ctx, lazyMerchantAcquireTimeout)
 	conn, err := l.pool.Acquire(acqCtx)
 	cancel()
 	if err != nil {
-		return nil, fmt.Errorf("db: acquire pgx tenant connection: %w", err)
+		return nil, fmt.Errorf("db: acquire pgx merchant connection: %w", err)
 	}
 	var out string
 	if err := conn.QueryRow(ctx,
 		"SELECT set_config($1, $2, FALSE)", MerchantGUC, l.tenantID).Scan(&out); err != nil {
 		conn.Release()
-		return nil, fmt.Errorf("db: set %s on pgx tenant connection: %w", MerchantGUC, err)
+		return nil, fmt.Errorf("db: set %s on pgx merchant connection: %w", MerchantGUC, err)
 	}
 	l.conn = conn
 	return l.conn, nil
@@ -218,7 +218,7 @@ func (l *lazyTenantPgxConn) get(ctx context.Context) (*pgxpool.Conn, error) {
 
 // release resets the GUC and returns the connection to the pool (no-op when
 // the request never touched a sqlc call site).
-func (l *lazyTenantPgxConn) release() {
+func (l *lazyMerchantPgxConn) release() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.conn == nil {
@@ -231,7 +231,7 @@ func (l *lazyTenantPgxConn) release() {
 	l.conn = nil
 }
 
-func (l *lazyTenantPgxConn) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+func (l *lazyMerchantPgxConn) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
 	conn, err := l.get(ctx)
 	if err != nil {
 		return pgconn.CommandTag{}, err
@@ -239,7 +239,7 @@ func (l *lazyTenantPgxConn) Exec(ctx context.Context, sql string, args ...interf
 	return conn.Exec(ctx, sql, args...)
 }
 
-func (l *lazyTenantPgxConn) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+func (l *lazyMerchantPgxConn) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
 	conn, err := l.get(ctx)
 	if err != nil {
 		return nil, err
@@ -247,7 +247,7 @@ func (l *lazyTenantPgxConn) Query(ctx context.Context, sql string, args ...inter
 	return conn.Query(ctx, sql, args...)
 }
 
-func (l *lazyTenantPgxConn) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+func (l *lazyMerchantPgxConn) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
 	conn, err := l.get(ctx)
 	if err != nil {
 		return errRow{err}

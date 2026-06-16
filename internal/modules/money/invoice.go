@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
@@ -17,16 +18,12 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// FinalizeInvoice builds and finalizes the monthly itemized invoice for
-// (payer, currency) over [from, to) (issue #303/#474). Line items are rolled up
-// from openrails.usage_events; money movements + totals from the money ledger in
-// that currency; both snapshotted on the immutable finalized invoice. Idempotent:
-// re-finalizing the same (period, currency) returns the existing invoice. currency
-// "" defaults to USD; billing is external-currency-only (#474 invariant).
-//
-// The invoice is a STATEMENT. For prepaid it is informational (usage was drawn
-// from balance); for arrears the owed_accrued total is what the #301 sweep
-// settles via the existing charge path. No charge is initiated here.
+// FinalizeInvoice builds the period invoice for (payer, currency) over [from,
+// to). Line items are rolled up from openrails.usage_events; money movements and
+// totals come from the money ledger; both are snapshotted on the invoice.
+// Idempotent: re-finalizing the same (period, currency) returns the existing
+// invoice. Arrears invoices with owed accrual become open receivables; prepaid
+// / zero-due invoices are marked paid informational statements.
 func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*models.Invoice, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -53,7 +50,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 	}
 
 	var inv *models.Invoice
-	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		tenantID := tid.UUID()
 		payerID := payer.UUID()
@@ -128,24 +125,48 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		closing := bal.Balance
 
 		now := s.now()
+		invoiceID := uuidutil.NewV7()
+		invoiceNumber := fmt.Sprintf("INV-%s", invoiceID.String())
+		totalAmount := movements[txOwedAccrual]
+		amountPaid := int64(0)
+		amountDue := totalAmount
+		status := "open"
+		issuedAt := &now
+		dueAt := &now
+		var paidAt *time.Time
+		if amountDue == 0 {
+			status = "paid"
+			totalAmount = usageTotal
+			amountPaid = usageTotal
+			paidAt = &now
+		}
 		inv = &models.Invoice{
-			ID:             uuidutil.NewV7(),
-			MerchantID:     tenantID,
-			CustomerID:     payerID,
-			Currency:       cur, // amounts are minor units of this currency (#474)
-			PeriodFrom:     pfrom,
-			PeriodTo:       pto,
-			UsageTotal:     usageTotal,
-			DepositsTotal:  movements["deposit"],
-			OwedAccrued:    movements[txOwedAccrual],
-			OwedPaid:       -movements[txOwedPayment], // owed_payment amounts are negative
-			ClosingBalance: closing,
-			LineItems:      lineItems,
-			MoneyMovements: movements,
-			Status:         "finalized",
-			FinalizedAt:    &now,
-			CreatedAt:      now,
-			UpdatedAt:      now,
+			ID:               invoiceID,
+			MerchantID:       tenantID,
+			CustomerID:       payerID,
+			Currency:         cur, // amounts are minor units of this currency (#474)
+			InvoiceNumber:    &invoiceNumber,
+			PeriodFrom:       pfrom,
+			PeriodTo:         pto,
+			UsageTotal:       usageTotal,
+			DepositsTotal:    movements["deposit"],
+			OwedAccrued:      movements[txOwedAccrual],
+			OwedPaid:         -movements[txOwedPayment], // owed_payment amounts are negative
+			ClosingBalance:   closing,
+			SubtotalAmount:   totalAmount,
+			TotalAmount:      totalAmount,
+			AmountPaid:       amountPaid,
+			AmountDue:        amountDue,
+			LineItems:        lineItems,
+			MoneyMovements:   movements,
+			Status:           status,
+			CollectionMethod: "charge_automatically",
+			IssuedAt:         issuedAt,
+			DueAt:            dueAt,
+			PaidAt:           paidAt,
+			FinalizedAt:      &now,
+			CreatedAt:        now,
+			UpdatedAt:        now,
 		}
 		lineItemsJSON, jerr := json.Marshal(inv.LineItems)
 		if jerr != nil {
@@ -155,25 +176,54 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		if jerr != nil {
 			return jerr
 		}
-		return q.InsertInvoice(ctx, gen.InsertInvoiceParams{
-			ID:             inv.ID,
-			MerchantID:     inv.MerchantID,
-			CustomerID:     inv.CustomerID,
-			Currency:       inv.Currency,
-			PeriodFrom:     inv.PeriodFrom,
-			PeriodTo:       inv.PeriodTo,
-			UsageTotal:     inv.UsageTotal,
-			DepositsTotal:  inv.DepositsTotal,
-			OwedAccrued:    inv.OwedAccrued,
-			OwedPaid:       inv.OwedPaid,
-			ClosingBalance: inv.ClosingBalance,
-			LineItems:      lineItemsJSON,
-			MoneyMovements: movementsJSON,
-			Status:         inv.Status,
-			FinalizedAt:    inv.FinalizedAt,
-			CreatedAt:      inv.CreatedAt,
-			UpdatedAt:      inv.UpdatedAt,
+		if err := q.InsertInvoice(ctx, gen.InsertInvoiceParams{
+			ID:               inv.ID,
+			MerchantID:       inv.MerchantID,
+			CustomerID:       inv.CustomerID,
+			Currency:         inv.Currency,
+			InvoiceNumber:    inv.InvoiceNumber,
+			PeriodFrom:       inv.PeriodFrom,
+			PeriodTo:         inv.PeriodTo,
+			UsageTotal:       inv.UsageTotal,
+			DepositsTotal:    inv.DepositsTotal,
+			OwedAccrued:      inv.OwedAccrued,
+			OwedPaid:         inv.OwedPaid,
+			ClosingBalance:   inv.ClosingBalance,
+			SubtotalAmount:   inv.SubtotalAmount,
+			TotalAmount:      inv.TotalAmount,
+			AmountPaid:       inv.AmountPaid,
+			AmountDue:        inv.AmountDue,
+			LineItems:        lineItemsJSON,
+			MoneyMovements:   movementsJSON,
+			Status:           inv.Status,
+			CollectionMethod: inv.CollectionMethod,
+			IssuedAt:         inv.IssuedAt,
+			DueAt:            inv.DueAt,
+			PaidAt:           inv.PaidAt,
+			FinalizedAt:      inv.FinalizedAt,
+			CreatedAt:        inv.CreatedAt,
+			UpdatedAt:        inv.UpdatedAt,
+		}); err != nil {
+			return err
+		}
+		attached, err := q.AttachPendingInvoiceItemsToInvoice(ctx, gen.AttachPendingInvoiceItemsToInvoiceParams{
+			MerchantID: inv.MerchantID,
+			CustomerID: inv.CustomerID,
+			InvoiceID:  &inv.ID,
+			Now:        now,
+			Currency:   inv.Currency,
+			PeriodFrom: inv.PeriodFrom,
+			PeriodTo:   inv.PeriodTo,
 		})
+		if err != nil {
+			return err
+		}
+		if attached == 0 {
+			if err := insertInvoiceItemsFromRollup(ctx, q, inv, now); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -181,9 +231,51 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 	return inv, nil
 }
 
-// ListInvoices lists an tenant subject's finalized invoices, newest period first,
+func insertInvoiceItemsFromRollup(ctx context.Context, q *gen.Queries, inv *models.Invoice, now time.Time) error {
+	for _, item := range inv.LineItems {
+		metadata, err := json.Marshal(map[string]any{"dimensions": item.Dimensions})
+		if err != nil {
+			return fmt.Errorf("money: encode invoice item metadata: %w", err)
+		}
+		eventType := item.EventType
+		sourceID := fmt.Sprintf("%s:%s", inv.ID.String(), item.EventType)
+		quantity := item.Count
+		if quantity <= 0 {
+			quantity = 1
+		}
+		unitAmount := int64(0)
+		if item.Count > 0 {
+			unitAmount = item.Amount / item.Count
+		}
+		if err := q.InsertInvoiceItem(ctx, gen.InsertInvoiceItemParams{
+			ID:         uuidutil.NewV7(),
+			MerchantID: inv.MerchantID,
+			CustomerID: inv.CustomerID,
+			Currency:   inv.Currency,
+			InvoiceID:  &inv.ID,
+			SourceType: "usage_rollup",
+			SourceID:   sourceID,
+			EventType:  &eventType,
+			PeriodFrom: inv.PeriodFrom,
+			PeriodTo:   inv.PeriodTo,
+			InvoiceAt:  now,
+			Quantity:   quantity,
+			UnitAmount: unitAmount,
+			Amount:     item.Amount,
+			Status:     "invoiced",
+			Metadata:   metadata,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListInvoices lists an merchant subject's finalized invoices, newest period first,
 // paginated (issue #303). It filters customer_id directly (the payer) and is
-// RLS-scoped to the request tenant via Qx(ctx), mirroring GetTransactionsByCustomer.
+// RLS-scoped to the request merchant via Qx(ctx), mirroring GetTransactionsByCustomer.
 // Returns the page plus the total count for pagination.
 func (s *MoneyService) ListInvoices(ctx context.Context, payer identity.CustomerID, limit, offset int) ([]models.Invoice, int, error) {
 	if s == nil || s.db == nil {
@@ -200,7 +292,7 @@ func (s *MoneyService) ListInvoices(ctx context.Context, payer identity.Customer
 	}
 	var items []models.Invoice
 	var total int
-	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
 		tid, terr := merchant.Require(ctx)
 		if terr != nil {
@@ -240,8 +332,8 @@ func (s *MoneyService) ListInvoices(ctx context.Context, payer identity.Customer
 }
 
 // GetInvoiceByID returns one finalized invoice (with its snapshotted line items)
-// for an tenant subject by id (issue #303). It filters tenant + payer + id and is
-// RLS-scoped via Qx(ctx); an invoice belonging to another payer/tenant is
+// for an merchant subject by id (issue #303). It filters merchant + payer + id and is
+// RLS-scoped via Qx(ctx); an invoice belonging to another payer/merchant is
 // unreachable (fail closed, pgx.ErrNoRows).
 func (s *MoneyService) GetInvoiceByID(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*models.Invoice, error) {
 	if s == nil || s.db == nil {
@@ -251,7 +343,7 @@ func (s *MoneyService) GetInvoiceByID(ctx context.Context, payer identity.Custom
 		return nil, fmt.Errorf("payer required")
 	}
 	var inv *models.Invoice
-	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		tid, terr := merchant.Require(ctx)
 		if terr != nil {
 			return terr
@@ -273,8 +365,209 @@ func (s *MoneyService) GetInvoiceByID(ctx context.Context, payer identity.Custom
 	return inv, nil
 }
 
+func (s *MoneyService) VoidInvoice(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*models.Invoice, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
+	}
+	var inv *models.Invoice
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		tid, terr := merchant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		existing, e := q.GetInvoiceForPayer(ctx, gen.GetInvoiceForPayerParams{
+			MerchantID: tid.UUID(),
+			CustomerID: payer.UUID(),
+			ID:         id,
+		})
+		if e != nil {
+			return e
+		}
+		row, e := q.VoidInvoiceForPayer(ctx, gen.VoidInvoiceForPayerParams{
+			MerchantID: tid.UUID(),
+			CustomerID: payer.UUID(),
+			InvoiceID:  id,
+			Now:        s.now(),
+		})
+		if e != nil {
+			return e
+		}
+		if existing.AmountDue > 0 {
+			if _, err := q.ReduceMoneyOutstandingOwedSnapshot(ctx, gen.ReduceMoneyOutstandingOwedSnapshotParams{
+				MerchantID: tid.UUID(),
+				CustomerID: payer.UUID(),
+				Currency:   existing.Currency,
+				Snapshot:   existing.AmountDue,
+				Now:        s.now(),
+			}); err != nil {
+				return err
+			}
+		}
+		var merr error
+		inv, merr = invoiceFromGen(row)
+		return merr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
+func (s *MoneyService) MarkInvoiceUncollectible(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*models.Invoice, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
+	}
+	var inv *models.Invoice
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		tid, terr := merchant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		row, e := gen.New(tx).MarkInvoiceUncollectibleForPayer(ctx, gen.MarkInvoiceUncollectibleForPayerParams{
+			MerchantID: tid.UUID(),
+			CustomerID: payer.UUID(),
+			InvoiceID:  id,
+			Now:        s.now(),
+		})
+		if e != nil {
+			return e
+		}
+		var merr error
+		inv, merr = invoiceFromGen(row)
+		return merr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
+func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer identity.CustomerID, id uuid.UUID, amount int64, processorPaymentID string) (*models.Invoice, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
+	}
+	if id == uuid.Nil {
+		return nil, fmt.Errorf("invoice_id required")
+	}
+	if amount <= 0 {
+		return nil, fmt.Errorf("amount must be positive")
+	}
+	processorPaymentID = strings.TrimSpace(processorPaymentID)
+	if processorPaymentID == "" {
+		return nil, fmt.Errorf("processor_payment_id required")
+	}
+	var inv *models.Invoice
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		tid, terr := merchant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		invoiceRow, e := q.GetInvoiceForPayerForUpdate(ctx, gen.GetInvoiceForPayerForUpdateParams{
+			MerchantID: tid.UUID(),
+			CustomerID: payer.UUID(),
+			ID:         id,
+		})
+		if e != nil {
+			return e
+		}
+		if invoiceRow.Status != "open" && invoiceRow.Status != "past_due" {
+			return fmt.Errorf("invoice is not payable")
+		}
+		if amount > invoiceRow.AmountDue {
+			return fmt.Errorf("payment amount exceeds invoice amount_due")
+		}
+		now := s.now()
+		n, e := q.ApplyInvoicePaymentSnapshot(ctx, gen.ApplyInvoicePaymentSnapshotParams{
+			MerchantID: tid.UUID(),
+			CustomerID: payer.UUID(),
+			InvoiceID:  id,
+			Snapshot:   amount,
+			Now:        now,
+		})
+		if e != nil {
+			return e
+		}
+		if n == 0 {
+			return fmt.Errorf("invoice payment was not applied")
+		}
+		if _, e := q.ReduceMoneyOutstandingOwedSnapshot(ctx, gen.ReduceMoneyOutstandingOwedSnapshotParams{
+			MerchantID: tid.UUID(),
+			CustomerID: payer.UUID(),
+			Currency:   invoiceRow.Currency,
+			Snapshot:   amount,
+			Now:        now,
+		}); e != nil {
+			return e
+		}
+		sourceID := processorPaymentID
+		trx := &models.MoneyTransaction{
+			ID:              uuidutil.NewV7(),
+			MerchantID:      tid.UUID(),
+			CustomerID:      payer.UUID(),
+			Currency:        invoiceRow.Currency,
+			Invoker:         payer.UUID().String(),
+			Amount:          -amount,
+			TransactionType: txOwedPayment,
+			Status:          "posted",
+			Source:          "manual_invoice_payment",
+			SourceID:        &sourceID,
+			InvoiceID:       &id,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		if e := q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(trx)); e != nil {
+			return e
+		}
+		processor := string(models.ProcessorManual)
+		if e := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
+			ID:                 uuidutil.NewV7(),
+			MerchantID:         tid.UUID(),
+			CustomerID:         payer.UUID(),
+			InvoiceID:          id,
+			MoneyTransactionID: &trx.ID,
+			Currency:           invoiceRow.Currency,
+			Amount:             amount,
+			Status:             "settled",
+			Processor:          &processor,
+			ProcessorPaymentID: &processorPaymentID,
+			AttemptedAt:        now,
+			SettledAt:          &now,
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		}); e != nil {
+			return e
+		}
+		row, e := q.GetInvoiceForPayer(ctx, gen.GetInvoiceForPayerParams{
+			MerchantID: tid.UUID(),
+			CustomerID: payer.UUID(),
+			ID:         id,
+		})
+		if e != nil {
+			return e
+		}
+		var merr error
+		inv, merr = invoiceFromGen(row)
+		return merr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
 // FinalizeDueInvoices finalizes the [from, to) invoice for every (payer, currency)
-// pair with money activity in the request tenant. Idempotent per pair. Returns the
+// pair with money activity in the request merchant. Idempotent per pair. Returns the
 // number of invoices finalized/returned. Invoices are denominated per currency
 // (#474), so a payer with both USD and USDC balances gets one invoice each.
 func (s *MoneyService) FinalizeDueInvoices(ctx context.Context, from, to time.Time) (int, error) {

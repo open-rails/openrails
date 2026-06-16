@@ -53,7 +53,7 @@ func TestTransitSignerSignsAndVerifies(t *testing.T) {
 	ft := &fakeTransit{key: key}
 	signer := NewTransitSigner(ft, nil, time.Minute)
 	ctx := context.Background()
-	tid := dbtest.TestTenantID
+	tid := dbtest.TestMerchantID
 
 	pub, err := signer.PublicKey(ctx, tid)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestTransitSignerCachesPublicKeyNotSignatures(t *testing.T) {
 	ft := &fakeTransit{key: key}
 	signer := NewTransitSigner(ft, nil, time.Minute)
 	ctx := context.Background()
-	tid := dbtest.TestTenantID
+	tid := dbtest.TestMerchantID
 
 	for range 3 {
 		if _, err := signer.PublicKey(ctx, tid); err != nil {
@@ -104,7 +104,7 @@ func TestTransitSignerCachesPublicKeyNotSignatures(t *testing.T) {
 func TestTransitSignerFailClosed(t *testing.T) {
 	ft := &fakeTransit{key: newTestKey(t), err: errors.New("vault transit unreachable")}
 	signer := NewTransitSigner(ft, nil, time.Minute)
-	if _, err := signer.SignMessage(context.Background(), dbtest.TestTenantID, []byte("m")); err == nil {
+	if _, err := signer.SignMessage(context.Background(), dbtest.TestMerchantID, []byte("m")); err == nil {
 		t.Fatal("expected error when transit fails, got nil")
 	}
 }
@@ -114,7 +114,7 @@ func TestTransitSignerCustomKeyName(t *testing.T) {
 	ft := &fakeTransit{key: newTestKey(t)}
 	naming := func(id merchant.ID) string { gotName = "custom-" + id.String(); return gotName }
 	signer := NewTransitSigner(ft, naming, time.Minute)
-	if _, err := signer.PublicKey(context.Background(), dbtest.TestTenantID); err != nil {
+	if _, err := signer.PublicKey(context.Background(), dbtest.TestMerchantID); err != nil {
 		t.Fatalf("PublicKey: %v", err)
 	}
 	if gotName == "" {

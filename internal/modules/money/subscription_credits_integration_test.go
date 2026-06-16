@@ -24,8 +24,8 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
-	dbtest.EnsureTestTenant(ctx, t, pool)
-	ctx = dbtest.WithTestTenant(ctx)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	ctx = dbtest.WithTestMerchant(ctx)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	periodEnd := now.Add(30 * 24 * time.Hour)
@@ -152,8 +152,8 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
-	dbtest.EnsureTestTenant(ctx, t, pool)
-	ctx = dbtest.WithTestTenant(ctx)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	ctx = dbtest.WithTestMerchant(ctx)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	periodEnd := now.Add(30 * 24 * time.Hour)

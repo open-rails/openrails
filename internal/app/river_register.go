@@ -82,7 +82,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Config: r.Config,
 		Clock:  clock,
 	}); err != nil {
-		return fmt.Errorf("add hold expiry worker: %w", err)
+		return fmt.Errorf("add money window expiry worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CancelSubscriptionWorker{
 		DB:                           r.DB,
@@ -137,24 +137,25 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add catalog reconciliation worker: %w", err)
 	}
-	// Credit money-in + reconciliation workers (#239/#240/#241/#243). The
-	// auto-top-up and arrears workers carry no Charger and the low-balance worker
-	// no Alerter yet, so they log-and-skip until the processor/notification wiring
-	// lands; the reconcile worker runs fully (alert-only).
+	// Credit money-in + reconciliation workers (#239/#240/#241/#243/#508). The
+	// auto-top-up and arrears workers share the configured off-session charger;
+	// when it is nil they log-and-skip until processor wiring is attached.
 	if err := river.AddWorkerSafely(workers, &riverjobs.LowBalanceAlertWorker{
 		Money: r.MoneyService,
 	}); err != nil {
 		return fmt.Errorf("add low-balance alert worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.AutoTopupWorker{
-		Money:  r.MoneyService,
-		Config: r.Config,
+		Money:   r.MoneyService,
+		Charger: r.MoneyCharger,
+		Config:  r.Config,
 	}); err != nil {
 		return fmt.Errorf("add auto-topup worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.ArrearsChargeWorker{
-		Money:  r.MoneyService,
-		Config: r.Config,
+		Money:   r.MoneyService,
+		Charger: r.MoneyCharger,
+		Config:  r.Config,
 	}); err != nil {
 		return fmt.Errorf("add arrears charge worker: %w", err)
 	}
@@ -447,8 +448,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
-	// Every 5 minutes: expire orphaned credit holds
-	// Handles cases where jobs crash without calling capture/release
+	// Every 5 minutes: expire open durable money windows. Request holds are Redis
+	// TTL state and do not need a Postgres expiry sweep.
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(5*time.Minute),
 		func() (river.JobArgs, *river.InsertOpts) {

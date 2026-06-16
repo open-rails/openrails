@@ -7,8 +7,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/budgets"
+	"github.com/open-rails/openrails/internal/modules/holds"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -46,6 +48,8 @@ type Admitter struct {
 	blocklist    *abuse.BlocklistService // optional; nil disables blocklist checks
 	budgets      *budgets.Service        // optional; nil disables fixed money-budget windows (#304, #337)
 	budgetScopes *BudgetPolicyStore      // optional; nil disables hierarchical budget scopes (#473)
+	holds        *holds.Store            // optional; nil disables Redis hold occupancy in the tier cap
+	fxProvider   fx.Provider             // optional; required for cross-currency policy enforcement
 
 	// wasted is the optional $-valued wasted-spend guard (#488); nil disables the
 	// wasted-spend admit gate. invokerWastedWindows is the FLAT per-invoker budget
@@ -64,6 +68,16 @@ func NewAdmitter(limiter *ratelimit.Limiter, moneySvc *money.MoneyService, polic
 // verdict. Nil store leaves only the pre-#473 (subject,invoker) tier-policy path.
 func (a *Admitter) WithBudgetScopes(store *BudgetPolicyStore) *Admitter {
 	a.budgetScopes = store
+	return a
+}
+
+func (a *Admitter) WithHolds(store *holds.Store) *Admitter {
+	a.holds = store
+	return a
+}
+
+func (a *Admitter) WithFXProvider(provider fx.Provider) *Admitter {
+	a.fxProvider = provider
 	return a
 }
 
@@ -86,7 +100,7 @@ type BlockCheck struct {
 
 // AdmitRequest is one admission decision input.
 type AdmitRequest struct {
-	CustomerID  identity.CustomerID // the tenant subject
+	CustomerID  identity.CustomerID // the merchant subject
 	Invoker     string              // canonical invoker: user:<id> / serviceToken:<key_id> / <issuer>:<sub>
 	InvokerType string              // "payer" for direct payer credential; empty/other = delegated
 	Tier        string              // the invoker's tier (selects the throughput policy)
@@ -115,13 +129,13 @@ type AdmitRequest struct {
 
 // AdmitDecision is the unified outcome.
 type AdmitDecision struct {
-	Allowed     bool
-	BlockedBy   string // "throughput" | "money" | ""
-	BlockedUnit string // throughput: the window unit that blocked
-	DenyCode    string // money: the ledger deny code
-	RetryAfter  time.Duration
-	Windows     []ratelimit.WindowInfo   // for x-ratelimit-* headers
-	Hold        *models.MoneyTransaction // the placed money hold when allowed
+	Allowed        bool
+	BlockedBy      string // "throughput" | "money" | ""
+	BlockedUnit    string // throughput: the window unit that blocked
+	DenyCode       string // money: the ledger deny code
+	RetryAfter     time.Duration
+	Windows        []ratelimit.WindowInfo // for x-ratelimit-* headers
+	CapacityAmount int64                  // available balance + allowed owed amount before Redis holds
 
 	// BudgetReservationID is the (subject,invoker)-scope money-budget reservation
 	// placed when allowed (#304, kept for back-compat); BudgetWindows is the
@@ -140,7 +154,7 @@ type AdmitDecision struct {
 	BudgetSourceID string
 
 	// QueueAcquired reports that queue/batch reservation units (#472 G2) were
-	// held for this request; ThroughputBase is the (tenant:payer:release) key
+	// held for this request; ThroughputBase is the (merchant:payer:release) key
 	// they were held under, so settlement releases them by request coords.
 	QueueAcquired  bool
 	ThroughputBase string
@@ -165,6 +179,8 @@ type AdmitDecision struct {
 	// MaxSingleChargeAmount is the resolved tier's per-charge ceiling (#487; 0 =
 	// uncapped), surfaced for host introspection.
 	MaxSingleChargeAmount int64
+	PolicyCurrency        string
+	PolicyAmount          int64
 }
 
 // Admit runs throughput then money and returns the unified decision.
@@ -228,23 +244,36 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		return AdmitDecision{Allowed: false, BlockedBy: "resource"}, nil
 	}
 
+	policyCurrency, err := effectivePolicyCurrency(req.Currency, pol.PolicyCurrency, pol.BudgetWindows)
+	if err != nil {
+		return AdmitDecision{}, err
+	}
+	policyAmount := req.EstimatedAmount
+	if req.EstimatedAmount > 0 {
+		policyAmount, _, err = fx.ConvertAmount(ctx, a.fxProvider, req.Currency, policyCurrency, req.EstimatedAmount)
+		if err != nil {
+			return AdmitDecision{}, err
+		}
+	}
+
 	// Per-charge ceiling (#487): a single Admit whose estimate exceeds the tier's
 	// max_single_charge_amount is a generic runaway guard — reject up front.
-	if pol.MaxSingleChargeAmount > 0 && req.EstimatedAmount > pol.MaxSingleChargeAmount {
+	if pol.MaxSingleChargeAmount > 0 && policyAmount > pol.MaxSingleChargeAmount {
 		return AdmitDecision{
 			Allowed: false, BlockedBy: "money", DenyCode: DenySingleChargeCap,
 			ResolvedTier: tier, MaxSingleChargeAmount: pol.MaxSingleChargeAmount,
 			MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount,
+			PolicyCurrency:          policyCurrency, PolicyAmount: policyAmount,
 		}, nil
 	}
 
 	// --- throughput axis (cheap Redis op; counts even if money later denies) ---
-	// KEY = (tenant, payer, endpoint-release) — #472 G1. The invoker (invoker) is
+	// KEY = (merchant, payer, endpoint-release) — #472 G1. The invoker (invoker) is
 	// DELIBERATELY NOT in the key: per-invoker throughput is bypassable (a payer
 	// can register unlimited invokers to multiply its limit), so the capacity
 	// limit AGGREGATES across all of a payer's invokers. `Resource` is the
 	// endpoint-release uuid (the host's releaseID), never a mutable name.
-	tid, err := merchant.Require(ctx) // #336: no default tenant
+	tid, err := merchant.Require(ctx) // #336: no default merchant
 	if err != nil {
 		return AdmitDecision{}, err
 	}
@@ -256,12 +285,16 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// normal ledger. ---
 	if a.wasted != nil && a.wasted.Enabled() {
 		if !identity.IsDirectPayerInvoker(req.InvokerType) && req.Invoker != "" && len(a.invokerWastedWindows) > 0 {
-			over, _, werr := a.wasted.InvokerOverBudget(ctx, tenantID.String(), req.CustomerID.UUID().String(), req.Invoker, money.NormalizeCurrency(req.Currency), a.invokerWastedWindows)
+			wastedCurrency, werr := effectiveWastedCurrency(req.Currency, a.invokerWastedWindows)
+			if werr != nil {
+				return AdmitDecision{}, werr
+			}
+			over, _, werr := a.wasted.InvokerOverBudget(ctx, tenantID.String(), req.CustomerID.UUID().String(), req.Invoker, wastedCurrency, a.invokerWastedWindows)
 			if werr != nil {
 				return AdmitDecision{}, werr
 			}
 			if over {
-				return AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: DenyFailureRateLimited, ResolvedTier: tier}, nil
+				return AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: DenyFailureRateLimited, ResolvedTier: tier, PolicyCurrency: wastedCurrency}, nil
 			}
 		}
 	}
@@ -344,9 +377,17 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 			return AdmitDecision{}, err
 		}
 		if len(scopes) > 0 {
+			policyCurrency, err = effectiveScopeCurrency(policyCurrency, scopes)
+			if err != nil {
+				return AdmitDecision{}, err
+			}
+			policyAmount, _, err = fx.ConvertAmount(ctx, a.fxProvider, req.Currency, policyCurrency, req.EstimatedAmount)
+			if err != nil {
+				return AdmitDecision{}, err
+			}
 			// Budgets and the ledger use the same currency internal precision. The
 			// estimate reserves 1:1 against every matching scope's windows.
-			statuses, ok, blockIdx, err := a.budgets.ReserveScopes(ctx, req.CustomerID, scopes, req.Currency, req.EstimatedAmount, req.Source, req.SourceID, ttl)
+			statuses, ok, blockIdx, err := a.budgets.ReserveScopes(ctx, req.CustomerID, scopes, policyCurrency, policyAmount, req.Source, req.SourceID, ttl)
 			if err != nil {
 				return AdmitDecision{}, err
 			}
@@ -364,12 +405,14 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 					_ = a.limiter.ReleaseQueueByRequest(ctx, req.Source, req.SourceID)
 				}
 				return AdmitDecision{
-					Allowed:       false,
-					BlockedBy:     "budget",
-					RetryAfter:    scopeRetry(statuses, blockIdx),
-					Windows:       tp.Windows,
-					BudgetWindows: budgetWindows,
-					BudgetScopes:  statuses,
+					Allowed:        false,
+					BlockedBy:      "budget",
+					RetryAfter:     scopeRetry(statuses, blockIdx),
+					Windows:        tp.Windows,
+					BudgetWindows:  budgetWindows,
+					BudgetScopes:   statuses,
+					PolicyCurrency: policyCurrency,
+					PolicyAmount:   policyAmount,
 				}, nil
 			}
 		}
@@ -383,14 +426,14 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// this hard deny (so OpenRails' gate is the committed-$ admission backstop). ---
 	var heldAmount int64
 	if req.EstimatedAmount > 0 && pol.MaxConcurrentHeldAmount > 0 {
-		held, herr := a.money.ActiveHeldForCurrency(ctx, req.CustomerID, req.Currency)
+		held, herr := a.activeHeldInCurrency(ctx, req.CustomerID, policyCurrency)
 		if herr != nil {
 			return AdmitDecision{}, herr
 		}
 		heldAmount = held
-		if held+req.EstimatedAmount > pol.MaxConcurrentHeldAmount {
+		if held+policyAmount > pol.MaxConcurrentHeldAmount {
 			if len(budgetScopeStatuses) > 0 && a.budgets != nil {
-				_ = a.budgets.ReleaseByCoords(ctx, req.CustomerID, req.Currency, req.Source, req.SourceID)
+				_ = a.budgets.ReleaseByCoords(ctx, req.CustomerID, policyCurrency, req.Source, req.SourceID)
 			}
 			if queueAcquired {
 				_ = a.limiter.ReleaseQueueByRequest(ctx, req.Source, req.SourceID)
@@ -400,6 +443,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 				Windows: tp.Windows, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses,
 				ResolvedTier: tier, MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount,
 				MaxSingleChargeAmount: pol.MaxSingleChargeAmount, HeldAmount: held,
+				PolicyCurrency: policyCurrency, PolicyAmount: policyAmount,
 			}, nil
 		}
 	}
@@ -422,19 +466,19 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 			// Roll back ALL reserved budget scopes so a money-denied request
 			// doesn't consume any of the payer's budget windows.
 			if len(budgetScopeStatuses) > 0 && a.budgets != nil {
-				_ = a.budgets.ReleaseByCoords(ctx, req.CustomerID, req.Currency, req.Source, req.SourceID)
+				_ = a.budgets.ReleaseByCoords(ctx, req.CustomerID, policyCurrency, req.Source, req.SourceID)
 			}
 			// Free any queue units held above (money deny must not leak the queue).
 			if queueAcquired {
 				_ = a.limiter.ReleaseQueueByRequest(ctx, req.Source, req.SourceID)
 			}
-			return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: res.Decision.DenyCode, Windows: tp.Windows, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, ResolvedTier: tier, MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount, MaxSingleChargeAmount: pol.MaxSingleChargeAmount, HeldAmount: heldAmount}, nil
+			return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: res.Decision.DenyCode, Windows: tp.Windows, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, ResolvedTier: tier, MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount, MaxSingleChargeAmount: pol.MaxSingleChargeAmount, HeldAmount: heldAmount, PolicyCurrency: policyCurrency, PolicyAmount: policyAmount}, nil
 		}
 		// Allowed: the hold is now placed, so the active-held sum includes it.
-		return AdmitDecision{Allowed: true, Windows: tp.Windows, Hold: res.Hold, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier, MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount, MaxSingleChargeAmount: pol.MaxSingleChargeAmount, HeldAmount: heldAmount + req.EstimatedAmount}, nil
+		return AdmitDecision{Allowed: true, Windows: tp.Windows, CapacityAmount: res.CapacityAmount, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier, MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount, MaxSingleChargeAmount: pol.MaxSingleChargeAmount, HeldAmount: heldAmount + policyAmount, PolicyCurrency: policyCurrency, PolicyAmount: policyAmount}, nil
 	}
 
-	return AdmitDecision{Allowed: true, Windows: tp.Windows, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier, MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount, MaxSingleChargeAmount: pol.MaxSingleChargeAmount}, nil
+	return AdmitDecision{Allowed: true, Windows: tp.Windows, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows, BudgetScopes: budgetScopeStatuses, BudgetSource: req.Source, BudgetSourceID: req.SourceID, QueueAcquired: queueAcquired, ThroughputBase: base, ResolvedTier: tier, MaxConcurrentHeldAmount: pol.MaxConcurrentHeldAmount, MaxSingleChargeAmount: pol.MaxSingleChargeAmount, PolicyCurrency: policyCurrency, PolicyAmount: policyAmount}, nil
 }
 
 // buildBudgetScopes assembles every budget scope to reserve for this request
@@ -537,12 +581,112 @@ func toWastedWindows(ws []models.BudgetWindowPolicy) []abuse.WastedWindow {
 			continue
 		}
 		out = append(out, abuse.WastedWindow{
-			Key:    w.Key,
-			Window: time.Duration(w.WindowSeconds) * time.Second,
-			Limit:  w.Limit,
+			Key:      w.Key,
+			Window:   time.Duration(w.WindowSeconds) * time.Second,
+			Limit:    w.Limit,
+			Currency: w.Currency,
 		})
 	}
 	return out
+}
+
+func effectivePolicyCurrency(requestCurrency, configured string, windows []budgets.BudgetWindow) (string, error) {
+	cur := money.NormalizeCurrency(requestCurrency)
+	explicit := false
+	if configured != "" {
+		cur = money.NormalizeCurrency(configured)
+		explicit = true
+	}
+	if err := money.ValidateCurrency(cur); err != nil {
+		return "", err
+	}
+	for _, w := range windows {
+		if w.Currency == "" {
+			continue
+		}
+		wc := money.NormalizeCurrency(w.Currency)
+		if err := money.ValidateCurrency(wc); err != nil {
+			return "", err
+		}
+		if !explicit {
+			cur = wc
+			explicit = true
+			continue
+		}
+		if cur != wc {
+			return "", fmt.Errorf("mixed policy currencies are not supported in one admit policy: %s and %s", cur, wc)
+		}
+	}
+	return cur, nil
+}
+
+func effectiveScopeCurrency(cur string, scopes []budgets.ScopeReservation) (string, error) {
+	for _, sc := range scopes {
+		next, err := effectivePolicyCurrency(cur, "", sc.Windows)
+		if err != nil {
+			return "", err
+		}
+		if next != cur {
+			return "", fmt.Errorf("mixed policy currencies are not supported in one admit policy: %s and %s", cur, next)
+		}
+	}
+	return cur, nil
+}
+
+func effectiveWastedCurrency(requestCurrency string, windows []abuse.WastedWindow) (string, error) {
+	cur := money.NormalizeCurrency(requestCurrency)
+	explicit := false
+	if err := money.ValidateCurrency(cur); err != nil {
+		return "", err
+	}
+	for _, w := range windows {
+		if w.Currency == "" {
+			continue
+		}
+		wc := money.NormalizeCurrency(w.Currency)
+		if err := money.ValidateCurrency(wc); err != nil {
+			return "", err
+		}
+		if !explicit {
+			cur = wc
+			explicit = true
+			continue
+		}
+		if wc != cur {
+			return "", fmt.Errorf("mixed wasted-spend currencies are not supported in one policy: %s and %s", cur, wc)
+		}
+	}
+	return cur, nil
+}
+
+func (a *Admitter) activeHeldInCurrency(ctx context.Context, payer identity.CustomerID, policyCurrency string) (int64, error) {
+	var total int64
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, cur := range money.CurrencyCodes() {
+		held, err := a.money.ActiveHeldForCurrency(ctx, payer, cur)
+		if err != nil {
+			return 0, err
+		}
+		if a.holds != nil {
+			redisHeld, rerr := a.holds.ActiveAmount(ctx, tid.UUID().String(), payer.UUID().String(), cur)
+			if rerr != nil {
+				return 0, rerr
+			}
+			held += redisHeld
+		}
+		if held == 0 {
+			continue
+		}
+		converted, _, err := fx.ConvertAmount(ctx, a.fxProvider, cur, policyCurrency, held)
+		if err != nil {
+			return 0, err
+		}
+		total += converted
+	}
+	return total, nil
 }
 
 func contains(xs []string, v string) bool {

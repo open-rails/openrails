@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// fakeSecrets is an in-memory TenantSecretGetter that counts reads so tests can
+// fakeSecrets is an in-memory MerchantSecretGetter that counts reads so tests can
 // assert caching behavior.
 type fakeSecrets struct {
 	mu    sync.Mutex
@@ -51,7 +51,7 @@ func TestKeypairSignerPublicKeyAndSign(t *testing.T) {
 	secrets := &fakeSecrets{value: key.String()}
 	signer := NewKeypairSigner(secrets, time.Minute)
 	ctx := context.Background()
-	tid := dbtest.TestTenantID
+	tid := dbtest.TestMerchantID
 
 	pub, err := signer.PublicKey(ctx, tid)
 	if err != nil {
@@ -76,7 +76,7 @@ func TestKeypairSignerCachesWithinTTL(t *testing.T) {
 	secrets := &fakeSecrets{value: key.String()}
 	signer := NewKeypairSigner(secrets, time.Minute)
 	ctx := context.Background()
-	tid := dbtest.TestTenantID
+	tid := dbtest.TestMerchantID
 
 	for i := range 5 {
 		if _, err := signer.PublicKey(ctx, tid); err != nil {
@@ -96,7 +96,7 @@ func TestKeypairSignerRefetchesAfterTTL(t *testing.T) {
 	current := time.Unix(1_700_000_000, 0)
 	ks.now = func() time.Time { return current }
 	ctx := context.Background()
-	tid := dbtest.TestTenantID
+	tid := dbtest.TestMerchantID
 
 	if _, err := ks.PublicKey(ctx, tid); err != nil {
 		t.Fatalf("first: %v", err)
@@ -119,7 +119,7 @@ func TestKeypairSignerRefetchesAfterTTL(t *testing.T) {
 func TestKeypairSignerFailClosed(t *testing.T) {
 	secrets := &fakeSecrets{err: errors.New("vault unreachable")}
 	signer := NewKeypairSigner(secrets, time.Minute)
-	if _, err := signer.PublicKey(context.Background(), dbtest.TestTenantID); err == nil {
+	if _, err := signer.PublicKey(context.Background(), dbtest.TestMerchantID); err == nil {
 		t.Fatal("expected error when secret store fails, got nil")
 	}
 }
@@ -128,6 +128,6 @@ func TestKeypairSignerRejectsZeroTenant(t *testing.T) {
 	key := newTestKey(t)
 	signer := NewKeypairSigner(&fakeSecrets{value: key.String()}, time.Minute)
 	if _, err := signer.SignMessage(context.Background(), merchant.ID{}, []byte("x")); err == nil {
-		t.Fatal("expected error for zero tenant id, got nil")
+		t.Fatal("expected error for zero merchant id, got nil")
 	}
 }

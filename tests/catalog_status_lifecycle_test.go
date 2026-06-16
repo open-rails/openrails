@@ -19,7 +19,7 @@ import (
 // the default on create is "active".
 func TestCatalogStatus_RoundTripsThroughFacade(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
@@ -50,7 +50,7 @@ func TestCatalogStatus_RoundTripsThroughFacade(t *testing.T) {
 // archived (no purchasable gap), and the price round-trips with that status.
 func TestCatalogStatus_CreateAsArchivedInOneStep(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
@@ -81,7 +81,7 @@ func TestCatalogStatus_CreateAsArchivedInOneStep(t *testing.T) {
 // is hidden from the public (non-admin) catalog and is not purchasable.
 func TestCatalogStatus_DraftHiddenAndNotPurchasable(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)

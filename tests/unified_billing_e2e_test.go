@@ -78,14 +78,14 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(ginmw.ResolveTenant(dbtest.TestTenantID))
+	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
 	group := router.Group("/v1/service")
 	resolver := stubServiceTokenResolver{permissions: []string{
 		controlplane.PermCreditsRead,
 		controlplane.PermCreditsWrite,
 		controlplane.PermCreditsSpend,
 	}, resources: []authcore.ServiceTokenResource{
-		controlplane.MerchantResource(dbtest.TestTenantID),
+		controlplane.MerchantResource(dbtest.TestMerchantID),
 	}}
 	// nil issuer-admin: the delegated issuer routes are
 	// irrelevant to the money path.
@@ -227,9 +227,9 @@ func (h *billingE2EHarness) rawBalanceRow(userID string) *models.MoneyBalance {
 		  AND (expires_at IS NULL OR expires_at > now())`, owner, "USD").Scan(&bal.Balance)
 	require.NoError(h.t, err)
 	err = h.suite.Pool.QueryRow(ctx, `
-		SELECT COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)::bigint
-		FROM openrails.money_transactions
-		WHERE customer_id = $1 AND currency = $2 AND transaction_type = 'hold' AND status = 'active'`,
+		SELECT COALESCE(SUM(held_amount - settled_amount), 0)::bigint
+		FROM openrails.money_windows
+		WHERE customer_id = $1 AND currency = $2 AND status = 'open'`,
 		owner, "USD").Scan(&bal.HeldBalance)
 	require.NoError(h.t, err)
 	return bal
@@ -432,7 +432,7 @@ func TestUnifiedBilling_OwnerScoping(t *testing.T) {
 	require.Equal(t, balanceView{Balance: 9_000, HeldBalance: 6_000}, h.balance(ownerB),
 		"owner B untouched by owner A's capture")
 
-	// Tenant subject A's ledger has no rows belonging to tenant subject B and vice versa.
+	// Merchant subject A's ledger has no rows belonging to tenant subject B and vice versa.
 	for _, r := range h.ledgerRows(ownerA) {
 		require.Equal(t, personalOwnerID(ownerA), r.CustomerID)
 	}

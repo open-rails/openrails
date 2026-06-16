@@ -30,6 +30,25 @@ func (q *Queries) GetProcessorCustomerID(ctx context.Context, arg GetProcessorCu
 	return processor_customer_id, err
 }
 
+const getProcessorCustomerIDForMerchant = `-- name: GetProcessorCustomerIDForMerchant :one
+SELECT processor_customer_id FROM openrails.processor_customers
+WHERE merchant_id = $1 AND customer_id = $2 AND processor = $3
+LIMIT 1
+`
+
+type GetProcessorCustomerIDForMerchantParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Processor  string
+}
+
+func (q *Queries) GetProcessorCustomerIDForMerchant(ctx context.Context, arg GetProcessorCustomerIDForMerchantParams) (string, error) {
+	row := q.db.QueryRow(ctx, getProcessorCustomerIDForMerchant, arg.MerchantID, arg.CustomerID, arg.Processor)
+	var processor_customer_id string
+	err := row.Scan(&processor_customer_id)
+	return processor_customer_id, err
+}
+
 const getProcessorCustomerSubject = `-- name: GetProcessorCustomerSubject :one
 SELECT customer_id::text FROM openrails.processor_customers
 WHERE processor_customer_id = $1 AND processor = $2

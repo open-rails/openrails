@@ -17,13 +17,14 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const schemaDDL = `
 CREATE SCHEMA IF NOT EXISTS openrails;
 
-CREATE TABLE IF NOT EXISTS openrails.tenants (
+CREATE TABLE IF NOT EXISTS openrails.merchants (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug         TEXT NOT NULL UNIQUE,
     name         TEXT NOT NULL,
@@ -36,13 +37,13 @@ CREATE TABLE IF NOT EXISTS openrails.tenants (
 
 CREATE TABLE IF NOT EXISTS openrails.subscriptions (
     id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID,
+    merchant_id UUID,
     status    TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS openrails.payments (
     id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID,
+    merchant_id UUID,
     amount    BIGINT NOT NULL,
     status    TEXT NOT NULL DEFAULT 'completed'
 );
@@ -108,11 +109,11 @@ func newExternalPlatformTestPool(t *testing.T, ctx context.Context, adminDSN str
 	return pool
 }
 
-func seedTenant(t *testing.T, pool *pgxpool.Pool, slug, status, tier string) merchant.ID {
+func seedMerchant(t *testing.T, pool *pgxpool.Pool, slug, status, tier string) merchant.ID {
 	t.Helper()
 	var idStr string
 	err := pool.QueryRow(context.Background(), `
-		INSERT INTO openrails.tenants (slug, name, status, billing_tier)
+		INSERT INTO openrails.merchants (slug, name, status, billing_tier)
 		VALUES ($1, $1, $2, NULLIF($3,'')) RETURNING id::text
 	`, slug, status, tier).Scan(&idStr)
 	require.NoError(t, err)
@@ -121,43 +122,43 @@ func seedTenant(t *testing.T, pool *pgxpool.Pool, slug, status, tier string) mer
 	return id
 }
 
-func TestMetrics_AggregatesAcrossTenants(t *testing.T) {
+func TestMetrics_AggregatesAcrossMerchants(t *testing.T) {
 	ctx := context.Background()
 	pool := newTestPool(t)
-	acme := seedTenant(t, pool, "acme", "active", "pro")
-	globex := seedTenant(t, pool, "globex", "suspended", "free")
-	_ = seedTenant(t, pool, "empty", "active", "")
+	acme := seedMerchant(t, pool, "acme", "active", "pro")
+	globex := seedMerchant(t, pool, "globex", "suspended", "free")
+	_ = seedMerchant(t, pool, "empty", "active", "")
 
 	exec := func(q string, args ...any) {
 		_, err := pool.Exec(ctx, q, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO openrails.subscriptions (tenant_id, status) VALUES ($1::uuid,'active'),($1::uuid,'active'),($1::uuid,'failed')`, acme.String())
-	exec(`INSERT INTO openrails.payments (tenant_id, amount, status) VALUES ($1::uuid,500,'completed'),($1::uuid,1500,'completed'),($1::uuid,999,'refunded')`, acme.String())
-	exec(`INSERT INTO openrails.subscriptions (tenant_id, status) VALUES ($1::uuid,'active')`, globex.String())
-	exec(`INSERT INTO openrails.payments (tenant_id, amount, status) VALUES ($1::uuid,300,'completed')`, globex.String())
+	exec(`INSERT INTO openrails.subscriptions (merchant_id, status) VALUES ($1::uuid,'active'),($1::uuid,'active'),($1::uuid,'failed')`, acme.String())
+	exec(`INSERT INTO openrails.payments (merchant_id, amount, status) VALUES ($1::uuid,500,'completed'),($1::uuid,1500,'completed'),($1::uuid,999,'refunded')`, acme.String())
+	exec(`INSERT INTO openrails.subscriptions (merchant_id, status) VALUES ($1::uuid,'active')`, globex.String())
+	exec(`INSERT INTO openrails.payments (merchant_id, amount, status) VALUES ($1::uuid,300,'completed')`, globex.String())
 
-	metrics, err := NewMetrics(pool)
+	metrics, err := NewMetrics(db.WrapPool(pool, ""))
 	require.NoError(t, err)
 	m, err := metrics.Compute(ctx)
 	require.NoError(t, err)
 
-	require.Equal(t, 3, m.TenantCount)
-	require.Equal(t, 2, m.ActiveTenantCount)
-	require.Equal(t, 1, m.SuspendedTenantCount)
+	require.Equal(t, 3, m.MerchantCount)
+	require.Equal(t, 2, m.ActiveMerchantCount)
+	require.Equal(t, 1, m.SuspendedMerchantCount)
 	require.Equal(t, int64(3), m.TotalActiveSubs)
 	require.Equal(t, int64(500+1500+300), m.TotalRevenueMinor)
 	require.Equal(t, int64(1), m.TotalWebhookFailures)
 
-	byTenant := map[string]TenantMetric{}
-	for _, tm := range m.Tenants {
-		byTenant[tm.Slug] = tm
+	byMerchant := map[string]MerchantMetric{}
+	for _, tm := range m.Merchants {
+		byMerchant[tm.Slug] = tm
 	}
-	require.Equal(t, int64(2), byTenant["acme"].ActiveSubs)
-	require.Equal(t, int64(2000), byTenant["acme"].RevenueMinor)
-	require.Equal(t, int64(1), byTenant["acme"].WebhookFailures)
-	require.Equal(t, int64(1), byTenant["globex"].ActiveSubs)
-	require.Equal(t, int64(300), byTenant["globex"].RevenueMinor)
-	require.Equal(t, "free", byTenant["globex"].BillingTier)
-	require.Zero(t, byTenant["empty"].ActiveSubs)
+	require.Equal(t, int64(2), byMerchant["acme"].ActiveSubs)
+	require.Equal(t, int64(2000), byMerchant["acme"].RevenueMinor)
+	require.Equal(t, int64(1), byMerchant["acme"].WebhookFailures)
+	require.Equal(t, int64(1), byMerchant["globex"].ActiveSubs)
+	require.Equal(t, int64(300), byMerchant["globex"].RevenueMinor)
+	require.Equal(t, "free", byMerchant["globex"].BillingTier)
+	require.Zero(t, byMerchant["empty"].ActiveSubs)
 }

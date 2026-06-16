@@ -8,7 +8,7 @@ import (
 
 type LinkedWallet struct {
 	ID                   uuid.UUID      `json:"id"`
-	MerchantID           uuid.UUID      `json:"tenant_id"`
+	MerchantID           uuid.UUID      `json:"merchant_id"`
 	CustomerID           uuid.UUID      `json:"customer_id"`
 	Chain                string         `json:"chain"`
 	Address              string         `json:"address"`

@@ -87,7 +87,7 @@ func TestDevnetSustainedRebill(t *testing.T) {
 
 	// An immediate separate crank now is period 2 — rejected as already-paid until
 	// the period rolls over (the cap gates a same-period double-charge).
-	_, earlyErr := crankSvc.Crank(ctx, dbtest.TestTenantID, row, amount)
+	_, earlyErr := crankSvc.Crank(ctx, dbtest.TestMerchantID, row, amount)
 	require.Error(t, earlyErr, "an immediate crank after the atomic subscribe must be rejected (period 1 already paid)")
 	require.Equal(t, declinecode.AlreadyPaid, ClassifyCrankError(earlyErr).Category,
 		"immediate post-subscribe crank should classify as AlreadyPaid (Custom:400), got: %v", earlyErr)
@@ -104,7 +104,7 @@ func TestDevnetSustainedRebill(t *testing.T) {
 
 		var sig string
 		for {
-			s, perr := crankSvc.Crank(ctx, dbtest.TestTenantID, row, amount)
+			s, perr := crankSvc.Crank(ctx, dbtest.TestMerchantID, row, amount)
 			if perr == nil {
 				sig = s
 				break // period rolled over: the rebill went through.
@@ -133,7 +133,7 @@ func TestDevnetSustainedRebill(t *testing.T) {
 			c, cycles, before, before+amount, sig, time.Since(start).Round(time.Second))
 
 		// The cap must now block a same-period double-charge.
-		_, eErr := crankSvc.Crank(ctx, dbtest.TestTenantID, row, amount)
+		_, eErr := crankSvc.Crank(ctx, dbtest.TestMerchantID, row, amount)
 		require.Error(t, eErr, "cycle %d: immediate re-pull must be rejected (period not rolled over)", c)
 		require.Equal(t, declinecode.AlreadyPaid, ClassifyCrankError(eErr).Category,
 			"cycle %d: immediate re-pull should classify as AlreadyPaid (Custom:400), got: %v", c, eErr)

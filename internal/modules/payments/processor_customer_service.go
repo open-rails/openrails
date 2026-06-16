@@ -34,7 +34,7 @@ func (s *ProcessorCustomerService) Upsert(ctx context.Context, userID, processor
 		return fmt.Errorf("invalid processor customer args")
 	}
 	now := time.Now().UTC()
-	// Resolve the payable tenant subject for this (tenant, user) so the row carries
+	// Resolve the payable merchant subject for this (merchant, user) so the row carries
 	// customer_id alongside the legacy user_id (#317).
 	customerRowID, err := repo.EnsureCustomerID(ctx, s.DB.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
@@ -44,8 +44,8 @@ func (s *ProcessorCustomerService) Upsert(ctx context.Context, userID, processor
 	if err != nil {
 		return err
 	}
-	// id is generated explicitly: the upsert targets the tenant-scoped
-	// (tenant_id, customer_id, processor) unique, not the pk.
+	// id is generated explicitly: the upsert targets the merchant-scoped
+	// (merchant_id, customer_id, processor) unique, not the pk.
 	return s.DB.Gen(ctx).UpsertProcessorCustomer(ctx, gen.UpsertProcessorCustomerParams{
 		ID:                  uuidutil.NewV7(),
 		MerchantID:          tid.UUID(),

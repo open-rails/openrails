@@ -24,55 +24,74 @@ func TestAuthorizeAndHold_ArrearsCreditLine(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1000), got)
 
-	// Balance 0, credit line 1000. A hold of 800 is allowed (balance goes to -800).
+	// Balance 0, credit line 1000. An estimate up to the line is allowed.
 	res, err := svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 800,
+		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 1000,
 		Source: "usage", SourceID: "h1", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.True(t, res.Decision.Allowed)
-	require.NotNil(t, res.Hold)
+	require.Equal(t, int64(1000), res.CapacityAmount)
 
-	// A second hold of 300 would push exposure to 1100 > 1000 -> insufficient_credit.
+	// Above the line is denied. Active Redis hold subtraction is tracked by #505.
 	res, err = svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 300,
+		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 1001,
 		Source: "usage", SourceID: "h2", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.False(t, res.Decision.Allowed)
 	require.Equal(t, money.DenyInsufficientCredit, res.Decision.DenyCode)
-	require.Nil(t, res.Hold)
-
-	// Exactly at the line (another 200, total held 1000) -> allowed.
-	res, err = svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 200,
-		Source: "usage", SourceID: "h3", ExpiresAt: time.Now().Add(time.Hour),
-	})
-	require.NoError(t, err)
-	require.True(t, res.Decision.Allowed)
 }
 
-// #489: credit_limit=0 (default OFF) preserves the EXISTING arrears behavior
-// (#302) — a hold may exceed the balance (bounded by the outstanding ceiling, not
-// the balance) — rather than the literal "prepaid" reading, which would regress
-// arrears-spill-past-balance. Prepaid accounts are unaffected (gated on balance).
-func TestAuthorizeAndHold_ArrearsNoCreditLine_ExistingBehavior(t *testing.T) {
+func TestAuthorizeAndHold_ArrearsCreditLineSubtractsOwedExposure(t *testing.T) {
 	svc, _, payer, _, ctx := moneyInEnv(t)
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
-	// No credit line set (default 0). Balance 500.
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})
+	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 1000))
+	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "owed-before-hold", 900)
 	require.NoError(t, err)
 
-	// A hold of 2000 (4x balance) is allowed under arrears with no credit line
-	// (existing #302 behavior — bounded by MaxOutstandingOwed, not the balance).
 	res, err := svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 2000,
-		Source: "usage", SourceID: "spill", ExpiresAt: time.Now().Add(time.Hour),
+		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 200,
+		Source: "usage", SourceID: "over-line", ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	require.False(t, res.Decision.Allowed)
+	require.Equal(t, money.DenyInsufficientCredit, res.Decision.DenyCode)
+
+	res, err = svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
+		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 100,
+		Source: "usage", SourceID: "at-line", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.True(t, res.Decision.Allowed)
-	require.NotNil(t, res.Hold)
+	require.Equal(t, int64(100), res.CapacityAmount)
+}
+
+// #506: credit_limit=0 means no arrears capacity. Prepaid balance can still
+// admit work, but a hold beyond prepaid availability is denied.
+func TestAuthorizeAndHold_ArrearsZeroCreditLinePrepaidOnly(t *testing.T) {
+	svc, _, payer, _, ctx := moneyInEnv(t)
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
+	require.NoError(t, err)
+	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})
+	require.NoError(t, err)
+
+	res, err := svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
+		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 200,
+		Source: "usage", SourceID: "prepaid-ok", ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	require.True(t, res.Decision.Allowed)
+	require.Equal(t, int64(500), res.CapacityAmount)
+
+	res, err = svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
+		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 600,
+		Source: "usage", SourceID: "prepaid-over", ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	require.False(t, res.Decision.Allowed)
+	require.Equal(t, money.DenyInsufficientCredit, res.Decision.DenyCode)
 }
 
 // #489: a PREPAID account is unaffected by the credit-line change — a hold beyond

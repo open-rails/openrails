@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/holds"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 )
@@ -25,7 +26,7 @@ type CreditAccountSnapshot struct {
 	OutstandingOwedAmount int64     `json:"outstanding_owed_amount"`
 }
 
-// GetCreditAccount returns the balance + policy snapshot for an tenant subject.
+// GetCreditAccount returns the balance + policy snapshot for an merchant subject.
 func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerID, currency string) (*CreditAccountSnapshot, error) {
 	currency, err := requireCurrency(currency)
 	if err != nil {
@@ -34,12 +35,12 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerI
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	// Pin a tenant-scoped connection so the balance/settings reads set the RLS GUC
-	// and are tenant-scoped under the openrails_app role (#227). RunInTenantConn
+	// Pin a merchant-scoped connection so the balance/settings reads set the RLS GUC
+	// and are merchant-scoped under the openrails_app role (#227). RunInMerchantConn
 	// reuses the request's already-pinned connection when the HTTP middleware set
 	// one, so this is safe whether called from a request or directly.
 	var snap *CreditAccountSnapshot
-	err = s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		bal, err := s.moneyService().GetBalanceForCustomer(ctx, payer, currency)
 		if err != nil {
 			return err
@@ -76,15 +77,15 @@ type UsageRow struct {
 
 // GetUsage rolls up an payer's usage events over [from, to) grouped by
 // event_type with summed dimensions (issue #289). Like GetCreditAccount it pins
-// a tenant-scoped connection so the rollup query runs RLS-scoped under the
-// openrails_app role (#227); RunInTenantConn reuses the request's already-pinned
+// a merchant-scoped connection so the rollup query runs RLS-scoped under the
+// openrails_app role (#227); RunInMerchantConn reuses the request's already-pinned
 // connection when one is set.
 func (s *Service) GetUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) ([]UsageRow, error) {
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
 	var out []UsageRow
-	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		rows, err := s.moneyService().AggregateUsage(ctx, payer, currency, from, to)
 		if err != nil {
 			return err
@@ -119,20 +120,33 @@ type InvoiceLineItemDTO struct {
 // #303), served by the customer-facing GET /v1/self/invoices[/:id] routes. It is
 // a public projection of models.Invoice so callers don't import internal types.
 type InvoiceDTO struct {
-	ID             uuid.UUID            `json:"id"`
-	Currency       string               `json:"currency"`
-	PeriodFrom     time.Time            `json:"period_from"`
-	PeriodTo       time.Time            `json:"period_to"`
-	UsageTotal     int64                `json:"usage_total"`
-	DepositsTotal  int64                `json:"deposits_total"`
-	OwedAccrued    int64                `json:"owed_accrued"`
-	OwedPaid       int64                `json:"owed_paid"`
-	ClosingBalance int64                `json:"closing_balance"`
-	LineItems      []InvoiceLineItemDTO `json:"line_items"`
-	MoneyMovements map[string]int64     `json:"money_movements,omitempty"`
-	Status         string               `json:"status"`
-	FinalizedAt    *time.Time           `json:"finalized_at,omitempty"`
-	CreatedAt      time.Time            `json:"created_at"`
+	ID                uuid.UUID            `json:"id"`
+	Currency          string               `json:"currency"`
+	InvoiceNumber     *string              `json:"invoice_number,omitempty"`
+	PeriodFrom        time.Time            `json:"period_from"`
+	PeriodTo          time.Time            `json:"period_to"`
+	UsageTotal        int64                `json:"usage_total"`
+	DepositsTotal     int64                `json:"deposits_total"`
+	OwedAccrued       int64                `json:"owed_accrued"`
+	OwedPaid          int64                `json:"owed_paid"`
+	ClosingBalance    int64                `json:"closing_balance"`
+	SubtotalAmount    int64                `json:"subtotal_amount"`
+	TotalAmount       int64                `json:"total_amount"`
+	AmountPaid        int64                `json:"amount_paid"`
+	AmountDue         int64                `json:"amount_due"`
+	LineItems         []InvoiceLineItemDTO `json:"line_items"`
+	MoneyMovements    map[string]int64     `json:"money_movements,omitempty"`
+	Status            string               `json:"status"`
+	CollectionMethod  string               `json:"collection_method"`
+	IssuedAt          *time.Time           `json:"issued_at,omitempty"`
+	DueAt             *time.Time           `json:"due_at,omitempty"`
+	PaidAt            *time.Time           `json:"paid_at,omitempty"`
+	VoidedAt          *time.Time           `json:"voided_at,omitempty"`
+	UncollectibleAt   *time.Time           `json:"uncollectible_at,omitempty"`
+	SentAt            *time.Time           `json:"sent_at,omitempty"`
+	FinalizedAt       *time.Time           `json:"finalized_at,omitempty"`
+	ExternalInvoiceID *string              `json:"external_invoice_id,omitempty"`
+	CreatedAt         time.Time            `json:"created_at"`
 }
 
 // invoiceToDTO projects an internal models.Invoice onto the public InvoiceDTO.
@@ -147,26 +161,39 @@ func invoiceToDTO(inv *models.Invoice) InvoiceDTO {
 		})
 	}
 	return InvoiceDTO{
-		ID:             inv.ID,
-		Currency:       inv.Currency,
-		PeriodFrom:     inv.PeriodFrom,
-		PeriodTo:       inv.PeriodTo,
-		UsageTotal:     inv.UsageTotal,
-		DepositsTotal:  inv.DepositsTotal,
-		OwedAccrued:    inv.OwedAccrued,
-		OwedPaid:       inv.OwedPaid,
-		ClosingBalance: inv.ClosingBalance,
-		LineItems:      items,
-		MoneyMovements: inv.MoneyMovements,
-		Status:         inv.Status,
-		FinalizedAt:    inv.FinalizedAt,
-		CreatedAt:      inv.CreatedAt,
+		ID:                inv.ID,
+		Currency:          inv.Currency,
+		InvoiceNumber:     inv.InvoiceNumber,
+		PeriodFrom:        inv.PeriodFrom,
+		PeriodTo:          inv.PeriodTo,
+		UsageTotal:        inv.UsageTotal,
+		DepositsTotal:     inv.DepositsTotal,
+		OwedAccrued:       inv.OwedAccrued,
+		OwedPaid:          inv.OwedPaid,
+		ClosingBalance:    inv.ClosingBalance,
+		SubtotalAmount:    inv.SubtotalAmount,
+		TotalAmount:       inv.TotalAmount,
+		AmountPaid:        inv.AmountPaid,
+		AmountDue:         inv.AmountDue,
+		LineItems:         items,
+		MoneyMovements:    inv.MoneyMovements,
+		Status:            inv.Status,
+		CollectionMethod:  inv.CollectionMethod,
+		IssuedAt:          inv.IssuedAt,
+		DueAt:             inv.DueAt,
+		PaidAt:            inv.PaidAt,
+		VoidedAt:          inv.VoidedAt,
+		UncollectibleAt:   inv.UncollectibleAt,
+		SentAt:            inv.SentAt,
+		FinalizedAt:       inv.FinalizedAt,
+		ExternalInvoiceID: inv.ExternalInvoiceID,
+		CreatedAt:         inv.CreatedAt,
 	}
 }
 
 // ListInvoices lists an payer's finalized invoices, newest period first,
-// paginated (issue #303). Like GetUsage it pins a tenant-scoped connection so the
-// read runs RLS-scoped under the openrails_app role (#227); RunInTenantConn
+// paginated (issue #303). Like GetUsage it pins a merchant-scoped connection so the
+// read runs RLS-scoped under the openrails_app role (#227); RunInMerchantConn
 // reuses the request's already-pinned connection when one is set. Returns the
 // page of public DTOs plus the total count for pagination.
 func (s *Service) ListInvoices(ctx context.Context, payer identity.CustomerID, limit, offset int) ([]InvoiceDTO, int, error) {
@@ -175,7 +202,7 @@ func (s *Service) ListInvoices(ctx context.Context, payer identity.CustomerID, l
 	}
 	var out []InvoiceDTO
 	var total int
-	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		rows, t, err := s.moneyService().ListInvoices(ctx, payer, limit, offset)
 		if err != nil {
 			return err
@@ -195,13 +222,13 @@ func (s *Service) ListInvoices(ctx context.Context, payer identity.CustomerID, l
 
 // GetInvoice returns one finalized invoice (with its line items) for an payer by
 // id (issue #303). RLS-scoped like ListInvoices; an invoice belonging to another
-// payer/tenant is unreachable (fail closed). Returns a public DTO.
+// payer/merchant is unreachable (fail closed). Returns a public DTO.
 func (s *Service) GetInvoice(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*InvoiceDTO, error) {
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
 	var out *InvoiceDTO
-	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		inv, err := s.moneyService().GetInvoiceByID(ctx, payer, id)
 		if err != nil {
 			return err
@@ -293,21 +320,24 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 
 // AuthorizeAndHoldRequest is the input to AuthorizeAndHold — the atomic
 // policy-decision + hold placement that backs POST /v1/service/credits/authorize
-// (issue #235/#247). Payer is the tenant subject billed; Invoker is the canonical
+// (issue #235/#247). Payer is the merchant subject billed; Invoker is the canonical
 // invoker for per-invoker sub-budgets; RequestID is the idempotency key for the
 // placed hold.
 type AuthorizeAndHoldRequest struct {
 	CustomerID      identity.CustomerID
 	Invoker         string
+	InvokerType     string
 	Currency        string
 	EstimatedAmount int64
 	RequestID       string
+	Resource        string
 	// ExpiresAt bounds the placed hold; when zero a default TTL is applied.
 	ExpiresAt time.Time
 }
 
-// AuthorizeAndHoldResult is the combined decision + reservation returned by
-// AuthorizeAndHold. ReservationID is the placed hold's id when Allowed, else nil.
+// AuthorizeAndHoldResult is the admission decision and capacity snapshot.
+// In-flight holds are request-id keyed Redis state in the #505 model, so no
+// Postgres reservation id is returned here.
 type AuthorizeAndHoldResult struct {
 	Allowed               bool              `json:"allowed"`
 	DenyCode              string            `json:"deny_code,omitempty"`
@@ -317,7 +347,7 @@ type AuthorizeAndHoldResult struct {
 	OutstandingOwedAmount int64             `json:"outstanding_owed_amount"`
 	RemainingTodayAmount  *int64            `json:"remaining_today_amount,omitempty"`
 	RetryAfterSeconds     int64             `json:"retry_after_seconds,omitempty"`
-	ReservationID         *uuid.UUID        `json:"reservation_id,omitempty"`
+	HoldExpiresAt         *time.Time        `json:"hold_expires_at,omitempty"`
 	Caps                  []money.CapResult `json:"caps,omitempty"`
 }
 
@@ -330,12 +360,9 @@ const authorizeHoldSource = "authorize"
 // invocation; the reconcile/orphan-hold sweeper (#243) is the backstop.
 const defaultAuthorizeHoldTTL = 15 * time.Minute
 
-// AuthorizeAndHold runs the spend-policy decision + prepaid available-balance
-// gate AND, when allowed, places the hold — ATOMICALLY, in one transaction
-// (issue #235/#247). Unlike AuthorizeSpend (a read-only decision) followed by a
-// separate HoldCredits, this cannot let two concurrent authorizes both pass on
-// the same available balance: the balance row is locked for the duration of the
-// decision + hold. Idempotent on RequestID.
+// AuthorizeAndHold runs the spend-policy decision + prepaid/arrears capacity
+// gate under the per-customer money lock. The actual in-flight reservation lives
+// outside the durable money ledger in the #505 Redis hold model.
 func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequest) (*AuthorizeAndHoldResult, error) {
 	if req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
@@ -350,6 +377,10 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 	req.RequestID = strings.TrimSpace(req.RequestID)
 	if req.RequestID == "" {
 		return nil, fmt.Errorf("request_id required")
+	}
+	req.InvokerType = strings.TrimSpace(req.InvokerType)
+	if req.EstimatedAmount > 0 && req.InvokerType != string(identity.InvokerTypePayer) && req.InvokerType != string(identity.InvokerTypeDelegated) {
+		return nil, fmt.Errorf("invoker_type must be payer or delegated")
 	}
 	expires := req.ExpiresAt
 	if expires.IsZero() {
@@ -382,9 +413,39 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 	if r := remainingTodayCents(out.Decision.Caps); r != nil {
 		res.RemainingTodayAmount = r
 	}
-	if out.Hold != nil {
-		id := out.Hold.ID
-		res.ReservationID = &id
+	if out.Decision.Allowed && req.EstimatedAmount > 0 {
+		store, err := s.holdStore()
+		if err != nil {
+			return nil, err
+		}
+		mid, err := serviceMerchantID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		allowed, _, err := store.Place(ctx, holds.Hold{
+			MerchantID:      mid,
+			RequestID:       req.RequestID,
+			CustomerID:      req.CustomerID.UUID().String(),
+			Invoker:         strings.TrimSpace(req.Invoker),
+			InvokerType:     req.InvokerType,
+			Currency:        currency,
+			EstimatedAmount: req.EstimatedAmount,
+			Source:          authorizeHoldSource,
+			Resource:        strings.TrimSpace(req.Resource),
+			CreatedAt:       s.now().UTC(),
+			ExpiresAt:       expires,
+		}, out.CapacityAmount)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			res.Allowed = false
+			if res.DenyCode == "" {
+				res.DenyCode = money.DenyInsufficientBalance
+			}
+			return res, nil
+		}
+		res.HoldExpiresAt = &expires
 	}
 	return res, nil
 }
@@ -415,8 +476,8 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.C
 	if err != nil {
 		return err
 	}
-	// Pin a tenant connection so the upsert sets the RLS GUC under openrails_app (#227).
-	return s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+	// Pin a merchant connection so the upsert sets the RLS GUC under openrails_app (#227).
+	return s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		_, err := s.moneyService().UpsertAccountSettings(ctx, payer, currency, in)
 		return err
 	})
@@ -424,7 +485,8 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.C
 
 // SetCreditLimit sets the admin/operator arrears credit line for a payer (#489):
 // under billing_mode=arrears the balance may go negative up to creditLimit;
-// AdmitHold denies insufficient_credit when a new hold would exceed it. 0 = off.
+// AdmitHold denies insufficient_credit when a new hold would exceed remaining
+// capacity. 0 means no arrears capacity; prepaid balance may still be spent.
 // OPERATOR-only — deliberately separate from SetCreditAccountSettings (the
 // self-serve surface): a subject cannot raise its own credit line.
 func (s *Service) SetCreditLimit(ctx context.Context, payer identity.CustomerID, currency string, creditLimit int64) error {
@@ -438,7 +500,7 @@ func (s *Service) SetCreditLimit(ctx context.Context, payer identity.CustomerID,
 	if err != nil {
 		return err
 	}
-	return s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+	return s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		return s.moneyService().SetCreditLimit(ctx, payer, currency, creditLimit)
 	})
 }
@@ -472,7 +534,7 @@ func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.C
 	return s.moneyService().GetAccountSettingsForCustomer(ctx, payer, currency)
 }
 
-// GetCustomerCreditTransactions lists a tenant subject's money transactions for
+// GetCustomerCreditTransactions lists a merchant subject's money transactions for
 // the billing-account admin surface (issue #242). RLS-scoped.
 func (s *Service) GetCustomerCreditTransactions(ctx context.Context, payer identity.CustomerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
 	if payer.IsZero() {
@@ -484,7 +546,7 @@ func (s *Service) GetCustomerCreditTransactions(ctx context.Context, payer ident
 	}
 	var items []models.MoneyTransaction
 	var total int
-	err = s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
 		items, total, e = s.moneyService().GetTransactionsByCustomer(ctx, payer, currency, limit, offset)
 		return e

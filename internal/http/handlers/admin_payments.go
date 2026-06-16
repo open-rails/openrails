@@ -120,7 +120,7 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 		return nil, 0, errors.New("refund ledger unavailable: runtime has no database")
 	}
 	var prepared *adminRefundPrepared
-	err := r.State.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.State.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminRefundLockKey(paymentID.String())); err != nil {
 			return fmt.Errorf("lock refund: %w", err)
 		}

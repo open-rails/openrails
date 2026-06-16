@@ -44,7 +44,7 @@ func AdminPermissionRequiredMW(checker AdminPermissionChecker, perm string) rout
 				r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
 				return
 			}
-			allowed, err := checker.HasAdminPermission(r.Request.Context(), uc.Tenant, uc.UserID, perm)
+			allowed, err := checker.HasAdminPermission(r.Request.Context(), uc.Org, uc.UserID, perm)
 			if err != nil {
 				log.WithError(err).Error("failed to evaluate admin permission")
 				r.AbortJSON(http.StatusInternalServerError, "failed to check permission")

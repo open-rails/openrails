@@ -17,7 +17,7 @@ import (
 // TestTierSchedule_AutoGraduationByCumulativeSpend is the #476 acceptance test:
 // set a per-subject schedule ONCE, then deposits crossing thresholds auto-raise
 // the tier with NO host GraduateTier call; the legacy host crank no-ops; an
-// admin override sticks across deposits; and a second tenant is isolated.
+// admin override sticks across deposits; and a second merchant is isolated.
 func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
@@ -73,18 +73,18 @@ func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 	require.Equal(t, "vip", tier(), "admin override wins over the schedule")
 }
 
-// TestTierSchedule_MultiTenantIsolation confirms a tenant-wide default schedule
-// in one tenant does not affect a payer in another tenant.
+// TestTierSchedule_MultiTenantIsolation confirms a merchant-wide default schedule
+// in one merchant does not affect a payer in another merchant.
 func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 	svc, pool, _, _, _ := moneyInEnv(t)
 	ctx := context.Background()
 
 	// Two distinct tenants, each with its own payer.
-	tA := dbtest.TestTenantID
-	ctxA := dbtest.WithTestTenant(ctx)
+	tA := dbtest.TestMerchantID
+	ctxA := dbtest.WithTestMerchant(ctx)
 	payerA := identity.CustomerIDFromString(uuid.NewString())
 
-	// Tenant B (a second, isolated tenant row).
+	// Merchant B (a second, isolated merchant row).
 	tenantB := uuid.New()
 	slugB := "tier-iso-" + tenantB.String()[:8]
 	_, err := pool.Exec(ctx,
@@ -107,7 +107,7 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 	})
 	_ = tA
 
-	// Tenant A: a tenant-wide default schedule with a low tier1 threshold.
+	// Merchant A: a merchant-wide default schedule with a low tier1 threshold.
 	require.NoError(t, svc.SetTierSchedule(ctxA, identity.CustomerID{}, money.DefaultCurrency, []money.TierThreshold{
 		{Tier: "free", MinPaidAmount: 0}, {Tier: "tier1", MinPaidAmount: 1_000},
 	}))
@@ -124,11 +124,11 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 	depA(2_000)
 	tierA, err := svc.GetTier(ctxA, payerA, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, "tier1", tierA, "tenant A's schedule graduates payer A")
+	require.Equal(t, "tier1", tierA, "merchant A's schedule graduates payer A")
 
-	// Tenant B has NO schedule — a deposit of the same size does NOT graduate.
+	// Merchant B has NO schedule — a deposit of the same size does NOT graduate.
 	depB(2_000)
 	tierB, err := svc.GetTier(ctxB, payerB, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, "", tierB, "tenant B has no schedule — no auto-graduation")
+	require.Equal(t, "", tierB, "merchant B has no schedule — no auto-graduation")
 }

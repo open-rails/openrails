@@ -11,30 +11,30 @@ import (
 	"github.com/open-rails/openrails/internal/http/request/ginreq"
 )
 
-// ServiceRoutePrefix is the path under the tenant-scoped public API where
+// ServiceRoutePrefix is the path under the merchant-scoped public API where
 // service token-authenticated server-to-server billing operations live (issue #222). It
 // REPLACES the retired private/mTLS service listener: machine callers present an
 // OpenRails-issued tenant service token as a Bearer token against this public surface. The
 // acting tenant is bound by the service token's owning tenant, not the URL.
 const ServiceRoutePrefix = "/service"
 
-// SelfRoutePrefix is the path under the tenant-scoped public API where
+// SelfRoutePrefix is the path under the merchant-scoped public API where
 // browser-direct SELF-SERVICE billing operations live (issue #222 browser
-// tier). A tenant's host frontend mints a short-lived DELEGATED ACCESS TOKEN for
+// tier). A merchant's host frontend mints a short-lived DELEGATED ACCESS TOKEN for
 // the logged-in end-user and the browser presents it as a Bearer token directly
 // against this surface. The acting user is the token's `delegated_sub` and the
 // acting tenant is bound by the token's `tenant` claim — never the URL.
 const SelfRoutePrefix = "/self"
 
-// TenantAdminRoutePrefix is the path under the tenant-scoped public API where
-// browser-direct TENANT-ADMIN billing operations live (issue #259). A tenant's
+// MerchantAdminRoutePrefix is the path under the merchant-scoped public API where
+// browser-direct MERCHANT-ADMIN billing operations live (issue #259). A merchant's
 // host frontend mints a FEDERATED, TENANT-SIGNED delegated access token carrying
-// `openrails:tenant:*` permissions for one of its ADMIN users; the browser
+// `openrails:merchant:*` permissions for one of its ADMIN users; the browser
 // presents it as a Bearer token directly against this surface to act on ANY user
 // WITHIN the token's tenant via the `:user_id` path param. The acting admin is
 // the token's `delegated_sub` (recorded for audit) and the acting tenant is
 // pinned from the token's validated issuer — never the URL.
-const TenantAdminRoutePrefix = "/tenant-admin"
+const MerchantAdminRoutePrefix = "/merchant-admin"
 
 func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -43,11 +43,11 @@ func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFu
 }
 
 // RegisterServiceRoutes mounts the server-to-server billing surface on a
-// tenant-scoped PUBLIC route group authenticated by OpenRails-issued tenant service tokens
+// merchant-scoped PUBLIC route group authenticated by OpenRails-issued tenant service tokens
 // (issue #222). This replaces the retired private/mTLS listener and its
 // certificate-scope model: every operation is gated by a service token permission from the
 // canonical colon-form OpenRails permission catalog, and the acting tenant is the
-// service token's owning tenant (pinned by ServiceTokenRequired before any tenant-owned DB access).
+// service token's owning tenant (pinned by ServiceTokenRequired before any merchant-owned DB access).
 //
 // oatMW must authenticate the service token (typically ginmw.ServiceTokenRequired); it pins the
 // resolved tenant + permissions onto the context that the per-route
@@ -58,10 +58,10 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	}
 
 	group.Use(oatMW)
-	// Pin a tenant-scoped DB connection AFTER the service token resolves the tenant, so RLS
-	// constrains every tenant-owned query (issue #227).
+	// Pin a merchant-scoped DB connection AFTER the service token resolves the tenant, so RLS
+	// constrains every merchant-owned query (issue #227).
 	if rt != nil && rt.DB != nil {
-		group.Use(ginmw.TenantDBConn(rt.DB))
+		group.Use(ginmw.MerchantDBConn(rt.DB))
 	}
 
 	// #480/#481: federated delegated-token issuers are no longer an OpenRails-owned
@@ -165,7 +165,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	credits.GET("/transactions/lookup", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
 	credits.GET("/invokers/:invoker", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
 
-	// Tenant billing-account admin surface (issue #242): configure prepaid|arrears
+	// Merchant billing-account admin surface (issue #242): configure prepaid|arrears
 	// mode + spend caps + auto-top-up, read settings, and list usage. Tensorhub's
 	// billing-admin proxies to these with its service service token; OpenRails owns the model.
 	creditsRead := ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead)
@@ -176,7 +176,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 }
 
 // RegisterSelfServiceRoutes mounts the browser-direct SELF-SERVICE billing
-// surface on a tenant-scoped PUBLIC route group authenticated by a browser's
+// surface on a merchant-scoped PUBLIC route group authenticated by a browser's
 // DELEGATED ACCESS TOKEN (issue #222 browser-tier foundation). It reuses the
 // existing user-facing handlers — they all read the acting user via
 // r.GetUser(), which delegatedMW binds to the token's `delegated_sub` — so every
@@ -194,10 +194,10 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	}
 
 	group.Use(delegatedMW)
-	// Pin a tenant-scoped DB connection AFTER the delegated token resolves the
-	// tenant, so RLS constrains every tenant-owned query (issue #227).
+	// Pin a merchant-scoped DB connection AFTER the delegated token resolves the
+	// tenant, so RLS constrains every merchant-owned query (issue #227).
 	if rt != nil && rt.DB != nil {
-		group.Use(ginmw.TenantDBConn(rt.DB))
+		group.Use(ginmw.MerchantDBConn(rt.DB))
 	}
 
 	read := ginmw.RequireDelegatedPermission(controlplane.PermSelfBillingRead)
@@ -298,9 +298,9 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	funding.GET("/:id", read, wrap(httphandlers.GetUSDCFundingSession))
 }
 
-// RegisterTenantAdminRoutes mounts the browser-direct TENANT-ADMIN billing
-// surface on a tenant-scoped PUBLIC route group authenticated by a FEDERATED,
-// TENANT-SIGNED delegated access token carrying `openrails:tenant:*` permissions
+// RegisterMerchantAdminRoutes mounts the browser-direct MERCHANT-ADMIN billing
+// surface on a merchant-scoped PUBLIC route group authenticated by a FEDERATED,
+// TENANT-SIGNED delegated access token carrying `openrails:merchant:*` permissions
 // (issue #259). Unlike the self-service surface (which has no `:user_id` and acts
 // only on the token's own subject), these routes act on ANY user WITHIN the
 // token's tenant via the `:user_id` path param.
@@ -311,40 +311,40 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 //   - the acting admin is r.GetUser() == the token's `delegated_sub` (so audit
 //     fields like EntitlementGrant.GrantedBy record the acting admin),
 //   - the tenant is pinned onto the request context by delegatedMW from the
-//     token's validated issuer, so every tenant-owned query is scoped to that
+//     token's validated issuer, so every merchant-owned query is scoped to that
 //     tenant (RLS-enforced, #227). A `:user_id` belonging to another tenant is
 //     therefore unreachable — fail closed, no cross-tenant access.
 //
 // delegatedMW must authenticate the delegated token (ginmw.DelegatedSelfRequired);
 // it pins the resolved tenant + acting admin + tenant-permissions onto the
 // context that the per-route RequireDelegatedPermission gates and handlers read.
-func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
+func RegisterMerchantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
 
 	group.Use(delegatedMW)
-	// Pin a tenant-scoped DB connection AFTER the delegated token resolves the
-	// tenant, so RLS constrains every tenant-owned query (issue #227).
+	// Pin a merchant-scoped DB connection AFTER the delegated token resolves the
+	// tenant, so RLS constrains every merchant-owned query (issue #227).
 	if rt != nil && rt.DB != nil {
-		group.Use(ginmw.TenantDBConn(rt.DB))
+		group.Use(ginmw.MerchantDBConn(rt.DB))
 	}
 
-	read := ginmw.RequireDelegatedPermission(controlplane.PermTenantBillingRead)
-	subRead := ginmw.RequireDelegatedPermission(controlplane.PermTenantBillingRead)
-	entWrite := ginmw.RequireDelegatedPermission(controlplane.PermTenantEntitlementsWrite)
-	payWrite := ginmw.RequireDelegatedPermission(controlplane.PermTenantPaymentsWrite)
-	subWrite := ginmw.RequireDelegatedPermission(controlplane.PermTenantSubscriptionsWrite)
-	metricsRead := ginmw.RequireDelegatedPermission(controlplane.PermTenantMetricsRead)
-	secretsList := ginmw.RequireDelegatedPermission(controlplane.PermTenantSecretsList)
-	secretsWrite := ginmw.RequireDelegatedPermission(controlplane.PermTenantSecretsWrite)
-	secretsDelete := ginmw.RequireDelegatedPermission(controlplane.PermTenantSecretsDelete)
-	secretsTest := ginmw.RequireDelegatedPermission(controlplane.PermTenantSecretsTest)
+	read := ginmw.RequireDelegatedPermission(controlplane.PermMerchantBillingRead)
+	subRead := ginmw.RequireDelegatedPermission(controlplane.PermMerchantBillingRead)
+	entWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantEntitlementsWrite)
+	payWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantPaymentsWrite)
+	subWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantSubscriptionsWrite)
+	metricsRead := ginmw.RequireDelegatedPermission(controlplane.PermMerchantMetricsRead)
+	secretsList := ginmw.RequireDelegatedPermission(controlplane.PermMerchantSecretsList)
+	secretsWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantSecretsWrite)
+	secretsDelete := ginmw.RequireDelegatedPermission(controlplane.PermMerchantSecretsDelete)
+	secretsTest := ginmw.RequireDelegatedPermission(controlplane.PermMerchantSecretsTest)
 
-	// Tenant metrics (issue #259 + #232): a tenant admin reads THEIR OWN tenant's
-	// analytics. The metrics queries are tenant-scoped to the request's tenant
+	// Merchant metrics (issue #259 + #232): a merchant admin reads THEIR OWN merchant's
+	// analytics. The metrics queries are merchant-scoped to the request's tenant
 	// (resolved from the delegated token's issuer + pinned above), so these never
-	// expose another tenant's numbers — cross-tenant aggregation is the separate
+	// expose another merchant's numbers — cross-tenant aggregation is the separate
 	// platform-superadmin path, not reachable here.
 	metrics := group.Group("/metrics")
 	metrics.GET("/summary", metricsRead, wrap(httphandlers.GetAdminMetricsSummary))
@@ -354,20 +354,20 @@ func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	metrics.GET("/churn", metricsRead, wrap(httphandlers.GetAdminMetricsChurn))
 
 	secretGroup := group.Group("/secrets")
-	secretGroup.GET("", secretsList, tenantSecretListHandler(rt))
-	secretGroup.GET("/registry", secretsList, tenantSecretRegistryHandler())
-	secretGroup.PUT("/*name", secretsWrite, tenantSecretPutHandler(rt))
-	secretGroup.DELETE("/*name", secretsDelete, tenantSecretDeleteHandler(rt))
-	secretGroup.POST("/validate/*name", secretsTest, tenantSecretValidateHandler(rt))
+	secretGroup.GET("", secretsList, merchantSecretListHandler(rt))
+	secretGroup.GET("/registry", secretsList, merchantSecretRegistryHandler())
+	secretGroup.PUT("/*name", secretsWrite, merchantSecretPutHandler(rt))
+	secretGroup.DELETE("/*name", secretsDelete, merchantSecretDeleteHandler(rt))
+	secretGroup.POST("/validate/*name", secretsTest, merchantSecretValidateHandler(rt))
 
-	// Tenant-wide operational lists. They reuse admin handlers, but the delegated
+	// Merchant-wide operational lists. They reuse admin handlers, but the delegated
 	// middleware pins the tenant before RLS-aware queries run.
 	group.GET("/repair-alerts", read, wrap(httphandlers.GetAdminRepairAlerts))
 	group.GET("/manual-rebill-attempts", read, wrap(httphandlers.GetAdminManualRebillAttempts))
 
 	users := group.Group("/users/:user_id")
 
-	// Reads — the tenant-admin billing:read capability.
+	// Reads — the merchant-admin billing:read capability.
 	users.GET("", read, wrap(httphandlers.GetAdminUserBillingProfile))
 	users.GET("/payments", read, wrap(httphandlers.GetAdminUserPayments))
 	users.GET("/entitlements", read, wrap(httphandlers.GetAdminUserEntitlements))
@@ -384,7 +384,7 @@ func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	users.POST("/payments/off-channel", payWrite, wrap(httphandlers.AdminCreateOffChannelPayment))
 	group.POST("/payments/:id/refund", payWrite, wrap(httphandlers.AdminRefundPayment))
 
-	// Subscriptions: a tenant admin may cancel a subscription owned by a user in
+	// Subscriptions: a merchant admin may cancel a subscription owned by a user in
 	// its tenant. Subscriptions are addressed by id; the handler operates within
 	// the pinned tenant, so a sub outside the tenant is unreachable (fail closed).
 	subs := group.Group("/subscriptions")

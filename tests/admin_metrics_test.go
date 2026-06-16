@@ -78,7 +78,7 @@ func seedClickHouseDailyMetrics(t *testing.T, suite *TestContainerSuite, amount 
 	scheduled := int64(0)
 	entitlements := int64(1)
 	require.NoError(t, batch.Append(
-		time.Now().UTC(), "usd", dbtest.TestTenantID.String(),
+		time.Now().UTC(), "usd", dbtest.TestMerchantID.String(),
 		amount, int64(0), int64(0), int64(0),
 		amount, amount,
 		int64(1), int64(0), amount,

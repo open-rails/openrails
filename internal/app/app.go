@@ -32,7 +32,7 @@ type App struct {
 	// the browser-direct self-service surface (issue #339): the host verifies
 	// the incoming credential itself and supplies the explicitly mapped
 	// {tenant, subject, permissions} principal. When set, the standalone/gin
-	// server mounts /v1/self/* + /v1/tenant-admin/* authenticated by this seam
+	// server mounts /v1/self/* + /v1/merchant-admin/* authenticated by this seam
 	// even without a control plane.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 

@@ -17,13 +17,13 @@ import (
 // Release -> "released" (counts against neither).
 //
 // Idempotency is enforced by a unique index on
-// (tenant_id, customer_id, invoker, currency, source, source_id): a replayed
+// (merchant_id, customer_id, invoker, currency, source, source_id): a replayed
 // Reserve returns the existing row rather than double-reserving.
 type BudgetReservation struct {
 	ID uuid.UUID `json:"id"`
-	// MerchantID scopes this row to a tenant / billing namespace (issue #223/#227).
-	MerchantID uuid.UUID `json:"tenant_id"`
-	// CustomerID is the tenant subject the budget is charged against (issue #221, the payer).
+	// MerchantID scopes this row to a merchant / billing namespace (issue #223/#227).
+	MerchantID uuid.UUID `json:"merchant_id"`
+	// CustomerID is the merchant subject the budget is charged against (issue #221, the payer).
 	CustomerID uuid.UUID `json:"customer_id"`
 	// Invoker is the caller-supplied principal string whose spend the windows cap.
 	Invoker string `json:"invoker"`

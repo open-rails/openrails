@@ -37,17 +37,17 @@ func LooksLikeJWT(token string) bool {
 // auth produces — so the existing #481 role-based merchant authz runs unchanged.
 //
 // AuthKit's verifier resolves the principal's STORED authority from the VALIDATED
-// `iss` (its registered remote_application -> assigned tenant roles + direct
+// `iss` (its registered remote_application -> assigned org roles + direct
 // permissions); the token's own self-claimed permissions/roles are IGNORED. The
 // merchant the caller administers is resolved by ROLE on the merchant's
-// owner_tenant_id (#481), never by an identity-equation — exactly the
+// owner_org_id (#481), never by an identity-equation — exactly the
 // service-token model.
 //
 // Returns:
 //   - ErrNotRemoteApplicationToken when the token verifies but is not a
 //     remote_application self-token (caller falls through / rejects),
 //   - ErrDelegatedInvalid for any verification failure (sanitized),
-//   - ErrServiceTokenMerchantUnresolved when the principal's tenant owns no
+//   - ErrServiceTokenMerchantUnresolved when the principal's org owns no
 //     active merchant (fail closed).
 func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token string) (*ResolvedServiceToken, error) {
 	if c == nil || c.delegatedVerifier == nil {
@@ -63,47 +63,58 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 	// validated `iss`; self-claimed authority is never honored.
 	cl, err := c.delegatedVerifier.Verify(token)
 	if err != nil {
+		if isRemoteApplicationWrongType(err) {
+			return nil, ErrNotRemoteApplicationToken
+		}
 		return nil, ErrDelegatedInvalid
 	}
 	if !cl.IsRemoteApplication() {
 		return nil, ErrNotRemoteApplicationToken
 	}
 
-	// #481: authorize by the principal's role on a merchant's owner_tenant_id. The
-	// principal's STORED tenant memberships (Claims.Tenant slug) name the owning
-	// AuthKit tenant; resolve the merchant it owns. Authority is the resolved
+	// #481: authorize by the principal's role on a merchant's owner_org_id. The
+	// principal's STORED org memberships (Claims.Org slug) name the owning
+	// AuthKit org; resolve the merchant it owns. Authority is the resolved
 	// role/perms, never the token's self-claims.
-	mid, mslug, ownerTenantID, err := c.merchantForRemoteApplication(ctx, cl)
+	mid, mslug, ownerOrgID, err := c.merchantForRemoteApplication(ctx, cl)
 	if err != nil {
 		return nil, err
 	}
 
 	return &ResolvedServiceToken{
-		OwnerTenantID:   ownerTenantID,
-		OwnerTenantSlug: strings.TrimSpace(cl.Org),
-		MerchantID:      mid,
-		MerchantSlug:    mslug,
-		Permissions:     append([]string(nil), cl.Permissions...),
+		OwnerOrgID:   ownerOrgID,
+		OwnerOrgSlug: strings.TrimSpace(cl.Org),
+		MerchantID:   mid,
+		MerchantSlug: mslug,
+		Permissions:  append([]string(nil), cl.Permissions...),
 		// A JWKS principal carries merchant-WIDE authority over the merchant its
-		// owning tenant owns; scope it to that merchant resource so subject-scope
+		// owning org owns; scope it to that merchant resource so subject-scope
 		// checks (AllowsCustomer) behave like a merchant-wide service token.
 		Resources: []authcore.ServiceTokenResource{MerchantResource(mid)},
 	}, nil
 }
 
+func isRemoteApplicationWrongType(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.TrimSpace(err.Error())
+	return msg == "access_token_wrong_typ" || msg == "delegated_access_wrong_typ"
+}
+
 // merchantForRemoteApplication resolves the OpenRails merchant a JWKS principal
-// administers (#481), by ROLE on the owning AuthKit tenant: the principal's
-// STORED tenant memberships -> the AuthKit tenant uuid -> the merchant whose
-// owner_tenant_id is that uuid. Returns the merchant id/slug and the resolved
-// owner_tenant_id (the caller's authority anchor). Fails closed when no
+// administers (#481), by ROLE on the owning AuthKit org: the principal's
+// STORED org memberships -> the AuthKit org uuid -> the merchant whose
+// owner_org_id is that uuid. Returns the merchant id/slug and the resolved
+// owner_org_id (the caller's authority anchor). Fails closed when no
 // membership owns an active merchant.
 func (c *ControlPlane) merchantForRemoteApplication(ctx context.Context, cl authhttp.Claims) (merchant.ID, string, string, error) {
 	if c == nil || c.Core() == nil || c.pool == nil {
 		return merchant.ID{}, "", "", errors.New("controlplane: control plane unavailable for remote_application resolution")
 	}
 
-	// The principal's assigned tenant slug(s). Claims.Tenant is the first
-	// membership; AuthKit surfaces a single membership as Tenant. Resolve its
+	// The principal's assigned org slug(s). Claims.Org is the first
+	// membership; AuthKit surfaces a single membership as Org. Resolve its
 	// AuthKit uuid, then the merchant owned by it.
 	slug := strings.TrimSpace(cl.Org)
 	if slug == "" {
@@ -113,7 +124,7 @@ func (c *ControlPlane) merchantForRemoteApplication(ctx context.Context, cl auth
 	if err != nil || t == nil {
 		return merchant.ID{}, "", "", ErrServiceTokenMerchantUnresolved
 	}
-	mid, mslug, err := c.merchantDirectoryRow(ctx, `owner_tenant_id = $1`, t.ID)
+	mid, mslug, err := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, t.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return merchant.ID{}, "", "", ErrServiceTokenMerchantUnresolved
 	}

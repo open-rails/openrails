@@ -18,11 +18,11 @@ import (
 func TestCustomCreditConsumeAndInvariant(t *testing.T) {
 	svc, _, payer, _, ctx := moneyInEnv(t)
 
-	// (1) define gold @ decimals=2, owned by the test tenant ("test" slug).
+	// (1) define gold @ decimals=2, owned by the test merchant ("test" slug).
 	ct, err := svc.DefineCustomCreditType(ctx, "gold", 2)
 	require.NoError(t, err)
 	require.Equal(t, int32(2), ct.Decimals)
-	unit := dbtest.TestTenantSlug + "/gold" // "test/gold"
+	unit := dbtest.TestMerchantSlug + "/gold" // "test/gold"
 
 	// ResolveUnit returns the custom decimals, not a built-in.
 	dec, builtin, err := svc.ResolveUnit(ctx, unit)

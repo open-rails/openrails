@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// BudgetWindowState is the per-(tenant, tenant subject, invoker, currency, window_key)
+// BudgetWindowState is the per-(merchant, merchant subject, invoker, currency, window_key)
 // fixed-window anchor row (#337, migration 005).
 //
 // Budget windows are FIXED with knowable reset boundaries, anchored to each
@@ -26,7 +26,7 @@ import (
 type BudgetWindowState struct {
 	ID uuid.UUID `json:"id"`
 
-	MerchantID uuid.UUID `json:"tenant_id"`
+	MerchantID uuid.UUID `json:"merchant_id"`
 
 	CustomerID uuid.UUID `json:"customer_id"`
 

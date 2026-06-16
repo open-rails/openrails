@@ -53,7 +53,7 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 	now := s.now()
 
 	var trx *models.MoneyTransaction
-	// Privileged (no-GUC) transaction: this path runs with explicit tenant_id
+	// Privileged (no-GUC) transaction: this path runs with explicit merchant_id
 	// predicates, matching the bun-era plain BeginTx.
 	err = s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
@@ -86,7 +86,12 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 			Amount: amount, TransactionType: txOwedAccrual, Status: "posted",
 			Source: source, SourceID: &sourceID, CreatedAt: now, UpdatedAt: now,
 		}
-		return q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(trx))
+		if err := q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(trx)); err != nil {
+			return err
+		}
+		return insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+sourceID, nil, amount, now, map[string]any{
+			"source": source,
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -111,10 +116,11 @@ func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, 
 
 // SetCreditLimit sets the admin/operator arrears credit line for a payer (#489):
 // under billing_mode=arrears the balance may go negative up to creditLimit;
-// AdmitHold denies insufficient_credit when a new hold would exceed it. 0 turns
-// the credit line OFF (prepaid/existing-arrears behavior). This is OPERATOR-only
-// — deliberately NOT part of the self-serve UpsertAccountSettings surface. It
-// ensures a settings row exists, then stamps the limit.
+// AdmitHold denies insufficient_credit when a new hold would exceed remaining
+// capacity. 0 means no arrears capacity, although prepaid balance may still be
+// spent. This is OPERATOR-only — deliberately NOT part of the self-serve
+// UpsertAccountSettings surface. It ensures a settings row exists, then stamps
+// the limit.
 func (s *MoneyService) SetCreditLimit(ctx context.Context, payer identity.CustomerID, currency string, creditLimit int64) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
@@ -176,13 +182,22 @@ type arrearsAccount struct {
 	PaymentMethodID *uuid.UUID
 }
 
+type invoiceArrearsAccount struct {
+	InvoiceID       uuid.UUID
+	MerchantID      uuid.UUID
+	CustomerID      uuid.UUID
+	Currency        string
+	AmountDue       int64
+	PaymentMethodID *uuid.UUID
+}
+
 // ChargeOutstanding collects outstanding owed for arrears accounts by charging
 // the card on file. When minThreshold > 0 only accounts owing at least that
 // much are charged (the threshold trigger, e.g. $500); minThreshold <= 0
-// charges every account with owed > 0 (the month-end sweep). The charge is
-// idempotent per (payer, owed-snapshot). On success the owed is reduced by the
-// charged amount and an owed_payment row is recorded; declines leave the owed in
-// place for the next run. Returns the number of accounts successfully charged. (#241)
+// charges every account with owed > 0 (the month-end sweep). Invoiced debt is
+// collected first and payments are allocated to invoice_id; legacy uninvoiced
+// owed balances remain as a fallback until #506 fully removes the live owed
+// counter. Returns the number of successful invoice/account charges. (#241/#506)
 func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, minThreshold int64) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
@@ -195,6 +210,30 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 		return 0, err
 	}
 	tenantID := tid.UUID()
+	invoiceRows, err := s.db.Gen(ctx).ListChargeableOpenInvoices(ctx, gen.ListChargeableOpenInvoicesParams{
+		MerchantID: tenantID, MinThreshold: minThreshold,
+	})
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, r := range invoiceRows {
+		ok, err := s.chargeOneOpenInvoice(ctx, charger, invoiceArrearsAccount{
+			InvoiceID:       r.ID,
+			MerchantID:      r.MerchantID,
+			CustomerID:      r.CustomerID,
+			Currency:        r.Currency,
+			AmountDue:       r.AmountDue,
+			PaymentMethodID: r.AutoTopupPaymentMethodID,
+		})
+		if err != nil {
+			return count, err
+		}
+		if ok {
+			count++
+		}
+	}
+
 	genRows, err := s.db.Gen(ctx).ListChargeableArrearsMoneyAccounts(ctx, gen.ListChargeableArrearsMoneyAccountsParams{
 		MerchantID: tenantID, MinThreshold: minThreshold,
 	})
@@ -212,7 +251,6 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 		})
 	}
 
-	count := 0
 	for _, r := range rows {
 		ok, err := s.chargeOneOutstanding(ctx, charger, r)
 		if err != nil {
@@ -223,6 +261,155 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 		}
 	}
 	return count, nil
+}
+
+func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger, r invoiceArrearsAccount) (bool, error) {
+	payer := identity.CustomerID(r.CustomerID)
+	snapshot := r.AmountDue
+	if snapshot <= 0 || r.PaymentMethodID == nil {
+		return false, nil
+	}
+	if err := RequireBillingCurrency(normalizeCurrency(r.Currency)); err != nil {
+		return false, nil
+	}
+	key := fmt.Sprintf("invoice:%s:%d", r.InvoiceID, snapshot)
+	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
+		MerchantID:      r.MerchantID,
+		Payer:           payer,
+		Invoker:         payer.UUID().String(),
+		InvoiceID:       &r.InvoiceID,
+		PaymentMethodID: *r.PaymentMethodID,
+		AmountCents:     (snapshot + 9_999) / 10_000,
+		Currency:        normalizeCurrency(r.Currency),
+		IdempotencyKey:  key,
+		Description:     fmt.Sprintf("invoice %s", r.InvoiceID.String()),
+	})
+	if err != nil {
+		return false, err
+	}
+	now := s.now()
+	if res.Declined {
+		if err := s.recordInvoicePaymentAttempt(ctx, r, nil, "failed", optionalProcessor(res.Processor), optionalString(res.TransactionID), res.FailureCode, res.FailureMessage, now); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
+	charged := false
+	err = s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		n, uerr := q.ApplyInvoicePaymentSnapshot(ctx, gen.ApplyInvoicePaymentSnapshotParams{
+			MerchantID: r.MerchantID, CustomerID: r.CustomerID, InvoiceID: r.InvoiceID,
+			Snapshot: snapshot, Now: now,
+		})
+		if uerr != nil {
+			return uerr
+		}
+		if n == 0 {
+			return nil
+		}
+		if externalInvoiceID := optionalString(res.ExternalInvoiceID); externalInvoiceID != nil {
+			if _, err := q.SetInvoiceExternalID(ctx, gen.SetInvoiceExternalIDParams{
+				MerchantID:        r.MerchantID,
+				CustomerID:        r.CustomerID,
+				InvoiceID:         r.InvoiceID,
+				ExternalInvoiceID: externalInvoiceID,
+				Now:               now,
+			}); err != nil {
+				return err
+			}
+		}
+		if _, err := q.ReduceMoneyOutstandingOwedSnapshot(ctx, gen.ReduceMoneyOutstandingOwedSnapshotParams{
+			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency),
+			Snapshot: snapshot, Now: now,
+		}); err != nil {
+			return err
+		}
+		sid := key
+		trx := &models.MoneyTransaction{
+			ID: uuidutil.NewV7(), MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency), Invoker: r.CustomerID.String(),
+			Amount: -snapshot, TransactionType: txOwedPayment, Status: "posted",
+			Source: "invoice_charge", SourceID: &sid, InvoiceID: &r.InvoiceID, CreatedAt: now, UpdatedAt: now,
+		}
+		if err := q.InsertMoneyTransactionIfAbsent(ctx, gen.InsertMoneyTransactionIfAbsentParams(insertParamsFromTransaction(trx))); err != nil {
+			return err
+		}
+		storedTrx, err := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
+			MerchantID:      r.MerchantID,
+			CustomerID:      r.CustomerID,
+			Currency:        normalizeCurrency(r.Currency),
+			TransactionType: txOwedPayment,
+			Source:          "invoice_charge",
+			SourceID:        &sid,
+		})
+		if err != nil {
+			return err
+		}
+		processor := optionalProcessor(res.Processor)
+		processorPaymentID := optionalString(res.TransactionID)
+		if err := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
+			ID:                 uuidutil.NewV7(),
+			MerchantID:         r.MerchantID,
+			CustomerID:         r.CustomerID,
+			InvoiceID:          r.InvoiceID,
+			MoneyTransactionID: &storedTrx.ID,
+			Currency:           normalizeCurrency(r.Currency),
+			Amount:             snapshot,
+			Status:             "settled",
+			Processor:          processor,
+			ProcessorPaymentID: processorPaymentID,
+			AttemptedAt:        now,
+			SettledAt:          &now,
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		}); err != nil {
+			return err
+		}
+		charged = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return charged, nil
+}
+
+func (s *MoneyService) recordInvoicePaymentAttempt(ctx context.Context, r invoiceArrearsAccount, trxID *uuid.UUID, status string, processor, processorPaymentID, failureCode, failureMessage *string, now time.Time) error {
+	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		return gen.New(tx).InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
+			ID:                 uuidutil.NewV7(),
+			MerchantID:         r.MerchantID,
+			CustomerID:         r.CustomerID,
+			InvoiceID:          r.InvoiceID,
+			MoneyTransactionID: trxID,
+			Currency:           normalizeCurrency(r.Currency),
+			Amount:             r.AmountDue,
+			Status:             status,
+			Processor:          processor,
+			ProcessorPaymentID: processorPaymentID,
+			FailureCode:        failureCode,
+			FailureMessage:     failureMessage,
+			AttemptedAt:        now,
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		})
+	})
+}
+
+func optionalProcessor(processor string) *string {
+	processor = normalizeProcessor(processor)
+	if processor == "" {
+		return nil
+	}
+	return &processor
+}
+
+func optionalString(v string) *string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 func (s *MoneyService) chargeOneOutstanding(ctx context.Context, charger Charger, r arrearsAccount) (bool, error) {
@@ -240,10 +427,12 @@ func (s *MoneyService) chargeOneOutstanding(ctx context.Context, charger Charger
 	// Owed is in the ledger currency's internal precision; the processor charges whole cents
 	// (1 cent = 10,000 internal units). Round up so we never under-collect.
 	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
+		MerchantID:      r.MerchantID,
 		Payer:           payer,
 		Invoker:         payer.UUID().String(),
 		PaymentMethodID: *r.PaymentMethodID,
 		AmountCents:     (snapshot + 9_999) / 10_000,
+		Currency:        normalizeCurrency(r.Currency),
 		IdempotencyKey:  key,
 		Description:     "outstanding balance",
 	})

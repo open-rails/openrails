@@ -3,11 +3,11 @@
 --
 -- Final structural state of the billing schema, hand-written in topological
 -- order (a table follows every table it FKs to, so FKs are inline named
--- table-constraints). No "default tenant": merchant_id is REQUIRED on every
--- tenant-scoped table — uuid NOT NULL with NO default. Writers must stamp
+-- table-constraints). No "default merchant": merchant_id is REQUIRED on every
+-- merchant-scoped table — uuid NOT NULL with NO default. Writers must stamp
 -- merchant_id explicitly; the RLS merchant_isolation policy enforces it against the
 -- app.merchant_id GUC. No seed rows are created here: merchants and custom credit
--- units are provisioned explicitly per-tenant, not seeded.
+-- units are provisioned explicitly per merchant, not seeded.
 -- =============================================================================
 
 SET statement_timeout = '300s';
@@ -81,7 +81,7 @@ CREATE TABLE openrails.merchants (
     slug text NOT NULL,
     name text NOT NULL,
     status text DEFAULT 'active'::text NOT NULL,
-    owner_tenant_id text,
+    owner_org_id text,
     plan text,
     region text,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -98,14 +98,14 @@ CREATE TABLE openrails.merchants (
     CONSTRAINT merchants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'suspended'::text, 'deleted'::text])))
 );
 
-CREATE INDEX idx_merchants_owner_tenant_id ON openrails.merchants USING btree (owner_tenant_id) WHERE (owner_tenant_id IS NOT NULL);
+CREATE INDEX idx_merchants_owner_org_id ON openrails.merchants USING btree (owner_org_id) WHERE (owner_org_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_merchants_webhook_host ON openrails.merchants USING btree (lower(webhook_host)) WHERE (webhook_host IS NOT NULL);
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchants TO openrails_app;
 
 COMMENT ON TABLE openrails.merchants IS 'Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant.';
 COMMENT ON COLUMN openrails.merchants.slug IS 'Stable merchant slug used in merchant-scoped routes and resolution.';
-COMMENT ON COLUMN openrails.merchants.owner_tenant_id IS 'OWNERSHIP (not identity) FK to the AuthKit tenant (org) that owns/administers this merchant (#481). NULL in embedded (no AuthKit). One tenant owns MANY merchants; never used to resolve a merchant from a token.';
+COMMENT ON COLUMN openrails.merchants.owner_org_id IS 'OWNERSHIP (not identity) FK to the AuthKit org that owns/administers this merchant (#481). NULL in embedded (no AuthKit). One org owns MANY merchants; never used to resolve a merchant from a token.';
 COMMENT ON COLUMN openrails.merchants.billing_tier IS 'The platform''s OWN billing tier for this merchant (eats own dogfood, issue #225). Distinct from plan (free-form hosting metadata).';
 COMMENT ON COLUMN openrails.merchants.webhook_host IS 'Optional host an ingress uses to route inbound webhooks to this merchant. OpenRails verifies the signature AFTER merchant resolution (router is not the trust boundary).';
 
@@ -129,6 +129,11 @@ CREATE INDEX idx_customers_merchant ON openrails.customers USING btree (merchant
 CREATE UNIQUE INDEX uq_customers_merchant_org ON openrails.customers USING btree (merchant_id, org_id) WHERE (org_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_customers_merchant_issuer_subject ON openrails.customers USING btree (merchant_id, issuer, subject) WHERE ((org_id IS NULL) AND (issuer IS NOT NULL) AND (subject IS NOT NULL));
 
+ALTER TABLE ONLY openrails.customers FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE openrails.customers ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.customers USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.customers TO openrails_app;
 
 COMMENT ON TABLE openrails.customers IS 'OpenRails payable identity. id is the payable UUID; org-bound issuers resolve one customer per (merchant, org_id), org-less issuers resolve by (merchant, issuer, subject), and native/embedded callers may materialize the subject UUID directly as id.';
@@ -149,10 +154,15 @@ CREATE TABLE openrails.merchant_deks (
     CONSTRAINT pk_merchant_deks PRIMARY KEY (merchant_id)
 );
 
+ALTER TABLE ONLY openrails.merchant_deks FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE openrails.merchant_deks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.merchant_deks USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_deks TO openrails_app;
 
-COMMENT ON TABLE openrails.merchant_deks IS 'Wrapped per-tenant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = tenant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. GLOBAL control-plane table.';
-COMMENT ON COLUMN openrails.merchant_deks.wrapped_dek IS 'AES-256-GCM(master_key, tenant_dek): nonce(12) || ciphertext(32) || tag(16).';
+COMMENT ON TABLE openrails.merchant_deks IS 'Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned and RLS protected.';
+COMMENT ON COLUMN openrails.merchant_deks.wrapped_dek IS 'AES-256-GCM(master_key, merchant_dek): nonce(12) || ciphertext(32) || tag(16).';
 
 -- =============================================================================
 -- merchant_secrets
@@ -168,9 +178,14 @@ CREATE TABLE openrails.merchant_secrets (
     CONSTRAINT pk_merchant_secrets PRIMARY KEY (merchant_id, name)
 );
 
+ALTER TABLE ONLY openrails.merchant_secrets FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE openrails.merchant_secrets ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.merchant_secrets USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_secrets TO openrails_app;
 
-COMMENT ON TABLE openrails.merchant_secrets IS 'DB-backed per-tenant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. GLOBAL control-plane table.';
+COMMENT ON TABLE openrails.merchant_secrets IS 'DB-backed per-merchant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned and RLS protected.';
 
 -- =============================================================================
 -- merchant_exports
@@ -190,9 +205,14 @@ CREATE TABLE openrails.merchant_exports (
 
 CREATE INDEX idx_merchant_exports_merchant ON openrails.merchant_exports USING btree (merchant_id, created_at DESC);
 
+ALTER TABLE ONLY openrails.merchant_exports FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE openrails.merchant_exports ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.merchant_exports USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_exports TO openrails_app;
 
-COMMENT ON TABLE openrails.merchant_exports IS 'Tenant logical-export bookkeeping (issue #225). Tenant deletion is gated on a completed export row (export-before-delete).';
+COMMENT ON TABLE openrails.merchant_exports IS 'Merchant logical-export bookkeeping (issue #225). Merchant deletion is gated on a completed export row (export-before-delete). Merchant-owned and RLS protected.';
 
 -- =============================================================================
 -- merchant_credential_audit
@@ -212,9 +232,14 @@ CREATE TABLE openrails.merchant_credential_audit (
 
 CREATE INDEX idx_merchant_credential_audit_merchant ON openrails.merchant_credential_audit USING btree (merchant_id, created_at DESC);
 
+ALTER TABLE ONLY openrails.merchant_credential_audit FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE openrails.merchant_credential_audit ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.merchant_credential_audit USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_credential_audit TO openrails_app;
 
-COMMENT ON TABLE openrails.merchant_credential_audit IS 'Append-only audit log of per-tenant credential put/rotate/delete/test events (issue #225).';
+COMMENT ON TABLE openrails.merchant_credential_audit IS 'Append-only audit log of per-merchant credential put/rotate/delete/test events (issue #225). Merchant-owned and RLS protected.';
 
 -- =============================================================================
 -- products
@@ -603,6 +628,11 @@ CREATE UNIQUE INDEX idx_usdc_funding_sessions_idempotency ON openrails.usdc_fund
 CREATE INDEX idx_usdc_funding_sessions_provider_session ON openrails.usdc_funding_sessions USING btree (provider, provider_session_id) WHERE (provider_session_id IS NOT NULL);
 CREATE INDEX idx_usdc_funding_sessions_customer ON openrails.usdc_funding_sessions USING btree (merchant_id, customer_id, created_at DESC);
 
+ALTER TABLE ONLY openrails.usdc_funding_sessions FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE openrails.usdc_funding_sessions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.usdc_funding_sessions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.usdc_funding_sessions TO openrails_app;
 
 COMMENT ON TABLE openrails.usdc_funding_sessions IS 'External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.';
@@ -635,6 +665,11 @@ CREATE TABLE openrails.solana_subscriptions (
 
 CREATE INDEX idx_solana_subscriptions_due ON openrails.solana_subscriptions USING btree (merchant_id, next_pull_at) WHERE (status = 'active'::text);
 CREATE INDEX idx_solana_subscriptions_subscription_id ON openrails.solana_subscriptions USING btree (subscription_id);
+
+ALTER TABLE ONLY openrails.solana_subscriptions FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE openrails.solana_subscriptions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.solana_subscriptions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.solana_subscriptions TO openrails_app;
 
@@ -769,6 +804,7 @@ CREATE TABLE openrails.invoices (
     merchant_id uuid NOT NULL,
     customer_id uuid CONSTRAINT invoices_customer_id_not_null NOT NULL,
     currency text NOT NULL,
+    invoice_number text,
     period_from timestamp with time zone NOT NULL,
     period_to timestamp with time zone NOT NULL,
     usage_total bigint DEFAULT 0 NOT NULL,
@@ -776,14 +812,28 @@ CREATE TABLE openrails.invoices (
     owed_accrued bigint DEFAULT 0 NOT NULL,
     owed_paid bigint DEFAULT 0 NOT NULL,
     closing_balance bigint DEFAULT 0 NOT NULL,
+    subtotal_amount bigint DEFAULT 0 NOT NULL,
+    total_amount bigint DEFAULT 0 NOT NULL,
+    amount_paid bigint DEFAULT 0 NOT NULL,
+    amount_due bigint DEFAULT 0 NOT NULL,
     line_items jsonb DEFAULT '[]'::jsonb NOT NULL,
     money_movements jsonb DEFAULT '{}'::jsonb NOT NULL,
     status text DEFAULT 'draft'::text NOT NULL,
+    collection_method text DEFAULT 'charge_automatically'::text NOT NULL,
+    issued_at timestamp with time zone,
+    due_at timestamp with time zone,
+    paid_at timestamp with time zone,
+    voided_at timestamp with time zone,
+    uncollectible_at timestamp with time zone,
+    sent_at timestamp with time zone,
     finalized_at timestamp with time zone,
+    external_invoice_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT invoices_pkey PRIMARY KEY (id),
-    CONSTRAINT invoices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'finalized'::text, 'voided'::text]))),
+    CONSTRAINT invoices_amounts_nonneg_chk CHECK (((subtotal_amount >= 0) AND (total_amount >= 0) AND (amount_paid >= 0) AND (amount_due >= 0))),
+    CONSTRAINT invoices_collection_method_check CHECK ((collection_method = ANY (ARRAY['charge_automatically'::text, 'send_invoice'::text]))),
+    CONSTRAINT invoices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'open'::text, 'paid'::text, 'past_due'::text, 'voided'::text, 'uncollectible'::text, 'finalized'::text]))),
     CONSTRAINT invoices_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
 );
 
@@ -791,14 +841,92 @@ ALTER TABLE ONLY openrails.invoices FORCE ROW LEVEL SECURITY;
 
 CREATE INDEX idx_invoices_customer ON openrails.invoices USING btree (customer_id, period_from DESC);
 CREATE INDEX ix_invoices_payer ON openrails.invoices USING btree (merchant_id, customer_id, period_from DESC);
-CREATE UNIQUE INDEX uq_invoices_period ON openrails.invoices USING btree (merchant_id, customer_id, period_from, period_to);
+CREATE INDEX ix_invoices_open_due ON openrails.invoices USING btree (merchant_id, customer_id, currency, due_at) WHERE ((status = ANY (ARRAY['open'::text, 'past_due'::text])) AND (amount_due > 0));
+CREATE UNIQUE INDEX uq_invoices_period ON openrails.invoices USING btree (merchant_id, customer_id, currency, period_from, period_to);
 
 ALTER TABLE openrails.invoices ENABLE ROW LEVEL SECURITY;
 CREATE POLICY merchant_isolation ON openrails.invoices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoices TO openrails_app;
 
-COMMENT ON TABLE openrails.invoices IS 'Monthly itemized statements (issue #303). Line items rolled up from openrails.usage_events; money movements from the money ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.';
+COMMENT ON TABLE openrails.invoices IS 'Period invoices/statements. For arrears, an open invoice is the receivable and payments are allocated to it. Prepaid invoices remain informational receipts/statements.';
+COMMENT ON COLUMN openrails.invoices.amount_due IS 'Outstanding amount for this invoice in the row currency internal precision. Open arrears balance is derived from open/past-due invoices.';
+
+CREATE TABLE openrails.invoice_items (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    merchant_id uuid NOT NULL,
+    customer_id uuid CONSTRAINT invoice_items_customer_id_not_null NOT NULL,
+    currency text NOT NULL,
+    invoice_id uuid,
+    source_type text NOT NULL,
+    source_id text NOT NULL,
+    event_type text,
+    period_from timestamp with time zone NOT NULL,
+    period_to timestamp with time zone NOT NULL,
+    invoice_at timestamp with time zone NOT NULL,
+    quantity bigint DEFAULT 1 NOT NULL,
+    unit_amount bigint DEFAULT 0 NOT NULL,
+    amount bigint NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT invoice_items_pkey PRIMARY KEY (id),
+    CONSTRAINT invoice_items_amount_nonneg_chk CHECK ((amount >= 0)),
+    CONSTRAINT invoice_items_quantity_positive_chk CHECK ((quantity > 0)),
+    CONSTRAINT invoice_items_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'invoiced'::text, 'voided'::text]))),
+    CONSTRAINT invoice_items_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id),
+    CONSTRAINT invoice_items_invoice_fk FOREIGN KEY (invoice_id) REFERENCES openrails.invoices(id) ON DELETE SET NULL
+);
+
+ALTER TABLE ONLY openrails.invoice_items FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX ix_invoice_items_pending ON openrails.invoice_items USING btree (merchant_id, customer_id, currency, invoice_at) WHERE ((invoice_id IS NULL) AND (status = 'pending'::text));
+CREATE INDEX ix_invoice_items_invoice ON openrails.invoice_items USING btree (merchant_id, invoice_id);
+CREATE UNIQUE INDEX uq_invoice_items_source ON openrails.invoice_items USING btree (merchant_id, customer_id, currency, source_type, source_id);
+
+ALTER TABLE openrails.invoice_items ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.invoice_items USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoice_items TO openrails_app;
+
+COMMENT ON TABLE openrails.invoice_items IS 'Pending and invoiced billable items. Arrears usage creates pending items; invoice creation attaches them to a draft/open invoice.';
+
+CREATE TABLE openrails.invoice_payments (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    merchant_id uuid NOT NULL,
+    customer_id uuid CONSTRAINT invoice_payments_customer_id_not_null NOT NULL,
+    invoice_id uuid NOT NULL,
+    money_transaction_id uuid,
+    currency text NOT NULL,
+    amount bigint NOT NULL,
+    status text DEFAULT 'attempted'::text NOT NULL,
+    processor text,
+    processor_payment_id text,
+    failure_code text,
+    failure_message text,
+    attempted_at timestamp with time zone DEFAULT now() NOT NULL,
+    settled_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT invoice_payments_pkey PRIMARY KEY (id),
+    CONSTRAINT invoice_payments_amount_positive_chk CHECK ((amount > 0)),
+    CONSTRAINT invoice_payments_status_check CHECK ((status = ANY (ARRAY['attempted'::text, 'settled'::text, 'failed'::text]))),
+    CONSTRAINT invoice_payments_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id),
+    CONSTRAINT invoice_payments_invoice_fk FOREIGN KEY (invoice_id) REFERENCES openrails.invoices(id) ON DELETE CASCADE
+);
+
+ALTER TABLE ONLY openrails.invoice_payments FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX ix_invoice_payments_invoice ON openrails.invoice_payments USING btree (merchant_id, invoice_id, created_at DESC);
+CREATE UNIQUE INDEX uq_invoice_payments_money_transaction ON openrails.invoice_payments USING btree (merchant_id, money_transaction_id) WHERE (money_transaction_id IS NOT NULL);
+
+ALTER TABLE openrails.invoice_payments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.invoice_payments USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoice_payments TO openrails_app;
+
+COMMENT ON TABLE openrails.invoice_payments IS 'Payment attempts and settled payments allocated to a specific invoice.';
 
 -- =============================================================================
 -- linked_wallets
@@ -824,6 +952,11 @@ CREATE TABLE openrails.linked_wallets (
 );
 
 CREATE INDEX idx_linked_wallets_customer ON openrails.linked_wallets USING btree (merchant_id, customer_id);
+
+ALTER TABLE ONLY openrails.linked_wallets FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE openrails.linked_wallets ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.linked_wallets USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.linked_wallets TO openrails_app;
 
@@ -996,7 +1129,7 @@ COMMENT ON COLUMN openrails.budget_window_state.window_start IS 'Start of the mo
 
 CREATE TABLE openrails.budget_policies (
     id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL DEFAULT COALESCE((NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
+    merchant_id uuid NOT NULL,
     customer_id uuid CONSTRAINT budget_policies_customer_id_not_null NOT NULL,
     scope text NOT NULL,
     owner text NOT NULL,
@@ -1060,7 +1193,7 @@ COMMENT ON COLUMN openrails.tier_policies.policy IS 'JSONB tier policy: throughp
 
 CREATE TABLE openrails.tier_schedules (
     id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL DEFAULT COALESCE((NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
+    merchant_id uuid NOT NULL,
     customer_id uuid,
     currency text NOT NULL,
     owner text DEFAULT 'platform'::text NOT NULL,
@@ -1377,18 +1510,20 @@ CREATE TABLE openrails.money_transactions (
     merchant_id uuid NOT NULL,
     customer_id uuid CONSTRAINT money_transactions_customer_id_not_null NOT NULL,
     currency text NOT NULL,
+    invoice_id uuid,
     CONSTRAINT money_transactions_pkey PRIMARY KEY (id),
-    CONSTRAINT money_transactions_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
+    CONSTRAINT money_transactions_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id),
+    CONSTRAINT money_transactions_invoice_fk FOREIGN KEY (invoice_id) REFERENCES openrails.invoices(id)
 );
 
 ALTER TABLE ONLY openrails.money_transactions FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_money_holds_active_expires ON openrails.money_transactions USING btree (expires_at) WHERE ((transaction_type = 'hold'::text) AND (status = 'active'::text));
 CREATE INDEX idx_money_transactions_payer ON openrails.money_transactions USING btree (merchant_id, customer_id, created_at DESC);
 CREATE INDEX idx_money_transactions_payer_invoker ON openrails.money_transactions USING btree (merchant_id, customer_id, invoker_id, created_at DESC);
 CREATE INDEX idx_money_transactions_merchant_id ON openrails.money_transactions USING btree (merchant_id);
+CREATE INDEX ix_money_transactions_invoice ON openrails.money_transactions USING btree (merchant_id, invoice_id) WHERE (invoice_id IS NOT NULL);
 CREATE UNIQUE INDEX uniq_money_deposit_idem_payer ON openrails.money_transactions USING btree (merchant_id, customer_id, currency, source, source_id) WHERE ((transaction_type = 'deposit'::text) AND (source_id IS NOT NULL));
-CREATE UNIQUE INDEX uniq_money_hold_idem_payer ON openrails.money_transactions USING btree (merchant_id, customer_id, currency, source, source_id) WHERE (transaction_type = 'hold'::text);
+CREATE UNIQUE INDEX uniq_money_owed_payment_idem_payer ON openrails.money_transactions USING btree (merchant_id, customer_id, currency, source, source_id) WHERE ((transaction_type = 'owed_payment'::text) AND (source_id IS NOT NULL));
 CREATE UNIQUE INDEX uniq_money_withdrawal_idem_payer ON openrails.money_transactions USING btree (merchant_id, customer_id, currency, source, source_id) WHERE ((transaction_type = 'withdrawal'::text) AND (source_id IS NOT NULL));
 
 ALTER TABLE openrails.money_transactions ENABLE ROW LEVEL SECURITY;
@@ -1496,7 +1631,7 @@ COMMENT ON COLUMN openrails.money_settings.max_spend_per_month IS 'Optional mont
 COMMENT ON COLUMN openrails.money_settings.max_outstanding_owed_amount IS 'Optional arrears owed ceiling in the row currency internal precision; NULL = uncapped.';
 COMMENT ON COLUMN openrails.money_settings.low_balance_threshold IS 'Optional low-balance trigger in the row currency internal precision.';
 COMMENT ON COLUMN openrails.money_settings.outstanding_owed_amount IS 'Current arrears owed amount in the row currency internal precision.';
-COMMENT ON COLUMN openrails.money_settings.credit_limit_amount IS 'Admin-set arrears credit line in the row currency internal precision. 0 = off.';
+COMMENT ON COLUMN openrails.money_settings.credit_limit_amount IS 'Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.';
 COMMENT ON COLUMN openrails.money_settings.tier_source IS 'auto = tier maintained by tier_schedule auto-graduation; admin = explicit override that auto-graduation must not overwrite.';
 COMMENT ON COLUMN openrails.money_settings.verified_payment_method IS 'True once the account has a verified payment method (set after a successful $1 auth-and-void verification charge — issue #299). The charge itself is a separate slice.';
 COMMENT ON COLUMN openrails.money_settings.suspended_at IS 'When set, the account is suspended (issue #299). Admission-deny-on-suspended wiring is a separate slice.';

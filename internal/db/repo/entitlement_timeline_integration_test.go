@@ -173,11 +173,11 @@ func TestEntitlementRepo_CustomerQueries(t *testing.T) {
 	finiteSourceID := uuid.New()
 	indefiniteSourceID := uuid.New()
 
-	dbtest.EnsureTestTenant(ctx, t, pool)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
 	_, err = pool.Exec(ctx,
 		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
 		tenantSubjectID,
-		dbtest.TestTenantID.UUID(),
+		dbtest.TestMerchantID.UUID(),
 	)
 	require.NoError(t, err)
 

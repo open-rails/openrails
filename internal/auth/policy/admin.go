@@ -43,8 +43,8 @@ type PlatformSuperadminChecker interface {
 // caller carries no tenant context, it returns false — there is no
 // operator-tenant or DB-role fallback.
 func IsLiveAdmin(ctx context.Context, checker AdminPermissionChecker, uc authprovider.UserContext) (bool, error) {
-	if checker == nil || strings.TrimSpace(uc.UserID) == "" || strings.TrimSpace(uc.Tenant) == "" {
+	if checker == nil || strings.TrimSpace(uc.UserID) == "" || strings.TrimSpace(uc.Org) == "" {
 		return false, nil
 	}
-	return checker.HasAdminPermission(ctx, uc.Tenant, uc.UserID, PermAdmin)
+	return checker.HasAdminPermission(ctx, uc.Org, uc.UserID, PermAdmin)
 }

@@ -31,7 +31,7 @@ import (
 // credentials supplies a billingauth.DelegatedAuthenticator returning the
 // explicitly mapped {tenant, subject, permissions} principal, and the
 // standalone gin handler (pkg/embedded/gin.Handler over Runtime.Embedded())
-// mounts /v1/self/* + /v1/tenant-admin/* authenticated by it — no control
+// mounts /v1/self/* + /v1/merchant-admin/* authenticated by it — no control
 // plane required. For example:
 //
 //	opts.DelegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(
@@ -64,15 +64,15 @@ type Options struct {
 	// Leave false to drive workers yourself via Runtime.RunWorkers.
 	RunWorkers bool
 
-	// Tenant binds this embedded engine to a single tenant at construction
+	// Merchant binds this embedded engine to a single tenant at construction
 	// (#336): doujins/hentai0 set it to their 'doujins' tenant SLUG. There is
 	// no default tenant — leave it empty only if you resolve a tenant per
-	// request some other way, otherwise tenant-owned operations hard-fail. It
-	// is propagated to Config.Tenant in New; the slug is resolved to the
+	// request some other way, otherwise merchant-owned operations hard-fail. It
+	// is propagated to Config.Merchant in New; the slug is resolved to the
 	// internal tenant id once at bootstrap so the HTTP resolver and the
 	// Solana-secret seed pin it. To serve another tenant, construct another
 	// engine/client.
-	Tenant string
+	Merchant string
 }
 
 // HandlerOptions selects the HTTP route groups for Runtime.Handler. It is
@@ -87,7 +87,7 @@ type Runtime struct {
 	svc *service.Service
 
 	// tenantID is the engine's construction-time bound tenant (#336/#478),
-	// resolved once from Config.Tenant. The unified Client adapter injects it
+	// resolved once from Config.Merchant. The unified Client adapter injects it
 	// onto each call's context so an embedded host can call the service-token-
 	// equivalent surface with a plain context (the host IS the principal and is
 	// trusted for its own tenant); the standalone/gin surface still resolves the
@@ -105,10 +105,10 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}
 	// Bind the engine to its construction-time tenant (#336): propagate the
-	// slug to Config.Tenant so the HTTP resolver and tenant-owned boot work pin
+	// slug to Config.Merchant so the HTTP resolver and merchant-owned boot work pin
 	// it (resolved slug→id once at bootstrap, downstream).
-	if opts.Tenant != "" {
-		opts.Config.Tenant = opts.Tenant
+	if opts.Merchant != "" {
+		opts.Config.Merchant = opts.Merchant
 	}
 	if opts.RunMigrations {
 		if opts.Config.DB == nil || opts.Config.DB.URL == "" {
@@ -130,24 +130,24 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	}
 	// Idempotently REGISTER the bound merchant (a billing bucket) from config
 	// (#480, supersedes #478). A host binds the engine to a merchant SLUG
-	// (opts.Tenant), but nothing else creates that row; without it, merchant
+	// (opts.Merchant), but nothing else creates that row; without it, merchant
 	// resolution (HTTP handler / self handler) would fail. Embedded OpenRails runs
 	// NO AuthKit and stores ZERO auth — RegisterMerchant carries billing-only
 	// state (NO issuer/JWKS). The host owns the embed + DB, so registration is
 	// safe and idempotent. Runs after migrations so the merchants table exists; a
 	// second New is an idempotent no-op.
-	var boundTenant merchant.ID
-	if opts.Config.Tenant != "" {
+	var boundMerchant merchant.ID
+	if opts.Config.Merchant != "" {
 		if a := emb.App(); a != nil && a.Runtime != nil && a.Runtime.DB != nil {
 			ectx := ctx
 			id, rerr := db.RegisterMerchant(ectx, a.Runtime.DB.Qx(ectx), db.RegisterMerchantOptions{
-				Slug: opts.Config.Tenant,
+				Slug: opts.Config.Merchant,
 			})
 			if rerr != nil {
 				_ = emb.Close(ctx)
 				return nil, fmt.Errorf("openrails embed: %w", rerr)
 			}
-			boundTenant = id
+			boundMerchant = id
 		}
 	}
 	svc, err := emb.Service()
@@ -156,7 +156,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, err
 	}
 
-	r := &Runtime{emb: emb, svc: svc, tenantID: boundTenant}
+	r := &Runtime{emb: emb, svc: svc, tenantID: boundMerchant}
 	if opts.RunWorkers {
 		wctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		r.workersCancel = cancel

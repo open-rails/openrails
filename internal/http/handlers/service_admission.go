@@ -596,6 +596,8 @@ type serviceMerchantConfigWindow struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
+	Currency      string `json:"currency,omitempty"`
+	Cadence       string `json:"cadence,omitempty"`
 }
 
 type serviceMerchantConfigurationRequest struct {
@@ -617,9 +619,10 @@ func ServiceSetMerchantConfiguration(r *httprequest.Request) {
 	windows := make([]abuse.WastedWindow, 0, len(req.DelegatedInvokerWastedSpendWindows))
 	for _, w := range req.DelegatedInvokerWastedSpendWindows {
 		windows = append(windows, abuse.WastedWindow{
-			Key:    w.Key,
-			Window: time.Duration(w.WindowSeconds) * time.Second,
-			Limit:  w.Limit,
+			Key:      w.Key,
+			Window:   time.Duration(w.WindowSeconds) * time.Second,
+			Limit:    w.Limit,
+			Currency: w.Currency,
 		})
 	}
 	if err := svc.SetMerchantConfiguration(r.Request.Context(), billingservice.MerchantConfiguration{
@@ -637,6 +640,7 @@ type budgetScopeWindow struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
+	Currency      string `json:"currency,omitempty"`
 	Cadence       string `json:"cadence,omitempty"`
 }
 
@@ -644,7 +648,7 @@ func budgetScopeWindowInputs(ws []budgetScopeWindow) []billingservice.BudgetScop
 	out := make([]billingservice.BudgetScopeWindowInput, 0, len(ws))
 	for _, w := range ws {
 		out = append(out, billingservice.BudgetScopeWindowInput{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence,
+			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence,
 		})
 	}
 	return out

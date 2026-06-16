@@ -91,7 +91,7 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 	}
 
 	var window *models.MoneyWindow
-	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		now := s.now()
 		tid, err := merchant.Require(ctx)
@@ -233,7 +233,7 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 		return res
 	}
 
-	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		now := s.now()
 
@@ -379,7 +379,7 @@ func (s *MoneyService) RefillWindow(ctx context.Context, windowID uuid.UUID, amo
 	}
 
 	var window *models.MoneyWindow
-	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		now := s.now()
 
@@ -445,7 +445,7 @@ func (s *MoneyService) CloseWindow(ctx context.Context, windowID uuid.UUID) (*mo
 	}
 
 	var window *models.MoneyWindow
-	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		now := s.now()
 
@@ -485,13 +485,13 @@ func (s *MoneyService) CloseWindow(ctx context.Context, windowID uuid.UUID) (*mo
 	return window, nil
 }
 
-// GetWindow returns one window by id (RLS/tenant-scoped).
+// GetWindow returns one window by id (RLS/merchant-scoped).
 func (s *MoneyService) GetWindow(ctx context.Context, windowID uuid.UUID) (*models.MoneyWindow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	var w *models.MoneyWindow
-	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		row, e := s.db.Gen(ctx).GetMoneyWindow(ctx, windowID)
 		if e != nil {
 			return e
@@ -510,7 +510,7 @@ func (s *MoneyService) GetWindow(ctx context.Context, windowID uuid.UUID) (*mode
 
 // ExpireWindows releases the unsettled remainder of every open window whose
 // expires_at has passed and marks it expired — the window analogue of the hold
-// expiry sweep, run from the same periodic HoldExpiryWorker job. Cross-tenant
+// expiry sweep, run from the same periodic HoldExpiryWorker job. Cross-merchant
 // (sweeps the whole table, like hold expiry). Returns the number expired.
 func (s *MoneyService) ExpireWindows(ctx context.Context, batchSize int) (int, error) {
 	if s == nil || s.db == nil {
@@ -524,8 +524,8 @@ func (s *MoneyService) ExpireWindows(ctx context.Context, batchSize int) (int, e
 
 	for {
 		batch := 0
-		// Privileged (no-GUC) transaction per batch: cross-tenant sweep with
-		// explicit tenant_id predicates, like the hold expiry worker.
+		// Privileged (no-GUC) transaction per batch: cross-merchant sweep with
+		// explicit merchant_id predicates, like the hold expiry worker.
 		err := s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			q := gen.New(tx)
 			batchSize32, _ := safecast.Convert[int32](batchSize)

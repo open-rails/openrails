@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -35,7 +37,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/services/health"
-	"github.com/open-rails/openrails/internal/tenancy"
 )
 
 // Runtime aggregates infrastructure clients and application services.
@@ -86,8 +87,9 @@ type Runtime struct {
 	FeatureService           *entitlements.FeatureService
 	ProductAccessService     *productaccess.Service
 	MoneyService             *money.MoneyService
+	MoneyCharger             money.Charger
 	ProcessorCustomerService *payments.ProcessorCustomerService
-	Tenancy                  *tenancy.Service
+	Merchants                *merchants.Service
 
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
@@ -95,6 +97,10 @@ type Runtime struct {
 	SolanaRPC                *solana.RPCClient
 	SolanaPriceProvider      solanamodule.TokenPriceProvider
 	FXProvider               fx.Provider
+	FXRateRefresher          interface {
+		Stop()
+		LastRefresh() time.Time
+	}
 	// SolanaCranker drives recurring Solana pulls (#256). Injected by the
 	// composition root once the tenant secret store is available; nil -> the
 	// cranker worker log-and-skips.
@@ -160,6 +166,14 @@ func (r *Runtime) AccountFingerprints() intents.FingerprintSource {
 	return r.intentFingerprints
 }
 
+func (r *Runtime) FXRateHealth() (time.Time, bool) {
+	if r == nil || r.FXRateRefresher == nil {
+		return time.Time{}, false
+	}
+	last := r.FXRateRefresher.LastRefresh()
+	return last, !last.IsZero() && time.Since(last) < 4*time.Hour
+}
+
 // Close gracefully shuts down runtime resources.
 func (r *Runtime) Close(ctx context.Context) error {
 	if r == nil {
@@ -175,6 +189,9 @@ func (r *Runtime) Close(ctx context.Context) error {
 	if r.SolanaPayPoller != nil {
 		log.Info("Stopping Solana Pay poller...")
 		r.SolanaPayPoller.Stop()
+	}
+	if r.FXRateRefresher != nil {
+		r.FXRateRefresher.Stop()
 	}
 
 	// Only stop River client if we created it (not external)

@@ -16,6 +16,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -32,8 +33,8 @@ func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, i
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
-	dbtest.EnsureTestTenant(ctx, t, pool)
-	ctx = dbtest.WithTestTenant(ctx)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	ctx = dbtest.WithTestMerchant(ctx)
 
 	rc, err := tcredis.Run(ctx, "redis:7-alpine")
 	require.NoError(t, err)
@@ -51,6 +52,7 @@ func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, i
 		RedisClient:        rdb,
 		MoneyService:       money.NewMoneyService(dbi),
 		EntitlementService: entitlements.NewEntitlementService(dbi),
+		FXProvider:         fx.NewMockProvider(map[string]float64{"eur": 2}),
 		Clock:              clockwork.NewRealClock(),
 	}
 	svc, err := billingservice.New(rt)
@@ -99,6 +101,34 @@ func TestMerchantConfiguration_ConfiguredDelegatedInvokerWindowDenies(t *testing
 	require.NoError(t, err)
 	require.False(t, res.Allowed, "invoker over the CONFIGURED $1 window must be denied")
 	require.Equal(t, "abuse", res.BlockedBy)
+}
+
+func TestMerchantConfiguration_EURWasteCountsAgainstUSDInvokerCutoff(t *testing.T) {
+	svc, _, payer, ctx := wastedSvcEnv(t)
+
+	require.NoError(t, svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{
+		DelegatedInvokerWastedSpendWindows: []abuse.WastedWindow{
+			{Key: "burst", Window: 15 * time.Minute, Limit: 1_000_000, Currency: "USD"},
+		},
+	}))
+
+	res, err := svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
+		CustomerID: payer, Invoker: "user:fx-cutoff", Currency: "EUR", Amount: 600_000,
+		Source: "test", SourceID: "fx-cutoff", Reason: "test",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "USD", res.PolicyCurrency)
+	require.EqualValues(t, 1_200_000, res.PolicyRecordedAmount)
+
+	admit, err := svc.Admit(ctx, billingservice.AdmitInput{
+		CustomerID: payer, Invoker: "user:fx-cutoff", Tier: "free", Resource: "r",
+		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
+		Source: "usage", SourceID: "blocked-fx-cutoff",
+	})
+	require.NoError(t, err)
+	require.False(t, admit.Allowed)
+	require.Equal(t, "abuse", admit.BlockedBy)
+	require.Equal(t, "USD", admit.PolicyCurrency)
 }
 
 // #499: with no merchant config stored, the resolver falls back to

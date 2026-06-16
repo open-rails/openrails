@@ -14,11 +14,11 @@ import (
 // ARCHITECTURAL BOUNDARY (issue #232 — Postgres is the system of record):
 //
 // DunningHistoryService is a FORENSICS/DISPLAY-ONLY read surface over the
-// derived, tenant-scoped ClickHouse event sink (payment_events +
+// derived, merchant-scoped ClickHouse event sink (payment_events +
 // subscription_events). It exists for exactly one consumer: the reconcile
 // engine's dunning-forensics report (#107), which merges these events as a
 // third evidence source alongside the provider-pulled transaction timeline and
-// the local retry fields. For migrated tenants the sink also holds the
+// the local retry fields. For migrated merchants the sink also holds the
 // imported legacy history (doujins #387 normalizes users_logs rebill attempts,
 // mobius_schedulers scheduler events and payment_settings gateway state into
 // these tables), so this is what answers "did legacy dunning run and when did
@@ -63,7 +63,7 @@ type DunningHistoryEvent struct {
 // point, so the cap is generous but finite.
 const defaultDunningHistoryLimit = 100000
 
-// ListDunningHistory returns the tenant's payment + subscription events for
+// ListDunningHistory returns the merchant's payment + subscription events for
 // the given processors, oldest first. Zero since/until leave the window
 // unbounded on that side (legacy history predates any reconcile window).
 func (s *DunningHistoryService) ListDunningHistory(ctx context.Context, processors []string, since, until time.Time, limit int) ([]DunningHistoryEvent, error) {
@@ -114,7 +114,7 @@ func (s *DunningHistoryService) ListDunningHistory(ctx context.Context, processo
                    toFloat64(amount) AS amount,
                    timestamp
             FROM payment_events
-            WHERE tenant_id = ? AND processor IN (?)` + window + `
+            WHERE merchant_id = ? AND processor IN (?)` + window + `
             UNION ALL
             SELECT 'subscription_events' AS source,
                    event_type, processor, subscription_id,
@@ -124,12 +124,12 @@ func (s *DunningHistoryService) ListDunningHistory(ctx context.Context, processo
                    toNullable(toFloat64(price_amount)) AS amount,
                    timestamp
             FROM subscription_events
-            WHERE tenant_id = ? AND processor IN (?)` + window + `
+            WHERE merchant_id = ? AND processor IN (?)` + window + `
         )
         ORDER BY timestamp ASC
         LIMIT ?`
 
-	// Interleave: tenant+processors (+window) for branch 1, same for branch 2.
+	// Interleave: merchant+processors (+window) for branch 1, same for branch 2.
 	allArgs := make([]any, 0, len(args)+2*len(windowArgs)+1)
 	allArgs = append(allArgs, args[0], args[1])
 	allArgs = append(allArgs, windowArgs...)

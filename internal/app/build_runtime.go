@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
 	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
@@ -317,6 +318,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		SolanaRPC:                serviceInstances.SolanaRPC,
 		SolanaPriceProvider:      solanaPriceProvider,
 		FXProvider:               serviceInstances.FXProvider,
+		FXRateRefresher:          serviceInstances.FXRateRefresher,
 
 		UserSubscriptionService:   serviceInstances.UserSubscriptionService,
 		PublicSubscriptionService: serviceInstances.PublicSubscriptionService,
@@ -328,10 +330,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		DeduplicationService:         serviceInstances.DeduplicationService,
 		IdempotencyService:           serviceInstances.IdempotencyService,
 
-		CheckoutService:          serviceInstances.CheckoutService,
-		CheckoutSessionService:   serviceInstances.CheckoutSessionService,
-		CardAbuseGuard:           cardAbuseGuard,
-		MoneyService:             serviceInstances.MoneyService,
+		CheckoutService:        serviceInstances.CheckoutService,
+		CheckoutSessionService: serviceInstances.CheckoutSessionService,
+		CardAbuseGuard:         cardAbuseGuard,
+		MoneyService:           serviceInstances.MoneyService,
+		MoneyCharger: money.NewScopedCharger(database, func() map[string]money.CollectionAdapter {
+			adapters := money.NewNMICollectionAdapters(nmiClients)
+			adapters[string(models.ProcessorStripe)] = money.NewStripeCollectionAdapter(database, &subscriptions.StripeService{Config: cfg})
+			return adapters
+		}()),
 		ProcessorCustomerService: serviceInstances.ProcessorCustomerService,
 	}
 
@@ -673,6 +680,10 @@ type servicesInstances struct {
 	SolanaRPC                *solana.RPCClient
 	SolanaPriceProvider      solanamodule.TokenPriceProvider
 	FXProvider               fx.Provider
+	FXRateRefresher          interface {
+		Stop()
+		LastRefresh() time.Time
+	}
 
 	UserSubscriptionService   *subscriptions.UserSubscriptionService
 	PublicSubscriptionService *catalog.PublicSubscriptionService
@@ -703,9 +714,21 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	processorCustomerService := payments.NewProcessorCustomerService(database)
 	profileRepo := repo.NewProfileRepo(database)
 
-	// Create FX provider for Solana token quoting with non-USD prices
-	// Uses CC0 exchange-api with 5-minute cache TTL
-	fxProvider := fx.NewCachedProvider(fx.NewExchangeAPIProvider(), 5*time.Minute)
+	// Create FX provider for Solana token quoting and policy-currency admission.
+	// Runtime enforcement reads fresh cross-currency rates from Redis; same-currency
+	// paths do not require FX.
+	liveFX := fx.NewExchangeAPIProvider()
+	var fxProvider fx.Provider = fx.NewCachedProvider(liveFX, 5*time.Minute)
+	var fxRateRefresher interface {
+		Stop()
+		LastRefresh() time.Time
+	}
+	if redisClient != nil {
+		redisFX := fx.NewRedisCachedProvider(redisClient, liveFX, 3*time.Hour)
+		redisFX.Start(context.Background(), money.CurrencyCodes(), 2*time.Hour)
+		fxProvider = redisFX
+		fxRateRefresher = redisFX
+	}
 
 	// Note: solanaPayService and SolanaPayPoller need checkoutService, which is created later
 	// We'll create solanaPayService with nil checkoutService and set it after checkoutService is created
@@ -868,6 +891,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		SolanaRPC:                    solanaRPC,
 		SolanaPriceProvider:          solanaPriceProvider,
 		FXProvider:                   fxProvider,
+		FXRateRefresher:              fxRateRefresher,
 		UserSubscriptionService:      userSubscriptionService,
 		PublicSubscriptionService:    publicSubscriptionService,
 		AdminSubscriptionService:     adminSubscriptionService,

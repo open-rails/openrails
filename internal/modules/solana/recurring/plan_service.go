@@ -17,19 +17,19 @@ import (
 
 const maxPeriodHours = 8760 // 1 year — the program's upper bound for period_hours
 
-// Submitter is the per-tenant Solana submit surface the recurring services use:
-// it resolves the tenant's merchant (cranker) address and signs+submits an
-// instruction set with that tenant's key. Declared here (dependency inversion)
+// Submitter is the per-merchant Solana submit surface the recurring services use:
+// it resolves the merchant's merchant (cranker) address and signs+submits an
+// instruction set with that merchant's key. Declared here (dependency inversion)
 // so the services are unit-testable without a live signer/RPC.
 type Submitter interface {
-	// MerchantAddress returns the tenant's on-chain merchant/cranker address.
+	// MerchantAddress returns the merchant's on-chain merchant/cranker address.
 	MerchantAddress(ctx context.Context, tenantID merchant.ID) (solanago.PublicKey, error)
-	// Submit signs (with the tenant's key) and submits the instructions, returning
+	// Submit signs (with the merchant's key) and submits the instructions, returning
 	// the confirmed transaction signature.
 	Submit(ctx context.Context, tenantID merchant.ID, instructions []solanago.Instruction) (solanago.Signature, error)
 }
 
-// signerSubmitter is the production Submitter: a per-tenant solana.Signer + RPC,
+// signerSubmitter is the production Submitter: a per-merchant solana.Signer + RPC,
 // wired through solana.BuildSignSubmit (the verified build/sign/submit path).
 type signerSubmitter struct {
 	signer solanaint.Signer
@@ -84,7 +84,7 @@ func NewPlanServiceWithReader(submitter Submitter, reader planReader, network st
 	return &PlanService{submitter: submitter, reader: reader, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens)), now: time.Now}
 }
 
-// MerchantAddress returns the tenant's on-chain merchant (cranker) address — the
+// MerchantAddress returns the merchant's on-chain merchant (cranker) address — the
 // owner half of a plan PDA. The catalog provider adapter uses it to derive a
 // price's plan PDA for an idempotent find-or-attach read-back before publishing.
 func (s *PlanService) MerchantAddress(ctx context.Context, tenantID merchant.ID) (solanago.PublicKey, error) {
@@ -142,7 +142,7 @@ func (h *PlanHandle) ToProcessorConfig() map[string]string {
 }
 
 // PublishPlan validates the token + terms, then signs and submits create_plan
-// from the tenant's merchant key, returning the durable plan handle. It fails
+// from the merchant's merchant key, returning the durable plan handle. It fails
 // closed: a non-allowlisted token, an out-of-range period, or a zero amount are
 // rejected before any on-chain action.
 //
@@ -198,7 +198,7 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 
 	merchant, err := s.submitter.MerchantAddress(ctx, in.MerchantID)
 	if err != nil {
-		return nil, fmt.Errorf("recurring: resolve tenant merchant address: %w", err)
+		return nil, fmt.Errorf("recurring: resolve merchant merchant address: %w", err)
 	}
 	planPDA, _, err := subscriptions.DerivePlanPDA(merchant, in.PlanID)
 	if err != nil {
@@ -356,9 +356,9 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 }
 
 // ErrPlanSunsetNotOwned: the plan account at the PDA is owned by a different
-// merchant than this tenant's — sunsetting someone else's plan is refused
+// merchant than this merchant's — sunsetting someone else's plan is refused
 // before any on-chain action (and would fail the program's owner check anyway).
-var ErrPlanSunsetNotOwned = errors.New("recurring: plan is not owned by this tenant's merchant; refusing to sunset")
+var ErrPlanSunsetNotOwned = errors.New("recurring: plan is not owned by this merchant's merchant; refusing to sunset")
 
 // SunsetPlan flips an on-chain plan to status=sunset via update_plan (#357/#358):
 // the program then rejects NEW subscribe calls ("Plan is in sunset status")
@@ -366,17 +366,17 @@ var ErrPlanSunsetNotOwned = errors.New("recurring: plan is not owned by this ten
 // Stripe's active=false. The caller supplies the CURRENT decoded plan account
 // (it has already verified the plan exists and is not yet sunset); its mutable
 // fields are echoed so the update changes status and nothing else. Signed by
-// the tenant's merchant key, which must equal the plan's owner.
+// the merchant's merchant key, which must equal the plan's owner.
 func (s *PlanService) SunsetPlan(ctx context.Context, tenantID merchant.ID, planPDA solanago.PublicKey, current *subscriptions.PlanAccount) (signature string, err error) {
 	if current == nil {
 		return "", fmt.Errorf("recurring: sunset requires the current plan account")
 	}
 	merchant, err := s.submitter.MerchantAddress(ctx, tenantID)
 	if err != nil {
-		return "", fmt.Errorf("recurring: resolve tenant merchant address: %w", err)
+		return "", fmt.Errorf("recurring: resolve merchant merchant address: %w", err)
 	}
 	if !current.Owner.Equals(merchant) {
-		return "", fmt.Errorf("%w (plan owner %s, tenant merchant %s)", ErrPlanSunsetNotOwned, current.Owner, merchant)
+		return "", fmt.Errorf("%w (plan owner %s, merchant merchant %s)", ErrPlanSunsetNotOwned, current.Owner, merchant)
 	}
 	ix, err := subscriptions.BuildUpdatePlan(subscriptions.UpdatePlanParams{
 		Owner:       merchant,
@@ -397,7 +397,7 @@ func (s *PlanService) SunsetPlan(ctx context.Context, tenantID merchant.ID, plan
 }
 
 // ensureReceivingATA idempotently provisions owner's associated token account for
-// mint (classic SPL Token), paid + signed by the tenant's cranker. A failure here
+// mint (classic SPL Token), paid + signed by the merchant's cranker. A failure here
 // is surfaced as a hard error: the plan cannot be billed without a receiving ATA.
 func (s *PlanService) ensureReceivingATA(ctx context.Context, tenantID merchant.ID, owner, mint solanago.PublicKey) error {
 	ata, _, err := subscriptions.DeriveATA(owner, mint, solanago.TokenProgramID)

@@ -34,18 +34,18 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("control plane unavailable (set auth.control_plane.issuer)")
 	}
 
-	authorityTenantSlug, err := cmd.Flags().GetString("org")
+	authorityOrgSlug, err := cmd.Flags().GetString("org")
 	if err != nil {
 		return fmt.Errorf("read org flag: %w", err)
 	}
-	authorityTenantSlug = strings.ToLower(strings.TrimSpace(authorityTenantSlug))
-	if authorityTenantSlug == "" {
-		// No default tenant (#336): the authority tenant must be named explicitly.
-		return fmt.Errorf("--org is required (the AuthKit tenant slug hosting the admin authority)")
+	authorityOrgSlug = strings.ToLower(strings.TrimSpace(authorityOrgSlug))
+	if authorityOrgSlug == "" {
+		// No default merchant (#336): the authority org must be named explicitly.
+		return fmt.Errorf("--org is required (the AuthKit org slug hosting the admin authority)")
 	}
 
 	if _, berr := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
-		BootstrapTenantSlug:     authorityTenantSlug,
+		BootstrapOrgSlug:        authorityOrgSlug,
 		MintInitialServiceToken: false,
 	}); berr != nil {
 		return fmt.Errorf("bootstrap authority/role: %w", berr)
@@ -71,17 +71,17 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 		permissions = controlplane.OperatorRolePermissions()
 	}
 
-	tenantRef, err := cmd.Flags().GetString("tenant")
+	merchantRef, err := cmd.Flags().GetString("merchant")
 	if err != nil {
-		return fmt.Errorf("read tenant flag: %w", err)
+		return fmt.Errorf("read merchant flag: %w", err)
 	}
-	tenantID, tenantSlug, tenantResource, err := cp.MerchantScope(ctx, tenantRef)
+	merchantID, merchantSlug, merchantResource, err := cp.MerchantScope(ctx, merchantRef)
 	if err != nil {
-		return fmt.Errorf("resolve tenant %q: %w", tenantRef, err)
+		return fmt.Errorf("resolve merchant %q: %w", merchantRef, err)
 	}
 
-	resources := []authcore.ServiceTokenResource{tenantResource}
-	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, authorityTenantSlug, authcore.ServiceTokenMintOptions{
+	resources := []authcore.ServiceTokenResource{merchantResource}
+	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, authorityOrgSlug, authcore.ServiceTokenMintOptions{
 		Name:        name,
 		Permissions: permissions,
 		Resources:   resources,
@@ -91,10 +91,10 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"org":                  authorityTenantSlug,
+		"org":                  authorityOrgSlug,
 		"name":                 name,
-		"tenant":               tenantSlug,
-		"tenant_id":            tenantID.String(),
+		"merchant":             merchantSlug,
+		"merchant_id":          merchantID.String(),
 		"service_token_key_id": serviceToken.KeyID,
 		"service_token_secret": token,
 		"permissions":          serviceToken.Permissions,

@@ -159,7 +159,7 @@ func (s *SubscriptionService) GetAvailableProducts(ctx context.Context) ([]*mode
 }
 
 // Database exposes the service's DB handle for callers that need to compose
-// multiple writes into one transaction (TenantTx + NewWithPgxTx pattern).
+// multiple writes into one transaction (MerchantTx + NewWithPgxTx pattern).
 func (s *SubscriptionService) Database() *db.DB { return s.db }
 
 func NewSubscriptionService(

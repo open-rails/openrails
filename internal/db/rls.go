@@ -14,8 +14,8 @@ import (
 // role. The migration enables + FORCEs RLS and creates the unprivileged
 // `openrails_app` role, but enforcement is a property of the CONNECTED role: if
 // the app connects as a superuser (or any BYPASSRLS role), every policy is
-// skipped and tenant isolation silently degrades to whatever explicit
-// `WHERE tenant_id = ...` predicates each query happens to carry. This type makes
+// skipped and merchant isolation silently degrades to whatever explicit
+// `WHERE merchant_id = ...` predicates each query happens to carry. This type makes
 // that posture observable instead of a silent footgun.
 type RLSPosture struct {
 	// CurrentUser is the Postgres role the connection authenticated as.
@@ -50,14 +50,14 @@ func (d *DB) CheckRLSPosture(ctx context.Context) (RLSPosture, error) {
 }
 
 // EnforceRLSPosture logs the connection's RLS posture and, when require is true
-// (managed multi-tenant deployments), FAILS startup if the connected role does
+// (managed multi-merchant deployments), FAILS startup if the connected role does
 // not enforce RLS. This is the guard that prevents shipping a managed/hosted
-// OpenRails that believes it has tenant isolation while actually connecting as a
+// OpenRails that believes it has merchant isolation while actually connecting as a
 // privileged role that bypasses every policy (issue #227).
 //
-// For self-hosted single-tenant deployments require is false: RLS is still a
+// For self-hosted single-merchant deployments require is false: RLS is still a
 // useful backstop but running as a privileged role is acceptable because there is
-// only one tenant.
+// only one merchant.
 func (d *DB) EnforceRLSPosture(ctx context.Context, require bool) error {
 	posture, err := d.CheckRLSPosture(ctx)
 	if err != nil {
@@ -76,8 +76,8 @@ func (d *DB) EnforceRLSPosture(ctx context.Context, require bool) error {
 		return err
 	}
 	logrus.WithFields(fields).Warn(
-		"db: connected role bypasses Row Level Security; tenant isolation relies on explicit query predicates only " +
-			"(acceptable for self-hosted single-tenant; set the RLS-required flag + connect as openrails_app for managed multi-tenant)")
+		"db: connected role bypasses Row Level Security; merchant isolation relies on explicit query predicates only " +
+			"(acceptable for self-hosted single-merchant; set the RLS-required flag + connect as openrails_app for managed multi-merchant)")
 	return nil
 }
 
@@ -90,7 +90,7 @@ func rlsPostureError(posture RLSPosture, require bool) error {
 	}
 	return fmt.Errorf(
 		"db: RLS enforcement required but role %q bypasses RLS (superuser/BYPASSRLS); "+
-			"connect as the unprivileged openrails_app role (created by 001_schema.up.sql) in managed multi-tenant mode",
+			"connect as the unprivileged openrails_app role (created by 001_schema.up.sql) in managed multi-merchant mode",
 		posture.CurrentUser,
 	)
 }

@@ -13,7 +13,7 @@ import (
 // browser's DELEGATED ACCESS TOKEN (issue #222 browser-tier foundation, the
 // backend prerequisite for browser-direct self-service consumers.
 //
-// A tenant's host frontend mints a short-lived AuthKit delegated access token
+// A merchant's host frontend mints a short-lived AuthKit delegated access token
 // (aud=openrails, tenant, delegated_sub, openrails:self:* perms) for the
 // logged-in end-user; the browser calls OpenRails directly with it. Every
 // operation is scoped to the token's delegated_sub + resolved tenant.
@@ -33,19 +33,19 @@ func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("delegated self-service API routes registered on public handler")
 
-	// Browser-direct TENANT-ADMIN surface (issue #259): the SAME delegated
-	// middleware authenticates; per-route gates require `openrails:tenant:*`
+	// Browser-direct MERCHANT-ADMIN surface (issue #259): the SAME delegated
+	// middleware authenticates; per-route gates require `openrails:merchant:*`
 	// permissions and the handlers act on a `:user_id` WITHIN the token's pinned
 	// tenant. Mounted on the same public engine alongside /v1/self/*.
-	adminGroup := e.Group(StandaloneV1Prefix + httproutes.TenantAdminRoutePrefix)
-	httproutes.RegisterTenantAdminRoutes(adminGroup, s.runtime, delegatedMW)
+	adminGroup := e.Group(StandaloneV1Prefix + httproutes.MerchantAdminRoutePrefix)
+	httproutes.RegisterMerchantAdminRoutes(adminGroup, s.runtime, delegatedMW)
 
-	log.WithField("prefix", StandaloneV1Prefix+httproutes.TenantAdminRoutePrefix).
-		Info("delegated tenant-admin API routes registered on public handler")
+	log.WithField("prefix", StandaloneV1Prefix+httproutes.MerchantAdminRoutePrefix).
+		Info("delegated merchant-admin API routes registered on public handler")
 }
 
 // delegatedMiddleware picks the delegated-identity middleware for the
-// self-service + tenant-admin surfaces (#339): the host-supplied
+// self-service + merchant-admin surfaces (#339): the host-supplied
 // DelegatedAuthenticator when present (an explicit override), else the
 // control plane's delegated-token verifier (always available, #469).
 func (s *Server) delegatedMiddleware() gin.HandlerFunc {

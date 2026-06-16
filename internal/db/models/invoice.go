@@ -6,34 +6,46 @@ import (
 	"github.com/google/uuid"
 )
 
-// Invoice is a monthly itemized statement for a customer (issue #303): the
-// human-readable record of what was billed in a period, for prepaid and arrears
-// alike. Line items + money movements are rolled up from openrails.usage_events
-// and the credit ledger, snapshotted at finalize for immutability.
+// Invoice is a period bill/statement for a customer. In arrears billing, open
+// invoices are receivables and payment state lives on the invoice. Prepaid
+// invoices remain informational receipts/statements.
 type Invoice struct {
 	ID         uuid.UUID `json:"id"`
-	MerchantID uuid.UUID `json:"tenant_id"`
+	MerchantID uuid.UUID `json:"merchant_id"`
 	CustomerID uuid.UUID `json:"customer_id"`
 	Currency   string    `json:"currency"`
 
-	PeriodFrom time.Time `json:"period_from"`
-	PeriodTo   time.Time `json:"period_to"`
+	InvoiceNumber *string   `json:"invoice_number,omitempty"`
+	PeriodFrom    time.Time `json:"period_from"`
+	PeriodTo      time.Time `json:"period_to"`
 
 	UsageTotal     int64 `json:"usage_total"`
 	DepositsTotal  int64 `json:"deposits_total"`
 	OwedAccrued    int64 `json:"owed_accrued"`
 	OwedPaid       int64 `json:"owed_paid"`
 	ClosingBalance int64 `json:"closing_balance"`
+	SubtotalAmount int64 `json:"subtotal_amount"`
+	TotalAmount    int64 `json:"total_amount"`
+	AmountPaid     int64 `json:"amount_paid"`
+	AmountDue      int64 `json:"amount_due"`
 
 	// LineItems is the per-event_type usage rollup snapshot (amount, count,
 	// dimensions). MoneyMovements is the summed-by-type ledger snapshot.
 	LineItems      []InvoiceLineItem `json:"line_items"`
 	MoneyMovements map[string]int64  `json:"money_movements"`
 
-	Status      string     `json:"status"`
-	FinalizedAt *time.Time `json:"finalized_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	Status            string     `json:"status"`
+	CollectionMethod  string     `json:"collection_method"`
+	IssuedAt          *time.Time `json:"issued_at,omitempty"`
+	DueAt             *time.Time `json:"due_at,omitempty"`
+	PaidAt            *time.Time `json:"paid_at,omitempty"`
+	VoidedAt          *time.Time `json:"voided_at,omitempty"`
+	UncollectibleAt   *time.Time `json:"uncollectible_at,omitempty"`
+	SentAt            *time.Time `json:"sent_at,omitempty"`
+	FinalizedAt       *time.Time `json:"finalized_at,omitempty"`
+	ExternalInvoiceID *string    `json:"external_invoice_id,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // InvoiceLineItem is one metered-usage line on an invoice: the per-event_type

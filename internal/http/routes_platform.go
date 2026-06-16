@@ -10,19 +10,19 @@ import (
 	policyginmw "github.com/open-rails/openrails/internal/auth/policy/ginmw"
 )
 
-// PlatformPrefix is the cross-tenant managed-hosting superadmin API (issue #226).
-// It is gated by openrails:platform:superadmin in the SEPARATE platform tenant —
-// DISTINCT from the per-tenant operator-admin gate on /v1/admin/*. A tenant
+// PlatformPrefix is the cross-merchant managed-hosting superadmin API (issue #226).
+// It is gated by openrails:platform:superadmin in the SEPARATE platform org —
+// DISTINCT from the per-merchant operator-admin gate on /v1/admin/*. A merchant
 // operator admin cannot reach this surface.
 const PlatformPrefix = "/platform"
 
-// registerPlatformRoutes mounts the platform-superadmin cross-tenant API. No-op
-// when no platform tenant is configured (the superadmin gate could never pass,
+// registerPlatformRoutes mounts the platform-superadmin cross-merchant API. No-op
+// when no platform org is configured (the superadmin gate could never pass,
 // so the surface stays closed).
 func (s *Server) registerPlatformRoutes(e *gin.Engine) {
-	if s.controlPlane.PlatformTenantSlug() == "" {
-		// No platform tenant configured: do not mount a surface nobody can pass.
-		log.Info("platform superadmin routes not mounted: no platform tenant configured")
+	if s.controlPlane.PlatformOrgSlug() == "" {
+		// No platform org configured: do not mount a surface nobody can pass.
+		log.Info("platform superadmin routes not mounted: no platform org configured")
 		return
 	}
 
@@ -30,41 +30,41 @@ func (s *Server) registerPlatformRoutes(e *gin.Engine) {
 	group.Use(s.authProvider.Required())
 	group.Use(policyginmw.PlatformSuperadminRequired(s.controlPlane))
 
-	// Cross-tenant directory + inspect.
-	group.GET("/tenants", s.platformListTenantsHandler())
-	group.GET("/tenants/:id", s.platformInspectTenantHandler())
-	// Cross-tenant search (audited: every search is recorded).
+	// Cross-merchant directory + inspect.
+	group.GET("/merchants", s.platformListMerchantsHandler())
+	group.GET("/merchants/:id", s.platformInspectMerchantHandler())
+	// Cross-merchant search (audited: every search is recorded).
 	group.GET("/search", s.platformSearchHandler())
 	// Platform-wide metrics aggregate.
 	group.GET("/metrics", s.platformMetricsHandler())
 
 	log.WithField("prefix", StandaloneV1Prefix+PlatformPrefix).
-		Info("platform superadmin cross-tenant routes registered")
+		Info("platform superadmin cross-merchant routes registered")
 }
 
-func (s *Server) platformListTenantsHandler() gin.HandlerFunc {
+func (s *Server) platformListMerchantsHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		m, err := s.platformMetrics.Compute(c.Request.Context())
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"tenants": m.Tenants, "count": m.TenantCount})
+		c.JSON(http.StatusOK, gin.H{"merchants": m.Merchants, "count": m.MerchantCount})
 	}
 }
 
-func (s *Server) platformInspectTenantHandler() gin.HandlerFunc {
+func (s *Server) platformInspectMerchantHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id, ok := tenantIDParam(c)
+		id, ok := merchantIDParam(c)
 		if !ok {
 			return
 		}
-		t, err := s.tenancy.Get(c.Request.Context(), id)
+		t, err := s.merchants.Get(c.Request.Context(), id)
 		if err != nil {
-			s.tenantErr(c, err)
+			s.merchantErr(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, tenantView(t))
+		c.JSON(http.StatusOK, merchantView(t))
 	}
 }
 
@@ -75,14 +75,14 @@ func (s *Server) platformSearchHandler() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "q is required"})
 			return
 		}
-		results, err := s.tenancy.SearchTenants(c.Request.Context(), q, 50)
+		results, err := s.merchants.SearchMerchants(c.Request.Context(), q, 50)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		views := make([]gin.H, 0, len(results))
 		for i := range results {
-			views = append(views, tenantView(&results[i]))
+			views = append(views, merchantView(&results[i]))
 		}
 		c.JSON(http.StatusOK, gin.H{"results": views, "count": len(views)})
 	}

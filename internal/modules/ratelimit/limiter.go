@@ -99,7 +99,7 @@ return res
 `)
 
 // Check evaluates the policy for one logical bucket (base, e.g.
-// "<tenant>:<owner>:<model>") given the unit amounts this request consumes
+// "<merchant>:<owner>:<model>") given the unit amounts this request consumes
 // (e.g. {"request":1,"token":150}). It is atomic and all-or-nothing.
 func (l *Limiter) Check(ctx context.Context, base string, p Policy, amounts map[string]int64) (Decision, error) {
 	if len(p.Windows) == 0 {

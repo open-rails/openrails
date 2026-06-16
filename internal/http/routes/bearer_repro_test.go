@@ -45,7 +45,7 @@ func TestRequiredMWPinsUserContextForHandler(t *testing.T) {
 		middleware.SecurityHeadersHTTP(),
 		middleware.CORSHTTP(nil),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.ResolveTenantHTTP(dbtest.TestTenantID),
+		middleware.ResolveMerchantHTTP(dbtest.TestMerchantID),
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "/billing/v1/me/credits", nil)

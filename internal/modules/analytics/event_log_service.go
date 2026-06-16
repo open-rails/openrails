@@ -32,15 +32,15 @@ import (
 //	Postgres is the authoritative system of record for billing state and for
 //	every money / entitlement / authorization DECISION (balances, holds,
 //	credits, charges, subscription status, entitlements). ClickHouse is a
-//	DERIVED, tenant-scoped analytics / event sink ONLY.
+//	DERIVED, merchant-scoped analytics / event sink ONLY.
 //
 // Three invariants this package must preserve:
 //  1. No money / entitlement / authorization decision ever READS from
 //     ClickHouse. This service therefore exposes only write/log methods and
 //     admin DISPLAY metrics (see AdminMetricsService); it must never be wired
 //     into a credit/hold/entitlement/charge/authz decision path.
-//  2. Every ClickHouse event is tenant-scoped: it carries the resolved
-//     tenant_id (merchant.Require). Hosted multi-tenant analytics
+//  2. Every ClickHouse event is merchant-scoped: it carries the resolved
+//     merchant_id (merchant.Require). Hosted multi-merchant analytics
 //     must never be written unscoped.
 //  3. ClickHouse is OPTIONAL: when unconfigured/unavailable, every Log* method
 //     is a no-op or spools-and-returns-nil — it never errors on the billing
@@ -112,10 +112,10 @@ func (s *EventLogService) Clock() clockwork.Clock {
 	return s.clock
 }
 
-// resolveTenantID returns the tenant id to stamp on a ClickHouse analytics
-// event. It prefers a tenant_id already set on the event (e.g. resolved by an
+// resolveTenantID returns the merchant id to stamp on a ClickHouse analytics
+// event. It prefers a merchant_id already set on the event (e.g. resolved by an
 // upstream writer), otherwise resolves it from the request context. A missing
-// tenant is an error: analytics events must always be tenant-scoped, so we
+// merchant is an error: analytics events must always be merchant-scoped, so we
 // never write an unscoped hosted event (issue #232).
 func resolveTenantID(ctx context.Context, existing string) (string, error) {
 	if existing != "" {
@@ -256,7 +256,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 				d.EventID = uuidutil.NewV7()
 			}
 			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
-				log.WithError(err).Warn("resolve tenant for subscription")
+				log.WithError(err).Warn("resolve merchant for subscription")
 				dead(p)
 				continue
 			}
@@ -276,7 +276,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 				d.EventID = uuidutil.NewV7()
 			}
 			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
-				log.WithError(err).Warn("resolve tenant for payment")
+				log.WithError(err).Warn("resolve merchant for payment")
 				dead(p)
 				continue
 			}
@@ -303,7 +303,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 				d.EventID = uuidutil.NewV7()
 			}
 			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
-				log.WithError(err).Warn("resolve tenant for transaction")
+				log.WithError(err).Warn("resolve merchant for transaction")
 				dead(p)
 				continue
 			}
@@ -349,7 +349,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 				d.EventID = uuidutil.NewV7()
 			}
 			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
-				log.WithError(err).Warn("resolve tenant for acu")
+				log.WithError(err).Warn("resolve merchant for acu")
 				dead(p)
 				continue
 			}
@@ -369,7 +369,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 				d.EventID = uuidutil.NewV7()
 			}
 			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
-				log.WithError(err).Warn("resolve tenant for chargeback")
+				log.WithError(err).Warn("resolve merchant for chargeback")
 				dead(p)
 				continue
 			}
@@ -455,10 +455,10 @@ func (s *EventLogService) Close() error {
 // SubscriptionEventData represents data for subscription events
 type SubscriptionEventData struct {
 	EventID uuid.UUID `json:"event_id"`
-	// MerchantID scopes this analytics event to a tenant / billing namespace
+	// MerchantID scopes this analytics event to a merchant / billing namespace
 	// (issue #232). It is populated from the request context at log time via
 	// merchant.Require; never write an unscoped hosted event.
-	MerchantID              string     `json:"tenant_id"`
+	MerchantID              string     `json:"merchant_id"`
 	SubscriptionID          uuid.UUID  `json:"subscription_id"`
 	UserID                  string     `json:"user_id"`
 	EventType               string     `json:"event_type"`
@@ -516,8 +516,8 @@ const (
 // PaymentEventData represents data for payment events
 type PaymentEventData struct {
 	EventID uuid.UUID `json:"event_id"`
-	// MerchantID scopes this analytics event to a tenant / billing namespace (issue #232).
-	MerchantID             string     `json:"tenant_id"`
+	// MerchantID scopes this analytics event to a merchant / billing namespace (issue #232).
+	MerchantID             string     `json:"merchant_id"`
 	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
 	UserID                 string     `json:"user_id"`
 	EventType              string     `json:"event_type"`
@@ -534,8 +534,8 @@ type PaymentEventData struct {
 // TransactionEventData represents data for transaction events
 type TransactionEventData struct {
 	EventID uuid.UUID `json:"event_id"`
-	// MerchantID scopes this analytics event to a tenant / billing namespace (issue #232).
-	MerchantID             string     `json:"tenant_id"`
+	// MerchantID scopes this analytics event to a merchant / billing namespace (issue #232).
+	MerchantID             string     `json:"merchant_id"`
 	TransactionID          string     `json:"transaction_id"`
 	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
 	UserID                 *string    `json:"user_id,omitempty"`
@@ -552,8 +552,8 @@ type TransactionEventData struct {
 // ACUEventData represents data for Automatic Card Updater events
 type ACUEventData struct {
 	EventID uuid.UUID `json:"event_id"`
-	// MerchantID scopes this analytics event to a tenant / billing namespace (issue #232).
-	MerchantID              string     `json:"tenant_id"`
+	// MerchantID scopes this analytics event to a merchant / billing namespace (issue #232).
+	MerchantID              string     `json:"merchant_id"`
 	SubscriptionID          *uuid.UUID `json:"subscription_id,omitempty"`
 	UserID                  *string    `json:"user_id,omitempty"`
 	EventType               string     `json:"event_type"`
@@ -570,8 +570,8 @@ type ACUEventData struct {
 // ChargebackEventData represents data for chargeback events
 type ChargebackEventData struct {
 	EventID uuid.UUID `json:"event_id"`
-	// MerchantID scopes this analytics event to a tenant / billing namespace (issue #232).
-	MerchantID             string     `json:"tenant_id"`
+	// MerchantID scopes this analytics event to a merchant / billing namespace (issue #232).
+	MerchantID             string     `json:"merchant_id"`
 	ChargebackID           string     `json:"chargeback_id"`
 	BatchID                string     `json:"batch_id"`
 	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
@@ -806,7 +806,7 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 
 	query := `
         INSERT INTO acu_events (
-            event_id, tenant_id, subscription_id, user_id, event_type, processor,
+            event_id, merchant_id, subscription_id, user_id, event_type, processor,
             processor_subscription_id, card_info, update_status, requires_action,
             reason, metadata, timestamp
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -880,7 +880,7 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 
 	query := `
 		INSERT INTO chargeback_events (
-			event_id, tenant_id, chargeback_id, batch_id, subscription_id, user_id, event_type, processor,
+			event_id, merchant_id, chargeback_id, batch_id, subscription_id, user_id, event_type, processor,
 			processor_transaction_id, amount, currency, chargeback_type, reason,
 			status, metadata, timestamp
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1106,7 +1106,7 @@ func (s *EventLogService) enqueue(kind string, v interface{}) error {
 func (s *EventLogService) insertSubscription(ctx context.Context, data SubscriptionEventData) error {
 	query := `
         INSERT INTO subscription_events (
-            event_id, tenant_id, subscription_id, user_id, event_type, status, cancel_type,
+            event_id, merchant_id, subscription_id, user_id, event_type, status, cancel_type,
             processor, processor_subscription_id, processor_transaction_id,
             price_amount, price_currency, billing_cycle_days, product_id, price_id,
             metadata, timestamp
@@ -1134,7 +1134,7 @@ func (s *EventLogService) insertSubscription(ctx context.Context, data Subscript
 }
 
 func (s *EventLogService) insertSubscriptionBatch(ctx context.Context, rows []SubscriptionEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO subscription_events (event_id, tenant_id, subscription_id, user_id, event_type, status, cancel_type, processor, processor_subscription_id, processor_transaction_id, price_amount, price_currency, billing_cycle_days, product_id, price_id, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO subscription_events (event_id, merchant_id, subscription_id, user_id, event_type, status, cancel_type, processor, processor_subscription_id, processor_transaction_id, price_amount, price_currency, billing_cycle_days, product_id, price_id, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
@@ -1163,7 +1163,7 @@ func nullableString2(value *string) any {
 func (s *EventLogService) insertPayment(ctx context.Context, data PaymentEventData) error {
 	query := `
         INSERT INTO payment_events (
-            event_id, tenant_id, subscription_id, user_id, event_type, processor,
+            event_id, merchant_id, subscription_id, user_id, event_type, processor,
             processor_transaction_id, amount, currency, billing_info,
             webhook_source, metadata, timestamp
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1186,7 +1186,7 @@ func (s *EventLogService) insertPayment(ctx context.Context, data PaymentEventDa
 }
 
 func (s *EventLogService) insertPaymentBatch(ctx context.Context, rows []PaymentEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO payment_events (event_id, tenant_id, subscription_id, user_id, event_type, processor, processor_transaction_id, amount, currency, billing_info, webhook_source, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO payment_events (event_id, merchant_id, subscription_id, user_id, event_type, processor, processor_transaction_id, amount, currency, billing_info, webhook_source, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
@@ -1199,7 +1199,7 @@ func (s *EventLogService) insertPaymentBatch(ctx context.Context, rows []Payment
 }
 
 func (s *EventLogService) insertACUBatch(ctx context.Context, rows []ACUEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO acu_events (event_id, tenant_id, subscription_id, user_id, event_type, processor, processor_subscription_id, card_info, update_status, requires_action, reason, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO acu_events (event_id, merchant_id, subscription_id, user_id, event_type, processor, processor_subscription_id, card_info, update_status, requires_action, reason, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
@@ -1212,7 +1212,7 @@ func (s *EventLogService) insertACUBatch(ctx context.Context, rows []ACUEventDat
 }
 
 func (s *EventLogService) insertChargebackBatch(ctx context.Context, rows []ChargebackEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO chargeback_events (event_id, tenant_id, chargeback_id, batch_id, subscription_id, user_id, event_type, processor, processor_transaction_id, amount, currency, chargeback_type, reason, status, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO chargeback_events (event_id, merchant_id, chargeback_id, batch_id, subscription_id, user_id, event_type, processor, processor_transaction_id, amount, currency, chargeback_type, reason, status, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}

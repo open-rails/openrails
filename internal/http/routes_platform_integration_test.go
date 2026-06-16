@@ -23,28 +23,29 @@ import (
 
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	policyginmw "github.com/open-rails/openrails/internal/auth/policy/ginmw"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/platform"
-	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
 
 const platformSchemaDDL = `
 CREATE SCHEMA IF NOT EXISTS openrails;
-CREATE TABLE IF NOT EXISTS openrails.tenants (
+CREATE TABLE IF NOT EXISTS openrails.merchants (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug         TEXT NOT NULL UNIQUE,
     name         TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'active',
-    authkit_tenant_id TEXT, authkit_tenant_slug TEXT,
+    owner_org_id TEXT,
     billing_tier TEXT, region TEXT, webhook_host TEXT, webhook_path TEXT,
     provisioned_at TIMESTAMPTZ,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     suspended_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ
 );
-CREATE TABLE IF NOT EXISTS openrails.subscriptions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID, status TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS openrails.payments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID, amount BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'completed');
-INSERT INTO openrails.tenants (slug, name, status, billing_tier) VALUES ('acme','Acme','active','pro') ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS openrails.subscriptions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), merchant_id UUID, status TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS openrails.payments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), merchant_id UUID, amount BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'completed');
+INSERT INTO openrails.merchants (slug, name, status, billing_tier) VALUES ('acme','Acme','active','pro') ON CONFLICT DO NOTHING;
 `
 
 func newPlatformTestPool(t *testing.T) *pgxpool.Pool {
@@ -107,11 +108,12 @@ func (f fakeSuperadminChecker) HasPlatformSuperadmin(_ context.Context, userID s
 
 func newPlatformServer(t *testing.T, pool *pgxpool.Pool) *Server {
 	t.Helper()
-	tsvc, err := tenancy.NewService(pool, tenancy.NewMemorySecretStore())
+	dbPool := db.WrapPool(pool, "")
+	tsvc, err := merchants.NewService(dbPool, merchants.NewMemorySecretStore())
 	require.NoError(t, err)
-	metrics, err := platform.NewMetrics(pool)
+	metrics, err := platform.NewMetrics(dbPool)
 	require.NoError(t, err)
-	return &Server{tenancy: tsvc, platformMetrics: metrics}
+	return &Server{merchants: tsvc, platformMetrics: metrics}
 }
 
 func doReq(t *testing.T, s *Server, checker authpolicy.PlatformSuperadminChecker, method, path string, uc authprovider.UserContext, body string) *httptest.ResponseRecorder {
@@ -121,7 +123,7 @@ func doReq(t *testing.T, s *Server, checker authpolicy.PlatformSuperadminChecker
 	e.Use(func(c *gin.Context) { c.Set("openrails.user_context", uc); c.Next() })
 	g := e.Group(StandaloneV1Prefix + PlatformPrefix)
 	g.Use(policyginmw.PlatformSuperadminRequired(checker))
-	g.GET("/tenants", s.platformListTenantsHandler())
+	g.GET("/merchants", s.platformListMerchantsHandler())
 	g.GET("/search", s.platformSearchHandler())
 	g.GET("/metrics", s.platformMetricsHandler())
 
@@ -143,13 +145,13 @@ func TestPlatformAPI_GateSearchAndMetrics(t *testing.T) {
 	s := newPlatformServer(t, pool)
 
 	base := StandaloneV1Prefix + PlatformPrefix
-	platformUC := authprovider.UserContext{UserID: "platform-admin", Tenant: "openrails-platform"}
-	tenantAdminUC := authprovider.UserContext{UserID: "tenant-admin", Tenant: "tenant-acme", TenantRoles: []string{"admin"}}
+	platformUC := authprovider.UserContext{UserID: "platform-admin", Org: "openrails-platform"}
+	merchantAdminUC := authprovider.UserContext{UserID: "merchant-admin", Org: "tenant-acme", OrgRoles: []string{"admin"}}
 
-	rr := doReq(t, s, checker, http.MethodGet, base+"/tenants", tenantAdminUC, "")
-	require.Equal(t, http.StatusForbidden, rr.Code, "tenant operator admin must be denied")
+	rr := doReq(t, s, checker, http.MethodGet, base+"/merchants", merchantAdminUC, "")
+	require.Equal(t, http.StatusForbidden, rr.Code, "merchant operator admin must be denied")
 
-	rr = doReq(t, s, checker, http.MethodGet, base+"/tenants", platformUC, "")
+	rr = doReq(t, s, checker, http.MethodGet, base+"/merchants", platformUC, "")
 	require.Equal(t, http.StatusOK, rr.Code, "platform identity must pass: %s", rr.Body.String())
 
 	rr = doReq(t, s, checker, http.MethodGet, base+"/search?q=acme", platformUC, "")
@@ -159,5 +161,5 @@ func TestPlatformAPI_GateSearchAndMetrics(t *testing.T) {
 	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 	var m platform.PlatformMetrics
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &m))
-	require.Equal(t, 1, m.TenantCount)
+	require.Equal(t, 1, m.MerchantCount)
 }

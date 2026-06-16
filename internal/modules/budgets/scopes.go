@@ -112,7 +112,7 @@ func MakeScopeReservation(scope, owner, invoker string, roleID uuid.UUID, window
 // reserves NOTHING (all-or-nothing) and reports the blocking scope+windows.
 //
 // Each scope is reserved as a separate budget_reservations row keyed by its
-// scope key in the `invoker` column, idempotent on (tenant, subject, key, source,
+// scope key in the `invoker` column, idempotent on (merchant, subject, key, source,
 // source_id) — a replay returns the existing rows. Budgets are GATES over the
 // single payer balance: these rows do NOT debit; the credit ledger places the
 // one hold separately. Sub-budgets MAY over-subscribe; the balance is the floor.
@@ -152,7 +152,7 @@ func (s *Service) ReserveScopes(ctx context.Context, payer identity.CustomerID, 
 		return nil, true, -1, nil
 	}
 
-	tid, terr := merchant.Require(ctx) // #336/#474: no default tenant
+	tid, terr := merchant.Require(ctx) // #336/#474: no default merchant
 	if terr != nil {
 		return nil, false, -1, terr
 	}
@@ -163,7 +163,7 @@ func (s *Service) ReserveScopes(ctx context.Context, payer identity.CustomerID, 
 	allowed := true
 	blockIdx := -1
 
-	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if _, err := repo.EnsureCustomerID(ctx, tx, tenantID, payerID.String()); err != nil {
 			return err
@@ -317,16 +317,44 @@ func (s *Service) CaptureByCoords(ctx context.Context, payer identity.CustomerID
 	if err != nil {
 		return err
 	}
-	tid, terr := merchant.Require(ctx) // #336/#474: no default tenant
+	tid, terr := merchant.Require(ctx) // #336/#474: no default merchant
 	if terr != nil {
 		return terr
 	}
 	tenantID := tid.UUID()
-	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		_, err := s.db.Gen(ctx).CaptureBudgetReservationsByCoords(ctx, gen.CaptureBudgetReservationsByCoordsParams{
 			MerchantID: tenantID, CustomerID: payer.UUID(),
 			Currency: cur, Source: strings.TrimSpace(source), SourceID: strings.TrimSpace(sourceID),
 			Captured: actual,
+		})
+		return err
+	})
+}
+
+// CaptureByCoordsReservedAmount settles active reservations at their own
+// reserved amount. Cross-currency settlement uses this for policy-currency budget
+// rows because the ledger capture remains in the original request currency.
+func (s *Service) CaptureByCoordsReservedAmount(ctx context.Context, payer identity.CustomerID, currency, source, sourceID string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("budgets service not initialized")
+	}
+	if payer.IsZero() {
+		return ErrCustomerRequired
+	}
+	cur, err := normalizeCurrency(currency)
+	if err != nil {
+		return err
+	}
+	tid, terr := merchant.Require(ctx)
+	if terr != nil {
+		return terr
+	}
+	tenantID := tid.UUID()
+	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		_, err := s.db.Gen(ctx).CaptureBudgetReservationsByCoordsReservedAmount(ctx, gen.CaptureBudgetReservationsByCoordsReservedAmountParams{
+			MerchantID: tenantID, CustomerID: payer.UUID(),
+			Currency: cur, Source: strings.TrimSpace(source), SourceID: strings.TrimSpace(sourceID),
 		})
 		return err
 	})
@@ -346,12 +374,12 @@ func (s *Service) ReleaseByCoords(ctx context.Context, payer identity.CustomerID
 	if err != nil {
 		return err
 	}
-	tid, terr := merchant.Require(ctx) // #336/#474: no default tenant
+	tid, terr := merchant.Require(ctx) // #336/#474: no default merchant
 	if terr != nil {
 		return terr
 	}
 	tenantID := tid.UUID()
-	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		_, err := s.db.Gen(ctx).ReleaseBudgetReservationsByCoords(ctx, gen.ReleaseBudgetReservationsByCoordsParams{
 			MerchantID: tenantID, CustomerID: payer.UUID(),
 			Currency: cur, Source: strings.TrimSpace(source), SourceID: strings.TrimSpace(sourceID),

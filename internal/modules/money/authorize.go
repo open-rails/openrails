@@ -2,20 +2,17 @@ package money
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// AuthorizeHoldInput is the input to AuthorizeAndHold: the payer (tenant subject), the
+// AuthorizeHoldInput is the input to AuthorizeAndHold: the payer (merchant subject), the
 // invoker (canonical invoker for per-invoker caps), the estimated charge, and the
 // idempotency-keyed source coordinates of the hold.
 type AuthorizeHoldInput struct {
@@ -23,16 +20,18 @@ type AuthorizeHoldInput struct {
 	Invoker         string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
 	Currency        string
 	EstimatedAmount int64
-	// Source + SourceID form the idempotency key for the placed hold (typically
-	// the request_id). A retry with the same coordinates returns the same hold.
+	// Source + SourceID are the durable provenance/idempotency coordinates used
+	// later when the admitted request is captured. SourceID is the caller's
+	// request_id.
 	Source   string
 	SourceID string
-	// ExpiresAt bounds the hold's lifetime.
+	// ExpiresAt bounds the Redis hold's lifetime; this package only validates it.
 	ExpiresAt time.Time
 }
 
-// AuthorizeHoldResult is the combined decision + (when allowed) placed hold,
-// returned atomically by AuthorizeAndHold.
+// AuthorizeHoldResult is the money-policy decision plus the available capacity
+// snapshot. The actual in-flight hold lives in Redis, keyed by merchant +
+// request_id, not in money_transactions.
 type AuthorizeHoldResult struct {
 	Decision    SpendDecision
 	BillingMode string
@@ -42,20 +41,14 @@ type AuthorizeHoldResult struct {
 	// was made against.
 	AvailableAmount       int64
 	OutstandingOwedAmount int64
-	// Hold is the placed reservation when Decision.Allowed; nil when denied.
-	Hold *models.MoneyTransaction
+	// CapacityAmount is the maximum money exposure this account can start now,
+	// before subtracting active Redis holds.
+	CapacityAmount int64
 }
 
-// AuthorizeAndHold evaluates the spend policy + prepaid available-balance gate
-// AND, when allowed, places the hold — ALL IN ONE TRANSACTION (issue #235/#247).
-//
-// Atomicity is what makes this distinct from calling CheckSpendAllowed then Hold
-// separately: the balance row is locked FOR UPDATE at the top of the tx, and the
-// policy evaluation (which counts active holds + windowed spend) and the hold
-// insert both run while that lock is held. Two concurrent authorizes on the same
-// (tenant, payer, currency) therefore serialize on the row lock — the second
-// sees the first's held_balance and active-hold exposure, so they cannot both
-// pass on the same available balance.
+// AuthorizeAndHold evaluates the spend policy + prepaid/arrears capacity gate
+// under the per-customer spend lock. It does not insert a money_transactions
+// hold row. In-flight reservations are Redis state owned by the service layer.
 func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInput) (*AuthorizeHoldResult, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -80,7 +73,7 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 	}
 
 	var result *AuthorizeHoldResult
-	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		// A tx-scoped service so the policy reads (CheckSpendAllowed via Qx(ctx))
 		// and the hold placement run on THIS transaction — one atomic unit.
 		q := gen.New(tx)
@@ -92,40 +85,9 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		}
 		tenantID := tid.UUID()
 		payerID := in.Payer.UUID()
-		now := s.now()
-
-		// Idempotency: an existing hold for these coordinates short-circuits — return
-		// it as an allowed decision without re-evaluating (the original authorize
-		// already passed). Mirrors Hold's idempotency key.
-		existingRow, ierr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			TransactionType: "hold", Source: in.Source, SourceID: &in.SourceID,
-		})
-		if ierr == nil {
-			existing, merr := moneyTransactionFromGen(existingRow)
-			if merr != nil {
-				return merr
-			}
-			snap, serr := txSvc.snapshotTx(ctx, in.Payer, cur)
-			if serr != nil {
-				return serr
-			}
-			result = &AuthorizeHoldResult{
-				Decision:              SpendDecision{Allowed: true},
-				BillingMode:           snap.billingMode,
-				Currency:              cur,
-				AvailableAmount:       snap.available,
-				OutstandingOwedAmount: snap.outstanding,
-				Hold:                  existing,
-			}
-			return nil
-		}
-		if !errors.Is(ierr, pgx.ErrNoRows) {
-			return ierr
-		}
 
 		// Lock the balance row FOR UPDATE up front: every subsequent read/decision in
-		// this tx is serialized behind it for the same (tenant, payer).
+		// this tx is serialized behind it for the same (merchant, payer).
 		bal, lerr := txSvc.lockBalance(ctx, q, in.Payer, in.Payer.UUID().String(), cur)
 		if lerr != nil {
 			return lerr
@@ -143,20 +105,14 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			return derr
 		}
 
-		// Admit-time balance/credit gate. Prepaid accounts gate on available balance
-		// (unchanged). Arrears accounts (#489): when an admin has set a credit line
-		// (credit_limit_amount > 0) the balance may go NEGATIVE only up to it, so a
-		// hold is allowed while estimate <= available + credit_limit and denied
-		// insufficient_credit otherwise. credit_limit=0 (the default) is OFF and
-		// preserves the EXISTING arrears behavior (#302): no admit-time balance gate
-		// — a hold may exceed the balance and spill to owed at capture, bounded only
-		// by the outstanding ceiling (MaxOutstandingOwed, inside CheckSpendAllowed).
-		//
-		// NOTE (design choice): #489's literal "credit_limit=0 ⇒ prepaid behavior"
-		// would block #302's arrears-spill-past-balance, a real existing capability.
-		// We instead make 0 = OFF (existing behavior unchanged) and a positive limit
-		// = the new explicit admit-time credit ceiling. Prepaid is unaffected either
-		// way.
+		// Admit-time balance/credit gate. Prepaid accounts gate on available balance.
+		// Arrears accounts gate on prepaid availability plus remaining credit line:
+		// credit_limit_amount - existing owed exposure. A zero credit line means no
+		// arrears capacity; prepaid balance can still admit work. During the #506
+		// transition, outstanding_owed_amount remains the exposure cache, and open
+		// invoice amount_due is used if it is higher so paid/open invoice state can
+		// drive admission as we migrate away from the account-level counter.
+		capacity := available
 		switch {
 		case settings.BillingMode != BillingModeArrears:
 			if in.EstimatedAmount > available {
@@ -165,8 +121,30 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 					dec.DenyCode = DenyInsufficientBalance
 				}
 			}
-		case settings.CreditLimitAmount > 0:
-			if in.EstimatedAmount > available+settings.CreditLimitAmount {
+		default:
+			openDue, oerr := q.SumOpenInvoiceAmountDue(ctx, gen.SumOpenInvoiceAmountDueParams{
+				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+			})
+			if oerr != nil {
+				return oerr
+			}
+			pendingDue, perr := q.SumPendingInvoiceItemAmount(ctx, gen.SumPendingInvoiceItemAmountParams{
+				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+			})
+			if perr != nil {
+				return perr
+			}
+			exposure := settings.OutstandingOwedAmount
+			invoiceExposure := openDue + pendingDue
+			if invoiceExposure > exposure {
+				exposure = invoiceExposure
+			}
+			remainingCredit := settings.CreditLimitAmount - exposure
+			if remainingCredit < 0 {
+				remainingCredit = 0
+			}
+			capacity = available + remainingCredit
+			if in.EstimatedAmount > available+remainingCredit {
 				dec.Allowed = false
 				if dec.DenyCode == "" {
 					dec.DenyCode = DenyInsufficientCredit
@@ -180,41 +158,8 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			Currency:              cur,
 			AvailableAmount:       available,
 			OutstandingOwedAmount: settings.OutstandingOwedAmount,
+			CapacityAmount:        capacity,
 		}
-
-		if !dec.Allowed {
-			result = res
-			return nil
-		}
-
-		// Place the hold within the SAME tx + customers-row lock. Inserting the
-		// active hold row IS the held reservation (#491): SumActiveMoneyHeld counts
-		// it, so a concurrent authorize on the same customer (serialized behind the
-		// lock) sees this hold's exposure.
-		amount := in.EstimatedAmount
-		exp := in.ExpiresAt.UTC()
-		auth := amount
-		srcID := in.SourceID
-		hold := &models.MoneyTransaction{
-			ID:              uuidutil.NewV7(),
-			MerchantID:      tenantID,
-			CustomerID:      payerID,
-			Currency:        cur,
-			Invoker:         strings.TrimSpace(in.Invoker),
-			Amount:          0,
-			Source:          in.Source,
-			SourceID:        &srcID,
-			Status:          "active",
-			Authorized:      &auth,
-			ExpiresAt:       &exp,
-			TransactionType: "hold",
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		}
-		if err := q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(hold)); err != nil {
-			return err
-		}
-		res.Hold = hold
 		result = res
 		return nil
 	})

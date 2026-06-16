@@ -34,12 +34,12 @@ type usdcFundingDelegatedResolver struct {
 func (r usdcFundingDelegatedResolver) ResolveDelegated(context.Context, string) (*controlplane.ResolvedDelegated, error) {
 	tenantID := r.tenantID
 	if tenantID.IsZero() {
-		tenantID = dbtest.TestTenantID
+		tenantID = dbtest.TestMerchantID
 	}
 	return &controlplane.ResolvedDelegated{
-		Tenant:           dbtest.TestTenantSlug,
+		Merchant:         dbtest.TestMerchantSlug,
 		MerchantID:       tenantID,
-		TenantSlug:       dbtest.TestTenantSlug,
+		MerchantSlug:     dbtest.TestMerchantSlug,
 		DelegatedSubject: r.subject,
 		Permissions:      r.permissions,
 	}, nil
@@ -53,7 +53,7 @@ func newUSDCFundingSelfRouter(t *testing.T, suite *TestContainerSuite, subject s
 	ginroutes.RegisterSelfServiceRoutes(group, suite.App.Runtime, ginmw.DelegatedSelfRequired(usdcFundingDelegatedResolver{
 		subject:     subject,
 		permissions: permissions,
-		tenantID:    dbtest.TestTenantID,
+		tenantID:    dbtest.TestMerchantID,
 	}))
 	return e
 }

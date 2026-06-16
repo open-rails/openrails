@@ -28,11 +28,11 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 		"openrails:self:subscriptions:cancel",
 		"openrails:self:payment-methods:manage",
 		"openrails:self:wallets:manage",
-		// Tenant-admin write-only secret management (#323).
-		PermTenantSecretsList,
-		PermTenantSecretsWrite,
-		PermTenantSecretsDelete,
-		PermTenantSecretsTest,
+		// Merchant-admin write-only secret management (#323).
+		PermMerchantSecretsList,
+		PermMerchantSecretsWrite,
+		PermMerchantSecretsDelete,
+		PermMerchantSecretsTest,
 		// Cross-tenant managed-hosting platform superadmin (#226). It is in the
 		// catalog (a valid grantable permission) but is NOT seeded into operator
 		// orgs — see TestOperatorRolePermissions_ExcludesPlatformSuperadmin.
@@ -134,7 +134,7 @@ func TestOperatorRoleExcludesPlatformSuperadmin(t *testing.T) {
 			t.Fatalf("operator role must NOT include %q", PermPlatformSuperadmin)
 		}
 	}
-	// Operator role still has the broad per-tenant admin permission.
+	// Operator role still has the broad per-merchant admin permission.
 	if !contains(OperatorRolePermissions(), PermAdmin) {
 		t.Fatalf("operator role must include %q", PermAdmin)
 	}

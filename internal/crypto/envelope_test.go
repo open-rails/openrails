@@ -108,7 +108,7 @@ func TestDecrypt_CrossTenantFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encrypt A: %v", err)
 	}
-	// Tenant B's DEK must NOT be able to decrypt tenant A's ciphertext.
+	// Merchant B's DEK must NOT be able to decrypt tenant A's ciphertext.
 	if _, err := enc.Decrypt(ctx, tB, ctA); err == nil {
 		t.Fatal("tenant B must not decrypt tenant A's ciphertext")
 	}

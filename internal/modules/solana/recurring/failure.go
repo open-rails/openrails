@@ -10,7 +10,7 @@ import (
 // crank error) that indicate the pull failed for reasons that are NOT the
 // subscriber's fault: RPC/network trouble or the cranker (fee-payer) wallet
 // being out of SOL. These must be retried and must NEVER dun the subscriber
-// (#257) — a SOL-gas outage hits a tenant's entire book at once, so dunning on
+// (#257) — a SOL-gas outage hits a merchant's entire book at once, so dunning on
 // it would wrongly past-due every subscriber.
 var operationalSignatures = []string{
 	// Transport / RPC availability.

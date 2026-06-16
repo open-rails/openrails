@@ -39,7 +39,7 @@ type CaptureUsageEventParams struct {
 }
 
 // InsertCaptureUsageEvent appends a usage_event for analytics, idempotent on
-// (tenant, payer, event_type, source, source_id). No ledger debit happens here.
+// (merchant, payer, event_type, source, source_id). No ledger debit happens here.
 func (s *MoneyService) InsertCaptureUsageEvent(ctx context.Context, p CaptureUsageEventParams) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
@@ -63,7 +63,7 @@ func (s *MoneyService) InsertCaptureUsageEvent(ctx context.Context, p CaptureUsa
 		return err
 	}
 	now := s.now()
-	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
 		tid, terr := merchant.Require(ctx)
 		if terr != nil {
@@ -137,7 +137,7 @@ var serviceUsageGroupKeys = map[string]bool{
 	"tier":     true,
 }
 
-// ServiceUsageRollup returns per-dimension-VALUE spend for a tenant subject over
+// ServiceUsageRollup returns per-dimension-VALUE spend for a merchant subject over
 // [from, to), grouped by group_by. Service-scoped (any payer), for the platform
 // usage/revenue surfaces — NOT the hot admission path.
 func (s *MoneyService) ServiceUsageRollup(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time, groupBy string) ([]ServiceUsageRollupRow, error) {
@@ -156,7 +156,7 @@ func (s *MoneyService) ServiceUsageRollup(ctx context.Context, payer identity.Cu
 		return nil, fmt.Errorf("invalid group_by %q (want resource|invoker|function|tier)", groupBy)
 	}
 	var out []ServiceUsageRollupRow
-	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		tid, terr := merchant.Require(ctx)
 		if terr != nil {
 			return terr
@@ -193,7 +193,7 @@ type ResourceRevenueDailyRow struct {
 
 // ResourceRevenueDaily returns per-day revenue (sum of captured usage_event
 // amounts; older rows used a USD-specific internal unit conversion) for
-// a resource (typed attribution column), across ALL payers in the tenant, over
+// a resource (typed attribution column), across ALL payers in the merchant, over
 // [from, to). Powers e.g. tensorhub endpoint revenue analytics (#410).
 func (s *MoneyService) ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
 	if s == nil || s.db == nil {
@@ -208,7 +208,7 @@ func (s *MoneyService) ResourceRevenueDaily(ctx context.Context, resource, curre
 		return nil, err
 	}
 	var out []ResourceRevenueDailyRow
-	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		tid, terr := merchant.Require(ctx)
 		if terr != nil {
 			return terr

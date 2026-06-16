@@ -24,19 +24,12 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz);
 
 -- name: SumActiveMoneyHeld :one
--- Derived held (#491): active-hold authorizations PLUS open-window unsettled
--- reservations (windows reserve held without a 'hold' row). Replaces the cached
--- money_balances.held_balance.
-SELECT (
-    COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0))
-              FROM openrails.money_transactions t
-              WHERE t.merchant_id = $1 AND t.customer_id = $2 AND t.currency = sqlc.arg(currency)
-                AND t.transaction_type = 'hold' AND t.status = 'active'), 0)
-  + COALESCE((SELECT SUM(w.held_amount - w.settled_amount)
+-- Derived held (#505): durable open-window unsettled reservations only.
+-- Request/admit holds live in Redis and are included by the admission layer.
+SELECT COALESCE((SELECT SUM(w.held_amount - w.settled_amount)
               FROM openrails.money_windows w
               WHERE w.merchant_id = $1 AND w.customer_id = $2 AND w.currency = sqlc.arg(currency)
-                AND w.status = 'open'), 0)
-)::bigint;
+                AND w.status = 'open'), 0)::bigint;
 
 -- name: ListSpendableMoneyBlocksForUpdate :many
 -- FIFO draw order: soonest-expiring first, then oldest.
@@ -61,16 +54,16 @@ INSERT INTO openrails.money_transactions (
     id, merchant_id, customer_id, currency, invoker_id, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
-    expires_at, description, created_at, updated_at
-) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18);
+    expires_at, description, invoice_id, created_at, updated_at
+) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, sqlc.narg(invoice_id), $17, $18);
 
 -- name: InsertMoneyTransactionIfAbsent :exec
 INSERT INTO openrails.money_transactions (
     id, merchant_id, customer_id, currency, invoker_id, resource, metadata,
     amount, balance_after, transaction_type, status,
     authorized_amount, captured_amount, source, source_id,
-    expires_at, description, created_at, updated_at
-) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+    expires_at, description, invoice_id, created_at, updated_at
+) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, sqlc.narg(invoice_id), $17, $18)
 ON CONFLICT DO NOTHING;
 
 -- name: GetMoneyTransactionByCoords :one
@@ -89,18 +82,17 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND transaction_type IN ('withdrawal', 'owed_accrual')
   AND source = $3 AND source_id = $4;
 
+-- name: GetMoneySpendByCoords :one
+-- Returns the first posted money movement for an idempotent captured request.
+SELECT * FROM openrails.money_transactions
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
+  AND transaction_type IN ('withdrawal', 'owed_accrual')
+  AND source = $3 AND source_id = $4
+ORDER BY created_at ASC
+LIMIT 1;
+
 -- name: GetMoneyTransactionForUpdate :one
 SELECT * FROM openrails.money_transactions WHERE id = $1 FOR UPDATE;
-
--- name: CaptureMoneyHold :exec
-UPDATE openrails.money_transactions
-SET status = 'captured', captured_amount = $2, amount = $3, balance_after = $4, updated_at = $5
-WHERE id = $1;
-
--- name: ReleaseMoneyHold :exec
-UPDATE openrails.money_transactions
-SET status = 'released', updated_at = $2
-WHERE id = $1;
 
 -- name: ListMoneyTransactionsByPayer :many
 SELECT * FROM openrails.money_transactions
@@ -113,14 +105,12 @@ SELECT count(*) FROM openrails.money_transactions
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: SumSpentInMoneyWindow :one
--- Spend counted against a rate cap since `since`: settled spend (withdrawals +
--- captured holds) PLUS currently-active holds created in the window, so
--- concurrent in-flight holds can't overshoot a cap. Empty invoker_id = all invokers.
+-- Posted spend counted against a rate cap since `since`. Concurrent request
+-- occupancy is Redis hold state, not a money_transactions row.
 SELECT COALESCE(SUM(
     CASE
         WHEN transaction_type = 'withdrawal' THEN -amount
-        WHEN transaction_type = 'hold' AND status = 'captured' THEN -amount
-        WHEN transaction_type = 'hold' AND status = 'active' THEN COALESCE(authorized_amount, 0)
+        WHEN transaction_type = 'owed_accrual' THEN amount
         ELSE 0
     END), 0)::bigint
 FROM openrails.money_transactions
@@ -128,23 +118,11 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND created_at >= sqlc.arg(since)::timestamptz
   AND (sqlc.arg(invoker_id)::text = '' OR invoker_id = sqlc.arg(invoker_id)::text);
 
--- name: SumActiveMoneyHoldAuthorizations :one
-SELECT COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)::bigint
-FROM openrails.money_transactions
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND transaction_type = 'hold' AND status = 'active';
-
 -- name: SumMoneyDeposits :one
 SELECT COALESCE(SUM(amount), 0)::bigint
 FROM openrails.money_transactions
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND transaction_type = 'deposit';
-
--- name: ListOrphanedExpiredMoneyHolds :many
-SELECT * FROM openrails.money_transactions
-WHERE merchant_id = $1 AND transaction_type = 'hold' AND status = 'active'
-  AND expires_at IS NOT NULL AND expires_at <= sqlc.arg(now)::timestamptz
-ORDER BY expires_at ASC;
 
 -- name: SumMoneyMovementsInPeriodByPayer :many
 SELECT transaction_type, COALESCE(SUM(amount), 0)::bigint AS total
@@ -191,20 +169,6 @@ WHERE status = 'open' AND expires_at <= sqlc.arg(now)::timestamptz
 ORDER BY expires_at ASC
 LIMIT sqlc.arg(batch_size)::int
 FOR UPDATE SKIP LOCKED;
-
--- name: ListExpiredActiveMoneyHoldsForUpdate :many
--- Hold expiry sweep (cross-tenant, SKIP LOCKED so concurrent sweeps don't contend).
-SELECT * FROM openrails.money_transactions
-WHERE transaction_type = 'hold' AND status = 'active'
-  AND expires_at IS NOT NULL AND expires_at <= sqlc.arg(now)::timestamptz
-ORDER BY expires_at ASC
-LIMIT sqlc.arg(batch_size)::int
-FOR UPDATE SKIP LOCKED;
-
--- name: ExpireMoneyHold :exec
-UPDATE openrails.money_transactions
-SET status = 'expired', updated_at = $2
-WHERE id = $1;
 
 -- name: DeleteCompactableMoneyBlocks :execrows
 -- Credit-block COMPACTION (#491): delete fully-spent (remaining_amount = 0) and

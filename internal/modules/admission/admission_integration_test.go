@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/budgets"
@@ -29,8 +30,8 @@ func admitEnv(t *testing.T) (*admission.Admitter, *money.MoneyService, *admissio
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
-	dbtest.EnsureTestTenant(ctx, t, pool)
-	ctx = dbtest.WithTestTenant(ctx)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	ctx = dbtest.WithTestMerchant(ctx)
 
 	payer := identity.CustomerIDFromString(uuid.NewString())
 	payerID := payer.UUID()
@@ -59,6 +60,107 @@ func admitEnv(t *testing.T) (*admission.Admitter, *money.MoneyService, *admissio
 	bsvc := budgets.NewService(dbi)
 	adm := admission.NewAdmitter(ratelimit.NewLimiter(rdb), cs, store, bl, bsvc)
 	return adm, cs, store, payer, money.DefaultCurrency, ctx, bl
+}
+
+func TestAdmit_USDChargeCountsAgainstEURBudget(t *testing.T) {
+	adm, cs, store, payer, _, ctx, _ := admitEnv(t)
+	adm = adm.WithFXProvider(fx.NewMockProvider(map[string]float64{"eur": 1.25}))
+	require.NoError(t, store.UpsertTierPolicyFull(ctx, payer, "free", models.ThroughputPolicy{
+		Windows:        []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}},
+		PolicyCurrency: "EUR",
+		BudgetWindows:  []models.BudgetWindowPolicy{{Key: "daily", WindowSeconds: 86_400, Limit: 800_000}},
+	}))
+	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 10_000_000, Source: "seed"})
+	require.NoError(t, err)
+
+	d, err := adm.Admit(ctx, admission.AdmitRequest{
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:fx", Tier: "free", Resource: "gpt-4o",
+		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 1_000_000,
+		Source: "usage", SourceID: "fx1", ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
+	require.Equal(t, "EUR", d.PolicyCurrency)
+	require.EqualValues(t, 800_000, d.PolicyAmount)
+
+	d, err = adm.Admit(ctx, admission.AdmitRequest{
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:fx", Tier: "free", Resource: "gpt-4o",
+		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 1,
+		Source: "usage", SourceID: "fx2", ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	require.False(t, d.Allowed)
+	require.Equal(t, "budget", d.BlockedBy)
+	require.Equal(t, "EUR", d.PolicyCurrency)
+	require.EqualValues(t, 1, d.PolicyAmount)
+}
+
+func TestAdmit_MissingRedisFXRateFailsClosed(t *testing.T) {
+	adm, cs, store, payer, _, ctx, _ := admitEnv(t)
+	rc, err := tcredis.Run(ctx, "redis:7-alpine")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rc.Terminate(ctx) })
+	conn, err := rc.ConnectionString(ctx)
+	require.NoError(t, err)
+	opt, err := redis.ParseURL(conn)
+	require.NoError(t, err)
+	rdb := redis.NewClient(opt)
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	adm = adm.WithFXProvider(fx.NewRedisCachedProvider(rdb, fx.NewMockProvider(map[string]float64{"eur": 1.25}), time.Hour))
+	require.NoError(t, store.UpsertTierPolicyFull(ctx, payer, "free", models.ThroughputPolicy{
+		Windows:        []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}},
+		PolicyCurrency: "EUR",
+		BudgetWindows:  []models.BudgetWindowPolicy{{Key: "daily", WindowSeconds: 86_400, Limit: 800_000}},
+	}))
+	_, err = cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 10_000_000, Source: "seed"})
+	require.NoError(t, err)
+
+	_, err = adm.Admit(ctx, admission.AdmitRequest{
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:missing-fx", Tier: "free", Resource: "gpt-4o",
+		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 1_000_000,
+		Source: "usage", SourceID: "missing-fx", ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "FX rate unavailable")
+}
+
+func TestAdmit_CustomCreditUnitCannotBeFXConverted(t *testing.T) {
+	adm, _, store, payer, _, ctx, _ := admitEnv(t)
+	adm = adm.WithFXProvider(fx.NewMockProvider(map[string]float64{"eur": 1.25}))
+	require.NoError(t, store.UpsertTierPolicyFull(ctx, payer, "free", models.ThroughputPolicy{
+		Windows:        []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}},
+		PolicyCurrency: "EUR",
+		BudgetWindows:  []models.BudgetWindowPolicy{{Key: "daily", WindowSeconds: 86_400, Limit: 800_000}},
+	}))
+
+	_, err := adm.Admit(ctx, admission.AdmitRequest{
+		CustomerID: payer, Currency: "tenant/custom", Invoker: "user:custom-fx", Tier: "free", Resource: "gpt-4o",
+		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 1,
+		Source: "usage", SourceID: "custom-fx", ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.Error(t, err)
+}
+
+func TestAdmit_SameCurrencyPolicyWorksWithoutFXProvider(t *testing.T) {
+	adm, cs, store, payer, _, ctx, _ := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicyFull(ctx, payer, "free", models.ThroughputPolicy{
+		Windows:        []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}},
+		PolicyCurrency: money.DefaultCurrency,
+		BudgetWindows:  []models.BudgetWindowPolicy{{Key: "daily", WindowSeconds: 86_400, Limit: 1_000_000}},
+	}))
+	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 10_000_000, Source: "seed"})
+	require.NoError(t, err)
+
+	d, err := adm.Admit(ctx, admission.AdmitRequest{
+		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:same-fx", Tier: "free", Resource: "gpt-4o",
+		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		Source: "usage", SourceID: "same-fx", ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
+	require.Equal(t, money.DefaultCurrency, d.PolicyCurrency)
+	require.EqualValues(t, 100, d.PolicyAmount)
 }
 
 func TestAdmit_ThroughputDeny(t *testing.T) {
@@ -111,7 +213,7 @@ func TestAdmit_Allow(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
-	require.NotNil(t, d.Hold, "allowed admit reserves a money hold")
+	require.Greater(t, d.CapacityAmount, int64(0), "allowed admit returns money capacity for the Redis hold")
 	require.NotEmpty(t, d.Windows)
 }
 

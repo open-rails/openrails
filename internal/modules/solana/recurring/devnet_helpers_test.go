@@ -150,7 +150,7 @@ func (f fixedSubReader) GetBySubscriptionID(context.Context, uuid.UUID) (*models
 	return f.row, nil
 }
 
-// memSecretGetter serves the merchant (cranker) key as the tenant's
+// memSecretGetter serves the merchant (cranker) key as the merchant's
 // solana/private_key so the production keypair signer / Submitter resolve it.
 type memSecretGetter struct{ key string }
 
@@ -169,7 +169,7 @@ func newMerchantSigner(merchant solanago.PrivateKey) solanaint.Signer {
 func publishUSDCPlan(ctx context.Context, t *testing.T, planSvc *PlanService, amount, periodHours uint64) *PlanHandle {
 	t.Helper()
 	h, err := planSvc.PublishPlan(ctx, PublishPlanInput{
-		MerchantID: dbtest.TestTenantID, PlanID: uint64(time.Now().UnixNano()),
+		MerchantID: dbtest.TestMerchantID, PlanID: uint64(time.Now().UnixNano()),
 		TokenSymbol: "USDC", AmountBaseUnits: amount, PeriodHours: periodHours,
 	})
 	require.NoError(t, err, "PublishPlan(%d/%dh) should create the plan on-chain", amount, periodHours)
@@ -191,7 +191,7 @@ func devnetSubscribe(ctx context.Context, t *testing.T, rc *solanaint.RPCClient,
 	t.Helper()
 	prepare := func() *PrepareSubscribeResult {
 		res, err := prepSvc.Prepare(ctx, PrepareSubscribeInput{
-			MerchantID: dbtest.TestTenantID, SubscriberWallet: sub.PublicKey().String(),
+			MerchantID: dbtest.TestMerchantID, SubscriberWallet: sub.PublicKey().String(),
 			PlanID: h.PlanID, MintSymbol: "USDC", AmountBaseUnits: amount, PeriodHours: periodHours, PlanCreatedAt: h.CreatedAt,
 		})
 		require.NoError(t, err)

@@ -36,7 +36,7 @@ type SpendParams struct {
 }
 
 // SpendCredits debits an account balance-first-then-owed in one transaction,
-// gated by the credit line. Idempotent on (tenant, payer, currency, source,
+// gated by the credit line. Idempotent on (merchant, payer, currency, source,
 // source_id). Returns ErrInsufficientCredits when balance + remaining credit
 // line cannot cover the amount.
 func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) error {
@@ -57,7 +57,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 		return err
 	}
 
-	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 
 		// Serialize per account and guard idempotency on the spend coordinates.
@@ -85,6 +85,86 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 		_, _, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount)
 		return serr
 	})
+}
+
+// CaptureAuthorized records the durable money movement for an admitted request.
+// The in-flight authorization itself lives in Redis; this method only posts the
+// actual charge and is idempotent on (merchant, payer, currency, source,
+// source_id).
+func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams) (*models.MoneyTransaction, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
+	if params.Amount <= 0 {
+		return nil, fmt.Errorf("amount must be positive")
+	}
+	params.Source = strings.TrimSpace(params.Source)
+	params.SourceID = strings.TrimSpace(params.SourceID)
+	if params.Source == "" || params.SourceID == "" {
+		return nil, fmt.Errorf("source and source_id required")
+	}
+	cur := normalizeCurrency(params.Currency)
+	if err := ValidateCurrency(cur); err != nil {
+		return nil, err
+	}
+	payer, err := resolveCustomer(params.Payer, params.Invoker)
+	if err != nil {
+		return nil, err
+	}
+
+	var trx *models.MoneyTransaction
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		tid, terr := merchant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		tenantID := tid.UUID()
+
+		if _, err := s.lockBalance(ctx, q, payer, params.Invoker, cur); err != nil {
+			return err
+		}
+		existing, gerr := q.GetMoneySpendByCoords(ctx, gen.GetMoneySpendByCoordsParams{
+			MerchantID: tenantID,
+			CustomerID: payer.UUID(),
+			Currency:   cur,
+			Source:     params.Source,
+			SourceID:   &params.SourceID,
+		})
+		if gerr == nil {
+			var merr error
+			trx, merr = moneyTransactionFromGen(existing)
+			return merr
+		}
+		if !errors.Is(gerr, pgx.ErrNoRows) {
+			return gerr
+		}
+
+		balID, owedID, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount)
+		if serr != nil {
+			return serr
+		}
+		var id uuid.UUID
+		switch {
+		case balID != nil:
+			id = *balID
+		case owedID != nil:
+			id = *owedID
+		default:
+			return fmt.Errorf("capture produced no money transaction")
+		}
+		row, rerr := q.GetMoneyTransactionForUpdate(ctx, id)
+		if rerr != nil {
+			return rerr
+		}
+		var merr error
+		trx, merr = moneyTransactionFromGen(row)
+		return merr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return trx, nil
 }
 
 // spendBalanceThenOwedTx debits `amount` within an existing tx: it draws the
@@ -177,6 +257,15 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		if err := q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(trx)); err != nil {
 			return nil, nil, err
 		}
+		itemSourceID := sourceID
+		if itemSourceID == "" {
+			itemSourceID = trx.ID.String()
+		}
+		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+itemSourceID, nil, fromOwed, now, map[string]any{
+			"source": source,
+		}); err != nil {
+			return nil, nil, err
+		}
 		owedTxnID = &trx.ID
 	}
 
@@ -197,7 +286,7 @@ func nullStr(s string) *string {
 // balance can't cover it. availableAfter is the available balance AFTER this
 // hold's reservation has been released. The capture is pre-authorized, so this
 // never re-gates. Returns the post-settlement balance.
-func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, userID, currency string, amount, availableAfter int64) (int64, error) {
+func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, userID, currency, source, sourceID string, amount, availableAfter int64) (int64, error) {
 	now := s.now()
 	cur := normalizeCurrency(currency)
 	tid, err := merchant.Require(ctx)
@@ -240,6 +329,15 @@ func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, paye
 		if err := q.AddMoneyOutstandingOwed(ctx, gen.AddMoneyOutstandingOwedParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			Amount: fromOwed, Now: now,
+		}); err != nil {
+			return 0, err
+		}
+		itemSourceID := sourceID
+		if itemSourceID == "" {
+			itemSourceID = fmt.Sprintf("capture:%s:%d", payerID.String(), now.UnixNano())
+		}
+		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+itemSourceID, nil, fromOwed, now, map[string]any{
+			"source": source,
 		}); err != nil {
 			return 0, err
 		}

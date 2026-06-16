@@ -13,7 +13,7 @@ import (
 )
 
 // pgx-side twin of TestRLSEnforcement_Under_OpenRailsAppRole (#334): proves
-// the sqlc/pgx plumbing (Qx, WithTenantConn dual-pin, TenantTx) enforces the
+// the sqlc/pgx plumbing (Qx, WithMerchantConn dual-pin, MerchantTx) enforces the
 // exact same migration-050 RLS semantics as the bun side. Same probe table,
 // same policy form, same unprivileged role.
 
@@ -61,13 +61,13 @@ func TestRLSEnforcement_PgxSide(t *testing.T) {
 	// (1) Fail-closed: no GUC anywhere -> the pgx pool sees NOTHING.
 	require.Empty(t, pgxProbeVals(ctx, t, app), "no GUC => zero rows visible on pgx pool (fail-closed)")
 
-	// (2) WithTenantConn pins a pgx connection with tenant A's GUC: every
-	// Qx(ctx) query on the returned ctx is scoped to tenant A.
+	// (2) WithMerchantConn pins a pgx connection with merchant A's GUC: every
+	// Qx(ctx) query on the returned ctx is scoped to merchant A.
 	ctxA := merchant.WithID(ctx, rlsTenantA)
-	pinnedCtx, release, err := app.WithTenantConn(ctxA)
+	pinnedCtx, release, err := app.WithMerchantConn(ctxA)
 	require.NoError(t, err)
 	require.Equal(t, []string{"a-row"}, pgxProbeVals(pinnedCtx, t, app),
-		"pinned tenant-A connection must see exactly tenant A's row")
+		"pinned merchant-A connection must see exactly merchant A's row")
 
 	// (3) RunInTx on the pinned connection inherits the session GUC.
 	require.NoError(t, app.RunInTx(pinnedCtx, func(ctx context.Context, tx pgx.Tx) error {
@@ -75,7 +75,7 @@ func TestRLSEnforcement_PgxSide(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM openrails.rls_probe`).Scan(&n); err != nil {
 			return err
 		}
-		require.Equal(t, 1, n, "tx begun on the pinned conn must inherit the tenant GUC")
+		require.Equal(t, 1, n, "tx begun on the pinned conn must inherit the merchant GUC")
 		return nil
 	}))
 
@@ -83,9 +83,9 @@ func TestRLSEnforcement_PgxSide(t *testing.T) {
 	release()
 	require.Empty(t, pgxProbeVals(ctx, t, app), "after release the pool must be fail-closed again")
 
-	// (5) TenantTx scopes a transaction without a pinned connection: tenant A
-	// sees only its row and cannot delete tenant B's (invisible).
-	require.NoError(t, app.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
+	// (5) MerchantTx scopes a transaction without a pinned connection: merchant A
+	// sees only its row and cannot delete merchant B's (invisible).
+	require.NoError(t, app.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
 		var n int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM openrails.rls_probe`).Scan(&n); err != nil {
 			return err
@@ -93,24 +93,24 @@ func TestRLSEnforcement_PgxSide(t *testing.T) {
 		require.Equal(t, 1, n)
 		tag, derr := tx.Exec(ctx, `DELETE FROM openrails.rls_probe WHERE val = 'b-row'`)
 		require.NoError(t, derr)
-		require.Equal(t, int64(0), tag.RowsAffected(), "tenant A must not delete tenant B's row")
+		require.Equal(t, int64(0), tag.RowsAffected(), "merchant A must not delete merchant B's row")
 		return nil
 	}))
 
-	// (6) WITH CHECK: a tenant-A transaction cannot insert a row stamped with
-	// tenant B's id.
-	err = app.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
+	// (6) WITH CHECK: a merchant-A transaction cannot insert a row stamped with
+	// merchant B's id.
+	err = app.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
 		_, ierr := tx.Exec(ctx, `
 			INSERT INTO openrails.rls_probe (id, merchant_id, val)
 			VALUES ('00000000-0000-0000-0000-00000000000c', $1, 'cross')`,
 			rlsTenantB.String())
 		return ierr
 	})
-	require.Error(t, err, "WITH CHECK must reject a cross-tenant insert on the pgx side")
+	require.Error(t, err, "WITH CHECK must reject a cross-merchant insert on the pgx side")
 
-	// (7) Tenant B's row survived and is visible under tenant B's GUC.
+	// (7) Merchant B's row survived and is visible under merchant B's GUC.
 	ctxB := merchant.WithID(ctx, rlsTenantB)
-	require.NoError(t, app.TenantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
+	require.NoError(t, app.MerchantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
 		var n int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM openrails.rls_probe`).Scan(&n); err != nil {
 			return err

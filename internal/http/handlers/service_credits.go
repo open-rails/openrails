@@ -39,13 +39,15 @@ type serviceDepositRequest struct {
 }
 
 type serviceHoldRequest struct {
-	CustomerID string `json:"customer_id"`
-	Invoker    string `json:"invoker"`
-	Currency   string `json:"currency"`
-	Amount     int64  `json:"amount" binding:"required"`
-	Source     string `json:"source" binding:"required"`
-	SourceID   string `json:"source_id" binding:"required"`
-	ExpiresAt  int64  `json:"expires_at" binding:"required"`
+	CustomerID  string `json:"customer_id"`
+	Invoker     string `json:"invoker"`
+	InvokerType string `json:"invoker_type"`
+	Currency    string `json:"currency"`
+	Amount      int64  `json:"amount" binding:"required"`
+	Source      string `json:"source" binding:"required"`
+	RequestID   string `json:"request_id" binding:"required"`
+	Resource    string `json:"resource,omitempty"`
+	ExpiresAt   int64  `json:"expires_at" binding:"required"`
 }
 
 type serviceCaptureRequest struct {
@@ -109,24 +111,34 @@ func requireServiceCustomerScope(r *httprequest.Request, tenantSubject billingid
 type serviceAuthorizeRequest struct {
 	CustomerID      string `json:"customer_id"`
 	Invoker         string `json:"invoker"`
+	InvokerType     string `json:"invoker_type"`
 	Currency        string `json:"currency"`
 	EstimatedAmount int64  `json:"estimated_amount"`
 	RequestID       string `json:"request_id" binding:"required"`
+	Resource        string `json:"resource,omitempty"`
 	ExpiresAt       *int64 `json:"expires_at"`
 }
 
 // serviceAuthorizeResponse mirrors the unified authorize contract: the policy
-// decision + the tenant subject's real available/outstanding + the placed reservation.
+// decision plus the payer's real available/outstanding capacity snapshot.
 type serviceAuthorizeResponse struct {
-	Allowed               bool       `json:"allowed"`
-	DenyCode              string     `json:"deny_code,omitempty"`
-	BillingMode           string     `json:"billing_mode"`
-	Currency              string     `json:"currency"`
-	AvailableAmount       int64      `json:"available_amount"`
-	OutstandingOwedAmount int64      `json:"outstanding_owed_amount"`
-	RemainingTodayAmount  *int64     `json:"remaining_today_amount,omitempty"`
-	RetryAfterSeconds     int64      `json:"retry_after_seconds,omitempty"`
-	ReservationID         *uuid.UUID `json:"reservation_id,omitempty"`
+	Allowed               bool   `json:"allowed"`
+	DenyCode              string `json:"deny_code,omitempty"`
+	BillingMode           string `json:"billing_mode"`
+	Currency              string `json:"currency"`
+	AvailableAmount       int64  `json:"available_amount"`
+	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
+	RemainingTodayAmount  *int64 `json:"remaining_today_amount,omitempty"`
+	RetryAfterSeconds     int64  `json:"retry_after_seconds,omitempty"`
+	HoldExpiresAt         *int64 `json:"hold_expires_at,omitempty"`
+}
+
+func unixPtr(t *time.Time) *int64 {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	v := t.Unix()
+	return &v
 }
 
 // ServiceAuthorizeCredits is the service token-authed policy-decision + ATOMIC hold
@@ -182,9 +194,11 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 	out, err := svc.AuthorizeAndHold(r.Request.Context(), billingservice.AuthorizeAndHoldRequest{
 		CustomerID:      *tenantSubject,
 		Invoker:         strings.TrimSpace(req.Invoker),
+		InvokerType:     strings.TrimSpace(req.InvokerType),
 		Currency:        currency,
 		EstimatedAmount: req.EstimatedAmount,
 		RequestID:       req.RequestID,
+		Resource:        req.Resource,
 		ExpiresAt:       expiresAt,
 	})
 	if err != nil {
@@ -201,7 +215,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 		OutstandingOwedAmount: out.OutstandingOwedAmount,
 		RemainingTodayAmount:  out.RemainingTodayAmount,
 		RetryAfterSeconds:     out.RetryAfterSeconds,
-		ReservationID:         out.ReservationID,
+		HoldExpiresAt:         unixPtr(out.HoldExpiresAt),
 	})
 }
 
@@ -219,7 +233,7 @@ type serviceBalanceResponse struct {
 
 // ServiceGetCreditsBalance returns the tenant subject's REAL balance snapshot (issue
 // #235/#247): available = balance - held, plus outstanding owed + billing mode.
-// Tenant-bound by the service token (RLS); tenant subject supplied via ?customer_id=.
+// Merchant-bound by the service token (RLS); tenant subject supplied via ?customer_id=.
 func ServiceGetCreditsBalance(r *httprequest.Request) {
 	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
 	if !ok {
@@ -658,13 +672,15 @@ func ServiceHoldCredits(r *httprequest.Request) {
 		return
 	}
 	hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
-		CustomerID: tenantSubjectID,
-		Invoker:    invoker,
-		Currency:   currency,
-		Amount:     req.Amount,
-		Source:     req.Source,
-		SourceID:   req.SourceID,
-		ExpiresAt:  time.Unix(req.ExpiresAt, 0).UTC(),
+		CustomerID:  tenantSubjectID,
+		Invoker:     invoker,
+		InvokerType: strings.TrimSpace(req.InvokerType),
+		Currency:    currency,
+		Amount:      req.Amount,
+		Source:      req.Source,
+		RequestID:   req.RequestID,
+		Resource:    req.Resource,
+		ExpiresAt:   time.Unix(req.ExpiresAt, 0).UTC(),
 	})
 	if err == billingservice.ErrInsufficientCredits {
 		r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")
@@ -678,9 +694,9 @@ func ServiceHoldCredits(r *httprequest.Request) {
 }
 
 func ServiceCaptureHold(r *httprequest.Request) {
-	holdID, err := uuid.Parse(r.Param("id"))
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid hold id")
+	requestID := strings.TrimSpace(r.Param("id"))
+	if requestID == "" {
+		r.ErrorJSON(http.StatusBadRequest, "request_id required")
 		return
 	}
 	var req serviceCaptureRequest
@@ -693,7 +709,7 @@ func ServiceCaptureHold(r *httprequest.Request) {
 		return
 	}
 	trx, err := svc.CaptureHold(r.Request.Context(), billingservice.CaptureHoldRequest{
-		HoldID:     holdID,
+		RequestID:  requestID,
 		Amount:     req.Amount,
 		EventType:  req.EventType,
 		Resource:   req.Resource,
@@ -714,9 +730,9 @@ func ServiceCaptureHold(r *httprequest.Request) {
 }
 
 func ServiceReleaseHold(r *httprequest.Request) {
-	holdID, err := uuid.Parse(r.Param("id"))
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid hold id")
+	requestID := strings.TrimSpace(r.Param("id"))
+	if requestID == "" {
+		r.ErrorJSON(http.StatusBadRequest, "request_id required")
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -724,7 +740,7 @@ func ServiceReleaseHold(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	if err := svc.ReleaseHold(r.Request.Context(), holdID); err != nil {
+	if err := svc.ReleaseHold(r.Request.Context(), requestID); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "release failed")
 		return
 	}

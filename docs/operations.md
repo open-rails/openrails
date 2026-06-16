@@ -93,7 +93,7 @@ event materializes as a finding. Inbound therefore has two layers — provider
 retries + reconcile — and we build neither.
 
 **Inspecting the ledger.** `billing intents` (CLI; `--status pending|all|...`,
-`--provider`, `--type`, `--tenant`, `--format table|json`) and
+`--provider`, `--type`, `--merchant`, `--format table|json`) and
 `GET /v1/admin/intents` list the queued outbound mutations read-only. Under
 `mode=limited`/`readonly` this doubles as the dry-run view of a cutover:
 pending rows are exactly what the executor drains when the mode lifts, and
@@ -128,7 +128,7 @@ Operational rules:
 - Pointing a provider key at a DIFFERENT account: pending intents park with
   "provider account changed since enqueue". Drain or expire them first, or —
   if adopting the new account deliberately — re-stamp with
-  `billing intents refingerprint --provider=<name> --tenant=<slug> --yes`.
+  `billing intents refingerprint --provider=<name> --merchant=<slug> --yes`.
 - A failed fingerprint fetch (provider down) skips the guard for that pass
   (warn logged) rather than blocking the ledger.
 - Intents enqueued before #365 carry no stamp and execute ungated.
@@ -150,8 +150,8 @@ provider:
 
 `check` and `fix` take `--provider nmi|ccbill|stripe|solana` (repeatable;
 default = every configured provider), `--since` / `--until` (RFC3339 or
-`YYYY-MM-DD`, bounding the transaction window), `--tenant` (slug or id;
-default tenant otherwise) and `--format table|json`. The same engine sits
+`YYYY-MM-DD`, bounding the transaction window), `--merchant` (slug or id;
+default merchant otherwise) and `--format table|json`. The same engine sits
 behind the admin API: `POST /v1/admin/reconcile/runs` `{mode, providers,
 since, until}` runs synchronously; `GET .../runs`,
 `GET .../runs/:id`, `GET .../findings?status=&provider=&type=&admin_queue=`,
@@ -205,7 +205,7 @@ cross-references, with each timeline entry tagged by source:
    `retry_attempts` / `next_retry_at`), preserved verbatim by the legacy
    import;
 3. **history** — OpenRails' own ClickHouse analytics events
-   (`payment_events` / `subscription_events`), which for migrated tenants
+   (`payment_events` / `subscription_events`), which for migrated merchants
    include the imported legacy history (users_logs rebill attempts,
    mobius_schedulers scheduler events, payment_settings gateway state). This
    is the deep-history source: the provider query APIs will not serve

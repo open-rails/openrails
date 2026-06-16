@@ -18,30 +18,30 @@ import (
 // ARCHITECTURAL BOUNDARY (issue #232 — Postgres is the system of record):
 //
 // AdminMetricsService is a DISPLAY-ONLY read surface over the derived,
-// tenant-scoped ClickHouse daily_metrics rollup. It must NEVER be consulted for
+// merchant-scoped ClickHouse daily_metrics rollup. It must NEVER be consulted for
 // a money / entitlement / authorization decision — those are always derived
 // from Postgres. ClickHouse is OPTIONAL: when unconfigured/unavailable these
 // queries fail soft at the handler layer, never blocking openrails.
 //
 // TENANT SCOPING (issue #232): every query in this service is filtered by the
-// tenant id resolved from the request context (merchant.Require), so
-// a tenant operator can only ever read their OWN metrics. Cross-tenant
+// merchant id resolved from the request context (merchant.Require), so
+// a merchant operator can only ever read their OWN metrics. Cross-merchant
 // (platform-wide) reads are a SEPARATE, explicit control-plane path gated on
-// controlplane.PermPlatformSuperadmin — see the *CrossTenant methods below.
+// controlplane.PermPlatformSuperadmin — see the *CrossMerchant methods below.
 type AdminMetricsService struct {
 	cfg   *config.ClickHouseConfig
 	clock clockwork.Clock
 }
 
-// tenantFilter builds the per-tenant WHERE predicate appended to every metrics
-// query (issue #232). When crossTenant is true (platform-superadmin path) it
-// returns an empty predicate so the caller reads across all tenants; otherwise
-// it pins the query to the single resolved tenant.
-func tenantFilter(tenantID merchant.ID, crossTenant bool) (string, []any) {
-	if crossTenant {
+// merchantFilter builds the per-merchant WHERE predicate appended to every metrics
+// query (issue #232). When crossMerchant is true (platform-superadmin path) it
+// returns an empty predicate so the caller reads across all merchants; otherwise
+// it pins the query to the single resolved merchant.
+func merchantFilter(merchantID merchant.ID, crossMerchant bool) (string, []any) {
+	if crossMerchant {
 		return "", nil
 	}
-	return "AND tenant_id = ?", []any{tenantID.String()}
+	return "AND merchant_id = ?", []any{merchantID.String()}
 }
 
 func NewAdminMetricsService(cfg *config.ClickHouseConfig) *AdminMetricsService {
@@ -332,8 +332,8 @@ func bucketStartExpr(granularity string) string {
 	}
 }
 
-// GetSummary returns per-currency summaries scoped to the tenant resolved from
-// ctx (issue #232). A tenant operator can only ever see their own metrics.
+// GetSummary returns per-currency summaries scoped to the merchant resolved from
+// ctx (issue #232). A merchant operator can only ever see their own metrics.
 func (s *AdminMetricsService) GetSummary(ctx context.Context, rng MetricsDateRange, currency string) ([]SummaryResponse, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -342,24 +342,24 @@ func (s *AdminMetricsService) GetSummary(ctx context.Context, rng MetricsDateRan
 	return s.getSummary(ctx, rng, currency, tid, false)
 }
 
-// GetSummaryCrossTenant returns platform-wide (all-tenant) summaries. This is
+// GetSummaryCrossMerchant returns platform-wide (all-merchant) summaries. This is
 // the explicit control-plane path and MUST only be reached by a caller holding
 // controlplane.PermPlatformSuperadmin (issue #232). It is NOT wired to the
-// per-tenant admin handlers.
+// per-merchant admin handlers.
 //
 // TODO(#232): expose this behind a dedicated platform-superadmin HTTP/control-
 // plane surface once that surface exists; until then it is library-only and
 // exercised by tests.
-func (s *AdminMetricsService) GetSummaryCrossTenant(ctx context.Context, rng MetricsDateRange, currency string) ([]SummaryResponse, error) {
+func (s *AdminMetricsService) GetSummaryCrossMerchant(ctx context.Context, rng MetricsDateRange, currency string) ([]SummaryResponse, error) {
 	return s.getSummary(ctx, rng, currency, merchant.ID{}, true)
 }
 
-func (s *AdminMetricsService) getSummary(ctx context.Context, rng MetricsDateRange, currency string, tenantID merchant.ID, crossTenant bool) ([]SummaryResponse, error) {
+func (s *AdminMetricsService) getSummary(ctx context.Context, rng MetricsDateRange, currency string, merchantID merchant.ID, crossMerchant bool) ([]SummaryResponse, error) {
 	startDay := truncateToDay(rng.Start)
 	endDay := truncateToDay(rng.End.Add(-time.Nanosecond))
 	endDay = clampToToday(endDay)
 
-	rows, err := s.querySummaryAggregates(ctx, startDay, endDay, currency, tenantID, crossTenant)
+	rows, err := s.querySummaryAggregates(ctx, startDay, endDay, currency, merchantID, crossMerchant)
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +371,7 @@ func (s *AdminMetricsService) getSummary(ctx context.Context, rng MetricsDateRan
 	prevLen := endDay.Add(24 * time.Hour).Sub(startDay)
 	prevStart := startDay.Add(-prevLen)
 	prevEnd := startDay.Add(-time.Nanosecond)
-	prevRows, _ := s.querySummaryAggregates(ctx, prevStart, prevEnd, currency, tenantID, crossTenant)
+	prevRows, _ := s.querySummaryAggregates(ctx, prevStart, prevEnd, currency, merchantID, crossMerchant)
 	prevByCurrency := make(map[string]summaryAggRow)
 	for _, r := range prevRows {
 		prevByCurrency[r.Currency] = r
@@ -443,7 +443,7 @@ func (s *AdminMetricsService) getSummary(ctx context.Context, rng MetricsDateRan
 	return out, nil
 }
 
-// GetRevenueSeries returns revenue buckets scoped to the tenant resolved from
+// GetRevenueSeries returns revenue buckets scoped to the merchant resolved from
 // ctx (issue #232).
 func (s *AdminMetricsService) GetRevenueSeries(ctx context.Context, rng MetricsDateRange, granularity string, currency string) ([]RevenueSeriesResponse, error) {
 	tid, err := merchant.Require(ctx)
@@ -453,13 +453,13 @@ func (s *AdminMetricsService) GetRevenueSeries(ctx context.Context, rng MetricsD
 	return s.getRevenueSeries(ctx, rng, granularity, currency, tid, false)
 }
 
-// GetRevenueSeriesCrossTenant is the platform-superadmin cross-tenant variant.
-// See GetSummaryCrossTenant for the boundary contract (issue #232).
-func (s *AdminMetricsService) GetRevenueSeriesCrossTenant(ctx context.Context, rng MetricsDateRange, granularity string, currency string) ([]RevenueSeriesResponse, error) {
+// GetRevenueSeriesCrossMerchant is the platform-superadmin cross-merchant variant.
+// See GetSummaryCrossMerchant for the boundary contract (issue #232).
+func (s *AdminMetricsService) GetRevenueSeriesCrossMerchant(ctx context.Context, rng MetricsDateRange, granularity string, currency string) ([]RevenueSeriesResponse, error) {
 	return s.getRevenueSeries(ctx, rng, granularity, currency, merchant.ID{}, true)
 }
 
-func (s *AdminMetricsService) getRevenueSeries(ctx context.Context, rng MetricsDateRange, granularity string, currency string, tenantID merchant.ID, crossTenant bool) ([]RevenueSeriesResponse, error) {
+func (s *AdminMetricsService) getRevenueSeries(ctx context.Context, rng MetricsDateRange, granularity string, currency string, merchantID merchant.ID, crossMerchant bool) ([]RevenueSeriesResponse, error) {
 	if granularity == "" {
 		granularity = "day"
 	}
@@ -467,7 +467,7 @@ func (s *AdminMetricsService) getRevenueSeries(ctx context.Context, rng MetricsD
 	endDay := truncateToDay(rng.End.Add(-time.Nanosecond))
 	endDay = clampToToday(endDay)
 
-	buckets, err := s.queryRevenueBuckets(ctx, startDay, endDay, granularity, currency, tenantID, crossTenant)
+	buckets, err := s.queryRevenueBuckets(ctx, startDay, endDay, granularity, currency, merchantID, crossMerchant)
 	if err != nil {
 		return nil, err
 	}
@@ -521,7 +521,7 @@ func (s *AdminMetricsService) getRevenueSeries(ctx context.Context, rng MetricsD
 	return out, nil
 }
 
-// GetSubscriptionSeries returns subscription buckets scoped to the tenant
+// GetSubscriptionSeries returns subscription buckets scoped to the merchant
 // resolved from ctx (issue #232).
 func (s *AdminMetricsService) GetSubscriptionSeries(ctx context.Context, rng MetricsDateRange, granularity string, currency string) ([]SubscriptionSeriesResponse, error) {
 	tid, err := merchant.Require(ctx)
@@ -531,13 +531,13 @@ func (s *AdminMetricsService) GetSubscriptionSeries(ctx context.Context, rng Met
 	return s.getSubscriptionSeries(ctx, rng, granularity, currency, tid, false)
 }
 
-// GetSubscriptionSeriesCrossTenant is the platform-superadmin cross-tenant
-// variant. See GetSummaryCrossTenant for the boundary contract (issue #232).
-func (s *AdminMetricsService) GetSubscriptionSeriesCrossTenant(ctx context.Context, rng MetricsDateRange, granularity string, currency string) ([]SubscriptionSeriesResponse, error) {
+// GetSubscriptionSeriesCrossMerchant is the platform-superadmin cross-merchant
+// variant. See GetSummaryCrossMerchant for the boundary contract (issue #232).
+func (s *AdminMetricsService) GetSubscriptionSeriesCrossMerchant(ctx context.Context, rng MetricsDateRange, granularity string, currency string) ([]SubscriptionSeriesResponse, error) {
 	return s.getSubscriptionSeries(ctx, rng, granularity, currency, merchant.ID{}, true)
 }
 
-func (s *AdminMetricsService) getSubscriptionSeries(ctx context.Context, rng MetricsDateRange, granularity string, currency string, tenantID merchant.ID, crossTenant bool) ([]SubscriptionSeriesResponse, error) {
+func (s *AdminMetricsService) getSubscriptionSeries(ctx context.Context, rng MetricsDateRange, granularity string, currency string, merchantID merchant.ID, crossMerchant bool) ([]SubscriptionSeriesResponse, error) {
 	if granularity == "" {
 		granularity = "day"
 	}
@@ -545,7 +545,7 @@ func (s *AdminMetricsService) getSubscriptionSeries(ctx context.Context, rng Met
 	endDay := truncateToDay(rng.End.Add(-time.Nanosecond))
 	endDay = clampToToday(endDay)
 
-	buckets, err := s.querySubscriptionBuckets(ctx, startDay, endDay, granularity, currency, tenantID, crossTenant)
+	buckets, err := s.querySubscriptionBuckets(ctx, startDay, endDay, granularity, currency, merchantID, crossMerchant)
 	if err != nil {
 		return nil, err
 	}
@@ -600,7 +600,7 @@ func (s *AdminMetricsService) getSubscriptionSeries(ctx context.Context, rng Met
 	return out, nil
 }
 
-// GetProcessorMetrics returns processor metrics scoped to the tenant resolved
+// GetProcessorMetrics returns processor metrics scoped to the merchant resolved
 // from ctx (issue #232).
 func (s *AdminMetricsService) GetProcessorMetrics(ctx context.Context, rng MetricsDateRange, currency string) ([]ProcessorMetricsResponse, error) {
 	tid, err := merchant.Require(ctx)
@@ -610,18 +610,18 @@ func (s *AdminMetricsService) GetProcessorMetrics(ctx context.Context, rng Metri
 	return s.getProcessorMetrics(ctx, rng, currency, tid, false)
 }
 
-// GetProcessorMetricsCrossTenant is the platform-superadmin cross-tenant
-// variant. See GetSummaryCrossTenant for the boundary contract (issue #232).
-func (s *AdminMetricsService) GetProcessorMetricsCrossTenant(ctx context.Context, rng MetricsDateRange, currency string) ([]ProcessorMetricsResponse, error) {
+// GetProcessorMetricsCrossMerchant is the platform-superadmin cross-merchant
+// variant. See GetSummaryCrossMerchant for the boundary contract (issue #232).
+func (s *AdminMetricsService) GetProcessorMetricsCrossMerchant(ctx context.Context, rng MetricsDateRange, currency string) ([]ProcessorMetricsResponse, error) {
 	return s.getProcessorMetrics(ctx, rng, currency, merchant.ID{}, true)
 }
 
-func (s *AdminMetricsService) getProcessorMetrics(ctx context.Context, rng MetricsDateRange, currency string, tenantID merchant.ID, crossTenant bool) ([]ProcessorMetricsResponse, error) {
+func (s *AdminMetricsService) getProcessorMetrics(ctx context.Context, rng MetricsDateRange, currency string, merchantID merchant.ID, crossMerchant bool) ([]ProcessorMetricsResponse, error) {
 	startDay := truncateToDay(rng.Start)
 	endDay := truncateToDay(rng.End.Add(-time.Nanosecond))
 	endDay = clampToToday(endDay)
 
-	aggRows, err := s.queryProcessorAggregates(ctx, startDay, endDay, currency, tenantID, crossTenant)
+	aggRows, err := s.queryProcessorAggregates(ctx, startDay, endDay, currency, merchantID, crossMerchant)
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +674,7 @@ func (s *AdminMetricsService) getProcessorMetrics(ctx context.Context, rng Metri
 	return out, nil
 }
 
-// GetChurn returns churn metrics scoped to the tenant resolved from ctx
+// GetChurn returns churn metrics scoped to the merchant resolved from ctx
 // (issue #232).
 func (s *AdminMetricsService) GetChurn(ctx context.Context, rng MetricsDateRange, currency string) ([]ChurnResponse, error) {
 	tid, err := merchant.Require(ctx)
@@ -684,19 +684,19 @@ func (s *AdminMetricsService) GetChurn(ctx context.Context, rng MetricsDateRange
 	return s.getChurn(ctx, rng, currency, tid, false)
 }
 
-// GetChurnCrossTenant is the platform-superadmin cross-tenant variant. See
-// GetSummaryCrossTenant for the boundary contract (issue #232).
-func (s *AdminMetricsService) GetChurnCrossTenant(ctx context.Context, rng MetricsDateRange, currency string) ([]ChurnResponse, error) {
+// GetChurnCrossMerchant is the platform-superadmin cross-merchant variant. See
+// GetSummaryCrossMerchant for the boundary contract (issue #232).
+func (s *AdminMetricsService) GetChurnCrossMerchant(ctx context.Context, rng MetricsDateRange, currency string) ([]ChurnResponse, error) {
 	return s.getChurn(ctx, rng, currency, merchant.ID{}, true)
 }
 
-func (s *AdminMetricsService) getChurn(ctx context.Context, rng MetricsDateRange, currency string, tenantID merchant.ID, crossTenant bool) ([]ChurnResponse, error) {
+func (s *AdminMetricsService) getChurn(ctx context.Context, rng MetricsDateRange, currency string, merchantID merchant.ID, crossMerchant bool) ([]ChurnResponse, error) {
 	startMonth := firstOfMonth(rng.Start)
 	endMonthStart := firstOfMonth(rng.End)
 	endBoundary := endMonthStart.AddDate(0, 1, 0).Add(-time.Nanosecond)
 	endBoundary = clampToToday(endBoundary)
 
-	monthly, err := s.queryChurnBuckets(ctx, startMonth, endBoundary, currency, tenantID, crossTenant)
+	monthly, err := s.queryChurnBuckets(ctx, startMonth, endBoundary, currency, merchantID, crossMerchant)
 	if err != nil {
 		return nil, err
 	}
@@ -776,7 +776,7 @@ func (s *AdminMetricsService) getChurn(ctx context.Context, rng MetricsDateRange
 	return out, nil
 }
 
-func (s *AdminMetricsService) querySummaryAggregates(ctx context.Context, startDay, endDay time.Time, currency string, tenantID merchant.ID, crossTenant bool) ([]summaryAggRow, error) {
+func (s *AdminMetricsService) querySummaryAggregates(ctx context.Context, startDay, endDay time.Time, currency string, merchantID merchant.ID, crossMerchant bool) ([]summaryAggRow, error) {
 	conn, err := s.openClickHouse()
 	if err != nil {
 		return nil, err
@@ -814,7 +814,7 @@ func (s *AdminMetricsService) querySummaryAggregates(ctx context.Context, startD
         GROUP BY currency
         ORDER BY currency`
 
-	tFilter, tArgs := tenantFilter(tenantID, crossTenant)
+	tFilter, tArgs := merchantFilter(merchantID, crossMerchant)
 	args := []any{startDay, endDay}
 	args = append(args, tArgs...)
 	filter := tFilter
@@ -840,7 +840,7 @@ func (s *AdminMetricsService) querySummaryAggregates(ctx context.Context, startD
 	return result, nil
 }
 
-func (s *AdminMetricsService) queryRevenueBuckets(ctx context.Context, startDay, endDay time.Time, granularity string, currency string, tenantID merchant.ID, crossTenant bool) ([]revenueBucketRow, error) {
+func (s *AdminMetricsService) queryRevenueBuckets(ctx context.Context, startDay, endDay time.Time, granularity string, currency string, merchantID merchant.ID, crossMerchant bool) ([]revenueBucketRow, error) {
 	conn, err := s.openClickHouse()
 	if err != nil {
 		return nil, err
@@ -865,7 +865,7 @@ func (s *AdminMetricsService) queryRevenueBuckets(ctx context.Context, startDay,
         GROUP BY currency, bucket_start
         ORDER BY currency, bucket_start`, bucketExpr, "%s")
 
-	tFilter, tArgs := tenantFilter(tenantID, crossTenant)
+	tFilter, tArgs := merchantFilter(merchantID, crossMerchant)
 	args := []any{startDay, endDay}
 	args = append(args, tArgs...)
 	filter := tFilter
@@ -891,7 +891,7 @@ func (s *AdminMetricsService) queryRevenueBuckets(ctx context.Context, startDay,
 	return result, nil
 }
 
-func (s *AdminMetricsService) querySubscriptionBuckets(ctx context.Context, startDay, endDay time.Time, granularity string, currency string, tenantID merchant.ID, crossTenant bool) ([]subscriptionBucketRow, error) {
+func (s *AdminMetricsService) querySubscriptionBuckets(ctx context.Context, startDay, endDay time.Time, granularity string, currency string, merchantID merchant.ID, crossMerchant bool) ([]subscriptionBucketRow, error) {
 	conn, err := s.openClickHouse()
 	if err != nil {
 		return nil, err
@@ -918,7 +918,7 @@ func (s *AdminMetricsService) querySubscriptionBuckets(ctx context.Context, star
         ORDER BY currency, bucket_start`, bucketExpr, "%s")
 
 	var result []subscriptionBucketRow
-	tFilter, tArgs := tenantFilter(tenantID, crossTenant)
+	tFilter, tArgs := merchantFilter(merchantID, crossMerchant)
 	args := []any{startDay, endDay}
 	args = append(args, tArgs...)
 	filter := tFilter
@@ -943,7 +943,7 @@ func (s *AdminMetricsService) querySubscriptionBuckets(ctx context.Context, star
 	return result, nil
 }
 
-func (s *AdminMetricsService) queryProcessorAggregates(ctx context.Context, startDay, endDay time.Time, currency string, tenantID merchant.ID, crossTenant bool) ([]processorAggRow, error) {
+func (s *AdminMetricsService) queryProcessorAggregates(ctx context.Context, startDay, endDay time.Time, currency string, merchantID merchant.ID, crossMerchant bool) ([]processorAggRow, error) {
 	conn, err := s.openClickHouse()
 	if err != nil {
 		return nil, err
@@ -988,7 +988,7 @@ func (s *AdminMetricsService) queryProcessorAggregates(ctx context.Context, star
         GROUP BY currency, processor
         ORDER BY currency, processor`
 
-	tFilter, tArgs := tenantFilter(tenantID, crossTenant)
+	tFilter, tArgs := merchantFilter(merchantID, crossMerchant)
 	args := []any{startDay, endDay}
 	args = append(args, tArgs...)
 	filter := tFilter
@@ -1014,7 +1014,7 @@ func (s *AdminMetricsService) queryProcessorAggregates(ctx context.Context, star
 	return result, nil
 }
 
-func (s *AdminMetricsService) queryChurnBuckets(ctx context.Context, startMonth, endDay time.Time, currency string, tenantID merchant.ID, crossTenant bool) ([]churnBucketRow, error) {
+func (s *AdminMetricsService) queryChurnBuckets(ctx context.Context, startMonth, endDay time.Time, currency string, merchantID merchant.ID, crossMerchant bool) ([]churnBucketRow, error) {
 	conn, err := s.openClickHouse()
 	if err != nil {
 		return nil, err
@@ -1036,7 +1036,7 @@ func (s *AdminMetricsService) queryChurnBuckets(ctx context.Context, startMonth,
         GROUP BY currency, month_start
         ORDER BY currency, month_start`
 
-	tFilter, tArgs := tenantFilter(tenantID, crossTenant)
+	tFilter, tArgs := merchantFilter(merchantID, crossMerchant)
 	args := []any{startMonth, endDay}
 	args = append(args, tArgs...)
 	filter := tFilter

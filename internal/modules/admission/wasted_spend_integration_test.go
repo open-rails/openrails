@@ -30,8 +30,8 @@ func wastedEnv(t *testing.T) (*admission.Admitter, *abuse.WastedSpendGuard, *rat
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
-	dbtest.EnsureTestTenant(ctx, t, pool)
-	ctx = dbtest.WithTestTenant(ctx)
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	ctx = dbtest.WithTestMerchant(ctx)
 
 	payer := identity.CustomerIDFromString(uuid.NewString())
 	payerID := payer.UUID()
@@ -84,8 +84,8 @@ func TestAdmit_WastedSpend_PayerOverBudgetDoesNotDeny(t *testing.T) {
 	require.True(t, d.Allowed)
 
 	// Report wasted $ that meets/exceeds the payer's per-tier bad_spend budget.
-	tenant := dbtest.TestTenantID.UUID().String()
-	require.NoError(t, guard.Record(ctx, tenant, payer.UUID().String(), "user:a", money.DefaultCurrency, 1_000,
+	merchant := dbtest.TestMerchantID.UUID().String()
+	require.NoError(t, guard.Record(ctx, merchant, payer.UUID().String(), "user:a", money.DefaultCurrency, 1_000,
 		[]abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, Limit: 1_000}},
 		[]abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, Limit: 5_000}}))
 
@@ -98,7 +98,7 @@ func TestAdmit_WastedSpend_PayerOverBudgetDoesNotDeny(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
-	require.NotNil(t, d.Hold)
+	require.Greater(t, d.CapacityAmount, int64(0))
 }
 
 // #488: INVOKER over the flat per-invoker wasted budget -> admit denies
@@ -111,9 +111,9 @@ func TestAdmit_WastedSpend_InvokerOverBudget(t *testing.T) {
 	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000, Source: "seed"})
 	require.NoError(t, err)
 
-	tenant := dbtest.TestTenantID.UUID().String()
+	merchant := dbtest.TestMerchantID.UUID().String()
 	// Report 5_000 wasted to the invoker's flat burst window (limit 5_000) -> over.
-	require.NoError(t, guard.Record(ctx, tenant, payer.UUID().String(), "user:b", money.DefaultCurrency, 5_000,
+	require.NoError(t, guard.Record(ctx, merchant, payer.UUID().String(), "user:b", money.DefaultCurrency, 5_000,
 		nil,
 		[]abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, Limit: 5_000}}))
 

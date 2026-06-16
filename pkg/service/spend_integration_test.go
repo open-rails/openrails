@@ -5,7 +5,6 @@ package service_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -104,13 +103,11 @@ func TestGetCreditAccount_Snapshot(t *testing.T) {
 	svc, ms, payer, ctx := authzEnv(t)
 	_, err := ms.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 5000, Source: "seed"})
 	require.NoError(t, err)
-	_, err = ms.Hold(ctx, &payer, "user:a", money.DefaultCurrency, 1500, "usage", "h1", time.Now().Add(time.Hour).UTC())
-	require.NoError(t, err)
 
 	snap, err := svc.GetCreditAccount(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(5000), snap.BalanceAmount)
-	require.Equal(t, int64(1500), snap.HeldAmount)
-	require.Equal(t, int64(3500), snap.AvailableAmount)
+	require.Equal(t, int64(0), snap.HeldAmount)
+	require.Equal(t, int64(5000), snap.AvailableAmount)
 	require.Equal(t, money.BillingModePrepaid, snap.BillingMode)
 }

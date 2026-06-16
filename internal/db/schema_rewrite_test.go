@@ -15,7 +15,7 @@ func TestSchemaRewriter(t *testing.T) {
 		if r.active {
 			t.Fatalf("rewriter for default schema must be inactive")
 		}
-		const sql = "SELECT * FROM openrails.tenants WHERE id = $1"
+		const sql = "SELECT * FROM openrails.merchants WHERE id = $1"
 		if got := r.apply(sql); got != sql {
 			t.Fatalf("identity rewrite changed SQL: %q", got)
 		}

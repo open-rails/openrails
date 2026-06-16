@@ -57,16 +57,16 @@ type Client interface {
 	// CaptureHold settles a hold and returns the ledger transaction.
 	CaptureHold(ctx context.Context, req CaptureHoldRequest) (*CreditTransaction, error)
 	// ReleaseHold frees a hold without charging.
-	ReleaseHold(ctx context.Context, holdID uuid.UUID) error
+	ReleaseHold(ctx context.Context, requestID string) error
 	// WithdrawCredits debits credits directly.
 	WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error)
 	// DepositCredits mints a credit block for a payer.
 	DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error)
-	// Capture settles the admission/authorize hold reservationID at the actual
+	// Capture settles the admission/authorize hold request_id at the actual
 	// amount, optionally recording a usage analytics event (#311/#410).
-	Capture(ctx context.Context, reservationID string, capturedAmount int64, usage *CaptureUsage) error
-	// Release frees the admission/authorize hold reservationID without charging.
-	Release(ctx context.Context, reservationID string) error
+	Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) error
+	// Release frees the admission/authorize hold request_id without charging.
+	Release(ctx context.Context, requestID string) error
 	// Balance returns the payer's balance snapshot.
 	Balance(ctx context.Context, customerID string) (*BalanceResponse, error)
 	// GetCreditAccount reads a payer's balance + policy snapshot for one currency.
@@ -203,8 +203,8 @@ type AuthorizeRequest struct {
 }
 
 // AuthorizeResponse is the OpenRails decision (handler serviceAuthorizeResponse).
-// Allowed=false with a DenyCode is a definitive deny; ReservationID is the hold
-// handle to later capture or release.
+// Allowed=false with a DenyCode is a definitive deny. The caller captures or
+// releases by the same request_id supplied on AuthorizeRequest.
 type AuthorizeResponse struct {
 	Allowed               bool   `json:"allowed"`
 	DenyCode              string `json:"deny_code,omitempty"`
@@ -214,41 +214,40 @@ type AuthorizeResponse struct {
 	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
 	RemainingTodayAmount  int64  `json:"remaining_today_amount,omitempty"`
 	RetryAfterSeconds     int64  `json:"retry_after_seconds,omitempty"`
-	ReservationID         string `json:"reservation_id,omitempty"`
+	HoldExpiresAt         *int64 `json:"hold_expires_at,omitempty"`
 }
 
 // HoldCreditsRequest reserves credits for an estimate.
 type HoldCreditsRequest struct {
-	CustomerID *CustomerID
-	Invoker    string
-	Currency   string
-	Amount     int64
-	Source     string
-	SourceID   string
-	ExpiresAt  time.Time
+	CustomerID  *CustomerID
+	Invoker     string
+	InvokerType string
+	Currency    string
+	Amount      int64
+	Source      string
+	RequestID   string
+	Resource    string
+	ExpiresAt   time.Time
 }
 
 // CreditHold is the reservation returned by a successful hold. Field names
 // match the wire exactly: the handler serializes pkg/service.CreditHold with Go
 // field names (no json tags).
 type CreditHold struct {
-	ID        uuid.UUID
+	RequestID string
 	Invoker   string
 	Currency  string
 	Amount    int64
 	Source    string
-	SourceID  string
-	Status    string
+	Resource  string
 	ExpiresAt time.Time
-	Captured  *int64
 	CreatedAt time.Time
-	UpdatedAt time.Time
 }
 
 // CaptureHoldRequest settles a hold at the actual amount.
 type CaptureHoldRequest struct {
-	HoldID uuid.UUID
-	Amount int64
+	RequestID string
+	Amount    int64
 }
 
 // WithdrawCreditsRequest debits credits directly.
@@ -349,9 +348,9 @@ type AdmitWindow struct {
 // AdmitResponse is the unified verdict (pkg/service.AdmitResult on the wire).
 // Allowed=false carries a BlockedBy axis ("throughput" | "money" | "budget" |
 // "blocked" | "suspended" | "unverified" | "resource") and, on a money deny, a
-// DenyCode. ReservationID is the placed credit hold to capture/release;
+// DenyCode. A successful money-bearing admit creates a request_id keyed Redis hold;
 // BudgetReservationID is the budget reservation (settled implicitly with the
-// hold). A deny is returned as (Allowed=false, nil error) on BOTH transports
+// request). A deny is returned as (Allowed=false, nil error) on BOTH transports
 // even though the HTTP layer carries it as 402/403/429.
 type AdmitResponse struct {
 	Allowed             bool           `json:"allowed"`
@@ -359,9 +358,12 @@ type AdmitResponse struct {
 	BlockedUnit         string         `json:"blocked_unit,omitempty"`
 	DenyCode            string         `json:"deny_code,omitempty"`
 	Currency            string         `json:"currency,omitempty"`
+	EstimatedAmount     int64          `json:"estimated_amount,omitempty"`
+	PolicyCurrency      string         `json:"policy_currency,omitempty"`
+	PolicyAmount        int64          `json:"policy_amount,omitempty"`
 	RetryAfterSeconds   int64          `json:"retry_after_seconds,omitempty"`
 	Windows             []AdmitWindow  `json:"windows,omitempty"`
-	ReservationID       string         `json:"reservation_id,omitempty"`
+	HoldExpiresAt       *time.Time     `json:"hold_expires_at,omitempty"`
 	BudgetReservationID string         `json:"budget_reservation_id,omitempty"`
 	BudgetWindows       []BudgetWindow `json:"budget_windows,omitempty"`
 	// ResolvedTier is the tier the verdict was evaluated under (#477): explicit
@@ -445,6 +447,7 @@ type BudgetWindowInput struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
+	Currency      string `json:"currency,omitempty"`
 	// Cadence is "session" (default) or "fixed" (#337 fixed per-user-anchored
 	// windows): session opens at the user's first charged request and closes
 	// WindowSeconds later; fixed ticks at anchor + k*WindowSeconds forever.
@@ -503,6 +506,7 @@ type TierPolicyInput struct {
 	Windows           []TierThroughputWindow `json:"windows"`
 	EntitledResources []string               `json:"entitled_resources"`
 	BudgetWindows     []BudgetWindowInput    `json:"budget_windows"`
+	PolicyCurrency    string                 `json:"policy_currency,omitempty"`
 	// QueueLimits are the batch/flex reservation-pool caps (#472 G2 / #477): the
 	// per-tier in-flight queue ceiling OpenRails enforces at admit (BlockedBy=
 	// "queue" on overflow). Empty = no queue cap for this tier.
@@ -550,12 +554,16 @@ type WastedSpendReport struct {
 
 // WastedSpendResponse reports how OpenRails handled a wasted-spend report.
 type WastedSpendResponse struct {
-	Currency       string `json:"currency"`
-	RecordedAmount int64  `json:"recorded_amount"`
-	ForgivenAmount int64  `json:"forgiven_amount"`
-	ChargedAmount  int64  `json:"charged_amount"`
-	Action         string `json:"action"`
-	Duplicate      bool   `json:"duplicate,omitempty"`
+	Currency             string `json:"currency"`
+	PolicyCurrency       string `json:"policy_currency,omitempty"`
+	RecordedAmount       int64  `json:"recorded_amount"`
+	PolicyRecordedAmount int64  `json:"policy_recorded_amount,omitempty"`
+	ForgivenAmount       int64  `json:"forgiven_amount"`
+	PolicyForgivenAmount int64  `json:"policy_forgiven_amount,omitempty"`
+	ChargedAmount        int64  `json:"charged_amount"`
+	PolicyChargedAmount  int64  `json:"policy_charged_amount,omitempty"`
+	Action               string `json:"action"`
+	Duplicate            bool   `json:"duplicate,omitempty"`
 }
 
 // TierScheduleRung is one rung of the persisted same-currency tier ladder set
@@ -575,6 +583,7 @@ type BudgetScopeWindow struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
+	Currency      string `json:"currency,omitempty"`
 	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
 	Cadence string `json:"cadence,omitempty"`
 }

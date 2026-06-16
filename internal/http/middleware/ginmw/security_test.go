@@ -74,8 +74,8 @@ func TestSecurityHeadersSkipsCSPForNMITokenizationDebugPage(t *testing.T) {
 	require.NotEmpty(t, apiW.Header().Get("Content-Security-Policy"))
 }
 
-// CORS tenant-origin tests (issue #222 browser tier): a browser on a configured
-// (per-tenant) allowed origin can preflight + call OpenRails directly; an
+// CORS merchant-origin tests (issue #222 browser tier): a browser on a configured
+// (per-merchant) allowed origin can preflight + call OpenRails directly; an
 // unlisted origin is denied. The allow-list never weakens to "*" when origins
 // are configured.
 func TestCORS_AllowsConfiguredTenantOrigin(t *testing.T) {
@@ -84,7 +84,7 @@ func TestCORS_AllowsConfiguredTenantOrigin(t *testing.T) {
 	r.Use(CORS([]string{"https://app.example.com", "https://app.example.com"}))
 	r.POST("/v1/self/status", func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	// Preflight (OPTIONS) from an allowed tenant origin.
+	// Preflight (OPTIONS) from an allowed merchant origin.
 	req := httptest.NewRequest(http.MethodOptions, "/v1/self/status", nil)
 	req.Header.Set("Origin", "https://app.example.com")
 	req.Header.Set("Access-Control-Request-Method", "POST")

@@ -552,7 +552,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		if scheduleKillSwitchedDelete {
 			runAt = now
 		}
-		if err := s.SubscriptionService.Database().TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			txdb := openrailsdb.NewWithPgxTx(tx)
 			txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, nil, nil, s.clock)
 			if err := txSubSvc.Update(ctx, subscription); err != nil {

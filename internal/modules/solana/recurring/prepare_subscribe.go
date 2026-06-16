@@ -90,7 +90,7 @@ type accountDataReader interface {
 // init tx first, signs+sends it, then re-prepares to get the subscribe tx; a
 // RETURNING subscriber (authority already exists) gets the subscribe tx directly.
 type PrepareSubscribeService struct {
-	submitter Submitter // resolves the tenant's merchant (plan owner / cranker) address
+	submitter Submitter // resolves the merchant's merchant (plan owner / cranker) address
 	// signer is the cranker key. The subscribe step (#286) is now an ATOMIC
 	// co-signed bundle [subscribe + transfer_subscription(first period)]; the
 	// transfer requires the cranker as the caller-signer, so this signer pre-signs

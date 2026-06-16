@@ -24,12 +24,12 @@ type TransitClient interface {
 // TransitKeyName maps a tenant to its Vault Transit key name.
 type TransitKeyName func(merchant.ID) string
 
-// DefaultTransitKeyName names a tenant's signing key "openrails-solana-<tenantID>".
+// DefaultTransitKeyName names a merchant signing key "openrails-solana-<merchantID>".
 func DefaultTransitKeyName(id merchant.ID) string {
 	return "openrails-solana-" + id.String()
 }
 
-// transitSigner is the "sign this" Signer: the tenant's Ed25519 key lives inside
+// transitSigner is the "sign this" Signer: the merchant's Ed25519 key lives inside
 // Vault Transit (non-extractable) and NEVER enters this process. PublicKey is the
 // Solana address (base58 of the Ed25519 public key) and is cached since it is
 // stable for the key version; signatures always round-trip Vault.
@@ -72,7 +72,7 @@ func (t *transitSigner) PublicKey(ctx context.Context, tenantID merchant.ID) (so
 		return solanago.PublicKey{}, fmt.Errorf("solana: transit signer has no client")
 	}
 	if tenantID.IsZero() {
-		return solanago.PublicKey{}, fmt.Errorf("solana: signing requires a tenant id")
+		return solanago.PublicKey{}, fmt.Errorf("solana: signing requires a merchant id")
 	}
 	id := tenantID.String()
 
@@ -105,7 +105,7 @@ func (t *transitSigner) SignMessage(ctx context.Context, tenantID merchant.ID, m
 		return solanago.Signature{}, fmt.Errorf("solana: transit signer has no client")
 	}
 	if tenantID.IsZero() {
-		return solanago.Signature{}, fmt.Errorf("solana: signing requires a tenant id")
+		return solanago.Signature{}, fmt.Errorf("solana: signing requires a merchant id")
 	}
 	if len(message) == 0 {
 		return solanago.Signature{}, fmt.Errorf("solana: cannot sign empty message")

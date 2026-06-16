@@ -35,29 +35,29 @@ func mintCustomerServiceToken(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("control plane unavailable (set auth.control_plane.issuer)")
 	}
 
-	bootstrapTenant, err := cmd.Flags().GetString("org")
+	bootstrapOrg, err := cmd.Flags().GetString("org")
 	if err != nil {
 		return fmt.Errorf("read org flag: %w", err)
 	}
-	bootstrapTenant = strings.ToLower(strings.TrimSpace(bootstrapTenant))
-	if bootstrapTenant == "" {
-		// No default tenant (#336): the authority tenant must be named explicitly.
-		return fmt.Errorf("--org is required (the AuthKit tenant slug hosting the admin authority)")
+	bootstrapOrg = strings.ToLower(strings.TrimSpace(bootstrapOrg))
+	if bootstrapOrg == "" {
+		// No default merchant (#336): the authority org must be named explicitly.
+		return fmt.Errorf("--org is required (the AuthKit org slug hosting the admin authority)")
 	}
 	if _, err := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
-		BootstrapTenantSlug:     bootstrapTenant,
+		BootstrapOrgSlug:        bootstrapOrg,
 		MintInitialServiceToken: false,
 	}); err != nil {
 		return fmt.Errorf("bootstrap authority/role: %w", err)
 	}
 
-	tenantRef, err := cmd.Flags().GetString("tenant")
+	merchantRef, err := cmd.Flags().GetString("merchant")
 	if err != nil {
-		return fmt.Errorf("read tenant flag: %w", err)
+		return fmt.Errorf("read merchant flag: %w", err)
 	}
-	tenantID, tenantSlug, tenantResource, err := cp.MerchantScope(ctx, tenantRef)
+	merchantID, merchantSlug, merchantResource, err := cp.MerchantScope(ctx, merchantRef)
 	if err != nil {
-		return fmt.Errorf("resolve tenant %q: %w", tenantRef, err)
+		return fmt.Errorf("resolve merchant %q: %w", merchantRef, err)
 	}
 
 	customerRef, err := cmd.Flags().GetString("customer")
@@ -90,10 +90,10 @@ func mintCustomerServiceToken(cmd *cobra.Command, _ []string) error {
 	}
 
 	resources := []authcore.ServiceTokenResource{
-		tenantResource,
+		merchantResource,
 		controlplane.CustomerResource(customerID),
 	}
-	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, bootstrapTenant, authcore.ServiceTokenMintOptions{
+	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, bootstrapOrg, authcore.ServiceTokenMintOptions{
 		Name:        name,
 		Permissions: permissions,
 		Resources:   resources,
@@ -103,10 +103,10 @@ func mintCustomerServiceToken(cmd *cobra.Command, _ []string) error {
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"org":                  bootstrapTenant,
+		"org":                  bootstrapOrg,
 		"name":                 name,
-		"tenant":               tenantSlug,
-		"tenant_id":            tenantID.String(),
+		"merchant":             merchantSlug,
+		"merchant_id":          merchantID.String(),
 		"customer_id":          customerID.String(),
 		"service_token_key_id": serviceToken.KeyID,
 		"service_token_secret": token,

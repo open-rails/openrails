@@ -12,10 +12,10 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
-	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
@@ -218,7 +218,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	pm, err := r.State.VaultService.CreateVault(ctx, user.ID, createReq)
 	if err != nil {
 		log.WithError(err).WithField("user_id", user.ID).Error("Failed to create payment method")
-		if errors.Is(err, tenancy.ErrSecretBackendUnavailable) {
+		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment processor credentials are temporarily unavailable")
 			return
 		}
@@ -370,7 +370,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	updated, err := r.State.VaultService.UpdateVault(ctx, pm, updateReq)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"payment_method_id": methodID, "user_id": user.ID}).Error("Failed to update payment method")
-		if errors.Is(err, tenancy.ErrSecretBackendUnavailable) {
+		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment processor credentials are temporarily unavailable")
 			return
 		}

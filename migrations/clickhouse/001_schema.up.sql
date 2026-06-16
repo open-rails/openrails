@@ -1,12 +1,12 @@
 -- ClickHouse analytics schema for Open Rails Billing.
 -- Postgres remains the source of truth for billing, entitlement, and money decisions.
--- ClickHouse is a derived tenant-scoped analytics sink only.
+-- ClickHouse is a derived merchant-scoped analytics sink only.
 
 CREATE TABLE IF NOT EXISTS subscription_events {{ON_CLUSTER}} (
     event_id UUID,
     subscription_id Nullable(UUID),
     user_id String,
-    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    merchant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
     event_type LowCardinality(String),
     processor LowCardinality(String),
     processor_subscription_id Nullable(String),
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS subscription_events {{ON_CLUSTER}} (
     INDEX idx_subscription_events_subscription (subscription_id) TYPE minmax GRANULARITY 1,
     INDEX idx_subscription_events_processor (processor) TYPE set(100) GRANULARITY 1,
     INDEX idx_subscription_events_type (event_type) TYPE set(100) GRANULARITY 1,
-    INDEX idx_subscription_events_tenant (tenant_id) TYPE set(0) GRANULARITY 1
+    INDEX idx_subscription_events_merchant (merchant_id) TYPE set(0) GRANULARITY 1
 ) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', version)
 ORDER BY (event_id, timestamp)
 SETTINGS index_granularity = 8192;
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS payment_events {{ON_CLUSTER}} (
     event_id UUID,
     subscription_id Nullable(UUID),
     user_id String,
-    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    merchant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
     event_type LowCardinality(String),
     processor LowCardinality(String),
     processor_transaction_id Nullable(String),
@@ -51,14 +51,14 @@ CREATE TABLE IF NOT EXISTS payment_events {{ON_CLUSTER}} (
     INDEX idx_payment_events_subscription (subscription_id) TYPE minmax GRANULARITY 1,
     INDEX idx_payment_events_processor (processor) TYPE set(100) GRANULARITY 1,
     INDEX idx_payment_events_type (event_type) TYPE set(100) GRANULARITY 1,
-    INDEX idx_payment_events_tenant (tenant_id) TYPE set(0) GRANULARITY 1
+    INDEX idx_payment_events_merchant (merchant_id) TYPE set(0) GRANULARITY 1
 ) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', version)
 ORDER BY (event_id, timestamp)
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS webhook_events {{ON_CLUSTER}} (
     event_id UUID,
-    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    merchant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
     webhook_source LowCardinality(String),
     event_type String,
     subscription_id Nullable(UUID),
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS webhook_events {{ON_CLUSTER}} (
     processed_at Nullable(DateTime('UTC')),
     created_at DateTime('UTC') DEFAULT now(),
     INDEX idx_webhook_events_ts (timestamp) TYPE minmax GRANULARITY 1,
-    INDEX idx_webhook_events_tenant (tenant_id) TYPE set(0) GRANULARITY 1
+    INDEX idx_webhook_events_merchant (merchant_id) TYPE set(0) GRANULARITY 1
 ) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}')
 ORDER BY (event_id)
 SETTINGS index_granularity = 8192;
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS acu_events {{ON_CLUSTER}} (
     event_id UUID,
     subscription_id Nullable(UUID),
     user_id Nullable(String),
-    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    merchant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
     event_type LowCardinality(String),
     processor LowCardinality(String),
     processor_subscription_id Nullable(String),
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS acu_events {{ON_CLUSTER}} (
     timestamp DateTime('UTC'),
     created_at DateTime('UTC') DEFAULT now(),
     INDEX idx_acu_events_ts (timestamp) TYPE minmax GRANULARITY 1,
-    INDEX idx_acu_events_tenant (tenant_id) TYPE set(0) GRANULARITY 1
+    INDEX idx_acu_events_merchant (merchant_id) TYPE set(0) GRANULARITY 1
 ) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}')
 ORDER BY (event_id)
 SETTINGS index_granularity = 8192;
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS chargeback_events {{ON_CLUSTER}} (
     batch_id String,
     subscription_id Nullable(UUID),
     user_id Nullable(String),
-    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    merchant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
     event_type LowCardinality(String),
     processor LowCardinality(String),
     processor_transaction_id Nullable(String),
@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS chargeback_events {{ON_CLUSTER}} (
     timestamp DateTime('UTC'),
     created_at DateTime('UTC') DEFAULT now(),
     INDEX idx_chargeback_events_ts (timestamp) TYPE minmax GRANULARITY 1,
-    INDEX idx_chargeback_events_tenant (tenant_id) TYPE set(0) GRANULARITY 1
+    INDEX idx_chargeback_events_merchant (merchant_id) TYPE set(0) GRANULARITY 1
 ) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}')
 ORDER BY (event_id)
 SETTINGS index_granularity = 8192;
@@ -127,10 +127,10 @@ SETTINGS index_granularity = 8192;
 CREATE TABLE IF NOT EXISTS premium_status_daily {{ON_CLUSTER}} (
     day Date,
     user_id String,
-    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    merchant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
     is_premium UInt8,
     last_updated DateTime('UTC') DEFAULT now(),
-    INDEX idx_premium_status_daily_tenant (tenant_id) TYPE set(0) GRANULARITY 1
+    INDEX idx_premium_status_daily_merchant (merchant_id) TYPE set(0) GRANULARITY 1
 ) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', last_updated)
 PARTITION BY toYYYYMM(day)
 ORDER BY (day, user_id)
@@ -139,7 +139,7 @@ SETTINGS index_granularity = 8192;
 CREATE TABLE IF NOT EXISTS daily_metrics {{ON_CLUSTER}} (
     snapshot_date Date,
     currency LowCardinality(String),
-    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    merchant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
     subscription_revenue_cents Int64,
     one_time_revenue_cents Int64,
     refunds_cents Int64,
@@ -176,8 +176,8 @@ CREATE TABLE IF NOT EXISTS daily_metrics {{ON_CLUSTER}} (
     ),
     created_at DateTime('UTC') DEFAULT now(),
     version DateTime('UTC') DEFAULT now()
-) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}_tenant_scoped_v2', '{replica}', version)
-ORDER BY (snapshot_date, currency, tenant_id)
+) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}_merchant_scoped_v2', '{replica}', version)
+ORDER BY (snapshot_date, currency, merchant_id)
 PARTITION BY toYYYYMM(snapshot_date)
 SETTINGS index_granularity = 8192;
 
@@ -196,17 +196,17 @@ event_bounds AS (
     )
 ),
 dims AS (
-    SELECT DISTINCT currency, tenant_id FROM (
-        SELECT if(price_currency = '', 'usd', price_currency) AS currency, tenant_id FROM subscription_events
+    SELECT DISTINCT currency, merchant_id FROM (
+        SELECT if(price_currency = '', 'usd', price_currency) AS currency, merchant_id FROM subscription_events
         UNION ALL
-        SELECT if(currency = '', 'usd', currency) AS currency, tenant_id FROM payment_events
+        SELECT if(currency = '', 'usd', currency) AS currency, merchant_id FROM payment_events
     )
 ),
 spine AS (
     SELECT
         dateAdd(day, n, bounds.min_date) AS snapshot_date,
         d.currency AS currency,
-        d.tenant_id AS tenant_id
+        d.merchant_id AS merchant_id
     FROM event_bounds AS bounds
     CROSS JOIN dims AS d
     ARRAY JOIN range(toUInt32(dateDiff('day', bounds.min_date, bounds.max_date) + 1)) AS n
@@ -215,7 +215,7 @@ per_sub AS (
     SELECT
         toDate(timestamp) AS snapshot_date,
         if(price_currency = '', 'usd', price_currency) AS currency,
-        tenant_id,
+        merchant_id,
         subscription_id,
         argMax(status, timestamp) AS status,
         argMax(price_amount, timestamp) AS price_amount,
@@ -225,26 +225,26 @@ per_sub AS (
     GROUP BY
         toDate(timestamp),
         if(price_currency = '', 'usd', price_currency),
-        tenant_id,
+        merchant_id,
         subscription_id
 ),
 sub_status AS (
     SELECT
         snapshot_date,
         currency,
-        tenant_id,
+        merchant_id,
         countIf(status = 'active') AS active_count_end,
         countIf(status = 'past_due') AS past_due_count_end,
         countIf(status = 'pending') AS pending_count_end,
         toInt64(sumIf(price_amount * 100 * 30 / NULLIF(billing_cycle_days, 0), status IN ('active','past_due'))) AS mrr_cents
     FROM per_sub
-    GROUP BY snapshot_date, currency, tenant_id
+    GROUP BY snapshot_date, currency, merchant_id
 ),
 sub_events AS (
     SELECT
         toDate(timestamp) AS snapshot_date,
         if(price_currency = '', 'usd', price_currency) AS currency,
-        tenant_id,
+        merchant_id,
         countIf(event_type = 'subscription_created') AS new_subscriptions,
         countIf(event_type = 'subscription_created' AND status = 'pending') AS scheduled_starts,
         countIf(event_type = 'subscription_reactivated') AS reactivations,
@@ -257,13 +257,13 @@ sub_events AS (
     GROUP BY
         toDate(timestamp),
         if(price_currency = '', 'usd', price_currency),
-        tenant_id
+        merchant_id
 ),
 sub_proc AS (
     SELECT
         toDate(timestamp) AS snapshot_date,
         if(price_currency = '', 'usd', price_currency) AS currency,
-        tenant_id,
+        merchant_id,
         processor,
         toInt64(countIf(event_type = 'subscription_created')) AS new_subscriptions,
         toInt64(countIf(event_type IN ('subscription_cancelled','subscription_expired'))) AS cancellations,
@@ -272,14 +272,14 @@ sub_proc AS (
     GROUP BY
         toDate(timestamp),
         if(price_currency = '', 'usd', price_currency),
-        tenant_id,
+        merchant_id,
         processor
 ),
 pay_events AS (
     SELECT
         snapshot_date,
         currency,
-        tenant_id,
+        merchant_id,
         toInt64(sumIf(amount * 100, event_type = 'charge_success' AND subscription_id IS NOT NULL)) AS subscription_revenue_cents,
         toInt64(sumIf(amount * 100, event_type = 'charge_success' AND subscription_id IS NULL)) AS one_time_revenue_cents,
         toInt64(sumIf(abs(amount) * 100, event_type = 'refund')) AS refunds_cents,
@@ -291,19 +291,19 @@ pay_events AS (
         SELECT
             toDate(timestamp) AS snapshot_date,
             if(currency = '', 'usd', currency) AS currency,
-            tenant_id,
+            merchant_id,
             amount,
             event_type,
             subscription_id
         FROM payment_events
     )
-    GROUP BY snapshot_date, currency, tenant_id
+    GROUP BY snapshot_date, currency, merchant_id
 ),
 pay_proc AS (
     SELECT
         snapshot_date,
         currency,
-        tenant_id,
+        merchant_id,
         processor,
         toInt64(sumIf(amount * 100, event_type = 'charge_success')) AS revenue_total_cents,
         toInt64(sumIf(amount * 100, event_type = 'charge_success' AND subscription_id IS NOT NULL)) AS revenue_subscription_cents,
@@ -316,20 +316,20 @@ pay_proc AS (
         SELECT
             toDate(timestamp) AS snapshot_date,
             if(currency = '', 'usd', currency) AS currency,
-            tenant_id,
+            merchant_id,
             processor,
             amount,
             event_type,
             subscription_id
         FROM payment_events
     )
-    GROUP BY snapshot_date, currency, tenant_id, processor
+    GROUP BY snapshot_date, currency, merchant_id, processor
 ),
 proc_join AS (
     SELECT
         coalesce(sp.snapshot_date, pp.snapshot_date) AS snapshot_date,
         coalesce(sp.currency, pp.currency) AS currency,
-        coalesce(sp.tenant_id, pp.tenant_id) AS tenant_id,
+        coalesce(sp.merchant_id, pp.merchant_id) AS merchant_id,
         coalesce(sp.processor, pp.processor) AS processor,
         coalesce(sp.active_subscriptions, 0) AS active_subscriptions,
         coalesce(sp.new_subscriptions, 0) AS new_subscriptions,
@@ -346,27 +346,27 @@ proc_join AS (
       ON sp.snapshot_date = pp.snapshot_date
      AND sp.processor = pp.processor
      AND sp.currency = pp.currency
-     AND sp.tenant_id = pp.tenant_id
+     AND sp.merchant_id = pp.merchant_id
 ),
 proc_arrays AS (
     WITH
     proc_dim AS (
-        SELECT DISTINCT currency, tenant_id, processor FROM proc_join
+        SELECT DISTINCT currency, merchant_id, processor FROM proc_join
     ),
     proc_spine AS (
         SELECT
             s.snapshot_date AS snapshot_date,
             d.currency AS currency,
-            d.tenant_id AS tenant_id,
+            d.merchant_id AS merchant_id,
             d.processor AS processor
         FROM spine s
-        INNER JOIN proc_dim d ON s.currency = d.currency AND s.tenant_id = d.tenant_id
+        INNER JOIN proc_dim d ON s.currency = d.currency AND s.merchant_id = d.merchant_id
     ),
     proc_filled AS (
         SELECT
             ps.snapshot_date,
             ps.currency,
-            ps.tenant_id,
+            ps.merchant_id,
             ps.processor,
             pj.active_subscriptions AS active_subscriptions_raw,
             coalesce(pj.new_subscriptions, 0) AS new_subscriptions,
@@ -382,16 +382,16 @@ proc_arrays AS (
         LEFT JOIN proc_join pj
           ON ps.snapshot_date = pj.snapshot_date
          AND ps.currency = pj.currency
-         AND ps.tenant_id = pj.tenant_id
+         AND ps.merchant_id = pj.merchant_id
          AND ps.processor = pj.processor
     ),
     proc_carried AS (
         SELECT
             snapshot_date,
             currency,
-            tenant_id,
+            merchant_id,
             processor,
-            last_value(active_subscriptions_raw) IGNORE NULLS OVER (PARTITION BY currency, tenant_id, processor ORDER BY snapshot_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS active_subscriptions,
+            last_value(active_subscriptions_raw) IGNORE NULLS OVER (PARTITION BY currency, merchant_id, processor ORDER BY snapshot_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS active_subscriptions,
             new_subscriptions,
             cancellations,
             revenue_total_cents,
@@ -406,7 +406,7 @@ proc_arrays AS (
     SELECT
         snapshot_date,
         currency,
-        tenant_id,
+        merchant_id,
         arraySort(groupArray((processor,
             coalesce(active_subscriptions, 0),
             coalesce(new_subscriptions, 0),
@@ -419,13 +419,13 @@ proc_arrays AS (
             coalesce(payments_successful, 0),
             coalesce(payments_failed, 0)))) AS proc_sorted
     FROM proc_carried
-    GROUP BY snapshot_date, currency, tenant_id
+    GROUP BY snapshot_date, currency, merchant_id
 ),
 daily AS (
     SELECT
         s.snapshot_date AS snapshot_date,
         s.currency AS currency,
-        s.tenant_id AS tenant_id,
+        s.merchant_id AS merchant_id,
         coalesce(pe.subscription_revenue_cents, 0) AS subscription_revenue_cents,
         coalesce(pe.one_time_revenue_cents, 0) AS one_time_revenue_cents,
         coalesce(pe.refunds_cents, 0) AS refunds_cents,
@@ -457,15 +457,15 @@ daily AS (
         arrayMap(x -> x.10, pa.proc_sorted) AS proc_pay_success,
         arrayMap(x -> x.11, pa.proc_sorted) AS proc_pay_failed
     FROM spine s
-    LEFT JOIN sub_events se ON s.snapshot_date = se.snapshot_date AND s.currency = se.currency AND s.tenant_id = se.tenant_id
-    LEFT JOIN sub_status ss ON s.snapshot_date = ss.snapshot_date AND s.currency = ss.currency AND s.tenant_id = ss.tenant_id
-    LEFT JOIN pay_events pe ON s.snapshot_date = pe.snapshot_date AND s.currency = pe.currency AND s.tenant_id = pe.tenant_id
-    LEFT JOIN proc_arrays pa ON s.snapshot_date = pa.snapshot_date AND s.currency = pa.currency AND s.tenant_id = pa.tenant_id
+    LEFT JOIN sub_events se ON s.snapshot_date = se.snapshot_date AND s.currency = se.currency AND s.merchant_id = se.merchant_id
+    LEFT JOIN sub_status ss ON s.snapshot_date = ss.snapshot_date AND s.currency = ss.currency AND s.merchant_id = ss.merchant_id
+    LEFT JOIN pay_events pe ON s.snapshot_date = pe.snapshot_date AND s.currency = pe.currency AND s.merchant_id = pe.merchant_id
+    LEFT JOIN proc_arrays pa ON s.snapshot_date = pa.snapshot_date AND s.currency = pa.currency AND s.merchant_id = pa.merchant_id
 )
 SELECT
     snapshot_date,
     currency,
-    tenant_id,
+    merchant_id,
     subscription_revenue_cents,
     one_time_revenue_cents,
     refunds_cents,
@@ -501,4 +501,4 @@ SELECT
     now('UTC') AS created_at,
     now('UTC') AS version
 FROM daily
-WINDOW w AS (PARTITION BY currency, tenant_id ORDER BY snapshot_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW);
+WINDOW w AS (PARTITION BY currency, merchant_id ORDER BY snapshot_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW);

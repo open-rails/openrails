@@ -19,7 +19,7 @@ type CrankService struct {
 	submitter Submitter
 }
 
-// NewCrankService builds a CrankService over a per-tenant Submitter.
+// NewCrankService builds a CrankService over a per-merchant Submitter.
 func NewCrankService(submitter Submitter) *CrankService {
 	return &CrankService{submitter: submitter}
 }

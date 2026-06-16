@@ -123,17 +123,15 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 
 -- name: ListBelowThresholdMoneyAccounts :many
 -- Money-in workers (#239/#240): accounts whose DERIVED available balance
--- (#491: SUM spendable blocks - active holds - open-window unsettled) is under
--- their configured low-balance threshold.
+-- (#505: SUM spendable blocks - durable open-window unsettled) is under their
+-- configured low-balance threshold. Request holds live in Redis and are not
+-- part of this durable account scan.
 SELECT s.merchant_id, s.customer_id, s.currency,
        (
          COALESCE((SELECT SUM(mb.remaining_amount) FROM openrails.money_blocks mb
                    WHERE mb.merchant_id = s.merchant_id AND mb.customer_id = s.customer_id
                      AND mb.currency = s.currency AND mb.remaining_amount > 0
                      AND (mb.expires_at IS NULL OR mb.expires_at > sqlc.arg(now)::timestamptz)), 0)
-       - COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0)) FROM openrails.money_transactions t
-                   WHERE t.merchant_id = s.merchant_id AND t.customer_id = s.customer_id
-                     AND t.currency = s.currency AND t.transaction_type = 'hold' AND t.status = 'active'), 0)
        - COALESCE((SELECT SUM(w.held_amount - w.settled_amount) FROM openrails.money_windows w
                    WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
                      AND w.currency = s.currency AND w.status = 'open'), 0)
@@ -149,9 +147,6 @@ WHERE s.merchant_id = $1
                    WHERE mb.merchant_id = s.merchant_id AND mb.customer_id = s.customer_id
                      AND mb.currency = s.currency AND mb.remaining_amount > 0
                      AND (mb.expires_at IS NULL OR mb.expires_at > sqlc.arg(now)::timestamptz)), 0)
-       - COALESCE((SELECT SUM(COALESCE(t.authorized_amount, 0)) FROM openrails.money_transactions t
-                   WHERE t.merchant_id = s.merchant_id AND t.customer_id = s.customer_id
-                     AND t.currency = s.currency AND t.transaction_type = 'hold' AND t.status = 'active'), 0)
        - COALESCE((SELECT SUM(w.held_amount - w.settled_amount) FROM openrails.money_windows w
                    WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
                      AND w.currency = s.currency AND w.status = 'open'), 0)
@@ -167,7 +162,16 @@ WHERE s.merchant_id = $1
   AND s.billing_mode = 'arrears'
   AND s.outstanding_owed_amount > 0
   AND s.auto_topup_payment_method_id IS NOT NULL
-  AND (sqlc.arg(min_threshold)::bigint <= 0 OR s.outstanding_owed_amount >= sqlc.arg(min_threshold)::bigint);
+  AND (sqlc.arg(min_threshold)::bigint <= 0 OR s.outstanding_owed_amount >= sqlc.arg(min_threshold)::bigint)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM openrails.invoices i
+      WHERE i.merchant_id = s.merchant_id
+        AND i.customer_id = s.customer_id
+        AND i.currency = s.currency
+        AND i.status IN ('open', 'past_due')
+        AND i.amount_due > 0
+  );
 
 -- name: GetMoneySpendLimit :one
 SELECT * FROM openrails.money_spend_limits

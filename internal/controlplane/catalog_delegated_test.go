@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests pin the LOAD-BEARING permission gate for federated tenant-signed
+// These tests pin the LOAD-BEARING permission gate for federated merchant-signed
 // browser tokens (issue #259): since the tenant signs, the verify-time catalog is
 // the SOLE authority for what a browser token may carry. A regression that let a
 // service/operator grant through would be a privilege-escalation hole.
@@ -16,9 +16,9 @@ func TestIsDelegatedPermission_AcceptsSelfAndTenant(t *testing.T) {
 	for _, p := range SelfCatalogNames() {
 		require.True(t, IsDelegatedPermission(p), "self perm %q must be accepted", p)
 	}
-	for _, p := range TenantCatalogNames() {
+	for _, p := range MerchantCatalogNames() {
 		require.True(t, IsDelegatedPermission(p), "tenant perm %q must be accepted", p)
-		require.True(t, IsTenantPermission(p))
+		require.True(t, IsMerchantPermission(p))
 		require.False(t, IsSelfPermission(p), "tenant perm %q must not be a self perm", p)
 	}
 }
@@ -35,9 +35,9 @@ func TestIsDelegatedPermission_HardRejectsServiceAndOperatorGrants(t *testing.T)
 		PermPaymentsRefund,
 		PermSubscriptionsCancel,
 		PermPlatformSuperadmin,
-		"openrails:tenant:*", // no wildcard is ever a real permission
-		"openrails:tenant",   // coarse super-grant must not exist
-		"openrails:self:*",   // wildcard, not a concrete self perm
+		"openrails:merchant:*", // no wildcard is ever a real permission
+		"openrails:merchant",   // coarse super-grant must not exist
+		"openrails:self:*",     // wildcard, not a concrete self perm
 		"totally-unknown-perm",
 	}
 	for _, p := range forbidden {
@@ -45,17 +45,17 @@ func TestIsDelegatedPermission_HardRejectsServiceAndOperatorGrants(t *testing.T)
 	}
 }
 
-// TestDelegatedVerify_AcceptsTenantAdminPermission proves a tenant-signed token
-// carrying a concrete openrails:tenant:* grant verifies through the same catalog
+// TestDelegatedVerify_AcceptsMerchantAdminPermission proves a merchant-signed token
+// carrying a concrete openrails:merchant:* grant verifies through the same catalog
 // the real verifier uses.
-func TestDelegatedVerify_AcceptsTenantAdminPermission(t *testing.T) {
+func TestDelegatedVerify_AcceptsMerchantAdminPermission(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Permissions: []string{PermTenantBillingRead, PermTenantEntitlementsWrite},
+		Permissions: []string{PermMerchantBillingRead, PermMerchantEntitlementsWrite},
 	})
 	_, dp, err := v.VerifyDelegatedAccess(tok)
 	require.NoError(t, err)
-	require.Contains(t, dp.Permissions, PermTenantBillingRead)
+	require.Contains(t, dp.Permissions, PermMerchantBillingRead)
 }
 
 // TestDelegatedVerify_RejectsServicePermissionEvenWhenTenantSigned proves the

@@ -50,7 +50,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	fixedTime := time.Date(2024, 8, 1, 10, 0, 0, 0, time.UTC)
 	mockClock := clockwork.NewFakeClockAt(fixedTime)
 	suite := setupTestSuite(t, WithSuiteClock(mockClock))
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	rt := suite.App.Runtime
 	require.Equal(t, mockClock, rt.Clock)
@@ -186,7 +186,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	blockExpiry := mockClock.Now().Add(time.Hour)
 	block := &models.MoneyBlock{
 		ID:              uuid.New(),
-		MerchantID:      dbtest.TestTenantID.UUID(),
+		MerchantID:      dbtest.TestMerchantID.UUID(),
 		CustomerID:      suite.ensureCustomer(ctx, creditUserID),
 		Currency:        "USD",
 		OriginalAmount:  75,

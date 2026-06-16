@@ -1,7 +1,7 @@
 # OpenRails API Reference
 
 OpenRails exposes public catalog routes, delegated browser/self-service APIs,
-tenant-admin APIs, processor webhooks, and a service-token server-to-server
+merchant-admin APIs, processor webhooks, and a service-token server-to-server
 surface on the same public port. All responses are JSON encoded. Unless
 otherwise stated, errors follow the
 Stripe-style envelope:
@@ -38,8 +38,8 @@ List endpoints use a Stripe-like envelope:
 | Surface | How to authenticate |
 |---------|---------------------|
 | Public catalog (`/`, `/v1/products`, `/v1/prices`, `/v1/solana/tokens`, health probes) | No auth required |
-| Delegated self routes (`/v1/self/*`) | `Authorization: Bearer <delegated JWT>` signed by a registered tenant issuer; token must carry OIDC `iss`, `sub` via AuthKit `delegated_sub`, accepted `aud`, and `openrails:self:*` permissions |
-| Delegated tenant-admin routes (`/v1/tenant-admin/*`) | Same delegated JWT shape, with `openrails:tenant:*` permissions |
+| Delegated self routes (`/v1/self/*`) | `Authorization: Bearer <delegated JWT>` signed by a registered issuer; token must carry OIDC `iss`, `sub` via AuthKit `delegated_sub`, accepted `aud`, and `openrails:self:*` permissions |
+| Delegated merchant-admin routes (`/v1/merchant-admin/*`) | Same delegated JWT shape, with `openrails:merchant:*` permissions |
 | Legacy user/admin routes (`/v1/checkout`, `/v1/me/*`, `/v1/admin/*`) | Host JWT auth where still mounted by the embedding deployment |
 | Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <generated service token or first-party service JWT>`; each route requires an `openrails:*` permission (see Service API section) |
 | Webhooks (`/v1/webhooks/:provider`) | Provider-specific verification (see notes) |
@@ -47,7 +47,7 @@ List endpoints use a Stripe-like envelope:
 Delegated JWTs and machine credentials are intentionally different credentials.
 Delegated JWTs are browser/direct-user credentials verified through OIDC issuer,
 JWKS, audience, expiry, and permission checks. OpenRails stores/touches only the
-minimal payable tenant subject `(tenant_id, issuer, subject)` needed for billing
+minimal payable customer reference `(merchant_id, issuer, subject)` needed for billing
 and audit references; it does not create OpenRails-native users for delegated
 subjects. Generated service tokens and first-party service JWTs are backend
 credentials and are rejected by delegated self/admin routes.
@@ -55,15 +55,15 @@ credentials and are rejected by delegated self/admin routes.
 Delegated JWT examples:
 
 - Doujins/Hentai0 membership UI: the host frontend presents a short-lived token
-  signed by its registered tenant issuer with `aud: "openrails-app"`,
+  signed by its registered issuer with `aud: "openrails-app"`,
   `delegated_sub: "<canonical-user-id>"`, and permissions such as
   `openrails:self:billing:read`, `openrails:self:checkout:create`, or
   `openrails:self:subscriptions:cancel` for `/v1/self/*`.
-- Cozy Art tenant-admin membership UI: an admin browser token is signed by the
+- Cozy Art merchant-admin membership UI: an admin browser token is signed by the
   Cozy issuer with `delegated_sub: "<admin-subject>"` and
-  `openrails:tenant:*` permissions for `/v1/tenant-admin/*`.
-- Tensorhub tenant balance UI: Cozy Art can present a delegated JWT whose
-  subject is the upstream tenant/company subject, with self billing permission,
+  `openrails:merchant:*` permissions for `/v1/merchant-admin/*`.
+- Tensorhub merchant balance UI: Cozy Art can present a delegated JWT whose
+  subject is the upstream merchant/company subject, with self billing permission,
   to read its own balance through browser/direct OpenRails routes. Backend
   reserve/capture/release remains machine-credential-only.
 
@@ -274,25 +274,25 @@ present one of:
 
 ```
 Authorization: Bearer <openrails_st_...>
-Authorization: Bearer <service-jwt-signed-by-registered-tenant-issuer>
+Authorization: Bearer <service-jwt-signed-by-registered-issuer>
 ```
 
 Generated service tokens are resolved through the OpenRails-owned AuthKit control
-plane: their owning tenant maps to an OpenRails tenant, AuthKit resource scopes
+plane: their owning org maps to an OpenRails merchant, AuthKit resource scopes
 constrain where they may act, and granted permissions gate what they may do.
 Every generated service token must carry
-`resources: [{kind:"openrails.tenant", id:"<tenant_uuid>"}]`.
+`resources: [{kind:"openrails.merchant", id:"<merchant_uuid>"}]`.
 Subject-scoped tokens additionally carry
 `{kind:"openrails.customer", id:"<customer_uuid>"}` and may only act
-for that exact `customer_id`; tenant-wide tokens omit the tenant-subject
+for that exact `customer_id`; merchant-wide tokens omit the customer
 resource.
 
-First-party service JWTs are signed by a registered tenant issuer and must carry
+First-party service JWTs are signed by a registered issuer and must carry
 standard JWT/OIDC claims plus `token_use=service`, `jti`, a maximum 15-minute
 lifetime, accepted `aud`, and self-assigned `permissions`. Registering the issuer
-to a tenant is the authorization: OpenRails resolves the issuer to its tenant,
+to a merchant is the authorization: OpenRails resolves the issuer to its merchant,
 treats the token's `permissions` claim as authoritative, and scopes every
-resource to that tenant (a token can never reach another tenant's resources).
+resource to that merchant (a token can never reach another merchant's resources).
 
 The canonical permission vocabulary is colon-form
 `openrails:<resource>:<action>`:
@@ -301,11 +301,11 @@ Machine-credential examples:
 
 - Doujins/Hentai0/Cozy backend entitlement read: first-party service JWT subject
   such as `service:doujins-runtime`, permission `openrails:entitlements:read`,
-  resource `openrails.tenant=<tenant_uuid>`, route
+  resource `openrails.merchant=<merchant_uuid>`, route
   `GET /v1/service/customers/{customer_id}/entitlements`.
 - Tensorhub balance reserve/capture/release: permissions
   `openrails:credits:read`, `openrails:credits:write`, and
-  `openrails:credits:spend`; resources include `openrails.tenant=<tenant_uuid>`
+  `openrails:credits:spend`; resources include `openrails.merchant=<merchant_uuid>`
   and, for payer-scoped generated tokens or service-JWT grants,
   `openrails.customer=<customer_uuid>`.
 
@@ -321,17 +321,17 @@ Embedded hosts skip HTTP entirely and call the in-process `pkg/service` facade
 after authorizing the action themselves.
 
 Terminology for this surface is defined in
-`docs/authkit-tenant-oidc-glossary.md`: OpenRails tenant = integration/customer
-boundary, delegated user = external OIDC `issuer` + `subject`, tenant subject =
+`docs/authkit-merchant-oidc-glossary.md`: OpenRails merchant = billing/integration
+boundary, delegated user = external OIDC `issuer` + `subject`, customer =
 payable identity, generated service token/service JWT = server-to-server
 credentials.
 
 ### GET /v1/service/customers/{customer_id}/entitlements
-Returns active entitlements for the payable tenant subject at the current time.
+Returns active entitlements for the payable customer at the current time.
 Optional query param `at` (RFC3339) queries entitlements at a specific time.
 Response: array of entitlement records with `customer_id`. Service
 entitlement reads query `billing.entitlements.customer_id` directly; they
-do not translate the tenant subject through legacy `user_id`.
+do not translate the customer through legacy `user_id`.
 
 ### GET /v1/service/credits/invokers/{invoker_id}
 Returns credit balance summary for an invoker. Optional query params: `customer_id` and `type` (defaults to `api_credits`, which must exist in `billing.credit_types`).

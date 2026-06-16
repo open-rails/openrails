@@ -58,8 +58,8 @@ func TestValidateServiceTokenResourcesRejectsLegacyPayableKinds(t *testing.T) {
 	}
 	for _, kind := range legacyKinds {
 		t.Run(kind, func(t *testing.T) {
-			err := validateServiceTokenResources(dbtest.TestTenantID, []authcore.ServiceTokenResource{
-				MerchantResource(dbtest.TestTenantID),
+			err := validateServiceTokenResources(dbtest.TestMerchantID, []authcore.ServiceTokenResource{
+				MerchantResource(dbtest.TestMerchantID),
 				{Kind: kind, ID: "legacy"},
 			})
 			if err != ErrServiceTokenScopeDenied {

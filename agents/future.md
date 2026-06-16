@@ -9,6 +9,112 @@
 
 ---
 
+# #509: Solana invoice collection authorization and settlement
+
+**Completed:** no — future direction only.
+
+Solana invoice collection is valuable, but it is materially different from Stripe/NMI automatic collection. A linked
+wallet is not a saved payment method that OpenRails can charge. Before Solana can collect arrears invoices, OpenRails
+needs an explicit authorization or prefunding model that defines what funds are available, who can move them, how much
+can be collected, when collection expires, and how settlement finality is detected.
+
+This is intentionally split out of #508 so Stripe and NMI/Mobius invoice collection can ship first.
+
+## Target Model
+- Solana invoice collection must require a prior customer-approved agreement:
+  escrow/prefund, delegated token authority, program-controlled allowance, durable nonce/signature flow, or another
+  explicit mechanism chosen after design.
+- Ordinary linked wallets are never collectible by default.
+- OpenRails invoices remain the receivable source of truth; Solana only supplies a settlement rail.
+- Collection should record transaction signatures, token account/source details, amount, currency/asset, network, and
+  confirmation status.
+- Invoice payment should become settled only after sufficient on-chain confirmation and local reconciliation.
+- Failed or expired Solana authorization leaves the invoice open/past-due and feeds admission/dunning like other failed
+  collection rails.
+
+## Questions To Resolve
+- Which authorization model is simplest and safest for USDC on Solana: prefunded escrow, SPL token delegate allowance,
+  program escrow, or customer-signed one-shot payment request?
+- Should collection support partial invoice payments, or require invoice-total availability before collecting?
+- How should authorization limits map to arrears credit limits?
+- What confirmation depth/finality is required before marking an invoice payment settled?
+- How are refunds/voids handled if an invoice is later adjusted?
+- How does this interact with existing Solana checkout/subscription/funding-session code?
+
+## Tasks
+- [ ] Inventory existing Solana wallet, funding-session, checkout, subscription, and signer code that could be reused.
+- [ ] Inventory current Solana DB tables and models:
+      linked wallets, funding sessions, Solana subscriptions, signer keys, vault/signer configuration, and payment rows
+      that already store signatures.
+- [ ] Inventory current Solana HTTP/service APIs that create wallet links, funding sessions, checkout payments, and
+      recurring/subscription state.
+- [ ] Decide whether invoice collection uses prefunded escrow, SPL token delegate allowance, program escrow, or
+      customer-signed one-shot payment request.
+- [ ] Document the chosen model's customer consent text, revocation path, maximum exposure, and who can submit
+      transactions.
+- [ ] Document why ordinary linked wallets are not collectible and add this as an explicit invariant.
+- [ ] Define whether partial invoice collection is supported in the first version.
+- [ ] Define how Solana authorization amount maps to arrears credit limit and invoice amount due.
+- [ ] Define confirmation/finality policy:
+      commitment level, number of confirmations if applicable, timeout, and retry behavior.
+- [ ] Define refund/void/adjustment behavior for Solana-collected invoice payments.
+- [ ] Add a Solana invoice authorization table or payment-method metadata:
+      merchant_id, customer_id, network, mint, source account, destination/escrow account, authorized amount,
+      consumed amount, expires_at, revoked_at, status, and created/updated timestamps.
+- [ ] Add uniqueness/idempotency constraints so one authorization cannot be consumed twice for the same invoice attempt.
+- [ ] Add sqlc queries to create, revoke, list, and load active Solana invoice authorizations by merchant/customer/asset.
+- [ ] Add sqlc queries to reserve authorization capacity for an invoice attempt without racing another worker.
+- [ ] Add sqlc queries to mark an authorization consumed/released after confirmed settlement or failed attempt.
+- [ ] Add Solana invoice collection capability metadata separately from Stripe/NMI capabilities.
+- [ ] Implement a deterministic fake Solana ledger:
+      balances, allowances/escrows, submitted signatures, confirmation states, failed transactions, and dropped
+      transactions.
+- [ ] Add fake-ledger test for successful authorization reservation before writing any real Solana client.
+- [ ] Add fake-ledger test for confirmed settlement applying an invoice payment exactly once.
+- [ ] Add fake-ledger test for dropped/ambiguous transaction requiring reconciliation before retry.
+- [ ] Implement collection scope validation:
+      invoice merchant/customer matches authorization merchant/customer and asset/network.
+- [ ] Implement amount validation:
+      invoice currency maps to the configured USDC mint/network and amount does not exceed available authorization.
+- [ ] Implement transaction construction/submission for the chosen authorization model.
+- [ ] Record a pending `invoice_payments` row with processor `solana`, signature or pending attempt id, network, mint,
+      and authorization id.
+- [ ] Implement confirmation polling or callback handling to settle pending Solana invoice payments.
+- [ ] Apply confirmed Solana payment to the invoice without overpaying or double-applying under retry.
+- [ ] Implement reconciliation:
+      verify signature status, handle expired blockhash/signature, handle dropped transactions, and repair pending state.
+- [ ] Add failure handling:
+      no authorization, insufficient authorization, expired authorization, revoked authorization, wrong network/mint,
+      failed transaction, ambiguous confirmation, and signer/RPC failure.
+- [ ] Add admission/dunning feedback so failed Solana invoice collection blocks or reduces further arrears capacity.
+- [ ] Add admin/service APIs to create/revoke/list Solana invoice authorizations.
+- [ ] Add admin/support reporting for authorization id, signature, network, mint, confirmation status, and failure reason.
+
+## Acceptance
+- A finalized/open invoice can be collected through Solana only when a valid prior authorization or prefunded balance
+  exists for that customer/merchant/asset/network.
+- OpenRails cannot collect from a normal linked wallet without explicit authorization.
+- Retried collection cannot double-spend or double-apply invoice payment.
+- Invoice payment is settled only after confirmed on-chain settlement.
+- Failed or expired authorization leaves the invoice receivable intact and blocks/reduces further arrears capacity.
+
+## Validation
+- [ ] Deterministic fake-ledger integration test:
+      finalized invoice -> authorized USDC collection -> confirmed invoice payment.
+- [ ] Failure-path integration tests:
+      no authorization, insufficient authorization, expired authorization, wrong network/mint, ambiguous confirmation,
+      retry/idempotency, and cross-merchant authorization misuse.
+- [ ] Authorization lifecycle integration test:
+      create authorization -> reserve capacity -> revoke/expire prevents future collection.
+- [ ] Partial-vs-full collection test based on the chosen first-version policy.
+- [ ] Confirmation/reconciliation test:
+      missed confirmation is repaired from signature lookup.
+- [ ] Admission feedback test:
+      failed or expired Solana collection blocks/reduces further arrears capacity.
+- [ ] Devnet integration checklist once the local model is stable.
+
+---
+
 # #498: Deliberate admin audit logging and global break-glass, if needed later
 
 **Completed:** no — future direction only.

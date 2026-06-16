@@ -20,8 +20,8 @@ import (
 func TestInvokerIdentityAndPayerNaturalKey(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedPGXPool(t)
-	dbtest.EnsureTestTenant(ctx, t, pool)
-	merchantID := dbtest.TestTenantID.UUID()
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	merchantID := dbtest.TestMerchantID.UUID()
 	q := gen.New(pool)
 
 	t.Run("org_less_natural_key_is_idempotent_and_per_subject", func(t *testing.T) {

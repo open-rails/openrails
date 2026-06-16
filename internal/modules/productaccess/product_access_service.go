@@ -48,15 +48,15 @@ func (s *Service) now() time.Time {
 	return time.Now()
 }
 
-// withTx runs fn inside a tenant-scoped transaction so the migration-063 RLS
-// policy constrains every query to the request's tenant (TenantTx pins the
-// app.tenant_id GUC as the first statement). repo calls inside fn use the
+// withTx runs fn inside a merchant-scoped transaction so the migration-063 RLS
+// policy constrains every query to the request's merchant (MerchantTx pins the
+// app.merchant_id GUC as the first statement). repo calls inside fn use the
 // tx-scoped repo so they ride that GUC.
 func (s *Service) withTx(ctx context.Context, fn func(ctx context.Context, r *repo.ProductAccessGrantRepo) error) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("product access service not initialized")
 	}
-	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, repo.NewProductAccessGrantRepo(s.db.NewWithPgxTx(tx)))
 	})
 }
@@ -132,7 +132,7 @@ func (s *Service) GrantProductAccess(ctx context.Context, params GrantParams) (*
 	return out, created, nil
 }
 
-// GetGrant returns a single grant by id (tenant-scoped), or nil if not found.
+// GetGrant returns a single grant by id (merchant-scoped), or nil if not found.
 func (s *Service) GetGrant(ctx context.Context, grantID uuid.UUID) (*models.ProductAccessGrant, error) {
 	var grant *models.ProductAccessGrant
 	err := s.withTx(ctx, func(ctx context.Context, r *repo.ProductAccessGrantRepo) error {

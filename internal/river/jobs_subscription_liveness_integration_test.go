@@ -95,7 +95,7 @@ func newLivenessFixture(t *testing.T, processor models.Processor, periodEndAgo t
 	periodEnd := now.Add(-periodEndAgo)
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: f.subID, MerchantID: dbtest.TestTenantID.UUID(), CustomerID: tenantSubjectID, ProductID: f.productID, PriceID: &f.priceID,
+		ID: f.subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: f.productID, PriceID: &f.priceID,
 		Status: string(models.StatusActive), Processor: string(processor),
 		ProcessorSubscriptionID: f.procSubID, PaymentMethodID: &f.paymentMethodID,
 		EntitlementsSpecSnapshot: []byte(`{"premium": null}`),
@@ -296,7 +296,7 @@ func TestLivenessWorker_RemoteAbsentCancelsAndRevokes(t *testing.T) {
 	_, err := f.pool.Exec(ctx,
 		`INSERT INTO openrails.entitlements (id, entitlement, start_at, end_at, source_id, source_type, customer_id, merchant_id)
 		 VALUES ($1, 'premium', now() - interval '40 days', now() + interval '10 days', $2, 'subscription', $3, $4)`,
-		uuid.New(), f.subID, tenantSubjectID, dbtest.TestTenantID.UUID())
+		uuid.New(), f.subID, tenantSubjectID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 
 	f.run(t)

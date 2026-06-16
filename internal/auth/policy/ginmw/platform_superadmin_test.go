@@ -45,7 +45,7 @@ func TestPlatformSuperadminRequired_AllowsPlatformIdentity(t *testing.T) {
 	checker := fakePlatformChecker{allow: map[string]bool{"platform-admin": true}}
 	rr := runPlatformGate(t, checker, authprovider.UserContext{
 		UserID: "platform-admin",
-		Tenant: "openrails-platform",
+		Org:    "openrails-platform",
 	})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("platform identity should pass: got %d body=%q", rr.Code, rr.Body.String())
@@ -57,9 +57,9 @@ func TestPlatformSuperadminRequired_DeniesTenantOperatorAdmin(t *testing.T) {
 	// NOT openrails:platform:superadmin in the platform tenant -> absent from allow.
 	checker := fakePlatformChecker{allow: map[string]bool{"platform-admin": true}}
 	rr := runPlatformGate(t, checker, authprovider.UserContext{
-		UserID:      "tenant-operator-admin",
-		Tenant:      "tenant-acme",
-		TenantRoles: []string{"admin", "owner"},
+		UserID:   "tenant-operator-admin",
+		Org:      "tenant-acme",
+		OrgRoles: []string{"admin", "owner"},
 	})
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("tenant operator admin must be denied platform gate: got %d", rr.Code)

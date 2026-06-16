@@ -28,7 +28,7 @@ func TestRequired(t *testing.T) {
 		var seen billingauth.UserContext
 		var found bool
 		auth := billingauth.AuthenticatorFunc(func(_ context.Context, _ *http.Request) (billingauth.UserContext, error) {
-			return billingauth.UserContext{UserID: uid, Tenant: "acme"}, nil
+			return billingauth.UserContext{UserID: uid, Org: "acme"}, nil
 		})
 		h := billingauth.Required(auth)(captureUC(&seen, &found))
 
@@ -38,8 +38,8 @@ func TestRequired(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
-		if !found || seen.UserID != uid || seen.Tenant != "acme" {
-			t.Fatalf("next saw uc=%+v found=%v, want UserID=%q Tenant=acme", seen, found, uid)
+		if !found || seen.UserID != uid || seen.Org != "acme" {
+			t.Fatalf("next saw uc=%+v found=%v, want UserID=%q Org=acme", seen, found, uid)
 		}
 	})
 

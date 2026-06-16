@@ -40,7 +40,7 @@ container on the e2e network):
 
 ```sh
 SERVICE_TOKEN=$(docker compose exec -T openrails /usr/local/bin/openrails \
-  --config /app/config/openrails.config.yaml mint-operator-service-token --tenant default \
+  --config /app/config/openrails.config.yaml mint-operator-service-token --merchant default \
   | grep -o '"service_token_secret":"[^"]*"' | cut -d'"' -f4)
 
 docker run --rm --network e2e_default \

@@ -48,7 +48,7 @@ func (s *MoneyService) SetPaymentMethodVerified(ctx context.Context, payer ident
 	payerID := payer.UUID()
 	now := s.now()
 
-	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModePrepaid, now); err != nil {
 			return err
@@ -80,7 +80,7 @@ func (s *MoneyService) Suspend(ctx context.Context, payer identity.CustomerID, c
 	now := s.now()
 	reason = strings.TrimSpace(reason)
 
-	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModePrepaid, now); err != nil {
 			return err
@@ -110,7 +110,7 @@ func (s *MoneyService) Resume(ctx context.Context, payer identity.CustomerID, cu
 	payerID := payer.UUID()
 	now := s.now()
 
-	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModePrepaid, now); err != nil {
 			return err

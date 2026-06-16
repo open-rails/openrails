@@ -52,7 +52,7 @@ func (s *MoneyService) CumulativePaidAmount(ctx context.Context, payer identity.
 	}
 	tenantID := tid.UUID()
 	var total int64
-	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
 		total, e = s.db.Gen(ctx).SumMoneyDeposits(ctx, gen.SumMoneyDepositsParams{
 			MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
@@ -96,7 +96,7 @@ func (s *MoneyService) SetTierOverride(ctx context.Context, payer identity.Custo
 	if tier == "" {
 		source = "auto"
 	}
-	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payer.UUID(), cur, BillingModePrepaid, now); err != nil {
 			return err
@@ -108,9 +108,9 @@ func (s *MoneyService) SetTierOverride(ctx context.Context, payer identity.Custo
 	})
 }
 
-// SetTierSchedule persists the tenant's tier ladder (#476): the host declares it
+// SetTierSchedule persists the merchant's tier ladder (#476): the host declares it
 // ONCE; OpenRails then auto-maintains each payer's tier from cumulative spend.
-// A nil/empty payer writes the tenant-wide default schedule; a non-zero payer
+// A nil/empty payer writes the merchant-wide default schedule; a non-zero payer
 // writes a per-subject override. owner is forced to 'platform' (set by us; the
 // subject cannot see/loosen it — the #473 owner pattern).
 func (s *MoneyService) SetTierSchedule(ctx context.Context, payer identity.CustomerID, currency string, schedule []TierThreshold) error {
@@ -131,7 +131,7 @@ func (s *MoneyService) SetTierSchedule(ctx context.Context, payer identity.Custo
 	if err != nil {
 		return fmt.Errorf("money: encode tier schedule: %w", err)
 	}
-	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
 		if payer.IsZero() {
 			return q.UpsertTierScheduleDefault(ctx, gen.UpsertTierScheduleDefaultParams{
@@ -152,8 +152,8 @@ func (s *MoneyService) SetTierSchedule(ctx context.Context, payer identity.Custo
 }
 
 // GetTierSchedule returns the EFFECTIVE platform-owned schedule for a payer (the
-// subject's override if present, else the tenant-wide default) in one currency,
-// or nil when none is set. A zero payer reads the tenant-wide default directly.
+// subject's override if present, else the merchant-wide default) in one currency,
+// or nil when none is set. A zero payer reads the merchant-wide default directly.
 func (s *MoneyService) GetTierSchedule(ctx context.Context, payer identity.CustomerID, currency string) ([]TierThreshold, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -168,8 +168,8 @@ func (s *MoneyService) GetTierSchedule(ctx context.Context, payer identity.Custo
 	}
 	tenantID := tid.UUID()
 	var out []TierThreshold
-	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		// nil subject → only the tenant-wide default row matches (#476).
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		// nil subject → only the merchant-wide default row matches (#476).
 		row, e := s.db.Gen(ctx).GetEffectiveTierSchedule(ctx, gen.GetEffectiveTierScheduleParams{
 			MerchantID: tenantID, Owner: "platform", Currency: cur, CustomerID: subjectPtr(payer),
 		})
@@ -234,7 +234,7 @@ func (s *MoneyService) autoGraduateTierTx(ctx context.Context, q *gen.Queries, t
 }
 
 // subjectPtr maps a payer to the nullable customer_id param: nil for a
-// zero payer (matches only the tenant-wide default schedule), else a pointer.
+// zero payer (matches only the merchant-wide default schedule), else a pointer.
 func subjectPtr(payer identity.CustomerID) *uuid.UUID {
 	if payer.IsZero() {
 		return nil
@@ -256,7 +256,7 @@ func rungThreshold(sched []TierThreshold, tier string) int64 {
 }
 
 // tierScheduleTx reads the effective platform schedule inside an open tx (the
-// connection already carries the tenant GUC, so no RunInTenantConn wrap).
+// connection already carries the merchant GUC, so no RunInMerchantConn wrap).
 func (s *MoneyService) tierScheduleTx(ctx context.Context, q *gen.Queries, tenantID uuid.UUID, payer identity.CustomerID, currency string) ([]TierThreshold, error) {
 	row, e := q.GetEffectiveTierSchedule(ctx, gen.GetEffectiveTierScheduleParams{
 		MerchantID: tenantID, Owner: "platform", Currency: currency, CustomerID: subjectPtr(payer),

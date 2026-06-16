@@ -77,11 +77,11 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	optional := opts.optionalMW()
 
 	// Pin a tenant-scoped DB connection for the request (tenant resolved by the
-	// global ResolveTenant middleware) so RLS constrains tenant-owned queries
+	// global ResolveMerchant middleware) so RLS constrains tenant-owned queries
 	// (issue #227). It applies to every route in this group.
 	var group router.Router = rr
 	if rt != nil && rt.DB != nil {
-		group = rr.Group("", middleware.TenantDBConnMW(rt.DB))
+		group = rr.Group("", middleware.MerchantDBConnMW(rt.DB))
 	}
 
 	group.Handle(http.MethodGet, "/products", h(httphandlers.GetProducts), optional)
@@ -140,7 +140,7 @@ func RegisterAdminRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	// Pin a tenant-scoped DB connection for the request so RLS constrains
 	// tenant-owned admin queries (issue #227).
 	if rt != nil && rt.DB != nil {
-		mw = append(mw, middleware.TenantDBConnMW(rt.DB))
+		mw = append(mw, middleware.MerchantDBConnMW(rt.DB))
 	}
 
 	group := rr.Group("", mw...)

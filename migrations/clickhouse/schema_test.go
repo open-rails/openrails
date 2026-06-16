@@ -60,16 +60,16 @@ func TestClickHouseSchemaConsolidationInvariants(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"tenant_id string default '00000000-0000-0000-0000-000000000001'",
+		"merchant_id string default '00000000-0000-0000-0000-000000000001'",
 		"create materialized view if not exists mv_daily_metrics {{on_cluster}} to daily_metrics",
-		"order by (snapshot_date, currency, tenant_id)",
-		"window w as (partition by currency, tenant_id order by snapshot_date rows between unbounded preceding and current row)",
-		"index idx_subscription_events_tenant (tenant_id) type set(0) granularity 1",
-		"index idx_payment_events_tenant (tenant_id) type set(0) granularity 1",
-		"index idx_webhook_events_tenant (tenant_id) type set(0) granularity 1",
-		"index idx_acu_events_tenant (tenant_id) type set(0) granularity 1",
-		"index idx_chargeback_events_tenant (tenant_id) type set(0) granularity 1",
-		"index idx_premium_status_daily_tenant (tenant_id) type set(0) granularity 1",
+		"order by (snapshot_date, currency, merchant_id)",
+		"window w as (partition by currency, merchant_id order by snapshot_date rows between unbounded preceding and current row)",
+		"index idx_subscription_events_merchant (merchant_id) type set(0) granularity 1",
+		"index idx_payment_events_merchant (merchant_id) type set(0) granularity 1",
+		"index idx_webhook_events_merchant (merchant_id) type set(0) granularity 1",
+		"index idx_acu_events_merchant (merchant_id) type set(0) granularity 1",
+		"index idx_chargeback_events_merchant (merchant_id) type set(0) granularity 1",
+		"index idx_premium_status_daily_merchant (merchant_id) type set(0) granularity 1",
 	} {
 		if !strings.Contains(schema, want) {
 			t.Errorf("consolidated ClickHouse schema missing invariant %q", want)

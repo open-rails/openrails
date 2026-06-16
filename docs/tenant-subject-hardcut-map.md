@@ -13,7 +13,7 @@ caused an action when that differs from the payable subject.
 | External principal | `issuer`, `subject` | Stored once in `billing.tenant_subjects` and touched idempotently. |
 | Action attribution | `invoker_id text` | For service tokens use `serviceToken:<key_id>`; for delegated users use `<issuer>:<subject>` or the resolved delegated subject when the route contract requires it. |
 | Tenant boundary | `tenant_id uuid not null` | RLS and directory boundary; do not infer it from a caller-provided subject string. |
-| Service-token scope | `openrails.tenant`, `openrails.tenant_subject` | AuthKit resource scopes are opaque there and interpreted only by OpenRails. |
+| Service-token scope | `openrails.merchant`, `openrails.customer` | AuthKit resource scopes are opaque there and interpreted only by OpenRails. |
 
 ## Rename / Model Map
 
@@ -38,7 +38,7 @@ caused an action when that differs from the payable subject.
 - Credit balances, transactions, blocks, account settings, spend limits, tier
   policies, budget reservations, usage events, and invoices have the
   `tenant_subject_id` column through migrations 071/072 and Go models.
-- Service-token resource scope uses `openrails.tenant_subject` with UUID values.
+- Service-token resource scope uses `openrails.customer` with UUID values.
 - Delegated JWT resolution touches `(tenant_id, issuer, subject)` idempotently.
 
 ## Hard-Cut Rules

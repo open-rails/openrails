@@ -17,6 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for the migration bootstrap
 	"github.com/open-rails/migratekit"
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
@@ -25,7 +27,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func startCryptoPostgres(t *testing.T) (*pgxpool.Pool, context.Context) {
+func startCryptoPostgres(t *testing.T) (*db.Pool, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN"))
@@ -66,10 +68,10 @@ func startCryptoPostgres(t *testing.T) (*pgxpool.Pool, context.Context) {
 	require.NoError(t, err)
 	require.NoError(t, migratekit.NewPostgres(sqlDB, "openrails").ApplyMigrations(ctx, migrations))
 
-	pool, err := pgxpool.New(ctx, dsn)
+	rawPool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-	return pool, ctx
+	t.Cleanup(rawPool.Close)
+	return db.WrapPool(rawPool, config.DefaultSchema), ctx
 }
 
 func masterKey(t *testing.T) string {
@@ -93,7 +95,7 @@ func TestDBDEKStore_LazyCreateReuseAndRoundTrip(t *testing.T) {
 
 	// No DEK row before first use.
 	var before int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.tenant_deks WHERE tenant_id=$1::uuid`, tA.String()).Scan(&before))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_deks WHERE merchant_id=$1::uuid`, tA.String()).Scan(&before))
 	require.Equal(t, 0, before)
 
 	ct, err := enc.Encrypt(ctx, tA, []byte("sk_live_db"))
@@ -101,7 +103,7 @@ func TestDBDEKStore_LazyCreateReuseAndRoundTrip(t *testing.T) {
 
 	// Exactly one wrapped DEK row created lazily.
 	var after int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.tenant_deks WHERE tenant_id=$1::uuid`, tA.String()).Scan(&after))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_deks WHERE merchant_id=$1::uuid`, tA.String()).Scan(&after))
 	require.Equal(t, 1, after)
 
 	// Round-trip with a FRESH encryptor (cold cache) over the same store+master
@@ -115,11 +117,11 @@ func TestDBDEKStore_LazyCreateReuseAndRoundTrip(t *testing.T) {
 	// Re-encrypting reuses the SAME DEK row (no second row).
 	_, err = enc.Encrypt(ctx, tA, []byte("again"))
 	require.NoError(t, err)
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.tenant_deks WHERE tenant_id=$1::uuid`, tA.String()).Scan(&after))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_deks WHERE merchant_id=$1::uuid`, tA.String()).Scan(&after))
 	require.Equal(t, 1, after, "DEK must be reused, not recreated")
 }
 
-func TestDBDEKStore_CrossTenantCiphertextIsolation(t *testing.T) {
+func TestDBDEKStore_CrossMerchantCiphertextIsolation(t *testing.T) {
 	pool, ctx := startCryptoPostgres(t)
 	store, _ := NewDBDEKStore(pool)
 	enc, _ := NewEncryptor(masterKey(t), store)
@@ -129,5 +131,5 @@ func TestDBDEKStore_CrossTenantCiphertextIsolation(t *testing.T) {
 	ctA, err := enc.Encrypt(ctx, tA, []byte("A-only"))
 	require.NoError(t, err)
 	_, err = enc.Decrypt(ctx, tB, ctA)
-	require.Error(t, err, "tenant B DEK must not decrypt tenant A ciphertext")
+	require.Error(t, err, "merchant B DEK must not decrypt merchant A ciphertext")
 }

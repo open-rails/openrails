@@ -1,7 +1,7 @@
 -- #107 phase 2: reconciliation runs + findings persistence, the engine's
--- tenant-scoped local-state reads, and the enforce appliers' idempotent local
--- writes. merchant_id is stamped explicitly (multi-tenant writer pattern); all
--- statements run on a tenant-pinned connection so RLS double-checks the stamp.
+-- merchant-scoped local-state reads, and the enforce appliers' idempotent local
+-- writes. merchant_id is stamped explicitly (multi-merchant writer pattern); all
+-- statements run on a merchant-pinned connection so RLS double-checks the stamp.
 
 -- ============================================================================
 -- Run lifecycle
@@ -41,7 +41,7 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 -- Findings: stable-identity upsert + lifecycle
 -- ============================================================================
 
--- Re-runs UPDATE the standing finding for (tenant, provider, finding_type,
+-- Re-runs UPDATE the standing finding for (merchant, provider, finding_type,
 -- subject_key). A previously resolved/auto_fixed finding that reappears is
 -- REOPENED with the freshly computed status; a dismissed finding stays
 -- dismissed (an admin explicitly silenced this identity) but keeps counting
@@ -294,7 +294,7 @@ WHERE NOT EXISTS (
 );
 
 -- PS-4: backfill a processor charge that has no local payment record.
--- Dedupe rides the uq_payments_tenant_processor_transaction identity.
+-- Dedupe rides the uq_payments_merchant_processor_transaction identity.
 -- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,

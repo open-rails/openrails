@@ -18,7 +18,7 @@ import (
 // TestStripeInvoicePaymentAlreadyRecorded covers the Bug 2 cross-key dedup: the
 // reconcile backfill records a subscription payment keyed by the CHARGE id (with
 // stripe_invoice_id in metadata), while the 2026-04-22.preview invoice.paid
-// webhook keys the SAME payment by the INVOICE id. The (tenant, processor,
+// webhook keys the SAME payment by the INVOICE id. The (merchant, processor,
 // transaction_id) unique index cannot see across those keys, so without this
 // helper a backfill-then-webhook ordering inserts a duplicate row.
 func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {

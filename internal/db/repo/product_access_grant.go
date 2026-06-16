@@ -14,9 +14,9 @@ import (
 )
 
 // ProductAccessGrantRepo persists durable product ownership/access grants
-// (issue #250). All tenant-owned queries go through the RLS-aware accessor
-// (#227) and stamp/scope the resolved tenant so single-tenant and
-// multi-tenant runs behave identically.
+// (issue #250). All merchant-owned queries go through the RLS-aware accessor
+// (#227) and stamp/scope the resolved merchant so single-merchant and
+// multi-merchant runs behave identically.
 type ProductAccessGrantRepo struct {
 	db *db.DB
 }
@@ -48,7 +48,7 @@ func productAccessGrantFromGen(g gen.OpenrailsProductAccessGrant) *models.Produc
 	return m
 }
 
-// Insert creates a grant, stamping the resolved tenant when the caller left it
+// Insert creates a grant, stamping the resolved merchant when the caller left it
 // zero (consistent with reads).
 func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.ProductAccessGrant) error {
 	if (grant.MerchantID == uuid.UUID{}) {
@@ -188,7 +188,7 @@ func (r *ProductAccessGrantRepo) ListByUser(ctx context.Context, userID string) 
 	return grants, nil
 }
 
-// GetByID returns a single grant by id (tenant-scoped).
+// GetByID returns a single grant by id (merchant-scoped).
 func (r *ProductAccessGrantRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.ProductAccessGrant, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {

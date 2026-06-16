@@ -23,21 +23,21 @@ const (
 
 // ResolvedServiceToken is the result of validating an OpenRails-issued service
 // token against live AuthKit + merchant-directory state. It carries everything
-// route authorization needs: the calling AuthKit tenant (org) that owns the
+// route authorization needs: the calling AuthKit org that owns the
 // merchant, the resolved OpenRails merchant, and the granted permission strings.
 //
 // #481: the merchant is NOT the caller's identity. The caller is an AuthKit
 // principal (user OR remote_application); its authority over the merchant comes
-// from a ROLE on the merchant's owner_tenant_id (the owning org), never from an
+// from a ROLE on the merchant's owner_org_id (the owning org), never from an
 // identity-equation with the merchant.
 type ResolvedServiceToken struct {
-	// OwnerTenantID is the AuthKit tenant (org) uuid that owns/administers the
+	// OwnerOrgID is the AuthKit org uuid that owns/administers the
 	// merchant — the caller's authority anchor (#481). Resolved by AuthKit's
-	// opaque service-token lookup (the token's owning tenant) or the issuer ->
+	// opaque service-token lookup (the token's owning org) or the issuer ->
 	// remote_application -> tenant mapping on the service-JWT path.
-	OwnerTenantID string
-	// OwnerTenantSlug is that owning tenant's slug (presentation/audit only).
-	OwnerTenantSlug string
+	OwnerOrgID string
+	// OwnerOrgSlug is that owning org's slug (presentation/audit only).
+	OwnerOrgSlug string
 	// MerchantID is the OpenRails merchant (#480) the service token administers.
 	MerchantID merchant.ID
 	// MerchantSlug is the resolved merchant's slug.
@@ -146,14 +146,14 @@ func (c *ControlPlane) LooksLikeServiceToken(token string) bool {
 // ResolveServiceToken validates a presented service token string end-to-end:
 //
 //   - parses the <prefix>_st_<key_id>_<secret> shape,
-//   - resolves key id + secret hash via AuthKit core (owning tenant, permissions,
+//   - resolves key id + secret hash via AuthKit core (owning org, permissions,
 //     expiry, revocation) — returns authcore.ErrAccessTokenExpired /
 //     ErrAccessTokenRevoked / ErrInvalidAccessToken on those conditions,
 //   - resolves the merchant the caller administers by ROLE (#481): the merchant
-//     whose owner_tenant_id is the caller's AuthKit tenant. Ownership (who
+//     whose owner_org_id is the caller's AuthKit org. Ownership (who
 //     administers), not identity — the merchant is never "equal to" the org.
 //
-// A caller whose AuthKit tenant owns no active merchant yields
+// A caller whose AuthKit org owns no active merchant yields
 // ErrServiceTokenMerchantUnresolved so the caller can reject the request.
 func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*ResolvedServiceToken, error) {
 	if c == nil || c.Core() == nil {
@@ -169,10 +169,10 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 		return nil, err
 	}
 
-	// #481: authorize by the caller's role on the merchant's owner_tenant_id. The
-	// owning AuthKit tenant administers its merchant(s); resolve the merchant via
+	// #481: authorize by the caller's role on the merchant's owner_org_id. The
+	// owning AuthKit org administers its merchant(s); resolve the merchant via
 	// that ownership link, never via an identity-equation.
-	mid, mslug, err := c.merchantForOwnerTenant(ctx, resolved.OrgID)
+	mid, mslug, err := c.merchantForOwnerOrg(ctx, resolved.OrgID)
 	if err != nil {
 		return nil, err
 	}
@@ -181,18 +181,18 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 	}
 
 	return &ResolvedServiceToken{
-		OwnerTenantID:   resolved.OrgID,
-		OwnerTenantSlug: resolved.OrgSlug,
-		MerchantID:      mid,
-		MerchantSlug:    mslug,
-		Permissions:     resolved.Permissions,
-		Resources:       resolved.Resources,
+		OwnerOrgID:   resolved.OrgID,
+		OwnerOrgSlug: resolved.OrgSlug,
+		MerchantID:   mid,
+		MerchantSlug: mslug,
+		Permissions:  resolved.Permissions,
+		Resources:    resolved.Resources,
 	}, nil
 }
 
-// ErrServiceTokenMerchantUnresolved indicates the caller's owning AuthKit tenant
+// ErrServiceTokenMerchantUnresolved indicates the caller's owning AuthKit org
 // owns no active OpenRails merchant (no openrails.merchants row with that
-// owner_tenant_id, or the merchant is suspended/deleted). Treated as an
+// owner_org_id, or the merchant is suspended/deleted). Treated as an
 // authorization failure: the caller cannot act on any merchant surface.
 var ErrServiceTokenMerchantUnresolved = errors.New("controlplane: service token caller owns no active merchant")
 
@@ -235,46 +235,46 @@ func hasAnyResourceKind(resources []authcore.ServiceTokenResource, kind string) 
 	return false
 }
 
-// merchantForOwnerTenant resolves the OpenRails merchant a caller administers, by
-// ROLE on the owning AuthKit tenant (#481): the merchant whose owner_tenant_id is
-// the caller's authenticated AuthKit tenant uuid. This is OWNERSHIP (who may
-// administer), not IDENTITY — one tenant owns many merchants; the merchant is
+// merchantForOwnerOrg resolves the OpenRails merchant a caller administers, by
+// ROLE on the owning AuthKit org (#481): the merchant whose owner_org_id is
+// the caller's authenticated AuthKit org uuid. This is OWNERSHIP (who may
+// administer), not IDENTITY — one org owns many merchants; the merchant is
 // never "equal to" the org. Suspended/deleted merchants are rejected.
 //
-// (When a tenant owns several merchants, the request names which via MerchantScope
+// (When an org owns several merchants, the request names which via MerchantScope
 // + AuthorizeMerchant; this single-merchant resolution serves the common
 // one-merchant-per-tenant service-token path and fails closed otherwise.)
-func (c *ControlPlane) merchantForOwnerTenant(ctx context.Context, ownerTenantID string) (merchant.ID, string, error) {
-	ownerTenantID = strings.TrimSpace(ownerTenantID)
+func (c *ControlPlane) merchantForOwnerOrg(ctx context.Context, ownerOrgID string) (merchant.ID, string, error) {
+	ownerOrgID = strings.TrimSpace(ownerOrgID)
 	if c.pool == nil {
 		return merchant.ID{}, "", errors.New("controlplane: pgx pool unavailable for merchant resolution")
 	}
-	if ownerTenantID == "" {
+	if ownerOrgID == "" {
 		return merchant.ID{}, "", ErrServiceTokenMerchantUnresolved
 	}
-	mid, slug, err := c.merchantDirectoryRow(ctx, `owner_tenant_id = $1`, ownerTenantID)
+	mid, slug, err := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, ownerOrgID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return merchant.ID{}, "", ErrServiceTokenMerchantUnresolved
 	}
 	return mid, slug, err
 }
 
-// AuthorizeMerchant checks that the caller's owning AuthKit tenant owns the named
-// merchant (#481 role-based authz): the merchant's owner_tenant_id must equal the
-// caller's AuthKit tenant. Use it when a request NAMES a merchant (a tenant owning
+// AuthorizeMerchant checks that the caller's owning AuthKit org owns the named
+// merchant (#481 role-based authz): the merchant's owner_org_id must equal the
+// caller's AuthKit org. Use it when a request NAMES a merchant (an org owning
 // many merchants) rather than relying on the single-merchant resolution.
-func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, ownerTenantID string, mid merchant.ID) error {
-	ownerTenantID = strings.TrimSpace(ownerTenantID)
+func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, ownerOrgID string, mid merchant.ID) error {
+	ownerOrgID = strings.TrimSpace(ownerOrgID)
 	if c == nil || c.pool == nil {
 		return errors.New("controlplane: pgx pool unavailable for merchant authorization")
 	}
-	if ownerTenantID == "" || mid.IsZero() {
+	if ownerOrgID == "" || mid.IsZero() {
 		return ErrServiceTokenMerchantUnresolved
 	}
 	var owner *string
 	var status string
 	err := c.pool.QueryRow(ctx, `
-		SELECT owner_tenant_id, status
+		SELECT owner_org_id, status
 		  FROM openrails.merchants
 		 WHERE id = $1 AND deleted_at IS NULL
 		 LIMIT 1
@@ -285,33 +285,53 @@ func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, ownerTenantID stri
 		}
 		return err
 	}
-	if status != "active" || owner == nil || strings.TrimSpace(*owner) != ownerTenantID {
+	if status != "active" || owner == nil || strings.TrimSpace(*owner) != ownerOrgID {
 		return ErrServiceTokenScopeDenied
 	}
 	return nil
 }
 
 // merchantDirectoryRow runs one openrails.merchants directory lookup with the
-// given WHERE predicate (which must reference exactly one $1 argument). It returns
-// pgx.ErrNoRows untouched so callers can decide whether a fallback applies; an
-// inactive (suspended) merchant is rejected with ErrServiceTokenMerchantUnresolved
-// and never falls through to another key.
+// given WHERE predicate (which must reference exactly one $1 argument). It
+// returns pgx.ErrNoRows untouched so callers can decide whether a fallback
+// applies. If the predicate matches multiple active merchants, the caller must
+// name a merchant explicitly and authorize it with AuthorizeMerchant.
 func (c *ControlPlane) merchantDirectoryRow(ctx context.Context, where, arg string) (merchant.ID, string, error) {
-	var (
-		idStr  string
-		slug   string
-		status string
-	)
-	err := c.pool.QueryRow(ctx, `
+	rows, err := c.pool.Query(ctx, `
 		SELECT id::text, slug, status
 		  FROM openrails.merchants
 		 WHERE `+where+`
 		   AND deleted_at IS NULL
-		 LIMIT 1
-	`, arg).Scan(&idStr, &slug, &status)
+		 LIMIT 2
+	`, arg)
 	if err != nil {
 		return merchant.ID{}, "", err
 	}
+	defer rows.Close()
+
+	type row struct {
+		idStr  string
+		slug   string
+		status string
+	}
+	var matches []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.idStr, &r.slug, &r.status); err != nil {
+			return merchant.ID{}, "", err
+		}
+		matches = append(matches, r)
+	}
+	if err := rows.Err(); err != nil {
+		return merchant.ID{}, "", err
+	}
+	if len(matches) == 0 {
+		return merchant.ID{}, "", pgx.ErrNoRows
+	}
+	if len(matches) > 1 {
+		return merchant.ID{}, "", ErrServiceTokenMerchantUnresolved
+	}
+	idStr, slug, status := matches[0].idStr, matches[0].slug, matches[0].status
 	if status != "active" {
 		return merchant.ID{}, "", ErrServiceTokenMerchantUnresolved
 	}

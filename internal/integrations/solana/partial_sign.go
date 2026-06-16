@@ -15,7 +15,7 @@ type blockhashGetter interface {
 }
 
 // BuildPartiallySignedTx assembles a transaction that requires TWO (or more)
-// signers, signs ONLY the co-signer's slot with the tenant's key, and returns it
+// signers, signs ONLY the co-signer's slot with the merchant key, and returns it
 // base64-encoded with the remaining signature slot(s) left empty for a wallet to
 // complete and submit.
 //

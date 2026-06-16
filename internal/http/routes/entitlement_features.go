@@ -16,7 +16,7 @@ import (
 // RegisterServiceRoutes do for their handlers.
 //
 // Intended mount: the operator-admin group built by RegisterAdminRoutes (which
-// applies AuthProvider.Required + OperatorAdminRequired + TenantDBConn). Under it
+// applies AuthProvider.Required + OperatorAdminRequired + MerchantDBConn). Under it
 // this exposes:
 //
 //	POST   /entitlements/features                          create a feature

@@ -40,7 +40,7 @@ func (s CatalogStatus) Valid() bool {
 // This represents our product catalog concept
 type Product struct {
 	ID          uuid.UUID `json:"id"`
-	MerchantID  uuid.UUID `json:"tenant_id"`
+	MerchantID  uuid.UUID `json:"merchant_id"`
 	Slug        string    `json:"slug"`
 	DisplayName string    `json:"display_name"`
 	Description string    `json:"description"`
@@ -93,7 +93,7 @@ const DefaultCreditGrantExpiryDays = 365
 
 type CreditGrantSpec struct {
 	// Unit is the currency code of the granted balance (#472). Required.
-	// Unqualified = built-in currency; a future tenant/name = custom credit (#473).
+	// Unqualified = built-in currency; a future merchant/name = custom credit (#473).
 	Unit   string `json:"unit,omitempty"`
 	Amount int64  `json:"amount"`
 	// ExpiryDays: balance expires now+N days. null/omitted => 365 default; explicit
@@ -162,7 +162,7 @@ func CloneCreditsSpec(spec CreditsSpec) CreditsSpec {
 // This represents pricing options similar to Stripe's pricing model
 type Price struct {
 	ID         uuid.UUID     `json:"id"`
-	MerchantID uuid.UUID     `json:"tenant_id"`
+	MerchantID uuid.UUID     `json:"merchant_id"`
 	ProductID  uuid.UUID     `json:"product_id"`
 	Status     CatalogStatus `json:"status"`
 	Amount     int64         `json:"amount"`

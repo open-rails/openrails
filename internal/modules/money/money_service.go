@@ -49,18 +49,18 @@ func (s *MoneyService) now() time.Time {
 }
 
 // ErrCustomerRequired is returned when a money operation cannot resolve a
-// real payer tenant-subject id. HARDCUT (#221): customer_id is supplied by
+// real payer merchant-subject id. HARDCUT (#221): customer_id is supplied by
 // the caller and is NOT synthesized — there is no deterministic stand-in
 // derivation. For the
-// self-hosted / single-tenant personal case the tenant subject IS the authenticated
-// user's own account/personal tenant-subject UUID, so a non-UUID invoker with no explicit
+// self-hosted / single-merchant personal case the merchant subject IS the authenticated
+// user's own account/personal merchant-subject UUID, so a non-UUID invoker with no explicit
 // payer is a programming error rather than something to paper over.
 var ErrCustomerRequired = errors.New("customer_id required")
 
-// resolveCustomer resolves the tenant subject for a money operation (issue #221, the
-// payer/billing payer). When the caller supplies an explicit tenant subject it is
-// used verbatim. Otherwise, for the self-hosted / single-tenant personal case,
-// the payer is the invoker's own account/personal tenant-subject id parsed from its UUID
+// resolveCustomer resolves the merchant subject for a money operation (issue #221, the
+// payer/billing payer). When the caller supplies an explicit merchant subject it is
+// used verbatim. Otherwise, for the self-hosted / single-merchant personal case,
+// the payer is the invoker's own account/personal merchant-subject id parsed from its UUID
 // subject (identity.CustomerIDFromString). It is NEVER a synthesized stand-in.
 //
 // The invokerID is the free-form invoker (who caused usage); it is retained for
@@ -81,9 +81,9 @@ func (s *MoneyService) GetBalance(ctx context.Context, invokerID, currency strin
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	// Reads are scoped by tenant + OWNER (issue #221). For the self-hosted /
-	// single-tenant personal case the payer IS the user's own account/personal tenant-subject
-	// UUID — the same row the tenant-subject-owned writers stamp — so single-user reads return
+	// Reads are scoped by merchant + OWNER (issue #221). For the self-hosted /
+	// single-merchant personal case the payer IS the user's own account/personal merchant-subject
+	// UUID — the same row the merchant-subject-owned writers stamp — so single-user reads return
 	// the right balance. customer_id is never synthesized.
 	payer, err := resolveCustomer(nil, invokerID)
 	if err != nil {
@@ -92,7 +92,7 @@ func (s *MoneyService) GetBalance(ctx context.Context, invokerID, currency strin
 	return s.GetBalanceForCustomer(ctx, payer, currency)
 }
 
-// GetBalanceForCustomer reads a balance scoped explicitly by tenant subject (issue
+// GetBalanceForCustomer reads a balance scoped explicitly by merchant subject (issue
 // #221), for callers that own balances at a team org rather than a personal
 // org. The invoker string is not required for an payer-scoped read.
 func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyBalance, error) {
@@ -126,11 +126,11 @@ func (s *MoneyService) GetTransactions(ctx context.Context, invokerID, currency 
 	return s.GetTransactionsByCustomer(ctx, payer, currency, limit, offset)
 }
 
-// GetTransactionsByCustomer lists money transactions for an EXPLICIT tenant subject
+// GetTransactionsByCustomer lists money transactions for an EXPLICIT merchant subject
 // (the payer), newest first, paginated. Unlike GetTransactions it does not derive
 // the payer from a invoker id — it filters customer_id directly, which is what the
 // org-level billing-account usage view (issue #242) needs. RLS-scoped to the
-// request tenant via Qx(ctx).
+// request merchant via Qx(ctx).
 func (s *MoneyService) GetTransactionsByCustomer(ctx context.Context, payer identity.CustomerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
 	if s == nil || s.db == nil {
 		return nil, 0, fmt.Errorf("money service not initialized")
@@ -181,10 +181,10 @@ func (s *MoneyService) GetTransactionsByCustomer(ctx context.Context, payer iden
 
 // GetAccountSettingsForCustomer returns the stored money-account settings for an
 // payer (billing mode, spend caps, auto-top-up, expiry default), RLS-scoped to
-// the request tenant (issue #242). Never nil — missing rows return the defaults.
+// the request merchant (issue #242). Never nil — missing rows return the defaults.
 func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	var out *models.MoneyAccount
-	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		st, e := s.GetAccountSettings(ctx, payer, currency)
 		if e != nil {
 			return e
@@ -246,9 +246,9 @@ func (s *MoneyService) GetTransactionBySource(ctx context.Context, invokerID str
 }
 
 type DepositParams struct {
-	// CustomerID is the tenant subject that owns the deposited balance (issue #221). When
-	// nil, the payer is the invoker (Invoker)'s own account/personal tenant-subject UUID for the
-	// self-hosted / single-tenant personal case; it is never a synthesized
+	// CustomerID is the merchant subject that owns the deposited balance (issue #221). When
+	// nil, the payer is the invoker (Invoker)'s own account/personal merchant-subject UUID for the
+	// self-hosted / single-merchant personal case; it is never a synthesized
 	// stand-in, and a non-UUID Invoker with no explicit payer is rejected.
 	CustomerID *identity.CustomerID
 	Invoker    string
@@ -287,7 +287,7 @@ func (s *MoneyService) Deposit(ctx context.Context, params DepositParams) (*mode
 	}
 
 	var trx *models.MoneyTransaction
-	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var terr error
 		trx, terr = s.depositTx(ctx, gen.New(tx), params)
 		return terr
@@ -338,7 +338,7 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		return nil, err
 	}
 
-	// Idempotency: if caller provides SourceID, treat (tenant, payer, source,
+	// Idempotency: if caller provides SourceID, treat (merchant, payer, source,
 	// source_id) as an idempotency key for deposits. This is safe because we hold
 	// the customers-row lock, serializing deposits per customer (#491).
 	sourceIDText := (*string)(nil)
@@ -439,15 +439,16 @@ func insertParamsFromTransaction(t *models.MoneyTransaction) gen.InsertMoneyTran
 		SourceID:         t.SourceID,
 		ExpiresAt:        t.ExpiresAt,
 		Description:      t.Description,
+		InvoiceID:        t.InvoiceID,
 		CreatedAt:        t.CreatedAt,
 		UpdatedAt:        t.UpdatedAt,
 	}
 }
 
 type WithdrawParams struct {
-	// CustomerID is the tenant subject to withdraw from (issue #221). When nil, the payer
-	// is the invoker (Invoker)'s own account/personal tenant-subject UUID for the self-hosted /
-	// single-tenant personal case; it is never a synthesized stand-in.
+	// CustomerID is the merchant subject to withdraw from (issue #221). When nil, the payer
+	// is the invoker (Invoker)'s own account/personal merchant-subject UUID for the self-hosted /
+	// single-merchant personal case; it is never a synthesized stand-in.
 	CustomerID *identity.CustomerID
 	Invoker    string
 	Currency   string
@@ -465,7 +466,7 @@ func (s *MoneyService) Withdraw(ctx context.Context, params WithdrawParams) (*mo
 	}
 
 	var trx *models.MoneyTransaction
-	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var terr error
 		trx, terr = s.withdrawTx(ctx, gen.New(tx), params)
 		return terr
@@ -474,210 +475,6 @@ func (s *MoneyService) Withdraw(ctx context.Context, params WithdrawParams) (*mo
 		return nil, err
 	}
 	return trx, nil
-}
-
-// Hold reserves money for prepay usage (issue #221: Reserve/Hold(payer) ->
-// CaptureHold(actual) -> ReleaseHold(failure/zero)). payer is the tenant subject the
-// reservation is charged against; when nil the payer is the invokerID's own
-// account/personal tenant-subject UUID for the self-hosted / single-tenant personal case
-// (never a synthesized stand-in).
-func (s *MoneyService) Hold(ctx context.Context, payer *identity.CustomerID, invokerID, currency string, amount int64, source, sourceID string, expiresAt time.Time) (*models.MoneyTransaction, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	if amount <= 0 {
-		return nil, fmt.Errorf("amount must be positive")
-	}
-	cur := normalizeUnit(currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
-		return nil, err
-	}
-
-	var hold *models.MoneyTransaction
-	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		now := s.now()
-		tid, terr := merchant.Require(ctx)
-		if terr != nil {
-			return terr
-		}
-		tenantID := tid.UUID()
-		customerSubject, rerr := resolveCustomer(payer, invokerID)
-		if rerr != nil {
-			return rerr
-		}
-		payerID := customerSubject.UUID()
-
-		// Idempotency: treat (tenant, payer, source, source_id) as a unique key for
-		// holds. This prevents duplicate reservations on caller retries.
-		existing, gerr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			TransactionType: "hold", Source: source, SourceID: &sourceID,
-		})
-		if gerr == nil {
-			hold, gerr = moneyTransactionFromGen(existing)
-			return gerr
-		}
-		if !errors.Is(gerr, pgx.ErrNoRows) {
-			return gerr
-		}
-
-		// Lock the customers row, then check derived available. Inserting the active
-		// hold row IS the held reservation (#491): SumActiveMoneyHeld picks it up.
-		bal, lerr := s.lockBalance(ctx, q, customerSubject, invokerID, cur)
-		if lerr != nil {
-			return lerr
-		}
-		available := bal.Balance - bal.HeldBalance
-		if available < amount {
-			return ErrInsufficientCredits
-		}
-
-		exp := expiresAt.UTC()
-		auth := amount
-		srcID := sourceID
-		hold = &models.MoneyTransaction{
-			ID:              uuidutil.NewV7(),
-			MerchantID:      tenantID,
-			CustomerID:      payerID,
-			Currency:        cur,
-			Invoker:         invokerID,
-			Amount:          0,
-			Source:          source,
-			SourceID:        &srcID,
-			Status:          "active",
-			Authorized:      &auth,
-			ExpiresAt:       &exp,
-			TransactionType: "hold",
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		}
-		return q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(hold))
-	})
-	if err != nil {
-		return nil, err
-	}
-	return hold, nil
-}
-
-func (s *MoneyService) CaptureHold(ctx context.Context, holdID uuid.UUID, actualAmount int64) (*models.MoneyTransaction, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	var hold *models.MoneyTransaction
-	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		row, gerr := q.GetMoneyTransactionForUpdate(ctx, holdID)
-		if gerr != nil {
-			return gerr
-		}
-		h, gerr := moneyTransactionFromGen(row)
-		if gerr != nil {
-			return gerr
-		}
-		if h.TransactionType != "hold" {
-			return fmt.Errorf("transaction is not a hold")
-		}
-		if h.Status != "active" {
-			return fmt.Errorf("hold is not active")
-		}
-		now := s.now()
-		if h.ExpiresAt != nil && !h.ExpiresAt.After(now) {
-			return fmt.Errorf("hold is expired")
-		}
-		if h.Authorized == nil || *h.Authorized <= 0 {
-			return fmt.Errorf("hold missing authorized amount")
-		}
-		authorized := *h.Authorized
-		if actualAmount <= 0 || actualAmount > authorized {
-			return fmt.Errorf("invalid capture amount")
-		}
-
-		holdPayer := identity.CustomerID(h.CustomerID)
-		cur := normalizeCurrency(h.Currency)
-		bal, lerr := s.lockBalance(ctx, q, holdPayer, h.Invoker, cur)
-		if lerr != nil {
-			return lerr
-		}
-
-		// Settle the actual balance-first-then-owed (#302): an arrears hold spills the
-		// uncovered remainder to outstanding_owed instead of failing. The hold is
-		// still 'active' here (CaptureMoneyHold runs below) so bal.HeldBalance still
-		// counts it; availableAfter is the available once THIS hold is released
-		// (#491: releasing held = the status flip to 'captured', no cache write).
-		availableAfter := bal.Balance - (bal.HeldBalance - authorized)
-		newBal, serr := s.captureSettleTx(ctx, q, holdPayer, h.Invoker, cur, actualAmount, availableAfter)
-		if serr != nil {
-			return serr
-		}
-		h.Status = "captured"
-		h.Captured = &actualAmount
-		h.Amount = -actualAmount
-		h.BalanceAfter = &newBal
-		h.UpdatedAt = now
-		if err := q.CaptureMoneyHold(ctx, gen.CaptureMoneyHoldParams{
-			ID: h.ID, CapturedAmount: &actualAmount, Amount: -actualAmount,
-			BalanceAfter: &newBal, UpdatedAt: now,
-		}); err != nil {
-			return err
-		}
-		hold = h
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return hold, nil
-}
-
-// ReleaseHold frees an active hold and returns the released transaction (the
-// caller uses its (payer, source, source_id) coords to settle any composed
-// budget reservations — #473).
-func (s *MoneyService) ReleaseHold(ctx context.Context, holdID uuid.UUID) (*models.MoneyTransaction, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	var released *models.MoneyTransaction
-	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		row, gerr := q.GetMoneyTransactionForUpdate(ctx, holdID)
-		if gerr != nil {
-			return gerr
-		}
-		if row.TransactionType != "hold" {
-			return fmt.Errorf("transaction is not a hold")
-		}
-		if row.Status != "active" {
-			return fmt.Errorf("hold is not active")
-		}
-		if row.AuthorizedAmount == nil || *row.AuthorizedAmount <= 0 {
-			return fmt.Errorf("hold missing authorized amount")
-		}
-
-		now := s.now()
-		holdPayer := identity.CustomerID(row.CustomerID)
-		cur := normalizeCurrency(row.Currency)
-		// Lock the customers row to serialize against concurrent spend; the status
-		// flip to 'released' IS the held release (#491), no cache write.
-		if _, lerr := s.lockBalance(ctx, q, holdPayer, row.InvokerID, cur); lerr != nil {
-			return lerr
-		}
-		if err := q.ReleaseMoneyHold(ctx, gen.ReleaseMoneyHoldParams{ID: row.ID, UpdatedAt: now}); err != nil {
-			return err
-		}
-		h, merr := moneyTransactionFromGen(row)
-		if merr != nil {
-			return merr
-		}
-		h.Status = "released"
-		h.UpdatedAt = now
-		released = h
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return released, nil
 }
 
 func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string, amount int64) (int64, error) {

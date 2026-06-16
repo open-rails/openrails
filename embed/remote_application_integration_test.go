@@ -4,13 +4,13 @@
 //
 // authkit #76 added a SECOND programmatic credential alongside service tokens: a
 // remote_application presenting a SELF-signed token (typ=remote-application-
-// access+jwt) whose authority is STORED (assigned tenant role/permissions),
+// access+jwt) whose authority is STORED (assigned org role/permissions),
 // resolved server-side from the validated `iss` — never self-claimed.
 //
 // This test drives that path end-to-end through the REAL standalone server +
 // real AuthKit control plane (integrationharness.StartStandalone):
 //
-//   - a JWKS principal holding the operator ROLE on the merchant's owner_tenant
+//   - a JWKS principal holding the operator ROLE on the merchant's owner_org
 //     can administer the merchant (the #481 role-based authz the service-token
 //     path already runs), and
 //   - a JWKS principal with NO role/perm on that tenant is DENIED.
@@ -37,16 +37,16 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 	h := integrationharness.New(t, ctx)
 	standalone := h.StartStandalone("USD")
 
-	// A JWKS principal granted the operator role on the merchant's owner_tenant
+	// A JWKS principal granted the operator role on the merchant's owner_org
 	// (the tenant that owns the test merchant). Its STORED authority lets it
 	// administer the merchant via the existing #481 role-based authz.
 	authorized := standalone.RegisterRemoteApplication(
-		"or484-authorized", dbtest.TestTenantSlug, controlplane.OperatorRole)
+		"or484-authorized", dbtest.TestMerchantSlug, controlplane.OperatorRole)
 
-	// A JWKS principal with NO membership/role on the owner_tenant: it owns no
+	// A JWKS principal with NO membership/role on the owner_org: it owns no
 	// active merchant, so it cannot administer this one (fail closed).
 	unauthorized := standalone.RegisterRemoteApplication(
-		"or484-unauthorized", dbtest.TestTenantSlug, "")
+		"or484-unauthorized", dbtest.TestMerchantSlug, "")
 
 	t.Run("authorized principal administers the merchant", func(t *testing.T) {
 		c := standalone.Client(openrails.WithTokenProvider(
@@ -88,7 +88,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 			SourceID:    &src,
 			Description: "should be denied",
 		})
-		require.Error(t, err, "JWKS principal without a role on the owner_tenant must be denied")
+		require.Error(t, err, "JWKS principal without a role on the owner_org must be denied")
 		require.True(t,
 			errorsIsAny(err, openrails.ErrUnauthorized, openrails.ErrDenied),
 			"deny must surface as unauthorized/forbidden, got %v", err)

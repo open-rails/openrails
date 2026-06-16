@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/stretchr/testify/require"
 )
@@ -99,16 +100,17 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 	capture := func(amount int64, holdSource, usageSourceID, invoker, resource string, metadata map[string]any) {
 		t.Helper()
 		hold, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
-			CustomerID: &payer,
-			Invoker:    invoker,
-			Amount:     amount,
-			Source:     "hold",
-			SourceID:   holdSource,
-			ExpiresAt:  time.Now().Add(time.Hour).UTC(),
+			CustomerID:  &payer,
+			Invoker:     invoker,
+			InvokerType: string(identity.InvokerTypePayer),
+			Amount:      amount,
+			Source:      "hold",
+			RequestID:   holdSource,
+			ExpiresAt:   time.Now().Add(time.Hour).UTC(),
 		})
 		require.NoError(t, err)
 		_, err = svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
-			HoldID:    hold.ID,
+			RequestID: hold.RequestID,
 			Amount:    amount,
 			EventType: "endpoint.capture",
 			Resource:  resource,

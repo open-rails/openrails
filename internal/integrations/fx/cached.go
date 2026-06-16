@@ -34,15 +34,17 @@ func NewCachedProvider(provider Provider, ttl time.Duration) *CachedProvider {
 	}
 }
 
-// QuoteToUSD returns a cached quote if available and not expired, otherwise fetches a new one.
-func (p *CachedProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
-	currency = normalizeCurrency(currency)
-	if currency == "" {
-		return nil, fmt.Errorf("currency is required")
+// Quote returns a cached quote if available and not expired, otherwise fetches a new one.
+func (p *CachedProvider) Quote(ctx context.Context, fromCurrency, toCurrency string) (*Quote, error) {
+	fromCurrency = normalizeCurrency(fromCurrency)
+	toCurrency = normalizeCurrency(toCurrency)
+	if fromCurrency == "" || toCurrency == "" {
+		return nil, fmt.Errorf("from_currency and to_currency are required")
 	}
+	key := fromCurrency + ":" + toCurrency
 	// Check cache first
 	p.mu.RLock()
-	if cached, ok := p.cache[currency]; ok && time.Now().Before(cached.expiresAt) {
+	if cached, ok := p.cache[key]; ok && time.Now().Before(cached.expiresAt) {
 		p.mu.RUnlock()
 		// Return a copy to prevent mutation
 		return &Quote{
@@ -55,20 +57,25 @@ func (p *CachedProvider) QuoteToUSD(ctx context.Context, currency string) (*Quot
 	p.mu.RUnlock()
 
 	// Fetch fresh quote
-	quote, err := p.provider.QuoteToUSD(ctx, currency)
+	quote, err := p.provider.Quote(ctx, fromCurrency, toCurrency)
 	if err != nil {
 		return nil, err
 	}
 
 	// Cache the result
 	p.mu.Lock()
-	p.cache[currency] = &cachedQuote{
+	p.cache[key] = &cachedQuote{
 		quote:     quote,
 		expiresAt: time.Now().Add(p.ttl),
 	}
 	p.mu.Unlock()
 
 	return quote, nil
+}
+
+// QuoteToUSD returns a cached quote to USD.
+func (p *CachedProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
+	return p.Quote(ctx, currency, "usd")
 }
 
 // InvalidateAll clears the entire cache.

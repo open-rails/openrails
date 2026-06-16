@@ -32,7 +32,7 @@ func (s *Store) Upsert(ctx context.Context, cfg models.MerchantConfiguration) er
 		return fmt.Errorf("merchant config: encode config: %w", err)
 	}
 	now := time.Now().UTC()
-	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		return s.db.Gen(ctx).UpsertMerchantConfiguration(ctx, gen.UpsertMerchantConfigurationParams{
 			MerchantID: tid.UUID(),
 			Config:     configJSON,
@@ -49,7 +49,7 @@ func (s *Store) Get(ctx context.Context) (models.MerchantConfiguration, bool, er
 	}
 	var cfg models.MerchantConfiguration
 	found := false
-	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		row, e := s.db.Gen(ctx).GetMerchantConfiguration(ctx, tid.UUID())
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil

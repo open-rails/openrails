@@ -20,11 +20,11 @@ const (
 
 // BootstrapManifest is the unified declarative provisioning document. It is
 // intentionally separate from config.yaml: config.yaml describes runtime
-// infrastructure, while this file describes desired tenant/catalog state.
+// infrastructure, while this file describes desired merchant/catalog state.
 type BootstrapManifest struct {
-	Version  int                `yaml:"version"`
-	Tenants  []ManifestTenant   `yaml:"tenants,omitempty"`
-	Catalogs []BootstrapCatalog `yaml:"catalogs,omitempty"`
+	Version   int                `yaml:"version"`
+	Merchants []ManifestMerchant `yaml:"merchants,omitempty"`
+	Catalogs  []BootstrapCatalog `yaml:"catalogs,omitempty"`
 }
 
 // BootstrapCatalog is one top-level catalog declaration. The catalog schema is
@@ -65,12 +65,12 @@ func (m *BootstrapManifest) Validate() error {
 	if m.Version != BootstrapManifestVersion {
 		return fmt.Errorf("bootstrap manifest version must be %d", BootstrapManifestVersion)
 	}
-	if len(m.Tenants) == 0 && len(m.Catalogs) == 0 {
-		return fmt.Errorf("bootstrap manifest must declare at least one tenant or catalog")
+	if len(m.Merchants) == 0 && len(m.Catalogs) == 0 {
+		return fmt.Errorf("bootstrap manifest must declare at least one merchant or catalog")
 	}
-	if len(m.Tenants) > 0 {
-		tm := m.TenantManifest()
-		if err := validateTenantManifestShape(tm); err != nil {
+	if len(m.Merchants) > 0 {
+		tm := m.MerchantManifest()
+		if err := validateMerchantManifestShape(tm); err != nil {
 			return err
 		}
 	}
@@ -82,14 +82,14 @@ func (m *BootstrapManifest) Validate() error {
 	return nil
 }
 
-// TenantManifest converts the tenant section to the internal tenant-manifest
-// shape consumed by ReconcileTenantManifestData. There is a single manifest
+// MerchantManifest converts the merchant section to the internal merchant-manifest
+// shape consumed by ReconcileMerchantManifestData. There is a single manifest
 // version (1); this internal representation carries it through unchanged.
-func (m *BootstrapManifest) TenantManifest() *TenantManifest {
+func (m *BootstrapManifest) MerchantManifest() *MerchantManifest {
 	if m == nil {
 		return nil
 	}
-	return &TenantManifest{Version: BootstrapManifestVersion, Tenants: append([]ManifestTenant(nil), m.Tenants...)}
+	return &MerchantManifest{Version: BootstrapManifestVersion, Merchants: append([]ManifestMerchant(nil), m.Merchants...)}
 }
 
 // CatalogManifest converts one catalogs[] entry to the existing catalog manifest
@@ -114,25 +114,25 @@ func (m *BootstrapManifest) CatalogManifest(index int) (*catalog.Manifest, error
 	return cm, nil
 }
 
-func validateTenantManifestShape(m *TenantManifest) error {
+func validateMerchantManifestShape(m *MerchantManifest) error {
 	if m == nil {
-		return fmt.Errorf("tenant manifest is required")
+		return fmt.Errorf("merchant manifest is required")
 	}
 	if m.Version != BootstrapManifestVersion {
-		return fmt.Errorf("tenant bootstrap: manifest version must be %d", BootstrapManifestVersion)
+		return fmt.Errorf("merchant bootstrap: manifest version must be %d", BootstrapManifestVersion)
 	}
 	seen := map[string]struct{}{}
-	for i := range m.Tenants {
-		t := &m.Tenants[i]
+	for i := range m.Merchants {
+		t := &m.Merchants[i]
 		slug := strings.ToLower(strings.TrimSpace(t.Slug))
 		if slug == "" {
-			return fmt.Errorf("tenant #%d slug is required", i+1)
+			return fmt.Errorf("merchant #%d slug is required", i+1)
 		}
 		if strings.TrimSpace(t.Name) == "" {
-			return fmt.Errorf("tenant %q name is required", slug)
+			return fmt.Errorf("merchant %q name is required", slug)
 		}
 		if _, ok := seen[slug]; ok {
-			return fmt.Errorf("duplicate tenant slug %q", slug)
+			return fmt.Errorf("duplicate merchant slug %q", slug)
 		}
 		seen[slug] = struct{}{}
 	}

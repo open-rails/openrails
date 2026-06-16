@@ -31,8 +31,8 @@ func TestEmbedNew_RegistersBoundMerchant(t *testing.T) {
 
 	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}
 	rt, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{Config: cfg},
-		Tenant:  slug,
+		Options:  embedded.Options{Config: cfg},
+		Merchant: slug,
 	})
 	require.NoError(t, err, "embed.New with an unprovisioned merchant slug must NOT panic/error")
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
@@ -59,8 +59,8 @@ func TestEmbedNew_RegistersBoundMerchant(t *testing.T) {
 	// Second New on the SAME slug is an idempotent no-op (INSERT ... ON CONFLICT
 	// DO NOTHING): boots fine, exactly one row.
 	rt2, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{Config: &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}},
-		Tenant:  slug,
+		Options:  embedded.Options{Config: &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}},
+		Merchant: slug,
 	})
 	require.NoError(t, err, "second embed.New on the same slug must be idempotent")
 	t.Cleanup(func() { _ = rt2.Close(context.Background()) })

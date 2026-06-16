@@ -7,7 +7,7 @@
 //   - mounts only the AuthKit route groups it intentionally exposes (NOT the
 //     full DefaultAPI surface),
 //   - runs with public user registration and public tenant management disabled,
-//   - bootstraps the default tenant's own AuthKit org, OpenRails roles, the
+//   - bootstraps the default merchant's own AuthKit org, OpenRails roles, the
 //     `openrails:*` permission catalog, and an initial deployment admin service
 //     token through in-process AuthKit CORE calls (CreateOrg / DefineRole /
 //     AssignRole / MintServiceToken) — never raw SQL or a private HTTP route.
@@ -15,7 +15,7 @@
 // HARDCUT (#312): admin authority is the LIVE openrails:admin permission held in
 // the caller's OWN tenant (or carried on a deployment-minted admin service
 // token) — deployment authority, NOT membership in a separate "operator" AuthKit
-// tenant. The bootstrap tenant (named by its slug) hosts its own admin role.
+// tenant. The bootstrap org (named by its slug) hosts its own admin role.
 package controlplane
 
 import (
@@ -73,9 +73,9 @@ const (
 	PermPaymentsRefund      = "openrails:payments:refund"
 	PermSubscriptionsCancel = "openrails:subscriptions:cancel"
 
-	// Self-service (browser-direct) permissions. These gate the tenant-scoped
+	// Self-service (browser-direct) permissions. These gate the merchant-scoped
 	// self-service surface (`/v1/self/*`) reached with a DELEGATED ACCESS TOKEN
-	// minted by a tenant's host frontend (issue #222 foundation for the browser
+	// minted by a merchant's host frontend (issue #222 foundation for the browser
 	// tier. Unlike the coarse
 	// server-to-server service token permissions above, `openrails:self:*` authorizes a
 	// human end-user (the token's `delegated_sub`) to manage ONLY their own
@@ -92,46 +92,46 @@ const (
 	PermSelfPaymentMethods     = "openrails:self:payment-methods:manage"
 	PermSelfWallets            = "openrails:self:wallets:manage"
 
-	// Tenant-admin (browser-direct) permissions (issue #259). These gate the
-	// `/v1/tenant-admin/users/:user_id/*` surface reached with a FEDERATED,
+	// Merchant-admin (browser-direct) permissions (issue #259). These gate the
+	// `/v1/merchant-admin/users/:user_id/*` surface reached with a FEDERATED,
 	// TENANT-SIGNED delegated access token whose `delegated_sub` is the ACTING
 	// ADMIN. Unlike `openrails:self:*` (which act on the holder's OWN billing),
-	// a `openrails:tenant:*` token acts on ANY user WITHIN the token's tenant via
+	// a `openrails:merchant:*` token acts on ANY user WITHIN the token's tenant via
 	// the `:user_id` path param (scoped to that tenant; cross-tenant targets are
 	// rejected). The minting TENANT decides who is an admin (it signs the token);
 	// OpenRails trusts the signature + this catalog.
 	//
 	// DECISION (owner): permissions are EXPLICIT, exact-match, NO wildcard. A full
 	// admin token lists ALL FIVE; a read-only/support admin lists only
-	// PermTenantBillingRead. There is deliberately NO `openrails:tenant:*` wildcard
-	// and NO coarse `openrails:tenant:admin` super-grant — so any future-added
+	// PermMerchantBillingRead. There is deliberately NO `openrails:merchant:*` wildcard
+	// and NO coarse `openrails:merchant:admin` super-grant — so any future-added
 	// tenant perm does NOT auto-grant to existing admin tokens (the minting tenant
 	// must opt each admin in explicitly), matching how `openrails:self:*` works.
-	PermTenantBillingRead        = "openrails:tenant:billing:read"
-	PermTenantEntitlementsWrite  = "openrails:tenant:entitlements:write"
-	PermTenantCreditsWrite       = "openrails:tenant:credits:write"
-	PermTenantPaymentsWrite      = "openrails:tenant:payments:write"
-	PermTenantSubscriptionsWrite = "openrails:tenant:subscriptions:write"
-	PermTenantSecretsList        = "openrails:tenant:secrets:list"
-	PermTenantSecretsWrite       = "openrails:tenant:secrets:write"
-	PermTenantSecretsDelete      = "openrails:tenant:secrets:delete"
-	PermTenantSecretsTest        = "openrails:tenant:secrets:test"
-	// PermTenantMetricsRead lets a tenant admin read THEIR OWN tenant's analytics
+	PermMerchantBillingRead        = "openrails:merchant:billing:read"
+	PermMerchantEntitlementsWrite  = "openrails:merchant:entitlements:write"
+	PermMerchantCreditsWrite       = "openrails:merchant:credits:write"
+	PermMerchantPaymentsWrite      = "openrails:merchant:payments:write"
+	PermMerchantSubscriptionsWrite = "openrails:merchant:subscriptions:write"
+	PermMerchantSecretsList        = "openrails:merchant:secrets:list"
+	PermMerchantSecretsWrite       = "openrails:merchant:secrets:write"
+	PermMerchantSecretsDelete      = "openrails:merchant:secrets:delete"
+	PermMerchantSecretsTest        = "openrails:merchant:secrets:test"
+	// PermMerchantMetricsRead lets a merchant admin read THEIR OWN merchant's analytics
 	// metrics (revenue/subscriptions/processors/churn) via the browser-direct
-	// tenant-admin surface. The metrics are tenant-scoped at the query layer
+	// merchant-admin surface. The metrics are merchant-scoped at the query layer
 	// (issue #232), so this only ever exposes the token's own tenant — never
 	// cross-tenant (that is the separate platform-superadmin path).
-	PermTenantMetricsRead = "openrails:tenant:metrics:read"
+	PermMerchantMetricsRead = "openrails:merchant:metrics:read"
 
-	// PermPlatformSuperadmin is the PLATFORM-level cross-tenant administrative
+	// PermPlatformSuperadmin is the PLATFORM-level cross-merchant administrative
 	// capability (issue #226), DISTINCT from PermAdmin. PermAdmin is per-tenant
-	// operator authority: it is held by an operator tenant and only governs THAT
-	// tenant. PermPlatformSuperadmin is held by a SEPARATE platform tenant/role
-	// (cfg.Auth.ControlPlane.PlatformTenantSlug) and authorizes managed-hosting
+	// operator authority: it is held by an operator org and only governs THAT
+	// tenant. PermPlatformSuperadmin is held by a SEPARATE platform org/role
+	// (cfg.Auth.ControlPlane.PlatformOrgSlug) and authorizes managed-hosting
 	// platform operators to administer ANY tenant via the control plane:
 	// the cross-tenant `/v1/platform/*` surface, cross-tenant search, platform
-	// metrics. A tenant operator admin does NOT hold
-	// this permission (it is never seeded into operator tenants), so it cannot pass
+	// metrics. A org operator admin does NOT hold
+	// this permission (it is never seeded into operator orgs), so it cannot pass
 	// the platform-superadmin gate. It is deliberately NOT part of selfCatalog:
 	// a browser delegated token can never carry it.
 	PermPlatformSuperadmin = "openrails:platform:superadmin"
@@ -154,11 +154,11 @@ var catalogEntries = []Permission{
 	{Name: PermSelfSubscriptionCancel, Description: "Self-service: cancel your own subscriptions."},
 	{Name: PermSelfPaymentMethods, Description: "Self-service: manage your own payment methods."},
 	{Name: PermSelfWallets, Description: "Self-service: manage your own verified linked wallets."},
-	{Name: PermTenantSecretsList, Description: "Tenant admin: list configured tenant-secret status without plaintext."},
-	{Name: PermTenantSecretsWrite, Description: "Tenant admin: create or rotate write-only tenant secrets."},
-	{Name: PermTenantSecretsDelete, Description: "Tenant admin: delete tenant secrets."},
-	{Name: PermTenantSecretsTest, Description: "Tenant admin: validate tenant secrets without reading plaintext."},
-	{Name: PermPlatformSuperadmin, Description: "Platform superadmin: administer ANY tenant across the managed-hosting platform (cross-tenant control plane). Seeded ONLY to the platform tenant, never to per-tenant operator tenants (issue #226)."},
+	{Name: PermMerchantSecretsList, Description: "Merchant admin: list configured merchant-secret status without plaintext."},
+	{Name: PermMerchantSecretsWrite, Description: "Merchant admin: create or rotate write-only merchant secrets."},
+	{Name: PermMerchantSecretsDelete, Description: "Merchant admin: delete merchant secrets."},
+	{Name: PermMerchantSecretsTest, Description: "Merchant admin: validate merchant secrets without reading plaintext."},
+	{Name: PermPlatformSuperadmin, Description: "Platform superadmin: administer ANY tenant across the managed-hosting platform (cross-tenant control plane). Seeded ONLY to the platform org, never to per-org operator orgs (issue #226)."},
 }
 
 // selfCatalog is the set of self-service permissions accepted on delegated
@@ -192,54 +192,54 @@ func IsSelfPermission(perm string) bool {
 	return ok
 }
 
-// tenantCatalog is the set of tenant-admin permissions accepted on a FEDERATED
-// tenant-signed delegated access token for the `/v1/tenant-admin/*` surface
+// merchantCatalog is the set of merchant-admin permissions accepted on a FEDERATED
+// merchant-signed delegated access token for the `/v1/merchant-admin/*` surface
 // (issue #259). Exact-match, no wildcard. A token presenting any permission
-// outside selfCatalog ∪ tenantCatalog is rejected: browser tokens must never
+// outside selfCatalog ∪ merchantCatalog is rejected: browser tokens must never
 // carry operator/server-to-server grants.
-var tenantCatalog = map[string]struct{}{
-	PermTenantBillingRead:        {},
-	PermTenantEntitlementsWrite:  {},
-	PermTenantCreditsWrite:       {},
-	PermTenantPaymentsWrite:      {},
-	PermTenantSubscriptionsWrite: {},
-	PermTenantSecretsList:        {},
-	PermTenantSecretsWrite:       {},
-	PermTenantSecretsDelete:      {},
-	PermTenantSecretsTest:        {},
-	PermTenantMetricsRead:        {},
+var merchantCatalog = map[string]struct{}{
+	PermMerchantBillingRead:        {},
+	PermMerchantEntitlementsWrite:  {},
+	PermMerchantCreditsWrite:       {},
+	PermMerchantPaymentsWrite:      {},
+	PermMerchantSubscriptionsWrite: {},
+	PermMerchantSecretsList:        {},
+	PermMerchantSecretsWrite:       {},
+	PermMerchantSecretsDelete:      {},
+	PermMerchantSecretsTest:        {},
+	PermMerchantMetricsRead:        {},
 }
 
-// TenantCatalogNames returns the tenant-admin permission names in catalog order.
-func TenantCatalogNames() []string {
+// MerchantCatalogNames returns the merchant-admin permission names in catalog order.
+func MerchantCatalogNames() []string {
 	return []string{
-		PermTenantBillingRead,
-		PermTenantEntitlementsWrite,
-		PermTenantCreditsWrite,
-		PermTenantPaymentsWrite,
-		PermTenantSubscriptionsWrite,
-		PermTenantSecretsList,
-		PermTenantSecretsWrite,
-		PermTenantSecretsDelete,
-		PermTenantSecretsTest,
-		PermTenantMetricsRead,
+		PermMerchantBillingRead,
+		PermMerchantEntitlementsWrite,
+		PermMerchantCreditsWrite,
+		PermMerchantPaymentsWrite,
+		PermMerchantSubscriptionsWrite,
+		PermMerchantSecretsList,
+		PermMerchantSecretsWrite,
+		PermMerchantSecretsDelete,
+		PermMerchantSecretsTest,
+		PermMerchantMetricsRead,
 	}
 }
 
-// IsTenantPermission reports whether perm is a known tenant-admin permission.
-func IsTenantPermission(perm string) bool {
-	_, ok := tenantCatalog[strings.TrimSpace(perm)]
+// IsMerchantPermission reports whether perm is a known merchant-admin permission.
+func IsMerchantPermission(perm string) bool {
+	_, ok := merchantCatalog[strings.TrimSpace(perm)]
 	return ok
 }
 
 // IsDelegatedPermission reports whether perm is acceptable on ANY browser-direct
-// delegated access token — i.e. a self-service OR tenant-admin permission. This
+// delegated access token — i.e. a self-service OR merchant-admin permission. This
 // is the SOLE allowlist the federated verifier enforces (issue #259): every
 // `permissions` entry must pass this, so service/operator grants
 // (`openrails:credits:*`, `openrails:catalog:write`, `openrails:admin`,
 // `openrails:platform:superadmin`, ...) are hard-rejected by exclusion.
 func IsDelegatedPermission(perm string) bool {
-	return IsSelfPermission(perm) || IsTenantPermission(perm)
+	return IsSelfPermission(perm) || IsMerchantPermission(perm)
 }
 
 // Catalog returns the OpenRails permission catalog as AuthKit PermissionDefs,
@@ -261,30 +261,30 @@ func CatalogNames() []string {
 }
 
 // Admin-role identity. The admin role is granted every OpenRails permission
-// EXCEPT the platform-superadmin capability, and is the per-tenant admin
-// authority (#312). HARDCUT: it is seeded under each tenant's OWN AuthKit org —
-// there is no separate "operator" AuthKit tenant. The AuthKit role identifier is
+// EXCEPT the platform-superadmin capability, and is the per-merchant admin
+// authority (#312). HARDCUT: it is seeded under each merchant's OWN AuthKit org —
+// there is no separate "operator" AuthKit org. The AuthKit role identifier is
 // kept stable ("openrails-operator") to avoid re-seeding existing deployments.
 const (
-	// OperatorRole is the OpenRails admin role seeded under a tenant's own AuthKit
+	// OperatorRole is the OpenRails admin role seeded under a merchant's own AuthKit
 	// org. It holds the full OpenRails per-tenant catalog but NOT
 	// PermPlatformSuperadmin (cross-tenant platform authority, seeded only to
 	// PlatformRole). A caller holding this role's openrails:admin permission in
 	// their own tenant is an OpenRails admin (#312).
 	OperatorRole = "openrails-operator"
 
-	// PlatformRole is the OpenRails role seeded in the SEPARATE platform tenant
-	// (cfg.Auth.ControlPlane.PlatformTenantSlug, issue #226). It holds
+	// PlatformRole is the OpenRails role seeded in the SEPARATE platform org
+	// (cfg.Auth.ControlPlane.PlatformOrgSlug, issue #226). It holds
 	// PermPlatformSuperadmin — the cross-tenant managed-hosting authority — and
 	// is the only role granted that permission. It is distinct from OperatorRole
-	// so that a per-tenant admin can never reach the platform surface.
+	// so that a per-merchant admin can never reach the platform surface.
 	PlatformRole = "openrails-platform-superadmin"
 )
 
-// OperatorRolePermissions returns the permission names granted to a tenant's
+// OperatorRolePermissions returns the permission names granted to a merchant's
 // operator role: the full OpenRails catalog EXCEPT PermPlatformSuperadmin. The
 // platform-superadmin capability is cross-tenant and must never be carried by a
-// per-tenant operator tenant (issue #226).
+// per-org operator org (issue #226).
 func OperatorRolePermissions() []string {
 	all := CatalogNames()
 	out := make([]string, 0, len(all))
@@ -299,7 +299,7 @@ func OperatorRolePermissions() []string {
 
 // PlatformRolePermissions returns the permission names granted to the platform
 // superadmin role: ONLY PermPlatformSuperadmin (issue #226). The platform role
-// is deliberately narrow — it is the cross-tenant admin gate, not a grab-bag of
+// is deliberately narrow — it is the cross-merchant admin gate, not a grab-bag of
 // per-tenant capabilities.
 func PlatformRolePermissions() []string {
 	return []string{PermPlatformSuperadmin}

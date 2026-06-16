@@ -202,10 +202,10 @@ func RevokeEntitlementNowTx(
 // --- Timeline-service helpers (#334): the pgx/sqlc surface used by
 // modules/entitlements.EntitlementService for PushNewEntitlement and
 // RevokeExistingEntitlement. All take an open transaction (gen.DBTX) so they
-// run inside the service's TenantTx with the timeline advisory lock held.
+// run inside the service's MerchantTx with the timeline advisory lock held.
 
 // TimelineHasIndefinite reports whether an unrevoked indefinite window exists
-// for (tenant subject, entitlement) — the timeline-terminal state.
+// for (merchant subject, entitlement) — the timeline-terminal state.
 func TimelineHasIndefinite(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.UUID, entitlement string) (bool, error) {
 	return gen.New(qx).TimelineHasIndefinite(ctx, gen.TimelineHasIndefiniteParams{
 		CustomerID: tenantSubjectID, Entitlement: entitlement,
@@ -256,8 +256,8 @@ func InsertTimelineWindow(ctx context.Context, qx gen.DBTX, ent *models.Entitlem
 	if ent.SourceID != nil && *ent.SourceID != uuid.Nil {
 		sourceID = ent.SourceID
 	}
-	// Stamp the resolved tenant (#223/#336) when the caller did not set one, so
-	// timeline windows are tenant-scoped consistently with reads — RLS WITH CHECK
+	// Stamp the resolved merchant (#223/#336) when the caller did not set one, so
+	// timeline windows are merchant-scoped consistently with reads — RLS WITH CHECK
 	// can't backfill it under an RLS-bypassing role.
 	if (ent.MerchantID == uuid.UUID{}) {
 		tid, err := merchant.Require(ctx)

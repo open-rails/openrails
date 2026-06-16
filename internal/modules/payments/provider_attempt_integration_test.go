@@ -20,7 +20,7 @@ import (
 func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := dbtest.WithTestTenant(context.Background())
+	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)

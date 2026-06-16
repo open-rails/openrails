@@ -17,10 +17,10 @@ const (
 // subscription (issue #255). It links 1:1 to a openrails.subscriptions row (the
 // canonical lifecycle record) and holds ONLY public on-chain data — never a
 // private key. The hourly pull worker (#256) queries due rows by
-// (tenant_id, next_pull_at).
+// (merchant_id, next_pull_at).
 type SolanaSubscription struct {
 	ID             uuid.UUID `json:"id"`
-	MerchantID     uuid.UUID `json:"tenant_id"`
+	MerchantID     uuid.UUID `json:"merchant_id"`
 	SubscriptionID uuid.UUID `json:"subscription_id"`
 
 	SubscriberWallet string `json:"subscriber_wallet"`

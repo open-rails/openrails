@@ -21,7 +21,7 @@ import (
 )
 
 // This suite proves the migration-050 Row Level Security DESIGN actually enforces
-// cross-tenant isolation when the app connects as the unprivileged openrails_app
+// cross-merchant isolation when the app connects as the unprivileged openrails_app
 // role (issue #227). It replicates 050's exact policy form on a probe table and
 // drives it through the real db.DB GUC plumbing (TestRLSEnforcement_PgxSide,
 // in rls_pgx_integration_test.go) — not a reimplementation of either.
@@ -59,6 +59,7 @@ func newDBRetry(t *testing.T, dsn string) *DB {
 
 const rlsSetupDDL = `
 CREATE SCHEMA IF NOT EXISTS billing;
+CREATE SCHEMA IF NOT EXISTS openrails;
 CREATE TABLE IF NOT EXISTS openrails.rls_probe (
     id        UUID PRIMARY KEY,
     merchant_id UUID NOT NULL,
@@ -79,6 +80,7 @@ CREATE POLICY merchant_isolation ON openrails.rls_probe
 	END $$;
 	ALTER ROLE openrails_app WITH LOGIN PASSWORD 'app_pw';
 	GRANT USAGE ON SCHEMA billing TO openrails_app;
+	GRANT USAGE ON SCHEMA openrails TO openrails_app;
 	GRANT SELECT, INSERT, UPDATE, DELETE ON openrails.rls_probe TO openrails_app;
 	`
 
