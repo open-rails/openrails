@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -96,7 +97,9 @@ func (p *ExchangeAPIProvider) fetchRate(ctx context.Context, baseURL, currency, 
 
 	// Parse the response - it's a dynamic structure where the currency code is a key
 	var raw map[string]json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	// Cap the upstream body: a buggy/compromised/MITM'd FX endpoint must not be
+	// able to stream an unbounded body into memory on a money-affecting path.
+	if err := httpx.DecodeJSONLimited(resp.Body, 0, &raw); err != nil {
 		return 0, time.Time{}, fmt.Errorf("failed to decode response: %w", err)
 	}
 
