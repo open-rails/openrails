@@ -138,7 +138,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add catalog reconciliation worker: %w", err)
 	}
 	// Credit money-in + reconciliation workers (#239/#240/#241/#243/#508). The
-	// auto-top-up and arrears workers share the configured off-session charger;
+	// auto-top-up and invoice workers share the configured off-session charger;
 	// when it is nil they log-and-skip until processor wiring is attached.
 	if err := river.AddWorkerSafely(workers, &riverjobs.LowBalanceAlertWorker{
 		Money: r.MoneyService,
@@ -152,24 +152,19 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add auto-topup worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.ArrearsChargeWorker{
+	if err := river.AddWorkerSafely(workers, &riverjobs.InvoiceWorker{
 		Money:   r.MoneyService,
 		Charger: r.MoneyCharger,
 		Config:  r.Config,
+		Clock:   clock,
 	}); err != nil {
-		return fmt.Errorf("add arrears charge worker: %w", err)
+		return fmt.Errorf("add invoice worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CreditReconcileWorker{
 		Money: r.MoneyService,
 		Clock: clock,
 	}); err != nil {
 		return fmt.Errorf("add credit reconcile worker: %w", err)
-	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.InvoiceFinalizeWorker{
-		Money: r.MoneyService,
-		Clock: clock,
-	}); err != nil {
-		return fmt.Errorf("add invoice finalize worker: %w", err)
 	}
 	// Solana recurring cranker (#256). The Cranker (per-tenant signer + RPC) is
 	// wired once tenant Solana signing lands; until then it log-and-skips like the
@@ -478,7 +473,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		))
 	}
 
-	// Every hour: low-balance alerts (#240) + arrears collection (#241).
+	// Every hour: low-balance alerts (#240) + invoice collection (#241).
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
@@ -492,24 +487,34 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.ArrearsChargeArgs{ThresholdAmount: riverjobs.ArrearsHourlyThresholdAmount}, &river.InsertOpts{
+			args := riverjobs.InvoiceArgs{
+				Collect:                   true,
+				CollectionThresholdAmount: riverjobs.ArrearsHourlyThresholdAmount,
+			}
+			opts := &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: time.Hour},
 			}
+			return args, opts
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
-	// Monthly arrears sweep (#301): collect the long tail of small owed balances
+	// Monthly invoice sweep (#301): collect the long tail of small owed balances
 	// (>= $1 floor) the hourly threshold trigger leaves behind. "Whichever comes
-	// first." Idempotent per owed-snapshot so it never double-charges what the
-	// hourly job already collected.
+	// first." Idempotent per invoice so it never double-charges what the hourly
+	// job already collected.
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(30*24*time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.ArrearsChargeArgs{ThresholdAmount: riverjobs.ArrearsMonthlyFloorAmount}, &river.InsertOpts{
+			args := riverjobs.InvoiceArgs{
+				Collect:                   true,
+				CollectionThresholdAmount: riverjobs.ArrearsMonthlyFloorAmount,
+			}
+			opts := &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: 30 * 24 * time.Hour},
 			}
+			return args, opts
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
@@ -520,7 +525,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(24*time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.InvoiceFinalizeArgs{}, &river.InsertOpts{
+			return riverjobs.InvoiceArgs{FinalizePreviousMonth: true}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
 			}

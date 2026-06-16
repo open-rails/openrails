@@ -6,8 +6,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// TierPolicy is a per-payer, per-tier admission policy for throughput and
-// rolling money-budget windows (#298/#304).
+// TierPolicy is a per-payer, per-tier admission policy for rolling money-budget
+// windows and wasted-spend grace.
 type TierPolicy struct {
 	ID         uuid.UUID `json:"id"`
 	MerchantID uuid.UUID `json:"merchant_id"`
@@ -16,69 +16,26 @@ type TierPolicy struct {
 	CustomerID uuid.UUID `json:"customer_id"`
 	// Tier name (e.g. "free", "tier_1"); the policy applies to actors at this tier.
 	Tier string `json:"tier"`
-	// Policy is the throughput windows: {"windows":[{"unit","window_seconds","max"}]}.
+	// Policy is the money policy JSON.
 	Policy        ThroughputPolicy `json:"policy"`
 	PolicyVersion int64            `json:"policy_version"`
 	CreatedAt     time.Time        `json:"created_at"`
 	UpdatedAt     time.Time        `json:"updated_at"`
 }
 
-// ThroughputPolicy is the JSONB-stored tier policy: fixed-window throughput
-// limits, the set of endpoints/models this tier may call (empty = all allowed),
-// and rolling money-budget windows (#304, e.g. $2/4h, $5/week). Endpoint gating
-// denies a request whose model is not entitled (#298).
+// ThroughputPolicy is the JSONB-stored tier money policy. The name is retained
+// for database compatibility with existing tier_policies rows.
 type ThroughputPolicy struct {
-	// Windows is the DEFAULT throughput window list, applied to any
-	// endpoint-release without a per-release override (#472 G1).
-	Windows           []ThroughputWindow   `json:"windows"`
-	EntitledResources []string             `json:"entitled_resources,omitempty"`
-	BudgetWindows     []BudgetWindowPolicy `json:"budget_windows,omitempty"`
+	BudgetWindows []BudgetWindowPolicy `json:"budget_windows,omitempty"`
 	// PolicyCurrency is the currency used for money policy checks whose window
 	// does not carry its own Currency. Blank means same currency as the request.
 	PolicyCurrency string `json:"policy_currency,omitempty"`
-
-	// ReleaseWindows holds per-(endpoint-release) throughput window VALUES (#472
-	// G1): the map key is the endpoint-release uuid (the host's releaseID, never a
-	// name). A release present here uses ITS windows; a release absent falls back
-	// to the default Windows above. This is how two releases under one payer carry
-	// different RPM/TPM/IPM/VPM.
-	ReleaseWindows map[string][]ThroughputWindow `json:"release_windows,omitempty"`
-
-	// QueueLimits are the batch/queue reservation-pool caps (#472 G2): each is a
-	// {unit, max} pool (NO time window) keyed per (payer, endpoint-release). The
-	// admit ACQUIRES the request's units on enqueue and the settle RELEASES them
-	// on completion; deny with BlockedBy="queue" when the in-flight sum would
-	// exceed max. tensorhub's instance is the count form (unit="request").
-	QueueLimits []QueueLimitPolicy `json:"queue_limits,omitempty"`
-
-	// MaxConcurrentHeldAmount caps the SUM of a payer's currently-ACTIVE
-	// (un-settled) hold $ at this tier (#487). 0 = uncapped. OpenRails enforces it
-	// at admit (deny "concurrent_held_cap_exceeded" when a new hold would push the
-	// active-hold sum past it) AND surfaces the resolved value on AdmitResponse so a
-	// host that enforces true occupancy itself (e.g. tensorhub's scheduler, which
-	// alone sees live GPU occupancy) can queue against cap + per-job estimate
-	// instead of taking the hard deny. Generic $-denominated; no host concepts.
-	MaxConcurrentHeldAmount int64 `json:"max_concurrent_held_amount,omitempty"`
-
-	// MaxSingleChargeAmount is the per-charge ceiling at this tier (#487): an Admit
-	// whose EstimatedAmount exceeds it is rejected ("single_charge_cap_exceeded").
-	// 0 = uncapped. Generic runaway guard.
-	MaxSingleChargeAmount int64 `json:"max_single_charge_amount,omitempty"`
 
 	// BadSpendWindows are $-VALUED wasted/failed-spend grace windows for this tier
 	// (#497): at most Limit of direct-payer wasted spend is forgiven per
 	// WindowSeconds. Overage is charged at report time. Delegated invokers use the
 	// separate flat invoker cutoff policy.
 	BadSpendWindows []BudgetWindowPolicy `json:"bad_spend_windows,omitempty"`
-}
-
-// QueueLimitPolicy is one batch/queue reservation-pool cap (#472 G2): at most
-// Max units of Unit may be IN-FLIGHT (reserved-but-not-yet-completed) at once
-// per (payer, endpoint-release). Unlike ThroughputWindow this is NOT a time
-// window — units are held while a job is pending and released on completion.
-type QueueLimitPolicy struct {
-	Unit string `json:"unit"` // "request" (count form, weight 1) | "token" | ...
-	Max  int64  `json:"max"`
 }
 
 // BudgetWindowPolicy is one rolling money-budget window for a tier (#304): at
@@ -90,11 +47,4 @@ type BudgetWindowPolicy struct {
 	Currency      string `json:"currency,omitempty"`
 	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
 	Cadence string `json:"cadence,omitempty"`
-}
-
-// ThroughputWindow is one limit: at most Max units of Unit per WindowSeconds.
-type ThroughputWindow struct {
-	Unit          string `json:"unit"`
-	WindowSeconds int64  `json:"window_seconds"`
-	Max           int64  `json:"max"`
 }

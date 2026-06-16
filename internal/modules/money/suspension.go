@@ -11,18 +11,17 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// suspension.go — account suspension + payment-method-verification STATE
-// (issue #299). This slice RECORDS state only; it does NOT gate admission.
+// suspension.go — legacy account-suspension + payment-method-verification
+// state. This slice records account metadata only; service admission does not
+// read it.
 //
-// Payment-method verification: the intended verification mechanism is a $1
-// auth-and-void charge against the customer's card. That requires a
-// `Charger.AuthorizeAndVoid` capability which is OUT of this slice — the
-// charge itself lives in a later slice. Here, a caller that has already run a
-// successful verification flips the verified flag via SetPaymentMethodVerified.
+// Payment-method verification: callers may record that a collection method was
+// verified after they complete their own processor-specific setup. Borrowing
+// capacity is computed elsewhere and should be consumed as credit capacity by
+// the hot path.
 //
-// Suspension: Suspend/Resume toggle suspended_at + suspend_reason. Wiring the
-// admission deny path to reject suspended accounts is a SEPARATE slice; the
-// foreground gates on IsSuspended.
+// Suspension: Suspend/Resume toggle suspended_at + suspend_reason for legacy
+// account metadata. This is intentionally not a service-admit gate.
 
 // SetPaymentMethodVerified records whether (payer, currency) has a verified
 // payment method. When verified is true, verified_at is stamped with now; when
@@ -60,9 +59,9 @@ func (s *MoneyService) SetPaymentMethodVerified(ctx context.Context, payer ident
 	})
 }
 
-// Suspend marks (payer, currency) suspended: stamps suspended_at=now and
+// Suspend records legacy account-freeze metadata: stamps suspended_at=now and
 // records suspend_reason. Upserts the settings row if one does not yet exist.
-// Admission-deny-on-suspended wiring is a separate slice.
+// Service admission does not consult this flag.
 func (s *MoneyService) Suspend(ctx context.Context, payer identity.CustomerID, currency, reason string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
@@ -142,8 +141,9 @@ func (s *MoneyService) IsPaymentMethodVerified(ctx context.Context, payer identi
 }
 
 // ArrearsRequiresVerification reports whether an account is on a credit line
-// (arrears) but has NOT verified a payment method (#299 PM-on-file gate). When
-// true, admission should deny credit-line spend until a method is verified.
+// (arrears) but has not recorded a verified payment method. This is a legacy
+// metadata query; service admission consumes computed credit capacity instead
+// of calling this hot-path check.
 func (s *MoneyService) ArrearsRequiresVerification(ctx context.Context, payer identity.CustomerID, currency string) (bool, error) {
 	settings, err := s.GetAccountSettings(ctx, payer, currency)
 	if err != nil {

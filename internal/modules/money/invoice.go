@@ -116,6 +116,16 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		for _, m := range movs {
 			movements[m.TransactionType] = m.Total
 		}
+		pendingReceivable, perr := q.SumPendingInvoiceItemAmountInPeriod(ctx, gen.SumPendingInvoiceItemAmountInPeriodParams{
+			MerchantID: tenantID,
+			CustomerID: payerID,
+			Currency:   cur,
+			PeriodFrom: pfrom,
+			PeriodTo:   pto,
+		})
+		if perr != nil {
+			return perr
+		}
 
 		// --- closing balance snapshot (derived, #491) ---
 		bal, balErr := s.deriveBalance(ctx, q, tenantID, payerID, cur)
@@ -127,7 +137,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		now := s.now()
 		invoiceID := uuidutil.NewV7()
 		invoiceNumber := fmt.Sprintf("INV-%s", invoiceID.String())
-		totalAmount := movements[txOwedAccrual]
+		totalAmount := pendingReceivable
 		amountPaid := int64(0)
 		amountDue := totalAmount
 		status := "open"
@@ -379,12 +389,11 @@ func (s *MoneyService) VoidInvoice(ctx context.Context, payer identity.CustomerI
 		if terr != nil {
 			return terr
 		}
-		existing, e := q.GetInvoiceForPayer(ctx, gen.GetInvoiceForPayerParams{
+		if _, e := q.GetInvoiceForPayer(ctx, gen.GetInvoiceForPayerParams{
 			MerchantID: tid.UUID(),
 			CustomerID: payer.UUID(),
 			ID:         id,
-		})
-		if e != nil {
+		}); e != nil {
 			return e
 		}
 		row, e := q.VoidInvoiceForPayer(ctx, gen.VoidInvoiceForPayerParams{
@@ -395,17 +404,6 @@ func (s *MoneyService) VoidInvoice(ctx context.Context, payer identity.CustomerI
 		})
 		if e != nil {
 			return e
-		}
-		if existing.AmountDue > 0 {
-			if _, err := q.ReduceMoneyOutstandingOwedSnapshot(ctx, gen.ReduceMoneyOutstandingOwedSnapshotParams{
-				MerchantID: tid.UUID(),
-				CustomerID: payer.UUID(),
-				Currency:   existing.Currency,
-				Snapshot:   existing.AmountDue,
-				Now:        s.now(),
-			}); err != nil {
-				return err
-			}
 		}
 		var merr error
 		inv, merr = invoiceFromGen(row)
@@ -501,15 +499,6 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		if n == 0 {
 			return fmt.Errorf("invoice payment was not applied")
 		}
-		if _, e := q.ReduceMoneyOutstandingOwedSnapshot(ctx, gen.ReduceMoneyOutstandingOwedSnapshotParams{
-			MerchantID: tid.UUID(),
-			CustomerID: payer.UUID(),
-			Currency:   invoiceRow.Currency,
-			Snapshot:   amount,
-			Now:        now,
-		}); e != nil {
-			return e
-		}
 		sourceID := processorPaymentID
 		trx := &models.MoneyTransaction{
 			ID:              uuidutil.NewV7(),
@@ -589,6 +578,43 @@ func (s *MoneyService) FinalizeDueInvoices(ctx context.Context, from, to time.Ti
 			continue
 		}
 		if _, err := s.FinalizeInvoice(ctx, identity.CustomerID(p.CustomerID), p.Currency, from, to); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, nil
+}
+
+// FinalizeThresholdInvoices finalizes open receivables for arrears customers
+// whose pending invoice items plus open invoice balances have reached their
+// configured credit line. Collection is intentionally left to ChargeOutstanding
+// so provider calls stay out of the invoice-finalization transaction.
+func (s *MoneyService) FinalizeThresholdInvoices(ctx context.Context, cutoff time.Time) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("money service not initialized")
+	}
+	if cutoff.IsZero() {
+		cutoff = s.now()
+	}
+	cutoff = cutoff.UTC()
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := s.db.Gen(ctx).ListInvoiceThresholdCandidates(ctx, gen.ListInvoiceThresholdCandidatesParams{
+		MerchantID: tid.UUID(),
+		Cutoff:     cutoff,
+	})
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, r := range rows {
+		from := r.PeriodFrom
+		if !cutoff.After(from) {
+			continue
+		}
+		if _, err := s.FinalizeInvoice(ctx, identity.CustomerID(r.CustomerID), r.Currency, from, cutoff); err != nil {
 			return count, err
 		}
 		count++

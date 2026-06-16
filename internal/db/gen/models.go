@@ -903,7 +903,7 @@ type OpenrailsTierPolicy struct {
 	// NULL = merchant-wide default tier policy (#477); non-NULL = per-customer override taking precedence for that customer.
 	CustomerID *uuid.UUID
 	Tier       string
-	// JSONB tier policy: throughput windows, release_windows, queue_limits, entitled_resources, budget_windows, max_concurrent_held_amount, max_single_charge_amount, and bad_spend_windows. Money values use the request currency internal precision.
+	// JSONB tier money policy: budget_windows and bad_spend_windows. Money values use the request currency internal precision.
 	Policy        []byte
 	PolicyVersion int64
 	CreatedAt     time.Time

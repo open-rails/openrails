@@ -15,15 +15,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Unified credit-line model (issue #302). Credit is ONE dial: an account spends
-// its prepaid balance FIRST, then accrues to outstanding_owed up to its credit
-// limit. Prepay-only = credit limit 0 (cannot go negative). Arrears = credit
-// limit > 0 (a credit line). The limit is BillingMode + MaxOutstandingOwedAmount:
-// prepaid -> 0; arrears -> MaxOutstandingOwedAmount (nil = unlimited line).
-//
-// This unifies the two IMMEDIATE-debit paths (prepaid Withdraw + arrears
-// AccrueOwed) into one balance-first-then-owed spend. The hold->capture path and
-// making BillingMode a pure display label are tracked as remaining #302 work.
+// Unified credit-line model. An account spends prepaid balance first, then
+// creates pending invoice items up to its admin-set credit_limit_amount.
+// Prepay-only = credit limit 0; arrears = explicit credit line.
 
 // SpendParams is a unified immediate spend (balance first, then owed).
 type SpendParams struct {
@@ -169,8 +163,8 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 
 // spendBalanceThenOwedTx debits `amount` within an existing tx: it draws the
 // prepaid balance first (FIFO blocks) and accrues any remainder to
-// outstanding_owed, gated by the account's credit line. The caller must have
-// already locked the balance row (serialization point) and handled idempotency.
+// pending invoice items, gated by the account's credit line. The caller must
+// have already locked the balance row (serialization point) and handled idempotency.
 // Returns the balance-debit and owed-accrual transaction ids (either may be nil).
 func (s *MoneyService) spendBalanceThenOwedTx(
 	ctx context.Context, q *gen.Queries, payer identity.CustomerID,
@@ -218,8 +212,14 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		if settings.BillingMode != BillingModeArrears {
 			return nil, nil, ErrInsufficientCredits // prepay-only: credit limit 0
 		}
-		if settings.MaxOutstandingOwedAmount != nil &&
-			settings.OutstandingOwedAmount+fromOwed > *settings.MaxOutstandingOwedAmount {
+		if settings.CreditLimitAmount <= 0 {
+			return nil, nil, ErrInsufficientCredits
+		}
+		exposure, eerr := s.arrearsExposureTx(ctx, q, tenantID, payerID, cur)
+		if eerr != nil {
+			return nil, nil, eerr
+		}
+		if exposure+fromOwed > settings.CreditLimitAmount {
 			return nil, nil, ErrInsufficientCredits // would exceed the credit line
 		}
 	}
@@ -243,12 +243,6 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	}
 
 	if fromOwed > 0 {
-		if err := q.AddMoneyOutstandingOwed(ctx, gen.AddMoneyOutstandingOwedParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			Amount: fromOwed, Now: now,
-		}); err != nil {
-			return nil, nil, err
-		}
 		trx := &models.MoneyTransaction{
 			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: cur, Invoker: userID,
 			Amount: fromOwed, TransactionType: txOwedAccrual, Status: "posted",
@@ -281,7 +275,7 @@ func nullStr(s string) *string {
 
 // captureSettleTx settles a captured hold's actual amount balance-first-then-owed
 // (#302): it draws min(amount, availableAfter) from the prepaid balance/blocks
-// and spills any remainder to outstanding_owed (the arrears credit line). This is
+// and spills any remainder to pending invoice items (the arrears credit line). This is
 // what lets a hold placed against an arrears credit line capture even when the
 // balance can't cover it. availableAfter is the available balance AFTER this
 // hold's reservation has been released. The capture is pre-authorized, so this
@@ -324,12 +318,6 @@ func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, paye
 	if fromOwed > 0 {
 		// Only reachable for an arrears credit line (a prepaid hold reserves balance).
 		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModeArrears, now); err != nil {
-			return 0, err
-		}
-		if err := q.AddMoneyOutstandingOwed(ctx, gen.AddMoneyOutstandingOwedParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			Amount: fromOwed, Now: now,
-		}); err != nil {
 			return 0, err
 		}
 		itemSourceID := sourceID

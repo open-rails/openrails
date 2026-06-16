@@ -27,9 +27,10 @@ import (
 // key the engine never interprets). Existing (subject, invoker) windows keep the
 // bare invoker string as their key:
 //
-//	ScopeInvoker -> the invoker string (the per-end-user attribution key)
-//	ScopeSubject -> "@subject"                  (payer total, one per subject)
-//	ScopeRole    -> "@role:<role-uuid>"         (shared pool for a role)
+//	ScopeInvoker     -> the invoker string (the per-end-user attribution key)
+//	ScopeSubject     -> "@subject"                  (payer total, one per subject)
+//	ScopeRole        -> "@role:<role-uuid>"         (shared pool for a role)
+//	ScopeInvokerTier -> "@invoker_tier:<tier>:<invoker>" (per-invoker bucket chosen by tier)
 //
 // The subject id is already carried by customer_id, so the subject scope
 // needs no per-key suffix; the role scope keys on the immutable role uuid
@@ -38,8 +39,9 @@ const (
 	ScopeSubject = "subject"
 	// ScopeInvoker is the canonical per-invoker (per-end-user) abuse-attribution
 	// scope (#491). Scoped (merchant, customer, invoker).
-	ScopeInvoker = "invoker"
-	ScopeRole    = "role"
+	ScopeInvoker     = "invoker"
+	ScopeRole        = "role"
+	ScopeInvokerTier = "invoker_tier"
 )
 
 func NormalizeScope(scope string) string {
@@ -50,7 +52,7 @@ func NormalizeScope(scope string) string {
 // scope the key is the caller-supplied invoker string (preserving pre-#473
 // rows); for subject/role it is a reserved, collision-resistant "@"-prefixed
 // form so a real invoker string can never alias a subject/role bucket.
-func scopeKey(scope, invoker string, roleID uuid.UUID) (string, error) {
+func scopeKey(scope, invoker string, roleID uuid.UUID, scopeKey string) (string, error) {
 	switch NormalizeScope(scope) {
 	case ScopeInvoker:
 		invoker = strings.TrimSpace(invoker)
@@ -65,8 +67,18 @@ func scopeKey(scope, invoker string, roleID uuid.UUID) (string, error) {
 			return "", fmt.Errorf("role scope requires a role uuid")
 		}
 		return "@role:" + roleID.String(), nil
+	case ScopeInvokerTier:
+		scopeKey = strings.TrimSpace(scopeKey)
+		if scopeKey == "" {
+			return "", fmt.Errorf("invoker_tier scope requires a tier")
+		}
+		invoker = strings.TrimSpace(invoker)
+		if invoker == "" {
+			return "", fmt.Errorf("invoker_tier scope requires an invoker")
+		}
+		return "@invoker_tier:" + scopeKey + ":" + invoker, nil
 	default:
-		return "", fmt.Errorf("unknown budget scope %q (want subject|invoker|role)", scope)
+		return "", fmt.Errorf("unknown budget scope %q (want subject|invoker|role|invoker_tier)", scope)
 	}
 }
 
@@ -99,11 +111,22 @@ type ScopeStatus struct {
 // from (scope, invoker, roleID). Empty windows yield a no-op scope (skipped).
 // The stored Scope is normalized to the canonical value (#491).
 func MakeScopeReservation(scope, owner, invoker string, roleID uuid.UUID, windows []BudgetWindow) (ScopeReservation, error) {
-	key, err := scopeKey(scope, invoker, roleID)
+	key, err := scopeKey(scope, invoker, roleID, "")
 	if err != nil {
 		return ScopeReservation{}, err
 	}
 	return ScopeReservation{Scope: NormalizeScope(scope), Owner: owner, Key: key, Windows: windows}, nil
+}
+
+// MakeInvokerTierScopeReservation builds a delegated-tier scope reservation. The
+// tier is a payer-authored invoker/delegated-user tier, not the payer's trust
+// tier. The grant is selected by tier, but spend is metered per invoker.
+func MakeInvokerTierScopeReservation(owner, tier, invoker string, windows []BudgetWindow) (ScopeReservation, error) {
+	key, err := scopeKey(ScopeInvokerTier, invoker, uuid.Nil, tier)
+	if err != nil {
+		return ScopeReservation{}, err
+	}
+	return ScopeReservation{Scope: ScopeInvokerTier, Owner: owner, Key: key, Windows: windows}, nil
 }
 
 // ReserveScopes composes the multi-scope admit verdict (#473): in ONE

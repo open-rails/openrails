@@ -538,6 +538,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 			require.Equal(t, "cus_openrails_invoice", r.Form.Get("customer"))
 			require.Equal(t, "charge_automatically", r.Form.Get("collection_method"))
 			require.Equal(t, "pm_openrails_invoice", r.Form.Get("default_payment_method"))
+			require.Equal(t, "include", r.Form.Get("pending_invoice_items_behavior"))
 			require.Equal(t, "invoice:"+inv.ID.String()+":50000:invoice", r.Header.Get("Idempotency-Key"))
 			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"draft"}`))
 		case "/v1/invoices/in_openrails_invoice/finalize":
@@ -546,7 +547,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 		case "/v1/invoices/in_openrails_invoice/pay":
 			require.Equal(t, "pm_openrails_invoice", r.Form.Get("payment_method"))
 			require.Equal(t, "invoice:"+inv.ID.String()+":50000:pay", r.Header.Get("Idempotency-Key"))
-			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"paid","payment_intent":"pi_openrails_invoice","charge":"ch_openrails_invoice"}`))
+			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"paid","amount_paid":5,"payment_intent":"pi_openrails_invoice","charge":"ch_openrails_invoice"}`))
 		default:
 			t.Fatalf("unexpected Stripe path %s", r.URL.Path)
 		}
@@ -672,6 +673,7 @@ func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsProcessor(t
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 1_000))
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000, Source: "seed"})
 	require.NoError(t, err)
 	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", Currency: money.DefaultCurrency, EventType: "gpt-4o", Amount: 1_500, Source: "req", SourceID: "scoped-invoice-charge"})
@@ -818,7 +820,7 @@ func TestChargeOutstanding_WithScopedCharger_TransientErrorRetriesWithoutSettlem
 	require.Equal(t, 1, settled)
 }
 
-func TestArrearsChargeWorker_UsesConfiguredScopedCharger(t *testing.T) {
+func TestInvoiceWorker_UsesConfiguredScopedCharger(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
@@ -841,8 +843,11 @@ func TestArrearsChargeWorker_UsesConfiguredScopedCharger(t *testing.T) {
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.ProcessorMobius): adapter,
 	})
-	err = riverjobs.ArrearsChargeWorker{Money: svc, Charger: ch}.Work(ctx, &river.Job[riverjobs.ArrearsChargeArgs]{
-		Args: riverjobs.ArrearsChargeArgs{ThresholdAmount: 0},
+	err = riverjobs.InvoiceWorker{Money: svc, Charger: ch}.Work(ctx, &river.Job[riverjobs.InvoiceArgs]{
+		Args: riverjobs.InvoiceArgs{
+			Collect:                   true,
+			CollectionThresholdAmount: 0,
+		},
 	})
 	require.NoError(t, err)
 	require.Len(t, adapter.charges, 1)

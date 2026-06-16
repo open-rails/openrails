@@ -83,6 +83,14 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	require.Equal(t, int64(750_000), paid.AmountPaid)
 	require.NotNil(t, paid.ExternalInvoiceID)
 	require.True(t, strings.HasPrefix(*paid.ExternalInvoiceID, "in_"))
+
+	stripeInvoice := stripeGet(t, secretKey, "/v1/invoices/"+url.PathEscape(*paid.ExternalInvoiceID)+"?expand%5B%5D=lines&expand%5B%5D=payment_intent")
+	require.Equal(t, "paid", strings.TrimSpace(stripeInvoice["status"].(string)))
+	require.Positive(t, jsonInt64(stripeInvoice["amount_paid"]), "Stripe invoice must collect real money")
+	require.NotEmpty(t, stripeInvoice["payment_intent"], "Stripe invoice must have a payment intent")
+	lines, ok := stripeInvoice["lines"].(map[string]any)
+	require.True(t, ok)
+	require.Positive(t, jsonInt64(lines["total_count"]), "Stripe invoice must include the OpenRails invoice item")
 }
 
 func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
@@ -228,6 +236,38 @@ func stripePost(t *testing.T, secretKey, path string, values url.Values) map[str
 	require.NoError(t, json.Unmarshal(body, &out))
 	require.NotEmpty(t, out["id"])
 	return out
+}
+
+func stripeGet(t *testing.T, secretKey, path string) map[string]any {
+	t.Helper()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://api.stripe.com"+path, nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	if resp.StatusCode >= 400 {
+		t.Fatalf("Stripe API %s failed with status %d: %s", path, resp.StatusCode, sanitizedStripeError(body))
+	}
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(body, &out))
+	require.NotEmpty(t, out["id"])
+	return out
+}
+
+func jsonInt64(v any) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case int:
+		return int64(n)
+	case float64:
+		return int64(n)
+	default:
+		return 0
+	}
 }
 
 func stripePostRaw(t *testing.T, secretKey, path string, values url.Values) []byte {

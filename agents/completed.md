@@ -10874,3 +10874,246 @@ reported in USD, EUR, JPY, or another supported native money currency.
 ## Verification
 - `go test ./internal/app ./internal/integrations/fx ./pkg/service ./internal/modules/admission`
 - `go test -tags integration ./internal/modules/admission ./pkg/service`
+---
+
+# #508: Processor-backed invoice collection
+
+**Status:** COMPLETE 2026-06-16: OpenRails can collect finalized/open invoices through the supported saved-payment
+rails: Stripe test-mode invoices and NMI/Mobius stored-vault sales. Stripe collection now requires the provider invoice
+to include pending line items and report a nonzero paid amount before OpenRails marks the local invoice paid. The
+collection router validates
+merchant/customer/payment-method scope, rejects locally failed payment methods, excludes CCBill/Solana from arbitrary
+invoice collection, records settled/failed `invoice_payments`, applies settled payments to invoices and the owed ledger,
+persists Stripe `in_...` ids, and is wired into the consolidated `InvoiceWorker`.
+
+The remaining provider-platform items that were previously listed here were pruned as over-broad for this issue:
+async Stripe webhook repair, Connect routing, manual/admin retry UI, out-of-band payment recording, support reporting,
+and generalized provider capability matrices belong in future operational/provider-hardening issues if needed.
+
+## Tasks
+- [x] Inventory current invoice collection tables and saved-method data:
+      `invoices`, `invoice_items`, `invoice_payments`, `money_transactions`, `money_settings`,
+      `payment_methods`, and `processor_customers`.
+- [x] Implement `money.ScopedCharger` to validate merchant/customer/payment-method scope before provider dispatch.
+- [x] Reject locally failed/stale payment methods before provider dispatch.
+- [x] Exclude CCBill and Solana from arbitrary invoice collection.
+- [x] Route NMI/Mobius invoice collection through stored customer-vault sales.
+- [x] Route Stripe invoice collection through Stripe invoice item/create/finalize/pay against a saved `pm_...`.
+- [x] Persist Stripe external invoice ids on OpenRails invoices.
+- [x] Record successful invoice collection as settled `invoice_payments` plus invoice-linked `owed_payment` ledger rows.
+- [x] Record hard declines as failed `invoice_payments` without reducing the receivable.
+- [x] Keep transient adapter errors retryable without creating local settled payments.
+- [x] Wire consolidated `InvoiceWorker` collection to the configured runtime collection router.
+- [x] Add guarded live processor tests for Stripe test mode and NMI/Mobius sandbox, requiring
+      `TEST_ENV=true OPENRAILS_LIVE_PROCESSOR_TESTS=1`.
+
+## Acceptance
+- [x] Open invoices with a valid saved Stripe payment method can be collected and marked paid.
+- [x] Open invoices with a valid saved NMI/Mobius vault payment method can be collected and marked paid.
+- [x] A repeated collection job cannot double-apply a paid invoice.
+- [x] A hard decline leaves the invoice receivable intact and records failure metadata.
+- [x] CCBill/Solana cannot be selected for arbitrary invoice collection.
+- [x] A merchant/customer cannot collect with another merchant/customer's saved payment method.
+- [x] A locally failed payment method cannot be used for invoice collection.
+
+## Validation
+- [x] `task sqlc`
+- [x] Fake-adapter success/failure/retry integration tests.
+- [x] Stripe fake-server success/failure integration tests.
+- [x] NMI fake-provider success/failure integration tests.
+- [x] Guarded Stripe test-account integration, including provider-side nonzero paid invoice/payment-intent checks:
+      `TEST_ENV=true OPENRAILS_LIVE_PROCESSOR_TESTS=1 go test -tags integration ./internal/modules/money -run 'TestLive(Stripe|NMI)InvoiceCollection' -count=1 -v`
+- [x] Guarded NMI/Mobius sandbox integration:
+      `TEST_ENV=true OPENRAILS_LIVE_PROCESSOR_TESTS=1 go test -tags integration ./internal/modules/money -run 'TestLive(Stripe|NMI)InvoiceCollection' -count=1 -v`
+- [x] Full money integration suite: `go test -tags integration ./internal/modules/money -count=1`
+- [x] `go test ./...`
+- [x] `task build`
+
+---
+
+# #506: Redesign arrears billing around invoice receivables
+
+**Status:** COMPLETE 2026-06-16: Arrears billing now uses invoice receivables as the source of truth. Usage/capture
+that spills into arrears creates pending `invoice_items`; finalization turns pending items into open invoices; payments
+are allocated through `invoice_payments`; and admission/credit capacity derives exposure from pending items plus
+open/past-due invoice balances. The old `money_settings.outstanding_owed_amount` column is inert legacy storage: runtime
+code no longer increments/decrements it or scans it for collection.
+
+Scope was deliberately kept smaller than full Stripe/OpenMeter parity. OpenRails finalizes directly to an open invoice
+instead of carrying a separate editable draft workflow, and admin/manual HTTP endpoints for every invoice mutation were
+left out until there is a concrete product surface for them.
+
+## Tasks
+- [x] Keep `usage_events` as the durable usage/audit source.
+- [x] Represent unbilled arrears as first-class pending `invoice_items`.
+- [x] Make pending invoice items idempotent by source so one usage/charge fact cannot create duplicates.
+- [x] Treat `invoices` as receivables with status, totals, due dates, payment state, void/uncollectible state, and
+      provider external invoice id.
+- [x] Store payment attempts and settled payments in `invoice_payments` linked to a specific invoice.
+- [x] Make arrears accrual, immediate spend spill, and hold capture spill create pending invoice items instead of updating
+      `money_settings.outstanding_owed_amount`.
+- [x] Remove runtime sqlc helpers for incrementing/decrementing/scanning the old outstanding owed counter.
+- [x] Compute current arrears exposure as pending unbilled invoice items plus open/past-due invoice balances.
+- [x] Gate arrears admission on `credit_limit_amount - pending_unbilled_arrears - open_invoice_amount_due`, with prepaid
+      balance still available when the credit line is zero.
+- [x] Finalize invoices from pending invoice-item totals so already-invoiced usage is not charged twice.
+- [x] Keep monthly invoice finalization for period-close invoices.
+- [x] Add threshold invoice finalization: `InvoiceWorker` first finalizes customers whose pending/open exposure
+      has reached their credit line, then charges resulting open invoices.
+- [x] Replace account-level `ChargeOutstanding` sweeps with invoice-level collection over open/past-due invoices.
+- [x] Apply successful automatic, manual, and out-of-band payments to invoice `amount_paid` / `amount_due`.
+- [x] Record failed automatic collection as failed `invoice_payments` while leaving the receivable open.
+- [x] Keep void and mark-uncollectible flows for open invoices.
+- [x] Expose invoice list/detail with invoice status, totals, due dates, payment state, and line items.
+- [x] Prune overbuilt items from this issue: separate draft CRUD, broad admin mutation endpoints, first-class credit notes,
+      and custom past-due retry scheduling.
+
+## Acceptance
+- [x] Pending usage/charges are inspectable before invoicing without being treated as issued debt.
+- [x] A bill is paid because the invoice is `paid` / `amount_due = 0`, not because an account-level owed counter dropped.
+- [x] Customer credit line capacity is based on pending unbilled arrears plus open/past-due invoice balances.
+- [x] Hitting the credit-line threshold can finalize an invoice before month end so the existing collection worker can
+      collect it.
+- [x] Failed collection leaves the invoice receivable intact and blocks further arrears growth by consuming credit
+      capacity.
+- [x] Open current owed balance is derived from invoice rows and can be rebuilt from invoice/payment state.
+- [x] Prepaid balance remains separate: prepaid statements can be informational, while arrears invoices are receivables.
+
+## Validation
+- [x] `task sqlc`
+- [x] `go test -tags integration ./internal/modules/money -count=1`
+- [x] `go test ./internal/river ./pkg/service ./internal/http/handlers ./migrations/postgres`
+- [x] `go test ./...`
+- [x] `task build`
+
+---
+
+# #505: Move admit-time holds out of the durable money ledger
+
+**Completed:** 2026-06-16
+
+OpenRails hard-cut request lifecycle holds to Redis state keyed by caller `request_id`.
+`money_transactions` no longer stores admit/release/expiry hold rows; capture posts only real debit / owed-accrual
+transactions and optional usage events. Tensorhub-side naming/resource follow-through is tracked in Tensorhub's own
+progress file.
+
+OpenRails currently uses `money_transactions` for both actual money movement and pre-work hold/reservation state.
+That makes the ledger harder to reason about: admit-time holds, releases, and expirations are not money events.
+
+The target model is:
+
+- `money_transactions` records only durable money movement: deposits, debits/captures, owed accruals, withdrawals,
+  refunds/credits if added later.
+- `usage_events` records durable metered usage/reporting events.
+- admit-time holds are ephemeral Redis reservations used only to prevent concurrent overspend while work is in flight.
+- reservation identity is caller-supplied and stable. OpenRails should not generate a separate reservation id. The
+  caller must provide a merchant-scoped `request_id` for the request/hold lifecycle, and capture/release must refer to
+  that same request id.
+- the admit contract should be explicit about identity: `payer/customer_id` is who pays, `invoker` is who caused the
+  request, and `invoker_type` tells OpenRails whether the invoker is a payer-controlled credential or a delegated user.
+- `resource` should be a stable policy/reporting key when possible, not a mutable display name. Tensorhub can still put
+  endpoint/function display names in usage metadata.
+- `source` remains durable provenance/idempotency namespace for ledger/usage rows, but it is not the hold identity.
+
+The admission check should effectively be:
+
+`available_to_start = spendable_balance + allowed_owed_amount - active_redis_holds`
+
+If `available_to_start >= estimated_amount`, OpenRails creates a TTL-bound Redis hold at
+`merchant + request_id` and admits the request. The hold value stores payer/customer, invoker, invoker type, currency,
+estimated amount, source/provenance, resource, created time, and expiry. Completion captures by `merchant + request_id`,
+releases the hold, and records the actual usage/charge in Postgres. Cancel/failure releases by the same request id when
+possible, and TTL expiry handles worker crashes.
+
+## Tasks
+- [x] Inventory every current hold path: authorize/admit, capture, release, expiry, settlement, tests, SDK/API payloads,
+      and generated SQL.
+- [x] Hard-cut the hold API contract so `request_id` is a required stable caller-assigned identifier for admit,
+      capture, and release; remove OpenRails-generated reservation ids from admit/capture/release semantics.
+- [x] Change the admit/capture/release response and SDK types to stop exposing `reservation_id`; return hold metadata
+      such as `hold_expires_at` when useful, but require the caller to settle by `request_id`.
+- [x] Define Redis hold keys as `openrails:hold:{merchant_id}:{request_id}`.
+- [x] Define Redis hold values with payer/customer, invoker identity/type, currency, estimated amount, source,
+      resource, created time, expiry, and TTL. For Tensorhub, `request_id` is the Tensorhub request id and
+      `source = "invoke"` remains provenance for durable ledger/usage rows.
+- [x] Require and validate `invoker_type` on money-bearing admits so OpenRails can distinguish direct payer credentials
+      from delegated users without guessing from invoker string shape.
+- [x] Audit Tensorhub/OpenRails integration naming and remove remaining request-lifecycle `actor` vocabulary in favor of
+      `invoker` / `invoker_type` on the admit path. Tensorhub follow-through is tracked in its own progress issue.
+- [x] Decide the stable `resource` identity Tensorhub should send for OpenRails gates and reports. Prefer a stable
+      endpoint/release/function id over mutable `tenant/endpointName`; keep human-readable names in usage metadata.
+- [x] Keep `source` as provenance for durable rows (`invoke`, `training`, `wasted_spend`, etc.) while ensuring Redis
+      hold lookup uses only `merchant_id + request_id`.
+- [x] Change admission to subtract active Redis holds from spendable balance plus allowed owed amount before admitting
+      new work.
+- [x] Create Redis holds during admit/authorize instead of inserting `money_transactions` rows with `transaction_type =
+      'hold'`.
+- [x] Capture and release Redis holds by `merchant + request_id`, not by a generated reservation handle and not by
+      resource/payer/currency key material.
+- [x] Release Redis holds on capture, cancel, explicit release, and failed work; rely on TTL as the crash fallback.
+- [x] On successful completion, record only the actual durable charge: `usage_events` plus `money_transactions` debit /
+      owed-accrual rows as needed.
+- [x] Remove hold/release/expiry transaction states from `money_transactions` schema, queries, models, tests, and API
+      semantics.
+- [x] Keep `money_transactions` focused on posted money movement and update comments/docs to make that invariant clear.
+- [x] Decide whether any long-running job class needs longer TTLs or periodic hold refresh; keep this in Redis unless a
+      concrete recovery/reconciliation need proves Postgres reservations are required.
+- [x] Add concurrency tests proving a payer with low remaining balance cannot start enough simultaneous estimated work
+      to overspend available balance.
+- [x] Add cancellation/failure tests proving released/expired Redis holds make capacity available again without creating
+      ledger rows.
+- [x] Add ledger tests proving admit/release/expiry without completed work creates no `money_transactions` rows.
+- [x] Run `task sqlc`, targeted admission/money integration tests, `go test ./...`, and `task build`.
+
+## Acceptance
+- Admit-time reservations are Redis enforcement state, not durable ledger rows.
+- Reservation identity is the caller's stable merchant-scoped `request_id`.
+- OpenRails does not mint or require a separate reservation id for Tensorhub-style request lifecycles.
+- Admit/capture/release APIs and SDKs settle by `request_id`, not `reservation_id`.
+- Money-bearing admits require explicit `invoker_type`, and direct-payer vs delegated policy no longer depends on
+  parsing `invoker`.
+- Tensorhub sends a stable OpenRails `resource` key for policy/reporting, with mutable names preserved as metadata.
+- `money_transactions` contains only real money movement.
+- Successful completed work still creates the expected usage event and ledger debit/owed rows.
+- Failed/cancelled/pre-work requests do not create money ledger entries.
+- Concurrent admits are bounded by `balance + allowed owed - active holds` for the request currency.
+
+---
+
+# #494: Multi-currency support — native currencies + abstract units + internal FX converter
+
+**Completed:** yes 2026-06-16. Native `currency + amount` support was completed in this issue, and the remaining FX converter capstone was completed later in #501 (`Cross-currency FX spend enforcement`). Current code includes the Redis-backed FX cache/provider, policy-currency fields, conservative integer conversion, same-currency no-provider behavior, and fail-closed cross-currency enforcement.
+
+**Outcome (2026-06-15):**
+- [x] Recreated migration 032 as plain DDL so sqlc sees it: `budget_reservations` ->
+      `budget_inflight_holds`; old hold amount/captured columns -> `amount/captured`; per-invoker spend
+      limit columns use amount-language names.
+- [x] Added migration 033 for the deeper native-money rename: money settings columns now use
+      `max_spend_per_day`, `max_spend_per_month`, `max_outstanding_owed_amount`,
+      `low_balance_threshold`, `outstanding_owed_amount`, and `credit_limit_amount`; JSONB policy/schedule
+      documents are migrated to `limit`, `min_cumulative_paid_amount`,
+      `max_concurrent_held_amount`, and `max_single_charge_amount`.
+- [x] Re-keyed budget state and holds by currency:
+      `budget_window_state UNIQUE(merchant_id, customer_id, invoker_id, currency, window_key)` and
+      `budget_inflight_holds UNIQUE(merchant_id, customer_id, invoker_id, currency, source, source_id)`,
+      with matching aggregation indexes.
+- [x] Threaded native currency through admit -> budget reserve -> money hold. Empty currency still resolves
+      to `USD`; budgets now validate against the OpenRails native currency registry and reject custom-credit
+      units for these native-money tables.
+- [x] Settlement by hold now captures/releases budget holds by `(payer, currency, source, source_id)`.
+- [x] Renamed public/service SDK amount fields and wire JSON away from fixed-precision wording:
+      `EstimatedAmount`, `BalanceAmount`, `AvailableAmount`, `OutstandingOwedAmount`, `Limit`,
+      `ReportWastedSpend(... amount ...)`, `threshold_amount`, etc.
+- [x] Regenerated sqlc and updated generated-field call sites (`Amount`, `Captured`,
+      `MaxSpendPerDay`, `MaxSpendPerMonth`, `CreditLimitAmount`).
+
+**FX follow-through:** Completed in #501. Cross-currency admission and wasted-spend enforcement now convert request amounts into explicit policy currencies through the FX provider/cache; same-currency paths do not require FX, and missing/stale cross-currency rates fail closed.
+
+**Verification:**
+- `task sqlc`
+- `go test ./...`
+- #501 verification: `go test ./internal/app ./internal/integrations/fx ./pkg/service ./internal/modules/admission`
+- #501 verification: `go test -tags integration ./internal/modules/admission ./pkg/service`
+
+---
+

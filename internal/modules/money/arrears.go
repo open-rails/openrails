@@ -22,11 +22,10 @@ const (
 	txOwedPayment = "owed_payment" // owed collected via a card charge (negative amount)
 )
 
-// AccrueOwed records postpaid usage against an arrears account: instead of
-// withdrawing prepaid balance, the cost is added to outstanding_owed_amount and a
-// ledger row is written. Idempotent on (payer, source, source_id).
-// The payer's outstanding ceiling is enforced separately at authorize time
-// (CheckSpendAllowed); this is the settlement side. (#241)
+// AccrueOwed records postpaid usage against an arrears account. It writes the
+// durable usage ledger row and a pending invoice item; issued debt exists only
+// once those pending items are finalized onto an open invoice. Idempotent on
+// (payer, source, source_id).
 func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID, currency, source, sourceID string, amount int64) (*models.MoneyTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -72,12 +71,6 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 		}
 
 		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModeArrears, now); err != nil {
-			return err
-		}
-		if err := q.AddMoneyOutstandingOwed(ctx, gen.AddMoneyOutstandingOwedParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			Amount: amount, Now: now,
-		}); err != nil {
 			return err
 		}
 
@@ -164,22 +157,25 @@ func (s *MoneyService) GetCreditLimit(ctx context.Context, payer identity.Custom
 	return settings.CreditLimitAmount, nil
 }
 
-// GetOutstandingOwed returns the current outstanding owed for payer in currency.
+// GetOutstandingOwed returns current arrears exposure for payer in currency:
+// pending unbilled invoice items plus open/past-due invoice balances. The name
+// is retained for older callers, but the value is invoice-derived.
 func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
-	settings, err := s.getAccountSettings(ctx, payer, currency)
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("money service not initialized")
+	}
+	if payer.IsZero() {
+		return 0, fmt.Errorf("payer required")
+	}
+	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return settings.OutstandingOwedAmount, nil
-}
-
-// arrearsAccount is a scanned arrears-account row for the charge job.
-type arrearsAccount struct {
-	MerchantID      uuid.UUID
-	CustomerID      uuid.UUID
-	Currency        string
-	Owed            int64
-	PaymentMethodID *uuid.UUID
+	cur := normalizeCurrency(currency)
+	if err := RequireBillingCurrency(cur); err != nil {
+		return 0, err
+	}
+	return s.arrearsExposureTx(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID(), cur)
 }
 
 type invoiceArrearsAccount struct {
@@ -191,13 +187,10 @@ type invoiceArrearsAccount struct {
 	PaymentMethodID *uuid.UUID
 }
 
-// ChargeOutstanding collects outstanding owed for arrears accounts by charging
-// the card on file. When minThreshold > 0 only accounts owing at least that
-// much are charged (the threshold trigger, e.g. $500); minThreshold <= 0
-// charges every account with owed > 0 (the month-end sweep). Invoiced debt is
-// collected first and payments are allocated to invoice_id; legacy uninvoiced
-// owed balances remain as a fallback until #506 fully removes the live owed
-// counter. Returns the number of successful invoice/account charges. (#241/#506)
+// ChargeOutstanding collects open/past-due invoice receivables by charging the
+// saved payment method on file. When minThreshold > 0 only invoices due at least
+// that much are charged; minThreshold <= 0 charges every open invoice due.
+// Returns the number of successful invoice charges. (#241/#506)
 func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, minThreshold int64) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
@@ -233,34 +226,23 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, charger Charger, m
 			count++
 		}
 	}
+	return count, nil
+}
 
-	genRows, err := s.db.Gen(ctx).ListChargeableArrearsMoneyAccounts(ctx, gen.ListChargeableArrearsMoneyAccountsParams{
-		MerchantID: tenantID, MinThreshold: minThreshold,
+func (s *MoneyService) arrearsExposureTx(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string) (int64, error) {
+	openDue, err := q.SumOpenInvoiceAmountDue(ctx, gen.SumOpenInvoiceAmountDueParams{
+		MerchantID: merchantID, CustomerID: customerID, Currency: normalizeCurrency(currency),
 	})
 	if err != nil {
 		return 0, err
 	}
-	rows := make([]arrearsAccount, 0, len(genRows))
-	for _, r := range genRows {
-		rows = append(rows, arrearsAccount{
-			MerchantID:      r.MerchantID,
-			CustomerID:      r.CustomerID,
-			Currency:        r.Currency,
-			Owed:            r.OutstandingOwedAmount,
-			PaymentMethodID: r.AutoTopupPaymentMethodID,
-		})
+	pendingDue, err := q.SumPendingInvoiceItemAmount(ctx, gen.SumPendingInvoiceItemAmountParams{
+		MerchantID: merchantID, CustomerID: customerID, Currency: normalizeCurrency(currency),
+	})
+	if err != nil {
+		return 0, err
 	}
-
-	for _, r := range rows {
-		ok, err := s.chargeOneOutstanding(ctx, charger, r)
-		if err != nil {
-			return count, err
-		}
-		if ok {
-			count++
-		}
-	}
-	return count, nil
+	return openDue + pendingDue, nil
 }
 
 func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger, r invoiceArrearsAccount) (bool, error) {
@@ -318,12 +300,6 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 			}); err != nil {
 				return err
 			}
-		}
-		if _, err := q.ReduceMoneyOutstandingOwedSnapshot(ctx, gen.ReduceMoneyOutstandingOwedSnapshotParams{
-			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency),
-			Snapshot: snapshot, Now: now,
-		}); err != nil {
-			return err
 		}
 		sid := key
 		trx := &models.MoneyTransaction{
@@ -410,73 +386,4 @@ func optionalString(v string) *string {
 		return nil
 	}
 	return &v
-}
-
-func (s *MoneyService) chargeOneOutstanding(ctx context.Context, charger Charger, r arrearsAccount) (bool, error) {
-	payer := identity.CustomerID(r.CustomerID)
-	snapshot := r.Owed
-	if snapshot <= 0 || r.PaymentMethodID == nil {
-		return false, nil
-	}
-	// #474 invariant: never charge a card for a custom-credit (non-currency) balance.
-	if err := RequireBillingCurrency(normalizeCurrency(r.Currency)); err != nil {
-		return false, nil
-	}
-	key := fmt.Sprintf("arrears:%s:%d", r.CustomerID, snapshot)
-
-	// Owed is in the ledger currency's internal precision; the processor charges whole cents
-	// (1 cent = 10,000 internal units). Round up so we never under-collect.
-	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
-		MerchantID:      r.MerchantID,
-		Payer:           payer,
-		Invoker:         payer.UUID().String(),
-		PaymentMethodID: *r.PaymentMethodID,
-		AmountCents:     (snapshot + 9_999) / 10_000,
-		Currency:        normalizeCurrency(r.Currency),
-		IdempotencyKey:  key,
-		Description:     "outstanding balance",
-	})
-	if err != nil {
-		return false, err
-	}
-	if res.Declined {
-		return false, nil // leave owed; dunning/next run retries
-	}
-
-	now := s.now()
-	charged := false
-	// Privileged (no-GUC) transaction, matching the bun-era plain BeginTx.
-	err = s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-
-		// Reduce owed by the snapshot (never below zero); CAS-style guard prevents a
-		// double-decrement if two runs race on the same snapshot.
-		n, uerr := q.ReduceMoneyOutstandingOwedSnapshot(ctx, gen.ReduceMoneyOutstandingOwedSnapshotParams{
-			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency),
-			Snapshot: snapshot, Now: now,
-		})
-		if uerr != nil {
-			return uerr
-		}
-		if n == 0 {
-			// Owed already reduced by a concurrent run for this snapshot; treat as done.
-			return nil
-		}
-
-		sid := key
-		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency), Invoker: r.CustomerID.String(),
-			Amount: -snapshot, TransactionType: txOwedPayment, Status: "posted",
-			Source: "arrears_charge", SourceID: &sid, CreatedAt: now, UpdatedAt: now,
-		}
-		if err := q.InsertMoneyTransactionIfAbsent(ctx, gen.InsertMoneyTransactionIfAbsentParams(insertParamsFromTransaction(trx))); err != nil {
-			return err
-		}
-		charged = true
-		return nil
-	})
-	if err != nil {
-		return false, err
-	}
-	return charged, nil
 }

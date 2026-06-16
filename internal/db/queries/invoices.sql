@@ -65,11 +65,44 @@ FROM openrails.invoice_items
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND invoice_id IS NULL AND status = 'pending';
 
+-- name: SumPendingInvoiceItemAmountInPeriod :one
+SELECT COALESCE(SUM(amount), 0)::bigint
+FROM openrails.invoice_items
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
+  AND invoice_id IS NULL AND status = 'pending'
+  AND invoice_at >= sqlc.arg(period_from)::timestamptz
+  AND invoice_at < sqlc.arg(period_to)::timestamptz;
+
 -- name: SumOpenInvoiceAmountDue :one
 SELECT COALESCE(SUM(amount_due), 0)::bigint
 FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND status IN ('open', 'past_due') AND amount_due > 0;
+
+-- name: ListInvoiceThresholdCandidates :many
+SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_from
+FROM openrails.money_settings s
+JOIN openrails.invoice_items ii
+  ON ii.merchant_id = s.merchant_id
+ AND ii.customer_id = s.customer_id
+ AND ii.currency = s.currency
+ AND ii.invoice_id IS NULL
+ AND ii.status = 'pending'
+ AND ii.invoice_at < sqlc.arg(cutoff)::timestamptz
+WHERE s.merchant_id = $1
+  AND s.billing_mode = 'arrears'
+  AND s.credit_limit_amount > 0
+GROUP BY s.merchant_id, s.customer_id, s.currency, s.credit_limit_amount
+HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
+    SELECT COALESCE(SUM(i.amount_due), 0)::bigint
+    FROM openrails.invoices i
+    WHERE i.merchant_id = s.merchant_id
+      AND i.customer_id = s.customer_id
+      AND i.currency = s.currency
+      AND i.status IN ('open', 'past_due')
+      AND i.amount_due > 0
+) >= s.credit_limit_amount
+ORDER BY period_from ASC;
 
 -- name: ListChargeableOpenInvoices :many
 SELECT i.id, i.merchant_id, i.customer_id, i.currency, i.amount_due, s.auto_topup_payment_method_id

@@ -23,7 +23,7 @@ import (
 
 // wastedEnv builds an Admitter wired with the wasted-spend guard + the guard +
 // the limiter (so the test can both report and admit against the same Redis).
-func wastedEnv(t *testing.T) (*admission.Admitter, *abuse.WastedSpendGuard, *ratelimit.Limiter, *money.MoneyService, *admission.TierPolicyStore, identity.CustomerID, context.Context) {
+func wastedEnv(t *testing.T) (*admission.Admitter, *abuse.WastedSpendGuard, *ratelimit.Limiter, *money.MoneyService, *admission.TierPolicyStore, *admission.BudgetPolicyStore, identity.CustomerID, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -36,6 +36,7 @@ func wastedEnv(t *testing.T) (*admission.Admitter, *abuse.WastedSpendGuard, *rat
 	payer := identity.CustomerIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_policies WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.tier_policies WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
@@ -56,19 +57,18 @@ func wastedEnv(t *testing.T) (*admission.Admitter, *abuse.WastedSpendGuard, *rat
 	guard := abuse.NewWastedSpendGuard(lim)
 	cs := money.NewMoneyService(dbi)
 	store := admission.NewTierPolicyStore(dbi)
-	bl := abuse.NewBlocklistService(dbi)
+	bpStore := admission.NewBudgetPolicyStore(dbi)
 	bsvc := budgets.NewService(dbi)
 	actorFlat := []abuse.WastedWindow{{Key: "burst", Window: 15 * time.Minute, Limit: 5_000}}
-	adm := admission.NewAdmitter(lim, cs, store, bl, bsvc).WithWastedSpend(guard, actorFlat)
-	return adm, guard, lim, cs, store, payer, ctx
+	adm := admission.NewAdmitter(cs, store, bsvc).WithBudgetScopes(bpStore).WithWastedSpend(guard, actorFlat)
+	return adm, guard, lim, cs, store, bpStore, payer, ctx
 }
 
 // #497: PAYER bad_spend is direct-payer grace for report-time charging, not an
 // admit-time cutoff.
 func TestAdmit_WastedSpend_PayerOverBudgetDoesNotDeny(t *testing.T) {
-	adm, guard, _, cs, store, payer, ctx := wastedEnv(t)
+	adm, guard, _, cs, store, _, payer, ctx := wastedEnv(t)
 	require.NoError(t, store.UpsertTierPolicyFull(ctx, payer, "free", models.ThroughputPolicy{
-		Windows:         []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}},
 		BadSpendWindows: []models.BudgetWindowPolicy{{Key: "burst", WindowSeconds: 900, Limit: 1_000}},
 	}))
 	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000, Source: "seed"})
@@ -77,7 +77,7 @@ func TestAdmit_WastedSpend_PayerOverBudgetDoesNotDeny(t *testing.T) {
 	// Under budget: allowed.
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
 		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:a", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		InvokerType: string(identity.InvokerTypePayer), EstimatedAmount: 100,
 		Source: "usage", SourceID: "ok1", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
@@ -93,21 +93,20 @@ func TestAdmit_WastedSpend_PayerOverBudgetDoesNotDeny(t *testing.T) {
 	// report time instead.
 	d, err = adm.Admit(ctx, admission.AdmitRequest{
 		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:a", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		InvokerType: string(identity.InvokerTypePayer), EstimatedAmount: 100,
 		Source: "usage", SourceID: "allowed-after-payer-waste", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
-	require.Greater(t, d.CapacityAmount, int64(0))
+	require.Greater(t, d.AccountCapacityAmount, int64(0))
 }
 
 // #488: INVOKER over the flat per-invoker wasted budget -> admit denies
 // failure_rate_limited (independent of the payer budget).
 func TestAdmit_WastedSpend_InvokerOverBudget(t *testing.T) {
-	adm, guard, _, cs, store, payer, ctx := wastedEnv(t)
-	// No payer bad_spend windows -> only the invoker flat budget (5_000) applies.
-	require.NoError(t, store.UpsertTierPolicy(ctx, payer, "free",
-		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
+	adm, guard, _, cs, store, bpStore, payer, ctx := wastedEnv(t)
+	require.NoError(t, store.UpsertTierPolicyFull(ctx, payer, "free", models.ThroughputPolicy{}))
+	grantInvokerBudget(t, ctx, bpStore, payer, "user:c", []models.BudgetWindowPolicy{{Key: "delegated", WindowSeconds: 3600, Limit: 100_000}})
 	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000, Source: "seed"})
 	require.NoError(t, err)
 
@@ -119,7 +118,7 @@ func TestAdmit_WastedSpend_InvokerOverBudget(t *testing.T) {
 
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
 		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:b", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		InvokerType: string(identity.InvokerTypeDelegated), EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-invoker", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
@@ -130,7 +129,7 @@ func TestAdmit_WastedSpend_InvokerOverBudget(t *testing.T) {
 	// A DIFFERENT invoker under the same payer is unaffected (per-invoker budget).
 	d, err = adm.Admit(ctx, admission.AdmitRequest{
 		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: "user:c", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, EstimatedAmount: 100,
+		InvokerType: string(identity.InvokerTypeDelegated), EstimatedAmount: 100,
 		Source: "usage", SourceID: "ok-invoker", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)

@@ -1139,7 +1139,7 @@ CREATE TABLE openrails.budget_policies (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT budget_policies_pkey PRIMARY KEY (id),
-    CONSTRAINT budget_policies_scope_check CHECK ((scope = ANY (ARRAY['subject'::text, 'invoker'::text, 'role'::text]))),
+    CONSTRAINT budget_policies_scope_check CHECK ((scope = ANY (ARRAY['subject'::text, 'invoker'::text, 'role'::text, 'invoker_tier'::text]))),
     CONSTRAINT budget_policies_owner_check CHECK ((owner = ANY (ARRAY['platform'::text, 'subject'::text]))),
     CONSTRAINT budget_policies_uniq UNIQUE (merchant_id, customer_id, scope, owner, scope_key),
     CONSTRAINT budget_policies_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
@@ -1154,7 +1154,7 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.budget_policies TO openrail
 
 COMMENT ON TABLE openrails.budget_policies IS 'Hierarchical money-budget policies (#473): {scope, owner, windows[]} composed in one admit verdict over the one payer balance. owner=platform rows are writable only via the platform path; owner=subject rows are the subject''s own caps.';
 COMMENT ON COLUMN openrails.budget_policies.owner IS 'platform (set by us; subject cannot edit/see) | subject (the subject''s own cap).';
-COMMENT ON COLUMN openrails.budget_policies.scope_key IS 'Immutable scope discriminator: role uuid (scope=role) or invoker string (scope=invoker); empty for scope=subject. Never a slug/name.';
+COMMENT ON COLUMN openrails.budget_policies.scope_key IS 'Immutable scope discriminator: role uuid (scope=role), invoker string (scope=invoker), or tier key (scope=invoker_tier); empty for scope=subject.';
 
 -- =============================================================================
 -- tier_policies
@@ -1185,7 +1185,7 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tier_policies TO openrails_
 
 COMMENT ON TABLE openrails.tier_policies IS 'Per-tier admission policy. customer_id NULL is the merchant-wide default; non-NULL is a per-customer override. Money values use the request currency internal precision.';
 COMMENT ON COLUMN openrails.tier_policies.customer_id IS 'NULL = merchant-wide default tier policy (#477); non-NULL = per-customer override taking precedence for that customer.';
-COMMENT ON COLUMN openrails.tier_policies.policy IS 'JSONB tier policy: throughput windows, release_windows, queue_limits, entitled_resources, budget_windows, max_concurrent_held_amount, max_single_charge_amount, and bad_spend_windows. Money values use the request currency internal precision.';
+COMMENT ON COLUMN openrails.tier_policies.policy IS 'JSONB tier money policy: budget_windows and bad_spend_windows. Money values use the request currency internal precision.';
 
 -- =============================================================================
 -- tier_schedules
@@ -1633,8 +1633,8 @@ COMMENT ON COLUMN openrails.money_settings.low_balance_threshold IS 'Optional lo
 COMMENT ON COLUMN openrails.money_settings.outstanding_owed_amount IS 'Current arrears owed amount in the row currency internal precision.';
 COMMENT ON COLUMN openrails.money_settings.credit_limit_amount IS 'Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.';
 COMMENT ON COLUMN openrails.money_settings.tier_source IS 'auto = tier maintained by tier_schedule auto-graduation; admin = explicit override that auto-graduation must not overwrite.';
-COMMENT ON COLUMN openrails.money_settings.verified_payment_method IS 'True once the account has a verified payment method (set after a successful $1 auth-and-void verification charge — issue #299). The charge itself is a separate slice.';
-COMMENT ON COLUMN openrails.money_settings.suspended_at IS 'When set, the account is suspended (issue #299). Admission-deny-on-suspended wiring is a separate slice.';
+COMMENT ON COLUMN openrails.money_settings.verified_payment_method IS 'Legacy metadata noting that a collection method was verified; service admission consumes computed credit capacity instead of checking this flag.';
+COMMENT ON COLUMN openrails.money_settings.suspended_at IS 'Legacy account-freeze metadata; service admission does not consult this flag.';
 
 -- =============================================================================
 -- money_spend_limits

@@ -176,8 +176,8 @@ func transactionFromService(t *billingservice.CreditTransaction) *openrails.Cred
 // --- Client implementation -------------------------------------------------
 
 // Admit transcribes handlers.ServiceAdmit + admitInputFromRequest
-// (service_admission.go). All verdict outcomes — allowed, throughput (429),
-// money (402), gated (403) — return (resp, nil), like the remote client.
+// (service_admission.go). All verdict outcomes — allowed, abuse (429), money
+// (402), gated (403) — return (resp, nil), like the remote client.
 func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*openrails.AdmitResponse, error) {
 	ctx = c.ensureTenant(ctx)
 	if req.EstimatedAmount < 0 {
@@ -210,7 +210,6 @@ func admitInputFromSDK(req openrails.AdmitRequest, payer identity.CustomerID) bi
 		InvokerType:     req.InvokerType,
 		Tier:            req.Tier,
 		Resource:        req.Resource,
-		Amounts:         req.Amounts,
 		Currency:        req.Currency,
 		EstimatedAmount: req.EstimatedAmount,
 		Source:          req.Source,
@@ -219,11 +218,6 @@ func admitInputFromSDK(req openrails.AdmitRequest, payer identity.CustomerID) bi
 	}
 	if req.ExpiresAt != nil {
 		in.ExpiresAtUnix = *req.ExpiresAt
-	}
-	for _, w := range req.TenantThroughput {
-		in.TenantThroughput = append(in.TenantThroughput, billingservice.AdmitThroughputWindow{
-			Unit: w.Unit, WindowSeconds: w.WindowSeconds, Max: w.Max,
-		})
 	}
 	return in
 }
@@ -235,22 +229,12 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 		EstimatedAmount:     res.EstimatedAmount,
 		PolicyCurrency:      res.PolicyCurrency,
 		PolicyAmount:        res.PolicyAmount,
+		StartCapacityAmount: res.StartCapacityAmount,
 		BlockedBy:           res.BlockedBy,
-		BlockedUnit:         res.BlockedUnit,
 		DenyCode:            res.DenyCode,
 		RetryAfterSeconds:   res.RetryAfterSeconds,
 		HoldExpiresAt:       res.HoldExpiresAt,
 		BudgetReservationID: res.BudgetReservationID,
-		ResolvedTier:        res.ResolvedTier,
-
-		MaxConcurrentHeldAmount: res.MaxConcurrentHeldAmount,
-		HeldAmount:              res.HeldAmount,
-		MaxSingleChargeAmount:   res.MaxSingleChargeAmount,
-	}
-	for _, w := range res.Windows {
-		out.Windows = append(out.Windows, openrails.AdmitWindow{
-			Unit: w.Unit, Limit: w.Limit, Remaining: w.Remaining, ResetAfterSeconds: w.ResetAfterSeconds,
-		})
 	}
 	for _, w := range res.BudgetWindows {
 		out.BudgetWindows = append(out.BudgetWindows, budgetWindowFromDTO(w))
@@ -301,10 +285,6 @@ func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequ
 		Currency:              out.Currency,
 		AvailableAmount:       out.AvailableAmount,
 		OutstandingOwedAmount: out.OutstandingOwedAmount,
-		RetryAfterSeconds:     out.RetryAfterSeconds,
-	}
-	if out.RemainingTodayAmount != nil {
-		resp.RemainingTodayAmount = *out.RemainingTodayAmount
 	}
 	if out.HoldExpiresAt != nil {
 		v := out.HoldExpiresAt.Unix()
@@ -766,16 +746,8 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 		}
 	}
 	pol := billingservice.TierPolicyInput{
-		Tier:                    in.Tier,
-		EntitledResources:       in.EntitledResources,
-		PolicyCurrency:          in.PolicyCurrency,
-		MaxConcurrentHeldAmount: in.MaxConcurrentHeldAmount,
-		MaxSingleChargeAmount:   in.MaxSingleChargeAmount,
-	}
-	for _, w := range in.Windows {
-		pol.Windows = append(pol.Windows, billingservice.TierWindowInput{
-			Unit: w.Unit, WindowSeconds: w.WindowSeconds, Max: w.Max,
-		})
+		Tier:           in.Tier,
+		PolicyCurrency: in.PolicyCurrency,
 	}
 	for _, b := range in.BudgetWindows {
 		pol.BudgetWindows = append(pol.BudgetWindows, billingservice.TierBudgetWindowInput{
@@ -785,11 +757,6 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 	for _, b := range in.BadSpendWindows {
 		pol.BadSpendWindows = append(pol.BadSpendWindows, billingservice.TierBudgetWindowInput{
 			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency, Cadence: b.Cadence,
-		})
-	}
-	for _, q := range in.QueueLimits {
-		pol.QueueLimits = append(pol.QueueLimits, billingservice.TierQueueLimitInput{
-			Unit: q.Unit, Max: q.Max,
 		})
 	}
 	if err := c.svc.SetTierPolicy(ctx, payer, pol); err != nil {
@@ -980,16 +947,20 @@ func budgetScopeWindowInputs(ws []openrails.BudgetScopeWindow) []billingservice.
 }
 
 // SetSubjectBudgetPolicy transcribes handlers.ServiceSetSubjectBudgetPolicy
-// (service_admission.go, #473). role_id maps onto the facade's ScopeKey.
+// (service_admission.go, #473).
 func (c *localClient) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in openrails.SubjectBudgetPolicyInput) error {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
 	if err != nil {
 		return err
 	}
+	scopeKey := strings.TrimSpace(in.ScopeKey)
+	if scopeKey == "" {
+		scopeKey = strings.TrimSpace(in.RoleID)
+	}
 	if err := c.svc.SetSubjectBudgetPolicy(ctx, payer, billingservice.BudgetScopePolicyInput{
 		Scope:    in.Scope,
-		ScopeKey: in.RoleID,
+		ScopeKey: scopeKey,
 		Windows:  budgetScopeWindowInputs(in.Windows),
 	}); err != nil {
 		return internalErr("set subject budget policy failed")
@@ -1317,11 +1288,11 @@ func admitVerdictStatus(res *billingservice.AdmitResult) int {
 		return http.StatusOK
 	}
 	switch res.BlockedBy {
-	case "throughput":
+	case "abuse":
 		return http.StatusTooManyRequests
 	case "money":
 		return http.StatusPaymentRequired
-	default: // suspended, blocked, unverified, endpoint
+	default:
 		return http.StatusForbidden
 	}
 }

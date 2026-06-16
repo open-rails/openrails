@@ -49,6 +49,10 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerI
 		if err != nil {
 			return err
 		}
+		outstanding, err := s.moneyService().GetOutstandingOwed(ctx, payer, currency)
+		if err != nil {
+			return err
+		}
 		snap = &CreditAccountSnapshot{
 			CustomerID:            payer.UUID(),
 			Currency:              currency,
@@ -56,7 +60,7 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerI
 			BalanceAmount:         bal.Balance,
 			HeldAmount:            bal.HeldBalance,
 			AvailableAmount:       bal.Balance - bal.HeldBalance,
-			OutstandingOwedAmount: settings.OutstandingOwedAmount,
+			OutstandingOwedAmount: outstanding,
 		}
 		return nil
 	})
@@ -319,10 +323,9 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 }
 
 // AuthorizeAndHoldRequest is the input to AuthorizeAndHold — the atomic
-// policy-decision + hold placement that backs POST /v1/service/credits/authorize
-// (issue #235/#247). Payer is the merchant subject billed; Invoker is the canonical
-// invoker for per-invoker sub-budgets; RequestID is the idempotency key for the
-// placed hold.
+// capacity-decision + hold placement that backs POST /v1/service/credits/authorize
+// (issue #235/#247). Payer is the merchant subject billed; RequestID is the
+// idempotency key for the placed hold.
 type AuthorizeAndHoldRequest struct {
 	CustomerID      identity.CustomerID
 	Invoker         string
@@ -335,20 +338,19 @@ type AuthorizeAndHoldRequest struct {
 	ExpiresAt time.Time
 }
 
-// AuthorizeAndHoldResult is the admission decision and capacity snapshot.
+// AuthorizeAndHoldResult is the account-capacity decision and start-capacity
+// snapshot.
 // In-flight holds are request-id keyed Redis state in the #505 model, so no
 // Postgres reservation id is returned here.
 type AuthorizeAndHoldResult struct {
-	Allowed               bool              `json:"allowed"`
-	DenyCode              string            `json:"deny_code,omitempty"`
-	BillingMode           string            `json:"billing_mode"`
-	Currency              string            `json:"currency"`
-	AvailableAmount       int64             `json:"available_amount"`
-	OutstandingOwedAmount int64             `json:"outstanding_owed_amount"`
-	RemainingTodayAmount  *int64            `json:"remaining_today_amount,omitempty"`
-	RetryAfterSeconds     int64             `json:"retry_after_seconds,omitempty"`
-	HoldExpiresAt         *time.Time        `json:"hold_expires_at,omitempty"`
-	Caps                  []money.CapResult `json:"caps,omitempty"`
+	Allowed               bool       `json:"allowed"`
+	DenyCode              string     `json:"deny_code,omitempty"`
+	BillingMode           string     `json:"billing_mode"`
+	Currency              string     `json:"currency"`
+	AvailableAmount       int64      `json:"available_amount"`
+	OutstandingOwedAmount int64      `json:"outstanding_owed_amount"`
+	StartCapacityAmount   int64      `json:"start_capacity_amount"`
+	HoldExpiresAt         *time.Time `json:"hold_expires_at,omitempty"`
 }
 
 // authorizeHoldSource is the source label recorded on holds placed by the
@@ -360,9 +362,10 @@ const authorizeHoldSource = "authorize"
 // invocation; the reconcile/orphan-hold sweeper (#243) is the backstop.
 const defaultAuthorizeHoldTTL = 15 * time.Minute
 
-// AuthorizeAndHold runs the spend-policy decision + prepaid/arrears capacity
-// gate under the per-customer money lock. The actual in-flight reservation lives
-// outside the durable money ledger in the #505 Redis hold model.
+// AuthorizeAndHold runs the prepaid/arrears capacity gate under the per-customer
+// money lock, then places the Redis request hold. The actual in-flight
+// reservation lives outside the durable money ledger in the #505 Redis hold
+// model.
 func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequest) (*AuthorizeAndHoldResult, error) {
 	if req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
@@ -407,11 +410,7 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 		Currency:              out.Currency,
 		AvailableAmount:       out.AvailableAmount,
 		OutstandingOwedAmount: out.OutstandingOwedAmount,
-		RetryAfterSeconds:     out.Decision.RetryAfterSeconds,
-		Caps:                  out.Decision.Caps,
-	}
-	if r := remainingTodayCents(out.Decision.Caps); r != nil {
-		res.RemainingTodayAmount = r
+		StartCapacityAmount:   out.AccountCapacityAmount,
 	}
 	if out.Decision.Allowed && req.EstimatedAmount > 0 {
 		store, err := s.holdStore()
@@ -422,7 +421,7 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 		if err != nil {
 			return nil, err
 		}
-		allowed, _, err := store.Place(ctx, holds.Hold{
+		allowed, activeHeld, err := store.Place(ctx, holds.Hold{
 			MerchantID:      mid,
 			RequestID:       req.RequestID,
 			CustomerID:      req.CustomerID.UUID().String(),
@@ -434,7 +433,7 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 			Resource:        strings.TrimSpace(req.Resource),
 			CreatedAt:       s.now().UTC(),
 			ExpiresAt:       expires,
-		}, out.CapacityAmount)
+		}, out.AccountCapacityAmount)
 		if err != nil {
 			return nil, err
 		}
@@ -443,27 +442,13 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 			if res.DenyCode == "" {
 				res.DenyCode = money.DenyInsufficientBalance
 			}
+			res.StartCapacityAmount = startCapacity(out.AccountCapacityAmount, activeHeld)
 			return res, nil
 		}
+		res.StartCapacityAmount = startCapacity(out.AccountCapacityAmount, activeHeld-req.EstimatedAmount)
 		res.HoldExpiresAt = &expires
 	}
 	return res, nil
-}
-
-// remainingTodayCents extracts the remaining headroom under a daily cap (org or
-// per-invoker) from the evaluated caps, for the authorize response's
-// remaining_today_amount field. Returns nil when no daily cap applies.
-func remainingTodayCents(caps []money.CapResult) *int64 {
-	for _, c := range caps {
-		if c.Code == money.DenyDailyCap || c.Code == money.DenyInvokerDailyCap {
-			r := c.Remaining
-			if r < 0 {
-				r = 0
-			}
-			return &r
-		}
-	}
-	return nil
 }
 
 // SetCreditAccountSettings upserts an payer's spend policy (issue #237/#235

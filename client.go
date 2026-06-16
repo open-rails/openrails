@@ -44,10 +44,9 @@ const (
 // the standalone HTTP handlers in internal/http/handlers/service_*.go; both
 // implementations follow them exactly.
 type Client interface {
-	// Admit performs the unified admission check + atomic hold (#298/#403/#404):
-	// throughput + budget + suspension/blocklist/resource gating + credit hold in
-	// one verdict. Idempotent on req.RequestID. A clean deny is (Allowed=false,
-	// nil error) on BOTH transports.
+	// Admit checks delegated spend, delegated wasted-spend, and money capacity,
+	// then places the request hold when allowed. Idempotent on req.RequestID. A
+	// clean deny is (Allowed=false, nil error) on BOTH transports.
 	Admit(ctx context.Context, req AdmitRequest) (*AdmitResponse, error)
 	// Authorize is the atomic authorize+hold (#235/#247), idempotent on
 	// req.RequestID. A clean deny is (Allowed=false, nil error).
@@ -86,8 +85,8 @@ type Client interface {
 	// BudgetStatus returns the invoker's fixed money-budget windows under the
 	// payer's stored tier policy without reserving (#304 introspection).
 	BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]BudgetWindow, error)
-	// SetTierPolicy upserts a per-payer tier policy (#298): throughput windows +
-	// entitled resources + fixed money-budget windows.
+	// SetTierPolicy upserts a per-payer tier money policy (#298): fixed
+	// money-budget windows and wasted-spend grace windows.
 	SetTierPolicy(ctx context.Context, tenantSubjectID string, in TierPolicyInput) error
 	// SetTierSchedule persists the tenant's tier SCHEDULE once (#476): the ordered
 	// ladder [{tier, min_cumulative_paid_amount}] for one currency. OpenRails then
@@ -212,8 +211,6 @@ type AuthorizeResponse struct {
 	Currency              string `json:"currency"`
 	AvailableAmount       int64  `json:"available_amount"`
 	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
-	RemainingTodayAmount  int64  `json:"remaining_today_amount,omitempty"`
-	RetryAfterSeconds     int64  `json:"retry_after_seconds,omitempty"`
 	HoldExpiresAt         *int64 `json:"hold_expires_at,omitempty"`
 }
 
@@ -297,89 +294,51 @@ type CreditTransaction struct {
 	UpdatedAt       time.Time
 }
 
-// AdmitRequest is the body for POST /v1/service/admit — the UNIFIED admission
-// verdict (#403/#404). It folds rate-limit/quota/concurrency (throughput),
-// money-budget windows, suspension/blocklist/resource gating, AND the credit
-// hold into ONE call, returning ONE reservation for later capture/release.
+// AdmitRequest is the body for POST /v1/service/admit. It checks payer money
+// capacity, delegated spend policy, delegated wasted-spend cutoff, and places the
+// request hold when allowed.
 //
-// Tier/Resource select the throughput + budget policy + resource gating;
-// Amounts is the per-request throughput consumption (e.g. {"request":1}).
+// Tier selects money policy. Resource is host-side attribution only; endpoint
+// authorization stays with the host.
 // EstimatedAmount is the upper-bound charge to hold. A zero EstimatedAmount runs
 // the limit checks without placing a money hold.
 type AdmitRequest struct {
-	CustomerID      string           `json:"customer_id"`
-	Invoker         string           `json:"invoker"`
-	InvokerType     string           `json:"invoker_type,omitempty"`
-	Tier            string           `json:"tier,omitempty"`
-	Resource        string           `json:"resource,omitempty"`
-	Amounts         map[string]int64 `json:"amounts,omitempty"`
-	Currency        string           `json:"currency,omitempty"`
-	EstimatedAmount int64            `json:"estimated_amount"`
-	RequestID       string           `json:"request_id"`
-	Source          string           `json:"source,omitempty"`
-	ExpiresAt       *int64           `json:"expires_at,omitempty"`
+	CustomerID      string `json:"customer_id"`
+	Invoker         string `json:"invoker"`
+	InvokerType     string `json:"invoker_type,omitempty"`
+	Tier            string `json:"tier,omitempty"`
+	Resource        string `json:"resource,omitempty"`
+	Currency        string `json:"currency,omitempty"`
+	EstimatedAmount int64  `json:"estimated_amount"`
+	RequestID       string `json:"request_id"`
+	Source          string `json:"source,omitempty"`
+	ExpiresAt       *int64 `json:"expires_at,omitempty"`
 	// Roles are the immutable role UUIDs the invoker holds (#473). Each role with a
 	// matching (subject, role) budget-scope policy gates this request's spend in
 	// the same admit verdict. The host reads them from the delegated
 	// JWT/permission set. Empty = no role-scoped budget applies.
 	Roles []uuid.UUID `json:"roles,omitempty"`
-	// TenantThroughput is the per-TENANT fixed-window throughput policy OpenRails
-	// should enforce on this invoke (#404).
-	TenantThroughput []AdmitThroughputWindow `json:"tenant_throughput,omitempty"`
 }
 
-// AdmitThroughputWindow is one tenant fixed-window throughput limit (#404):
-// at most Max units of Unit per WindowSeconds (Unit defaults to "request").
-type AdmitThroughputWindow struct {
-	Unit          string `json:"unit,omitempty"`
-	WindowSeconds int64  `json:"window_seconds"`
-	Max           int64  `json:"max"`
-}
-
-// AdmitWindow is one throughput window's state (mirrors the x-ratelimit-*
-// headers; pkg/service.AdmitWindowDTO on the wire).
-type AdmitWindow struct {
-	Unit              string `json:"unit"`
-	Limit             int64  `json:"limit"`
-	Remaining         int64  `json:"remaining"`
-	ResetAfterSeconds int64  `json:"reset_after_seconds"`
-}
-
-// AdmitResponse is the unified verdict (pkg/service.AdmitResult on the wire).
-// Allowed=false carries a BlockedBy axis ("throughput" | "money" | "budget" |
-// "blocked" | "suspended" | "unverified" | "resource") and, on a money deny, a
-// DenyCode. A successful money-bearing admit creates a request_id keyed Redis hold;
-// BudgetReservationID is the budget reservation (settled implicitly with the
-// request). A deny is returned as (Allowed=false, nil error) on BOTH transports
-// even though the HTTP layer carries it as 402/403/429.
+// AdmitResponse is the admission verdict (pkg/service.AdmitResult on the wire).
+// Allowed=false carries a BlockedBy axis ("budget" | "abuse" | "money") and a
+// DenyCode when available. A successful money-bearing admit creates a request_id
+// keyed Redis hold; BudgetReservationID is the budget reservation settled with
+// the request. A deny is returned as (Allowed=false, nil error) on both
+// transports even though HTTP maps it to 402/403/429.
 type AdmitResponse struct {
 	Allowed             bool           `json:"allowed"`
 	BlockedBy           string         `json:"blocked_by,omitempty"`
-	BlockedUnit         string         `json:"blocked_unit,omitempty"`
 	DenyCode            string         `json:"deny_code,omitempty"`
 	Currency            string         `json:"currency,omitempty"`
 	EstimatedAmount     int64          `json:"estimated_amount,omitempty"`
 	PolicyCurrency      string         `json:"policy_currency,omitempty"`
 	PolicyAmount        int64          `json:"policy_amount,omitempty"`
+	StartCapacityAmount int64          `json:"start_capacity_amount,omitempty"`
 	RetryAfterSeconds   int64          `json:"retry_after_seconds,omitempty"`
-	Windows             []AdmitWindow  `json:"windows,omitempty"`
 	HoldExpiresAt       *time.Time     `json:"hold_expires_at,omitempty"`
 	BudgetReservationID string         `json:"budget_reservation_id,omitempty"`
 	BudgetWindows       []BudgetWindow `json:"budget_windows,omitempty"`
-	// ResolvedTier is the tier the verdict was evaluated under (#477): explicit
-	// req.Tier, else the auto-graduated tier (#476), else the lowest default. The
-	// host reads it back to drive its own per-tier capacity decisions (e.g.
-	// tensorhub's scheduler in-flight concurrency cap) without a second round-trip.
-	ResolvedTier string `json:"resolved_tier,omitempty"`
-	// MaxConcurrentHeldAmount is the resolved tier's cap on the sum of the payer's
-	// active (un-settled) hold $ (#487; 0 = uncapped); HeldAmount is the active-hold
-	// $ sum as evaluated for this verdict (includes the hold just placed on an
-	// allow). A host that enforces true occupancy itself reads these to queue
-	// against cap + per-job estimate instead of taking the hard deny. An estimate
-	// above MaxSingleChargeAmount is denied DenyCode="single_charge_cap_exceeded".
-	MaxConcurrentHeldAmount int64 `json:"max_concurrent_held_amount,omitempty"`
-	HeldAmount              int64 `json:"held_amount,omitempty"`
-	MaxSingleChargeAmount   int64 `json:"max_single_charge_amount,omitempty"`
 }
 
 // CaptureUsage carries the analytics dimensions recorded alongside a capture so
@@ -395,9 +354,7 @@ type CaptureUsage struct {
 
 // BalanceResponse is the GET /v1/service/credits/balance snapshot (handler
 // serviceBalanceResponse). NOTE: the wire field for the owed amount is
-// outstanding_owed_amount — go-client's BalanceResponse decoded
-// "outstanding_owed_amount"/"remaining_today_amount", which this endpoint never
-// sends; fixed here to the handler contract.
+// outstanding_owed_amount.
 type BalanceResponse struct {
 	Currency              string `json:"currency"`
 	BillingMode           string `json:"billing_mode"`
@@ -479,44 +436,14 @@ type BudgetWindow struct {
 	Allowed bool      `json:"allowed"`
 }
 
-// TierThroughputWindow is one tier throughput limit: at most Max units of Unit
-// per WindowSeconds (pkg/service.TierWindowInput on the wire).
-type TierThroughputWindow struct {
-	Unit          string `json:"unit"`
-	WindowSeconds int64  `json:"window_seconds"`
-	Max           int64  `json:"max"`
-}
-
-// TierQueueLimit is one batch/queue reservation-pool cap (#472 G2 / #477): at
-// most Max units of Unit in-flight per (payer, endpoint-release). No time
-// window — held while the job is pending, freed at settlement
-// (pkg/service.TierQueueLimitInput on the wire).
-type TierQueueLimit struct {
-	Unit string `json:"unit"`
-	Max  int64  `json:"max"`
-}
-
 // TierPolicyInput configures a per-payer tier policy via
-// PUT /v1/service/tier-policies (#298): throughput windows + entitled
-// resources + fixed money-budget windows + flex/batch queue limits
-// (pkg/service.TierPolicyInput on the wire; customer_id travels alongside
-// it).
+// PUT /v1/service/tier-policies (#298): fixed money-budget windows and wasted
+// spend grace windows (pkg/service.TierPolicyInput on the wire; customer_id
+// travels alongside it).
 type TierPolicyInput struct {
-	Tier              string                 `json:"tier"`
-	Windows           []TierThroughputWindow `json:"windows"`
-	EntitledResources []string               `json:"entitled_resources"`
-	BudgetWindows     []BudgetWindowInput    `json:"budget_windows"`
-	PolicyCurrency    string                 `json:"policy_currency,omitempty"`
-	// QueueLimits are the batch/flex reservation-pool caps (#472 G2 / #477): the
-	// per-tier in-flight queue ceiling OpenRails enforces at admit (BlockedBy=
-	// "queue" on overflow). Empty = no queue cap for this tier.
-	QueueLimits []TierQueueLimit `json:"queue_limits,omitempty"`
-	// MaxConcurrentHeldAmount / MaxSingleChargeAmount are the #487 generic
-	// $-denominated per-tier admit limits (0 = uncapped): a cap on the payer's
-	// active (un-settled) hold $ sum (surfaced + enforced at admit), and a
-	// per-charge ceiling (an over-limit estimate is rejected at admit).
-	MaxConcurrentHeldAmount int64 `json:"max_concurrent_held_amount,omitempty"`
-	MaxSingleChargeAmount   int64 `json:"max_single_charge_amount,omitempty"`
+	Tier           string              `json:"tier"`
+	BudgetWindows  []BudgetWindowInput `json:"budget_windows"`
+	PolicyCurrency string              `json:"policy_currency,omitempty"`
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
 	// windows for this tier: at most Limit of host-reported wasted spend is
 	// forgiven per window; direct-payer overage is charged.
@@ -590,14 +517,15 @@ type BudgetScopeWindow struct {
 
 // SubjectBudgetPolicyInput configures a SUBJECT-owned hierarchical budget-scope
 // policy via PUT /v1/service/budget-policies/subject (#473). Scope is
-// "subject" (the subject's self cap) or "role" (a (subject, role) pool); RoleID
-// is the role uuid when scope=role, empty otherwise. The owner is fixed to
-// "subject" server-side (pkg/service.BudgetScopePolicyInput on the wire;
-// customer_id travels alongside it).
+// "subject" (self cap), "role" (a (subject, role) pool), "invoker" (a
+// (subject, invoker) grant), or "invoker_tier" (a shared tier grant). ScopeKey
+// is the role uuid, invoker string, or tier key. RoleID is kept as a
+// role-compatible alias for older role callers.
 type SubjectBudgetPolicyInput struct {
-	Scope   string              `json:"scope"`
-	RoleID  string              `json:"role_id,omitempty"`
-	Windows []BudgetScopeWindow `json:"windows"`
+	Scope    string              `json:"scope"`
+	ScopeKey string              `json:"scope_key,omitempty"`
+	RoleID   string              `json:"role_id,omitempty"`
+	Windows  []BudgetScopeWindow `json:"windows"`
 }
 
 // PlatformBudgetPolicyInput configures a PLATFORM-owned budget cap via
@@ -611,9 +539,10 @@ type PlatformBudgetPolicyInput struct {
 // SubjectBudgetPolicy is one subject-owned budget-scope policy returned by
 // SubjectBudgetPolicies (#473) — the read-back shape for host reconciliation.
 type SubjectBudgetPolicy struct {
-	Scope   string              `json:"scope"`
-	RoleID  string              `json:"role_id,omitempty"`
-	Windows []BudgetScopeWindow `json:"windows"`
+	Scope    string              `json:"scope"`
+	ScopeKey string              `json:"scope_key,omitempty"`
+	RoleID   string              `json:"role_id,omitempty"`
+	Windows  []BudgetScopeWindow `json:"windows"`
 }
 
 // ResourceRevenueDailyRow is one day's revenue for a resource.

@@ -1,8 +1,6 @@
-// Package ratelimit is OpenRails' own fixed-window + (later) concurrency rate
-// limiter for customer API throughput (issue #298). It is the THROUGHPUT axis of
-// admission control: RPM/RPD/TPM/TPD per endpoint(=model) over arbitrary unit
-// types (request/token/image/gpu-second). The MONEY axis stays on the credit
-// ledger; this package never touches Postgres.
+// Package ratelimit is a generic Redis-backed fixed-window limiter primitive.
+// Service admit no longer uses it for request/token/image throughput; retained
+// callers use it explicitly for non-money rate-limit use cases.
 //
 // Built natively (the user's cozy-creator/ratelimiter is a reference only, not
 // imported). Counters live in Redis/Garnet. The check+increment across all

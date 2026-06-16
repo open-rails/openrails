@@ -110,6 +110,9 @@ func (s *StripeService) CollectInvoice(ctx context.Context, params StripeInvoice
 		return nil, err
 	}
 	if strings.EqualFold(invoice.Status, "paid") {
+		if invoice.AmountPaid < params.AmountCents {
+			return nil, fmt.Errorf("stripe invoice %s paid only %d of %d", invoice.ID, invoice.AmountPaid, params.AmountCents)
+		}
 		return invoice.result(), nil
 	}
 
@@ -123,6 +126,9 @@ func (s *StripeService) CollectInvoice(ctx context.Context, params StripeInvoice
 	}
 	if !strings.EqualFold(invoice.Status, "paid") {
 		return nil, fmt.Errorf("stripe invoice %s not paid after collection attempt: status=%s", invoice.ID, invoice.Status)
+	}
+	if invoice.AmountPaid < params.AmountCents {
+		return nil, fmt.Errorf("stripe invoice %s paid only %d of %d", invoice.ID, invoice.AmountPaid, params.AmountCents)
 	}
 	return invoice.result(), nil
 }
@@ -164,6 +170,7 @@ func (p StripeInvoiceCollectionParams) invoiceValues() url.Values {
 	values.Set("collection_method", "charge_automatically")
 	values.Set("default_payment_method", strings.TrimSpace(p.PaymentMethodID))
 	values.Set("auto_advance", "false")
+	values.Set("pending_invoice_items_behavior", "include")
 	addStripeCollectionMetadata(values, p)
 	return values
 }
@@ -234,6 +241,7 @@ func parseStripeAPIError(statusCode int, body []byte) error {
 type stripeCollectionInvoice struct {
 	ID            string `json:"id"`
 	Status        string `json:"status"`
+	AmountPaid    int64  `json:"amount_paid"`
 	PaymentIntent string `json:"payment_intent"`
 	Charge        string `json:"charge"`
 }
@@ -246,6 +254,7 @@ func parseStripeCollectionInvoice(body []byte) (stripeCollectionInvoice, error) 
 	out := stripeCollectionInvoice{}
 	out.ID = rawString(raw["id"])
 	out.Status = rawString(raw["status"])
+	out.AmountPaid = rawInt64(raw["amount_paid"])
 	out.PaymentIntent = rawID(raw["payment_intent"])
 	out.Charge = rawID(raw["charge"])
 	if out.Charge == "" {
@@ -280,6 +289,18 @@ func rawString(raw json.RawMessage) string {
 		return ""
 	}
 	return strings.TrimSpace(s)
+}
+
+func rawInt64(raw json.RawMessage) int64 {
+	var n int64
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return n
+	}
+	var f float64
+	if err := json.Unmarshal(raw, &f); err == nil {
+		return int64(f)
+	}
+	return 0
 }
 
 func (i stripeCollectionInvoice) result() *StripeInvoiceCollectionResult {

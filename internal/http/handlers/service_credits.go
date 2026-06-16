@@ -119,7 +119,7 @@ type serviceAuthorizeRequest struct {
 	ExpiresAt       *int64 `json:"expires_at"`
 }
 
-// serviceAuthorizeResponse mirrors the unified authorize contract: the policy
+// serviceAuthorizeResponse mirrors the unified authorize contract: the capacity
 // decision plus the payer's real available/outstanding capacity snapshot.
 type serviceAuthorizeResponse struct {
 	Allowed               bool   `json:"allowed"`
@@ -128,8 +128,6 @@ type serviceAuthorizeResponse struct {
 	Currency              string `json:"currency"`
 	AvailableAmount       int64  `json:"available_amount"`
 	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
-	RemainingTodayAmount  *int64 `json:"remaining_today_amount,omitempty"`
-	RetryAfterSeconds     int64  `json:"retry_after_seconds,omitempty"`
 	HoldExpiresAt         *int64 `json:"hold_expires_at,omitempty"`
 }
 
@@ -141,10 +139,9 @@ func unixPtr(t *time.Time) *int64 {
 	return &v
 }
 
-// ServiceAuthorizeCredits is the service token-authed policy-decision + ATOMIC hold
-// placement (issue #235/#247). The decision (CheckSpendAllowed + prepaid
-// available-balance gate) and the hold are run in ONE transaction so two
-// concurrent authorizes cannot both pass on the same balance.
+// ServiceAuthorizeCredits is the service token-authed capacity decision + ATOMIC
+// hold placement (issue #235/#247). Account capacity and Redis active holds are
+// checked before a request is admitted.
 //
 // TENANT-SUBJECT AUTHORIZATION (issue #246): the acting TENANT is bound by the service token
 // (middleware.ServiceTokenRequired pinned it onto the context; RegisterServiceRoutes then
@@ -213,8 +210,6 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 		Currency:              out.Currency,
 		AvailableAmount:       out.AvailableAmount,
 		OutstandingOwedAmount: out.OutstandingOwedAmount,
-		RemainingTodayAmount:  out.RemainingTodayAmount,
-		RetryAfterSeconds:     out.RetryAfterSeconds,
 		HoldExpiresAt:         unixPtr(out.HoldExpiresAt),
 	})
 }

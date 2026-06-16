@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,28 +17,23 @@ import (
 type serviceAdmitRequest struct {
 	CustomerID string `json:"customer_id"`
 	// Invoker is the end-user attribution/abuse label (#491).
-	Invoker         string                           `json:"invoker"`
-	InvokerType     string                           `json:"invoker_type"`
-	Tier            string                           `json:"tier"`
-	Resource        string                           `json:"resource"`
-	Amounts         map[string]int64                 `json:"amounts"`
-	Currency        string                           `json:"currency"`
-	EstimatedAmount int64                            `json:"estimated_amount"`
-	RequestID       string                           `json:"request_id"`
-	Source          string                           `json:"source"`
-	ExpiresAt       *int64                           `json:"expires_at"`
-	BlockChecks     []billingservice.AdmitBlockCheck `json:"block_checks"`
+	Invoker         string `json:"invoker"`
+	InvokerType     string `json:"invoker_type"`
+	Tier            string `json:"tier"`
+	Resource        string `json:"resource"`
+	Currency        string `json:"currency"`
+	EstimatedAmount int64  `json:"estimated_amount"`
+	RequestID       string `json:"request_id"`
+	Source          string `json:"source"`
+	ExpiresAt       *int64 `json:"expires_at"`
 	// Roles are the invoker's immutable role UUIDs (#473) — each (subject, role)
 	// budget-scope policy gates this request's spend.
 	Roles []uuid.UUID `json:"roles"`
-	// #404: per-tenant fixed-window throughput the host wants OpenRails to enforce.
-	TenantThroughput []billingservice.AdmitThroughputWindow `json:"tenant_throughput"`
 }
 
-// ServiceAdmit is the unified admission endpoint (issue #298): throughput +
-// money + suspension + blocklist + endpoint gating in one decision. It emits
-// x-ratelimit-* headers and returns 429 + Retry-After on a throughput breach,
-// 402 on a money deny, 403 on suspended/blocked/endpoint, 200 when allowed.
+// ServiceAdmit checks delegated spend, wasted-spend, and money capacity in one
+// decision. Endpoint/resource authorization stays with the host before billing
+// admission.
 func ServiceAdmit(r *httprequest.Request) {
 	var req serviceAdmitRequest
 	if !r.BindJSON(&req) {
@@ -77,26 +71,16 @@ func ServiceAdmit(r *httprequest.Request) {
 		return
 	}
 
-	// x-ratelimit-* headers (per unit window).
-	for _, w := range res.Windows {
-		r.SetHeader("X-RateLimit-Limit-"+w.Unit, strconv.FormatInt(w.Limit, 10))
-		r.SetHeader("X-RateLimit-Remaining-"+w.Unit, strconv.FormatInt(w.Remaining, 10))
-		r.SetHeader("X-RateLimit-Reset-"+w.Unit, strconv.FormatInt(w.ResetAfterSeconds, 10))
-	}
-
 	if res.Allowed {
 		r.JSON(http.StatusOK, res)
 		return
 	}
 	switch res.BlockedBy {
-	case "throughput", "abuse":
-		if res.RetryAfterSeconds > 0 {
-			r.SetHeader("Retry-After", strconv.FormatInt(res.RetryAfterSeconds, 10))
-		}
+	case "abuse":
 		r.JSON(http.StatusTooManyRequests, res)
 	case "money":
 		r.JSON(http.StatusPaymentRequired, res)
-	default: // suspended, blocked, endpoint
+	default:
 		r.JSON(http.StatusForbidden, res)
 	}
 }
@@ -105,19 +89,16 @@ func ServiceAdmit(r *httprequest.Request) {
 // shared by the single /admit route and each /admit/batch item.
 func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.CustomerID) billingservice.AdmitInput {
 	in := billingservice.AdmitInput{
-		CustomerID:       payer,
-		Invoker:          strings.TrimSpace(req.Invoker),
-		InvokerType:      req.InvokerType,
-		Tier:             req.Tier,
-		Resource:         req.Resource,
-		Amounts:          req.Amounts,
-		Currency:         req.Currency,
-		EstimatedAmount:  req.EstimatedAmount,
-		Source:           req.Source,
-		SourceID:         req.RequestID,
-		Roles:            req.Roles,
-		BlockChecks:      req.BlockChecks,
-		TenantThroughput: req.TenantThroughput,
+		CustomerID:      payer,
+		Invoker:         strings.TrimSpace(req.Invoker),
+		InvokerType:     req.InvokerType,
+		Tier:            req.Tier,
+		Resource:        req.Resource,
+		Currency:        req.Currency,
+		EstimatedAmount: req.EstimatedAmount,
+		Source:          req.Source,
+		SourceID:        req.RequestID,
+		Roles:           req.Roles,
 	}
 	if req.ExpiresAt != nil {
 		in.ExpiresAtUnix = *req.ExpiresAt
@@ -132,11 +113,11 @@ func admitVerdictStatus(res *billingservice.AdmitResult) int {
 		return http.StatusOK
 	}
 	switch res.BlockedBy {
-	case "throughput", "abuse":
+	case "abuse":
 		return http.StatusTooManyRequests
 	case "money":
 		return http.StatusPaymentRequired
-	default: // suspended, blocked, unverified, endpoint
+	default:
 		return http.StatusForbidden
 	}
 }
@@ -159,10 +140,8 @@ type serviceAdmitVerdict struct {
 // never fails the others. allows gates each item's payer against the service
 // token's tenant-subject scope; admit is the (injected) single-admit core.
 //
-// Follow-up (#335): each item currently runs the full single-admit path
-// (suspension/settings/balance queries per item). An obvious optimization is
-// batching the shared reads (suspension + settings per distinct payer, one
-// Redis pipeline for throughput) inside one transaction — deferred for v1.
+// Follow-up (#335): each item currently runs the full single-admit path. An
+// obvious optimization is batching shared payer reads inside one transaction.
 func serviceAdmitBatchVerdicts(
 	ctx context.Context,
 	items []serviceAdmitRequest,
@@ -508,8 +487,7 @@ type serviceTierPolicyRequest struct {
 	billingservice.TierPolicyInput
 }
 
-// ServiceSetTierPolicy upserts a tier policy (#298 tier admin API): throughput
-// windows + entitled endpoints + queue limits + fixed money-budget windows. An
+// ServiceSetTierPolicy upserts a tier money policy (#298 tier admin API). An
 // EMPTY customer_id sets the tenant-wide DEFAULT policy for the tier (#477,
 // the platform capacity ladder declared once); a non-empty one sets a
 // per-subject override (scope-checked).
@@ -657,14 +635,17 @@ func budgetScopeWindowInputs(ws []budgetScopeWindow) []billingservice.BudgetScop
 type serviceSubjectBudgetPolicyRequest struct {
 	CustomerID string              `json:"customer_id"`
 	Scope      string              `json:"scope"`
+	ScopeKey   string              `json:"scope_key"`
 	RoleID     string              `json:"role_id"`
 	Windows    []budgetScopeWindow `json:"windows"`
 }
 
 // ServiceSetSubjectBudgetPolicy upserts a SUBJECT-owned hierarchical
-// budget-scope policy (#473): a self cap (scope=subject) or a (subject, role)
-// pool (scope=role; role_id is the role uuid). The owner is forced to "subject"
-// by the service facade. Operator service token, credits:write.
+// budget-scope policy (#473): a self cap (scope=subject), a role pool
+// (scope=role; scope_key/role_id is the role uuid), an invoker grant
+// (scope=invoker; scope_key is the invoker string), or an invoker-tier grant
+// (scope=invoker_tier; scope_key is the tier key). The owner is forced to
+// "subject" by the service facade. Operator service token, credits:write.
 func ServiceSetSubjectBudgetPolicy(r *httprequest.Request) {
 	var req serviceSubjectBudgetPolicyRequest
 	if !r.BindJSON(&req) {
@@ -683,9 +664,13 @@ func ServiceSetSubjectBudgetPolicy(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
+	scopeKey := strings.TrimSpace(req.ScopeKey)
+	if scopeKey == "" {
+		scopeKey = strings.TrimSpace(req.RoleID)
+	}
 	if err := svc.SetSubjectBudgetPolicy(r.Request.Context(), *payer, billingservice.BudgetScopePolicyInput{
 		Scope:    req.Scope,
-		ScopeKey: req.RoleID,
+		ScopeKey: scopeKey,
 		Windows:  budgetScopeWindowInputs(req.Windows),
 	}); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set subject budget policy failed")
@@ -761,7 +746,11 @@ func ServiceGetSubjectBudgetPolicies(r *httprequest.Request) {
 		for _, w := range p.Windows {
 			ws = append(ws, budgetScopeWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence})
 		}
-		out = append(out, map[string]any{"scope": p.Scope, "role_id": p.ScopeKey, "windows": ws})
+		row := map[string]any{"scope": p.Scope, "scope_key": p.ScopeKey, "windows": ws}
+		if strings.EqualFold(p.Scope, "role") {
+			row["role_id"] = p.ScopeKey
+		}
+		out = append(out, row)
 	}
 	r.SuccessJSON(map[string]any{"policies": out})
 }

@@ -20,7 +20,7 @@ import (
 func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 	allowedPayer := uuid.NewString()
 	brokePayer := uuid.NewString()
-	throttledPayer := uuid.NewString()
+	abuseLimitedPayer := uuid.NewString()
 	erroringPayer := uuid.NewString()
 	scopedOutPayer := uuid.NewString()
 
@@ -28,7 +28,7 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 		{CustomerID: allowedPayer, Invoker: "user:a", EstimatedAmount: 100, RequestID: "r1"},
 		{CustomerID: brokePayer, Invoker: "user:b", EstimatedAmount: 100, RequestID: "r2"},
 		{CustomerID: "not-a-uuid", Invoker: "user:c", RequestID: "r3"},
-		{CustomerID: throttledPayer, Invoker: "user:d", RequestID: "r4"},
+		{CustomerID: abuseLimitedPayer, Invoker: "user:d", RequestID: "r4"},
 		{CustomerID: erroringPayer, Invoker: "user:e", RequestID: "r5"},
 		{CustomerID: scopedOutPayer, Invoker: "user:f", RequestID: "r6"},
 		{CustomerID: allowedPayer, Invoker: "user:g", EstimatedAmount: -1, RequestID: "r7"},
@@ -43,8 +43,8 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 			return &billingservice.AdmitResult{Allowed: true}, nil
 		case brokePayer:
 			return &billingservice.AdmitResult{Allowed: false, BlockedBy: "money", DenyCode: "insufficient_balance"}, nil
-		case throttledPayer:
-			return &billingservice.AdmitResult{Allowed: false, BlockedBy: "throughput", RetryAfterSeconds: 7}, nil
+		case abuseLimitedPayer:
+			return &billingservice.AdmitResult{Allowed: false, BlockedBy: "abuse", RetryAfterSeconds: 7}, nil
 		default:
 			return nil, fmt.Errorf("backend exploded")
 		}
@@ -67,7 +67,7 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, out[2].Status)
 	require.Nil(t, out[2].Result)
 
-	// Item 3: throughput deny -> 429.
+	// Item 3: abuse deny -> 429.
 	require.Equal(t, http.StatusTooManyRequests, out[3].Status)
 	require.NotNil(t, out[3].Result)
 	require.Equal(t, int64(7), out[3].Result.RetryAfterSeconds)

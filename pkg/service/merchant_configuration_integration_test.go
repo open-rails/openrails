@@ -62,6 +62,8 @@ func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, i
 	payerID := payer.UUID()
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.merchant_configurations")
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_policies WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.tier_policies WHERE customer_id IS NULL OR customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payerID)
@@ -70,6 +72,17 @@ func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, i
 	_, err = ms.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000_000, Source: "seed"})
 	require.NoError(t, err)
 	return svc, ms, payer, ctx
+}
+
+func grantDelegatedSpend(t *testing.T, svc *billingservice.Service, ctx context.Context, payer identity.CustomerID, invoker string) {
+	t.Helper()
+	require.NoError(t, svc.SetSubjectBudgetPolicy(ctx, payer, billingservice.BudgetScopePolicyInput{
+		Scope:    "invoker",
+		ScopeKey: invoker,
+		Windows: []billingservice.BudgetScopeWindowInput{
+			{Key: "delegated", WindowSeconds: 3600, Limit: 100_000_000},
+		},
+	}))
 }
 
 // #499: with merchant config SMALLER than the hardcoded default
@@ -94,8 +107,8 @@ func TestMerchantConfiguration_ConfiguredDelegatedInvokerWindowDenies(t *testing
 	require.NoError(t, err)
 
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payer, Invoker: "user:configured", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
+		CustomerID: payer, Invoker: "user:configured", InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-configured",
 	})
 	require.NoError(t, err)
@@ -121,8 +134,8 @@ func TestMerchantConfiguration_EURWasteCountsAgainstUSDInvokerCutoff(t *testing.
 	require.EqualValues(t, 1_200_000, res.PolicyRecordedAmount)
 
 	admit, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payer, Invoker: "user:fx-cutoff", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
+		CustomerID: payer, Invoker: "user:fx-cutoff", InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-fx-cutoff",
 	})
 	require.NoError(t, err)
@@ -136,6 +149,7 @@ func TestMerchantConfiguration_EURWasteCountsAgainstUSDInvokerCutoff(t *testing.
 // proving the default is the fallback and the $1 config above was load-bearing.
 func TestMerchantConfiguration_UnsetFallsBackToDefault(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
+	grantDelegatedSpend(t, svc, ctx, payer, "user:default")
 
 	// No SetMerchantConfiguration call -> hardcoded $5/15m default applies.
 	_, err := svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
@@ -145,8 +159,8 @@ func TestMerchantConfiguration_UnsetFallsBackToDefault(t *testing.T) {
 	require.NoError(t, err)
 
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payer, Invoker: "user:default", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
+		CustomerID: payer, Invoker: "user:default", InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "ok-default",
 	})
 	require.NoError(t, err)
@@ -155,6 +169,7 @@ func TestMerchantConfiguration_UnsetFallsBackToDefault(t *testing.T) {
 
 func TestMerchantConfiguration_EmptyConfigFallsBackToDefault(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
+	grantDelegatedSpend(t, svc, ctx, payer, "user:empty-config")
 
 	require.NoError(t, svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{}))
 	_, err := svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
@@ -164,8 +179,8 @@ func TestMerchantConfiguration_EmptyConfigFallsBackToDefault(t *testing.T) {
 	require.NoError(t, err)
 
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payer, Invoker: "user:empty-config", Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
+		CustomerID: payer, Invoker: "user:empty-config", InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "ok-empty-config",
 	})
 	require.NoError(t, err)
@@ -198,6 +213,7 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	payerBID := payerB.UUID()
 	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
 	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.budget_policies WHERE customer_id = $1", payerBID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerBID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerBID)
 	})
@@ -211,6 +227,7 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	}))
 
 	const invoker = "user:same-delegated-id"
+	grantDelegatedSpend(t, svc, ctx, payerB, invoker)
 	_, err = svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
 		CustomerID: payerA, Invoker: invoker, Currency: money.DefaultCurrency, Amount: 2_000_000,
 		Source: "test", SourceID: "payer-a", Reason: "test",
@@ -218,16 +235,16 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	require.NoError(t, err)
 
 	resA, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payerA, Invoker: invoker, Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
+		CustomerID: payerA, Invoker: invoker, InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-payer-a",
 	})
 	require.NoError(t, err)
 	require.False(t, resA.Allowed, "payer A's invoker is over the merchant-wide $1 policy")
 
 	resB, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payerB, Invoker: invoker, Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
+		CustomerID: payerB, Invoker: invoker, InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "allowed-payer-b",
 	})
 	require.NoError(t, err)
@@ -239,8 +256,8 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	})
 	require.NoError(t, err)
 	resB, err = svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payerB, Invoker: invoker, Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
+		CustomerID: payerB, Invoker: invoker, InvokerType: string(identity.InvokerTypeDelegated), Tier: "free", Resource: "r",
+		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "blocked-payer-b",
 	})
 	require.NoError(t, err)
@@ -325,7 +342,7 @@ func TestWastedSpendDirectPayer_DoesNotHitDelegatedInvokerCutoff(t *testing.T) {
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "service-token:payer-owned", InvokerType: string(identity.InvokerTypePayer),
 		Tier: "free", Resource: "r",
-		Amounts: map[string]int64{"request": 1}, Currency: money.DefaultCurrency, EstimatedAmount: 100,
+		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "direct-admit",
 	})
 	require.NoError(t, err)

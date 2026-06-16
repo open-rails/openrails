@@ -12,9 +12,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// AuthorizeHoldInput is the input to AuthorizeAndHold: the payer (merchant subject), the
-// invoker (canonical invoker for per-invoker caps), the estimated charge, and the
-// idempotency-keyed source coordinates of the hold.
+// AuthorizeHoldInput is the input to AuthorizeAndHold: the payer, invoker
+// provenance, estimated charge, and idempotency-keyed source coordinates of the
+// hold.
 type AuthorizeHoldInput struct {
 	Payer           identity.CustomerID
 	Invoker         string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
@@ -29,8 +29,8 @@ type AuthorizeHoldInput struct {
 	ExpiresAt time.Time
 }
 
-// AuthorizeHoldResult is the money-policy decision plus the available capacity
-// snapshot. The actual in-flight hold lives in Redis, keyed by merchant +
+// AuthorizeHoldResult is the account-capacity decision plus its snapshot. The
+// actual in-flight hold lives in Redis, keyed by merchant +
 // request_id, not in money_transactions.
 type AuthorizeHoldResult struct {
 	Decision    SpendDecision
@@ -41,14 +41,14 @@ type AuthorizeHoldResult struct {
 	// was made against.
 	AvailableAmount       int64
 	OutstandingOwedAmount int64
-	// CapacityAmount is the maximum money exposure this account can start now,
-	// before subtracting active Redis holds.
-	CapacityAmount int64
+	// AccountCapacityAmount is prepaid availability plus remaining credit
+	// capacity before subtracting active Redis holds.
+	AccountCapacityAmount int64
 }
 
-// AuthorizeAndHold evaluates the spend policy + prepaid/arrears capacity gate
-// under the per-customer spend lock. It does not insert a money_transactions
-// hold row. In-flight reservations are Redis state owned by the service layer.
+// AuthorizeAndHold evaluates prepaid/arrears account capacity under the
+// per-customer spend lock. It does not insert a money_transactions hold row.
+// In-flight reservations are Redis state owned by the service layer.
 func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInput) (*AuthorizeHoldResult, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -74,8 +74,8 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 
 	var result *AuthorizeHoldResult
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		// A tx-scoped service so the policy reads (CheckSpendAllowed via Qx(ctx))
-		// and the hold placement run on THIS transaction — one atomic unit.
+		// A tx-scoped service keeps balance/settings/capacity reads on this
+		// transaction.
 		q := gen.New(tx)
 		txSvc := &MoneyService{db: s.db.NewWithPgxTx(tx), clock: s.clock}
 
@@ -99,20 +99,14 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			return serr
 		}
 
-		// Spend policy (per-invoker + org caps + outstanding ceiling).
-		dec, derr := txSvc.CheckSpendAllowed(ctx, in.Payer, cur, strings.TrimSpace(in.Invoker), in.EstimatedAmount)
-		if derr != nil {
-			return derr
-		}
+		dec := SpendDecision{Allowed: true, HardStop: true}
 
-		// Admit-time balance/credit gate. Prepaid accounts gate on available balance.
+		// Account-capacity gate. Prepaid accounts gate on available balance.
 		// Arrears accounts gate on prepaid availability plus remaining credit line:
-		// credit_limit_amount - existing owed exposure. A zero credit line means no
-		// arrears capacity; prepaid balance can still admit work. During the #506
-		// transition, outstanding_owed_amount remains the exposure cache, and open
-		// invoice amount_due is used if it is higher so paid/open invoice state can
-		// drive admission as we migrate away from the account-level counter.
-		capacity := available
+		// credit_limit_amount - invoice-derived exposure. A zero credit line means
+		// no arrears capacity; prepaid balance can still admit work.
+		accountCapacity := available
+		exposure := int64(0)
 		switch {
 		case settings.BillingMode != BillingModeArrears:
 			if in.EstimatedAmount > available {
@@ -122,28 +116,16 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 				}
 			}
 		default:
-			openDue, oerr := q.SumOpenInvoiceAmountDue(ctx, gen.SumOpenInvoiceAmountDueParams{
-				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			})
-			if oerr != nil {
-				return oerr
-			}
-			pendingDue, perr := q.SumPendingInvoiceItemAmount(ctx, gen.SumPendingInvoiceItemAmountParams{
-				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			})
-			if perr != nil {
-				return perr
-			}
-			exposure := settings.OutstandingOwedAmount
-			invoiceExposure := openDue + pendingDue
-			if invoiceExposure > exposure {
-				exposure = invoiceExposure
+			var eerr error
+			exposure, eerr = txSvc.arrearsExposureTx(ctx, q, tenantID, payerID, cur)
+			if eerr != nil {
+				return eerr
 			}
 			remainingCredit := settings.CreditLimitAmount - exposure
 			if remainingCredit < 0 {
 				remainingCredit = 0
 			}
-			capacity = available + remainingCredit
+			accountCapacity = available + remainingCredit
 			if in.EstimatedAmount > available+remainingCredit {
 				dec.Allowed = false
 				if dec.DenyCode == "" {
@@ -157,8 +139,8 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 			BillingMode:           settings.BillingMode,
 			Currency:              cur,
 			AvailableAmount:       available,
-			OutstandingOwedAmount: settings.OutstandingOwedAmount,
-			CapacityAmount:        capacity,
+			OutstandingOwedAmount: exposure,
+			AccountCapacityAmount: accountCapacity,
 		}
 		result = res
 		return nil
@@ -191,6 +173,14 @@ func (s *MoneyService) snapshotTx(ctx context.Context, payer identity.CustomerID
 	if err != nil {
 		return accountSnapshot{}, err
 	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return accountSnapshot{}, err
+	}
+	outstanding, err := s.arrearsExposureTx(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID(), cur)
+	if err != nil {
+		return accountSnapshot{}, err
+	}
 	settings, err := s.getAccountSettings(ctx, payer, cur)
 	if err != nil {
 		return accountSnapshot{}, err
@@ -198,6 +188,6 @@ func (s *MoneyService) snapshotTx(ctx context.Context, payer identity.CustomerID
 	return accountSnapshot{
 		billingMode: settings.BillingMode,
 		available:   bal.Balance - bal.HeldBalance,
-		outstanding: settings.OutstandingOwedAmount,
+		outstanding: outstanding,
 	}, nil
 }

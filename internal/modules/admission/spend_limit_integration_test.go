@@ -12,15 +12,11 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
-	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 )
 
 // === Per-tier, per-delegated-user (per-invoker) fixed-window $-spend limits at
@@ -64,21 +60,10 @@ func spendEnv(t *testing.T) (*admission.Admitter, *budgets.Service, *clockwork.F
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", payerID)
 	})
 
-	rc, err := tcredis.Run(ctx, "redis:7-alpine")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = rc.Terminate(ctx) })
-	conn, err := rc.ConnectionString(ctx)
-	require.NoError(t, err)
-	opt, err := redis.ParseURL(conn)
-	require.NoError(t, err)
-	rdb := redis.NewClient(opt)
-	t.Cleanup(func() { _ = rdb.Close() })
-	require.NoError(t, rdb.Ping(ctx).Err())
-
 	cs := money.NewMoneyService(dbi)
 	// Fund the payer well above any test's spend so the money axis never gates;
 	// the budget windows are the unit under test.
-	_, err = cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000_000_000, Source: "seed"})
+	_, err := cs.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000_000_000, Source: "seed"})
 	require.NoError(t, err)
 
 	// Fixed wall clock so window math is deterministic; advance to cross windows.
@@ -87,28 +72,31 @@ func spendEnv(t *testing.T) (*admission.Admitter, *budgets.Service, *clockwork.F
 
 	tierStore := admission.NewTierPolicyStore(dbi)
 	bpStore := admission.NewBudgetPolicyStore(dbi)
-	bl := abuse.NewBlocklistService(dbi)
-	adm := admission.NewAdmitter(ratelimit.NewLimiter(rdb), cs, tierStore, bl, bsvc).WithBudgetScopes(bpStore)
+	adm := admission.NewAdmitter(cs, tierStore, bsvc).WithBudgetScopes(bpStore)
 	return adm, bsvc, clk, tierStore, bpStore, payer, pool, ctx
 }
 
-// cozyTier1 is the cozy-art tier_1 shape: $5 per 5h (fixed) AND $35 per 7d
-// (fixed), with a generous throughput allowance so only the $ windows gate.
-func cozyTier1() models.ThroughputPolicy {
-	return models.ThroughputPolicy{
-		Windows: []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 1_000_000}},
-		BudgetWindows: []models.BudgetWindowPolicy{
-			{Key: "5h", WindowSeconds: 5 * 3600, Limit: 5 * usd, Cadence: budgets.CadenceFixed},
-			{Key: "7d", WindowSeconds: 7 * 24 * 3600, Limit: 35 * usd, Cadence: budgets.CadenceFixed},
-		},
+// cozyTier1Windows is the cozy-art tier_1 shape: $5 per 5h (fixed) AND $35 per
+// 7d (fixed), stored as explicit invoker budget-policy grants.
+func cozyTier1Windows() []models.BudgetWindowPolicy {
+	return []models.BudgetWindowPolicy{
+		{Key: "5h", WindowSeconds: 5 * 3600, Limit: 5 * usd, Cadence: budgets.CadenceFixed},
+		{Key: "7d", WindowSeconds: 7 * 24 * 3600, Limit: 35 * usd, Cadence: budgets.CadenceFixed},
 	}
 }
 
 func spendReq(payer identity.CustomerID, invoker, srcID string, amount int64) admission.AdmitRequest {
 	return admission.AdmitRequest{
 		CustomerID: payer, Currency: money.DefaultCurrency, Invoker: invoker, Tier: "tier_1", Resource: "gpt-4o",
-		Amounts: map[string]int64{"request": 1}, EstimatedAmount: amount,
-		Source: "gen", SourceID: srcID, ExpiresAt: time.Now().Add(time.Hour),
+		EstimatedAmount: amount,
+		Source:          "gen", SourceID: srcID, ExpiresAt: time.Now().Add(time.Hour),
+	}
+}
+
+func grantTier1(t *testing.T, ctx context.Context, store *admission.BudgetPolicyStore, payer identity.CustomerID, invokers ...string) {
+	t.Helper()
+	for _, invoker := range invokers {
+		grantInvokerBudget(t, ctx, store, payer, invoker, cozyTier1Windows())
 	}
 }
 
@@ -128,8 +116,11 @@ func windowByKey(d admission.AdmitDecision, key string) (budgets.WindowStatus, b
 // does NOT block invoker B. This is the core per-invoker abuse-attribution
 // guarantee (#491) exercised through admission with the cozy-art tier.
 func TestSpend_PerInvokerIsolation_5hCap(t *testing.T) {
-	adm, _, _, tier, _, payer, _, ctx := spendEnv(t)
-	require.NoError(t, tier.UpsertTierPolicyFull(ctx, payer, "tier_1", cozyTier1()))
+	adm, _, _, _, bpStore, payer, _, ctx := spendEnv(t)
+	grantTier1(t, ctx, bpStore, payer,
+		"du-019759a1-0aa1-7c31-8f01-000000000a01",
+		"du-019759a1-0aa1-7c31-8f01-000000000b02",
+	)
 
 	// Invoker A spends its full $5 / 5h.
 	d, err := adm.Admit(ctx, spendReq(payer, "du-019759a1-0aa1-7c31-8f01-000000000a01", "a1", 5*usd))
@@ -157,8 +148,8 @@ func TestSpend_PerInvokerIsolation_5hCap(t *testing.T) {
 // and confirm admit allows again. Fixed cadence: the window boundary ticks at
 // anchor+k*5h (NOT "now"), so the post-reset ResetAt is anchor+2*5h.
 func TestSpend_FixedCadenceReset_ThroughAdmit(t *testing.T) {
-	adm, _, clk, tier, _, payer, _, ctx := spendEnv(t)
-	require.NoError(t, tier.UpsertTierPolicyFull(ctx, payer, "tier_1", cozyTier1()))
+	adm, _, clk, _, bpStore, payer, _, ctx := spendEnv(t)
+	grantTier1(t, ctx, bpStore, payer, "du-019759a1-0aa1-7c31-8f01-000000000a01")
 	t0 := clk.Now().UTC()
 
 	// Fill A's $5/5h window at t0 (opens [t0, t0+5h) on the fixed anchor).
@@ -196,8 +187,8 @@ func TestSpend_FixedCadenceReset_ThroughAdmit(t *testing.T) {
 // would breach the weekly $35 the 7d window binds instead. Each window's ResetAt
 // is reported on the correct boundary.
 func TestSpend_MultiWindow_TighterBinds_ThroughAdmit(t *testing.T) {
-	adm, _, clk, tier, _, payer, _, ctx := spendEnv(t)
-	require.NoError(t, tier.UpsertTierPolicyFull(ctx, payer, "tier_1", cozyTier1()))
+	adm, _, clk, _, bpStore, payer, _, ctx := spendEnv(t)
+	grantTier1(t, ctx, bpStore, payer, "du-019759a1-0aa1-7c31-8f01-000000000a01")
 	t0 := clk.Now().UTC()
 
 	// Spend $5 every 5h. After 7 such windows the invoker has spent $35 — the
@@ -242,8 +233,8 @@ func TestSpend_MultiWindow_TighterBinds_ThroughAdmit(t *testing.T) {
 // would have exhausted the window, settled below estimate, leaves room for a
 // follow-up that the full estimate would have blocked.
 func TestSpend_SettleAccounting_CaptureUnderEstimate(t *testing.T) {
-	adm, bsvc, _, tier, _, payer, _, ctx := spendEnv(t)
-	require.NoError(t, tier.UpsertTierPolicyFull(ctx, payer, "tier_1", cozyTier1()))
+	adm, bsvc, _, _, bpStore, payer, _, ctx := spendEnv(t)
+	grantTier1(t, ctx, bpStore, payer, "du-019759a1-0aa1-7c31-8f01-000000000a01")
 
 	// Reserve the full $5/5h via an admit (estimate $5).
 	d, err := adm.Admit(ctx, spendReq(payer, "du-019759a1-0aa1-7c31-8f01-000000000a01", "s1", 5*usd))
@@ -279,8 +270,8 @@ func TestSpend_SettleAccounting_CaptureUnderEstimate(t *testing.T) {
 // TestSpend_SettleAccounting_ReleaseFrees: a Release frees the whole
 // reservation back into the window (failed/aborted request path).
 func TestSpend_SettleAccounting_ReleaseFrees(t *testing.T) {
-	adm, bsvc, _, tier, _, payer, _, ctx := spendEnv(t)
-	require.NoError(t, tier.UpsertTierPolicyFull(ctx, payer, "tier_1", cozyTier1()))
+	adm, bsvc, _, _, bpStore, payer, _, ctx := spendEnv(t)
+	grantTier1(t, ctx, bpStore, payer, "du-019759a1-0aa1-7c31-8f01-000000000a01")
 
 	d, err := adm.Admit(ctx, spendReq(payer, "du-019759a1-0aa1-7c31-8f01-000000000a01", "r1", 5*usd))
 	require.NoError(t, err)
@@ -305,8 +296,8 @@ func TestSpend_SettleAccounting_ReleaseFrees(t *testing.T) {
 // TestSpend_DenyShape: a budget deny carries BlockedBy="budget", a positive
 // RetryAfter, and a populated per-window ResetAt on the breached window.
 func TestSpend_DenyShape(t *testing.T) {
-	adm, _, clk, tier, _, payer, _, ctx := spendEnv(t)
-	require.NoError(t, tier.UpsertTierPolicyFull(ctx, payer, "tier_1", cozyTier1()))
+	adm, _, clk, _, bpStore, payer, _, ctx := spendEnv(t)
+	grantTier1(t, ctx, bpStore, payer, "du-019759a1-0aa1-7c31-8f01-000000000a01")
 	t0 := clk.Now().UTC()
 
 	d, err := adm.Admit(ctx, spendReq(payer, "du-019759a1-0aa1-7c31-8f01-000000000a01", "d1", 5*usd))
@@ -328,7 +319,7 @@ func TestSpend_DenyShape(t *testing.T) {
 
 // --- helpers shared by the settle tests ---
 
-// tier1Windows mirrors cozyTier1's budget windows as budgets.BudgetWindow for
+// tier1Windows mirrors cozyTier1Windows as budgets.BudgetWindow for
 // direct Check() introspection (the engine API takes BudgetWindow, not policy).
 func tier1Windows() []budgets.BudgetWindow {
 	return []budgets.BudgetWindow{

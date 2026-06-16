@@ -4,7 +4,7 @@
 // now run against TWO REAL servers over REAL HTTP (no stubs).
 //
 // The reusable integrationharness boots both surfaces over the same migrated
-// dbtest Postgres (+ a shared Redis testcontainer for admission throughput):
+// dbtest Postgres:
 //
 //   - Server 1, EMBEDDED no-auth HOST (≈ doujins minus auth): embed.New +
 //     the real embedded /v1/service/* surface on httptest, behind the REAL
@@ -168,12 +168,10 @@ func observeBudgetPolicies(ps []openrails.SubjectBudgetPolicy) []obsBudgetPolicy
 type obsAdmit struct {
 	Allowed              bool
 	BlockedBy            string
-	BlockedUnit          string
 	DenyCode             string
 	HasRetry             bool
 	HasReservation       bool
 	HasBudgetReservation bool
-	Windows              []obsWindow
 	Budget               []obsBudget
 }
 
@@ -181,15 +179,11 @@ func observeAdmit(res *openrails.AdmitResponse) obsAdmit {
 	o := obsAdmit{
 		Allowed:              res.Allowed,
 		BlockedBy:            res.BlockedBy,
-		BlockedUnit:          res.BlockedUnit,
 		DenyCode:             res.DenyCode,
 		HasRetry:             res.RetryAfterSeconds > 0,
 		HasReservation:       res.HoldExpiresAt != nil,
 		HasBudgetReservation: res.BudgetReservationID != "",
 		Budget:               observeBudgets(res.BudgetWindows),
-	}
-	for _, w := range res.Windows {
-		o.Windows = append(o.Windows, obsWindow{Unit: w.Unit, Limit: w.Limit, Remaining: w.Remaining})
 	}
 	return o
 }
@@ -216,7 +210,8 @@ type scriptResult struct {
 
 	Admit1 obsAdmit // allowed (hold + budget reservation)
 	Admit2 obsAdmit // denied: budget exhausted
-	Admit3 obsAdmit // denied: throughput window
+	Admit3 obsAdmit // allowed: budget still has room
+	Admit4 obsAdmit // denied: budget window exhausted
 
 	BudgetCheck  []obsBudget
 	BudgetStatus []obsBudget
@@ -423,16 +418,26 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.NoError(t, err, "%s withdraw", env.side)
 	r.Withdraw = observeTxn(t, env.side+" withdraw", wd)
 
-	// 4) Tier policy: 2 requests/60s throughput + a 10,000-unit fixed
-	// hourly money window (#337 cadence on the wire).
+	// 4) Explicit delegated-spend grant: a 10,000-unit fixed hourly money
+	// window (#337 cadence on the wire). The tier policy below remains only as a
+	// legacy BudgetStatus fixture; service admit reads the explicit role budget
+	// policy.
+	roleID := uuid.New().String()
+	roleUUID, err := uuid.Parse(roleID)
+	require.NoError(t, err, "%s parse role id", env.side)
 	require.NoError(t, c.SetTierPolicy(ctx, payerID, openrails.TierPolicyInput{
-		Tier:              "conf",
-		Windows:           []openrails.TierThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 2}},
-		EntitledResources: []string{},
+		Tier: "conf",
 		BudgetWindows: []openrails.BudgetWindowInput{
 			{Key: "hourly", WindowSeconds: 3600, Limit: 10_000, Cadence: "fixed"},
 		},
 	}), "%s set-tier-policy", env.side)
+	require.NoError(t, c.SetSubjectBudgetPolicy(ctx, payerID, openrails.SubjectBudgetPolicyInput{
+		Scope:  "role",
+		RoleID: roleID,
+		Windows: []openrails.BudgetScopeWindow{
+			{Key: "hourly", WindowSeconds: 3600, Limit: 10_000, Cadence: "fixed"},
+		},
+	}), "%s set-subject-budget-policy (admit role)", env.side)
 
 	// 5) Admit #1: estimated amount 5,000 -> allowed (budgets and ledger are
 	// both in the currency's internal precision, 1:1 — the old /10 was the pre-#337 millicent
@@ -440,13 +445,14 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	a1, err := c.Admit(ctx, openrails.AdmitRequest{
 		CustomerID:      payerID,
 		Invoker:         env.invoker,
+		InvokerType:     openrails.InvokerTypeDelegated,
 		Tier:            "conf",
 		Resource:        env.resource,
-		Amounts:         map[string]int64{"request": 1},
 		Currency:        env.currency,
 		EstimatedAmount: 5_000,
 		RequestID:       env.side + "-admit-1",
 		Source:          "admit",
+		Roles:           []uuid.UUID{roleUUID},
 	})
 	require.NoError(t, err, "%s admit#1", env.side)
 	r.Admit1 = observeAdmit(a1)
@@ -464,38 +470,58 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	a2, err := c.Admit(ctx, openrails.AdmitRequest{
 		CustomerID:      payerID,
 		Invoker:         env.invoker,
+		InvokerType:     openrails.InvokerTypeDelegated,
 		Tier:            "conf",
 		Resource:        env.resource,
-		Amounts:         map[string]int64{"request": 1},
 		Currency:        env.currency,
 		EstimatedAmount: 6_000,
 		RequestID:       env.side + "-admit-2",
 		Source:          "admit",
+		Roles:           []uuid.UUID{roleUUID},
 	})
 	require.NoError(t, err, "%s admit#2 (deny must be a verdict, not an error)", env.side)
 	r.Admit2 = observeAdmit(a2)
 	require.False(t, a2.Allowed, "%s admit#2 must be denied", env.side)
 	require.Equal(t, "budget", a2.BlockedBy, "%s admit#2 blocked_by", env.side)
 
-	// 8) Admit #3: small estimate, but the 2-requests/60s throughput window is
-	// already consumed by #1+#2 -> denied on the throughput axis (HTTP 429 on
-	// the remote transport; still a verdict).
+	// 8) Admit #3: estimate 5,000 fits the remaining hourly budget (5,000
+	// already captured of 10,000).
 	a3, err := c.Admit(ctx, openrails.AdmitRequest{
 		CustomerID:      payerID,
 		Invoker:         env.invoker,
+		InvokerType:     openrails.InvokerTypeDelegated,
 		Tier:            "conf",
 		Resource:        env.resource,
-		Amounts:         map[string]int64{"request": 1},
 		Currency:        env.currency,
-		EstimatedAmount: 100,
+		EstimatedAmount: 5_000,
 		RequestID:       env.side + "-admit-3",
 		Source:          "admit",
+		Roles:           []uuid.UUID{roleUUID},
 	})
-	require.NoError(t, err, "%s admit#3 (deny must be a verdict, not an error)", env.side)
+	require.NoError(t, err, "%s admit#3", env.side)
 	r.Admit3 = observeAdmit(a3)
-	require.Equal(t, "throughput", a3.BlockedBy, "%s admit#3 blocked_by", env.side)
+	require.True(t, a3.Allowed, "%s admit#3 must be allowed", env.side)
 
-	// 9) Budget check against caller-supplied windows: fixed + session cadence
+	// 9) Admit #4: the in-flight 5,000 reservation plus captured 5,000 exhausts
+	// the hourly budget, so even 1 more unit is denied on budget.
+	a4, err := c.Admit(ctx, openrails.AdmitRequest{
+		CustomerID:      payerID,
+		Invoker:         env.invoker,
+		InvokerType:     openrails.InvokerTypeDelegated,
+		Tier:            "conf",
+		Resource:        env.resource,
+		Currency:        env.currency,
+		EstimatedAmount: 1,
+		RequestID:       env.side + "-admit-4",
+		Source:          "admit",
+		Roles:           []uuid.UUID{roleUUID},
+	})
+	require.NoError(t, err, "%s admit#4 (deny must be a verdict, not an error)", env.side)
+	r.Admit4 = observeAdmit(a4)
+	require.False(t, a4.Allowed, "%s admit#4 must be denied", env.side)
+	require.Equal(t, "budget", a4.BlockedBy, "%s admit#4 blocked_by", env.side)
+
+	// 10) Budget check against caller-supplied windows: fixed + session cadence
 	// round-trip (#337).
 	bw, err := c.BudgetCheck(ctx, payerID, env.invoker, env.currency, []openrails.BudgetWindowInput{
 		{Key: "hourly", WindowSeconds: 3600, Limit: 10_000, Cadence: "fixed"},
@@ -697,10 +723,10 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// 18) Cross-payer batch admission (#335): allowed + money-denied + bad payer + negative estimate — per-item
 	// isolation, the batch call itself succeeds.
 	verdicts, err := c.AdmitBatch(ctx, []openrails.AdmitRequest{
-		{CustomerID: payerID, Invoker: env.invoker, Currency: env.currency, EstimatedAmount: 1_000, RequestID: env.side + "-batch-1", Source: "admit"},
-		{CustomerID: payerID, Invoker: env.invoker, Currency: env.currency, EstimatedAmount: 10_000_000_000, RequestID: env.side + "-batch-2"},
-		{CustomerID: "not-a-uuid", Invoker: env.invoker, Currency: env.currency, EstimatedAmount: 1, RequestID: env.side + "-batch-3"},
-		{CustomerID: payerID, Invoker: env.invoker, Currency: env.currency, EstimatedAmount: -1, RequestID: env.side + "-batch-4"},
+		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 1_000, RequestID: env.side + "-batch-1", Source: "admit"},
+		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 10_000_000_000, RequestID: env.side + "-batch-2"},
+		{CustomerID: "not-a-uuid", Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 1, RequestID: env.side + "-batch-3"},
+		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: -1, RequestID: env.side + "-batch-4"},
 	})
 	require.NoError(t, err, "%s admit-batch", env.side)
 	require.Len(t, verdicts, 4, "%s admit-batch verdicts are positional", env.side)
@@ -754,7 +780,6 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// new methods, then read back ONLY the subject-owned ones (the platform cap
 	// stays invisible to the subject surface). Runs LAST so the stored caps never
 	// gate the admit steps above. role uuid is per-side -> normalized to compare.
-	roleID := uuid.New().String()
 	require.NoError(t, c.SetSubjectBudgetPolicy(ctx, payerID, openrails.SubjectBudgetPolicyInput{
 		Scope: "subject",
 		Windows: []openrails.BudgetScopeWindow{

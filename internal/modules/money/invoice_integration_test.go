@@ -87,6 +87,7 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 1_000))
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000, Source: "seed"})
 	require.NoError(t, err)
 	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: "u", Currency: money.DefaultCurrency, EventType: "gpt-4o", Amount: 1_500, Source: "req", SourceID: "r1"})
@@ -187,6 +188,55 @@ func TestInvoiceCollectionDeclineLeavesInvoiceOpenAndBlocksArrears(t *testing.T)
 	require.NoError(t, err)
 	require.False(t, res.Decision.Allowed)
 	require.Equal(t, money.DenyInsufficientCredit, res.Decision.DenyCode)
+}
+
+func TestFinalizeThresholdInvoices_CapHitCreatesCollectableInvoice(t *testing.T) {
+	svc, pool, payer, _, ctx := moneyInEnv(t)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "UPDATE openrails.money_transactions SET invoice_id = NULL WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
+	})
+	pm := uuid.New()
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
+		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+	})
+	require.NoError(t, err)
+	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 500))
+	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "threshold-invoice", 500)
+	require.NoError(t, err)
+
+	var rawCounter int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT outstanding_owed_amount
+		FROM openrails.money_settings
+		WHERE customer_id = $1 AND currency = $2
+	`, payer.UUID(), money.DefaultCurrency).Scan(&rawCounter))
+	require.Equal(t, int64(0), rawCounter, "runtime exposure is invoice-derived, not the old settings counter")
+
+	n, err := svc.FinalizeThresholdInvoices(ctx, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	invoices, total, err := svc.ListInvoices(ctx, payer, 10, 0)
+	require.NoError(t, err)
+	require.Equal(t, 1, total)
+	require.Len(t, invoices, 1)
+	require.Equal(t, "open", invoices[0].Status)
+	require.Equal(t, int64(500), invoices[0].AmountDue)
+
+	ch := &fakeCharger{}
+	n, err = svc.ChargeOutstanding(ctx, ch, 0)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Len(t, ch.charges, 1)
+
+	paid, err := svc.GetInvoiceByID(ctx, payer, invoices[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, "paid", paid.Status)
+	require.Equal(t, int64(0), paid.AmountDue)
 }
 
 func TestRecordOutOfBandInvoicePayment_PartialThenPaid(t *testing.T) {

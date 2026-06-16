@@ -60,21 +60,6 @@ UPDATE openrails.money_settings
 SET credit_limit_amount = sqlc.arg(credit_limit)::bigint, updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
--- name: AddMoneyOutstandingOwed :exec
-UPDATE openrails.money_settings
-SET outstanding_owed_amount = outstanding_owed_amount + sqlc.arg(amount)::bigint,
-    updated_at = sqlc.arg(now)
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
-
--- name: ReduceMoneyOutstandingOwedSnapshot :execrows
--- CAS-style decrement: only applies when owed still covers the snapshot, so
--- two collection runs racing on the same snapshot can't double-decrement.
-UPDATE openrails.money_settings
-SET outstanding_owed_amount = GREATEST(0, outstanding_owed_amount - sqlc.arg(snapshot)::bigint),
-    updated_at = sqlc.arg(now)
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND outstanding_owed_amount >= sqlc.arg(snapshot)::bigint;
-
 -- name: StampMoneyAccountAlertAt :exec
 UPDATE openrails.money_settings
 SET last_alert_at = sqlc.arg(now), updated_at = sqlc.arg(now)
@@ -151,27 +136,6 @@ WHERE s.merchant_id = $1
                    WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
                      AND w.currency = s.currency AND w.status = 'open'), 0)
        ) < s.low_balance_threshold;
-
--- name: ListChargeableArrearsMoneyAccounts :many
--- Arrears collection (#241): accounts owing with a card on file.
--- min_threshold <= 0 means "charge every account with owed > 0".
-SELECT s.merchant_id, s.customer_id, s.currency,
-       s.outstanding_owed_amount, s.auto_topup_payment_method_id
-FROM openrails.money_settings s
-WHERE s.merchant_id = $1
-  AND s.billing_mode = 'arrears'
-  AND s.outstanding_owed_amount > 0
-  AND s.auto_topup_payment_method_id IS NOT NULL
-  AND (sqlc.arg(min_threshold)::bigint <= 0 OR s.outstanding_owed_amount >= sqlc.arg(min_threshold)::bigint)
-  AND NOT EXISTS (
-      SELECT 1
-      FROM openrails.invoices i
-      WHERE i.merchant_id = s.merchant_id
-        AND i.customer_id = s.customer_id
-        AND i.currency = s.currency
-        AND i.status IN ('open', 'past_due')
-        AND i.amount_due > 0
-  );
 
 -- name: GetMoneySpendLimit :one
 SELECT * FROM openrails.money_spend_limits

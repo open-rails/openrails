@@ -20,13 +20,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// AdmitBlockCheck is one (kind,value) tested against the payment blocklist.
-type AdmitBlockCheck struct {
-	Kind  string `json:"kind"`
-	Value string `json:"value"`
-}
-
-// AdmitInput is the host's admission request: throughput + money + gates.
+// AdmitInput is the host's admission request for payer capacity and delegated
+// spend gates.
 type AdmitInput struct {
 	CustomerID  identity.CustomerID
 	Invoker     string
@@ -37,69 +32,28 @@ type AdmitInput struct {
 	// matching (subject, role) budget policy gates this request's spend. The host
 	// reads them from the delegated JWT/permission set.
 	Roles           []uuid.UUID
-	Amounts         map[string]int64
 	Currency        string
 	EstimatedAmount int64
 	Source          string
 	SourceID        string
 	ExpiresAtUnix   int64
-	BlockChecks     []AdmitBlockCheck
-	// TenantThroughput is the host's per-TENANT fixed-window throughput policy
-	// (#404). When set, OpenRails enforces these merchant-scoped windows on the
-	// invoke path BEFORE the per-invoker policy + any hold, so the host (tensorhub)
-	// no longer rate-limits invokes locally. Empty = no merchant throughput limit.
-	TenantThroughput []AdmitThroughputWindow
-}
-
-// AdmitThroughputWindow is one caller-supplied merchant fixed-window throughput
-// limit (#404): at most Max units of Unit per WindowSeconds. Unit defaults to
-// "request".
-type AdmitThroughputWindow struct {
-	Unit          string `json:"unit"`
-	WindowSeconds int64  `json:"window_seconds"`
-	Max           int64  `json:"max"`
-}
-
-// AdmitWindowDTO is a throughput window's state for x-ratelimit-* headers.
-type AdmitWindowDTO struct {
-	Unit              string `json:"unit"`
-	Limit             int64  `json:"limit"`
-	Remaining         int64  `json:"remaining"`
-	ResetAfterSeconds int64  `json:"reset_after_seconds"`
 }
 
 // AdmitResult is the unified admission decision returned to the host.
 type AdmitResult struct {
-	Allowed           bool             `json:"allowed"`
-	Currency          string           `json:"currency,omitempty"`
-	EstimatedAmount   int64            `json:"estimated_amount,omitempty"`
-	PolicyCurrency    string           `json:"policy_currency,omitempty"`
-	PolicyAmount      int64            `json:"policy_amount,omitempty"`
-	BlockedBy         string           `json:"blocked_by,omitempty"`
-	BlockedUnit       string           `json:"blocked_unit,omitempty"`
-	DenyCode          string           `json:"deny_code,omitempty"`
-	RetryAfterSeconds int64            `json:"retry_after_seconds,omitempty"`
-	Windows           []AdmitWindowDTO `json:"windows,omitempty"`
-	HoldExpiresAt     *time.Time       `json:"hold_expires_at,omitempty"`
+	Allowed             bool       `json:"allowed"`
+	Currency            string     `json:"currency,omitempty"`
+	EstimatedAmount     int64      `json:"estimated_amount,omitempty"`
+	PolicyCurrency      string     `json:"policy_currency,omitempty"`
+	PolicyAmount        int64      `json:"policy_amount,omitempty"`
+	StartCapacityAmount int64      `json:"start_capacity_amount,omitempty"`
+	BlockedBy           string     `json:"blocked_by,omitempty"`
+	DenyCode            string     `json:"deny_code,omitempty"`
+	RetryAfterSeconds   int64      `json:"retry_after_seconds,omitempty"`
+	HoldExpiresAt       *time.Time `json:"hold_expires_at,omitempty"`
 	// Budget (#304): the rolling money-budget reservation + per-window state.
 	BudgetReservationID string                 `json:"budget_reservation_id,omitempty"`
 	BudgetWindows       []AdmitBudgetWindowDTO `json:"budget_windows,omitempty"`
-	// ResolvedTier is the tier this verdict was evaluated under (#477): explicit
-	// req.Tier, else the auto-graduated tier (#476), else the lowest default. The
-	// host reads it back to drive its own per-tier capacity decisions (e.g.
-	// tensorhub's scheduler in-flight concurrency cap) without a second round-trip.
-	ResolvedTier string `json:"resolved_tier,omitempty"`
-	// MaxConcurrentHeldAmount is the resolved tier's cap on the sum of the payer's
-	// active (un-settled) hold $ (#487; 0 = uncapped). HeldAmount is the payer's
-	// active-hold $ sum as evaluated for this verdict (includes the hold just placed
-	// on an allow). A host that enforces true occupancy itself reads these to queue
-	// against cap + per-job estimate instead of taking the hard deny.
-	MaxConcurrentHeldAmount int64 `json:"max_concurrent_held_amount,omitempty"`
-	HeldAmount              int64 `json:"held_amount,omitempty"`
-	// MaxSingleChargeAmount is the resolved tier's per-charge ceiling (#487; 0 =
-	// uncapped). An estimate above it is denied with deny_code
-	// "single_charge_cap_exceeded".
-	MaxSingleChargeAmount int64 `json:"max_single_charge_amount,omitempty"`
 }
 
 // AdmitBudgetWindowDTO is a rolling money-budget window's state (#304), for the
@@ -119,9 +73,8 @@ type AdmitBudgetWindowDTO struct {
 	Allowed bool      `json:"allowed"`
 }
 
-// Admit runs the unified admission check (issue #298): blocklist + suspension +
-// endpoint gating + throughput (Redis) + money capacity + Redis hold. It builds the
-// admitter from the runtime (Redis + DB + credits) per call.
+// Admit runs service admission: delegated spend policy + wasted-spend cutoff +
+// money capacity + Redis hold. It builds the admitter from the runtime per call.
 func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
@@ -147,55 +100,19 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		return nil, err
 	}
 
-	lim := ratelimit.NewLimiter(s.rt.RedisClient)
 	store := admission.NewTierPolicyStore(s.rt.DB)
-	bl := abuse.NewBlocklistService(s.rt.DB)
 	bsvc := budgets.NewService(s.rt.DB)
+	lim := ratelimit.NewLimiter(s.rt.RedisClient)
 	// Resolve the merchant-configured flat delegated-invoker wasted-spend windows,
 	// falling back to DefaultInvokerWastedWindows() when unset.
 	invokerWindows, err := s.invokerWastedSpendPolicy(ctx)
 	if err != nil {
 		return nil, err
 	}
-	adm := admission.NewAdmitter(lim, s.moneyService(), store, bl, bsvc).
+	adm := admission.NewAdmitter(s.moneyService(), store, bsvc).
 		WithBudgetScopes(admission.NewBudgetPolicyStore(s.rt.DB)).
-		WithHolds(holds.NewStore(s.rt.RedisClient)).
 		WithFXProvider(s.rt.FXProvider).
 		WithWastedSpend(abuse.NewWastedSpendGuard(lim), invokerWindows)
-
-	// #404: merchant-scoped throughput. The host passes its per-merchant RPM/RPD
-	// windows; OpenRails enforces them on the invoke path BEFORE the per-invoker
-	// policy + any credit hold, so a merchant breach places no hold and the host
-	// stops rate-limiting invokes locally.
-	if len(in.TenantThroughput) > 0 {
-		windows := make([]ratelimit.Limit, 0, len(in.TenantThroughput))
-		for _, w := range in.TenantThroughput {
-			if w.Max <= 0 || w.WindowSeconds <= 0 {
-				continue
-			}
-			unit := w.Unit
-			if unit == "" {
-				unit = "request"
-			}
-			windows = append(windows, ratelimit.Limit{Unit: unit, Window: time.Duration(w.WindowSeconds) * time.Second, Max: w.Max})
-		}
-		if len(windows) > 0 {
-			tdec, err := lim.Check(ctx, "merchant:"+in.CustomerID.UUID().String(), ratelimit.Policy{Windows: windows}, map[string]int64{"request": 1})
-			if err != nil {
-				return nil, err
-			}
-			if !tdec.Allowed {
-				res := &AdmitResult{Allowed: false, BlockedBy: "throughput", BlockedUnit: tdec.BlockedUnit}
-				for _, w := range tdec.Windows {
-					res.Windows = append(res.Windows, AdmitWindowDTO{Unit: w.Unit, Limit: w.Limit, Remaining: w.Remaining, ResetAfterSeconds: int64(w.ResetAfter / time.Second)})
-					if w.Unit == tdec.BlockedUnit {
-						res.RetryAfterSeconds = int64(w.ResetAfter / time.Second)
-					}
-				}
-				return res, nil
-			}
-		}
-	}
 
 	var exp time.Time
 	switch {
@@ -209,11 +126,6 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		source = "admit"
 	}
 
-	checks := make([]admission.BlockCheck, 0, len(in.BlockChecks))
-	for _, b := range in.BlockChecks {
-		checks = append(checks, admission.BlockCheck{Kind: b.Kind, Value: b.Value})
-	}
-
 	dec, err := adm.Admit(ctx, admission.AdmitRequest{
 		CustomerID:      in.CustomerID,
 		Invoker:         in.Invoker,
@@ -221,41 +133,37 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		Tier:            in.Tier,
 		Resource:        in.Resource,
 		Roles:           in.Roles,
-		Amounts:         in.Amounts,
 		Currency:        currency,
 		EstimatedAmount: in.EstimatedAmount,
 		Source:          source,
 		SourceID:        in.SourceID,
 		ExpiresAt:       exp,
-		BlockChecks:     checks,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	res := &AdmitResult{
-		Allowed:           dec.Allowed,
-		Currency:          currency,
-		EstimatedAmount:   in.EstimatedAmount,
-		PolicyCurrency:    dec.PolicyCurrency,
-		PolicyAmount:      dec.PolicyAmount,
-		BlockedBy:         dec.BlockedBy,
-		BlockedUnit:       dec.BlockedUnit,
-		DenyCode:          dec.DenyCode,
-		RetryAfterSeconds: int64(dec.RetryAfter / time.Second),
-		ResolvedTier:      dec.ResolvedTier,
-
-		MaxConcurrentHeldAmount: dec.MaxConcurrentHeldAmount,
-		HeldAmount:              dec.HeldAmount,
-		MaxSingleChargeAmount:   dec.MaxSingleChargeAmount,
+		Allowed:             dec.Allowed,
+		Currency:            currency,
+		EstimatedAmount:     in.EstimatedAmount,
+		PolicyCurrency:      dec.PolicyCurrency,
+		PolicyAmount:        dec.PolicyAmount,
+		StartCapacityAmount: dec.AccountCapacityAmount,
+		BlockedBy:           dec.BlockedBy,
+		DenyCode:            dec.DenyCode,
+		RetryAfterSeconds:   int64(dec.RetryAfter / time.Second),
 	}
-	for _, w := range dec.Windows {
-		res.Windows = append(res.Windows, AdmitWindowDTO{
-			Unit:              w.Unit,
-			Limit:             w.Limit,
-			Remaining:         w.Remaining,
-			ResetAfterSeconds: int64(w.ResetAfter / time.Second),
-		})
+	if !dec.Allowed && dec.BlockedBy == "money" && in.EstimatedAmount > 0 {
+		mid, err := serviceMerchantID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		activeHeld, err := holds.NewStore(s.rt.RedisClient).ActiveAmount(ctx, mid, in.CustomerID.UUID().String(), currency)
+		if err != nil {
+			return nil, err
+		}
+		res.StartCapacityAmount = startCapacity(dec.AccountCapacityAmount, activeHeld)
 	}
 	if dec.Allowed && in.EstimatedAmount > 0 {
 		mid, err := serviceMerchantID(ctx)
@@ -277,7 +185,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 			PolicyAmount:    dec.PolicyAmount,
 			CreatedAt:       s.now().UTC(),
 			ExpiresAt:       exp,
-		}, dec.CapacityAmount)
+		}, dec.AccountCapacityAmount)
 		if err != nil {
 			s.releaseBudgetScopesByCoords(ctx, in.CustomerID, source, in.SourceID)
 			return nil, err
@@ -286,13 +194,11 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 			s.releaseBudgetScopesByCoords(ctx, in.CustomerID, source, in.SourceID)
 			return &AdmitResult{
 				Allowed: false, Currency: currency, EstimatedAmount: in.EstimatedAmount,
-				PolicyCurrency: dec.PolicyCurrency, PolicyAmount: dec.PolicyAmount,
+				PolicyCurrency: dec.PolicyCurrency, PolicyAmount: dec.PolicyAmount, StartCapacityAmount: startCapacity(dec.AccountCapacityAmount, activeHeld),
 				BlockedBy: "money", DenyCode: money.DenyInsufficientBalance,
-				ResolvedTier: dec.ResolvedTier, MaxConcurrentHeldAmount: dec.MaxConcurrentHeldAmount,
-				MaxSingleChargeAmount: dec.MaxSingleChargeAmount, HeldAmount: activeHeld,
 			}, nil
 		}
-		res.HeldAmount = activeHeld
+		res.StartCapacityAmount = startCapacity(dec.AccountCapacityAmount, activeHeld-in.EstimatedAmount)
 		res.HoldExpiresAt = &exp
 	}
 	if dec.BudgetReservationID != uuid.Nil {
@@ -309,6 +215,16 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		})
 	}
 	return res, nil
+}
+
+func startCapacity(accountCapacity, activeHeld int64) int64 {
+	if activeHeld < 0 {
+		activeHeld = 0
+	}
+	if activeHeld >= accountCapacity {
+		return 0
+	}
+	return accountCapacity - activeHeld
 }
 
 // BudgetStatus returns the rolling money-budget windows for (payer, invoker) at a
@@ -458,9 +374,8 @@ type BudgetScopeWindowInput struct {
 }
 
 // BudgetScopePolicyInput configures one hierarchical budget-scope policy (#473).
-// Scope is "subject" | "role" | "invoker" ("invoker" still accepted, #491);
-// ScopeKey is the role uuid (scope=role) or invoker string (scope=invoker),
-// empty for scope=subject.
+// Scope is "subject" | "role" | "invoker" | "invoker_tier"; ScopeKey is the
+// role uuid, invoker string, or invoker-tier key, empty for scope=subject.
 type BudgetScopePolicyInput struct {
 	Scope    string                   `json:"scope"`
 	ScopeKey string                   `json:"scope_key,omitempty"`
@@ -476,8 +391,8 @@ func budgetScopeWindowModels(ws []BudgetScopeWindowInput) []models.BudgetWindowP
 }
 
 // SetSubjectBudgetPolicy upserts a SUBJECT-owned budget-scope policy (#473): the
-// subject's self (subject) cap, a (subject, role) pool, or a (subject, invoker)
-// cap. The owner is forced to "subject" — this path can NEVER write a
+// subject's self cap, a role pool, an invoker grant, or an invoker-tier grant.
+// The owner is forced to "subject" — this path can NEVER write a
 // platform-owned cap, so a subject cannot create/loosen one.
 func (s *Service) SetSubjectBudgetPolicy(ctx context.Context, payer identity.CustomerID, in BudgetScopePolicyInput) error {
 	if s == nil || s.rt == nil {
@@ -534,13 +449,8 @@ func (s *Service) SubjectBudgetPolicies(ctx context.Context, payer identity.Cust
 	return out, nil
 }
 
-// TierWindowInput / TierBudgetWindowInput / TierPolicyInput configure a tier's
-// policy via the admin endpoint (#298: tier admin API).
-type TierWindowInput struct {
-	Unit          string `json:"unit"`
-	WindowSeconds int64  `json:"window_seconds"`
-	Max           int64  `json:"max"`
-}
+// TierBudgetWindowInput / TierPolicyInput configure a tier's money policy via
+// the admin endpoint (#298: tier admin API).
 type TierBudgetWindowInput struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
@@ -550,29 +460,10 @@ type TierBudgetWindowInput struct {
 	Cadence string `json:"cadence,omitempty"`
 }
 
-// TierQueueLimitInput is one batch/queue reservation-pool cap (#472 G2): at most
-// Max units of Unit in-flight per (payer, endpoint-release). No time window.
-type TierQueueLimitInput struct {
-	Unit string `json:"unit"`
-	Max  int64  `json:"max"`
-}
 type TierPolicyInput struct {
-	Tier              string                  `json:"tier"`
-	Windows           []TierWindowInput       `json:"windows"`
-	EntitledResources []string                `json:"entitled_resources"`
-	BudgetWindows     []TierBudgetWindowInput `json:"budget_windows"`
-	PolicyCurrency    string                  `json:"policy_currency,omitempty"`
-	// ReleaseWindows holds per-(endpoint-release) throughput window VALUES (#472
-	// G1): map key = release uuid, value = that release's window list. Absent
-	// releases fall back to Windows.
-	ReleaseWindows map[string][]TierWindowInput `json:"release_windows,omitempty"`
-	// QueueLimits are the batch/queue reservation-pool caps (#472 G2).
-	QueueLimits []TierQueueLimitInput `json:"queue_limits,omitempty"`
-	// MaxConcurrentHeldAmount / MaxSingleChargeAmount are the #487 generic
-	// $-denominated per-tier admit limits (0 = uncapped): a cap on the payer's
-	// active (un-settled) hold $ sum, and a per-charge ceiling.
-	MaxConcurrentHeldAmount int64 `json:"max_concurrent_held_amount,omitempty"`
-	MaxSingleChargeAmount   int64 `json:"max_single_charge_amount,omitempty"`
+	Tier           string                  `json:"tier"`
+	BudgetWindows  []TierBudgetWindowInput `json:"budget_windows"`
+	PolicyCurrency string                  `json:"policy_currency,omitempty"`
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
 	// windows for this tier: at most Limit of host-reported wasted spend is
 	// forgiven per window; direct-payer overage is charged.
@@ -945,8 +836,7 @@ func toAbuseUsageWindows(ws []abuse.WindowUsage) []AbuseUsageWindow {
 	return out
 }
 
-// SetTierPolicy upserts a per-payer tier policy (throughput + entitled endpoints
-// + money-budget windows).
+// SetTierPolicy upserts a per-payer tier money policy.
 func (s *Service) SetTierPolicy(ctx context.Context, payer identity.CustomerID, in TierPolicyInput) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
@@ -957,33 +847,12 @@ func (s *Service) SetTierPolicy(ctx context.Context, payer identity.CustomerID, 
 	if in.Tier == "" {
 		return fmt.Errorf("tier required")
 	}
-	pol := models.ThroughputPolicy{
-		EntitledResources:       in.EntitledResources,
-		PolicyCurrency:          in.PolicyCurrency,
-		MaxConcurrentHeldAmount: in.MaxConcurrentHeldAmount,
-		MaxSingleChargeAmount:   in.MaxSingleChargeAmount,
-	}
-	for _, w := range in.Windows {
-		pol.Windows = append(pol.Windows, models.ThroughputWindow{Unit: w.Unit, WindowSeconds: w.WindowSeconds, Max: w.Max})
-	}
+	pol := models.ThroughputPolicy{PolicyCurrency: in.PolicyCurrency}
 	for _, b := range in.BudgetWindows {
 		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency, Cadence: b.Cadence})
 	}
 	for _, b := range in.BadSpendWindows {
 		pol.BadSpendWindows = append(pol.BadSpendWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency, Cadence: b.Cadence})
-	}
-	if len(in.ReleaseWindows) > 0 {
-		pol.ReleaseWindows = make(map[string][]models.ThroughputWindow, len(in.ReleaseWindows))
-		for rel, ws := range in.ReleaseWindows {
-			out := make([]models.ThroughputWindow, 0, len(ws))
-			for _, w := range ws {
-				out = append(out, models.ThroughputWindow{Unit: w.Unit, WindowSeconds: w.WindowSeconds, Max: w.Max})
-			}
-			pol.ReleaseWindows[rel] = out
-		}
-	}
-	for _, q := range in.QueueLimits {
-		pol.QueueLimits = append(pol.QueueLimits, models.QueueLimitPolicy{Unit: q.Unit, Max: q.Max})
 	}
 	return admission.NewTierPolicyStore(s.rt.DB).UpsertTierPolicyFull(ctx, payer, in.Tier, pol)
 }

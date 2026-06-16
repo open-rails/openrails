@@ -30,6 +30,7 @@ func TestSpendCredits_ArrearsAccruesBeyondBalance(t *testing.T) {
 	svc, _, payer, cur, ctx := moneyInEnv(t)
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 1_000))
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 
@@ -45,8 +46,9 @@ func TestSpendCredits_ArrearsAccruesBeyondBalance(t *testing.T) {
 func TestSpendCredits_HybridSpansBalanceThenOwed(t *testing.T) {
 	svc, _, payer, cur, ctx := moneyInEnv(t)
 	limit := int64(10000)
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears), MaxOutstandingOwedAmount: &limit})
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, limit))
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
@@ -61,8 +63,9 @@ func TestSpendCredits_HybridSpansBalanceThenOwed(t *testing.T) {
 func TestSpendCredits_RespectsCreditLimit(t *testing.T) {
 	svc, _, payer, cur, ctx := moneyInEnv(t)
 	limit := int64(1000)
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears), MaxOutstandingOwedAmount: &limit})
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, limit))
 	// balance 0, credit line 1000.
 	err = svc.SpendCredits(ctx, money.SpendParams{Payer: &payer, Invoker: "u", Currency: money.DefaultCurrency, Amount: 1500, Source: "s", SourceID: "x1"})
 	require.ErrorIs(t, err, money.ErrInsufficientCredits, "exceeds credit line")
@@ -94,6 +97,7 @@ func TestRecordUsage_ArrearsDrawsThenAccrues(t *testing.T) {
 	})
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 1_000))
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 

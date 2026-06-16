@@ -4,6 +4,7 @@ package money_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -38,8 +39,18 @@ func TestChargeOutstanding_Threshold(t *testing.T) {
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}
+	// Pending invoice items are not receivables yet, so collection waits for
+	// invoice finalization.
+	n, err := svc.ChargeOutstanding(ctx, ch, 0)
+	require.NoError(t, err)
+	require.Equal(t, 0, n)
+	require.Empty(t, ch.charges)
+
+	_, err = svc.FinalizeInvoice(ctx, payer, cur, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	require.NoError(t, err)
+
 	// Below threshold first: owed $5, threshold $10 (both internal amounts) -> no charge.
-	n, err := svc.ChargeOutstanding(ctx, ch, 10_000_000)
+	n, err = svc.ChargeOutstanding(ctx, ch, 10_000_000)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Empty(t, ch.charges)
@@ -66,6 +77,8 @@ func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 	require.NoError(t, err)
 	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "r1", 3_000_001) // $3 + 1 micro owed
 	require.NoError(t, err)
+	_, err = svc.FinalizeInvoice(ctx, payer, cur, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	require.NoError(t, err)
 
 	ch := &fakeCharger{}
 	// threshold <= 0 => sweep everything with owed > 0.
@@ -88,6 +101,8 @@ func TestChargeOutstanding_Declined_LeavesOwed(t *testing.T) {
 	require.NoError(t, err)
 	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "r1", 400)
 	require.NoError(t, err)
+	_, err = svc.FinalizeInvoice(ctx, payer, cur, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	require.NoError(t, err)
 
 	ch := &fakeCharger{declineAll: true}
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
@@ -104,6 +119,8 @@ func TestChargeOutstanding_NoPaymentMethod_Skipped(t *testing.T) {
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
 	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "r1", 500)
+	require.NoError(t, err)
+	_, err = svc.FinalizeInvoice(ctx, payer, cur, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}

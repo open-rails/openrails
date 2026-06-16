@@ -435,10 +435,10 @@ func (s *MoneyService) ActiveHeldForCurrency(ctx context.Context, payer identity
 }
 
 // CheckSpendAllowed evaluates the spend policy for (payer, currency, invoker)
-// against an estimated charge, WITHOUT moving money. It enforces, in order:
-// per-invoker daily/monthly caps, org daily/monthly caps, and the outstanding
-// exposure ceiling (settled owed + active holds + this estimate). The balance
-// itself is enforced separately by Hold.
+// against an estimated charge, WITHOUT moving money. It enforces per-invoker
+// daily/monthly caps, org daily/monthly caps, and the legacy outstanding cap
+// against invoice-derived exposure when configured. The balance/credit-line gate
+// itself is enforced by AuthorizeAndHold.
 func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.CustomerID, currency, invoker string, estimateAmount int64) (SpendDecision, error) {
 	if s == nil || s.db == nil {
 		return SpendDecision{}, fmt.Errorf("money service not initialized")
@@ -504,13 +504,18 @@ func (s *MoneyService) CheckSpendAllowed(ctx context.Context, payer identity.Cus
 		caps = append(caps, capInput{DenyMonthlyCap, settings.MaxSpendPerMonth, spent, &monReset})
 	}
 
-	// Outstanding exposure ceiling (settled owed + active holds + this estimate).
+	// Legacy outstanding exposure ceiling, derived from invoice rows. New arrears
+	// capacity uses credit_limit_amount in AuthorizeAndHold.
 	if settings.MaxOutstandingOwedAmount != nil {
 		held, e := s.activeHoldsTotal(ctx, tenantID, payerID, cur)
 		if e != nil {
 			return SpendDecision{}, e
 		}
-		exposure := settings.OutstandingOwedAmount + held
+		exposure, e := s.arrearsExposureTx(ctx, s.db.Gen(ctx), tenantID, payerID, cur)
+		if e != nil {
+			return SpendDecision{}, e
+		}
+		exposure += held
 		caps = append(caps, capInput{DenyOutstandingCap, settings.MaxOutstandingOwedAmount, exposure, nil})
 	}
 

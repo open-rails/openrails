@@ -12,32 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const addMoneyOutstandingOwed = `-- name: AddMoneyOutstandingOwed :exec
-UPDATE openrails.money_settings
-SET outstanding_owed_amount = outstanding_owed_amount + $3::bigint,
-    updated_at = $4
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
-`
-
-type AddMoneyOutstandingOwedParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Amount     int64
-	Now        time.Time
-	Currency   string
-}
-
-func (q *Queries) AddMoneyOutstandingOwed(ctx context.Context, arg AddMoneyOutstandingOwedParams) error {
-	_, err := q.db.Exec(ctx, addMoneyOutstandingOwed,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Amount,
-		arg.Now,
-		arg.Currency,
-	)
-	return err
-}
-
 const autoGraduateMoneyAccountTier = `-- name: AutoGraduateMoneyAccountTier :exec
 UPDATE openrails.money_settings
 SET tier = $3::text, tier_source = 'auto', updated_at = $4
@@ -263,67 +237,6 @@ func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, arg ListB
 	return items, nil
 }
 
-const listChargeableArrearsMoneyAccounts = `-- name: ListChargeableArrearsMoneyAccounts :many
-SELECT s.merchant_id, s.customer_id, s.currency,
-       s.outstanding_owed_amount, s.auto_topup_payment_method_id
-FROM openrails.money_settings s
-WHERE s.merchant_id = $1
-  AND s.billing_mode = 'arrears'
-  AND s.outstanding_owed_amount > 0
-  AND s.auto_topup_payment_method_id IS NOT NULL
-  AND ($2::bigint <= 0 OR s.outstanding_owed_amount >= $2::bigint)
-  AND NOT EXISTS (
-      SELECT 1
-      FROM openrails.invoices i
-      WHERE i.merchant_id = s.merchant_id
-        AND i.customer_id = s.customer_id
-        AND i.currency = s.currency
-        AND i.status IN ('open', 'past_due')
-        AND i.amount_due > 0
-  )
-`
-
-type ListChargeableArrearsMoneyAccountsParams struct {
-	MerchantID   uuid.UUID
-	MinThreshold int64
-}
-
-type ListChargeableArrearsMoneyAccountsRow struct {
-	MerchantID               uuid.UUID
-	CustomerID               uuid.UUID
-	Currency                 string
-	OutstandingOwedAmount    int64
-	AutoTopupPaymentMethodID *uuid.UUID
-}
-
-// Arrears collection (#241): accounts owing with a card on file.
-// min_threshold <= 0 means "charge every account with owed > 0".
-func (q *Queries) ListChargeableArrearsMoneyAccounts(ctx context.Context, arg ListChargeableArrearsMoneyAccountsParams) ([]ListChargeableArrearsMoneyAccountsRow, error) {
-	rows, err := q.db.Query(ctx, listChargeableArrearsMoneyAccounts, arg.MerchantID, arg.MinThreshold)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListChargeableArrearsMoneyAccountsRow
-	for rows.Next() {
-		var i ListChargeableArrearsMoneyAccountsRow
-		if err := rows.Scan(
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.Currency,
-			&i.OutstandingOwedAmount,
-			&i.AutoTopupPaymentMethodID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listMoneyAccountPairs = `-- name: ListMoneyAccountPairs :many
 
 SELECT DISTINCT customer_id, currency
@@ -408,38 +321,6 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.CreditLimitAmount,
 	)
 	return i, err
-}
-
-const reduceMoneyOutstandingOwedSnapshot = `-- name: ReduceMoneyOutstandingOwedSnapshot :execrows
-UPDATE openrails.money_settings
-SET outstanding_owed_amount = GREATEST(0, outstanding_owed_amount - $3::bigint),
-    updated_at = $4
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
-  AND outstanding_owed_amount >= $3::bigint
-`
-
-type ReduceMoneyOutstandingOwedSnapshotParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Snapshot   int64
-	Now        time.Time
-	Currency   string
-}
-
-// CAS-style decrement: only applies when owed still covers the snapshot, so
-// two collection runs racing on the same snapshot can't double-decrement.
-func (q *Queries) ReduceMoneyOutstandingOwedSnapshot(ctx context.Context, arg ReduceMoneyOutstandingOwedSnapshotParams) (int64, error) {
-	result, err := q.db.Exec(ctx, reduceMoneyOutstandingOwedSnapshot,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Snapshot,
-		arg.Now,
-		arg.Currency,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const resumeMoneyAccount = `-- name: ResumeMoneyAccount :exec

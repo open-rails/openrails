@@ -531,6 +531,63 @@ func (q *Queries) ListChargeableOpenInvoices(ctx context.Context, arg ListCharge
 	return items, nil
 }
 
+const listInvoiceThresholdCandidates = `-- name: ListInvoiceThresholdCandidates :many
+SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_from
+FROM openrails.money_settings s
+JOIN openrails.invoice_items ii
+  ON ii.merchant_id = s.merchant_id
+ AND ii.customer_id = s.customer_id
+ AND ii.currency = s.currency
+ AND ii.invoice_id IS NULL
+ AND ii.status = 'pending'
+ AND ii.invoice_at < $2::timestamptz
+WHERE s.merchant_id = $1
+  AND s.billing_mode = 'arrears'
+  AND s.credit_limit_amount > 0
+GROUP BY s.merchant_id, s.customer_id, s.currency, s.credit_limit_amount
+HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
+    SELECT COALESCE(SUM(i.amount_due), 0)::bigint
+    FROM openrails.invoices i
+    WHERE i.merchant_id = s.merchant_id
+      AND i.customer_id = s.customer_id
+      AND i.currency = s.currency
+      AND i.status IN ('open', 'past_due')
+      AND i.amount_due > 0
+) >= s.credit_limit_amount
+ORDER BY period_from ASC
+`
+
+type ListInvoiceThresholdCandidatesParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+}
+
+type ListInvoiceThresholdCandidatesRow struct {
+	CustomerID uuid.UUID
+	Currency   string
+	PeriodFrom time.Time
+}
+
+func (q *Queries) ListInvoiceThresholdCandidates(ctx context.Context, arg ListInvoiceThresholdCandidatesParams) ([]ListInvoiceThresholdCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, listInvoiceThresholdCandidates, arg.MerchantID, arg.Cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInvoiceThresholdCandidatesRow
+	for rows.Next() {
+		var i ListInvoiceThresholdCandidatesRow
+		if err := rows.Scan(&i.CustomerID, &i.Currency, &i.PeriodFrom); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listInvoicesByPayer = `-- name: ListInvoicesByPayer :many
 SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, sent_at, finalized_at, external_invoice_id, created_at, updated_at FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2
@@ -726,6 +783,36 @@ type SumPendingInvoiceItemAmountParams struct {
 
 func (q *Queries) SumPendingInvoiceItemAmount(ctx context.Context, arg SumPendingInvoiceItemAmountParams) (int64, error) {
 	row := q.db.QueryRow(ctx, sumPendingInvoiceItemAmount, arg.MerchantID, arg.CustomerID, arg.Currency)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const sumPendingInvoiceItemAmountInPeriod = `-- name: SumPendingInvoiceItemAmountInPeriod :one
+SELECT COALESCE(SUM(amount), 0)::bigint
+FROM openrails.invoice_items
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
+  AND invoice_id IS NULL AND status = 'pending'
+  AND invoice_at >= $4::timestamptz
+  AND invoice_at < $5::timestamptz
+`
+
+type SumPendingInvoiceItemAmountInPeriodParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	PeriodFrom time.Time
+	PeriodTo   time.Time
+}
+
+func (q *Queries) SumPendingInvoiceItemAmountInPeriod(ctx context.Context, arg SumPendingInvoiceItemAmountInPeriodParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumPendingInvoiceItemAmountInPeriod,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.PeriodFrom,
+		arg.PeriodTo,
+	)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err

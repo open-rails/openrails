@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/holds"
@@ -135,6 +136,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	require.True(t, res.Allowed)
 	require.NotNil(t, res.HoldExpiresAt)
 	require.Equal(t, int64(1000), res.AvailableAmount, "snapshot is pre-hold available")
+	require.Equal(t, int64(1000), res.StartCapacityAmount, "no prior Redis holds, so start capacity equals account capacity")
 
 	snap, err := svc.GetCreditAccount(tctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
@@ -158,6 +160,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
 	require.Equal(t, billingservice.DenyInsufficientBalance, deny.DenyCode)
+	require.Equal(t, int64(400), deny.StartCapacityAmount, "start capacity subtracts the existing 600 Redis hold")
 	require.Nil(t, deny.HoldExpiresAt)
 
 	snap2, err := svc.GetCreditAccount(tctx, payer, money.DefaultCurrency)
@@ -214,9 +217,166 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	require.Equal(t, 0, txCount, "admit/release without completion must not create ledger rows")
 }
 
+func TestAuthorizeAndHold_StartCapacityTracksDBAndRedisChanges(t *testing.T) {
+	ctx := context.Background()
+	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	pool := dbi.Pool()
+	dbtest.EnsureTestMerchant(ctx, t, pool)
+	tctx := dbtest.WithTestMerchant(ctx)
+	tenantID := dbtest.TestMerchantID.UUID().String()
+
+	rc, err := tcredis.Run(ctx, "redis:7-alpine")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rc.Terminate(ctx) })
+	conn, err := rc.ConnectionString(ctx)
+	require.NoError(t, err)
+	opt, err := redis.ParseURL(conn)
+	require.NoError(t, err)
+	rdb := redis.NewClient(opt)
+	t.Cleanup(func() { _ = rdb.Close() })
+	require.NoError(t, rdb.Ping(ctx).Err())
+
+	rt := &app.Runtime{
+		DB:                 dbi,
+		RedisClient:        rdb,
+		MoneyService:       money.NewMoneyService(dbi),
+		EntitlementService: entitlements.NewEntitlementService(dbi),
+		Clock:              clockwork.NewRealClock(),
+	}
+	svc, err := billingservice.New(rt)
+	require.NoError(t, err)
+
+	payer := identity.CustomerIDFromString(uuid.NewString())
+	payerID := payer.UUID()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
+	})
+	exp := time.Now().Add(time.Hour).UTC()
+
+	deposit := func(source string, amount int64) {
+		t.Helper()
+		sourceID := uuid.New()
+		_, err := svc.DepositCredits(tctx, billingservice.DepositCreditsRequest{
+			CustomerID: &payer,
+			Invoker:    payer.UUID().String(),
+			Currency:   money.DefaultCurrency,
+			Amount:     amount,
+			Source:     source,
+			SourceID:   &sourceID,
+		})
+		require.NoError(t, err)
+	}
+	withdraw := func(source string, amount int64) {
+		t.Helper()
+		sourceID := uuid.New()
+		_, err := svc.WithdrawCredits(tctx, billingservice.WithdrawCreditsRequest{
+			CustomerID: &payer,
+			Invoker:    "test",
+			Currency:   money.DefaultCurrency,
+			Amount:     amount,
+			Source:     source,
+			SourceID:   &sourceID,
+		})
+		require.NoError(t, err)
+	}
+	authorize := func(requestID string, amount int64) *billingservice.AuthorizeAndHoldResult {
+		t.Helper()
+		res, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
+			CustomerID:      payer,
+			Invoker:         "serviceToken:test",
+			InvokerType:     string(identity.InvokerTypePayer),
+			Currency:        money.DefaultCurrency,
+			EstimatedAmount: amount,
+			RequestID:       requestID,
+			ExpiresAt:       exp,
+		})
+		require.NoError(t, err)
+		return res
+	}
+	active := func() int64 {
+		t.Helper()
+		v, err := holds.NewStore(rdb).ActiveAmount(tctx, tenantID, payerID.String(), money.DefaultCurrency)
+		require.NoError(t, err)
+		return v
+	}
+
+	deposit("seed", 1000)
+	res := authorize("race-1", 600)
+	require.True(t, res.Allowed)
+	require.Equal(t, int64(1000), res.StartCapacityAmount)
+	require.Equal(t, int64(600), active())
+
+	withdraw("shrink-capacity", 500)
+	deny := authorize("race-2", 1)
+	require.False(t, deny.Allowed)
+	require.Equal(t, int64(0), deny.StartCapacityAmount, "active Redis holds can exceed the shrunken DB capacity, so no new hold is allowed")
+	require.Equal(t, int64(600), active(), "denied request must not add a Redis hold")
+
+	deposit("grow-capacity", 300)
+	res = authorize("race-3", 200)
+	require.True(t, res.Allowed)
+	require.Equal(t, int64(200), res.StartCapacityAmount, "800 account capacity - 600 active holds")
+	require.Equal(t, int64(800), active())
+
+	deny = authorize("race-4", 1)
+	require.False(t, deny.Allowed)
+	require.Equal(t, int64(0), deny.StartCapacityAmount)
+
+	_, err = svc.CaptureHold(tctx, billingservice.CaptureHoldRequest{RequestID: "race-3", Amount: 200})
+	require.NoError(t, err)
+	require.Equal(t, int64(600), active(), "capturing race-3 releases that Redis hold")
+	deny = authorize("race-5", 1)
+	require.False(t, deny.Allowed)
+	require.Equal(t, int64(0), deny.StartCapacityAmount, "capture lowered DB capacity to match the remaining active hold")
+
+	require.NoError(t, svc.ReleaseHold(tctx, "race-1"))
+	require.Equal(t, int64(0), active())
+	res = authorize("race-6", 600)
+	require.True(t, res.Allowed)
+	require.Equal(t, int64(600), res.StartCapacityAmount)
+
+	arrearsPayer := identity.CustomerIDFromString(uuid.NewString())
+	arrearsID := arrearsPayer.UUID()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", arrearsID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", arrearsID)
+	})
+	require.NoError(t, svc.SetCreditAccountSettings(tctx, arrearsPayer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: ptrString(money.BillingModeArrears)}))
+	require.NoError(t, svc.SetCreditLimit(tctx, arrearsPayer, money.DefaultCurrency, 1000))
+	credit, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
+		CustomerID:      arrearsPayer,
+		Invoker:         "serviceToken:test",
+		InvokerType:     string(identity.InvokerTypePayer),
+		Currency:        money.DefaultCurrency,
+		EstimatedAmount: 800,
+		RequestID:       "credit-1",
+		ExpiresAt:       exp,
+	})
+	require.NoError(t, err)
+	require.True(t, credit.Allowed)
+	require.Equal(t, int64(1000), credit.StartCapacityAmount)
+	require.NoError(t, svc.SetCreditLimit(tctx, arrearsPayer, money.DefaultCurrency, 700))
+	creditDeny, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
+		CustomerID:      arrearsPayer,
+		Invoker:         "serviceToken:test",
+		InvokerType:     string(identity.InvokerTypePayer),
+		Currency:        money.DefaultCurrency,
+		EstimatedAmount: 1,
+		RequestID:       "credit-2",
+		ExpiresAt:       exp,
+	})
+	require.NoError(t, err)
+	require.False(t, creditDeny.Allowed)
+	require.Equal(t, int64(0), creditDeny.StartCapacityAmount, "lowering credit below active holds denies new work")
+}
+
 func mustTenantID(t *testing.T, s string) merchant.ID {
 	t.Helper()
 	id, err := merchant.ParseID(s)
 	require.NoError(t, err)
 	return id
 }
+
+func ptrString(s string) *string { return &s }

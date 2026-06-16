@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/holds"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -139,7 +138,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 		Resource:        strings.TrimSpace(req.Resource),
 		CreatedAt:       s.now().UTC(),
 		ExpiresAt:       req.ExpiresAt.UTC(),
-	}, out.CapacityAmount)
+	}, out.AccountCapacityAmount)
 	if err != nil {
 		return nil, err
 	}
@@ -553,23 +552,6 @@ func (s *Service) releaseBudgetScopesByCoords(ctx context.Context, payer identit
 			log.Warnf("service release: budget scope release failed (request_id %s released, currency %s): %v", sourceID, cur, err)
 		}
 	}
-	s.releaseQueueUnitsByCoords(ctx, source, sourceID)
-}
-
-// releaseQueueUnits frees any batch/queue reservation units this request held
-// (#472 G2c) by its (source, source_id) coords — a completed OR failed job frees
-// its queued units. Best-effort + idempotent (no-op when no queue hold exists).
-func (s *Service) releaseQueueUnitsByCoords(ctx context.Context, source, sourceID string) {
-	if strings.TrimSpace(sourceID) == "" {
-		return
-	}
-	if s.rt.RedisClient == nil {
-		return
-	}
-	lim := ratelimit.NewLimiter(s.rt.RedisClient)
-	if err := lim.ReleaseQueueByRequest(ctx, source, sourceID); err != nil {
-		log.Warnf("service settle: queue unit release failed (request_id %s): %v", sourceID, err)
-	}
 }
 
 // captureBudgetScopes settles every budget-scope reservation for a captured
@@ -592,8 +574,6 @@ func (s *Service) captureBudgetScopesByCoords(ctx context.Context, payer identit
 			log.Warnf("service capture: budget scope capture failed (request_id %s captured, currency %s): %v", sourceID, cur, err)
 		}
 	}
-	// A completed (captured) job also frees its queued units (#472 G2c).
-	s.releaseQueueUnitsByCoords(ctx, source, sourceID)
 }
 
 func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {

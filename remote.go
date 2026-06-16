@@ -92,9 +92,9 @@ func (c *remote) bearer(ctx context.Context) (string, error) {
 }
 
 // Admit implements Client. Verdict statuses (200 OK, 402 money, 403 gated, 429
-// throughput) all carry the AdmitResponse body and are returned as a decision
-// with a nil error — matching the embedded transport, where a deny is
-// (Allowed=false, nil). Handler: ServiceAdmit (service_admission.go).
+// abuse) all carry the AdmitResponse body and are returned as a decision with a
+// nil error — matching the embedded transport, where a deny is (Allowed=false,
+// nil). Handler: ServiceAdmit (service_admission.go).
 func (c *remote) Admit(ctx context.Context, req AdmitRequest) (*AdmitResponse, error) {
 	status, raw, err := c.doRaw(ctx, http.MethodPost, "/v1/service/admit", req)
 	if err != nil {
@@ -379,19 +379,10 @@ func (c *remote) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, c
 // SetTierPolicy implements Client (handler ServiceSetTierPolicy).
 func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in TierPolicyInput) error {
 	body := map[string]any{
-		"customer_id":        strings.TrimSpace(tenantSubjectID),
-		"tier":               in.Tier,
-		"windows":            in.Windows,
-		"entitled_resources": in.EntitledResources,
-		"budget_windows":     in.BudgetWindows,
-		"policy_currency":    in.PolicyCurrency,
-		"queue_limits":       in.QueueLimits,
-	}
-	if in.MaxConcurrentHeldAmount != 0 {
-		body["max_concurrent_held_amount"] = in.MaxConcurrentHeldAmount
-	}
-	if in.MaxSingleChargeAmount != 0 {
-		body["max_single_charge_amount"] = in.MaxSingleChargeAmount
+		"customer_id":     strings.TrimSpace(tenantSubjectID),
+		"tier":            in.Tier,
+		"budget_windows":  in.BudgetWindows,
+		"policy_currency": in.PolicyCurrency,
 	}
 	if len(in.BadSpendWindows) > 0 {
 		body["bad_spend_windows"] = in.BadSpendWindows
@@ -506,9 +497,14 @@ func (c *remote) GetCreditLimit(ctx context.Context, tenantSubjectID, currency s
 
 // SetSubjectBudgetPolicy implements Client (handler ServiceSetSubjectBudgetPolicy, #473).
 func (c *remote) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in SubjectBudgetPolicyInput) error {
+	scopeKey := strings.TrimSpace(in.ScopeKey)
+	if scopeKey == "" {
+		scopeKey = strings.TrimSpace(in.RoleID)
+	}
 	body := map[string]any{
 		"customer_id": strings.TrimSpace(tenantSubjectID),
 		"scope":       in.Scope,
+		"scope_key":   scopeKey,
 		"role_id":     in.RoleID,
 		"windows":     in.Windows,
 	}

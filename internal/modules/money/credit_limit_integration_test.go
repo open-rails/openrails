@@ -31,7 +31,7 @@ func TestAuthorizeAndHold_ArrearsCreditLine(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, res.Decision.Allowed)
-	require.Equal(t, int64(1000), res.CapacityAmount)
+	require.Equal(t, int64(1000), res.AccountCapacityAmount)
 
 	// Above the line is denied. Active Redis hold subtraction is tracked by #505.
 	res, err = svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
@@ -65,7 +65,7 @@ func TestAuthorizeAndHold_ArrearsCreditLineSubtractsOwedExposure(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, res.Decision.Allowed)
-	require.Equal(t, int64(100), res.CapacityAmount)
+	require.Equal(t, int64(100), res.AccountCapacityAmount)
 }
 
 // #506: credit_limit=0 means no arrears capacity. Prepaid balance can still
@@ -83,7 +83,7 @@ func TestAuthorizeAndHold_ArrearsZeroCreditLinePrepaidOnly(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, res.Decision.Allowed)
-	require.Equal(t, int64(500), res.CapacityAmount)
+	require.Equal(t, int64(500), res.AccountCapacityAmount)
 
 	res, err = svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
 		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 600,

@@ -1,7 +1,5 @@
-// Package admission unifies OpenRails' two admission axes into one decision
-// (issue #298): the THROUGHPUT limiter (internal/modules/ratelimit, Redis) and
-// the MONEY gate (internal/modules/credits, the ledger). A host calls Admit
-// before doing work; it denies on whichever axis is hit first.
+// Package admission implements OpenRails service admission for payer money
+// capacity, delegated spend windows, and delegated wasted-spend cutoffs.
 package admission
 
 import (
@@ -17,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/budgets"
-	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -31,45 +28,16 @@ type TierPolicyStore struct {
 
 func NewTierPolicyStore(database *db.DB) *TierPolicyStore { return &TierPolicyStore{db: database} }
 
-// ResolvedPolicy is a tier's enforceable policy: throughput windows, entitled
-// resources (empty = all allowed), and fixed money-budget windows (#304, #337).
+// ResolvedPolicy is a tier's enforceable money policy.
 type ResolvedPolicy struct {
-	// Throughput is the DEFAULT throughput window list (used when a release has
-	// no per-release override).
-	Throughput ratelimit.Policy
-	// ReleaseThroughput holds per-(endpoint-release) throughput window VALUES
-	// (#472 G1); keyed by the release uuid. ThroughputForRelease resolves a
-	// release to its windows (override > default).
-	ReleaseThroughput map[string]ratelimit.Policy
-	// QueueLimits are the batch/queue reservation-pool caps (#472 G2).
-	QueueLimits       []models.QueueLimitPolicy
-	EntitledResources []string
-	BudgetWindows     []budgets.BudgetWindow
-	PolicyCurrency    string
-	// MaxConcurrentHeldAmount / MaxSingleChargeAmount are the #487 generic
-	// $-denominated per-tier admit limits (0 = uncapped).
-	MaxConcurrentHeldAmount int64
-	MaxSingleChargeAmount   int64
+	BudgetWindows  []budgets.BudgetWindow
+	PolicyCurrency string
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
 	// windows for this tier; direct-payer overage is charged at report time.
 	BadSpendWindows []models.BudgetWindowPolicy
 }
 
-// ThroughputForRelease returns the throughput policy for an endpoint-release:
-// its per-release override when present, else the tier-global default (#472 G1).
-func (p ResolvedPolicy) ThroughputForRelease(release string) ratelimit.Policy {
-	if rp, ok := p.ReleaseThroughput[release]; ok {
-		return rp
-	}
-	return p.Throughput
-}
-
-// UpsertTierPolicy sets the throughput windows for (payer, tier).
-func (s *TierPolicyStore) UpsertTierPolicy(ctx context.Context, payer identity.CustomerID, tier string, windows []models.ThroughputWindow) error {
-	return s.UpsertTierPolicyFull(ctx, payer, tier, models.ThroughputPolicy{Windows: windows})
-}
-
-// UpsertTierPolicyFull sets the full tier policy (windows + entitled resources).
+// UpsertTierPolicyFull sets the full tier money policy.
 // A ZERO payer writes the TENANT-WIDE DEFAULT policy for the tier (#477): the
 // platform capacity ladder declared once, applied to every payer at that tier
 // (selected by GetTierPolicy when the payer has no own override).
@@ -116,8 +84,8 @@ func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identi
 	})
 }
 
-// GetTierPolicy returns the enforceable policy for (payer, tier). A missing row
-// yields an empty policy (no throughput limit, all resources allowed).
+// GetTierPolicy returns the enforceable money policy for (payer, tier). A
+// missing row yields an empty policy.
 func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.CustomerID, tier string) (ResolvedPolicy, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -154,23 +122,10 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Cust
 	if !found {
 		return ResolvedPolicy{}, nil
 	}
-	var releaseTP map[string]ratelimit.Policy
-	if len(row.Policy.ReleaseWindows) > 0 {
-		releaseTP = make(map[string]ratelimit.Policy, len(row.Policy.ReleaseWindows))
-		for rel, ws := range row.Policy.ReleaseWindows {
-			releaseTP[rel] = toRatelimitPolicy(models.ThroughputPolicy{Windows: ws})
-		}
-	}
 	return ResolvedPolicy{
-		Throughput:              toRatelimitPolicy(row.Policy),
-		ReleaseThroughput:       releaseTP,
-		QueueLimits:             row.Policy.QueueLimits,
-		EntitledResources:       row.Policy.EntitledResources,
-		BudgetWindows:           toBudgetWindows(row.Policy.BudgetWindows),
-		PolicyCurrency:          row.Policy.PolicyCurrency,
-		MaxConcurrentHeldAmount: row.Policy.MaxConcurrentHeldAmount,
-		MaxSingleChargeAmount:   row.Policy.MaxSingleChargeAmount,
-		BadSpendWindows:         row.Policy.BadSpendWindows,
+		BudgetWindows:   toBudgetWindows(row.Policy.BudgetWindows),
+		PolicyCurrency:  row.Policy.PolicyCurrency,
+		BadSpendWindows: row.Policy.BadSpendWindows,
 	}, nil
 }
 
@@ -318,18 +273,6 @@ func toBudgetWindows(ws []models.BudgetWindowPolicy) []budgets.BudgetWindow {
 	out := make([]budgets.BudgetWindow, 0, len(ws))
 	for _, w := range ws {
 		out = append(out, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence})
-	}
-	return out
-}
-
-func toRatelimitPolicy(p models.ThroughputPolicy) ratelimit.Policy {
-	out := ratelimit.Policy{Windows: make([]ratelimit.Limit, 0, len(p.Windows))}
-	for _, w := range p.Windows {
-		out.Windows = append(out.Windows, ratelimit.Limit{
-			Unit:   w.Unit,
-			Window: time.Duration(w.WindowSeconds) * time.Second,
-			Max:    w.Max,
-		})
 	}
 	return out
 }
