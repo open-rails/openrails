@@ -2,7 +2,6 @@ package pyth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -10,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
 const defaultHTTPTimeout = 5 * time.Second
@@ -144,7 +145,9 @@ func (c *Client) LatestPrice(ctx context.Context, symbol string) (Price, error) 
 	}
 
 	var decoded latestPriceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	// Cap the upstream body: Pyth Hermes feeds a crypto pricing decision, so an
+	// unbounded response must not be read straight into memory.
+	if err := httpx.DecodeJSONLimited(resp.Body, 0, &decoded); err != nil {
 		return Price{}, fmt.Errorf("decode pyth price for %s: %w", normalizedSymbol, err)
 	}
 
