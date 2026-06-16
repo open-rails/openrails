@@ -1,0 +1,977 @@
+// OpenRails Postgres schema (DBML for https://dbdiagram.io/).
+// Paste this into dbdiagram.io. ClickHouse analytics tables are NOT included
+// (separate store, derived sink). Generated from migrations/postgres/.
+//
+// Conventions:
+//   - Every tenant-scoped table has tenant_id NOT NULL + an RLS tenant_isolation
+//     policy keyed on app.tenant_id. Not shown in DBML.
+//   - Per-user billing rows reference tenant_subjects (the OIDC-style payable
+//     identity), not raw user IDs.
+//   - Money amounts are integer minor units; *_micros = 1e-6 USD.
+//   - Indexes shown are the unique/partial-unique ones that encode invariants;
+//     all single-column non-unique btree indexes are omitted for clarity.
+//
+// Visual refs (RLS-only, no DB-level FK):
+//   Several control-plane / audit / operational tables have a tenant_id column
+//   but NO Postgres FK constraint to tenants — RLS does the tenant-isolation
+//   work, and the FK is deliberately omitted so the row can survive a tenant
+//   delete (audit, break-glass) or simply because the column is the PK itself
+//   (tenant_deks, tenant_secrets). Such columns are drawn with `ref: > tenants.id`
+//   below so the diagram is readable, and tagged 'RLS-only; no DB-level FK'.
+//   Affected: tenant_deks, tenant_secrets, tenant_exports, tenant_credential_audit,
+//   platform_audit.target_tenant_id, platform_break_glass.target_tenant_id,
+//   catalog_drift_events, reconciliation_runs, reconciliation_findings,
+//   provider_intents, solana_subscriptions.
+//   probe_verdicts has no tenant column at all (instance-level credential state).
+
+Project openrails {
+  database_type: 'PostgreSQL'
+  Note: 'OpenRails billing schema — single consolidated Postgres schema under the `openrails` namespace.'
+}
+
+// ============================================================================
+// Enums
+// ============================================================================
+
+Enum processor_type {
+  paypal
+  solana
+  mobius
+  ccbill
+  stripe
+  admin
+  nmi
+  manual
+}
+
+Enum purchase_status {
+  pending
+  completed
+  failed
+  refunded
+}
+
+Enum subscription_status {
+  pending
+  active
+  expired
+  cancelled
+  failed
+  past_due
+}
+
+// ============================================================================
+// Control plane (GLOBAL — not tenant-scoped)
+// ============================================================================
+
+Table tenants {
+  id uuid [pk, default: `uuidv7()`]
+  slug text [not null, unique]
+  name text [not null]
+  status text [not null, default: 'active', note: 'active | suspended | deleted']
+  authkit_tenant_id text [note: 'OpenRails-owned AuthKit org id; nullable until provisioned']
+  authkit_tenant_slug text
+  plan text
+  region text
+  billing_tier text [note: "Platform's OWN billing tier for this tenant (dogfood)"]
+  stripe_account_id text
+  webhook_host text [note: 'Optional ingress host for routing inbound webhooks']
+  webhook_path text
+  provisioned_at timestamptz
+  suspended_at timestamptz
+  deleted_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    authkit_tenant_id [unique, name: 'uq_tenants_authkit_tenant_id', note: 'WHERE authkit_tenant_id IS NOT NULL']
+    `lower(webhook_host)` [unique, name: 'uq_tenants_webhook_host', note: 'WHERE webhook_host IS NOT NULL']
+  }
+  Note: 'Tenant / billing-namespace directory. GLOBAL (control-plane); not tenant-scoped.'
+}
+
+Table tenant_subjects {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null, ref: > tenants.id]
+  issuer text [not null]
+  subject text [not null]
+  created_at timestamptz [not null, default: `now()`]
+  last_seen_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, issuer, subject) [unique, name: 'uq_tenant_subjects_issuer_subject']
+  }
+  Note: 'Payable identity. One row per OIDC (issuer, subject) under a tenant. The hub of the join graph — billing tables reference this row.'
+}
+
+Table tenant_delegated_issuers {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null, ref: > tenants.id]
+  issuer text [not null, unique]
+  jwks_uri text [not null]
+  enabled boolean [not null, default: true]
+  audiences text [not null, default: `'{}'::text[]`, note: 'PG text[]; accepted OIDC JWT aud values for this tenant issuer']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  Note: 'Federated delegated-token iss → tenant + JWKS allowlist. GLOBAL control plane. Many issuers can map to one tenant.'
+}
+
+Table tenant_deks {
+  tenant_id uuid [pk, ref: > tenants.id, note: 'RLS-only; no DB-level FK']
+  wrapped_dek bytea [not null, note: 'AES-256-GCM(master_key, tenant_dek): nonce(12) || ct(32) || tag(16)']
+  key_version integer [not null, default: 1]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  Note: 'Wrapped per-tenant Data Encryption Keys for envelope encryption-at-rest. GLOBAL control plane.'
+}
+
+Table tenant_secrets {
+  tenant_id uuid [not null, ref: > tenants.id, note: 'RLS-only; no DB-level FK']
+  name text [not null]
+  value text [not null]
+  version integer [not null, default: 1]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, name) [pk]
+  }
+  Note: 'DB-backed per-tenant secret store. Vault-mirrorable. GLOBAL control plane.'
+}
+
+Table tenant_exports {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null, ref: > tenants.id, note: 'RLS-only; no DB-level FK']
+  status text [not null, default: 'completed', note: 'pending | completed | failed']
+  location text
+  row_counts jsonb
+  created_at timestamptz [not null, default: `now()`]
+  completed_at timestamptz
+  Note: 'Logical-export bookkeeping. Tenant deletion gated on a completed export row.'
+}
+
+Table tenant_credential_audit {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null, ref: > tenants.id, note: 'RLS-only; no DB-level FK — append-only audit']
+  name text [not null]
+  action text [not null, note: 'put | rotate | delete | test']
+  actor text
+  detail text
+  created_at timestamptz [not null, default: `now()`]
+  Note: 'Append-only audit log of per-tenant credential put/rotate/delete/test events.'
+}
+
+Table platform_audit {
+  id uuid [pk, default: `uuidv7()`]
+  actor_user_id text [not null]
+  actor_tenant text
+  action text [not null]
+  target_tenant_id uuid [ref: > tenants.id, note: 'RLS-only; no DB-level FK — audit must survive tenant delete']
+  reason text
+  before_state jsonb
+  after_state jsonb
+  detail jsonb
+  created_at timestamptz [not null, default: `now()`]
+  Note: 'Append-only cross-tenant superadmin audit log. CROSS-TENANT — not purged by tenant delete.'
+}
+
+Table platform_break_glass {
+  id uuid [pk, default: `uuidv7()`]
+  actor_user_id text [not null]
+  target_tenant_id uuid [ref: > tenants.id, note: 'RLS-only; no DB-level FK — grant must survive tenant delete']
+  justification text [not null]
+  granted_at timestamptz [not null, default: `now()`]
+  expires_at timestamptz [not null]
+  revoked_at timestamptz
+  Note: 'Time-boxed break-glass elevation grants. CROSS-TENANT control plane.'
+}
+
+Table probe_verdicts {
+  provider text [not null]
+  key_hash text [not null, note: 'sha256(security_key) hex']
+  verdict text [not null, note: 'live | simulated']
+  checked_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (provider, key_hash) [pk]
+  }
+  Note: 'Cached NMI test-mode probe verdicts. RLS-exempt: instance-level credential state, not tenant data.'
+}
+
+// ============================================================================
+// Catalog (tenant-scoped + RLS)
+// ============================================================================
+
+Table products {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  slug text [not null, unique]
+  display_name text [not null]
+  description text
+  entitlements_spec jsonb
+  credits_spec jsonb [note: 'Bundled promo credits for subscriptions']
+  tier_group varchar(100) [note: 'Semantic mutual-exclusion group (e.g. "premium")']
+  tier_rank integer [not null, default: 0, note: 'Higher = more premium; drives upgrade vs downgrade direction']
+  status text [not null, default: 'active', note: 'draft | active | archived']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table prices {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  product_id uuid [not null, ref: > products.id]
+  amount bigint [not null, note: 'Minor units of currency']
+  currency text [not null]
+  billing_cycle_days integer
+  processors jsonb [note: 'Per-processor external IDs (Stripe, NMI, Solana, etc.)']
+  status text [not null, default: 'active']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (product_id, amount, currency, billing_cycle_days) [unique, name: 'unique_prices_product_amount_cycle']
+  }
+}
+
+Table entitlement_features {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  lookup_key text [not null, note: 'Stable key carried in AuthKit JWT entitlements + host-app checks']
+  name text [not null]
+  active boolean [not null, default: true]
+  metadata jsonb
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, lookup_key) [unique]
+  }
+  Note: 'Stripe-shaped feature definitions (#245). entitlements ledger remains source of truth for active access.'
+}
+
+Table product_entitlement_features {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  product_id uuid [not null, ref: > products.id]
+  entitlement_feature_id uuid [not null, ref: > entitlement_features.id]
+  duration_days integer [note: 'null = indefinite']
+  metadata jsonb
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, product_id, entitlement_feature_id) [unique, name: 'product_entitlement_features_unique']
+  }
+  Note: 'Stripe-shaped product_feature attachments: which entitlement features a product grants when purchased.'
+}
+
+Table catalog_drift_events {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null, ref: > tenants.id, note: 'RLS-only; no DB-level FK']
+  provider text [not null, note: 'stripe | nmi']
+  kind text [not null, note: 'orphan_in_stripe | missing_in_stripe | orphan_in_nmi | missing_in_nmi | field_drift']
+  openrails_resource_type text [not null, note: 'product | price']
+  openrails_resource_id text
+  external_resource_id text
+  field text
+  openrails_value text
+  external_value text
+  detected_at timestamptz [not null, default: `now()`]
+  resolved_at timestamptz
+  Note: 'Alert-only drift/orphan records from the catalog reconciliation loop.'
+}
+
+Table reconciliation_runs {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null, ref: > tenants.id, note: 'RLS-only; no DB-level FK']
+  mode text [not null, note: 'advisory | enforce']
+  providers text [not null, note: 'PG text[]; processors targeted by this reconciliation run']
+  window_since timestamptz
+  window_until timestamptz
+  started_at timestamptz [not null, default: `now()`]
+  finished_at timestamptz
+  status text [not null, default: 'running', note: 'running | completed | failed']
+  summary jsonb
+  error text
+  Note: 'One row per manual reconcile run (#107) against the payment processors.'
+}
+
+Table reconciliation_findings {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null, ref: > tenants.id, note: 'RLS-only; no DB-level FK']
+  provider text [not null]
+  finding_type text [not null, note: 'PS-1 .. PS-10']
+  subject_key text [not null]
+  severity text [not null, note: 'critical | high | medium | low']
+  status text [not null, default: 'open', note: 'open | auto_fixed | admin_pending | resolved | dismissed']
+  requires_admin boolean [not null, default: false]
+  recommended_action text
+  local_evidence jsonb
+  remote_evidence jsonb
+  intent_evidence jsonb
+  resolution_evidence jsonb
+  first_seen_run uuid [not null, ref: > reconciliation_runs.id, note: 'No DB-level FK']
+  last_seen_run uuid [not null, ref: > reconciliation_runs.id, note: 'No DB-level FK']
+  first_seen_at timestamptz [not null, default: `now()`]
+  last_seen_at timestamptz [not null, default: `now()`]
+  occurrence_count integer [not null, default: 1]
+  resolved_at timestamptz
+  resolution text [note: 'auto_vanished | enforced | admin_ack | dismissed']
+  notes text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, provider, finding_type, subject_key) [unique, name: 'uq_reconciliation_findings_identity']
+  }
+  Note: 'Durable local-vs-processor drift ledger PS-1..PS-10. Stable identity per (tenant, provider, finding_type, subject_key); disappearance auto-resolves.'
+}
+
+// ============================================================================
+// Customer state
+// ============================================================================
+
+Table payment_methods {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  processor varchar(50) [not null]
+  vault_id varchar(255) [not null, note: 'Primary identifier in the processor system']
+  billing_id varchar(255)
+  initial_transaction_id varchar(255) [not null]
+  last_four varchar(4)
+  card_type varchar(50)
+  expiry_date varchar(5)
+  failure_reason text
+  metadata jsonb
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, processor, vault_id) [unique, name: 'uq_payment_methods_tenant_processor_vault']
+    (tenant_id, tenant_subject_id, vault_id) [unique, name: 'uq_payment_methods_tenant_subject_vault']
+  }
+}
+
+Table processor_customers {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  processor text [not null]
+  customer_id text [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, processor, customer_id) [unique]
+    (tenant_id, tenant_subject_id, processor) [unique]
+  }
+}
+
+Table linked_wallets {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  chain text [not null]
+  address text [not null]
+  verification_provider text [not null]
+  verified_at timestamptz [not null]
+  display_name text
+  metadata jsonb [not null, default: `'{}'::jsonb`]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, chain, address) [unique, name: 'linked_wallets_unique_chain_address']
+    (tenant_id, tenant_subject_id, chain) [unique, name: 'linked_wallets_unique_subject_chain']
+  }
+  Note: 'Verified user wallet links for browser self-service billing identity.'
+}
+
+Table payment_blocklist {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [ref: > tenant_subjects.id, note: 'NULL = tenant-wide block']
+  kind text [not null, note: 'card_fingerprint | processor_customer | email | ip']
+  value text [not null]
+  reason text
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, kind, value) [unique, name: 'uq_payment_blocklist']
+  }
+}
+
+// ============================================================================
+// Checkout → Purchase → Subscription
+// ============================================================================
+
+Table checkout_sessions {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  price_id uuid [not null, ref: > prices.id]
+  mode text [not null, note: 'one_off | subscription']
+  processor text [not null]
+  status text [not null]
+  amount bigint [not null]
+  currency text [not null, default: 'usd']
+  expires_at timestamptz
+  reference text
+  transaction_id text
+  payment_id uuid [ref: > payments.id]
+  subscription_id uuid [ref: > subscriptions.id]
+  processor_fields jsonb
+  processor_state jsonb
+  metadata jsonb
+  idempotency_key text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (processor, reference) [unique, name: 'checkout_sessions_processor_reference_idx', note: 'WHERE reference IS NOT NULL']
+    (processor, transaction_id) [unique, name: 'checkout_sessions_processor_transaction_id_idx', note: 'WHERE transaction_id IS NOT NULL']
+  }
+}
+
+Table usdc_funding_sessions {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  checkout_session_id uuid [ref: > checkout_sessions.id, note: 'ON DELETE SET NULL']
+  provider text [not null, note: 'robinhood | coinbase']
+  wallet_address text [not null]
+  asset text [not null, note: "Must be 'USDC'"]
+  network text [not null]
+  requested_amount text [not null]
+  provider_session_id text
+  provider_url text [not null]
+  status text [not null, note: 'created | opened | pending_provider | pending_settlement | funded | failed | expired | cancelled']
+  return_url text
+  idempotency_key text
+  metadata jsonb [not null, default: `'{}'::jsonb`]
+  last_checked_at timestamptz
+  expires_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, tenant_subject_id, idempotency_key) [unique, name: 'idx_usdc_funding_sessions_idempotency', note: 'WHERE idempotency_key IS NOT NULL']
+  }
+  Note: 'External Robinhood/Coinbase handoffs that fund USDC into a user wallet before normal Solana checkout.'
+}
+
+Table payments {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  price_id uuid [not null, ref: > prices.id]
+  processor processor_type [not null]
+  transaction_id text [not null]
+  amount bigint [not null]
+  list_amount bigint [not null]
+  currency text [not null, default: 'usd']
+  status purchase_status [not null, default: 'completed']
+  subscription_id uuid [ref: > subscriptions.id, note: 'ON DELETE SET NULL']
+  refunded_payment_id uuid [ref: > payments.id, note: 'Self-FK for refund linkage']
+  discount_code text
+  discount_reason text
+  discount_metadata jsonb
+  entitlements_spec_snapshot jsonb
+  credits_spec_snapshot jsonb
+  metadata jsonb
+  purchased_at timestamptz [not null, default: `now()`]
+  card_brand text
+  card_last4 text
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, processor, transaction_id) [unique, name: 'uq_payments_tenant_processor_transaction']
+  }
+}
+
+Table subscriptions {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  product_id uuid [not null, ref: > products.id, note: 'Denormalized for efficient user+product lookups']
+  price_id uuid [ref: > prices.id]
+  scheduled_price_id uuid [ref: > prices.id, note: 'Scheduled tier change (downgrade); applied at renewal']
+  payment_method_id uuid [ref: > payment_methods.id, note: 'ON DELETE SET NULL']
+  status subscription_status [not null, default: 'pending']
+  processor text [not null, default: 'ccbill']
+  processor_subscription_id text [not null, default: '']
+  user_email text
+  current_period_starts_at timestamptz
+  current_period_ends_at timestamptz
+  started_at timestamptz [not null, default: `now()`]
+  ended_at timestamptz
+  grace_ends_at timestamptz
+  last_retry_at timestamptz
+  retry_attempts integer [default: 0]
+  next_retry_at timestamptz
+  cancelled_at timestamptz
+  cancel_type text
+  cancel_feedback text
+  entitlements_spec_snapshot jsonb
+  credits_spec_snapshot jsonb
+  gateway_response jsonb
+  tier_group varchar(100) [note: 'Denormalized from products.tier_group via trigger; backs one-active-sub-per-tier-group invariant']
+  deletion_scheduled_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, processor, processor_subscription_id) [unique, name: 'uq_subscriptions_tenant_processor_subscription_id', note: "WHERE processor_subscription_id <> ''"]
+    (tenant_id, tenant_subject_id, product_id) [unique, name: 'uq_subscriptions_tenant_subject_product_lifecycle', note: 'WHERE status IN (active, pending, past_due)']
+    (tenant_subject_id, tier_group) [unique, name: 'uq_subscriptions_tenant_subject_tier_group_active', note: 'One active/pending sub per (subject, tier_group)']
+  }
+  Note: 'Core subscription records. Trigger trg_subscriptions_set_tier_group denormalizes products.tier_group.'
+}
+
+Table solana_subscriptions {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null, ref: > tenants.id, note: 'RLS-only; no DB-level FK']
+  subscription_id uuid [not null, ref: > subscriptions.id, note: 'ON DELETE CASCADE']
+  subscriber_wallet text [not null]
+  authority_pda text [not null]
+  subscription_pda text [not null, unique]
+  plan_pda text [not null]
+  merchant_address text [not null]
+  mint text [not null]
+  plan_created_at_fingerprint bigint [not null]
+  last_pulled_period_start timestamptz
+  last_signature text
+  next_pull_at timestamptz [not null]
+  status text [not null, default: 'active']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table provider_intents {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null, ref: > tenants.id, note: 'RLS-only; no DB-level FK']
+  provider text [not null]
+  intent_type text [not null, note: 'Registry key (nmi_delete_subscription, manual_rebill, refund, plan_archive, ...)']
+  subscription_id uuid [ref: > subscriptions.id]
+  payment_id uuid [ref: > payments.id]
+  price_id uuid [ref: > prices.id]
+  payload jsonb
+  idempotency_key text [not null]
+  status text [not null, default: 'pending', note: 'pending | in_flight | succeeded | unknown_needs_verify | failed_retryable | failed_terminal | superseded | expired']
+  attempts integer [not null, default: 0]
+  next_attempt_at timestamptz [not null, default: `now()`]
+  claimed_until timestamptz [note: 'Single-executor lease (SKIP LOCKED claim)']
+  origin text [not null, note: 'user | admin | system']
+  origin_reason text
+  last_failure_reason text
+  expires_at timestamptz
+  result_evidence jsonb
+  account_fingerprint text [note: 'Provider account fingerprint guard (#365)']
+  created_at timestamptz [not null, default: `now()`]
+  executed_at timestamptz
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, idempotency_key) [unique, name: 'uq_provider_intents_tenant_idempotency_key']
+  }
+  Note: 'Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent per tenant.'
+}
+
+// ============================================================================
+// Entitlements & ownership
+// ============================================================================
+
+Table entitlements {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  entitlement text [not null]
+  start_at timestamptz [not null]
+  end_at timestamptz
+  period tstzrange [note: 'GENERATED ALWAYS AS tstzrange(start_at, coalesce(end_at, infinity), [))']
+  source_id uuid [not null]
+  source_type text [not null, note: 'subscription | one_off | admin | grace']
+  revoked_at timestamptz
+  revoke_reason text
+  deleted_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, tenant_subject_id, entitlement) [unique, name: 'uq_entitlements_tenant_subject_active', note: 'WHERE revoked_at IS NULL AND deleted_at IS NULL AND end_at IS NULL']
+  }
+  Note: 'GIST EXCLUDE constraint prevents overlap of active windows per (tenant, subject, entitlement). Bounded windows do not need uniqueness — the no-overlap exclusion handles them.'
+}
+
+Table product_access_grants {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  product_id uuid [not null, ref: > products.id]
+  source_type text [not null, note: 'purchase | subscription | admin']
+  source_id text [not null, default: '']
+  payment_id uuid
+  status text [not null, default: 'active', note: 'active | revoked']
+  starts_at timestamptz [not null, default: `now()`]
+  ends_at timestamptz
+  revoked_at timestamptz
+  revoke_reason text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  Note: 'Durable application-facing product ownership/access (#250). Distinct from feature entitlements: answers "does this user own product X?".'
+}
+
+Table admin_grants {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  price_id uuid [ref: > prices.id]
+  payment_id uuid [ref: > payments.id]
+  granted_by text [not null, note: 'Admin user ID']
+  reason text [not null, note: 'comp | contest_winner | refund_compensation | partnership | manual_payment | ...']
+  duration_days integer [note: 'NULL=use Product spec, 0=indefinite, N=N days']
+  created_at timestamptz [not null, default: `now()`]
+  Note: 'Admin-initiated product grants (comps, contest winners, manual payments, partnerships).'
+}
+
+// ============================================================================
+// Notifications
+// ============================================================================
+
+Table notification_queue {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  event_type text [not null]
+  data jsonb [not null]
+  seen boolean [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+}
+
+// ============================================================================
+// Usage & invoicing
+// ============================================================================
+
+Table usage_events {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  actor text [not null, note: 'Caller-supplied opaque principal string']
+  resource text [note: 'Caller-supplied free-form string for what was metered']
+  event_type text [not null]
+  dimensions jsonb [not null, default: `'{}'::jsonb`]
+  amount bigint [not null]
+  source text [not null]
+  source_id text [not null]
+  money_transaction_id uuid
+  metadata jsonb
+  occurred_at timestamptz [not null, default: `now()`]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, tenant_subject_id, event_type, source, source_id) [unique, name: 'uq_usage_events_idem']
+  }
+  Note: 'Append-only multi-dimensional metered usage (#289). Source of truth for #303 invoice line items.'
+}
+
+Table invoices {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  currency text [not null, default: '']
+  period_from timestamptz [not null]
+  period_to timestamptz [not null]
+  usage_total bigint [not null, default: 0]
+  deposits_total bigint [not null, default: 0]
+  owed_accrued bigint [not null, default: 0]
+  owed_paid bigint [not null, default: 0]
+  closing_balance bigint [not null, default: 0]
+  line_items jsonb [not null, default: `'[]'::jsonb`]
+  money_movements jsonb [not null, default: `'{}'::jsonb`]
+  status text [not null, default: 'draft', note: 'draft | finalized | voided']
+  finalized_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, tenant_subject_id, period_from, period_to) [unique, name: 'uq_invoices_period']
+  }
+  Note: 'Monthly itemized statements (#303). Line items rolled up from usage_events; money movements from the money ledger.'
+}
+
+// ============================================================================
+// Money ledger (per-payer × currency)
+// ============================================================================
+
+Table money_accounts {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  currency text [not null, default: 'USD']
+  billing_mode text [not null, default: 'prepaid', note: 'prepaid | arrears']
+  max_spend_per_day_micros bigint
+  max_spend_per_month_micros bigint
+  max_outstanding_owed_micros bigint
+  low_balance_threshold_micros bigint
+  auto_topup_enabled boolean [not null, default: false]
+  auto_topup_amount_cents bigint
+  auto_topup_payment_method_id uuid
+  default_credit_expiry_days integer
+  hard_stop_on_breach boolean [not null, default: true]
+  alert_threshold_pct integer [not null, default: 80]
+  outstanding_owed_micros bigint [not null, default: 0]
+  last_alert_at timestamptz
+  last_topup_at timestamptz
+  verified_payment_method boolean [not null, default: false]
+  verified_at timestamptz
+  suspended_at timestamptz
+  suspend_reason text
+  tier text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, tenant_subject_id, currency) [unique, name: 'uq_money_accounts_payer']
+  }
+  Note: 'Per-(tenant, subject, currency) spend policy + money-in config. Host SETS; OpenRails STORES + ENFORCES.'
+}
+
+Table money_balances {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  currency text [not null, default: 'USD']
+  balance bigint [not null, default: 0]
+  held_balance bigint [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, tenant_subject_id, currency) [unique, name: 'uq_money_balances_payer']
+  }
+}
+
+Table money_transactions {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  currency text [not null, default: 'USD']
+  actor text [not null, note: 'Caller-supplied opaque principal string (per-actor spend-cap grouping key)']
+  resource text [note: 'What the charge was for; opaque to OpenRails']
+  metadata jsonb
+  amount bigint [not null]
+  balance_after bigint
+  transaction_type text [not null, note: 'deposit | withdrawal | hold | ...']
+  source text [not null]
+  source_id text
+  expires_at timestamptz
+  description text
+  status text [not null, default: 'posted']
+  authorized_amount bigint
+  captured_amount bigint
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, tenant_subject_id, currency, source, source_id) [unique, name: 'uniq_money_deposit_idem_payer', note: "WHERE type='deposit' AND source_id IS NOT NULL"]
+    (tenant_id, tenant_subject_id, currency, source, source_id) [unique, name: 'uniq_money_hold_idem_payer', note: "WHERE type='hold'"]
+    (tenant_id, tenant_subject_id, currency, source, source_id) [unique, name: 'uniq_money_withdrawal_idem_payer', note: "WHERE type='withdrawal' AND source_id IS NOT NULL"]
+  }
+  Note: 'Append-only ledger. Default µ$ (1e-6 USD).'
+}
+
+Table money_blocks {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  currency text [not null, default: 'USD']
+  original_amount bigint [not null]
+  remaining_amount bigint [not null]
+  expires_at timestamptz
+  source_transaction_id uuid [ref: > money_transactions.id]
+  created_at timestamptz [not null, default: `now()`]
+  Note: 'FIFO credit lots consumed by withdrawals. Default µ$ (1e-6 USD).'
+}
+
+Table money_windows {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  currency text [not null, default: 'USD']
+  held_amount bigint [not null]
+  settled_amount bigint [not null, default: 0]
+  status text [not null, default: 'open', note: 'open | closed | expired']
+  expires_at timestamptz [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  Note: 'Prepaid bulk-hold reservation: host admits requests against locally, settles in cross-payer batches.'
+}
+
+Table money_spend_limits {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  currency text [not null, default: 'USD']
+  actor text [not null]
+  max_spend_per_day_micros bigint
+  max_spend_per_month_micros bigint
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, tenant_subject_id, currency, actor) [unique, name: 'uq_money_spend_limits_payer_actor']
+  }
+  Note: 'Optional per-(actor, currency) money spend caps for a tenant subject.'
+}
+
+// ============================================================================
+// Budget / admission control (throughput; not money)
+// ============================================================================
+
+Table tier_policies {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  tier text [not null]
+  policy jsonb [not null, default: `'{}'::jsonb`]
+  policy_version bigint [not null, default: 1]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, tenant_subject_id, tier) [unique, name: 'uq_tier_policies']
+  }
+  Note: 'Per-tenant-subject tier throughput policies for the admission check (#298).'
+}
+
+Table budget_reservations {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  actor text [not null]
+  amount_micros bigint [not null]
+  captured_micros bigint [not null, default: 0]
+  status text [not null, default: 'active', note: 'active | captured | released']
+  source text [not null]
+  source_id text [not null]
+  created_at timestamptz [not null, default: `now()`]
+  expires_at timestamptz
+
+  indexes {
+    (tenant_id, tenant_subject_id, actor, source, source_id) [unique, name: 'uq_budget_reservations_idem']
+  }
+  Note: 'Rolling-window money-budget reservations (#304). Windowed SUM() over created_at.'
+}
+
+Table budget_window_state {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  actor text [not null]
+  window_key text [not null]
+  cadence text [not null, note: 'session | fixed']
+  window_seconds bigint [not null]
+  anchor timestamptz [not null, note: 'First-ever window open; fixed boundaries are anchor + k*window_seconds']
+  window_start timestamptz [not null, note: 'Start of most recently OPENED window']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, tenant_subject_id, actor, window_key) [unique, name: 'budget_window_state_uniq']
+  }
+  Note: 'Per-(subject, actor, window_key) anchor. Locked FOR UPDATE in Reserve — the boundary-rollover serialization point.'
+}
+
+Table budget_policies {
+  id uuid [pk, default: `uuidv7()`]
+  tenant_id uuid [not null]
+  tenant_subject_id uuid [not null, ref: > tenant_subjects.id]
+  scope text [not null, note: 'subject | actor | role']
+  owner text [not null, note: 'platform | subject (write-authz split)']
+  scope_key text [not null, default: '', note: 'role uuid (scope=role) | actor string (scope=actor); empty for scope=subject']
+  windows jsonb [not null, default: `'[]'::jsonb`, note: 'Array of {key, window_seconds, limit_micros, cadence}']
+  policy_version bigint [not null, default: 1]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, tenant_subject_id, scope, owner, scope_key) [unique, name: 'budget_policies_uniq']
+  }
+  Note: 'Hierarchical money-budget policies (#473): {scope, owner, windows[]} composed in one admit verdict. platform-owned rows are NOT writable by the subject.'
+}
+
+// ============================================================================
+// Table groups (visual clustering in dbdiagram.io)
+// ============================================================================
+
+TableGroup control_plane {
+  tenants
+  tenant_subjects
+  tenant_delegated_issuers
+  tenant_deks
+  tenant_secrets
+  tenant_exports
+  tenant_credential_audit
+  platform_audit
+  platform_break_glass
+  probe_verdicts
+}
+
+TableGroup catalog {
+  products
+  prices
+  entitlement_features
+  product_entitlement_features
+  catalog_drift_events
+  reconciliation_runs
+  reconciliation_findings
+}
+
+TableGroup customer {
+  payment_methods
+  processor_customers
+  linked_wallets
+  payment_blocklist
+}
+
+TableGroup checkout_purchase {
+  checkout_sessions
+  usdc_funding_sessions
+  payments
+  subscriptions
+  solana_subscriptions
+  provider_intents
+}
+
+TableGroup entitlements_ownership {
+  entitlements
+  product_access_grants
+  admin_grants
+}
+
+TableGroup notifications {
+  notification_queue
+}
+
+TableGroup usage_invoicing {
+  usage_events
+  invoices
+}
+
+TableGroup money_ledger {
+  money_accounts
+  money_balances
+  money_transactions
+  money_blocks
+  money_windows
+  money_spend_limits
+}
+
+TableGroup budget_admission {
+  tier_policies
+  budget_reservations
+  budget_window_state
+  budget_policies
+}
