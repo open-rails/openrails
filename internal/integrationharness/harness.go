@@ -520,11 +520,19 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 	})
 	require.NoError(h.t, err, "register service-JWT issuer")
 	require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ownerOrgSlug, ra.ID, "member"), "assign org membership")
-	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
 	if len(permissions) == 0 {
 		permissions = []string{controlplane.PermCreditsWrite}
 	}
+	// BND-C1: grant each requested permission as a STORED direct grant so the
+	// authority intersection in ResolveServiceJWT can approve the token's
+	// self-asserted permissions. Without this, every service JWT would be
+	// rejected (empty intersection → ErrServiceTokenScopeDenied).
+	for _, perm := range permissions {
+		require.NoError(h.t, core.AddRemoteApplicationPermission(h.ctx, ra.ID, perm), "grant stored permission %q to %s", perm, slug)
+	}
+	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
+
 	token, _, err := authcore.MintServiceJWT(h.ctx, issuer.Signer(), issuer.URL(), authcore.ServiceJWTMintOptions{
 		Subject:     "service:" + slug,
 		Audiences:   []string{"openrails-app"},
