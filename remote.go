@@ -152,8 +152,12 @@ func (c *remote) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cred
 
 // CaptureHold implements Client (handler ServiceCaptureHold).
 func (c *remote) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*CreditTransaction, error) {
+	requestID := strings.TrimSpace(req.RequestID)
+	if requestID == "" {
+		return nil, fmt.Errorf("%w: capture_hold requires request_id", ErrInvalid)
+	}
 	var out CreditTransaction
-	path := "/v1/service/credits/holds/" + url.PathEscape(strings.TrimSpace(req.RequestID)) + "/capture"
+	path := "/v1/service/credits/holds/" + url.PathEscape(requestID) + "/capture"
 	if err := c.do(ctx, http.MethodPost, path, map[string]any{"amount": req.Amount}, &out); err != nil {
 		return nil, err
 	}
@@ -162,7 +166,11 @@ func (c *remote) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cred
 
 // ReleaseHold implements Client (handler ServiceReleaseHold).
 func (c *remote) ReleaseHold(ctx context.Context, requestID string) error {
-	return c.do(ctx, http.MethodPost, "/v1/service/credits/holds/"+url.PathEscape(strings.TrimSpace(requestID))+"/release", map[string]any{}, nil)
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return fmt.Errorf("%w: release_hold requires request_id", ErrInvalid)
+	}
+	return c.do(ctx, http.MethodPost, "/v1/service/credits/holds/"+url.PathEscape(requestID)+"/release", map[string]any{}, nil)
 }
 
 // WithdrawCredits implements Client (handler ServiceWithdrawCredits).
@@ -236,7 +244,7 @@ type captureBody struct {
 // request_id. A nil error means OpenRails accepted the capture.
 func (c *remote) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) error {
 	if strings.TrimSpace(requestID) == "" {
-		return fmt.Errorf("openrails: capture requires request_id")
+		return fmt.Errorf("%w: capture requires request_id", ErrInvalid)
 	}
 	body := captureBody{Amount: capturedAmount}
 	if usage != nil && strings.TrimSpace(usage.EventType) != "" {
@@ -254,7 +262,7 @@ func (c *remote) Capture(ctx context.Context, requestID string, capturedAmount i
 // request_id. Used when the work fails after a successful authorize/admit.
 func (c *remote) Release(ctx context.Context, requestID string) error {
 	if strings.TrimSpace(requestID) == "" {
-		return fmt.Errorf("openrails: release requires request_id")
+		return fmt.Errorf("%w: release requires request_id", ErrInvalid)
 	}
 	path := "/v1/service/credits/holds/" + url.PathEscape(strings.TrimSpace(requestID)) + "/release"
 	return c.do(ctx, http.MethodPost, path, nil, nil)
@@ -559,6 +567,9 @@ func (c *remote) SettleWindowItems(ctx context.Context, items []WindowSettleItem
 
 // RefillWindow implements Client (handler ServiceRefillCreditWindow).
 func (c *remote) RefillWindow(ctx context.Context, windowID uuid.UUID, amount, ttlSeconds int64) (*CreditWindow, error) {
+	if windowID == uuid.Nil {
+		return nil, fmt.Errorf("%w: refill_window requires a non-nil window_id", ErrInvalid)
+	}
 	body := map[string]any{"amount": amount, "ttl_seconds": ttlSeconds}
 	var out CreditWindow
 	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/windows/"+windowID.String()+"/refill", body, &out); err != nil {
@@ -569,6 +580,9 @@ func (c *remote) RefillWindow(ctx context.Context, windowID uuid.UUID, amount, t
 
 // CloseWindow implements Client (handler ServiceCloseCreditWindow).
 func (c *remote) CloseWindow(ctx context.Context, windowID uuid.UUID) (*CreditWindow, error) {
+	if windowID == uuid.Nil {
+		return nil, fmt.Errorf("%w: close_window requires a non-nil window_id", ErrInvalid)
+	}
 	var out CreditWindow
 	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/windows/"+windowID.String()+"/close", map[string]any{}, &out); err != nil {
 		return nil, err
