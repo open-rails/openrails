@@ -35,7 +35,10 @@ type remote struct {
 type RemoteOption func(*remote)
 
 // WithHTTPClient injects a transport (tests, custom TLS/conn pooling). When
-// unset a client bounded by the configured timeout is created.
+// unset a client bounded by the configured timeout is created. The per-call
+// timeout (WithTimeout) is enforced via a per-request context deadline
+// REGARDLESS of the injected client, so a custom client that omits
+// http.Client.Timeout still cannot stall the hot path.
 func WithHTTPClient(hc *http.Client) RemoteOption {
 	return func(r *remote) { r.client = hc }
 }
@@ -67,9 +70,12 @@ func WithAPIKey(key string) RemoteOption {
 	})
 }
 
-// WithTimeout bounds EVERY hot-path call. A short value is the point — a slow
-// OpenRails must not stall the request hot path; on timeout the fail-policy
-// decides (ErrUnreachable). Defaults to 2s.
+// WithTimeout bounds EVERY hot-path call via a per-request context deadline
+// (independent of the http.Client, so WithHTTPClient cannot silently drop it).
+// A short value is the point — a slow OpenRails must not stall the request hot
+// path; on timeout the fail-policy decides (ErrUnreachable). A non-positive
+// value disables the per-call deadline (rely on ctx / the client transport).
+// Defaults to 2s.
 func WithTimeout(d time.Duration) RemoteOption {
 	return func(r *remote) { r.timeout = d }
 }
@@ -619,6 +625,14 @@ func (c *remote) doRaw(ctx context.Context, method, path string, body any) (int,
 		if merr != nil {
 			return 0, nil, fmt.Errorf("openrails: marshal request: %w", merr)
 		}
+	}
+	// Enforce the per-call timeout via a context deadline so it holds even when
+	// the host injected its own http.Client (which may have no Timeout). Only
+	// shorten, never extend, an existing caller deadline.
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
 	}
 	bearer, berr := c.bearer(ctx)
 	if berr != nil {
