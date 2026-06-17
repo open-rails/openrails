@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // remote is the HTTP implementation of Client, ported from go-client/client.go
@@ -600,7 +602,12 @@ func statusErrorFromBody(status int, raw []byte) error {
 		}
 	}
 	if code == "" && message == "" {
-		message = strings.TrimSpace(string(raw))
+		// No recognized error envelope: the body is an opaque/foreign payload
+		// (a proxy's HTML error page, an upstream stack trace, etc.). Surface a
+		// short, single-line excerpt rather than dumping the whole body into the
+		// error string — an unbounded body can be large, contain newlines/control
+		// characters, or echo internal detail into the caller's logs.
+		message = excerptErrorBody(raw)
 	}
 	if status >= 500 {
 		// 5xx is server-side fault: also unreachable for fail-policy purposes
@@ -609,6 +616,48 @@ func statusErrorFromBody(status int, raw []byte) error {
 		return newStatusError(status, code, message, ErrUnreachable)
 	}
 	return newStatusError(status, code, message)
+}
+
+// maxErrorMessageBytes bounds the excerpt taken from an unrecognized (non-
+// envelope) error body before it becomes a StatusError message.
+const maxErrorMessageBytes = 512
+
+// excerptErrorBody turns an opaque error body into a safe, single-line excerpt:
+// it strips control characters (collapsing runs of whitespace), trims, and
+// truncates to maxErrorMessageBytes with an ellipsis. This keeps a foreign
+// upstream payload (HTML page, stack trace) from polluting the caller's error
+// strings/logs while preserving a useful hint.
+func excerptErrorBody(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(raw))
+	prevSpace := false
+	for _, r := range string(raw) {
+		if r == '\uFFFD' {
+			continue
+		}
+		if r == '\n' || r == '\r' || r == '\t' || unicode.IsControl(r) || unicode.IsSpace(r) {
+			if !prevSpace {
+				b.WriteByte(' ')
+				prevSpace = true
+			}
+			continue
+		}
+		b.WriteRune(r)
+		prevSpace = false
+	}
+	msg := strings.TrimSpace(b.String())
+	if len(msg) > maxErrorMessageBytes {
+		// Truncate on a rune boundary.
+		cut := maxErrorMessageBytes
+		for cut > 0 && !utf8.RuneStart(msg[cut]) {
+			cut--
+		}
+		msg = strings.TrimSpace(msg[:cut]) + "…"
+	}
+	return msg
 }
 
 // doRaw issues a single authed request and returns (status, body) for 2xx and
