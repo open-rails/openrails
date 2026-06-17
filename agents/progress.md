@@ -7,142 +7,193 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 511
+next_id: 513
 
 ---
 
-# #510: Unify standalone provisioning and merchant action auth
+# #512: double-entry-immutable-ledger-reorg
 
-**Completed:** yes
-**Status:** COMPLETE 2026-06-16: `bootstrap apply` now consumes a top-level AuthKit `auth:` bootstrap section via
-AuthKit v0.37.0, catalogs explicitly declare `merchant:`, `--prune` replaces the operator-facing `--exhaustive` flag
-with `--exhaustive` retained as a hidden alias, `catalog apply --api-url/--api-token` and the HTTP applier were removed,
-and catalog action routes moved from `/admin/catalog/*` to the unified merchant action surface at
-`/merchant/catalog/*`, gated by `openrails:catalog:write`. Validation passed with focused package tests, full
-`go test ./...`, CLI help smoke checks, and a live standalone HTTP integration test for `/v1/merchant/catalog/*`.
+**Completed:** no
+**Status:** PLANNED 2026-06-17: design from a TigerBeetle (github.com/tigerbeetle/tigerbeetle) data-model comparison; no code written yet. Re-shape the money ledger from a single-entry, mutate-in-place, per-customer-balance store into a TigerBeetle-style **double-entry, append-only ledger** (accounts + immutable transfers, balances derived, holds = one durable two-phase primitive), WITHOUT adopting TigerBeetle-the-database. Today there is NO counter-account anywhere (`grep` for debit/credit/counter-account in `internal/modules/money` returns nothing): a deposit mints a `money_block`, a charge decrements `money_blocks.remaining_amount`, and money is not conserved.
+
+Adopt TigerBeetle's data-modeling **principles** inside Postgres so every money movement has two sides (conserved by construction), the ledger is immutable+auditable, holds stop being fragmented across four mechanisms, and arrears stops being a hand-maintained scalar. Running TigerBeetle itself is explicitly out of scope here and gated behind the Phase F scaling trigger.
+
+## Why make these changes
+
+Current model (verified in code 2026-06-17):
+
+- **Single-entry, money not conserved.** `depositTx` inserts a `money_transactions` row + a `money_blocks` lot; `withdrawBalanceAndBlocks` decrements `money_blocks.remaining_amount` FIFO (`SetMoneyBlockRemaining`). There is no offsetting account (no platform-revenue / processor-clearing / arrears-liability / expired-credits account), so there is no invariant to assert and reconciliation against Stripe/NMI/Solana is a bespoke diff rather than "the books net out".
+- **Mutable, not append-only.** `money_transactions` rows are UPDATEd in place (`status`, `authorized_amount`, `captured_amount`); `money_blocks` rows are mutated and DELETEd on expiry; a denormalized `balance_after` running snapshot is stored on every row. Mutation + denormalization is a drift surface and blocks any future replication/sharding of the ledger.
+- **Holds are an admission concern, not a ledger concern (RESOLVED — keep in Redis).** Four distinct hold mechanisms coexist, and they are NOT redundant: (1) `AuthorizeAndHold`'s per-request money-capacity hold lives in **Redis** keyed by `merchant+request_id` — ephemeral *by design*, so the hot admission path never writes Postgres; (2) `money_windows` (`held_amount`/`settled_amount`, plus the `authorized_amount`/`captured_amount` columns written only by `windows.go` settle) — a prepaid BULK reservation handed to a host to meter locally, settled in batches (durable on purpose); (3) `budget_inflight_holds` — windowed spend-budget/rate caps, durable because the rolling window needs history (a different axis: rate/budget, not balance). `deriveBalance`'s `HeldBalance` (= `SumActiveMoneyHeld`) sums ONLY open `money_windows` — it deliberately does NOT see the Redis hold. This is sound: the Redis hold reserves nothing settled; the no-overspend guarantee lives at CAPTURE, not at admission (see Phase C / decision 8). TigerBeetle's durable two-phase transfer is the right model for real money movement (capture/refund/settle), NOT for the throwaway admission gate.
+- **Arrears as a scalar.** `money_settings.outstanding_owed_amount` + `credit_limit_amount` model debt as a mutable counter + ceiling, exposure re-derived from open invoices — instead of a real account allowed to go negative.
+- **Business attribution baked into ledger rows.** `money_transactions` carries `invoker_id`, `resource`, `description`, `metadata`, `invoice_id`. TigerBeetle keeps ledger rows pure and pushes all of that to opaque `user_data` references.
+- **One coarse concurrency primitive.** Every spend/hold/deposit/capture takes a `FOR UPDATE` lock on the `customers` row (`lockBalance`). Correct, but a hard per-customer throughput ceiling — and exactly the row-lock TigerBeetle's deterministic batched applier exists to eliminate.
+
+TigerBeetle's lesson, in five primitives we are mapping onto Postgres: **Account** (belongs to one ledger=currency; balance derived from debits/credits, never stored as an overwritten scalar; sign-constraint flags), **Transfer** (immutable, append-only, `id`=idempotency, moves amount debit→credit within ONE ledger), **two-phase transfer** (pending → post/void = authorize/capture/release), **linked transfers** (atomic all-or-nothing chains; FX = linked transfers through a liquidity account, since no single transfer crosses ledgers), and **`user_data`/`code`** (opaque join keys back to the control plane; the ledger knows nothing about subscriptions/products/entitlements).
+
+## Guiding principles / design decisions
+
+1. **Principles in Postgres, not the database.** This issue does NOT introduce TigerBeetle as a running system. It re-shapes the Postgres schema + `internal/modules/money` to TB semantics. Actually running TB is a separate, later decision gated on Phase F.
+2. **Conserve by construction.** Model an external/world side for every movement (a `world`/equity account or the processor-clearing account that nets against real processor float) so `Σ balances over all accounts in a (merchant, currency) ledger == 0` is an assertable invariant.
+3. **Derive, don't store.** Account balance = `Σ credits_posted − Σ debits_posted`; held = pending side. Keep the cheap partial-index/derive approach already used post-#491; drop `balance_after`.
+4. **Immutable ledger.** Capture/void/refund/expiry are NEW linked rows, never in-place updates or deletes.
+5. **Holds stay ephemeral (Redis); the bill is durable (Postgres).** The admission hold is a throwaway Redis reservation keyed by the provider/tensorhub request-id; the hot path writes NO Postgres and reads balance from an in-memory cache. The durable double-entry ledger (Phases A/B) is written at/after capture, OFF the hot path (batched/async). Slight over-spend from a stale cache is acceptable and bounded (decision 8).
+6. **Ledger purity.** Transfer rows carry accounts/amount/currency/type/pending_id/flags/source+source_id + opaque `user_data` refs only; business joins live in control-plane tables.
+7. **Keep what already matches TB:** integer minor units (no floats), idempotency keys, entitlements `tstzrange` GIST-exclusion windows, append-only `usage_events`.
+8. **Target admission model (RESOLVED 2026-06-17, Paul).** The whole money admission path is exactly this and nothing more: (a) request costs $X; (b) admit iff `cached_balance − Σ active Redis holds ≥ $X`; (c) on admit, record an $X hold in Redis keyed by the request-id; (d) on completion, deduct ACTUAL cost and release the hold; (e) on failure, release the hold and bill nothing, but record money-wasted in Redis for rate-limit/abuse. No Postgres on the hot path; balance is memory-cached; the durable spend is persisted to the ledger off the hot path. No-overspend is an ADMISSION-time check against the cached balance, not a capture-time Postgres gate — a slightly-negative balance from a stale cache is fine.
+
+## Metadata
+
+- Category: architecture
+- Status: planned
+- Passes: false
+
+## Work breakdown
+
+### A. Double-entry account + transfer foundation
+- [ ] New `openrails.ledger_accounts` (id, merchant_id, customer_id NULL, account_type, currency, flags, created_at). account_type ∈ {customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, fx_liquidity, world}; system accounts per (merchant, currency), customer accounts per (merchant, customer, currency). RLS + merchant_isolation like every other table.
+- [ ] New `openrails.ledger_transfers` (immutable): id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, pending_id NULL, flags (pending|post_pending|void_pending|linked), source, source_id, user_data refs (customer_id, invoker_id, resource, invoice_id), created_at. Append-only — NO update/delete grant intent.
+- [ ] CHECK/app-invariant: `debit.currency = credit.currency = transfer.currency` (a transfer never crosses ledgers).
+- [ ] Sign-constraint flags on accounts (TB `debits_must_not_exceed_credits` / `credits_must_not_exceed_debits`) enforced in the applier: customer_balance may go negative only up to the arrears credit line.
+- [ ] Conservation invariant job: per (merchant, currency) assert `Σ account balances == 0`; surface as an Integrity finding (ties into #511 I-plane).
+- [ ] Map the existing flows to transfer pairs: deposit = DR processor_clearing / CR customer_balance; spend = DR customer_balance / CR platform_revenue; refund = reverse; expiry = DR customer_balance / CR expired_credits.
+
+### B. Immutable ledger — derive, don't mutate
+- [ ] Stop UPDATE on `money_transactions`; capture = new post_pending transfer linked via `pending_id`; void/refund = new transfers. (touch: `internal/db/gen/money_ledger.sql.go` writers, `money_service.go`)
+- [ ] Replace `SetMoneyBlockRemaining` mutation + `DELETE FROM money_blocks` expiry: lots become immutable (`original_amount` only); remaining is derived from transfers; expiry is a transfer to `expired_credits`, never a delete. (touch: `withdrawBalanceAndBlocks`, `jobs_credit_expiry.go`)
+- [ ] Drop `money_transactions.balance_after`; extend `deriveBalance` to be the only balance source.
+- [ ] Decide lot model: keep `money_blocks` as an immutable lot index for FIFO/expiry vs. fold the lot dimension into `ledger_transfers`. (OPEN design decision)
+
+### C. Simplify holds to the ephemeral Redis admission model (decision 8)
+Goal: collapse the admission path to decision 8's five steps. Holds NEVER touch Postgres; the durable ledger write happens at capture, off the hot path. This SIMPLIFIES the current system, which today is heavier than decision 8 on three counts: capture (`CaptureAuthorized`/`spendBalanceThenOwedTx`) is a synchronous Postgres tx under the per-customer `FOR UPDATE` lock; balance is Postgres-derived under that lock on every spend (not memory-cached); and two extra reservation layers exist beyond the per-request hold.
+- [ ] **Balance cache.** Serve admission from an in-memory (per-instance) cache of the Postgres-derived balance; refresh on TTL and invalidate/bump on deposit/top-up so a funded payer can spend immediately. Per-instance staleness is fine; the resulting over-spend is bounded.
+- [ ] **Hold.** Keep the per-request hold in Redis keyed by the provider/tensorhub request-id (shared Redis, so every instance's admission sees the same holds); admit iff `cached_balance − Σ active holds ≥ estimate`; record the hold on admit. (touch: `pkg/service/spend.go` `AuthorizeAndHold`, `internal/modules/money/authorize.go`)
+- [ ] **Capture.** On completion, deduct ACTUAL cost from the cache + release the hold, and persist the real spend to the durable ledger (Phases A/B) OFF the hot path — NOT today's synchronous per-request locked Postgres tx. Decide durability of the off-path write: a durable spend outbox (at-least-once) vs. accepting crash-loss of in-flight captures as part of the bounded leak.
+- [ ] **Failure.** Release the hold, bill nothing, record money-wasted in Redis for rate-limit/abuse (supersedes durable wasted-spend bookkeeping where it exists, e.g. `delegated_invoker_wasted_spend_windows`).
+- [ ] **No-overspend at admission, not capture.** The credit/balance limit is checked at admission against `cached_balance − holds` (arrears: `≤ credit_limit`); capture/persist faithfully records actual spend even if a stale cache let the balance go slightly negative. The negative is bounded by `(cache-staleness × spend rate) + (estimate − actual)` and is accepted — never ledger corruption, never unbounded. This deliberately drops today's synchronous capture-time credit-limit gate in `spendBalanceThenOwedTx`.
+- [ ] **Map before cutting the heavier layers.** `money_windows` (prepaid BULK reservation a host meters locally, settled in batches) and `budget_inflight_holds` + admission delegated-spend windows (windowed rate/budget caps) exceed decision 8. For each: either justify it as a genuinely-distinct feature or fold it in. Don't delete blind. (touch: `internal/modules/admission`, `internal/modules/money/windows.go`)
+
+### D. Separate ledger fields from control-plane attribution
+- [ ] Move `invoker_id`/`resource`/`description`/`metadata`/`invoice_id` off the hot ledger row into opaque `user_data` columns (or one `user_data` jsonb) + control-plane joins by id. Ledger stays narrow and reusable.
+
+### E. FX rule (bake in before multi-currency settlement)
+- [ ] Enforce "no cross-currency in one transfer" (Phase A CHECK already covers it).
+- [ ] When FX is first needed: add a per-merchant `fx_liquidity` account + a linked-transfer helper (two transfers, one per currency, atomic via `flags.linked`). Document the rule now; implement on first multi-currency demand. (custom credits remain no-FX by design — #475)
+
+### F. Per-customer FOR UPDATE lock = the scaling tell
+- [ ] No behavior change now. Add observability: per (merchant, customer) lock-wait/contention metric on `lockBalance`.
+- [ ] Decision gate: if a hot customer/invoker saturates the lock, THAT is the trigger to evaluate running TigerBeetle (or a deterministic batched applier) for the money ledger — TB = money source of truth, Postgres = control plane, synced by transfer id / user_data. Document the trigger + integration sketch.
+
+### G. Tests
+- [ ] Conservation: random transfer sequences leave `Σ ledger == 0`.
+- [ ] Immutability: no UPDATE/DELETE on ledger rows; capture/void/refund/expiry are new rows.
+- [ ] Two-phase durability: a crash between authorize and capture leaves a recoverable pending transfer; expiry voids it; no double-spend.
+- [ ] Migration: backfill `money_transactions`/`money_blocks` → accounts+transfers; assert post-migration derived balances equal pre-migration derived balances for every (merchant, customer, currency).
+
+## Non-goals
+
+- NOT running TigerBeetle-the-database in this issue (it is a separate stateful system + a two-phase sync with Postgres); only its data-modeling principles, in Postgres. Adopting TB is gated on Phase F.
+- Do NOT regress the already-TB-aligned wins: integer minor units, idempotency keys, entitlements `tstzrange` exclusion windows, append-only `usage_events`, derived available balance (post-#491).
+
+## References
+
+- Source comparison: TigerBeetle (github.com/tigerbeetle/tigerbeetle) Account/Transfer/two-phase/linked-transfer model.
+- Current code: `internal/modules/money/money_service.go` (`depositTx`/`withdrawTx`/`withdrawBalanceAndBlocks`/`deriveBalance`/`lockBalance`), `internal/modules/money/authorize.go` (`AuthorizeAndHold` Redis hold), `internal/db/gen/money_ledger.sql.go`, `internal/db/gen/money_accounts.sql.go` (settings only — misnamed), schema `migrations/postgres/001_schema.up.sql` (money_transactions/money_blocks/money_settings/money_windows/budget_inflight_holds).
+- Integrity-invariant overlap: #511 (the conservation check is an I-plane finding).
+
+---
+
+# #511: unified-consistency-invariant-engine
+
+**Completed:** no
+**Status:** PLANNED 2026-06-17: design complete in `docs/consistency-invariants.md`; no code written yet. Replaces the two split consistency mechanisms — `internal/reconcile` (PS-1..PS-10, local-vs-processor) and `internal/audit` (P-E/S-E/SS, local-vs-local) — with ONE system: `reconcile` becomes a pure provider-state pull that overwrites the local mirror, plus a continuously-running **Convergence Engine** that drives every projection (entitlements / credits / product-access) and external decision into a consistent state with the source events, via a canonical **grants** layer.
+
+Build the unified billing-consistency system designed in `docs/consistency-invariants.md`: a provider-truth **pull** (`reconcile`) and a **continuously-running Convergence Engine**, organized by the five-plane taxonomy — **M** Mirror (inbound: processor → local, the pull) / **D** Derivation (source → grant → projection) / **L** Lifecycle (clock + state machine) / **N** Intent (outbound: our recorded decision → the processor must change) / **I** Integrity-Rule (internal financial/referential rules). Subsumes and retires `openrails audit` and the `PS-1..PS-10` reconcile taxonomy.
+
+## Design decisions (resolved 2026-06-17)
+
+1. **Provider state is authoritative but may be incomplete w.r.t. future-dated intent.** The pull overwrites the local mirror with observed provider state, but NEVER deletes a standing local intent (`deletion_scheduled_at`, `scheduled_price_id`, pending `provider_intents`). The engine is schedule-aware: a not-yet-due scheduled change (cancel scheduled for Jun 28, pull on Jun 17 still sees the sub live at NMI) is fully consistent — expected lag, not drift. Divergence is a fault (N-plane re-drive) only when a scheduled intent is PAST-DUE and the provider has not reflected it.
+2. **No enforce command/crank.** Convergence runs continuously while the server is up (inline after every source mutation + a background sweep). `reconcile pull` is a CLI used when the server may be down, so it pulls and then runs a one-shot `Converge` pass itself. No `--enforce` flag; `pull` always converges.
+3. **Credit clawback pulls back UNSPENT only.** A fully-refunded payment's unspent credit remainder is clawed back automatically — post-#512 a reversing `ledger_transfer` to `expired_credits` with "unspent" derived from the ledger (not a `money_blocks.remaining_amount` mutation); the already-spent portion is left untouched (informational only).
+4. **Default pull = the head (current state).** `reconcile pull` pulls current provider state by default; an optional `--since` / date range backfills historical transactions for replaying old projections (legacy import, audit completeness).
+5. **Grants layer.** A canonical `grants` row sits between source events and projections (generalizing `product_access_grants`); derivation is two pure steps — derive-1 (event → grant) and derive-2 (grant → projection) — so the D-plane is uniform across entitlements/credits/access and the manual-override rule lives on the grant's `revoked_at`+`revoke_reason`.
+6. **No "conflict" shape.** Shapes are MISSING/EXCESS/MISMATCH only (an exhaustive 2×2). A case the engine can't evaluate (authority unreachable or evidence ambiguous) is the `indeterminate` finding state — an evidence problem, never a truth-model fault.
+
+## Two safety doctrines for bulk legacy import
+
+- **Replay vs converge.** Projections are replayed at their historical source timestamps (a 2025-06-30 90-day membership is recreated already-expired). Side-effecting external actions (charges, rebills, dunning) are NEVER replayed — the Convergence Engine converges a record to its correct CURRENT state (dunning unrun for 3 months ⇒ cancel now + revoke as-of grace end), never retro-charges.
+- **Confirmed-absence gate.** MISSING/materialize is additive ⇒ AUTO even in bulk. EXCESS/retract is destructive and is HELD until the relevant source domain is confirmed fully reconciled for that merchant (an imported entitlement with no subscription is "not imported yet", not "orphaned"); then ADMIN-gated, never silent.
+
+## Relationship to #512 (double-entry ledger)
+
+#512 reshapes the money **substrate** (credits become double-entry `ledger_accounts` + immutable `ledger_transfers`); this issue reshapes the **control plane** (what a customer is *owed*, via grants). They meet at credit grants:
+
+- **A credit projection is a `ledger_transfer`, not a `money_blocks` row.** For a credit-granting grant, derive-2 emits a credit-deposit transfer (`world`/`processor_clearing` → `customer_balance`) tagged with the grant via #512's `source='grant'` / `source_id=grant_id`. So #511 does NOT add `grant_id` to `money_blocks` — the grant linkage rides on `ledger_transfers`.
+- **Clawback (D5) is a reversing transfer, not a mutation.** A refund's unspent remainder is returned by appending a `customer_balance → expired_credits` transfer; "unspent" is *derived* from the ledger — matching #512's append-only + derive-don't-store principles.
+- **Entitlements and product-access projections are unaffected by #512** (not money); they stay local rows derived from grants.
+- **D-plane credit checks run against `ledger_transfers`:** every credit grant has its deposit transfer (D4), every credit deposit traces to a live grant (D5), amounts/cadence match the grant spec (D6).
+- **Sequencing:** land #512's credit substrate before/with #511's credit derivation so credits aren't migrated twice. If #512 slips, #511's credit derivation targets the current `money_transactions` shape behind the same derive-2 interface and swaps substrate when #512 lands.
 
 ## Metadata
 
 - Category: feature
-- Status: complete
-- Passes: true
+- Status: planned
+- Passes: false
 
-## Problem
+## Work breakdown
 
-Private standalone OpenRails deployments should be provisionable from one desired-state YAML file. That file should
-describe merchant ownership, remote applications/JWKS principals, and the merchant's catalog products/prices. Operators
-should be able to dry-run the plan, apply it locally/in-process, and optionally prune OpenRails-owned provider catalog
-objects that are no longer declared.
+### A. Schema, grants layer & findings ledger
+- [ ] **Grants layer:** generalize `product_access_grants` into the canonical `grants` table that entitlements + credits + access all derive from; repoint `entitlements`; tag credit deposits with the grant (under #512 via `ledger_transfers.source='grant'`/`source_id`; pre-#512 a `grant_id` on `money_transactions`), replacing the free-string `source` — NOT a separate `money_blocks` migration (see **Relationship to #512**); migrate existing rows.
+- [ ] Extend `reconciliation_findings`: admit the M/D/L/N/I `finding_type` codes (replace the `PS-1..PS-10` CHECK with the new set / registry validation); allow a `self` value in `provider` for D/L/I findings.
+- [ ] Add the `held` status (+ reason `held_pending_source_reconciliation`, the confirmed-absence gate) AND the `indeterminate` status (authority unreachable/ambiguous — verify then escalate; never a truth-model fault).
+- [ ] Add per-merchant reconciliation-state (table or columns): per source-domain `last_full_pull_at` + `fully_reconciled` flag, backing the confirmed-absence gate (per-domain granularity: subscriptions / payments / grants).
+- [ ] Confirm intent fields suffice for schedule-awareness (`subscriptions.deletion_scheduled_at`, `scheduled_price_id`, `provider_intents.next_attempt_at`/`expires_at`); add a scheduled-effective-at marker if any transition lacks one.
 
-The current surface is close but inconsistent:
+### B. The pull (`reconcile` rework)
+- [ ] Rename `reconcile fix` → `reconcile pull`; keep `check` (dry-run change log, zero writes, no convergence) and `report`.
+- [ ] Rewrite pull semantics from "diff + selectively apply findings" to "pull complete head state per provider, OVERWRITE the local mirror, log every row old→new".
+- [ ] Mirror coverage: subscription observed status/period/next-bill, charges→payments, refunds, chargebacks/disputes, vault→payment_methods, plan amount/cadence.
+- [ ] Intent preservation in the overwrite: never clobber `deletion_scheduled_at`/`scheduled_price_id`/pending intents; compute divergence against (mirror + scheduled future transitions); flag only PAST-DUE intents.
+- [ ] `--since` / date-range flag for historical backfill; default pulls the head.
+- [ ] After a successful pull: mark the pulled source domains reconciled (gate) and run a one-shot `Converge(merchant)` pass.
 
-- `openrails bootstrap apply` already applies a unified manifest with `merchants:` and `catalogs:`.
-- Startup bootstrap auto-applies `/etc/openrails/bootstrap.yaml`, but only additively and only from that conventional
-  location.
-- `openrails catalog apply` applies catalog-only manifests and has a remote HTTP mode.
-- `catalog apply --api-url` calls `/admin/catalog/*` and its `--api-token` story is unclear: those routes are behind
-  user/admin auth and `openrails:admin`, not the merchant-scoped service-token/remote-application authorization model.
-- There should not be separate route trees for the same merchant administrative actions. Applying catalog updates,
-  rotating merchant secrets, refunding payments, and similar operations should be capability-gated merchant actions that
-  any supported credential type can call when it resolves to the right merchant and permission.
-- Bootstrap manifests currently do not declare remote applications; issuer/JWKS trust is owned by AuthKit
-  remote_application records.
-- `bootstrap apply --exhaustive` is accurate internally but not the clearest operator-facing name. The action is pruning:
-  archive OpenRails-owned provider-side catalog extras absent from the manifest, never delete or touch foreign objects.
+### C. The Convergence Engine (new core)
+- [ ] `Converge(scope)` — idempotent (second run is a no-op), scope-narrowable (customer | subscription | merchant | global).
+- [ ] Plane passes run in order D → L → N → I (M is the pull); each plane is a module.
+- [ ] Derivation is two pure appliers — derive-1 (event → grant) and derive-2 (grant → projection) — the SOLE writers of grants and projections; refactor existing grant/entitlement/credit paths to route through them.
+- [ ] Historical replay anchored to source-event timestamps, judged against the grant's `*_spec_snapshot` (never live product spec).
+- [ ] Converge-not-replay for the L-plane; confirmed-absence gate on every EXCESS repair.
 
-## Target Model
+### D. Invariant checks + appliers (catalogue, `docs/consistency-invariants.md` §4)
+- [ ] D grant tier: D1 grant.missing (event→grant) / D2 grant.excess (gated) / D3 grant.mismatch — derive-1, uniform across entitlements/credits/access.
+- [ ] D projection tier: D4 projection.missing (grant→projection) / D5 projection.excess (gated; credit clawback = unspent only) / D6 projection.mismatch (incl. per-renewal credit cadence) — derive-2; credit + product-access projections are NEW beyond entitlements. The credit projection is a #512 `ledger_transfer`; entitlement + access projections are local rows.
+- [ ] L subscription period-overdue / dunning-overdue / grace-exhausted / pending-stale (L1-L4), intent-stuck (L5), checkout-session-stale (L6).
+- [ ] N (Intent) billing-leak (N1), undelivered-decision re-drive (N2), duplicate-subscription (N3), dispute-unresolved (N4) — via `provider_intents` / operator queue.
+- [ ] I duplicate-charge (I1), refund-math (I2), price/product (I3), payment-amount (I4), unresolved-reference (I6).
 
-- Keep runtime infrastructure config separate from desired provisioned state:
-  - `config.yaml`: DB, ports, mode, processor secret sources, runtime behavior.
-  - bootstrap/apply YAML: merchants, AuthKit remote applications, catalog products/prices, provider mappings.
-- Make `openrails bootstrap apply` the canonical private-standalone desired-state command.
-- Let the bootstrap YAML declare everything a private standalone install needs:
-  - merchants and owner orgs;
-  - an `auth:` section passed to AuthKit's planned first-class bootstrap manifest/API/CLI (`authkit#84`) for orgs,
-    users/credentials, roles, permission assignments, service tokens, and remote applications/JWKS principals;
-  - per-merchant catalog products, prices, tier groups, and provider mappings.
-- Keep startup auto-apply additive-only from `/etc/openrails/bootstrap.yaml`.
-- Keep destructive cleanup explicit on the manual CLI only, behind a clearer flag such as `--prune`.
-- Replace the current route/auth split with one merchant administrative action model:
-  every accepted credential normalizes to a principal with `merchant_id`, `owner_org_id`, subject/key/issuer identity,
-  `permissions[]`, and resource scopes.
-- Use permission gates for actions, not route-family identity:
-  `openrails:catalog:write` for catalog apply, `openrails:merchant:secrets:write` for merchant secrets,
-  `openrails:payments:refund` for refunds, `openrails:platform:superadmin` for true cross-merchant platform actions.
-- Do not preserve `/admin/catalog/*` as a separate authority model. Catalog apply should be a merchant action callable by
-  an AuthKit user access token, generated service token, first-party service JWT, remote-application token, or delegated
-  merchant-admin token when that credential resolves to the target merchant and carries `openrails:catalog:write`.
-- Keep "admin UI" as a client/product concept only. An admin UI signs in a user and calls the same merchant action routes
-  with that user's access token; it should not require a separate admin-only route/auth stack.
-- For private standalone OpenRails, seed all authority through bootstrap/AuthKit: orgs, roles, permission assignments,
-  users/passwords if AuthKit supports it, remote applications/JWKS principals, and service tokens. OpenRails should use
-  AuthKit's standard bootstrap APIs rather than inventing its own user/credential store. The upstream AuthKit work is
-  tracked as `authkit#84: First-class AuthKit bootstrap manifest/API/CLI`.
-- Public OpenRails, later, can enable AuthKit public registration and host onboarding UI where users create orgs,
-  merchants, remote applications, and credentials. It should reuse the same merchant action routes and permission gates.
+### E. Continuous convergence wiring
+- [ ] Inline hooks: `Converge(customer|subscription)` synchronously after checkout completion, renewal billing, refund/webhook ingestion, dunning transitions, admin grant/revoke.
+- [ ] Background sweep (River worker): periodic `Converge(merchant)` scanning for due lifecycle transitions, overdue intents, and gate-released held findings.
+- [ ] Server-running convergence and the CLI one-shot share the same `Converge` core.
 
-## Tasks
+### F. Retire the split mechanisms
+- [ ] Fold `internal/audit` checks into the engine as D/I-plane checks; remove/alias the standalone `openrails audit` command.
+- [ ] Replace `internal/reconcile` PS-* finding types + selective-apply with the pull + M/D/L/N/I Convergence Engine; update the store, report rendering, CLI help.
+- [ ] Update `README.md` billing section (audit/reconcile description, PS-1..PS-10 mention) to the new model once shipped.
 
-- [x] Keep `openrails bootstrap apply` as the canonical private-standalone provisioning command; keep `openrails catalog apply`
-      as local/in-process only and remove remote HTTP mode.
-- [x] Use the existing AuthKit-backed effective-permission principal path for merchant action routes; catalog actions now
-      require a credential that resolves to the merchant org and holds `openrails:catalog:write`.
-- [x] Collapse catalog products/prices/drift mutation/read action routes from `/admin/catalog/*` onto one merchant action
-      route family.
-- [x] Use `/merchant/catalog/*` as the neutral merchant-scoped action prefix.
-- [x] Gate catalog action routes with `openrails:catalog:write` rather than broad `openrails:admin`.
-- [x] Rename the operator-facing cleanup flag to `--prune` with help text that says OpenRails-owned provider extras are
-      archived and foreign provider objects are never touched.
-- [x] Preserve `--exhaustive` as a hidden deprecated alias for `--prune`.
-- [x] Consume `authkit#84` by bumping to AuthKit v0.37.0.
-- [x] Extend the OpenRails bootstrap manifest schema with an AuthKit-owned `auth:` section.
-- [x] Reconcile remote applications/JWKS/public-key trust through AuthKit bootstrap/core APIs, not raw SQL or OpenRails
-      issuer tables.
-- [x] Delegate AuthKit orgs, roles, role assignments, users/password credentials, remote applications/JWKS principals,
-      and generated service tokens to AuthKit's bootstrap reconciler.
-- [x] Keep service-token bootstrap on AuthKit's generated-output model; fixed plaintext API-key constants were not added.
-- [x] Reject stale merchant-level `issuers:` with a clear error pointing to top-level `auth.orgs[].issuers`.
-- [x] Require each bootstrap catalog declaration to specify `merchant: <slug>` instead of overloading catalog `name`.
-- [x] Print AuthKit bootstrap, merchant, catalog, and prune dry-run plans without mutating.
-- [x] Keep startup bootstrap additive-only and conventional-path-only; pruning remains manual CLI-only.
-- [x] Remove `catalog apply --api-url --api-token` and delete the redundant HTTP catalog applier.
-- [x] Replace the `/admin/catalog/*` dependency with `/merchant/catalog/*`, gated by `openrails:catalog:write`.
-- [x] Remove loose "admin bearer token" CLI help/docs for catalog remote apply.
-- [x] Update catalog route docs/comments and provider-link hints to use `/merchant/catalog/*`.
-- [x] Update `docs/operations.md`, `docs/merchant-provisioning.md`, `docs/api/endpoints.md`, and bootstrap examples for
-      `auth:` plus explicit catalog `merchant:`.
-- [x] Add manifest parsing/validation tests for `auth:`, stale `issuers:`, and explicit catalog merchant scoping.
-- [x] Add route authorization regression coverage proving `/merchant/catalog/*` requires `openrails:catalog:write` and
-      `/admin/catalog/*` is no longer registered.
+### G. Legacy import
+- [ ] Import flow leaves the per-merchant gate "not reconciled" until import + a full historical pull complete; bulk sweep entry point for a freshly imported merchant.
+- [ ] Triage report for `held` findings (entitlements without sources, dunning long-overdue, …) before any destructive repair is approved.
 
-## Acceptance
+### H. Tests
+- [ ] Per-plane / per-code unit tests; idempotency (double-run no-op); historical replay (already-expired windows); converge-not-replay (no retroactive charges).
+- [ ] Schedule-aware intent test (Jun 15 cancel / Jun 28 delete / Jun 17 pull is consistent).
+- [ ] Confirmed-absence gate (held pre-reconciliation, fires after); credit unspent-only clawback.
+- [ ] Migration test: the findings-ledger CHECK admits the new codes and old runs still load.
 
-- A private standalone deployment can be provisioned from one YAML file with AuthKit `auth:`, OpenRails `merchants:`,
-  and explicit per-merchant `catalogs:` entries.
-- `openrails bootstrap apply --file <path> --dry-run` prints AuthKit, merchant, catalog, and prune plans and makes no
-  mutations through the OpenRails apply path.
-- `openrails bootstrap apply --file <path>` idempotently converges AuthKit authority, merchants, and catalog state.
-- Provider-side extras are only archived when an operator explicitly passes `--prune` or the hidden deprecated
-  `--exhaustive` alias; startup bootstrap never prunes.
-- Foreign provider objects are never archived by prune.
-- The CLI no longer describes or accepts a vague "admin token" for remote catalog apply.
-- Catalog action HTTP routes are merchant-scoped under `/merchant/catalog/*` and require `openrails:catalog:write`
-  rather than broad `openrails:admin`.
-- Applying a catalog update does not depend on `/admin/catalog/*`.
-- Private standalone bootstrap can seed the AuthKit authority graph needed for an initial deployment: orgs, roles,
-  permissions, users/credentials, generated service tokens, remote applications/JWKS/public keys, merchant ownership,
-  and catalog.
-- `catalog apply` is catalog-only, local/in-process, and no longer conflicts with the unified bootstrap apply model.
-
-## Validation
-
-- [x] `go test ./internal/bootstrap ./cmd/openrails ./pkg/catalog ./internal/http ./internal/http/routes ./pkg/embedded/gin ./pkg/service`
-- [x] `go test ./internal/http/routes ./internal/http`
-- [x] `go test ./...`
-- [x] `go test -tags integration ./internal/integrationharness -run TestStandaloneMerchantCatalogRoutesHTTP -count=1`
-- [x] `go run ./cmd/openrails bootstrap apply --help`
-- [x] `go run ./cmd/openrails catalog apply --help`
-
+## References
+- Design doc: `docs/consistency-invariants.md`
+- Supersedes the operator-facing taxonomy work-item in `agents/future.md`.
 
 ---
 
@@ -577,7 +628,7 @@ Publish and maintain a provider certification matrix for Stripe, NMI/Mobius, CCB
 -
 - EXECUTABLE CERTIFICATION:
 - [ ] Add or formalize focused integration tests for NMI/Mobius sale, vault, recurring plan create/readback, and query API.
-- [ ] Add Stripe test-mode catalog apply + subscription sync certification steps.
+- [ ] Add Stripe test-mode catalog command + subscription sync certification steps.
 - [ ] Add Solana devnet read-back certification for plan accounts and recurring lifecycle.
 - [ ] Add CCBill manual-action verification path so unsupported remote catalog operations surface as pending_manual_actions rather than errors.
 -
@@ -611,7 +662,7 @@ Expose processor capability metadata in code, APIs, catalog planning, checkout v
 -
 - INTEGRATION POINTS:
 - [ ] Use capabilities in checkout validation instead of hard-coded processor switches where practical.
-- [ ] Use capabilities in catalog apply/plan to decide provider actions and pending_manual_actions.
+- [ ] Use capabilities in catalog planning/reconciliation to decide provider actions and pending_manual_actions.
 - [ ] Use capabilities in routing/fallback policy (#288) so unsupported rails are filtered before checkout.
 - [ ] Surface capabilities through admin/provider status endpoints and docs.
 -

@@ -463,7 +463,7 @@ move in any mode):
 | User/admin cancel → processor-side delete | ✅ | ✅ | ❌ marker left for replay |
 | Dunning charges + window-expiry cancellations | ✅ | ❌ runs dry | ❌ |
 | Auto-top-ups, arrears collection, Solana pulls | ✅ | ❌ | ❌ |
-| Catalog provider-object writes (bootstrap apply) | ✅ | ❌ deferred | ❌ deferred |
+| Catalog provider-object writes (`push-catalog`) | ✅ | ❌ deferred | ❌ deferred |
 | Provider reads (query APIs, catalog verification) | ✅ | ✅ | ✅ |
 | Webhook ingestion + local serving | ✅ | ✅ | ✅ |
 
@@ -559,7 +559,7 @@ pure observer for forensics.
 ## Consistency checks & corrections
 
 **`audit`** — checks internal DB consistency. Read-only, report-only:
- - 30 checks across nine categories:
+ - active checks across internal OpenRails finding categories:
    - duplicates
    - foreign keys
    - subscription/entitlement state
@@ -570,11 +570,18 @@ pure observer for forensics.
 
 ```bash
 openrails audit                                  # full audit, table output
+openrails audit --details-file=/tmp/audit.log    # detailed per-account table log
 openrails audit --format=json                    # json | csv | table
 openrails audit --severity=HIGH                  # CRITICAL | HIGH | MEDIUM | LOW floor
 openrails audit --category=duplicates,temporal   # repeatable filter
 openrails audit --user-id=<uuid>                 # single user
 ```
+
+Table output keeps stdout summary-focused and writes the individual affected
+accounts/entities to a detailed audit log. Audit finding codes such as `P-E-1`
+and `SS-1` are internal OpenRails check IDs. The consistency model and the target
+invariant taxonomy live in
+[docs/consistency-invariants.md](docs/consistency-invariants.md).
 
 **`reconcile`** — local state vs. the payment processors as the source of truth.
 Pulls the payment processor's records and compares to OpenRails local records, looking for inconsistencies.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/fatih/color"
@@ -31,6 +32,68 @@ func GetFormatter(format string) Formatter {
 type TableFormatter struct{}
 
 func (f *TableFormatter) Format(w io.Writer, findings []Finding, summary Summary) error {
+	return f.FormatDetails(w, findings, summary)
+}
+
+// FormatSummary prints the terminal-friendly audit summary. Individual findings
+// belong in the detailed audit log, not stdout.
+func (f *TableFormatter) FormatSummary(w io.Writer, findings []Finding, summary Summary, detailsPath string) error {
+	// Define colors
+	critical := color.New(color.FgRed, color.Bold)
+	high := color.New(color.FgRed)
+	medium := color.New(color.FgYellow)
+	low := color.New(color.FgCyan)
+	header := color.New(color.FgWhite, color.Bold)
+
+	// Print header
+	header.Fprintln(w)
+	header.Fprintln(w, "═══════════════════════════════════════════════════════════════════")
+	header.Fprintln(w, "                    BILLING CONSISTENCY AUDIT")
+	header.Fprintln(w, "═══════════════════════════════════════════════════════════════════")
+	fmt.Fprintln(w)
+
+	if len(findings) == 0 {
+		color.New(color.FgGreen, color.Bold).Fprintln(w, "✓ No consistency issues found!")
+		return nil
+	}
+
+	fmt.Fprintf(w, "Total findings:     %d\n", summary.TotalFindings)
+	fmt.Fprintf(w, "Auto-fixable:       %d\n", summary.AutoFixable)
+	fmt.Fprintf(w, "Manual review:      %d\n", summary.ManualReviewOnly)
+	if detailsPath != "" {
+		fmt.Fprintf(w, "Detailed log:       %s\n", detailsPath)
+	}
+
+	fmt.Fprintln(w, "\nBy Severity:")
+	if v := summary.BySeverity[SeverityCritical]; v > 0 {
+		critical.Fprintf(w, "  CRITICAL: %d\n", v)
+	}
+	if v := summary.BySeverity[SeverityHigh]; v > 0 {
+		high.Fprintf(w, "  HIGH:     %d\n", v)
+	}
+	if v := summary.BySeverity[SeverityMedium]; v > 0 {
+		medium.Fprintf(w, "  MEDIUM:   %d\n", v)
+	}
+	if v := summary.BySeverity[SeverityLow]; v > 0 {
+		low.Fprintf(w, "  LOW:      %d\n", v)
+	}
+
+	fmt.Fprintln(w, "\nBy Category:")
+	for _, cat := range sortedKeys(summary.ByCategory) {
+		fmt.Fprintf(w, "  %-25s %d\n", cat+":", summary.ByCategory[cat])
+	}
+
+	fmt.Fprintln(w, "\nBy Check:")
+	for _, row := range checkCounts(findings) {
+		fmt.Fprintf(w, "  %-8s %-45s %d\n", row.id, row.name, row.count)
+	}
+	fmt.Fprintln(w)
+
+	return nil
+}
+
+// FormatDetails prints every finding for the audit log file.
+func (f *TableFormatter) FormatDetails(w io.Writer, findings []Finding, summary Summary) error {
 	// Define colors
 	critical := color.New(color.FgRed, color.Bold)
 	high := color.New(color.FgRed)
@@ -45,10 +108,11 @@ func (f *TableFormatter) Format(w io.Writer, findings []Finding, summary Summary
 	header.Fprintln(w, "                    BILLING CONSISTENCY AUDIT")
 	header.Fprintln(w, "═══════════════════════════════════════════════════════════════════")
 	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Check IDs are internal OpenRails audit labels, not payment-network or accounting standards.")
+	fmt.Fprintln(w)
 
 	if len(findings) == 0 {
 		color.New(color.FgGreen, color.Bold).Fprintln(w, "✓ No consistency issues found!")
-		fmt.Fprintf(w, "\nAudit completed in %s\n", summary.Duration)
 		return nil
 	}
 
@@ -119,7 +183,6 @@ func (f *TableFormatter) Format(w io.Writer, findings []Finding, summary Summary
 	fmt.Fprintf(w, "Total findings:     %d\n", summary.TotalFindings)
 	fmt.Fprintf(w, "Auto-fixable:       %d\n", summary.AutoFixable)
 	fmt.Fprintf(w, "Manual review:      %d\n", summary.ManualReviewOnly)
-	fmt.Fprintf(w, "Duration:           %s\n", summary.Duration)
 
 	fmt.Fprintln(w, "\nBy Severity:")
 	if v := summary.BySeverity[SeverityCritical]; v > 0 {
@@ -142,6 +205,45 @@ func (f *TableFormatter) Format(w io.Writer, findings []Finding, summary Summary
 	fmt.Fprintln(w)
 
 	return nil
+}
+
+type checkCount struct {
+	id    string
+	name  string
+	count int
+}
+
+func checkCounts(findings []Finding) []checkCount {
+	byID := make(map[string]*checkCount)
+	for _, f := range findings {
+		row := byID[f.CheckID]
+		if row == nil {
+			row = &checkCount{id: f.CheckID, name: f.CheckName}
+			byID[f.CheckID] = row
+		}
+		row.count++
+	}
+
+	rows := make([]checkCount, 0, len(byID))
+	for _, row := range byID {
+		rows = append(rows, *row)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].count != rows[j].count {
+			return rows[i].count > rows[j].count
+		}
+		return rows[i].id < rows[j].id
+	})
+	return rows
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func categoryFromCheckID(checkID string) string {

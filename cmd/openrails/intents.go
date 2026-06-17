@@ -10,9 +10,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // newIntentsCmd wires the read-only provider-intent-ledger (#358) CLI:
@@ -73,9 +75,8 @@ func runIntentsRefingerprint(cmd *cobra.Command, provider, merchantSlug string, 
 	if !yes {
 		return fmt.Errorf("refingerprint re-stamps every live %s intent to the CURRENT account fingerprint; intents will then execute against the CURRENT credentials. Confirm with --yes after verifying the credential change does not point at a different provider account", provider)
 	}
-	return withReconcileApp(cmd, merchantSlug, func(ctx context.Context, application *app.App) error {
-		rt := application.Runtime
-		fp, ok := rt.AccountFingerprints().AccountFingerprint(ctx, provider)
+	return withReconcileRuntime(cmd, merchantSlug, func(ctx context.Context, rt *reconcileRuntime) error {
+		fp, ok := intents.NewRuntimeFingerprints(rt.Config, rt.NMIClients).AccountFingerprint(ctx, provider)
 		if !ok || fp == "" {
 			return fmt.Errorf("no account fingerprint resolvable for provider %q (unconfigured client, or an exempt provider like solana)", provider)
 		}
@@ -133,8 +134,8 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 		limit = 500
 	}
 
-	return withReconcileApp(cmd, merchantSlug, func(ctx context.Context, application *app.App) error {
-		q := application.Runtime.DB.Gen(ctx)
+	return withIntentsListDB(cmd, merchantSlug, func(ctx context.Context, database *db.DB) error {
+		q := database.Gen(ctx)
 		total, err := q.CountProviderIntents(ctx, gen.CountProviderIntentsParams{
 			Status: statusFilter, Provider: providerFilter, IntentType: typeFilter,
 		})
@@ -216,5 +217,29 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 				byMode["limited"], byMode["full"])
 		}
 		return nil
+	})
+}
+
+func withIntentsListDB(cmd *cobra.Command, merchantSlug string, fn func(ctx context.Context, database *db.DB) error) error {
+	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+	if cfg == nil || cfg.DB == nil {
+		return fmt.Errorf("config not loaded")
+	}
+
+	database, err := db.NewDB(cfg.DB)
+	if err != nil {
+		return fmt.Errorf("open postgres: %w", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	tid, err := resolveCLIMerchant(cmd.Context(), database, merchantSlug)
+	if err != nil {
+		return err
+	}
+	ctx := merchant.WithID(cmd.Context(), tid)
+	return database.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		return fn(ctx, database)
 	})
 }

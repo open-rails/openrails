@@ -1503,7 +1503,6 @@ func assembleDBURL(cfg *Config) {
 
 	// If URL is already explicitly set, nothing to do
 	if cfg.DB.URL != "" {
-		log.Debug("Using explicitly configured DB_URL")
 		return
 	}
 
@@ -1513,27 +1512,6 @@ func assembleDBURL(cfg *Config) {
 	}
 
 	cfg.DB.URL = connStr
-
-	// Log warnings for critical default values being used
-	warnings := []string{}
-	if cfg.DB.Host == "localhost" {
-		warnings = append(warnings, "DB host")
-	}
-	if cfg.DB.Username == "admin" {
-		warnings = append(warnings, "DB username")
-	}
-	if cfg.DB.Password == "admin_password" {
-		warnings = append(warnings, "DB password")
-	}
-	if cfg.DB.Database == "openrails_db" {
-		warnings = append(warnings, "DB database name")
-	}
-
-	if len(warnings) > 0 {
-		log.Warnf("Using default values for: %s. Assembled DB URL configured", strings.Join(warnings, ", "))
-	} else {
-		log.Debug("Assembled DB URL from configured parameters")
-	}
 }
 
 // validateDatabase validates database configuration
@@ -1921,28 +1899,41 @@ func Load(configPath string) (*Config, error) {
 		cfg.DB.Schema = normalizeSchema(cfg.DB.Schema)
 	}
 
-	// Log credential-environment status clearly at startup
-	logTestEnvStatus(cfg)
-
-	// Log feature flags status at startup
-	logFeatureFlagsStatus(cfg)
-
 	// Validate the loaded configuration
 	if err := Validate(cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
-	// Configure the CCBill webhook IP allowlist from config (fail-fast on invalid
-	// CIDRs). Empty list falls back to the documented default ranges.
+	return cfg, nil
+}
+
+// ConfigureProcessGlobals applies runtime process-level configuration derived
+// from Config. It is intentionally outside Load: one-off CLIs should be able to
+// parse and validate config without mutating webhook globals or emitting server
+// startup banners.
+func ConfigureProcessGlobals(cfg *Config) error {
+	if cfg == nil {
+		return fmt.Errorf("config is nil")
+	}
+
+	// Configure the CCBill webhook IP allowlist from config. Empty list falls
+	// back to the documented default ranges.
 	var ccbillCIDRs []string
 	if ccbillProc := cfg.GetCCBillProcessor(); ccbillProc != nil {
 		ccbillCIDRs = ccbillProc.AllowedCIDRs
 	}
 	if err := iputil.Configure(ccbillCIDRs); err != nil {
-		return nil, fmt.Errorf("config validation failed: ccbill allowed_cidrs: %w", err)
+		return fmt.Errorf("config validation failed: ccbill allowed_cidrs: %w", err)
 	}
+	return nil
+}
 
-	return cfg, nil
+// LogStartupStatus writes the operator-facing posture banners for long-running
+// OpenRails processes. Keep this out of Load so one-off CLIs do not look like
+// they started the payment server.
+func LogStartupStatus(cfg *Config) {
+	logTestEnvStatus(cfg)
+	logFeatureFlagsStatus(cfg)
 }
 
 // logFeatureFlagsStatus logs the operating mode + feature flags at startup.

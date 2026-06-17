@@ -33,7 +33,7 @@ func loadSchemaMigration(t *testing.T) string {
 // products or prices — the property that makes "a row only exists if it
 // meaningfully differs" true at the database layer rather than by convention.
 //
-//   - A product's identity is its slug (UNIQUE).
+//   - A product's identity is its merchant plus slug (UNIQUE).
 //   - A price's identity is its financial substance: (product, amount, currency,
 //     billing cycle). That is EXACTLY the content key the provider adapters reuse
 //     as the Stripe lookup_key, the NMI plan_id, and the Solana plan PDA — so the
@@ -48,8 +48,8 @@ func TestCatalogDedupConstraints(t *testing.T) {
 	schema := collapseWS(loadSchemaMigration(t))
 
 	for _, want := range []string{
-		// Product identity = slug.
-		"constraint products_slug_key unique (slug)",
+		// Product identity = merchant + slug.
+		"constraint products_merchant_slug_key unique (merchant_id, slug)",
 		// Price identity = financial substance (the provider/content de-dup key).
 		"constraint unique_prices_product_amount_cycle",
 		"unique (product_id, amount, currency, billing_cycle_days)",

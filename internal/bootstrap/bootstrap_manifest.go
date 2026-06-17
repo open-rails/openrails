@@ -8,38 +8,28 @@ import (
 
 	"github.com/goccy/go-yaml"
 	authcore "github.com/open-rails/authkit/core"
-
-	"github.com/open-rails/openrails/pkg/catalog"
 )
 
 const (
-	// DefaultBootstrapManifestPath is the conventional mounted provisioning file
-	// location for containers and Linux deployments.
+	// DefaultBootstrapManifestPath is the conventional mounted bootstrap
+	// provisioning file location for containers and Linux deployments. It
+	// contains auth + merchant definitions only; catalog state lives in the
+	// separate catalog manifest.
 	DefaultBootstrapManifestPath = "/etc/openrails/bootstrap.yaml"
 	BootstrapManifestVersion     = 1
 )
 
-// BootstrapManifest is the unified declarative provisioning document. It is
-// intentionally separate from config.yaml: config.yaml describes runtime
-// infrastructure, while this file describes desired merchant/catalog state.
+// BootstrapManifest is the auth/merchant declarative provisioning document. It
+// is intentionally separate from config.yaml: config.yaml describes runtime
+// infrastructure, while this file describes desired AuthKit authority and
+// OpenRails merchant state. Catalog state is pushed by `openrails push-catalog`.
 type BootstrapManifest struct {
 	Version   int                         `yaml:"version"`
 	Auth      *authcore.BootstrapManifest `yaml:"auth,omitempty"`
 	Merchants []ManifestMerchant          `yaml:"merchants,omitempty"`
-	Catalogs  []BootstrapCatalog          `yaml:"catalogs,omitempty"`
 }
 
-// BootstrapCatalog is one top-level catalog declaration. The catalog schema is
-// the existing pkg/catalog shape, embedded under catalogs[] so bootstrap can
-// apply more than one catalog later without inventing a second catalog format.
-type BootstrapCatalog struct {
-	Merchant         string              `yaml:"merchant"`
-	Name             string              `yaml:"name,omitempty"`
-	DefaultProviders []string            `yaml:"default_providers,omitempty"`
-	TierGroups       []catalog.TierGroup `yaml:"tier_groups"`
-}
-
-// LoadBootstrapManifest reads and validates a unified bootstrap manifest.
+// LoadBootstrapManifest reads and validates a bootstrap manifest.
 func LoadBootstrapManifest(path string) (*BootstrapManifest, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -48,7 +38,7 @@ func LoadBootstrapManifest(path string) (*BootstrapManifest, error) {
 	return ParseBootstrapManifest(raw)
 }
 
-// ParseBootstrapManifest parses and validates a unified bootstrap manifest.
+// ParseBootstrapManifest parses and validates a bootstrap manifest.
 func ParseBootstrapManifest(raw []byte) (*BootstrapManifest, error) {
 	var manifest BootstrapManifest
 	if err := yaml.UnmarshalWithOptions(raw, &manifest, yaml.DisallowUnknownField()); err != nil {
@@ -68,20 +58,12 @@ func (m *BootstrapManifest) Validate() error {
 	if m.Version != BootstrapManifestVersion {
 		return fmt.Errorf("bootstrap manifest version must be %d", BootstrapManifestVersion)
 	}
-	if !m.HasAuthBootstrap() && len(m.Merchants) == 0 && len(m.Catalogs) == 0 {
-		return fmt.Errorf("bootstrap manifest must declare at least one auth, merchant, or catalog section")
+	if !m.HasAuthBootstrap() && len(m.Merchants) == 0 {
+		return fmt.Errorf("merchant manifest must declare at least one auth or merchant section")
 	}
 	if len(m.Merchants) > 0 {
 		tm := m.MerchantManifest()
 		if err := validateMerchantManifestShape(tm); err != nil {
-			return err
-		}
-	}
-	for i := range m.Catalogs {
-		if strings.TrimSpace(m.Catalogs[i].Merchant) == "" {
-			return fmt.Errorf("catalog #%d merchant is required", i+1)
-		}
-		if _, err := m.CatalogManifest(i); err != nil {
 			return err
 		}
 	}
@@ -90,7 +72,7 @@ func (m *BootstrapManifest) Validate() error {
 
 // HasAuthBootstrap reports whether the manifest has AuthKit-owned state to
 // reconcile. A nil or empty auth section is allowed so OpenRails manifests can
-// carry only merchant/catalog state.
+// carry only merchant state.
 func (m *BootstrapManifest) HasAuthBootstrap() bool {
 	if m == nil || m.Auth == nil {
 		return false
@@ -106,28 +88,6 @@ func (m *BootstrapManifest) MerchantManifest() *MerchantManifest {
 		return nil
 	}
 	return &MerchantManifest{Version: BootstrapManifestVersion, Merchants: append([]ManifestMerchant(nil), m.Merchants...)}
-}
-
-// CatalogManifest converts one catalogs[] entry to the existing catalog manifest
-// shape and validates it with the catalog package.
-func (m *BootstrapManifest) CatalogManifest(index int) (*catalog.Manifest, error) {
-	if m == nil || index < 0 || index >= len(m.Catalogs) {
-		return nil, fmt.Errorf("catalog index %d out of range", index)
-	}
-	c := m.Catalogs[index]
-	cm := &catalog.Manifest{
-		Version:          catalog.SupportedVersion,
-		DefaultProviders: append([]string(nil), c.DefaultProviders...),
-		TierGroups:       append([]catalog.TierGroup(nil), c.TierGroups...),
-	}
-	if err := cm.Validate(); err != nil {
-		name := strings.TrimSpace(c.Name)
-		if name == "" {
-			name = fmt.Sprintf("#%d", index+1)
-		}
-		return nil, fmt.Errorf("catalog %s: %w", name, err)
-	}
-	return cm, nil
 }
 
 func validateMerchantManifestShape(m *MerchantManifest) error {

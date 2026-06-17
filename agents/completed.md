@@ -11370,3 +11370,137 @@ in-flight-dollar policy as a scheduler fairness/reordering signal outside OpenRa
 - `go test ./internal/modules/admission ./internal/modules/ratelimit ./pkg/service ./internal/http/handlers`
 - `go test ./...`
 - `task build`
+
+---
+
+# #510: Unify standalone provisioning and merchant action auth
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-16: `bootstrap` now consumes a top-level AuthKit `auth:` bootstrap section via
+AuthKit v0.37.0, catalogs explicitly declare `merchant:`, `--prune` replaces the operator-facing `--exhaustive` flag
+with `--exhaustive` retained as a hidden alias, `catalog --api-url/--api-token` and the HTTP applier were removed,
+and catalog action routes moved from `/admin/catalog/*` to the unified merchant action surface at
+`/merchant/catalog/*`, gated by `openrails:catalog:write`. Validation passed with focused package tests, full
+`go test ./...`, CLI help smoke checks, and a live standalone HTTP integration test for `/v1/merchant/catalog/*`.
+
+## Metadata
+
+- Category: feature
+- Status: complete
+- Passes: true
+
+## Problem
+
+Private standalone OpenRails deployments should be provisionable from one desired-state YAML file. That file should
+describe merchant ownership, remote applications/JWKS principals, and the merchant's catalog products/prices. Operators
+should be able to dry-run the plan, apply it locally/in-process, and optionally prune OpenRails-owned provider catalog
+objects that are no longer declared.
+
+The current surface is close but inconsistent:
+
+- `openrails bootstrap` applies a unified manifest with `merchants:` and `catalogs:`.
+- Startup bootstrap auto-applies `/etc/openrails/bootstrap.yaml`, but only additively and only from that conventional
+  location.
+- `openrails catalog` applies catalog-only manifests.
+- `catalog --api-url` used to call `/admin/catalog/*` and its `--api-token` story is unclear: those routes are behind
+  user/admin auth and `openrails:admin`, not the merchant-scoped service-token/remote-application authorization model.
+- There should not be separate route trees for the same merchant administrative actions. Applying catalog updates,
+  rotating merchant secrets, refunding payments, and similar operations should be capability-gated merchant actions that
+  any supported credential type can call when it resolves to the right merchant and permission.
+- Bootstrap manifests currently do not declare remote applications; issuer/JWKS trust is owned by AuthKit
+  remote_application records.
+- `bootstrap --exhaustive` is accurate internally but not the clearest operator-facing name. The action is pruning:
+  archive OpenRails-owned provider-side catalog extras absent from the manifest, never delete or touch foreign objects.
+
+## Target Model
+
+- Keep runtime infrastructure config separate from desired provisioned state:
+  - `config.yaml`: DB, ports, mode, processor secret sources, runtime behavior.
+  - bootstrap/apply YAML: merchants, AuthKit remote applications, catalog products/prices, provider mappings.
+- Make `openrails bootstrap` the canonical private-standalone desired-state command.
+- Let the bootstrap YAML declare everything a private standalone install needs:
+  - merchants and owner orgs;
+  - an `auth:` section passed to AuthKit's planned first-class bootstrap manifest/API/CLI (`authkit#84`) for orgs,
+    users/credentials, roles, permission assignments, service tokens, and remote applications/JWKS principals;
+  - per-merchant catalog products, prices, tier groups, and provider mappings.
+- Keep startup auto-apply additive-only from `/etc/openrails/bootstrap.yaml`.
+- Keep destructive cleanup explicit on the manual CLI only, behind a clearer flag such as `--prune`.
+- Replace the current route/auth split with one merchant administrative action model:
+  every accepted credential normalizes to a principal with `merchant_id`, `owner_org_id`, subject/key/issuer identity,
+  `permissions[]`, and resource scopes.
+- Use permission gates for actions, not route-family identity:
+  `openrails:catalog:write` for catalog reconciliation, `openrails:merchant:secrets:write` for merchant secrets,
+  `openrails:payments:refund` for refunds, `openrails:platform:superadmin` for true cross-merchant platform actions.
+- Do not preserve `/admin/catalog/*` as a separate authority model. Catalog reconciliation should be a merchant action callable by
+  an AuthKit user access token, generated service token, first-party service JWT, remote-application token, or delegated
+  merchant-admin token when that credential resolves to the target merchant and carries `openrails:catalog:write`.
+- Keep "admin UI" as a client/product concept only. An admin UI signs in a user and calls the same merchant action routes
+  with that user's access token; it should not require a separate admin-only route/auth stack.
+- For private standalone OpenRails, seed all authority through bootstrap/AuthKit: orgs, roles, permission assignments,
+  users/passwords if AuthKit supports it, remote applications/JWKS principals, and service tokens. OpenRails should use
+  AuthKit's standard bootstrap APIs rather than inventing its own user/credential store. The upstream AuthKit work is
+  tracked as `authkit#84: First-class AuthKit bootstrap manifest/API/CLI`.
+- Public OpenRails, later, can enable AuthKit public registration and host onboarding UI where users create orgs,
+  merchants, remote applications, and credentials. It should reuse the same merchant action routes and permission gates.
+
+## Tasks
+
+- [x] Keep `openrails bootstrap` as the canonical private-standalone provisioning command; keep `openrails catalog`
+      as local/in-process only and remove remote HTTP mode.
+- [x] Use the existing AuthKit-backed effective-permission principal path for merchant action routes; catalog actions now
+      require a credential that resolves to the merchant org and holds `openrails:catalog:write`.
+- [x] Collapse catalog products/prices/drift mutation/read action routes from `/admin/catalog/*` onto one merchant action
+      route family.
+- [x] Use `/merchant/catalog/*` as the neutral merchant-scoped action prefix.
+- [x] Gate catalog action routes with `openrails:catalog:write` rather than broad `openrails:admin`.
+- [x] Rename the operator-facing cleanup flag to `--prune` with help text that says OpenRails-owned provider extras are
+      archived and foreign provider objects are never touched.
+- [x] Preserve `--exhaustive` as a hidden deprecated alias for `--prune`.
+- [x] Consume `authkit#84` by bumping to AuthKit v0.37.0.
+- [x] Extend the OpenRails bootstrap manifest schema with an AuthKit-owned `auth:` section.
+- [x] Reconcile remote applications/JWKS/public-key trust through AuthKit bootstrap/core APIs, not raw SQL or OpenRails
+      issuer tables.
+- [x] Delegate AuthKit orgs, roles, role assignments, users/password credentials, remote applications/JWKS principals,
+      and generated service tokens to AuthKit's bootstrap reconciler.
+- [x] Keep service-token bootstrap on AuthKit's generated-output model; fixed plaintext API-key constants were not added.
+- [x] Reject stale merchant-level `issuers:` with a clear error pointing to top-level `auth.orgs[].issuers`.
+- [x] Require each bootstrap catalog declaration to specify `merchant: <slug>` instead of overloading catalog `name`.
+- [x] Print AuthKit bootstrap, merchant, catalog, and prune dry-run plans without mutating.
+- [x] Keep startup bootstrap additive-only and conventional-path-only; pruning remains manual CLI-only.
+- [x] Remove `catalog --api-url --api-token` and delete the redundant HTTP catalog applier.
+- [x] Replace the `/admin/catalog/*` dependency with `/merchant/catalog/*`, gated by `openrails:catalog:write`.
+- [x] Remove loose "admin bearer token" CLI help/docs for catalog remote apply.
+- [x] Update catalog route docs/comments and provider-link hints to use `/merchant/catalog/*`.
+- [x] Update `docs/operations.md`, `docs/merchant-provisioning.md`, `docs/api/endpoints.md`, and bootstrap examples for
+      `auth:` plus explicit catalog `merchant:`.
+- [x] Add manifest parsing/validation tests for `auth:`, stale `issuers:`, and explicit catalog merchant scoping.
+- [x] Add route authorization regression coverage proving `/merchant/catalog/*` requires `openrails:catalog:write` and
+      `/admin/catalog/*` is no longer registered.
+
+## Acceptance
+
+- A private standalone deployment can be provisioned from one YAML file with AuthKit `auth:`, OpenRails `merchants:`,
+  and explicit per-merchant `catalogs:` entries.
+- `openrails bootstrap --file <path> --dry-run` prints AuthKit, merchant, catalog, and prune plans and makes no
+  mutations through the OpenRails apply path.
+- `openrails bootstrap --file <path>` idempotently converges AuthKit authority, merchants, and catalog state.
+- Provider-side extras are only archived when an operator explicitly passes `--prune` or the hidden deprecated
+  `--exhaustive` alias; startup bootstrap never prunes.
+- Foreign provider objects are never archived by prune.
+- The CLI no longer describes or accepts a vague "admin token" for remote catalog.
+- Catalog action HTTP routes are merchant-scoped under `/merchant/catalog/*` and require `openrails:catalog:write`
+  rather than broad `openrails:admin`.
+- Applying a catalog update does not depend on `/admin/catalog/*`.
+- Private standalone bootstrap can seed the AuthKit authority graph needed for an initial deployment: orgs, roles,
+  permissions, users/credentials, generated service tokens, remote applications/JWKS/public keys, merchant ownership,
+  and catalog.
+- `catalog` is catalog-only, defaults to `/etc/openrails/catalog.yaml`, local/in-process, and no longer conflicts with the unified bootstrap apply model.
+
+## Validation
+
+- [x] `go test ./internal/bootstrap ./cmd/openrails ./pkg/catalog ./internal/http ./internal/http/routes ./pkg/embedded/gin ./pkg/service`
+- [x] `go test ./internal/http/routes ./internal/http`
+- [x] `go test ./...`
+- [x] `go test -tags integration ./internal/integrationharness -run TestStandaloneMerchantCatalogRoutesHTTP -count=1`
+- [x] `go run ./cmd/openrails bootstrap --help`
+- [x] `go run ./cmd/openrails catalog --help`

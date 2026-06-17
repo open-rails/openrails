@@ -200,14 +200,15 @@ auth:
   #   # issued_audiences: ["openrails-app"]   # defaults to expected_audience
   #   # expected_audiences: ["openrails-app"]
 
-# Declarative bootstrap for closed-registration deployments is an explicit step:
+# Declarative setup for closed-registration deployments is explicit:
 #
 #   billing migrate up -c /etc/openrails/config.yaml
-#   billing bootstrap apply -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
+#   billing push-bootstrap -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
+#   billing push-catalog -c /etc/openrails/config.yaml -f /etc/openrails/catalog.yaml
 #   billing run-server -c /etc/openrails/config.yaml
 #
-# The mounted bootstrap file uses three explicit sections: AuthKit-owned
-# `auth:`, OpenRails-owned `merchants:`, and merchant catalog declarations.
+# The mounted merchant file uses two explicit sections: AuthKit-owned `auth:`
+# and OpenRails-owned `merchants:`.
 #
 # Example /etc/openrails/bootstrap.yaml:
 # version: 1
@@ -219,6 +220,9 @@ auth:
 #   - slug: local-stack
 #     name: Local Stack
 #     owner_org_id: 11111111-1111-1111-1111-111111111111
+#
+# Example /etc/openrails/catalog.yaml:
+# version: 1
 # catalogs:
 #   - merchant: local-stack
 #     name: default

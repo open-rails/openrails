@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -24,8 +26,10 @@ import (
 //	openrails reconcile report [--run=ID]                                latest/specified run report
 //
 // Reconciliation is manual-only by design (no scheduled runs). The remote
-// processors are NEVER mutated: fix converges local state and queues remote
-// actions for an admin, so it is safe (and intended) under mode=readonly.
+// processors are NEVER mutated: fix converges local state only. Remote-provider
+// writes are queued by the operation that requests them through the provider
+// intent ledger, not by reconciliation, so reconcile is safe under
+// mode=readonly.
 func newReconcileCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "reconcile",
@@ -81,46 +85,127 @@ func newReconcileCmd() *cobra.Command {
 	return cmd
 }
 
-// withReconcileApp bootstraps the application, resolves the merchant, and runs
-// fn on a merchant-pinned connection so every engine read/write is RLS-scoped.
-func withReconcileApp(cmd *cobra.Command, merchantSlug string, fn func(ctx context.Context, application *app.App) error) error {
-	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	application, err := app.Bootstrap(cfg)
-	if err != nil {
-		return fmt.Errorf("bootstrap application: %w", err)
-	}
-	defer func() {
-		if err := application.Close(context.Background()); err != nil {
-			log.WithError(err).Error("Application cleanup failed")
-		}
-	}()
+type reconcileRuntime struct {
+	DB             *db.DB
+	Config         *config.Config
+	NMIClients     map[string]*nmi.NMIClient
+	CCBillDataLink *ccbill.DataLinkClient
+	SolanaRPC      *solanaint.RPCClient
+}
 
-	tid, err := resolveReconcileMerchant(cmd.Context(), application, merchantSlug)
+// withReconcileRuntime builds only the dependencies reconciliation needs, then
+// runs fn on a merchant-pinned connection so every engine read/write is
+// RLS-scoped. It deliberately avoids app.Bootstrap: reconcile does not need
+// Redis, health checks, River, cache monitoring, HTTP, or analytics emitters.
+func withReconcileRuntime(cmd *cobra.Command, merchantSlug string, fn func(ctx context.Context, rt *reconcileRuntime) error) error {
+	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+	tid, err := resolveReconcileMerchantWithDB(cmd.Context(), cfg, merchantSlug)
 	if err != nil {
 		return err
 	}
+	rt, cleanup, err := newReconcileRuntime(cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
 	ctx := merchant.WithID(cmd.Context(), tid)
-	return application.Runtime.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		return fn(ctx, application)
+	return rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		return fn(ctx, rt)
 	})
 }
 
-func resolveReconcileMerchant(ctx context.Context, application *app.App, slug string) (merchant.ID, error) {
-	slug = strings.TrimSpace(slug)
-	if slug == "" {
-		// No default merchant (#336): reconciliation must target a named merchant.
-		return merchant.ID{}, fmt.Errorf("--merchant is required (slug or id of the merchant to reconcile)")
+func newReconcileRuntime(cfg *config.Config) (*reconcileRuntime, func(), error) {
+	if cfg == nil || cfg.DB == nil {
+		return nil, nil, fmt.Errorf("config not loaded")
 	}
-	if tid, err := merchant.ParseID(slug); err == nil {
-		return tid, nil
+	database, err := db.NewDB(cfg.DB)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
-	var id string
-	if err := application.Runtime.DB.DataPool().
-		QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1)`, slug).
-		Scan(&id); err != nil {
-		return merchant.ID{}, fmt.Errorf("resolve merchant %q: %w", slug, err)
+	cleanup := func() { _ = database.Close() }
+
+	nmiClients, err := reconcileNMIClients(cfg)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
 	}
-	return merchant.ParseID(id)
+	return &reconcileRuntime{
+		DB:             database,
+		Config:         cfg,
+		NMIClients:     nmiClients,
+		CCBillDataLink: reconcileCCBillDataLink(cfg),
+		SolanaRPC:      reconcileSolanaRPC(cfg),
+	}, cleanup, nil
+}
+
+func reconcileNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
+	clients := map[string]*nmi.NMIClient{}
+	for name, procConfig := range cfg.GetNMIProcessors() {
+		providerKey := strings.TrimSpace(strings.ToLower(name))
+		if providerKey == "" {
+			return nil, fmt.Errorf("nmi provider name cannot be empty")
+		}
+		if strings.TrimSpace(procConfig.SecurityKey) == "" {
+			return nil, fmt.Errorf("nmi provider %q security key is required for reconciliation", providerKey)
+		}
+		client, err := nmi.NewClient(providerKey, procConfig.ToNMIProviderSettings(providerKey), cfg.IsTestEnv())
+		if err != nil {
+			return nil, err
+		}
+		client.ReadOnly = true
+		client.SubscriptionDeletesDisabled = true
+		clients[providerKey] = client
+	}
+	return clients, nil
+}
+
+func reconcileCCBillDataLink(cfg *config.Config) *ccbill.DataLinkClient {
+	proc := cfg.GetCCBillProcessor()
+	if proc == nil || proc.DataLinkUsername == "" || proc.DataLinkPassword == "" || proc.ClientAccNum == "" {
+		return nil
+	}
+	ccbillConfig := proc.ToCCBillConfig()
+	ccbillConfig.TestMode = cfg.IsTestEnv()
+	return ccbill.NewDataLinkClient(ccbillConfig)
+}
+
+func reconcileSolanaRPC(cfg *config.Config) *solanaint.RPCClient {
+	proc := cfg.GetSolanaProcessor()
+	if proc == nil {
+		return nil
+	}
+	network := "mainnet"
+	if cfg.IsTestEnv() {
+		network = "devnet"
+	}
+	return solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
+		HeliusAPIKey: proc.HeliusAPIKey,
+		Network:      network,
+		ReadOnly:     true,
+	})
+}
+
+func resolveReconcileMerchantWithDB(ctx context.Context, cfg *config.Config, slug string) (merchant.ID, error) {
+	if cfg == nil || cfg.DB == nil {
+		return merchant.ID{}, fmt.Errorf("config not loaded")
+	}
+	database, err := db.NewDB(cfg.DB)
+	if err != nil {
+		return merchant.ID{}, fmt.Errorf("open postgres: %w", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	tid, err := resolveCLIMerchant(ctx, database, slug)
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "--merchant is required") {
+			return merchant.ID{}, fmt.Errorf("--merchant is required (slug or id of the merchant to reconcile)")
+		}
+		return merchant.ID{}, err
+	}
+	return tid, nil
 }
 
 func parseReconcileCLITime(s, name string) (time.Time, error) {
@@ -152,8 +237,7 @@ func runReconcileCLI(cmd *cobra.Command, mode reconcile.Mode, providerNames []st
 		provs = append(provs, reconcile.Provider(strings.ToLower(strings.TrimSpace(p))))
 	}
 
-	return withReconcileApp(cmd, merchantSlug, func(ctx context.Context, application *app.App) error {
-		rt := application.Runtime
+	return withReconcileRuntime(cmd, merchantSlug, func(ctx context.Context, rt *reconcileRuntime) error {
 		fetchers := reconcile.BuildFetchers(rt.Config, reconcile.FetcherClients{
 			NMIClients:     rt.NMIClients,
 			CCBillDataLink: rt.CCBillDataLink,
@@ -191,8 +275,8 @@ func runReconcileCLI(cmd *cobra.Command, mode reconcile.Mode, providerNames []st
 }
 
 func runReconcileReport(cmd *cobra.Command, runIDStr, format, merchantSlug string) error {
-	return withReconcileApp(cmd, merchantSlug, func(ctx context.Context, application *app.App) error {
-		store := &reconcile.PGStore{DB: application.Runtime.DB}
+	return withReconcileDB(cmd, merchantSlug, func(ctx context.Context, database *db.DB) error {
+		store := &reconcile.PGStore{DB: database}
 
 		var (
 			run reconcile.RunRecord
@@ -226,5 +310,31 @@ func runReconcileReport(cmd *cobra.Command, runIDStr, format, merchantSlug strin
 			return reconcile.RenderRunJSON(os.Stdout, run, open)
 		}
 		return reconcile.RenderRunTable(os.Stdout, run, open)
+	})
+}
+
+func withReconcileDB(cmd *cobra.Command, merchantSlug string, fn func(ctx context.Context, database *db.DB) error) error {
+	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+	if cfg == nil || cfg.DB == nil {
+		return fmt.Errorf("config not loaded")
+	}
+	database, err := db.NewDB(cfg.DB)
+	if err != nil {
+		return fmt.Errorf("open postgres: %w", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	tid, err := resolveCLIMerchant(cmd.Context(), database, merchantSlug)
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "--merchant is required") {
+			return fmt.Errorf("--merchant is required (slug or id of the merchant to reconcile)")
+		}
+		return err
+	}
+	ctx := merchant.WithID(cmd.Context(), tid)
+	return database.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		return fn(ctx, database)
 	})
 }

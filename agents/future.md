@@ -9,6 +9,210 @@
 
 ---
 
+# #512: Merchant-downloadable report artifacts backed by S3-compatible storage
+
+**Completed:** no — future direction only.
+
+OpenRails now has CLI/reporting surfaces that can produce large human-readable outputs, especially `audit` and
+`reconcile check` / `reconcile fix`. Local CLI runs can write timestamped files, but standalone/server deployments need
+a durable remote place to store report artifacts so merchants can list and download them later. This should use a
+merchant-scoped S3-compatible bucket, similar to the bucket patterns already used by `~/doujins` and `~/hentai0`.
+
+The first report artifacts should be:
+- audit detailed findings from `openrails audit`
+- reconcile check reports
+- reconcile fix reports
+
+This is separate from the reconciliation ledger. Postgres should remain the source of truth for standing reconcile
+state, open findings, acknowledgements, resolutions, and run metadata. The bucket stores immutable human/downloadable
+run artifacts.
+
+## Target Model
+- Keep this deliberately minimal: a small S3-compatible report writer plus enough metadata to let merchants download
+  their own reports.
+- Support AWS S3, Cloudflare R2, and MinIO-compatible local/dev stacks through one configuration shape.
+- Store artifacts under merchant-scoped object keys, for example:
+  `merchants/{merchant_id}/reports/{kind}/YYYY/MM/DD/{run_id-or-timestamp}.{ext}`.
+- Persist artifact metadata in Postgres:
+  merchant ID, report kind, source run ID if any, object key, filename, content type, format, size, SHA-256, created time,
+  retention/expiry, and actor/admin context when available.
+- Expose the smallest merchant-authorized HTTP surface needed to download report artifacts.
+- Prefer signed object-store URLs if they are already easy with the chosen S3 client; otherwise proxy-stream through
+  OpenRails and defer signed URLs.
+- Keep stdout bounded:
+  command output should print summary counts plus the local path or remote artifact URL/ID, not the full per-account list.
+- Keep local-only development usable:
+  if no artifact bucket is configured, CLI commands can continue writing a timestamped local file.
+
+## Scope
+- Build a reusable artifact/report storage boundary, not an audit-only special case.
+- Avoid building a general document-management, export, search, sharing, or lifecycle system in this issue.
+- Wire audit detailed table output into artifact storage.
+- Wire reconcile check/fix run reports into artifact storage.
+- Keep reconciliation standing state in the database.
+- Do not use the bucket as the source of truth for reconcile finding status.
+- Remove the `openrails reconcile report` sub-command once check/fix artifacts are downloadable.
+- Treat future report access as a generic log/report download or stream surface for both audit and reconcile.
+- Do not implement invoice export or general CSV exports in this issue, but leave the artifact model reusable for them.
+
+## Questions To Resolve
+- Should artifact storage be required in standalone production mode, or optional with a warning when absent? Prefer
+  optional for the first pass unless a deployment explicitly needs remote downloads.
+- Should the first stored audit artifact be table text only, JSON only, or both text + JSON?
+- Should reconcile check/fix always write an artifact, even when there are zero findings?
+- Should artifact downloads use short-lived signed URLs by default, or should the first pass proxy-stream downloads to
+  avoid extra backend-specific signing complexity?
+- Should report artifacts have a simple default retention window, or be retained until explicit merchant/admin deletion?
+- Should audit report metadata get its own run table, or should a generic `report_artifacts` table be enough for now?
+- Which merchant/admin permission should authorize artifact listing and download?
+- What PII or payment-sensitive fields must be redacted before writing downloadable artifacts?
+- Should live log streaming be deferred? Prefer yes; start with completed artifact download only.
+
+## Tasks
+- [ ] Inspect the bucket configuration and object-key conventions in `~/doujins` and `~/hentai0` before finalizing the
+      OpenRails config shape.
+- [ ] Add report artifact config:
+      backend, bucket, region, endpoint URL, prefix, force-path-style, access-key source, secret-key source, and retention.
+- [ ] Add a small `internal/reports` or `internal/artifacts` interface with only the first-pass operations:
+      write artifact and open/download artifact.
+- [ ] Implement an S3-compatible backend using the chosen AWS SDK or existing repo dependency pattern.
+- [ ] Implement a local filesystem backend for tests and local development.
+- [ ] Add the smallest Postgres metadata table needed for report artifact lookup, scoped by merchant.
+- [ ] Add sqlc queries for creating, listing, and reading report artifact metadata.
+- [ ] Wire `openrails audit` table mode so detailed findings are written to a report artifact when storage is configured.
+- [ ] Wire `reconcile check` and `reconcile fix` so each run writes a downloadable report artifact.
+- [ ] Keep CLI stdout to summary + artifact location.
+- [ ] Add minimal HTTP endpoints for merchant/admin report listing and download.
+- [ ] Defer live log streaming unless it is needed for the first remote workflow.
+- [ ] Enforce merchant isolation on every artifact metadata query and download path.
+- [ ] Remove the `openrails reconcile report` sub-command once downloadable artifacts cover human run output.
+- [ ] Delete or simplify any reconcile-report-only formatting/storage code that is no longer needed after artifact download
+      is available.
+- [ ] Document local MinIO/R2/S3 configuration and production bucket requirements.
+- [ ] Add retention cleanup only if the metadata model includes expiry in the first pass; otherwise leave retention to the
+      bucket lifecycle policy.
+
+## Acceptance
+- A merchant can run or trigger audit/reconcile and receive a compact summary plus a report artifact reference.
+- In server/remote mode, report details are stored in the configured S3-compatible bucket.
+- A merchant admin can list and download only their own report artifacts.
+- Reconcile standing state remains queryable from Postgres and is not replaced by log files.
+- `openrails reconcile report` is gone; humans use downloadable report artifacts instead.
+- The implementation is small and report-focused, while still not audit-only.
+- Local development works with either local filesystem storage or MinIO.
+
+## Validation
+- [ ] Unit tests for object key construction and metadata validation.
+- [ ] Unit tests for local artifact storage.
+- [ ] Integration test against MinIO or another S3-compatible test backend.
+- [ ] HTTP tests proving merchant A cannot list or download merchant B's artifacts.
+- [ ] CLI tests proving audit stdout stays summary-only and writes/uploads the detailed artifact.
+- [ ] CLI tests proving reconcile check/fix write/upload report artifacts.
+- [ ] `go test ./internal/artifacts ./cmd/openrails`
+- [ ] `go test ./...`
+
+---
+
+# #511: Develop the audit finding taxonomy into a clearer operator-facing system
+
+**Completed:** no — future direction only.
+
+OpenRails now has an internal audit finding taxonomy (`P-E-1`, `SS-1`, `S-E-1`, etc.) for local DB consistency checks.
+The current compact IDs are stable and useful in logs, but they are not self-explanatory for operators. They read a bit
+like HTTP status codes, but unlike HTTP they are not a shared industry standard and do not describe request outcomes.
+They are OpenRails domain-invariant failures: payment↔entitlement, subscription state, subscription↔entitlement,
+duplicates, temporal anomalies, and reference mismatches.
+
+The next step is to turn this from "short internal labels" into a deliberate operator-facing taxonomy with clear names,
+documentation, stable identifiers, and output/reporting that scales beyond a few findings.
+
+## Current State
+- `check_id` is a compact internal code:
+  `P-E-1`, `SS-1`, `S-E-1`, `D-2`, etc.
+- `check_name` is already the more readable slug:
+  `completed_payment_missing_entitlements`, `active_subscription_past_period_end`, etc.
+- Table-mode stdout is now summary-focused and writes the detailed per-account list to an audit log file.
+- `docs/consistency-invariants.md` documents the target unified taxonomy (M/D/L/X/I) that supersedes these compact codes.
+
+## Design Goals
+- Preserve stable machine/log references for historical audit runs.
+- Make human output understandable without memorizing prefixes.
+- Make codes searchable in docs and support runbooks.
+- Separate identity from presentation:
+  stable ID, readable slug, title, category, severity, remediation, and owner domain.
+- Avoid pretending these are industry/payment-network codes.
+- Keep the taxonomy small enough that operators can scan it, but precise enough that repeated incidents can be grouped.
+
+## Questions To Resolve
+- Should compact IDs stay as the canonical `check_id`, or should slug names become canonical?
+- Should every finding expose both:
+  `check_id = P-E-1` and `check_code = payment_entitlement.missing_one_off_grant`?
+- Should compact IDs be renamed now, or retained forever as historical stable labels?
+- Should check IDs use domain prefixes (`P-E`, `SS`) or severity/class prefixes like HTTP-style families?
+- Should `check_name` strings be normalized to dotted slugs instead of snake_case?
+- Should findings include a short human title separate from the longer description?
+- Should findings include an explicit `owner_domain` / `data_owner` field:
+  payments, subscriptions, entitlements, catalog, admin_grants, payment_methods?
+- Should remediation be typed:
+  `auto_fixable`, `manual_refund`, `rerun_worker`, `contact_customer`, `configuration_error`, etc.?
+- Should audit and reconcile taxonomies converge, or stay separate?
+  Audit checks local DB invariants; reconcile checks local-vs-processor truth. They overlap conceptually but are not the
+  same system.
+
+## Proposed Direction
+- Keep compact `check_id` stable for backward compatibility with historical logs and runbooks.
+- Add a readable dotted `check_code` or promote `check_name` to this style:
+  - `payment_entitlement.missing_one_off_grant`
+  - `subscription_state.active_past_period_end`
+  - `subscription_entitlement.active_missing_grant`
+  - `duplicate.charge_same_period`
+- Add a short title field for terminal/report display:
+  "Payment missing entitlement grant", "Active subscription past period end", etc.
+- Keep stdout grouped by readable title first, compact ID second:
+  `payment_entitlement.missing_one_off_grant (P-E-1)`.
+- Generate or maintain a taxonomy table in docs from the live check registry so docs cannot drift.
+- Use the detailed audit log for individual entities and stdout for counts/groupings only.
+
+## Tasks
+- [ ] Inventory every active `internal/audit` check:
+      compact ID, current `Name()`, category, severity, entity type, auto-fixability, and recommendation.
+- [ ] Identify inactive/historical IDs that are still referenced in completed issues, docs, or runbooks.
+- [ ] Decide canonical identifier model:
+      compact-only, slug-only, or compact + slug.
+- [ ] Decide whether slug style should be snake_case or dotted namespace.
+- [ ] Add a title/display-name field to the audit check interface if needed.
+- [ ] Add structured taxonomy metadata if needed:
+      owner domain, remediation type, data source, and whether the failure is prevented by DB constraints in new installs.
+- [ ] Update stdout `By Check` output to show the chosen readable label before or alongside compact IDs.
+- [ ] Update JSON output to include all taxonomy fields without breaking existing `check_id` consumers.
+- [ ] Update CSV output to include the readable slug/title fields.
+- [ ] Generate or update `docs/consistency-invariants.md` with a complete table of active checks.
+- [ ] Add a short "how to read audit findings" section:
+      ID, severity, category, entity, user/customer, details file, and remediation.
+- [ ] Decide whether `internal/reconcile` finding types should share terminology with audit findings or stay in a
+      separate "processor reconciliation" taxonomy.
+- [ ] Add tests proving compact IDs remain stable and every active check has complete taxonomy metadata.
+- [ ] Add tests proving stdout uses readable labels and detailed logs still include compact IDs for searchability.
+
+## Acceptance
+- Operators can understand common audit output without memorizing `P-E`, `S-E`, `SS`, etc.
+- Every active audit check has:
+  stable compact ID, readable code/name, category, severity, title, and remediation guidance.
+- The docs contain a complete current taxonomy table.
+- Stdout remains compact and readable when hundreds of findings exist.
+- Detailed logs preserve per-entity evidence and stable IDs.
+- JSON/CSV output remains usable for automation and includes the improved readable taxonomy fields.
+
+## Validation
+- [ ] `go test ./internal/audit ./cmd/openrails`
+- [ ] `go test ./...`
+- [ ] Manual smoke:
+      run `openrails audit` against a DB with findings and confirm stdout is readable and bounded.
+- [ ] Manual smoke:
+      confirm the detailed audit log contains per-account findings with compact ID + readable code/title.
+
+---
+
 # #509: Solana invoice collection authorization and settlement
 
 **Completed:** no — future direction only.

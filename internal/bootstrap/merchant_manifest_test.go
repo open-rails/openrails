@@ -26,28 +26,10 @@ merchants:
   - slug: cozy-art
     name: Cozy Art
     owner_org_id: 11111111-1111-1111-1111-111111111111
-catalogs:
-  - merchant: cozy-art
-    name: default
-    tier_groups:
-      - slug: plans
-        display_name: Plans
-        products:
-          - slug: starter
-            display_name: Starter
-            tier_rank: 1
-            prices:
-              - currency: usd
-                unit_amount: 1000
-                interval: month
 `))
 	require.NoError(t, err)
 	require.True(t, manifest.HasAuthBootstrap())
 	require.Len(t, manifest.Merchants, 1)
-	require.Len(t, manifest.Catalogs, 1)
-	cat, err := manifest.CatalogManifest(0)
-	require.NoError(t, err)
-	require.Equal(t, "starter", cat.TierGroups[0].Products[0].Slug)
 }
 
 func TestParseBootstrapManifestValidationErrors(t *testing.T) {
@@ -113,7 +95,7 @@ merchants:
 			want: "service_jwt_principals",
 		},
 		{
-			name: "duplicate product slug",
+			name: "catalogs belong to push-catalog",
 			body: `
 version: 1
 catalogs:
@@ -128,58 +110,7 @@ catalogs:
         products:
           - {slug: p, display_name: P, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
 `,
-			want: "duplicate product slug",
-		},
-		{
-			name: "duplicate price terms",
-			body: `
-version: 1
-catalogs:
-  - merchant: cozy-art
-    tier_groups:
-      - slug: g
-        display_name: G
-        products:
-          - slug: p
-            display_name: P
-            tier_rank: 1
-            prices:
-              - {currency: usd, unit_amount: 1000, interval: month}
-              - {currency: usd, unit_amount: 1000, interval: month}
-`,
-			want: "duplicate price terms",
-		},
-		{
-			name: "invalid provider config",
-			body: `
-version: 1
-catalogs:
-  - merchant: cozy-art
-    tier_groups:
-      - slug: g
-        display_name: G
-        products:
-          - slug: p
-            display_name: P
-            tier_rank: 1
-            providers: [solana]
-            prices:
-              - {currency: eur, unit_amount: 1000, interval: month}
-`,
-			want: "solana requires a stablecoin",
-		},
-		{
-			name: "catalog merchant required",
-			body: `
-version: 1
-catalogs:
-  - tier_groups:
-      - slug: g
-        display_name: G
-        products:
-          - {slug: p, display_name: P, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-`,
-			want: "catalog #1 merchant is required",
+			want: "catalogs",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

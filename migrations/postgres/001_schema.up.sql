@@ -259,7 +259,7 @@ CREATE TABLE openrails.products (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     merchant_id uuid NOT NULL,
     CONSTRAINT products_pkey PRIMARY KEY (id),
-    CONSTRAINT products_slug_key UNIQUE (slug),
+    CONSTRAINT products_merchant_slug_key UNIQUE (merchant_id, slug),
     CONSTRAINT products_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'archived'::text])))
 );
 

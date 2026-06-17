@@ -29,7 +29,7 @@ type ManifestMerchant struct {
 	WebhookHost string `yaml:"webhook_host"`
 	WebhookPath string `yaml:"webhook_path"`
 	// OwnerOrgID is the AuthKit org uuid that owns this merchant namespace
-	// (#500 ownership link). Optional in the manifest: when empty, bootstrap
+	// (#500 ownership link). Optional in the manifest: when empty, push-bootstrap
 	// creates/resolves an AuthKit org with the same slug as the merchant.
 	OwnerOrgID string `yaml:"owner_org_id"`
 	// Issuers is rejected during validation. Issuer/JWKS trust belongs in the

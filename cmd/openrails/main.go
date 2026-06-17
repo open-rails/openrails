@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/audit"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
@@ -85,10 +86,9 @@ func main() {
 	serverCmd.Flags().Bool("no-workers", false, "Disable background workers in this server process")
 
 	workerCmd := &cobra.Command{
-		Use:     "worker",
-		Aliases: []string{"run-worker"},
-		RunE:    runWorker,
-		Short:   "Start OpenRails background workers",
+		Use:   "run-worker",
+		RunE:  runWorker,
+		Short: "Start OpenRails background workers",
 	}
 
 	migrateCmd := &cobra.Command{
@@ -142,51 +142,26 @@ func main() {
 		RunE:  runAudit,
 	}
 	auditCmd.Flags().String("format", "table", "Output format: table, json, csv")
+	auditCmd.Flags().String("details-file", "", "Path for detailed table findings in table mode (default: openrails-audit-<timestamp>.log)")
 	auditCmd.Flags().String("user-id", "", "Filter to specific user ID")
 	auditCmd.Flags().String("severity", "", "Filter by minimum severity: CRITICAL, HIGH, MEDIUM, LOW")
 	auditCmd.Flags().StringSlice("category", nil, "Filter by category (can be repeated)")
 
-	seedDevCatalogCmd := &cobra.Command{
-		Use:   "seed-dev-catalog",
-		Short: "Seed a minimal dev billing catalog for local migrations",
-		RunE:  seedDevCatalog,
+	mintMerchantAPIKeyCmd := &cobra.Command{
+		Use:   "mint-merchant-api-key",
+		Short: "Mint a merchant-scoped OpenRails API key and print the one-time secret",
+		RunE:  mintMerchantAPIKey,
 	}
-	mintOperatorServiceTokenCmd := &cobra.Command{
-		Use:   "mint-operator-service-token",
-		Short: "Mint an OpenRails operator service token and print the one-time token",
-		RunE:  mintOperatorServiceToken,
-	}
-	mintOperatorServiceTokenCmd.Flags().String("name", "openrails-operator-manual", "service token display name")
-	mintOperatorServiceTokenCmd.Flags().String("org", "", "Bootstrap authority slug for the legacy AuthKit --org bridge (defaults to config/operator)")
-	mintOperatorServiceTokenCmd.Flags().String("merchant", "", "OpenRails merchant slug or id (defaults to default merchant)")
-	mintOperatorServiceTokenCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to full operator permissions")
-
-	mintCustomerServiceTokenCmd := &cobra.Command{
-		Use:   "mint-customer-service-token",
-		Short: "Mint an OpenRails customer-scoped service token and print the one-time token",
-		RunE:  mintCustomerServiceToken,
-	}
-	mintCustomerServiceTokenCmd.Flags().String("name", "", "service token display name")
-	mintCustomerServiceTokenCmd.Flags().String("org", "", "Bootstrap authority slug for the legacy AuthKit --org bridge that owns the service token (defaults to config/operator)")
-	mintCustomerServiceTokenCmd.Flags().String("merchant", "", "OpenRails merchant slug or id (defaults to default merchant)")
-	mintCustomerServiceTokenCmd.Flags().String("customer", "", "OpenRails customer UUID to scope the service token to")
-	mintCustomerServiceTokenCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to openrails:credits:spend")
-
-	mintOperatorJWTCmd := &cobra.Command{
-		Use:   "mint-operator-jwt",
-		Short: "Mint a JWKS-verifiable bootstrap JWT for /v1/admin/* e2e provisioning",
-		RunE:  mintOperatorJWT,
-	}
-	mintOperatorJWTCmd.Flags().String("org", "", "Bootstrap authority slug for the legacy AuthKit --org bridge (defaults to config/operator)")
-	mintOperatorJWTCmd.Flags().String("email", "", "Test user email (default e2e-operator@openrails.test)")
-	mintOperatorJWTCmd.Flags().String("username", "", "Test user username (default e2e-operator)")
-	mintOperatorJWTCmd.Flags().String("role", "", "Merchant role to assign (default openrails-operator)")
+	mintMerchantAPIKeyCmd.Flags().String("name", "openrails-merchant-api-key", "API key display name")
+	mintMerchantAPIKeyCmd.Flags().String("org", "", "AuthKit org slug that owns the API key")
+	mintMerchantAPIKeyCmd.Flags().String("merchant", "", "OpenRails merchant slug or id (defaults to configured merchant)")
+	mintMerchantAPIKeyCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to full merchant API permissions")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, newBootstrapCmd(), mintOperatorServiceTokenCmd, mintCustomerServiceTokenCmd, mintOperatorJWTCmd, newCatalogCmd(), newReconcileCmd(), newIntentsCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, newPushBootstrapCmd(), mintMerchantAPIKeyCmd, newPushCatalogCmd(), newReconcileCmd(), newIntentsCmd())
 
 	if err := rootCmd.Execute(); err != nil {
-		log.WithError(err).Fatal("Failed to execute command")
+		os.Exit(1)
 	}
 }
 
@@ -197,6 +172,10 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read no-workers flag: %w", err)
 	}
 	startWorkers := !noWorkers
+	config.LogStartupStatus(cfg)
+	if err := config.ConfigureProcessGlobals(cfg); err != nil {
+		return err
+	}
 
 	if cfg.Env == "production" || cfg.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
@@ -247,10 +226,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 			Warn("control plane: initial operator service token minted; capture the secret from logs now (shown once)")
 	}
 
-	// Startup provisioning (#327): apply the unified bootstrap manifest on every
-	// start. The apply is idempotent + additive, so it converges the control
-	// plane to the mounted manifest each boot (registering e.g. a delegated
-	// issuer added after first provisioning) without a separate CLI step.
+	// Startup provisioning (#327): apply auth/merchant provisioning on every
+	// start. The apply is idempotent + additive, so it converges authority and
+	// merchant definitions without touching catalog/provider state.
 	if err := applyStartupBootstrap(context.Background(), cfg, embeddedApp.App()); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("startup bootstrap: %w", err)
@@ -368,6 +346,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 func runWorker(cmd *cobra.Command, args []string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+	config.LogStartupStatus(cfg)
+	if err := config.ConfigureProcessGlobals(cfg); err != nil {
+		return err
+	}
+
 	application, err := app.Bootstrap(cfg)
 	if err != nil {
 		return fmt.Errorf("bootstrap application: %w", err)
@@ -433,18 +416,17 @@ func runWorker(cmd *cobra.Command, args []string) error {
 
 func runAudit(cmd *cobra.Command, args []string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	application, err := app.Bootstrap(cfg)
-	if err != nil {
-		return fmt.Errorf("bootstrap application: %w", err)
+	if cfg == nil {
+		return fmt.Errorf("config not loaded; audit requires --config")
 	}
-	defer func() {
-		if err := application.Close(context.Background()); err != nil {
-			log.WithError(err).Error("Application cleanup failed")
-		}
-	}()
+	database, err := db.NewDB(cfg.DB)
+	if err != nil {
+		return fmt.Errorf("open postgres: %w", err)
+	}
 
 	// Parse flags
 	format, _ := cmd.Flags().GetString("format")
+	detailsFile, _ := cmd.Flags().GetString("details-file")
 	userID, _ := cmd.Flags().GetString("user-id")
 	severityStr, _ := cmd.Flags().GetString("severity")
 	categories, _ := cmd.Flags().GetStringSlice("category")
@@ -460,16 +442,48 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create checker and run audit
-	checker := audit.NewChecker(application.Runtime.DB.DataPool())
+	checker := audit.NewChecker(database.DataPool())
 	findings, summary, err := checker.Run(cmd.Context(), opts)
 	if err != nil {
+		_ = database.Close()
 		return fmt.Errorf("audit failed: %w", err)
 	}
 
-	// Format and output results
-	formatter := audit.GetFormatter(format)
-	if err := formatter.Format(os.Stdout, findings, summary); err != nil {
-		return fmt.Errorf("format output: %w", err)
+	if strings.EqualFold(format, "table") {
+		table := &audit.TableFormatter{}
+		if len(findings) > 0 {
+			if strings.TrimSpace(detailsFile) == "" {
+				detailsFile = fmt.Sprintf("openrails-audit-%s.log", time.Now().UTC().Format("20060102-150405"))
+			}
+			f, err := os.OpenFile(detailsFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+			if err != nil {
+				_ = database.Close()
+				return fmt.Errorf("open audit details file %q: %w", detailsFile, err)
+			}
+			if err := table.FormatDetails(f, findings, summary); err != nil {
+				_ = f.Close()
+				_ = database.Close()
+				return fmt.Errorf("write audit details file %q: %w", detailsFile, err)
+			}
+			if err := f.Close(); err != nil {
+				_ = database.Close()
+				return fmt.Errorf("close audit details file %q: %w", detailsFile, err)
+			}
+		}
+		if err := table.FormatSummary(os.Stdout, findings, summary, detailsFile); err != nil {
+			_ = database.Close()
+			return fmt.Errorf("format audit summary: %w", err)
+		}
+	} else {
+		formatter := audit.GetFormatter(format)
+		if err := formatter.Format(os.Stdout, findings, summary); err != nil {
+			_ = database.Close()
+			return fmt.Errorf("format output: %w", err)
+		}
+	}
+
+	if err := database.Close(); err != nil {
+		return fmt.Errorf("close postgres: %w", err)
 	}
 
 	// Return non-zero exit if critical issues found

@@ -43,13 +43,11 @@ type ApplyPlan struct {
 // PlanOptions controls how the manifest is compared to the live catalog.
 type PlanOptions struct {
 	// ArchiveMissingProducts archives active products in a declared tier group
-	// when they are absent from the manifest. The standalone catalog apply command
-	// keeps this terraform-style convergence behavior; unified bootstrap uses
-	// additive/upsert semantics and leaves omitted products alone.
+	// when they are absent from the manifest. The push-catalog command keeps this
+	// terraform-style convergence behavior.
 	ArchiveMissingProducts bool
 	// ArchiveMissingPrices archives active prices for a declared product when
-	// their financial identity is absent from the manifest. Disabled for unified
-	// bootstrap's additive/upsert semantics.
+	// their financial identity is absent from the manifest.
 	ArchiveMissingPrices bool
 }
 

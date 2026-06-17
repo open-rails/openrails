@@ -20,7 +20,7 @@ mechanism:
 
 | # | Divergence | Direction | Mechanism |
 |---|---|---|---|
-| 1 | Catalog wrong at the provider | push (OpenRails → provider) | `bootstrap apply` — verify-or-create at apply time, re-applied idempotently on every boot; alert-only drift watching; provider extras are logged, and archived only under the explicit `--prune` flag (#357) |
+| 1 | Catalog wrong at the provider | push (OpenRails → provider) | `push-catalog` — verify-or-create at apply time; alert-only drift watching; provider extras are logged, and archived only under the explicit `--prune` flag (#357) |
 | 2 | Money state wrong locally | pull (provider → OpenRails) | webhooks in real time; **reconcile (#107)** as the batch truth-pull: advisory diffs, enforce converges local state |
 | 3 | Outbound action never executed | (intent, not sync) | **durable intent + replay** — see "Durability model" below; reconcile is its *detector* |
 | 4 | Entitlements inconsistent | derived | re-run the derivation once 1–3 are true; `internal/audit` checks the local derivation, reconcile's PS-9 converges it against trued-up inputs |
@@ -63,7 +63,7 @@ the dunning window as the relevance window; the verifier resolves ambiguous
 charges by querying NMI for the period's order reference and repairs the
 subscription lifecycle on late-confirmed success. Phase D routed catalog
 archive ops through the ledger (`stripe_archive_product`,
-`stripe_archive_price`, `solana_sunset_plan`; admin-origin): `bootstrap apply
+`stripe_archive_price`, `solana_sunset_plan`; admin-origin): `push-catalog
 --prune` (#357) enqueues+executes an intent per extra, so a provider
 being down no longer aborts the sweep — items park and drain durably, and an
 intent expires if its object joins the local catalog before execution. NMI

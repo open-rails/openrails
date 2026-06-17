@@ -20,6 +20,8 @@ type EntitlementRepo struct {
 
 func NewEntitlementRepo(d *db.DB) *EntitlementRepo { return &EntitlementRepo{db: d} }
 
+const selfIssuer = "openrails:self"
+
 func (r *EntitlementRepo) SetEndAtTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, endAt *time.Time, now time.Time) error {
 	return SetEntitlementEndAtTx(ctx, tx, id, endAt, now)
 }
@@ -220,6 +222,22 @@ func (r *EntitlementRepo) ListActiveRecordsByExternalSubjects(ctx context.Contex
 		return nil, err
 	}
 	merchantID := tid.UUID()
+	if issuer == selfIssuer {
+		subjectByCustomerID := make(map[uuid.UUID]string, len(subjects))
+		customerIDs := make([]uuid.UUID, 0, len(subjects))
+		for _, subject := range subjects {
+			uid, err := ResolveCustomerID(subject)
+			if err != nil {
+				return nil, err
+			}
+			if uid == uuid.Nil {
+				continue
+			}
+			subjectByCustomerID[uid] = subject
+			customerIDs = append(customerIDs, uid)
+		}
+		return r.listActiveRecordsByCustomerIDs(ctx, merchantID, subjectByCustomerID, customerIDs, at)
+	}
 	resolved, err := r.db.Gen(ctx).LookupCustomerIDsByIssuerSubjects(ctx, gen.LookupCustomerIDsByIssuerSubjectsParams{
 		MerchantID: merchantID,
 		Issuer:     &issuer,
@@ -238,6 +256,10 @@ func (r *EntitlementRepo) ListActiveRecordsByExternalSubjects(ctx context.Contex
 		subjectByCustomerID[row.ID] = subj
 		customerIDs = append(customerIDs, row.ID)
 	}
+	return r.listActiveRecordsByCustomerIDs(ctx, merchantID, subjectByCustomerID, customerIDs, at)
+}
+
+func (r *EntitlementRepo) listActiveRecordsByCustomerIDs(ctx context.Context, merchantID uuid.UUID, subjectByCustomerID map[uuid.UUID]string, customerIDs []uuid.UUID, at time.Time) (map[string][]models.Entitlement, error) {
 	if len(customerIDs) == 0 {
 		return map[string][]models.Entitlement{}, nil
 	}

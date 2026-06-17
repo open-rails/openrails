@@ -11,29 +11,12 @@ import (
 
 	authcore "github.com/open-rails/authkit/core"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
-func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
-	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	ctx := context.Background()
-
-	embeddedApp, err := embedded.New(embedded.Options{Config: cfg})
-	if err != nil {
-		return fmt.Errorf("bootstrap application: %w", err)
-	}
-	defer func() { _ = embeddedApp.Close(ctx) }()
-
-	if err := embcp.Attach(ctx, embeddedApp.App(), cfg, nil); err != nil {
-		return fmt.Errorf("attach control plane: %w", err)
-	}
-	cp := embcp.Get(embeddedApp.App())
-	if cp == nil || cp.Core() == nil {
-		return fmt.Errorf("control plane unavailable (set auth.control_plane.issuer)")
-	}
-
+func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 	authorityOrgSlug, err := cmd.Flags().GetString("org")
 	if err != nil {
 		return fmt.Errorf("read org flag: %w", err)
@@ -44,7 +27,20 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--org is required (the AuthKit org slug hosting the admin authority)")
 	}
 
-	if _, berr := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
+	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+	ctx := context.Background()
+	application := &app.App{Config: cfg}
+	defer func() { _ = application.Close(ctx) }()
+
+	if err := embcp.Attach(ctx, application, cfg, nil); err != nil {
+		return fmt.Errorf("attach control plane: %w", err)
+	}
+	cp := embcp.Get(application)
+	if cp == nil || cp.Core() == nil {
+		return fmt.Errorf("control plane unavailable (set auth.control_plane.issuer)")
+	}
+
+	if _, berr := embcp.RunBootstrap(ctx, application, controlplane.BootstrapOptions{
 		BootstrapOrgSlug:        authorityOrgSlug,
 		MintInitialServiceToken: false,
 	}); berr != nil {
@@ -57,7 +53,7 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = "openrails-operator-manual"
+		name = "openrails-merchant-api-key"
 	}
 
 	permissions, err := cmd.Flags().GetStringSlice("permission")
@@ -87,17 +83,17 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 		Resources:   resources,
 	})
 	if err != nil {
-		return fmt.Errorf("mint operator service token: %w", err)
+		return fmt.Errorf("mint merchant API key: %w", err)
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"org":                  authorityOrgSlug,
-		"name":                 name,
-		"merchant":             merchantSlug,
-		"merchant_id":          merchantID.String(),
-		"service_token_key_id": serviceToken.KeyID,
-		"service_token_secret": token,
-		"permissions":          serviceToken.Permissions,
-		"resources":            serviceToken.Resources,
+		"org":         authorityOrgSlug,
+		"name":        name,
+		"merchant":    merchantSlug,
+		"merchant_id": merchantID.String(),
+		"api_key_id":  serviceToken.KeyID,
+		"api_key":     token,
+		"permissions": serviceToken.Permissions,
+		"resources":   serviceToken.Resources,
 	})
 }

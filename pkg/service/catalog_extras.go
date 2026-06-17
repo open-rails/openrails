@@ -22,7 +22,7 @@ import (
 // Issue #358 phase D — every archive WRITE flows through the provider intent
 // ledger instead of being a direct provider call.
 //
-// DEFAULT (`bootstrap apply`): DetectCatalogExtras enumerates every
+// DEFAULT (`push-catalog`): DetectCatalogExtras enumerates every
 // provider-side catalog object (Stripe products + prices, NMI recurring plans)
 // and reports those NOT present in the local catalog. For Solana — whose plans
 // are PDAs with no enumeration API, so FOREIGN plans are unobservable — the
@@ -32,7 +32,7 @@ import (
 // Detection is READ-ONLY — it works in every operating mode — and extras are
 // ignorable: the default path never touches them.
 //
-// --prune (`bootstrap apply --prune`): the local catalog is treated
+// --prune (`push-catalog --prune`): the local catalog is treated
 // as complete — ArchiveCatalogExtras archives (NEVER
 // deletes) extras that bear OpenRails ownership markers, by enqueuing
 // admin-origin intents on the provider intent ledger (#358) and executing them
@@ -535,7 +535,7 @@ func archiveCatalogExtrasVia(ctx context.Context, exec intentExecutor, tenantID 
 			IdempotencyKey: idempotencyKey,
 			NextAttemptAt:  now,
 			Origin:         intents.OriginAdmin,
-			OriginReason:   "bootstrap apply --prune (#357)",
+			OriginReason:   "push-catalog --prune (#357)",
 		})
 		if err != nil {
 			outcomes = append(outcomes, CatalogExtraArchiveOutcome{

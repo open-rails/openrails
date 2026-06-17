@@ -223,9 +223,8 @@ services:
       AUTH_ISSUERS: '${AUTH_ISSUERS:-["http://issuer:8080"]}'
       AUTH_EXPECTED_AUDIENCE: "${AUTH_EXPECTED_AUDIENCE:-openrails-app}"
       # Closed-registration provisioning is explicit:
-      #   billing bootstrap apply -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
-      # The checked-in Doujins/Hentai0 local-stack example is a unified
-      # bootstrap manifest for /etc/openrails/bootstrap.yaml.
+      #   billing push-bootstrap -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
+      #   billing push-catalog -c /etc/openrails/config.yaml -f /etc/openrails/catalog.yaml
 
       # Processor env passthrough (for local sandbox/E2E)
       PROCESSORS_MOBIUS_TYPE: "nmi"

@@ -85,10 +85,11 @@ These routes are gated by live AuthKit org permissions. A user, service token, o
 registered JWKS issuer controls a merchant only through its authority over the
 merchant's `owner_org_id`.
 
-## Bootstrap Manifest
+## Merchant Manifest
 
-The bootstrap manifest keeps AuthKit-owned authority in `auth:` and
-OpenRails-owned merchant/catalog state in `merchants:` and `catalogs:`.
+The bootstrap manifest used by `openrails push-bootstrap` keeps AuthKit-owned
+authority in `auth:` and OpenRails-owned merchant definitions in `merchants:`.
+Catalog state is pushed separately with `openrails push-catalog`.
 
 ```yaml
 version: 1
@@ -104,7 +105,13 @@ auth:
 merchants:
   - slug: doujins
     name: Doujins
+```
 
+Catalog manifests are explicitly catalog-scoped and may contain one or more
+merchant catalog entries:
+
+```yaml
+version: 1
 catalogs:
   - merchant: doujins
     default_providers: [nmi]
