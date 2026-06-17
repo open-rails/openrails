@@ -187,7 +187,7 @@ type OpenrailsBudgetPolicy struct {
 	Scope      string
 	// platform (set by us; subject cannot edit/see) | subject (the subject's own cap).
 	Owner string
-	// Immutable scope discriminator: role uuid (scope=role) or invoker string (scope=invoker); empty for scope=subject. Never a slug/name.
+	// Immutable scope discriminator: role uuid (scope=role), invoker string (scope=invoker), or tier key (scope=invoker_tier); empty for scope=subject.
 	ScopeKey      string
 	Windows       []byte
 	PolicyVersion int64
@@ -534,10 +534,10 @@ type OpenrailsMoneySetting struct {
 	LastTopupAt           *time.Time
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
-	// True once the account has a verified payment method (set after a successful $1 auth-and-void verification charge — issue #299). The charge itself is a separate slice.
+	// Legacy metadata noting that a collection method was verified; service admission consumes computed credit capacity instead of checking this flag.
 	VerifiedPaymentMethod bool
 	VerifiedAt            *time.Time
-	// When set, the account is suspended (issue #299). Admission-deny-on-suspended wiring is a separate slice.
+	// Legacy account-freeze metadata; service admission does not consult this flag.
 	SuspendedAt   *time.Time
 	SuspendReason *string
 	Tier          *string

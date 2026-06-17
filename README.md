@@ -661,7 +661,7 @@ The next reconcile run independently verifies reality converged.
 ## Documentation
 
 - **HTTP API reference:** [docs/api/endpoints.md](docs/api/endpoints.md)
-- **Operations manual:** [docs/operations.md](docs/operations.md) — provider consistency, the durability model, dunning, safety levers, and `billing reconcile check|fix|report`: the manual batch truth-pull that diffs and (on `fix`) converges local state to the payment processors (#107; never writes to a provider).
+- **Operations manual:** [docs/operations.md](docs/operations.md) — provider consistency, the durability model, dunning, safety levers, and `openrails reconcile check|fix|report`: the manual batch truth-pull that diffs and (on `fix`) converges local state to the payment processors (#107; never writes to a provider).
 - **Entitlements model:** [docs/entitlements_timeline.md](docs/entitlements_timeline.md)
 - **Merchant provisioning & service tokens:** [docs/merchant-provisioning.md](docs/merchant-provisioning.md)
 - **Testing with business time:** [docs/business-time.md](docs/business-time.md)

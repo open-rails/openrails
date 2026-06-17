@@ -206,19 +206,22 @@ auth:
 #   billing bootstrap apply -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
 #   billing run-server -c /etc/openrails/config.yaml
 #
-# The mounted bootstrap file uses the unified manifest shape: merchants and
-# top-level catalogs. Issuer/JWKS trust belongs in AuthKit remote_applications;
-# this manifest binds OpenRails merchant namespaces to owner orgs and billing
-# metadata.
+# The mounted bootstrap file uses three explicit sections: AuthKit-owned
+# `auth:`, OpenRails-owned `merchants:`, and merchant catalog declarations.
 #
 # Example /etc/openrails/bootstrap.yaml:
 # version: 1
+# auth:
+#   orgs:
+#     - slug: local-stack
+#       issuers: []
 # merchants:
 #   - slug: local-stack
 #     name: Local Stack
 #     owner_org_id: 11111111-1111-1111-1111-111111111111
 # catalogs:
-#   - name: default
+#   - merchant: local-stack
+#     name: default
 #     tier_groups: []   # each price declares its own `currency`
 #
 # A price may either let OpenRails find-or-create each provider object

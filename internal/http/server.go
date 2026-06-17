@@ -414,6 +414,7 @@ func New(deps Dependencies) (*Server, error) {
 	// Canonical: /v1/*
 	s.registerUserRoutes(s.publicHandler)
 	s.registerAdminRoutesOn(s.publicHandler)
+	s.registerMerchantActionRoutesOn(s.publicHandler)
 	s.registerWebhookRoutes(s.publicHandler)
 
 	// Selective AuthKit route mounting (#224). In locked-down mode this mounts
@@ -487,6 +488,7 @@ func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
 	// The control plane is always present on this surface (#469); it is the
 	// live admin-permission checker.
 	asm.AdminChecker = s.controlPlane
+	asm.ServiceCredentialResolver = s.controlPlane
 	return asm.NewHTTPHandler(embedhttp.Options{
 		IncludeUser:     opts.IncludeUser,
 		IncludeAdmin:    opts.IncludeAdmin,

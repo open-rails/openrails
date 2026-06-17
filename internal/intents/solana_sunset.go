@@ -24,7 +24,7 @@ import (
 // status=sunset via update_plan (#357/#358 phase D) — the program's exact
 // archive semantics: new subscribe calls are rejected ("Plan is in sunset
 // status") while existing subscriptions keep openrails. Produced by the
-// `bootstrap apply --exhaustive` sweep for plans whose local price is no
+// `bootstrap apply --prune` sweep for plans whose local price is no
 // longer purchasable.
 const TypeSolanaSunsetPlan = "solana_sunset_plan"
 

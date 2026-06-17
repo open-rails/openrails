@@ -15,6 +15,11 @@ import (
 // catalog references this same value (see internal/controlplane/catalog.go).
 const PermAdmin = "openrails:admin"
 
+// PermCatalogWrite is the narrow merchant catalog mutation capability. It
+// mirrors controlplane.PermCatalogWrite without making gin-free route
+// registration import the control-plane package.
+const PermCatalogWrite = "openrails:catalog:write"
+
 // AdminPermissionChecker is the live AuthKit effective-permission check the
 // control plane provides. HARDCUT (#312): admin authority is the openrails:admin
 // permission held in the CALLER'S OWN tenant (or carried on a deployment-minted

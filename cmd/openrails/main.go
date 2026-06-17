@@ -28,7 +28,7 @@ import (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "billing",
+		Use:   "openrails",
 		Short: "OpenRails server",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			configPath, err := cmd.Flags().GetString("config")
@@ -225,7 +225,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// Bootstrap the OpenRails-owned AuthKit control plane (#224). Idempotent;
 	// runs after migrations have been applied (migrations are a separate
-	// `billing migrate` step) and at startup.
+	// `openrails migrate` step) and at startup.
 	//
 	// TODO(#336): no default merchant — startup bootstrap must resolve/configure a
 	// real merchant slug to seed. This previously relied on the (now removed) default merchant; with an empty BootstrapOrgSlug, RunBootstrap now errors. A

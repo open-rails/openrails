@@ -7,260 +7,142 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 510
+next_id: 511
 
 ---
 
-# #507: Remove legacy non-money gates from service admit
+# #510: Unify standalone provisioning and merchant action auth
 
-OpenRails still carries a legacy hot-path throughput layer from the earlier Tensorhub design:
+**Completed:** yes
+**Status:** COMPLETE 2026-06-16: `bootstrap apply` now consumes a top-level AuthKit `auth:` bootstrap section via
+AuthKit v0.37.0, catalogs explicitly declare `merchant:`, `--prune` replaces the operator-facing `--exhaustive` flag
+with `--exhaustive` retained as a hidden alias, `catalog apply --api-url/--api-token` and the HTTP applier were removed,
+and catalog action routes moved from `/admin/catalog/*` to the unified merchant action surface at
+`/merchant/catalog/*`, gated by `openrails:catalog:write`. Validation passed with focused package tests, full
+`go test ./...`, CLI help smoke checks, and a live standalone HTTP integration test for `/v1/merchant/catalog/*`.
 
-- `tenant_throughput` lets the host send rate-limit policy in every admit request.
-- `amounts` drives request/token/image/unit windows in OpenRails.
-- tier policy `throughput` / `release_windows` and queue-unit reservations enforce RPM/TPM/IPM/RPD-style limits.
-- `block_checks` runs an unrelated blocklist gate before the real prepaid/money admission logic.
-- tier-policy `entitled_resources` / resource allowlist denies invokes for reasons that belong in Tensorhub's own
-  endpoint authorization layer, not OpenRails' billing admission.
-- `max_single_charge_amount` / per-job cost cap is an arbitrary service-admit denial that duplicates the real
-  affordability check and should not be part of the generic billing gate.
+## Metadata
 
-That model is wrong for the current billing architecture. The payer/customer is the subject being governed, and
-OpenRails' hot admit path should answer a narrower money question: can this customer afford this estimated request after
-existing holds and delegated-spend reservations? Admit-time requests should not carry rate-limit policy, and OpenRails
-should not enforce old request/token/image throughput limits or a separate max-in-flight-dollar cap for Tensorhub-style
-admission. Prepaid balance + computed credit capacity + active holds already bound spend; Tensorhub can still use
-in-flight-dollar policy as a scheduler fairness/reordering signal outside OpenRails' admit gate.
+- Category: feature
+- Status: complete
+- Passes: true
+
+## Problem
+
+Private standalone OpenRails deployments should be provisionable from one desired-state YAML file. That file should
+describe merchant ownership, remote applications/JWKS principals, and the merchant's catalog products/prices. Operators
+should be able to dry-run the plan, apply it locally/in-process, and optionally prune OpenRails-owned provider catalog
+objects that are no longer declared.
+
+The current surface is close but inconsistent:
+
+- `openrails bootstrap apply` already applies a unified manifest with `merchants:` and `catalogs:`.
+- Startup bootstrap auto-applies `/etc/openrails/bootstrap.yaml`, but only additively and only from that conventional
+  location.
+- `openrails catalog apply` applies catalog-only manifests and has a remote HTTP mode.
+- `catalog apply --api-url` calls `/admin/catalog/*` and its `--api-token` story is unclear: those routes are behind
+  user/admin auth and `openrails:admin`, not the merchant-scoped service-token/remote-application authorization model.
+- There should not be separate route trees for the same merchant administrative actions. Applying catalog updates,
+  rotating merchant secrets, refunding payments, and similar operations should be capability-gated merchant actions that
+  any supported credential type can call when it resolves to the right merchant and permission.
+- Bootstrap manifests currently do not declare remote applications; issuer/JWKS trust is owned by AuthKit
+  remote_application records.
+- `bootstrap apply --exhaustive` is accurate internally but not the clearest operator-facing name. The action is pruning:
+  archive OpenRails-owned provider-side catalog extras absent from the manifest, never delete or touch foreign objects.
 
 ## Target Model
-- Trust-tier policy is configured out of band by the merchant/operator and stored in OpenRails.
-- Admit requests report only stable identity and billing facts: `customer_id`, `invoker`, `invoker_type`, `resource`,
-  `currency`, `estimated_amount`, `request_id`, `source`, and expiry.
-- OpenRails no longer accepts host-supplied throughput policy on the hot path.
-- OpenRails no longer uses `amounts` to enforce request/token/image throughput windows.
-- OpenRails no longer enforces tier-policy `throughput`, per-release throughput overrides, or queue-unit reservations.
-- OpenRails no longer enforces `max_concurrent_held_amount` / Tensorhub `max_inflight_micros` as a hard admit gate.
-  If Tensorhub keeps a max-in-flight-dollar policy, it is a scheduler fairness/reordering signal, not a second
-  affordability check in OpenRails.
-- Other money controls remain admission/accounting controls, not payer throughput limits: prepaid balance, Redis holds,
-  optional arrears credit capacity, and wasted-spend abuse windows for refunded/costly failures.
-- Name the money gate as `start_capacity` everywhere practical:
-  `prepaid_available + remaining_arrears_credit - active_holds`. Admit only when the estimated charge fits that
-  capacity.
-- Arrears exposure should follow the redesigned invoice model. The final gate should derive owed exposure from pending
-  unbilled invoice items plus open/past-due invoice receivables, not from a live account-level
-  `outstanding_owed_amount` counter. Any use of that counter is transition-only and should disappear with #506.
-- The DB capacity snapshot and Redis hold placement must remain race-safe. Redis protects admit-vs-admit races by
-  atomically summing active holds, but tests should prove that balance/credit changes cannot slip between the DB
-  snapshot and Redis hold placement and admit work beyond real capacity.
-- The blocklist gate is also wrong here. Tensorhub/OpenRails prepaid job admission is not a payment-instrument fraud
-  flow, and there is no current requirement to block arbitrary identifiers before an invoke. Remove the layer from
-  service admit rather than preserving or relocating it in this path.
-- Gate #6 is two concerns mixed together. Keep tier resolution only where service admit still needs the payer's resolved
-  trust tier to load retained money policy such as wasted-spend windows. Remove the `entitled_resources` / resource
-  allowlist denial from service admit. Endpoint/resource authorization belongs to the host application before billing
-  admit.
-- Current tier resolution also loads `max_single_charge_amount`, but Gate #7 removes that arbitrary per-job cost cap
-  from the final service-admit policy surface.
-- The per-job cost cap should be removed from service admit. If a request is too expensive, prepaid/arrears
-  `start_capacity` already denies it; if the host wants endpoint-specific pricing or product policy, that belongs in
-  Tensorhub before billing admit.
-- Gate #8 should stay as a wasted-spend abuse backstop, not a normal throughput limit. It has two distinct policies:
-  payer/customer wasted spend gets a grace budget and is charged through report-time accounting beyond that point;
-  delegated-invoker wasted spend is an admit-time hard cutoff when the invoker is already over budget.
-- Remove the manual payer/customer suspension gate from service admit. `suspended_at` is a vague manual policy override
-  that does not belong in the hot billing admission path. A payer should be denied because money capacity, delegated-spend
-  policy, wasted-spend cutoff, or in-flight exposure says no, not because an operator toggled a generic frozen state.
-- Move arrears/payment-method eligibility out of the hot admit path. Admit should consume a precomputed credit capacity:
-  "how much can this customer borrow right now?" That separate credit-policy path can consider trust tier, invoice
-  receivables, functioning payment method, collection status, and risk. The hot path should then compare
-  `prepaid_available + remaining_credit_capacity - active_holds` against the estimate, the same shape as prepaid.
-- Tensorhub's current target is credit capacity `0`, so Tensorhub-style admit is effectively prepaid-only plus active
-  holds.
-- After this cleanup, the intended OpenRails service-admit policy gates are only:
-  1. Payer/customer affordability and hold placement: compare `estimated_amount` against `start_capacity` after local FX
-     conversion where needed, then place the idempotent request hold if allowed.
-  2. Customer-funded invoker spend authorization and budget: when `invoker != customer`, OpenRails must find an explicit
-     payer-configured delegated-spend grant for that invoker, role, invoker tier, or other configured scope, then reserve
-     against its money-denominated spend windows. This applies equally to Tensorhub-native users, such as org members
-     spending an org/customer balance, and to remote-application delegated users, such as Cozy-Art JWKS users spending
-     Cozy-Art's customer balance. No matching delegated-spend grant means deny; a missing policy is not unlimited spend.
-  3. Delegated-invoker wasted-spend cutoff: when `invoker != customer`, deny if the invoker is already past the
-     platform-imposed wasted-spend budget for the relevant window. Direct customer credentials are not hard-denied here;
-     customer wasted spend is handled by report-time accounting/charging beyond the grace budget.
-  Merchant/service authentication, request idempotency, Redis hold atomicity, and FX conversion are required mechanics,
-  but they are not additional Tensorhub user-governance gates.
-- Gate #9 and Gate #10 are the old request/token/image throughput idea and should be removed: no per-payer/per-resource
-  unit windows, no Tensorhub `amounts` enforcement, and no queue/batch unit reservations in OpenRails admission.
-- The retained delegated-spend gate is the generalized "customer lets invoker spend his money" policy surface:
-  money-denominated authorization + budget windows/reservations over estimated spend, not RPM/TPM/IPM/image counters. It
-  must work for Cozy-Art-style org + remote-application/JWKS users spending the Cozy-Art customer balance, for Tensorhub
-  native org members whose role allows them to spend an org/customer's money, and for Tensorhub-native delegated users.
-  The payer/customer principal decides the spend policy: windows such as max spend per 5 hours, 7 days, month, or any
-  overlapping configured period. Tensorhub owns credential validation and endpoint/resource authorization; OpenRails owns
-  the billing authorization question "may this invoker spend this customer's money?" OpenRails service admit now treats
-  explicit `budget_policies` rows (`scope=invoker`, `scope=role`, or `scope=invoker_tier`) as the customer-funded spend
-  grant and fails closed when no matching delegated-spend policy exists. Tier-policy `budget_windows` are no longer an
-  implicit admit grant; Tensorhub now syncs delegated tier budget windows into the explicit `invoker_tier` budget-policy
-  scope. If group, org-membership, remote-application, or other customer-funded scopes are supported later, they must be
-  explicit delegated-spend policy scopes rather than stale implicit subject/role pools. These reservations should follow
-  the same idempotency and release/capture lifecycle as the request hold so denied, failed, retried, and settled work
-  cannot leak allocated-spend capacity.
-- Cross-repo audit finding: Tensorhub had multiple overlapping surfaces for this idea. The cleanup now maps delegated-user
-  tier budget windows to explicit OpenRails `scope=invoker_tier` grants, maps `RoleBudgets` to `scope=role`, stops syncing
-  tenant self-caps as admit grants, and deletes the Tensorhub-side `/platforms/me/generation-budget/check` preflight that
-  passed caller-supplied windows into OpenRails `BudgetCheck`.
-- Remove the payer-level max-in-flight-dollar gate from OpenRails admit. Affordability is already covered by
-  `start_capacity`; Tensorhub may keep in-flight-dollar fairness in its scheduler to queue or reorder work, but
-  OpenRails should not deny solely because a customer is over a fairness cap.
-- Capture/usage reporting can still record operational metadata, but it must not reintroduce an admission-time
-  rate-limit policy surface.
+
+- Keep runtime infrastructure config separate from desired provisioned state:
+  - `config.yaml`: DB, ports, mode, processor secret sources, runtime behavior.
+  - bootstrap/apply YAML: merchants, AuthKit remote applications, catalog products/prices, provider mappings.
+- Make `openrails bootstrap apply` the canonical private-standalone desired-state command.
+- Let the bootstrap YAML declare everything a private standalone install needs:
+  - merchants and owner orgs;
+  - an `auth:` section passed to AuthKit's planned first-class bootstrap manifest/API/CLI (`authkit#84`) for orgs,
+    users/credentials, roles, permission assignments, service tokens, and remote applications/JWKS principals;
+  - per-merchant catalog products, prices, tier groups, and provider mappings.
+- Keep startup auto-apply additive-only from `/etc/openrails/bootstrap.yaml`.
+- Keep destructive cleanup explicit on the manual CLI only, behind a clearer flag such as `--prune`.
+- Replace the current route/auth split with one merchant administrative action model:
+  every accepted credential normalizes to a principal with `merchant_id`, `owner_org_id`, subject/key/issuer identity,
+  `permissions[]`, and resource scopes.
+- Use permission gates for actions, not route-family identity:
+  `openrails:catalog:write` for catalog apply, `openrails:merchant:secrets:write` for merchant secrets,
+  `openrails:payments:refund` for refunds, `openrails:platform:superadmin` for true cross-merchant platform actions.
+- Do not preserve `/admin/catalog/*` as a separate authority model. Catalog apply should be a merchant action callable by
+  an AuthKit user access token, generated service token, first-party service JWT, remote-application token, or delegated
+  merchant-admin token when that credential resolves to the target merchant and carries `openrails:catalog:write`.
+- Keep "admin UI" as a client/product concept only. An admin UI signs in a user and calls the same merchant action routes
+  with that user's access token; it should not require a separate admin-only route/auth stack.
+- For private standalone OpenRails, seed all authority through bootstrap/AuthKit: orgs, roles, permission assignments,
+  users/passwords if AuthKit supports it, remote applications/JWKS principals, and service tokens. OpenRails should use
+  AuthKit's standard bootstrap APIs rather than inventing its own user/credential store. The upstream AuthKit work is
+  tracked as `authkit#84: First-class AuthKit bootstrap manifest/API/CLI`.
+- Public OpenRails, later, can enable AuthKit public registration and host onboarding UI where users create orgs,
+  merchants, remote applications, and credentials. It should reuse the same merchant action routes and permission gates.
 
 ## Tasks
-- [x] Inventory the legacy throughput admission surface:
-      `AdmitRequest.TenantThroughput`, `AdmitInput.TenantThroughput`, `Amounts`, `admission.ResolvedPolicy.Throughput`,
-      `ReleaseThroughput`, `QueueLimits`, `ThroughputForRelease`, Redis limiter calls in `Admitter.Admit`, SDK structs,
-      embed/remote clients, HTTP handlers, tests, docs, and generated examples.
-- [x] Inventory the blocklist admit surface:
-      `block_checks`, `AdmitBlockCheck`, `admission.BlockCheck`, `abuse.BlocklistService` dependency construction in
-      `pkg/service.Admit`, `BlockedBy="blocked"`, service admit/batch wire shape, SDK structs, docs, and tests.
-- [x] Remove `tenant_throughput` from service admit and admit-batch request/response/client contracts.
-- [x] Remove the gate #3 implementation from `pkg/service.Admit`: the pre-admitter
-      `TenantThroughput` Redis check must disappear rather than be renamed or moved.
-- [x] Remove admit-time `amounts` consumption from OpenRails policy enforcement. If a field remains for telemetry, rename
-      and route it only to durable usage metadata/capture, not to admission gates.
-- [x] Delete per-(merchant, payer, resource) unit-throughput checks from `Admitter.Admit`.
-- [x] Delete queue-unit reservation acquire/release from admission settlement paths.
-- [x] Remove tier-policy `throughput`, `release_windows`, and `queue_limits` from the enforceable policy model, schema JSON
-      parsing/writing, SDK types, docs, and tests unless another non-Tensorhub host has a live use case.
-- [x] Remove `block_checks` / blocklist evaluation from the service admit contract. Do not keep a blocklist dependency in
-      this path; any future fraud control must be introduced separately with an explicit current requirement.
-- [x] Remove `entitled_resources` / `BlockedBy="resource"` evaluation from service admit. Preserve `resource` only as a
-      stable reporting/provenance key unless another current billing requirement justifies it.
-- [x] Keep tier resolution only for retained money policy that truly belongs in OpenRails admit, such as payer
-      wasted-spend windows. It must not imply endpoint authorization or max-in-flight-dollar admission denial.
-- [x] Remove `max_single_charge_amount` / per-job cost cap from service admit, tier policy SDK/wire structs, docs, and
-      tests unless another current non-Tensorhub billing requirement justifies it.
-- [x] Keep the wasted-spend abuse gate, but make the contract explicit: payer/customer wasted spend has a grace budget
-      and is charged through report-time accounting beyond that point; delegated invokers are hard-cut from admit when
-      they are already over their wasted-spend budget.
-- [x] Keep and verify delegated-spend budget windows as money-denominated reservations over `estimated_amount`. They must
-      not depend on Tensorhub `amounts`, request/token/image units, or endpoint resources.
-- [x] Make delegated-spend fail closed: if `invoker != customer`, OpenRails must require at least one matching
-      payer-configured delegated-spend grant/scope before placing a money hold. A missing matching policy denies rather
-      than allowing unlimited delegated spend.
-- [x] Define the generalized customer-funded invoker spend model for "customer lets invoker spend his money": direct
-      invoker, delegated user, verified org role, invoker tier, or another explicit configured scope. Keep payer/customer
-      trust tier separate from invoker/delegated-user spend tier.
-- [x] Ensure the delegated-spend model is source-agnostic: Tensorhub-native org users and remote-application delegated
-      users are both just invokers spending a payer/customer principal's money under that principal's configured
-      overlapping money windows.
-- [x] Decide the canonical OpenRails storage surface for delegated-spend policy. Prefer explicit budget-scope policies
-      (`scope=invoker`, `scope=role`, and optionally a named invoker-tier/group scope if needed) over hiding
-      customer-funded invoker-spend windows inside payer trust-tier `TierPolicy.BudgetWindows`.
-- [x] Expose the delegated-spend scope key in the public SDK/HTTP/embedded client as `scope_key`, with `role_id` kept only
-      as a role-compatible alias. Tensorhub can now write explicit `scope=invoker` grants without overloading role ids.
-- [x] Reconcile Tensorhub policy sync with OpenRails enforcement: `RoleBudgets` participate as `scope=role`,
-      delegated-user tier `BudgetWindows` participate as `scope=invoker_tier`, and tenant self-caps are not synced as
-      OpenRails service-admit grants.
-- [x] Revisit Tensorhub `/platforms/me/generation-budget/check`: it should be a read/preflight view over the same stored
-      OpenRails delegated-spend policy used by admit, not a second path where Tensorhub passes ad hoc budget windows for
-      OpenRails to evaluate. Tensorhub deleted the ad hoc route and removed `BudgetCheck` from its OpenRails admin
-      interface.
-- [x] Verify delegated-spend reservations use request-level idempotency and are released or settled alongside the money
-      hold lifecycle, including admit denial rollback, post-admit failure release, retry, and capture.
-- [x] Clean stale budget comments/fields that describe subject/role pools as accidental behavior. Role or invoker-tier
-      support is allowed only if it is intentionally modeled as delegated-spend policy.
-- [x] Remove `max_concurrent_held_amount` / Tensorhub `max_inflight_micros` as an OpenRails hard admit gate, including
-      deny codes, response fields that exist only for hard-denial scheduling, tier policy SDK/wire fields, docs, and
-      tests unless another current non-Tensorhub billing requirement justifies them.
-- [x] If Tensorhub keeps max-in-flight-dollar fairness, keep it in Tensorhub's scheduler/configuration surface and make it
-      explicitly soft/work-conserving: it reorders or queues requests, but affordability is still decided by OpenRails
-      `start_capacity`.
-- [x] Keep and verify FX conversion for retained money policies: if the admit estimate is in EUR and a delegated-spend or
-      wasted-spend policy is in USD (or any other configured policy currency), convert locally before evaluating it. All
-      values remain integer micros in their respective currencies.
-- [x] Remove manual payer/customer suspension from service admit and delete or quarantine the `suspended_at` /
-      `suspend_reason` account-freeze surface if no other current product requirement uses it.
-- [x] Move arrears/payment-method eligibility out of service admit. The hot path should consume already-computed
-      `remaining_credit_capacity` and should not perform payment-method setup checks itself.
-- [x] For Tensorhub configuration, set credit capacity to `0` until a real arrears product is deliberately enabled.
-      Tensorhub defaults `billing.platform_arrears_cap_micros` to `0`, no longer syncs that config through delegated-spend
-      budget policy, and only changes OpenRails credit limit through the explicit admin arrears endpoint.
-- [x] Keep and verify non-throughput admit/accounting gates: prepaid/credit capacity, Redis hold placement, and
-      wasted-spend gates.
-- [x] Rename/refactor the solvency gate around the explicit `start_capacity` model:
-      `prepaid_available + remaining_arrears_credit - active_holds`, with denial when `estimated_amount` exceeds it.
-- [x] Align arrears capacity with the invoice-receivables redesign (#506): derive exposure from pending invoice items and
-      open/past-due invoice balances; remove or clearly quarantine any remaining `outstanding_owed_amount` dependency as
-      transition-only.
-- [x] Add regression coverage for the DB-snapshot/Redis-hold race boundary: concurrent admits, captures/releases,
-      deposits/withdrawals/collections, and credit-line changes must not allow active holds to exceed current start
-      capacity.
-- [x] Keep the Tensorhub prepaid admit gate narrow: no daily/monthly spend caps, blocklists, token/request rates,
-      arbitrary per-job caps, max-in-flight-dollar hard denials, or other user-governance policy in this path. The normal
-      payer controls are prepaid reserve, computed credit capacity, active holds, and costly-failure backstops.
-- [x] Update Tensorhub integration guidance: Tensorhub must stop sending `tenant_throughput` and `amounts` for admission.
-      Any `max_inflight_micros` style policy belongs in Tensorhub scheduler fairness, not OpenRails service admit.
-- [x] Remove or update stale comments that describe OpenRails as enforcing Tensorhub RPM/RPD/TPM/IPM on admit.
-- [x] Slim the admit response contract after the removals: do not return resolved scheduling policy such as
-      `max_concurrent_held_amount` or per-job charge caps once they no longer drive OpenRails denial. Keep only the
-      admit decision, deny reason, hold/capacity facts, policy currency/amount, and retained delegated-spend or
-      wasted-spend window status that a caller can legitimately display or act on.
-- [x] Coordinate the Tensorhub sibling cleanup: Tensorhub must remove stale #486 assumptions about OpenRails-owned
-      `max_inflight_micros`, per-job caps, request/token/image `amounts`, host-supplied `tenant_throughput`, and ad hoc
-      generation-budget checks. Tensorhub should retain endpoint authorization and scheduler fairness locally, while
-      OpenRails owns affordability, delegated-spend authorization/budget, and delegated wasted-spend cutoff.
-      Status 2026-06-16: request-shape removals, windowed-admission removal, max-in-flight/per-job cap response cleanup,
-      BudgetCheck route deletion, local scheduler fairness docs, local OpenRails replace, and embedded integration tests
-      are done. Tier budget windows now sync as explicit `invoker_tier` grants and role budgets sync as `role` grants.
-      Tensorhub's remaining follow-through is route-level proof that native org members and remote-application delegated
-      users resolve the expected payer/invoker/tier facts before OpenRails admit.
+
+- [x] Keep `openrails bootstrap apply` as the canonical private-standalone provisioning command; keep `openrails catalog apply`
+      as local/in-process only and remove remote HTTP mode.
+- [x] Use the existing AuthKit-backed effective-permission principal path for merchant action routes; catalog actions now
+      require a credential that resolves to the merchant org and holds `openrails:catalog:write`.
+- [x] Collapse catalog products/prices/drift mutation/read action routes from `/admin/catalog/*` onto one merchant action
+      route family.
+- [x] Use `/merchant/catalog/*` as the neutral merchant-scoped action prefix.
+- [x] Gate catalog action routes with `openrails:catalog:write` rather than broad `openrails:admin`.
+- [x] Rename the operator-facing cleanup flag to `--prune` with help text that says OpenRails-owned provider extras are
+      archived and foreign provider objects are never touched.
+- [x] Preserve `--exhaustive` as a hidden deprecated alias for `--prune`.
+- [x] Consume `authkit#84` by bumping to AuthKit v0.37.0.
+- [x] Extend the OpenRails bootstrap manifest schema with an AuthKit-owned `auth:` section.
+- [x] Reconcile remote applications/JWKS/public-key trust through AuthKit bootstrap/core APIs, not raw SQL or OpenRails
+      issuer tables.
+- [x] Delegate AuthKit orgs, roles, role assignments, users/password credentials, remote applications/JWKS principals,
+      and generated service tokens to AuthKit's bootstrap reconciler.
+- [x] Keep service-token bootstrap on AuthKit's generated-output model; fixed plaintext API-key constants were not added.
+- [x] Reject stale merchant-level `issuers:` with a clear error pointing to top-level `auth.orgs[].issuers`.
+- [x] Require each bootstrap catalog declaration to specify `merchant: <slug>` instead of overloading catalog `name`.
+- [x] Print AuthKit bootstrap, merchant, catalog, and prune dry-run plans without mutating.
+- [x] Keep startup bootstrap additive-only and conventional-path-only; pruning remains manual CLI-only.
+- [x] Remove `catalog apply --api-url --api-token` and delete the redundant HTTP catalog applier.
+- [x] Replace the `/admin/catalog/*` dependency with `/merchant/catalog/*`, gated by `openrails:catalog:write`.
+- [x] Remove loose "admin bearer token" CLI help/docs for catalog remote apply.
+- [x] Update catalog route docs/comments and provider-link hints to use `/merchant/catalog/*`.
+- [x] Update `docs/operations.md`, `docs/merchant-provisioning.md`, `docs/api/endpoints.md`, and bootstrap examples for
+      `auth:` plus explicit catalog `merchant:`.
+- [x] Add manifest parsing/validation tests for `auth:`, stale `issuers:`, and explicit catalog merchant scoping.
+- [x] Add route authorization regression coverage proving `/merchant/catalog/*` requires `openrails:catalog:write` and
+      `/admin/catalog/*` is no longer registered.
 
 ## Acceptance
-- `POST /v1/service/admit` and `/v1/service/admit/batch` have no host-supplied throughput-policy field.
-- OpenRails admit decisions cannot be affected by request/token/image `amounts`.
-- No Redis throughput or queue-unit reservation is created during admit; Redis is used for money holds and any remaining
-  explicitly money-denominated windows only.
-- OpenRails service admit has no hard max-in-flight-dollar denial; in-flight-dollar fairness, if retained, is a
-  Tensorhub scheduler concern.
-- Cross-currency admits compare policy-currency micros after local FX conversion for retained delegated-spend and
-  wasted-spend policies; no retained money policy silently assumes USD-only request amounts.
-- Payer/customer wasted spend is charged beyond its grace budget through report-time accounting, not by an admit denial.
-- Delegated-invoker wasted spend remains an admit-time hard cutoff when the invoker is already over budget.
-- Tensorhub-style admit has no manual customer suspension gate and no prepaid payment-setup gate.
-- Arrears/payment-method eligibility is not checked inline by service admit; admit consumes a computed credit-capacity
-  value. Tensorhub sets that capacity to `0` for now.
-- Delegated-spend budget windows are retained only as money-denominated estimated-spend reservations.
-- Delegated-spend authorization fails closed: `invoker != customer` cannot spend customer money unless a matching
-  payer-configured delegated-spend grant/scope exists.
-- Delegated-spend policy supports explicit customer-funded invoker scopes such as direct invoker, delegated user,
-  verified org role, org membership, remote-application user, or invoker tier without confusing those invoker scopes with
-  the payer/customer trust tier.
-- Tensorhub and OpenRails have one delegated-spend contract: Tensorhub authors/syncs policy, OpenRails stores/enforces
-  reservations and actuals, and preflight reads the same policy admit will enforce.
-- Delegated-spend reservations are idempotent and cannot leak capacity across denied, failed, retried, or
-  captured requests.
-- The OpenRails admit response no longer exposes removed scheduling/capacity policy fields whose only purpose was
-  Tensorhub's old hard or soft max-in-flight-dollar design.
-- Tensorhub-style admit does not accept or evaluate blocklist identifiers.
-- Tensorhub-style admit does not deny on resource allowlists; endpoint/resource authorization is host-owned and happens
-  before billing admit.
-- Tensorhub-style admit does not deny on an arbitrary per-job cost cap; affordability is handled by `start_capacity`.
-- Tier resolution still happens before money policy evaluation and is not treated as resource authorization.
-- The solvency gate is documented and implemented as `start_capacity`; prepaid and arrears paths share the same final
-  admit predicate.
-- Arrears exposure is invoice-derived after #506, with no live account-level owed counter required for correctness.
-- Tests cover concurrent DB balance/credit changes around Redis hold placement and prove no stale capacity admit.
-- Payer trust-tier policy is represented as stored OpenRails configuration, not request payload.
-- Tensorhub-style admission remains protected by money-denominated controls and the hold lifecycle.
-- Docs clearly state that host applications configure payer/customer policy ahead of time and report billable estimates at
-  admit time.
+
+- A private standalone deployment can be provisioned from one YAML file with AuthKit `auth:`, OpenRails `merchants:`,
+  and explicit per-merchant `catalogs:` entries.
+- `openrails bootstrap apply --file <path> --dry-run` prints AuthKit, merchant, catalog, and prune plans and makes no
+  mutations through the OpenRails apply path.
+- `openrails bootstrap apply --file <path>` idempotently converges AuthKit authority, merchants, and catalog state.
+- Provider-side extras are only archived when an operator explicitly passes `--prune` or the hidden deprecated
+  `--exhaustive` alias; startup bootstrap never prunes.
+- Foreign provider objects are never archived by prune.
+- The CLI no longer describes or accepts a vague "admin token" for remote catalog apply.
+- Catalog action HTTP routes are merchant-scoped under `/merchant/catalog/*` and require `openrails:catalog:write`
+  rather than broad `openrails:admin`.
+- Applying a catalog update does not depend on `/admin/catalog/*`.
+- Private standalone bootstrap can seed the AuthKit authority graph needed for an initial deployment: orgs, roles,
+  permissions, users/credentials, generated service tokens, remote applications/JWKS/public keys, merchant ownership,
+  and catalog.
+- `catalog apply` is catalog-only, local/in-process, and no longer conflicts with the unified bootstrap apply model.
 
 ## Validation
-- `task sqlc`
-- `go test ./internal/modules/admission ./internal/modules/ratelimit ./pkg/service ./internal/http/handlers`
-- `go test ./...`
-- `task build`
+
+- [x] `go test ./internal/bootstrap ./cmd/openrails ./pkg/catalog ./internal/http ./internal/http/routes ./pkg/embedded/gin ./pkg/service`
+- [x] `go test ./internal/http/routes ./internal/http`
+- [x] `go test ./...`
+- [x] `go test -tags integration ./internal/integrationharness -run TestStandaloneMerchantCatalogRoutesHTTP -count=1`
+- [x] `go run ./cmd/openrails bootstrap apply --help`
+- [x] `go run ./cmd/openrails catalog apply --help`
+
 
 ---
 

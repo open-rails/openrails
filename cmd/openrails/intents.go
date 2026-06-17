@@ -17,7 +17,7 @@ import (
 
 // newIntentsCmd wires the read-only provider-intent-ledger (#358) CLI:
 //
-//	billing intents [--status=pending|all|...] [--provider=...] [--type=...] [--merchant=...]
+//	openrails intents [--status=pending|all|...] [--provider=...] [--type=...] [--merchant=...]
 //
 // Under mode=limited/readonly this is the dry-run view: the pending rows are
 // exactly the provider writes the executor will drain when the mode lifts —

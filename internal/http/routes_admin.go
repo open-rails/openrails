@@ -25,3 +25,19 @@ func (s *Server) registerAdminRoutesAt(e *gin.Engine, apiPrefix string) {
 func (s *Server) registerAdminRoutesOn(e *gin.Engine) {
 	s.registerAdminRoutesAt(e, StandaloneV1Prefix)
 }
+
+func (s *Server) registerMerchantActionRoutesAt(e *gin.Engine, apiPrefix string) {
+	group := e.Group(apiPrefix + "/merchant")
+	opts := httproutes.Options{
+		Authenticator: s.embeddedAuthenticator(),
+	}
+	if s.controlPlane != nil {
+		opts.AdminPermissionChecker = authpolicy.AdminPermissionChecker(s.controlPlane)
+		opts.ServiceCredentialResolver = s.controlPlane
+	}
+	httproutes.RegisterMerchantActionRoutes(ginrouter.New(group, s.runtime), s.runtime, opts)
+}
+
+func (s *Server) registerMerchantActionRoutesOn(e *gin.Engine) {
+	s.registerMerchantActionRoutesAt(e, StandaloneV1Prefix)
+}

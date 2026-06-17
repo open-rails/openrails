@@ -45,7 +45,7 @@ func (a *mobiusAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	return PendingAction{
 		Provider: "mobius",
 		Action:   "create_recurring_plan",
-		Hint:     "Create plan in NMI control center, then PATCH /admin/catalog/prices/" + priceID.String() + " with provider_links.mobius.plan_id",
+		Hint:     "Create plan in NMI control center, then PATCH /merchant/catalog/prices/" + priceID.String() + " with provider_links.mobius.plan_id",
 		PatchRequired: map[string]map[string]map[string]string{
 			"provider_links": {
 				"mobius": {

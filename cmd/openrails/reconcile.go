@@ -19,9 +19,9 @@ import (
 
 // newReconcileCmd wires the #107 processor-reconcile CLI:
 //
-//	billing reconcile check  [--provider=... --since=... --until=...]  advisory diff
-//	billing reconcile fix    [--provider=... --since=... --until=...]  enforce (LOCAL writes only, incl. PS-1 materialization)
-//	billing reconcile report [--run=ID]                                latest/specified run report
+//	openrails reconcile check  [--provider=... --since=... --until=...]  advisory diff
+//	openrails reconcile fix    [--provider=... --since=... --until=...]  enforce (LOCAL writes only, incl. PS-1 materialization)
+//	openrails reconcile report [--run=ID]                                latest/specified run report
 //
 // Reconciliation is manual-only by design (no scheduled runs). The remote
 // processors are NEVER mutated: fix converges local state and queues remote

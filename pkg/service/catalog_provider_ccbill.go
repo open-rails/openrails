@@ -25,7 +25,7 @@ func (a *ccbillAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	return PendingAction{
 		Provider: "ccbill",
 		Action:   "create_flexform",
-		Hint:     "Create a FlexForm in the CCBill admin portal, then PATCH /admin/catalog/prices/" + priceID.String() + " with provider_links.ccbill.{form_name,flex_id}",
+		Hint:     "Create a FlexForm in the CCBill admin portal, then PATCH /merchant/catalog/prices/" + priceID.String() + " with provider_links.ccbill.{form_name,flex_id}",
 		PatchRequired: map[string]map[string]map[string]string{
 			"provider_links": {
 				"ccbill": {

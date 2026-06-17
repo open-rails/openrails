@@ -13,25 +13,19 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// catalogApplyOptions holds the flags for `billing catalog apply`.
+// catalogApplyOptions holds the flags for `openrails catalog apply`.
 type catalogApplyOptions struct {
-	file     string
-	dryRun   bool
-	apiURL   string
-	apiToken string
+	file   string
+	dryRun bool
 }
 
-// newCatalogCmd builds the `billing catalog` command group and its `apply`
+// newCatalogCmd builds the `openrails catalog` command group and its `apply`
 // subcommand — a terraform-style declarative apply of a YAML catalog manifest
 // (issue #162). It mirrors cozy-art's sync-product-catalog pipeline:
 // load -> validate -> plan -> print -> (dry-run? stop : apply).
 //
-// Mode selection:
-//   - no --api-url   => in-process facade mode: bootstrap the app runtime and
-//     drive *service.Service directly (same path embedded hosts use).
-//   - --api-url set  => HTTP mode: drive a remote standalone OpenRails over its
-//     admin catalog HTTP API, authenticating with --api-token as an
-//     operator-admin bearer token. No DB/config needed locally.
+// The command runs in-process: it bootstraps the app runtime and drives
+// *service.Service directly, which is the same catalog facade embedded hosts use.
 func newCatalogCmd() *cobra.Command {
 	opts := catalogApplyOptions{}
 	catalogCmd := &cobra.Command{
@@ -53,8 +47,6 @@ func newCatalogCmd() *cobra.Command {
 	flags := applyCmd.Flags()
 	flags.StringVarP(&opts.file, "file", "f", "", "catalog manifest YAML file (required)")
 	flags.BoolVar(&opts.dryRun, "dry-run", false, "compute and print the plan without mutating anything")
-	flags.StringVar(&opts.apiURL, "api-url", "", "remote OpenRails base URL incl. api prefix (e.g. https://host/billing/v1); empty = in-process mode")
-	flags.StringVar(&opts.apiToken, "api-token", "", "operator-admin bearer token for --api-url (HTTP) mode")
 	_ = applyCmd.MarkFlagRequired("file")
 
 	catalogCmd.AddCommand(applyCmd)
@@ -104,14 +96,9 @@ func runCatalogApply(cmd *cobra.Command, opts catalogApplyOptions) error {
 	return nil
 }
 
-// buildApplier selects in-process vs HTTP mode and returns an Applier plus an
-// optional cleanup func (non-nil only in in-process mode, where it closes the
-// bootstrapped app runtime).
+// buildApplier returns an in-process Applier plus a cleanup func that closes the
+// bootstrapped app runtime.
 func buildApplier(_ context.Context, cmd *cobra.Command, opts catalogApplyOptions) (catalog.Applier, func(), error) {
-	if opts.apiURL != "" {
-		return catalog.NewHTTPApplier(opts.apiURL, opts.apiToken), nil, nil
-	}
-
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	if cfg == nil {
 		return nil, nil, fmt.Errorf("config not loaded; in-process mode requires --config")

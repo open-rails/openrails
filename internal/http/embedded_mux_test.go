@@ -80,4 +80,12 @@ func TestEmbeddedMuxAdminAssembles(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/admin/subscriptions", nil))
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/catalog/products", nil))
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/admin/catalog/products", nil))
+	require.Equal(t, http.StatusNotFound, rec.Code)
 }

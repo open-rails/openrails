@@ -67,9 +67,10 @@ type Assembler struct {
 	// neither internal/controlplane nor AuthKit (#284). nil for embedded hosts
 	// without a control plane (admin routes then fail closed). The concrete
 	// *controlplane.ControlPlane satisfies it.
-	AdminChecker  authpolicy.AdminPermissionChecker
-	CaptchaStore  *captcha.ChallengeStore
-	Authenticator billingauth.Authenticator
+	AdminChecker              authpolicy.AdminPermissionChecker
+	ServiceCredentialResolver httproutes.ServiceCredentialResolver
+	CaptchaStore              *captcha.ChallengeStore
+	Authenticator             billingauth.Authenticator
 }
 
 // FromApp builds an Assembler from the gin-free application graph (the same
@@ -85,12 +86,17 @@ func FromApp(a *app.App) *Assembler {
 	if c, ok := a.ControlPlane.(authpolicy.AdminPermissionChecker); ok {
 		checker = c
 	}
+	var resolver httproutes.ServiceCredentialResolver
+	if c, ok := a.ControlPlane.(httproutes.ServiceCredentialResolver); ok {
+		resolver = c
+	}
 	return &Assembler{
-		Cfg:           a.Config,
-		Runtime:       a.Runtime,
-		AdminChecker:  checker,
-		CaptchaStore:  captcha.NewChallengeStore(a.RedisClient),
-		Authenticator: a.Authenticator,
+		Cfg:                       a.Config,
+		Runtime:                   a.Runtime,
+		AdminChecker:              checker,
+		ServiceCredentialResolver: resolver,
+		CaptchaStore:              captcha.NewChallengeStore(a.RedisClient),
+		Authenticator:             a.Authenticator,
 	}
 }
 
@@ -123,7 +129,11 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		if s.AdminChecker != nil {
 			adminOpts.AdminPermissionChecker = s.AdminChecker
 		}
+		if s.ServiceCredentialResolver != nil {
+			adminOpts.ServiceCredentialResolver = s.ServiceCredentialResolver
+		}
 		httproutes.RegisterAdminRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/admin", s.Runtime), s.Runtime, adminOpts)
+		httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
 	}
 	if opts.IncludeWebhooks {
 		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.Runtime), s.Runtime)

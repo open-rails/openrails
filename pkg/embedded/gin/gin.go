@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/http/router/ginrouter"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -35,7 +36,7 @@ type RouteOptions struct {
 // Handler returns the full standalone gin HTTP surface for the embedded app:
 // health + debug (dev only) + user + admin + webhooks + the service token-authenticated
 // server-to-server service routes. It is built from the gin-free app graph and
-// is intended for the standalone server entrypoint (cmd/billing).
+// is intended for the standalone server entrypoint (cmd/openrails).
 func Handler(e *embedded.Embedded) (http.Handler, error) {
 	srv, err := newServer(e)
 	if err != nil {
@@ -80,7 +81,28 @@ func RegisterAdminRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts Rout
 	adminOpts := httproutes.Options{
 		Authenticator: routeAuthenticator(e, opts),
 	}
+	if cp := embcp.Get(a); cp != nil {
+		adminOpts.AdminPermissionChecker = authpolicy.AdminPermissionChecker(cp)
+	}
 	httproutes.RegisterAdminRoutes(ginrouter.New(group, a.Runtime), a.Runtime, adminOpts)
+}
+
+// RegisterMerchantActionRoutes registers merchant-scoped administrative action
+// routes such as catalog product/price mutation. These routes require the
+// narrow openrails:catalog:write permission rather than the broad admin grant.
+func RegisterMerchantActionRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts RouteOptions) {
+	a := e.App()
+	if a == nil {
+		panic("embedded billing: not initialized")
+	}
+	actionOpts := httproutes.Options{
+		Authenticator: routeAuthenticator(e, opts),
+	}
+	if cp := embcp.Get(a); cp != nil {
+		actionOpts.AdminPermissionChecker = authpolicy.AdminPermissionChecker(cp)
+		actionOpts.ServiceCredentialResolver = cp
+	}
+	httproutes.RegisterMerchantActionRoutes(ginrouter.New(group, a.Runtime), a.Runtime, actionOpts)
 }
 
 // RegisterWebhookRoutes registers webhook routes on the provided gin router

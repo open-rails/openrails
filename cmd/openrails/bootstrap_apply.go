@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	authcore "github.com/open-rails/authkit/core"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -21,9 +22,9 @@ import (
 )
 
 type bootstrapApplyOptions struct {
-	file       string
-	dryRun     bool
-	exhaustive bool
+	file   string
+	dryRun bool
+	prune  bool
 }
 
 func newBootstrapCmd() *cobra.Command {
@@ -41,7 +42,9 @@ func newBootstrapCmd() *cobra.Command {
 	}
 	apply.Flags().StringVarP(&opts.file, "file", "f", bootstrap.DefaultBootstrapManifestPath, "bootstrap manifest YAML file")
 	apply.Flags().BoolVar(&opts.dryRun, "dry-run", false, "validate and print plans without mutating state")
-	apply.Flags().BoolVar(&opts.exhaustive, "exhaustive", false, "treat the local catalog as exhaustive: ARCHIVE (never delete) provider-side catalog objects bearing OpenRails ownership markers that are not in the local catalog (#357); foreign provider objects are never touched")
+	apply.Flags().BoolVar(&opts.prune, "prune", false, "treat the local catalog as complete and archive OpenRails-owned provider objects that are absent from it; foreign provider objects are never touched")
+	apply.Flags().BoolVar(&opts.prune, "exhaustive", false, "deprecated alias for --prune")
+	_ = apply.Flags().MarkHidden("exhaustive")
 	cmd.AddCommand(apply)
 	return cmd
 }
@@ -64,7 +67,7 @@ func runBootstrapApply(cmd *cobra.Command, opts bootstrapApplyOptions) error {
 		return fmt.Errorf("config not loaded; bootstrap apply requires --config")
 	}
 
-	// --exhaustive archives provider-side catalog objects — provider WRITES
+	// --prune archives provider-side catalog objects — provider WRITES
 	// that flow through the provider intent ledger (#358) as ADMIN-origin
 	// intents (the flag is an explicit human request). No up-front mode
 	// refusal: under mode=limited the intents execute; under readonly they
@@ -84,7 +87,7 @@ func runBootstrapApply(cmd *cobra.Command, opts bootstrapApplyOptions) error {
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
-	return applyBootstrapManifest(ctx, cfg, embeddedApp.App(), manifest, out, opts.dryRun, opts.exhaustive)
+	return applyBootstrapManifest(ctx, cfg, embeddedApp.App(), manifest, out, opts.dryRun, opts.prune)
 }
 
 // startupBootstrapLockKey is the pg_advisory_lock key serializing concurrent
@@ -135,8 +138,8 @@ func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) 
 	}()
 
 	log.WithField("file", path).Info("startup bootstrap: applying unified manifest (idempotent)")
-	// exhaustive=false: the startup re-apply is additive-only; archiving extras
-	// is reserved for the explicit `bootstrap apply --exhaustive` CLI (#357).
+	// prune=false: the startup re-apply is additive-only; archiving extras
+	// is reserved for the explicit `bootstrap apply --prune` CLI (#357).
 	return applyBootstrapManifest(ctx, cfg, a, manifest, log.StandardLogger().Out, false, false)
 }
 
@@ -160,11 +163,23 @@ func resolveBootstrapManifestPath(_ *config.Config) string {
 // After the catalogs converge it additionally detects provider-side catalog
 // EXTRAS — products/prices/plans on the provider account that are NOT in the
 // local catalog (#357). By default extras are only logged (read-only; they are
-// ignorable and never touched). Under exhaustive=true the OpenRails-marked
+// ignorable and never touched). Under prune=true the OpenRails-marked
 // extras are ARCHIVED (never deleted) through the provider intent ledger
 // (#358): Stripe active=false; Solana plans sunset on-chain; NMI/CCBill
 // surface pending manual actions. Foreign provider objects are never touched.
-func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BootstrapManifest, out io.Writer, dryRun bool, exhaustive bool) error {
+func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BootstrapManifest, out io.Writer, dryRun bool, prune bool) error {
+	if manifest.HasAuthBootstrap() {
+		cp := embcp.Get(a)
+		if cp == nil || cp.Core() == nil {
+			return fmt.Errorf("auth bootstrap: control plane not attached")
+		}
+		result, err := cp.Core().ReconcileBootstrapManifest(ctx, *manifest.Auth, authcore.FileBootstrapTokenStore{}, authcore.BootstrapReconcileOptions{DryRun: dryRun})
+		if err != nil {
+			return fmt.Errorf("auth bootstrap: %w", err)
+		}
+		printAuthBootstrapResult(out, result)
+	}
+
 	if len(manifest.Merchants) > 0 {
 		if dryRun {
 			fmt.Fprintf(out, "merchants: %d declared (dry-run: no merchant mutations)\n", len(manifest.Merchants))
@@ -195,54 +210,76 @@ func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App,
 		if err != nil {
 			return err
 		}
-		name := strings.TrimSpace(manifest.Catalogs[i].Name)
-		if name == "" {
-			name = fmt.Sprintf("catalog-%d", i+1)
+		label := strings.TrimSpace(manifest.Catalogs[i].Name)
+		if label == "" {
+			label = manifest.Catalogs[i].Merchant
 		}
-		catalogCtx, err := contextForBootstrapCatalog(ctx, a, manifest.Catalogs[i].Name)
+		catalogCtx, err := contextForBootstrapCatalog(ctx, a, manifest.Catalogs[i].Merchant)
 		if err != nil {
 			return err
 		}
 		plan, err := catalog.PlanWithOptions(catalogCtx, applier, cat, catalog.PlanOptions{ArchiveMissingProducts: false})
 		if err != nil {
-			return fmt.Errorf("plan %s: %w", name, err)
+			return fmt.Errorf("plan %s: %w", label, err)
 		}
-		fmt.Fprintf(out, "\n%s plan:\n", name)
+		fmt.Fprintf(out, "\n%s plan:\n", label)
 		plan.Print(out, dryRun)
 		if dryRun {
 			continue
 		}
 		if !plan.HasChanges() {
-			fmt.Fprintf(out, "\n%s: no changes\n", name)
+			fmt.Fprintf(out, "\n%s: no changes\n", label)
 			continue
 		}
 		result, err := catalog.Apply(catalogCtx, applier, plan)
 		if err != nil {
-			return fmt.Errorf("apply %s: %w", name, err)
+			return fmt.Errorf("apply %s: %w", label, err)
 		}
 		fmt.Fprintln(out)
 		result.Print(out)
 	}
 
 	// #357: extras pass. Gated on the manifest actually declaring catalogs —
-	// an empty/merchants-only manifest makes no exhaustiveness claim about the
+	// an empty/merchants-only manifest makes no prune claim about the
 	// provider accounts, so nothing is scanned (and nothing could ever be
 	// archived) for it.
-	return reportCatalogExtras(ctx, svc, out, dryRun, exhaustive)
+	return reportCatalogExtras(ctx, svc, out, dryRun, prune)
+}
+
+func printAuthBootstrapResult(out io.Writer, result authcore.BootstrapManifestResult) {
+	mode := "reconciled"
+	if result.DryRun {
+		mode = "planned (dry-run)"
+	}
+	fmt.Fprintf(out, "auth: %s users=%d updated=%d passwords_set=%d passwords_kept=%d global_roles=%d global_role_assignments=%d orgs=%d issuers=%d roles=%d memberships=%d service_tokens_minted=%d service_tokens_kept=%d\n",
+		mode,
+		result.UsersCreated,
+		result.UsersUpdated,
+		result.PasswordsSet,
+		result.PasswordsKept,
+		result.GlobalRoles,
+		result.GlobalRoleAssignments,
+		result.OrgManifest.Orgs,
+		result.OrgManifest.Issuers,
+		result.OrgManifest.Roles,
+		result.OrgManifest.Memberships,
+		result.OrgManifest.TokensMinted,
+		result.OrgManifest.TokensKept,
+	)
 }
 
 // reportCatalogExtras runs the #357 extras pass after a catalog apply: detect
 // + log provider-side objects not in the local catalog (always; read-only),
-// and archive the OpenRails-marked ones when exhaustive is set. Under dry-run
+// and archive the OpenRails-marked ones when prune is set. Under dry-run
 // the archive half only prints what it WOULD archive.
 //
 // Detection failure is non-fatal on a default apply (the apply itself
-// succeeded; extras logging is advisory) but fatal under --exhaustive, where
+// succeeded; extras logging is advisory) but fatal under --prune, where
 // the operator explicitly asked for the provider accounts to be converged.
-func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out io.Writer, dryRun bool, exhaustive bool) error {
+func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out io.Writer, dryRun bool, prune bool) error {
 	report, err := svc.DetectCatalogExtras(ctx)
 	if err != nil {
-		if exhaustive {
+		if prune {
 			return fmt.Errorf("catalog extras detection: %w", err)
 		}
 		log.WithError(err).Warn("catalog extras detection failed (apply succeeded; provider extras were not checked)")
@@ -276,16 +313,16 @@ func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out i
 		fmt.Fprintf(out, "  note (%s): %s\n", n.Provider, n.Note)
 	}
 
-	if !exhaustive || len(report.Extras) == 0 {
+	if !prune || len(report.Extras) == 0 {
 		return nil
 	}
 	if dryRun {
-		fmt.Fprintf(out, "\nexhaustive (dry-run): would archive the openrails-marked extras above; foreign objects would not be touched\n")
+		fmt.Fprintf(out, "\nprune (dry-run): would archive the openrails-marked extras above; foreign objects would not be touched\n")
 		return nil
 	}
 	outcomes, archiveErr := svc.ArchiveCatalogExtras(ctx, report.Extras)
 	var archived, parked, failedN int
-	fmt.Fprintf(out, "\nexhaustive archive outcomes:\n")
+	fmt.Fprintf(out, "\nprune archive outcomes:\n")
 	for _, o := range outcomes {
 		switch o.Action {
 		case billingservice.CatalogExtraArchived:
@@ -304,21 +341,21 @@ func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out i
 			"action":      string(o.Action),
 			"detail":      o.Detail,
 			"intent_id":   o.IntentID,
-		}).Info("bootstrap apply --exhaustive: catalog extra archive outcome")
+		}).Info("bootstrap apply --prune: catalog extra archive outcome")
 	}
-	fmt.Fprintf(out, "exhaustive summary: %d archived, %d parked (durable — the intent executor drains them; NOT an error), %d failed\n",
+	fmt.Fprintf(out, "prune summary: %d archived, %d parked (durable — the intent executor drains them; NOT an error), %d failed\n",
 		archived, parked, failedN)
 	return archiveErr
 }
 
-func contextForBootstrapCatalog(ctx context.Context, a *app.App, catalogName string) (context.Context, error) {
-	slug := strings.ToLower(strings.TrimSpace(catalogName))
+func contextForBootstrapCatalog(ctx context.Context, a *app.App, merchantSlug string) (context.Context, error) {
+	slug := strings.ToLower(strings.TrimSpace(merchantSlug))
 	if slug == "" {
-		return ctx, nil
+		return nil, fmt.Errorf("catalog merchant is required")
 	}
 	cp := embcp.Get(a)
 	if cp == nil || cp.Pool() == nil {
-		return nil, fmt.Errorf("catalog %q declares a merchant name but the control plane is not attached", catalogName)
+		return nil, fmt.Errorf("catalog declares merchant %q but the control plane is not attached", merchantSlug)
 	}
 	var id string
 	if err := cp.Pool().QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1)`, slug).Scan(&id); err != nil {

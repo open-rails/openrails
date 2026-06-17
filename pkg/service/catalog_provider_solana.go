@@ -278,7 +278,7 @@ func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *pr
 
 // Update is a no-op: Solana plan core terms are immutable on-chain. Archiving
 // (updatePlan status=sunset, subscriptions.BuildUpdatePlan) is wired through
-// the provider intent ledger instead — the `bootstrap apply --exhaustive`
+// the provider intent ledger instead — the `bootstrap apply --prune`
 // sweep enqueues solana_sunset_plan intents for plans whose local price is no
 // longer purchasable (#357/#358 phase D).
 func (a *solanaAdapter) Update(_ context.Context, _ map[string]string, _ mutableUpdate) error {

@@ -8,8 +8,8 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// Admin catalog drift handlers (issue #209). Mounted under /admin/catalog/* with
-// the OperatorAdminRequired middleware. These surface the alert-only catalog
+// Catalog drift handlers (issue #209/#510). Mounted under /merchant/catalog/*
+// with the live openrails:catalog:write permission gate. These surface the alert-only catalog
 // reconciliation loop's findings; they never mutate Stripe or the catalog rows.
 // Operators resolve drift through the existing per-price reconcile action.
 
@@ -17,7 +17,7 @@ import (
 // pagination and optional provider / kind / resource_type filters. The
 // provider filter ('stripe' | 'nmi') disambiguates the shared field_drift kind.
 //
-//	GET /admin/catalog/drift?provider=nmi&kind=field_drift&resource_type=price&limit=&offset=
+//	GET /merchant/catalog/drift?provider=nmi&kind=field_drift&resource_type=price&limit=&offset=
 func AdminListCatalogDrift(r *httprequest.Request) {
 	svc, ok := newAdminBillingService(r)
 	if !ok {
@@ -49,16 +49,16 @@ func AdminListCatalogDrift(r *httprequest.Request) {
 // every provider. (CCBill is never reconciled — no catalog-list API — so it
 // never appears here.)
 //
-//	GET /admin/catalog/orphans?provider=nmi&resource_type=price
+//	GET /merchant/catalog/orphans?provider=nmi&resource_type=price
 func AdminListCatalogOrphans(r *httprequest.Request) {
 	provider := strings.TrimSpace(r.Query("provider"))
 	listOrphans(r, provider)
 }
 
 // AdminListStripeOrphans is the operator-friendly convenience alias for
-// GET /admin/catalog/orphans?provider=stripe.
+// GET /merchant/catalog/orphans?provider=stripe.
 //
-//	GET /admin/catalog/stripe/orphans
+//	GET /merchant/catalog/stripe/orphans
 func AdminListStripeOrphans(r *httprequest.Request) {
 	listOrphans(r, "stripe")
 }
@@ -115,7 +115,7 @@ func listOrphans(r *httprequest.Request, provider string) {
 // AdminRefreshCatalogDrift runs the pull-and-diff pass synchronously on demand
 // and returns the resulting open drift set. Idempotent.
 //
-//	POST /admin/catalog/drift/refresh
+//	POST /merchant/catalog/drift/refresh
 func AdminRefreshCatalogDrift(r *httprequest.Request) {
 	svc, ok := newAdminBillingService(r)
 	if !ok {

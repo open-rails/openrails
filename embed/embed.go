@@ -54,7 +54,7 @@ type Options struct {
 	// app graph is built. It requires Options.Config.DB.URL — the migration
 	// runner opens its own connection; a host that supplies only a PGXPool must
 	// either also set DB.URL or run migrations itself (internal/migrate is what
-	// cmd/billing's `migrate` entrypoint calls).
+	// cmd/openrails's `migrate` entrypoint calls).
 	RunMigrations bool
 
 	// RunWorkers starts the River background workers on a goroutine owned by
@@ -112,7 +112,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	}
 	if opts.RunMigrations {
 		if opts.Config.DB == nil || opts.Config.DB.URL == "" {
-			return nil, fmt.Errorf("openrails embed: RunMigrations requires config.DB.URL (or run migrations yourself via cmd/billing migrate)")
+			return nil, fmt.Errorf("openrails embed: RunMigrations requires config.DB.URL (or run migrations yourself via cmd/openrails migrate)")
 		}
 		if err := migrate.RunPostgres(ctx, opts.Config); err != nil {
 			return nil, fmt.Errorf("openrails embed: run postgres migrations: %w", err)

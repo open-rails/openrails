@@ -133,7 +133,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	// limited-legal, and the lifecycle respects the entitlement-expiration
 	// kill switch), and in-window charges are enqueued as parked system-origin
 	// intents the ledger executor drains at mode=full. That makes a freshly
-	// migrated backlog VISIBLE in `billing intents` instead of implicit in
+	// migrated backlog VISIBLE in `openrails intents` instead of implicit in
 	// subscription rows. Readonly stays a pure observer: demote to
 	// dry_run_only exactly as before (forensics boots must not mutate state).
 	materialize := false

@@ -271,7 +271,7 @@ func TestArchiveCatalogExtrasVia_EnqueuesOnlyOwnedActiveObjects(t *testing.T) {
 	for _, c := range exec.calls {
 		byType[c.IntentType] = c
 		if c.Origin != intents.OriginAdmin {
-			t.Errorf("%s: archive intents must be ADMIN-origin (the --exhaustive flag is a human request), got %q", c.IntentType, c.Origin)
+			t.Errorf("%s: archive intents must be ADMIN-origin (the --prune flag is a human request), got %q", c.IntentType, c.Origin)
 		}
 		if c.MerchantID != dbtest.TestMerchantID.UUID() {
 			t.Errorf("%s: merchant not stamped", c.IntentType)

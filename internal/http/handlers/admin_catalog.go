@@ -13,9 +13,8 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// Admin catalog handlers (issue #205). Mounted under /admin/catalog/* with
-// the OperatorAdminRequired middleware, so every request is already guaranteed
-// to be from an authenticated admin.
+// Catalog action handlers (issue #205/#510). Mounted under
+// /merchant/catalog/* with the live openrails:catalog:write permission gate.
 //
 // Each handler is a thin shim: bind input -> call pkg/service facade -> emit
 // JSON. The pkg/service facade is the canonical surface; embedded callers and

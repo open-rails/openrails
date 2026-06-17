@@ -12,12 +12,23 @@ func TestParseBootstrapManifest(t *testing.T) {
 	// remote_application registry (#74), no longer declared here.
 	manifest, err := ParseBootstrapManifest([]byte(`
 version: 1
+auth:
+  users:
+    - ref: owner
+      email: owner@example.com
+  orgs:
+    - slug: cozy-art
+      issuers:
+        - slug: cozy-art-app
+          issuer: https://auth.cozy.art
+          jwks_uri: https://auth.cozy.art/.well-known/jwks.json
 merchants:
   - slug: cozy-art
     name: Cozy Art
     owner_org_id: 11111111-1111-1111-1111-111111111111
 catalogs:
-  - name: default
+  - merchant: cozy-art
+    name: default
     tier_groups:
       - slug: plans
         display_name: Plans
@@ -31,6 +42,7 @@ catalogs:
                 interval: month
 `))
 	require.NoError(t, err)
+	require.True(t, manifest.HasAuthBootstrap())
 	require.Len(t, manifest.Merchants, 1)
 	require.Len(t, manifest.Catalogs, 1)
 	cat, err := manifest.CatalogManifest(0)
@@ -76,7 +88,7 @@ merchants:
       - issuer: https://auth.cozy.art
         jwks_uri: https://auth.cozy.art/.well-known/jwks.json
 `),
-			want: "issuers",
+			want: "top-level auth.orgs[].issuers",
 		},
 		{
 			name: "service tokens removed",
@@ -105,7 +117,8 @@ merchants:
 			body: `
 version: 1
 catalogs:
-  - tier_groups:
+  - merchant: cozy-art
+    tier_groups:
       - slug: g1
         display_name: G1
         products:
@@ -122,7 +135,8 @@ catalogs:
 			body: `
 version: 1
 catalogs:
-  - tier_groups:
+  - merchant: cozy-art
+    tier_groups:
       - slug: g
         display_name: G
         products:
@@ -140,7 +154,8 @@ catalogs:
 			body: `
 version: 1
 catalogs:
-  - tier_groups:
+  - merchant: cozy-art
+    tier_groups:
       - slug: g
         display_name: G
         products:
@@ -152,6 +167,19 @@ catalogs:
               - {currency: eur, unit_amount: 1000, interval: month}
 `,
 			want: "solana requires a stablecoin",
+		},
+		{
+			name: "catalog merchant required",
+			body: `
+version: 1
+catalogs:
+  - tier_groups:
+      - slug: g
+        display_name: G
+        products:
+          - {slug: p, display_name: P, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
+`,
+			want: "catalog #1 merchant is required",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

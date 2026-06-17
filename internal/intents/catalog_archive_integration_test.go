@@ -55,7 +55,7 @@ func (fx *archiveFixture) enqueueArchive(t *testing.T, objectID string, dueAt ti
 		IdempotencyKey: StripeArchiveIdempotencyKey(TypeStripeArchivePrice, objectID),
 		NextAttemptAt:  dueAt,
 		Origin:         OriginAdmin,
-		OriginReason:   "integration test (--exhaustive)",
+		OriginReason:   "integration test (--prune)",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {

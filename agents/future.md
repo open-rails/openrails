@@ -163,11 +163,14 @@ orchestrator's job, confirming OpenRails' boundary: gate/meter/bill, not dispatc
 
 ---
 
-# #228: admin-analytics-and-billing-dashboard
+# #228: private admin UI and hosted OpenRails SaaS console boundary
 
 **Completed:** no
 
-Build a merchant/admin web dashboard for billing analytics, provider health, and safe support operations.
+Build a private-mode OpenRails admin UI for merchant operations, and keep public hosted onboarding/registration in a
+separate `openrails-saas` repo. OpenRails itself should ship the source-available/admin console needed by private
+standalone installs; the hosted public platform can build a richer SaaS product on top without changing OpenRails'
+core route/auth model.
 
 ## Metadata
 
@@ -177,28 +180,55 @@ Build a merchant/admin web dashboard for billing analytics, provider health, and
 
 ## Goals
 
-- Primary: analytics visibility (sales, churn, failures, revenue).
-- Secondary: safe merchant/admin operations (support workflows) with audit trails.
-- Make OpenRails' operational state visible without SQL or ad hoc CLIs: subscriptions, checkout sessions, payments, entitlements, credits, catalog/provider status, webhook failures, rebills, refunds/disputes, and processor-specific lifecycle actions.
-- Give merchants confidence in non-Stripe rails by showing processor configuration, test/live mode, last successful checks, catalog provider status, and known limitations.
+- Private OpenRails mode: an admin UI only. Users do not publicly register; authority is seeded through bootstrap/AuthKit.
+- Public hosted mode: user registration, org/merchant onboarding, remote application creation, billing for OpenRails
+  customers, and other SaaS features live in the separate private `openrails-saas` repo, not this source-available repo.
+- Primary OpenRails UI goal: merchant operations and observability for already-provisioned merchants.
+- Make OpenRails' operational state visible without SQL or ad hoc CLIs: subscriptions, checkout sessions, payments,
+  entitlements, credits, catalog/provider status, webhook failures, rebills, refunds/disputes, and processor-specific
+  lifecycle actions.
+- Give merchants confidence in non-Stripe rails by showing processor configuration, test/live mode, last successful
+  checks, catalog provider status, and known limitations.
+- Use the unified merchant action auth model from #510. The UI is just a client using the same capability-gated merchant
+  action routes as service tokens, remote applications, delegated merchant admins, and user access tokens.
 
 ## Non-goals (initially)
 
-- Customer-facing self-serve dashboard.
+- Public sign-up, org onboarding, checkout/pricing pages for hosted OpenRails, or marketing pages in this repo.
+- The hosted OpenRails SaaS product. That belongs to `openrails-saas` and can be closed-source/private.
+- Customer-facing self-serve dashboard for end users.
 - Replacing core billing APIs.
-- A marketing analytics site; this is an operational merchant console.
+- A marketing analytics site; this is an operational merchant console for private standalone OpenRails.
 
 ## Notes
 
 - Keep the surface area minimal: read-heavy analytics and support visibility first, then a small set of high-confidence mutations.
-- Every mutation must be gated + audited (who/what/when/why).
+- Every mutation must be gated + audited (who/what/when/why) through the same route/auth model as #510.
 - Treat this as the productized surface for the backend roadmap items around processor capabilities, routing/fallback, provider certification, catalog-as-code status, dunning, and credits.
+- Private mode should be useful with no public registration enabled. Admin users, service tokens, remote applications,
+  roles, and permissions come from bootstrap/AuthKit.
+- Public mode is a hosted-platform concern: `openrails-saas` can enable AuthKit public registration, tenant creation,
+  onboarding flows, plan/billing for OpenRails customers, marketing/product UX, and managed-hosting support workflows.
+- OpenRails should expose the API primitives and private admin UI; `openrails-saas` composes those primitives into the
+  public hosted product.
 
 **Tasks:**
 - FOUNDATION:
-- [ ] Choose hosting path (serve via billing service, or separate static app + API calls)
-- [ ] Define admin authz model (role/entitlement) and enforce on all dashboard APIs
-- [ ] Add structured audit log table/events for admin actions (actor, action, target, before/after, request_id)
+- [ ] Choose private admin UI hosting path in this repo:
+      serve static assets from the OpenRails binary, or ship a separate static app that calls the OpenRails API.
+- [ ] Define private-mode entrypoint and deployment defaults:
+      UI disabled unless configured, no public registration, AuthKit sign-in only for seeded users/roles.
+- [ ] Align admin UI authorization with #510:
+      no separate admin-only route/auth model; UI calls capability-gated merchant action routes with a user access token
+      carrying the required permissions for that merchant.
+- [ ] Define the normalized UI principal display:
+      user, service token, service JWT, remote application, delegated merchant admin, merchant scope, permissions, and
+      platform-superadmin state where applicable.
+- [ ] Add structured audit log events for merchant action mutations:
+      actor, credential type, merchant, action, target, before/after where safe, request_id, reason, source UI/API.
+- [ ] Define `openrails-saas` boundary doc:
+      public registration/onboarding and hosted-platform UX live in the separate private repo; OpenRails exposes reusable
+      auth/provisioning/billing APIs and the private admin console.
 - 
 - ANALYTICS (READ):
 - [ ] Define core metrics: gross sales, net sales, refunds, chargebacks, MRR, active subs, churn, failed attempts
@@ -210,7 +240,9 @@ Build a merchant/admin web dashboard for billing analytics, provider health, and
 - ADMIN OPS (MUTATIONS):
 - [ ] User lookup + detail view (subscriptions, checkout sessions, payments, entitlements, credits, payment methods, processor IDs)
 - [ ] Add billing timeline per user/subscription that merges payments, subscription events, entitlement changes, credits, webhooks, and admin actions
-- [ ] Support actions: cancel subscription, pause/resume, extend access, comp/refund, grant/revoke entitlement, grant/revoke credits, retry rebill, replay webhook, reconcile catalog item (only where safe)
+- [ ] Support merchant actions through unified capability-gated routes:
+      cancel subscription, pause/resume, extend access, comp/refund, grant/revoke entitlement, grant/revoke credits,
+      retry rebill, replay webhook, reconcile/apply catalog item (only where safe).
 - [ ] Add external processor links where available (Stripe objects, NMI transaction/plan identifiers, CCBill portal/admin references, Solana signatures/accounts)
 - [ ] Guardrails: confirmation steps, rate limiting, and require a reason for every mutation
 - [ ] Safe idempotency for all admin operations (avoid double-cancel/refund)
@@ -218,6 +250,26 @@ Build a merchant/admin web dashboard for billing analytics, provider health, and
 - PROVIDER + CATALOG OPS:
 - [ ] Provider health page: configured processors, sandbox/test/live mode, credential presence, last successful API call, supported capabilities, and known limitations
 - [ ] Catalog/provider page: catalog-as-code apply status, provider object ids, NMI recurring plan ids, Stripe Product/Price ids, CCBill pending_manual_actions, Solana plan accounts, and open catalog drift events
+- [ ] Bootstrap/provisioning page for private mode:
+      show current merchant, owner org, roles, service tokens (metadata only), remote applications, catalog manifest status,
+      last apply result, and prune/archive-extra warnings.
+- [ ] Catalog apply UI:
+      upload/paste/select manifest, dry-run plan, apply, optional `--prune` equivalent with explicit warning that
+      OpenRails-owned provider extras are archived and foreign objects are untouched.
+- [ ] Remote application management UI:
+      list registered AuthKit remote applications for the merchant, issuer/JWKS status, enabled state, role/permission
+      assignments, last verification result, and safe disable/rotate workflows.
+
+- PUBLIC/HOSTED OPENRAILS-SAAS:
+- [ ] In this repo, document that public hosted registration/onboarding is out of scope and belongs to `openrails-saas`.
+- [ ] In `openrails-saas`, plan a public registration flow:
+      sign up, create org, create merchant, create/verify remote application, seed catalog, configure provider secrets,
+      invite team members, and enter the private/admin console for that merchant.
+- [ ] In `openrails-saas`, plan hosted-platform features:
+      OpenRails customer billing, plan limits, managed support workflows, platform-superadmin operations, hosted status,
+      onboarding checklists, and product/marketing pages.
+- [ ] Keep `openrails-saas` private/non-source-available; it can depend on OpenRails APIs and SDKs without pushing hosted
+      product concerns into this repo.
 - [ ] Routing policy page when #288 exists: show preferred processors, fallback order, disabled rails, and dry-run/explain selected processor for a price/user/tenant
 - [ ] Certification matrix page or linked view when #290 exists: show last verified date/environment/command for provider flows without exposing secrets
 - 

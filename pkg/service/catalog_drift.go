@@ -25,7 +25,7 @@ import (
 // BOTH the Stripe catalog and the NMI recurring-plan catalog. It NEVER mutates
 // Stripe, NMI, or the OpenRails catalog rows — it only records divergence into
 // openrails.catalog_drift_events. Operators resolve drift via the existing
-// per-price reconcile action (POST /admin/catalog/prices/:id/reconcile from
+// per-price reconcile action (POST /merchant/catalog/prices/:id/reconcile from
 // issue #205), which auto-closes matching open drift events.
 //
 // CCBill is intentionally NOT reconciled: CCBill has no catalog-list API

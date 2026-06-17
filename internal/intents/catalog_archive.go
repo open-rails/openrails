@@ -19,10 +19,10 @@ import (
 )
 
 // Catalog archive intent types (#358 phase D): the provider writes of
-// `bootstrap apply --exhaustive` (#357) flow through the ledger. Archives are
+// `bootstrap apply --prune` (#357) flow through the ledger. Archives are
 // idempotent verify-then-execute (the remote object is read first;
 // already-archived/absent = success with evidence) and admin-origin (the
-// --exhaustive flag is an explicit human request), so they execute under
+// --prune flag is an explicit human request), so they execute under
 // mode=limited and park under readonly — a provider being down no longer
 // aborts the sweep, those intents retry durably.
 //

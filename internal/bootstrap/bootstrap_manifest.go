@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
+	authcore "github.com/open-rails/authkit/core"
 
 	"github.com/open-rails/openrails/pkg/catalog"
 )
@@ -22,15 +23,17 @@ const (
 // intentionally separate from config.yaml: config.yaml describes runtime
 // infrastructure, while this file describes desired merchant/catalog state.
 type BootstrapManifest struct {
-	Version   int                `yaml:"version"`
-	Merchants []ManifestMerchant `yaml:"merchants,omitempty"`
-	Catalogs  []BootstrapCatalog `yaml:"catalogs,omitempty"`
+	Version   int                         `yaml:"version"`
+	Auth      *authcore.BootstrapManifest `yaml:"auth,omitempty"`
+	Merchants []ManifestMerchant          `yaml:"merchants,omitempty"`
+	Catalogs  []BootstrapCatalog          `yaml:"catalogs,omitempty"`
 }
 
 // BootstrapCatalog is one top-level catalog declaration. The catalog schema is
 // the existing pkg/catalog shape, embedded under catalogs[] so bootstrap can
 // apply more than one catalog later without inventing a second catalog format.
 type BootstrapCatalog struct {
+	Merchant         string              `yaml:"merchant"`
 	Name             string              `yaml:"name,omitempty"`
 	DefaultProviders []string            `yaml:"default_providers,omitempty"`
 	TierGroups       []catalog.TierGroup `yaml:"tier_groups"`
@@ -65,8 +68,8 @@ func (m *BootstrapManifest) Validate() error {
 	if m.Version != BootstrapManifestVersion {
 		return fmt.Errorf("bootstrap manifest version must be %d", BootstrapManifestVersion)
 	}
-	if len(m.Merchants) == 0 && len(m.Catalogs) == 0 {
-		return fmt.Errorf("bootstrap manifest must declare at least one merchant or catalog")
+	if !m.HasAuthBootstrap() && len(m.Merchants) == 0 && len(m.Catalogs) == 0 {
+		return fmt.Errorf("bootstrap manifest must declare at least one auth, merchant, or catalog section")
 	}
 	if len(m.Merchants) > 0 {
 		tm := m.MerchantManifest()
@@ -75,11 +78,24 @@ func (m *BootstrapManifest) Validate() error {
 		}
 	}
 	for i := range m.Catalogs {
+		if strings.TrimSpace(m.Catalogs[i].Merchant) == "" {
+			return fmt.Errorf("catalog #%d merchant is required", i+1)
+		}
 		if _, err := m.CatalogManifest(i); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// HasAuthBootstrap reports whether the manifest has AuthKit-owned state to
+// reconcile. A nil or empty auth section is allowed so OpenRails manifests can
+// carry only merchant/catalog state.
+func (m *BootstrapManifest) HasAuthBootstrap() bool {
+	if m == nil || m.Auth == nil {
+		return false
+	}
+	return len(m.Auth.Users) > 0 || len(m.Auth.GlobalRoles) > 0 || len(m.Auth.Orgs) > 0
 }
 
 // MerchantManifest converts the merchant section to the internal merchant-manifest
@@ -130,6 +146,9 @@ func validateMerchantManifestShape(m *MerchantManifest) error {
 		}
 		if strings.TrimSpace(t.Name) == "" {
 			return fmt.Errorf("merchant %q name is required", slug)
+		}
+		if len(t.Issuers) > 0 {
+			return fmt.Errorf("merchant %q issuers is removed; declare JWKS/public-key trust in top-level auth.orgs[].issuers (AuthKit remote applications)", slug)
 		}
 		if _, ok := seen[slug]; ok {
 			return fmt.Errorf("duplicate merchant slug %q", slug)

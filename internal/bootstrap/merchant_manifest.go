@@ -32,6 +32,9 @@ type ManifestMerchant struct {
 	// (#500 ownership link). Optional in the manifest: when empty, bootstrap
 	// creates/resolves an AuthKit org with the same slug as the merchant.
 	OwnerOrgID string `yaml:"owner_org_id"`
+	// Issuers is rejected during validation. Issuer/JWKS trust belongs in the
+	// top-level auth.orgs[].issuers AuthKit bootstrap section.
+	Issuers []any `yaml:"issuers,omitempty"`
 }
 
 type MerchantManifestReconcileOptions struct{}

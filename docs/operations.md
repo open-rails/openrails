@@ -20,7 +20,7 @@ mechanism:
 
 | # | Divergence | Direction | Mechanism |
 |---|---|---|---|
-| 1 | Catalog wrong at the provider | push (OpenRails → provider) | `bootstrap apply` — verify-or-create at apply time, re-applied idempotently on every boot; alert-only drift watching; provider extras are logged, and archived only under the explicit `--exhaustive` flag (#357) |
+| 1 | Catalog wrong at the provider | push (OpenRails → provider) | `bootstrap apply` — verify-or-create at apply time, re-applied idempotently on every boot; alert-only drift watching; provider extras are logged, and archived only under the explicit `--prune` flag (#357) |
 | 2 | Money state wrong locally | pull (provider → OpenRails) | webhooks in real time; **reconcile (#107)** as the batch truth-pull: advisory diffs, enforce converges local state |
 | 3 | Outbound action never executed | (intent, not sync) | **durable intent + replay** — see "Durability model" below; reconcile is its *detector* |
 | 4 | Entitlements inconsistent | derived | re-run the derivation once 1–3 are true; `internal/audit` checks the local derivation, reconcile's PS-9 converges it against trued-up inputs |
@@ -64,7 +64,7 @@ charges by querying NMI for the period's order reference and repairs the
 subscription lifecycle on late-confirmed success. Phase D routed catalog
 archive ops through the ledger (`stripe_archive_product`,
 `stripe_archive_price`, `solana_sunset_plan`; admin-origin): `bootstrap apply
---exhaustive` (#357) enqueues+executes an intent per extra, so a provider
+--prune` (#357) enqueues+executes an intent per extra, so a provider
 being down no longer aborts the sweep — items park and drain durably, and an
 intent expires if its object joins the local catalog before execution. NMI
 deliberately has NO archive write path (plan edits affect live subscribers);
@@ -92,7 +92,7 @@ is reconcile's pull: the next run reads provider state directly and the missed
 event materializes as a finding. Inbound therefore has two layers — provider
 retries + reconcile — and we build neither.
 
-**Inspecting the ledger.** `billing intents` (CLI; `--status pending|all|...`,
+**Inspecting the ledger.** `openrails intents` (CLI; `--status pending|all|...`,
 `--provider`, `--type`, `--merchant`, `--format table|json`) and
 `GET /v1/admin/intents` list the queued outbound mutations read-only. Under
 `mode=limited`/`readonly` this doubles as the dry-run view of a cutover:
@@ -128,7 +128,7 @@ Operational rules:
 - Pointing a provider key at a DIFFERENT account: pending intents park with
   "provider account changed since enqueue". Drain or expire them first, or —
   if adopting the new account deliberately — re-stamp with
-  `billing intents refingerprint --provider=<name> --merchant=<slug> --yes`.
+  `openrails intents refingerprint --provider=<name> --merchant=<slug> --yes`.
 - A failed fingerprint fetch (provider down) skips the guard for that pass
   (warn logged) rather than blocking the ledger.
 - Intents enqueued before #365 carry no stamp and execute ungated.
@@ -138,14 +138,14 @@ Operational rules:
 Manual-only — **never scheduled**. Two modes, neither ever writes to a
 provider:
 
-- `billing reconcile check` (advisory): pull provider truth, diff, persist
+- `openrails reconcile check` (advisory): pull provider truth, diff, persist
   findings, change nothing.
-- `billing reconcile fix` (enforce): same pull + converge **local** state to
+- `openrails reconcile fix` (enforce): same pull + converge **local** state to
   provider truth (status/periods adopted, payments backfilled,
   subscription-sourced entitlements granted/revoked — admin-grant comps are
   untouchable). Anything requiring a *remote* action lands in the admin queue
   for a human.
-- `billing reconcile report [--run=ID]`: render the latest (or given) run's
+- `openrails reconcile report [--run=ID]`: render the latest (or given) run's
   summary, dunning forensics, and standing open findings.
 
 `check` and `fix` take `--provider nmi|ccbill|stripe|solana` (repeatable;

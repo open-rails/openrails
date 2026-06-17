@@ -182,7 +182,7 @@ type StuckIntentReport struct {
 }
 
 // StuckIntentLine is one stuck intent's report line, persisted in the run
-// summary so `billing reconcile report` can render it later.
+// summary so `openrails reconcile report` can render it later.
 type StuckIntentLine struct {
 	IntentID          string `json:"intent_id"`
 	IntentType        string `json:"intent_type"`

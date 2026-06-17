@@ -87,20 +87,29 @@ merchant's `owner_org_id`.
 
 ## Bootstrap Manifest
 
-The bootstrap manifest uses `merchants:`:
+The bootstrap manifest keeps AuthKit-owned authority in `auth:` and
+OpenRails-owned merchant/catalog state in `merchants:` and `catalogs:`.
 
 ```yaml
 version: 1
 
+auth:
+  orgs:
+    - slug: doujins
+      issuers:
+        - slug: doujins-app
+          issuer: https://doujins.example
+          jwks_uri: https://doujins.example/.well-known/jwks.json
+
 merchants:
   - slug: doujins
     name: Doujins
-    owner_org_slug: doujins
 
 catalogs:
-  - name: doujins
+  - merchant: doujins
     default_providers: [nmi]
 ```
 
-Issuer/JWKS registration belongs in AuthKit remote applications. OpenRails
-stores only the merchant ownership link and billing configuration.
+Issuer/JWKS registration belongs in AuthKit remote applications through the
+`auth.orgs[].issuers` bootstrap section. OpenRails stores only the merchant
+ownership link and billing configuration.

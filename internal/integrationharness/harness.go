@@ -16,7 +16,7 @@
 //
 //   - STANDALONE real server + real AuthKit (Server 2, the production path).
 //     Boots the actual standalone gin server (internal/bootstrap/ginboot +
-//     internal/http, the same graph cmd/billing run-server uses) with the
+//     internal/http, the same graph cmd/openrails run-server uses) with the
 //     OpenRails-owned AuthKit control plane attached, provisions the merchant via
 //     the REAL control-plane bootstrap (links owner_org_id + mints a real
 //     admin service token through AuthKit core), and authenticates the client
@@ -213,7 +213,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 }
 
 // StartStandalone boots Server 2: the REAL standalone gin server (ginboot.NewServer
-// -> internal/http, the cmd/billing run-server graph) over the shared Postgres +
+// -> internal/http, the cmd/openrails run-server graph) over the shared Postgres +
 // Redis with the OpenRails control plane attached, then provisions the merchant
 // through the REAL control-plane bootstrap (links owner_org_id + mints a real
 // admin service token via AuthKit core) and returns a Surface whose client
@@ -264,7 +264,7 @@ func (h *Harness) StartStandalone(currency string) *Surface {
 
 	// Real control-plane bootstrap: ensures the operator AuthKit org + role, links
 	// the merchant's owner_org_id to it, and mints a REAL admin service token
-	// scoped to the merchant — the production provisioning path (cmd/billing
+	// scoped to the merchant — the production provisioning path (cmd/openrails
 	// run-server does the same at boot). MintInitialServiceToken returns the
 	// one-time secret we hand to the client.
 	res, err := embcp.RunBootstrap(h.ctx, app, controlplane.BootstrapOptions{

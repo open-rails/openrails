@@ -1,15 +1,21 @@
 package routes
 
 import (
+	"context"
+	"errors"
 	"net/http"
+	"strings"
 
+	authcore "github.com/open-rails/authkit/core"
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/internal/controlplane"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type Options struct {
@@ -23,6 +29,24 @@ type Options struct {
 	// which case admin routes fail closed (there is no operator-tenant or
 	// role-claim fallback).
 	AdminPermissionChecker authpolicy.AdminPermissionChecker
+
+	// ServiceCredentialResolver validates merchant-scoped programmatic
+	// credentials: generated service tokens, remote-application self tokens, and
+	// service JWTs. The control plane satisfies this in standalone mode.
+	ServiceCredentialResolver ServiceCredentialResolver
+}
+
+type ServiceCredentialResolver interface {
+	LooksLikeServiceToken(token string) bool
+	ResolveServiceToken(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
+}
+
+type serviceJWTResolver interface {
+	ResolveServiceJWT(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
+}
+
+type remoteApplicationResolver interface {
+	ResolveRemoteApplication(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
 }
 
 // requiredMW builds the neutral "authentication required" middleware for the
@@ -170,41 +194,6 @@ func RegisterAdminRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	group.Handle(http.MethodPost, "/users/:user_id/entitlements", h(httphandlers.GrantAdminEntitlement))
 	group.Handle(http.MethodDelete, "/users/:user_id/entitlements/:id", h(httphandlers.RevokeAdminEntitlement))
 
-	// Admin catalog API (issue #205). Mounted alongside subscriptions/payments/users.
-	// Symmetric with pkg/service facade; embedded hosts may call the facade directly.
-	adminCatalog := group.Group("/catalog")
-	adminProducts := adminCatalog.Group("/products")
-	adminProducts.Handle(http.MethodPost, "", h(httphandlers.AdminCreateProduct))
-	adminProducts.Handle(http.MethodGet, "", h(httphandlers.AdminListProducts))
-	adminProducts.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetProduct))
-	adminProducts.Handle(http.MethodGet, "/by-slug/:slug", h(httphandlers.AdminGetProductBySlug))
-	adminProducts.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdateProduct))
-	adminProducts.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivateProduct))
-	adminProducts.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivateProduct))
-	adminProducts.Handle(http.MethodPost, "/:id/reconcile", h(httphandlers.AdminReconcileProduct))
-
-	adminPrices := adminCatalog.Group("/prices")
-	adminPrices.Handle(http.MethodPost, "", h(httphandlers.AdminCreatePrice))
-	adminPrices.Handle(http.MethodGet, "", h(httphandlers.AdminListPrices))
-	adminPrices.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetPrice))
-	adminPrices.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdatePrice))
-	adminPrices.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivatePrice))
-	adminPrices.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivatePrice))
-	adminPrices.Handle(http.MethodPost, "/:id/reconcile", h(httphandlers.AdminReconcilePrice))
-
-	// Catalog reconciliation loop drift surface (issue #209). Alert-only:
-	// these endpoints never mutate Stripe, NMI, or the catalog rows. Operators
-	// resolve drift via the per-price reconcile action above. CCBill is never
-	// reconciled (no catalog-list API), so it never appears in these surfaces.
-	adminCatalog.Handle(http.MethodGet, "/drift", h(httphandlers.AdminListCatalogDrift))
-	adminCatalog.Handle(http.MethodPost, "/drift/refresh", h(httphandlers.AdminRefreshCatalogDrift))
-	// reconcile-all is the spec-named alias for an on-demand synchronous pull.
-	adminCatalog.Handle(http.MethodPost, "/drift/reconcile-all", h(httphandlers.AdminRefreshCatalogDrift))
-	// /orphans is provider-filterable (?provider=stripe|nmi); /stripe/orphans is
-	// the operator-friendly convenience alias scoped to Stripe.
-	adminCatalog.Handle(http.MethodGet, "/orphans", h(httphandlers.AdminListCatalogOrphans))
-	adminCatalog.Handle(http.MethodGet, "/stripe/orphans", h(httphandlers.AdminListStripeOrphans))
-
 	group.Handle(http.MethodGet, "/metrics/summary", h(httphandlers.GetAdminMetricsSummary))
 	group.Handle(http.MethodGet, "/metrics/revenue", h(httphandlers.GetAdminMetricsRevenue))
 	group.Handle(http.MethodGet, "/metrics/subscriptions", h(httphandlers.GetAdminMetricsSubscriptions))
@@ -235,6 +224,175 @@ func RegisterAdminRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	adminReconcile.Handle(http.MethodGet, "/findings", h(httphandlers.AdminReconcileListFindings))
 	adminReconcile.Handle(http.MethodPost, "/findings/:id/ack", h(httphandlers.AdminReconcileAckFinding))
 	adminReconcile.Handle(http.MethodPost, "/findings/:id/dismiss", h(httphandlers.AdminReconcileDismissFinding))
+}
+
+func RegisterMerchantActionRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	mw := []router.Middleware{
+		opts.merchantActionPermissionMW(authpolicy.PermCatalogWrite),
+	}
+	if rt != nil && rt.DB != nil {
+		mw = append(mw, middleware.MerchantDBConnMW(rt.DB))
+	}
+
+	group := rr.Group("", mw...)
+	registerCatalogActionRoutes(group.Group("/catalog"))
+}
+
+func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			if resolved, handled := opts.resolveServiceCredential(r); handled {
+				if resolved == nil {
+					return
+				}
+				if !resolved.HasPermission(perm) {
+					r.AbortJSON(http.StatusForbidden, "permission_required")
+					return
+				}
+				if r.Request != nil {
+					r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), resolved.MerchantID))
+				}
+				r.Set("openrails.service_token", resolved)
+				next(r)
+				return
+			}
+
+			uc, ok := opts.authenticateUser(r)
+			if !ok {
+				return
+			}
+			if opts.AdminPermissionChecker == nil {
+				r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
+				return
+			}
+			allowed, err := opts.AdminPermissionChecker.HasAdminPermission(r.Request.Context(), uc.Org, uc.UserID, perm)
+			if err != nil {
+				r.AbortJSON(http.StatusInternalServerError, "failed to check permission")
+				return
+			}
+			if !allowed {
+				r.AbortJSON(http.StatusForbidden, "permission_required")
+				return
+			}
+			next(r)
+		}
+	}
+}
+
+func (opts Options) authenticateUser(r *httprequest.Request) (billingauth.UserContext, bool) {
+	a := opts.Authenticator
+	if a == nil {
+		r.AbortJSON(http.StatusInternalServerError, "authentication disabled")
+		return billingauth.UserContext{}, false
+	}
+	uc, err := a.Authenticate(r.Request.Context(), r.Request)
+	if err != nil {
+		r.AbortJSON(http.StatusUnauthorized, billingauth.UnauthenticatedMessage(err))
+		return billingauth.UserContext{}, false
+	}
+	if verr := uc.ValidateSubject(); verr != nil {
+		r.AbortJSON(http.StatusUnauthorized, verr.Error())
+		return billingauth.UserContext{}, false
+	}
+	r.SetUserContext(uc)
+	return uc, true
+}
+
+func (opts Options) resolveServiceCredential(r *httprequest.Request) (*controlplane.ResolvedServiceToken, bool) {
+	resolver := opts.ServiceCredentialResolver
+	if resolver == nil || r == nil || r.Request == nil {
+		return nil, false
+	}
+	token := bearerToken(r.Request.Header.Get("Authorization"))
+	if token == "" {
+		return nil, false
+	}
+	if resolver.LooksLikeServiceToken(token) {
+		resolved, err := resolver.ResolveServiceToken(r.Request.Context(), token)
+		if err != nil {
+			writeServiceCredentialError(r, err)
+			return nil, true
+		}
+		return resolved, true
+	}
+	if !controlplane.LooksLikeJWT(token) {
+		return nil, false
+	}
+	if raResolver, ok := resolver.(remoteApplicationResolver); ok {
+		resolved, err := raResolver.ResolveRemoteApplication(r.Request.Context(), token)
+		if err == nil {
+			return resolved, true
+		}
+		if !errors.Is(err, controlplane.ErrNotRemoteApplicationToken) {
+			writeServiceCredentialError(r, err)
+			return nil, true
+		}
+	}
+	if jwtResolver, ok := resolver.(serviceJWTResolver); ok {
+		resolved, err := jwtResolver.ResolveServiceJWT(r.Request.Context(), token)
+		if err == nil {
+			return resolved, true
+		}
+	}
+	return nil, false
+}
+
+func bearerToken(header string) string {
+	header = strings.TrimSpace(header)
+	const prefix = "Bearer "
+	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return ""
+	}
+	return strings.TrimSpace(header[len(prefix):])
+}
+
+func writeServiceCredentialError(r *httprequest.Request, err error) {
+	switch {
+	case errors.Is(err, authcore.ErrAccessTokenExpired):
+		r.AbortJSON(http.StatusUnauthorized, "service_token_expired")
+	case errors.Is(err, authcore.ErrAccessTokenRevoked):
+		r.AbortJSON(http.StatusUnauthorized, "service_token_revoked")
+	case errors.Is(err, controlplane.ErrServiceTokenMerchantUnresolved):
+		r.AbortJSON(http.StatusForbidden, "service_token_merchant_unresolved")
+	case errors.Is(err, controlplane.ErrServiceTokenScopeDenied):
+		r.AbortJSON(http.StatusForbidden, "service_token_resource_scope_denied")
+	default:
+		r.AbortJSON(http.StatusUnauthorized, "service_token_invalid")
+	}
+}
+
+func registerCatalogActionRoutes(catalog router.Router) {
+	products := catalog.Group("/products")
+	products.Handle(http.MethodPost, "", h(httphandlers.AdminCreateProduct))
+	products.Handle(http.MethodGet, "", h(httphandlers.AdminListProducts))
+	products.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetProduct))
+	products.Handle(http.MethodGet, "/by-slug/:slug", h(httphandlers.AdminGetProductBySlug))
+	products.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdateProduct))
+	products.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivateProduct))
+	products.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivateProduct))
+	products.Handle(http.MethodPost, "/:id/reconcile", h(httphandlers.AdminReconcileProduct))
+
+	prices := catalog.Group("/prices")
+	prices.Handle(http.MethodPost, "", h(httphandlers.AdminCreatePrice))
+	prices.Handle(http.MethodGet, "", h(httphandlers.AdminListPrices))
+	prices.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetPrice))
+	prices.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdatePrice))
+	prices.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivatePrice))
+	prices.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivatePrice))
+	prices.Handle(http.MethodPost, "/:id/reconcile", h(httphandlers.AdminReconcilePrice))
+
+	// Catalog reconciliation loop drift surface (issue #209). Alert-only:
+	// these endpoints never mutate Stripe, NMI, or the catalog rows. Operators
+	// resolve drift via the per-price reconcile action above. CCBill is never
+	// reconciled (no catalog-list API), so it never appears in these surfaces.
+	catalog.Handle(http.MethodGet, "/drift", h(httphandlers.AdminListCatalogDrift))
+	catalog.Handle(http.MethodPost, "/drift/refresh", h(httphandlers.AdminRefreshCatalogDrift))
+	// reconcile-all is the spec-named alias for an on-demand synchronous pull.
+	catalog.Handle(http.MethodPost, "/drift/reconcile-all", h(httphandlers.AdminRefreshCatalogDrift))
+	// /orphans is provider-filterable (?provider=stripe|nmi); /stripe/orphans is
+	// the operator-friendly convenience alias scoped to Stripe.
+	catalog.Handle(http.MethodGet, "/orphans", h(httphandlers.AdminListCatalogOrphans))
+	catalog.Handle(http.MethodGet, "/stripe/orphans", h(httphandlers.AdminListStripeOrphans))
 }
 
 func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {

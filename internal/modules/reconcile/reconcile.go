@@ -1,5 +1,5 @@
-// Package reconcile holds the Stripe backfill orchestration shared by the
-// standalone stripe-reconcile CLI and embedded hosts (via pkg/reconcile).
+// Package reconcile holds the Stripe backfill orchestration used by embedded
+// hosts via pkg/service.
 //
 // It mirrors existing Stripe state into the local DB and NEVER charges or
 // mutates anything in Stripe. Every write is create-if-not-exists / upsert /
@@ -134,8 +134,7 @@ type diffResult struct {
 	Matched    int
 }
 
-// diffSubscriptions compares the set of remote and local subscription ids,
-// mirroring subscription-sync's diffKeys behavior.
+// diffSubscriptions compares the set of remote and local subscription ids.
 func diffSubscriptions(remoteIDs, localIDs map[string]struct{}) diffResult {
 	result := diffResult{
 		RemoteOnly: diffKeys(remoteIDs, localIDs),
@@ -327,9 +326,9 @@ func reconcileSubscriptions(
 	}
 
 	// Safety guard: refuse a large/destructive apply when the remote report
-	// returned zero subscriptions while local active subs exist (mirrors the
-	// NMI guard in subscription-sync). A zero-length remote report most likely
-	// indicates an auth/API problem rather than a genuinely empty account.
+	// returned zero subscriptions while local active subs exist. A zero-length
+	// remote report most likely indicates an auth/API problem rather than a
+	// genuinely empty account.
 	if len(remoteSubs) == 0 && len(localIDs) > 0 {
 		return fmt.Errorf("refusing to apply stripe reconciliation: remote report returned zero subscriptions while %d local active subscriptions exist", len(localIDs))
 	}

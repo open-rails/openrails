@@ -18,7 +18,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Issue #357 — provider-side catalog extras: detection + (--exhaustive) archive.
+// Issue #357 — provider-side catalog extras: detection + (--prune) archive.
 // Issue #358 phase D — every archive WRITE flows through the provider intent
 // ledger instead of being a direct provider call.
 //
@@ -32,8 +32,8 @@ import (
 // Detection is READ-ONLY — it works in every operating mode — and extras are
 // ignorable: the default path never touches them.
 //
-// --exhaustive (`bootstrap apply --exhaustive`): the local catalog is treated
-// as authoritative-and-exhaustive — ArchiveCatalogExtras archives (NEVER
+// --prune (`bootstrap apply --prune`): the local catalog is treated
+// as complete — ArchiveCatalogExtras archives (NEVER
 // deletes) extras that bear OpenRails ownership markers, by enqueuing
 // admin-origin intents on the provider intent ledger (#358) and executing them
 // synchronously. Per-provider archive semantics:
@@ -64,9 +64,9 @@ import (
 // content-addressed "<slug>-<currency>-<amount>-<cycle>" plan_id shape; Solana
 // sunset candidates come from our own stored plan handles. Foreign (merchant-
 // owned, unrelated) provider objects are LISTED in the report but NEVER
-// touched, even under --exhaustive.
+// touched, even under --prune.
 //
-// MODE INTERPLAY (#358): the intents are admin-origin (the --exhaustive flag
+// MODE INTERPLAY (#358): the intents are admin-origin (the --prune flag
 // is an explicit human request), so they EXECUTE under mode=limited and PARK
 // under mode=readonly — parked is NOT an error, the scheduled executor drains
 // the queue when the mode lifts. A provider being down no longer aborts the
@@ -144,7 +144,7 @@ type CatalogExtraArchiveOutcome struct {
 }
 
 // nmiPlanArchiveManualDetail is the manual-action text attached to owned NMI
-// plan extras under --exhaustive. See the file header for the doc citations.
+// plan extras under --prune. See the file header for the doc citations.
 const nmiPlanArchiveManualDetail = "NMI has no plan-archive primitive and plan deletion is irreversible and unsafe while customers use the plan " +
 	"(NMI: \"Once a plan is deleted, this action cannot be undone. Please ensure no customers are using the plan before proceeding\"); " +
 	"verify the plan has zero subscribers in the NMI control center, then delete it manually"
@@ -489,7 +489,7 @@ func isAllLowerAlpha(s string) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Archive (--exhaustive; provider WRITES — through the intent ledger, #358)
+// Archive (--prune; provider WRITES — through the intent ledger, #358)
 // ---------------------------------------------------------------------------
 
 // intentExecutor is the ledger surface the archive pass drives (interface for
@@ -535,7 +535,7 @@ func archiveCatalogExtrasVia(ctx context.Context, exec intentExecutor, tenantID 
 			IdempotencyKey: idempotencyKey,
 			NextAttemptAt:  now,
 			Origin:         intents.OriginAdmin,
-			OriginReason:   "bootstrap apply --exhaustive (#357)",
+			OriginReason:   "bootstrap apply --prune (#357)",
 		})
 		if err != nil {
 			outcomes = append(outcomes, CatalogExtraArchiveOutcome{
@@ -556,7 +556,7 @@ func archiveCatalogExtrasVia(ctx context.Context, exec intentExecutor, tenantID 
 		switch {
 		case !e.Owned:
 			// HARD GUARD: no OpenRails ownership marker — never touched, even
-			// under --exhaustive.
+			// under --prune.
 			outcomes = append(outcomes, CatalogExtraArchiveOutcome{
 				Extra:  e,
 				Action: CatalogExtraSkippedForeign,
