@@ -227,11 +227,16 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// runs after migrations have been applied (migrations are a separate
 	// `openrails migrate` step) and at startup.
 	//
-	// TODO(#336): no default merchant — startup bootstrap must resolve/configure a
-	// real merchant slug to seed. This previously relied on the (now removed) default merchant; with an empty BootstrapOrgSlug, RunBootstrap now errors. A
-	// deployment-level config field (e.g. auth.control_plane.bootstrap_org_slug)
-	// must supply it before standalone startup can bootstrap an org.
-	if res, err := embcp.RunBootstrap(context.Background(), embeddedApp.App(), controlplane.BootstrapOptions{MintInitialServiceToken: true}); err != nil {
+	// #336: no default merchant — the control-plane bootstrap seeds the org for the
+	// merchant this engine is bound to (cfg.Merchant, the construction-time merchant
+	// slug; standalone sets `merchant:` / MERCHANT, embedded sets embed.Options.Merchant).
+	// A matching openrails.merchants row must already exist (registered via migrate/
+	// provisioning); empty merchant means there is nothing to bootstrap.
+	if strings.TrimSpace(cfg.Merchant) == "" {
+		cleanupOnError = true
+		return fmt.Errorf("control plane bootstrap: no merchant configured — set `merchant:` (MERCHANT) to the deployment's merchant slug")
+	}
+	if res, err := embcp.RunBootstrap(context.Background(), embeddedApp.App(), controlplane.BootstrapOptions{BootstrapOrgSlug: cfg.Merchant, MintInitialServiceToken: true}); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("control plane bootstrap: %w", err)
 	} else if res != nil && res.ServiceTokenMinted {
