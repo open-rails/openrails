@@ -208,7 +208,7 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 	// The token carries no merchant claims (issuer-only profile, authkit v0.23.0):
 	// the issuer registry is the SOLE source of merchant identity, so slug renames
 	// never invalidate in-flight tokens.
-	tid, tslug, _, _, err := c.merchantForIssuer(ctx, issuer)
+	tid, tslug, _, _, _, err := c.merchantForIssuer(ctx, issuer)
 	if err != nil {
 		return nil, err
 	}

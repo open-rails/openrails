@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	authcore "github.com/open-rails/authkit/core"
@@ -11,14 +12,13 @@ import (
 // ResolveServiceJWT validates a first-party OIDC service JWT and resolves the
 // effective OpenRails service principal.
 //
-// Authorization model: registering an issuer to a tenant IS the authorization.
-// A tenant has full authority over its OWN resources, so a validly-signed token
-// from a registered issuer is trusted; the token's permission claims are
-// authoritative (self-assigned least-privilege markers chosen by the caller for
-// the step it is performing), NOT a request intersected against a separate
-// server-side grant. The ONLY hard boundary is that every resource the token
-// acts on must belong to the issuer's own tenant — a tenant can never reach
-// another tenant's resources.
+// Authorization model: the token's cryptographic signature proves issuer identity;
+// the issuer's STORED authority (direct permission grants + org-role expansion in
+// AuthKit) is the source of truth for what that issuer MAY do. The token's
+// self-asserted `permissions` claim is treated as a REQUESTED SUBSET — it is
+// intersected against stored authority so a compromised or malicious issuer
+// cannot escalate by self-claiming permissions (including openrails:admin) that
+// were never explicitly granted.
 func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*ResolvedServiceToken, error) {
 	if c == nil || c.delegatedVerifier == nil {
 		return nil, ErrNoControlPlane
@@ -30,13 +30,23 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 
 	// The validated issuer (remote_application) resolves, via the org it
 	// controls, to the merchant namespace that org owns (#500). That merchant is
-	// the token's only reachable resource scope.
-	mid, mslug, ownerOrgID, ownerOrgSlug, err := c.merchantForIssuer(ctx, principal.Issuer)
+	// the token's only reachable resource scope. raID is the AuthKit
+	// remote_application UUID used to look up stored authority below.
+	mid, mslug, ownerOrgID, ownerOrgSlug, raID, err := c.merchantForIssuer(ctx, principal.Issuer)
 	if err != nil {
 		return nil, err
 	}
 
-	permissions := cleanPermissionList(principal.Permissions)
+	// BND-C1: intersect the token's self-asserted permissions against the
+	// remote_application's STORED authority. A service JWT may only DOWN-SCOPE
+	// its stored grants, never widen them. This prevents a merchant from minting
+	// a token that claims openrails:admin (or any other permission not explicitly
+	// granted to their remote_application).
+	_, storedPerms, err := c.Core().ResolveRemoteApplicationAuthority(ctx, raID)
+	if err != nil {
+		return nil, fmt.Errorf("controlplane: cannot resolve authority for issuer %s: %w", principal.Issuer, err)
+	}
+	permissions := intersectPermissions(cleanPermissionList(principal.Permissions), storedPerms)
 	if len(permissions) == 0 {
 		return nil, ErrServiceTokenScopeDenied
 	}
@@ -61,6 +71,25 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 		Permissions:  permissions,
 		Resources:    resources,
 	}, nil
+}
+
+// intersectPermissions returns the elements of claimed that also appear in
+// stored. Order follows claimed so the caller gets its preferred subset.
+func intersectPermissions(claimed, stored []string) []string {
+	if len(stored) == 0 || len(claimed) == 0 {
+		return nil
+	}
+	grant := make(map[string]bool, len(stored))
+	for _, p := range stored {
+		grant[p] = true
+	}
+	out := make([]string, 0, len(claimed))
+	for _, p := range claimed {
+		if grant[p] {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func cleanPermissionList(in []string) []string {

@@ -46,25 +46,25 @@ func (c *ControlPlane) ReloadRemoteApplications(ctx context.Context) error {
 //
 // Returns ErrDelegatedIssuerUnknown when the issuer is unregistered, controls no
 // org, or that org owns no active merchant (fail closed).
-func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (merchantID merchant.ID, merchantSlug, ownerOrgID, ownerOrgSlug string, err error) {
+func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (merchantID merchant.ID, merchantSlug, ownerOrgID, ownerOrgSlug, remoteApplicationID string, err error) {
 	issuer = strings.TrimSpace(issuer)
 	if issuer == "" {
-		return merchant.ID{}, "", "", "", ErrDelegatedIssuerUnknown
+		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
 	}
 	if c == nil || c.Core() == nil || c.pool == nil {
-		return merchant.ID{}, "", "", "", errors.New("controlplane: control plane unavailable for issuer resolution")
+		return merchant.ID{}, "", "", "", "", errors.New("controlplane: control plane unavailable for issuer resolution")
 	}
 
 	ra, err := c.Core().GetRemoteApplication(ctx, issuer)
 	if err != nil || ra == nil || !ra.Enabled {
-		return merchant.ID{}, "", "", "", ErrDelegatedIssuerUnknown
+		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
 	}
 
 	// The org(s) the remote_application controls (its memberships). Resolve the
 	// first one that owns exactly one active merchant namespace.
 	memberships, err := c.Core().RemoteApplicationOrgRoles(ctx, ra.ID)
 	if err != nil {
-		return merchant.ID{}, "", "", "", err
+		return merchant.ID{}, "", "", "", "", err
 	}
 	for _, m := range memberships {
 		t, terr := c.Core().ResolveOrgBySlug(ctx, m.Org)
@@ -73,11 +73,11 @@ func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (me
 		}
 		mid, mslug, merr := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, t.ID)
 		if merr == nil {
-			return mid, mslug, t.ID, t.Slug, nil
+			return mid, mslug, t.ID, t.Slug, ra.ID, nil
 		}
 		if !errors.Is(merr, pgx.ErrNoRows) {
-			return merchant.ID{}, "", "", "", merr
+			return merchant.ID{}, "", "", "", "", merr
 		}
 	}
-	return merchant.ID{}, "", "", "", ErrDelegatedIssuerUnknown
+	return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
 }
