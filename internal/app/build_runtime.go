@@ -293,17 +293,16 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	}
 
 	runtime := &Runtime{
-		DB:                    database,
-		RedisClient:           redisClient,
-		Config:                cfg,
-		Clock:                 clock,
-		AdmissionBalanceCache: admission.NewBalanceCache(0), // #513: default short TTL
-		AdmissionPolicyCache:  admission.NewPolicyCache(0),  // #513: default long TTL (config)
-		HealthManager:         healthManager,
-		CCBillClient:          ccbillClient,
-		CCBillRESTClient:      ccbillRESTClient,
-		CCBillDataLink:        ccbillDataLinkClient,
-		NMIClients:            nmiClients,
+		DB:                   database,
+		RedisClient:          redisClient,
+		Config:               cfg,
+		Clock:                clock,
+		AdmissionPolicyCache: admission.NewPolicyCache(0), // #513: default long TTL (config)
+		HealthManager:        healthManager,
+		CCBillClient:         ccbillClient,
+		CCBillRESTClient:     ccbillRESTClient,
+		CCBillDataLink:       ccbillDataLinkClient,
+		NMIClients:           nmiClients,
 
 		SubscriptionService:      serviceInstances.SubscriptionService,
 		ProductService:           serviceInstances.ProductService,

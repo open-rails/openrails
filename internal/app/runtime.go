@@ -88,9 +88,6 @@ type Runtime struct {
 	FeatureService       *entitlements.FeatureService
 	ProductAccessService *productaccess.Service
 	MoneyService         *money.MoneyService
-	// AdmissionBalanceCache is the process-local short-TTL affordability cache the
-	// admit hot path reads (#513 Phase C). nil = read balance fresh every admit.
-	AdmissionBalanceCache *admission.BalanceCache
 	// AdmissionPolicyCache is the process-local long-TTL spend-cap CONFIG cache
 	// (tier + delegated-spend caps). nil = read the config from Postgres every admit.
 	AdmissionPolicyCache     *admission.PolicyCache

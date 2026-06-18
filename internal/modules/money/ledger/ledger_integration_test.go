@@ -44,7 +44,7 @@ func testLedger(t *testing.T) (*ledger.Ledger, *pgxpool.Pool, context.Context, u
 
 // Deposit -> spend -> expire: balances move correctly and the ledger conserves.
 func TestLedger_ConservationAndFlows(t *testing.T) {
-	l, _, ctx, customer, _, cur := testLedger(t)
+	l, pool, ctx, customer, merchantID, cur := testLedger(t)
 
 	_, err := l.Deposit(ctx, customer, cur, 1000, "grant", uuid.NewString(), uuid.New())
 	require.NoError(t, err)
@@ -70,12 +70,13 @@ func TestLedger_ConservationAndFlows(t *testing.T) {
 	net, err := l.Conservation(ctx, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), net, "every (merchant,currency) ledger must net to zero")
+	requireNoCounterDrift(t, ctx, pool, merchantID, cur)
 }
 
 // Authorize holds funds; Capture posts the actual; the remainder is released;
 // a pending may be resolved at most once.
 func TestLedger_TwoPhase(t *testing.T) {
-	l, _, ctx, customer, _, cur := testLedger(t)
+	l, pool, ctx, customer, merchantID, cur := testLedger(t)
 	_, err := l.Deposit(ctx, customer, cur, 1000, "grant", uuid.NewString(), uuid.New())
 	require.NoError(t, err)
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
@@ -110,11 +111,12 @@ func TestLedger_TwoPhase(t *testing.T) {
 	net, err := l.Conservation(ctx, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), net)
+	requireNoCounterDrift(t, ctx, pool, merchantID, cur)
 }
 
 // A customer_balance cannot be overdrawn past its arrears floor.
 func TestLedger_SignConstraint(t *testing.T) {
-	l, _, ctx, customer, _, cur := testLedger(t)
+	l, pool, ctx, customer, merchantID, cur := testLedger(t)
 	_, err := l.Deposit(ctx, customer, cur, 100, "grant", uuid.NewString(), uuid.New())
 	require.NoError(t, err)
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
@@ -133,6 +135,7 @@ func TestLedger_SignConstraint(t *testing.T) {
 	net, err := l.Conservation(ctx, cur)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), net)
+	requireNoCounterDrift(t, ctx, pool, merchantID, cur)
 }
 
 // A transfer may never cross ledgers (the currency-guard trigger).
@@ -204,4 +207,62 @@ func mustAvailable(t *testing.T, ctx context.Context, l *ledger.Ledger, acc uuid
 	got, err := l.Available(ctx, acc)
 	require.NoError(t, err)
 	require.Equal(t, want, got, "available of %s", acc)
+}
+
+func requireNoCounterDrift(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchantID uuid.UUID, currency string) {
+	t.Helper()
+	rows, err := pool.Query(ctx, `
+WITH actual AS (
+    SELECT
+        a.id,
+        COALESCE(SUM(t.amount) FILTER (
+            WHERE t.credit_account_id = a.id AND t.phase IN ('posted', 'post_pending')
+        ), 0)::bigint AS credits_posted,
+        COALESCE(SUM(t.amount) FILTER (
+            WHERE t.debit_account_id = a.id AND t.phase IN ('posted', 'post_pending')
+        ), 0)::bigint AS debits_posted,
+        COALESCE(SUM(t.amount) FILTER (
+            WHERE t.credit_account_id = a.id
+              AND t.phase = 'pending'
+              AND NOT EXISTS (
+                  SELECT 1 FROM openrails.ledger_transfers r
+                  WHERE r.merchant_id = t.merchant_id AND r.pending_id = t.id
+              )
+        ), 0)::bigint AS credits_pending,
+        COALESCE(SUM(t.amount) FILTER (
+            WHERE t.debit_account_id = a.id
+              AND t.phase = 'pending'
+              AND NOT EXISTS (
+                  SELECT 1 FROM openrails.ledger_transfers r
+                  WHERE r.merchant_id = t.merchant_id AND r.pending_id = t.id
+              )
+        ), 0)::bigint AS debits_pending
+    FROM openrails.ledger_accounts a
+    LEFT JOIN openrails.ledger_transfers t
+      ON t.merchant_id = a.merchant_id
+     AND (t.debit_account_id = a.id OR t.credit_account_id = a.id)
+    WHERE a.merchant_id = $1 AND a.currency = $2
+    GROUP BY a.id
+)
+SELECT a.id
+FROM openrails.ledger_accounts a
+JOIN actual ON actual.id = a.id
+WHERE a.merchant_id = $1
+  AND a.currency = $2
+  AND (
+      a.credits_posted <> actual.credits_posted
+      OR a.debits_posted <> actual.debits_posted
+      OR a.credits_pending <> actual.credits_pending
+      OR a.debits_pending <> actual.debits_pending
+  )`, merchantID, currency)
+	require.NoError(t, err)
+	defer rows.Close()
+	var drift []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		require.NoError(t, rows.Scan(&id))
+		drift = append(drift, id)
+	}
+	require.NoError(t, rows.Err())
+	require.Empty(t, drift, "ledger account counters must match transfer re-sum")
 }

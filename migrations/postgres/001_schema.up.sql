@@ -1126,43 +1126,40 @@ COMMENT ON COLUMN openrails.budget_window_state.anchor IS 'First-ever window ope
 COMMENT ON COLUMN openrails.budget_window_state.window_start IS 'Start of the most recently OPENED window. Authoritative for session cadence; for fixed cadence the current start is derived from anchor at read time.';
 
 -- =============================================================================
--- scoped_spend_caps
+-- invoker_spend_limits
 -- =============================================================================
 
-CREATE TABLE openrails.scoped_spend_caps (
+CREATE TABLE openrails.invoker_spend_limits (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
-    customer_id uuid CONSTRAINT scoped_spend_caps_customer_id_not_null NOT NULL,
+    customer_id uuid CONSTRAINT invoker_spend_limits_customer_id_not_null NOT NULL,
     scope text NOT NULL,
-    owner text NOT NULL,
     scope_key text DEFAULT ''::text NOT NULL,
     windows jsonb DEFAULT '[]'::jsonb NOT NULL,
     policy_version bigint DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT scoped_spend_caps_pkey PRIMARY KEY (id),
-    CONSTRAINT scoped_spend_caps_scope_check CHECK ((scope = ANY (ARRAY['subject'::text, 'invoker'::text, 'role'::text, 'invoker_tier'::text]))),
-    CONSTRAINT scoped_spend_caps_owner_check CHECK ((owner = ANY (ARRAY['platform'::text, 'subject'::text]))),
-    CONSTRAINT scoped_spend_caps_uniq UNIQUE (merchant_id, customer_id, scope, owner, scope_key),
-    CONSTRAINT scoped_spend_caps_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
+    CONSTRAINT invoker_spend_limits_pkey PRIMARY KEY (id),
+    CONSTRAINT invoker_spend_limits_scope_check CHECK ((scope = ANY (ARRAY['invoker'::text, 'role'::text, 'invoker_tier'::text]))),
+    CONSTRAINT invoker_spend_limits_uniq UNIQUE (merchant_id, customer_id, scope, scope_key),
+    CONSTRAINT invoker_spend_limits_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
 );
 
-ALTER TABLE ONLY openrails.scoped_spend_caps FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.invoker_spend_limits FORCE ROW LEVEL SECURITY;
 
-ALTER TABLE openrails.scoped_spend_caps ENABLE ROW LEVEL SECURITY;
-CREATE POLICY merchant_isolation ON openrails.scoped_spend_caps USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+ALTER TABLE openrails.invoker_spend_limits ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.invoker_spend_limits USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.scoped_spend_caps TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoker_spend_limits TO openrails_app;
 
-COMMENT ON TABLE openrails.scoped_spend_caps IS 'Hierarchical money-budget policies (#473): {scope, owner, windows[]} composed in one admit verdict over the one payer balance. owner=platform rows are writable only via the platform path; owner=subject rows are the subject''s own caps.';
-COMMENT ON COLUMN openrails.scoped_spend_caps.owner IS 'platform (set by us; subject cannot edit/see) | subject (the subject''s own cap).';
-COMMENT ON COLUMN openrails.scoped_spend_caps.scope_key IS 'Immutable scope discriminator: role uuid (scope=role), invoker string (scope=invoker), or tier key (scope=invoker_tier); empty for scope=subject.';
+COMMENT ON TABLE openrails.invoker_spend_limits IS 'Per-invoker spend limits (#473/#517): the payer caps how much a delegated invoker/role can spend of the payer''s money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.';
+COMMENT ON COLUMN openrails.invoker_spend_limits.scope_key IS 'Immutable scope discriminator: role uuid (scope=role), invoker string (scope=invoker), or tier key (scope=invoker_tier).';
 
 -- =============================================================================
--- tier_spend_caps
+-- payer_spend_limits
 -- =============================================================================
 
-CREATE TABLE openrails.tier_spend_caps (
+CREATE TABLE openrails.payer_spend_limits (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     customer_id uuid,
@@ -1171,23 +1168,23 @@ CREATE TABLE openrails.tier_spend_caps (
     policy_version bigint DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT tier_spend_caps_pkey PRIMARY KEY (id),
-    CONSTRAINT tier_spend_caps_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
+    CONSTRAINT payer_spend_limits_pkey PRIMARY KEY (id),
+    CONSTRAINT payer_spend_limits_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
 );
 
-ALTER TABLE ONLY openrails.tier_spend_caps FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.payer_spend_limits FORCE ROW LEVEL SECURITY;
 
-CREATE UNIQUE INDEX uq_tier_spend_caps_merchant_default ON openrails.tier_spend_caps USING btree (merchant_id, tier) WHERE (customer_id IS NULL);
-CREATE UNIQUE INDEX uq_tier_spend_caps_customer ON openrails.tier_spend_caps USING btree (merchant_id, customer_id, tier) WHERE (customer_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_payer_spend_limits_merchant_default ON openrails.payer_spend_limits USING btree (merchant_id, tier) WHERE (customer_id IS NULL);
+CREATE UNIQUE INDEX uq_payer_spend_limits_customer ON openrails.payer_spend_limits USING btree (merchant_id, customer_id, tier) WHERE (customer_id IS NOT NULL);
 
-ALTER TABLE openrails.tier_spend_caps ENABLE ROW LEVEL SECURITY;
-CREATE POLICY merchant_isolation ON openrails.tier_spend_caps USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+ALTER TABLE openrails.payer_spend_limits ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.payer_spend_limits USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tier_spend_caps TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payer_spend_limits TO openrails_app;
 
-COMMENT ON TABLE openrails.tier_spend_caps IS 'Per-tier admission policy. customer_id NULL is the merchant-wide default; non-NULL is a per-customer override. Money values use the request currency internal precision.';
-COMMENT ON COLUMN openrails.tier_spend_caps.customer_id IS 'NULL = merchant-wide default tier policy (#477); non-NULL = per-customer override taking precedence for that customer.';
-COMMENT ON COLUMN openrails.tier_spend_caps.policy IS 'JSONB tier money policy: budget_windows and bad_spend_windows. Money values use the request currency internal precision.';
+COMMENT ON TABLE openrails.payer_spend_limits IS 'Per-tier payer spend limit (#477/#517): the platform caps the payer''s spend, keyed by trust-tier. customer_id NULL is the merchant-wide default; non-NULL is a per-customer override.';
+COMMENT ON COLUMN openrails.payer_spend_limits.customer_id IS 'NULL = merchant-wide default tier limit (#477); non-NULL = per-customer override taking precedence for that customer.';
+COMMENT ON COLUMN openrails.payer_spend_limits.policy IS 'JSONB tier money policy: budget_windows and bad_spend_windows. Money values use the request currency internal precision.';
 
 -- =============================================================================
 -- tier_schedules

@@ -17,7 +17,8 @@ no principled axis.
    and **overwrite** the local mirror. The provider is the source of truth for
    provider-owned facts (charges, refunds, remote liveness, vault). The pull does
    not reason about entitlements or credits — it just makes the local ledger a
-   faithful mirror.
+   faithful mirror. A pull is authoritative only for the provider account it
+   actually queried: `(merchant, provider_type, merchant_provider_account_id)`.
 2. **The Convergence Engine.** Given a truthful ledger, drive every *grant effect*
    (entitlements, credits, product access) and every standing *external decision*
    to a consistent state with the source events — repairing internal and external
@@ -45,6 +46,8 @@ internal planes.
 
 - **PULL — Provider-Pull** *(inbound)*: the provider is authoritative; pull its
   observed truth into our local row. This is the entire job of `reconcile pull`.
+  The provider account must match the merchant/provider binding before a pull is
+  allowed to insert or overwrite anything.
 
 **Three planes are internal** — a local row checked against a local yardstick, no
 processor involved:
@@ -78,7 +81,7 @@ consistency checks run.
 enqueue a `provider_intent` or operator task when the repair must happen at Stripe,
 NMI/Mobius, CCBill, Solana, or another provider. Examples: cancelling an extra
 remote subscription, retrying a scheduled cancellation, or pushing a catalog plan
-definition. Those actions are linked remediation for `LIFE-*` or `CON-*` findings,
+definition. Those actions are linked remediation for `life.*` or `consistency.*` findings,
 not `PUSH-*` findings.
 
 ### The shape axis
@@ -107,20 +110,16 @@ intent of unknown outcome), never a truth-model problem. Two valid authorities
 genuinely fighting would mean the model assigned two masters to one fact — a design
 bug that must never ship, not a runtime category.
 
-### Code scheme
+### Finding type scheme
 
-- **Compact stable ID:** `<plane-code>-<n>` — `PULL-1`, `DERIVE-2`, `LIFE-3`, `CON-3`.
-  Greppable, stable; planned codes stay compact, and shipped codes are not renamed
-  lightly once external users depend on them.
-- **Canonical slug:** `<plane>.<subject>.<shape>` — e.g.
-  `derivation.grant.missing`, `lifecycle.subscription.dunning_overdue`,
-  `consistency.amount_mismatch.provider_catalog`. Used everywhere a human reads output.
-- **Subtype slug:** broad CON classes keep a compact top-level ID, then add one
-  more segment for the concrete surface: `CON-3 consistency.reference.catalog_scope`,
-  `CON-2 consistency.amount_mismatch.invoice_math`, `CON-1 consistency.duplicate.provider_charge`.
-  Store the stable code in `finding_type`; store the full subtype slug and subtype
-  fields in finding metadata/details.
+Use one self-describing qualified name as the error identity. Store that name
+directly in `reconciliation_findings.finding_type`; do not maintain a second
+opaque numbered code.
 
+Format: `<plane>.<subject>.<shape-or-condition>`, e.g.
+`pull.charge.missing`, `derive.grant.excess`,
+`life.subscription.dunning_overdue`,
+`consistency.amount_mismatch.provider_catalog`.
 ### Remediation class (orthogonal to plane & shape)
 
 | Class | When | Channel |
@@ -216,7 +215,7 @@ truly does not exist. "Source not present in the local DB" is **not** confirmed
 absence during import — it usually just means *not imported yet*.
 
 > Poster case: *"a user has had an entitlement for months but no subscription."* The
-> entitlement's grant has no live source -> `DERIVE-2 derivation.grant.excess`.
+> entitlement's grant has no live source -> `derive.grant.excess`.
 > Pre-reconciliation it is **HELD** (the subscription may be un-imported). Only after
 > the import + a full provider pull confirm no source exists does it become a real
 > RETRACT — and even then mass retraction is **ADMIN**-gated, not silent.
@@ -248,7 +247,7 @@ payment/subscription at purchase time** (now carried on the grant), never the li
 This catalogue is the table/system pass. It targets the post-hard-cut model:
 `money_transactions`, `money_blocks`, and `money_spend_limits` are retired by
 migrations 004/005; credit lots are `grants`, balances are `ledger_transfers`,
-and per-invoker spend caps are `scoped_spend_caps` / Redis admission state.
+and per-invoker spend caps are `invoker_spend_limits` / Redis admission state.
 
 ### Postgres-enforced invariants
 
@@ -257,7 +256,7 @@ FKs, exclusion constraints, RLS/role privileges, or triggers. They should not
 become normal Convergence Engine findings unless a legacy import or manual repair
 path bypasses the schema.
 
-Postgres-enforced invariants do **not** need stable consistency error codes.
+Postgres-enforced invariants do **not** need runtime consistency findings.
 Violations should fail at write/import time as constraint errors. If a legacy
 repair path finds already-existing impossible rows, treat that as a schema/import
 repair task, not as a durable finding taxonomy.
@@ -283,51 +282,75 @@ polymorphic/non-FK references. They are the Convergence Engine/runtime surface.
 
 | Surface / tables | Invariant application must enforce | Plane/check |
 |---|---|---|
-| Same-merchant references not yet composite-FK hardened | A row's `merchant_id` must agree with every merchant-owned row it references. Remaining hardening candidates include `prices.product_id`, `product_entitlement_features.product_id/entitlement_feature_id`, `payments.price_id`, `checkout_sessions.price_id`, `grants.product_id/payment_id`, and invoice/payment references. Prefer future DB constraints when they do not block valid imports. | Schema hardening first; `CON-3` only for references that cannot be constrained |
-| Provider mirror: `payments`, `subscriptions`, `payment_methods`, disputes/refunds | Provider-owned facts are reflected locally: successful charges, refunds, chargebacks/disputes, subscription status/period/next bill, and vault metadata. The pull overwrites the mirror; it does not rewrite local intent or catalog definitions. | `PULL-*` |
-| Provider charges and local payments | Every successful provider charge has exactly one local payment row after pull. Same provider transaction duplicates are schema-blocked; distinct charge IDs for the same customer/product/period are only valid when explained by invoice/proration/operator intent. | `PULL-1`, `CON-1` |
-| Refunds / chargebacks | Every provider refund/chargeback is mirrored; every mirrored refund links to a real original payment; `sum(refunds) <= original charge` after the charge/refund domain is fully pulled. | `PULL-3`, `PULL-4`, `CON-2` |
-| Payment amount explanation | A provider-observed payment amount must be explained by the checkout session, invoice, discount, tax, proration, historical price snapshot, or explicit operator/off-channel record. It is not compared to the current live catalog price. | `CON-2` |
-| Subscription lifecycle | Active periods advance, failed periods enter dunning, grace exhaustion terminates, and pending sessions do not sit forever. Missing rebill/failure webhooks past the expected period boundary are lifecycle drift, not catalog drift. | `LIFE-1..4`, `LIFE-6` |
-| Remote recurring subscriptions | OpenRails expects one effective active billable remote subscription for a customer/merchant/product/tier group. Extra active remote subscriptions, including cross-provider duplicates, are duplicate facts. If no duplicate money has been collected yet, the finding is `CON-1 consistency.duplicate.remote_subscription` and the repair is a provider action to cancel/disable the extra remote subscription. If duplicate money was already collected, the primary integrity finding is `CON-1 consistency.duplicate.provider_charge`, with the same provider-side cancellation linked as remediation while the extra remote subscription remains active. | `CON-1` + provider action |
-| Scheduled provider decisions: `provider_intents`, `subscriptions.deletion_scheduled_at`, `scheduled_price_id` | Not-yet-due provider lag is consistent. Past-due local decisions must either be reflected at the provider, re-enqueued, or surfaced once automatic retry is abandoned. | provider action while retryable; `LIFE-5` once abandoned |
-| Provider catalog objects | Local catalog is desired state. Provider product/plan/price objects must match the OpenRails catalog amount/cadence/provider metadata and OpenRails ownership markers. Drift is a catalog amount mismatch; repair is a provider catalog push or manual provider action. | `CON-2 consistency.amount_mismatch.provider_catalog` + provider action |
-| Grant ledger derivation | Each source event that should create access/credits has the right grant; each grant's source still exists and justifies it; grant windows/spec snapshots match the source event. | `DERIVE-1..3` |
-| Grant effects: entitlements, product access, credit grants/ledger transfers | Every active grant has exactly its derived effects; every live effect traces to a live grant; windows/amounts/cadence match the grant spec snapshot. Product access and credit effects are derived, not authoritative. | `DERIVE-4..6` |
-| Credit-lot arithmetic | For each credit grant lot: `original_amount = spent + expired + revoked + refunded/frozen remainder + remaining`. Spend/expiry/revoke/refund are ledger transfers, never mutations. Revoked unspent credits freeze in `revoked_credits`; lapsed credits move to `expired_credits`; optional refund drains `revoked_credits` to `processor_clearing`. | `DERIVE-5/6` + ledger diagnostics |
-| Double-entry ledger conservation | Per `(merchant,currency)`, `sum(account balances) = 0`; each account balance is derived from transfers, never stored. Held amount is derived from unresolved pending transfers. | #512 diagnostic/test |
+| Soft or polymorphic references | A declared `source_type/source_id`, ledger reference, or provider-intent reference must resolve to the intended row in the same merchant/scope. Prefer future DB constraints when the relationship can be expressed without blocking valid imports. | `consistency.reference.*` only for references that cannot be constrained |
+| Provider mirror: `payments`, `subscriptions`, `payment_methods`, disputes/refunds | Provider-owned facts are reflected locally: successful charges, refunds, chargebacks/disputes, subscription status/period/next bill, and vault metadata. The pull upserts and overwrites provider-owned mirror fields only inside the same `(merchant, provider_type, merchant_provider_account_id)` binding. Active #511 intentionally ignores local-only provider mirror rows rather than emitting `pull.*.excess`; provider absence is too often ambiguous due to retention/reporting windows, incomplete attribution, partial pulls, or wrong provider/account lookup. The pull does not rewrite local intent or catalog definitions. | `pull.*` |
+| Provider charges and local payments | Every successful provider charge has exactly one local payment row after pull. Same provider transaction duplicates are schema-blocked; distinct charge IDs for the same customer/product/period are only valid when explained by invoice/proration/operator intent. Local-only charge mirrors are not deleted until the payment domain is confirmed complete. | `pull.charge.*`, `consistency.duplicate.provider_charge` |
+| Refunds / chargebacks | Every provider refund/chargeback is mirrored; every mirrored refund links to a real original payment; `sum(refunds) <= original charge` after the charge/refund domain is fully pulled. | `pull.refund.*`, `pull.dispute.*`, `consistency.amount_mismatch.refund_math` |
+| Payment amount explanation | A provider-observed payment amount must be explained by the checkout session, invoice, discount, tax, proration, historical price snapshot, or explicit operator/off-channel record. It is not compared to the current live catalog price. | `consistency.amount_mismatch.payment_amount` |
+| Subscription lifecycle | Active periods advance, failed periods enter dunning, grace exhaustion terminates, and pending sessions do not sit forever. Missing rebill/failure webhooks past the expected period boundary are lifecycle drift, not catalog drift. | `life.subscription.*`, `life.checkout_session.stale` |
+| Remote recurring subscriptions | OpenRails expects one effective active billable remote subscription for a customer/merchant/product/tier group. Extra active remote subscriptions, including cross-provider duplicates, are duplicate facts. If no duplicate money has been collected yet, the finding is `consistency.duplicate.remote_subscription` and the repair is a provider action to cancel/disable the extra remote subscription. If duplicate money was already collected, the primary integrity finding is `consistency.duplicate.provider_charge`, with the same provider-side cancellation linked as remediation while the extra remote subscription remains active. | `consistency.duplicate.remote_subscription` + provider action |
+| Scheduled provider decisions: `provider_intents`, `subscriptions.deletion_scheduled_at`, `scheduled_price_id` | Not-yet-due provider lag is consistent. Past-due local decisions must either be reflected at the provider, re-enqueued, or surfaced once automatic retry is abandoned. | provider action while retryable; `life.provider_intent.abandoned` once abandoned |
+| Provider catalog objects | Local catalog is desired state. Provider product/plan/price objects must match the OpenRails catalog amount/cadence/provider metadata and OpenRails ownership markers. Drift is a catalog amount mismatch; repair is a provider catalog push or manual provider action. | `consistency.amount_mismatch.provider_catalog` + provider action |
+| Grant ledger derivation | Each source event that should create access/credits has the right grant; each grant's source still exists and justifies it; grant windows/spec snapshots match the source event. | `derive.grant.*` |
+| Grant effects: entitlements, product access, credit grants/ledger transfers | Every active grant has exactly its derived effects; every live effect traces to a live grant; windows/amounts/cadence match the grant spec snapshot. Product access and credit effects are derived, not authoritative. | `derive.grant_effect.*` |
+| Credit-lot arithmetic | For each credit grant lot: `original_amount = spent + expired + revoked + refunded/frozen remainder + remaining`. Spend/expiry/revoke/refund are ledger transfers, never mutations. Revoked unspent credits freeze in `revoked_credits`; lapsed credits move to `expired_credits`; optional refund drains `revoked_credits` to `processor_clearing`. | `derive.grant_effect.excess` / `.mismatch` + ledger diagnostics |
+| Double-entry ledger conservation | Per `(merchant,currency)`, `sum(account balances) = 0`; each account balance is derived from transfers, never stored. Held amount is derived from unresolved pending transfers. This is structurally guaranteed by the transfer model and stays a #512 smoke/diagnostic check, not a normal #511 finding. | #512 diagnostic/test |
 | Ledger sign / credit limits | Customer balance may not go below the allowed arrears floor. `credit_limit_amount` / billing mode are admission and applier policy inputs, not a separate stored balance. | applier check + #512/#513 diagnostic |
-| Invoices: `invoices`, `invoice_items`, `invoice_payments`, `usage_events` | Invoice amounts must match their source rows: `subtotal/total = sum(non-void items)`, `amount_paid = sum(settled invoice payments)`, `amount_due = total - amount_paid`, paid invoices have zero due, and closed-period billable usage is invoiced exactly once. | `CON-1` for duplicate coverage; `CON-2` for amount mismatches |
+| Invoices: `invoices`, `invoice_items`, `invoice_payments`, `usage_events` | Invoice amounts must match their source rows: `subtotal/total = sum(non-void items)`, `amount_paid = sum(settled invoice payments)`, `amount_due = total - amount_paid`, paid invoices have zero due, and closed-period billable usage is invoiced exactly once. | `consistency.duplicate.*` for duplicate coverage; `consistency.amount_mismatch.*` for amount mismatches |
 | Admission windows and Redis spendgate | Admission compares `sum(captured + active holds)` against the effective policy. Redis is the hot-path source for in-flight holds; Postgres rows here are legacy/transitional unless still wired. | #513 admission checks |
-| Provider/customer configuration | Provider credentials must resolve to the account fingerprint used by provider intents and pulls. Probe verdicts are credential-cache state, not tenant consistency state. | startup/runtime validation |
+| Provider/customer configuration | `merchant_provider_accounts` records a merchant-scoped provider account: provider type, provider-returned account id, display metadata, vault secret reference, and role (`primary`, `secondary`, `legacy`). Each merchant may bind multiple provider accounts per provider rail, but provider-owned rows must be tied to the exact `merchant_provider_account_id` that produced them, and only one enabled row per provider type is primary for new default checkout/catalog work. Provider credentials must resolve through the provider's account/profile/whoami endpoint to the provider account id used by the targeted row. A mismatch is configuration drift and aborts the pull before any mirror write for that row; it is not a normal data inconsistency. Probe verdicts are credential-cache state, not tenant consistency state. | startup/runtime validation |
 | Operational workflows | Merchant delete is gated by completed export; notification and credential-audit ledgers remain append/log hygiene unless a billing workflow consumes them. | app policy; outside #511 by default |
 
 If an application-enforced row can be moved into a DB constraint without blocking
 valid imports, prefer the constraint. The Convergence Engine should focus on
 facts that cross tables, cross time, or cross the provider boundary.
 
-Application-enforced rows that belong to #511 should map to a stable finding code
-(`PULL-*`, `DERIVE-*`, `LIFE-*`, or `CON-*`). Rows marked as #512/#513
+Application-enforced rows that belong to #511 should map to a stable qualified
+finding type (`pull.*`, `derive.*`, `life.*`, or `consistency.*`). Rows marked as #512/#513
 diagnostics, startup/runtime validation, or operational policy are adjacent checks:
-they may log, fail the operation, or feed an operator queue, but they are not normal
-`reconciliation_findings` codes unless later promoted into #511.
+they may log, fail the operation, or feed an operator queue, but they are not
+normal `reconciliation_findings` rows.
 
 ### Plane PULL — Provider-Pull (provider authoritative; resolved by the pull, surfaced by `check`)
 
-| ID | Slug | Invariant — must hold | Shape | Class |
-|---|---|---|---|---|
-| `PULL-1` | provider_pull.charge.missing | Every successful provider charge has a local payment | MISSING | AUTO (pull) |
-| `PULL-2` | provider_pull.subscription.status | Local sub observed status/period/next-bill = provider | MISMATCH | AUTO (pull) |
-| `PULL-3` | provider_pull.refund.missing | Every provider refund is recorded locally | MISSING | AUTO (pull) |
-| `PULL-4` | provider_pull.dispute.missing | Every provider chargeback/dispute is recorded | MISSING | AUTO (pull) |
-| `PULL-5` | provider_pull.vault.mismatch | Payment-method metadata (last4/expiry/token) = provider vault | MISMATCH | AUTO (pull) |
+Provider-Pull findings are grouped by provider-owned resource. The active #511
+implementation intentionally uses only `missing` and `mismatch` shapes. A local
+provider-owned row not found in a provider list/report is not reliable enough to
+call an inconsistency: provider retention/reporting windows may be incomplete, the
+pull may be partial, or the row may be attributed to the wrong provider/account.
+Future provider-absence/tombstone work (#517) can revisit `pull.*.excess`, but the current
+reconcile command should not emit it.
+
+Provider-Pull is account-bound. Before `check` or `pull` treats provider output
+as truth, OpenRails resolves the live credentials through the provider's
+account/profile/whoami endpoint and compares the returned provider account id to
+the targeted `merchant_provider_account_id` binding. Stripe uses the account id
+from `/v1/account` (for example `acct_...`); NMI/Mobius uses the gateway
+merchant/account identity returned by the profile endpoint; CCBill should use its
+account/subaccount identity once implemented. A merchant may have multiple
+bindings for the same provider type, such as Stripe-A for legacy rebills and
+Stripe-B as primary for new checkout. A pull writes only inside the targeted
+binding. If current credentials resolve to a different account than the targeted
+binding, the pull aborts as a configuration error. It must not insert `missing`
+rows, overwrite `mismatch` fields, or mark a source domain fully reconciled from
+the wrong account. Legacy mirror rows without a binding are ambiguous import state
+and should be handled conservatively.
+
+| Resource | Finding types | Repair |
+|---|---|---|
+| charge | `pull.charge.missing` / `.mismatch` | Insert missing provider charge mirrors; overwrite provider-owned charge status/amount/currency/timestamps when provider differs |
+| subscription | `pull.subscription.missing` / `.mismatch` | Insert missing remote subscriptions when identity/plan resolve; overwrite provider-owned status/period/next-bill fields |
+| refund | `pull.refund.missing` / `.mismatch` | Insert missing provider refunds; overwrite provider-owned refund amount/status/timestamps |
+| dispute | `pull.dispute.missing` / `.mismatch` | Insert missing provider disputes/chargebacks; overwrite provider-owned dispute status/amount/deadline fields |
+| vault/payment method | `pull.vault.missing` / `.mismatch` | Insert missing vault/payment-method mirrors; overwrite provider-owned metadata such as last4/expiry/token status |
 
 > Provider-Pull drifts aren't "findings" in steady state — the pull overwrites them. They
 > matter as the dry-run change log and the first wave of an import diff. The pull
 > **never** overwrites local *intent* (`deletion_scheduled_at`, `scheduled_price_id`,
 > pending `provider_intents`) or local catalog/product/price definitions. A divergence
-> there is either expected provider lag, a provider action to enqueue/retry, `LIFE-5`
-> once the action is abandoned, or a `CON-2 consistency.amount_mismatch.provider_catalog`
+> there is either expected provider lag, a provider action to enqueue/retry,
+> `life.provider_intent.abandoned` once the action is abandoned, or a
+> `consistency.amount_mismatch.provider_catalog`
 > finding for catalog drift. A not-yet-due scheduled change (cancel set for Jun 28,
 > pull on Jun 17 still sees the sub live) is fully consistent — expected lag.
 
@@ -335,96 +358,101 @@ they may log, fail the operation, or feed an operator queue, but they are not no
 
 **Grant tier** (event ↔ grant):
 
-| ID | Slug | Invariant — must hold | Shape | Class |
-|---|---|---|---|---|
-| `DERIVE-1` | derivation.grant.missing | A completed payment / billed sub period / admin action has its grant | MISSING | AUTO |
-| `DERIVE-2` | derivation.grant.excess | A grant has a current, non-refunded, non-revoked source | EXCESS | ADMIN *(gated §3.2)* |
-| `DERIVE-3` | derivation.grant.mismatch | A grant's window + spec snapshot match its source (period, spec) | MISMATCH | AUTO |
+| Finding type | Invariant — must hold | Shape | Class |
+|---|---|---|---|
+| `derive.grant.missing` | A completed payment / billed sub period / admin action has its grant | MISSING | AUTO |
+| `derive.grant.excess` | A grant has a current, non-refunded, non-revoked source | EXCESS | ADMIN *(gated §3.2)* |
+| `derive.grant.mismatch` | A grant's window + spec snapshot match its source (period, spec) | MISMATCH | AUTO |
 
 **Grant-effect tier** (grant ↔ effect):
 
-| ID | Slug | Invariant — must hold | Shape | Class |
-|---|---|---|---|---|
-| `DERIVE-4` | derivation.grant_effect.missing | Every active grant has all its grant effects (entitlement windows, credit blocks, access) | MISSING | AUTO |
-| `DERIVE-5` | derivation.grant_effect.excess | Every live grant effect has a live grant | EXCESS | ADMIN *(gated; credit clawback = unspent only → `revoked_credits`, reversible; refund is separate OPERATOR; see §11 (decision 4))* |
-| `DERIVE-6` | derivation.grant_effect.mismatch | A grant effect's window/amount/cadence matches the grant's spec (incl. per-renewal credit cadence) | MISMATCH | AUTO |
+| Finding type | Invariant — must hold | Shape | Class |
+|---|---|---|---|
+| `derive.grant_effect.missing` | Every active grant has all its grant effects (entitlement windows, credit blocks, access) | MISSING | AUTO |
+| `derive.grant_effect.excess` | Every live grant effect has a live grant | EXCESS | ADMIN *(gated; credit clawback = unspent only -> `revoked_credits`, reversible; refund is separate OPERATOR; see §11 (decision 4))* |
+| `derive.grant_effect.mismatch` | A grant effect's window/amount/cadence matches the grant's spec (incl. per-renewal credit cadence) | MISMATCH | AUTO |
 
 > "Grant effect" = an entitlement-feature window, a credit block, or a product-access
 > row; the finding names which kind. Credits and product-access derivation are
 > **net-new** — nothing checks them today (credits the largest gap). Revoke/refund
-> clawback (`DERIVE-5`, credits) retracts the **unspent** remainder only via a reversing
+> clawback (`derive.grant_effect.excess`, credits) retracts the **unspent** remainder only via a reversing
 > transfer to `revoked_credits` (reversible; money frozen, not refunded — refund is a
 > separate OPERATOR step, optionally bundled into `RevokeGrant(grant,{refund})`; §11 (decision 4));
 > spent credits are left as-is. An expired admin grant (`created_at + duration_days`)
-> is a `DERIVE-2` grant whose source no longer justifies it -> its grant effects become `DERIVE-5`.
+> is a `derive.grant.excess` grant whose source no longer justifies it -> its grant effects become `derive.grant_effect.excess`.
 
 ### Plane LIFE — Lifecycle (clock/state-machine authoritative; converge forward, §3.1)
 
-| ID | Slug | Invariant — must hold | Shape | Class |
-|---|---|---|---|---|
-| `LIFE-1` | lifecycle.subscription.period_overdue | An `active` sub past `current_period_ends_at` is renewing or in dunning | MISMATCH | AUTO |
-| `LIFE-2` | lifecycle.subscription.dunning_overdue | A `past_due` sub has a live, on-time retry schedule | MISSING | AUTO |
-| `LIFE-3` | lifecycle.subscription.grace_exhausted | A `past_due` sub past grace/max-retries is terminal (converge: cancel now, revoke as-of grace end) | EXCESS | AUTO -> provider cancel action |
-| `LIFE-4` | lifecycle.subscription.pending_stale | A `pending` sub does not sit unconfirmed past threshold | EXCESS | AUTO |
-| `LIFE-5` | lifecycle.provider_intent.abandoned | A desired provider action remains unapplied, but no automatic retry will happen (max attempts exhausted, expired, no retry scheduled, retry policy disabled, provider unavailable, or manual action required) | MISMATCH | OPERATOR / ADMIN |
-| `LIFE-6` | lifecycle.checkout_session.stale | An expired `checkout_session` is cleaned up | EXCESS | AUTO |
+| Finding type | Invariant — must hold | Shape | Class |
+|---|---|---|---|
+| `life.subscription.period_overdue` | An `active` sub past `current_period_ends_at` is renewing or in dunning | MISMATCH | AUTO |
+| `life.subscription.dunning_overdue` | A `past_due` sub has a live, on-time retry schedule | MISSING | AUTO |
+| `life.subscription.grace_exhausted` | A `past_due` sub past grace/max-retries is terminal (converge: cancel now, revoke as-of grace end) | EXCESS | AUTO -> provider cancel action |
+| `life.subscription.pending_stale` | A `pending` sub does not sit unconfirmed past threshold | EXCESS | AUTO |
+| `life.provider_intent.abandoned` | A desired provider action remains unapplied, but no automatic retry will happen (max attempts exhausted, expired, no retry scheduled, retry policy disabled, provider unavailable, or manual action required) | MISMATCH | OPERATOR / ADMIN |
+| `life.checkout_session.stale` | An expired `checkout_session` is cleaned up | EXCESS | AUTO |
 
 ### Plane CON — Consistency (internal accounting / referential)
 
 CON is intentionally small. Every finding should fit one of three residual
 consistency classes: duplicate, amount/explainability mismatch, or reference resolution.
 Specific surfaces such as refund math, payment amount explanation, invoice math,
-usage coverage, credit-lot arithmetic, or ledger conservation are **subtypes** of
-those classes. The stable `finding_type` stays `CON-1`/`CON-2`/`CON-3`; the emitted
-slug should be specific, such as `consistency.reference.catalog_scope` or
+usage coverage, and credit-lot arithmetic are encoded in the qualified finding
+type, such as `consistency.reference.source_reference` or
 `consistency.amount_mismatch.invoice_math`. Apparent "invalid state"
 cases should usually be moved into a DB constraint (`CHECK`, FK, unique/exclusion
 index), the LIFE plane (clock/state-machine overdue), DERIVE (source -> grant ->
 effect), or PULL (provider-observed truth). Do not use CON as a miscellaneous
 local-audit bucket.
 
-| ID | Slug | Invariant — must hold | Shape | Class |
-|---|---|---|---|---|
-| `CON-1` | `consistency.duplicate.<subtype>` | Individually valid facts are invalid in combination because more than one exists where only one is allowed | EXCESS | ADMIN / OPERATOR |
-| `CON-2` | `consistency.amount_mismatch.<subtype>` | Numbers or explainability equations do not add up: `A + B = C`, total <= source, observed amount is unexplained, expected coverage differs from actual coverage | MISMATCH | ADMIN / OPERATOR |
-| `CON-3` | `consistency.reference.<subtype>` | A polymorphic, soft, or not-yet-FK-hardened reference resolves to no row, the wrong row, or a row in the wrong merchant/scope | EXCESS / MISMATCH | ADMIN |
+| Finding type family | Invariant — must hold | Shape | Class |
+|---|---|---|---|
+| `consistency.duplicate.<subject>` | Individually valid facts are invalid in combination because more than one exists where only one is allowed | EXCESS | ADMIN / OPERATOR |
+| `consistency.amount_mismatch.<subject>` | Numbers or explainability equations do not add up: `A + B = C`, total <= source, observed amount is unexplained, expected coverage differs from actual coverage | MISMATCH | ADMIN / OPERATOR |
+| `consistency.reference.<subject>` | A polymorphic, soft, or not-yet-FK-hardened reference resolves to no row, the wrong row, or a row in the wrong merchant/scope | EXCESS / MISMATCH | ADMIN |
 
-`CON-1` includes duplicate provider-observed charges for the same customer/product/
+`consistency.duplicate.provider_charge` includes duplicate provider-observed charges for the same customer/product/
 period when no invoice, proration, or explicit operator action explains the overlap.
 This is the primary finding once money has actually been collected twice. If the
 duplicate charge came from overlapping active remote subscriptions, the repair may
 also enqueue/link a provider action to cancel the extra provider subscription and
-stop future billing. `CON-1` also covers duplicate invoice/usage coverage and other
-individually-valid rows that become invalid as a set. Duplicate local rows for the
-same provider transaction are structurally blocked by
+stop future billing. `consistency.duplicate.*` also covers duplicate invoice/usage coverage.
+Duplicate local rows for the same provider transaction are structurally blocked by
 `uq_payments_merchant_processor_transaction`; if a legacy/import path still
-materializes one, it is a local mirror repair.
+materializes one, it is a local mirror repair, not a normal recurring finding.
 Initial subtypes: `provider_charge`, `remote_subscription`, `invoice_usage`,
-`invoice_payment`, `ledger_operation`.
+`invoice_payment`.
 
-`CON-2` is the generic arithmetic/explainability class. Examples: provider-observed
+`consistency.amount_mismatch.*` is the generic arithmetic/explainability class. Examples: provider-observed
 refund totals exceed the original charge after pull; a provider-observed payment
 amount is not explained by checkout/invoice/discount/proration/operator snapshot;
 invoice totals do not equal item/payment rows; closed-period billable usage does not
 match invoice items; a credit lot's original amount does not equal spent plus
-expired plus revoked plus refunded/frozen plus remaining. Ledger conservation can
-use this class if #512 later promotes it from diagnostic/test into a #511 finding.
+expired plus revoked plus refunded/frozen plus remaining.
 Initial subtypes: `refund_math`, `payment_amount`, `invoice_math`, `usage_coverage`,
-`credit_lot`, `provider_catalog`, `ledger_conservation`, `pending_resolver`.
+`credit_lot`, `provider_catalog`.
 
-`CON-3` is the fallback for references that cannot yet be made impossible through
-Postgres: unresolved polymorphic references, references to rows in the wrong merchant
-scope, or soft references whose declared type/id pair does not resolve. If a
-reference can become an FK/composite FK without blocking valid imports, prefer the
-schema constraint over a `CON-3` finding.
-Initial subtypes: `catalog_scope`, `payment_scope`, `checkout_scope`,
-`subscription_scope`, `grant_source`, `grant_effect_source`, `invoice_reference`,
-`ledger_reference`, `provider_intent_reference`.
+Do **not** create normal `consistency.amount_mismatch.*` findings for `ledger_conservation` or
+`pending_resolver`. Ledger conservation is a #512 diagnostic/smoke check because
+double-entry inserts make it structural. Pending transfer resolution is guarded by
+`uq_ledger_transfers_pending_resolution`; an old unresolved pending transfer is a
+LIFE/staleness problem, not an amount-mismatch finding.
+
+`consistency.reference.*` is the fallback for references that cannot yet be made impossible through
+Postgres: unresolved polymorphic references, soft references whose declared
+type/id pair does not resolve, or opaque ledger/provider-intent references that
+cannot be FK-backed. If a reference can become an FK/composite FK without blocking
+valid imports, prefer the schema constraint over a runtime finding.
+Initial subtypes: `source_reference`, `ledger_reference`, `provider_intent_reference`.
+
+Do **not** create normal `consistency.reference.*` findings for FK-backed catalog/payment/checkout/
+subscription scope relationships. Those belong in Postgres constraints or
+one-off schema/import repair, not the runtime finding taxonomy.
 
 Subscription price/product coherence is enforced by schema, not by a CON-plane
 finding: `subscriptions(price_id, product_id, merchant_id)` references
 `prices(id, product_id, merchant_id)`. Provider plan drift is
-`CON-2 consistency.amount_mismatch.provider_catalog`, because OpenRails catalog definitions
+`consistency.amount_mismatch.provider_catalog`, because OpenRails catalog definitions
 are desired state and the provider catalog must be pushed back into shape.
 
 ### Adjacent: billing viability (risk, not inconsistency)
@@ -442,11 +470,11 @@ A recorded human action must never read as a violation. With the grant log this
 collapses to one rule:
 
 - **Admin revoked access** -> a **revoke event** is appended to the grant log (the
-  grant itself is never edited). So `DERIVE-4` (grant -> grant effect) asks *"was the
+  grant itself is never edited). So `derive.grant_effect.missing` asks *"was the
   grant effect **ever** granted?"* — a grant followed by a recorded revoke is not
   `MISSING`; only *no grant ever* is. Every revoke event carries a reason.
 - **Admin granted with no payment** → an `admin`-sourced grant is itself the source,
-  so `DERIVE-2` ("grant needs a payment/subscription source") never applies to it.
+  so `derive.grant.excess` ("grant needs a payment/subscription source") never applies to it.
 
 Principle: **every grant effect traces to a grant; every grant traces to a recorded
 source or an admin action; every removal carries a reason.** A finding fires only on
@@ -479,7 +507,7 @@ each invariant has exactly one implementation.
 ## 8. Findings ledger & finding states
 
 All findings share `openrails.reconciliation_findings` (extended: `finding_type`
-admits the new IDs; `provider` admits a `self` sentinel for DERIVE/LIFE/CON
+admits qualified finding types; `provider` admits a `self` sentinel for derive/life/consistency
 findings; severity lowercase). States:
 
 - `open` → `auto_fixed` | `admin_pending` | `resolved` | `dismissed`; disappearance
@@ -533,7 +561,7 @@ Excluded to avoid redundancy — the schema makes these impossible:
   table; repoint `entitlements` and tag credit deposits with their `grant_id`
   (a ledger transfer under the double-entry ledger reorg); migrate
   existing rows; implement derive-1 / derive-2 as the sole writers.
-- Replace the old `PS-*`/`P-E-*` codes with `PULL-*` / `DERIVE-*` / `LIFE-*` / `CON-*`; extend the ledger
+- Replace the old `PS-*`/`P-E-*` codes with qualified finding types under `pull.*`, `derive.*`, `life.*`, and `consistency.*`; extend the ledger
   CHECK + add the `self` provider, the `held` status, and the `indeterminate` status.
 - **`Converge(scope)`** as the single idempotent engine / sole grant-effect writer.
 - **Import mode:** per-source-domain "fully reconciled" flags gating every `EXCESS`
@@ -545,7 +573,7 @@ Excluded to avoid redundancy — the schema makes these impossible:
    overwrites observed provider state but never deletes a standing intent
    (`deletion_scheduled_at`, `scheduled_price_id`, pending `provider_intents`); the
    engine is schedule-aware: not-yet-due provider lag is expected; retryable
-   lag remains a provider action; abandoned past-due work becomes `LIFE-5`.
+   lag remains a provider action; abandoned past-due work becomes `life.provider_intent.abandoned`.
 2. **`reconcile pull` always converges** (no `--enforce` flag); continuous in-server,
    one-shot via CLI.
 3. **Confirmed-absence gate is per source domain** (subscriptions / payments / grants).

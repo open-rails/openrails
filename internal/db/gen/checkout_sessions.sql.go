@@ -118,6 +118,28 @@ func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutS
 	return result.RowsAffected(), nil
 }
 
+const expireCheckoutSessionByID = `-- name: ExpireCheckoutSessionByID :execrows
+UPDATE openrails.checkout_sessions
+SET status = 'expired', updated_at = $1::timestamptz
+WHERE merchant_id = $2::uuid AND id = $3::uuid
+  AND status IN ('created', 'requires_action')
+`
+
+type ExpireCheckoutSessionByIDParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// Repair for life.checkout_session.stale: mark one stale session expired.
+func (q *Queries) ExpireCheckoutSessionByID(ctx context.Context, arg ExpireCheckoutSessionByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, expireCheckoutSessionByID, arg.Now, arg.MerchantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const expireCheckoutSessions = `-- name: ExpireCheckoutSessions :execrows
 UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = $1
@@ -248,6 +270,43 @@ func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLates
 		&i.CustomerID,
 	)
 	return i, err
+}
+
+const listStaleCheckoutSessions = `-- name: ListStaleCheckoutSessions :many
+SELECT id FROM openrails.checkout_sessions
+WHERE merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR customer_id = $2::uuid)
+  AND expires_at IS NOT NULL AND expires_at < $3::timestamptz
+  AND status IN ('created', 'requires_action')
+ORDER BY expires_at
+`
+
+type ListStaleCheckoutSessionsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Now        time.Time
+}
+
+// #511 LIFE plane (life.checkout_session.stale): expired-but-not-terminal
+// checkout sessions for a scope. Detection (read-only) for the Convergence Engine.
+func (q *Queries) ListStaleCheckoutSessions(ctx context.Context, arg ListStaleCheckoutSessionsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listStaleCheckoutSessions, arg.MerchantID, arg.CustomerID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateCheckoutSession = `-- name: UpdateCheckoutSession :execrows

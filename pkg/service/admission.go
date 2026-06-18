@@ -103,8 +103,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 
 	gate := spendgate.New(s.rt.RedisClient)
 	loader := admission.NewSpendgatePolicyLoader(
-		admission.NewTierSpendCapStore(s.rt.DB),
-		admission.NewScopedSpendCapStore(s.rt.DB),
+		admission.NewPayerSpendLimitStore(s.rt.DB),
+		admission.NewInvokerSpendLimitStore(s.rt.DB),
 		s.rt.FXProvider,
 	).WithCache(s.rt.AdmissionPolicyCache)
 	invokerWindows, err := s.invokerWastedSpendPolicy(ctx)
@@ -112,8 +112,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		return nil, err
 	}
 	adm := admission.NewAdmitter(s.moneyService(), gate, loader).
-		WithWastedSpend(abuse.NewWastedSpendGuard(ratelimit.NewLimiter(s.rt.RedisClient)), invokerWindows).
-		WithBalanceCache(s.rt.AdmissionBalanceCache)
+		WithWastedSpend(abuse.NewWastedSpendGuard(ratelimit.NewLimiter(s.rt.RedisClient)), invokerWindows)
 
 	var exp time.Time
 	switch {
@@ -194,8 +193,8 @@ func (s *Service) BudgetStatus(ctx context.Context, payer identity.CustomerID, i
 		return nil, err
 	}
 	loader := admission.NewSpendgatePolicyLoader(
-		admission.NewTierSpendCapStore(s.rt.DB),
-		admission.NewScopedSpendCapStore(s.rt.DB),
+		admission.NewPayerSpendLimitStore(s.rt.DB),
+		admission.NewInvokerSpendLimitStore(s.rt.DB),
 		s.rt.FXProvider,
 	).WithCache(s.rt.AdmissionPolicyCache)
 	req := spendgate.Request{Invoker: strings.TrimSpace(invoker), Tier: tier}
@@ -222,9 +221,9 @@ func (s *Service) BudgetStatus(ctx context.Context, payer identity.CustomerID, i
 	return out, nil
 }
 
-// SpendCapWindowInput is one fixed money-budget window for a budget-scope
+// SpendLimitWindowInput is one fixed money-budget window for a budget-scope
 // policy (#473): same shape as TierBudgetWindowInput.
-type SpendCapWindowInput struct {
+type SpendLimitWindowInput struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
@@ -232,16 +231,16 @@ type SpendCapWindowInput struct {
 	Cadence       string `json:"cadence,omitempty"`
 }
 
-// ScopedSpendCapInput configures one hierarchical budget-scope policy (#473).
+// InvokerSpendLimitInput configures one hierarchical budget-scope policy (#473).
 // Scope is "subject" | "role" | "invoker" | "invoker_tier"; ScopeKey is the
 // role uuid, invoker string, or invoker-tier key, empty for scope=subject.
-type ScopedSpendCapInput struct {
-	Scope    string                `json:"scope"`
-	ScopeKey string                `json:"scope_key,omitempty"`
-	Windows  []SpendCapWindowInput `json:"windows"`
+type InvokerSpendLimitInput struct {
+	Scope    string                  `json:"scope"`
+	ScopeKey string                  `json:"scope_key,omitempty"`
+	Windows  []SpendLimitWindowInput `json:"windows"`
 }
 
-func budgetScopeWindowModels(ws []SpendCapWindowInput) []models.BudgetWindowPolicy {
+func budgetScopeWindowModels(ws []SpendLimitWindowInput) []models.BudgetWindowPolicy {
 	out := make([]models.BudgetWindowPolicy, 0, len(ws))
 	for _, w := range ws {
 		out = append(out, models.BudgetWindowPolicy{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence})
@@ -249,66 +248,46 @@ func budgetScopeWindowModels(ws []SpendCapWindowInput) []models.BudgetWindowPoli
 	return out
 }
 
-// SetSubjectSpendCaps upserts a SUBJECT-owned budget-scope policy (#473): the
+// SetInvokerSpendLimits upserts a SUBJECT-owned budget-scope policy (#473): the
 // subject's self cap, a role pool, an invoker grant, or an invoker-tier grant.
-// The owner is forced to "subject" — this path can NEVER write a
-// platform-owned cap, so a subject cannot create/loosen one.
-func (s *Service) SetSubjectSpendCaps(ctx context.Context, payer identity.CustomerID, in ScopedSpendCapInput) error {
+// Payer-set: the payer caps how much its delegated invokers/roles may spend.
+func (s *Service) SetInvokerSpendLimits(ctx context.Context, payer identity.CustomerID, in InvokerSpendLimitInput) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	return admission.NewScopedSpendCapStore(s.rt.DB).Upsert(ctx, payer, admission.ScopedSpendCap{
-		Scope: in.Scope, Owner: "subject", ScopeKey: in.ScopeKey,
+	return admission.NewInvokerSpendLimitStore(s.rt.DB).Upsert(ctx, payer, admission.InvokerSpendLimit{
+		Scope: in.Scope, ScopeKey: in.ScopeKey,
 		Windows: budgetScopeWindowModels(in.Windows),
 	})
 }
 
-// SetPlatformSpendCaps upserts a PLATFORM-owned budget cap (#473) — the
-// platform->payer cap (level 1; tensorhub #475 scope B). Callable ONLY from a
-// platform-admin path (the caller enforces operator authz before invoking this);
-// the subject's own policy surface can never reach it, and the subject's
-// SubjectSpendCaps read does not expose it.
-func (s *Service) SetPlatformSpendCaps(ctx context.Context, payer identity.CustomerID, in ScopedSpendCapInput) error {
-	if s == nil || s.rt == nil {
-		return fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
-	}
-	return admission.NewScopedSpendCapStore(s.rt.DB).Upsert(ctx, payer, admission.ScopedSpendCap{
-		Scope: in.Scope, Owner: "platform", ScopeKey: in.ScopeKey,
-		Windows: budgetScopeWindowModels(in.Windows),
-	})
-}
-
-// SubjectSpendCaps returns ONLY the subject-owned budget-scope policies
-// (#473) — platform-owned caps are deliberately invisible to the subject.
-func (s *Service) SubjectSpendCaps(ctx context.Context, payer identity.CustomerID) ([]ScopedSpendCapInput, error) {
+// InvokerSpendLimits returns the payer's per-invoker spend limits (#473/#517).
+func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.CustomerID) ([]InvokerSpendLimitInput, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	rows, err := admission.NewScopedSpendCapStore(s.rt.DB).LoadByOwner(ctx, payer, "subject")
+	rows, err := admission.NewInvokerSpendLimitStore(s.rt.DB).LoadAll(ctx, payer)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]ScopedSpendCapInput, 0, len(rows))
+	out := make([]InvokerSpendLimitInput, 0, len(rows))
 	for _, r := range rows {
-		w := make([]SpendCapWindowInput, 0, len(r.Windows))
+		w := make([]SpendLimitWindowInput, 0, len(r.Windows))
 		for _, ww := range r.Windows {
-			w = append(w, SpendCapWindowInput{Key: ww.Key, WindowSeconds: ww.WindowSeconds, Limit: ww.Limit, Currency: ww.Currency, Cadence: ww.Cadence})
+			w = append(w, SpendLimitWindowInput{Key: ww.Key, WindowSeconds: ww.WindowSeconds, Limit: ww.Limit, Currency: ww.Currency, Cadence: ww.Cadence})
 		}
-		out = append(out, ScopedSpendCapInput{Scope: r.Scope, ScopeKey: r.ScopeKey, Windows: w})
+		out = append(out, InvokerSpendLimitInput{Scope: r.Scope, ScopeKey: r.ScopeKey, Windows: w})
 	}
 	return out, nil
 }
 
-// TierBudgetWindowInput / TierSpendCapInput configure a tier's money policy via
+// TierBudgetWindowInput / PayerSpendLimitInput configure a tier's money policy via
 // the admin endpoint (#298: tier admin API).
 type TierBudgetWindowInput struct {
 	Key           string `json:"key"`
@@ -319,7 +298,7 @@ type TierBudgetWindowInput struct {
 	Cadence string `json:"cadence,omitempty"`
 }
 
-type TierSpendCapInput struct {
+type PayerSpendLimitInput struct {
 	Tier           string                  `json:"tier"`
 	BudgetWindows  []TierBudgetWindowInput `json:"budget_windows"`
 	PolicyCurrency string                  `json:"policy_currency,omitempty"`
@@ -404,7 +383,7 @@ func (s *Service) payerWastedWindows(ctx context.Context, payer identity.Custome
 			tier = admission.DefaultTier
 		}
 	}
-	pol, err := admission.NewTierSpendCapStore(s.rt.DB).GetTierSpendCaps(ctx, payer, tier)
+	pol, err := admission.NewPayerSpendLimitStore(s.rt.DB).GetPayerSpendLimits(ctx, payer, tier)
 	if err != nil {
 		return nil, err
 	}
@@ -695,8 +674,8 @@ func toAbuseUsageWindows(ws []abuse.WindowUsage) []AbuseUsageWindow {
 	return out
 }
 
-// SetTierSpendCaps upserts a per-payer tier money policy.
-func (s *Service) SetTierSpendCaps(ctx context.Context, payer identity.CustomerID, in TierSpendCapInput) error {
+// SetPayerSpendLimits upserts a per-payer tier money policy.
+func (s *Service) SetPayerSpendLimits(ctx context.Context, payer identity.CustomerID, in PayerSpendLimitInput) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
@@ -713,7 +692,7 @@ func (s *Service) SetTierSpendCaps(ctx context.Context, payer identity.CustomerI
 	for _, b := range in.BadSpendWindows {
 		pol.BadSpendWindows = append(pol.BadSpendWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency, Cadence: b.Cadence})
 	}
-	return admission.NewTierSpendCapStore(s.rt.DB).UpsertTierSpendCapsFull(ctx, payer, in.Tier, pol)
+	return admission.NewPayerSpendLimitStore(s.rt.DB).UpsertPayerSpendLimitsFull(ctx, payer, in.Tier, pol)
 }
 
 // TierScheduleRung is one rung of a persisted same-currency tier ladder (#476):

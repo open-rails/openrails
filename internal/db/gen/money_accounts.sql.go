@@ -42,6 +42,53 @@ func (q *Queries) AutoGraduateMoneyAccountTier(ctx context.Context, arg AutoGrad
 	return err
 }
 
+const getAdmissionCapacity = `-- name: GetAdmissionCapacity :one
+SELECT
+    (a.credits_posted - a.debits_posted)::bigint AS balance,
+    a.debits_pending::bigint AS held,
+    COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
+    COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount
+FROM openrails.ledger_accounts a
+LEFT JOIN openrails.money_settings s
+  ON s.merchant_id = a.merchant_id
+ AND s.customer_id = a.customer_id
+ AND s.currency = a.currency
+WHERE a.merchant_id = $1::uuid
+  AND a.customer_id = $2::uuid
+  AND a.currency = $3::text
+  AND a.account_type = 'customer_balance'
+LIMIT 1
+`
+
+type GetAdmissionCapacityParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+type GetAdmissionCapacityRow struct {
+	Balance           int64
+	Held              int64
+	BillingMode       string
+	CreditLimitAmount int64
+}
+
+// Hot-path affordability snapshot for service admit. The customer_balance account
+// carries Phase-H O(1) counters; money_settings is optional (missing = prepaid,
+// no credit line). Request in-flight holds live in Redis and are subtracted by
+// spendgate, not here.
+func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapacityParams) (GetAdmissionCapacityRow, error) {
+	row := q.db.QueryRow(ctx, getAdmissionCapacity, arg.MerchantID, arg.CustomerID, arg.Currency)
+	var i GetAdmissionCapacityRow
+	err := row.Scan(
+		&i.Balance,
+		&i.Held,
+		&i.BillingMode,
+		&i.CreditLimitAmount,
+	)
+	return i, err
+}
+
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
 SELECT id, merchant_id, customer_id, billing_mode, max_spend_per_day, max_spend_per_month, max_outstanding_owed_amount, low_balance_threshold, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_amount, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, tier_source, currency, credit_limit_amount FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
@@ -127,13 +174,8 @@ WITH avail AS (
            s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at,
            (
              COALESCE((
-                 SELECT SUM(CASE WHEN t.credit_account_id = a.id THEN t.amount
-                                 WHEN t.debit_account_id = a.id THEN -t.amount ELSE 0 END)
+                 SELECT a.credits_posted - a.debits_posted
                  FROM openrails.ledger_accounts a
-                 JOIN openrails.ledger_transfers t
-                   ON t.merchant_id = a.merchant_id
-                  AND (t.debit_account_id = a.id OR t.credit_account_id = a.id)
-                  AND t.phase IN ('posted', 'post_pending')
                  WHERE a.merchant_id = s.merchant_id AND a.customer_id = s.customer_id
                    AND a.currency = s.currency AND a.account_type = 'customer_balance'
              ), 0)

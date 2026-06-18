@@ -3,19 +3,21 @@
 //
 // A ledger is a (merchant, currency) pair. Accounts belong to one ledger;
 // transfers move an amount debit->credit within one ledger and are immutable
-// (the openrails_app role is granted SELECT,INSERT only). Balances are DERIVED
-// from transfers, never stored. Two-phase transfers (Authorize -> Capture/
-// Release) model real money movement; the throwaway admission hold lives in
-// Redis (#513), not here.
+// (the openrails_app role is granted SELECT,INSERT only). Balances are maintained
+// on account counters, with transfers as the immutable truth. Two-phase transfers
+// (Authorize -> Capture/Release) model real money movement; the throwaway
+// admission hold lives in Redis (#513), not here.
 package ledger
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 )
@@ -139,23 +141,32 @@ func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTran
 			return gen.OpenrailsLedgerTransfer{}, err
 		}
 	}
-	return l.q.InsertLedgerTransfer(ctx, gen.InsertLedgerTransferParams{
-		MerchantID:      l.merchant,
-		DebitAccountID:  t.Debit,
-		CreditAccountID: t.Credit,
-		Amount:          t.Amount,
-		Currency:        t.Currency,
-		TransferType:    t.Type,
-		Phase:           string(phase),
-		PendingID:       t.PendingID,
-		Source:          t.Source,
-		SourceID:        t.SourceID,
-		GrantID:         t.GrantID,
-		CustomerID:      t.Customer,
-		InvokerID:       t.Invoker,
-		Resource:        t.Resource,
-		InvoiceID:       t.Invoice,
+	tr, err := l.q.InsertLedgerTransfer(ctx, gen.InsertLedgerTransferParams{
+		MerchantID:             l.merchant,
+		DebitAccountID:         t.Debit,
+		CreditAccountID:        t.Credit,
+		Amount:                 t.Amount,
+		Currency:               t.Currency,
+		TransferType:           t.Type,
+		Phase:                  string(phase),
+		PendingID:              t.PendingID,
+		AllowDebitNegativeUpTo: t.AllowDebitNegativeUpTo,
+		Source:                 t.Source,
+		SourceID:               t.SourceID,
+		GrantID:                t.GrantID,
+		CustomerID:             t.Customer,
+		InvokerID:              t.Invoker,
+		Resource:               t.Resource,
+		InvoiceID:              t.Invoice,
 	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && strings.Contains(pgErr.Message, "ledger_insufficient_funds") {
+			return gen.OpenrailsLedgerTransfer{}, fmt.Errorf("%w: %s", ErrInsufficientFunds, pgErr.Message)
+		}
+		return gen.OpenrailsLedgerTransfer{}, err
+	}
+	return tr, nil
 }
 
 func (l *Ledger) checkDebitFloor(ctx context.Context, account uuid.UUID, amount, floor int64) error {
@@ -166,23 +177,20 @@ func (l *Ledger) checkDebitFloor(ctx context.Context, account uuid.UUID, amount,
 	if !acc.DebitsMustNotExceedCredits {
 		return nil
 	}
-	bal, err := l.Balance(ctx, account)
-	if err != nil {
-		return err
-	}
+	bal := acc.CreditsPosted - acc.DebitsPosted
 	if bal-amount < -floor {
 		return fmt.Errorf("%w (balance %d, amount %d, floor %d)", ErrInsufficientFunds, bal, amount, floor)
 	}
 	return nil
 }
 
-// Balance returns the account's derived balance (credits - debits over posted +
-// post_pending transfers).
+// Balance returns the account's maintained balance counter
+// (credits_posted - debits_posted).
 func (l *Ledger) Balance(ctx context.Context, account uuid.UUID) (int64, error) {
 	return l.q.LedgerAccountBalance(ctx, gen.LedgerAccountBalanceParams{AccountID: account, MerchantID: l.merchant})
 }
 
-// Held returns the sum of unresolved pending debits against the account.
+// Held returns the account's maintained unresolved-pending-debits counter.
 func (l *Ledger) Held(ctx context.Context, account uuid.UUID) (int64, error) {
 	return l.q.LedgerAccountHeld(ctx, gen.LedgerAccountHeldParams{MerchantID: l.merchant, AccountID: account})
 }

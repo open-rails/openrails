@@ -3,9 +3,9 @@
 //
 // #513 hard cut: admission is ONE atomic Redis decision (internal/modules/admission/spendgate).
 // The admitter resolves the payer tier, enforces the delegated wasted-spend
-// cutoff, loads the cached cap windows, reads the (unlocked) balance, and runs the
-// single spendgate EVAL that checks affordability + every window and places the
-// in-flight hold. No Postgres locks, no per-request budget reservation rows.
+// cutoff, loads the cached cap windows, reads the O(1) ledger balance, and runs
+// the single spendgate EVAL that checks affordability + every window and places
+// the in-flight hold. No Postgres locks, no per-request budget reservation rows.
 package admission
 
 import (
@@ -46,11 +46,6 @@ type Admitter struct {
 	// nil disables it. invokerWastedWindows is the flat per-invoker backstop.
 	wasted               *abuse.WastedSpendGuard
 	invokerWastedWindows []abuse.WastedWindow
-
-	// cache is the optional process-local affordability cache (nil = read through
-	// every admit). It removes the per-admit ledger-balance aggregation read for
-	// hot payers; staleness is bounded (short TTL + deposit invalidation).
-	cache *BalanceCache
 }
 
 // NewAdmitter builds the admitter over the Redis gate + the Postgres→policy loader.
@@ -62,13 +57,6 @@ func NewAdmitter(moneySvc *money.MoneyService, gate *spendgate.Gate, loader *Spe
 func (a *Admitter) WithWastedSpend(guard *abuse.WastedSpendGuard, invokerWindows []abuse.WastedWindow) *Admitter {
 	a.wasted = guard
 	a.invokerWastedWindows = invokerWindows
-	return a
-}
-
-// WithBalanceCache attaches the process-local affordability cache (nil disables
-// it; admit then reads balance fresh every time).
-func (a *Admitter) WithBalanceCache(c *BalanceCache) *Admitter {
-	a.cache = c
 	return a
 }
 
@@ -155,29 +143,27 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyDelegatedSpendNotAllowed}, nil
 	}
 
-	// Unlocked balance + arrears credit line (the gate's affordability inputs),
-	// served from the short-TTL cache when warm. The settled balance is a growing
-	// ledger aggregation, so caching it is the highest-value read to elide.
-	available, creditLine, err := a.cache.Capacity(merchantID, req.CustomerID.UUID().String(), req.Currency, func() (int64, int64, error) {
-		return payerCapacity(ctx, a.money, req.CustomerID, req.Currency)
-	})
+	// Unlocked balance + arrears credit line (the gate's affordability inputs).
+	// Phase H makes the settled balance an O(1) ledger account read, so this stays
+	// direct and avoids a staleness window.
+	available, creditLine, err := payerCapacity(ctx, a.money, req.CustomerID, req.Currency)
 	if err != nil {
 		return AdmitDecision{}, err
 	}
 
 	dec, err := a.gate.Admit(ctx, spendgate.AdmitInput{
-		Merchant:      merchantID,
-		Customer:      req.CustomerID.UUID().String(),
-		Currency:      req.Currency,
-		RequestID:     req.SourceID,
-		Invoker:       req.Invoker,
-		Source:        req.Source,
-		Cost:          req.EstimatedAmount,
-		CachedBalance: available,
-		CreditLimit:   creditLine,
-		HoldTTL:       holdTTL(req.ExpiresAt),
-		Policy:        policy,
-		Request:       sgReq,
+		Merchant:       merchantID,
+		Customer:       req.CustomerID.UUID().String(),
+		Currency:       req.Currency,
+		RequestID:      req.SourceID,
+		Invoker:        req.Invoker,
+		Source:         req.Source,
+		Cost:           req.EstimatedAmount,
+		AccountBalance: available,
+		CreditLimit:    creditLine,
+		HoldTTL:        holdTTL(req.ExpiresAt),
+		Policy:         policy,
+		Request:        sgReq,
 	})
 	if err != nil {
 		return AdmitDecision{}, err
@@ -202,7 +188,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 }
 
 // roleStrings maps the invoker's role UUIDs to the strings the spendgate role
-// scope matches on (the scoped_spend_caps role scope key is the role uuid string).
+// scope matches on (the invoker_spend_limits role scope key is the role uuid string).
 func roleStrings(roles []uuid.UUID) []string {
 	out := make([]string, 0, len(roles))
 	for _, r := range roles {

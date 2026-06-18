@@ -8,7 +8,7 @@
 -- per-request reservation rows) and budget_window_state (the per-window anchor row
 -- taken FOR UPDATE) — are no longer read or written by any code path.
 --
--- openrails.scoped_spend_caps is KEPT: it stores the {scope, owner, windows[]} cap
+-- openrails.invoker_spend_limits is KEPT: it stores the {scope, owner, windows[]} cap
 -- CONFIG the admission policy loader reads into the spendgate policy.
 -- =============================================================================
 

@@ -319,6 +319,106 @@ func (l *Ledger) LiveGrants(ctx context.Context, customer uuid.UUID) ([]gen.Open
 	return l.q.ListLiveGrantsByCustomer(ctx, gen.ListLiveGrantsByCustomerParams{MerchantID: l.merchant, CustomerID: customer})
 }
 
+// MissingEffects returns the customer's live grants whose derived grant effects
+// are NOT fully materialized — the read-only detection behind the Convergence
+// Engine's `derive.grant_effect.missing` check (#511 DERIVE plane). The repair is
+// MaterializeGrant, which is idempotent, so re-running converges to empty.
+func (l *Ledger) MissingEffects(ctx context.Context, customer uuid.UUID) ([]gen.OpenrailsGrant, error) {
+	live, err := l.LiveGrants(ctx, customer)
+	if err != nil {
+		return nil, err
+	}
+	var missing []gen.OpenrailsGrant
+	for i := range live {
+		ok, err := l.isMaterialized(ctx, live[i])
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			missing = append(missing, live[i])
+		}
+	}
+	return missing, nil
+}
+
+// UnretractedTerminations returns the customer's TERMINATED grants whose derived
+// effect is still live — the detection behind `derive.grant_effect.excess` (#511):
+// a revoke/expire event was recorded but its retraction never propagated. The
+// repair is MaterializeGrant, which retracts a terminated grant (entitlement →
+// revoke window; credit → clawback to revoked_credits) — idempotent.
+func (l *Ledger) UnretractedTerminations(ctx context.Context, customer uuid.UUID) ([]gen.OpenrailsGrant, error) {
+	all, err := l.q.ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{MerchantID: l.merchant, CustomerID: customer})
+	if err != nil {
+		return nil, err
+	}
+	var out []gen.OpenrailsGrant
+	for i := range all {
+		g := all[i]
+		terminated, err := l.q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: l.merchant, GrantID: g.ID})
+		if err != nil {
+			return nil, err
+		}
+		if !terminated {
+			continue
+		}
+		live, err := l.effectStillLive(ctx, g)
+		if err != nil {
+			return nil, err
+		}
+		if live {
+			out = append(out, g)
+		}
+	}
+	return out, nil
+}
+
+// effectStillLive reports whether a grant's derived effect is still active: a
+// non-revoked entitlement window, or a credit lot with an unspent/unclawed
+// remainder. Ownership has no separate effect (handled by derive.grant.excess).
+func (l *Ledger) effectStillLive(ctx context.Context, g gen.OpenrailsGrant) (bool, error) {
+	switch Kind(g.Kind) {
+	case Entitlement:
+		return l.q.GrantHasLiveEntitlement(ctx, gen.GrantHasLiveEntitlementParams{MerchantID: l.merchant, GrantID: g.ID})
+	case Credit:
+		rem, err := l.q.GetCreditLotRemaining(ctx, gen.GetCreditLotRemainingParams{MerchantID: l.merchant, GrantID: g.ID})
+		if err != nil {
+			return false, err
+		}
+		return rem > 0, nil
+	default:
+		return false, nil
+	}
+}
+
+// isMaterialized reports whether a live grant's derived effect already exists:
+// every entitlement-feature window for an entitlement grant, the #512 deposit for
+// a credit grant; ownership grants have no separate effect (the grant row is it).
+func (l *Ledger) isMaterialized(ctx context.Context, g gen.OpenrailsGrant) (bool, error) {
+	switch Kind(g.Kind) {
+	case Entitlement:
+		feats, err := specFeatures(g.SpecSnapshot)
+		if err != nil {
+			return false, err
+		}
+		for _, f := range feats {
+			exists, err := l.q.EntitlementExistsForGrant(ctx, gen.EntitlementExistsForGrantParams{
+				MerchantID: l.merchant, GrantID: g.ID, Entitlement: f,
+			})
+			if err != nil {
+				return false, err
+			}
+			if !exists {
+				return false, nil
+			}
+		}
+		return true, nil
+	case Credit:
+		return l.q.GrantCreditDeposited(ctx, gen.GrantCreditDepositedParams{MerchantID: l.merchant, GrantID: g.ID})
+	default: // ownership / unknown — the grant row itself is the record
+		return true, nil
+	}
+}
+
 func specFeatures(raw []byte) ([]string, error) {
 	if len(raw) == 0 {
 		return nil, nil

@@ -162,6 +162,56 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 	return s.deriveBalance(ctx, s.db.Gen(ctx), tenantID, payerID, cur)
 }
 
+// AdmissionCapacity is the O(1) affordability snapshot consumed by the Redis
+// service-admit gate.
+type AdmissionCapacity struct {
+	Balance     int64
+	Held        int64
+	BillingMode string
+	CreditLimit int64
+}
+
+// GetAdmissionCapacity reads the admit hot-path capacity in one point lookup:
+// customer_balance counters plus optional money_settings. It deliberately does
+// not subtract outstanding owed; under the Phase-H model used credit is already
+// represented by a negative customer_balance.
+func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.CustomerID, currency string) (AdmissionCapacity, error) {
+	if s == nil || s.db == nil {
+		return AdmissionCapacity{}, fmt.Errorf("money service not initialized")
+	}
+	cur := normalizeUnit(currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
+		return AdmissionCapacity{}, err
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	tenantID := tid.UUID()
+	payerID := payer.UUID()
+	q := s.db.Gen(ctx)
+	if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
+		return AdmissionCapacity{}, err
+	}
+	if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
+		return AdmissionCapacity{}, err
+	}
+	row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
+		MerchantID: tenantID,
+		CustomerID: payerID,
+		Currency:   cur,
+	})
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	return AdmissionCapacity{
+		Balance:     row.Balance,
+		Held:        row.Held,
+		BillingMode: row.BillingMode,
+		CreditLimit: row.CreditLimitAmount,
+	}, nil
+}
+
 func (s *MoneyService) GetTransactions(ctx context.Context, invokerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
 	if s == nil || s.db == nil {
 		return nil, 0, fmt.Errorf("money service not initialized")

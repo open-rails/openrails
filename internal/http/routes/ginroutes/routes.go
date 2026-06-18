@@ -105,7 +105,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// Budget introspection (#304): spend-cap windows for a host /status dashboard.
 	group.GET("/budget", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetBudget))
 	// Tier policy admin (#298): configure a tier's throughput + entitled endpoints + money budgets.
-	group.PUT("/tier-spend-caps", creditsWrite, wrap(httphandlers.ServiceSetTierSpendCaps))
+	group.PUT("/payer-spend-limits", creditsWrite, wrap(httphandlers.ServiceSetPayerSpendLimits))
 	// Tier SCHEDULE admin (#476): declare the cumulative-spend ladder ONCE; OpenRails
 	// then auto-maintains each payer's tier (no host cranking of GraduateTier).
 	group.PUT("/tier-schedules", creditsWrite, wrap(httphandlers.ServiceSetTierSchedule))
@@ -124,14 +124,10 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// ceiling. Admin-gated (openrails:admin) — NOT self-serve. Read is credits:read.
 	group.PUT("/credit-limit", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), wrap(httphandlers.ServiceSetCreditLimit))
 	group.GET("/credit-limit", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetCreditLimit))
-	// Hierarchical budget-scope policies (#473). Subject-owned caps (self +
-	// (subject, role) pools) are written/read with the same operator credits
-	// gates as tier policies. The PLATFORM-owned payer cap is operator-admin
-	// gated (openrails:admin) — a subject's own surface can never reach it.
-	spendCaps := group.Group("/spend-caps")
-	spendCaps.PUT("/subject", creditsWrite, wrap(httphandlers.ServiceSetSubjectSpendCaps))
-	spendCaps.GET("/subject", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetSubjectSpendCaps))
-	spendCaps.PUT("/platform", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), wrap(httphandlers.ServiceSetPlatformSpendCaps))
+	// Per-invoker spend limits (#473/#517): the payer caps how much its delegated
+	// invokers/roles may spend. Written/read with the operator credits gates.
+	group.PUT("/invoker-spend-limits", creditsWrite, wrap(httphandlers.ServiceSetInvokerSpendLimits))
+	group.GET("/invoker-spend-limits", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerSpendLimits))
 
 	// Prepaid credit windows (#335): open reserves a bulk hold the host admits
 	// against locally; settle flushes cross-payer batches of actuals (idempotent

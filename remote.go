@@ -319,8 +319,8 @@ func (c *remote) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, c
 	return resp.Windows, nil
 }
 
-// SetTierSpendCaps implements Client (handler ServiceSetTierSpendCaps).
-func (c *remote) SetTierSpendCaps(ctx context.Context, tenantSubjectID string, in TierSpendCapInput) error {
+// SetPayerSpendLimits implements Client (handler ServiceSetPayerSpendLimits).
+func (c *remote) SetPayerSpendLimits(ctx context.Context, tenantSubjectID string, in PayerSpendLimitInput) error {
 	body := map[string]any{
 		"customer_id":     strings.TrimSpace(tenantSubjectID),
 		"tier":            in.Tier,
@@ -330,7 +330,7 @@ func (c *remote) SetTierSpendCaps(ctx context.Context, tenantSubjectID string, i
 	if len(in.BadSpendWindows) > 0 {
 		body["bad_spend_windows"] = in.BadSpendWindows
 	}
-	return c.do(ctx, http.MethodPut, "/v1/service/tier-spend-caps", body, nil)
+	return c.do(ctx, http.MethodPut, "/v1/service/payer-spend-limits", body, nil)
 }
 
 // SetTierSchedule implements Client (handler ServiceSetTierSchedule, #476).
@@ -438,8 +438,8 @@ func (c *remote) GetCreditLimit(ctx context.Context, tenantSubjectID, currency s
 	return resp.CreditLimitAmount, nil
 }
 
-// SetSubjectSpendCaps implements Client (handler ServiceSetSubjectSpendCaps, #473).
-func (c *remote) SetSubjectSpendCaps(ctx context.Context, tenantSubjectID string, in SubjectSpendCapInput) error {
+// SetInvokerSpendLimits implements Client (handler ServiceSetInvokerSpendLimits, #473).
+func (c *remote) SetInvokerSpendLimits(ctx context.Context, tenantSubjectID string, in InvokerSpendLimitInput) error {
 	scopeKey := strings.TrimSpace(in.ScopeKey)
 	if scopeKey == "" {
 		scopeKey = strings.TrimSpace(in.RoleID)
@@ -451,27 +451,17 @@ func (c *remote) SetSubjectSpendCaps(ctx context.Context, tenantSubjectID string
 		"role_id":     in.RoleID,
 		"windows":     in.Windows,
 	}
-	return c.do(ctx, http.MethodPut, "/v1/service/spend-caps/subject", body, nil)
+	return c.do(ctx, http.MethodPut, "/v1/service/invoker-spend-limits", body, nil)
 }
 
-// SetPlatformSpendCaps implements Client (handler ServiceSetPlatformSpendCaps, #473).
-func (c *remote) SetPlatformSpendCaps(ctx context.Context, tenantSubjectID string, in PlatformSpendCapInput) error {
-	body := map[string]any{
-		"customer_id": strings.TrimSpace(tenantSubjectID),
-		"scope":       in.Scope,
-		"windows":     in.Windows,
-	}
-	return c.do(ctx, http.MethodPut, "/v1/service/spend-caps/platform", body, nil)
-}
-
-// SubjectSpendCaps implements Client (handler ServiceGetSubjectSpendCaps, #473).
-func (c *remote) SubjectSpendCaps(ctx context.Context, tenantSubjectID string) ([]SubjectSpendCap, error) {
+// InvokerSpendLimits implements Client (handler ServiceGetInvokerSpendLimits, #473).
+func (c *remote) InvokerSpendLimits(ctx context.Context, tenantSubjectID string) ([]InvokerSpendLimit, error) {
 	q := url.Values{}
 	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
 	var resp struct {
-		Policies []SubjectSpendCap `json:"policies"`
+		Policies []InvokerSpendLimit `json:"policies"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/service/spend-caps/subject?"+q.Encode(), nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/service/invoker-spend-limits?"+q.Encode(), nil, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Policies, nil

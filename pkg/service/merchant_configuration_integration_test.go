@@ -62,8 +62,8 @@ func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, i
 	payerID := payer.UUID()
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.merchant_configurations")
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.scoped_spend_caps WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.tier_spend_caps WHERE customer_id IS NULL OR customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payer_spend_limits WHERE customer_id IS NULL OR customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payerID)
@@ -76,10 +76,10 @@ func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, i
 
 func grantDelegatedSpend(t *testing.T, svc *billingservice.Service, ctx context.Context, payer identity.CustomerID, invoker string) {
 	t.Helper()
-	require.NoError(t, svc.SetSubjectSpendCaps(ctx, payer, billingservice.ScopedSpendCapInput{
+	require.NoError(t, svc.SetInvokerSpendLimits(ctx, payer, billingservice.InvokerSpendLimitInput{
 		Scope:    "invoker",
 		ScopeKey: invoker,
-		Windows: []billingservice.SpendCapWindowInput{
+		Windows: []billingservice.SpendLimitWindowInput{
 			{Key: "delegated", WindowSeconds: 3600, Limit: 100_000_000},
 		},
 	}))
@@ -213,7 +213,7 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	payerBID := payerB.UUID()
 	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.scoped_spend_caps WHERE customer_id = $1", payerBID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerBID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerBID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerBID)
 	})
@@ -267,7 +267,7 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 func TestWastedSpendDirectPayer_GraceThenChargeIdempotently(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
 	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
-	require.NoError(t, svc.SetTierSpendCaps(ctx, identity.CustomerID{}, billingservice.TierSpendCapInput{
+	require.NoError(t, svc.SetPayerSpendLimits(ctx, identity.CustomerID{}, billingservice.PayerSpendLimitInput{
 		Tier: "free",
 		BadSpendWindows: []billingservice.TierBudgetWindowInput{
 			{Key: "burst", WindowSeconds: int64((15 * time.Minute) / time.Second), Limit: 1_000_000},
@@ -321,7 +321,7 @@ func TestWastedSpendDirectPayer_GraceThenChargeIdempotently(t *testing.T) {
 
 func TestWastedSpendDirectPayer_DoesNotHitDelegatedInvokerCutoff(t *testing.T) {
 	svc, _, payer, ctx := wastedSvcEnv(t)
-	require.NoError(t, svc.SetTierSpendCaps(ctx, identity.CustomerID{}, billingservice.TierSpendCapInput{
+	require.NoError(t, svc.SetPayerSpendLimits(ctx, identity.CustomerID{}, billingservice.PayerSpendLimitInput{
 		Tier: "free",
 		BadSpendWindows: []billingservice.TierBudgetWindowInput{
 			{Key: "burst", WindowSeconds: int64((15 * time.Minute) / time.Second), Limit: 10_000_000},

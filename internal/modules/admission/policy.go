@@ -20,18 +20,18 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// TierSpendCapStore loads + stores per-payer, per-tier admission policies
-// (openrails.tier_spend_caps). Account money state stays in money_accounts.
-type TierSpendCapStore struct {
+// PayerSpendLimitStore loads + stores per-payer, per-tier admission policies
+// (openrails.payer_spend_limits). Account money state stays in money_accounts.
+type PayerSpendLimitStore struct {
 	db *db.DB
 }
 
-func NewTierSpendCapStore(database *db.DB) *TierSpendCapStore {
-	return &TierSpendCapStore{db: database}
+func NewPayerSpendLimitStore(database *db.DB) *PayerSpendLimitStore {
+	return &PayerSpendLimitStore{db: database}
 }
 
-// TierSpendCaps is a tier's enforceable money policy.
-type TierSpendCaps struct {
+// PayerSpendLimits is a tier's enforceable money policy.
+type PayerSpendLimits struct {
 	BudgetWindows  []budgets.BudgetWindow
 	PolicyCurrency string
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
@@ -39,11 +39,11 @@ type TierSpendCaps struct {
 	BadSpendWindows []models.BudgetWindowPolicy
 }
 
-// UpsertTierSpendCapsFull sets the full tier money policy.
+// UpsertPayerSpendLimitsFull sets the full tier money policy.
 // A ZERO payer writes the TENANT-WIDE DEFAULT policy for the tier (#477): the
 // platform capacity ladder declared once, applied to every payer at that tier
-// (selected by GetTierSpendCaps when the payer has no own override).
-func (s *TierSpendCapStore) UpsertTierSpendCapsFull(ctx context.Context, payer identity.CustomerID, tier string, policy models.TierMoneyPolicy) error {
+// (selected by GetPayerSpendLimits when the payer has no own override).
+func (s *PayerSpendLimitStore) UpsertPayerSpendLimitsFull(ctx context.Context, payer identity.CustomerID, tier string, policy models.TierMoneyPolicy) error {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -57,7 +57,7 @@ func (s *TierSpendCapStore) UpsertTierSpendCapsFull(ctx context.Context, payer i
 		}
 		// Merchant-wide default (#477): no subject row to materialize, NULL subject.
 		if payer.IsZero() {
-			return s.db.Gen(ctx).UpsertTierSpendCapDefault(ctx, gen.UpsertTierSpendCapDefaultParams{
+			return s.db.Gen(ctx).UpsertPayerSpendLimitDefault(ctx, gen.UpsertPayerSpendLimitDefaultParams{
 				ID:            uuidutil.NewV7(),
 				MerchantID:    tenantID,
 				Tier:          tier,
@@ -68,12 +68,12 @@ func (s *TierSpendCapStore) UpsertTierSpendCapsFull(ctx context.Context, payer i
 			})
 		}
 		// Per-subject override: materialize the payable customers row so the
-		// tier_spend_caps FK (migration 076) is satisfied on first write (#317).
+		// payer_spend_limits FK (migration 076) is satisfied on first write (#317).
 		if _, err := repo.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
 			return err
 		}
 		subjectID := payer.UUID()
-		return s.db.Gen(ctx).UpsertTierSpendCap(ctx, gen.UpsertTierSpendCapParams{
+		return s.db.Gen(ctx).UpsertPayerSpendLimit(ctx, gen.UpsertPayerSpendLimitParams{
 			ID:            uuidutil.NewV7(),
 			MerchantID:    tenantID,
 			CustomerID:    &subjectID,
@@ -86,22 +86,22 @@ func (s *TierSpendCapStore) UpsertTierSpendCapsFull(ctx context.Context, payer i
 	})
 }
 
-// GetTierSpendCaps returns the enforceable money policy for (payer, tier). A
+// GetPayerSpendLimits returns the enforceable money policy for (payer, tier). A
 // missing row yields an empty policy.
-func (s *TierSpendCapStore) GetTierSpendCaps(ctx context.Context, payer identity.CustomerID, tier string) (TierSpendCaps, error) {
+func (s *PayerSpendLimitStore) GetPayerSpendLimits(ctx context.Context, payer identity.CustomerID, tier string) (PayerSpendLimits, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return TierSpendCaps{}, err
+		return PayerSpendLimits{}, err
 	}
 	tenantID := tid.UUID()
 	row := new(models.TierPolicy)
 	found := false
-	// GetTierSpendCaps resolves the payer's own override else the merchant-wide default
+	// GetPayerSpendLimits resolves the payer's own override else the merchant-wide default
 	// (NULL subject, #477). The query's subject predicate is `= $2 OR IS NULL`, so
 	// passing the payer uuid matches both the override and the default.
 	subjectID := payer.UUID()
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		genRow, e := s.db.Gen(ctx).GetTierSpendCaps(ctx, gen.GetTierSpendCapsParams{
+		genRow, e := s.db.Gen(ctx).GetPayerSpendLimits(ctx, gen.GetPayerSpendLimitsParams{
 			MerchantID: tenantID, CustomerID: &subjectID, Tier: tier,
 		})
 		if errors.Is(e, pgx.ErrNoRows) {
@@ -119,70 +119,67 @@ func (s *TierSpendCapStore) GetTierSpendCaps(ctx context.Context, payer identity
 		return nil
 	})
 	if err != nil {
-		return TierSpendCaps{}, err
+		return PayerSpendLimits{}, err
 	}
 	if !found {
-		return TierSpendCaps{}, nil
+		return PayerSpendLimits{}, nil
 	}
-	return TierSpendCaps{
+	return PayerSpendLimits{
 		BudgetWindows:   toBudgetWindows(row.Policy.BudgetWindows),
 		PolicyCurrency:  row.Policy.PolicyCurrency,
 		BadSpendWindows: row.Policy.BadSpendWindows,
 	}, nil
 }
 
-// ScopedSpendCapStore reads/writes hierarchical money-budget policies (#473) —
-// {scope, owner, windows[]} rows in openrails.scoped_spend_caps. The OWNER
-// discriminator is the write-authz split: SetSubjectSpendCaps may only write
-// owner='subject' rows; SetPlatformSpendCaps writes owner='platform' rows
-// (callable only from a platform-admin path); a subject's read MUST NOT expose
-// platform-owned rows. The admit path (LoadAll) reads ALL owners to compose.
-type ScopedSpendCapStore struct {
+// InvokerSpendLimitStore reads/writes per-invoker spend limits (#473/#517) —
+// {scope, scope_key, windows[]} rows in openrails.invoker_spend_limits. These are
+// the payer's own caps on its delegated invokers/roles (payer-set only). The admit
+// path (LoadAll) reads every scope to compose the verdict.
+type InvokerSpendLimitStore struct {
 	db *db.DB
 }
 
-func NewScopedSpendCapStore(database *db.DB) *ScopedSpendCapStore {
-	return &ScopedSpendCapStore{db: database}
+func NewInvokerSpendLimitStore(database *db.DB) *InvokerSpendLimitStore {
+	return &InvokerSpendLimitStore{db: database}
 }
 
-// ScopedSpendCap is one stored scope policy: {scope, owner, scopeKey,
-// windows[]}. scopeKey is the immutable role uuid (scope=role) / invoker string
-// (scope=invoker) / "" (scope=subject).
-type ScopedSpendCap struct {
+// InvokerSpendLimit is one stored limit: {scope, scopeKey, windows[]}. scopeKey is
+// the immutable role uuid (scope=role) / invoker string (scope=invoker) / tier key
+// (scope=invoker_tier).
+type InvokerSpendLimit struct {
 	Scope    string
-	Owner    string
 	ScopeKey string
 	Windows  []models.BudgetWindowPolicy
 }
 
-func scopedSpendCapFromGen(r gen.OpenrailsScopedSpendCap) (ScopedSpendCap, error) {
-	p := ScopedSpendCap{Scope: r.Scope, Owner: r.Owner, ScopeKey: r.ScopeKey}
+func invokerSpendLimitFromGen(r gen.OpenrailsInvokerSpendLimit) (InvokerSpendLimit, error) {
+	p := InvokerSpendLimit{Scope: r.Scope, ScopeKey: r.ScopeKey}
 	if len(r.Windows) > 0 {
 		if err := json.Unmarshal(r.Windows, &p.Windows); err != nil {
-			return ScopedSpendCap{}, fmt.Errorf("admission: decode budget policy windows: %w", err)
+			return InvokerSpendLimit{}, fmt.Errorf("admission: decode invoker spend-limit windows: %w", err)
 		}
 	}
 	return p, nil
 }
 
-// LoadAll returns every budget-scope policy for a subject regardless of owner
-// (the admit path composes all of them). Returns nil when none exist.
-func (s *ScopedSpendCapStore) LoadAll(ctx context.Context, payer identity.CustomerID) ([]ScopedSpendCap, error) {
+// LoadAll returns every invoker spend limit for a payer (the admit path composes
+// all of them). Returns nil when none exist.
+func (s *InvokerSpendLimitStore) LoadAll(ctx context.Context, payer identity.CustomerID) ([]InvokerSpendLimit, error) {
 	tid, terr := merchant.Require(ctx) // #336/#474: no default merchant
 	if terr != nil {
 		return nil, terr
 	}
 	tenantID := tid.UUID()
-	var out []ScopedSpendCap
+	var out []InvokerSpendLimit
 	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, e := s.db.Gen(ctx).ListScopedSpendCaps(ctx, gen.ListScopedSpendCapsParams{
+		rows, e := s.db.Gen(ctx).ListInvokerSpendLimits(ctx, gen.ListInvokerSpendLimitsParams{
 			MerchantID: tenantID, CustomerID: payer.UUID(),
 		})
 		if e != nil {
 			return e
 		}
 		for _, r := range rows {
-			p, derr := scopedSpendCapFromGen(r)
+			p, derr := invokerSpendLimitFromGen(r)
 			if derr != nil {
 				return derr
 			}
@@ -193,38 +190,8 @@ func (s *ScopedSpendCapStore) LoadAll(ctx context.Context, payer identity.Custom
 	return out, err
 }
 
-// LoadByOwner returns a subject's budget-scope policies for one owner only — the
-// subject-facing read uses owner="subject" so platform-owned caps are invisible.
-func (s *ScopedSpendCapStore) LoadByOwner(ctx context.Context, payer identity.CustomerID, owner string) ([]ScopedSpendCap, error) {
-	tid, terr := merchant.Require(ctx) // #336/#474: no default merchant
-	if terr != nil {
-		return nil, terr
-	}
-	tenantID := tid.UUID()
-	var out []ScopedSpendCap
-	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, e := s.db.Gen(ctx).ListScopedSpendCapsByOwner(ctx, gen.ListScopedSpendCapsByOwnerParams{
-			MerchantID: tenantID, CustomerID: payer.UUID(), Owner: owner,
-		})
-		if e != nil {
-			return e
-		}
-		for _, r := range rows {
-			p, derr := scopedSpendCapFromGen(r)
-			if derr != nil {
-				return derr
-			}
-			out = append(out, p)
-		}
-		return nil
-	})
-	return out, err
-}
-
-// Upsert writes one budget-scope policy. owner MUST be supplied by the caller's
-// authz path (SetSubjectSpendCaps / SetPlatformSpendCaps at the service
-// layer); this method does not itself decide authz.
-func (s *ScopedSpendCapStore) Upsert(ctx context.Context, payer identity.CustomerID, p ScopedSpendCap) error {
+// Upsert writes one invoker spend limit (payer-set).
+func (s *InvokerSpendLimitStore) Upsert(ctx context.Context, payer identity.CustomerID, p InvokerSpendLimit) error {
 	tid, terr := merchant.Require(ctx) // #336/#474: no default merchant
 	if terr != nil {
 		return terr
@@ -233,18 +200,17 @@ func (s *ScopedSpendCapStore) Upsert(ctx context.Context, payer identity.Custome
 	now := time.Now().UTC()
 	windowsJSON, err := json.Marshal(p.Windows)
 	if err != nil {
-		return fmt.Errorf("admission: encode budget policy windows: %w", err)
+		return fmt.Errorf("admission: encode invoker spend-limit windows: %w", err)
 	}
 	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		if _, err := repo.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
 			return err
 		}
-		return s.db.Gen(ctx).UpsertScopedSpendCap(ctx, gen.UpsertScopedSpendCapParams{
+		return s.db.Gen(ctx).UpsertInvokerSpendLimit(ctx, gen.UpsertInvokerSpendLimitParams{
 			ID:            uuidutil.NewV7(),
 			MerchantID:    tenantID,
 			CustomerID:    payer.UUID(),
 			Scope:         budgets.NormalizeScope(p.Scope), // #491: store canonical invoker
-			Owner:         p.Owner,
 			ScopeKey:      p.ScopeKey,
 			Windows:       windowsJSON,
 			PolicyVersion: 1,
@@ -254,18 +220,17 @@ func (s *ScopedSpendCapStore) Upsert(ctx context.Context, payer identity.Custome
 	})
 }
 
-// Delete removes one budget-scope policy (owner-qualified so a subject path
-// cannot delete a platform-owned row).
-func (s *ScopedSpendCapStore) Delete(ctx context.Context, payer identity.CustomerID, scope, owner, scopeKey string) error {
+// Delete removes one invoker spend limit.
+func (s *InvokerSpendLimitStore) Delete(ctx context.Context, payer identity.CustomerID, scope, scopeKey string) error {
 	tid, terr := merchant.Require(ctx) // #336/#474: no default merchant
 	if terr != nil {
 		return terr
 	}
 	tenantID := tid.UUID()
 	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		_, err := s.db.Gen(ctx).DeleteScopedSpendCap(ctx, gen.DeleteScopedSpendCapParams{
+		_, err := s.db.Gen(ctx).DeleteInvokerSpendLimit(ctx, gen.DeleteInvokerSpendLimitParams{
 			MerchantID: tenantID, CustomerID: payer.UUID(),
-			Scope: budgets.NormalizeScope(scope), Owner: owner, ScopeKey: scopeKey,
+			Scope: budgets.NormalizeScope(scope), ScopeKey: scopeKey,
 		})
 		return err
 	})

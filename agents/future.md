@@ -1101,3 +1101,78 @@ Today a Solana payment lands in the recipient ("pull") wallet, the **fiat produc
 - Reuses the shipped Pyth price provider + `internal/integrations/fx`.
 - Distinct from **#515** (that's converting between a *customer's* currency wallets; this is *merchant* treasury management of received crypto) but shares the swap/rate machinery.
 - The holdings ledger's basis-at-receipt is the durable form of the "persist the quote snapshot on the payment" idea noted in #515.
+
+---
+
+# #517: Provider-absence tombstones for local-only provider mirror rows
+
+**Completed:** no — future direction only.
+
+Active #511 deliberately does **not** emit or repair `pull.*.excess`. A local payment/subscription/refund/dispute/vault
+row that is not returned by a provider pull is not reliably wrong:
+
+- the provider may not expose a complete all-time history;
+- report/export endpoints may have retention windows or date-window limits;
+- the pull may have failed pagination or used a partial current-state endpoint;
+- the local row may be attributed to provider/account A while the pull checked provider/account B;
+- old imports may have incomplete provider identifiers or copied/off-platform records.
+
+This issue captures the later, stricter design if OpenRails ever wants to handle confirmed provider absence. Until then,
+the reconcile/pull command should materialize missing provider facts and overwrite mismatched provider-owned fields, but
+should ignore local-only provider mirror rows.
+
+## Target Model
+
+Provider absence is a verifier result, not a normal list-diff result. Only create `pull.*.excess` when a provider-specific
+absence contract proves the local mirror cannot correspond to a real provider object.
+
+If that bar is met, do not hard-delete and do not add generic `deleted_on` / `deleted_at` columns to provider mirrors.
+Provider mirror rows are audit evidence. Add explicit tombstones instead:
+
+- `invalidated_at timestamptz`
+- `invalidated_reason text`
+- `invalidated_by_finding_id uuid REFERENCES openrails.reconciliation_findings(id)`
+- `provider_absence_confirmed_at timestamptz`
+- `provider_absence_evidence jsonb`
+
+For payments, an invalidated row is no longer a live source event for grants, entitlements, credits, invoice settlement,
+or consistency math. DERIVE/LIFE/CON then clean up consequences through append-only paths.
+
+## Questions To Resolve
+
+- Which provider APIs can prove absence strongly enough?
+  Stripe direct object lookup may be stronger than list absence; NMI reports may be weaker.
+- What is the minimum evidence contract per provider/resource?
+  Account fingerprint, provider id, endpoint, pagination, date window, request id, and direct lookup result likely matter.
+- Should `pull.*.excess` exist at all, or should provider-absence verification only write tombstones plus operator notes?
+- Which tables need tombstones first?
+  Likely `payments`, then `payment_methods`; refund/dispute storage should wait until the concrete mirror tables are settled.
+- How should historical imports with missing provider attribution be excluded from absence checks?
+- Should this ever auto-apply, or should it always be operator-reviewed?
+
+## Tasks
+
+- [ ] Inventory provider capabilities for direct object lookup vs list/report absence:
+      Stripe charges/refunds/disputes/payment methods/subscriptions, NMI/Mobius transactions/subscriptions/vault,
+      CCBill transactions/subscriptions, and Solana signatures/references.
+- [ ] Define a provider-specific absence authority contract.
+- [ ] Add provider account fingerprint requirements to absence checks.
+- [ ] Add tombstone columns to `payments` first if `pull.charge.excess` is approved.
+- [ ] Add equivalent tombstone columns to `payment_methods` only if vault absence can be proven usefully.
+- [ ] Defer refund/dispute tombstones until refund/dispute mirror storage is concrete.
+- [ ] Ensure invalidated payments are excluded from live source-event queries used by grants, entitlements, credits,
+      invoice settlement, and consistency math.
+- [ ] Ensure invalidation never mutates balances directly; money corrections stay append-only.
+- [ ] Add operator-facing evidence rendering for any provider-absence finding or tombstone.
+- [ ] Add tests proving list/report absence alone does not tombstone a local row.
+- [ ] Add tests proving wrong-provider/wrong-account pulls cannot tombstone a row.
+- [ ] Add tests proving an invalidated payment stops acting as a live grant source while preserving audit history.
+
+## Acceptance
+
+- Active reconcile remains conservative: local-only provider mirrors are ignored unless a provider-specific verifier proves
+  absence.
+- No generic `deleted_on` / `deleted_at` columns are added for provider mirror rows.
+- Tombstoned rows remain queryable as audit evidence.
+- Invalidated payments no longer produce grants, entitlements, credits, invoice settlement, or consistency math inputs.
+- All destructive consequences are produced by DERIVE/LIFE/CON through append-only repair paths, not by hard deletion.

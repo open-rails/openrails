@@ -72,3 +72,20 @@ UPDATE openrails.checkout_sessions
 SET status = 'expired', updated_at = sqlc.arg(now)
 WHERE expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
   AND status IN ('created', 'requires_action');
+
+-- #511 LIFE plane (life.checkout_session.stale): expired-but-not-terminal
+-- checkout sessions for a scope. Detection (read-only) for the Convergence Engine.
+-- name: ListStaleCheckoutSessions :many
+SELECT id FROM openrails.checkout_sessions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
+  AND expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
+  AND status IN ('created', 'requires_action')
+ORDER BY expires_at;
+
+-- name: ExpireCheckoutSessionByID :execrows
+-- Repair for life.checkout_session.stale: mark one stale session expired.
+UPDATE openrails.checkout_sessions
+SET status = 'expired', updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND status IN ('created', 'requires_action');

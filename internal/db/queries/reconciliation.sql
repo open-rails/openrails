@@ -373,3 +373,45 @@ SET last_four = COALESCE(NULLIF(sqlc.arg(last_four)::text, ''), last_four),
 WHERE id = sqlc.arg(id)
   AND (last_four IS DISTINCT FROM NULLIF(sqlc.arg(last_four)::text, '')
        OR expiry_date IS DISTINCT FROM NULLIF(sqlc.arg(expiry_date)::text, ''));
+
+-- #511 Convergence Engine: per-(merchant, source_domain) confirmed-absence gate.
+
+-- name: UpsertReconciliationState :one
+-- Mark a source domain's reconciliation watermark. Pass fully_reconciled=true +
+-- last_full_pull_at after a completed authoritative pull/import for that domain.
+INSERT INTO openrails.reconciliation_state (
+    merchant_id, source_domain, fully_reconciled, last_full_pull_at, updated_at
+) VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(source_domain)::text,
+    sqlc.arg(fully_reconciled)::boolean, sqlc.narg(last_full_pull_at)::timestamptz, now()
+)
+ON CONFLICT (merchant_id, source_domain) DO UPDATE SET
+    fully_reconciled = EXCLUDED.fully_reconciled,
+    last_full_pull_at = COALESCE(EXCLUDED.last_full_pull_at, openrails.reconciliation_state.last_full_pull_at),
+    updated_at = now()
+RETURNING *;
+
+-- name: ListReconciliationState :many
+SELECT * FROM openrails.reconciliation_state
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+ORDER BY source_domain;
+
+-- name: IsSourceDomainReconciled :one
+-- The confirmed-absence gate (§3.2): is this source domain proven fully
+-- reconciled for the merchant? Absent row = not yet reconciled = false.
+SELECT COALESCE((
+    SELECT fully_reconciled FROM openrails.reconciliation_state
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+      AND source_domain = sqlc.arg(source_domain)::text
+), false) AS fully_reconciled;
+
+-- #511 LIFE plane (life.subscription.grace_exhausted): past_due subscriptions
+-- whose grace window has elapsed — they should be terminal. Scope-aware detection.
+-- name: ListGraceExhaustedSubscriptions :many
+SELECT id, customer_id, grace_ends_at FROM openrails.subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
+  AND status = 'past_due'
+  AND grace_ends_at IS NOT NULL
+  AND grace_ends_at < sqlc.arg(now)::timestamptz
+ORDER BY grace_ends_at;

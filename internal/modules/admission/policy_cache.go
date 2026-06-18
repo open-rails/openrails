@@ -10,26 +10,26 @@ import (
 // read-mostly config — it changes only when an admin/payer edits a cap, never on
 // the spend path. So a cap edit simply takes effect within the TTL; there's no
 // over-admission risk from stale config (the COUNTERS that meter spend live in
-// Redis and are always live). Like the balance cache: pure TTL, no invalidation.
-const DefaultPolicyCacheTTL = 10 * time.Minute
+// Redis and are always live). Pure TTL, no invalidation.
+const DefaultPolicyCacheTTL = 15 * time.Minute
 
 // policyCacheSweepThreshold caps each map: once it grows past this, a miss sweeps
 // expired entries (bounds memory without a background goroutine).
 const policyCacheSweepThreshold = 8192
 
 type tierCacheEntry struct {
-	pol TierSpendCaps
+	pol PayerSpendLimits
 	exp time.Time
 }
 
 type scopeCacheEntry struct {
-	pols []ScopedSpendCap
+	pols []InvokerSpendLimit
 	exp  time.Time
 }
 
 // PolicyCache is a process-local, long-TTL cache of the admit POLICY config: the
-// per-tier spend-cap windows (`tier_spend_caps`) and the hierarchical
-// delegated-spend caps (`scoped_spend_caps`). It caches the read-mostly CONFIG —
+// per-tier spend-cap windows (`payer_spend_limits`) and the hierarchical
+// delegated-spend caps (`invoker_spend_limits`). It caches the read-mostly CONFIG —
 // not the live spend counters (those stay in Redis) — so the admit hot path can
 // skip both config reads on a warm payer. Nil-safe: a nil *PolicyCache reads
 // through every time.
@@ -61,9 +61,9 @@ func (c *PolicyCache) SetClock(now func() time.Time) {
 	}
 }
 
-// TierSpendCaps returns the cached per-tier spend-cap policy for (merchant, payer,
+// PayerSpendLimits returns the cached per-tier spend-cap policy for (merchant, payer,
 // tier), loading via load() on a miss. Nil receiver reads through.
-func (c *PolicyCache) TierSpendCaps(merchant, payer, tier string, load func() (TierSpendCaps, error)) (TierSpendCaps, error) {
+func (c *PolicyCache) PayerSpendLimits(merchant, payer, tier string, load func() (PayerSpendLimits, error)) (PayerSpendLimits, error) {
 	if c == nil {
 		return load()
 	}
@@ -79,7 +79,7 @@ func (c *PolicyCache) TierSpendCaps(merchant, payer, tier string, load func() (T
 
 	pol, err := load()
 	if err != nil {
-		return TierSpendCaps{}, err
+		return PayerSpendLimits{}, err
 	}
 
 	c.mu.Lock()
@@ -95,9 +95,9 @@ func (c *PolicyCache) TierSpendCaps(merchant, payer, tier string, load func() (T
 	return pol, nil
 }
 
-// ScopedSpendCaps returns the cached delegated-spend caps for (merchant, payer),
+// InvokerSpendLimits returns the cached delegated-spend caps for (merchant, payer),
 // loading via load() on a miss. Nil receiver reads through.
-func (c *PolicyCache) ScopedSpendCaps(merchant, payer string, load func() ([]ScopedSpendCap, error)) ([]ScopedSpendCap, error) {
+func (c *PolicyCache) InvokerSpendLimits(merchant, payer string, load func() ([]InvokerSpendLimit, error)) ([]InvokerSpendLimit, error) {
 	if c == nil {
 		return load()
 	}

@@ -1,5 +1,5 @@
 -- #512 double-entry immutable money ledger (ledger_accounts + ledger_transfers).
--- Balances are DERIVED here, never stored. Transfers are append-only.
+-- Balances are O(1) maintained counters on accounts; transfers are append-only.
 
 -- name: GetLedgerAccount :one
 SELECT * FROM openrails.ledger_accounts
@@ -22,11 +22,13 @@ RETURNING *;
 -- name: InsertLedgerTransfer :one
 INSERT INTO openrails.ledger_transfers (
     merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, phase, pending_id,
+    allow_debit_negative_up_to,
     source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(debit_account_id)::uuid, sqlc.arg(credit_account_id)::uuid,
     sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(transfer_type)::text, sqlc.arg(phase)::text,
     sqlc.narg(pending_id)::uuid,
+    sqlc.arg(allow_debit_negative_up_to)::bigint,
     sqlc.narg(source)::text, sqlc.narg(source_id)::text, sqlc.narg(grant_id)::uuid, sqlc.narg(customer_id)::uuid,
     sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(invoice_id)::uuid
 )
@@ -46,28 +48,20 @@ SELECT EXISTS (
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND pending_id = sqlc.arg(pending_id)::uuid
 ) AS resolved;
 
--- LedgerAccountBalance: net credit (credits - debits) over posted+post_pending
--- transfers — the account's derived, spendable balance.
+-- LedgerAccountBalance: net credit (credits - debits) from maintained account
+-- counters. This is the Phase H O(1) replacement for summing ledger_transfers.
 -- name: LedgerAccountBalance :one
-SELECT (
-    COALESCE(SUM(amount) FILTER (WHERE credit_account_id = sqlc.arg(account_id)::uuid AND phase IN ('posted', 'post_pending')), 0)
-    - COALESCE(SUM(amount) FILTER (WHERE debit_account_id = sqlc.arg(account_id)::uuid AND phase IN ('posted', 'post_pending')), 0)
-)::bigint AS balance
-FROM openrails.ledger_transfers
+SELECT (credits_posted - debits_posted)::bigint AS balance
+FROM openrails.ledger_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (debit_account_id = sqlc.arg(account_id)::uuid OR credit_account_id = sqlc.arg(account_id)::uuid);
+  AND id = sqlc.arg(account_id)::uuid;
 
--- LedgerAccountHeld: sum of unresolved pending debits against the account (a
--- two-phase hold reserves balance until it is posted or voided).
+-- LedgerAccountHeld: unresolved pending debits from maintained account counters.
 -- name: LedgerAccountHeld :one
-SELECT COALESCE(SUM(p.amount), 0)::bigint AS held
-FROM openrails.ledger_transfers p
-WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND p.debit_account_id = sqlc.arg(account_id)::uuid
-  AND p.phase = 'pending'
-  AND NOT EXISTS (
-      SELECT 1 FROM openrails.ledger_transfers r WHERE r.pending_id = p.id
-  );
+SELECT debits_pending::bigint AS held
+FROM openrails.ledger_accounts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id = sqlc.arg(account_id)::uuid;
 
 -- ListLedgerTransfersByCustomer: a customer's money-movement history (newest
 -- first, paginated) — the source for GetTransactions after the single-entry
@@ -138,16 +132,64 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND created_at < sqlc.arg(period_to)::timestamptz
 GROUP BY transfer_type;
 
--- LedgerLedgerNet: conservation check — the sum of every account's net balance
--- in a (merchant, currency) ledger. Double-entry guarantees this is 0.
+-- LedgerLedgerNet: conservation check from maintained counters. Double-entry
+-- guarantees this is 0 when the projection is in sync.
 -- name: LedgerLedgerNet :one
-SELECT COALESCE(SUM(net), 0)::bigint AS net FROM (
+SELECT COALESCE(SUM(credits_posted - debits_posted), 0)::bigint AS net
+FROM openrails.ledger_accounts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND currency = sqlc.arg(currency)::text;
+
+-- LedgerAccountCounterDrift: hard-gate invariant for the maintained account
+-- counters. Any row returned means ledger_accounts drifted from the immutable
+-- transfer log.
+-- name: LedgerAccountCounterDrift :many
+WITH actual AS (
     SELECT
-        COALESCE(SUM(t.amount) FILTER (WHERE t.credit_account_id = a.id AND t.phase IN ('posted', 'post_pending')), 0)
-        - COALESCE(SUM(t.amount) FILTER (WHERE t.debit_account_id = a.id AND t.phase IN ('posted', 'post_pending')), 0) AS net
+        a.id,
+        COALESCE(SUM(t.amount) FILTER (
+            WHERE t.credit_account_id = a.id AND t.phase IN ('posted', 'post_pending')
+        ), 0)::bigint AS credits_posted,
+        COALESCE(SUM(t.amount) FILTER (
+            WHERE t.debit_account_id = a.id AND t.phase IN ('posted', 'post_pending')
+        ), 0)::bigint AS debits_posted,
+        COALESCE(SUM(t.amount) FILTER (
+            WHERE t.credit_account_id = a.id
+              AND t.phase = 'pending'
+              AND NOT EXISTS (
+                  SELECT 1 FROM openrails.ledger_transfers r
+                  WHERE r.merchant_id = t.merchant_id AND r.pending_id = t.id
+              )
+        ), 0)::bigint AS credits_pending,
+        COALESCE(SUM(t.amount) FILTER (
+            WHERE t.debit_account_id = a.id
+              AND t.phase = 'pending'
+              AND NOT EXISTS (
+                  SELECT 1 FROM openrails.ledger_transfers r
+                  WHERE r.merchant_id = t.merchant_id AND r.pending_id = t.id
+              )
+        ), 0)::bigint AS debits_pending
     FROM openrails.ledger_accounts a
     LEFT JOIN openrails.ledger_transfers t
-        ON t.merchant_id = a.merchant_id AND (t.debit_account_id = a.id OR t.credit_account_id = a.id)
-    WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.currency = sqlc.arg(currency)::text
+      ON t.merchant_id = a.merchant_id
+     AND (t.debit_account_id = a.id OR t.credit_account_id = a.id)
+    WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND a.currency = sqlc.arg(currency)::text
     GROUP BY a.id
-) s;
+)
+SELECT
+    a.id,
+    (a.credits_posted - actual.credits_posted)::bigint AS credits_posted_delta,
+    (a.debits_posted - actual.debits_posted)::bigint AS debits_posted_delta,
+    (a.credits_pending - actual.credits_pending)::bigint AS credits_pending_delta,
+    (a.debits_pending - actual.debits_pending)::bigint AS debits_pending_delta
+FROM openrails.ledger_accounts a
+JOIN actual ON actual.id = a.id
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND a.currency = sqlc.arg(currency)::text
+  AND (
+      a.credits_posted <> actual.credits_posted
+      OR a.debits_posted <> actual.debits_posted
+      OR a.credits_pending <> actual.credits_pending
+      OR a.debits_pending <> actual.debits_pending
+  );

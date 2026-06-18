@@ -75,7 +75,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 			}
 		}
 
-		_, _, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount)
+		_, _, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount, false)
 		return serr
 	})
 }
@@ -84,6 +84,14 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 // The in-flight authorization itself lives in Redis; this method only posts the
 // actual charge and is idempotent on (merchant, payer, currency, source,
 // source_id).
+//
+// #513 decision 8: capture RECORDS REALITY UNCONDITIONALLY. The Redis spendgate
+// at admit time is the ONLY gate, and concurrent admits may bounded-over-admit.
+// Capture therefore must NOT re-gate the credit line: it draws the prepaid
+// balance first and records any remainder as owed/overdraft (even for a prepaid
+// payer with no credit line — an involuntary overdraft that is reconciled later).
+// Re-gating here would mean "served but can't charge", which is deterministic on
+// idempotent retry and a hard failure for the caller.
 func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams) (*models.MoneyTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -132,7 +140,7 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 			return gerr
 		}
 
-		if _, _, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount); serr != nil {
+		if _, _, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount, true); serr != nil {
 			return serr
 		}
 		// The durable spend is the first transfer at these coordinates (the
@@ -159,12 +167,22 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 // spendBalanceThenOwedTx debits `amount` within an existing tx: it draws the
 // prepaid balance first (FIFO credit lots → #512 ledger spend transfers) and
 // accrues any remainder to pending invoice items + an arrears-liability ledger
-// transfer, gated by the account's credit line. The caller must have already
-// locked the balance row (serialization point) and handled idempotency. Returns
-// the amounts drawn from balance and accrued to owed (either may be 0).
+// transfer. The caller must have already locked the balance row (serialization
+// point) and handled idempotency. Returns the amounts drawn from balance and
+// accrued to owed (either may be 0).
+//
+// preAuthorized selects the gating contract:
+//   - false (immediate SpendCredits): the remainder is GATED by the account's
+//     credit line — a prepaid payer (no/zero credit line) or a spend that would
+//     push owed past the line is rejected with ErrInsufficientCredits, and
+//     nothing is debited.
+//   - true (capture of a pre-authorized hold, #513 decision 8): NEVER re-gates.
+//     The remainder is recorded as owed/overdraft unconditionally — including for
+//     a prepaid payer with no credit line (an involuntary overdraft). The Redis
+//     spendgate at admit time was the only gate; capture records reality.
 func (s *MoneyService) spendBalanceThenOwedTx(
 	ctx context.Context, q *gen.Queries, payer identity.CustomerID,
-	userID, currency, source, sourceID string, amount int64,
+	userID, currency, source, sourceID string, amount int64, preAuthorized bool,
 ) (balanceSpent, owedAccrued int64, err error) {
 	if amount <= 0 {
 		return 0, 0, fmt.Errorf("amount must be positive")
@@ -192,31 +210,41 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	}
 	fromOwed := amount - fromBalance
 
-	// The remainder can only go to owed when the account has a credit line.
 	if fromOwed > 0 {
-		settingsRow, serr := q.LockMoneyAccountSettings(ctx, gen.LockMoneyAccountSettingsParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-		})
-		if errors.Is(serr, pgx.ErrNoRows) {
-			// No settings row => prepaid default => no credit line.
-			return 0, 0, ErrInsufficientCredits
-		}
-		if serr != nil {
-			return 0, 0, serr
-		}
-		settings := settingsFromGen(settingsRow)
-		if settings.BillingMode != BillingModeArrears {
-			return 0, 0, ErrInsufficientCredits // prepay-only: credit limit 0
-		}
-		if settings.CreditLimitAmount <= 0 {
-			return 0, 0, ErrInsufficientCredits
-		}
-		exposure, eerr := s.arrearsExposureTx(ctx, q, tenantID, payerID, cur)
-		if eerr != nil {
-			return 0, 0, eerr
-		}
-		if exposure+fromOwed > settings.CreditLimitAmount {
-			return 0, 0, ErrInsufficientCredits // would exceed the credit line
+		if preAuthorized {
+			// Pre-authorized capture never re-gates: the remainder becomes
+			// owed/overdraft regardless of the credit line. Ensure a settings row
+			// exists so the owed accrual has a home (mirrors the arrears flow).
+			if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModeArrears, now); err != nil {
+				return 0, 0, err
+			}
+		} else {
+			// Immediate spend: the remainder can only go to owed when the account
+			// has a credit line, and only up to that line.
+			settingsRow, serr := q.LockMoneyAccountSettings(ctx, gen.LockMoneyAccountSettingsParams{
+				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+			})
+			if errors.Is(serr, pgx.ErrNoRows) {
+				// No settings row => prepaid default => no credit line.
+				return 0, 0, ErrInsufficientCredits
+			}
+			if serr != nil {
+				return 0, 0, serr
+			}
+			settings := settingsFromGen(settingsRow)
+			if settings.BillingMode != BillingModeArrears {
+				return 0, 0, ErrInsufficientCredits // prepay-only: credit limit 0
+			}
+			if settings.CreditLimitAmount <= 0 {
+				return 0, 0, ErrInsufficientCredits
+			}
+			exposure, eerr := s.arrearsExposureTx(ctx, q, tenantID, payerID, cur)
+			if eerr != nil {
+				return 0, 0, eerr
+			}
+			if exposure+fromOwed > settings.CreditLimitAmount {
+				return 0, 0, ErrInsufficientCredits // would exceed the credit line
+			}
 		}
 	}
 
@@ -245,75 +273,4 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	}
 
 	return balanceSpent, owedAccrued, nil
-}
-
-func nullStr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-// captureSettleTx settles a captured hold's actual amount balance-first-then-owed
-// (#302): it draws min(amount, availableAfter) from the prepaid balance/blocks
-// and spills any remainder to pending invoice items (the arrears credit line). This is
-// what lets a hold placed against an arrears credit line capture even when the
-// balance can't cover it. availableAfter is the available balance AFTER this
-// hold's reservation has been released. The capture is pre-authorized, so this
-// never re-gates. Returns the post-settlement balance.
-func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, userID, currency, source, sourceID string, amount, availableAfter int64) (int64, error) {
-	now := s.now()
-	cur := normalizeCurrency(currency)
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return 0, err
-	}
-	tenantID := tid.UUID()
-	payerID := payer.UUID()
-	if availableAfter < 0 {
-		availableAfter = 0
-	}
-	fromBalance := amount
-	if fromBalance > availableAfter {
-		fromBalance = availableAfter
-	}
-	fromOwed := amount - fromBalance
-
-	var newBal int64
-	if fromBalance > 0 {
-		nb, err := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, cur, source, sourceID, "", fromBalance)
-		if err != nil {
-			return 0, err
-		}
-		newBal = nb
-	} else {
-		// Nothing drawn from balance (full spill to owed): report the derived
-		// spendable total unchanged (#491).
-		b, err := s.deriveBalance(ctx, q, tenantID, payerID, cur)
-		if err != nil {
-			return 0, err
-		}
-		newBal = b.Balance
-	}
-
-	if fromOwed > 0 {
-		// Only reachable for an arrears credit line (a prepaid hold reserves balance).
-		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModeArrears, now); err != nil {
-			return 0, err
-		}
-		itemSourceID := sourceID
-		if itemSourceID == "" {
-			itemSourceID = fmt.Sprintf("capture:%s:%d", payerID.String(), now.UnixNano())
-		}
-		ml := s.moneyLedger(q, tenantID)
-		if _, err := ml.AccrueOwed(ctx, payerID, cur, fromOwed, source, itemSourceID, nil); err != nil {
-			return 0, err
-		}
-		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+itemSourceID, nil, fromOwed, now, map[string]any{
-			"source": source,
-		}); err != nil {
-			return 0, err
-		}
-	}
-	return newBal, nil
 }

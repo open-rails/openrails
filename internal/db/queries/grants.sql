@@ -168,3 +168,14 @@ SET revoked_at = sqlc.arg(revoked_at)::timestamptz,
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND source_type = 'grant' AND source_id = sqlc.arg(grant_id)::uuid
   AND revoked_at IS NULL AND deleted_at IS NULL;
+
+-- GrantHasLiveEntitlement: does this grant still have a non-revoked entitlement
+-- window? Used by the Convergence Engine to detect `derive.grant_effect.excess`
+-- (a terminated grant whose entitlement effect was never retracted).
+-- name: GrantHasLiveEntitlement :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.entitlements
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+      AND source_type = 'grant' AND source_id = sqlc.arg(grant_id)::uuid
+      AND revoked_at IS NULL AND deleted_at IS NULL
+) AS exists;

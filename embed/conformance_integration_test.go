@@ -145,7 +145,7 @@ type obsBudgetPolicy struct {
 	Windows []obsBudgetPolicyWindow
 }
 
-func observeBudgetPolicies(ps []openrails.SubjectSpendCap) []obsBudgetPolicy {
+func observeBudgetPolicies(ps []openrails.InvokerSpendLimit) []obsBudgetPolicy {
 	out := make([]obsBudgetPolicy, 0, len(ps))
 	for _, p := range ps {
 		o := obsBudgetPolicy{Scope: p.Scope, RoleID: p.RoleID}
@@ -216,7 +216,7 @@ type scriptResult struct {
 	BudgetStatus []obsBudget
 
 	// Hierarchical budget-scope policies on the unified client (#473).
-	SubjectSpendCaps []obsBudgetPolicy
+	InvokerSpendLimits []obsBudgetPolicy
 
 	// Merchant-configured flat delegated-invoker wasted-spend windows: the
 	// configured limit + over-budget state observed via AbuseUsage.
@@ -422,16 +422,16 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	roleID := uuid.New().String()
 	roleUUID, err := uuid.Parse(roleID)
 	require.NoError(t, err, "%s parse role id", env.side)
-	require.NoError(t, c.SetTierSpendCaps(ctx, payerID, openrails.TierSpendCapInput{
+	require.NoError(t, c.SetPayerSpendLimits(ctx, payerID, openrails.PayerSpendLimitInput{
 		Tier: "conf",
 		BudgetWindows: []openrails.BudgetWindowInput{
 			{Key: "hourly", WindowSeconds: 3600, Limit: 10_000, Cadence: "fixed"},
 		},
 	}), "%s set-tier-policy", env.side)
-	require.NoError(t, c.SetSubjectSpendCaps(ctx, payerID, openrails.SubjectSpendCapInput{
+	require.NoError(t, c.SetInvokerSpendLimits(ctx, payerID, openrails.InvokerSpendLimitInput{
 		Scope:  "role",
 		RoleID: roleID,
-		Windows: []openrails.SpendCapWindow{
+		Windows: []openrails.SpendLimitWindow{
 			{Key: "hourly", WindowSeconds: 3600, Limit: 10_000, Cadence: "fixed"},
 		},
 	}), "%s set-subject-budget-policy (admit role)", env.side)
@@ -752,34 +752,29 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// new methods, then read back ONLY the subject-owned ones (the platform cap
 	// stays invisible to the subject surface). Runs LAST so the stored caps never
 	// gate the admit steps above. role uuid is per-side -> normalized to compare.
-	require.NoError(t, c.SetSubjectSpendCaps(ctx, payerID, openrails.SubjectSpendCapInput{
-		Scope: "subject",
-		Windows: []openrails.SpendCapWindow{
-			{Key: "subj-daily", WindowSeconds: 86400, Limit: 50_000, Cadence: "fixed"},
+	require.NoError(t, c.SetInvokerSpendLimits(ctx, payerID, openrails.InvokerSpendLimitInput{
+		Scope:    "invoker",
+		ScopeKey: "user:conformance",
+		Windows: []openrails.SpendLimitWindow{
+			{Key: "inv-daily", WindowSeconds: 86400, Limit: 50_000, Cadence: "fixed"},
 		},
-	}), "%s set-subject-budget-policy (self)", env.side)
-	require.NoError(t, c.SetSubjectSpendCaps(ctx, payerID, openrails.SubjectSpendCapInput{
+	}), "%s set-invoker-spend-limit (invoker)", env.side)
+	require.NoError(t, c.SetInvokerSpendLimits(ctx, payerID, openrails.InvokerSpendLimitInput{
 		Scope:  "role",
 		RoleID: roleID,
-		Windows: []openrails.SpendCapWindow{
+		Windows: []openrails.SpendLimitWindow{
 			{Key: "role-hourly", WindowSeconds: 3600, Limit: 20_000, Cadence: "session"},
 		},
-	}), "%s set-subject-budget-policy (role)", env.side)
-	require.NoError(t, c.SetPlatformSpendCaps(ctx, payerID, openrails.PlatformSpendCapInput{
-		Scope: "subject",
-		Windows: []openrails.SpendCapWindow{
-			{Key: "plat-monthly", WindowSeconds: 2592000, Limit: 1_000_000, Cadence: "fixed"},
-		},
-	}), "%s set-platform-budget-policy", env.side)
-	pols, err := c.SubjectSpendCaps(ctx, payerID)
-	require.NoError(t, err, "%s subject-spend-caps", env.side)
+	}), "%s set-invoker-spend-limit (role)", env.side)
+	pols, err := c.InvokerSpendLimits(ctx, payerID)
+	require.NoError(t, err, "%s invoker-spend-limits", env.side)
 	for i := range pols {
 		if pols[i].Scope == "role" {
 			pols[i].RoleID = "ROLE" // role uuid is per-side; normalize
 		}
 	}
-	r.SubjectSpendCaps = observeBudgetPolicies(pols)
-	require.Len(t, r.SubjectSpendCaps, 2, "%s subject-spend-caps: platform cap must stay invisible", env.side)
+	r.InvokerSpendLimits = observeBudgetPolicies(pols)
+	require.Len(t, r.InvokerSpendLimits, 2, "%s invoker-spend-limits", env.side)
 
 	// 22) Merchant-configured flat delegated-invoker wasted-spend window (#499): set
 	// the merchant config ($1/15m), report $2 wasted, then observe via AbuseUsage that

@@ -77,9 +77,9 @@ type Client interface {
 	// BudgetStatus returns the invoker's fixed money-budget windows under the
 	// payer's stored tier policy without reserving (#304 introspection).
 	BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]BudgetWindow, error)
-	// SetTierSpendCaps upserts a per-payer tier money policy (#298): fixed
+	// SetPayerSpendLimits upserts a per-payer tier money policy (#298): fixed
 	// money-budget windows and wasted-spend grace windows.
-	SetTierSpendCaps(ctx context.Context, tenantSubjectID string, in TierSpendCapInput) error
+	SetPayerSpendLimits(ctx context.Context, tenantSubjectID string, in PayerSpendLimitInput) error
 	// SetTierSchedule persists the tenant's tier SCHEDULE once (#476): the ordered
 	// ladder [{tier, min_cumulative_paid_amount}] for one currency. OpenRails then
 	// AUTO-maintains each payer's same-currency tier from cumulative spend — the
@@ -114,19 +114,13 @@ type Client interface {
 	SetCreditLimit(ctx context.Context, tenantSubjectID, currency string, creditLimit int64) error
 	// GetCreditLimit returns the admin-set arrears credit line for a payer (#489).
 	GetCreditLimit(ctx context.Context, tenantSubjectID, currency string) (int64, error)
-	// SetSubjectSpendCaps upserts a SUBJECT-owned hierarchical budget-scope
-	// policy (#473): the subject's self cap (scope=subject) or a (subject, role)
-	// pool (scope=role, RoleID = the role uuid). The owner is forced to "subject"
-	// — this path can never write or loosen a platform-owned cap.
-	SetSubjectSpendCaps(ctx context.Context, tenantSubjectID string, in SubjectSpendCapInput) error
-	// SetPlatformSpendCaps upserts a PLATFORM-owned budget cap (#473): the
-	// platform->payer cap (scope=subject). Owner is forced to "platform".
-	// Platform-admin-authorized on the HTTP transport; a direct call when embedded.
-	SetPlatformSpendCaps(ctx context.Context, tenantSubjectID string, in PlatformSpendCapInput) error
-	// SubjectSpendCaps reads back ONLY the subject-owned budget-scope policies
-	// (#473) for the host to reconcile — platform-owned caps are deliberately
-	// invisible here.
-	SubjectSpendCaps(ctx context.Context, tenantSubjectID string) ([]SubjectSpendCap, error)
+	// SetInvokerSpendLimits upserts a per-invoker spend limit (#473/#517): the
+	// payer's cap on a delegated invoker (scope=invoker), a role (scope=role,
+	// RoleID = the role uuid), or an invoker-at-tier (scope=invoker_tier).
+	SetInvokerSpendLimits(ctx context.Context, tenantSubjectID string, in InvokerSpendLimitInput) error
+	// InvokerSpendLimits reads back the payer's per-invoker spend limits (#473/#517)
+	// for the host to reconcile.
+	InvokerSpendLimits(ctx context.Context, tenantSubjectID string) ([]InvokerSpendLimit, error)
 	// ResourceRevenueDaily returns per-day revenue for a resource across all
 	// payers in the tenant (#410).
 	ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error)
@@ -372,11 +366,11 @@ type BudgetWindow struct {
 	Allowed bool      `json:"allowed"`
 }
 
-// TierSpendCapInput configures a per-payer tier policy via
-// PUT /v1/service/tier-spend-caps (#298): fixed money-budget windows and wasted
-// spend grace windows (pkg/service.TierSpendCapInput on the wire; customer_id
+// PayerSpendLimitInput configures a per-payer tier policy via
+// PUT /v1/service/payer-spend-limits (#298): fixed money-budget windows and wasted
+// spend grace windows (pkg/service.PayerSpendLimitInput on the wire; customer_id
 // travels alongside it).
-type TierSpendCapInput struct {
+type PayerSpendLimitInput struct {
 	Tier           string              `json:"tier"`
 	BudgetWindows  []BudgetWindowInput `json:"budget_windows"`
 	PolicyCurrency string              `json:"policy_currency,omitempty"`
@@ -439,10 +433,10 @@ type TierScheduleRung struct {
 	MinCumulativePaidAmount int64  `json:"min_cumulative_paid_amount"`
 }
 
-// SpendCapWindow is one fixed money-budget window in a hierarchical
+// SpendLimitWindow is one fixed money-budget window in a hierarchical
 // budget-scope policy (#473) — same shape as BudgetWindowInput
-// (pkg/service.SpendCapWindowInput on the wire).
-type SpendCapWindow struct {
+// (pkg/service.SpendLimitWindowInput on the wire).
+type SpendLimitWindow struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
@@ -451,34 +445,26 @@ type SpendCapWindow struct {
 	Cadence string `json:"cadence,omitempty"`
 }
 
-// SubjectSpendCapInput configures a SUBJECT-owned hierarchical budget-scope
-// policy via PUT /v1/service/spend-caps/subject (#473). Scope is
+// InvokerSpendLimitInput configures a SUBJECT-owned hierarchical budget-scope
+// policy via PUT /v1/service/invoker-spend-limits (#473). Scope is
 // "subject" (self cap), "role" (a (subject, role) pool), "invoker" (a
 // (subject, invoker) grant), or "invoker_tier" (a shared tier grant). ScopeKey
 // is the role uuid, invoker string, or tier key. RoleID is kept as a
 // role-compatible alias for older role callers.
-type SubjectSpendCapInput struct {
-	Scope    string           `json:"scope"`
-	ScopeKey string           `json:"scope_key,omitempty"`
-	RoleID   string           `json:"role_id,omitempty"`
-	Windows  []SpendCapWindow `json:"windows"`
+type InvokerSpendLimitInput struct {
+	Scope    string             `json:"scope"`
+	ScopeKey string             `json:"scope_key,omitempty"`
+	RoleID   string             `json:"role_id,omitempty"`
+	Windows  []SpendLimitWindow `json:"windows"`
 }
 
-// PlatformSpendCapInput configures a PLATFORM-owned budget cap via
-// PUT /v1/service/spend-caps/platform (#473): the platform->payer cap
-// (scope=subject). The owner is fixed to "platform" server-side.
-type PlatformSpendCapInput struct {
-	Scope   string           `json:"scope"`
-	Windows []SpendCapWindow `json:"windows"`
-}
-
-// SubjectSpendCap is one subject-owned budget-scope policy returned by
-// SubjectSpendCaps (#473) — the read-back shape for host reconciliation.
-type SubjectSpendCap struct {
-	Scope    string           `json:"scope"`
-	ScopeKey string           `json:"scope_key,omitempty"`
-	RoleID   string           `json:"role_id,omitempty"`
-	Windows  []SpendCapWindow `json:"windows"`
+// InvokerSpendLimit is one per-invoker spend limit returned by
+// InvokerSpendLimits (#473/#517) — the read-back shape for host reconciliation.
+type InvokerSpendLimit struct {
+	Scope    string             `json:"scope"`
+	ScopeKey string             `json:"scope_key,omitempty"`
+	RoleID   string             `json:"role_id,omitempty"`
+	Windows  []SpendLimitWindow `json:"windows"`
 }
 
 // ResourceRevenueDailyRow is one day's revenue for a resource.

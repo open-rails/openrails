@@ -28,11 +28,10 @@ type BudgetWindow struct {
 	Cadence string
 }
 
-// Budget scopes (#473): a budget POLICY is {scope, owner, windows[]}; at admit
-// time a request (subject, invoker, roles[]) is gated by EVERY matching scope's
-// windows. These identifiers are stored in scoped_spend_caps.scope.
+// Invoker spend-limit scopes (#473/#517): a limit is {scope, scope_key, windows[]};
+// at admit time a request (invoker, roles[]) is gated by EVERY matching scope's
+// windows. These identifiers are stored in invoker_spend_limits.scope.
 const (
-	ScopeSubject     = "subject"
 	ScopeInvoker     = "invoker"
 	ScopeRole        = "role"
 	ScopeInvokerTier = "invoker_tier"

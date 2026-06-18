@@ -372,7 +372,21 @@ type OpenrailsInvoicePayment struct {
 	UpdatedAt          time.Time
 }
 
-// #512 double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; balance is DERIVED from ledger_transfers, never stored. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, fx_liquidity, world).
+// Per-invoker spend limits (#473/#517): the payer caps how much a delegated invoker/role can spend of the payer's money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.
+type OpenrailsInvokerSpendLimit struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Scope      string
+	// Immutable scope discriminator: role uuid (scope=role), invoker string (scope=invoker), or tier key (scope=invoker_tier).
+	ScopeKey      string
+	Windows       []byte
+	PolicyVersion int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// #512 double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, fx_liquidity, world).
 type OpenrailsLedgerAccount struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -383,10 +397,18 @@ type OpenrailsLedgerAccount struct {
 	// TB sign flag: balance (credits-debits) may not go below zero (minus an applier-supplied arrears floor). Set on customer_balance.
 	DebitsMustNotExceedCredits bool
 	CreditsMustNotExceedDebits bool
-	CreatedAt                  time.Time
+	// Phase H maintained counter: posted credits for O(1) balance reads.
+	CreditsPosted int64
+	// Phase H maintained counter: posted debits for O(1) balance reads.
+	DebitsPosted int64
+	// Phase H maintained counter: unresolved pending credits.
+	CreditsPending int64
+	// Phase H maintained counter: unresolved pending debits / held amount.
+	DebitsPending int64
+	CreatedAt     time.Time
 }
 
-// #512 immutable double-entry transfers. Append-only (role granted SELECT,INSERT only). A transfer moves amount debit->credit within ONE (merchant, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. Balances + held are derived from this table.
+// #512 immutable double-entry transfers. Append-only (role granted SELECT,INSERT only). A transfer moves amount debit->credit within ONE (merchant, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters are a maintained projection of this table.
 type OpenrailsLedgerTransfer struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
@@ -398,6 +420,8 @@ type OpenrailsLedgerTransfer struct {
 	// posted = single-phase (counts in balance); pending = two-phase hold (counts in held until resolved); post_pending/void_pending = resolves the pending named by pending_id.
 	Phase     string
 	PendingID *uuid.UUID
+	// Debit-account floor used by the counter trigger for debits_must_not_exceed_credits accounts. Usually 0; arrears paths pass the current credit-line allowance.
+	AllowDebitNegativeUpTo int64
 	// Opaque origin key (e.g. 'grant'/grant_id, 'payment'/transaction_id). Ledger purity: business joins live in control-plane tables.
 	Source     *string
 	SourceID   *string
@@ -567,6 +591,20 @@ type OpenrailsNotificationQueue struct {
 	CreatedAt  time.Time
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
+}
+
+// Per-tier payer spend limit (#477/#517): the platform caps the payer's spend, keyed by trust-tier. customer_id NULL is the merchant-wide default; non-NULL is a per-customer override.
+type OpenrailsPayerSpendLimit struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// NULL = merchant-wide default tier limit (#477); non-NULL = per-customer override taking precedence for that customer.
+	CustomerID *uuid.UUID
+	Tier       string
+	// JSONB tier money policy: budget_windows and bad_spend_windows. Money values use the request currency internal precision.
+	Policy        []byte
+	PolicyVersion int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // Records of all payment transactions (formerly purchases table)
@@ -744,10 +782,11 @@ type OpenrailsProviderIntent struct {
 	AccountFingerprint *string
 }
 
-// Durable local-vs-processor drift ledger (#107 PS-1..PS-9). Stable identity per (tenant, provider, finding_type, subject_key): re-runs update, disappearance auto-resolves as auto_vanished. requires_admin = true rows are the admin action queue.
+// Durable reconciliation findings ledger. Stable identity per (merchant, provider, finding_type, subject_key); finding_type is a qualified name such as pull.charge.missing, derive.grant.excess, life.provider_intent.abandoned, or consistency.amount_mismatch.provider_catalog. Legacy PS-* findings remain transitional until #511 Phase F.
 type OpenrailsReconciliationFinding struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// Provider for pull.* findings (nmi|ccbill|stripe|solana); the literal 'self' for internal derive/life/consistency findings (#511).
 	Provider    string
 	FindingType string
 	// Stable identity of the drifted subject within (provider, finding_type): processor subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.
@@ -788,20 +827,14 @@ type OpenrailsReconciliationRun struct {
 	Error       *string
 }
 
-// Hierarchical money-budget policies (#473): {scope, owner, windows[]} composed in one admit verdict over the one payer balance. owner=platform rows are writable only via the platform path; owner=subject rows are the subject's own caps.
-type OpenrailsScopedSpendCap struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Scope      string
-	// platform (set by us; subject cannot edit/see) | subject (the subject's own cap).
-	Owner string
-	// Immutable scope discriminator: role uuid (scope=role), invoker string (scope=invoker), or tier key (scope=invoker_tier); empty for scope=subject.
-	ScopeKey      string
-	Windows       []byte
-	PolicyVersion int64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+// #511 per-(merchant, source_domain) reconciliation watermark. fully_reconciled gates the confirmed-absence rule: a destructive EXCESS repair is HELD until its source domain (subscriptions|payments|grants) is proven fully reconciled.
+type OpenrailsReconciliationState struct {
+	ID              uuid.UUID
+	MerchantID      uuid.UUID
+	SourceDomain    string
+	FullyReconciled bool
+	LastFullPullAt  *time.Time
+	UpdatedAt       time.Time
 }
 
 type OpenrailsSolanaSubscription struct {
@@ -874,20 +907,6 @@ type OpenrailsTierSchedule struct {
 	ScheduleVersion int64
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
-}
-
-// Per-tier admission policy. customer_id NULL is the merchant-wide default; non-NULL is a per-customer override. Money values use the request currency internal precision.
-type OpenrailsTierSpendCap struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	// NULL = merchant-wide default tier policy (#477); non-NULL = per-customer override taking precedence for that customer.
-	CustomerID *uuid.UUID
-	Tier       string
-	// JSONB tier money policy: budget_windows and bad_spend_windows. Money values use the request currency internal precision.
-	Policy        []byte
-	PolicyVersion int64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
 }
 
 // Append-only multi-dimensional metered usage (issue #289). Source of truth for usage reporting + #303 invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path (#298) never reads this table.

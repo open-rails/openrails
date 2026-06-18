@@ -38,8 +38,8 @@ const reqPtrSep = "\x1f"
 
 // admitScript atomically, all-or-nothing:
 //  1. idempotent no-op if this request's hold record already exists (retry safety);
-//  2. affordability gate: cachedBalance - held - cost >= floor (floor = -creditLimit;
-//     prepaid = 0). cachedBalance is the caller's in-memory figure; `held` is the
+//  2. affordability gate: accountBalance - held - cost >= floor (floor = -creditLimit;
+//     prepaid = 0). accountBalance is the caller's ledger snapshot; `held` is the
 //     shared in-flight reservation gauge;
 //  3. window gate: every applicable window can fit cost in its current bucket;
 //  4. iff all pass, RESERVE: held += cost, each window += cost (with a bucket TTL),
@@ -52,7 +52,7 @@ const reqPtrSep = "\x1f"
 // first-charge / anchor-TTL bookkeeping. SESSION windows are a single key opened
 // on first reserve (TTL = dur, not refreshed).
 //
-// KEYS: [1]=held [2]=hold:<reqID>. ARGV: [1]=cost [2]=floor [3]=cachedBalance
+// KEYS: [1]=held [2]=hold:<reqID>. ARGV: [1]=cost [2]=floor [3]=accountBalance
 // [4]=holdTtlMs [5]=nowMs [6]=n, then per window {prefix, cadence(0|1), durMs, limit, offsetMs}.
 // Returns {allowed(1/0), blocked}: blocked 0=ok, -1=affordability, i>0 = window i.
 var admitScript = redis.NewScript(`
@@ -170,7 +170,7 @@ return 1
 // crashed in-flight request whose hold record TTL-expires leaves `held` inflated
 // (over-reserved → mild under-admission); a periodic reconciliation sweep can
 // recompute held = Σ live hold records per payer to self-heal. The drift between
-// sweeps is bounded and acceptable (same tolerance as the in-memory balance cache).
+// sweeps is bounded and acceptable.
 type Gate struct {
 	rdb redis.Cmdable
 	now func() time.Time
@@ -196,7 +196,7 @@ type AdmitInput struct {
 	Invoker                      string        // recorded so capture's durable ledger write carries attribution
 	Source                       string        // idempotency namespace for the durable capture
 	Cost                         int64         // estimate, minor units
-	CachedBalance                int64         // caller's available balance for (payer,currency), minor units
+	AccountBalance               int64         // caller's ledger balance snapshot for (payer,currency), minor units
 	CreditLimit                  int64         // arrears credit line (0 = prepaid); affordability floor = -CreditLimit
 	HoldTTL                      time.Duration // bounds an abandoned hold's life (default 1h)
 	Policy                       Policy
@@ -225,7 +225,7 @@ func (g *Gate) Admit(ctx context.Context, in AdmitInput) (Decision, error) {
 	}
 	keys := []string{base + ":held", base + ":hold:" + in.RequestID}
 	argv := make([]any, 0, 6+len(wins)*5)
-	argv = append(argv, in.Cost, -in.CreditLimit, in.CachedBalance, holdTTL.Milliseconds(), now.UnixMilli(), len(wins))
+	argv = append(argv, in.Cost, -in.CreditLimit, in.AccountBalance, holdTTL.Milliseconds(), now.UnixMilli(), len(wins))
 	for _, w := range wins {
 		prefix := w.identity(base)
 		dur := w.durationMillis()

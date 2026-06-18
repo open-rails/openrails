@@ -20,64 +20,57 @@ SELECT EXISTS (
     WHERE merchant_id = $1 AND kind = $2 AND value = $3
 );
 
--- name: UpsertTierSpendCap :exec
--- Per-(subject, tier) policy override. ON CONFLICT targets the partial unique
+-- name: UpsertPayerSpendLimit :exec
+-- Per-(subject, tier) limit override. ON CONFLICT targets the partial unique
 -- index for non-NULL subjects (#477).
-INSERT INTO openrails.tier_spend_caps (
+INSERT INTO openrails.payer_spend_limits (
     id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (merchant_id, customer_id, tier) WHERE (customer_id IS NOT NULL) DO UPDATE SET
     policy = EXCLUDED.policy,
     updated_at = EXCLUDED.updated_at;
 
--- name: UpsertTierSpendCapDefault :exec
--- Tenant-wide DEFAULT tier policy (#477): customer_id IS NULL applies to
+-- name: UpsertPayerSpendLimitDefault :exec
+-- Tenant-wide DEFAULT tier limit (#477): customer_id IS NULL applies to
 -- every payer at this tier — the platform capacity ladder declared once. ON
 -- CONFLICT targets the partial unique index for the NULL-subject default.
-INSERT INTO openrails.tier_spend_caps (
+INSERT INTO openrails.payer_spend_limits (
     id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at
 ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
 ON CONFLICT (merchant_id, tier) WHERE (customer_id IS NULL) DO UPDATE SET
     policy = EXCLUDED.policy,
     updated_at = EXCLUDED.updated_at;
 
--- name: GetTierSpendCaps :one
--- The effective policy for a (tenant, subject, tier): the subject's own override
+-- name: GetPayerSpendLimits :one
+-- The effective limit for a (tenant, subject, tier): the subject's own override
 -- if present, else the tenant-wide default (customer_id IS NULL, #477).
 -- Subject-specific rows sort first so LIMIT 1 picks the override.
-SELECT * FROM openrails.tier_spend_caps
+SELECT * FROM openrails.payer_spend_limits
 WHERE merchant_id = $1 AND tier = $3
   AND (customer_id = $2 OR customer_id IS NULL)
 ORDER BY (customer_id IS NOT NULL) DESC
 LIMIT 1;
 
--- name: UpsertScopedSpendCap :exec
--- Hierarchical money-budget policy upsert (#473). The owner discriminator is the
--- write-authz split (platform vs subject); the caller (service layer) enforces
--- that a subject path may only write owner='subject' rows.
-INSERT INTO openrails.scoped_spend_caps (
-    id, merchant_id, customer_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-ON CONFLICT (merchant_id, customer_id, scope, owner, scope_key) DO UPDATE SET
+-- name: UpsertInvokerSpendLimit :exec
+-- Per-invoker spend-limit upsert (#473/#517): the payer's cap on a delegated
+-- invoker/role. Payer-set only (no owner discriminator).
+INSERT INTO openrails.invoker_spend_limits (
+    id, merchant_id, customer_id, scope, scope_key, windows, policy_version, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (merchant_id, customer_id, scope, scope_key) DO UPDATE SET
     windows = EXCLUDED.windows,
     updated_at = EXCLUDED.updated_at;
 
--- name: DeleteScopedSpendCap :execrows
-DELETE FROM openrails.scoped_spend_caps
+-- name: DeleteInvokerSpendLimit :execrows
+DELETE FROM openrails.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2
-  AND scope = $3 AND owner = $4 AND scope_key = $5;
+  AND scope = $3 AND scope_key = $4;
 
--- name: ListScopedSpendCaps :many
--- ALL budget policies for a subject regardless of owner (the admit path reads
--- every scope to compose the verdict).
-SELECT * FROM openrails.scoped_spend_caps
+-- name: ListInvokerSpendLimits :many
+-- ALL invoker spend limits for a payer (the admit path reads every scope to
+-- compose the verdict).
+SELECT * FROM openrails.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2;
-
--- name: ListScopedSpendCapsByOwner :many
--- Budget policies for a subject filtered by owner (the subject-facing read must
--- NOT expose platform-owned rows).
-SELECT * FROM openrails.scoped_spend_caps
-WHERE merchant_id = $1 AND customer_id = $2 AND owner = $3;
 
 -- name: UpsertTierScheduleDefault :exec
 -- Tenant-wide tier schedule upsert (#476): customer_id IS NULL is the

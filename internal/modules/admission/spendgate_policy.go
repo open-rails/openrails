@@ -14,26 +14,26 @@ import (
 )
 
 // SpendgatePolicyLoader builds a spendgate.Policy (the cap config the Redis admit
-// gate enforces) for one (payer, tier, request) from the Postgres tier_spend_caps +
-// scoped_spend_caps. Every window's limit is expressed in the REQUEST currency
+// gate enforces) for one (payer, tier, request) from the Postgres payer_spend_limits +
+// invoker_spend_limits. Every window's limit is expressed in the REQUEST currency
 // (FX-converted when a window is denominated in another currency), so the gate
 // runs in a single currency per admit. #513: this read replaces the per-request
 // Postgres budget reservation; nothing on the hot path locks Postgres.
 type SpendgatePolicyLoader struct {
-	tiers   *TierSpendCapStore
-	budgets *ScopedSpendCapStore
+	tiers   *PayerSpendLimitStore
+	budgets *InvokerSpendLimitStore
 	fx      fx.Provider
 	cache   *PolicyCache // optional; nil reads config from Postgres every load
 }
 
 // NewSpendgatePolicyLoader wires the loader. budgetScopes may be nil (then only
 // the tier policy's payer-scope windows are loaded).
-func NewSpendgatePolicyLoader(tiers *TierSpendCapStore, budgetScopes *ScopedSpendCapStore, fxp fx.Provider) *SpendgatePolicyLoader {
+func NewSpendgatePolicyLoader(tiers *PayerSpendLimitStore, budgetScopes *InvokerSpendLimitStore, fxp fx.Provider) *SpendgatePolicyLoader {
 	return &SpendgatePolicyLoader{tiers: tiers, budgets: budgetScopes, fx: fxp}
 }
 
 // WithCache attaches the process-local policy-config cache (nil disables it; the
-// loader then reads tier_spend_caps + scoped_spend_caps from Postgres every load).
+// loader then reads payer_spend_limits + invoker_spend_limits from Postgres every load).
 func (l *SpendgatePolicyLoader) WithCache(c *PolicyCache) *SpendgatePolicyLoader {
 	l.cache = c
 	return l
@@ -59,8 +59,8 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.Custome
 
 	// Tier policy → payer-scope velocity windows (the payer's own cap at this tier).
 	// Read-mostly config, served from the long-TTL policy cache when warm.
-	tp, err := l.cache.TierSpendCaps(mid, payerID, tier, func() (TierSpendCaps, error) {
-		return l.tiers.GetTierSpendCaps(ctx, payer, tier)
+	tp, err := l.cache.PayerSpendLimits(mid, payerID, tier, func() (PayerSpendLimits, error) {
+		return l.tiers.GetPayerSpendLimits(ctx, payer, tier)
 	})
 	if err != nil {
 		return spendgate.Policy{}, false, err
@@ -74,7 +74,7 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.Custome
 	}
 
 	if l.budgets != nil {
-		policies, lerr := l.cache.ScopedSpendCaps(mid, payerID, func() ([]ScopedSpendCap, error) {
+		policies, lerr := l.cache.InvokerSpendLimits(mid, payerID, func() ([]InvokerSpendLimit, error) {
 			return l.budgets.LoadAll(ctx, payer)
 		})
 		if lerr != nil {
@@ -87,14 +87,6 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.Custome
 		for _, p := range policies {
 			bw := toBudgetWindows(p.Windows)
 			switch budgets.NormalizeScope(p.Scope) {
-			case budgets.ScopeSubject:
-				w, cerr := l.convert(ctx, spendgate.ScopePayer, bw, requestCurrency)
-				if cerr != nil {
-					return spendgate.Policy{}, false, cerr
-				}
-				if len(w) > 0 {
-					scopes = append(scopes, spendgate.ScopedWindows{Scope: spendgate.ScopePayer, Windows: w})
-				}
 			case budgets.ScopeInvoker:
 				w, cerr := l.convert(ctx, spendgate.ScopeInvoker, bw, requestCurrency)
 				if cerr != nil {
@@ -172,26 +164,18 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 	return out, nil
 }
 
-// payerCapacity reads the (available, creditLine) figures the admit gate needs:
-// available = settled balance − money-window reservations; creditLine = the
-// arrears credit line (0 for prepaid), used as the gate's negative floor. This is
-// an UNLOCKED read (no FOR UPDATE) — a stale read can only cause bounded
-// over-admission, never a wrong durable charge (the #512 ledger is the truth).
+// payerCapacity reads the (available, creditLine) figures the admit gate needs in
+// one O(1) money-service query: available = ledger customer_balance counters;
+// creditLine = the arrears credit line (0 for prepaid), used as the gate's
+// negative floor. In-flight request holds are enforced by Redis.
 func payerCapacity(ctx context.Context, moneySvc *money.MoneyService, payer identity.CustomerID, currency string) (available, creditLine int64, err error) {
-	bal, err := moneySvc.GetBalanceForCustomer(ctx, payer, currency)
+	capacity, err := moneySvc.GetAdmissionCapacity(ctx, payer, currency)
 	if err != nil {
 		return 0, 0, err
 	}
-	available = bal.Balance - bal.HeldBalance
-	settings, err := moneySvc.GetAccountSettings(ctx, payer, currency)
-	if err != nil {
-		return 0, 0, err
-	}
-	if settings.BillingMode == money.BillingModeArrears {
-		creditLine = settings.CreditLimitAmount - settings.OutstandingOwedAmount
-		if creditLine < 0 {
-			creditLine = 0
-		}
+	available = capacity.Balance - capacity.Held
+	if capacity.BillingMode == money.BillingModeArrears && capacity.CreditLimit > 0 {
+		creditLine = capacity.CreditLimit
 	}
 	return available, creditLine, nil
 }

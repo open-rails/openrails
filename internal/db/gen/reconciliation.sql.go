@@ -279,6 +279,72 @@ func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (Openr
 	return i, err
 }
 
+const isSourceDomainReconciled = `-- name: IsSourceDomainReconciled :one
+SELECT COALESCE((
+    SELECT fully_reconciled FROM openrails.reconciliation_state
+    WHERE merchant_id = $1::uuid
+      AND source_domain = $2::text
+), false) AS fully_reconciled
+`
+
+type IsSourceDomainReconciledParams struct {
+	MerchantID   uuid.UUID
+	SourceDomain string
+}
+
+// The confirmed-absence gate (§3.2): is this source domain proven fully
+// reconciled for the merchant? Absent row = not yet reconciled = false.
+func (q *Queries) IsSourceDomainReconciled(ctx context.Context, arg IsSourceDomainReconciledParams) (*bool, error) {
+	row := q.db.QueryRow(ctx, isSourceDomainReconciled, arg.MerchantID, arg.SourceDomain)
+	var fully_reconciled *bool
+	err := row.Scan(&fully_reconciled)
+	return fully_reconciled, err
+}
+
+const listGraceExhaustedSubscriptions = `-- name: ListGraceExhaustedSubscriptions :many
+SELECT id, customer_id, grace_ends_at FROM openrails.subscriptions
+WHERE merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR customer_id = $2::uuid)
+  AND status = 'past_due'
+  AND grace_ends_at IS NOT NULL
+  AND grace_ends_at < $3::timestamptz
+ORDER BY grace_ends_at
+`
+
+type ListGraceExhaustedSubscriptionsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Now        time.Time
+}
+
+type ListGraceExhaustedSubscriptionsRow struct {
+	ID          uuid.UUID
+	CustomerID  uuid.UUID
+	GraceEndsAt *time.Time
+}
+
+// #511 LIFE plane (life.subscription.grace_exhausted): past_due subscriptions
+// whose grace window has elapsed — they should be terminal. Scope-aware detection.
+func (q *Queries) ListGraceExhaustedSubscriptions(ctx context.Context, arg ListGraceExhaustedSubscriptionsParams) ([]ListGraceExhaustedSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, listGraceExhaustedSubscriptions, arg.MerchantID, arg.CustomerID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListGraceExhaustedSubscriptionsRow
+	for rows.Next() {
+		var i ListGraceExhaustedSubscriptionsRow
+		if err := rows.Scan(&i.ID, &i.CustomerID, &i.GraceEndsAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenReconciliationFindingsByProvider = `-- name: ListOpenReconciliationFindingsByProvider :many
 SELECT id, merchant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings
 WHERE provider = $1 AND status IN ('open', 'admin_pending')
@@ -431,6 +497,39 @@ func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconcilia
 			&i.Status,
 			&i.Summary,
 			&i.Error,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReconciliationState = `-- name: ListReconciliationState :many
+SELECT id, merchant_id, source_domain, fully_reconciled, last_full_pull_at, updated_at FROM openrails.reconciliation_state
+WHERE merchant_id = $1::uuid
+ORDER BY source_domain
+`
+
+func (q *Queries) ListReconciliationState(ctx context.Context, merchantID uuid.UUID) ([]OpenrailsReconciliationState, error) {
+	rows, err := q.db.Query(ctx, listReconciliationState, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsReconciliationState
+	for rows.Next() {
+		var i OpenrailsReconciliationState
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.SourceDomain,
+			&i.FullyReconciled,
+			&i.LastFullPullAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1279,6 +1378,50 @@ func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertRec
 		&i.Resolution,
 		&i.Notes,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertReconciliationState = `-- name: UpsertReconciliationState :one
+
+INSERT INTO openrails.reconciliation_state (
+    merchant_id, source_domain, fully_reconciled, last_full_pull_at, updated_at
+) VALUES (
+    $1::uuid, $2::text,
+    $3::boolean, $4::timestamptz, now()
+)
+ON CONFLICT (merchant_id, source_domain) DO UPDATE SET
+    fully_reconciled = EXCLUDED.fully_reconciled,
+    last_full_pull_at = COALESCE(EXCLUDED.last_full_pull_at, openrails.reconciliation_state.last_full_pull_at),
+    updated_at = now()
+RETURNING id, merchant_id, source_domain, fully_reconciled, last_full_pull_at, updated_at
+`
+
+type UpsertReconciliationStateParams struct {
+	MerchantID      uuid.UUID
+	SourceDomain    string
+	FullyReconciled bool
+	LastFullPullAt  *time.Time
+}
+
+// #511 Convergence Engine: per-(merchant, source_domain) confirmed-absence gate.
+// Mark a source domain's reconciliation watermark. Pass fully_reconciled=true +
+// last_full_pull_at after a completed authoritative pull/import for that domain.
+func (q *Queries) UpsertReconciliationState(ctx context.Context, arg UpsertReconciliationStateParams) (OpenrailsReconciliationState, error) {
+	row := q.db.QueryRow(ctx, upsertReconciliationState,
+		arg.MerchantID,
+		arg.SourceDomain,
+		arg.FullyReconciled,
+		arg.LastFullPullAt,
+	)
+	var i OpenrailsReconciliationState
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.SourceDomain,
+		&i.FullyReconciled,
+		&i.LastFullPullAt,
 		&i.UpdatedAt,
 	)
 	return i, err

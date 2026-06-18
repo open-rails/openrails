@@ -1,15 +1,15 @@
 // Package spendgate is the Redis-backed admission primitive for openrails #513:
-// ONE atomic Lua gate that checks a payer's affordability (cached balance minus
+// ONE atomic Lua gate that checks a payer's affordability (settled balance minus
 // the shared in-flight hold gauge) and every applicable spend-cap window, places
 // a per-request hold, and frees it at capture/release — replacing the Postgres
 // budget_window_state / budget_inflight_holds locked-tx path AND the separate
 // Redis hold store.
 //
 // MODEL (decided 2026-06-17, Paul):
-//   - Affordability uses an IN-MEMORY cached balance passed in by the caller
-//     (refreshed off the #512 ledger); only the `held` reservation gauge and the
-//     window counters live in shared Redis. Stale cache → bounded over-admission,
-//     never ledger corruption (the durable truth is the #512 ledger).
+//   - Affordability uses the #512 ledger account balance passed in by the caller;
+//     only the `held` reservation gauge and the window counters live in shared
+//     Redis. A stale/concurrent read can cause bounded over-admission, never
+//     ledger corruption (the durable truth is the #512 ledger).
 //   - Spend-cap windows are PER-USER-STAGGERED (#337): "session" opens at the first
 //     reserve when none is active and closes Duration later; "fixed" ticks at
 //     offset + k*Duration forever, where offset is a deterministic phase derived

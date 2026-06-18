@@ -16,6 +16,27 @@ SELECT * FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 LIMIT 1;
 
+-- name: GetAdmissionCapacity :one
+-- Hot-path affordability snapshot for service admit. The customer_balance account
+-- carries Phase-H O(1) counters; money_settings is optional (missing = prepaid,
+-- no credit line). Request in-flight holds live in Redis and are subtracted by
+-- spendgate, not here.
+SELECT
+    (a.credits_posted - a.debits_posted)::bigint AS balance,
+    a.debits_pending::bigint AS held,
+    COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
+    COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount
+FROM openrails.ledger_accounts a
+LEFT JOIN openrails.money_settings s
+  ON s.merchant_id = a.merchant_id
+ AND s.customer_id = a.customer_id
+ AND s.currency = a.currency
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND a.customer_id = sqlc.arg(customer_id)::uuid
+  AND a.currency = sqlc.arg(currency)::text
+  AND a.account_type = 'customer_balance'
+LIMIT 1;
+
 -- name: LockMoneyAccountSettings :one
 SELECT * FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
@@ -117,13 +138,8 @@ WITH avail AS (
            s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at,
            (
              COALESCE((
-                 SELECT SUM(CASE WHEN t.credit_account_id = a.id THEN t.amount
-                                 WHEN t.debit_account_id = a.id THEN -t.amount ELSE 0 END)
+                 SELECT a.credits_posted - a.debits_posted
                  FROM openrails.ledger_accounts a
-                 JOIN openrails.ledger_transfers t
-                   ON t.merchant_id = a.merchant_id
-                  AND (t.debit_account_id = a.id OR t.credit_account_id = a.id)
-                  AND t.phase IN ('posted', 'post_pending')
                  WHERE a.merchant_id = s.merchant_id AND a.customer_id = s.customer_id
                    AND a.currency = s.currency AND a.account_type = 'customer_balance'
              ), 0)

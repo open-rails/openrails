@@ -12,6 +12,32 @@ import (
 	"github.com/google/uuid"
 )
 
+const deleteInvokerSpendLimit = `-- name: DeleteInvokerSpendLimit :execrows
+DELETE FROM openrails.invoker_spend_limits
+WHERE merchant_id = $1 AND customer_id = $2
+  AND scope = $3 AND scope_key = $4
+`
+
+type DeleteInvokerSpendLimitParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Scope      string
+	ScopeKey   string
+}
+
+func (q *Queries) DeleteInvokerSpendLimit(ctx context.Context, arg DeleteInvokerSpendLimitParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteInvokerSpendLimit,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Scope,
+		arg.ScopeKey,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deletePaymentBlock = `-- name: DeletePaymentBlock :exec
 DELETE FROM openrails.payment_blocklist
 WHERE merchant_id = $1 AND kind = $2 AND value = $3
@@ -26,34 +52,6 @@ type DeletePaymentBlockParams struct {
 func (q *Queries) DeletePaymentBlock(ctx context.Context, arg DeletePaymentBlockParams) error {
 	_, err := q.db.Exec(ctx, deletePaymentBlock, arg.MerchantID, arg.Kind, arg.Value)
 	return err
-}
-
-const deleteScopedSpendCap = `-- name: DeleteScopedSpendCap :execrows
-DELETE FROM openrails.scoped_spend_caps
-WHERE merchant_id = $1 AND customer_id = $2
-  AND scope = $3 AND owner = $4 AND scope_key = $5
-`
-
-type DeleteScopedSpendCapParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Scope      string
-	Owner      string
-	ScopeKey   string
-}
-
-func (q *Queries) DeleteScopedSpendCap(ctx context.Context, arg DeleteScopedSpendCapParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteScopedSpendCap,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Scope,
-		arg.Owner,
-		arg.ScopeKey,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const getEffectiveTierSchedule = `-- name: GetEffectiveTierSchedule :one
@@ -98,26 +96,26 @@ func (q *Queries) GetEffectiveTierSchedule(ctx context.Context, arg GetEffective
 	return i, err
 }
 
-const getTierSpendCaps = `-- name: GetTierSpendCaps :one
-SELECT id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at FROM openrails.tier_spend_caps
+const getPayerSpendLimits = `-- name: GetPayerSpendLimits :one
+SELECT id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at FROM openrails.payer_spend_limits
 WHERE merchant_id = $1 AND tier = $3
   AND (customer_id = $2 OR customer_id IS NULL)
 ORDER BY (customer_id IS NOT NULL) DESC
 LIMIT 1
 `
 
-type GetTierSpendCapsParams struct {
+type GetPayerSpendLimitsParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	Tier       string
 }
 
-// The effective policy for a (tenant, subject, tier): the subject's own override
+// The effective limit for a (tenant, subject, tier): the subject's own override
 // if present, else the tenant-wide default (customer_id IS NULL, #477).
 // Subject-specific rows sort first so LIMIT 1 picks the override.
-func (q *Queries) GetTierSpendCaps(ctx context.Context, arg GetTierSpendCapsParams) (OpenrailsTierSpendCap, error) {
-	row := q.db.QueryRow(ctx, getTierSpendCaps, arg.MerchantID, arg.CustomerID, arg.Tier)
-	var i OpenrailsTierSpendCap
+func (q *Queries) GetPayerSpendLimits(ctx context.Context, arg GetPayerSpendLimitsParams) (OpenrailsPayerSpendLimit, error) {
+	row := q.db.QueryRow(ctx, getPayerSpendLimits, arg.MerchantID, arg.CustomerID, arg.Tier)
+	var i OpenrailsPayerSpendLimit
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -167,77 +165,32 @@ func (q *Queries) InsertPaymentBlockIfAbsent(ctx context.Context, arg InsertPaym
 	return err
 }
 
-const listScopedSpendCaps = `-- name: ListScopedSpendCaps :many
-SELECT id, merchant_id, customer_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at FROM openrails.scoped_spend_caps
+const listInvokerSpendLimits = `-- name: ListInvokerSpendLimits :many
+SELECT id, merchant_id, customer_id, scope, scope_key, windows, policy_version, created_at, updated_at FROM openrails.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2
 `
 
-type ListScopedSpendCapsParams struct {
+type ListInvokerSpendLimitsParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 }
 
-// ALL budget policies for a subject regardless of owner (the admit path reads
-// every scope to compose the verdict).
-func (q *Queries) ListScopedSpendCaps(ctx context.Context, arg ListScopedSpendCapsParams) ([]OpenrailsScopedSpendCap, error) {
-	rows, err := q.db.Query(ctx, listScopedSpendCaps, arg.MerchantID, arg.CustomerID)
+// ALL invoker spend limits for a payer (the admit path reads every scope to
+// compose the verdict).
+func (q *Queries) ListInvokerSpendLimits(ctx context.Context, arg ListInvokerSpendLimitsParams) ([]OpenrailsInvokerSpendLimit, error) {
+	rows, err := q.db.Query(ctx, listInvokerSpendLimits, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsScopedSpendCap
+	var items []OpenrailsInvokerSpendLimit
 	for rows.Next() {
-		var i OpenrailsScopedSpendCap
+		var i OpenrailsInvokerSpendLimit
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.Scope,
-			&i.Owner,
-			&i.ScopeKey,
-			&i.Windows,
-			&i.PolicyVersion,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listScopedSpendCapsByOwner = `-- name: ListScopedSpendCapsByOwner :many
-SELECT id, merchant_id, customer_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at FROM openrails.scoped_spend_caps
-WHERE merchant_id = $1 AND customer_id = $2 AND owner = $3
-`
-
-type ListScopedSpendCapsByOwnerParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Owner      string
-}
-
-// Budget policies for a subject filtered by owner (the subject-facing read must
-// NOT expose platform-owned rows).
-func (q *Queries) ListScopedSpendCapsByOwner(ctx context.Context, arg ListScopedSpendCapsByOwnerParams) ([]OpenrailsScopedSpendCap, error) {
-	rows, err := q.db.Query(ctx, listScopedSpendCapsByOwner, arg.MerchantID, arg.CustomerID, arg.Owner)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsScopedSpendCap
-	for rows.Next() {
-		var i OpenrailsScopedSpendCap
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.Scope,
-			&i.Owner,
 			&i.ScopeKey,
 			&i.Windows,
 			&i.PolicyVersion,
@@ -274,21 +227,20 @@ func (q *Queries) PaymentBlockExists(ctx context.Context, arg PaymentBlockExists
 	return exists, err
 }
 
-const upsertScopedSpendCap = `-- name: UpsertScopedSpendCap :exec
-INSERT INTO openrails.scoped_spend_caps (
-    id, merchant_id, customer_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-ON CONFLICT (merchant_id, customer_id, scope, owner, scope_key) DO UPDATE SET
+const upsertInvokerSpendLimit = `-- name: UpsertInvokerSpendLimit :exec
+INSERT INTO openrails.invoker_spend_limits (
+    id, merchant_id, customer_id, scope, scope_key, windows, policy_version, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (merchant_id, customer_id, scope, scope_key) DO UPDATE SET
     windows = EXCLUDED.windows,
     updated_at = EXCLUDED.updated_at
 `
 
-type UpsertScopedSpendCapParams struct {
+type UpsertInvokerSpendLimitParams struct {
 	ID            uuid.UUID
 	MerchantID    uuid.UUID
 	CustomerID    uuid.UUID
 	Scope         string
-	Owner         string
 	ScopeKey      string
 	Windows       []byte
 	PolicyVersion int64
@@ -296,18 +248,87 @@ type UpsertScopedSpendCapParams struct {
 	UpdatedAt     time.Time
 }
 
-// Hierarchical money-budget policy upsert (#473). The owner discriminator is the
-// write-authz split (platform vs subject); the caller (service layer) enforces
-// that a subject path may only write owner='subject' rows.
-func (q *Queries) UpsertScopedSpendCap(ctx context.Context, arg UpsertScopedSpendCapParams) error {
-	_, err := q.db.Exec(ctx, upsertScopedSpendCap,
+// Per-invoker spend-limit upsert (#473/#517): the payer's cap on a delegated
+// invoker/role. Payer-set only (no owner discriminator).
+func (q *Queries) UpsertInvokerSpendLimit(ctx context.Context, arg UpsertInvokerSpendLimitParams) error {
+	_, err := q.db.Exec(ctx, upsertInvokerSpendLimit,
 		arg.ID,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Scope,
-		arg.Owner,
 		arg.ScopeKey,
 		arg.Windows,
+		arg.PolicyVersion,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertPayerSpendLimit = `-- name: UpsertPayerSpendLimit :exec
+INSERT INTO openrails.payer_spend_limits (
+    id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (merchant_id, customer_id, tier) WHERE (customer_id IS NOT NULL) DO UPDATE SET
+    policy = EXCLUDED.policy,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertPayerSpendLimitParams struct {
+	ID            uuid.UUID
+	MerchantID    uuid.UUID
+	CustomerID    *uuid.UUID
+	Tier          string
+	Policy        []byte
+	PolicyVersion int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// Per-(subject, tier) limit override. ON CONFLICT targets the partial unique
+// index for non-NULL subjects (#477).
+func (q *Queries) UpsertPayerSpendLimit(ctx context.Context, arg UpsertPayerSpendLimitParams) error {
+	_, err := q.db.Exec(ctx, upsertPayerSpendLimit,
+		arg.ID,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Tier,
+		arg.Policy,
+		arg.PolicyVersion,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertPayerSpendLimitDefault = `-- name: UpsertPayerSpendLimitDefault :exec
+INSERT INTO openrails.payer_spend_limits (
+    id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at
+) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
+ON CONFLICT (merchant_id, tier) WHERE (customer_id IS NULL) DO UPDATE SET
+    policy = EXCLUDED.policy,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertPayerSpendLimitDefaultParams struct {
+	ID            uuid.UUID
+	MerchantID    uuid.UUID
+	Tier          string
+	Policy        []byte
+	PolicyVersion int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// Tenant-wide DEFAULT tier limit (#477): customer_id IS NULL applies to
+// every payer at this tier — the platform capacity ladder declared once. ON
+// CONFLICT targets the partial unique index for the NULL-subject default.
+func (q *Queries) UpsertPayerSpendLimitDefault(ctx context.Context, arg UpsertPayerSpendLimitDefaultParams) error {
+	_, err := q.db.Exec(ctx, upsertPayerSpendLimitDefault,
+		arg.ID,
+		arg.MerchantID,
+		arg.Tier,
+		arg.Policy,
 		arg.PolicyVersion,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -383,77 +404,6 @@ func (q *Queries) UpsertTierScheduleSubject(ctx context.Context, arg UpsertTierS
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.Currency,
-	)
-	return err
-}
-
-const upsertTierSpendCap = `-- name: UpsertTierSpendCap :exec
-INSERT INTO openrails.tier_spend_caps (
-    id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-ON CONFLICT (merchant_id, customer_id, tier) WHERE (customer_id IS NOT NULL) DO UPDATE SET
-    policy = EXCLUDED.policy,
-    updated_at = EXCLUDED.updated_at
-`
-
-type UpsertTierSpendCapParams struct {
-	ID            uuid.UUID
-	MerchantID    uuid.UUID
-	CustomerID    *uuid.UUID
-	Tier          string
-	Policy        []byte
-	PolicyVersion int64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-}
-
-// Per-(subject, tier) policy override. ON CONFLICT targets the partial unique
-// index for non-NULL subjects (#477).
-func (q *Queries) UpsertTierSpendCap(ctx context.Context, arg UpsertTierSpendCapParams) error {
-	_, err := q.db.Exec(ctx, upsertTierSpendCap,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Tier,
-		arg.Policy,
-		arg.PolicyVersion,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-	)
-	return err
-}
-
-const upsertTierSpendCapDefault = `-- name: UpsertTierSpendCapDefault :exec
-INSERT INTO openrails.tier_spend_caps (
-    id, merchant_id, customer_id, tier, policy, policy_version, created_at, updated_at
-) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
-ON CONFLICT (merchant_id, tier) WHERE (customer_id IS NULL) DO UPDATE SET
-    policy = EXCLUDED.policy,
-    updated_at = EXCLUDED.updated_at
-`
-
-type UpsertTierSpendCapDefaultParams struct {
-	ID            uuid.UUID
-	MerchantID    uuid.UUID
-	Tier          string
-	Policy        []byte
-	PolicyVersion int64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-}
-
-// Tenant-wide DEFAULT tier policy (#477): customer_id IS NULL applies to
-// every payer at this tier — the platform capacity ladder declared once. ON
-// CONFLICT targets the partial unique index for the NULL-subject default.
-func (q *Queries) UpsertTierSpendCapDefault(ctx context.Context, arg UpsertTierSpendCapDefaultParams) error {
-	_, err := q.db.Exec(ctx, upsertTierSpendCapDefault,
-		arg.ID,
-		arg.MerchantID,
-		arg.Tier,
-		arg.Policy,
-		arg.PolicyVersion,
-		arg.CreatedAt,
-		arg.UpdatedAt,
 	)
 	return err
 }

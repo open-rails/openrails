@@ -598,9 +598,9 @@ func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, invoker
 	return out, nil
 }
 
-// SetTierSpendCaps transcribes handlers.ServiceSetTierSpendCaps
+// SetPayerSpendLimits transcribes handlers.ServiceSetPayerSpendLimits
 // (service_admission.go).
-func (c *localClient) SetTierSpendCaps(ctx context.Context, tenantSubjectID string, in openrails.TierSpendCapInput) error {
+func (c *localClient) SetPayerSpendLimits(ctx context.Context, tenantSubjectID string, in openrails.PayerSpendLimitInput) error {
 	ctx = c.ensureTenant(ctx)
 	// An EMPTY customer_id sets the tenant-wide DEFAULT tier policy (#477,
 	// the platform capacity ladder declared once); a non-empty one is a per-subject
@@ -613,7 +613,7 @@ func (c *localClient) SetTierSpendCaps(ctx context.Context, tenantSubjectID stri
 			return err
 		}
 	}
-	pol := billingservice.TierSpendCapInput{
+	pol := billingservice.PayerSpendLimitInput{
 		Tier:           in.Tier,
 		PolicyCurrency: in.PolicyCurrency,
 	}
@@ -627,7 +627,7 @@ func (c *localClient) SetTierSpendCaps(ctx context.Context, tenantSubjectID stri
 			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency, Cadence: b.Cadence,
 		})
 	}
-	if err := c.svc.SetTierSpendCaps(ctx, payer, pol); err != nil {
+	if err := c.svc.SetPayerSpendLimits(ctx, payer, pol); err != nil {
 		return internalErr("set tier policy failed")
 	}
 	return nil
@@ -804,19 +804,19 @@ func abuseUsageWindows(ws []billingservice.AbuseUsageWindow) []openrails.AbuseUs
 	return out
 }
 
-func spendCapWindowInputs(ws []openrails.SpendCapWindow) []billingservice.SpendCapWindowInput {
-	out := make([]billingservice.SpendCapWindowInput, 0, len(ws))
+func spendLimitWindowInputs(ws []openrails.SpendLimitWindow) []billingservice.SpendLimitWindowInput {
+	out := make([]billingservice.SpendLimitWindowInput, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, billingservice.SpendCapWindowInput{
+		out = append(out, billingservice.SpendLimitWindowInput{
 			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence,
 		})
 	}
 	return out
 }
 
-// SetSubjectSpendCaps transcribes handlers.ServiceSetSubjectSpendCaps
+// SetInvokerSpendLimits transcribes handlers.ServiceSetInvokerSpendLimits
 // (service_admission.go, #473).
-func (c *localClient) SetSubjectSpendCaps(ctx context.Context, tenantSubjectID string, in openrails.SubjectSpendCapInput) error {
+func (c *localClient) SetInvokerSpendLimits(ctx context.Context, tenantSubjectID string, in openrails.InvokerSpendLimitInput) error {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
 	if err != nil {
@@ -826,54 +826,36 @@ func (c *localClient) SetSubjectSpendCaps(ctx context.Context, tenantSubjectID s
 	if scopeKey == "" {
 		scopeKey = strings.TrimSpace(in.RoleID)
 	}
-	if err := c.svc.SetSubjectSpendCaps(ctx, payer, billingservice.ScopedSpendCapInput{
+	if err := c.svc.SetInvokerSpendLimits(ctx, payer, billingservice.InvokerSpendLimitInput{
 		Scope:    in.Scope,
 		ScopeKey: scopeKey,
-		Windows:  spendCapWindowInputs(in.Windows),
+		Windows:  spendLimitWindowInputs(in.Windows),
 	}); err != nil {
 		return internalErr("set subject budget policy failed")
 	}
 	return nil
 }
 
-// SetPlatformSpendCaps transcribes handlers.ServiceSetPlatformSpendCaps
-// (service_admission.go, #473). The platform-admin route gate is not transcribed
-// — embedded hosts are the principal (the direct call is operator-trusted).
-func (c *localClient) SetPlatformSpendCaps(ctx context.Context, tenantSubjectID string, in openrails.PlatformSpendCapInput) error {
-	ctx = c.ensureTenant(ctx)
-	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
-	if err != nil {
-		return err
-	}
-	if err := c.svc.SetPlatformSpendCaps(ctx, payer, billingservice.ScopedSpendCapInput{
-		Scope:   in.Scope,
-		Windows: spendCapWindowInputs(in.Windows),
-	}); err != nil {
-		return internalErr("set platform budget policy failed")
-	}
-	return nil
-}
-
-// SubjectSpendCaps transcribes handlers.ServiceGetSubjectSpendCaps
+// InvokerSpendLimits transcribes handlers.ServiceGetInvokerSpendLimits
 // (service_admission.go, #473): subject-owned policies only; ScopeKey maps back
 // onto role_id.
-func (c *localClient) SubjectSpendCaps(ctx context.Context, tenantSubjectID string) ([]openrails.SubjectSpendCap, error) {
+func (c *localClient) InvokerSpendLimits(ctx context.Context, tenantSubjectID string) ([]openrails.InvokerSpendLimit, error) {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
 	if err != nil {
 		return nil, err
 	}
-	policies, err := c.svc.SubjectSpendCaps(ctx, payer)
+	policies, err := c.svc.InvokerSpendLimits(ctx, payer)
 	if err != nil {
 		return nil, internalErr("subject budget policies lookup failed")
 	}
-	out := make([]openrails.SubjectSpendCap, 0, len(policies))
+	out := make([]openrails.InvokerSpendLimit, 0, len(policies))
 	for _, p := range policies {
-		ws := make([]openrails.SpendCapWindow, 0, len(p.Windows))
+		ws := make([]openrails.SpendLimitWindow, 0, len(p.Windows))
 		for _, w := range p.Windows {
-			ws = append(ws, openrails.SpendCapWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence})
+			ws = append(ws, openrails.SpendLimitWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence})
 		}
-		out = append(out, openrails.SubjectSpendCap{Scope: p.Scope, RoleID: p.ScopeKey, Windows: ws})
+		out = append(out, openrails.InvokerSpendLimit{Scope: p.Scope, RoleID: p.ScopeKey, Windows: ws})
 	}
 	return out, nil
 }

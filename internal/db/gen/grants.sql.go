@@ -162,6 +162,30 @@ func (q *Queries) GrantCreditDeposited(ctx context.Context, arg GrantCreditDepos
 	return deposited, err
 }
 
+const grantHasLiveEntitlement = `-- name: GrantHasLiveEntitlement :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.entitlements
+    WHERE merchant_id = $1::uuid
+      AND source_type = 'grant' AND source_id = $2::uuid
+      AND revoked_at IS NULL AND deleted_at IS NULL
+) AS exists
+`
+
+type GrantHasLiveEntitlementParams struct {
+	MerchantID uuid.UUID
+	GrantID    uuid.UUID
+}
+
+// GrantHasLiveEntitlement: does this grant still have a non-revoked entitlement
+// window? Used by the Convergence Engine to detect `derive.grant_effect.excess`
+// (a terminated grant whose entitlement effect was never retracted).
+func (q *Queries) GrantHasLiveEntitlement(ctx context.Context, arg GrantHasLiveEntitlementParams) (bool, error) {
+	row := q.db.QueryRow(ctx, grantHasLiveEntitlement, arg.MerchantID, arg.GrantID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const insertGrant = `-- name: InsertGrant :one
 
 INSERT INTO openrails.grants (

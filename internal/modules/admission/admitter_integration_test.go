@@ -25,7 +25,7 @@ import (
 // (tier/budget policy + money balance) + real Redis (the atomic gate). Returns the
 // admitter, the budget-policy store (to grant delegated caps), a freshly funded
 // payer, and a merchant-scoped context.
-func admitEnv(t *testing.T, deposit int64) (*admission.Admitter, *admission.ScopedSpendCapStore, identity.CustomerID, context.Context, *pgxpool.Pool) {
+func admitEnv(t *testing.T, deposit int64) (*admission.Admitter, *admission.InvokerSpendLimitStore, identity.CustomerID, context.Context, *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -37,7 +37,7 @@ func admitEnv(t *testing.T, deposit int64) (*admission.Admitter, *admission.Scop
 	payer := identity.CustomerIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.scoped_spend_caps WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
 	})
 
@@ -58,8 +58,8 @@ func admitEnv(t *testing.T, deposit int64) (*admission.Admitter, *admission.Scop
 	t.Cleanup(func() { _ = rdb.Close() })
 	require.NoError(t, rdb.Ping(ctx).Err())
 
-	bpStore := admission.NewScopedSpendCapStore(dbi)
-	loader := admission.NewSpendgatePolicyLoader(admission.NewTierSpendCapStore(dbi), bpStore, nil)
+	bpStore := admission.NewInvokerSpendLimitStore(dbi)
+	loader := admission.NewSpendgatePolicyLoader(admission.NewPayerSpendLimitStore(dbi), bpStore, nil)
 	adm := admission.NewAdmitter(cs, spendgate.New(rdb), loader)
 	return adm, bpStore, payer, ctx, pool
 }
@@ -95,6 +95,24 @@ func TestAdmitter_PrepaidBalanceGate(t *testing.T) {
 	require.Equal(t, money.DenyInsufficientBalance, d.DenyCode)
 }
 
+func TestAdmitter_ArrearsCreditLineFromAdmissionCapacity(t *testing.T) {
+	adm, _, payer, ctx, _ := admitEnv(t, 0)
+	svc := money.NewMoneyService(dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)))
+	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 500))
+
+	d, err := adm.Admit(ctx, payerReq(payer, uuid.NewString(), 400))
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
+
+	// The first admit reserved 400 in Redis. With a 500 credit line and zero balance,
+	// only 100 remains available for the next in-flight request.
+	d, err = adm.Admit(ctx, payerReq(payer, uuid.NewString(), 200))
+	require.NoError(t, err)
+	require.False(t, d.Allowed)
+	require.Equal(t, "money", d.BlockedBy)
+	require.Equal(t, money.DenyInsufficientCredit, d.DenyCode)
+}
+
 func TestAdmitter_DelegatedWithoutGrantDenied(t *testing.T) {
 	adm, _, payer, ctx, _ := admitEnv(t, 1_000_000)
 
@@ -110,8 +128,8 @@ func TestAdmitter_DelegatedInvokerWindowEnforced(t *testing.T) {
 	invoker := "user:alice"
 
 	// Grant the invoker a $1000-per-5h fixed window (the delegated spend cap).
-	require.NoError(t, bpStore.Upsert(ctx, payer, admission.ScopedSpendCap{
-		Scope: "invoker", Owner: "subject", ScopeKey: invoker,
+	require.NoError(t, bpStore.Upsert(ctx, payer, admission.InvokerSpendLimit{
+		Scope: "invoker", ScopeKey: invoker,
 		Windows: []models.BudgetWindowPolicy{{Key: "5h", WindowSeconds: 5 * 3600, Limit: 1000, Cadence: "fixed"}},
 	}))
 
@@ -144,13 +162,13 @@ func TestAdmitter_StaggeredPerPayerWindows(t *testing.T) {
 		Deposit(ctx, money.DepositParams{CustomerID: &payerB, Invoker: payerB.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000_000_000, Source: "seed"})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.scoped_spend_caps WHERE customer_id = $1", payerB.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerB.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerB.UUID())
 	})
 	inv := "user:shared-name"
 	for _, p := range []identity.CustomerID{payerA, payerB} {
-		require.NoError(t, bpStore.Upsert(ctx, p, admission.ScopedSpendCap{
-			Scope: "invoker", Owner: "subject", ScopeKey: inv,
+		require.NoError(t, bpStore.Upsert(ctx, p, admission.InvokerSpendLimit{
+			Scope: "invoker", ScopeKey: inv,
 			Windows: []models.BudgetWindowPolicy{{Key: "7d", WindowSeconds: 7 * 24 * 3600, Limit: 1000, Cadence: "fixed"}},
 		}))
 	}
