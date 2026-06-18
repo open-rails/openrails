@@ -24,7 +24,7 @@ import (
 func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)

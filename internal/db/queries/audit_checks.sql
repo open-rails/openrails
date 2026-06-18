@@ -419,17 +419,6 @@ FROM openrails.subscriptions sub
 LEFT JOIN openrails.prices price ON sub.price_id = price.id
 WHERE price.id IS NULL OR price.status <> 'active';
 
--- FK-3
--- name: AuditPriceProductMismatch :many
-SELECT
-    sub.id AS sub_id,
-    sub.customer_id::text AS user_id,
-    sub.product_id AS sub_product_id,
-    price.product_id AS price_product_id
-FROM openrails.subscriptions sub
-JOIN openrails.prices price ON sub.price_id = price.id
-WHERE sub.product_id != price.product_id;
-
 -- FK-4
 -- name: AuditPaymentOrphanSubscription :many
 SELECT

@@ -38,18 +38,6 @@ type serviceDepositRequest struct {
 	Description *string    `json:"description"`
 }
 
-type serviceHoldRequest struct {
-	CustomerID  string `json:"customer_id"`
-	Invoker     string `json:"invoker"`
-	InvokerType string `json:"invoker_type"`
-	Currency    string `json:"currency"`
-	Amount      int64  `json:"amount" binding:"required"`
-	Source      string `json:"source" binding:"required"`
-	RequestID   string `json:"request_id" binding:"required"`
-	Resource    string `json:"resource,omitempty"`
-	ExpiresAt   int64  `json:"expires_at" binding:"required"`
-}
-
 type serviceCaptureRequest struct {
 	Amount int64 `json:"amount" binding:"required"`
 
@@ -101,117 +89,6 @@ func requireServiceCustomerScope(r *httprequest.Request, tenantSubject billingid
 		return false
 	}
 	return true
-}
-
-// serviceAuthorizeRequest is the body of POST /v1/service/credits/authorize
-// (issue #235/#247). customer_id is the subject billed; invoker is the
-// canonical caller for per-(customer_id, invoker) sub-budgets;
-// estimated_amount = the upper-bound charge;
-// request_id = the idempotency key for the placed hold.
-type serviceAuthorizeRequest struct {
-	CustomerID      string `json:"customer_id"`
-	Invoker         string `json:"invoker"`
-	InvokerType     string `json:"invoker_type"`
-	Currency        string `json:"currency"`
-	EstimatedAmount int64  `json:"estimated_amount"`
-	RequestID       string `json:"request_id" binding:"required"`
-	Resource        string `json:"resource,omitempty"`
-	ExpiresAt       *int64 `json:"expires_at"`
-}
-
-// serviceAuthorizeResponse mirrors the unified authorize contract: the capacity
-// decision plus the payer's real available/outstanding capacity snapshot.
-type serviceAuthorizeResponse struct {
-	Allowed               bool   `json:"allowed"`
-	DenyCode              string `json:"deny_code,omitempty"`
-	BillingMode           string `json:"billing_mode"`
-	Currency              string `json:"currency"`
-	AvailableAmount       int64  `json:"available_amount"`
-	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
-	HoldExpiresAt         *int64 `json:"hold_expires_at,omitempty"`
-}
-
-func unixPtr(t *time.Time) *int64 {
-	if t == nil || t.IsZero() {
-		return nil
-	}
-	v := t.Unix()
-	return &v
-}
-
-// ServiceAuthorizeCredits is the service token-authed capacity decision + ATOMIC
-// hold placement (issue #235/#247). Account capacity and Redis active holds are
-// checked before a request is admitted.
-//
-// TENANT-SUBJECT AUTHORIZATION (issue #246): the acting TENANT is bound by the service token
-// (middleware.ServiceTokenRequired pinned it onto the context; RegisterServiceRoutes then
-// pinned the RLS connection), NEVER by the body. The tenant subject is read
-// from the body but every credit query runs RLS-scoped to the service token's tenant, so a
-// tenant subject outside the service token's tenant is structurally unreachable (its rows carry a
-// different tenant_id and are invisible — fail closed). The route additionally
-// requires PermCreditsSpend (billing:spend), the explicit "may you draw down this
-// tenant subject's balance" gate.
-func ServiceAuthorizeCredits(r *httprequest.Request) {
-	var req serviceAuthorizeRequest
-	if !r.BindJSON(&req) {
-		return
-	}
-	if req.EstimatedAmount < 0 {
-		r.ErrorJSON(http.StatusBadRequest, "estimated_amount must be >= 0")
-		return
-	}
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return
-	}
-
-	tenantSubject, err := parseServiceCustomerID(req.CustomerID)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
-		return
-	}
-	if tenantSubject == nil {
-		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
-		return
-	}
-	if !requireServiceCustomerScope(r, *tenantSubject) {
-		return
-	}
-	currency, ok := serviceRequiredCurrency(r, req.Currency)
-	if !ok {
-		return
-	}
-
-	var expiresAt time.Time
-	if req.ExpiresAt != nil {
-		expiresAt = time.Unix(*req.ExpiresAt, 0).UTC()
-	}
-
-	out, err := svc.AuthorizeAndHold(r.Request.Context(), billingservice.AuthorizeAndHoldRequest{
-		CustomerID:      *tenantSubject,
-		Invoker:         strings.TrimSpace(req.Invoker),
-		InvokerType:     strings.TrimSpace(req.InvokerType),
-		Currency:        currency,
-		EstimatedAmount: req.EstimatedAmount,
-		RequestID:       req.RequestID,
-		Resource:        req.Resource,
-		ExpiresAt:       expiresAt,
-	})
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "authorize failed")
-		return
-	}
-
-	r.SuccessJSON(serviceAuthorizeResponse{
-		Allowed:               out.Allowed,
-		DenyCode:              out.DenyCode,
-		BillingMode:           out.BillingMode,
-		Currency:              out.Currency,
-		AvailableAmount:       out.AvailableAmount,
-		OutstandingOwedAmount: out.OutstandingOwedAmount,
-		HoldExpiresAt:         unixPtr(out.HoldExpiresAt),
-	})
 }
 
 // serviceBalanceResponse is the tenant-subject balance snapshot served by
@@ -633,59 +510,6 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(trx)
-}
-
-func ServiceHoldCredits(r *httprequest.Request) {
-	var req serviceHoldRequest
-	if !r.BindJSON(&req) {
-		return
-	}
-	invoker := strings.TrimSpace(req.Invoker)
-	if invoker == "" {
-		r.ErrorJSON(http.StatusBadRequest, "invoker required")
-		return
-	}
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return
-	}
-	tenantSubjectID, err := parseServiceCustomerID(req.CustomerID)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	if tenantSubjectID == nil {
-		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
-		return
-	}
-	if !requireServiceCustomerScope(r, *tenantSubjectID) {
-		return
-	}
-	currency, ok := serviceRequiredCurrency(r, req.Currency)
-	if !ok {
-		return
-	}
-	hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
-		CustomerID:  tenantSubjectID,
-		Invoker:     invoker,
-		InvokerType: strings.TrimSpace(req.InvokerType),
-		Currency:    currency,
-		Amount:      req.Amount,
-		Source:      req.Source,
-		RequestID:   req.RequestID,
-		Resource:    req.Resource,
-		ExpiresAt:   time.Unix(req.ExpiresAt, 0).UTC(),
-	})
-	if err == billingservice.ErrInsufficientCredits {
-		r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")
-		return
-	}
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "hold failed")
-		return
-	}
-	r.SuccessJSON(hold)
 }
 
 func ServiceCaptureHold(r *httprequest.Request) {

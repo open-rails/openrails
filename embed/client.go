@@ -242,110 +242,6 @@ func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitRe
 	return out
 }
 
-// Authorize transcribes handlers.ServiceAuthorizeCredits (service_credits.go).
-func (c *localClient) Authorize(ctx context.Context, req openrails.AuthorizeRequest) (*openrails.AuthorizeResponse, error) {
-	ctx = c.ensureTenant(ctx)
-	if req.Currency == "" {
-		req.Currency = c.currency
-	}
-	currency, err := requireCurrency(req.Currency)
-	if err != nil {
-		return nil, err
-	}
-	// gin binding: request_id is `binding:"required"`.
-	if strings.TrimSpace(req.RequestID) == "" {
-		return nil, bindRequiredErr("RequestID")
-	}
-	if req.EstimatedAmount < 0 {
-		return nil, invalidErr("estimated_amount must be >= 0")
-	}
-	payer, err := parseCustomer(req.CustomerID, "invalid customer_id")
-	if err != nil {
-		return nil, err
-	}
-	var expiresAt time.Time
-	if req.ExpiresAt != nil {
-		expiresAt = time.Unix(*req.ExpiresAt, 0).UTC()
-	}
-	out, err := c.svc.AuthorizeAndHold(ctx, billingservice.AuthorizeAndHoldRequest{
-		CustomerID:      payer,
-		Invoker:         req.Invoker,
-		Currency:        currency,
-		EstimatedAmount: req.EstimatedAmount,
-		RequestID:       req.RequestID,
-		ExpiresAt:       expiresAt,
-	})
-	if err != nil {
-		return nil, internalErr("authorize failed")
-	}
-	resp := &openrails.AuthorizeResponse{
-		Allowed:               out.Allowed,
-		DenyCode:              out.DenyCode,
-		BillingMode:           out.BillingMode,
-		Currency:              out.Currency,
-		AvailableAmount:       out.AvailableAmount,
-		OutstandingOwedAmount: out.OutstandingOwedAmount,
-	}
-	if out.HoldExpiresAt != nil {
-		v := out.HoldExpiresAt.Unix()
-		resp.HoldExpiresAt = &v
-	}
-	return resp, nil
-}
-
-// HoldCredits transcribes handlers.ServiceHoldCredits (service_credits.go).
-func (c *localClient) HoldCredits(ctx context.Context, req openrails.HoldCreditsRequest) (*openrails.CreditHold, error) {
-	ctx = c.ensureTenant(ctx)
-	currency, err := requireCurrency(firstNonEmpty(req.Currency, c.currency))
-	if err != nil {
-		return nil, err
-	}
-	// gin binding (in struct field order): invoker, amount, source, source_id,
-	// expires_at are all `binding:"required"`.
-	switch {
-	case strings.TrimSpace(req.Invoker) == "":
-		return nil, bindRequiredErr("Invoker")
-	case strings.TrimSpace(req.InvokerType) == "":
-		return nil, bindRequiredErr("InvokerType")
-	case req.Amount == 0:
-		return nil, bindRequiredErr("Amount")
-	case strings.TrimSpace(req.Source) == "":
-		return nil, bindRequiredErr("Source")
-	case strings.TrimSpace(req.RequestID) == "":
-		return nil, bindRequiredErr("RequestID")
-	}
-	payer, err := parseCustomer(customerString(req.CustomerID), "invalid customer_id")
-	if err != nil {
-		return nil, err
-	}
-	hold, err := c.svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
-		CustomerID:  &payer,
-		Invoker:     req.Invoker,
-		InvokerType: req.InvokerType,
-		Currency:    currency,
-		Amount:      req.Amount,
-		Source:      req.Source,
-		RequestID:   req.RequestID,
-		Resource:    req.Resource,
-		// The wire carries unix seconds; mirror the handler's re-derivation so
-		// sub-second precision is dropped identically on both transports.
-		ExpiresAt: time.Unix(req.ExpiresAt.Unix(), 0).UTC(),
-	})
-	if err != nil {
-		return nil, mapCreditErr(err, "hold failed")
-	}
-	return &openrails.CreditHold{
-		RequestID: hold.RequestID,
-		Invoker:   hold.Invoker,
-		Currency:  hold.Currency,
-		Amount:    hold.Amount,
-		Source:    hold.Source,
-		Resource:  hold.Resource,
-		ExpiresAt: hold.ExpiresAt,
-		CreatedAt: hold.CreatedAt,
-	}, nil
-}
-
 // CaptureHold transcribes handlers.ServiceCaptureHold (service_credits.go)
 // without the usage-event extension (see Capture for that).
 func (c *localClient) CaptureHold(ctx context.Context, req openrails.CaptureHoldRequest) (*openrails.CreditTransaction, error) {
@@ -680,34 +576,6 @@ func (c *localClient) UsageRollup(ctx context.Context, customerID, currency stri
 	return out, nil
 }
 
-// BudgetCheck transcribes handlers.ServiceBudgetCheck (service_admission.go).
-func (c *localClient) BudgetCheck(ctx context.Context, tenantSubjectID, invokerID, currency string, windows []openrails.BudgetWindowInput, requestedAmount int64) ([]openrails.BudgetWindow, error) {
-	ctx = c.ensureTenant(ctx)
-	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
-	if err != nil {
-		return nil, err
-	}
-	currency, err = requireCurrency(currency)
-	if err != nil {
-		return nil, err
-	}
-	in := make([]billingservice.BudgetCheckWindowInput, 0, len(windows))
-	for _, w := range windows {
-		in = append(in, billingservice.BudgetCheckWindowInput{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence,
-		})
-	}
-	statuses, err := c.svc.BudgetCheck(ctx, payer, invokerID, currency, in, requestedAmount)
-	if err != nil {
-		return nil, internalErr("budget check failed")
-	}
-	out := make([]openrails.BudgetWindow, 0, len(statuses))
-	for _, w := range statuses {
-		out = append(out, budgetWindowFromDTO(w))
-	}
-	return out, nil
-}
-
 // BudgetStatus transcribes handlers.ServiceGetBudget (service_admission.go).
 func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]openrails.BudgetWindow, error) {
 	ctx = c.ensureTenant(ctx)
@@ -730,9 +598,9 @@ func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, invoker
 	return out, nil
 }
 
-// SetTierPolicy transcribes handlers.ServiceSetTierPolicy
+// SetTierSpendCaps transcribes handlers.ServiceSetTierSpendCaps
 // (service_admission.go).
-func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string, in openrails.TierPolicyInput) error {
+func (c *localClient) SetTierSpendCaps(ctx context.Context, tenantSubjectID string, in openrails.TierSpendCapInput) error {
 	ctx = c.ensureTenant(ctx)
 	// An EMPTY customer_id sets the tenant-wide DEFAULT tier policy (#477,
 	// the platform capacity ladder declared once); a non-empty one is a per-subject
@@ -745,7 +613,7 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 			return err
 		}
 	}
-	pol := billingservice.TierPolicyInput{
+	pol := billingservice.TierSpendCapInput{
 		Tier:           in.Tier,
 		PolicyCurrency: in.PolicyCurrency,
 	}
@@ -759,7 +627,7 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency, Cadence: b.Cadence,
 		})
 	}
-	if err := c.svc.SetTierPolicy(ctx, payer, pol); err != nil {
+	if err := c.svc.SetTierSpendCaps(ctx, payer, pol); err != nil {
 		return internalErr("set tier policy failed")
 	}
 	return nil
@@ -936,19 +804,19 @@ func abuseUsageWindows(ws []billingservice.AbuseUsageWindow) []openrails.AbuseUs
 	return out
 }
 
-func budgetScopeWindowInputs(ws []openrails.BudgetScopeWindow) []billingservice.BudgetScopeWindowInput {
-	out := make([]billingservice.BudgetScopeWindowInput, 0, len(ws))
+func spendCapWindowInputs(ws []openrails.SpendCapWindow) []billingservice.SpendCapWindowInput {
+	out := make([]billingservice.SpendCapWindowInput, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, billingservice.BudgetScopeWindowInput{
+		out = append(out, billingservice.SpendCapWindowInput{
 			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence,
 		})
 	}
 	return out
 }
 
-// SetSubjectBudgetPolicy transcribes handlers.ServiceSetSubjectBudgetPolicy
+// SetSubjectSpendCaps transcribes handlers.ServiceSetSubjectSpendCaps
 // (service_admission.go, #473).
-func (c *localClient) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in openrails.SubjectBudgetPolicyInput) error {
+func (c *localClient) SetSubjectSpendCaps(ctx context.Context, tenantSubjectID string, in openrails.SubjectSpendCapInput) error {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
 	if err != nil {
@@ -958,54 +826,54 @@ func (c *localClient) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectI
 	if scopeKey == "" {
 		scopeKey = strings.TrimSpace(in.RoleID)
 	}
-	if err := c.svc.SetSubjectBudgetPolicy(ctx, payer, billingservice.BudgetScopePolicyInput{
+	if err := c.svc.SetSubjectSpendCaps(ctx, payer, billingservice.ScopedSpendCapInput{
 		Scope:    in.Scope,
 		ScopeKey: scopeKey,
-		Windows:  budgetScopeWindowInputs(in.Windows),
+		Windows:  spendCapWindowInputs(in.Windows),
 	}); err != nil {
 		return internalErr("set subject budget policy failed")
 	}
 	return nil
 }
 
-// SetPlatformBudgetPolicy transcribes handlers.ServiceSetPlatformBudgetPolicy
+// SetPlatformSpendCaps transcribes handlers.ServiceSetPlatformSpendCaps
 // (service_admission.go, #473). The platform-admin route gate is not transcribed
 // — embedded hosts are the principal (the direct call is operator-trusted).
-func (c *localClient) SetPlatformBudgetPolicy(ctx context.Context, tenantSubjectID string, in openrails.PlatformBudgetPolicyInput) error {
+func (c *localClient) SetPlatformSpendCaps(ctx context.Context, tenantSubjectID string, in openrails.PlatformSpendCapInput) error {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
 	if err != nil {
 		return err
 	}
-	if err := c.svc.SetPlatformBudgetPolicy(ctx, payer, billingservice.BudgetScopePolicyInput{
+	if err := c.svc.SetPlatformSpendCaps(ctx, payer, billingservice.ScopedSpendCapInput{
 		Scope:   in.Scope,
-		Windows: budgetScopeWindowInputs(in.Windows),
+		Windows: spendCapWindowInputs(in.Windows),
 	}); err != nil {
 		return internalErr("set platform budget policy failed")
 	}
 	return nil
 }
 
-// SubjectBudgetPolicies transcribes handlers.ServiceGetSubjectBudgetPolicies
+// SubjectSpendCaps transcribes handlers.ServiceGetSubjectSpendCaps
 // (service_admission.go, #473): subject-owned policies only; ScopeKey maps back
 // onto role_id.
-func (c *localClient) SubjectBudgetPolicies(ctx context.Context, tenantSubjectID string) ([]openrails.SubjectBudgetPolicy, error) {
+func (c *localClient) SubjectSpendCaps(ctx context.Context, tenantSubjectID string) ([]openrails.SubjectSpendCap, error) {
 	ctx = c.ensureTenant(ctx)
 	payer, err := parseCustomer(tenantSubjectID, "customer_id required")
 	if err != nil {
 		return nil, err
 	}
-	policies, err := c.svc.SubjectBudgetPolicies(ctx, payer)
+	policies, err := c.svc.SubjectSpendCaps(ctx, payer)
 	if err != nil {
 		return nil, internalErr("subject budget policies lookup failed")
 	}
-	out := make([]openrails.SubjectBudgetPolicy, 0, len(policies))
+	out := make([]openrails.SubjectSpendCap, 0, len(policies))
 	for _, p := range policies {
-		ws := make([]openrails.BudgetScopeWindow, 0, len(p.Windows))
+		ws := make([]openrails.SpendCapWindow, 0, len(p.Windows))
 		for _, w := range p.Windows {
-			ws = append(ws, openrails.BudgetScopeWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence})
+			ws = append(ws, openrails.SpendCapWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence})
 		}
-		out = append(out, openrails.SubjectBudgetPolicy{Scope: p.Scope, RoleID: p.ScopeKey, Windows: ws})
+		out = append(out, openrails.SubjectSpendCap{Scope: p.Scope, RoleID: p.ScopeKey, Windows: ws})
 	}
 	return out, nil
 }

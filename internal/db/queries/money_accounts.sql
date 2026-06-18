@@ -3,12 +3,12 @@
 -- precision. currency is a system code; the Go registry is authority.
 
 -- name: ListMoneyAccountPairs :many
--- Distinct (payer, currency) pairs to finalize invoices for (#472). money_balances
--- is gone (#491); the durable ledger (money_transactions) is now the source of
--- every payer with money activity, in every currency.
-SELECT DISTINCT customer_id, currency
-FROM openrails.money_transactions
-WHERE merchant_id = $1
+-- Distinct (payer, currency) pairs to finalize invoices for (#472). The #512
+-- ledger transfers are the durable source of every payer with money activity,
+-- in every currency (the single-entry money_transactions table is gone).
+SELECT DISTINCT customer_id::uuid AS customer_id, currency
+FROM openrails.ledger_transfers
+WHERE merchant_id = $1 AND customer_id IS NOT NULL
 ORDER BY customer_id, currency;
 
 -- name: GetMoneyAccountSettings :one
@@ -108,46 +108,35 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 
 -- name: ListBelowThresholdMoneyAccounts :many
 -- Money-in workers (#239/#240): accounts whose DERIVED available balance
--- (#505: SUM spendable blocks - durable open-window unsettled) is under their
--- configured low-balance threshold. Request holds live in Redis and are not
--- part of this durable account scan.
-SELECT s.merchant_id, s.customer_id, s.currency,
-       (
-         COALESCE((SELECT SUM(mb.remaining_amount) FROM openrails.money_blocks mb
-                   WHERE mb.merchant_id = s.merchant_id AND mb.customer_id = s.customer_id
-                     AND mb.currency = s.currency AND mb.remaining_amount > 0
-                     AND (mb.expires_at IS NULL OR mb.expires_at > sqlc.arg(now)::timestamptz)), 0)
-       - COALESCE((SELECT SUM(w.held_amount - w.settled_amount) FROM openrails.money_windows w
-                   WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
-                     AND w.currency = s.currency AND w.status = 'open'), 0)
-       )::bigint AS available,
-       COALESCE(s.low_balance_threshold, 0)::bigint AS threshold,
-       s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id,
-       s.last_alert_at, s.last_topup_at
-FROM openrails.money_settings s
-WHERE s.merchant_id = $1
-  AND s.low_balance_threshold IS NOT NULL
-  AND (
-         COALESCE((SELECT SUM(mb.remaining_amount) FROM openrails.money_blocks mb
-                   WHERE mb.merchant_id = s.merchant_id AND mb.customer_id = s.customer_id
-                     AND mb.currency = s.currency AND mb.remaining_amount > 0
-                     AND (mb.expires_at IS NULL OR mb.expires_at > sqlc.arg(now)::timestamptz)), 0)
-       - COALESCE((SELECT SUM(w.held_amount - w.settled_amount) FROM openrails.money_windows w
-                   WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
-                     AND w.currency = s.currency AND w.status = 'open'), 0)
-       ) < s.low_balance_threshold;
-
--- name: GetMoneySpendLimit :one
-SELECT * FROM openrails.money_spend_limits
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency) AND invoker_id = $3
-LIMIT 1;
-
--- name: UpsertMoneySpendLimit :exec
-INSERT INTO openrails.money_spend_limits (
-    id, merchant_id, customer_id, currency, invoker_id,
-    max_spend_per_day, max_spend_per_month, created_at, updated_at
-) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8)
-ON CONFLICT (merchant_id, customer_id, currency, invoker_id) DO UPDATE SET
-    max_spend_per_day = EXCLUDED.max_spend_per_day,
-    max_spend_per_month = EXCLUDED.max_spend_per_month,
-    updated_at = EXCLUDED.updated_at;
+-- (#512 ledger customer_balance − durable open-window unsettled) is under their
+-- configured low-balance threshold. Request holds live in Redis and are not part
+-- of this durable account scan.
+WITH avail AS (
+    SELECT s.merchant_id, s.customer_id, s.currency,
+           s.low_balance_threshold, s.auto_topup_enabled, s.auto_topup_amount_cents,
+           s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at,
+           (
+             COALESCE((
+                 SELECT SUM(CASE WHEN t.credit_account_id = a.id THEN t.amount
+                                 WHEN t.debit_account_id = a.id THEN -t.amount ELSE 0 END)
+                 FROM openrails.ledger_accounts a
+                 JOIN openrails.ledger_transfers t
+                   ON t.merchant_id = a.merchant_id
+                  AND (t.debit_account_id = a.id OR t.credit_account_id = a.id)
+                  AND t.phase IN ('posted', 'post_pending')
+                 WHERE a.merchant_id = s.merchant_id AND a.customer_id = s.customer_id
+                   AND a.currency = s.currency AND a.account_type = 'customer_balance'
+             ), 0)
+           - COALESCE((SELECT SUM(w.held_amount - w.settled_amount) FROM openrails.money_windows w
+                       WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
+                         AND w.currency = s.currency AND w.status = 'open'), 0)
+           )::bigint AS available
+    FROM openrails.money_settings s
+    WHERE s.merchant_id = $1 AND s.low_balance_threshold IS NOT NULL
+)
+SELECT merchant_id, customer_id, currency, available,
+       COALESCE(low_balance_threshold, 0)::bigint AS threshold,
+       auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id,
+       last_alert_at, last_topup_at
+FROM avail
+WHERE available < low_balance_threshold;

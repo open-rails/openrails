@@ -26,7 +26,7 @@ func TestProbeVerdictCacheRoundtrip(t *testing.T) {
 	pool, err := pgxpool.New(context.Background(), appDSN)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	appDB, err := db.NewWithPGXPool(pool)
+	appDB, err := db.NewWithPGXPool(pool, "") // default schema (shared harness)
 	require.NoError(t, err)
 
 	keyHash := probeKeyHash("integration-test-key")

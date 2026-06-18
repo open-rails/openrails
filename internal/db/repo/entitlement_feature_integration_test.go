@@ -35,7 +35,7 @@ func startFeatureRLSPostgres(t *testing.T) (appDB *db.DB, ctx context.Context) {
 	pool, err := pgxpool.New(ctx, appDSN)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	appDB, err = db.NewWithPGXPool(pool)
+	appDB, err = db.NewWithPGXPool(pool, "") // default schema (shared harness)
 	require.NoError(t, err)
 	return appDB, ctx
 }

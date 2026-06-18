@@ -114,42 +114,6 @@ func (c *remote) Admit(ctx context.Context, req AdmitRequest) (*AdmitResponse, e
 	return nil, statusErrorFromBody(status, raw)
 }
 
-// Authorize implements Client (handler ServiceAuthorizeCredits).
-func (c *remote) Authorize(ctx context.Context, req AuthorizeRequest) (*AuthorizeResponse, error) {
-	if req.Currency == "" {
-		req.Currency = c.currency
-	}
-	var out AuthorizeResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/authorize", req, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// HoldCredits implements Client (handler ServiceHoldCredits).
-func (c *remote) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*CreditHold, error) {
-	currency := normalizeCurrency(req.Currency)
-	if currency == "" {
-		currency = normalizeCurrency(c.currency)
-	}
-	var out CreditHold
-	err := c.do(ctx, http.MethodPost, "/v1/service/credits/hold", map[string]any{
-		"customer_id":  customerIDString(req.CustomerID),
-		"invoker":      req.Invoker,
-		"invoker_type": req.InvokerType,
-		"currency":     currency,
-		"amount":       req.Amount,
-		"source":       req.Source,
-		"request_id":   req.RequestID,
-		"resource":     req.Resource,
-		"expires_at":   req.ExpiresAt.Unix(),
-	}, &out)
-	if err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // CaptureHold implements Client (handler ServiceCaptureHold).
 func (c *remote) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*CreditTransaction, error) {
 	var out CreditTransaction
@@ -335,27 +299,6 @@ func (c *remote) UsageRollup(ctx context.Context, customerID, currency string, f
 	return resp.Rows, nil
 }
 
-// BudgetCheck implements Client (handler ServiceBudgetCheck).
-func (c *remote) BudgetCheck(ctx context.Context, tenantSubjectID, invokerID, currency string, windows []BudgetWindowInput, requestedAmount int64) ([]BudgetWindow, error) {
-	if windows == nil {
-		windows = []BudgetWindowInput{}
-	}
-	var resp struct {
-		Windows []BudgetWindow `json:"windows"`
-	}
-	body := map[string]any{
-		"customer_id":      tenantSubjectID,
-		"invoker":          invokerID,
-		"currency":         normalizeCurrency(currency),
-		"windows":          windows,
-		"requested_amount": requestedAmount,
-	}
-	if err := c.do(ctx, http.MethodPost, "/v1/service/budget/check", body, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Windows, nil
-}
-
 // BudgetStatus implements Client (handler ServiceGetBudget).
 func (c *remote) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]BudgetWindow, error) {
 	q := url.Values{}
@@ -376,8 +319,8 @@ func (c *remote) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, c
 	return resp.Windows, nil
 }
 
-// SetTierPolicy implements Client (handler ServiceSetTierPolicy).
-func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in TierPolicyInput) error {
+// SetTierSpendCaps implements Client (handler ServiceSetTierSpendCaps).
+func (c *remote) SetTierSpendCaps(ctx context.Context, tenantSubjectID string, in TierSpendCapInput) error {
 	body := map[string]any{
 		"customer_id":     strings.TrimSpace(tenantSubjectID),
 		"tier":            in.Tier,
@@ -387,7 +330,7 @@ func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in T
 	if len(in.BadSpendWindows) > 0 {
 		body["bad_spend_windows"] = in.BadSpendWindows
 	}
-	return c.do(ctx, http.MethodPut, "/v1/service/tier-policies", body, nil)
+	return c.do(ctx, http.MethodPut, "/v1/service/tier-spend-caps", body, nil)
 }
 
 // SetTierSchedule implements Client (handler ServiceSetTierSchedule, #476).
@@ -495,8 +438,8 @@ func (c *remote) GetCreditLimit(ctx context.Context, tenantSubjectID, currency s
 	return resp.CreditLimitAmount, nil
 }
 
-// SetSubjectBudgetPolicy implements Client (handler ServiceSetSubjectBudgetPolicy, #473).
-func (c *remote) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in SubjectBudgetPolicyInput) error {
+// SetSubjectSpendCaps implements Client (handler ServiceSetSubjectSpendCaps, #473).
+func (c *remote) SetSubjectSpendCaps(ctx context.Context, tenantSubjectID string, in SubjectSpendCapInput) error {
 	scopeKey := strings.TrimSpace(in.ScopeKey)
 	if scopeKey == "" {
 		scopeKey = strings.TrimSpace(in.RoleID)
@@ -508,27 +451,27 @@ func (c *remote) SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID str
 		"role_id":     in.RoleID,
 		"windows":     in.Windows,
 	}
-	return c.do(ctx, http.MethodPut, "/v1/service/budget-policies/subject", body, nil)
+	return c.do(ctx, http.MethodPut, "/v1/service/spend-caps/subject", body, nil)
 }
 
-// SetPlatformBudgetPolicy implements Client (handler ServiceSetPlatformBudgetPolicy, #473).
-func (c *remote) SetPlatformBudgetPolicy(ctx context.Context, tenantSubjectID string, in PlatformBudgetPolicyInput) error {
+// SetPlatformSpendCaps implements Client (handler ServiceSetPlatformSpendCaps, #473).
+func (c *remote) SetPlatformSpendCaps(ctx context.Context, tenantSubjectID string, in PlatformSpendCapInput) error {
 	body := map[string]any{
 		"customer_id": strings.TrimSpace(tenantSubjectID),
 		"scope":       in.Scope,
 		"windows":     in.Windows,
 	}
-	return c.do(ctx, http.MethodPut, "/v1/service/budget-policies/platform", body, nil)
+	return c.do(ctx, http.MethodPut, "/v1/service/spend-caps/platform", body, nil)
 }
 
-// SubjectBudgetPolicies implements Client (handler ServiceGetSubjectBudgetPolicies, #473).
-func (c *remote) SubjectBudgetPolicies(ctx context.Context, tenantSubjectID string) ([]SubjectBudgetPolicy, error) {
+// SubjectSpendCaps implements Client (handler ServiceGetSubjectSpendCaps, #473).
+func (c *remote) SubjectSpendCaps(ctx context.Context, tenantSubjectID string) ([]SubjectSpendCap, error) {
 	q := url.Values{}
 	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
 	var resp struct {
-		Policies []SubjectBudgetPolicy `json:"policies"`
+		Policies []SubjectSpendCap `json:"policies"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/service/budget-policies/subject?"+q.Encode(), nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/service/spend-caps/subject?"+q.Encode(), nil, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Policies, nil

@@ -98,13 +98,16 @@ func (f *fakeAlerter) LowBalanceAlert(_ context.Context, _ identity.CustomerID, 
 	return nil
 }
 
-func latestBlock(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payerID uuid.UUID) *models.MoneyBlock {
+// latestBlockExpiry returns the expiry of the most recent credit lot (a #514
+// credit grant) for the payer — the money_blocks table is gone (#512 hard cut),
+// the credit grant carries the lot's amount + expiry.
+func latestBlockExpiry(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payerID uuid.UUID) *time.Time {
 	t.Helper()
-	b := new(models.MoneyBlock)
+	var exp *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT expires_at FROM openrails.money_blocks WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
-		payerID).Scan(&b.ExpiresAt))
-	return b
+		"SELECT ends_at FROM openrails.grants WHERE customer_id = $1 AND kind = 'credit' AND event = 'grant' ORDER BY created_at DESC LIMIT 1",
+		payerID).Scan(&exp))
+	return exp
 }
 
 func seedPaymentMethod(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, processor string) uuid.UUID {
@@ -164,9 +167,9 @@ func TestDeposit_DefaultExpiry_NoSettingsRow(t *testing.T) {
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
-	b := latestBlock(t, pool, ctx, payer.UUID())
-	require.NotNil(t, b.ExpiresAt, "default 365d expiry should be applied")
-	days := b.ExpiresAt.Sub(time.Now().UTC()).Hours() / 24
+	exp := latestBlockExpiry(t, pool, ctx, payer.UUID())
+	require.NotNil(t, exp, "default 365d expiry should be applied")
+	days := exp.Sub(time.Now().UTC()).Hours() / 24
 	require.InDelta(t, 365, days, 1.5)
 }
 
@@ -176,8 +179,8 @@ func TestDeposit_NoFlag_Permanent(t *testing.T) {
 		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Source: "grant",
 	})
 	require.NoError(t, err)
-	b := latestBlock(t, pool, ctx, payer.UUID())
-	require.Nil(t, b.ExpiresAt, "no flag, no explicit expiry -> permanent")
+	exp := latestBlockExpiry(t, pool, ctx, payer.UUID())
+	require.Nil(t, exp, "no flag, no explicit expiry -> permanent")
 }
 
 func TestDeposit_ConfiguredExpiryDays(t *testing.T) {
@@ -190,9 +193,9 @@ func TestDeposit_ConfiguredExpiryDays(t *testing.T) {
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
-	b := latestBlock(t, pool, ctx, payer.UUID())
-	require.NotNil(t, b.ExpiresAt)
-	require.InDelta(t, 30, b.ExpiresAt.Sub(time.Now().UTC()).Hours()/24, 1.5)
+	exp := latestBlockExpiry(t, pool, ctx, payer.UUID())
+	require.NotNil(t, exp)
+	require.InDelta(t, 30, exp.Sub(time.Now().UTC()).Hours()/24, 1.5)
 }
 
 // --- #240 low-balance alerts ---

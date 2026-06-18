@@ -42,11 +42,14 @@ func TestReconcile_IgnoresLegacyPostgresHoldRows(t *testing.T) {
 
 func resetMoneyLedger(t *testing.T, pool *pgxpool.Pool, ctx context.Context) {
 	t.Helper()
+	// FK-safe order: transfers before accounts; grants after (self-FK ok in one
+	// statement). The #512 ledger + #514 grants replaced money_blocks/transactions.
 	for _, table := range []string{
-		"openrails.money_spend_limits",
+		"openrails.ledger_transfers",
+		"openrails.grants",
+		"openrails.ledger_accounts",
 		"openrails.money_settings",
-		"openrails.money_blocks",
-		"openrails.money_transactions",
+		"openrails.money_windows",
 	} {
 		_, err := pool.Exec(ctx, "DELETE FROM "+table)
 		require.NoError(t, err, "reset %s", table)

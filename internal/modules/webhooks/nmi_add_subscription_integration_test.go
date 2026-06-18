@@ -25,7 +25,7 @@ func TestHandleAddSubscription_ActivatesPendingWithSettledTransactionMetadata(t 
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	svc, dbi, ids := setupNMIAddSubscriptionTest(t, dsn, true)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
@@ -74,7 +74,7 @@ func TestHandleTransactionSaleSuccess_AcksDuplicateInitialChargeOnActiveSubscrip
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	svc, dbi, ids := setupNMIAddSubscriptionTest(t, dsn, true)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	pool := dbi.Pool()
 
 	// Activate the subscription and record the initial charge (the analogue of
@@ -120,7 +120,7 @@ func TestHandleAddSubscription_WithoutSettledTransactionMetadataStaysPending(t *
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	svc, dbi, ids := setupNMIAddSubscriptionTest(t, dsn, false)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	pool := dbi.Pool()
 
 	require.NoError(t, svc.handleAddSubscription(ctx))

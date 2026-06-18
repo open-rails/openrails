@@ -1,0 +1,254 @@
+//go:build integration
+
+package spendgate_test
+
+import (
+	"context"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
+	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
+	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
+)
+
+// clock is a mutable test clock so anchored-window resets can be exercised
+// deterministically (advance time → a fixed window rolls to a new bucket) without
+// real sleeps.
+type clock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *clock) now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
+func (c *clock) add(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+func newGate(t *testing.T) (*spendgate.Gate, *clock, context.Context) {
+	t.Helper()
+	ctx := context.Background()
+	c, err := tcredis.Run(ctx, "redis:7-alpine")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = c.Terminate(ctx) })
+	conn, err := c.ConnectionString(ctx)
+	require.NoError(t, err)
+	opt, err := redis.ParseURL(conn)
+	require.NoError(t, err)
+	rdb := redis.NewClient(opt)
+	t.Cleanup(func() { _ = rdb.Close() })
+	require.NoError(t, rdb.Ping(ctx).Err())
+
+	g := spendgate.New(rdb)
+	clk := &clock{t: time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)}
+	g.SetClock(clk.now)
+	return g, clk, ctx
+}
+
+// reqIDs are unique per call so each admit is a distinct request.
+func rid() string { return uuid.NewString() }
+
+func payer() (string, string, string) { return uuid.NewString(), uuid.NewString(), "USD" }
+
+func TestGate_AffordabilityGate_Prepaid(t *testing.T) {
+	g, _, ctx := newGate(t)
+	m, c, cur := payer()
+
+	// cachedBalance 1000, prepaid (creditLimit 0): first 600 fits, second 600 does not
+	// (1000 - 600 held - 600 < 0).
+	d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 600, CachedBalance: 1000})
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
+
+	d, err = g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 600, CachedBalance: 1000})
+	require.NoError(t, err)
+	require.False(t, d.Allowed)
+	require.True(t, d.BlockedBalance)
+
+	held, err := g.HeldAmount(ctx, m, c, cur)
+	require.NoError(t, err)
+	require.Equal(t, int64(600), held)
+}
+
+func TestGate_CreditLimit_Arrears(t *testing.T) {
+	g, _, ctx := newGate(t)
+	m, c, cur := payer()
+
+	// balance 0, credit line 500: floor = -500. 400 fits (0-0-400 >= -500); a further
+	// 200 does not (0-400-200 = -600 < -500).
+	d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 400, CachedBalance: 0, CreditLimit: 500})
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
+
+	d, err = g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 200, CachedBalance: 0, CreditLimit: 500})
+	require.NoError(t, err)
+	require.False(t, d.Allowed)
+	require.True(t, d.BlockedBalance)
+}
+
+func fixedPayerPolicy(limit int64, dur time.Duration) spendgate.Policy {
+	return spendgate.Policy{Scopes: []spendgate.ScopedWindows{{
+		Scope: spendgate.ScopePayer,
+		Windows: []spendgate.Window{{
+			Scope: spendgate.ScopePayer, Cadence: spendgate.CadenceFixed, Duration: dur, Limit: limit, Key: "win",
+		}},
+	}}}
+}
+
+func TestGate_WindowGate_FixedResets(t *testing.T) {
+	g, clk, ctx := newGate(t)
+	m, c, cur := payer()
+	pol := fixedPayerPolicy(1000, 5*time.Hour)
+	big := int64(1_000_000) // balance never binds
+
+	d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 600, CachedBalance: big, Policy: pol})
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
+
+	// Second 600 would breach the 1000 window (600+600>1000).
+	d, err = g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 600, CachedBalance: big, Policy: pol})
+	require.NoError(t, err)
+	require.False(t, d.Allowed)
+	require.NotNil(t, d.BlockedWindow)
+	require.Equal(t, "win", d.BlockedWindow.Key)
+
+	// Advance past the fixed window: a new bucket resets the counter.
+	clk.add(5*time.Hour + time.Second)
+	d, err = g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 600, CachedBalance: big, Policy: pol})
+	require.NoError(t, err)
+	require.True(t, d.Allowed, "window should reset in the next fixed bucket")
+}
+
+func TestGate_Idempotent(t *testing.T) {
+	g, _, ctx := newGate(t)
+	m, c, cur := payer()
+	r := rid()
+
+	for i := 0; i < 3; i++ {
+		d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: r, Cost: 500, CachedBalance: 1000})
+		require.NoError(t, err)
+		require.True(t, d.Allowed)
+	}
+	held, err := g.HeldAmount(ctx, m, c, cur)
+	require.NoError(t, err)
+	require.Equal(t, int64(500), held, "replaying the same request must not double-reserve")
+}
+
+func TestGate_CaptureFreesHeldKeepsWindow(t *testing.T) {
+	g, _, ctx := newGate(t)
+	m, c, cur := payer()
+	pol := fixedPayerPolicy(1000, 5*time.Hour)
+	big := int64(1_000_000)
+	r := rid()
+
+	_, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: r, Cost: 500, CachedBalance: big, Policy: pol})
+	require.NoError(t, err)
+	require.NoError(t, g.Capture(ctx, spendgate.CaptureInput{Merchant: m, Customer: c, Currency: cur, RequestID: r}))
+
+	held, err := g.HeldAmount(ctx, m, c, cur)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), held, "capture frees the held reservation")
+
+	// The window kept the estimate (estimate-based): 500 already counted, so a 600
+	// request now breaches the 1000 cap.
+	d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 600, CachedBalance: big, Policy: pol})
+	require.NoError(t, err)
+	require.False(t, d.Allowed)
+	require.NotNil(t, d.BlockedWindow)
+}
+
+func TestGate_ReleaseFreesHeldAndWindow(t *testing.T) {
+	g, _, ctx := newGate(t)
+	m, c, cur := payer()
+	pol := fixedPayerPolicy(1000, 5*time.Hour)
+	big := int64(1_000_000)
+	r := rid()
+
+	_, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: r, Cost: 500, CachedBalance: big, Policy: pol})
+	require.NoError(t, err)
+	require.NoError(t, g.Release(ctx, spendgate.ReleaseInput{Merchant: m, Customer: c, Currency: cur, RequestID: r}))
+
+	held, err := g.HeldAmount(ctx, m, c, cur)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), held, "release frees the held reservation")
+
+	// The window was freed too (the request did not happen): a full 1000 fits again.
+	d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 1000, CachedBalance: big, Policy: pol})
+	require.NoError(t, err)
+	require.True(t, d.Allowed, "release should free the window reservation")
+}
+
+func TestGate_MultiScopeDenyOnAnyWindow(t *testing.T) {
+	g, _, ctx := newGate(t)
+	m, c, cur := payer()
+	big := int64(1_000_000)
+	// payer window allows 1000; invoker window allows only 300.
+	pol := spendgate.Policy{Scopes: []spendgate.ScopedWindows{
+		{Scope: spendgate.ScopePayer, Windows: []spendgate.Window{{Scope: spendgate.ScopePayer, Cadence: spendgate.CadenceFixed, Duration: time.Hour, Limit: 1000, Key: "p"}}},
+		{Scope: spendgate.ScopeInvoker, ScopeID: "svc:abc", Windows: []spendgate.Window{{Scope: spendgate.ScopeInvoker, Cadence: spendgate.CadenceFixed, Duration: time.Hour, Limit: 300, Key: "i"}}},
+	}}
+	req := spendgate.Request{Invoker: "svc:abc"}
+
+	// 500 fits the payer window but breaches the invoker window → denied on invoker.
+	d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 500, CachedBalance: big, Policy: pol, Request: req})
+	require.NoError(t, err)
+	require.False(t, d.Allowed)
+	require.NotNil(t, d.BlockedWindow)
+	require.Equal(t, "i", d.BlockedWindow.Key)
+
+	// A different invoker is unconstrained by the svc:abc window → 500 fits the payer cap.
+	d, err = g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 500, CachedBalance: big, Policy: pol, Request: spendgate.Request{Invoker: "svc:other"}})
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
+}
+
+func TestGate_ResolvePointer(t *testing.T) {
+	g, _, ctx := newGate(t)
+	m, c, cur := payer()
+	r := rid()
+
+	_, ok, err := g.Resolve(ctx, m, r)
+	require.NoError(t, err)
+	require.False(t, ok, "no pointer before admit")
+
+	_, err = g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: r, Invoker: "user:x", Source: "usage", Cost: 100, CachedBalance: 1000})
+	require.NoError(t, err)
+
+	ref, ok, err := g.Resolve(ctx, m, r)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, c, ref.Customer)
+	require.Equal(t, cur, ref.Currency)
+	require.Equal(t, "user:x", ref.Invoker)
+	require.Equal(t, "usage", ref.Source)
+
+	// Capture removes the pointer.
+	require.NoError(t, g.Capture(ctx, spendgate.CaptureInput{Merchant: m, Customer: c, Currency: cur, RequestID: r}))
+	_, ok, err = g.Resolve(ctx, m, r)
+	require.NoError(t, err)
+	require.False(t, ok, "pointer cleared after capture")
+}
+
+func TestGate_SessionWindowAccumulates(t *testing.T) {
+	g, _, ctx := newGate(t)
+	m, c, cur := payer()
+	big := int64(1_000_000)
+	pol := spendgate.Policy{Scopes: []spendgate.ScopedWindows{{
+		Scope:   spendgate.ScopePayer,
+		Windows: []spendgate.Window{{Scope: spendgate.ScopePayer, Cadence: spendgate.CadenceSession, Duration: time.Hour, Limit: 1000, Key: "s"}},
+	}}}
+
+	d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 700, CachedBalance: big, Policy: pol})
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
+
+	d, err = g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 400, CachedBalance: big, Policy: pol})
+	require.NoError(t, err)
+	require.False(t, d.Allowed, "700+400 breaches the 1000 session window")
+	require.NotNil(t, d.BlockedWindow)
+}

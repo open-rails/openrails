@@ -10,8 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/modules/budgets"
-	"github.com/open-rails/openrails/internal/modules/holds"
+	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -47,115 +46,6 @@ func (s *Service) now() time.Time {
 }
 
 var ErrInsufficientCredits = money.ErrInsufficientCredits
-
-type HoldCreditsRequest struct {
-	CustomerID  *identity.CustomerID
-	Invoker     string
-	InvokerType string
-	Currency    string
-	Amount      int64
-	Source      string
-	RequestID   string
-	Resource    string
-	ExpiresAt   time.Time
-}
-
-type CreditHold struct {
-	RequestID string
-	Invoker   string
-	Currency  string
-	Amount    int64
-	Source    string
-	Resource  string
-	ExpiresAt time.Time
-	CreatedAt time.Time
-}
-
-func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*CreditHold, error) {
-	req.Invoker = strings.TrimSpace(req.Invoker)
-	req.InvokerType = strings.TrimSpace(req.InvokerType)
-	req.Source = strings.TrimSpace(req.Source)
-	req.RequestID = strings.TrimSpace(req.RequestID)
-	if req.CustomerID == nil || req.CustomerID.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
-	}
-	if req.Invoker == "" {
-		return nil, fmt.Errorf("invoker required")
-	}
-	currency, err := requireCurrency(req.Currency)
-	if err != nil {
-		return nil, err
-	}
-	if req.Amount <= 0 {
-		return nil, fmt.Errorf("amount must be > 0")
-	}
-	if req.Source == "" {
-		return nil, fmt.Errorf("source required")
-	}
-	if req.RequestID == "" {
-		return nil, fmt.Errorf("request_id required")
-	}
-	if req.ExpiresAt.IsZero() {
-		return nil, fmt.Errorf("expires_at required")
-	}
-	if req.InvokerType != string(identity.InvokerTypePayer) && req.InvokerType != string(identity.InvokerTypeDelegated) {
-		return nil, fmt.Errorf("invoker_type must be payer or delegated")
-	}
-
-	out, err := s.moneyService().AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-		Payer:           *req.CustomerID,
-		Invoker:         req.Invoker,
-		Currency:        currency,
-		EstimatedAmount: req.Amount,
-		Source:          req.Source,
-		SourceID:        req.RequestID,
-		ExpiresAt:       req.ExpiresAt.UTC(),
-	})
-	if err != nil {
-		return nil, err
-	}
-	if !out.Decision.Allowed {
-		return nil, ErrInsufficientCredits
-	}
-
-	store, err := s.holdStore()
-	if err != nil {
-		return nil, err
-	}
-	mid, err := serviceMerchantID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	allowed, _, err := store.Place(ctx, holds.Hold{
-		MerchantID:      mid,
-		RequestID:       req.RequestID,
-		CustomerID:      req.CustomerID.UUID().String(),
-		Invoker:         req.Invoker,
-		InvokerType:     req.InvokerType,
-		Currency:        currency,
-		EstimatedAmount: req.Amount,
-		Source:          req.Source,
-		Resource:        strings.TrimSpace(req.Resource),
-		CreatedAt:       s.now().UTC(),
-		ExpiresAt:       req.ExpiresAt.UTC(),
-	}, out.AccountCapacityAmount)
-	if err != nil {
-		return nil, err
-	}
-	if !allowed {
-		return nil, ErrInsufficientCredits
-	}
-	return &CreditHold{
-		RequestID: req.RequestID,
-		Invoker:   req.Invoker,
-		Currency:  currency,
-		Amount:    req.Amount,
-		Source:    req.Source,
-		Resource:  strings.TrimSpace(req.Resource),
-		ExpiresAt: req.ExpiresAt.UTC(),
-		CreatedAt: s.now().UTC(),
-	}, nil
-}
 
 type CaptureHoldRequest struct {
 	RequestID string
@@ -336,58 +226,63 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
 	}
-	store, err := s.holdStore()
-	if err != nil {
-		return nil, err
+	if s.rt == nil || s.rt.RedisClient == nil {
+		return nil, fmt.Errorf("capture unavailable: redis not configured")
 	}
 	mid, err := serviceMerchantID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	hold, err := store.Get(ctx, mid, req.RequestID)
+	// Resolve the payer coords the admit-time hold was placed under (#513): the
+	// capture wire carries only the request id.
+	gate := spendgate.New(s.rt.RedisClient)
+	ref, ok, err := gate.Resolve(ctx, mid, req.RequestID)
 	if err != nil {
 		return nil, err
 	}
-	if req.Amount > hold.EstimatedAmount {
-		return nil, fmt.Errorf("capture amount exceeds estimated hold amount")
+	if !ok {
+		return nil, fmt.Errorf("hold not found for request_id %q", req.RequestID)
 	}
-	payerID, err := uuid.Parse(hold.CustomerID)
+	payerID, err := uuid.Parse(ref.Customer)
 	if err != nil {
 		return nil, fmt.Errorf("invalid hold customer_id")
 	}
 	payer := identity.CustomerID(payerID)
+	source := ref.Source
+	if source == "" {
+		source = "usage"
+	}
+	// Durable money movement (#512 ledger), idempotent on
+	// (merchant, payer, currency, source, source_id) = the admit request id.
 	trx, err := s.moneyService().CaptureAuthorized(ctx, money.SpendParams{
 		Payer:    &payer,
-		Invoker:  hold.Invoker,
-		Currency: hold.Currency,
+		Invoker:  ref.Invoker,
+		Currency: ref.Currency,
 		Amount:   req.Amount,
-		Source:   hold.Source,
-		SourceID: hold.RequestID,
+		Source:   source,
+		SourceID: req.RequestID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if _, rerr := store.Release(ctx, mid, req.RequestID); rerr != nil {
-		log.Warnf("service capture: redis hold release failed after capture (request_id %s): %v", req.RequestID, rerr)
+	// Free the Redis reservation (estimate-based: windows keep the estimate). The
+	// durable charge already landed, so a release failure only inflates `held`
+	// until its TTL/sweep — never a lost/double charge.
+	if cerr := gate.Capture(ctx, spendgate.CaptureInput{Merchant: mid, Customer: ref.Customer, Currency: ref.Currency, RequestID: req.RequestID}); cerr != nil {
+		log.Warnf("service capture: spendgate release failed after durable capture (request_id %s): %v", req.RequestID, cerr)
 	}
-	// #473: settle ALL composed budget-scope reservations for this request to
-	// "captured" by the hold's (payer, source, source_id) coords.
-	s.captureBudgetScopesByCoords(ctx, payer, hold.Currency, hold.Source, hold.RequestID, req.Amount)
 	// #311: append an analytics usage_event linked to this capture (no second
 	// debit) so OpenRails is the source of truth for platform usage/revenue.
 	if strings.TrimSpace(req.EventType) != "" {
-		source := strings.TrimSpace(req.Source)
-		if source == "" {
-			source = strings.TrimSpace(hold.Source)
+		usageSource := strings.TrimSpace(req.Source)
+		if usageSource == "" {
+			usageSource = source
 		}
 		sourceID := strings.TrimSpace(req.SourceID)
 		if sourceID == "" {
-			sourceID = strings.TrimSpace(hold.RequestID)
+			sourceID = req.RequestID
 		}
 		resource := strings.TrimSpace(req.Resource)
-		if resource == "" {
-			resource = strings.TrimSpace(hold.Resource)
-		}
 		captureTxnID := trx.ID
 		if uerr := s.moneyService().InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
 			CustomerID:         trx.CustomerID,
@@ -398,7 +293,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 			Amount:             req.Amount,
 			Dimensions:         req.Dimensions,
 			Metadata:           req.Metadata,
-			Source:             source,
+			Source:             usageSource,
 			SourceID:           sourceID,
 			MoneyTransactionID: &captureTxnID,
 		}); uerr != nil {
@@ -498,34 +393,25 @@ func (s *Service) ReleaseHold(ctx context.Context, requestID string) error {
 	if requestID == "" {
 		return fmt.Errorf("request_id required")
 	}
-	store, err := s.holdStore()
-	if err != nil {
-		return err
+	if s.rt == nil || s.rt.RedisClient == nil {
+		return fmt.Errorf("release unavailable: redis not configured")
 	}
 	mid, err := serviceMerchantID(ctx)
 	if err != nil {
 		return err
 	}
-	hold, err := store.Release(ctx, mid, requestID)
+	gate := spendgate.New(s.rt.RedisClient)
+	ref, ok, err := gate.Resolve(ctx, mid, requestID)
 	if err != nil {
 		return err
 	}
-	payerID, err := uuid.Parse(hold.CustomerID)
-	if err != nil {
-		return fmt.Errorf("invalid hold customer_id")
+	if !ok {
+		// Already settled / never held / TTL-expired — idempotent no-op.
+		return nil
 	}
-	payer := identity.CustomerID(payerID)
-	// #473: free ALL composed budget-scope reservations for this request (every
-	// scope reserved under the hold's (payer, source, source_id)). Idempotent.
-	s.releaseBudgetScopesByCoords(ctx, payer, hold.Source, hold.RequestID)
-	return nil
-}
-
-func (s *Service) holdStore() (*holds.Store, error) {
-	if s == nil || s.rt == nil || s.rt.RedisClient == nil {
-		return nil, fmt.Errorf("hold store unavailable: redis not configured")
-	}
-	return holds.NewStore(s.rt.RedisClient), nil
+	// Free the in-flight reservation AND the spend-cap window estimates (the request
+	// did not happen). Idempotent.
+	return gate.Release(ctx, spendgate.ReleaseInput{Merchant: mid, Customer: ref.Customer, Currency: ref.Currency, RequestID: requestID})
 }
 
 func serviceMerchantID(ctx context.Context) (string, error) {
@@ -534,46 +420,6 @@ func serviceMerchantID(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return mid.UUID().String(), nil
-}
-
-// releaseBudgetScopes settles every budget-scope reservation for a released
-// hold to "released" by its (payer, source, source_id) coords (#473). Budget
-// settlement is best-effort: the money hold is already released, so a budget
-// settle failure must not fail the release (a stale active budget row self-heals
-// at its reservation TTL).
-func (s *Service) releaseBudgetScopesByCoords(ctx context.Context, payer identity.CustomerID, source, sourceID string) {
-	sourceID = strings.TrimSpace(sourceID)
-	if payer.IsZero() || sourceID == "" {
-		return
-	}
-	bsvc := budgets.NewService(s.rt.DB)
-	for _, cur := range money.CurrencyCodes() {
-		if err := bsvc.ReleaseByCoords(ctx, payer, cur, source, sourceID); err != nil {
-			log.Warnf("service release: budget scope release failed (request_id %s released, currency %s): %v", sourceID, cur, err)
-		}
-	}
-}
-
-// captureBudgetScopes settles every budget-scope reservation for a captured
-// hold to "captured" with the captured amount by its (payer, source, source_id)
-// coords (#473). Best-effort, mirroring releaseBudgetScopes.
-func (s *Service) captureBudgetScopesByCoords(ctx context.Context, payer identity.CustomerID, currency, source, sourceID string, capturedAmount int64) {
-	sourceID = strings.TrimSpace(sourceID)
-	if payer.IsZero() || sourceID == "" {
-		return
-	}
-	bsvc := budgets.NewService(s.rt.DB)
-	for _, cur := range money.CurrencyCodes() {
-		var err error
-		if cur == money.NormalizeCurrency(currency) {
-			err = bsvc.CaptureByCoords(ctx, payer, cur, source, sourceID, capturedAmount)
-		} else {
-			err = bsvc.CaptureByCoordsReservedAmount(ctx, payer, cur, source, sourceID)
-		}
-		if err != nil {
-			log.Warnf("service capture: budget scope capture failed (request_id %s captured, currency %s): %v", sourceID, cur, err)
-		}
-	}
 }
 
 func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {

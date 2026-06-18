@@ -12,7 +12,6 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
-	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
 	"github.com/testcontainers/testcontainers-go"
 	chmod "github.com/testcontainers/testcontainers-go/modules/clickhouse"
@@ -50,7 +49,7 @@ func TestAdminMetricsCrossMerchantIsolation(t *testing.T) {
 			chmod.WithPassword(dbPass),
 			chmod.WithDatabase(dbName),
 			testcontainers.WithWaitStrategy(
-				wait.ForListeningPort(nat.Port("9000/tcp")).
+				wait.ForListeningPort("9000/tcp").
 					WithStartupTimeout(180*time.Second).
 					WithPollInterval(time.Second),
 			),

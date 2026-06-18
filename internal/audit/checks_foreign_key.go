@@ -101,47 +101,6 @@ func (c *CheckOrphanSubscriptionPrice) Run(ctx context.Context, q *gen.Queries, 
 	return findings, nil
 }
 
-// FK-3: Price-product mismatch
-type CheckPriceProductMismatch struct{}
-
-func (c *CheckPriceProductMismatch) ID() string         { return "FK-3" }
-func (c *CheckPriceProductMismatch) Name() string       { return "price_product_mismatch" }
-func (c *CheckPriceProductMismatch) Category() string   { return "foreign_key" }
-func (c *CheckPriceProductMismatch) Severity() Severity { return SeverityHigh }
-
-func (c *CheckPriceProductMismatch) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
-	var findings []Finding
-
-	results, err := q.AuditPriceProductMismatch(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("query price product mismatch: %w", err)
-	}
-
-	for _, r := range results {
-		if opts.UserID != "" && r.UserID != opts.UserID {
-			continue
-		}
-
-		findings = append(findings, Finding{
-			CheckID:        c.ID(),
-			CheckName:      c.Name(),
-			Severity:       c.Severity(),
-			EntityType:     EntitySubscription,
-			EntityID:       r.SubID,
-			UserID:         r.UserID,
-			Description:    fmt.Sprintf("Subscription product_id (%s) != price.product_id (%s)", r.SubProductID, r.PriceProductID),
-			Recommendation: "Update subscription.product_id to match price.product_id",
-			AutoFixable:    true,
-			Details: map[string]any{
-				"subscription_product_id": r.SubProductID,
-				"price_product_id":        r.PriceProductID,
-			},
-		})
-	}
-
-	return findings, nil
-}
-
 // FK-4: Payment references non-existent subscription
 type CheckPaymentOrphanSubscription struct{}
 

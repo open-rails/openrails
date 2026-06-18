@@ -35,7 +35,7 @@ func TestRegisterServiceRoutes_ServiceTokenAuthGatesMountedSurface(t *testing.T)
 	// gate prevents from ever running.
 	httproutes.RegisterServiceRoutes(group, nil, rejectAll)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/service/credits/hold", nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/service/admit", nil)
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 	require.Equal(t, http.StatusUnauthorized, w.Code)

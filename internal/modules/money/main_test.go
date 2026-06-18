@@ -18,6 +18,9 @@ import (
 // reaper is unavailable (offline/sandboxed runs).
 func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
+// strptr returns a pointer to s — a shared helper for the money integration suite.
+func strptr(s string) *string { return &s }
+
 // seedCustomer materializes the openrails.customers row a direct money-row
 // insert needs to satisfy the customer_id FK. customers is UUID-only (#491): the
 // id IS the payable customer id; merchant_id is the canonical test merchant (#336:

@@ -33,7 +33,7 @@ func TestConsolidatedSchemaCoversTenantOwnedRLSTables(t *testing.T) {
 		"product_access_grants",
 		"usage_events",
 		"invoices",
-		"tier_policies",
+		"tier_spend_caps",
 		"payment_blocklist",
 	)
 	for _, tbl := range tables {

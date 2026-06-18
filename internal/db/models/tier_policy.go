@@ -17,15 +17,16 @@ type TierPolicy struct {
 	// Tier name (e.g. "free", "tier_1"); the policy applies to actors at this tier.
 	Tier string `json:"tier"`
 	// Policy is the money policy JSON.
-	Policy        ThroughputPolicy `json:"policy"`
-	PolicyVersion int64            `json:"policy_version"`
-	CreatedAt     time.Time        `json:"created_at"`
-	UpdatedAt     time.Time        `json:"updated_at"`
+	Policy        TierMoneyPolicy `json:"policy"`
+	PolicyVersion int64           `json:"policy_version"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
-// ThroughputPolicy is the JSONB-stored tier money policy. The name is retained
-// for database compatibility with existing tier_policies rows.
-type ThroughputPolicy struct {
+// TierMoneyPolicy is the JSONB-stored tier money policy: the per-tier $-budget
+// windows and wasted-spend grace. (It carries no throughput/concurrency axis —
+// fleet scheduling/fairness is owned by the consumer's scheduler, not OpenRails.)
+type TierMoneyPolicy struct {
 	BudgetWindows []BudgetWindowPolicy `json:"budget_windows,omitempty"`
 	// PolicyCurrency is the currency used for money policy checks whose window
 	// does not carry its own Currency. Blank means same currency as the request.

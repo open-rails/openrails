@@ -145,7 +145,7 @@ type obsBudgetPolicy struct {
 	Windows []obsBudgetPolicyWindow
 }
 
-func observeBudgetPolicies(ps []openrails.SubjectBudgetPolicy) []obsBudgetPolicy {
+func observeBudgetPolicies(ps []openrails.SubjectSpendCap) []obsBudgetPolicy {
 	out := make([]obsBudgetPolicy, 0, len(ps))
 	for _, p := range ps {
 		o := obsBudgetPolicy{Scope: p.Scope, RoleID: p.RoleID}
@@ -213,11 +213,10 @@ type scriptResult struct {
 	Admit3 obsAdmit // allowed: budget still has room
 	Admit4 obsAdmit // denied: budget window exhausted
 
-	BudgetCheck  []obsBudget
 	BudgetStatus []obsBudget
 
 	// Hierarchical budget-scope policies on the unified client (#473).
-	SubjectBudgetPolicies []obsBudgetPolicy
+	SubjectSpendCaps []obsBudgetPolicy
 
 	// Merchant-configured flat delegated-invoker wasted-spend windows: the
 	// configured limit + over-budget state observed via AbuseUsage.
@@ -235,7 +234,6 @@ type scriptResult struct {
 
 	ErrReleaseUnknown   obsErr
 	ErrReleaseGarbage   obsErr
-	ErrHoldInsufficient obsErr
 	ErrWithdrawNoSource obsErr
 	ErrDepositBadType   obsErr
 	ErrBalanceBadID     obsErr
@@ -385,23 +383,22 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.NoError(t, err, "%s deposit", env.side)
 	r.Deposit = observeTxn(t, env.side+" deposit", dep)
 
-	// 2) Hold 10,000 then capture 8,000.
-	hold, err := c.HoldCredits(ctx, openrails.HoldCreditsRequest{
-		CustomerID:  &pid,
-		Invoker:     env.invoker,
-		InvokerType: "delegated",
-		Currency:    env.currency,
-		Amount:      10_000,
-		Source:      "conformance",
-		RequestID:   "hold-1",
-		ExpiresAt:   time.Now().Add(10 * time.Minute),
+	// 2) Admit 10,000 (the request hold) then capture 8,000. Holds are Redis (#513);
+	// a direct-payer admit is balance-gated, so no delegated budget grant is needed.
+	ad1, err := c.Admit(ctx, openrails.AdmitRequest{
+		CustomerID:      payerID,
+		Invoker:         env.invoker,
+		InvokerType:     "payer",
+		Currency:        env.currency,
+		EstimatedAmount: 10_000,
+		Source:          "conformance",
+		RequestID:       "hold-1",
 	})
-	require.NoError(t, err, "%s hold", env.side)
-	require.Equal(t, "hold-1", hold.RequestID, "%s hold request id", env.side)
-	require.Equal(t, int64(10_000), hold.Amount, "%s hold amount", env.side)
-	r.HoldOK = hold.ExpiresAt.After(time.Now())
+	require.NoError(t, err, "%s admit-hold", env.side)
+	require.True(t, ad1.Allowed, "%s admit-hold allowed", env.side)
+	r.HoldOK = ad1.Allowed
 
-	cap1, err := c.CaptureHold(ctx, openrails.CaptureHoldRequest{RequestID: hold.RequestID, Amount: 8_000})
+	cap1, err := c.CaptureHold(ctx, openrails.CaptureHoldRequest{RequestID: "hold-1", Amount: 8_000})
 	require.NoError(t, err, "%s capture-hold", env.side)
 	r.Capture = observeTxn(t, env.side+" capture", cap1)
 
@@ -425,16 +422,16 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	roleID := uuid.New().String()
 	roleUUID, err := uuid.Parse(roleID)
 	require.NoError(t, err, "%s parse role id", env.side)
-	require.NoError(t, c.SetTierPolicy(ctx, payerID, openrails.TierPolicyInput{
+	require.NoError(t, c.SetTierSpendCaps(ctx, payerID, openrails.TierSpendCapInput{
 		Tier: "conf",
 		BudgetWindows: []openrails.BudgetWindowInput{
 			{Key: "hourly", WindowSeconds: 3600, Limit: 10_000, Cadence: "fixed"},
 		},
 	}), "%s set-tier-policy", env.side)
-	require.NoError(t, c.SetSubjectBudgetPolicy(ctx, payerID, openrails.SubjectBudgetPolicyInput{
+	require.NoError(t, c.SetSubjectSpendCaps(ctx, payerID, openrails.SubjectSpendCapInput{
 		Scope:  "role",
 		RoleID: roleID,
-		Windows: []openrails.BudgetScopeWindow{
+		Windows: []openrails.SpendCapWindow{
 			{Key: "hourly", WindowSeconds: 3600, Limit: 10_000, Cadence: "fixed"},
 		},
 	}), "%s set-subject-budget-policy (admit role)", env.side)
@@ -520,19 +517,6 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	r.Admit4 = observeAdmit(a4)
 	require.False(t, a4.Allowed, "%s admit#4 must be denied", env.side)
 	require.Equal(t, "budget", a4.BlockedBy, "%s admit#4 blocked_by", env.side)
-
-	// 10) Budget check against caller-supplied windows: fixed + session cadence
-	// round-trip (#337).
-	bw, err := c.BudgetCheck(ctx, payerID, env.invoker, env.currency, []openrails.BudgetWindowInput{
-		{Key: "hourly", WindowSeconds: 3600, Limit: 10_000, Cadence: "fixed"},
-		{Key: "sess", WindowSeconds: 600, Limit: 2_000, Cadence: "session"},
-	}, 0)
-	require.NoError(t, err, "%s budget-check", env.side)
-	r.BudgetCheck = observeBudgets(bw)
-	require.Len(t, bw, 2, "%s budget-check windows", env.side)
-	require.Equal(t, "fixed", bw[0].Cadence, "%s budget-check cadence round-trip (fixed)", env.side)
-	require.Equal(t, "session", bw[1].Cadence, "%s budget-check cadence round-trip (session)", env.side)
-	require.False(t, bw[0].ResetAt.IsZero(), "%s budget-check fixed window reset_at must round-trip", env.side)
 
 	// 10) Budget status from the STORED tier policy.
 	bs, err := c.BudgetStatus(ctx, payerID, env.invoker, money.DefaultCurrency, "conf")
@@ -627,18 +611,6 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		c.Release(ctx, uuid.NewString()))
 	r.ErrReleaseGarbage = observeErr(t, env.side+" release garbage id",
 		c.Release(ctx, "not-a-uuid"))
-
-	_, err = c.HoldCredits(ctx, openrails.HoldCreditsRequest{
-		CustomerID:  &pid,
-		Invoker:     env.invoker,
-		InvokerType: "delegated",
-		Currency:    env.currency,
-		Amount:      10_000_000_000,
-		Source:      "conformance",
-		RequestID:   "hold-too-big",
-		ExpiresAt:   time.Now().Add(10 * time.Minute),
-	})
-	r.ErrHoldInsufficient = observeErr(t, env.side+" hold insufficient", err)
 
 	_, err = c.WithdrawCredits(ctx, openrails.WithdrawCreditsRequest{
 		CustomerID: &pid,
@@ -780,34 +752,34 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// new methods, then read back ONLY the subject-owned ones (the platform cap
 	// stays invisible to the subject surface). Runs LAST so the stored caps never
 	// gate the admit steps above. role uuid is per-side -> normalized to compare.
-	require.NoError(t, c.SetSubjectBudgetPolicy(ctx, payerID, openrails.SubjectBudgetPolicyInput{
+	require.NoError(t, c.SetSubjectSpendCaps(ctx, payerID, openrails.SubjectSpendCapInput{
 		Scope: "subject",
-		Windows: []openrails.BudgetScopeWindow{
+		Windows: []openrails.SpendCapWindow{
 			{Key: "subj-daily", WindowSeconds: 86400, Limit: 50_000, Cadence: "fixed"},
 		},
 	}), "%s set-subject-budget-policy (self)", env.side)
-	require.NoError(t, c.SetSubjectBudgetPolicy(ctx, payerID, openrails.SubjectBudgetPolicyInput{
+	require.NoError(t, c.SetSubjectSpendCaps(ctx, payerID, openrails.SubjectSpendCapInput{
 		Scope:  "role",
 		RoleID: roleID,
-		Windows: []openrails.BudgetScopeWindow{
+		Windows: []openrails.SpendCapWindow{
 			{Key: "role-hourly", WindowSeconds: 3600, Limit: 20_000, Cadence: "session"},
 		},
 	}), "%s set-subject-budget-policy (role)", env.side)
-	require.NoError(t, c.SetPlatformBudgetPolicy(ctx, payerID, openrails.PlatformBudgetPolicyInput{
+	require.NoError(t, c.SetPlatformSpendCaps(ctx, payerID, openrails.PlatformSpendCapInput{
 		Scope: "subject",
-		Windows: []openrails.BudgetScopeWindow{
+		Windows: []openrails.SpendCapWindow{
 			{Key: "plat-monthly", WindowSeconds: 2592000, Limit: 1_000_000, Cadence: "fixed"},
 		},
 	}), "%s set-platform-budget-policy", env.side)
-	pols, err := c.SubjectBudgetPolicies(ctx, payerID)
-	require.NoError(t, err, "%s subject-budget-policies", env.side)
+	pols, err := c.SubjectSpendCaps(ctx, payerID)
+	require.NoError(t, err, "%s subject-spend-caps", env.side)
 	for i := range pols {
 		if pols[i].Scope == "role" {
 			pols[i].RoleID = "ROLE" // role uuid is per-side; normalize
 		}
 	}
-	r.SubjectBudgetPolicies = observeBudgetPolicies(pols)
-	require.Len(t, r.SubjectBudgetPolicies, 2, "%s subject-budget-policies: platform cap must stay invisible", env.side)
+	r.SubjectSpendCaps = observeBudgetPolicies(pols)
+	require.Len(t, r.SubjectSpendCaps, 2, "%s subject-spend-caps: platform cap must stay invisible", env.side)
 
 	// 22) Merchant-configured flat delegated-invoker wasted-spend window (#499): set
 	// the merchant config ($1/15m), report $2 wasted, then observe via AbuseUsage that

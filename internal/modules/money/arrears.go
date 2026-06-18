@@ -57,14 +57,14 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 	err = s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 
-		// Idempotency.
-		existing, gerr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
+		// Idempotency: an owed-accrual transfer at these coordinates means it ran.
+		existing, gerr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			TransactionType: txOwedAccrual, Source: source, SourceID: &sourceID,
+			TransferType: "owed_accrual", Source: source, SourceID: sourceID,
 		})
 		if gerr == nil {
-			trx, gerr = moneyTransactionFromGen(existing)
-			return gerr
+			trx = moneyTransactionFromTransfer(existing)
+			return nil
 		}
 		if !errors.Is(gerr, pgx.ErrNoRows) {
 			return gerr
@@ -74,14 +74,12 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 			return err
 		}
 
-		trx = &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: cur, Invoker: payerID.String(),
-			Amount: amount, TransactionType: txOwedAccrual, Status: "posted",
-			Source: source, SourceID: &sourceID, CreatedAt: now, UpdatedAt: now,
-		}
-		if err := q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(trx)); err != nil {
+		ml := s.moneyLedger(q, tenantID)
+		tr, err := ml.AccrueOwed(ctx, payerID, cur, amount, source, sourceID, nil)
+		if err != nil {
 			return err
 		}
+		trx = moneyTransactionFromTransfer(tr)
 		return insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+sourceID, nil, amount, now, map[string]any{
 			"source": source,
 		})
@@ -302,22 +300,18 @@ func (s *MoneyService) chargeOneOpenInvoice(ctx context.Context, charger Charger
 			}
 		}
 		sid := key
-		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: normalizeCurrency(r.Currency), Invoker: r.CustomerID.String(),
-			Amount: -snapshot, TransactionType: txOwedPayment, Status: "posted",
-			Source: "invoice_charge", SourceID: &sid, InvoiceID: &r.InvoiceID, CreatedAt: now, UpdatedAt: now,
-		}
-		if err := q.InsertMoneyTransactionIfAbsent(ctx, gen.InsertMoneyTransactionIfAbsentParams(insertParamsFromTransaction(trx))); err != nil {
-			return err
-		}
-		storedTrx, err := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			MerchantID:      r.MerchantID,
-			CustomerID:      r.CustomerID,
-			Currency:        normalizeCurrency(r.Currency),
-			TransactionType: txOwedPayment,
-			Source:          "invoice_charge",
-			SourceID:        &sid,
+		cur := normalizeCurrency(r.Currency)
+		ml := s.moneyLedger(q, r.MerchantID)
+		// Settle the arrears liability via the external charge (idempotent on the
+		// invoice/snapshot key). InsertInvoicePayment's unique index on
+		// money_transaction_id guards a double-link, but check the transfer first.
+		storedTrx, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
+			MerchantID: r.MerchantID, CustomerID: r.CustomerID, Currency: cur,
+			TransferType: "owed_payment", Source: "invoice_charge", SourceID: sid,
 		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			storedTrx, err = ml.PayOwed(ctx, r.CustomerID, cur, snapshot, "invoice_charge", sid, &r.InvoiceID)
+		}
 		if err != nil {
 			return err
 		}

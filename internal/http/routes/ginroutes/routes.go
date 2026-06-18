@@ -102,13 +102,10 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// Cross-payer BATCH admission (#335): N admit items (mixed payers) in one
 	// hop, per-item verdicts with single-admit semantics. Same spend gates.
 	group.POST("/admit/batch", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAdmitBatch))
-	// Budget introspection (#304): fixed money-budget windows for a host /status.
+	// Budget introspection (#304): spend-cap windows for a host /status dashboard.
 	group.GET("/budget", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetBudget))
-	// #410: budget-window status against caller-supplied windows (host owns the
-	// policy, OpenRails owns the actuals) — powers the tensorhub delegated display.
-	group.POST("/budget/check", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceBudgetCheck))
 	// Tier policy admin (#298): configure a tier's throughput + entitled endpoints + money budgets.
-	group.PUT("/tier-policies", creditsWrite, wrap(httphandlers.ServiceSetTierPolicy))
+	group.PUT("/tier-spend-caps", creditsWrite, wrap(httphandlers.ServiceSetTierSpendCaps))
 	// Tier SCHEDULE admin (#476): declare the cumulative-spend ladder ONCE; OpenRails
 	// then auto-maintains each payer's tier (no host cranking of GraduateTier).
 	group.PUT("/tier-schedules", creditsWrite, wrap(httphandlers.ServiceSetTierSchedule))
@@ -131,10 +128,10 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// (subject, role) pools) are written/read with the same operator credits
 	// gates as tier policies. The PLATFORM-owned payer cap is operator-admin
 	// gated (openrails:admin) — a subject's own surface can never reach it.
-	budgetPolicies := group.Group("/budget-policies")
-	budgetPolicies.PUT("/subject", creditsWrite, wrap(httphandlers.ServiceSetSubjectBudgetPolicy))
-	budgetPolicies.GET("/subject", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetSubjectBudgetPolicies))
-	budgetPolicies.PUT("/platform", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), wrap(httphandlers.ServiceSetPlatformBudgetPolicy))
+	spendCaps := group.Group("/spend-caps")
+	spendCaps.PUT("/subject", creditsWrite, wrap(httphandlers.ServiceSetSubjectSpendCaps))
+	spendCaps.GET("/subject", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetSubjectSpendCaps))
+	spendCaps.PUT("/platform", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), wrap(httphandlers.ServiceSetPlatformSpendCaps))
 
 	// Prepaid credit windows (#335): open reserves a bulk hold the host admits
 	// against locally; settle flushes cross-payer batches of actuals (idempotent
@@ -146,14 +143,11 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	credits.POST("/windows/:id/refill", creditsWrite, creditsSpend, wrap(httphandlers.ServiceRefillCreditWindow))
 	credits.POST("/windows/:id/close", creditsWrite, wrap(httphandlers.ServiceCloseCreditWindow))
 
-	// Unified authorize: policy decision + ATOMIC hold placement (issue #235/#247).
-	credits.POST("/authorize", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAuthorizeCredits))
 	// Payer balance snapshot (issue #235/#247): available = balance - held.
 	credits.GET("/balance", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetCreditsBalance))
 
 	credits.POST("/deposit", creditsWrite, wrap(httphandlers.ServiceDepositCredits))
 	credits.POST("/withdraw", creditsWrite, wrap(httphandlers.ServiceWithdrawCredits))
-	credits.POST("/hold", creditsWrite, creditsSpend, wrap(httphandlers.ServiceHoldCredits))
 	credits.POST("/holds/:id/capture", creditsWrite, creditsSpend, wrap(httphandlers.ServiceCaptureHold))
 	credits.POST("/holds/:id/release", creditsWrite, wrap(httphandlers.ServiceReleaseHold))
 	credits.POST("/hold/:id/capture", creditsWrite, creditsSpend, wrap(httphandlers.ServiceCaptureHold))

@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"time"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/jackc/pgx/v5"
@@ -9,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -19,13 +21,13 @@ type CreditExpiryArgs struct{}
 
 func (CreditExpiryArgs) Kind() string { return KindCreditExpiry }
 
-// CreditExpiryWorker COMPACTS the credit-block table (#491): it deletes
-// fully-spent (remaining_amount=0) and expired (past expires_at) money_blocks,
-// keeping the spendable-lot table bounded so the derived available SUM stays
-// cheap. Balance is derived from the unexpired, unspent lots — expired lots stop
-// counting the moment they pass expires_at, so deletion is pure compaction (no
-// balance movement, no ledger row). It touches money_blocks ONLY; the deposit
-// receipt (money_transactions + payments) is never touched.
+// CreditExpiryWorker claws back the unspent remainder of lapsed credit lots
+// (#514): for every (merchant, customer, currency) with a past-expiry credit
+// grant that still has an unspent balance, it runs grants.ExpireLapsed, which
+// emits a #512 ledger transfer (DR customer_balance / CR expired_credits) per
+// lapsed lot — conserved, append-only, idempotent (an already-clawed lot has
+// zero remainder and is skipped). The credit lot IS the grant; there is no
+// money_blocks table to compact anymore.
 // Controlled by config.FeatureFlags.DisableEntitlementExpiration - when true, skips.
 type CreditExpiryWorker struct {
 	river.WorkerDefaults[CreditExpiryArgs]
@@ -55,32 +57,44 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 	}
 
 	now := clock.Now().UTC()
+	nowFn := func() time.Time { return now }
 	logger := log.WithContext(ctx).WithField("worker", KindCreditExpiry)
 
-	for {
-		batch := int64(0)
-		// Privileged (no-GUC) cross-tenant compaction: delete spent + expired lots.
-		err := w.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			batchSize32, _ := safecast.Convert[int32](batchSize)
-			deleted, err := gen.New(tx).DeleteCompactableMoneyBlocks(ctx, gen.DeleteCompactableMoneyBlocksParams{
-				Now: now, BatchSize: batchSize32,
-			})
-			if err != nil {
-				return err
-			}
-			batch = deleted
-			return nil
+	batchSize32, _ := safecast.Convert[int32](batchSize)
+	// Privileged (no-GUC) cross-tenant sweep: find customers with lapsed,
+	// not-yet-clawed credit lots, then expire each via the grant ledger.
+	var rows []gen.ListCustomersWithLapsedCreditLotsRow
+	if err := w.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		rows, err = gen.New(tx).ListCustomersWithLapsedCreditLots(ctx, gen.ListCustomersWithLapsedCreditLotsParams{
+			AsOf: now, BatchSize: batchSize32,
 		})
-		if err != nil {
+		return err
+	}); err != nil {
+		return err
+	}
+
+	var totalExpired int64
+	for _, r := range rows {
+		currency := ""
+		if r.Currency != nil {
+			currency = *r.Currency
+		}
+		var expired int64
+		if err := w.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			gl := grants.New(gen.New(tx), r.MerchantID)
+			gl.SetClock(nowFn)
+			var e error
+			expired, e = gl.ExpireLapsed(ctx, r.CustomerID, currency)
+			return e
+		}); err != nil {
 			return err
 		}
-		if batch == 0 {
-			break
-		}
-		logger.WithField("compacted_blocks", batch).Info("compacted spent/expired credit blocks")
-		if batch < int64(batchSize) {
-			break
-		}
+		totalExpired += expired
+	}
+	if totalExpired > 0 {
+		logger.WithFields(log.Fields{"customers": len(rows), "expired_amount": totalExpired}).
+			Info("clawed back lapsed credit-lot remainders")
 	}
 
 	return nil

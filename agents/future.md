@@ -1010,3 +1010,94 @@ Design questions to resolve before building:
 - [ ] Author catalog-only configs for doujins/hentai0/cozy-art; full config for tensorhub
 
 ---
+
+# #515: cross-currency settlement (convert / spend across a customer's currency wallets)
+
+**Completed:** no — future direction only. Extracted from #512 Phase E (CLOSED there as not-needed under the current "each currency is its own wallet" model). Build only when a concrete use case appears.
+
+## What this is (and is NOT)
+Multi-currency **wallets already work**: a customer holds an independent balance per currency (USD/USDC/EUR/JPY/SOL), and **FX rate conversion for comparison already exists** (`internal/integrations/fx` `ExchangeAPIProvider`, live + free + no-key, used by admission/checkout/solana to evaluate a charge priced in currency A against a cap/budget denominated in currency B). This issue is NEITHER of those.
+
+This issue is **settlement** = *moving actual money between a customer's wallets*: debit their EUR balance to pay a USD charge (or convert one wallet into another), recorded as ledger transfers. The difference from what exists: converting a *number* for a comparison (done) vs moving *money* between wallets (this).
+
+## When we'd actually do it (triggers, increasing likelihood)
+1. **Explicit convert** (user-initiated): customer holds $50 USD, hits "convert", we reprice into €X at spot, they now have a EUR balance.
+2. **Auto cross-wallet spend**: customer has only a EUR balance, a USD charge arrives, we auto-draw EUR at spot to cover it.
+3. **Crypto deposit → fiat credits** (the nearest real case): customer deposits SOL/USDC, we credit a USD balance at the deposit-time rate. The Solana pay path already quotes via `fx.ConvertAmount`, so this is the most plausible first consumer.
+
+## Design — keep it minimal (NOT money-transmitter grade)
+Spreads / FX gain-loss machinery exist for businesses that **hold a currency position and settle on a market later**. OpenRails balances are **prepaid credit we already hold** — when a customer converts $50→€44 and later spends it, we just *deliver €44 of service*; we never bought euros on a market. So for one-way fiat↔fiat conversion: **no spread needed for risk, no FX P&L to track.** A spread is only a *product choice* (charge a conversion fee), not a necessity.
+
+**The one irreducible mechanic** (a ledger transfer can't cross currencies — the currency-guard trigger forbids it): a conversion is **two transfers through a per-merchant `fx_liquidity` account**:
+```
+DR customer EUR-wallet  €30  /  CR fx_liquidity (EUR)  €30
+DR fx_liquidity (USD)   $33  /  CR customer USD-wallet $33
+```
+Each currency ledger still conserves on its own (EUR −30/+30; USD +33/−33). Sub-cent **rounding dust** (€30 at the real rate ≈ $33.0094, rounded to $33) lands in `fx_liquidity` — that's all the account is for in the simple case; it's where pennies go so the books balance, not a risk buffer. No P&L reporting unless we want it.
+
+## Where real FX risk DOES appear (so we know the boundary)
+- **Volatile assets held over time** (crypto deposit→fiat, #3): if we credit USD value at deposit and the held SOL drops before external conversion, that loss is real. Mitigation is usually "convert immediately at deposit," not a spread.
+- **Round-trips** (€→$→€): rounding + any spread compounds, can leak value.
+- **Delayed external settlement** (repatriating balances to a bank at a later rate).
+None of these apply to "one-way convert at spot, each currency its own wallet."
+
+## Tasks (when built)
+- [ ] Decide explicit user-initiated convert (simpler, auditable — RECOMMENDED) vs implicit cross-currency spend at spot.
+- [ ] Add an `fx_liquidity` account type; model conversion as two linked transfers through it (atomic), reusing the existing live `fx.Provider` for the rate; round the output to integer minor units.
+- [ ] Record the quote (rate, AsOf, provider) on the conversion transfers for audit.
+- [ ] Only if charging a conversion fee or holding volatile positions: add spread + FX gain/loss reporting. Otherwise skip.
+- [ ] Custom credits remain no-FX by design (#475).
+- [ ] **Persist the crypto FMV-at-receipt basis snapshot on the durable payment** (small; standalone-able). Today a confirmed SOL payment records only the fiat product amount + on-chain signature; the receipt quote (`token_amount`, `token_price_usd`, `quoted_at`, oracle source) lives only on the ephemeral Redis pending and is dropped at confirmation. Stamp it onto the `payments.metadata` jsonb (already exists) at confirmation so the merchant has a stored cost-basis record instead of reconstructing it from chain + a historical oracle. **Two distinct rates — store the ones that apply:** `token_price_usd` = SOL→USD (the crypto price; this alone gives the USD FMV/basis = `token_amount × token_price_usd`); `fx_rate` = USD→billing-currency, the *second* leg, only non-trivial when the product is priced in a non-USD fiat (EUR/JPY) — for a USD-billed merchant it's always 1.0 and redundant. Store `token_price_usd` always; store `fx_rate`/billing-currency only when billing ≠ USD (so the merchant can also record income in their books' currency). The durable form of this basis record is the #516 holdings-ledger lot.
+
+## Relationship
+- Closes the loop on **#512 Phase E** (which is marked CLOSED-as-not-needed there, pointing here).
+- Reuses the **already-shipped** `internal/integrations/fx` provider (no new rate-source work).
+
+---
+
+# #516: crypto treasury policy — auto-convert / stop-loss / hold+stake on received crypto
+
+**Completed:** no — future direction only.
+
+Today a Solana payment lands in the recipient ("pull") wallet, the **fiat product price** is recorded as income (a `payments` row, with the on-chain signature as the audit anchor), and that's it — what happens to the received SOL afterward is entirely manual / off-platform. That leaves the merchant holding a volatile asset with no managed disposal, and it leaves the *capital* side of crypto tax (basis → disposal → gain/loss, the "Event 2" from the tax discussion) completely unmodeled. This issue adds a configurable **treasury policy** that automates the disposal decision per merchant (and per token), plus the holdings sub-ledger needed to track basis and realized gain/loss.
+
+## Why
+- **Risk:** volatile crypto held with no policy = uncontrolled FX/price exposure. The cleanest mitigation ("convert at receipt") and the smarter ones (stop-loss, stake-for-yield) should be a config knob, not a manual chore.
+- **Tax/accounting:** receipt records income at FMV (≈ fiat price); the later disposal is a separate capital event. A holdings ledger that stamps **basis at receipt** and **proceeds at conversion** produces the merchant's realized gain/loss records automatically (see the tax reasoning in #515 / the FMV-at-receipt note).
+- **Custody:** holding/staking means a second key. Receiving and long-term holding should NOT share one hot key.
+
+## The three policies (per-merchant, ideally per-token)
+1. **Immediate convert** — on confirmed receipt, swap SOL→USDC (and optionally off-ramp USDC→USD). Basis ≈ proceeds → ~zero capital gain/loss, no held position, no price risk. The "convert at deposit" mitigation; the simplest + safest default for risk-averse merchants.
+2. **Stop-loss hold** — hold the SOL but anchor its **receipt-time price**; a background monitor auto-converts if the price falls ≥ X% below the anchor (e.g., 10%) to cap downside. Otherwise keep holding. (Optional symmetric take-profit ceiling — out of scope unless wanted.)
+3. **Hold + stake** — sweep to a cold wallet and natively stake the SOL (stake account → validator) for yield; long-term hold. Manual or policy-driven unstake/convert later.
+
+## Infrastructure this needs
+- **Two-tier wallet model.** Keep the existing hot/receiving wallet (`recipient_wallet`, the "pull key"); add a **cold wallet** key for held/staked funds. Sweep hot→cold for anything not immediately converted. The cold key is high-value — store via the existing `internal/modules/vault`, and strongly prefer never holding it in app memory: offline/HSM/multisig signing for sweeps + stake ops. **This custody surface is the riskiest part of the issue — design it first.**
+- **Holdings sub-ledger (treasury lots).** One row per received-and-held lot: token, amount, **basis (FMV/fiat at receipt)**, receipt signature/time, policy, anchor price (for stop-loss), status (`held | converting | converted | staked | unstaking`), and on disposal: proceeds, realized gain/loss, holding period (short/long). This is the durable record the payment row doesn't keep today (the receipt quote currently lives only on the ephemeral Redis pending — see #515 note). Fills the "Event 2" gap.
+- **Swap execution.** SOL→USDC on-chain via Jupiter (**depends on / subsumes #260 solana-swap-to-usdc-via-jupiter**). USDC→USD bank off-ramp (if wanted) needs a CEX/off-ramp (Coinbase) — separate, custodial, KYC.
+- **Price monitor.** Reuse the shipped Pyth price provider + `internal/integrations/fx` for the stop-loss trigger; a background poller compares live price vs each lot's anchor.
+- **Staking ops** (policy 3 only): stake-account create / delegate / deactivate / withdraw; validator selection config. Heaviest, lowest-priority sub-part — could ship policies 1+2 first and defer 3.
+
+## Decisions to make
+- [ ] Swap venue: on-chain DEX (Jupiter — non-custodial, but slippage/MEV) vs CEX (better liquidity + fiat off-ramp, but custodial/KYC). Likely Jupiter for SOL→USDC, CEX only if USD off-ramp is needed.
+- [ ] Anchor price granularity: per-lot (cleaner for tax + precise stop-loss) vs weighted-average across holdings. Recommend per-lot.
+- [ ] Stop-loss execution realities: oracle-trigger vs actual fill price gap, slippage caps, partial fills, re-trigger debounce.
+- [ ] Which tokens: USDC received needs no conversion (already a stable); target = SOL + other volatile tokens. Custom credits N/A.
+- [ ] Finality: wait for Solana confirmation/finality before sweeping hot→cold.
+- [ ] Policy scope: per-merchant default + per-token override? Where configured (catalog/treasury config)?
+
+## Tasks (rough, sequence policies 1→2→3)
+- [ ] Cold-wallet key model + Vault storage + secure sweep signing (design custody first).
+- [ ] Treasury holdings sub-ledger (lots: basis, anchor, status, disposal → realized gain/loss).
+- [ ] Policy config surface (per-merchant / per-token) + wiring into the confirmed-payment path.
+- [ ] Policy 1 (immediate convert) via Jupiter swap (#260).
+- [ ] Policy 2 (stop-loss): price-monitor poller off Pyth/fx + anchor + auto-convert.
+- [ ] Policy 3 (hold + stake): cold-wallet staking ops.
+- [ ] Surface realized gain/loss + holdings as a merchant report (ties to tax basis records).
+
+## Relationship
+- Builds on the Solana payment path (`internal/modules/solana` pay/poller/transaction) + the FMV-at-receipt income record.
+- **Depends on / subsumes #260** (solana-swap-to-usdc-via-jupiter) for the swap primitive.
+- Reuses the shipped Pyth price provider + `internal/integrations/fx`.
+- Distinct from **#515** (that's converting between a *customer's* currency wallets; this is *merchant* treasury management of received crypto) but shares the swap/rate machinery.
+- The holdings ledger's basis-at-receipt is the durable form of the "persist the quote snapshot on the payment" idea noted in #515.

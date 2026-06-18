@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
+	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -82,11 +83,17 @@ type Runtime struct {
 
 	EmailService *subscriptions.EmailService
 
-	EventLogService          *analytics.EventLogService
-	EntitlementService       *entitlements.EntitlementService
-	FeatureService           *entitlements.FeatureService
-	ProductAccessService     *productaccess.Service
-	MoneyService             *money.MoneyService
+	EventLogService      *analytics.EventLogService
+	EntitlementService   *entitlements.EntitlementService
+	FeatureService       *entitlements.FeatureService
+	ProductAccessService *productaccess.Service
+	MoneyService         *money.MoneyService
+	// AdmissionBalanceCache is the process-local short-TTL affordability cache the
+	// admit hot path reads (#513 Phase C). nil = read balance fresh every admit.
+	AdmissionBalanceCache *admission.BalanceCache
+	// AdmissionPolicyCache is the process-local long-TTL spend-cap CONFIG cache
+	// (tier + delegated-spend caps). nil = read the config from Postgres every admit.
+	AdmissionPolicyCache     *admission.PolicyCache
 	MoneyCharger             money.Charger
 	ProcessorCustomerService *payments.ProcessorCustomerService
 	Merchants                *merchants.Service

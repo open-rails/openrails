@@ -68,9 +68,7 @@ func (s *MoneyService) belowThresholdAccounts(ctx context.Context) ([]moneyInAcc
 		return nil, err
 	}
 	tenantID := tid.UUID()
-	rows, err := s.db.Gen(ctx).ListBelowThresholdMoneyAccounts(ctx, gen.ListBelowThresholdMoneyAccountsParams{
-		MerchantID: tenantID, Now: s.now(),
-	})
+	rows, err := s.db.Gen(ctx).ListBelowThresholdMoneyAccounts(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}

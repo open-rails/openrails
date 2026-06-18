@@ -5,6 +5,7 @@ package tests
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -13,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/grants"
 )
 
 // Gen returns the sqlc query catalog bound to the suite's pgx pool.
@@ -73,18 +75,36 @@ func (suite *TestContainerSuite) InsertNotification(ctx context.Context, n *mode
 	require.NoError(suite.t, dbrepo.NewNotificationQueueRepo(suite.App.Runtime.DB).Create(ctx, n), "Failed to insert notification")
 }
 
-// insertMoneyBlock inserts a money lot (openrails.money_blocks). The caller
-// must set MerchantID, CustomerID, and Currency.
-func (suite *TestContainerSuite) insertMoneyBlock(ctx context.Context, b *models.MoneyBlock) {
+// insertMoneyCreditLot seeds a credit lot — a #514 credit grant — and
+// materializes it into the #512 ledger (the single-entry money_blocks table is
+// gone, #512 hard cut). Returns the lot (grant) id.
+func (suite *TestContainerSuite) insertMoneyCreditLot(ctx context.Context, merchantID, customerID uuid.UUID, currency string, amount int64, expiresAt *time.Time, now time.Time) uuid.UUID {
 	suite.t.Helper()
-	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.money_blocks (
-			id, merchant_id, customer_id, currency, original_amount,
-			remaining_amount, expires_at, source_transaction_id, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		b.ID, b.MerchantID, b.CustomerID, b.Currency, b.OriginalAmount,
-		b.RemainingAmount, b.ExpiresAt, b.SourceTransactionID, b.CreatedAt)
-	require.NoError(suite.t, err, "Failed to insert money block")
+	gl := grants.New(gen.New(suite.Pool), merchantID)
+	gl.SetClock(func() time.Time { return now })
+	amt, cur := amount, currency
+	g, err := gl.Grant(ctx, grants.GrantInput{
+		Customer: customerID, Kind: grants.Credit, Source: grants.Admin,
+		SourceID: "test_lot_" + uuid.NewString(), Amount: &amt, Currency: &cur,
+		StartsAt: now, EndsAt: expiresAt,
+	})
+	require.NoError(suite.t, err, "create credit lot grant")
+	require.NoError(suite.t, gl.MaterializeGrant(ctx, g), "materialize credit lot")
+	return g.ID
+}
+
+// lotRemaining returns a credit lot's derived remaining (amount − spent − expired).
+func (suite *TestContainerSuite) lotRemaining(ctx context.Context, merchantID, lotID uuid.UUID) int64 {
+	suite.t.Helper()
+	var remaining int64
+	require.NoError(suite.t, suite.Pool.QueryRow(ctx, `
+		SELECT g.amount - COALESCE((
+			SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+			WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
+			  AND t.transfer_type IN ('credit_spend', 'credit_expire')
+		), 0)
+		FROM openrails.grants g WHERE g.id = $1`, lotID).Scan(&remaining))
+	return remaining
 }
 
 // --- read helpers ---

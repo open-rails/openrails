@@ -59,3 +59,16 @@ func TestCatalogDedupConstraints(t *testing.T) {
 		}
 	}
 }
+
+func TestSubscriptionPriceProductConstraint(t *testing.T) {
+	schema := collapseWS(loadSchemaMigration(t))
+
+	for _, want := range []string{
+		"create unique index uq_prices_id_product_merchant on openrails.prices using btree (id, product_id, merchant_id)",
+		"constraint subscriptions_price_product_merchant_fkey foreign key (price_id, product_id, merchant_id) references openrails.prices(id, product_id, merchant_id)",
+	} {
+		if !strings.Contains(schema, want) {
+			t.Errorf("subscription price/product constraint missing from schema migration: %q", want)
+		}
+	}
+}

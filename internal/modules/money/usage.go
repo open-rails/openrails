@@ -110,14 +110,19 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		// amount exceeds available balance.
 		var debitID *uuid.UUID
 		if params.Amount > 0 {
-			balID, owedID, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount)
-			if derr != nil {
+			if _, _, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount); derr != nil {
 				return derr
 			}
-			if balID != nil {
-				debitID = balID
-			} else {
-				debitID = owedID
+			// Link the usage event to the durable #512 spend transfer (the balance
+			// debit, else the owed accrual) at these coordinates.
+			if tr, terr := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
+				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+				Source: params.Source, SourceID: params.SourceID,
+			}); terr == nil {
+				id := tr.ID
+				debitID = &id
+			} else if !errors.Is(terr, pgx.ErrNoRows) {
+				return terr
 			}
 		}
 

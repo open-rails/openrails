@@ -3,13 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/holds"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 )
@@ -247,210 +245,6 @@ func (s *Service) GetInvoice(ctx context.Context, payer identity.CustomerID, id 
 	return out, nil
 }
 
-// AuthorizeSpendRequest is the input to AuthorizeSpend — the read+decision side
-// of the authorize/hold route (issue #235). The hold itself is placed by
-// HoldCredits once this allows it.
-type AuthorizeSpendRequest struct {
-	CustomerID      identity.CustomerID
-	Invoker         string
-	Currency        string
-	EstimatedAmount int64
-}
-
-// AuthorizeSpendResult is the decision returned to the caller (mirrors the
-// authorize route payload).
-type AuthorizeSpendResult struct {
-	Allowed               bool              `json:"allowed"`
-	DenyCode              string            `json:"deny_code,omitempty"`
-	BillingMode           string            `json:"billing_mode"`
-	Currency              string            `json:"currency"`
-	AvailableAmount       int64             `json:"available_amount"`
-	OutstandingOwedAmount int64             `json:"outstanding_owed_amount"`
-	RetryAfterSeconds     int64             `json:"retry_after_seconds,omitempty"`
-	NextAllowedAt         *time.Time        `json:"next_allowed_at,omitempty"`
-	Caps                  []money.CapResult `json:"caps,omitempty"`
-}
-
-// DenyInsufficientBalance is the deny code when a prepaid account lacks the
-// available balance to cover the estimate.
-const DenyInsufficientBalance = "insufficient_balance"
-
-// AuthorizeSpend evaluates whether an estimated charge is permitted for an
-// payer: the per-account/per-invoker spend policy (CheckSpendAllowed) AND, for
-// prepaid accounts, available balance. It does NOT move money. (#235)
-func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest) (*AuthorizeSpendResult, error) {
-	if req.EstimatedAmount < 0 {
-		return nil, fmt.Errorf("estimate must be >= 0")
-	}
-	if req.CustomerID.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
-	}
-	currency, err := requireCurrency(req.Currency)
-	if err != nil {
-		return nil, err
-	}
-
-	snap, err := s.GetCreditAccount(ctx, req.CustomerID, currency)
-	if err != nil {
-		return nil, err
-	}
-	dec, err := s.moneyService().CheckSpendAllowed(ctx, req.CustomerID, currency, strings.TrimSpace(req.Invoker), req.EstimatedAmount)
-	if err != nil {
-		return nil, err
-	}
-
-	res := &AuthorizeSpendResult{
-		Allowed:               dec.Allowed,
-		DenyCode:              dec.DenyCode,
-		BillingMode:           snap.BillingMode,
-		Currency:              snap.Currency,
-		AvailableAmount:       snap.AvailableAmount,
-		OutstandingOwedAmount: snap.OutstandingOwedAmount,
-		RetryAfterSeconds:     dec.RetryAfterSeconds,
-		NextAllowedAt:         dec.NextAllowedAt,
-		Caps:                  dec.Caps,
-	}
-
-	// Prepaid accounts are additionally gated on available balance; arrears
-	// accounts are gated by the outstanding ceiling inside CheckSpendAllowed.
-	if snap.BillingMode != money.BillingModeArrears && req.EstimatedAmount > snap.AvailableAmount {
-		res.Allowed = false
-		if res.DenyCode == "" {
-			res.DenyCode = DenyInsufficientBalance
-		}
-	}
-	return res, nil
-}
-
-// AuthorizeAndHoldRequest is the input to AuthorizeAndHold — the atomic
-// capacity-decision + hold placement that backs POST /v1/service/credits/authorize
-// (issue #235/#247). Payer is the merchant subject billed; RequestID is the
-// idempotency key for the placed hold.
-type AuthorizeAndHoldRequest struct {
-	CustomerID      identity.CustomerID
-	Invoker         string
-	InvokerType     string
-	Currency        string
-	EstimatedAmount int64
-	RequestID       string
-	Resource        string
-	// ExpiresAt bounds the placed hold; when zero a default TTL is applied.
-	ExpiresAt time.Time
-}
-
-// AuthorizeAndHoldResult is the account-capacity decision and start-capacity
-// snapshot.
-// In-flight holds are request-id keyed Redis state in the #505 model, so no
-// Postgres reservation id is returned here.
-type AuthorizeAndHoldResult struct {
-	Allowed               bool       `json:"allowed"`
-	DenyCode              string     `json:"deny_code,omitempty"`
-	BillingMode           string     `json:"billing_mode"`
-	Currency              string     `json:"currency"`
-	AvailableAmount       int64      `json:"available_amount"`
-	OutstandingOwedAmount int64      `json:"outstanding_owed_amount"`
-	StartCapacityAmount   int64      `json:"start_capacity_amount"`
-	HoldExpiresAt         *time.Time `json:"hold_expires_at,omitempty"`
-}
-
-// authorizeHoldSource is the source label recorded on holds placed by the
-// authorize route, so they are attributable + idempotency-keyed by request_id.
-const authorizeHoldSource = "authorize"
-
-// defaultAuthorizeHoldTTL bounds a placed hold when the caller does not supply an
-// explicit expiry. A hold is a short-lived reservation against an in-flight
-// invocation; the reconcile/orphan-hold sweeper (#243) is the backstop.
-const defaultAuthorizeHoldTTL = 15 * time.Minute
-
-// AuthorizeAndHold runs the prepaid/arrears capacity gate under the per-customer
-// money lock, then places the Redis request hold. The actual in-flight
-// reservation lives outside the durable money ledger in the #505 Redis hold
-// model.
-func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequest) (*AuthorizeAndHoldResult, error) {
-	if req.CustomerID.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
-	}
-	if req.EstimatedAmount < 0 {
-		return nil, fmt.Errorf("estimate must be >= 0")
-	}
-	currency, err := requireCurrency(req.Currency)
-	if err != nil {
-		return nil, err
-	}
-	req.RequestID = strings.TrimSpace(req.RequestID)
-	if req.RequestID == "" {
-		return nil, fmt.Errorf("request_id required")
-	}
-	req.InvokerType = strings.TrimSpace(req.InvokerType)
-	if req.EstimatedAmount > 0 && req.InvokerType != string(identity.InvokerTypePayer) && req.InvokerType != string(identity.InvokerTypeDelegated) {
-		return nil, fmt.Errorf("invoker_type must be payer or delegated")
-	}
-	expires := req.ExpiresAt
-	if expires.IsZero() {
-		expires = s.now().Add(defaultAuthorizeHoldTTL).UTC()
-	}
-
-	out, err := s.moneyService().AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-		Payer:           req.CustomerID,
-		Invoker:         strings.TrimSpace(req.Invoker),
-		Currency:        currency,
-		EstimatedAmount: req.EstimatedAmount,
-		Source:          authorizeHoldSource,
-		SourceID:        req.RequestID,
-		ExpiresAt:       expires,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	res := &AuthorizeAndHoldResult{
-		Allowed:               out.Decision.Allowed,
-		DenyCode:              out.Decision.DenyCode,
-		BillingMode:           out.BillingMode,
-		Currency:              out.Currency,
-		AvailableAmount:       out.AvailableAmount,
-		OutstandingOwedAmount: out.OutstandingOwedAmount,
-		StartCapacityAmount:   out.AccountCapacityAmount,
-	}
-	if out.Decision.Allowed && req.EstimatedAmount > 0 {
-		store, err := s.holdStore()
-		if err != nil {
-			return nil, err
-		}
-		mid, err := serviceMerchantID(ctx)
-		if err != nil {
-			return nil, err
-		}
-		allowed, activeHeld, err := store.Place(ctx, holds.Hold{
-			MerchantID:      mid,
-			RequestID:       req.RequestID,
-			CustomerID:      req.CustomerID.UUID().String(),
-			Invoker:         strings.TrimSpace(req.Invoker),
-			InvokerType:     req.InvokerType,
-			Currency:        currency,
-			EstimatedAmount: req.EstimatedAmount,
-			Source:          authorizeHoldSource,
-			Resource:        strings.TrimSpace(req.Resource),
-			CreatedAt:       s.now().UTC(),
-			ExpiresAt:       expires,
-		}, out.AccountCapacityAmount)
-		if err != nil {
-			return nil, err
-		}
-		if !allowed {
-			res.Allowed = false
-			if res.DenyCode == "" {
-				res.DenyCode = money.DenyInsufficientBalance
-			}
-			res.StartCapacityAmount = startCapacity(out.AccountCapacityAmount, activeHeld)
-			return res, nil
-		}
-		res.StartCapacityAmount = startCapacity(out.AccountCapacityAmount, activeHeld-req.EstimatedAmount)
-		res.HoldExpiresAt = &expires
-	}
-	return res, nil
-}
-
 // SetCreditAccountSettings upserts an payer's spend policy (issue #237/#235
 // admin surface). Thin passthrough to the credits service.
 func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, currency string, in money.AccountSettingsInput) error {
@@ -537,13 +331,4 @@ func (s *Service) GetCustomerCreditTransactions(ctx context.Context, payer ident
 		return e
 	})
 	return items, total, err
-}
-
-// SetSpendLimit upserts a per-invoker spend cap under an payer (issue #237).
-func (s *Service) SetSpendLimit(ctx context.Context, payer identity.CustomerID, currency, invoker string, maxDay, maxMonth *int64) error {
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
-	}
-	_, err := s.moneyService().SetSpendLimit(ctx, payer, currency, invoker, maxDay, maxMonth)
-	return err
 }

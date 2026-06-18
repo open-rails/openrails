@@ -160,9 +160,9 @@ func (c *Checker) registerAllChecks() {
 		// =====================================================================
 		// Foreign key checks
 		// FK-1, FK-2: Prevented by fk_subscriptions_price_id and fk_subscriptions_product
+		// Subscription price/product coherence is prevented by subscriptions_price_product_merchant_fkey.
 		// FK-4: Prevented by FK constraint on payments.subscription_id
 		// =====================================================================
-		&CheckPriceProductMismatch{},    // FK-3: Cross-table business logic
 		&CheckEntitlementOrphanSource{}, // FK-5: Polymorphic FK, cannot be DB constraint
 
 		// =====================================================================

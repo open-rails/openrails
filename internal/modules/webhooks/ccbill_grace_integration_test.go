@@ -22,7 +22,7 @@ import (
 func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
@@ -165,7 +165,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)

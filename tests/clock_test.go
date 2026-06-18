@@ -177,24 +177,17 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, isEntitled)
 
-	// #491: balance is derived from money_blocks. Seed a 25 non-expiring lot (the
-	// surviving balance) + a 75 lot that expires in 1h; hold 25 against it.
+	// Balance derives from #514 credit lots (grants) → the #512 ledger. Seed a 25
+	// non-expiring lot (the surviving balance) + a 75 lot that expires in 1h; hold
+	// 25 against it.
 	creditUserID := uuid.New().String()
-	balance := suite.createTestMoneyBalance(creditUserID, 25, 0) // 25 non-expiring lot
+	merchantID := dbtest.TestMerchantID.UUID()
+	customerID := suite.ensureCustomer(ctx, creditUserID)
+	_ = suite.insertMoneyCreditLot(ctx, merchantID, customerID, "USD", 25, nil, mockClock.Now()) // non-expiring
 	holdExpiry := mockClock.Now().Add(time.Hour)
 	hold := suite.createTestMoneyHold(creditUserID, 25, "active", holdExpiry)
 	blockExpiry := mockClock.Now().Add(time.Hour)
-	block := &models.MoneyBlock{
-		ID:              uuid.New(),
-		MerchantID:      dbtest.TestMerchantID.UUID(),
-		CustomerID:      suite.ensureCustomer(ctx, creditUserID),
-		Currency:        "USD",
-		OriginalAmount:  75,
-		RemainingAmount: 75,
-		ExpiresAt:       &blockExpiry,
-		CreatedAt:       mockClock.Now(),
-	}
-	suite.insertMoneyBlock(ctx, block)
+	lotID := suite.insertMoneyCreditLot(ctx, merchantID, customerID, "USD", 75, &blockExpiry, mockClock.Now())
 
 	holdWorker := &riverjobs.HoldExpiryWorker{DB: rt.DB, Config: rt.Config, Clock: rt.Clock}
 	creditWorker := &riverjobs.CreditExpiryWorker{DB: rt.DB, Config: rt.Config, Clock: rt.Clock}
@@ -202,21 +195,13 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	require.NoError(t, holdWorker.Work(ctx, &river.Job[riverjobs.HoldExpiryArgs]{Args: riverjobs.HoldExpiryArgs{}}))
 	require.NoError(t, creditWorker.Work(ctx, &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
 	assert.Equal(t, "active", suite.getMoneyHold(hold.ID).Status)
-	var remaining int64
-	require.NoError(t, suite.Pool.QueryRow(ctx,
-		"SELECT remaining_amount FROM openrails.money_blocks WHERE id = $1", block.ID).Scan(&remaining))
-	assert.Equal(t, int64(75), remaining)
+	assert.Equal(t, int64(75), suite.lotRemaining(ctx, merchantID, lotID), "lot intact before expiry")
 
 	mockClock.Advance(2 * time.Hour)
 	require.NoError(t, holdWorker.Work(ctx, &river.Job[riverjobs.HoldExpiryArgs]{Args: riverjobs.HoldExpiryArgs{}}))
 	require.NoError(t, creditWorker.Work(ctx, &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
 	assert.Equal(t, "expired", suite.getMoneyHold(hold.ID).Status)
-	updatedBalance := suite.getMoneyBalance(balance)
-	assert.Equal(t, int64(0), updatedBalance.HeldBalance)
-	assert.Equal(t, int64(25), updatedBalance.Balance)
-	require.NoError(t, suite.Pool.QueryRow(ctx,
-		"SELECT remaining_amount FROM openrails.money_blocks WHERE id = $1", block.ID).Scan(&remaining))
-	assert.Equal(t, int64(0), remaining)
+	assert.Equal(t, int64(0), suite.lotRemaining(ctx, merchantID, lotID), "lapsed lot remainder clawed to expired_credits")
 }
 
 // TestSubscriptionExpiryWithMockClock demonstrates testing subscription expiry logic

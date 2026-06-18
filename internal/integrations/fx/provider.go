@@ -39,7 +39,11 @@ type Provider interface {
 	QuoteToUSD(ctx context.Context, currency string) (*Quote, error)
 }
 
-// NoOpProvider returns rate=1.0 for all currencies (useful for testing or USD-only deployments).
+// NoOpProvider returns rate=1.0 for all currencies. It is NOT the runtime
+// default: the real app (internal/app/build_runtime.go createServices) hardwires
+// the live, free, no-API-key ExchangeAPIProvider wrapped in caching. NoOpProvider
+// is used ONLY in tests and standalone/USD-only contexts that must avoid a
+// network call. Do not assume production runs at a flat 1.0 — it doesn't.
 type NoOpProvider struct{}
 
 // Quote always returns rate=1.0 for NoOpProvider.

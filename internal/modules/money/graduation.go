@@ -40,7 +40,7 @@ func tierForCumulative(paid int64, ladder []TierThreshold) string {
 }
 
 // CumulativePaidAmount is the total a payer has PAID in one currency (sum of
-// deposit transactions) — the trust signal that graduates that currency's tier.
+// credit grants) — the trust signal that graduates that currency's tier.
 func (s *MoneyService) CumulativePaidAmount(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
 	cur := normalizeUnit(currency)
 	if err := s.validateUnit(ctx, cur); err != nil {
@@ -54,7 +54,7 @@ func (s *MoneyService) CumulativePaidAmount(ctx context.Context, payer identity.
 	var total int64
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
-		total, e = s.db.Gen(ctx).SumMoneyDeposits(ctx, gen.SumMoneyDepositsParams{
+		total, e = s.db.Gen(ctx).SumCreditGrants(ctx, gen.SumCreditGrantsParams{
 			MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
 		})
 		return e

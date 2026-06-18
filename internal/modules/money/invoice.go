@@ -104,17 +104,33 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			lineItems = append(lineItems, *it)
 		}
 
-		// --- money movements (ledger, by transaction_type) ---
-		movs, merr := q.SumMoneyMovementsInPeriodByPayer(ctx, gen.SumMoneyMovementsInPeriodByPayerParams{
+		// --- money movements (#512 ledger, by transfer_type; amounts positive) ---
+		movs, merr := q.SumLedgerMovementsByCustomerInPeriod(ctx, gen.SumLedgerMovementsByCustomerInPeriodParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			PeriodFrom: pfrom, PeriodTo: pto,
 		})
 		if merr != nil {
 			return merr
 		}
+		// Normalize ledger transfer types (all positive amounts) into the statement's
+		// signed movement map: money in is positive, money out negative — matching the
+		// retired single-entry money_transactions sign convention.
 		movements := map[string]int64{}
 		for _, m := range movs {
-			movements[m.TransactionType] = m.Total
+			switch m.TransferType {
+			case "deposit":
+				movements["deposit"] += m.Total
+			case "credit_spend", "spend", "capture":
+				movements["withdrawal"] -= m.Total
+			case "owed_accrual":
+				movements[txOwedAccrual] += m.Total
+			case "owed_payment":
+				movements[txOwedPayment] -= m.Total
+			case "credit_expire", "expire":
+				movements["expiry"] -= m.Total
+			default:
+				movements[m.TransferType] += m.Total
+			}
 		}
 		pendingReceivable, perr := q.SumPendingInvoiceItemAmountInPeriod(ctx, gen.SumPendingInvoiceItemAmountInPeriodParams{
 			MerchantID: tenantID,
@@ -161,7 +177,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			UsageTotal:       usageTotal,
 			DepositsTotal:    movements["deposit"],
 			OwedAccrued:      movements[txOwedAccrual],
-			OwedPaid:         -movements[txOwedPayment], // owed_payment amounts are negative
+			OwedPaid:         -movements[txOwedPayment], // owed_payment is stored negative in the map
 			ClosingBalance:   closing,
 			SubtotalAmount:   totalAmount,
 			TotalAmount:      totalAmount,
@@ -486,6 +502,18 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 			return fmt.Errorf("payment amount exceeds invoice amount_due")
 		}
 		now := s.now()
+		sourceID := processorPaymentID
+		// Reference dedup: a prior owed-payment transfer with this reference means
+		// the manual payment was already applied (the single-entry uniqueness this
+		// replaced lived on money_transactions).
+		if _, derr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
+			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: normalizeCurrency(invoiceRow.Currency),
+			TransferType: "owed_payment", Source: "manual_invoice_payment", SourceID: sourceID,
+		}); derr == nil {
+			return fmt.Errorf("manual payment reference %q already applied", sourceID)
+		} else if !errors.Is(derr, pgx.ErrNoRows) {
+			return derr
+		}
 		n, e := q.ApplyInvoicePaymentSnapshot(ctx, gen.ApplyInvoicePaymentSnapshotParams{
 			MerchantID: tid.UUID(),
 			CustomerID: payer.UUID(),
@@ -499,23 +527,11 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		if n == 0 {
 			return fmt.Errorf("invoice payment was not applied")
 		}
-		sourceID := processorPaymentID
-		trx := &models.MoneyTransaction{
-			ID:              uuidutil.NewV7(),
-			MerchantID:      tid.UUID(),
-			CustomerID:      payer.UUID(),
-			Currency:        invoiceRow.Currency,
-			Invoker:         payer.UUID().String(),
-			Amount:          -amount,
-			TransactionType: txOwedPayment,
-			Status:          "posted",
-			Source:          "manual_invoice_payment",
-			SourceID:        &sourceID,
-			InvoiceID:       &id,
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		}
-		if e := q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(trx)); e != nil {
+		// Settle the arrears liability via a #512 ledger owed-payment transfer
+		// (DR processor_clearing / CR arrears_liability).
+		ml := s.moneyLedger(q, tid.UUID())
+		tr, e := ml.PayOwed(ctx, payer.UUID(), normalizeCurrency(invoiceRow.Currency), amount, "manual_invoice_payment", sourceID, &id)
+		if e != nil {
 			return e
 		}
 		processor := string(models.ProcessorManual)
@@ -524,7 +540,7 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 			MerchantID:         tid.UUID(),
 			CustomerID:         payer.UUID(),
 			InvoiceID:          id,
-			MoneyTransactionID: &trx.ID,
+			MoneyTransactionID: &tr.ID,
 			Currency:           invoiceRow.Currency,
 			Amount:             amount,
 			Status:             "settled",

@@ -14,11 +14,58 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
+
+// grantLedger binds a #514 grant ledger to the query handle + merchant, on the
+// service clock so derived event/expiry timestamps stay consistent with the
+// rest of the money service.
+func (s *MoneyService) grantLedger(q *gen.Queries, tenantID uuid.UUID) *grants.Ledger {
+	gl := grants.New(q, tenantID)
+	gl.SetClock(s.now)
+	return gl
+}
+
+// moneyLedger binds a #512 double-entry money ledger to the query handle +
+// merchant (for direct transfers like owed accrual/settlement).
+func (s *MoneyService) moneyLedger(q *gen.Queries, tenantID uuid.UUID) *ledger.Ledger {
+	return ledger.New(q, tenantID)
+}
+
+// depositSourceType maps a free-form deposit source label onto the grant
+// ledger's source_type vocabulary (purchase | subscription | admin | grace).
+func depositSourceType(source string) string {
+	s := strings.ToLower(source)
+	switch {
+	case strings.Contains(s, "subscription"):
+		return string(grants.Subscription)
+	case strings.Contains(s, "purchase"):
+		return string(grants.Purchase)
+	case strings.Contains(s, "grace"):
+		return string(grants.Grace)
+	default:
+		return string(grants.Admin)
+	}
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func derefInt(v *int64) int64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
 
 var (
 	ErrInsufficientCredits = errors.New("insufficient_credits")
@@ -149,7 +196,7 @@ func (s *MoneyService) GetTransactionsByCustomer(ctx context.Context, payer iden
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	q := s.db.Gen(ctx)
-	total, err := q.CountMoneyTransactionsByPayer(ctx, gen.CountMoneyTransactionsByPayerParams{
+	total, err := q.CountLedgerTransfersByCustomer(ctx, gen.CountLedgerTransfersByCustomerParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 	})
 	if err != nil {
@@ -161,20 +208,16 @@ func (s *MoneyService) GetTransactionsByCustomer(ctx context.Context, payer iden
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := q.ListMoneyTransactionsByPayer(ctx, gen.ListMoneyTransactionsByPayerParams{
+	rows, err := q.ListLedgerTransfersByCustomer(ctx, gen.ListLedgerTransfersByCustomerParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-		Column3: int32(limit), Column4: int32(offset),
+		Lim: int32(limit), Off: int32(offset),
 	})
 	if err != nil {
 		return nil, 0, err
 	}
 	items := make([]models.MoneyTransaction, 0, len(rows))
 	for _, r := range rows {
-		m, merr := moneyTransactionFromGen(r)
-		if merr != nil {
-			return nil, 0, merr
-		}
-		items = append(items, *m)
+		items = append(items, *moneyTransactionFromTransfer(r))
 	}
 	return items, int(total), nil
 }
@@ -231,18 +274,18 @@ func (s *MoneyService) GetTransactionBySource(ctx context.Context, invokerID str
 	if err := s.validateUnit(ctx, cur); err != nil {
 		return nil, err
 	}
-	row, err := s.db.Gen(ctx).GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-		MerchantID:      tid.UUID(),
-		CustomerID:      payer.UUID(),
-		Currency:        cur,
-		TransactionType: transactionType,
-		Source:          source,
-		SourceID:        &sourceID,
+	row, err := s.db.Gen(ctx).GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
+		MerchantID:   tid.UUID(),
+		CustomerID:   payer.UUID(),
+		Currency:     cur,
+		TransferType: transactionType,
+		Source:       source,
+		SourceID:     sourceID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return moneyTransactionFromGen(row)
+	return moneyTransactionFromTransfer(row), nil
 }
 
 type DepositParams struct {
@@ -317,6 +360,12 @@ func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUI
 	})
 }
 
+// depositTx records a money-in as a #514 credit grant (kind=credit), then
+// materializes it (derive-2) into a #512 ledger deposit (DR processor_clearing /
+// CR customer_balance). The grant IS the FIFO credit lot — there is no separate
+// money_blocks row. Idempotent on the deposit's natural key (merchant, payer,
+// source_id) via the credit-grant lookup. Runs under the customers-row lock so
+// deposits serialize per customer.
 func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params DepositParams) (*models.MoneyTransaction, error) {
 	now := s.now()
 	cur := normalizeUnit(params.Currency)
@@ -337,74 +386,43 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 	if err != nil {
 		return nil, err
 	}
+	// Guard against int64 overflow: a deposit that would wrap the derived balance
+	// past MaxInt64 is rejected rather than corrupting the ledger.
+	if bal.Balance > math.MaxInt64-params.Amount {
+		return nil, fmt.Errorf("deposit would overflow balance")
+	}
 
-	// Idempotency: if caller provides SourceID, treat (merchant, payer, source,
-	// source_id) as an idempotency key for deposits. This is safe because we hold
-	// the customers-row lock, serializing deposits per customer (#491).
-	sourceIDText := (*string)(nil)
-	if params.SourceID != nil {
-		v := *params.SourceID
-		sourceIDText = &v
-		existing, gerr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			TransactionType: "deposit", Source: params.Source, SourceID: &v,
+	// Idempotency: (merchant, payer, source_id) is the deposit key. A credit grant
+	// already carrying this source_id means the deposit happened — return it.
+	if params.SourceID != nil && strings.TrimSpace(*params.SourceID) != "" {
+		existing, gerr := q.GetCreditGrantBySourceID(ctx, gen.GetCreditGrantBySourceIDParams{
+			MerchantID: tenantID, CustomerID: payerID, SourceID: *params.SourceID,
 		})
 		if gerr == nil {
-			return moneyTransactionFromGen(existing)
+			return s.creditGrantTxn(existing, params), nil
 		}
 		if !errors.Is(gerr, pgx.ErrNoRows) {
 			return nil, gerr
 		}
 	}
 
-	// Guard against int64 overflow: a sufficiently large deposit on a customer
-	// with a positive balance would wrap the derived balance negative. Reject the
-	// deposit rather than corrupt the spendable total.
-	if bal.Balance > math.MaxInt64-params.Amount {
-		return nil, fmt.Errorf("deposit would overflow balance")
-	}
-	newBal := bal.Balance + params.Amount
-
-	trx := &models.MoneyTransaction{
-		ID:              uuidutil.NewV7(),
-		MerchantID:      tenantID,
-		CustomerID:      payerID,
-		Currency:        cur,
-		Invoker:         params.Invoker,
-		Amount:          params.Amount,
-		BalanceAfter:    &newBal,
-		TransactionType: "deposit",
-		Status:          "posted",
-		Source:          params.Source,
-		SourceID:        sourceIDText,
-		ExpiresAt:       params.ExpiresAt,
-		Description:     params.Description,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if err := q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(trx)); err != nil {
+	gl := s.grantLedger(q, tenantID)
+	g, err := gl.Grant(ctx, grants.GrantInput{
+		Customer: payerID, Kind: grants.Credit,
+		Source: grants.SourceType(depositSourceType(params.Source)), SourceID: derefStr(params.SourceID),
+		Amount: &params.Amount, Currency: &cur, StartsAt: now, EndsAt: params.ExpiresAt,
+	})
+	if err != nil {
 		return nil, err
 	}
-	if err := q.InsertMoneyBlock(ctx, gen.InsertMoneyBlockParams{
-		ID:                  uuidutil.NewV7(),
-		MerchantID:          tenantID,
-		CustomerID:          payerID,
-		Currency:            cur,
-		OriginalAmount:      params.Amount,
-		RemainingAmount:     params.Amount,
-		ExpiresAt:           params.ExpiresAt,
-		SourceTransactionID: &trx.ID,
-		CreatedAt:           now,
-	}); err != nil {
+	if err := gl.MaterializeGrant(ctx, g); err != nil {
 		return nil, err
 	}
 
-	// AUTO-graduation (#476): cumulative_paid in this currency just changed, so
-	// recompute + persist the payer's same-currency tier from the stored
-	// tier_schedule, in-band with the deposit. A schedule lookup error fails the
-	// deposit (consistency), but no schedule is the common path and costs one
-	// indexed read.
-	cumPaid, perr := q.SumMoneyDeposits(ctx, gen.SumMoneyDepositsParams{
+	// AUTO-graduation (#476): cumulative credits granted in this currency just
+	// changed, so recompute + persist the payer's same-currency tier from the
+	// stored tier_schedule, in-band with the deposit.
+	cumPaid, perr := q.SumCreditGrants(ctx, gen.SumCreditGrantsParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 	})
 	if perr != nil {
@@ -414,35 +432,37 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		return nil, err
 	}
 
-	return trx, nil
+	return s.creditGrantTxn(g, params), nil
 }
 
-// insertParamsFromTransaction maps a fully-populated transaction model onto the
-// generated insert params (one definition shared by every ledger writer).
-// Metadata is dropped: no current ledger writer sets it (windows/settles stamp
-// resource only), and an encode error has nowhere to go from this mapper.
-func insertParamsFromTransaction(t *models.MoneyTransaction) gen.InsertMoneyTransactionParams {
-	return gen.InsertMoneyTransactionParams{
-		ID:               t.ID,
-		MerchantID:       t.MerchantID,
-		CustomerID:       t.CustomerID,
-		Currency:         normalizeCurrency(t.Currency),
-		InvokerID:        t.Invoker,
-		Resource:         t.Resource,
-		Amount:           t.Amount,
-		BalanceAfter:     t.BalanceAfter,
-		TransactionType:  t.TransactionType,
-		Status:           t.Status,
-		AuthorizedAmount: t.Authorized,
-		CapturedAmount:   t.Captured,
-		Source:           t.Source,
-		SourceID:         t.SourceID,
-		ExpiresAt:        t.ExpiresAt,
-		Description:      t.Description,
-		InvoiceID:        t.InvoiceID,
-		CreatedAt:        t.CreatedAt,
-		UpdatedAt:        t.UpdatedAt,
+// creditGrantTxn synthesizes the public MoneyTransaction DTO for a deposit from
+// its backing credit grant (the lot). The single-entry money_transactions row is
+// gone (#512 hard cut); this DTO is derived, not stored.
+func (s *MoneyService) creditGrantTxn(g gen.OpenrailsGrant, params DepositParams) *models.MoneyTransaction {
+	sid := g.SourceID
+	return &models.MoneyTransaction{
+		ID:              g.ID,
+		MerchantID:      g.MerchantID,
+		CustomerID:      g.CustomerID,
+		Currency:        normalizeCurrency(derefStrOr(g.Currency, params.Currency)),
+		Invoker:         params.Invoker,
+		Amount:          derefInt(g.Amount),
+		TransactionType: "deposit",
+		Status:          "posted",
+		Source:          params.Source,
+		SourceID:        &sid,
+		ExpiresAt:       g.EndsAt,
+		Description:     params.Description,
+		CreatedAt:       g.CreatedAt,
+		UpdatedAt:       g.CreatedAt,
 	}
+}
+
+func derefStrOr(s *string, fallback string) string {
+	if s == nil || *s == "" {
+		return fallback
+	}
+	return *s
 }
 
 type WithdrawParams struct {
@@ -477,8 +497,14 @@ func (s *MoneyService) Withdraw(ctx context.Context, params WithdrawParams) (*mo
 	return trx, nil
 }
 
-func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string, amount int64) (int64, error) {
-	now := s.now()
+// withdrawBalanceAndBlocks debits `amount` from the customer's prepaid balance by
+// spending #514 credit lots FIFO (soonest-expiring first) via the grant ledger,
+// which emits one #512 credit_spend transfer per lot drawn — tagged with the
+// caller's operation coordinate (source, sourceID) for idempotency/history and
+// grant_id for lot attribution. The available/credit-line gate is the CALLER's
+// job (#491); this fails only if the lots physically cannot cover `amount` (a
+// gated caller never hits that). Returns the derived balance AFTER the debit.
+func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency, source, sourceID, resource string, amount int64) (int64, error) {
 	cur := normalizeUnit(currency)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -486,10 +512,7 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 	}
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
-	// Lock + serialize. This is a low-level FIFO block-debit primitive: the
-	// available/credit-line gate is the CALLER's job (#491). It draws the spendable
-	// lots and errors only if the blocks physically cannot cover `amount` (a gated
-	// caller never hits that). Returns the derived balance AFTER the debit.
+	// Lock + serialize, then derive the balance under the lock.
 	bal, err := s.lockBalance(ctx, q, payer, invokerID, cur)
 	if err != nil {
 		return 0, err
@@ -497,36 +520,12 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 	if bal.Balance < amount {
 		return 0, ErrInsufficientCredits
 	}
-
-	remaining := amount
-	blocks, err := q.ListSpendableMoneyBlocksForUpdate(ctx, gen.ListSpendableMoneyBlocksForUpdateParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur, Now: now,
-	})
-	if err != nil {
+	gl := s.grantLedger(q, tenantID)
+	if err := gl.CreditSpend(ctx, payerID, cur, amount, invokerID, resource, source, sourceID); err != nil {
+		if errors.Is(err, grants.ErrInsufficientCredits) {
+			return 0, ErrInsufficientCredits
+		}
 		return 0, err
-	}
-	for i := range blocks {
-		if remaining == 0 {
-			break
-		}
-		use := blocks[i].RemainingAmount
-		if use > remaining {
-			use = remaining
-		}
-		if use <= 0 {
-			continue
-		}
-		remaining -= use
-		if err := q.SetMoneyBlockRemaining(ctx, gen.SetMoneyBlockRemainingParams{
-			ID: blocks[i].ID, RemainingAmount: blocks[i].RemainingAmount - use,
-		}); err != nil {
-			return 0, err
-		}
-	}
-	if remaining > 0 {
-		// Blocks couldn't cover it despite the balance check — should be impossible
-		// under the customers-row lock; fail loudly rather than under-debit.
-		return 0, ErrInsufficientCredits
 	}
 	return bal.Balance - amount, nil
 }
@@ -558,16 +557,22 @@ func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer id
 }
 
 // deriveBalance computes the balance snapshot from the source of truth: balance
-// = SUM(unexpired, unspent money_blocks), held = active holds + open windows. The
+// = the customer's #512 ledger balance (credits − debits over posted +
+// post_pending transfers), held = open-window unsettled reservations (#335). The
 // caller holds the customers-row lock (#491).
 func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string) (*models.MoneyBalance, error) {
-	now := s.now()
-	bal, err := q.SumSpendableMoneyBlocks(ctx, gen.SumSpendableMoneyBlocksParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur, Now: now,
-	})
+	l := ledger.New(q, tenantID)
+	acc, err := l.EnsureCustomerBalance(ctx, payerID, cur)
 	if err != nil {
 		return nil, err
 	}
+	bal, err := l.Balance(ctx, acc)
+	if err != nil {
+		return nil, err
+	}
+	// Held stays on durable open windows (#335): the prepaid bulk reservation a
+	// host meters locally. Two-phase ledger holds are not on the live path (the
+	// admission hold is Redis, #513), so they don't contribute here.
 	held, err := q.SumActiveMoneyHeld(ctx, gen.SumActiveMoneyHeldParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 	})
@@ -609,21 +614,22 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 		return nil, ErrInsufficientCredits
 	}
 	sourceIDText := (*string)(nil)
+	sid := ""
 	if params.SourceID != nil {
-		v := params.SourceID.String()
-		sourceIDText = &v
-		existing, gerr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
+		sid = params.SourceID.String()
+		sourceIDText = &sid
+		existing, gerr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			TransactionType: "withdrawal", Source: params.Source, SourceID: &v,
+			TransferType: "credit_spend", Source: params.Source, SourceID: sid,
 		})
 		if gerr == nil {
-			return moneyTransactionFromGen(existing)
+			return moneyTransactionFromTransfer(existing), nil
 		}
 		if !errors.Is(gerr, pgx.ErrNoRows) {
 			return nil, gerr
 		}
 	}
-	newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, params.Invoker, cur, params.Amount)
+	newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, params.Invoker, cur, params.Source, sid, "", params.Amount)
 	if err != nil {
 		return nil, err
 	}
@@ -642,9 +648,6 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 		SourceID:        sourceIDText,
 		CreatedAt:       now,
 		UpdatedAt:       now,
-	}
-	if err := q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(trx)); err != nil {
-		return nil, err
 	}
 	return trx, nil
 }

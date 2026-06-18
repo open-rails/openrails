@@ -22,9 +22,10 @@ var merchantOwnedTables = []string{
 	"subscriptions", "entitlements", "payments", "admin_grants",
 	"notification_queue", "processor_customers",
 	"checkout_sessions", "provider_intents",
-	// money ledger: blocks reference transactions, so purge blocks first (FK-safe).
-	"money_settings", "money_blocks", "money_transactions",
-	"money_windows", "money_spend_limits",
+	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
+	// tables are gone. The append-only ledger_transfers/grants are immutable
+	// (REVOKE DELETE) and intentionally NOT row-purged here.
+	"money_settings", "money_windows",
 }
 
 // countTenantRows dispatches to the table's generated count query.
@@ -56,14 +57,8 @@ func countTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.CountMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
 		return q.CountMerchantRowsMoneyAccounts(ctx, id)
-	case "money_blocks":
-		return q.CountMerchantRowsMoneyBlocks(ctx, id)
-	case "money_transactions":
-		return q.CountMerchantRowsMoneyTransactions(ctx, id)
 	case "money_windows":
 		return q.CountMerchantRowsMoneyWindows(ctx, id)
-	case "money_spend_limits":
-		return q.CountMerchantRowsMoneySpendLimits(ctx, id)
 	default:
 		return 0, fmt.Errorf("tenancy: no count query for table %q", table)
 	}
@@ -98,14 +93,8 @@ func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.PurgeMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
 		return q.PurgeMerchantRowsMoneyAccounts(ctx, id)
-	case "money_blocks":
-		return q.PurgeMerchantRowsMoneyBlocks(ctx, id)
-	case "money_transactions":
-		return q.PurgeMerchantRowsMoneyTransactions(ctx, id)
 	case "money_windows":
 		return q.PurgeMerchantRowsMoneyWindows(ctx, id)
-	case "money_spend_limits":
-		return q.PurgeMerchantRowsMoneySpendLimits(ctx, id)
 	default:
 		return fmt.Errorf("tenancy: no purge query for table %q", table)
 	}

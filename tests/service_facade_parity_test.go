@@ -3,7 +3,6 @@
 package tests
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -150,54 +149,12 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		req.Header.Set("Authorization", "Bearer openrails_st_testkeyid_testsecret")
 	}
 
-	// 1) Create hold via Service facade, release via service HTTP.
-	hold1, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
-		CustomerID:  &tenantSubject,
-		Invoker:     userID,
-		InvokerType: string(identity.InvokerTypeDelegated),
-		Amount:      123,
-		Source:      "svc_test",
-		RequestID:   "hold-1",
-		ExpiresAt:   time.Now().Add(10 * time.Minute).UTC(),
-	})
-	require.NoError(t, err)
-	require.Equal(t, "hold-1", hold1.RequestID)
+	// Hold create/capture/release parity moved to the spendgate admit path (#513);
+	// the legacy /credits/hold + HoldCredits facade were removed. Capture/release
+	// parity over the unified admit gate is covered by the spendgate + admitter
+	// integration tests.
 
-	reqRelease := httptest.NewRequest(http.MethodPost, "/v1/service/credits/hold/"+hold1.RequestID+"/release", nil)
-	withServiceToken(reqRelease)
-	wRelease := httptest.NewRecorder()
-	router.ServeHTTP(wRelease, reqRelease)
-	require.Equal(t, http.StatusOK, wRelease.Code)
-
-	// 2) Create hold via service HTTP, capture via Service facade.
-	bodyHold, _ := json.Marshal(map[string]any{
-		"customer_id":  tenantSubjectID.String(),
-		"invoker":      userID,
-		"invoker_type": string(identity.InvokerTypeDelegated),
-		"credit_type":  creditTypeName,
-		"amount":       456,
-		"source":       "svc_test",
-		"request_id":   "hold-2",
-		"expires_at":   time.Now().Add(10 * time.Minute).Unix(),
-	})
-	reqHold := httptest.NewRequest(http.MethodPost, "/v1/service/credits/hold", bytes.NewReader(bodyHold))
-	withServiceToken(reqHold)
-	reqHold.Header.Set("Content-Type", "application/json")
-	wHold := httptest.NewRecorder()
-	router.ServeHTTP(wHold, reqHold)
-	require.Equal(t, http.StatusOK, wHold.Code)
-
-	var holdResp struct {
-		RequestID string `json:"RequestID"`
-	}
-	require.NoError(t, json.Unmarshal(wHold.Body.Bytes(), &holdResp))
-	require.Equal(t, "hold-2", holdResp.RequestID)
-
-	trx, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{RequestID: "hold-2", Amount: 111})
-	require.NoError(t, err)
-	require.Equal(t, int64(-111), trx.Amount)
-
-	// 3) Entitlements: facade and service HTTP both see the record.
+	// 1) Entitlements: facade and service HTTP both see the record.
 	ents, err := svc.ListActiveEntitlements(ctx, userID, time.Now().UTC())
 	require.NoError(t, err)
 	require.Contains(t, ents, "premium-1")

@@ -43,18 +43,6 @@ type MoneyTransaction struct {
 	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
-type MoneyBlock struct {
-	ID                  uuid.UUID  `json:"id"`
-	MerchantID          uuid.UUID  `json:"merchant_id"`
-	CustomerID          uuid.UUID  `json:"customer_id"`
-	Currency            string     `json:"currency"`
-	OriginalAmount      int64      `json:"original_amount"`
-	RemainingAmount     int64      `json:"remaining_amount"`
-	ExpiresAt           *time.Time `json:"expires_at,omitempty"`
-	SourceTransactionID *uuid.UUID `json:"source_transaction_id,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-}
-
 // MoneyWindow is a prepaid money window (issue #335): one bulk reservation a
 // host admits requests against locally. See CreditWindow for the mechanics.
 type MoneyWindow struct {
@@ -110,18 +98,4 @@ type MoneyAccount struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// MoneySpendLimit is an optional per-invoker µ$ spend cap under a merchant subject
-// (issue #237). The invoker string is matched against money_transactions.invoker.
-type MoneySpendLimit struct {
-	ID               uuid.UUID `json:"id"`
-	MerchantID       uuid.UUID `json:"merchant_id"`
-	CustomerID       uuid.UUID `json:"customer_id"`
-	Currency         string    `json:"currency"`
-	Invoker          string    `json:"invoker"`
-	MaxSpendPerDay   *int64    `json:"max_spend_per_day,omitempty"`
-	MaxSpendPerMonth *int64    `json:"max_spend_per_month,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
 }

@@ -107,28 +107,18 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 		Source:         "subscription_renewal",
 	}))
 
-	var depositCount int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.money_transactions
-		 WHERE customer_id = $1 AND currency = 'USD'
-		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'`,
-		tenantSubjectID).Scan(&depositCount))
-	require.Equal(t, 1, depositCount)
-
-	// #491: source_id IS the natural-key string itself (uuidv7 pk + UNIQUE natural
-	// key), no longer a derived uuidv5.
+	// A deposit is now a #514 credit grant (the lot). #491: source_id IS the
+	// natural-key string itself (uuidv7 pk + UNIQUE natural key), no uuidv5.
 	grantKey := fmt.Sprintf("openrails:sub_credit_grant:%s:%s:%s:%s",
 		models.CreditGrantCadencePerRenewal, subID, grantLabel, periodEnd.UTC().Format(time.RFC3339Nano))
 
-	dep := new(models.MoneyTransaction)
+	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT source_id FROM openrails.money_transactions
+		`SELECT count(*) FROM openrails.grants
 		 WHERE customer_id = $1 AND currency = 'USD'
-		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'
-		 LIMIT 1`,
-		tenantSubjectID).Scan(&dep.SourceID))
-	require.NotNil(t, dep.SourceID)
-	require.Equal(t, grantKey, *dep.SourceID)
+		   AND kind = 'credit' AND event = 'grant' AND source_id = $2`,
+		tenantSubjectID, grantKey).Scan(&depositCount))
+	require.Equal(t, 1, depositCount, "renewal grants exactly one credit lot (idempotent)")
 
 	bal, err := moneySvc.GetBalance(ctx, tenantSubjectID.String(), money.DefaultCurrency)
 	require.NoError(t, err)

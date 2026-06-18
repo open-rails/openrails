@@ -131,9 +131,8 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 		}); err != nil {
 			return err
 		}
-		if err := insertWindowRecordTx(ctx, q, w, txWindowOpen, windowActor(p.Invoker, payerID), p.Amount, now); err != nil {
-			return err
-		}
+		// The open window row IS the reservation record (#335); the prior
+		// zero-amount money_transactions audit row is gone with the hard cut.
 		window = w
 		return nil
 	})
@@ -141,32 +140,6 @@ func (s *MoneyService) OpenWindow(ctx context.Context, p OpenWindowParams) (*mod
 		return nil, err
 	}
 	return window, nil
-}
-
-// insertWindowRecordTx writes the zero-amount audit ledger row for a window
-// open/refill (amount=0 — no balance movement; authorized records the reserved
-// delta; source_id is the window id).
-func insertWindowRecordTx(ctx context.Context, q *gen.Queries, w *models.MoneyWindow, txType, invoker string, amount int64, now time.Time) error {
-	auth := amount
-	exp := w.ExpiresAt
-	srcID := w.ID.String()
-	rec := &models.MoneyTransaction{
-		ID:              uuidutil.NewV7(),
-		MerchantID:      w.MerchantID,
-		CustomerID:      w.CustomerID,
-		Currency:        normalizeCurrency(w.Currency),
-		Invoker:         invoker,
-		Amount:          0,
-		TransactionType: txType,
-		Status:          "posted",
-		Authorized:      &auth,
-		Source:          windowOpenSource,
-		SourceID:        &srcID,
-		ExpiresAt:       &exp,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	return q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(rec))
 }
 
 // windowActor returns the ledger/usage attribution invoker: the caller-supplied
@@ -250,10 +223,11 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 		cur := normalizeCurrency(w.Currency)
 
 		// Replay check FIRST (under the window lock) so a re-sent batch returns
-		// success even after the window has since closed/expired.
-		existing, derr := q.GetMoneyTransactionByCoords(ctx, gen.GetMoneyTransactionByCoordsParams{
+		// success even after the window has since closed/expired. The settle is a
+		// #512 credit_spend transfer keyed on (source=window_settle, request_id).
+		existing, derr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: w.MerchantID, CustomerID: w.CustomerID, Currency: cur,
-			TransactionType: "withdrawal", Source: windowSettleSource, SourceID: &res.RequestID,
+			TransferType: "credit_spend", Source: windowSettleSource, SourceID: res.RequestID,
 		})
 		if derr == nil {
 			id := existing.ID
@@ -273,7 +247,8 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 
 		// Capture mechanics: bumping settled_amount releases this slice of the
 		// window reservation from the derived held (#491); withdrawBalanceAndBlocks
-		// debits the FIFO blocks for the actual spend. Lock the customers row first.
+		// spends the FIFO credit lots for the actual amount, tagged with the
+		// request_id (idempotency). Lock the customers row first.
 		if _, err := s.lockBalance(ctx, q, payer, invoker, cur); err != nil {
 			return err
 		}
@@ -282,29 +257,16 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 		}); err != nil {
 			return err
 		}
-		newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, invoker, cur, item.Amount)
-		if err != nil {
+		if _, err := s.withdrawBalanceAndBlocks(ctx, q, payer, invoker, cur, windowSettleSource, res.RequestID, strings.TrimSpace(item.Resource), item.Amount); err != nil {
 			return err
 		}
-
-		srcID := res.RequestID
-		trx := &models.MoneyTransaction{
-			ID:              uuidutil.NewV7(),
-			MerchantID:      w.MerchantID,
-			CustomerID:      w.CustomerID,
-			Currency:        cur,
-			Invoker:         invoker,
-			Resource:        nilIfEmpty(strings.TrimSpace(item.Resource)),
-			Amount:          -item.Amount,
-			BalanceAfter:    &newBal,
-			TransactionType: "withdrawal",
-			Status:          "posted",
-			Source:          windowSettleSource,
-			SourceID:        &srcID,
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		}
-		if err := q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(trx)); err != nil {
+		// Fetch the settle transfer id (the first lot debit at these coordinates)
+		// for the result + the usage-event link.
+		settleTr, err := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
+			MerchantID: w.MerchantID, CustomerID: w.CustomerID, Currency: cur,
+			Source: windowSettleSource, SourceID: res.RequestID,
+		})
+		if err != nil {
 			return err
 		}
 
@@ -325,7 +287,7 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 				Amount:             item.Amount,
 				Source:             windowSettleSource,
 				SourceID:           res.RequestID,
-				MoneyTransactionID: &trx.ID,
+				MoneyTransactionID: &settleTr.ID,
 				Metadata:           meta,
 				OccurredAt:         now,
 				CreatedAt:          now,
@@ -334,7 +296,7 @@ func (s *MoneyService) settleOneWindowItem(ctx context.Context, item WindowSettl
 			}
 		}
 
-		res.OK, res.TransactionID = true, &trx.ID
+		res.OK, res.TransactionID = true, &settleTr.ID
 		return nil
 	})
 	if err != nil {
@@ -418,11 +380,6 @@ func (s *MoneyService) RefillWindow(ctx context.Context, windowID uuid.UUID, amo
 			ID: w.ID, HeldAmount: w.HeldAmount, ExpiresAt: w.ExpiresAt, UpdatedAt: w.UpdatedAt,
 		}); err != nil {
 			return err
-		}
-		if amount > 0 {
-			if err := insertWindowRecordTx(ctx, q, w, txWindowRefill, invoker, amount, now); err != nil {
-				return err
-			}
 		}
 		window = w
 		return nil

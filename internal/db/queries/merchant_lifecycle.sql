@@ -81,26 +81,8 @@ SELECT count(*) FROM openrails.money_settings WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsMoneyAccounts :exec
 DELETE FROM openrails.money_settings WHERE merchant_id = $1;
 
--- name: CountMerchantRowsMoneyBlocks :one
-SELECT count(*) FROM openrails.money_blocks WHERE merchant_id = $1;
-
--- name: PurgeMerchantRowsMoneyBlocks :exec
-DELETE FROM openrails.money_blocks WHERE merchant_id = $1;
-
--- name: CountMerchantRowsMoneyTransactions :one
-SELECT count(*) FROM openrails.money_transactions WHERE merchant_id = $1;
-
--- name: PurgeMerchantRowsMoneyTransactions :exec
-DELETE FROM openrails.money_transactions WHERE merchant_id = $1;
-
 -- name: CountMerchantRowsMoneyWindows :one
 SELECT count(*) FROM openrails.money_windows WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsMoneyWindows :exec
 DELETE FROM openrails.money_windows WHERE merchant_id = $1;
-
--- name: CountMerchantRowsMoneySpendLimits :one
-SELECT count(*) FROM openrails.money_spend_limits WHERE merchant_id = $1;
-
--- name: PurgeMerchantRowsMoneySpendLimits :exec
-DELETE FROM openrails.money_spend_limits WHERE merchant_id = $1;

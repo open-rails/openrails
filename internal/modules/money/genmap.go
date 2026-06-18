@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 )
@@ -29,32 +30,55 @@ func toJSONBC[M ~map[string]V, V any](m M) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-func moneyTransactionFromGen(r gen.OpenrailsMoneyTransaction) (*models.MoneyTransaction, error) {
-	m := &models.MoneyTransaction{
+// moneyTransactionFromTransfer derives the public MoneyTransaction DTO from a
+// #512 immutable ledger transfer (the single-entry money_transactions table was
+// retired in the hard cut). The DTO's sign convention is preserved: money OUT of
+// the customer is negative. Transfers are immutable, so UpdatedAt == CreatedAt.
+func moneyTransactionFromTransfer(r gen.OpenrailsLedgerTransfer) *models.MoneyTransaction {
+	amount := r.Amount
+	txType := r.TransferType
+	switch r.TransferType {
+	case "deposit":
+		txType = "deposit"
+	case "credit_spend", "spend", "capture":
+		amount = -amount
+		txType = "withdrawal"
+	case "owed_accrual":
+		txType = "owed_accrual"
+	case "owed_payment":
+		amount = -amount
+		txType = "owed_payment"
+	case "credit_expire", "expire":
+		amount = -amount
+		txType = "expiry"
+	}
+	status := "posted"
+	switch r.Phase {
+	case "pending":
+		status = "pending"
+	case "void_pending":
+		status = "voided"
+	}
+	var customerID uuid.UUID
+	if r.CustomerID != nil {
+		customerID = *r.CustomerID
+	}
+	return &models.MoneyTransaction{
 		ID:              r.ID,
 		MerchantID:      r.MerchantID,
-		CustomerID:      r.CustomerID,
+		CustomerID:      customerID,
 		Currency:        r.Currency,
-		Invoker:         r.InvokerID,
+		Invoker:         derefStr(r.InvokerID),
 		Resource:        r.Resource,
-		Amount:          r.Amount,
-		BalanceAfter:    r.BalanceAfter,
-		TransactionType: r.TransactionType,
-		Status:          r.Status,
-		Authorized:      r.AuthorizedAmount,
-		Captured:        r.CapturedAmount,
-		Source:          r.Source,
+		Amount:          amount,
+		TransactionType: txType,
+		Status:          status,
+		Source:          derefStr(r.Source),
 		SourceID:        r.SourceID,
 		InvoiceID:       r.InvoiceID,
-		ExpiresAt:       r.ExpiresAt,
-		Description:     r.Description,
 		CreatedAt:       r.CreatedAt,
-		UpdatedAt:       r.UpdatedAt,
+		UpdatedAt:       r.CreatedAt,
 	}
-	if err := fromJSONBC(r.Metadata, &m.Metadata, "money_transactions.metadata"); err != nil {
-		return nil, err
-	}
-	return m, nil
 }
 
 func settingsFromGen(r gen.OpenrailsMoneySetting) *models.MoneyAccount {
@@ -91,20 +115,6 @@ func settingsFromGen(r gen.OpenrailsMoneySetting) *models.MoneyAccount {
 		TierSource:               r.TierSource,
 		CreatedAt:                r.CreatedAt,
 		UpdatedAt:                r.UpdatedAt,
-	}
-}
-
-func spendLimitFromGen(r gen.OpenrailsMoneySpendLimit) *models.MoneySpendLimit {
-	return &models.MoneySpendLimit{
-		ID:               r.ID,
-		MerchantID:       r.MerchantID,
-		CustomerID:       r.CustomerID,
-		Currency:         r.Currency,
-		Invoker:          r.InvokerID,
-		MaxSpendPerDay:   r.MaxSpendPerDay,
-		MaxSpendPerMonth: r.MaxSpendPerMonth,
-		CreatedAt:        r.CreatedAt,
-		UpdatedAt:        r.UpdatedAt,
 	}
 }
 

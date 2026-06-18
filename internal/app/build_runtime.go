@@ -32,6 +32,7 @@ import (
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/abuse"
+	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -292,15 +293,17 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	}
 
 	runtime := &Runtime{
-		DB:               database,
-		RedisClient:      redisClient,
-		Config:           cfg,
-		Clock:            clock,
-		HealthManager:    healthManager,
-		CCBillClient:     ccbillClient,
-		CCBillRESTClient: ccbillRESTClient,
-		CCBillDataLink:   ccbillDataLinkClient,
-		NMIClients:       nmiClients,
+		DB:                    database,
+		RedisClient:           redisClient,
+		Config:                cfg,
+		Clock:                 clock,
+		AdmissionBalanceCache: admission.NewBalanceCache(0), // #513: default short TTL
+		AdmissionPolicyCache:  admission.NewPolicyCache(0),  // #513: default long TTL (config)
+		HealthManager:         healthManager,
+		CCBillClient:          ccbillClient,
+		CCBillRESTClient:      ccbillRESTClient,
+		CCBillDataLink:        ccbillDataLinkClient,
+		NMIClients:            nmiClients,
 
 		SubscriptionService:      serviceInstances.SubscriptionService,
 		ProductService:           serviceInstances.ProductService,
@@ -717,6 +720,13 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	// Create FX provider for Solana token quoting and policy-currency admission.
 	// Runtime enforcement reads fresh cross-currency rates from Redis; same-currency
 	// paths do not require FX.
+	//
+	// THIS IS THE DEFAULT FX PROVIDER for the whole app — LIVE rates, always on.
+	// ExchangeAPIProvider uses the fawazahmed0 exchange-api (CC0, free, NO API key),
+	// wrapped in a 5-minute in-memory cache, or (when Redis is present) a 3-hour
+	// Redis cache with a background refresher. There is no config switch and no
+	// NoOp fallback here: production never runs at a flat 1.0 rate. (fx.NoOpProvider
+	// is test/standalone-only — see internal/integrations/fx/provider.go.)
 	liveFX := fx.NewExchangeAPIProvider()
 	var fxProvider fx.Provider = fx.NewCachedProvider(liveFX, 5*time.Minute)
 	var fxRateRefresher interface {

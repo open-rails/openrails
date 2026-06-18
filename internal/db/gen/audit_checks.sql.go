@@ -1481,50 +1481,6 @@ func (q *Queries) AuditPaymentOrphanSubscription(ctx context.Context) ([]AuditPa
 	return items, nil
 }
 
-const auditPriceProductMismatch = `-- name: AuditPriceProductMismatch :many
-SELECT
-    sub.id AS sub_id,
-    sub.customer_id::text AS user_id,
-    sub.product_id AS sub_product_id,
-    price.product_id AS price_product_id
-FROM openrails.subscriptions sub
-JOIN openrails.prices price ON sub.price_id = price.id
-WHERE sub.product_id != price.product_id
-`
-
-type AuditPriceProductMismatchRow struct {
-	SubID          uuid.UUID
-	UserID         string
-	SubProductID   uuid.UUID
-	PriceProductID uuid.UUID
-}
-
-// FK-3
-func (q *Queries) AuditPriceProductMismatch(ctx context.Context) ([]AuditPriceProductMismatchRow, error) {
-	rows, err := q.db.Query(ctx, auditPriceProductMismatch)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuditPriceProductMismatchRow
-	for rows.Next() {
-		var i AuditPriceProductMismatchRow
-		if err := rows.Scan(
-			&i.SubID,
-			&i.UserID,
-			&i.SubProductID,
-			&i.PriceProductID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const auditProcessorMismatch = `-- name: AuditProcessorMismatch :many
 SELECT
     sub.id AS sub_id,

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -64,9 +63,9 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) err
 				return terr
 			}
 			tenantID := tid.UUID()
-			existing, cerr := q.CountMoneySpendByCoords(ctx, gen.CountMoneySpendByCoordsParams{
+			existing, cerr := q.CountLedgerSpendByCoords(ctx, gen.CountLedgerSpendByCoordsParams{
 				MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
-				Source: params.Source, SourceID: &params.SourceID,
+				Source: params.Source, SourceID: params.SourceID,
 			})
 			if cerr != nil {
 				return cerr
@@ -118,42 +117,38 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 		if _, err := s.lockBalance(ctx, q, payer, params.Invoker, cur); err != nil {
 			return err
 		}
-		existing, gerr := q.GetMoneySpendByCoords(ctx, gen.GetMoneySpendByCoordsParams{
+		existing, gerr := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
 			MerchantID: tenantID,
 			CustomerID: payer.UUID(),
 			Currency:   cur,
 			Source:     params.Source,
-			SourceID:   &params.SourceID,
+			SourceID:   params.SourceID,
 		})
 		if gerr == nil {
-			var merr error
-			trx, merr = moneyTransactionFromGen(existing)
-			return merr
+			trx = moneyTransactionFromTransfer(existing)
+			return nil
 		}
 		if !errors.Is(gerr, pgx.ErrNoRows) {
 			return gerr
 		}
 
-		balID, owedID, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount)
-		if serr != nil {
+		if _, _, serr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Source, params.SourceID, params.Amount); serr != nil {
 			return serr
 		}
-		var id uuid.UUID
-		switch {
-		case balID != nil:
-			id = *balID
-		case owedID != nil:
-			id = *owedID
-		default:
-			return fmt.Errorf("capture produced no money transaction")
-		}
-		row, rerr := q.GetMoneyTransactionForUpdate(ctx, id)
+		// The durable spend is the first transfer at these coordinates (the
+		// balance debit, else the owed accrual).
+		row, rerr := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
+			MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
+			Source: params.Source, SourceID: params.SourceID,
+		})
 		if rerr != nil {
+			if errors.Is(rerr, pgx.ErrNoRows) {
+				return fmt.Errorf("capture produced no money transfer")
+			}
 			return rerr
 		}
-		var merr error
-		trx, merr = moneyTransactionFromGen(row)
-		return merr
+		trx = moneyTransactionFromTransfer(row)
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -162,29 +157,30 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 }
 
 // spendBalanceThenOwedTx debits `amount` within an existing tx: it draws the
-// prepaid balance first (FIFO blocks) and accrues any remainder to
-// pending invoice items, gated by the account's credit line. The caller must
-// have already locked the balance row (serialization point) and handled idempotency.
-// Returns the balance-debit and owed-accrual transaction ids (either may be nil).
+// prepaid balance first (FIFO credit lots → #512 ledger spend transfers) and
+// accrues any remainder to pending invoice items + an arrears-liability ledger
+// transfer, gated by the account's credit line. The caller must have already
+// locked the balance row (serialization point) and handled idempotency. Returns
+// the amounts drawn from balance and accrued to owed (either may be 0).
 func (s *MoneyService) spendBalanceThenOwedTx(
 	ctx context.Context, q *gen.Queries, payer identity.CustomerID,
 	userID, currency, source, sourceID string, amount int64,
-) (balanceTxnID, owedTxnID *uuid.UUID, err error) {
+) (balanceSpent, owedAccrued int64, err error) {
 	if amount <= 0 {
-		return nil, nil, fmt.Errorf("amount must be positive")
+		return 0, 0, fmt.Errorf("amount must be positive")
 	}
 	now := s.now()
 	cur := normalizeCurrency(currency)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, nil, err
+		return 0, 0, err
 	}
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
 
 	bal, err := s.lockBalance(ctx, q, payer, userID, cur)
 	if err != nil {
-		return nil, nil, err
+		return 0, 0, err
 	}
 	available := bal.Balance - bal.HeldBalance
 	if available < 0 {
@@ -203,67 +199,52 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		})
 		if errors.Is(serr, pgx.ErrNoRows) {
 			// No settings row => prepaid default => no credit line.
-			return nil, nil, ErrInsufficientCredits
+			return 0, 0, ErrInsufficientCredits
 		}
 		if serr != nil {
-			return nil, nil, serr
+			return 0, 0, serr
 		}
 		settings := settingsFromGen(settingsRow)
 		if settings.BillingMode != BillingModeArrears {
-			return nil, nil, ErrInsufficientCredits // prepay-only: credit limit 0
+			return 0, 0, ErrInsufficientCredits // prepay-only: credit limit 0
 		}
 		if settings.CreditLimitAmount <= 0 {
-			return nil, nil, ErrInsufficientCredits
+			return 0, 0, ErrInsufficientCredits
 		}
 		exposure, eerr := s.arrearsExposureTx(ctx, q, tenantID, payerID, cur)
 		if eerr != nil {
-			return nil, nil, eerr
+			return 0, 0, eerr
 		}
 		if exposure+fromOwed > settings.CreditLimitAmount {
-			return nil, nil, ErrInsufficientCredits // would exceed the credit line
+			return 0, 0, ErrInsufficientCredits // would exceed the credit line
 		}
 	}
 
 	if fromBalance > 0 {
-		if _, err := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, cur, fromBalance); err != nil {
-			return nil, nil, err
+		if _, err := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, cur, source, sourceID, "", fromBalance); err != nil {
+			return 0, 0, err
 		}
-		newBal := bal.Balance - fromBalance
-		neg := -fromBalance
-		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: cur, Invoker: userID,
-			Amount: neg, BalanceAfter: &newBal,
-			TransactionType: "withdrawal", Status: "posted",
-			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
-		}
-		if err := q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(trx)); err != nil {
-			return nil, nil, err
-		}
-		balanceTxnID = &trx.ID
+		balanceSpent = fromBalance
 	}
 
 	if fromOwed > 0 {
-		trx := &models.MoneyTransaction{
-			ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: payerID, Currency: cur, Invoker: userID,
-			Amount: fromOwed, TransactionType: txOwedAccrual, Status: "posted",
-			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
-		}
-		if err := q.InsertMoneyTransaction(ctx, insertParamsFromTransaction(trx)); err != nil {
-			return nil, nil, err
+		ml := s.moneyLedger(q, tenantID)
+		if _, err := ml.AccrueOwed(ctx, payerID, cur, fromOwed, source, sourceID, nil); err != nil {
+			return 0, 0, err
 		}
 		itemSourceID := sourceID
 		if itemSourceID == "" {
-			itemSourceID = trx.ID.String()
+			itemSourceID = uuidutil.NewV7().String()
 		}
 		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+itemSourceID, nil, fromOwed, now, map[string]any{
 			"source": source,
 		}); err != nil {
-			return nil, nil, err
+			return 0, 0, err
 		}
-		owedTxnID = &trx.ID
+		owedAccrued = fromOwed
 	}
 
-	return balanceTxnID, owedTxnID, nil
+	return balanceSpent, owedAccrued, nil
 }
 
 func nullStr(s string) *string {
@@ -300,7 +281,7 @@ func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, paye
 
 	var newBal int64
 	if fromBalance > 0 {
-		nb, err := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, cur, fromBalance)
+		nb, err := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, cur, source, sourceID, "", fromBalance)
 		if err != nil {
 			return 0, err
 		}
@@ -323,6 +304,10 @@ func (s *MoneyService) captureSettleTx(ctx context.Context, q *gen.Queries, paye
 		itemSourceID := sourceID
 		if itemSourceID == "" {
 			itemSourceID = fmt.Sprintf("capture:%s:%d", payerID.String(), now.UnixNano())
+		}
+		ml := s.moneyLedger(q, tenantID)
+		if _, err := ml.AccrueOwed(ctx, payerID, cur, fromOwed, source, itemSourceID, nil); err != nil {
+			return 0, err
 		}
 		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, source+":"+itemSourceID, nil, fromOwed, now, map[string]any{
 			"source": source,

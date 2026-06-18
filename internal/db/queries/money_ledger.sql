@@ -1,27 +1,17 @@
--- The money ledger (modules/money): FIFO blocks + transactions. There is NO
--- balance cache (#491): available is derived from spendable money_blocks and
--- held from active holds + open windows. The per-customer spend mutex is a
--- FOR UPDATE lock on the customers row.
--- amounts are integers in the row currency's internal precision.
--- currency is a system code (USD/USDC/EUR/JPY/SOL); the Go registry is authority.
+-- modules/money serialization + prepaid windows. After the #512 hard cut the
+-- single-entry money_blocks / money_transactions tables are gone: balance is
+-- derived from the #512 ledger (internal/db/queries/ledger.sql), credit lots are
+-- #514 grants (grants.sql), and the per-customer spend mutex is a FOR UPDATE
+-- lock on the customers row. Held is the durable open-window unsettled
+-- reservation (#335). amounts are integers in the row currency's precision.
 
 -- name: LockCustomerForSpend :one
 -- The per-customer spend mutex (#491): every spend/hold/capture/deposit/expiry
--- path locks this row FOR UPDATE before reading/mutating the customer's blocks,
+-- path locks this row FOR UPDATE before reading/mutating the customer's ledger,
 -- serializing all money mutations per customer. Returns the customer id.
 SELECT id FROM openrails.customers
 WHERE id = $1 AND merchant_id = $2
 FOR UPDATE;
-
--- name: SumSpendableMoneyBlocks :one
--- Derived balance (#491): the sum of unexpired, unspent FIFO credit lots — the
--- spendable total for a (merchant, customer, currency). Replaces the cached
--- money_balances.balance.
-SELECT COALESCE(SUM(remaining_amount), 0)::bigint
-FROM openrails.money_blocks
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND remaining_amount > 0
-  AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz);
 
 -- name: SumActiveMoneyHeld :one
 -- Derived held (#505): durable open-window unsettled reservations only.
@@ -30,107 +20,6 @@ SELECT COALESCE((SELECT SUM(w.held_amount - w.settled_amount)
               FROM openrails.money_windows w
               WHERE w.merchant_id = $1 AND w.customer_id = $2 AND w.currency = sqlc.arg(currency)
                 AND w.status = 'open'), 0)::bigint;
-
--- name: ListSpendableMoneyBlocksForUpdate :many
--- FIFO draw order: soonest-expiring first, then oldest.
-SELECT * FROM openrails.money_blocks
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND remaining_amount > 0
-  AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz)
-ORDER BY expires_at ASC NULLS LAST, created_at ASC
-FOR UPDATE;
-
--- name: SetMoneyBlockRemaining :exec
-UPDATE openrails.money_blocks SET remaining_amount = $2 WHERE id = $1;
-
--- name: InsertMoneyBlock :exec
-INSERT INTO openrails.money_blocks (
-    id, merchant_id, customer_id, currency,
-    original_amount, remaining_amount, expires_at, source_transaction_id, created_at
-) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8);
-
--- name: InsertMoneyTransaction :exec
-INSERT INTO openrails.money_transactions (
-    id, merchant_id, customer_id, currency, invoker_id, resource, metadata,
-    amount, balance_after, transaction_type, status,
-    authorized_amount, captured_amount, source, source_id,
-    expires_at, description, invoice_id, created_at, updated_at
-) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, sqlc.narg(invoice_id), $17, $18);
-
--- name: InsertMoneyTransactionIfAbsent :exec
-INSERT INTO openrails.money_transactions (
-    id, merchant_id, customer_id, currency, invoker_id, resource, metadata,
-    amount, balance_after, transaction_type, status,
-    authorized_amount, captured_amount, source, source_id,
-    expires_at, description, invoice_id, created_at, updated_at
-) VALUES ($1, $2, $3, sqlc.arg(currency), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, sqlc.narg(invoice_id), $17, $18)
-ON CONFLICT DO NOTHING;
-
--- name: GetMoneyTransactionByCoords :one
--- (tenant, payer, currency, transaction_type, source, source_id) is the
--- idempotency key for deposits / withdrawals / holds.
-SELECT * FROM openrails.money_transactions
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND transaction_type = $3 AND source = $4 AND source_id = $5
-LIMIT 1;
-
--- name: CountMoneySpendByCoords :one
--- Unified-spend idempotency (#302): a withdrawal OR an owed accrual with these
--- coordinates means the spend already happened.
-SELECT count(*) FROM openrails.money_transactions
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND transaction_type IN ('withdrawal', 'owed_accrual')
-  AND source = $3 AND source_id = $4;
-
--- name: GetMoneySpendByCoords :one
--- Returns the first posted money movement for an idempotent captured request.
-SELECT * FROM openrails.money_transactions
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND transaction_type IN ('withdrawal', 'owed_accrual')
-  AND source = $3 AND source_id = $4
-ORDER BY created_at ASC
-LIMIT 1;
-
--- name: GetMoneyTransactionForUpdate :one
-SELECT * FROM openrails.money_transactions WHERE id = $1 FOR UPDATE;
-
--- name: ListMoneyTransactionsByPayer :many
-SELECT * FROM openrails.money_transactions
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-ORDER BY created_at DESC
-LIMIT $3::int OFFSET $4::int;
-
--- name: CountMoneyTransactionsByPayer :one
-SELECT count(*) FROM openrails.money_transactions
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
-
--- name: SumSpentInMoneyWindow :one
--- Posted spend counted against a rate cap since `since`. Concurrent request
--- occupancy is Redis hold state, not a money_transactions row.
-SELECT COALESCE(SUM(
-    CASE
-        WHEN transaction_type = 'withdrawal' THEN -amount
-        WHEN transaction_type = 'owed_accrual' THEN amount
-        ELSE 0
-    END), 0)::bigint
-FROM openrails.money_transactions
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND created_at >= sqlc.arg(since)::timestamptz
-  AND (sqlc.arg(invoker_id)::text = '' OR invoker_id = sqlc.arg(invoker_id)::text);
-
--- name: SumMoneyDeposits :one
-SELECT COALESCE(SUM(amount), 0)::bigint
-FROM openrails.money_transactions
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND transaction_type = 'deposit';
-
--- name: SumMoneyMovementsInPeriodByPayer :many
-SELECT transaction_type, COALESCE(SUM(amount), 0)::bigint AS total
-FROM openrails.money_transactions
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND created_at >= sqlc.arg(period_from)::timestamptz
-  AND created_at < sqlc.arg(period_to)::timestamptz
-GROUP BY transaction_type;
 
 -- openrails.money_windows: prepaid bulk reservations (#335).
 
@@ -169,21 +58,3 @@ WHERE status = 'open' AND expires_at <= sqlc.arg(now)::timestamptz
 ORDER BY expires_at ASC
 LIMIT sqlc.arg(batch_size)::int
 FOR UPDATE SKIP LOCKED;
-
--- name: DeleteCompactableMoneyBlocks :execrows
--- Credit-block COMPACTION (#491): delete fully-spent (remaining_amount = 0) and
--- expired (past expires_at) lots, keeping the spendable-lot table bounded so the
--- derived available SUM stays cheap. Touches money_blocks ONLY — NEVER the
--- money_transactions receipt/ledger or payments (a deleted block's
--- source_transaction_id reference simply goes away; the deposit receipt
--- survives). Cross-tenant; bounded batch via a CTE of ids; the matching FK from
--- money_blocks -> money_transactions is the only inbound reference and it lives
--- ON the block being deleted, so the delete is self-contained.
-WITH doomed AS (
-    SELECT id FROM openrails.money_blocks
-    WHERE remaining_amount = 0
-       OR (expires_at IS NOT NULL AND expires_at <= sqlc.arg(now)::timestamptz)
-    ORDER BY id
-    LIMIT sqlc.arg(batch_size)::int
-)
-DELETE FROM openrails.money_blocks WHERE id IN (SELECT id FROM doomed);

@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -41,7 +40,6 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 
 	tenantID := uuid.NewString()
 	payer := identity.CustomerIDFromString(uuid.NewString())
-	now := time.Now().UTC().Truncate(time.Second)
 
 	// Seed merchant as super (super bypasses RLS). Money needs no credit-type row (#472).
 	super, err := db.NewDB(&config.DBConfig{URL: superDSN})
@@ -102,28 +100,18 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1000), acct.BalanceAmount, "USD account must stay separate from EUR")
 
-	// Hold 600.
-	hold, err := svc.HoldCredits(tctx, billingservice.HoldCreditsRequest{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 600,
-		InvokerType: string(identity.InvokerTypePayer),
-		Source:      "test", RequestID: uuid.NewString(), ExpiresAt: now.Add(time.Hour),
+	// Withdraw 400 — exercises a money debit under openrails_app (RLS GUC). Request
+	// holds moved to Redis (#513), so this direct debit is the merchant-scoped write
+	// path that proves writes work under the openrails_app role.
+	wSrc := uuid.New()
+	_, err = svc.WithdrawCredits(tctx, billingservice.WithdrawCreditsRequest{
+		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 400, Source: "test", SourceID: &wSrc,
 	})
-	require.NoError(t, err, "HoldCredits must work under openrails_app")
-	require.NotNil(t, hold)
-
-	held, err := svc.GetCreditAccount(tctx, payer, money.DefaultCurrency)
-	require.NoError(t, err)
-	require.Equal(t, int64(600), held.HeldAmount)
-	require.Equal(t, int64(400), held.AvailableAmount)
-
-	// Capture 400 of the 600 hold.
-	_, err = svc.CaptureHold(tctx, billingservice.CaptureHoldRequest{RequestID: hold.RequestID, Amount: 400})
-	require.NoError(t, err, "CaptureHold must work under openrails_app")
+	require.NoError(t, err, "WithdrawCredits must work under openrails_app")
 
 	final, err := svc.GetCreditAccount(tctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, int64(600), final.BalanceAmount, "1000 - 400 captured = 600")
-	require.Equal(t, int64(0), final.HeldAmount, "hold fully resolved")
+	require.Equal(t, int64(600), final.BalanceAmount, "1000 - 400 withdrawn = 600")
 
 	// #242 billing-account admin surface under openrails_app: configure arrears
 	// mode + an outstanding cap, read it back, and list the org's usage.
@@ -139,6 +127,15 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 
 	txns, total, err := svc.GetCustomerCreditTransactions(tctx, payer, money.DefaultCurrency, 50, 0)
 	require.NoError(t, err)
-	require.Greater(t, total, 0, "org has credit transactions (deposit/hold/capture)")
+	require.Greater(t, total, 0, "org has credit transactions (deposit/withdraw)")
 	require.NotEmpty(t, txns)
+}
+
+// mustTenantID parses a merchant id for tests (re-homed from the removed
+// authorize_and_hold test).
+func mustTenantID(t *testing.T, s string) merchant.ID {
+	t.Helper()
+	id, err := merchant.ParseID(s)
+	require.NoError(t, err)
+	return id
 }

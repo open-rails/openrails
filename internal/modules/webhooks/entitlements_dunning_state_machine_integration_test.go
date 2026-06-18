@@ -23,7 +23,7 @@ import (
 func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
@@ -47,6 +47,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	description := "Test"
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:               productID,
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		Slug:             "test_product_" + uuid.New().String(),
 		DisplayName:      "Test Product",
 		Description:      &description,
@@ -59,6 +60,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:               priceID,
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ProductID:        productID,
 		Amount:           999,
 		Currency:         "usd",
@@ -71,6 +73,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      subID,
+		MerchantID:              dbtest.TestMerchantID.UUID(),
 		CustomerID:              tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 &priceID,
@@ -88,6 +91,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	paidEntID := uuid.New()
 	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
 		ID:          paidEntID,
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		CustomerID:  tenantSubjectID,
 		Entitlement: "premium",
 		StartAt:     periodStart,

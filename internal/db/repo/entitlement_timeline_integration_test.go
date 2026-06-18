@@ -16,10 +16,10 @@ import (
 )
 
 func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) {
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	pool := dbtest.SharedPGXPool(t)
 
-	dbi, err := db.NewWithPGXPool(pool)
+	dbi, err := db.NewWithPGXPool(pool, "") // default schema (shared harness)
 	require.NoError(t, err)
 
 	r := NewEntitlementRepo(dbi)
@@ -85,10 +85,10 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 }
 
 func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	pool := dbtest.SharedPGXPool(t)
 
-	dbi, err := db.NewWithPGXPool(pool)
+	dbi, err := db.NewWithPGXPool(pool, "") // default schema (shared harness)
 	require.NoError(t, err)
 
 	r := NewEntitlementRepo(dbi)
@@ -158,10 +158,10 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 }
 
 func TestEntitlementRepo_CustomerQueries(t *testing.T) {
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	pool := dbtest.SharedPGXPool(t)
 
-	dbi, err := db.NewWithPGXPool(pool)
+	dbi, err := db.NewWithPGXPool(pool, "") // default schema (shared harness)
 	require.NoError(t, err)
 
 	r := NewEntitlementRepo(dbi)

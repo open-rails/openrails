@@ -48,11 +48,6 @@ type Client interface {
 	// then places the request hold when allowed. Idempotent on req.RequestID. A
 	// clean deny is (Allowed=false, nil error) on BOTH transports.
 	Admit(ctx context.Context, req AdmitRequest) (*AdmitResponse, error)
-	// Authorize is the atomic authorize+hold (#235/#247), idempotent on
-	// req.RequestID. A clean deny is (Allowed=false, nil error).
-	Authorize(ctx context.Context, req AuthorizeRequest) (*AuthorizeResponse, error)
-	// HoldCredits reserves credits for an estimate (legacy hold route).
-	HoldCredits(ctx context.Context, req HoldCreditsRequest) (*CreditHold, error)
 	// CaptureHold settles a hold and returns the ledger transaction.
 	CaptureHold(ctx context.Context, req CaptureHoldRequest) (*CreditTransaction, error)
 	// ReleaseHold frees a hold without charging.
@@ -79,15 +74,12 @@ type Client interface {
 	// UsageRollup returns grouped spend over [from, to). groupBy is
 	// resource|invoker|function|tier.
 	UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
-	// BudgetCheck computes fixed money-budget windows for (payer, invoker) against
-	// CALLER-SUPPLIED windows without reserving (#410, #337 cadence).
-	BudgetCheck(ctx context.Context, tenantSubjectID, invokerID, currency string, windows []BudgetWindowInput, requestedAmount int64) ([]BudgetWindow, error)
 	// BudgetStatus returns the invoker's fixed money-budget windows under the
 	// payer's stored tier policy without reserving (#304 introspection).
 	BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]BudgetWindow, error)
-	// SetTierPolicy upserts a per-payer tier money policy (#298): fixed
+	// SetTierSpendCaps upserts a per-payer tier money policy (#298): fixed
 	// money-budget windows and wasted-spend grace windows.
-	SetTierPolicy(ctx context.Context, tenantSubjectID string, in TierPolicyInput) error
+	SetTierSpendCaps(ctx context.Context, tenantSubjectID string, in TierSpendCapInput) error
 	// SetTierSchedule persists the tenant's tier SCHEDULE once (#476): the ordered
 	// ladder [{tier, min_cumulative_paid_amount}] for one currency. OpenRails then
 	// AUTO-maintains each payer's same-currency tier from cumulative spend — the
@@ -122,19 +114,19 @@ type Client interface {
 	SetCreditLimit(ctx context.Context, tenantSubjectID, currency string, creditLimit int64) error
 	// GetCreditLimit returns the admin-set arrears credit line for a payer (#489).
 	GetCreditLimit(ctx context.Context, tenantSubjectID, currency string) (int64, error)
-	// SetSubjectBudgetPolicy upserts a SUBJECT-owned hierarchical budget-scope
+	// SetSubjectSpendCaps upserts a SUBJECT-owned hierarchical budget-scope
 	// policy (#473): the subject's self cap (scope=subject) or a (subject, role)
 	// pool (scope=role, RoleID = the role uuid). The owner is forced to "subject"
 	// — this path can never write or loosen a platform-owned cap.
-	SetSubjectBudgetPolicy(ctx context.Context, tenantSubjectID string, in SubjectBudgetPolicyInput) error
-	// SetPlatformBudgetPolicy upserts a PLATFORM-owned budget cap (#473): the
+	SetSubjectSpendCaps(ctx context.Context, tenantSubjectID string, in SubjectSpendCapInput) error
+	// SetPlatformSpendCaps upserts a PLATFORM-owned budget cap (#473): the
 	// platform->payer cap (scope=subject). Owner is forced to "platform".
 	// Platform-admin-authorized on the HTTP transport; a direct call when embedded.
-	SetPlatformBudgetPolicy(ctx context.Context, tenantSubjectID string, in PlatformBudgetPolicyInput) error
-	// SubjectBudgetPolicies reads back ONLY the subject-owned budget-scope policies
+	SetPlatformSpendCaps(ctx context.Context, tenantSubjectID string, in PlatformSpendCapInput) error
+	// SubjectSpendCaps reads back ONLY the subject-owned budget-scope policies
 	// (#473) for the host to reconcile — platform-owned caps are deliberately
 	// invisible here.
-	SubjectBudgetPolicies(ctx context.Context, tenantSubjectID string) ([]SubjectBudgetPolicy, error)
+	SubjectSpendCaps(ctx context.Context, tenantSubjectID string) ([]SubjectSpendCap, error)
 	// ResourceRevenueDaily returns per-day revenue for a resource across all
 	// payers in the tenant (#410).
 	ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error)
@@ -184,62 +176,6 @@ type CustomerID uuid.UUID
 func (id CustomerID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id CustomerID) String() string  { return uuid.UUID(id).String() }
 func (id CustomerID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
-
-// AuthorizeRequest is the body for POST /v1/service/credits/authorize. It is the
-// atomic authorize+hold: OpenRails checks the payer's balance and, if allowed,
-// places a hold for EstimatedAmount in a single idempotent call keyed on RequestID.
-type AuthorizeRequest struct {
-	CustomerID string `json:"customer_id"`
-	Invoker    string `json:"invoker"`
-	// Currency is the ledger unit. A free string so #475 qualified custom-credit
-	// unit codes ride the same field.
-	Currency        string `json:"currency,omitempty"`
-	EstimatedAmount int64  `json:"estimated_amount"`
-	RequestID       string `json:"request_id"`
-	// ExpiresAt (unix seconds) bounds the placed hold; nil applies the engine's
-	// default hold TTL.
-	ExpiresAt *int64 `json:"expires_at,omitempty"`
-}
-
-// AuthorizeResponse is the OpenRails decision (handler serviceAuthorizeResponse).
-// Allowed=false with a DenyCode is a definitive deny. The caller captures or
-// releases by the same request_id supplied on AuthorizeRequest.
-type AuthorizeResponse struct {
-	Allowed               bool   `json:"allowed"`
-	DenyCode              string `json:"deny_code,omitempty"`
-	BillingMode           string `json:"billing_mode,omitempty"`
-	Currency              string `json:"currency"`
-	AvailableAmount       int64  `json:"available_amount"`
-	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
-	HoldExpiresAt         *int64 `json:"hold_expires_at,omitempty"`
-}
-
-// HoldCreditsRequest reserves credits for an estimate.
-type HoldCreditsRequest struct {
-	CustomerID  *CustomerID
-	Invoker     string
-	InvokerType string
-	Currency    string
-	Amount      int64
-	Source      string
-	RequestID   string
-	Resource    string
-	ExpiresAt   time.Time
-}
-
-// CreditHold is the reservation returned by a successful hold. Field names
-// match the wire exactly: the handler serializes pkg/service.CreditHold with Go
-// field names (no json tags).
-type CreditHold struct {
-	RequestID string
-	Invoker   string
-	Currency  string
-	Amount    int64
-	Source    string
-	Resource  string
-	ExpiresAt time.Time
-	CreatedAt time.Time
-}
 
 // CaptureHoldRequest settles a hold at the actual amount.
 type CaptureHoldRequest struct {
@@ -436,11 +372,11 @@ type BudgetWindow struct {
 	Allowed bool      `json:"allowed"`
 }
 
-// TierPolicyInput configures a per-payer tier policy via
-// PUT /v1/service/tier-policies (#298): fixed money-budget windows and wasted
-// spend grace windows (pkg/service.TierPolicyInput on the wire; customer_id
+// TierSpendCapInput configures a per-payer tier policy via
+// PUT /v1/service/tier-spend-caps (#298): fixed money-budget windows and wasted
+// spend grace windows (pkg/service.TierSpendCapInput on the wire; customer_id
 // travels alongside it).
-type TierPolicyInput struct {
+type TierSpendCapInput struct {
 	Tier           string              `json:"tier"`
 	BudgetWindows  []BudgetWindowInput `json:"budget_windows"`
 	PolicyCurrency string              `json:"policy_currency,omitempty"`
@@ -503,10 +439,10 @@ type TierScheduleRung struct {
 	MinCumulativePaidAmount int64  `json:"min_cumulative_paid_amount"`
 }
 
-// BudgetScopeWindow is one fixed money-budget window in a hierarchical
+// SpendCapWindow is one fixed money-budget window in a hierarchical
 // budget-scope policy (#473) — same shape as BudgetWindowInput
-// (pkg/service.BudgetScopeWindowInput on the wire).
-type BudgetScopeWindow struct {
+// (pkg/service.SpendCapWindowInput on the wire).
+type SpendCapWindow struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
@@ -515,34 +451,34 @@ type BudgetScopeWindow struct {
 	Cadence string `json:"cadence,omitempty"`
 }
 
-// SubjectBudgetPolicyInput configures a SUBJECT-owned hierarchical budget-scope
-// policy via PUT /v1/service/budget-policies/subject (#473). Scope is
+// SubjectSpendCapInput configures a SUBJECT-owned hierarchical budget-scope
+// policy via PUT /v1/service/spend-caps/subject (#473). Scope is
 // "subject" (self cap), "role" (a (subject, role) pool), "invoker" (a
 // (subject, invoker) grant), or "invoker_tier" (a shared tier grant). ScopeKey
 // is the role uuid, invoker string, or tier key. RoleID is kept as a
 // role-compatible alias for older role callers.
-type SubjectBudgetPolicyInput struct {
-	Scope    string              `json:"scope"`
-	ScopeKey string              `json:"scope_key,omitempty"`
-	RoleID   string              `json:"role_id,omitempty"`
-	Windows  []BudgetScopeWindow `json:"windows"`
+type SubjectSpendCapInput struct {
+	Scope    string           `json:"scope"`
+	ScopeKey string           `json:"scope_key,omitempty"`
+	RoleID   string           `json:"role_id,omitempty"`
+	Windows  []SpendCapWindow `json:"windows"`
 }
 
-// PlatformBudgetPolicyInput configures a PLATFORM-owned budget cap via
-// PUT /v1/service/budget-policies/platform (#473): the platform->payer cap
+// PlatformSpendCapInput configures a PLATFORM-owned budget cap via
+// PUT /v1/service/spend-caps/platform (#473): the platform->payer cap
 // (scope=subject). The owner is fixed to "platform" server-side.
-type PlatformBudgetPolicyInput struct {
-	Scope   string              `json:"scope"`
-	Windows []BudgetScopeWindow `json:"windows"`
+type PlatformSpendCapInput struct {
+	Scope   string           `json:"scope"`
+	Windows []SpendCapWindow `json:"windows"`
 }
 
-// SubjectBudgetPolicy is one subject-owned budget-scope policy returned by
-// SubjectBudgetPolicies (#473) — the read-back shape for host reconciliation.
-type SubjectBudgetPolicy struct {
-	Scope    string              `json:"scope"`
-	ScopeKey string              `json:"scope_key,omitempty"`
-	RoleID   string              `json:"role_id,omitempty"`
-	Windows  []BudgetScopeWindow `json:"windows"`
+// SubjectSpendCap is one subject-owned budget-scope policy returned by
+// SubjectSpendCaps (#473) — the read-back shape for host reconciliation.
+type SubjectSpendCap struct {
+	Scope    string           `json:"scope"`
+	ScopeKey string           `json:"scope_key,omitempty"`
+	RoleID   string           `json:"role_id,omitempty"`
+	Windows  []SpendCapWindow `json:"windows"`
 }
 
 // ResourceRevenueDailyRow is one day's revenue for a resource.

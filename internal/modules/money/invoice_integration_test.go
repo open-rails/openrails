@@ -291,11 +291,11 @@ func TestRecordOutOfBandInvoicePayment_PartialThenPaid(t *testing.T) {
 	var ledgerSum int64
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*), COALESCE(SUM(amount), 0)
-		FROM openrails.money_transactions
-		WHERE invoice_id = $1 AND transaction_type = 'owed_payment'
+		FROM openrails.ledger_transfers
+		WHERE invoice_id = $1 AND transfer_type = 'owed_payment'
 	`, inv.ID).Scan(&ledgerCount, &ledgerSum))
 	require.Equal(t, 2, ledgerCount)
-	require.Equal(t, int64(-500), ledgerSum)
+	require.Equal(t, int64(500), ledgerSum) // #512 ledger amounts are positive
 }
 
 func TestInvoiceVoidAndUncollectibleLifecycle(t *testing.T) {

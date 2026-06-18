@@ -1,0 +1,331 @@
+// Package grants is the #514 append-only grant ledger — the access-domain
+// sibling of the #512 money ledger.
+//
+//   - derive-1 (Grant / Revoke / Expire / Supersede) appends immutable grant
+//     events; it is the SOLE writer of openrails.grants.
+//   - derive-2 (Materialize) folds the grant log into projections: entitlement
+//     windows in openrails.entitlements, and credit lots as #512 ledger deposits.
+//     Ownership needs no projection — the grant row itself is the record.
+//
+// Grants are immutable: revoke/expire/supersede are NEW events referencing the
+// original. A credit grant carries the lot amount+currency and IS the FIFO lot.
+package grants
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
+)
+
+// Kind is what a grant confers.
+type Kind string
+
+const (
+	Entitlement Kind = "entitlement"
+	Ownership   Kind = "ownership"
+	Credit      Kind = "credit"
+)
+
+// SourceType is the origin of a grant.
+type SourceType string
+
+const (
+	Purchase     SourceType = "purchase"
+	Subscription SourceType = "subscription"
+	Admin        SourceType = "admin"
+	Grace        SourceType = "grace"
+)
+
+// Spec is the product spec snapshot captured on a grant at issuance, so derive-2
+// is a pure function of the grant (exact + historical replay).
+type Spec struct {
+	Entitlements []string `json:"entitlements,omitempty"`
+}
+
+// Ledger is the append-only grant ledger for one merchant. It composes a #512
+// money ledger over the same query handle so a credit grant and its deposit
+// transfer commit together.
+type Ledger struct {
+	q        *gen.Queries
+	merchant uuid.UUID
+	money    *ledger.Ledger
+	now      func() time.Time
+}
+
+// New binds a grant Ledger to a query handle and merchant. Compose it inside a
+// pgx transaction for atomic derive-1 + derive-2.
+func New(q *gen.Queries, merchant uuid.UUID) *Ledger {
+	return &Ledger{
+		q:        q,
+		merchant: merchant,
+		money:    ledger.New(q, merchant),
+		now:      func() time.Time { return time.Now().UTC() },
+	}
+}
+
+// SetClock overrides the grant ledger's time source (event timestamps, FIFO/
+// expiry "as-of"), so a caller that runs on an injected clock (e.g. the money
+// service) derives consistently. nil restores the default real clock.
+func (l *Ledger) SetClock(now func() time.Time) {
+	if now == nil {
+		now = func() time.Time { return time.Now().UTC() }
+	}
+	l.now = now
+}
+
+// GrantInput describes a new grant to append.
+type GrantInput struct {
+	Customer uuid.UUID
+	Product  *uuid.UUID
+	Kind     Kind
+	Source   SourceType
+	SourceID string
+	Payment  *uuid.UUID
+	Spec     *Spec
+	StartsAt time.Time // zero => now
+	EndsAt   *time.Time
+	Amount   *int64  // credit lots
+	Currency *string // credit lots
+}
+
+// Grant appends a 'grant' event (derive-1). Call Materialize afterwards (or rely
+// on the convergence sweep) to project it.
+func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.OpenrailsGrant, error) {
+	var spec []byte
+	if in.Spec != nil {
+		b, err := json.Marshal(in.Spec)
+		if err != nil {
+			return gen.OpenrailsGrant{}, fmt.Errorf("grants: marshal spec: %w", err)
+		}
+		spec = b
+	}
+	starts := in.StartsAt
+	if starts.IsZero() {
+		starts = l.now()
+	}
+	return l.q.InsertGrant(ctx, gen.InsertGrantParams{
+		MerchantID: l.merchant, CustomerID: in.Customer, ProductID: in.Product,
+		Kind: string(in.Kind), SourceType: string(in.Source), SourceID: in.SourceID, PaymentID: in.Payment,
+		Event: "grant", SupersedesID: nil, SpecSnapshot: spec,
+		StartsAt: starts, EndsAt: in.EndsAt, Amount: in.Amount, Currency: in.Currency,
+	})
+}
+
+// Revoke appends a 'revoke' event terminating the grant (derive-1). The grant row
+// is never edited. A grant may be terminated at most once (unique index).
+func (l *Ledger) Revoke(ctx context.Context, grantID uuid.UUID, reason string) (gen.OpenrailsGrant, error) {
+	return l.terminate(ctx, grantID, "revoke", reason)
+}
+
+// Expire appends an 'expire' event terminating the grant (derive-1).
+func (l *Ledger) Expire(ctx context.Context, grantID uuid.UUID) (gen.OpenrailsGrant, error) {
+	return l.terminate(ctx, grantID, "expire", "expired")
+}
+
+func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason string) (gen.OpenrailsGrant, error) {
+	g, err := l.q.GetGrant(ctx, gen.GetGrantParams{MerchantID: l.merchant, ID: grantID})
+	if err != nil {
+		return gen.OpenrailsGrant{}, fmt.Errorf("grants: load grant %s: %w", grantID, err)
+	}
+	if g.Event != "grant" {
+		return gen.OpenrailsGrant{}, fmt.Errorf("grants: %s is a %q event, not a grant", grantID, g.Event)
+	}
+	sup := grantID
+	r := reason
+	return l.q.InsertGrant(ctx, gen.InsertGrantParams{
+		MerchantID: l.merchant, CustomerID: g.CustomerID, ProductID: g.ProductID,
+		Kind: g.Kind, SourceType: g.SourceType, SourceID: g.SourceID, PaymentID: g.PaymentID,
+		Event: event, SupersedesID: &sup, SpecSnapshot: g.SpecSnapshot,
+		StartsAt: l.now(), EndsAt: g.EndsAt, Amount: g.Amount, Currency: g.Currency, Reason: &r,
+	})
+}
+
+// Materialize folds every grant for a customer into its projections (derive-2).
+// Idempotent: re-running changes nothing.
+func (l *Ledger) Materialize(ctx context.Context, customer uuid.UUID) error {
+	gs, err := l.q.ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{MerchantID: l.merchant, CustomerID: customer})
+	if err != nil {
+		return fmt.Errorf("grants: list grants: %w", err)
+	}
+	for i := range gs {
+		if err := l.MaterializeGrant(ctx, gs[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MaterializeGrant projects a single grant event (derive-2): entitlement windows
+// for entitlement grants, a #512 deposit for credit grants, nothing for ownership
+// (the grant row is the record). Terminated grants have their projection retracted.
+func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) error {
+	if g.Event != "grant" {
+		return fmt.Errorf("grants: MaterializeGrant needs a grant event, got %q", g.Event)
+	}
+	terminated, err := l.q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: l.merchant, GrantID: g.ID})
+	if err != nil {
+		return fmt.Errorf("grants: termination check: %w", err)
+	}
+
+	switch Kind(g.Kind) {
+	case Entitlement:
+		if terminated {
+			_, err := l.q.RevokeEntitlementsByGrant(ctx, gen.RevokeEntitlementsByGrantParams{
+				MerchantID: l.merchant, GrantID: g.ID, RevokedAt: l.now(), RevokeReason: "grant_revoked",
+			})
+			return err
+		}
+		feats, err := specFeatures(g.SpecSnapshot)
+		if err != nil {
+			return err
+		}
+		for _, f := range feats {
+			exists, err := l.q.EntitlementExistsForGrant(ctx, gen.EntitlementExistsForGrantParams{
+				MerchantID: l.merchant, GrantID: g.ID, Entitlement: f,
+			})
+			if err != nil {
+				return err
+			}
+			if exists {
+				continue
+			}
+			gid := g.ID
+			if _, err := l.q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
+				Entitlement: f, StartAt: g.StartsAt, SourceType: "grant",
+				MerchantID: l.merchant, CustomerID: g.CustomerID, EndAt: g.EndsAt, SourceID: &gid,
+			}); err != nil {
+				return fmt.Errorf("grants: materialize entitlement %q: %w", f, err)
+			}
+		}
+		return nil
+
+	case Credit:
+		if terminated {
+			return l.clawbackRevokedCredit(ctx, g)
+		}
+		deposited, err := l.q.GrantCreditDeposited(ctx, gen.GrantCreditDepositedParams{MerchantID: l.merchant, GrantID: g.ID})
+		if err != nil {
+			return err
+		}
+		if deposited {
+			return nil
+		}
+		if g.Amount == nil || g.Currency == nil {
+			return fmt.Errorf("grants: credit grant %s missing amount/currency", g.ID)
+		}
+		if _, err := l.money.Deposit(ctx, g.CustomerID, *g.Currency, *g.Amount, "grant", g.ID.String(), g.ID); err != nil {
+			return fmt.Errorf("grants: materialize credit deposit: %w", err)
+		}
+		return nil
+
+	case Ownership:
+		return nil // the grant row IS the ownership record
+
+	default:
+		return fmt.Errorf("grants: unknown kind %q", g.Kind)
+	}
+}
+
+// clawbackRevokedCredit retracts a revoked credit lot's UNSPENT remainder via a
+// reversing transfer DR customer_balance / CR revoked_credits (the money is
+// frozen there — recoverable/reversible — NOT refunded; a refund is a separate
+// step). Idempotent: GetCreditLotRemaining nets out prior credit_revoke
+// transfers, so a re-derive of an already-clawed lot moves nothing. (#514, see
+// docs/consistency-invariants.md §11 decision 4.)
+func (l *Ledger) clawbackRevokedCredit(ctx context.Context, g gen.OpenrailsGrant) error {
+	if g.Currency == nil {
+		return fmt.Errorf("grants: revoked credit grant %s missing currency", g.ID)
+	}
+	remaining, err := l.q.GetCreditLotRemaining(ctx, gen.GetCreditLotRemainingParams{MerchantID: l.merchant, GrantID: g.ID})
+	if err != nil {
+		return fmt.Errorf("grants: lot remaining for %s: %w", g.ID, err)
+	}
+	if remaining <= 0 {
+		return nil // fully spent/expired/already-clawed — nothing to retract
+	}
+	cust, err := l.money.EnsureCustomerBalance(ctx, g.CustomerID, *g.Currency)
+	if err != nil {
+		return err
+	}
+	rev, err := l.money.EnsureSystemAccount(ctx, ledger.RevokedCredits, *g.Currency)
+	if err != nil {
+		return err
+	}
+	src, sid, lot, c := "grant_revoke", g.ID.String(), g.ID, g.CustomerID
+	_, err = l.money.Apply(ctx, ledger.Transfer{
+		Debit: cust, Credit: rev, Amount: remaining, Currency: *g.Currency, Type: "credit_revoke",
+		Source: &src, SourceID: &sid, GrantID: &lot, Customer: &c,
+	})
+	return err
+}
+
+// RevokeGrant is the high-level revoke operation: it appends the revoke event,
+// projects it (derive-2 — for a credit lot this claws the unspent remainder to
+// revoked_credits; for an entitlement it retracts the windows; ownership drops
+// from the roster), and OPTIONALLY refunds the clawed-back amount out of the
+// platform (DR revoked_credits / CR processor_clearing). The `refund` flag is the
+// operator authorization; the actual external provider refund (Stripe/NMI/Solana)
+// is triggered by the CALLER using the returned clawed-back amount. Returns the
+// amount clawed back (0 for non-credit grants). Clawback-only is reversible; a
+// refund is not.
+func (l *Ledger) RevokeGrant(ctx context.Context, grantID uuid.UUID, reason string, refund bool) (int64, error) {
+	if _, err := l.Revoke(ctx, grantID, reason); err != nil {
+		return 0, err
+	}
+	g, err := l.q.GetGrant(ctx, gen.GetGrantParams{MerchantID: l.merchant, ID: grantID})
+	if err != nil {
+		return 0, fmt.Errorf("grants: reload grant %s: %w", grantID, err)
+	}
+	var clawed int64
+	if Kind(g.Kind) == Credit && g.Currency != nil {
+		// Capture the unspent remainder BEFORE clawback applies (after, it's 0).
+		clawed, err = l.q.GetCreditLotRemaining(ctx, gen.GetCreditLotRemainingParams{MerchantID: l.merchant, GrantID: g.ID})
+		if err != nil {
+			return 0, err
+		}
+	}
+	if err := l.MaterializeGrant(ctx, g); err != nil {
+		return 0, err
+	}
+	if refund && clawed > 0 && g.Currency != nil {
+		rev, err := l.money.EnsureSystemAccount(ctx, ledger.RevokedCredits, *g.Currency)
+		if err != nil {
+			return 0, err
+		}
+		clearing, err := l.money.EnsureSystemAccount(ctx, ledger.ProcessorClearing, *g.Currency)
+		if err != nil {
+			return 0, err
+		}
+		src, sid, lot, c := "grant_refund", g.ID.String(), g.ID, g.CustomerID
+		if _, err := l.money.Apply(ctx, ledger.Transfer{
+			Debit: rev, Credit: clearing, Amount: clawed, Currency: *g.Currency, Type: "credit_refund",
+			Source: &src, SourceID: &sid, GrantID: &lot, Customer: &c,
+		}); err != nil {
+			return 0, fmt.Errorf("grants: refund leg for %s: %w", g.ID, err)
+		}
+	}
+	return clawed, nil
+}
+
+// LiveGrants returns the customer's non-terminated grants — the ownership/access
+// roster read directly off the ledger.
+func (l *Ledger) LiveGrants(ctx context.Context, customer uuid.UUID) ([]gen.OpenrailsGrant, error) {
+	return l.q.ListLiveGrantsByCustomer(ctx, gen.ListLiveGrantsByCustomerParams{MerchantID: l.merchant, CustomerID: customer})
+}
+
+func specFeatures(raw []byte) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var s Spec
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return nil, fmt.Errorf("grants: parse spec_snapshot: %w", err)
+	}
+	return s.Entitlements, nil
+}

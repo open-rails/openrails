@@ -37,8 +37,8 @@ var merchantOwnedTables = []string{
 	"budget_inflight_holds",
 	"budget_window_state",
 	// #472: money ledger replaced the credit_* tables. money_balances dropped (#491).
-	"budget_policies",
-	"tier_policies",
+	"scoped_spend_caps",
+	"tier_spend_caps",
 	"tier_schedules",
 	"merchant_configurations",
 	"usage_events",

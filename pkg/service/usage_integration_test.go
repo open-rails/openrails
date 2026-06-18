@@ -6,10 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/identity"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -78,105 +75,4 @@ func TestGetUsage_Breakdown(t *testing.T) {
 	empty, err := svc.GetUsage(ctx, payer, money.DefaultCurrency, time.Now().Add(-72*time.Hour), time.Now().Add(-48*time.Hour))
 	require.NoError(t, err)
 	require.Empty(t, empty)
-}
-
-func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
-	svc, ms, payer, ctx := authzEnv(t)
-
-	pool := testPool(t)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-	})
-
-	_, err := ms.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer,
-		Invoker:    payer.UUID().String(),
-		Currency:   money.DefaultCurrency,
-		Amount:     10_000,
-		Source:     "seed",
-	})
-	require.NoError(t, err)
-
-	capture := func(amount int64, holdSource, usageSourceID, invoker, resource string, metadata map[string]any) {
-		t.Helper()
-		hold, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
-			CustomerID:  &payer,
-			Invoker:     invoker,
-			InvokerType: string(identity.InvokerTypePayer),
-			Amount:      amount,
-			Source:      "hold",
-			RequestID:   holdSource,
-			ExpiresAt:   time.Now().Add(time.Hour).UTC(),
-		})
-		require.NoError(t, err)
-		_, err = svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
-			RequestID: hold.RequestID,
-			Amount:    amount,
-			EventType: "endpoint.capture",
-			Resource:  resource,
-			Metadata:  metadata,
-			Source:    "capture",
-			SourceID:  usageSourceID,
-		})
-		require.NoError(t, err)
-	}
-
-	capture(1_000, uuid.NewString(), "usage-replay", "u1", "ep-a", map[string]any{
-		"function_name":     "txt2img",
-		"availability_tier": "fast",
-	})
-	capture(2_000, uuid.NewString(), "usage-replay", "u1", "ep-a", map[string]any{
-		"function_name":     "txt2img",
-		"availability_tier": "fast",
-	})
-	capture(3_000, uuid.NewString(), "usage-unique", "u2", "ep-b", map[string]any{
-		"function_name":     "img2img",
-		"availability_tier": "batch",
-	})
-
-	account, err := svc.GetCreditAccount(ctx, payer, money.DefaultCurrency)
-	require.NoError(t, err)
-	require.Equal(t, int64(4_000), account.BalanceAmount, "three captures debit exactly their captured amounts")
-
-	var usageEventCount int
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.usage_events WHERE customer_id = $1 AND event_type = $2",
-		payer.UUID(), "endpoint.capture",
-	).Scan(&usageEventCount))
-	require.Equal(t, 2, usageEventCount, "duplicate usage source_id is idempotent")
-
-	var captureCount int
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.money_transactions WHERE customer_id = $1 AND transaction_type = $2 AND status = $3",
-		payer.UUID(), "hold", "captured",
-	).Scan(&captureCount))
-	require.Equal(t, 3, captureCount)
-
-	var ledgerCount int
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.money_transactions WHERE customer_id = $1",
-		payer.UUID(),
-	).Scan(&ledgerCount))
-	require.Equal(t, 4, ledgerCount, "usage analytics must not create extra ledger debits")
-
-	assertRollup := func(groupBy string, want map[string]int64) {
-		t.Helper()
-		rows, err := svc.ServiceUsageRollup(ctx, billingservice.ServiceUsageRollupRequest{
-			CustomerID: &payer,
-			From:       time.Now().Add(-time.Hour),
-			To:         time.Now().Add(time.Hour),
-			GroupBy:    groupBy,
-		})
-		require.NoError(t, err)
-		got := make(map[string]int64, len(rows))
-		for _, row := range rows {
-			got[row.Key] = row.TotalAmount
-		}
-		require.Equal(t, want, got)
-	}
-
-	assertRollup("resource", map[string]int64{"ep-a": 1_000, "ep-b": 3_000})
-	assertRollup("function", map[string]int64{"txt2img": 1_000, "img2img": 3_000})
-	assertRollup("tier", map[string]int64{"fast": 1_000, "batch": 3_000})
-	assertRollup("invoker", map[string]int64{"u1": 1_000, "u2": 3_000})
 }

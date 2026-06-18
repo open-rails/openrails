@@ -23,17 +23,20 @@ import (
 func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
 
+	// Money is now a #514 grant ledger: credit deposits are rows in
+	// openrails.grants (kind='credit'); the old money_blocks/money_transactions
+	// tables were dropped (#512). Guard on the current table.
 	var exists bool
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='money_blocks')").
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='openrails' AND table_name='grants')").
 		Scan(&exists))
 	if !exists {
-		t.Skip("openrails.money_blocks not found; run migrations before integration tests")
+		t.Skip("openrails.grants not found; run migrations before integration tests")
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -56,6 +59,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	description := "Test"
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Slug:        "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
 		Description: &description,
@@ -68,6 +72,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:               priceID,
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		ProductID:        productID,
 		Amount:           999,
 		Currency:         "usd",
@@ -82,6 +87,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	periodStart := now
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      subID,
+		MerchantID:              dbtest.TestMerchantID.UUID(),
 		CustomerID:              tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 &priceID,
@@ -97,8 +103,10 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", tenantSubjectID)
+		// Deposits are now #514 credit grants (openrails.grants) with their
+		// double-entry movement in openrails.ledger_transfers (#512).
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.ledger_transfers WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE customer_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
@@ -140,11 +148,23 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	require.NoError(t, svc.handleRenewalSuccess(ctx))
 
+	// The renewal deposit is a #514 credit grant: a single openrails.grants row
+	// (kind='credit', event='grant') whose source_type maps from the deposit
+	// source ("subscription_renewal" -> 'subscription'). The grant key is
+	// idempotent per (subscription, period_end), so re-delivery never doubles it.
 	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.money_transactions
+		`SELECT count(*) FROM openrails.grants
 		 WHERE customer_id = $1 AND currency = 'USD'
-		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'`,
+		   AND kind = 'credit' AND event = 'grant' AND source_type = 'subscription'`,
 		tenantSubjectID).Scan(&depositCount))
 	require.Equal(t, 1, depositCount)
+
+	// The deposit also posts a double-entry movement into the credit balance.
+	var transferCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM openrails.ledger_transfers
+		 WHERE customer_id = $1 AND currency = 'USD'`,
+		tenantSubjectID).Scan(&transferCount))
+	require.Equal(t, 1, transferCount)
 }
