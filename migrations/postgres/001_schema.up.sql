@@ -689,18 +689,18 @@ CREATE TABLE openrails.entitlement_grants (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
-    CONSTRAINT admin_grants_pkey PRIMARY KEY (id),
-    CONSTRAINT admin_grants_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES openrails.payments(id),
-    CONSTRAINT admin_grants_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id),
-    CONSTRAINT admin_grants_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
+    CONSTRAINT entitlement_grants_pkey PRIMARY KEY (id),
+    CONSTRAINT entitlement_grants_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES openrails.payments(id),
+    CONSTRAINT entitlement_grants_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id),
+    CONSTRAINT entitlement_grants_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
 );
 
 ALTER TABLE ONLY openrails.entitlement_grants FORCE ROW LEVEL SECURITY;
 
-CREATE INDEX idx_admin_grants_granted_by ON openrails.entitlement_grants USING btree (granted_by);
-CREATE INDEX idx_admin_grants_payment_id ON openrails.entitlement_grants USING btree (payment_id) WHERE (payment_id IS NOT NULL);
-CREATE INDEX idx_admin_grants_merchant_id ON openrails.entitlement_grants USING btree (merchant_id);
-CREATE INDEX idx_admin_grants_customer ON openrails.entitlement_grants USING btree (customer_id) WHERE (customer_id IS NOT NULL);
+CREATE INDEX idx_entitlement_grants_granted_by ON openrails.entitlement_grants USING btree (granted_by);
+CREATE INDEX idx_entitlement_grants_payment_id ON openrails.entitlement_grants USING btree (payment_id) WHERE (payment_id IS NOT NULL);
+CREATE INDEX idx_entitlement_grants_merchant_id ON openrails.entitlement_grants USING btree (merchant_id);
+CREATE INDEX idx_entitlement_grants_customer ON openrails.entitlement_grants USING btree (customer_id) WHERE (customer_id IS NOT NULL);
 
 ALTER TABLE openrails.entitlement_grants ENABLE ROW LEVEL SECURITY;
 CREATE POLICY merchant_isolation ON openrails.entitlement_grants USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));

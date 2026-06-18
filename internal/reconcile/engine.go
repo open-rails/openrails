@@ -60,14 +60,28 @@ type RunParams struct {
 	Mode Mode
 	// Providers to reconcile; empty means every wired fetcher.
 	Providers []Provider
+	// ProviderAccounts optionally binds each provider section to one
+	// merchant-scoped provider account. When set, the engine scopes local mirror
+	// reads and local materialization writes to that account id.
+	ProviderAccounts map[Provider]ProviderAccountBinding
 	// Since/Until bound the transaction window passed to the fetchers.
 	Since time.Time
 	Until time.Time
 }
 
+// ProviderAccountBinding is the account row a provider-pull is authorized to
+// treat as authoritative. ID is openrails.provider_accounts.id; AccountID is
+// the raw provider-returned account identifier.
+type ProviderAccountBinding struct {
+	ID           uuid.UUID `json:"id"`
+	ProviderType string    `json:"provider_type"`
+	AccountID    string    `json:"account_id"`
+}
+
 // ProviderReport is one provider's section of the run summary.
 type ProviderReport struct {
 	Provider            Provider          `json:"provider"`
+	ProviderAccountID   string            `json:"provider_account_id,omitempty"`
 	Aborted             bool              `json:"aborted,omitempty"`
 	Error               string            `json:"error,omitempty"`
 	RemoteSubscriptions int               `json:"remote_subscriptions"`
@@ -264,15 +278,28 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	fetcher := e.Fetchers[provider]
-	snap, err := fetcher.Fetch(ctx, FetchParams{Since: params.Since, Until: params.Until})
+	binding := params.ProviderAccounts[provider]
+	if binding.ID != uuid.Nil {
+		rep.ProviderAccountID = binding.ID.String()
+	}
+	snap, err := fetcher.Fetch(ctx, FetchParams{
+		Since:             params.Since,
+		Until:             params.Until,
+		ProviderAccountID: binding.ID.String(),
+		ProviderType:      binding.ProviderType,
+		AccountID:         binding.AccountID,
+	})
 	if err != nil {
 		return rep, nil, fmt.Errorf("fetch: %w", err)
+	}
+	if binding.ID != uuid.Nil {
+		snap.ProviderAccountID = binding.ID.String()
 	}
 	rep.RemoteSubscriptions = len(snap.Subscriptions)
 	rep.RemoteTransactions = len(snap.Transactions)
 	rep.RemoteVaultEntries = len(snap.VaultEntries)
 
-	local, err := e.Local.Load(ctx, provider)
+	local, err := e.Local.Load(ctx, provider, nullableProviderAccountID(binding))
 	if err != nil {
 		return rep, nil, fmt.Errorf("load local state: %w", err)
 	}
@@ -303,13 +330,14 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// Local payments are looked up by the snapshot's transaction identity
 	// set (plus refund->charge links) rather than a date window.
 	txnIDs := collectTxnLookupIDs(snap)
-	localPayments, err := e.Local.PaymentsByTransactionIDs(ctx, provider, txnIDs)
+	localPayments, err := e.Local.PaymentsByTransactionIDs(ctx, provider, nullableProviderAccountID(binding), txnIDs)
 	if err != nil {
 		return rep, nil, fmt.Errorf("load local payments: %w", err)
 	}
 
 	now := e.now()
 	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{Materialize: params.Mode == ModeEnforce})
+	bindApplyActions(findings, nullableProviderAccountID(binding))
 
 	if snap.Capabilities.Transactions {
 		history, historyNote := e.fetchHistory(ctx, provider, params)
@@ -448,6 +476,37 @@ func (e *Engine) coveredWindow(provider Provider, params RunParams, now time.Tim
 		// NMI/Stripe unbounded queries cover the full timeline.
 	}
 	return since, until
+}
+
+func nullableProviderAccountID(binding ProviderAccountBinding) *uuid.UUID {
+	if binding.ID == uuid.Nil {
+		return nil
+	}
+	return &binding.ID
+}
+
+func bindApplyActions(findings []Finding, providerAccountID *uuid.UUID) {
+	if providerAccountID == nil {
+		return
+	}
+	for i := range findings {
+		a := findings[i].Apply
+		if a == nil {
+			continue
+		}
+		if a.BackfillPayment != nil {
+			a.BackfillPayment.ProviderAccountID = providerAccountID
+		}
+		if a.RecordRefund != nil {
+			a.RecordRefund.ProviderAccountID = providerAccountID
+		}
+		if a.Materialize != nil {
+			a.Materialize.ProviderAccountID = providerAccountID
+			if a.Materialize.Backfill != nil {
+				a.Materialize.Backfill.ProviderAccountID = providerAccountID
+			}
+		}
+	}
 }
 
 func evidenceTime(m map[string]any, key string) (time.Time, bool) {

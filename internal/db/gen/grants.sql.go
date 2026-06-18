@@ -284,6 +284,34 @@ func (q *Queries) IsGrantTerminated(ctx context.Context, arg IsGrantTerminatedPa
 	return terminated, err
 }
 
+const listCustomerIDsWithGrants = `-- name: ListCustomerIDsWithGrants :many
+SELECT DISTINCT customer_id FROM openrails.grants
+WHERE merchant_id = $1::uuid
+ORDER BY customer_id
+`
+
+// #511 DERIVE merchant-wide fan-out: customers in a merchant that hold any grant,
+// so Converge(merchant) can run the per-customer DERIVE checks across all of them.
+func (q *Queries) ListCustomerIDsWithGrants(ctx context.Context, merchantID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listCustomerIDsWithGrants, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var customer_id uuid.UUID
+		if err := rows.Scan(&customer_id); err != nil {
+			return nil, err
+		}
+		items = append(items, customer_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCustomersWithLapsedCreditLots = `-- name: ListCustomersWithLapsedCreditLots :many
 SELECT DISTINCT g.merchant_id, g.customer_id, g.currency
 FROM openrails.grants g
@@ -494,6 +522,45 @@ func (q *Queries) ListLiveGrantsByCustomer(ctx context.Context, arg ListLiveGran
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLiveOwnershipGrantIDsByPayment = `-- name: ListLiveOwnershipGrantIDsByPayment :many
+SELECT g.id FROM openrails.grants g
+WHERE g.merchant_id = $1::uuid
+  AND g.payment_id = $2::uuid
+  AND g.kind = 'ownership'
+  AND g.event = 'grant'
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants t
+      WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
+  )
+`
+
+type ListLiveOwnershipGrantIDsByPaymentParams struct {
+	MerchantID uuid.UUID
+	PaymentID  uuid.UUID
+}
+
+// #511 ownership-on-grants: live (un-terminated) ownership grant ids backing a
+// payment, so a refund/chargeback can revoke product access for that payment.
+func (q *Queries) ListLiveOwnershipGrantIDsByPayment(ctx context.Context, arg ListLiveOwnershipGrantIDsByPaymentParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listLiveOwnershipGrantIDsByPayment, arg.MerchantID, arg.PaymentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

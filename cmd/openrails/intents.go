@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/config"
@@ -49,42 +50,45 @@ func newIntentsCmd() *cobra.Command {
 	cmd.Flags().IntVar(&limit, "limit", 500, "Maximum rows to list")
 
 	var (
-		rfProvider string
-		rfMerchant string
-		rfYes      bool
+		rebindProvider string
+		rebindMerchant string
+		rebindYes      bool
 	)
-	refingerprintCmd := &cobra.Command{
-		Use:   "refingerprint",
-		Short: "Re-stamp LIVE intents of a provider to the CURRENT account fingerprint (#365 escape hatch after a confirmed same-account credential change)",
+	rebindCmd := &cobra.Command{
+		Use:   "rebind-account",
+		Short: "Rebind LIVE intents of a provider to the CURRENT provider account (#518 escape hatch after a confirmed account change)",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runIntentsRefingerprint(c, rfProvider, rfMerchant, rfYes)
+			return runIntentsRebindAccount(c, rebindProvider, rebindMerchant, rebindYes)
 		},
 	}
-	refingerprintCmd.Flags().StringVar(&rfProvider, "provider", "", "Provider whose live intents to re-stamp (required)")
-	refingerprintCmd.Flags().StringVar(&rfMerchant, "merchant", "", "Merchant slug or id (default: the default merchant)")
-	refingerprintCmd.Flags().BoolVar(&rfYes, "yes", false, "Confirm: the current credentials point at the same (or deliberately adopted) provider account")
-	cmd.AddCommand(refingerprintCmd)
+	rebindCmd.Flags().StringVar(&rebindProvider, "provider", "", "Provider whose live intents to rebind (required)")
+	rebindCmd.Flags().StringVar(&rebindMerchant, "merchant", "", "Merchant slug or id (default: the default merchant)")
+	rebindCmd.Flags().BoolVar(&rebindYes, "yes", false, "Confirm: the current credentials point at the same (or deliberately adopted) provider account")
+	cmd.AddCommand(rebindCmd)
 	return cmd
 }
 
-func runIntentsRefingerprint(cmd *cobra.Command, provider, merchantSlug string, yes bool) error {
+func runIntentsRebindAccount(cmd *cobra.Command, provider, merchantSlug string, yes bool) error {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
 		return fmt.Errorf("--provider is required")
 	}
 	if !yes {
-		return fmt.Errorf("refingerprint re-stamps every live %s intent to the CURRENT account fingerprint; intents will then execute against the CURRENT credentials. Confirm with --yes after verifying the credential change does not point at a different provider account", provider)
+		return fmt.Errorf("rebind-account rebinds every live %s intent to the CURRENT provider account; intents will then execute against the CURRENT credentials. Confirm with --yes after verifying the credential change does not point at a different provider account", provider)
 	}
 	return withReconcileRuntime(cmd, merchantSlug, func(ctx context.Context, rt *reconcileRuntime) error {
-		fp, ok := intents.NewRuntimeFingerprints(rt.Config, rt.NMIClients).AccountFingerprint(ctx, provider)
-		if !ok || fp == "" {
-			return fmt.Errorf("no account fingerprint resolvable for provider %q (unconfigured client, or an exempt provider like solana)", provider)
+		merchantID, ok := merchant.FromContext(ctx)
+		if !ok {
+			return fmt.Errorf("merchant context not set")
 		}
-		n, err := intents.NewStore(rt.DB).Refingerprint(ctx, provider, fp)
+		resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.NMIClients)
+		account, n, err := intents.NewStore(rt.DB).WithProviderAccounts(resolver).
+			RebindProviderIntentsToCurrentAccount(ctx, uuid.UUID(merchantID), provider)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Re-stamped %d live intent(s) of provider %q to %s\n", n, provider, fp)
+		fmt.Printf("Rebound %d live intent(s) of provider %q to %s account %s (%s)\n",
+			n, provider, account.ProviderType, account.AccountID, account.ID)
 		return nil
 	})
 }
@@ -169,7 +173,7 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 					"expires_at":          row.ExpiresAt,
 					"executed_at":         row.ExecutedAt,
 					"created_at":          row.CreatedAt,
-					"account_fingerprint": row.AccountFingerprint,
+					"provider_account_id": row.ProviderAccountID,
 				}
 				if len(row.Payload) > 0 {
 					item["payload"] = json.RawMessage(row.Payload)
@@ -198,8 +202,8 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 				reason = *row.LastFailureReason
 			}
 			account := ""
-			if row.AccountFingerprint != nil {
-				account = *row.AccountFingerprint
+			if row.ProviderAccountID != nil {
+				account = row.ProviderAccountID.String()
 			}
 			if row.Status == intents.StatusPending {
 				byMode[executesUnder(row.Origin)]++

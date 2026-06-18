@@ -141,12 +141,13 @@ type RemoteVaultEntry struct {
 
 // RemoteSnapshot is the normalized result of one fetch against one provider.
 type RemoteSnapshot struct {
-	Provider      Provider             `json:"provider"`
-	FetchedAt     time.Time            `json:"fetched_at"`
-	Subscriptions []RemoteSubscription `json:"subscriptions"`
-	Transactions  []RemoteTransaction  `json:"transactions"`
-	VaultEntries  []RemoteVaultEntry   `json:"vault_entries"`
-	Capabilities  Capabilities         `json:"capabilities"`
+	Provider          Provider             `json:"provider"`
+	ProviderAccountID string               `json:"provider_account_id,omitempty"`
+	FetchedAt         time.Time            `json:"fetched_at"`
+	Subscriptions     []RemoteSubscription `json:"subscriptions"`
+	Transactions      []RemoteTransaction  `json:"transactions"`
+	VaultEntries      []RemoteVaultEntry   `json:"vault_entries"`
+	Capabilities      Capabilities         `json:"capabilities"`
 }
 
 // FetchParams bounds a fetch. Since/Until constrain the transaction window
@@ -160,6 +161,12 @@ type FetchParams struct {
 	Until          time.Time
 	SubscriptionID string
 	CustomerID     string
+	// ProviderAccountID is the OpenRails provider_accounts.id being pulled.
+	// Fetchers do not usually need it for API calls, but it is carried for
+	// evidence and for account-bound provider-pull wiring.
+	ProviderAccountID string
+	ProviderType      string
+	AccountID         string
 }
 
 // ProcessorFetcher pulls a provider's declared state into a RemoteSnapshot.
@@ -169,6 +176,30 @@ type ProcessorFetcher interface {
 	Name() string
 	Capabilities() Capabilities
 	Fetch(ctx context.Context, params FetchParams) (*RemoteSnapshot, error)
+}
+
+// ProviderKeyer is implemented by fetchers/wrappers that know which configured
+// provider key backs the provider type. NMI is the important case: the local
+// provider is "nmi", but the configured key may be "mobius" or another NMI MID.
+type ProviderKeyer interface {
+	ProviderKey() string
+}
+
+type keyedFetcher struct {
+	ProcessorFetcher
+	key string
+}
+
+func (f keyedFetcher) ProviderKey() string { return f.key }
+
+// ProviderKeyFor returns the configured provider key behind a fetcher.
+func ProviderKeyFor(provider Provider, fetcher ProcessorFetcher) string {
+	if k, ok := fetcher.(ProviderKeyer); ok {
+		if key := strings.ToLower(strings.TrimSpace(k.ProviderKey())); key != "" {
+			return key
+		}
+	}
+	return string(provider)
 }
 
 // rawJSON marshals v into a json.RawMessage for the Raw forensics fields,

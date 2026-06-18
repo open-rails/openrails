@@ -533,7 +533,6 @@ type serviceMerchantConfigWindow struct {
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
 	Currency      string `json:"currency,omitempty"`
-	Cadence       string `json:"cadence,omitempty"`
 }
 
 type serviceMerchantConfigurationRequest struct {
@@ -577,14 +576,13 @@ type spendLimitWindow struct {
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
 	Currency      string `json:"currency,omitempty"`
-	Cadence       string `json:"cadence,omitempty"`
 }
 
 func spendLimitWindowInputs(ws []spendLimitWindow) []billingservice.SpendLimitWindowInput {
 	out := make([]billingservice.SpendLimitWindowInput, 0, len(ws))
 	for _, w := range ws {
 		out = append(out, billingservice.SpendLimitWindowInput{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence,
+			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
 		})
 	}
 	return out
@@ -664,7 +662,7 @@ func ServiceGetInvokerSpendLimits(r *httprequest.Request) {
 	for _, p := range policies {
 		ws := make([]spendLimitWindow, 0, len(p.Windows))
 		for _, w := range p.Windows {
-			ws = append(ws, spendLimitWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence})
+			ws = append(ws, spendLimitWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit})
 		}
 		row := map[string]any{"scope": p.Scope, "scope_key": p.ScopeKey, "windows": ws}
 		if strings.EqualFold(p.Scope, "role") {

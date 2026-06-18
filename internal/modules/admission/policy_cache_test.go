@@ -51,30 +51,6 @@ func TestPolicyCache_TierHitMissTTL(t *testing.T) {
 	require.Equal(t, int32(4), atomic.LoadInt32(&calls))
 }
 
-func TestPolicyCache_BudgetPoliciesHitMiss(t *testing.T) {
-	c := NewPolicyCache(time.Hour)
-	var calls int32
-	load := func() ([]InvokerSpendLimit, error) {
-		atomic.AddInt32(&calls, 1)
-		return []InvokerSpendLimit{{Scope: "invoker", ScopeKey: "user:a"}}, nil
-	}
-
-	got, err := c.InvokerSpendLimits("m", "cust", load)
-	require.NoError(t, err)
-	require.Len(t, got, 1)
-	require.Equal(t, int32(1), atomic.LoadInt32(&calls))
-
-	// hit.
-	_, err = c.InvokerSpendLimits("m", "cust", load)
-	require.NoError(t, err)
-	require.Equal(t, int32(1), atomic.LoadInt32(&calls))
-
-	// different payer → miss.
-	_, err = c.InvokerSpendLimits("m", "other", load)
-	require.NoError(t, err)
-	require.Equal(t, int32(2), atomic.LoadInt32(&calls))
-}
-
 func TestPolicyCache_NilReadsThrough_AndErrorNotCached(t *testing.T) {
 	var c *PolicyCache // nil
 	var calls int32
@@ -91,11 +67,11 @@ func TestPolicyCache_NilReadsThrough_AndErrorNotCached(t *testing.T) {
 	require.Equal(t, int32(2), atomic.LoadInt32(&calls), "nil cache never caches")
 
 	live := NewPolicyCache(time.Hour)
-	_, err = live.InvokerSpendLimits("m", "cust", func() ([]InvokerSpendLimit, error) { return nil, errors.New("boom") })
+	_, err = live.PayerSpendLimits("m", "cust", "t", func() (PayerSpendLimits, error) { return PayerSpendLimits{}, errors.New("boom") })
 	require.Error(t, err)
 	// error not cached → retry loads again.
 	var n int32
-	_, err = live.InvokerSpendLimits("m", "cust", func() ([]InvokerSpendLimit, error) { atomic.AddInt32(&n, 1); return nil, nil })
+	_, err = live.PayerSpendLimits("m", "cust", "t", func() (PayerSpendLimits, error) { atomic.AddInt32(&n, 1); return PayerSpendLimits{}, nil })
 	require.NoError(t, err)
 	require.Equal(t, int32(1), atomic.LoadInt32(&n))
 }

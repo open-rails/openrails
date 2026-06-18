@@ -19,7 +19,7 @@ import (
 // has a STATIC generated count/purge query — no runtime SQL assembly).
 var merchantOwnedTables = []string{
 	"products", "prices", "catalog_drift_events", "payment_methods",
-	"subscriptions", "entitlements", "payments", "admin_grants",
+	"subscriptions", "entitlements", "payments", "entitlement_grants",
 	"notification_queue", "processor_customers",
 	"checkout_sessions", "provider_intents",
 	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
@@ -45,7 +45,7 @@ func countTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.CountMerchantRowsEntitlements(ctx, id)
 	case "payments":
 		return q.CountMerchantRowsPayments(ctx, id)
-	case "admin_grants":
+	case "entitlement_grants":
 		return q.CountMerchantRowsEntitlementGrants(ctx, id)
 	case "notification_queue":
 		return q.CountMerchantRowsNotificationQueue(ctx, id)
@@ -81,7 +81,7 @@ func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.PurgeMerchantRowsEntitlements(ctx, id)
 	case "payments":
 		return q.PurgeMerchantRowsPayments(ctx, id)
-	case "admin_grants":
+	case "entitlement_grants":
 		return q.PurgeMerchantRowsEntitlementGrants(ctx, id)
 	case "notification_queue":
 		return q.PurgeMerchantRowsNotificationQueue(ctx, id)

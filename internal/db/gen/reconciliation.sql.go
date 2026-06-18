@@ -301,6 +301,125 @@ func (q *Queries) IsSourceDomainReconciled(ctx context.Context, arg IsSourceDoma
 	return fully_reconciled, err
 }
 
+const listAbandonedProviderIntents = `-- name: ListAbandonedProviderIntents :many
+SELECT id, intent_type, status, provider FROM openrails.provider_intents
+WHERE merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR subscription_id = $2::uuid)
+  AND (
+        status IN ('failed_terminal', 'expired')
+        OR (status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
+            AND expires_at IS NOT NULL AND expires_at < $3::timestamptz)
+      )
+ORDER BY created_at
+`
+
+type ListAbandonedProviderIntentsParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID *uuid.UUID
+	Now            time.Time
+}
+
+type ListAbandonedProviderIntentsRow struct {
+	ID         uuid.UUID
+	IntentType string
+	Status     string
+	Provider   string
+}
+
+// #511 LIFE plane (life.provider_intent.abandoned): desired provider actions that
+// will not auto-retry (terminal/expired, or past their deadline) and need an
+// operator/admin. Surface-only (no auto-repair). Scoped by merchant (+ optional sub).
+func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAbandonedProviderIntentsParams) ([]ListAbandonedProviderIntentsRow, error) {
+	rows, err := q.db.Query(ctx, listAbandonedProviderIntents, arg.MerchantID, arg.SubscriptionID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAbandonedProviderIntentsRow
+	for rows.Next() {
+		var i ListAbandonedProviderIntentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.IntentType,
+			&i.Status,
+			&i.Provider,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveMerchantIDs = `-- name: ListActiveMerchantIDs :many
+SELECT id FROM openrails.merchants
+WHERE status = 'active' AND deleted_at IS NULL
+ORDER BY id
+`
+
+// #511 Phase E (Converge sweep worker): the privileged, no-GUC list of merchants
+// to sweep. merchants is a GLOBAL control-plane table (not RLS-scoped).
+func (q *Queries) ListActiveMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listActiveMerchantIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDunningStalledSubscriptions = `-- name: ListDunningStalledSubscriptions :many
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR customer_id = $2::uuid)
+  AND status = 'past_due'
+  AND next_retry_at IS NULL
+  AND (grace_ends_at IS NULL OR grace_ends_at > $3::timestamptz)
+ORDER BY current_period_ends_at
+`
+
+type ListDunningStalledSubscriptionsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Now        time.Time
+}
+
+// #511 LIFE plane (life.subscription.dunning_overdue): a past_due sub still in
+// grace but with NO retry scheduled — its dunning schedule stalled. MISSING.
+func (q *Queries) ListDunningStalledSubscriptions(ctx context.Context, arg ListDunningStalledSubscriptionsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listDunningStalledSubscriptions, arg.MerchantID, arg.CustomerID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listGraceExhaustedSubscriptions = `-- name: ListGraceExhaustedSubscriptions :many
 SELECT id, customer_id, grace_ends_at FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
@@ -385,6 +504,49 @@ func (q *Queries) ListOpenReconciliationFindingsByProvider(ctx context.Context, 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPeriodOverdueSubscriptions = `-- name: ListPeriodOverdueSubscriptions :many
+SELECT id, current_period_ends_at FROM openrails.subscriptions
+WHERE merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR customer_id = $2::uuid)
+  AND status = 'active'
+  AND current_period_ends_at IS NOT NULL
+  AND current_period_ends_at < $3::timestamptz
+ORDER BY current_period_ends_at
+`
+
+type ListPeriodOverdueSubscriptionsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Now        time.Time
+}
+
+type ListPeriodOverdueSubscriptionsRow struct {
+	ID                  uuid.UUID
+	CurrentPeriodEndsAt *time.Time
+}
+
+// #511 LIFE plane (life.subscription.period_overdue): an `active` sub past its
+// current_period_ends_at that never advanced (missed rebill/failure webhook).
+func (q *Queries) ListPeriodOverdueSubscriptions(ctx context.Context, arg ListPeriodOverdueSubscriptionsParams) ([]ListPeriodOverdueSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, listPeriodOverdueSubscriptions, arg.MerchantID, arg.CustomerID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPeriodOverdueSubscriptionsRow
+	for rows.Next() {
+		var i ListPeriodOverdueSubscriptionsRow
+		if err := rows.Scan(&i.ID, &i.CurrentPeriodEndsAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -541,6 +703,43 @@ func (q *Queries) ListReconciliationState(ctx context.Context, merchantID uuid.U
 	return items, nil
 }
 
+const listStalePendingSubscriptions = `-- name: ListStalePendingSubscriptions :many
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR customer_id = $2::uuid)
+  AND status = 'pending'
+  AND created_at < $3::timestamptz
+ORDER BY created_at
+`
+
+type ListStalePendingSubscriptionsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Cutoff     time.Time
+}
+
+// #511 LIFE plane (life.subscription.pending_stale): pending subscriptions that
+// never confirmed within the threshold (cutoff = now - pendingStaleAfter).
+func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListStalePendingSubscriptionsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listStalePendingSubscriptions, arg.MerchantID, arg.CustomerID, arg.Cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markReconciliationFindingAutoFixed = `-- name: MarkReconciliationFindingAutoFixed :execrows
 UPDATE openrails.reconciliation_findings
 SET status = 'auto_fixed',
@@ -575,6 +774,32 @@ WHERE id = $1 AND status IN ('open', 'admin_pending')
 
 func (q *Queries) MarkReconciliationFindingVanished(ctx context.Context, id uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, markReconciliationFindingVanished, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markSubscriptionPastDueFromOverdue = `-- name: MarkSubscriptionPastDueFromOverdue :execrows
+UPDATE openrails.subscriptions
+SET status = 'past_due',
+    grace_ends_at = COALESCE(grace_ends_at, $1::timestamptz),
+    updated_at = now()
+WHERE id = $2 AND status = 'active'
+  AND current_period_ends_at IS NOT NULL
+`
+
+type MarkSubscriptionPastDueFromOverdueParams struct {
+	GraceEndsAt time.Time
+	ID          uuid.UUID
+}
+
+// Repair for period_overdue: enter dunning. Set past_due + a grace window dated
+// to the period end (not wall-clock), so a long-overdue sub's grace is already
+// exhausted and life.subscription.grace_exhausted terminates it on the next pass
+// (converge-not-replay: no missed charges are re-run).
+func (q *Queries) MarkSubscriptionPastDueFromOverdue(ctx context.Context, arg MarkSubscriptionPastDueFromOverdueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markSubscriptionPastDueFromOverdue, arg.GraceEndsAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -645,7 +870,7 @@ func (q *Queries) ReconcileAdoptSubscriptionStatus(ctx context.Context, arg Reco
 const reconcileBackfillPayment = `-- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, customer_id
+    status, subscription_id, metadata, purchased_at, customer_id, provider_account_id
 ) VALUES (
     $1::uuid,
     $2, $3::openrails.processor_type,
@@ -653,22 +878,23 @@ INSERT INTO openrails.payments (
     $6,
     'completed', $7, $8,
     COALESCE(NULLIF($9::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $10
+    $10, $11
 )
-ON CONFLICT (merchant_id, processor, transaction_id) DO NOTHING
+ON CONFLICT DO NOTHING
 `
 
 type ReconcileBackfillPaymentParams struct {
-	MerchantID     uuid.UUID
-	PriceID        uuid.UUID
-	Processor      OpenrailsProcessorType
-	TransactionID  string
-	Amount         int64
-	Currency       string
-	SubscriptionID *uuid.UUID
-	Metadata       []byte
-	PurchasedAt    time.Time
-	CustomerID     uuid.UUID
+	MerchantID        uuid.UUID
+	PriceID           uuid.UUID
+	Processor         OpenrailsProcessorType
+	TransactionID     string
+	Amount            int64
+	Currency          string
+	SubscriptionID    *uuid.UUID
+	Metadata          []byte
+	PurchasedAt       time.Time
+	CustomerID        uuid.UUID
+	ProviderAccountID *uuid.UUID
 }
 
 // PS-4: backfill a processor charge that has no local payment record.
@@ -685,6 +911,7 @@ func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBac
 		arg.Metadata,
 		arg.PurchasedAt,
 		arg.CustomerID,
+		arg.ProviderAccountID,
 	)
 	if err != nil {
 		return 0, err
@@ -788,7 +1015,13 @@ SELECT id, customer_id, processor, vault_id, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
 WHERE processor = ANY ($1::text[])
+  AND ($2::uuid IS NULL OR provider_account_id = $2::uuid)
 `
+
+type ReconcileListPaymentMethodsByProcessorsParams struct {
+	Processors        []string
+	ProviderAccountID *uuid.UUID
+}
 
 type ReconcileListPaymentMethodsByProcessorsRow struct {
 	ID         uuid.UUID
@@ -800,8 +1033,8 @@ type ReconcileListPaymentMethodsByProcessorsRow struct {
 	ExpiryDate *string
 }
 
-func (q *Queries) ReconcileListPaymentMethodsByProcessors(ctx context.Context, processors []string) ([]ReconcileListPaymentMethodsByProcessorsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListPaymentMethodsByProcessors, processors)
+func (q *Queries) ReconcileListPaymentMethodsByProcessors(ctx context.Context, arg ReconcileListPaymentMethodsByProcessorsParams) ([]ReconcileListPaymentMethodsByProcessorsRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListPaymentMethodsByProcessors, arg.Processors, arg.ProviderAccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -834,11 +1067,13 @@ SELECT id, customer_id, processor, transaction_id, amount, status,
 FROM openrails.payments
 WHERE processor::text = ANY ($1::text[])
   AND transaction_id = ANY ($2::text[])
+  AND ($3::uuid IS NULL OR provider_account_id = $3::uuid)
 `
 
 type ReconcileListPaymentsByTransactionIDsParams struct {
-	Processors     []string
-	TransactionIds []string
+	Processors        []string
+	TransactionIds    []string
+	ProviderAccountID *uuid.UUID
 }
 
 type ReconcileListPaymentsByTransactionIDsRow struct {
@@ -854,7 +1089,7 @@ type ReconcileListPaymentsByTransactionIDsRow struct {
 }
 
 func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg ReconcileListPaymentsByTransactionIDsParams) ([]ReconcileListPaymentsByTransactionIDsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListPaymentsByTransactionIDs, arg.Processors, arg.TransactionIds)
+	rows, err := q.db.Query(ctx, reconcileListPaymentsByTransactionIDs, arg.Processors, arg.TransactionIds, arg.ProviderAccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -969,10 +1204,16 @@ SELECT ent.id, ent.customer_id, ent.entitlement, ent.source_id,
 FROM openrails.entitlements ent
 JOIN openrails.subscriptions sub ON sub.id = ent.source_id
 WHERE sub.processor = ANY ($1::text[])
+  AND ($2::uuid IS NULL OR sub.provider_account_id = $2::uuid)
   AND ent.source_type = 'subscription'
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
 `
+
+type ReconcileListSubscriptionEntitlementsParams struct {
+	Processors        []string
+	ProviderAccountID *uuid.UUID
+}
 
 type ReconcileListSubscriptionEntitlementsRow struct {
 	ID          uuid.UUID
@@ -986,8 +1227,8 @@ type ReconcileListSubscriptionEntitlementsRow struct {
 // Live subscription-sourced entitlements for the provider's subscriptions.
 // Grace windows and admin grants are deliberately excluded: only
 // subscription-sourced entitlements are reconciled (PS-9).
-func (q *Queries) ReconcileListSubscriptionEntitlements(ctx context.Context, processors []string) ([]ReconcileListSubscriptionEntitlementsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListSubscriptionEntitlements, processors)
+func (q *Queries) ReconcileListSubscriptionEntitlements(ctx context.Context, arg ReconcileListSubscriptionEntitlementsParams) ([]ReconcileListSubscriptionEntitlementsRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListSubscriptionEntitlements, arg.Processors, arg.ProviderAccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -1023,7 +1264,13 @@ SELECT id, customer_id, price_id, product_id, status, processor,
        entitlements_spec_snapshot
 FROM openrails.subscriptions
 WHERE processor = ANY ($1::text[])
+  AND ($2::uuid IS NULL OR provider_account_id = $2::uuid)
 `
+
+type ReconcileListSubscriptionsByProcessorsParams struct {
+	Processors        []string
+	ProviderAccountID *uuid.UUID
+}
 
 type ReconcileListSubscriptionsByProcessorsRow struct {
 	ID                       uuid.UUID
@@ -1052,8 +1299,8 @@ type ReconcileListSubscriptionsByProcessorsRow struct {
 // ============================================================================
 // Local-state reads for the diff engine
 // ============================================================================
-func (q *Queries) ReconcileListSubscriptionsByProcessors(ctx context.Context, processors []string) ([]ReconcileListSubscriptionsByProcessorsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListSubscriptionsByProcessors, processors)
+func (q *Queries) ReconcileListSubscriptionsByProcessors(ctx context.Context, arg ReconcileListSubscriptionsByProcessorsParams) ([]ReconcileListSubscriptionsByProcessorsRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListSubscriptionsByProcessors, arg.Processors, arg.ProviderAccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -1112,7 +1359,7 @@ const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscript
 INSERT INTO openrails.subscriptions (
     merchant_id, price_id, product_id, status, processor, processor_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_spec_snapshot, credits_spec_snapshot, customer_id
+    entitlements_spec_snapshot, credits_spec_snapshot, customer_id, provider_account_id
 )
 SELECT $1::uuid, pr.id, pr.product_id, $2::openrails.subscription_status,
        $3, $4,
@@ -1120,14 +1367,15 @@ SELECT $1::uuid, pr.id, pr.product_id, $2::openrails.subscription_status,
        $6::timestamptz,
        $7::timestamptz,
        COALESCE($8::timestamptz, now()),
-       p.entitlements_spec, p.credits_spec, $9
+       p.entitlements_spec, p.credits_spec, $9, $10
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
-WHERE pr.id = $10
+WHERE pr.id = $11
   AND NOT EXISTS (
       SELECT 1 FROM openrails.subscriptions s
       WHERE s.processor_subscription_id = $4
-        AND s.processor = ANY ($11::text[])
+        AND s.processor = ANY ($12::text[])
+        AND ($10::uuid IS NULL OR s.provider_account_id = $10::uuid)
   )
 RETURNING id, entitlements_spec_snapshot
 `
@@ -1142,6 +1390,7 @@ type ReconcileMaterializeSubscriptionParams struct {
 	PeriodEndsAt            *time.Time
 	StartedAt               *time.Time
 	CustomerID              uuid.UUID
+	ProviderAccountID       *uuid.UUID
 	PriceID                 uuid.UUID
 	Processors              []string
 }
@@ -1169,6 +1418,7 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 		arg.PeriodEndsAt,
 		arg.StartedAt,
 		arg.CustomerID,
+		arg.ProviderAccountID,
 		arg.PriceID,
 		arg.Processors,
 	)
@@ -1194,7 +1444,7 @@ const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id
+    customer_id, provider_account_id
 ) VALUES (
     $1::uuid,
     $2, $3::openrails.processor_type,
@@ -1203,9 +1453,9 @@ INSERT INTO openrails.payments (
     'completed', $7, $8,
     $9,
     COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $11
+    $11, $12
 )
-ON CONFLICT (merchant_id, processor, transaction_id) DO NOTHING
+ON CONFLICT DO NOTHING
 `
 
 type ReconcileRecordRefundParams struct {
@@ -1220,6 +1470,7 @@ type ReconcileRecordRefundParams struct {
 	Metadata          []byte
 	PurchasedAt       time.Time
 	CustomerID        uuid.UUID
+	ProviderAccountID *uuid.UUID
 }
 
 // PS-5: record a processor refund that is missing locally as a negative-
@@ -1237,6 +1488,7 @@ func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecord
 		arg.Metadata,
 		arg.PurchasedAt,
 		arg.CustomerID,
+		arg.ProviderAccountID,
 	)
 	if err != nil {
 		return 0, err
@@ -1267,6 +1519,27 @@ type ReconcileRevokeSubscriptionEntitlementsParams struct {
 // are untouchable by construction.
 func (q *Queries) ReconcileRevokeSubscriptionEntitlements(ctx context.Context, arg ReconcileRevokeSubscriptionEntitlementsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileRevokeSubscriptionEntitlements, arg.Now, arg.Reason, arg.SubscriptionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setSubscriptionNextRetry = `-- name: SetSubscriptionNextRetry :execrows
+UPDATE openrails.subscriptions
+SET next_retry_at = $1::timestamptz, updated_at = now()
+WHERE id = $2 AND status = 'past_due' AND next_retry_at IS NULL
+`
+
+type SetSubscriptionNextRetryParams struct {
+	NextRetryAt time.Time
+	ID          uuid.UUID
+}
+
+// Repair for dunning_overdue: re-establish the retry schedule so the dunning
+// worker resumes (a CURRENT retry within grace — not a replay of missed cycles).
+func (q *Queries) SetSubscriptionNextRetry(ctx context.Context, arg SetSubscriptionNextRetryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setSubscriptionNextRetry, arg.NextRetryAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}

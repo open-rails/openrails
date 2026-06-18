@@ -335,10 +335,6 @@ type BudgetWindowInput struct {
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
 	Currency      string `json:"currency,omitempty"`
-	// Cadence is "session" (default) or "fixed" (#337 fixed per-user-anchored
-	// windows): session opens at the user's first charged request and closes
-	// WindowSeconds later; fixed ticks at anchor + k*WindowSeconds forever.
-	Cadence string `json:"cadence,omitempty"`
 }
 
 // MerchantConfigurationInput is the public SDK shape for
@@ -362,7 +358,6 @@ type BudgetWindow struct {
 	ResetAfterSeconds int64  `json:"reset_after_seconds"`
 	// ResetAt is the exact window boundary (#337 fixed windows).
 	ResetAt time.Time `json:"reset_at,omitzero"`
-	Cadence string    `json:"cadence,omitempty"`
 	Allowed bool      `json:"allowed"`
 }
 
@@ -442,7 +437,6 @@ type SpendLimitWindow struct {
 	Limit         int64  `json:"limit"`
 	Currency      string `json:"currency,omitempty"`
 	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
-	Cadence string `json:"cadence,omitempty"`
 }
 
 // InvokerSpendLimitInput configures a SUBJECT-owned hierarchical budget-scope

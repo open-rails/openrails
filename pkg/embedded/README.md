@@ -20,6 +20,23 @@ func main() {
         Config:  cfg,
         PGXPool: yourPgxPool,  // Share your existing connection pool
         Redis:   yourRedis,    // Share your existing Redis client
+        PaymentProviders: []embedded.PaymentProvider{
+            {
+                Config: config.ProcessorConfig{
+                    Type:      config.ProcessorTypeStripe,
+                    Role:      config.ProcessorRolePrimary,
+                    SecretKey: hostSecrets.StripePrimaryKey,
+                },
+            },
+            {
+                Name: "stripe_legacy",
+                Config: config.ProcessorConfig{
+                    Type:      config.ProcessorTypeStripe,
+                    Role:      config.ProcessorRoleLegacy,
+                    SecretKey: hostSecrets.StripeLegacyKey,
+                },
+            },
+        },
     })
     if err != nil {
         log.Fatal(err)
@@ -32,6 +49,66 @@ func main() {
     openrails.RegisterWebhookRoutes(router.Group("/billing/v1/webhooks"))
 }
 ```
+
+## Payment Providers
+
+Embedded hosts can configure payment providers either by filling
+`config.Config.Processors` directly or by passing `PaymentProviders` to
+`embedded.New`.
+
+```go
+openrails, err := embedded.New(embedded.Options{
+    Config: cfg,
+    PaymentProviders: []embedded.PaymentProvider{
+        {
+            Config: config.ProcessorConfig{
+                Type:      config.ProcessorTypeStripe,
+                Role:      config.ProcessorRolePrimary,
+                SecretKey: stripePrimarySecret,
+            },
+        },
+        {
+            Name: "stripe_legacy",
+            Config: config.ProcessorConfig{
+                Type:      config.ProcessorTypeStripe,
+                Role:      config.ProcessorRoleLegacy,
+                SecretKey: stripeLegacySecret,
+            },
+        },
+        {
+            Name: "mobius",
+            Config: config.ProcessorConfig{
+                Type:        config.ProcessorTypeNMI,
+                Role:        config.ProcessorRolePrimary,
+                SecurityKey: mobiusSecurityKey,
+            },
+        },
+    },
+})
+```
+
+`Name` is only a local selector for config, logs, and explicit operations. It is
+not durable identity. OpenRails resolves durable provider-account identity from
+the provider itself, such as Stripe `/v1/account` or the NMI profile report, and
+stores provider-owned rows against that provider account id.
+
+`Role` controls default routing:
+
+- `primary` or empty: default account for new work of that provider type.
+- `secondary`: configured and available for explicit/manual targeting.
+- `legacy`: retained for old provider objects, historical pulls, refunds, or
+  subscriptions that still rebill on an old account.
+
+Most embedded applications should configure exactly one `primary` account per
+provider type: one Stripe account, one NMI/Mobius account, one CCBill account,
+and so on. Extra accounts are mainly for account rotation: keep the old account
+as `legacy` so existing historical charges/subscriptions remain attributable
+and repairable, while new work routes to the new `primary` account. OpenRails
+does not automatically fail over from primary to secondary.
+
+If `Name` is omitted, OpenRails generates a local selector like `stripe`,
+`stripe_2`, or `nmi`. If a host needs to target a credential set by name, provide
+an explicit `Name`.
 
 ## Postgres & River schema contract
 

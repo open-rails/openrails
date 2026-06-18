@@ -68,7 +68,6 @@ type AdmitBudgetWindowDTO struct {
 	// ResetAt is the exact window boundary (#337 fixed windows) — displayable
 	// as "your next reset is 4:30pm". Zero when the engine predates state.
 	ResetAt time.Time `json:"reset_at,omitzero"`
-	Cadence string    `json:"cadence,omitempty"`
 	Allowed bool      `json:"allowed"`
 }
 
@@ -215,7 +214,7 @@ func (s *Service) BudgetStatus(ctx context.Context, payer identity.CustomerID, i
 		out = append(out, AdmitBudgetWindowDTO{
 			Key: w.Key, Currency: cur, Limit: w.Limit, Used: w.Used, Reserved: 0,
 			Remaining: w.Remaining, ResetAfterSeconds: rs, ResetAt: w.ResetAt,
-			Cadence: string(w.Cadence), Allowed: w.Remaining >= 0,
+			Allowed: w.Remaining >= 0,
 		})
 	}
 	return out, nil
@@ -228,7 +227,6 @@ type SpendLimitWindowInput struct {
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
 	Currency      string `json:"currency,omitempty"`
-	Cadence       string `json:"cadence,omitempty"`
 }
 
 // InvokerSpendLimitInput configures one hierarchical budget-scope policy (#473).
@@ -243,7 +241,7 @@ type InvokerSpendLimitInput struct {
 func budgetScopeWindowModels(ws []SpendLimitWindowInput) []models.BudgetWindowPolicy {
 	out := make([]models.BudgetWindowPolicy, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, models.BudgetWindowPolicy{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence})
+		out = append(out, models.BudgetWindowPolicy{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency})
 	}
 	return out
 }
@@ -280,7 +278,7 @@ func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.Custome
 	for _, r := range rows {
 		w := make([]SpendLimitWindowInput, 0, len(r.Windows))
 		for _, ww := range r.Windows {
-			w = append(w, SpendLimitWindowInput{Key: ww.Key, WindowSeconds: ww.WindowSeconds, Limit: ww.Limit, Currency: ww.Currency, Cadence: ww.Cadence})
+			w = append(w, SpendLimitWindowInput{Key: ww.Key, WindowSeconds: ww.WindowSeconds, Limit: ww.Limit, Currency: ww.Currency})
 		}
 		out = append(out, InvokerSpendLimitInput{Scope: r.Scope, ScopeKey: r.ScopeKey, Windows: w})
 	}
@@ -294,8 +292,6 @@ type TierBudgetWindowInput struct {
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
 	Currency      string `json:"currency,omitempty"`
-	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
-	Cadence string `json:"cadence,omitempty"`
 }
 
 type PayerSpendLimitInput struct {
@@ -687,10 +683,10 @@ func (s *Service) SetPayerSpendLimits(ctx context.Context, payer identity.Custom
 	}
 	pol := models.TierMoneyPolicy{PolicyCurrency: in.PolicyCurrency}
 	for _, b := range in.BudgetWindows {
-		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency, Cadence: b.Cadence})
+		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency})
 	}
 	for _, b := range in.BadSpendWindows {
-		pol.BadSpendWindows = append(pol.BadSpendWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency, Cadence: b.Cadence})
+		pol.BadSpendWindows = append(pol.BadSpendWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency})
 	}
 	return admission.NewPayerSpendLimitStore(s.rt.DB).UpsertPayerSpendLimitsFull(ctx, payer, in.Tier, pol)
 }

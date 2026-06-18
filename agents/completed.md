@@ -11504,3 +11504,299 @@ The current surface is close but inconsistent:
 - [x] `go test -tags integration ./internal/integrationharness -run TestStandaloneMerchantCatalogRoutesHTTP -count=1`
 - [x] `go run ./cmd/openrails bootstrap --help`
 - [x] `go run ./cmd/openrails catalog --help`
+
+---
+
+# #517: budget-system simplify — two symmetrical spend limits (PayerSpendLimits + InvokerSpendLimits)
+
+**Status:** DONE 2026-06-18 (Paul: "Full simplify + SpendLimits"). Supersedes the #513-item-7 `*SpendCap*` names. The over-engineered cap surface collapsed to exactly TWO budgets, symmetrical:
+- **PayerSpendLimits** = the customer/payer budget. Platform's choice, keyed by trust-tier. (Table `payer_spend_limits`, was `tier_spend_caps`.) Protects the platform.
+- **InvokerSpendLimits** = the agent/invoker budget. Payer's choice on its delegated invokers/roles. (Table `invoker_spend_limits`, was `scoped_spend_caps`.) Protects the payer. Keeps `scope` (invoker|role|invoker_tier).
+
+**Renamed:** tables + `TierSpendCapStore`→`PayerSpendLimitStore`, `TierSpendCaps`→`PayerSpendLimits`, `GetTierSpendCaps`→`GetPayerSpendLimits`, `ScopedSpendCapStore`→`InvokerSpendLimitStore`, `ScopedSpendCap`→`InvokerSpendLimit`; SDK `TierSpendCapInput`→`PayerSpendLimitInput`, `SubjectSpendCapInput`→`InvokerSpendLimitInput`, `SubjectSpendCap`→`InvokerSpendLimit`, `SpendCapWindow`→`SpendLimitWindow`, `SetTierSpendCaps`→`SetPayerSpendLimits`, `SetSubjectSpendCaps`→`SetInvokerSpendLimits`, `SubjectSpendCaps`→`InvokerSpendLimits`; routes `/tier-spend-caps`→`/payer-spend-limits`, `/spend-caps/subject`→`/invoker-spend-limits`. sqlc regenerated.
+
+**DELETED (over-engineering, zero consumers — verified tensorhub+cozy-art+doujins):** the platform-owned path (`SetPlatformSpendCaps`, `PlatformSpendCapInput`, `ServiceSetPlatformSpendCaps`, `PUT /spend-caps/platform`, `LoadByOwner`/`ListScopedSpendCapsByOwner`), the `owner` column + CHECK + owner from the unique key, and `scope=subject` (a payer-total cap belongs to PayerSpendLimits). Net: the whole `owner` axis gone, 1 scope value gone, ~1 SDK type + 1 method + 1 route + 1 store method + 1 query removed. Strictly less code, names map 1:1 to who-sets-it × who's-capped.
+
+**FOLLOW-UP 2026-06-18 — window cadence removed (fixed-only).** Deleted the `session` cadence + the per-window `cadence` config entirely; every spend window is now `fixed` (deterministic per-UUID-staggered, no stored anchor). Gate Lua simplified (per-window ARGV 5→4, no `cad` branch); removed `spendgate.Cadence`/`NormalizeCadence`/`Window.Cadence` + the `Cadence` field on every window type (SDK/models/budgets/DTOs/handler inputs) + tensorhub's `platformpolicy.BudgetWindow.Cadence` + schema.json `cadence`. (Subscription/credit-grant cadence is a separate concept — kept.) **Also fixed a latent over-reach from this rename:** the snake_case rules had swept tensorhub's OWN `platform_policies.tier_policies` column + Document contract (tensorhub coincidentally shares the name) → reverted to `tier_policies` in tensorhub (openrails SDK CamelCase types untouched); `go build` missed it (renamed SQL still compiles), tensorhub's `platformpolicy` schema-drift test caught it. Both repos build+vet+unit+spendgate/admitter/HTTP-e2e/conformance/schema-drift green.
+
+**Bug found + fixed while verifying (real #513 correctness fix):** the `PolicyCache` (15-min TTL) was caching the per-invoker GRANTS — so a freshly-added invoker grant was invisible (denied `delegated_spend_not_allowed`) for up to 15 min. Fix: invoker spend limits (which carry the delegated-grant signal) are read LIVE; only the per-tier payer CAPS (benign when stale) stay cached. Dead invoker-cache method removed.
+
+**Verified:** openrails build+vet+gofmt; full no-tag unit suite; spendgate + admitter + HTTP-e2e + embed/remote conformance + schema text tests all green (testcontainers). **tensorhub lockstep DONE:** SDK call sites renamed + the pre-existing `Authorize`/`HoldCredits` test debt rewired to `Admit`; `go build ./...` + vet + rewired tests + full test-compile green against local openrails (committed local `replace`; `go mod tidy` re-run for openrails's Phase-H/provider-account deps). cozy-art/doujins use none of the deleted surface.
+
+**Rename script:** `/tmp/rename_spendlimits.pl` (token map, ephemeral).
+
+---
+
+# #514: grant-ledger
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-17: the live money path now runs on the grant ledger. `money_service.depositTx` records a deposit as a credit grant (`kind=credit`) + `MaterializeGrant` (→ #512 ledger deposit); the grant IS the FIFO credit lot (no `money_blocks`). Credit spend = `grants.CreditSpend` FIFO across lots (one #512 `credit_spend` transfer per lot, tagged `grant_id` for lot attribution + the caller's `source/source_id` for idempotency); expiry = `CreditExpiryWorker` → `grants.ExpireLapsed` (claws lapsed remainders to `expired_credits`); subscription/purchase credits + tier graduation (`SumCreditGrants`) all route through grants. Added a `grant_id` column to `ledger_transfers` (migration 002) so lot attribution and caller idempotency don't collide. `migrations/postgres/004_drop_single_entry.up.sql` drops `money_blocks` + `money_transactions`. Validated live: `internal/modules/grants` (7/7) + `internal/modules/money` (67/67) + `internal/modules/money/ledger` + `internal/river` (credit expiry) + `pkg/service` + `internal/modules/admission` all green; whole-repo `go build` + `go vet` clean. Refund clawback on revoke is DONE (revoke→`revoked_credits`, reversible; optional bundled refund via `RevokeGrant(grant,{refund})`; `revoke_clawback_integration_test.go`). No remaining implementable work; `supersede`/`adjust` appliers stay deferred until a proration/plan-change flow consumes them. [#513 cache-bump-on-deposit DROPPED: the #513 balance cache was removed on 2026-06-18 after #512 Phase H; fresh deposits are visible on the next direct ledger-account counter read.] | (foundation, earlier 2026-06-17) **grant-ledger foundation BUILT + integration-tested, 5/5 green.** Added `migrations/postgres/003_grants.up.sql` (append-only `openrails.grants` via explicit `REVOKE UPDATE/DELETE`, RLS, + extends `entitlements.source_type` with `grant`), sqlc queries `internal/db/queries/grants.sql` → `gen`, and `internal/modules/grants`: derive-1 (`Grant`/`Revoke`/`Expire`, the sole append-only writer) + derive-2 (`Materialize` → entitlement windows, ownership roster, and the **#514→#512 seam**: a credit grant emits a conserved ledger deposit). Integration tests on live Postgres — entitlement projection + historical replay (already-expired), revoke→retract + single-termination, credit→#512 deposit + conservation + idempotency, ownership, append-only — all pass. — The access-domain sibling of #512's money ledger — an **append-only grant ledger**. A grant is an immutable event ("source S grants customer C product P for [start,end), spec snapshot X"); revoke / expire / supersede / adjust are NEW events, never edits. The live **entitlement windows, product ownership, and credit lots are DERIVED grant effects** folded from the grant log, never the source of truth. Generalizes today's `product_access_grants` (already ~80% the shape) into the one layer entitlements + credits + ownership all derive from. Foundation of #511 (its DERIVE-plane derives from this) and feeds #512 (credit grants emit money transfers; the grant IS the credit lot).
+
+Build the grant ledger: the access analogue of double-entry money. Money (#512) became append-only transfers with derived balances; access becomes append-only grants with derived grant effects — same discipline (immutable, derive-don't-store, replay-exact), so "who has access and why" is one auditable log and reconciliation / import / repair reduce to "re-derive the grant effects and diff."
+
+## Why make these changes
+
+Current model (verified 2026-06-17):
+- **Access is authored by scattered code paths.** Checkout, renewal, dunning, admin-grant, and reconcile each write `entitlements` / `product_access_grants` / `money_blocks` directly, with heterogeneous source links (`entitlements.source_type`+`source_id` typed; `money_transactions.source` a free string; `product_access_grants` its own shape). There is no single record of "who got what, when, why" and no uniform way to re-derive or reconcile it.
+- **Revocation is a mutation.** `revoked_at`/`revoke_reason` are UPDATEd in place — a drift surface that loses event history, exactly the mutation #512 removes from money.
+- **The credit lot is a separate mutable table.** `money_blocks` (amount + expiry + remaining, FIFO) is precisely a grant of credits — but lives apart and is mutated/deleted on spend/expiry.
+
+## Guiding principles (mirror #512)
+
+1. **Append-only / immutable.** A grant row is never updated. Revoke / expire / supersede / adjust = NEW events referencing the original (`supersedes_id`).
+2. **Derive, don't store.** Live entitlement windows, ownership rows, and credit balances/lots are grant effects folded from the grant log — rebuildable, never the source of truth.
+3. **Single-entry issuance, NOT double-entry.** Access is not conserved (no counter-account): a grant asserts a right came into existence. Money IS conserved, so the ONE cross-over is that a **credit grant also emits a double-entry transfer** into #512's ledger.
+4. **Spec snapshot on the grant.** Captures the product's `entitlements_spec` + `credits_spec` at issuance, so derive-2 (grant → grant effect) is a pure function and replay is exact + historical (a 2025-06-30 90-day grant reconstructs already-expired).
+5. **Control-plane object; #512 ledger purity preserved.** The grant knows products/customers/windows; #512's transfers stay pure and reference the grant by id (`source='grant'`/`source_id`), per #512 decision 6.
+6. **The grant IS the credit lot.** A credit grant carries amount + expiry + source — exactly a FIFO lot. Consumption + expiry operate over grants; `money_blocks` is subsumed (resolves #512's open lot-model decision).
+
+## Metadata
+
+- Category: architecture
+- Status: planned
+- Passes: false
+
+## Work breakdown
+
+### A. Grant schema & migration
+- [x] New `openrails.grants`: id, merchant_id, customer_id, product_id, kind ∈ {entitlement, ownership, credit}, source_type ∈ {purchase|subscription|admin|grace}, source_id, payment_id NULL, event ∈ {grant|revoke|expire|supersede|adjust}, supersedes_id NULL, spec_snapshot jsonb, starts_at, ends_at NULL, amount NULL + currency NULL (credit lots), reason NULL, created_at. Append-only (GRANT SELECT,INSERT + REVOKE UPDATE/DELETE), CHECKs (event↔supersedes, credit↔amount/currency, valid window), unique single-termination index, RLS.
+- [x] Kind modeling: one table + `kind` discriminator.
+- [~] Migration parity: N/A under the pre-launch HARD CUT. `product_access_grants`, `money_blocks`, and `money_transactions` are dropped rather than translated; grant effects are produced by the new grant ledger path.
+
+### B. derive-1 (event → grant) — sole writer of grants
+- [x] `Grant` applier appends a grant event, dated to the event, snapshotting the spec. (Wiring it into the real callers — checkout/renewal/dunning/admin — is the cutover.)
+- [x] Revoke / Expire appended as new events (never edits); single-termination enforced by unique index. (supersede/adjust events are schema-ready; appliers land with the tier-change/cutover work.)
+
+- [x] `Materialize` folds the grant log into live entitlement windows (existing GIST-exclusion table) + the ownership roster (read off grants); rebuildable, re-derivation is a no-op (idempotency tested). Terminated grants retract their grant effects.
+- [x] Credit grants emit a #512 deposit transfer (DR processor_clearing / CR customer_balance) tagged `source='grant'`/`source_id` — the seam is live + tested.
+- [x] **Credit spend + expiry on the new model** (`CreditSpend` FIFO-by-expiry across lots with derived per-lot remaining → one ledger spend transfer per lot; `ExpireLapsed` claws each lapsed lot's unspent remainder to `expired_credits`). Tested (`TestGrants_CreditSpendFIFO`, `TestGrants_CreditExpire`): FIFO order, atomic over-spend rejection, idempotent expiry, conservation.
+- [x] **Clawback on revoke — BUILT + integration-tested 2026-06-17.** `MaterializeGrant` on a terminated credit grant appends a reversing transfer for the unspent remainder `DR customer_balance / CR revoked_credits` (`clawbackRevokedCredit`); the new `revoked_credits` account type (migration 002 + `ledger.RevokedCredits`) keeps admin-revoke distinct from lapse. Idempotent via `GetCreditLotRemaining` (nets out prior `credit_revoke`). The revoke event already drops the lot from `ListSpendableCreditLots`, so the clawback only reconciles the *derived balance*; money is **frozen** in `revoked_credits` (not refunded) and reversible. `grants.Ledger.RevokeGrant(grantID, reason, refund) (clawed int64, …)` = revoke event + materialize + optional refund leg `DR revoked_credits / CR processor_clearing` (the `refund` flag is the operator authorization; the actual external provider refund is the caller's, using the returned clawed amount). Tests (`internal/modules/grants/revoke_clawback_integration_test.go`): `TestGrants_RevokeClawback` (spent-30/claw-70, balance→0, revoked_credits=70, conservation, idempotent), `…Reversible` (counter-transfer restores), `…WithRefund` (revoked_credits drained → processor_clearing nets the deposit). Whole-repo `go build`+`go vet` clean. (Convergence-engine policy home = #511 `derive.grant_effect.excess`; see `docs/consistency-invariants.md` §11 (decision 4).)
+- [~] On a credit-grant deposit, bump the #513 admission balance cache — DROPPED/OBSOLETE. As of 2026-06-18 the cache is gone; admission reads the O(1) ledger account counters directly, so a fresh deposit is visible on the next admit read.
+
+### D. Tests
+- [x] Append-only: app role denied UPDATE/DELETE on grants; revoke/expire are new rows (`TestGrants_AppendOnly`, `TestGrants_Revoke`).
+- [x] Replay/idempotency: re-deriving a grant is a no-op (`TestGrants_EntitlementProjection`, `TestGrants_CreditDepositSeam`).
+- [x] Historical replay: a 2025 grant rebuilds as an already-expired window (`TestGrants_EntitlementProjection`).
+- [x] Grant-as-lot FIFO consumption + lapsed expiry (`TestGrants_CreditSpendFIFO`, `TestGrants_CreditExpire`).
+- [~] Migration parity: N/A — pre-launch HARD CUT, no data migration (decided 2026-06-17, Paul). The flip just drops the old tables.
+
+## Relationship
+- **#511 (Convergence Engine)** derives its DERIVE plane from this ledger; derive-1/derive-2 live here and are the sole writers of grants + grant effects; #511 invokes + verifies them.
+- **#512 (money ledger)** receives the deposit transfer a credit grant emits; the grant is the credit lot (resolves #512's open lot-model decision).
+- **#513 (admission)** balance cache was removed 2026-06-18 after Phase H; fresh credit deposits are visible on the next direct O(1) ledger account read — no explicit deposit-bump from this layer.
+
+---
+
+# #512: double-entry-immutable-ledger-reorg
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-18: HARD CUT done, including Phase H. The live money path is fully on the double-entry ledger; account balance/held reads are O(1) `ledger_accounts` counters maintained from immutable `ledger_transfers`; admission capacity is a direct point lookup; the #513 balance cache is gone.
+**Update 2026-06-18:** Phase H is BUILT + tested. `ledger_accounts` now carries TB-style `{credits,debits}_{posted,pending}` counters maintained by the `ledger_transfers` insert trigger; `LedgerAccountBalance`/`Held` and `checkDebitFloor` are O(1) counter reads; `GetAdmissionCapacity` returns balance + held + billing mode + credit limit in one query; `admission.BalanceCache` and all runtime wiring/tests were deleted per Paul. Validation: `task sqlc`; `go test ./...`; `go vet ./...`; `go build ./...`; integration `money/ledger TestLedger_*`, `admission TestAdmitter_*`, and service-admit HTTP E2E all green.
+
+Adopt TigerBeetle's data-modeling **principles** inside Postgres so every money movement has two sides (conserved by construction), the ledger is immutable+auditable, holds stop being fragmented across four mechanisms, and arrears stops being a hand-maintained scalar. Running TigerBeetle itself is explicitly out of scope here and gated behind the Phase F scaling trigger.
+
+## Why make these changes
+
+Current model (verified in code 2026-06-17):
+
+- **Single-entry, money not conserved.** `depositTx` inserts a `money_transactions` row + a `money_blocks` lot; `withdrawBalanceAndBlocks` decrements `money_blocks.remaining_amount` FIFO (`SetMoneyBlockRemaining`). There is no offsetting account (no platform-revenue / processor-clearing / arrears-liability / expired-credits account), so there is no invariant to assert and reconciliation against Stripe/NMI/Solana is a bespoke diff rather than "the books net out".
+- **Mutable, not append-only.** `money_transactions` rows are UPDATEd in place (`status`, `authorized_amount`, `captured_amount`); `money_blocks` rows are mutated and DELETEd on expiry; a denormalized `balance_after` running snapshot is stored on every row. Mutation + denormalization is a drift surface and blocks any future replication/sharding of the ledger.
+- **Holds are an admission concern, not a ledger concern (RESOLVED — keep in Redis).** Four distinct hold mechanisms coexist, and they are NOT redundant: (1) `AuthorizeAndHold`'s per-request money-capacity hold lives in **Redis** keyed by `merchant+request_id` — ephemeral *by design*, so the hot admission path never writes Postgres; (2) `money_windows` (`held_amount`/`settled_amount`, plus the `authorized_amount`/`captured_amount` columns written only by `windows.go` settle) — a prepaid BULK reservation handed to a host to meter locally, settled in batches (durable on purpose); (3) `budget_inflight_holds` — windowed spend-budget/rate caps, durable because the rolling window needs history (a different axis: rate/budget, not balance). `deriveBalance`'s `HeldBalance` (= `SumActiveMoneyHeld`) sums ONLY open `money_windows` — it deliberately does NOT see the Redis hold. This is sound: the Redis hold reserves nothing settled; the no-overspend guarantee lives at CAPTURE, not at admission (see Phase C / decision 8). TigerBeetle's durable two-phase transfer is the right model for real money movement (capture/refund/settle), NOT for the throwaway admission gate.
+- **Arrears as a scalar.** `money_settings.outstanding_owed_amount` + `credit_limit_amount` model debt as a mutable counter + ceiling, exposure re-derived from open invoices — instead of a real account allowed to go negative.
+- **Business attribution baked into ledger rows.** `money_transactions` carries `invoker_id`, `resource`, `description`, `metadata`, `invoice_id`. TigerBeetle keeps ledger rows pure and pushes all of that to opaque `user_data` references.
+- **One coarse concurrency primitive.** Every spend/hold/deposit/capture takes a `FOR UPDATE` lock on the `customers` row (`lockBalance`). Correct, but a hard per-customer throughput ceiling — and exactly the row-lock TigerBeetle's deterministic batched applier exists to eliminate.
+
+TigerBeetle's lesson, in five primitives we are mapping onto Postgres: **Account** (belongs to one ledger=currency; balance derived from debits/credits, never stored as an overwritten scalar; sign-constraint flags), **Transfer** (immutable, append-only, `id`=idempotency, moves amount debit→credit within ONE ledger), **two-phase transfer** (pending → post/void = authorize/capture/release), **linked transfers** (atomic all-or-nothing chains; FX = linked transfers through a liquidity account, since no single transfer crosses ledgers), and **`user_data`/`code`** (opaque join keys back to the control plane; the ledger knows nothing about subscriptions/products/entitlements).
+
+## Guiding principles / design decisions
+
+1. **Principles in Postgres, not the database.** This issue does NOT introduce TigerBeetle as a running system. It re-shapes the Postgres schema + `internal/modules/money` to TB semantics. Actually running TB is a separate, later decision gated on Phase F.
+2. **Conserve by construction.** Model an external/world side for every movement (a `world`/equity account or the processor-clearing account that nets against real processor float) so `Σ balances over all accounts in a (merchant, currency) ledger == 0` is an assertable invariant.
+3. **Derive, don't store.** Account balance = `Σ credits_posted − Σ debits_posted`; held = pending side. Keep the cheap partial-index/derive approach already used post-#491; drop `balance_after`.
+4. **Immutable ledger.** Capture/void/refund/expiry are NEW linked rows, never in-place updates or deletes.
+5. **Holds stay ephemeral (Redis); the bill is durable (Postgres).** The admission hold is a throwaway Redis reservation keyed by the provider/tensorhub request-id; the hot path writes NO Postgres and reads capacity from O(1) ledger account counters. The durable double-entry ledger (Phases A/B) is written at/after capture. Slight over-spend from concurrency is acceptable and bounded (decision 8).
+6. **Ledger purity.** Transfer rows carry accounts/amount/currency/type/pending_id/flags/source+source_id + opaque `user_data` refs only; business joins live in control-plane tables.
+7. **Keep what already matches TB:** integer minor units (no floats), idempotency keys, entitlements `tstzrange` GIST-exclusion windows, append-only `usage_events`.
+8. **Target admission model (UPDATED 2026-06-18, Paul).** The whole money admission path is exactly this and nothing more: (a) request costs $X; (b) admit iff `account_balance − Σ active Redis holds ≥ $X`; (c) on admit, record an $X hold in Redis keyed by the request-id; (d) on completion, deduct ACTUAL cost and release the hold; (e) on failure, release the hold and bill nothing, but record money-wasted in Redis for rate-limit/abuse. The balance is an O(1) Postgres account-counter read, not an in-memory cache. No-overspend is an ADMISSION-time check, not a capture-time Postgres gate; bounded over-admission under concurrency is accepted.
+
+## Metadata
+
+- Category: architecture
+- Status: planned
+- Passes: false
+
+## Work breakdown
+
+### A. Double-entry account + transfer foundation
+- [x] New `openrails.ledger_accounts` (id, merchant_id, customer_id NULL, account_type, currency, flags, created_at). account_type ∈ {customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, fx_liquidity, world}; system accounts per (merchant, currency), customer accounts per (merchant, customer, currency). RLS + merchant_isolation like every other table.
+- [x] New `openrails.ledger_transfers` (immutable): id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, `phase` (posted|pending|post_pending|void_pending), pending_id NULL, source, source_id, user_data refs (customer_id, invoker_id, resource, invoice_id), created_at. Append-only enforced by `REVOKE UPDATE/DELETE`. (`linked` FX flag deferred to Phase E.)
+- [x] CHECK/app-invariant: `debit.currency = credit.currency = transfer.currency` (a transfer never crosses ledgers) — enforced by the `ledger_transfers_currency_guard` BEFORE-INSERT trigger.
+- [x] Sign-constraint flags on accounts (TB `debits_must_not_exceed_credits` / `credits_must_not_exceed_debits`) enforced in the applier: customer_balance may go negative only up to the arrears credit line (`AllowDebitNegativeUpTo` floor).
+- [x] Conservation invariant: per (merchant, currency) assert `Σ account balances == 0` — `Ledger.Conservation()` / `LedgerLedgerNet` query + integration test. This is a ledger diagnostic/smoke check; the double-entry transfer model makes it structural, not a scheduled convergence finding.
+- [x] Map the existing flows to transfer pairs: deposit = DR processor_clearing / CR customer_balance; spend = DR customer_balance / CR platform_revenue; expiry = DR customer_balance / CR expired_credits; two-phase authorize/capture/release. (Implemented as `Ledger` flow constructors; wiring them into `money_service` is Phase B.)
+
+### B. Immutable ledger — derive, don't mutate
+- [x] Stop UPDATE on `money_transactions` — the table is GONE (migration 004); capture/void/refund are new transfers. `money_service`/`unified_spend`/`arrears`/`invoice`/`windows` all emit `ledger_transfers`.
+- [x] Replaced `SetMoneyBlockRemaining` + `DELETE FROM money_blocks`: lots are immutable #514 credit grants; remaining is derived; expiry/clawback are transfers (`ExpireLapsed`→`expired_credits`, revoke→`revoked_credits`), never a delete.
+- [x] Dropped `money_transactions.balance_after`; `deriveBalance` (ledger customer_balance net) is the only balance source.
+- [x] Lot model — RESOLVED by #514: the lot = the credit grant; `money_blocks` subsumed; deposit transfer references the lot via `grant_id`.
+
+### C. Simplify holds to the ephemeral Redis admission model (decision 8) → MOVED TO #513
+The full admission + holds redesign (Redis accounting, direct O(1) balance capacity, cached policy config, atomic Lua admit/capture, cap-taxonomy collapse, durable-spend seam) lives in **#513**. This ledger issue only consumes its output: the durable spend that #513's capture writes here as immutable double-entry transfers (Phases A/B).
+- [x] Durable-spend writer is live (`CaptureAuthorized`→`spendBalanceThenOwedTx` writes immutable transfers); the balance-cache refresh source #513 reads is `deriveBalance`/`LedgerAccountBalance`. The Redis hot-path/cache itself is #513.
+
+### D. Separate ledger fields from control-plane attribution
+- [~] CANCELLED (2026-06-17, recommend won't-do): moving `invoker_id`/`resource`/`invoice_id`/`grant_id` into an opaque `user_data` jsonb is YAGNI — the typed columns are indexed and actively queried (invoice rollup, lot attribution, history). Collapsing to jsonb LOSES queryability for only theoretical "ledger purity." Reversible if strict TB purity is ever wanted.
+
+### E. Cross-currency settlement (the ONLY real FX gap — gated on a product decision)
+Reality check (verified 2026-06-17): multi-currency native balances ALREADY work and are NOT a gap. The registry (`internal/modules/money/currency.go`) defines USD/USDC/EUR (6dp), JPY (4dp), SOL (9dp); every money table keys on `currency`; balance/owed/caps/settings are per (merchant, customer, currency). Each currency is its own sealed ledger — already the TB ledger-per-currency model, "one currency per entry" enforced by construction. FX conversion also already exists for READ-ONLY budget-policy comparison (`internal/integrations/fx` `ConvertAmount`, ceil-rounded, `NoOpProvider`=1.0 default), so a request in currency A is evaluable against a cap denominated in currency B.
+The only thing missing is cross-currency SETTLEMENT as money movement — spending a currency-A balance against a currency-B charge, or converting balance between currencies. Today that's impossible (a EUR charge needs EUR balance/credit). This is a feature, not a bug; it brings rate sourcing, spreads, rounding residual, liquidity accounting, and FX gain/loss.
+- [~] CLOSED as NOT-NEEDED under the current product model ("each currency is its own wallet" — every balance/cap/credit keys on `currency`; custom credits are no-FX by design #475). Per this phase's own gate, NOTHING here is required. The settlement design (when/how, minimal mechanic, risk boundary) is extracted to **future.md #515** to pick up if/when a real use case appears (most likely crypto-deposit→USD-credit).
+- [~] Future #515: model conversion as two linked transfers through a per-merchant `fx_liquidity` account (DR payer A-balance / CR fx_liquidity-A; DR fx_liquidity-B / CR settle-B), atomic via `flags.linked`; the liquidity account accrues spread / FX P&L.
+- [~] Future #515: record the quote (rate, AsOf, provider) on the conversion transfers for audit; needs a REAL `fx.Provider` (the NoOp returns 1.0).
+- [~] Future #515: decide explicit user-initiated convert (simpler, auditable — RECOMMENDED) vs implicit cross-currency spend at spot (magical, riskier: rate at spend time, partial draws across currencies).
+- [~] Already true by construction: no cross-currency in one transfer. Custom credits remain no-FX by design (#475).
+
+### F. Per-customer FOR UPDATE lock = the scaling tell
+- [~] Lock-wait/contention metric DEFERRED to when operational-metrics infra exists (the repo has app-level analytics but no Prometheus/operational metrics sink today; adding one for this alone is out of scope). No behavior change is needed now regardless.
+- [x] Trigger DOCUMENTED: the per-customer `lockBalance` `FOR UPDATE` is the scaling tell. UPDATE 2026-06-17 (Paul): the FIRST response is now Phase H (denormalized account counters → O(1) balance reads, keeps Postgres) — chosen proactively rather than waiting for contention, because the balance SUM grows unbounded on both read and write. TigerBeetle (TB = money source of truth, Postgres = control plane, synced by transfer id) remains the FURTHER escalation if a single hot account's write rate still contends after H (H removes the read-cost growth but not per-account write serialization).
+
+### G. Tests
+- [x] Conservation: transfer sequences leave `Σ ledger == 0` (`TestLedger_ConservationAndFlows`).
+- [x] Immutability: app role (NOBYPASSRLS) denied UPDATE/DELETE on ledger rows; capture/void/expiry are new rows (`TestLedger_AppendOnly`).
+- [x] Two-phase durability: a pending persists until resolved; capture posts the actual, release frees the hold, a pending resolves at most once (`TestLedger_TwoPhase`). Plus sign-constraint + currency-guard tests.
+- [~] Migration backfill — N/A: pre-launch HARD CUT (decided 2026-06-17, Paul). Migration 004 DROPs `money_transactions`/`money_blocks` outright; no data to translate.
+
+### H. Denormalized account balances — O(1) reads (DESIGNED 2026-06-17, Paul; the chosen fix, not "wait for TB")
+PROBLEM (confirmed 2026-06-17): `LedgerAccountBalance`/`LedgerAccountHeld` are `SUM(...) FILTER (...)` over EVERY `ledger_transfers` row touching the account — O(transfers-per-account), growing forever. Worse, it's on the WRITE path too: `Apply`'s `checkDebitFloor` calls `Balance()` (another full SUM) on every posted debit to a floor-enforced account. The admit hot path pays it on read; capture/spend pays it on write.
+
+FIX — maintain running counters on the `ledger_accounts` row, updated atomically with each transfer insert (this is exactly what TigerBeetle does: accounts carry `debits_posted`/`credits_posted`/`debits_pending`/`credits_pending`; balances are O(1) reads, never re-summed). The append-only `ledger_transfers` stays the immutable source of truth; the counters are a maintained PROJECTION, verified by the conservation re-SUM.
+- [x] Add `credits_posted`/`debits_posted`/`credits_pending`/`debits_pending` (bigint NOT NULL default 0) to `ledger_accounts` in the pre-launch `002_ledger` baseline. No separate backfill needed under the current hard-cut migration model.
+- [x] The `ledger_transfers` insert trigger updates the counters of the affected accounts in the SAME tx as the insert, per phase: **posted** → debit.debits_posted += amt, credit.credits_posted += amt; **pending** → debit.debits_pending += amt (+ credit.credits_pending += amt); **post_pending** (capture, may true-up to actual) → release the full pending reservation and post the actual; **void_pending** (release) → debit.debits_pending −= pending amt (+ credit.credits_pending −= pending amt).
+- [x] `Balance` = `credits_posted − debits_posted` (O(1) row read); `Held` = `debits_pending` (O(1)); `checkDebitFloor` reads the row instead of re-summing.
+- [x] **Available balance + available credit in ONE query** (Paul's ask): for the admit affordability gate, arrears = the `customer_balance` account is allowed to go NEGATIVE down to `−credit_limit` (already how `Spend` works: `AllowDebitNegativeUpTo = credit_line`), so **the negative balance IS the used credit — there is NO separate owed quantity to subtract** for affordability. One point-lookup JOIN returns everything:
+  ```sql
+  SELECT a.credits_posted - a.debits_posted AS balance,
+         a.debits_pending                   AS held,
+         s.billing_mode,
+         COALESCE(s.credit_limit_amount, 0)  AS credit_limit
+  FROM openrails.ledger_accounts a
+  LEFT JOIN <money settings> s
+    ON s.merchant_id = a.merchant_id AND s.customer_id = a.customer_id AND s.currency = a.currency
+  WHERE a.merchant_id = $1 AND a.customer_id = $2 AND a.currency = $3
+    AND a.account_type = 'customer_balance';
+  ```
+  Then the caller computes: `floor = billing_mode='arrears' ? -credit_limit : 0`; `available_credit = arrears ? credit_limit + min(0, balance) : 0`; `total_spendable = balance + (arrears ? credit_limit : 0)`. The admit gate already takes exactly `(balance, creditLimit→floor)`. (NOTE: the `arrears_liability` account / `OutstandingOwedAmount` is the INVOICING/collection view — keep it OUT of the spend-affordability path so owed isn't double-counted.)
+- [x] Conservation stays the HARD-GATE invariant test: `Σ(transfers for account) == stored counters` (drift = wrong money). `TestLedger_*` now asserts the counters equal the re-SUM after transfer sequences.
+- [~] Documented caveat, not remaining implementation work: the counter `UPDATE` still takes a row lock on the account row, so per-account WRITE serialization (Phase F) remains — that's inherent to a consistent running balance; TB/sharding is the escalation if a single hot account's write rate contends. H removes the READ-cost growth, not the per-account write-serialization.
+- [x] WHEN THIS LANDS: delete the #513 in-memory balance cache (`admission.BalanceCache` + its wiring). DONE 2026-06-18: cache impl/test/runtime field/admitter wiring removed; spendgate input renamed from `CachedBalance` to `AccountBalance`.
+
+## Non-goals
+
+- NOT running TigerBeetle-the-database in this issue (it is a separate stateful system + a two-phase sync with Postgres); only its data-modeling principles, in Postgres. Adopting TB is gated on Phase F.
+- Do NOT regress the already-TB-aligned wins: integer minor units, idempotency keys, entitlements `tstzrange` exclusion windows, append-only `usage_events`, derived available balance (post-#491).
+
+## HARD CUT — no legacy, no backward compatibility (decided 2026-06-17, Paul)
+
+The ledger flips to double-entry/immutable completely; the single-entry representation does NOT survive alongside it.
+- No backfill migration is required under the pre-launch HARD CUT. `migrations/postgres/004_drop_single_entry.up.sql` drops `money_transactions` + `money_blocks`; the live path writes only the double-entry ledger and grant ledger. Specifically `money_transactions.balance_after` is gone (balances are derived), `money_blocks` mutation/expiry is replaced, and there is NO dual-read (old single-entry + new double-entry) and NO compatibility view kept around.
+- NO feature flag toggling single-entry vs double-entry; NO dual-write; NO "fall back to balance_after if the derived balance disagrees." One model, the new one.
+- Wire-contract changes (if any) are outright — consumers move in LOCKSTEP via a coordinated version bump, no compat window.
+- Exit gate: after the cut, `grep` finds no `balance_after`/single-entry-mutation reader; conservation invariant (`Σ ledger == 0`) holds; `go build ./... && go vet ./...` clean.
+
+## References
+
+- Source comparison: TigerBeetle (github.com/tigerbeetle/tigerbeetle) Account/Transfer/two-phase/linked-transfer model.
+- Current code: `internal/modules/money/money_service.go` (`depositTx`/`withdrawTx`/`withdrawBalanceAndBlocks`/`deriveBalance`/`lockBalance`), `internal/modules/money/authorize.go` (`AuthorizeAndHold` Redis hold), `internal/db/gen/money_ledger.sql.go`, `internal/db/gen/money_accounts.sql.go` (settings only — misnamed), schema `migrations/postgres/001_schema.up.sql` (money_transactions/money_blocks/money_settings/money_windows/budget_inflight_holds).
+- Consistency-invariant overlap + DEPENDENCY: #511 (unified consistency engine). The conservation check (`Σ ledger == 0`) stays a #512 ledger diagnostic/test, not a #511 finding. #511's money-side consistency checks (`consistency.duplicate.provider_charge`, `consistency.amount_mismatch.*` for refund/payment/invoice/credit mismatches) must be written against provider-observed payments/refunds plus #512/#514 source events, not the deleted single-entry `money_transactions`.
+
+---
+
+# #518: provider-accounts
+
+**Completed:** yes
+**Status:** DONE 2026-06-18: migration `009_provider_accounts.up.sql` adds merchant-scoped `provider_accounts`, migrates provider intents from legacy `account_fingerprint` to `provider_account_id`, and adds nullable `provider_account_id` FKs to provider-owned rows. `provider_accounts` stores durable identity only (`merchant_id`, `provider_type`, provider-returned/configured `account_id`, role/status/evidence); local config keys like `stripe_primary` are in-process selectors and are not stored in the DB. Intent enqueue resolves current credentials into provider account rows, and the executor/verifier finds credentials by `(provider_type, account_id)` so A-bound work parks if no current credential resolves to A. Default `reconcile check` / `fix` uses the configured primary provider entry for `--provider=<type>`, upserts/promotes the resolved provider account as primary, demotes the old primary to legacy, and scopes local reads/writes to that `provider_account_id`; `--provider-account=<uuid>` targets a specific stored account and requires matching current credentials. Embedded hosts can pass `PaymentProviders` programmatically; helpers select the primary processor by provider type rather than hard-coded reserved slots. Runtime merchant registration no longer writes `merchants.stripe_account_id`; provider identity is owned by `provider_accounts`. Checkout session creation now binds/stamps the current primary provider account before writing the provider checkout row. Integration coverage proves first bind/upsert, real HTTP-backed Stripe `/v1/account` and NMI `query.php report_type=profile` identity resolution, same-account key rotation, config-driven account promotion, same raw account id across merchants, colliding NMI provider object ids isolated by provider account row, and checkout session stamping when the Stripe config key is `stripe_primary`. Broader account-inspection/admin UI, bootstrap declarations, and deeper payment/subscription write-path stamping are follow-up work, not blockers for #518's provider-account safety boundary.
+
+Bind each merchant to one or more provider accounts per provider type/rail, while keeping every provider-owned row tied to the exact account that produced it. A private standalone merchant like `doujins` may start with Stripe account A, later add Stripe account B as the new primary account, and keep account A around for legacy rebills, refunds, webhooks, or historical charge lookup. Swapping accounts is an explicit rotation/adoption workflow that preserves historical account identity; it is never an accidental effect of changing config credentials.
+
+## Design decisions
+
+1. **Provider account identity is durable state, not config labels.** Config supplies credential entries under local names (`stripe_primary`, `stripe_old`, `mobius`, etc.). Those names are disposable selectors for the host/CLI only. OpenRails resolves each configured entry through the provider's account/profile/whoami endpoint and records the provider account identity it represents. The durable binding is `(merchant_id, provider_type, account_id)`, not the local config key.
+2. **A provider key can point to a different account tomorrow.** If `stripe_primary` resolves to Stripe-A today and Stripe-B tomorrow, that is equivalent to declaring "Stripe-B is now my primary Stripe account." OpenRails should upsert/bind B, promote B to primary for new default work, demote A to legacy/secondary as needed, and keep all old A-owned mirror rows on A. This is not a mismatch by itself.
+3. **Normal apps use one primary per provider type; extra accounts are for rotation/history.** Provider type is the rail (`stripe`, `nmi`/`mobius`, `ccbill`, `solana`, ...). Doujins/Hentai0/Cozy Art style embedded apps are expected to configure one primary Stripe account, one primary NMI/Mobius account, one primary CCBill account, etc. A merchant may bind several accounts of the same type only so it can rotate away from an old account without losing attribution or repair access. Only one account per provider type should be `primary` for new checkout/catalog work. Legacy/live accounts remain bound for rebills, refunds, pulls, webhooks, and evidence.
+4. **Provider accounts are merchant-scoped.** `provider_accounts` is the provider-account record and the merchant binding in one table. It stores merchant id, provider type, provider-returned account id, vault credential reference, role/status, and operational evidence. We do not need a separate global provider-account registry unless we later intentionally support shared provider accounts across merchants.
+5. **Account id identifies the provider account, not the secret.** `provider_accounts.account_id` is the canonical provider-account identity returned by a provider account/profile/"whoami" endpoint. Stripe uses account id (`acct_...`); NMI/Mobius uses the gateway merchant/account identity from its profile endpoint; CCBill must use its account/subaccount identity; Solana can use network + wallet/program authority where account-binding is useful. Do not use a credential hash as canonical identity when the provider can tell us the account id.
+6. **Provider mirror rows should reference the merchant-scoped account row.** New provider-owned mirror rows should store `provider_account_id` as a local FK to `provider_accounts.id` rather than duplicating raw provider account ids. Historical rows retain the old account row when a merchant rotates from Stripe-A to Stripe-B, so Stripe-B pulls cannot overwrite or "not find" Stripe-A rows.
+7. **Targeted account operations require matching credentials for that account.** If an operation targets a specific existing `provider_accounts.id` (for example an A-bound refund, old subscription cancellation, or explicit legacy pull), OpenRails must find a currently configured credential entry that resolves to that same `account_id`; otherwise it parks/aborts as "credentials for this provider account are not configured." It must never execute A-bound work with B credentials. This is different from changing the default primary config slot to B, which is allowed and simply changes new default routing.
+8. **CLI/API selectors should be provider type first, account optional.** `reconcile fix --provider=stripe` should mean "use the current configured primary Stripe account" and should not require knowing a local handler/config key. Explicit targeting uses `--provider-account=<uuid-or-account-id>` when the operator wants a legacy/secondary/specific account. A local config key selector may exist as a debug/escape hatch, but it is not the normal CLI/API contract and not durable identity.
+9. **Account rotation can be config-driven but must be row-safe.** Moving `doujins` from Stripe-A to Stripe-B creates/uses a merchant-scoped provider account row for B, promotes B to primary for future default work, and leaves A in legacy/live state if it still has rebills/refunds/webhooks to service. It does not rewrite old rows and does not make old provider objects disappear.
+10. **Delete provider fingerprint terminology.** The existing #365 `account_fingerprint` column/interface/CLI names are legacy implementation detail. Replace them with provider account identity terms (`provider_account_id`, `account_id`, `ProviderAccountResolver`, etc.) and drop the old column once intents can point at provider account rows.
+11. **Naming convention.** `provider_accounts.id` is OpenRails' local UUID row id. `provider_accounts.account_id` is the provider-returned account identifier. `provider_account_id` on mirror tables is a UUID FK to `provider_accounts.id`, not the raw provider account identifier. Local config provider keys are not stored as provider-account state.
+
+## Binding roles
+
+- **`primary`**: the default account for new provider work of that type. If a user chooses Stripe checkout and no account is explicitly selected, OpenRails routes to the enabled primary Stripe binding. Catalog push also targets primary unless told otherwise.
+- **`secondary`**: an enabled non-default account. It is not used automatically just because primary fails unless a merchant/operator config explicitly allows fallback/routing policy. Useful for manual migration, controlled traffic split, alternate geography/MID, or a temporary backup account.
+- **`legacy`**: an enabled account retained for old provider objects. OpenRails may pull it, receive webhooks for it, refund historical charges from it, cancel old subscriptions on it, or let existing remote rebills continue if the operator chooses that migration style. It is not used for new checkout/catalog creation by default.
+- **`disabled` status**: no new provider work and no routine pull. Historical rows remain attributed to the binding. Operator repair may still require a targeted credential restore or manual provider action.
+
+## Work breakdown
+
+### A. Schema
+- [x] Add `openrails.provider_accounts`: `id`, `merchant_id`, `provider_type`, `account_id`, `display_name`, `vault_secret_ref`, `role` (`primary`, `secondary`, `legacy`), `status` (`enabled`, `disabled`), `first_seen_at`, `last_verified_at`, `replaced_at`, timestamps/evidence. `id` is the local FK target for provider-owned mirror rows; `account_id` is the provider-returned identity (`acct_...`, Mobius account id/profile identity, CCBill account/subaccount, Solana public key/authority). Store secret references only, never provider secrets or local config keys.
+- [x] Add FK/RLS/indexes and constraints:
+  - unique `(merchant_id, provider_type, account_id)` so the same account is not bound twice to the same merchant;
+  - at most one enabled `primary` row per `(merchant_id, provider_type)`;
+  - no global uniqueness across merchants; if two merchants point at the same provider account id, OpenRails stores separate merchant-scoped rows and keeps their mirror rows separate by `merchant_id` + `provider_account_id`;
+  - normalize/lowercase provider type/account identity; never include local config keys in the identity or safety check.
+- [x] Deprecate `merchants.stripe_account_id` as runtime truth: merchant registration no longer writes or refreshes it, and provider identity lives in `provider_accounts`. The legacy column may remain in old baseline/schema artifacts until a schema compaction/removal migration is scheduled, but it is not a binding source of truth.
+- [x] Add `provider_account_id` (UUID FK to `provider_accounts.id`) to provider-owned mirror tables where it matters first: `payments`, `subscriptions`, `payment_methods`, `processor_customers`, `checkout_sessions`, and `invoice_payments`. Keep it nullable for legacy/import rows. Existing provider-specific remote object ids remain on those tables (`payments.transaction_id`, `subscriptions.processor_subscription_id`, `processor_customers.processor_customer_id`, payment-method token/id fields); do not introduce a generic `provider_object_id` column unless a new generic mirror table needs one.
+- [x] Migrate `provider_intents`: add nullable `provider_account_id` (UUID FK to `provider_accounts.id`), stamp it at enqueue, verify it at execution/verification, backfill where possible from legacy `account_fingerprint` + provider key, then drop `provider_intents.account_fingerprint`.
+
+### B. Provider account identity resolvers
+- [x] Replace the #365 `FingerprintSource` naming with a provider account resolver API that returns `(provider_type, account_id)`.
+- [x] Reuse/adapt the existing account-identity resolver logic for Stripe and NMI/Mobius, but expose the concept as provider `account_id` for #518 and create/verify `provider_accounts`.
+- [x] Bind CCBill to the configured account/subaccount identity (`client_acc_num` + `client_sub_acc`) because OpenRails does not currently have a CCBill whoami/profile endpoint. If CCBill exposes a stronger account-profile API later, replace the evidence source without changing the `provider_accounts` model.
+- [x] Define Solana's binding identity only where the provider account concept is load-bearing (`network + receiving wallet/program authority`); do not over-model it if globally unique addresses already protect the operation.
+
+### C. Binding service
+- [x] Add a small service/store for runtime account binding:
+  - resolves current credentials to provider `account_id`;
+  - creates or verifies the merchant-scoped provider account row and vault secret reference only from trusted bootstrap/admin context;
+  - default/current operations bind to the account currently resolved by the selected config credential entry, and may promote that resolved account to primary;
+  - targeted operations against an existing `provider_account_id` find credentials by matching resolved `(provider_type, account_id)`, never by stored local config key;
+  - returns "credentials unavailable for provider account" when no current config entry resolves to the targeted account.
+- [x] Add provider-safe primary sync path: when config says the current primary slot now resolves to B, add/bind B, promote B to primary, demote old primary A to `legacy`, preserve A-bound rows, and never execute A-bound work with B credentials.
+- [x] Make key rotation within the same provider account a no-op because the resolved provider account id is unchanged.
+
+### D. Integrations
+- [x] Add embedded-host API support: `pkg/embedded.Options.PaymentProviders` accepts multiple provider credential entries, `embed.PaymentProvider` aliases it for high-level `embed.New`, omitted names generate local selectors, and `config.GetStripeProcessor` / `GetCCBillProcessor` / `GetSolanaProcessor` now select the configured primary by provider type instead of only hard-coded reserved slots.
+- [x] Audit embedded consumers for the new provider config model. Doujins already passes processor config through generically; Hentai0 loads OpenRails config through OpenRails' loader; Tensorhub embeds OpenRails without payment providers; Cozy Art needed a small fix so checkout return URLs apply to every configured Stripe processor by type, not only the local key `stripe`.
+- [x] Gate `reconcile check` / `reconcile fix` on provider account identity resolution before provider data is treated as authoritative. `--provider=stripe` resolves the current configured primary Stripe account and pulls that account without requiring a local config key.
+- [x] Run provider-pull per `provider_account_id`. Default pull uses the account resolved from the current primary/default config entry for the given `--provider` type. Explicit targeting uses `--provider-account=<uuid>` for legacy/secondary accounts and requires matching configured credentials.
+- [x] Stamp new provider mirror rows with `provider_account_id`; compare/upsert only inside the same provider account row. Legacy NULL-binding rows remain ambiguous import state and are not destructively reconciled.
+- [x] Include binding id/provider account id in reconciliation run summaries and provider fetch params/snapshots.
+- [x] Teach checkout session creation to verify/bind the active primary provider account and stamp `checkout_sessions.provider_account_id` before creating provider-owned checkout rows. Broader payment/subscription/vault stamping can layer on later as those write paths are tightened, but checkout sessions now start with the correct account binding.
+- [x] Replace existing `provider_intents.account_fingerprint` guard with `provider_intents.provider_account_id`: queued intents should execute only when current credentials resolve to the same account id as the provider account row they were enqueued against.
+
+### E. Bootstrap / operations
+- [>] Bootstrap declarations deferred: bootstrap may later declare expected provider account bindings by provider type/account_id, plus optional local config selectors as convenience/evidence. Not needed for the core runtime safety boundary because default operations resolve and bind current credentials at use time.
+- [>] Richer inspect/admin commands deferred: `reconcile check|fix --provider=<type>` uses the normal default-primary path, and `--provider-account=<uuid>` explicitly targets a stored account with matching credentials. Dedicated inspect/verify/list/admin surfaces and account-id selectors can be added with future admin/ops work.
+- [x] Replace `openrails intents refingerprint` with binding-aware pending-intent `rebind-account`; broader `verify` and `rotate/adopt` commands remain planned.
+- [x] Document recovery: restoring old credentials, rotating keys within the same account, deliberately adopting a new account, and handling pending intents from the old account are covered in `docs/operations.md`.
+
+### F. Tests
+- [x] Integration test: first trusted bind/upsert succeeds, and same-account upsert returns the existing provider account row.
+- [x] Replace the current mismatch tests: credentials under the same local config key resolving to a different provider account now upsert/promote the new account for default primary operations, not reject. Targeted old-account execution parks when no configured credential resolves to the old account.
+- [x] Integration test: Stripe `/v1/account` and NMI `query.php report_type=profile` HTTP responses drive the runtime resolver into `provider_accounts`; same-account key rotation reuses the existing row, and different-account config rotation creates/promotes the new row while demoting the old primary.
+- [x] Integration test: Stripe-A + Stripe-B can both be bound to the same merchant/provider type, with exactly one primary; the schema role/primary constraints and config-driven primary promotion are covered. Checkout session routing/stamping is covered by `TestCheckoutSessionStampsPrimaryProviderAccount`.
+- [x] Integration test: rows linked to account A are not blended with account B when remote object ids collide. `TestProviderAccountScopedLocalStateDoesNotBlendCollidingProviderIDs` seeds two NMI accounts with the same transaction id, subscription id, and vault id, then proves the local provider-pull loader returns only rows for the targeted account.
+- [x] Integration test: duplicate account binding for the same merchant/type/account_id upserts the existing row, and two enabled primaries for the same merchant/type are rejected.
+- [x] Integration test: the same provider `account_id` can appear under two different merchants without merging their mirror rows or routing state.
+- [x] Migration/code cleanup test: no remaining runtime code paths depend on `provider_intents.account_fingerprint`; old fingerprint terminology is removed from commands/docs except migration notes.
+
+## Relationship
+
+- **#511 depends on this for safe Provider-Pull.** #511 can keep building the convergence engine, but provider-pull must not mark source domains reconciled or overwrite provider mirrors until this binding exists.
+- **#365's safety property remains necessary, but its schema/name should not.** Merchant bindings protect the merchant/account boundary; per-intent binding ids protect already-queued outbound work from executing against changed credentials. Replace the `account_fingerprint` column and "refingerprint" command with binding-aware provider account id semantics.
+- **#517 provider-absence tombstones depend on this even more strongly.** Absence checks are meaningless unless they prove absence in the same provider account that originally produced the row.

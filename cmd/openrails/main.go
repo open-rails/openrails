@@ -18,9 +18,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/audit"
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
@@ -136,17 +134,6 @@ func main() {
 		},
 	}
 
-	auditCmd := &cobra.Command{
-		Use:   "audit",
-		Short: "Run consistency audit on the OpenRails database",
-		RunE:  runAudit,
-	}
-	auditCmd.Flags().String("format", "table", "Output format: table, json, csv")
-	auditCmd.Flags().String("details-file", "", "Path for detailed table findings in table mode (default: openrails-audit-<timestamp>.log)")
-	auditCmd.Flags().String("user-id", "", "Filter to specific user ID")
-	auditCmd.Flags().String("severity", "", "Filter by minimum severity: CRITICAL, HIGH, MEDIUM, LOW")
-	auditCmd.Flags().StringSlice("category", nil, "Filter by category (can be repeated)")
-
 	mintMerchantAPIKeyCmd := &cobra.Command{
 		Use:   "mint-merchant-api-key",
 		Short: "Mint a merchant-scoped OpenRails API key and print the one-time secret",
@@ -158,7 +145,7 @@ func main() {
 	mintMerchantAPIKeyCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to full merchant API permissions")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, newPushBootstrapCmd(), mintMerchantAPIKeyCmd, newPushCatalogCmd(), newReconcileCmd(), newIntentsCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushBootstrapCmd(), mintMerchantAPIKeyCmd, newPushCatalogCmd(), newPullProviderCmd(), newIntentsCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -411,85 +398,5 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	}
 
 	log.Info("Billing service workers shutdown complete")
-	return nil
-}
-
-func runAudit(cmd *cobra.Command, args []string) error {
-	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	if cfg == nil {
-		return fmt.Errorf("config not loaded; audit requires --config")
-	}
-	database, err := db.NewDB(cfg.DB)
-	if err != nil {
-		return fmt.Errorf("open postgres: %w", err)
-	}
-
-	// Parse flags
-	format, _ := cmd.Flags().GetString("format")
-	detailsFile, _ := cmd.Flags().GetString("details-file")
-	userID, _ := cmd.Flags().GetString("user-id")
-	severityStr, _ := cmd.Flags().GetString("severity")
-	categories, _ := cmd.Flags().GetStringSlice("category")
-
-	opts := audit.Options{
-		UserID:     userID,
-		Format:     format,
-		Categories: categories,
-	}
-
-	if severityStr != "" {
-		opts.Severity = audit.Severity(severityStr)
-	}
-
-	// Create checker and run audit
-	checker := audit.NewChecker(database.DataPool())
-	findings, summary, err := checker.Run(cmd.Context(), opts)
-	if err != nil {
-		_ = database.Close()
-		return fmt.Errorf("audit failed: %w", err)
-	}
-
-	if strings.EqualFold(format, "table") {
-		table := &audit.TableFormatter{}
-		if len(findings) > 0 {
-			if strings.TrimSpace(detailsFile) == "" {
-				detailsFile = fmt.Sprintf("openrails-audit-%s.log", time.Now().UTC().Format("20060102-150405"))
-			}
-			f, err := os.OpenFile(detailsFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-			if err != nil {
-				_ = database.Close()
-				return fmt.Errorf("open audit details file %q: %w", detailsFile, err)
-			}
-			if err := table.FormatDetails(f, findings, summary); err != nil {
-				_ = f.Close()
-				_ = database.Close()
-				return fmt.Errorf("write audit details file %q: %w", detailsFile, err)
-			}
-			if err := f.Close(); err != nil {
-				_ = database.Close()
-				return fmt.Errorf("close audit details file %q: %w", detailsFile, err)
-			}
-		}
-		if err := table.FormatSummary(os.Stdout, findings, summary, detailsFile); err != nil {
-			_ = database.Close()
-			return fmt.Errorf("format audit summary: %w", err)
-		}
-	} else {
-		formatter := audit.GetFormatter(format)
-		if err := formatter.Format(os.Stdout, findings, summary); err != nil {
-			_ = database.Close()
-			return fmt.Errorf("format output: %w", err)
-		}
-	}
-
-	if err := database.Close(); err != nil {
-		return fmt.Errorf("close postgres: %w", err)
-	}
-
-	// Return non-zero exit if critical issues found
-	if summary.BySeverity[audit.SeverityCritical] > 0 {
-		os.Exit(1)
-	}
-
 	return nil
 }

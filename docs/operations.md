@@ -111,27 +111,42 @@ never claims the subscription (claiming writes `last_retry_at`, which is the
 dunning-forensics evidence imported from legacy) and never applies failure
 policy. `readonly` is unchanged: pure dry-run observer.
 
-**Account guard / credential rotation (#365).** Every intent is stamped at
-enqueue with a fingerprint of the provider ACCOUNT the producer was configured
-against — always the account's own identity, never the credential: NMI uses
-the merchant identity from the gateway's profile report (query.php
-`report_type=profile` -> "nmi:<company> <email>"), Stripe the `acct_...` id
-from GET /v1/account; both fetched lazily and cached per key. The executor AND
-verifier compare it against the current credentials and park/defer on
-mismatch — a queue built against one account is never executed against
-another (NMI ids are small numerics that collide across accounts: the wrong
-account's subscription would be deleted, the wrong customer's card charged).
+**Provider account guard / credential rotation (#518).** Provider-owned work is
+bound to a merchant-scoped `provider_accounts` row. The row stores the account's
+own identity, never the credential or local config key: NMI uses the merchant
+identity from the gateway's profile report (query.php `report_type=profile`),
+Stripe uses the `acct_...` id from GET /v1/account, CCBill uses the configured
+account/subaccount identity, and Solana uses the configured recipient/authority
+identity where account-binding is useful. Local config keys such as
+`stripe_primary` are disposable selectors only.
+
+Every provider intent is stamped at enqueue with the `provider_account_id` row
+for the provider account the producer was configured against. The executor and
+verifier compare that row against the current credentials and park/defer when no
+current credential resolves to the same account — a queue built against one
+account is never executed against another (NMI ids are small numerics that
+collide across accounts: the wrong account's subscription would be deleted, the
+wrong customer's card charged). Checkout session creation also resolves the
+current primary provider account and stamps `checkout_sessions.provider_account_id`
+before creating the provider checkout row.
 Operational rules:
 
-- Key rotation within the SAME account (NMI or Stripe): no effect — the
-  fingerprint is refetched under the new key and matches.
-- Pointing a provider key at a DIFFERENT account: pending intents park with
-  "provider account changed since enqueue". Drain or expire them first, or —
-  if adopting the new account deliberately — re-stamp with
-  `openrails intents refingerprint --provider=<name> --merchant=<slug> --yes`.
-- A failed fingerprint fetch (provider down) skips the guard for that pass
+- Key rotation within the SAME account: no effect — the provider account identity
+  is refetched under the new key and matches.
+- Pointing a provider key at a DIFFERENT account for default work is an account
+  rotation: OpenRails binds/promotes the new account as primary and leaves old
+  provider-owned rows attributed to the old account. New default checkout/pull
+  work uses the new primary.
+- Pending intents that were stamped with the OLD account do not follow that
+  default rotation automatically. Restore credentials for the old account so they
+  can drain, let stale intents expire/supersede, or — if deliberately adopting
+  the new account for those old intents — rebind with
+  `openrails intents rebind-account --provider=<name> --merchant=<slug> --yes`
+  after verifying the provider-side operation is safe to run against the current
+  account.
+- A failed account-identity fetch (provider down) skips the guard for that pass
   (warn logged) rather than blocking the ledger.
-- Intents enqueued before #365 carry no stamp and execute ungated.
+- Legacy intents without `provider_account_id` execute ungated.
 
 ## Reconcile (#107)
 
@@ -160,6 +175,16 @@ and `POST .../findings/:id/{ack,dismiss}` work the queue.
 Every local write `fix` applies is logged (finding id, type, subject,
 evidence) and persisted as the finding's resolution evidence, so a run's
 changes are fully reconstructable from the log or the findings table.
+
+Before a provider's data is treated as authoritative, `check` / `fix` resolves
+the configured provider key to a provider account identity and verifies it
+against the merchant's enabled primary `provider_accounts` row. A changed
+credential that points at a different Stripe/NMI/Mobius/CCBill/Solana account
+aborts the provider run before local mirror rows are inserted or overwritten.
+The run summary and provider fetch params carry the local `provider_account_id`;
+local mirror reads/writes are scoped to that row. Historical NULL
+`provider_account_id` rows are ambiguous import state and are not used as proof
+for destructive absence handling.
 
 **Materialize** — part of `fix` (enforce mode; advisory never writes). PS-1
 findings (the processor bills a subscription OpenRails does not know) are

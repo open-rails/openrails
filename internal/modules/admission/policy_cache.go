@@ -5,15 +5,17 @@ import (
 	"time"
 )
 
-// DefaultPolicyCacheTTL bounds how long a cached spend-cap CONFIG read may be
-// stale. Long on purpose: the policy (per-tier caps + delegated-spend caps) is
-// read-mostly config — it changes only when an admin/payer edits a cap, never on
-// the spend path. So a cap edit simply takes effect within the TTL; there's no
-// over-admission risk from stale config (the COUNTERS that meter spend live in
-// Redis and are always live). Pure TTL, no invalidation.
+// DefaultPolicyCacheTTL bounds how long a cached per-tier payer spend limit may be
+// stale. Long on purpose: the per-tier caps are read-mostly config — they change
+// only when an admin edits a tier's caps, never on the spend path, and a stale cap
+// is benign (a missing upper bound briefly admits a little more, never denies). The
+// COUNTERS that meter spend live in Redis and are always live. Pure TTL, no
+// invalidation. Per-invoker GRANTS are deliberately NOT cached — they gate whether a
+// delegated invoker may spend at all, so a freshly added grant must take effect
+// immediately; the loader reads them live (#517).
 const DefaultPolicyCacheTTL = 15 * time.Minute
 
-// policyCacheSweepThreshold caps each map: once it grows past this, a miss sweeps
+// policyCacheSweepThreshold caps the map: once it grows past this, a miss sweeps
 // expired entries (bounds memory without a background goroutine).
 const policyCacheSweepThreshold = 8192
 
@@ -22,23 +24,15 @@ type tierCacheEntry struct {
 	exp time.Time
 }
 
-type scopeCacheEntry struct {
-	pols []InvokerSpendLimit
-	exp  time.Time
-}
-
-// PolicyCache is a process-local, long-TTL cache of the admit POLICY config: the
-// per-tier spend-cap windows (`payer_spend_limits`) and the hierarchical
-// delegated-spend caps (`invoker_spend_limits`). It caches the read-mostly CONFIG —
-// not the live spend counters (those stay in Redis) — so the admit hot path can
-// skip both config reads on a warm payer. Nil-safe: a nil *PolicyCache reads
-// through every time.
+// PolicyCache is a process-local, long-TTL cache of the per-tier payer spend limits
+// (`payer_spend_limits`) — the read-mostly caps, not the live spend counters (those
+// stay in Redis) — so the admit hot path skips the tier-policy read on a warm payer.
+// Nil-safe: a nil *PolicyCache reads through every time.
 type PolicyCache struct {
-	ttl    time.Duration
-	now    func() time.Time
-	mu     sync.Mutex
-	tiers  map[string]tierCacheEntry
-	scopes map[string]scopeCacheEntry
+	ttl   time.Duration
+	now   func() time.Time
+	mu    sync.Mutex
+	tiers map[string]tierCacheEntry
 }
 
 // NewPolicyCache builds a cache with the given TTL (<=0 uses the default).
@@ -47,10 +41,9 @@ func NewPolicyCache(ttl time.Duration) *PolicyCache {
 		ttl = DefaultPolicyCacheTTL
 	}
 	return &PolicyCache{
-		ttl:    ttl,
-		now:    time.Now,
-		tiers:  make(map[string]tierCacheEntry),
-		scopes: make(map[string]scopeCacheEntry),
+		ttl:   ttl,
+		now:   time.Now,
+		tiers: make(map[string]tierCacheEntry),
 	}
 }
 
@@ -61,8 +54,8 @@ func (c *PolicyCache) SetClock(now func() time.Time) {
 	}
 }
 
-// PayerSpendLimits returns the cached per-tier spend-cap policy for (merchant, payer,
-// tier), loading via load() on a miss. Nil receiver reads through.
+// PayerSpendLimits returns the cached per-tier payer spend limit for (merchant,
+// payer, tier), loading via load() on a miss. Nil receiver reads through.
 func (c *PolicyCache) PayerSpendLimits(merchant, payer, tier string, load func() (PayerSpendLimits, error)) (PayerSpendLimits, error) {
 	if c == nil {
 		return load()
@@ -93,38 +86,4 @@ func (c *PolicyCache) PayerSpendLimits(merchant, payer, tier string, load func()
 	c.tiers[key] = tierCacheEntry{pol: pol, exp: now.Add(c.ttl)}
 	c.mu.Unlock()
 	return pol, nil
-}
-
-// InvokerSpendLimits returns the cached delegated-spend caps for (merchant, payer),
-// loading via load() on a miss. Nil receiver reads through.
-func (c *PolicyCache) InvokerSpendLimits(merchant, payer string, load func() ([]InvokerSpendLimit, error)) ([]InvokerSpendLimit, error) {
-	if c == nil {
-		return load()
-	}
-	key := merchant + "|" + payer
-	now := c.now()
-
-	c.mu.Lock()
-	if e, ok := c.scopes[key]; ok && now.Before(e.exp) {
-		c.mu.Unlock()
-		return e.pols, nil
-	}
-	c.mu.Unlock()
-
-	pols, err := load()
-	if err != nil {
-		return nil, err
-	}
-
-	c.mu.Lock()
-	if len(c.scopes) >= policyCacheSweepThreshold {
-		for k, e := range c.scopes {
-			if !now.Before(e.exp) {
-				delete(c.scopes, k)
-			}
-		}
-	}
-	c.scopes[key] = scopeCacheEntry{pols: pols, exp: now.Add(c.ttl)}
-	c.mu.Unlock()
-	return pols, nil
 }

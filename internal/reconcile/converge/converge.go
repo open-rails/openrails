@@ -1,4 +1,4 @@
-package reconcile
+package converge
 
 import (
 	"context"
@@ -23,6 +23,16 @@ import (
 // customer/subscription), once after a pull (scoped to a merchant), and on a
 // background sweep. It is idempotent: a converged scope emits no findings and
 // every repair is a no-op, so re-running changes nothing.
+
+// Severity is a finding's urgency label, persisted verbatim to the ledger.
+type Severity string
+
+const (
+	SeverityCritical Severity = "critical"
+	SeverityHigh     Severity = "high"
+	SeverityMedium   Severity = "medium"
+	SeverityLow      Severity = "low"
+)
 
 // Shape is the 1:1-to-repair-verb classification of a divergence.
 type Shape string
@@ -112,6 +122,21 @@ type ConvergeResult struct {
 	AdminQueued int
 	Operator    int
 	RunID       *uuid.UUID
+}
+
+// AfterMutation runs Converge for a customer inline, right after a state mutation
+// commits, so the customer is left consistent by construction (entitlement/credit
+// effects, lifecycle state, references). It is the per-mutation companion to the
+// background sweep: every mutation re-converges its own scope, so drift never
+// accumulates between sweeps. Cheap by design — a customer-scoped Converge scans
+// only that customer's rows (all three planes take a customer filter) and does
+// ZERO writes when nothing diverged.
+//
+// Best-effort: convergence failures are returned for the caller to LOG, never to
+// fail the mutation that already succeeded — the sweep is the backstop. Must run
+// on the request's merchant-scoped connection (RLS), after the mutation committed.
+func AfterMutation(ctx context.Context, database *db.DB, merchantID merchant.ID, customer uuid.UUID) (ConvergeResult, error) {
+	return NewConvergeEngine(database).Converge(ctx, Scope{Merchant: merchantID, Customer: &customer})
 }
 
 // Converge runs every plane pass for the scope (DERIVE → LIFE → CON), then

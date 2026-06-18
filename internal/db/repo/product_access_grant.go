@@ -2,21 +2,24 @@ package repo
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
+
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// ProductAccessGrantRepo persists durable product ownership/access grants
-// (issue #250). All merchant-owned queries go through the RLS-aware accessor
-// (#227) and stamp/scope the resolved merchant so single-merchant and
-// multi-merchant runs behave identically.
+// ProductAccessGrantRepo persists durable product ownership as `kind=ownership`
+// rows in the #514 grant ledger — the single source of truth for all grant kinds
+// (entitlement / credit / ownership). The legacy `product_access_grants` table is
+// retired (#511): ownership has no separate projection, so the grant row IS the
+// record. This repo maps the append-only grant/revoke events back to the
+// status-column models.ProductAccessGrant shape the Service + callers expect, so
+// nothing above this layer changed.
 type ProductAccessGrantRepo struct {
 	db *db.DB
 }
@@ -25,31 +28,81 @@ func NewProductAccessGrantRepo(d *db.DB) *ProductAccessGrantRepo {
 	return &ProductAccessGrantRepo{db: d}
 }
 
-func productAccessGrantFromGen(g gen.OpenrailsProductAccessGrant) *models.ProductAccessGrant {
-	m := &models.ProductAccessGrant{
+// ledger builds a merchant-scoped grant ledger on this repo's (tx-scoped) conn.
+func (r *ProductAccessGrantRepo) ledger(ctx context.Context, merchantID uuid.UUID) *grants.Ledger {
+	return grants.New(r.db.Gen(ctx), merchantID)
+}
+
+// ownershipModel maps an ownership grant-event (+ its optional termination event)
+// to the legacy ProductAccessGrant shape. status='revoked' iff a terminating
+// event supersedes the grant; revoked_at / reason come from that event.
+func ownershipModel(g gen.OpenrailsGrant, term *gen.OpenrailsGrant) models.ProductAccessGrant {
+	var productID uuid.UUID
+	if g.ProductID != nil {
+		productID = *g.ProductID
+	}
+	m := models.ProductAccessGrant{
 		ID:         g.ID,
 		MerchantID: g.MerchantID,
 		CustomerID: g.CustomerID,
-		ProductID:  g.ProductID,
+		ProductID:  productID,
 		SourceType: models.ProductAccessSourceType(g.SourceType),
 		SourceID:   g.SourceID,
 		PaymentID:  g.PaymentID,
-		Status:     models.ProductAccessStatus(g.Status),
+		Status:     models.ProductAccessStatusActive,
 		StartsAt:   g.StartsAt,
 		EndsAt:     g.EndsAt,
-		RevokedAt:  g.RevokedAt,
 		CreatedAt:  g.CreatedAt,
-		UpdatedAt:  g.UpdatedAt,
+		UpdatedAt:  g.CreatedAt, // grants are append-only; the row is never updated
 	}
-	if g.RevokeReason != nil {
-		rr := models.ProductAccessRevokeReason(*g.RevokeReason)
-		m.RevokeReason = &rr
+	if term != nil {
+		m.Status = models.ProductAccessStatusRevoked
+		ra := term.CreatedAt
+		m.RevokedAt = &ra
+		m.UpdatedAt = term.CreatedAt
+		if term.Reason != nil {
+			rr := models.ProductAccessRevokeReason(*term.Reason)
+			m.RevokeReason = &rr
+		}
 	}
 	return m
 }
 
-// Insert creates a grant, stamping the resolved merchant when the caller left it
-// zero (consistent with reads).
+// ownershipGrants loads every ownership grant-event for a customer with its
+// derived status, by reading the full grant log once and pairing each grant with
+// its termination event (avoids a per-grant termination query).
+func (r *ProductAccessGrantRepo) ownershipGrants(ctx context.Context, merchantID, customerID uuid.UUID) ([]models.ProductAccessGrant, error) {
+	rows, err := r.db.Gen(ctx).ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{
+		MerchantID: merchantID, CustomerID: customerID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Index terminations by the grant they supersede.
+	terms := make(map[uuid.UUID]gen.OpenrailsGrant)
+	for i := range rows {
+		t := rows[i]
+		if t.SupersedesID != nil && (t.Event == "revoke" || t.Event == "expire" || t.Event == "supersede") {
+			terms[*t.SupersedesID] = t
+		}
+	}
+	out := make([]models.ProductAccessGrant, 0, len(rows))
+	for i := range rows {
+		g := rows[i]
+		if g.Kind != string(grants.Ownership) || g.Event != "grant" {
+			continue
+		}
+		var term *gen.OpenrailsGrant
+		if t, ok := terms[g.ID]; ok {
+			term = &t
+		}
+		out = append(out, ownershipModel(g, term))
+	}
+	return out, nil
+}
+
+// Insert creates an ownership grant in the ledger. The grant row IS the ownership
+// record (no projection); the caller's model is stamped with the new grant id.
 func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.ProductAccessGrant) error {
 	if (grant.MerchantID == uuid.UUID{}) {
 		tid, err := merchant.Require(ctx)
@@ -61,180 +114,227 @@ func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.Produ
 	if err := ensureCustomerRow(ctx, r.db.Qx(ctx), grant.MerchantID, grant.CustomerID); err != nil {
 		return err
 	}
-	var revokeReason *string
-	if grant.RevokeReason != nil {
-		rr := string(*grant.RevokeReason)
-		revokeReason = &rr
-	}
-	id, err := r.db.Gen(ctx).CreateProductAccessGrant(ctx, gen.CreateProductAccessGrantParams{
-		ID:           grant.ID,
-		MerchantID:   grant.MerchantID,
-		CustomerID:   grant.CustomerID,
-		ProductID:    grant.ProductID,
-		SourceType:   string(grant.SourceType),
-		SourceID:     grant.SourceID,
-		PaymentID:    grant.PaymentID,
-		Status:       string(grant.Status),
-		StartsAt:     grant.StartsAt,
-		EndsAt:       grant.EndsAt,
-		RevokedAt:    grant.RevokedAt,
-		RevokeReason: revokeReason,
-		CreatedAt:    grant.CreatedAt,
-		UpdatedAt:    grant.UpdatedAt,
+	productID := grant.ProductID
+	g, err := r.ledger(ctx, grant.MerchantID).Grant(ctx, grants.GrantInput{
+		Customer: grant.CustomerID,
+		Product:  &productID,
+		Kind:     grants.Ownership,
+		Source:   grants.SourceType(grant.SourceType),
+		SourceID: grant.SourceID,
+		Payment:  grant.PaymentID,
+		StartsAt: grant.StartsAt,
+		EndsAt:   grant.EndsAt,
 	})
 	if err != nil {
 		return err
 	}
-	grant.ID = id
+	grant.ID = g.ID
+	grant.StartsAt = g.StartsAt
+	grant.CreatedAt = g.CreatedAt
+	grant.UpdatedAt = g.CreatedAt
 	return nil
 }
 
-// GetBySource returns the existing grant for a (user, product, source)
-// idempotency key, or nil if none. Used to make granting idempotent.
+// GetBySource returns the ownership grant for a (user, product, source)
+// idempotency key, or nil. Prefers a live grant; falls back to the most recent.
 func (r *ProductAccessGrantRepo) GetBySource(ctx context.Context, userID string, productID uuid.UUID, sourceID string) (*models.ProductAccessGrant, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	tenantID := tid.UUID()
 	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetProductAccessGrantBySource(ctx, gen.GetProductAccessGrantBySourceParams{
-		MerchantID: tenantID,
-		CustomerID: tsid,
-		ProductID:  productID,
-		SourceID:   sourceID,
-	})
+	all, err := r.ownershipGrants(ctx, tid.UUID(), tsid)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	return productAccessGrantFromGen(row), nil
+	var match *models.ProductAccessGrant
+	for i := range all {
+		g := all[i]
+		if g.ProductID != productID || g.SourceID != sourceID {
+			continue
+		}
+		if g.Status == models.ProductAccessStatusActive {
+			gg := g
+			return &gg, nil // a live grant for this source wins
+		}
+		gg := g
+		match = &gg // remember the most recent (rows are created_at ASC)
+	}
+	return match, nil
 }
 
-// HasActiveAccess reports whether the user has an active, in-window grant for the
-// product at time t.
+// HasActiveAccess reports whether the user has a live, in-window ownership grant
+// for the product at time t.
 func (r *ProductAccessGrantRepo) HasActiveAccess(ctx context.Context, userID string, productID uuid.UUID, at time.Time) (bool, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
 	}
-	tenantID := tid.UUID()
 	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return false, err
 	}
-	return r.db.Gen(ctx).HasActiveProductAccess(ctx, gen.HasActiveProductAccessParams{
-		MerchantID: tenantID,
-		CustomerID: tsid,
-		ProductID:  productID,
-		At:         at,
+	live, err := r.db.Gen(ctx).ListLiveGrantsByCustomer(ctx, gen.ListLiveGrantsByCustomerParams{
+		MerchantID: tid.UUID(), CustomerID: tsid,
 	})
+	if err != nil {
+		return false, err
+	}
+	for i := range live {
+		if ownershipInWindow(live[i], productID, at) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
-// ListActiveByUser returns the user's active, in-window grants, most recent first.
+// ownershipInWindow reports whether a live grant grants product access at `at`.
+func ownershipInWindow(g gen.OpenrailsGrant, productID uuid.UUID, at time.Time) bool {
+	if g.Kind != string(grants.Ownership) || g.ProductID == nil || *g.ProductID != productID {
+		return false
+	}
+	if at.Before(g.StartsAt) {
+		return false
+	}
+	if g.EndsAt != nil && !at.Before(*g.EndsAt) {
+		return false
+	}
+	return true
+}
+
+// ListActiveByUser returns the user's live, in-window ownership grants.
 func (r *ProductAccessGrantRepo) ListActiveByUser(ctx context.Context, userID string, at time.Time) ([]models.ProductAccessGrant, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	tenantID := tid.UUID()
 	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListActiveProductAccessGrantsByCustomer(ctx, gen.ListActiveProductAccessGrantsByCustomerParams{
-		MerchantID: tenantID,
-		CustomerID: tsid,
-		At:         at,
+	live, err := r.db.Gen(ctx).ListLiveGrantsByCustomer(ctx, gen.ListLiveGrantsByCustomerParams{
+		MerchantID: tid.UUID(), CustomerID: tsid,
 	})
 	if err != nil {
 		return nil, err
 	}
-	grants := make([]models.ProductAccessGrant, 0, len(rows))
-	for _, row := range rows {
-		grants = append(grants, *productAccessGrantFromGen(row))
+	out := make([]models.ProductAccessGrant, 0, len(live))
+	for i := range live {
+		g := live[i]
+		if g.Kind != string(grants.Ownership) {
+			continue
+		}
+		if g.ProductID == nil || at.Before(g.StartsAt) || (g.EndsAt != nil && !at.Before(*g.EndsAt)) {
+			continue
+		}
+		out = append(out, ownershipModel(g, nil))
 	}
-	return grants, nil
+	reverse(out) // most-recent first (live list is created_at ASC)
+	return out, nil
 }
 
-// ListByUser returns ALL of the user's grants (active + revoked), most recent
-// first. Used by admin views.
+// ListByUser returns ALL of the user's ownership grants (active + revoked),
+// most recent first.
 func (r *ProductAccessGrantRepo) ListByUser(ctx context.Context, userID string) ([]models.ProductAccessGrant, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	tenantID := tid.UUID()
 	tsid, err := ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListProductAccessGrantsByCustomer(ctx, gen.ListProductAccessGrantsByCustomerParams{
-		MerchantID: tenantID,
-		CustomerID: tsid,
-	})
+	all, err := r.ownershipGrants(ctx, tid.UUID(), tsid)
 	if err != nil {
 		return nil, err
 	}
-	grants := make([]models.ProductAccessGrant, 0, len(rows))
-	for _, row := range rows {
-		grants = append(grants, *productAccessGrantFromGen(row))
-	}
-	return grants, nil
+	reverse(all)
+	return all, nil
 }
 
-// GetByID returns a single grant by id (merchant-scoped).
+// GetByID returns a single ownership grant by id (merchant-scoped), or nil.
 func (r *ProductAccessGrantRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.ProductAccessGrant, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetProductAccessGrantByID(ctx, gen.GetProductAccessGrantByIDParams{
-		MerchantID: tid.UUID(),
-		ID:         id,
-	})
+	g, err := r.db.Gen(ctx).GetGrant(ctx, gen.GetGrantParams{MerchantID: tid.UUID(), ID: id})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
+		return nil, nil // not found
+	}
+	if g.Kind != string(grants.Ownership) || g.Event != "grant" {
+		return nil, nil
+	}
+	// Resolve status from the customer's grant log (to populate revoked_at/reason).
+	all, err := r.ownershipGrants(ctx, tid.UUID(), g.CustomerID)
+	if err != nil {
 		return nil, err
 	}
-	return productAccessGrantFromGen(row), nil
+	for i := range all {
+		if all[i].ID == id {
+			m := all[i]
+			return &m, nil
+		}
+	}
+	m := ownershipModel(g, nil)
+	return &m, nil
 }
 
-// RevokeByID revokes a single active grant. Returns the number of rows affected
-// so callers can detect "already revoked / not found".
+// RevokeByID revokes a single active ownership grant. Returns rows affected so
+// callers stay idempotent (already-revoked / not-found / non-ownership => 0).
 func (r *ProductAccessGrantRepo) RevokeByID(ctx context.Context, id uuid.UUID, now time.Time, reason models.ProductAccessRevokeReason) (int64, error) {
-	rr := string(reason)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return r.db.Gen(ctx).RevokeProductAccessGrantByID(ctx, gen.RevokeProductAccessGrantByIDParams{
-		MerchantID: tid.UUID(),
-		ID:         id,
-		Now:        now,
-		Reason:     &rr,
-	})
+	g, err := r.db.Gen(ctx).GetGrant(ctx, gen.GetGrantParams{MerchantID: tid.UUID(), ID: id})
+	if err != nil || g.Kind != string(grants.Ownership) || g.Event != "grant" {
+		return 0, nil
+	}
+	terminated, err := r.db.Gen(ctx).IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: tid.UUID(), GrantID: id})
+	if err != nil {
+		return 0, err
+	}
+	if terminated {
+		return 0, nil // already revoked
+	}
+	if _, err := r.ledger(ctx, tid.UUID()).Revoke(ctx, id, string(reason)); err != nil {
+		return 0, err
+	}
+	return 1, nil
 }
 
-// RevokeByPayment revokes all active grants tied to a payment. Used by the
-// refund / chargeback reversal path. Returns rows affected.
+// RevokeByPayment revokes all live ownership grants tied to a payment (refund /
+// chargeback reversal). Returns the number revoked.
 func (r *ProductAccessGrantRepo) RevokeByPayment(ctx context.Context, paymentID uuid.UUID, now time.Time, reason models.ProductAccessRevokeReason) (int64, error) {
-	rr := string(reason)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return r.db.Gen(ctx).RevokeProductAccessGrantsByPayment(ctx, gen.RevokeProductAccessGrantsByPaymentParams{
-		MerchantID: tid.UUID(),
-		PaymentID:  &paymentID,
-		Now:        now,
-		Reason:     &rr,
+	ids, err := r.db.Gen(ctx).ListLiveOwnershipGrantIDsByPayment(ctx, gen.ListLiveOwnershipGrantIDsByPaymentParams{
+		MerchantID: tid.UUID(), PaymentID: paymentID,
 	})
+	if err != nil {
+		return 0, err
+	}
+	gl := r.ledger(ctx, tid.UUID())
+	var n int64
+	for _, id := range ids {
+		if _, err := gl.Revoke(ctx, id, string(reason)); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// reverse flips a slice in place (live/all lists come back created_at ASC; the
+// API contract is most-recent first).
+func reverse(s []models.ProductAccessGrant) {
+	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
+		s[i], s[j] = s[j], s[i]
+	}
 }

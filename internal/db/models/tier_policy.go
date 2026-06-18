@@ -46,6 +46,4 @@ type BudgetWindowPolicy struct {
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
 	Currency      string `json:"currency,omitempty"`
-	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
-	Cadence string `json:"cadence,omitempty"`
 }

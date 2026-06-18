@@ -433,6 +433,10 @@ const (
 	ProcessorTypeCCBill = "ccbill"
 	ProcessorTypeStripe = "stripe"
 	ProcessorTypeSolana = "solana"
+
+	ProcessorRolePrimary   = "primary"
+	ProcessorRoleSecondary = "secondary"
+	ProcessorRoleLegacy    = "legacy"
 )
 
 // ReservedProcessorNames maps processor names that imply their type.
@@ -457,6 +461,11 @@ type ProcessorConfig struct {
 	// Required for non-reserved processor names.
 	// For reserved names (ccbill, stripe, solana), type is inferred from the name.
 	Type string `koanf:"type"`
+	// Role selects routine routing for this configured credential set. Empty is
+	// primary for existing single-provider configs. secondary is enabled for
+	// explicit/manual targeting; legacy is retained for old rows/rebills/refunds
+	// and should not receive new default work.
+	Role string `koanf:"role"`
 
 	// --- NMI fields (type: nmi) ---
 	SecurityKey     string `koanf:"security_key"`
@@ -527,6 +536,19 @@ func (p *ProcessorConfig) GetEffectiveType(name string) string {
 		return impliedType
 	}
 	return ""
+}
+
+// EffectiveRole returns primary when role is omitted, preserving the existing
+// one-config-per-provider behavior.
+func (p *ProcessorConfig) EffectiveRole() string {
+	if p == nil {
+		return ""
+	}
+	role := strings.ToLower(strings.TrimSpace(p.Role))
+	if role == "" {
+		return ProcessorRolePrimary
+	}
+	return role
 }
 
 // IsNMI returns true if this processor config is for an NMI-backed processor.
@@ -1174,43 +1196,56 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 // disable Stripe. This prevents accidentally processing real charges in a test
 // environment or test charges in a live one.
 func validateStripeKeyForTestEnv(cfg *Config) error {
-	stripeProc, ok := cfg.Processors["stripe"]
-	if !ok || stripeProc == nil {
-		return nil // No Stripe configured
-	}
+	for name, stripeProc := range cfg.Processors {
+		if stripeProc == nil || stripeProc.GetEffectiveType(name) != ProcessorTypeStripe {
+			continue
+		}
 
-	secretKey := strings.TrimSpace(stripeProc.SecretKey)
-	if secretKey == "" {
-		return nil // No key configured, nothing to validate
-	}
+		secretKey := strings.TrimSpace(stripeProc.SecretKey)
+		if secretKey == "" {
+			continue
+		}
 
-	// Both standard secret keys (sk_*) and restricted keys (rk_*) carry the
-	// live/test mode in their prefix, so classify either form.
-	isLiveKey := strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_")
-	isTestKey := strings.HasPrefix(secretKey, "sk_test_") || strings.HasPrefix(secretKey, "rk_test_")
+		// Both standard secret keys (sk_*) and restricted keys (rk_*) carry the
+		// live/test mode in their prefix, so classify either form.
+		isLiveKey := strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_")
+		isTestKey := strings.HasPrefix(secretKey, "sk_test_") || strings.HasPrefix(secretKey, "rk_test_")
 
-	if cfg.IsTestEnv() && isLiveKey {
-		// Hard guarantee (#347): the sandbox environment must never hold a live
-		// key — a mistakenly-test-enved production system would otherwise carry
-		// a credential that can move real money.
-		return fmt.Errorf("stripe live key (sk_live_/rk_live_) is not allowed when test_env is enabled; use a test key or unset test_env")
-	}
-	if !cfg.IsTestEnv() && isTestKey {
-		log.Warn("⚠️  Stripe test key provided but test_env is disabled (live credentials) - disabling Stripe")
-		log.Warn("   Use a live-mode key (sk_live_/rk_live_), or set test_env=true for sandbox testing")
-		stripeProc.SecretKey = ""
+		if cfg.IsTestEnv() && isLiveKey {
+			// Hard guarantee (#347): the sandbox environment must never hold a live
+			// key — a mistakenly-test-enved production system would otherwise carry
+			// a credential that can move real money.
+			return fmt.Errorf("stripe processor %q: live key (sk_live_/rk_live_) is not allowed when test_env is enabled; use a test key or unset test_env", strings.ToLower(strings.TrimSpace(name)))
+		}
+		if !cfg.IsTestEnv() && isTestKey {
+			log.Warnf("⚠️  Stripe test key provided for processor %q but test_env is disabled (live credentials) - disabling Stripe", strings.ToLower(strings.TrimSpace(name)))
+			log.Warn("   Use a live-mode key (sk_live_/rk_live_), or set test_env=true for sandbox testing")
+			stripeProc.SecretKey = ""
+		}
 	}
 	return nil
 }
 
 // validateProcessors validates all processors in the new Processors map
 func validateProcessors(cfg *Config, isDev bool) error {
+	primaryByType := map[string]string{}
 	for name, proc := range cfg.Processors {
 		if proc == nil {
 			continue
 		}
+		switch role := proc.EffectiveRole(); role {
+		case ProcessorRolePrimary, ProcessorRoleSecondary, ProcessorRoleLegacy:
+		default:
+			return fmt.Errorf("processor '%s' has unknown role '%s'", name, proc.Role)
+		}
 
 		effectiveType := proc.GetEffectiveType(name)
+		if proc.EffectiveRole() == ProcessorRolePrimary {
+			if existing := primaryByType[effectiveType]; existing != "" {
+				return fmt.Errorf("multiple primary processors configured for type %q: %q and %q", effectiveType, existing, strings.ToLower(strings.TrimSpace(name)))
+			}
+			primaryByType[effectiveType] = strings.ToLower(strings.TrimSpace(name))
+		}
 		switch effectiveType {
 		case ProcessorTypeNMI:
 			if err := validateNMIProcessor(name, proc, isDev); err != nil {
@@ -1348,37 +1383,66 @@ func (cfg *Config) GetNMIProcessors() map[string]*ProcessorConfig {
 	return result
 }
 
-// GetCCBillProcessor returns the CCBill processor config from the Processors map.
+// ProcessorKeysByType returns configured processor names for the provider type,
+// sorted for deterministic diagnostics and selection.
+func (cfg *Config) ProcessorKeysByType(providerType string) []string {
+	if cfg == nil || cfg.Processors == nil {
+		return nil
+	}
+	providerType = strings.ToLower(strings.TrimSpace(providerType))
+	keys := make([]string, 0)
+	for name, proc := range cfg.Processors {
+		if proc == nil {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key != "" && proc.GetEffectiveType(key) == providerType {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// PrimaryProcessorByType returns the configured primary credential set for a
+// provider type. Existing configs with one entry and no role keep working
+// because an empty role is primary. Multiple primaries are a configuration
+// error: OpenRails cannot guess where default new work should route.
+func (cfg *Config) PrimaryProcessorByType(providerType string) (string, *ProcessorConfig, error) {
+	keys := cfg.ProcessorKeysByType(providerType)
+	var (
+		primaryKey string
+		primary    *ProcessorConfig
+	)
+	for _, key := range keys {
+		proc := cfg.Processors[key]
+		if proc.EffectiveRole() != ProcessorRolePrimary {
+			continue
+		}
+		if primary != nil {
+			return "", nil, fmt.Errorf("multiple primary processors configured for type %q: %q and %q", providerType, primaryKey, key)
+		}
+		primaryKey, primary = key, proc
+	}
+	return primaryKey, primary, nil
+}
+
+// GetCCBillProcessor returns the configured primary CCBill processor.
 func (cfg *Config) GetCCBillProcessor() *ProcessorConfig {
-	if cfg == nil || cfg.Processors == nil {
-		return nil
-	}
-	if proc, ok := cfg.Processors["ccbill"]; ok && proc != nil {
-		return proc
-	}
-	return nil
+	_, proc, _ := cfg.PrimaryProcessorByType(ProcessorTypeCCBill)
+	return proc
 }
 
-// GetStripeProcessor returns the Stripe processor config from the Processors map.
+// GetStripeProcessor returns the configured primary Stripe processor.
 func (cfg *Config) GetStripeProcessor() *ProcessorConfig {
-	if cfg == nil || cfg.Processors == nil {
-		return nil
-	}
-	if proc, ok := cfg.Processors["stripe"]; ok && proc != nil {
-		return proc
-	}
-	return nil
+	_, proc, _ := cfg.PrimaryProcessorByType(ProcessorTypeStripe)
+	return proc
 }
 
-// GetSolanaProcessor returns the Solana processor config from the Processors map.
+// GetSolanaProcessor returns the configured primary Solana processor.
 func (cfg *Config) GetSolanaProcessor() *ProcessorConfig {
-	if cfg == nil || cfg.Processors == nil {
-		return nil
-	}
-	if proc, ok := cfg.Processors["solana"]; ok && proc != nil {
-		return proc
-	}
-	return nil
+	_, proc, _ := cfg.PrimaryProcessorByType(ProcessorTypeSolana)
+	return proc
 }
 
 // GetProcessor returns a processor config by name from the Processors map.

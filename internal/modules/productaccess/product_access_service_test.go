@@ -23,13 +23,16 @@ func newTestService(t *testing.T, now time.Time) (*Service, context.Context, uui
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := context.Background()
+	// The Service is RLS-scoped (MerchantTx), so it needs a merchant on the ctx.
+	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
+	dbtest.EnsureTestMerchant(ctx, t, pool)
 
 	productID := uuid.New()
 	_, err := gen.New(pool).CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Slug:        "test-product-" + productID.String(),
 		DisplayName: "Test Product",
 		Status:      string(models.CatalogStatusActive),
@@ -38,7 +41,10 @@ func newTestService(t *testing.T, now time.Time) (*Service, context.Context, uui
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.product_access_grants WHERE product_id = $1", productID)
+		// Ownership now lives in the append-only grant ledger (#511) — grants are
+		// immutable (REVOKE DELETE), so we can't purge them; leftover grants for
+		// this run's unique product/customer are harmless in the shared test DB.
+		// The product delete is best-effort (a grant's product_id FK may pin it).
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 

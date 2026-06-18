@@ -8,48 +8,58 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
-// fakeFingerprints maps provider -> current fingerprint; missing = exempt.
-type fakeFingerprints map[string]string
+// fakeProviderAccountResolver maps provider -> current account; missing = exempt.
+type fakeProviderAccountResolver map[string]ProviderAccountIdentity
 
-func (f fakeFingerprints) AccountFingerprint(_ context.Context, provider string) (string, bool) {
-	fp, ok := f[provider]
-	return fp, ok
+func (f fakeProviderAccountResolver) ResolveProviderAccount(_ context.Context, provider string) (ProviderAccountIdentity, bool) {
+	account, ok := f[provider]
+	return account, ok
 }
 
-func strPtr(s string) *string { return &s }
+func boundAccount(id uuid.UUID, providerType, accountID string) gen.OpenrailsProviderAccount {
+	return gen.OpenrailsProviderAccount{ID: id, ProviderType: providerType, AccountID: accountID}
+}
 
-// TestRunnerAccountGuardExecute drives the #365 gate through the executor:
-// a stamped intent only executes when the current credentials resolve to the
+func currentAccount(providerType, accountID string) ProviderAccountIdentity {
+	return ProviderAccountIdentity{ProviderKey: "mobius", ProviderType: providerType, AccountID: accountID}
+}
+
+// TestRunnerAccountGuardExecute drives the #518 gate through the executor:
+// a bound intent only executes when the current credentials resolve to the
 // SAME account; a mismatch parks without touching the handler.
 func TestRunnerAccountGuardExecute(t *testing.T) {
+	boundID := uuid.New()
 	cases := []struct {
-		name         string
-		stamp        *string
-		fingerprints FingerprintSource
-		wantExecuted bool
+		name              string
+		providerAccountID *uuid.UUID
+		current           ProviderAccountResolver
+		wantExecuted      bool
 	}{
-		{"mismatch parks", strPtr("nmi:old"), fakeFingerprints{"mobius": "nmi:new"}, false},
-		{"match executes", strPtr("nmi:same"), fakeFingerprints{"mobius": "nmi:same"}, true},
-		{"unstamped (pre-#365) executes", nil, fakeFingerprints{"mobius": "nmi:new"}, true},
-		{"unresolvable current executes", strPtr("nmi:old"), fakeFingerprints{}, true},
-		{"nil source executes", strPtr("nmi:old"), nil, true},
+		{"mismatch parks", &boundID, fakeProviderAccountResolver{"mobius": currentAccount("nmi", "new")}, false},
+		{"match executes", &boundID, fakeProviderAccountResolver{"mobius": currentAccount("nmi", "old")}, true},
+		{"unbound legacy intent executes", nil, fakeProviderAccountResolver{"mobius": currentAccount("nmi", "new")}, true},
+		{"unresolvable current executes", &boundID, fakeProviderAccountResolver{}, true},
+		{"nil resolver executes", &boundID, nil, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ledger := newFakeLedger()
+			ledger.accounts[boundID] = boundAccount(boundID, "nmi", "old")
 			intent := testIntent("t", OriginUser, 1)
-			intent.AccountFingerprint = tc.stamp
+			intent.ProviderAccountID = tc.providerAccountID
 			ledger.due = append(ledger.due, intent)
 
 			handler := &fakeHandler{typ: "t", relevance: Relevance{Applicable: true}, execute: Succeeded(nil)}
-			r := &Runner{Store: ledger, Registry: NewRegistry(handler), Fingerprints: tc.fingerprints}
+			r := &Runner{Store: ledger, Registry: NewRegistry(handler), ProviderAccounts: tc.current}
 			stats, err := r.RunExecuteOnce(context.Background())
 			require.NoError(t, err)
 
@@ -71,13 +81,15 @@ func TestRunnerAccountGuardExecute(t *testing.T) {
 // intent) — a mismatch defers the verify, never calls the handler.
 func TestRunnerAccountGuardVerify(t *testing.T) {
 	ledger := newFakeLedger()
+	boundID := uuid.New()
+	ledger.accounts[boundID] = boundAccount(boundID, "nmi", "old")
 	intent := testIntent("t", OriginSystem, 1)
 	intent.Status = StatusUnknownNeedsVerify
-	intent.AccountFingerprint = strPtr("nmi:old")
+	intent.ProviderAccountID = &boundID
 	ledger.dueVerify = append(ledger.dueVerify, intent)
 
 	handler := &fakeHandler{typ: "t", relevance: Relevance{Applicable: true}, verify: Succeeded(nil)}
-	r := &Runner{Store: ledger, Registry: NewRegistry(handler), Fingerprints: fakeFingerprints{"mobius": "nmi:new"}}
+	r := &Runner{Store: ledger, Registry: NewRegistry(handler), ProviderAccounts: fakeProviderAccountResolver{"mobius": currentAccount("nmi", "new")}}
 	stats, err := r.RunVerifyOnce(context.Background())
 	require.NoError(t, err)
 
@@ -105,8 +117,8 @@ func newNMIProfileServer(t *testing.T, calls *atomic.Int64) *httptest.Server {
 	}))
 }
 
-// TestNMIAccountIdentity: the fingerprint is the MERCHANT identity from the
-// gateway's profile report — derived from the account, not the credential.
+// TestNMIAccountIdentity: the account identity is the MERCHANT identity from
+// the gateway's profile report — derived from the account, not the credential.
 func TestNMIAccountIdentity(t *testing.T) {
 	var calls atomic.Int64
 	srv := newNMIProfileServer(t, &calls)
@@ -130,10 +142,10 @@ func TestNMIAccountIdentity(t *testing.T) {
 	assert.Contains(t, err.Error(), "rejected")
 }
 
-// TestRuntimeFingerprintsStripe: the stripe fingerprint is the account id
+// TestRuntimeProviderAccountsStripe: the stripe account identity is the account id
 // from GET /v1/account, cached per secret key — key rotation within the same
 // account refetches and matches; a fetch failure resolves to ok=false.
-func TestRuntimeFingerprintsStripe(t *testing.T) {
+func TestRuntimeProviderAccountsStripe(t *testing.T) {
 	var calls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		calls.Add(1)
@@ -149,65 +161,67 @@ func TestRuntimeFingerprintsStripe(t *testing.T) {
 	cfg := &config.Config{Processors: map[string]*config.ProcessorConfig{
 		"stripe": {Type: "stripe", SecretKey: "sk_test_aaa"},
 	}}
-	f := NewRuntimeFingerprints(cfg, nil)
-	f.StripeBaseURL = srv.URL
+	resolver := NewRuntimeProviderAccounts(cfg, nil)
+	resolver.StripeBaseURL = srv.URL
 
 	ctx := context.Background()
-	fp, ok := f.AccountFingerprint(ctx, "stripe")
+	account, ok := resolver.ResolveProviderAccount(ctx, "stripe")
 	require.True(t, ok)
-	assert.Equal(t, "stripe:acct_123", fp)
+	assert.Equal(t, "stripe", account.ProviderType)
+	assert.Equal(t, "acct_123", account.AccountID)
 
 	// Cached: second lookup with the same key makes no HTTP call.
-	_, _ = f.AccountFingerprint(ctx, "stripe")
+	_, _ = resolver.ResolveProviderAccount(ctx, "stripe")
 	assert.Equal(t, int64(1), calls.Load())
 
-	// Same-account key rotation: refetch, same fingerprint, no false park.
+	// Same-account key rotation: refetch, same account id, no false park.
 	cfg.Processors["stripe"].SecretKey = "sk_test_bbb"
-	fp2, ok := f.AccountFingerprint(ctx, "stripe")
+	account2, ok := resolver.ResolveProviderAccount(ctx, "stripe")
 	require.True(t, ok)
-	assert.Equal(t, fp, fp2)
+	assert.Equal(t, account.AccountID, account2.AccountID)
 	assert.Equal(t, int64(2), calls.Load())
 
 	// Fetch failure -> ok=false (guard skipped), not an error.
 	cfg.Processors["stripe"].SecretKey = "rk_live_denied"
-	_, ok = f.AccountFingerprint(ctx, "stripe")
+	_, ok = resolver.ResolveProviderAccount(ctx, "stripe")
 	assert.False(t, ok)
 
 	// Unknown / exempt providers resolve to ok=false.
-	_, ok = f.AccountFingerprint(ctx, "solana")
+	_, ok = resolver.ResolveProviderAccount(ctx, "unknown")
 	assert.False(t, ok)
 }
 
-// TestRuntimeFingerprintsNMIProvider: NMI-backed provider names resolve
+// TestRuntimeProviderAccountsNMIProvider: NMI-backed provider names resolve
 // through the client map; the identity is fetched lazily, cached per
 // security key, refetched after key rotation (same account -> same
-// fingerprint, no false park), and unresolvable on fetch failure.
-func TestRuntimeFingerprintsNMIProvider(t *testing.T) {
+// account id, no false park), and unresolvable on fetch failure.
+func TestRuntimeProviderAccountsNMIProvider(t *testing.T) {
 	var calls atomic.Int64
 	srv := newNMIProfileServer(t, &calls)
 	defer srv.Close()
 	ctx := context.Background()
 
 	client := &nmi.NMIClient{SecurityKey: "sec-one", QueryURL: srv.URL}
-	f := NewRuntimeFingerprints(nil, map[string]*nmi.NMIClient{"mobius": client})
+	resolver := NewRuntimeProviderAccounts(nil, map[string]*nmi.NMIClient{"mobius": client})
 
-	fp, ok := f.AccountFingerprint(ctx, "Mobius")
+	account, ok := resolver.ResolveProviderAccount(ctx, "Mobius")
 	require.True(t, ok)
-	assert.Equal(t, "nmi:Acme TEST <billing@acme.test>", fp)
+	assert.Equal(t, "nmi", account.ProviderType)
+	assert.Equal(t, "Acme TEST <billing@acme.test>", account.AccountID)
 
 	// Cached: no second profile query for the same key.
-	_, _ = f.AccountFingerprint(ctx, "mobius")
+	_, _ = resolver.ResolveProviderAccount(ctx, "mobius")
 	assert.Equal(t, int64(1), calls.Load())
 
-	// Key rotation within the same account: refetch, identical fingerprint.
+	// Key rotation within the same account: refetch, identical account id.
 	client.SecurityKey = "sec-two"
-	fp2, ok := f.AccountFingerprint(ctx, "mobius")
+	account2, ok := resolver.ResolveProviderAccount(ctx, "mobius")
 	require.True(t, ok)
-	assert.Equal(t, fp, fp2)
+	assert.Equal(t, account.AccountID, account2.AccountID)
 	assert.Equal(t, int64(2), calls.Load())
 
 	// Fetch failure (gateway rejects the key) -> ok=false, guard skipped.
 	client.SecurityKey = "rejected"
-	_, ok = f.AccountFingerprint(ctx, "mobius")
+	_, ok = resolver.ResolveProviderAccount(ctx, "mobius")
 	assert.False(t, ok)
 }

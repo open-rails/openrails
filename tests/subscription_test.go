@@ -12,9 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/http/response"
 	"github.com/open-rails/openrails/pkg/api"
 )
+
+type listResponse[T any] struct {
+	Object  string `json:"object"`
+	Data    []T    `json:"data"`
+	Total   int64  `json:"total"`
+	Limit   int    `json:"limit"`
+	Offset  int    `json:"offset"`
+	HasMore bool   `json:"has_more"`
+}
 
 // TestGetProductsEndpoint tests the public products endpoint returns seeded products
 func TestGetProductsEndpoint(t *testing.T) {
@@ -33,7 +41,7 @@ func TestGetProductsEndpoint(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, "Should return 200 OK")
 
 		// Parse list response with pagination
-		var resp response.List[api.ProductObject]
+		var resp listResponse[api.ProductObject]
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err, "Should parse response JSON")
 
@@ -71,7 +79,7 @@ func TestGetProductsEndpoint(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 
-		var resp response.List[api.ProductObject]
+		var resp listResponse[api.ProductObject]
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 
@@ -130,7 +138,7 @@ func TestGetActiveSubscriptionEndpoint(t *testing.T) {
 		// User without subscription should get 200 with empty list
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var resp response.List[any]
+		var resp listResponse[any]
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 
@@ -151,7 +159,7 @@ func TestGetActiveSubscriptionEndpoint(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 
 		// Parse list response
-		var resp response.List[json.RawMessage]
+		var resp listResponse[json.RawMessage]
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 
@@ -203,7 +211,7 @@ func TestGetSubscriptionHistoryEndpoint(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var resp response.List[any]
+		var resp listResponse[any]
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 
@@ -230,7 +238,7 @@ func TestGetSubscriptionHistoryEndpoint(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 
-		var resp response.List[map[string]any]
+		var resp listResponse[map[string]any]
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 
@@ -272,7 +280,7 @@ func TestGetUserPaymentsEndpoint(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var resp response.List[any]
+		var resp listResponse[any]
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 
@@ -294,7 +302,7 @@ func TestGetUserPaymentsEndpoint(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 
-		var resp response.List[map[string]any]
+		var resp listResponse[map[string]any]
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 

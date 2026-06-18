@@ -130,7 +130,7 @@ func TestAdmitter_DelegatedInvokerWindowEnforced(t *testing.T) {
 	// Grant the invoker a $1000-per-5h fixed window (the delegated spend cap).
 	require.NoError(t, bpStore.Upsert(ctx, payer, admission.InvokerSpendLimit{
 		Scope: "invoker", ScopeKey: invoker,
-		Windows: []models.BudgetWindowPolicy{{Key: "5h", WindowSeconds: 5 * 3600, Limit: 1000, Cadence: "fixed"}},
+		Windows: []models.BudgetWindowPolicy{{Key: "5h", WindowSeconds: 5 * 3600, Limit: 1000}},
 	}))
 
 	d, err := adm.Admit(ctx, delegatedReq(payer, invoker, uuid.NewString(), 600))
@@ -169,7 +169,7 @@ func TestAdmitter_StaggeredPerPayerWindows(t *testing.T) {
 	for _, p := range []identity.CustomerID{payerA, payerB} {
 		require.NoError(t, bpStore.Upsert(ctx, p, admission.InvokerSpendLimit{
 			Scope: "invoker", ScopeKey: inv,
-			Windows: []models.BudgetWindowPolicy{{Key: "7d", WindowSeconds: 7 * 24 * 3600, Limit: 1000, Cadence: "fixed"}},
+			Windows: []models.BudgetWindowPolicy{{Key: "7d", WindowSeconds: 7 * 24 * 3600, Limit: 1000}},
 		}))
 	}
 

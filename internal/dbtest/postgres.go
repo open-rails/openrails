@@ -20,6 +20,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -29,10 +30,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/lib/pq" // database/sql driver used for schema bootstrap
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/open-rails/openrails/config"
@@ -43,7 +43,7 @@ var (
 	sharedOnce      sync.Once
 	sharedDSN       string
 	sharedErr       error
-	sharedContainer *postgres.PostgresContainer
+	sharedContainer testcontainers.Container
 )
 
 // RunMain is the TestMain entry point for any package that uses
@@ -101,16 +101,22 @@ func provision(ctx context.Context) (string, error) {
 		}
 		dsn = isolatedDSN
 	} else {
-		container, err := postgres.Run(ctx,
-			"postgres:18-alpine",
-			postgres.WithDatabase("test_db"),
-			postgres.WithUsername("test_user"),
-			postgres.WithPassword("test_password"),
-			testcontainers.WithWaitStrategy(
-				wait.ForLog("database system is ready to accept connections").
-					WithOccurrence(2).
-					WithStartupTimeout(60*time.Second),
-			),
+		container, err := testcontainers.GenericContainer(ctx,
+			testcontainers.GenericContainerRequest{
+				ContainerRequest: testcontainers.ContainerRequest{
+					Image:        "postgres:18-alpine",
+					ExposedPorts: []string{"5432/tcp"},
+					Env: map[string]string{
+						"POSTGRES_DB":       "test_db",
+						"POSTGRES_USER":     "test_user",
+						"POSTGRES_PASSWORD": "test_password",
+					},
+					WaitingFor: wait.ForLog("database system is ready to accept connections").
+						WithOccurrence(2).
+						WithStartupTimeout(60 * time.Second),
+				},
+				Started: true,
+			},
 		)
 		if err != nil {
 			return "", fmt.Errorf("start postgres container: %w", err)
@@ -121,10 +127,21 @@ func provision(ctx context.Context) (string, error) {
 		// Ryuk reaper is a secondary safety net but cannot be relied upon in
 		// offline/sandboxed runs where its image is unavailable.)
 		sharedContainer = container
-		dsn, err = container.ConnectionString(ctx, "sslmode=disable")
+		host, err := container.Host(ctx)
 		if err != nil {
-			return "", fmt.Errorf("postgres connection string: %w", err)
+			return "", fmt.Errorf("postgres container host: %w", err)
 		}
+		port, err := container.MappedPort(ctx, "5432/tcp")
+		if err != nil {
+			return "", fmt.Errorf("postgres mapped port: %w", err)
+		}
+		dsn = (&url.URL{
+			Scheme:   "postgres",
+			User:     url.UserPassword("test_user", "test_password"),
+			Host:     net.JoinHostPort(host, port.Port()),
+			Path:     "/test_db",
+			RawQuery: "sslmode=disable",
+		}).String()
 	}
 
 	if err := bootstrapAndMigrate(ctx, dsn); err != nil {
@@ -184,7 +201,7 @@ func replaceDSNDatabase(dsn, dbName string) (string, error) {
 }
 
 func bootstrapAndMigrate(ctx context.Context, dsn string) error {
-	sqlDB, err := sql.Open("postgres", dsn)
+	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return fmt.Errorf("open postgres for bootstrap: %w", err)
 	}

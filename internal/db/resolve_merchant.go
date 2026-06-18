@@ -53,11 +53,10 @@ func RegisterMerchant(ctx context.Context, qx gen.DBTX, opts RegisterMerchantOpt
 		name = opts.Slug
 	}
 	id, err := gen.New(qx).RegisterMerchant(ctx, gen.RegisterMerchantParams{
-		Slug:            opts.Slug,
-		Name:            name,
-		StripeAccountID: opts.StripeAccountID,
-		WebhookHost:     opts.WebhookHost,
-		WebhookPath:     opts.WebhookPath,
+		Slug:        opts.Slug,
+		Name:        name,
+		WebhookHost: opts.WebhookHost,
+		WebhookPath: opts.WebhookPath,
 	})
 	if err != nil {
 		return merchant.ID{}, fmt.Errorf("register merchant slug %q: %w", opts.Slug, err)
@@ -67,11 +66,11 @@ func RegisterMerchant(ctx context.Context, qx gen.DBTX, opts RegisterMerchantOpt
 
 // RegisterMerchantOptions is the billing-only descriptor for RegisterMerchant.
 // It carries NO auth/issuer/JWKS — auth is the host's (embedded) or AuthKit's
-// (standalone). Processor refs are optional; nil leaves an existing value intact.
+// (standalone). Provider account identity is owned by provider_accounts, not
+// merchants.
 type RegisterMerchantOptions struct {
-	Slug            string
-	Name            string
-	StripeAccountID *string
-	WebhookHost     *string
-	WebhookPath     *string
+	Slug        string
+	Name        string
+	WebhookHost *string
+	WebhookPath *string
 }

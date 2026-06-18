@@ -152,22 +152,22 @@ type Runtime struct {
 	// user-origin instance wired into UserSubscriptionService.
 	DeferredDeletes subscriptions.DeferredDeleteScheduler
 
-	// intentFingerprints is the shared #365 account-fingerprint source — one
+	// intentProviderAccounts is the shared #518 provider-account resolver — one
 	// instance so the Stripe account-id cache is reused across every
-	// producer/executor. Built lazily by AccountFingerprints().
-	intentFingerprints     *intents.RuntimeFingerprints
-	intentFingerprintsOnce sync.Once
+	// producer/executor. Built lazily by ProviderAccounts().
+	intentProviderAccounts     *intents.RuntimeProviderAccounts
+	intentProviderAccountsOnce sync.Once
 }
 
-// AccountFingerprints returns the #365 account-fingerprint source over the
-// runtime's live provider credentials. Producers stamp it at enqueue; the
-// executor/verifier compare against it and park intents enqueued under a
-// different provider account.
-func (r *Runtime) AccountFingerprints() intents.FingerprintSource {
-	r.intentFingerprintsOnce.Do(func() {
-		r.intentFingerprints = intents.NewRuntimeFingerprints(r.Config, r.NMIClients)
+// ProviderAccounts returns the provider-account resolver over the runtime's
+// live provider credentials. Producers bind it at enqueue; the executor/verifier
+// compare against it and park intents enqueued under a different provider
+// account.
+func (r *Runtime) ProviderAccounts() intents.ProviderAccountResolver {
+	r.intentProviderAccountsOnce.Do(func() {
+		r.intentProviderAccounts = intents.NewRuntimeProviderAccounts(r.Config, r.NMIClients)
 	})
-	return r.intentFingerprints
+	return r.intentProviderAccounts
 }
 
 func (r *Runtime) FXRateHealth() (time.Time, bool) {

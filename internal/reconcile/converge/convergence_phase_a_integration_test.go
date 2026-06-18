@@ -1,6 +1,6 @@
 //go:build integration
 
-package reconcile
+package converge
 
 import (
 	"context"
@@ -16,8 +16,8 @@ import (
 )
 
 // #511 Phase A: the findings ledger admits self-describing qualified finding
-// types and the held/indeterminate statuses, and rejects unknown names. The
-// legacy PS-* codes stay admitted during the transition.
+// types and the held/indeterminate statuses, and rejects everything else —
+// including the retired legacy PS-* codes (Phase F: slugs only).
 func TestConvergenceFindings_PhaseA_Taxonomy(t *testing.T) {
 	ctx := context.Background()
 	appDB := startReconcilePostgres(t)
@@ -32,7 +32,6 @@ func TestConvergenceFindings_PhaseA_Taxonomy(t *testing.T) {
 		{"life.subscription.grace_exhausted", "open", "self"}, // grace exhausted
 		{"consistency.duplicate.provider_charge", "admin_pending", "self"},
 		{"pull.charge.missing", "indeterminate", "nmi"}, // provider authority unreachable
-		{"PS-2", "open", "nmi"},                         // legacy code still admitted (transition)
 	}
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		q := gen.New(appDB.Qx(ctx))
@@ -49,17 +48,21 @@ func TestConvergenceFindings_PhaseA_Taxonomy(t *testing.T) {
 		return nil
 	}))
 
-	// An unknown finding_type violates the CHECK (isolated conn so a poisoned tx
-	// can't affect the assertions above).
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		q := gen.New(appDB.Qx(ctx))
-		_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
-			MerchantID: merchantID, Provider: "self", FindingType: "bogus",
-			SubjectKey: "bogus:" + suffix, Severity: "high", Status: "open", RunID: runID,
-		})
-		require.Error(t, err, "an unknown finding_type must be rejected by the CHECK")
-		return nil
-	}))
+	// An unknown finding_type — and, post-Phase-F, a legacy PS-* code — violates
+	// the CHECK (isolated conn each so a poisoned tx can't affect the assertions
+	// above).
+	for _, bad := range []string{"bogus", "PS-2"} {
+		bad := bad
+		require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			q := gen.New(appDB.Qx(ctx))
+			_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+				MerchantID: merchantID, Provider: "self", FindingType: bad,
+				SubjectKey: bad + ":" + suffix, Severity: "high", Status: "open", RunID: runID,
+			})
+			require.Error(t, err, "finding_type %q must be rejected by the CHECK (slugs only)", bad)
+			return nil
+		}))
+	}
 }
 
 // #511 Phase A: the per-(merchant, source_domain) confirmed-absence gate (§3.2).

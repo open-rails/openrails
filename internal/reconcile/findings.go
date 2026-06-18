@@ -14,38 +14,38 @@ const (
 	// OpenRails does not know. CRITICAL. Enforce materializes the local
 	// subscription when identity AND plan resolve unambiguously; ambiguous or
 	// unresolvable findings stay admin_pending.
-	FindingRemoteSubMissingLocal FindingType = "PS-1"
+	FindingRemoteSubMissingLocal FindingType = "pull.subscription.missing"
 	// FindingLocalActiveRemoteDead (PS-2): local says active/past_due, the
 	// processor says cancelled/expired (on NMI: absent from the recurring
 	// report). Enforce: cancel locally + revoke subscription-sourced
 	// entitlements.
-	FindingLocalActiveRemoteDead FindingType = "PS-2"
+	FindingLocalActiveRemoteDead FindingType = "pull.subscription.dead"
 	// FindingStatusMismatch (PS-3): statuses/periods disagree in a non-PS-2
 	// way. Enforce: adopt the processor's status + period timestamps.
-	FindingStatusMismatch FindingType = "PS-3"
+	FindingStatusMismatch FindingType = "pull.subscription.mismatch"
 	// FindingChargeMissingLocal (PS-4): a successful processor charge has no
 	// local payment record. Enforce: backfill openrails.payments (+ entitlements
 	// when the charge's subscription period is current).
-	FindingChargeMissingLocal FindingType = "PS-4"
+	FindingChargeMissingLocal FindingType = "pull.charge.missing"
 	// FindingRefundUnrecorded (PS-5): a processor refund is not recorded
 	// locally. Enforce: record the refund; any entitlement-revocation
 	// recommendation goes to the admin queue.
-	FindingRefundUnrecorded FindingType = "PS-5"
+	FindingRefundUnrecorded FindingType = "pull.refund.missing"
 	// FindingChargebackActiveSub (PS-6): chargeback at the processor while the
 	// matched subscription is still active locally. CRITICAL; admin_pending
 	// (terminating a paying-ish user over a dispute is a human decision).
-	FindingChargebackActiveSub FindingType = "PS-6"
+	FindingChargebackActiveSub FindingType = "pull.dispute.chargeback"
 	// FindingVaultMismatch (PS-7): stored payment-method metadata disagrees
 	// with the processor vault. Enforce: adopt the processor record.
-	FindingVaultMismatch FindingType = "PS-7"
+	FindingVaultMismatch FindingType = "pull.payment_method.mismatch"
 	// FindingDuplicateSubscriptions (PS-8): one subject carries overlapping
 	// active subscriptions. Always admin_pending — the fix (cancel+refund at
 	// the processor) is remote and human.
-	FindingDuplicateSubscriptions FindingType = "PS-8"
+	FindingDuplicateSubscriptions FindingType = "consistency.duplicate.remote_subscription"
 	// FindingEntitlementMismatch (PS-9): entitlements disagree with the
 	// subscription, either direction. Enforce: grant/revoke
 	// SUBSCRIPTION-sourced entitlements only.
-	FindingEntitlementMismatch FindingType = "PS-9"
+	FindingEntitlementMismatch FindingType = "derive.grant_effect.mismatch"
 	// FindingStuckIntent (PS-10): a provider intent (#358 ledger) sat
 	// non-terminal beyond the hardcoded stuck thresholds (pending/
 	// failed_retryable > 24h; in_flight/unknown_needs_verify > 2h).
@@ -55,7 +55,7 @@ const (
 	// lifts); everything else is admin_pending — it means provider failures,
 	// bad credentials, or a dead worker. Neither check nor fix ever touches
 	// the intent itself: the executor/verifier own it.
-	FindingStuckIntent FindingType = "PS-10"
+	FindingStuckIntent FindingType = "life.provider_intent.stuck"
 )
 
 // Severity of a finding.
@@ -137,6 +137,9 @@ type ApplyAction struct {
 // subscription-sourced path.
 type MaterializeSubscriptionAction struct {
 	Provider Provider
+	// ProviderAccountID is openrails.provider_accounts.id for account-bound
+	// provider-pull materialization.
+	ProviderAccountID *uuid.UUID
 	// Processor is the LOCAL processor name to stamp on the subscription —
 	// the key under which the price's provider link matched (e.g. "mobius",
 	// "stripe"), so the new row joins the same roster future reconciles load.
@@ -187,15 +190,16 @@ type AdoptStatusAction struct {
 // charge (PS-4), deduped on (tenant, processor, transaction_id), and grants
 // the subscription's entitlements when the period is current.
 type BackfillPaymentAction struct {
-	Processor      string
-	TransactionID  string
-	AmountCents    int64
-	Currency       string
-	PurchasedAt    time.Time
-	PriceID        uuid.UUID
-	SubscriptionID *uuid.UUID
-	CustomerID     uuid.UUID
-	Metadata       map[string]any
+	ProviderAccountID *uuid.UUID
+	Processor         string
+	TransactionID     string
+	AmountCents       int64
+	Currency          string
+	PurchasedAt       time.Time
+	PriceID           uuid.UUID
+	SubscriptionID    *uuid.UUID
+	CustomerID        uuid.UUID
+	Metadata          map[string]any
 	// Grant, when non-nil, grants entitlements for the current period after
 	// the backfill (charge covers a period that is still running).
 	Grant *GrantEntitlementsAction
@@ -204,6 +208,7 @@ type BackfillPaymentAction struct {
 // RecordRefundAction records a processor refund locally (PS-5) as a
 // negative-amount payment row linked to the refunded payment.
 type RecordRefundAction struct {
+	ProviderAccountID *uuid.UUID
 	Processor         string
 	TransactionID     string
 	AmountCents       int64 // positive remote amount; recorded negative

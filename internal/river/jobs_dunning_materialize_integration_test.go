@@ -123,19 +123,18 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Zero(t, nmiMutations.Load(), "materialize must not send a provider mutation")
 
 	// The decision is on the ledger: pending, system-origin, window-bounded,
-	// #365 fingerprint stamped.
+	// #518 provider account binding stamped.
 	var status, origin, intentType string
-	var fingerprint *string
+	var providerAccountID *uuid.UUID
 	var expiresAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, origin, intent_type, account_fingerprint, expires_at
+		`SELECT status, origin, intent_type, provider_account_id, expires_at
 		 FROM openrails.provider_intents WHERE subscription_id = $1`, subID).
-		Scan(&status, &origin, &intentType, &fingerprint, &expiresAt))
+		Scan(&status, &origin, &intentType, &providerAccountID, &expiresAt))
 	assert.Equal(t, intents.StatusPending, status)
 	assert.Equal(t, string(intents.OriginSystem), origin)
 	assert.Equal(t, intents.TypeManualRebill, intentType)
-	require.NotNil(t, fingerprint)
-	assert.Equal(t, "nmi:Mat TEST <mat@acme.test>", *fingerprint)
+	require.NotNil(t, providerAccountID)
 	require.NotNil(t, expiresAt, "parked charge must be bounded by the dunning window")
 
 	// No lifecycle movement, and the forensic retry fields are untouched

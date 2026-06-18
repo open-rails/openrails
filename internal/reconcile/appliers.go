@@ -93,16 +93,17 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 		return false, err
 	}
 	n, err := w.DB.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
-		MerchantID:     tid.UUID(),
-		PriceID:        a.PriceID,
-		Processor:      gen.OpenrailsProcessorType(a.Processor),
-		TransactionID:  a.TransactionID,
-		Amount:         a.AmountCents,
-		Currency:       currency,
-		SubscriptionID: a.SubscriptionID,
-		Metadata:       metadataJSON(a.Metadata),
-		PurchasedAt:    a.PurchasedAt,
-		CustomerID:     a.CustomerID,
+		MerchantID:        tid.UUID(),
+		PriceID:           a.PriceID,
+		Processor:         gen.OpenrailsProcessorType(a.Processor),
+		TransactionID:     a.TransactionID,
+		Amount:            a.AmountCents,
+		Currency:          currency,
+		SubscriptionID:    a.SubscriptionID,
+		Metadata:          metadataJSON(a.Metadata),
+		PurchasedAt:       a.PurchasedAt,
+		CustomerID:        a.CustomerID,
+		ProviderAccountID: a.ProviderAccountID,
 	})
 	if err != nil {
 		return false, err
@@ -147,6 +148,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		Metadata:          metadataJSON(a.Metadata),
 		PurchasedAt:       a.PurchasedAt,
 		CustomerID:        a.CustomerID,
+		ProviderAccountID: a.ProviderAccountID,
 	})
 	if err != nil {
 		return false, err
@@ -220,6 +222,7 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		CustomerID:              a.CustomerID,
 		PriceID:                 a.PriceID,
 		Processors:              localProcessorNames(a.Provider),
+		ProviderAccountID:       a.ProviderAccountID,
 	})
 	if err != nil {
 		return MaterializeResult{}, err

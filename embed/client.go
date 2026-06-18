@@ -144,7 +144,6 @@ func budgetWindowFromDTO(w billingservice.AdmitBudgetWindowDTO) openrails.Budget
 		Remaining:         w.Remaining,
 		ResetAfterSeconds: w.ResetAfterSeconds,
 		ResetAt:           w.ResetAt,
-		Cadence:           w.Cadence,
 		Allowed:           w.Allowed,
 	}
 }
@@ -619,12 +618,12 @@ func (c *localClient) SetPayerSpendLimits(ctx context.Context, tenantSubjectID s
 	}
 	for _, b := range in.BudgetWindows {
 		pol.BudgetWindows = append(pol.BudgetWindows, billingservice.TierBudgetWindowInput{
-			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency, Cadence: b.Cadence,
+			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency,
 		})
 	}
 	for _, b := range in.BadSpendWindows {
 		pol.BadSpendWindows = append(pol.BadSpendWindows, billingservice.TierBudgetWindowInput{
-			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency, Cadence: b.Cadence,
+			Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency,
 		})
 	}
 	if err := c.svc.SetPayerSpendLimits(ctx, payer, pol); err != nil {
@@ -808,7 +807,7 @@ func spendLimitWindowInputs(ws []openrails.SpendLimitWindow) []billingservice.Sp
 	out := make([]billingservice.SpendLimitWindowInput, 0, len(ws))
 	for _, w := range ws {
 		out = append(out, billingservice.SpendLimitWindowInput{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence,
+			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
 		})
 	}
 	return out
@@ -853,7 +852,7 @@ func (c *localClient) InvokerSpendLimits(ctx context.Context, tenantSubjectID st
 	for _, p := range policies {
 		ws := make([]openrails.SpendLimitWindow, 0, len(p.Windows))
 		for _, w := range p.Windows {
-			ws = append(ws, openrails.SpendLimitWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence})
+			ws = append(ws, openrails.SpendLimitWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency})
 		}
 		out = append(out, openrails.InvokerSpendLimit{Scope: p.Scope, RoleID: p.ScopeKey, Windows: ws})
 	}

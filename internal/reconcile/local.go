@@ -132,8 +132,8 @@ type LocalState struct {
 // by the snapshot's transaction set rather than a date window, so clock skew
 // between us and the processor can not fake a missing payment).
 type LocalStateLoader interface {
-	Load(ctx context.Context, provider Provider) (*LocalState, error)
-	PaymentsByTransactionIDs(ctx context.Context, provider Provider, transactionIDs []string) ([]LocalPayment, error)
+	Load(ctx context.Context, provider Provider, providerAccountID *uuid.UUID) (*LocalState, error)
+	PaymentsByTransactionIDs(ctx context.Context, provider Provider, providerAccountID *uuid.UUID, transactionIDs []string) ([]LocalPayment, error)
 }
 
 // PGLocalStateLoader loads local state through the sqlc layer on a
@@ -144,13 +144,16 @@ type PGLocalStateLoader struct {
 
 var _ LocalStateLoader = (*PGLocalStateLoader)(nil)
 
-func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider) (*LocalState, error) {
+func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, providerAccountID *uuid.UUID) (*LocalState, error) {
 	names := localProcessorNames(provider)
 	q := l.DB.Gen(ctx)
 
 	state := &LocalState{}
 
-	subs, err := q.ReconcileListSubscriptionsByProcessors(ctx, names)
+	subs, err := q.ReconcileListSubscriptionsByProcessors(ctx, gen.ReconcileListSubscriptionsByProcessorsParams{
+		Processors:        names,
+		ProviderAccountID: providerAccountID,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +199,10 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider) (*Loca
 		state.Subscriptions = append(state.Subscriptions, s)
 	}
 
-	ents, err := q.ReconcileListSubscriptionEntitlements(ctx, names)
+	ents, err := q.ReconcileListSubscriptionEntitlements(ctx, gen.ReconcileListSubscriptionEntitlementsParams{
+		Processors:        names,
+		ProviderAccountID: providerAccountID,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +241,10 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider) (*Loca
 		state.Prices = append(state.Prices, p)
 	}
 
-	pms, err := q.ReconcileListPaymentMethodsByProcessors(ctx, names)
+	pms, err := q.ReconcileListPaymentMethodsByProcessors(ctx, gen.ReconcileListPaymentMethodsByProcessorsParams{
+		Processors:        names,
+		ProviderAccountID: providerAccountID,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -261,13 +270,14 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider) (*Loca
 	return state, nil
 }
 
-func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provider Provider, transactionIDs []string) ([]LocalPayment, error) {
+func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provider Provider, providerAccountID *uuid.UUID, transactionIDs []string) ([]LocalPayment, error) {
 	if len(transactionIDs) == 0 {
 		return nil, nil
 	}
 	rows, err := l.DB.Gen(ctx).ReconcileListPaymentsByTransactionIDs(ctx, gen.ReconcileListPaymentsByTransactionIDsParams{
-		Processors:     localProcessorNames(provider),
-		TransactionIds: transactionIDs,
+		Processors:        localProcessorNames(provider),
+		ProviderAccountID: providerAccountID,
+		TransactionIds:    transactionIDs,
 	})
 	if err != nil {
 		return nil, err

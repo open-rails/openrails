@@ -179,14 +179,16 @@ SELECT id, customer_id, price_id, product_id, status, processor,
        last_retry_at, retry_attempts, next_retry_at,
        entitlements_spec_snapshot
 FROM openrails.subscriptions
-WHERE processor = ANY (sqlc.arg(processors)::text[]);
+WHERE processor = ANY (sqlc.arg(processors)::text[])
+  AND (sqlc.narg(provider_account_id)::uuid IS NULL OR provider_account_id = sqlc.narg(provider_account_id)::uuid);
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, processor, transaction_id, amount, status,
        subscription_id, refunded_payment_id, purchased_at
 FROM openrails.payments
 WHERE processor::text = ANY (sqlc.arg(processors)::text[])
-  AND transaction_id = ANY (sqlc.arg(transaction_ids)::text[]);
+  AND transaction_id = ANY (sqlc.arg(transaction_ids)::text[])
+  AND (sqlc.narg(provider_account_id)::uuid IS NULL OR provider_account_id = sqlc.narg(provider_account_id)::uuid);
 
 -- Live subscription-sourced entitlements for the provider's subscriptions.
 -- Grace windows and admin grants are deliberately excluded: only
@@ -197,6 +199,7 @@ SELECT ent.id, ent.customer_id, ent.entitlement, ent.source_id,
 FROM openrails.entitlements ent
 JOIN openrails.subscriptions sub ON sub.id = ent.source_id
 WHERE sub.processor = ANY (sqlc.arg(processors)::text[])
+  AND (sqlc.narg(provider_account_id)::uuid IS NULL OR sub.provider_account_id = sqlc.narg(provider_account_id)::uuid)
   AND ent.source_type = 'subscription'
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL;
@@ -205,7 +208,8 @@ WHERE sub.processor = ANY (sqlc.arg(processors)::text[])
 SELECT id, customer_id, processor, vault_id, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
-WHERE processor = ANY (sqlc.arg(processors)::text[]);
+WHERE processor = ANY (sqlc.arg(processors)::text[])
+  AND (sqlc.narg(provider_account_id)::uuid IS NULL OR provider_account_id = sqlc.narg(provider_account_id)::uuid);
 
 -- name: ReconcileListSolanaSubscriptionRefs :many
 SELECT subscription_pda, plan_pda, subscriber_wallet
@@ -298,7 +302,7 @@ WHERE NOT EXISTS (
 -- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
     merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, customer_id
+    status, subscription_id, metadata, purchased_at, customer_id, provider_account_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(processor)::openrails.processor_type,
@@ -306,9 +310,9 @@ INSERT INTO openrails.payments (
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id)
+    sqlc.arg(customer_id), sqlc.narg(provider_account_id)
 )
-ON CONFLICT (merchant_id, processor, transaction_id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 -- PS-5: record a processor refund that is missing locally as a negative-
 -- amount payment row linked to the refunded payment. Same dedupe identity.
@@ -316,7 +320,7 @@ ON CONFLICT (merchant_id, processor, transaction_id) DO NOTHING;
 INSERT INTO openrails.payments (
     merchant_id, price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id
+    customer_id, provider_account_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(processor)::openrails.processor_type,
@@ -325,9 +329,9 @@ INSERT INTO openrails.payments (
     'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id)
+    sqlc.arg(customer_id), sqlc.narg(provider_account_id)
 )
-ON CONFLICT (merchant_id, processor, transaction_id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 -- name: ReconcileMarkPaymentRefunded :execrows
 UPDATE openrails.payments
@@ -345,7 +349,7 @@ WHERE id = sqlc.arg(id) AND status <> 'refunded';
 INSERT INTO openrails.subscriptions (
     merchant_id, price_id, product_id, status, processor, processor_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_spec_snapshot, credits_spec_snapshot, customer_id
+    entitlements_spec_snapshot, credits_spec_snapshot, customer_id, provider_account_id
 )
 SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::openrails.subscription_status,
        sqlc.arg(processor), sqlc.arg(processor_subscription_id),
@@ -353,7 +357,7 @@ SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::open
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
-       p.entitlements_spec, p.credits_spec, sqlc.arg(customer_id)
+       p.entitlements_spec, p.credits_spec, sqlc.arg(customer_id), sqlc.narg(provider_account_id)
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
 WHERE pr.id = sqlc.arg(price_id)
@@ -361,6 +365,7 @@ WHERE pr.id = sqlc.arg(price_id)
       SELECT 1 FROM openrails.subscriptions s
       WHERE s.processor_subscription_id = sqlc.arg(processor_subscription_id)
         AND s.processor = ANY (sqlc.arg(processors)::text[])
+        AND (sqlc.narg(provider_account_id)::uuid IS NULL OR s.provider_account_id = sqlc.narg(provider_account_id)::uuid)
   )
 RETURNING id, entitlements_spec_snapshot;
 
@@ -415,3 +420,75 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND grace_ends_at IS NOT NULL
   AND grace_ends_at < sqlc.arg(now)::timestamptz
 ORDER BY grace_ends_at;
+
+-- #511 LIFE plane (life.subscription.pending_stale): pending subscriptions that
+-- never confirmed within the threshold (cutoff = now - pendingStaleAfter).
+-- name: ListStalePendingSubscriptions :many
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
+  AND status = 'pending'
+  AND created_at < sqlc.arg(cutoff)::timestamptz
+ORDER BY created_at;
+
+-- #511 LIFE plane (life.provider_intent.abandoned): desired provider actions that
+-- will not auto-retry (terminal/expired, or past their deadline) and need an
+-- operator/admin. Surface-only (no auto-repair). Scoped by merchant (+ optional sub).
+-- name: ListAbandonedProviderIntents :many
+SELECT id, intent_type, status, provider FROM openrails.provider_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
+  AND (
+        status IN ('failed_terminal', 'expired')
+        OR (status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
+            AND expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz)
+      )
+ORDER BY created_at;
+
+-- #511 LIFE plane (life.subscription.period_overdue): an `active` sub past its
+-- current_period_ends_at that never advanced (missed rebill/failure webhook).
+-- name: ListPeriodOverdueSubscriptions :many
+SELECT id, current_period_ends_at FROM openrails.subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
+  AND status = 'active'
+  AND current_period_ends_at IS NOT NULL
+  AND current_period_ends_at < sqlc.arg(now)::timestamptz
+ORDER BY current_period_ends_at;
+
+-- name: MarkSubscriptionPastDueFromOverdue :execrows
+-- Repair for period_overdue: enter dunning. Set past_due + a grace window dated
+-- to the period end (not wall-clock), so a long-overdue sub's grace is already
+-- exhausted and life.subscription.grace_exhausted terminates it on the next pass
+-- (converge-not-replay: no missed charges are re-run).
+UPDATE openrails.subscriptions
+SET status = 'past_due',
+    grace_ends_at = COALESCE(grace_ends_at, sqlc.arg(grace_ends_at)::timestamptz),
+    updated_at = now()
+WHERE id = sqlc.arg(id) AND status = 'active'
+  AND current_period_ends_at IS NOT NULL;
+
+-- #511 LIFE plane (life.subscription.dunning_overdue): a past_due sub still in
+-- grace but with NO retry scheduled — its dunning schedule stalled. MISSING.
+-- name: ListDunningStalledSubscriptions :many
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
+  AND status = 'past_due'
+  AND next_retry_at IS NULL
+  AND (grace_ends_at IS NULL OR grace_ends_at > sqlc.arg(now)::timestamptz)
+ORDER BY current_period_ends_at;
+
+-- name: SetSubscriptionNextRetry :execrows
+-- Repair for dunning_overdue: re-establish the retry schedule so the dunning
+-- worker resumes (a CURRENT retry within grace — not a replay of missed cycles).
+UPDATE openrails.subscriptions
+SET next_retry_at = sqlc.arg(next_retry_at)::timestamptz, updated_at = now()
+WHERE id = sqlc.arg(id) AND status = 'past_due' AND next_retry_at IS NULL;
+
+-- #511 Phase E (Converge sweep worker): the privileged, no-GUC list of merchants
+-- to sweep. merchants is a GLOBAL control-plane table (not RLS-scoped).
+-- name: ListActiveMerchantIDs :many
+SELECT id FROM openrails.merchants
+WHERE status = 'active' AND deleted_at IS NULL
+ORDER BY id;

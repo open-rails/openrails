@@ -3,8 +3,9 @@ package repo
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -16,6 +17,23 @@ type ProductRepo struct {
 }
 
 func NewProductRepo(d *db.DB) *ProductRepo { return &ProductRepo{db: d} }
+
+func productPageInt32(v int) int32 {
+	if v < 0 {
+		return 0
+	}
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(v)
+}
+
+func productTierRankInt32(v int) (int32, error) {
+	if v < math.MinInt32 || v > math.MaxInt32 {
+		return 0, fmt.Errorf("product tier_rank %d outside int32 range", v)
+	}
+	return int32(v), nil
+}
 
 func productsFromGen(rows []gen.OpenrailsProduct) ([]*models.Product, error) {
 	out := make([]*models.Product, 0, len(rows))
@@ -42,7 +60,10 @@ func (r *ProductRepo) Create(ctx context.Context, product *models.Product) error
 	if product.Description != "" {
 		desc = &product.Description
 	}
-	tierRank32, _ := safecast.Convert[int32](product.TierRank)
+	tierRank32, err := productTierRankInt32(product.TierRank)
+	if err != nil {
+		return err
+	}
 	rows, err := r.db.Gen(ctx).CreateProduct(ctx, gen.CreateProductParams{
 		ID:               product.ID,
 		MerchantID:       product.MerchantID,
@@ -97,11 +118,9 @@ func (r *ProductRepo) GetActivePaginated(ctx context.Context, limit, offset int)
 	if err != nil {
 		return nil, 0, err
 	}
-	limit32, _ := safecast.Convert[int32](limit)
-	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListActiveProductsPaged(ctx, gen.ListActiveProductsPagedParams{
-		PageLimit:  limit32,
-		PageOffset: offset32,
+		PageLimit:  productPageInt32(limit),
+		PageOffset: productPageInt32(offset),
 	})
 	if err != nil {
 		return nil, 0, err
@@ -120,11 +139,9 @@ func (r *ProductRepo) GetAllPaginated(ctx context.Context, limit, offset int) ([
 	if err != nil {
 		return nil, 0, err
 	}
-	limit32, _ := safecast.Convert[int32](limit)
-	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListAllProductsPaged(ctx, gen.ListAllProductsPagedParams{
-		PageLimit:  limit32,
-		PageOffset: offset32,
+		PageLimit:  productPageInt32(limit),
+		PageOffset: productPageInt32(offset),
 	})
 	if err != nil {
 		return nil, 0, err
@@ -149,7 +166,10 @@ func (r *ProductRepo) Update(ctx context.Context, product *models.Product) error
 	if product.Description != "" {
 		desc = &product.Description
 	}
-	tierRank32, _ := safecast.Convert[int32](product.TierRank)
+	tierRank32, err := productTierRankInt32(product.TierRank)
+	if err != nil {
+		return err
+	}
 	rows, err := r.db.Gen(ctx).UpdateProduct(ctx, gen.UpdateProductParams{
 		ID:               product.ID,
 		Slug:             product.Slug,

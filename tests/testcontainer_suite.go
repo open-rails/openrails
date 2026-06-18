@@ -4,7 +4,6 @@ package tests
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
@@ -29,24 +28,24 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
-	_ "github.com/lib/pq" // PostgreSQL driver for schema creation
 	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	clickhousecontainer "github.com/testcontainers/testcontainers-go/modules/clickhouse"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	redismodule "github.com/testcontainers/testcontainers-go/modules/redis"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// TestContainerSuite manages test containers for integration testing
+// TestContainerSuite is the tests package's full-stack app harness. Postgres
+// lifecycle and migrations live in internal/dbtest; this type owns the remaining
+// Redis, ClickHouse, HTTP server, worker, and fixture-helper surface used by the
+// older tests in this package.
 type TestContainerSuite struct {
 	t *testing.T
 
 	// Containers
-	postgresContainer   *postgres.PostgresContainer
 	redisContainer      *redismodule.RedisContainer
 	clickhouseContainer *clickhousecontainer.ClickHouseContainer
 
@@ -112,46 +111,22 @@ func (suite *TestContainerSuite) SetupSuite() {
 	// Set log level to reduce noise during tests
 	logrus.SetLevel(logrus.WarnLevel)
 
-	// Start containers
-	suite.startPostgresContainer()
+	// Postgres is process-shared through internal/dbtest; this suite owns only
+	// the extra services its full-stack tests still need.
 	suite.startRedisContainer()
 	suite.startClickHouseContainer()
 
 	// Initialize config with container connection details
 	suite.initializeDatabaseConnections()
 
-	// Run database migrations (creates schema before app connects)
-	suite.runDatabaseMigrations()
+	// Run non-Postgres migrations and seed the tenant before app connects.
+	suite.prepareDatastores()
 
 	// Initialize server (bootstraps the app and sets up DB connection)
 	suite.initializeServer()
 
 	// Wait for server to be ready
 	suite.waitForServerReady()
-}
-
-// startPostgresContainer starts a PostgreSQL test container
-func (suite *TestContainerSuite) startPostgresContainer() {
-	suite.t.Helper()
-
-	if strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_URL")) != "" || strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN")) != "" {
-		return
-	}
-
-	container, err := postgres.Run(suite.ctx,
-		"postgres:18-alpine",
-		postgres.WithDatabase("test_db"),
-		postgres.WithUsername("test_user"),
-		postgres.WithPassword("test_password"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(30*time.Second),
-		),
-	)
-	require.NoError(suite.t, err)
-
-	suite.postgresContainer = container
 }
 
 // startRedisContainer starts a Redis test container
@@ -203,9 +178,7 @@ func (suite *TestContainerSuite) startClickHouseContainer() {
 func (suite *TestContainerSuite) initializeDatabaseConnections() {
 	suite.t.Helper()
 
-	// Get PostgreSQL connection string
-	postgresConnStr, err := suite.postgresConnectionString()
-	require.NoError(suite.t, err)
+	postgresConnStr := dbtest.SharedPostgresDSN(suite.t)
 
 	// Get Redis connection details
 	redisAddr, err := suite.redisAddress()
@@ -301,52 +274,18 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 	require.NoError(suite.t, err)
 }
 
-// runDatabaseMigrations runs database migrations for testing
-func (suite *TestContainerSuite) runDatabaseMigrations() {
+func (suite *TestContainerSuite) prepareDatastores() {
 	suite.t.Helper()
 
-	// First, create the required schemas (normally done by bootstrap SQL)
-	postgresConnStr, err := suite.postgresConnectionString()
-	require.NoError(suite.t, err)
-
-	// Connect directly to create schemas
-	sqlDB, err := sql.Open("postgres", postgresConnStr)
-	require.NoError(suite.t, err)
-	defer sqlDB.Close()
-
-	// Create required schemas
-	_, err = sqlDB.ExecContext(suite.ctx, `
-		CREATE SCHEMA IF NOT EXISTS billing;
-		CREATE SCHEMA IF NOT EXISTS profiles;
-	`)
-	require.NoError(suite.t, err)
-
-	// NOTE: the profiles schema (users, *_roles, the role_id() function, etc.) is
-	// owned entirely by the authkit migrations that migrate.RunPostgres applies
-	// below. Do NOT pre-create profiles tables here — a stale hand-rolled
-	// profiles.users (missing columns authkit later expects, e.g. phone_number)
-	// or a role_id() with a different return type shadows authkit's own
-	// migration-managed definitions and breaks the migration run. Admin authority
-	// in the integration suite comes from operator-tenant JWT claims, not DB roles
-	// (see test_helpers.go), so no profiles.roles seeding is needed either.
-
-	// Run all migrations using the migrate package
-	err = migrate.RunPostgres(suite.ctx, suite.Config)
-	require.NoError(suite.t, err)
-
-	err = migrate.RunClickHouse(suite.ctx, suite.Config)
+	err := migrate.RunClickHouse(suite.ctx, suite.Config)
 	require.NoError(suite.t, err)
 
 	// #336: no default merchant — seed the tenant this suite's engine binds to,
 	// then configure it (slug) so ResolveMerchant pins it.
 	seedPool, perr := pgxpool.New(suite.ctx, suite.Config.DB.URL)
 	require.NoError(suite.t, perr)
-	_, perr = seedPool.Exec(suite.ctx,
-		`INSERT INTO openrails.merchants (id, slug, name, status)
-		 VALUES ($1, $2, 'Test Merchant', 'active') ON CONFLICT (slug) DO NOTHING`,
-		dbtest.TestMerchantID.UUID(), dbtest.TestMerchantSlug)
-	seedPool.Close()
-	require.NoError(suite.t, perr)
+	defer seedPool.Close()
+	dbtest.EnsureTestMerchant(suite.ctx, suite.t, seedPool)
 	suite.Config.Merchant = dbtest.TestMerchantSlug
 }
 
@@ -364,19 +303,6 @@ func firstNonEmptyEnv(keys ...string) string {
 		}
 	}
 	return ""
-}
-
-func (suite *TestContainerSuite) postgresConnectionString() (string, error) {
-	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_URL")); dsn != "" {
-		return dsn, nil
-	}
-	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN")); dsn != "" {
-		return dsn, nil
-	}
-	if suite.postgresContainer == nil {
-		return "", fmt.Errorf("postgres test container is not initialized")
-	}
-	return suite.postgresContainer.ConnectionString(suite.ctx, "sslmode=disable")
 }
 
 func (suite *TestContainerSuite) redisAddress() (string, error) {
@@ -541,13 +467,6 @@ func (suite *TestContainerSuite) Cleanup() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		suite.App.Close(ctx)
-	}
-
-	// Terminate containers
-	if suite.postgresContainer != nil {
-		if err := suite.postgresContainer.Terminate(suite.ctx); err != nil {
-			suite.t.Logf("Failed to terminate postgres container: %v", err)
-		}
 	}
 
 	if suite.redisContainer != nil {

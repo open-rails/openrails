@@ -39,6 +39,11 @@ type Options struct {
 	// billingauth.DelegatedAuthenticatorFunc for a closure example.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	Cache                  cache.Cache
+	// PaymentProviders lets embedding hosts supply one or more payment-provider
+	// credential sets programmatically. This is merged into Config.Processors
+	// before the runtime is built. Local provider names are optional selectors;
+	// durable provider-account identity is resolved from the provider itself.
+	PaymentProviders []PaymentProvider
 }
 
 type Embedded struct {
@@ -48,6 +53,9 @@ type Embedded struct {
 func New(opts Options) (*Embedded, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("config is required")
+	}
+	if err := ApplyPaymentProviders(opts.Config, opts.PaymentProviders); err != nil {
+		return nil, err
 	}
 
 	// Build the gin-free application graph only. The standalone gin HTTP surface

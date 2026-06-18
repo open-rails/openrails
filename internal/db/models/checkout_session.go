@@ -63,9 +63,13 @@ type CheckoutSession struct {
 	ProcessorFields map[string]any `json:"processor_fields,omitempty"`
 	ProcessorState  map[string]any `json:"processor_state,omitempty"`
 
-	IdempotencyKey *string   `json:"idempotency_key,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+	// ProviderAccountID is the provider_accounts row selected for this provider
+	// checkout. It prevents provider sessions from being confused across rotated
+	// Stripe/NMI/CCBill accounts.
+	ProviderAccountID *uuid.UUID `json:"provider_account_id,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 
 	Price      *Price  `json:"price,omitempty"`
 	LastFour   *string `json:"last_four,omitempty"`

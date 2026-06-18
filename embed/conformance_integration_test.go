@@ -110,7 +110,6 @@ type obsBudget struct {
 	Remaining  int64
 	HasReset   bool
 	HasResetAt bool
-	Cadence    string
 	Allowed    bool
 }
 
@@ -120,7 +119,7 @@ func observeBudgets(ws []openrails.BudgetWindow) []obsBudget {
 		out = append(out, obsBudget{
 			Key: w.Key, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
 			Remaining: w.Remaining, HasReset: w.ResetAfterSeconds > 0,
-			HasResetAt: !w.ResetAt.IsZero(), Cadence: w.Cadence, Allowed: w.Allowed,
+			HasResetAt: !w.ResetAt.IsZero(), Allowed: w.Allowed,
 		})
 	}
 	return out
@@ -136,7 +135,6 @@ type obsBudgetPolicyWindow struct {
 	Key           string
 	WindowSeconds int64
 	Limit         int64
-	Cadence       string
 }
 
 type obsBudgetPolicy struct {
@@ -151,7 +149,7 @@ func observeBudgetPolicies(ps []openrails.InvokerSpendLimit) []obsBudgetPolicy {
 		o := obsBudgetPolicy{Scope: p.Scope, RoleID: p.RoleID}
 		for _, w := range p.Windows {
 			o.Windows = append(o.Windows, obsBudgetPolicyWindow{
-				Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Cadence: w.Cadence,
+				Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit,
 			})
 		}
 		out = append(out, o)
@@ -232,8 +230,6 @@ type scriptResult struct {
 	RevenueTotal int64
 	RevenueDays  []int64
 
-	ErrReleaseUnknown   obsErr
-	ErrReleaseGarbage   obsErr
 	ErrWithdrawNoSource obsErr
 	ErrDepositBadType   obsErr
 	ErrBalanceBadID     obsErr
@@ -425,14 +421,14 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.NoError(t, c.SetPayerSpendLimits(ctx, payerID, openrails.PayerSpendLimitInput{
 		Tier: "conf",
 		BudgetWindows: []openrails.BudgetWindowInput{
-			{Key: "hourly", WindowSeconds: 3600, Limit: 10_000, Cadence: "fixed"},
+			{Key: "hourly", WindowSeconds: 3600, Limit: 10_000},
 		},
 	}), "%s set-tier-policy", env.side)
 	require.NoError(t, c.SetInvokerSpendLimits(ctx, payerID, openrails.InvokerSpendLimitInput{
 		Scope:  "role",
 		RoleID: roleID,
 		Windows: []openrails.SpendLimitWindow{
-			{Key: "hourly", WindowSeconds: 3600, Limit: 10_000, Cadence: "fixed"},
+			{Key: "hourly", WindowSeconds: 3600, Limit: 10_000},
 		},
 	}), "%s set-subject-budget-policy (admit role)", env.side)
 
@@ -523,7 +519,6 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.NoError(t, err, "%s budget-status", env.side)
 	r.BudgetStatus = observeBudgets(bs)
 	require.Len(t, bs, 1, "%s budget-status windows", env.side)
-	require.Equal(t, "fixed", bs[0].Cadence, "%s budget-status cadence", env.side)
 
 	// 11) Balance + account snapshot (after all money movement).
 	bal, err := c.Balance(ctx, payerID)
@@ -606,11 +601,11 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		r.RevenueDays = append(r.RevenueDays, d.Amount)
 	}
 
-	// 16) Error cases — same sentinel via errors.Is on both transports.
-	r.ErrReleaseUnknown = observeErr(t, env.side+" release unknown hold",
-		c.Release(ctx, uuid.NewString()))
-	r.ErrReleaseGarbage = observeErr(t, env.side+" release garbage id",
-		c.Release(ctx, "not-a-uuid"))
+	// 16) Release is idempotent (#513): releasing an unknown / TTL-expired / garbage
+	// request id is a no-op on BOTH transports (the hold reservation is gone, so there
+	// is nothing to free — never an error).
+	require.NoError(t, c.Release(ctx, uuid.NewString()), "%s release unknown hold is idempotent", env.side)
+	require.NoError(t, c.Release(ctx, "not-a-uuid"), "%s release garbage id is idempotent", env.side)
 
 	_, err = c.WithdrawCredits(ctx, openrails.WithdrawCreditsRequest{
 		CustomerID: &pid,
@@ -756,14 +751,14 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		Scope:    "invoker",
 		ScopeKey: "user:conformance",
 		Windows: []openrails.SpendLimitWindow{
-			{Key: "inv-daily", WindowSeconds: 86400, Limit: 50_000, Cadence: "fixed"},
+			{Key: "inv-daily", WindowSeconds: 86400, Limit: 50_000},
 		},
 	}), "%s set-invoker-spend-limit (invoker)", env.side)
 	require.NoError(t, c.SetInvokerSpendLimits(ctx, payerID, openrails.InvokerSpendLimitInput{
 		Scope:  "role",
 		RoleID: roleID,
 		Windows: []openrails.SpendLimitWindow{
-			{Key: "role-hourly", WindowSeconds: 3600, Limit: 20_000, Cadence: "session"},
+			{Key: "role-hourly", WindowSeconds: 3600, Limit: 20_000},
 		},
 	}), "%s set-invoker-spend-limit (role)", env.side)
 	pols, err := c.InvokerSpendLimits(ctx, payerID)
@@ -877,16 +872,10 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	require.Equal(t, resEmbedded, resStandalone,
 		"embedded and standalone surfaces diverged — fix the adapter, never the assertion")
 
-	// Both transports are REAL HTTP now, so a 5xx is ErrUnreachable on both (the
-	// fail-policy axis — a wire to lose either way).
-	embeddedErr := embeddedClient.Release(ctx, uuid.NewString())
-	require.Error(t, embeddedErr)
-	require.ErrorIs(t, embeddedErr, openrails.ErrUnreachable)
-	require.ErrorIs(t, embeddedErr, openrails.ErrInternal)
-	standaloneErr := standaloneClient.Release(ctx, uuid.NewString())
-	require.Error(t, standaloneErr)
-	require.ErrorIs(t, standaloneErr, openrails.ErrUnreachable)
-	require.ErrorIs(t, standaloneErr, openrails.ErrInternal)
+	// Release is idempotent on BOTH real transports (#513): releasing an unknown
+	// request id is a no-op (the reservation is already gone), never an error.
+	require.NoError(t, embeddedClient.Release(ctx, uuid.NewString()))
+	require.NoError(t, standaloneClient.Release(ctx, uuid.NewString()))
 
 	// Standalone real-auth contract: a bad bearer is rejected by the real
 	// ServiceTokenRequired middleware -> 401 -> ErrUnauthorized.

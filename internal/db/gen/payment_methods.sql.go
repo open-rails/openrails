@@ -110,7 +110,7 @@ func (q *Queries) DeletePaymentMethod(ctx context.Context, id uuid.UUID) (int64,
 }
 
 const getPaymentMethodByID = `-- name: GetPaymentMethodByID :one
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id FROM openrails.payment_methods WHERE id = $1
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id, provider_account_id FROM openrails.payment_methods WHERE id = $1
 `
 
 func (q *Queries) GetPaymentMethodByID(ctx context.Context, id uuid.UUID) (OpenrailsPaymentMethod, error) {
@@ -131,12 +131,13 @@ func (q *Queries) GetPaymentMethodByID(ctx context.Context, id uuid.UUID) (Openr
 		&i.UpdatedAt,
 		&i.MerchantID,
 		&i.CustomerID,
+		&i.ProviderAccountID,
 	)
 	return i, err
 }
 
 const getPaymentMethodByInitialTransactionID = `-- name: GetPaymentMethodByInitialTransactionID :one
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id FROM openrails.payment_methods pm
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id, provider_account_id FROM openrails.payment_methods pm
 WHERE pm.processor = $1 AND pm.initial_transaction_id = $2
 LIMIT 1
 `
@@ -164,12 +165,13 @@ func (q *Queries) GetPaymentMethodByInitialTransactionID(ctx context.Context, ar
 		&i.UpdatedAt,
 		&i.MerchantID,
 		&i.CustomerID,
+		&i.ProviderAccountID,
 	)
 	return i, err
 }
 
 const getPaymentMethodByVaultID = `-- name: GetPaymentMethodByVaultID :one
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id FROM openrails.payment_methods pm
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id, provider_account_id FROM openrails.payment_methods pm
 WHERE pm.processor = $1 AND pm.vault_id = $2
 LIMIT 1
 `
@@ -197,12 +199,13 @@ func (q *Queries) GetPaymentMethodByVaultID(ctx context.Context, arg GetPaymentM
 		&i.UpdatedAt,
 		&i.MerchantID,
 		&i.CustomerID,
+		&i.ProviderAccountID,
 	)
 	return i, err
 }
 
 const listPaymentMethodsByCustomer = `-- name: ListPaymentMethodsByCustomer :many
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id FROM openrails.payment_methods pm
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id, provider_account_id FROM openrails.payment_methods pm
 WHERE pm.customer_id = $1
 ORDER BY pm.created_at DESC
 `
@@ -231,6 +234,7 @@ func (q *Queries) ListPaymentMethodsByCustomer(ctx context.Context, customerID u
 			&i.UpdatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
+			&i.ProviderAccountID,
 		); err != nil {
 			return nil, err
 		}
@@ -243,7 +247,7 @@ func (q *Queries) ListPaymentMethodsByCustomer(ctx context.Context, customerID u
 }
 
 const listPaymentMethodsByCustomerPaged = `-- name: ListPaymentMethodsByCustomerPaged :many
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id FROM openrails.payment_methods pm
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id, provider_account_id FROM openrails.payment_methods pm
 WHERE pm.customer_id = $1
 ORDER BY pm.created_at DESC
 LIMIT NULLIF($3::int, 0) OFFSET $2::int
@@ -279,6 +283,7 @@ func (q *Queries) ListPaymentMethodsByCustomerPaged(ctx context.Context, arg Lis
 			&i.UpdatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
+			&i.ProviderAccountID,
 		); err != nil {
 			return nil, err
 		}
@@ -291,7 +296,7 @@ func (q *Queries) ListPaymentMethodsByCustomerPaged(ctx context.Context, arg Lis
 }
 
 const listPaymentMethodsByCustomerProcessors = `-- name: ListPaymentMethodsByCustomerProcessors :many
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id FROM openrails.payment_methods pm
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id, provider_account_id FROM openrails.payment_methods pm
 WHERE pm.customer_id = $1
   AND pm.processor = ANY($2::text[])
 ORDER BY pm.created_at DESC
@@ -326,6 +331,7 @@ func (q *Queries) ListPaymentMethodsByCustomerProcessors(ctx context.Context, ar
 			&i.UpdatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
+			&i.ProviderAccountID,
 		); err != nil {
 			return nil, err
 		}
@@ -338,7 +344,7 @@ func (q *Queries) ListPaymentMethodsByCustomerProcessors(ctx context.Context, ar
 }
 
 const listPaymentMethodsByIDs = `-- name: ListPaymentMethodsByIDs :many
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id FROM openrails.payment_methods WHERE id = ANY($1::uuid[])
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id, provider_account_id FROM openrails.payment_methods WHERE id = ANY($1::uuid[])
 `
 
 func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsPaymentMethod, error) {
@@ -365,6 +371,7 @@ func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, ids []uuid.UUID) 
 			&i.UpdatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
+			&i.ProviderAccountID,
 		); err != nil {
 			return nil, err
 		}
@@ -377,7 +384,7 @@ func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, ids []uuid.UUID) 
 }
 
 const listPaymentMethodsByProcessor = `-- name: ListPaymentMethodsByProcessor :many
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id FROM openrails.payment_methods pm
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id, provider_account_id FROM openrails.payment_methods pm
 WHERE pm.processor = $1
 ORDER BY pm.created_at DESC
 `
@@ -406,6 +413,7 @@ func (q *Queries) ListPaymentMethodsByProcessor(ctx context.Context, processor s
 			&i.UpdatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
+			&i.ProviderAccountID,
 		); err != nil {
 			return nil, err
 		}
@@ -418,7 +426,7 @@ func (q *Queries) ListPaymentMethodsByProcessor(ctx context.Context, processor s
 }
 
 const listPaymentMethodsByProcessors = `-- name: ListPaymentMethodsByProcessors :many
-SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id FROM openrails.payment_methods pm
+SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, merchant_id, customer_id, provider_account_id FROM openrails.payment_methods pm
 WHERE pm.processor = ANY($1::text[])
 ORDER BY pm.created_at DESC
 `
@@ -447,6 +455,7 @@ func (q *Queries) ListPaymentMethodsByProcessors(ctx context.Context, processors
 			&i.UpdatedAt,
 			&i.MerchantID,
 			&i.CustomerID,
+			&i.ProviderAccountID,
 		); err != nil {
 			return nil, err
 		}

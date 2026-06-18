@@ -31,40 +31,14 @@ func (g *Gate) WindowStatus(ctx context.Context, merchant, customer, currency st
 	for _, w := range wins {
 		prefix := w.identity(base)
 		dur := w.Duration
-		var used int64
-		var resetAt time.Time
-		switch w.Cadence {
-		case CadenceFixed:
-			durMs := dur.Milliseconds()
-			offset := fixedOffsetMs(prefix, durMs)
-			nowMs := now.UnixMilli()
-			bucket := (nowMs - offset) / durMs
-			cnt, _, err := getInt(ctx, g.rdb, prefix+":"+strconv.FormatInt(bucket, 10))
-			if err != nil {
-				return nil, err
-			}
-			used = cnt
-			resetAt = time.UnixMilli(offset + (bucket+1)*durMs)
-		default: // session
-			cnt, ok, err := getInt(ctx, g.rdb, prefix)
-			if err != nil {
-				return nil, err
-			}
-			used = cnt
-			if ok {
-				ttl, err := g.rdb.PTTL(ctx, prefix).Result()
-				if err != nil {
-					return nil, err
-				}
-				if ttl > 0 {
-					resetAt = now.Add(ttl)
-				} else {
-					resetAt = now.Add(dur)
-				}
-			} else {
-				resetAt = now.Add(dur)
-			}
+		durMs := dur.Milliseconds()
+		offset := fixedOffsetMs(prefix, durMs)
+		bucket := (now.UnixMilli() - offset) / durMs
+		used, _, err := getInt(ctx, g.rdb, prefix+":"+strconv.FormatInt(bucket, 10))
+		if err != nil {
+			return nil, err
 		}
+		resetAt := time.UnixMilli(offset + (bucket+1)*durMs)
 		out = append(out, WindowStatus{
 			Window:    w.Window,
 			ScopeID:   w.scopeID,

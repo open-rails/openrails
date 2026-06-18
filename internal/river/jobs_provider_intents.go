@@ -40,8 +40,8 @@ type ProviderIntentExecuteWorker struct {
 	Config   *config.Config
 	Clock    clockwork.Clock
 	Registry *intents.Registry
-	// Fingerprints gates execution on the provider account (#365).
-	Fingerprints intents.FingerprintSource
+	// ProviderAccounts gates execution on the provider account (#518).
+	ProviderAccounts intents.ProviderAccountResolver
 }
 
 func (ProviderIntentExecuteWorker) Kind() string { return KindProviderIntentExecute }
@@ -51,11 +51,11 @@ func (w ProviderIntentExecuteWorker) Work(ctx context.Context, _ *river.Job[Prov
 		return fmt.Errorf("provider intent executor: DB and registry are required")
 	}
 	runner := &intents.Runner{
-		Store:        intents.NewStore(w.DB),
-		Registry:     w.Registry,
-		Config:       w.Config,
-		Clock:        w.Clock,
-		Fingerprints: w.Fingerprints,
+		Store:            intents.NewStore(w.DB),
+		Registry:         w.Registry,
+		Config:           w.Config,
+		Clock:            w.Clock,
+		ProviderAccounts: w.ProviderAccounts,
 	}
 	stats, err := runner.RunExecuteOnce(ctx)
 	if err != nil {
@@ -83,8 +83,8 @@ type ProviderIntentVerifyWorker struct {
 	Config   *config.Config
 	Clock    clockwork.Clock
 	Registry *intents.Registry
-	// Fingerprints defers verification on provider-account mismatch (#365).
-	Fingerprints intents.FingerprintSource
+	// ProviderAccounts defers verification on provider-account mismatch (#518).
+	ProviderAccounts intents.ProviderAccountResolver
 }
 
 func (ProviderIntentVerifyWorker) Kind() string { return KindProviderIntentVerify }
@@ -94,11 +94,11 @@ func (w ProviderIntentVerifyWorker) Work(ctx context.Context, _ *river.Job[Provi
 		return fmt.Errorf("provider intent verifier: DB and registry are required")
 	}
 	runner := &intents.Runner{
-		Store:        intents.NewStore(w.DB),
-		Registry:     w.Registry,
-		Config:       w.Config,
-		Clock:        w.Clock,
-		Fingerprints: w.Fingerprints,
+		Store:            intents.NewStore(w.DB),
+		Registry:         w.Registry,
+		Config:           w.Config,
+		Clock:            w.Clock,
+		ProviderAccounts: w.ProviderAccounts,
 	}
 	stats, err := runner.RunVerifyOnce(ctx)
 	if err != nil {

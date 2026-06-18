@@ -94,14 +94,14 @@ func (w *DunningWorker) intentRunner() *intents.Runner {
 	if w.Intents != nil {
 		return w.Intents
 	}
-	fingerprints := intents.NewRuntimeFingerprints(w.Config, w.NMIClients)
+	providerAccounts := intents.NewRuntimeProviderAccounts(w.Config, w.NMIClients)
 	runner := &intents.Runner{
-		Store: intents.NewStore(w.DB).WithFingerprints(fingerprints),
+		Store: intents.NewStore(w.DB).WithProviderAccounts(providerAccounts),
 		Registry: intents.NewRegistry(
 			intents.NewManualRebillHandler(w.DB, w.Config, w.NMIClients, w.Clock, w.EventLogService),
 		),
-		Clock:        w.Clock,
-		Fingerprints: fingerprints,
+		Clock:            w.Clock,
+		ProviderAccounts: providerAccounts,
 	}
 	if w.Config != nil {
 		runner.Config = w.Config

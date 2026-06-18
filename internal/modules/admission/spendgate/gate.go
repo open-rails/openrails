@@ -34,7 +34,7 @@ const reqPtrSep = "\x1f"
 // reserved estimate (freed from `held` at capture/release); the remaining fields
 // are the EXACT window counter keys this admit incremented, so release can
 // decrement precisely the buckets it hit (no policy reload, no roll ambiguity).
-// '|' never appears in a key (keys are scope/id/cadence/bucket joined by ':').
+// '|' never appears in a key (keys are scope/id/key/bucket joined by ':').
 
 // admitScript atomically, all-or-nothing:
 //  1. idempotent no-op if this request's hold record already exists (retry safety);
@@ -45,15 +45,14 @@ const reqPtrSep = "\x1f"
 //  4. iff all pass, RESERVE: held += cost, each window += cost (with a bucket TTL),
 //     and store the hold record (cost + window keys).
 //
-// FIXED windows are PER-USER-STAGGERED by a deterministic phase `offset` derived
-// from the (customer-scoped) window key (passed in by the caller) — bucket =
+// Windows are PER-USER-STAGGERED by a deterministic phase `offset` derived from the
+// (customer-scoped) window key (passed in by the caller) — bucket =
 // floor((now-offset)/dur), boundaries at offset + k*dur. No stored anchor: the
 // phase is recomputable, so a Redis flush can't desync it and there is no
-// first-charge / anchor-TTL bookkeeping. SESSION windows are a single key opened
-// on first reserve (TTL = dur, not refreshed).
+// first-charge / anchor-TTL bookkeeping.
 //
 // KEYS: [1]=held [2]=hold:<reqID>. ARGV: [1]=cost [2]=floor [3]=accountBalance
-// [4]=holdTtlMs [5]=nowMs [6]=n, then per window {prefix, cadence(0|1), durMs, limit, offsetMs}.
+// [4]=holdTtlMs [5]=nowMs [6]=n, then per window {prefix, durMs, limit, offsetMs}.
 // Returns {allowed(1/0), blocked}: blocked 0=ok, -1=affordability, i>0 = window i.
 var admitScript = redis.NewScript(`
 local cost  = tonumber(ARGV[1])
@@ -74,19 +73,13 @@ end
 
 -- check phase: no writes
 for i=1,n do
-  local b = 6 + (i-1)*5
+  local b = 6 + (i-1)*4
   local prefix = ARGV[b+1]
-  local cad    = tonumber(ARGV[b+2])
-  local dur    = tonumber(ARGV[b+3])
-  local limit  = tonumber(ARGV[b+4])
-  local offset = tonumber(ARGV[b+5])
-  local cntKey
-  if cad == 1 then
-    local bucket = math.floor((now - offset) / dur)
-    cntKey = prefix .. ':' .. string.format('%d', bucket)
-  else
-    cntKey = prefix
-  end
+  local dur    = tonumber(ARGV[b+2])
+  local limit  = tonumber(ARGV[b+3])
+  local offset = tonumber(ARGV[b+4])
+  local bucket = math.floor((now - offset) / dur)
+  local cntKey = prefix .. ':' .. string.format('%d', bucket)
   local cur = tonumber(redis.call('GET', cntKey) or '0')
   if cur + cost > limit then
     return {0, i}
@@ -97,25 +90,15 @@ end
 redis.call('INCRBY', KEYS[1], cost)
 local rec = tostring(cost)
 for i=1,n do
-  local b = 6 + (i-1)*5
+  local b = 6 + (i-1)*4
   local prefix = ARGV[b+1]
-  local cad    = tonumber(ARGV[b+2])
-  local dur    = tonumber(ARGV[b+3])
-  local offset = tonumber(ARGV[b+5])
-  local cntKey
-  if cad == 1 then
-    local bucket = math.floor((now - offset) / dur)
-    cntKey = prefix .. ':' .. string.format('%d', bucket)
-    local newv = redis.call('INCRBY', cntKey, cost)
-    if newv == cost then
-      redis.call('PEXPIRE', cntKey, (offset + (bucket+1)*dur - now) + 1000)
-    end
-  else
-    cntKey = prefix
-    local newv = redis.call('INCRBY', cntKey, cost)
-    if newv == cost then
-      redis.call('PEXPIRE', cntKey, dur + 1000)  -- TTL set at open, NOT refreshed
-    end
+  local dur    = tonumber(ARGV[b+2])
+  local offset = tonumber(ARGV[b+4])
+  local bucket = math.floor((now - offset) / dur)
+  local cntKey = prefix .. ':' .. string.format('%d', bucket)
+  local newv = redis.call('INCRBY', cntKey, cost)
+  if newv == cost then
+    redis.call('PEXPIRE', cntKey, (offset + (bucket+1)*dur - now) + 1000)
   end
   rec = rec .. '|' .. cntKey
 end
@@ -224,12 +207,12 @@ func (g *Gate) Admit(ctx context.Context, in AdmitInput) (Decision, error) {
 		holdTTL = time.Hour
 	}
 	keys := []string{base + ":held", base + ":hold:" + in.RequestID}
-	argv := make([]any, 0, 6+len(wins)*5)
+	argv := make([]any, 0, 6+len(wins)*4)
 	argv = append(argv, in.Cost, -in.CreditLimit, in.AccountBalance, holdTTL.Milliseconds(), now.UnixMilli(), len(wins))
 	for _, w := range wins {
 		prefix := w.identity(base)
 		dur := w.durationMillis()
-		argv = append(argv, prefix, w.cadenceCode(), dur, w.Limit, fixedOffsetMs(prefix, dur))
+		argv = append(argv, prefix, dur, w.Limit, fixedOffsetMs(prefix, dur))
 	}
 
 	raw, err := admitScript.Run(ctx, g.rdb, keys, argv...).Result()

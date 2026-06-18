@@ -95,7 +95,7 @@ func fixedPayerPolicy(limit int64, dur time.Duration) spendgate.Policy {
 	return spendgate.Policy{Scopes: []spendgate.ScopedWindows{{
 		Scope: spendgate.ScopePayer,
 		Windows: []spendgate.Window{{
-			Scope: spendgate.ScopePayer, Cadence: spendgate.CadenceFixed, Duration: dur, Limit: limit, Key: "win",
+			Scope: spendgate.ScopePayer, Duration: dur, Limit: limit, Key: "win",
 		}},
 	}}}
 }
@@ -189,8 +189,8 @@ func TestGate_MultiScopeDenyOnAnyWindow(t *testing.T) {
 	big := int64(1_000_000)
 	// payer window allows 1000; invoker window allows only 300.
 	pol := spendgate.Policy{Scopes: []spendgate.ScopedWindows{
-		{Scope: spendgate.ScopePayer, Windows: []spendgate.Window{{Scope: spendgate.ScopePayer, Cadence: spendgate.CadenceFixed, Duration: time.Hour, Limit: 1000, Key: "p"}}},
-		{Scope: spendgate.ScopeInvoker, ScopeID: "svc:abc", Windows: []spendgate.Window{{Scope: spendgate.ScopeInvoker, Cadence: spendgate.CadenceFixed, Duration: time.Hour, Limit: 300, Key: "i"}}},
+		{Scope: spendgate.ScopePayer, Windows: []spendgate.Window{{Scope: spendgate.ScopePayer, Duration: time.Hour, Limit: 1000, Key: "p"}}},
+		{Scope: spendgate.ScopeInvoker, ScopeID: "svc:abc", Windows: []spendgate.Window{{Scope: spendgate.ScopeInvoker, Duration: time.Hour, Limit: 300, Key: "i"}}},
 	}}
 	req := spendgate.Request{Invoker: "svc:abc"}
 
@@ -234,13 +234,13 @@ func TestGate_ResolvePointer(t *testing.T) {
 	require.False(t, ok, "pointer cleared after capture")
 }
 
-func TestGate_SessionWindowAccumulates(t *testing.T) {
+func TestGate_WindowAccumulates(t *testing.T) {
 	g, _, ctx := newGate(t)
 	m, c, cur := payer()
 	big := int64(1_000_000)
 	pol := spendgate.Policy{Scopes: []spendgate.ScopedWindows{{
 		Scope:   spendgate.ScopePayer,
-		Windows: []spendgate.Window{{Scope: spendgate.ScopePayer, Cadence: spendgate.CadenceSession, Duration: time.Hour, Limit: 1000, Key: "s"}},
+		Windows: []spendgate.Window{{Scope: spendgate.ScopePayer, Duration: time.Hour, Limit: 1000, Key: "s"}},
 	}}}
 
 	d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 700, AccountBalance: big, Policy: pol})
@@ -249,6 +249,6 @@ func TestGate_SessionWindowAccumulates(t *testing.T) {
 
 	d, err = g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 400, AccountBalance: big, Policy: pol})
 	require.NoError(t, err)
-	require.False(t, d.Allowed, "700+400 breaches the 1000 session window")
+	require.False(t, d.Allowed, "700+400 breaches the 1000 window")
 	require.NotNil(t, d.BlockedWindow)
 }

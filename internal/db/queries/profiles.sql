@@ -29,11 +29,10 @@ WHERE slug = $1 AND deleted_at IS NULL;
 -- merchant carries ONLY billing/rail state; NO auth. Used by embedded boot and
 -- standalone provisioning. Re-registering an existing slug refreshes the
 -- billing-only fields and returns the canonical (self-owned) merchant id.
-INSERT INTO openrails.merchants (slug, name, status, stripe_account_id, webhook_host, webhook_path)
-VALUES ($1, $2, 'active', sqlc.narg('stripe_account_id'), sqlc.narg('webhook_host'), sqlc.narg('webhook_path'))
+INSERT INTO openrails.merchants (slug, name, status, webhook_host, webhook_path)
+VALUES ($1, $2, 'active', sqlc.narg('webhook_host'), sqlc.narg('webhook_path'))
 ON CONFLICT (slug) DO UPDATE SET
     name = EXCLUDED.name,
-    stripe_account_id = COALESCE(EXCLUDED.stripe_account_id, openrails.merchants.stripe_account_id),
     webhook_host = COALESCE(EXCLUDED.webhook_host, openrails.merchants.webhook_host),
     webhook_path = COALESCE(EXCLUDED.webhook_path, openrails.merchants.webhook_path),
     updated_at = now()

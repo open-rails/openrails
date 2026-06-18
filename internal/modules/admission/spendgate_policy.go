@@ -74,9 +74,12 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.Custome
 	}
 
 	if l.budgets != nil {
-		policies, lerr := l.cache.InvokerSpendLimits(mid, payerID, func() ([]InvokerSpendLimit, error) {
-			return l.budgets.LoadAll(ctx, payer)
-		})
+		// Invoker spend limits gate delegated GRANTS (hasDelegatedGrant) — a freshly
+		// added grant must take effect immediately, so these are read LIVE, never
+		// cached: a stale-absent grant would wrongly deny a just-granted invoker for the
+		// whole cache TTL (#517). Only the per-tier payer CAPS above are cached (benign
+		// when stale: a missing upper-bound briefly admits a little more, never denies).
+		policies, lerr := l.budgets.LoadAll(ctx, payer)
 		if lerr != nil {
 			return spendgate.Policy{}, false, lerr
 		}
@@ -141,10 +144,6 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 		if w.WindowSeconds <= 0 || w.Limit < 0 {
 			continue
 		}
-		cad, err := spendgate.NormalizeCadence(w.Cadence)
-		if err != nil {
-			return nil, err
-		}
 		limit := w.Limit
 		if c := strings.TrimSpace(w.Currency); c != "" && money.NormalizeCurrency(c) != reqCur {
 			conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(c), reqCur, w.Limit)
@@ -155,7 +154,6 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 		}
 		out = append(out, spendgate.Window{
 			Scope:    scope,
-			Cadence:  cad,
 			Duration: time.Duration(w.WindowSeconds) * time.Second,
 			Limit:    limit,
 			Key:      w.Key,

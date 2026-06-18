@@ -79,6 +79,11 @@ type Options struct {
 // pkg/embedded.HTTPHandlerOptions; zero value defaults to user+admin+webhooks.
 type HandlerOptions = embedded.HTTPHandlerOptions
 
+// PaymentProvider is one embedded payment-provider credential set. It aliases
+// pkg/embedded.PaymentProvider so hosts using embed.New can configure multiple
+// provider accounts without importing the lower-level package.
+type PaymentProvider = embedded.PaymentProvider
+
 // Runtime is the in-process OpenRails engine plus its SDK adapter. It is the
 // ONE entry point an embedding host needs: Client() for the unified interface,
 // Handler() to mount the embedded HTTP surface, RunWorkers/Close for lifecycle.

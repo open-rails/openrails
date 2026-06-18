@@ -496,6 +496,45 @@ func TestValidateStripeKeyForTestEnv(t *testing.T) {
 		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
 		assert.Equal(t, "rk_live_abc123", cfg.Processors["stripe"].SecretKey, "restricted live key in live env should be kept")
 	})
+
+	t.Run("validates every stripe processor", func(t *testing.T) {
+		cfg := &Config{
+			Mode:    ModeFull,
+			TestEnv: false,
+			Processors: map[string]*ProcessorConfig{
+				"stripe_primary": {Type: ProcessorTypeStripe, SecretKey: "sk_live_primary"},
+				"stripe_legacy":  {Type: ProcessorTypeStripe, Role: ProcessorRoleLegacy, SecretKey: "sk_test_legacy"},
+			},
+		}
+		require.NoError(t, validateStripeKeyForTestEnv(cfg))
+		require.Equal(t, "sk_live_primary", cfg.Processors["stripe_primary"].SecretKey)
+		require.Empty(t, cfg.Processors["stripe_legacy"].SecretKey)
+	})
+}
+
+func TestPrimaryProcessorByType(t *testing.T) {
+	cfg := &Config{Processors: map[string]*ProcessorConfig{
+		"stripe_old": {Type: ProcessorTypeStripe, Role: ProcessorRoleLegacy, SecretKey: "sk_live_old"},
+		"stripe_new": {Type: ProcessorTypeStripe, SecretKey: "sk_live_new"},
+		"mobius":     {Type: ProcessorTypeNMI, SecurityKey: "sec"},
+	}}
+	key, proc, err := cfg.PrimaryProcessorByType(ProcessorTypeStripe)
+	require.NoError(t, err)
+	require.Equal(t, "stripe_new", key)
+	require.Equal(t, "sk_live_new", proc.SecretKey)
+	require.Equal(t, proc, cfg.GetStripeProcessor())
+
+	cfg.Processors["stripe_other"] = &ProcessorConfig{Type: ProcessorTypeStripe, SecretKey: "sk_live_other"}
+	_, _, err = cfg.PrimaryProcessorByType(ProcessorTypeStripe)
+	require.ErrorContains(t, err, "multiple primary processors")
+	require.ErrorContains(t, Validate(&Config{
+		Mode: ModeFull,
+		DB:   &DBConfig{URL: "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"},
+		Processors: map[string]*ProcessorConfig{
+			"stripe_a": {Type: ProcessorTypeStripe, SecretKey: "sk_live_a"},
+			"stripe_b": {Type: ProcessorTypeStripe, SecretKey: "sk_live_b"},
+		},
+	}), "multiple primary processors")
 }
 
 // =============================================================================

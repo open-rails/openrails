@@ -1,7 +1,9 @@
 package reconcile
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -21,40 +23,121 @@ type FetcherClients struct {
 	SolanaRPC      *solanaint.RPCClient
 }
 
+type FetcherOptions struct {
+	// ProviderKeys optionally pins a provider type to a local config key. These
+	// keys are selectors only; durable identity still comes from provider_accounts.
+	ProviderKeys map[Provider]string
+}
+
 // BuildFetchers wires a ProcessorFetcher for every provider the runtime has
 // clients/credentials for. Reads only; providers without configuration are
 // simply absent from the map.
 func BuildFetchers(cfg *config.Config, clients FetcherClients, d *db.DB) map[Provider]ProcessorFetcher {
+	fetchers, _ := BuildFetchersWithOptions(cfg, clients, d, FetcherOptions{})
+	return fetchers
+}
+
+// BuildFetchersWithOptions is the strict builder used by operator commands.
+// It respects processor role selection and returns config errors instead of
+// silently picking an arbitrary account.
+func BuildFetchersWithOptions(cfg *config.Config, clients FetcherClients, d *db.DB, opts FetcherOptions) (map[Provider]ProcessorFetcher, error) {
 	fetchers := map[Provider]ProcessorFetcher{}
 
-	if c := pickNMIClient(clients.NMIClients); c != nil {
-		fetchers[ProviderNMI] = NewNMIFetcher(c)
+	if key, c, err := selectNMIClient(cfg, clients.NMIClients, opts.providerKey(ProviderNMI)); err != nil {
+		return nil, err
+	} else if c != nil {
+		fetchers[ProviderNMI] = keyedFetcher{ProcessorFetcher: NewNMIFetcher(c), key: key}
 	}
 	if clients.CCBillDataLink != nil {
-		fetchers[ProviderCCBill] = NewCCBillFetcher(clients.CCBillDataLink)
+		key, proc, err := selectProcessorByType(cfg, config.ProcessorTypeCCBill, opts.providerKey(ProviderCCBill))
+		if err != nil {
+			return nil, err
+		}
+		if proc != nil {
+			fetchers[ProviderCCBill] = keyedFetcher{ProcessorFetcher: NewCCBillFetcher(clients.CCBillDataLink), key: key}
+		}
 	}
 	if cfg != nil {
-		if sp := cfg.GetStripeProcessor(); sp != nil && sp.SecretKey != "" {
-			fetchers[ProviderStripe] = NewStripeFetcher(sp.SecretKey)
+		key, sp, err := selectProcessorByType(cfg, config.ProcessorTypeStripe, opts.providerKey(ProviderStripe))
+		if err != nil {
+			return nil, err
+		}
+		if sp != nil && sp.SecretKey != "" {
+			fetchers[ProviderStripe] = keyedFetcher{ProcessorFetcher: NewStripeFetcher(sp.SecretKey), key: key}
 		}
 	}
 	if clients.SolanaRPC != nil && d != nil {
-		fetchers[ProviderSolana] = NewSolanaFetcher(clients.SolanaRPC, SolanaSubscriptionSourceFromDB(d))
+		key, proc, err := selectProcessorByType(cfg, config.ProcessorTypeSolana, opts.providerKey(ProviderSolana))
+		if err != nil {
+			return nil, err
+		}
+		if proc != nil {
+			fetchers[ProviderSolana] = keyedFetcher{ProcessorFetcher: NewSolanaFetcher(clients.SolanaRPC, SolanaSubscriptionSourceFromDB(d)), key: key}
+		}
 	}
 
-	return fetchers
+	return fetchers, nil
+}
+
+func (o FetcherOptions) providerKey(provider Provider) string {
+	if o.ProviderKeys == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(o.ProviderKeys[provider]))
+}
+
+func selectProcessorByType(cfg *config.Config, providerType, explicitKey string) (string, *config.ProcessorConfig, error) {
+	if cfg == nil {
+		return "", nil, nil
+	}
+	if explicitKey != "" {
+		proc := cfg.GetProcessor(explicitKey)
+		if proc == nil {
+			return "", nil, fmt.Errorf("processor %q is not configured", explicitKey)
+		}
+		if proc.GetEffectiveType(explicitKey) != providerType {
+			return "", nil, fmt.Errorf("processor %q is type %q, not %q", explicitKey, proc.GetEffectiveType(explicitKey), providerType)
+		}
+		return explicitKey, proc, nil
+	}
+	return cfg.PrimaryProcessorByType(providerType)
+}
+
+func selectNMIClient(cfg *config.Config, clients map[string]*nmi.NMIClient, explicitKey string) (string, *nmi.NMIClient, error) {
+	if explicitKey != "" {
+		c := clients[explicitKey]
+		if c == nil {
+			return "", nil, fmt.Errorf("nmi processor %q is not configured for reconciliation", explicitKey)
+		}
+		return explicitKey, c, nil
+	}
+	if cfg != nil {
+		key, proc, err := cfg.PrimaryProcessorByType(config.ProcessorTypeNMI)
+		if err != nil {
+			return "", nil, err
+		}
+		if proc != nil {
+			c := clients[key]
+			if c == nil {
+				return "", nil, fmt.Errorf("primary nmi processor %q is not configured for reconciliation", key)
+			}
+			return key, c, nil
+		}
+	}
+	key, c := pickNMIClient(clients)
+	return key, c, nil
 }
 
 // pickNMIClient selects the NMI gateway client deterministically: the only
 // one when a single NMI processor is configured, else "mobius" then "nmi"
 // then the lexicographically first key.
-func pickNMIClient(clients map[string]*nmi.NMIClient) *nmi.NMIClient {
+func pickNMIClient(clients map[string]*nmi.NMIClient) (string, *nmi.NMIClient) {
 	if len(clients) == 0 {
-		return nil
+		return "", nil
 	}
 	for _, preferred := range []string{"mobius", "nmi"} {
 		if c, ok := clients[preferred]; ok && c != nil {
-			return c
+			return preferred, c
 		}
 	}
 	keys := make([]string, 0, len(clients))
@@ -62,7 +145,7 @@ func pickNMIClient(clients map[string]*nmi.NMIClient) *nmi.NMIClient {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	return clients[keys[0]]
+	return keys[0], clients[keys[0]]
 }
 
 // NewEngine assembles a DB-backed engine over the given fetchers. The caller

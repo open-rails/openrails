@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
@@ -102,6 +103,7 @@ type CheckoutSessionService struct {
 	solanaTransactionService solanaTransactionService
 	fxProvider               fx.Provider
 	priceProvider            solanamodule.TokenPriceProvider
+	providerAccounts         intents.ProviderAccountResolver
 	config                   *config.Config
 	clock                    clockwork.Clock
 
@@ -265,6 +267,13 @@ func (s *CheckoutSessionService) Clock() clockwork.Clock {
 	return s.clock
 }
 
+// SetProviderAccounts wires the #518 provider-account resolver. When present,
+// newly-created provider checkout sessions are stamped with the provider account
+// row selected for the configured primary account of that provider type.
+func (s *CheckoutSessionService) SetProviderAccounts(resolver intents.ProviderAccountResolver) {
+	s.providerAccounts = resolver
+}
+
 func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		return nil, fmt.Errorf("%w: user is required", ErrCheckoutSessionValidation)
@@ -389,6 +398,10 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	if err := s.validatePayment(ctx, processor, &req.Payment, user); err != nil {
 		return nil, fmt.Errorf("error validating payment: %w", err)
 	}
+	providerAccountID, err := s.providerAccountIDForCheckout(ctx, processor)
+	if err != nil {
+		return nil, err
+	}
 
 	now := s.now()
 	ttl := defaultCheckoutSessionTTL
@@ -396,23 +409,24 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		ttl = redirectCheckoutSessionTTL
 	}
 	session := &models.CheckoutSession{
-		ID:              uuidutil.NewV7(),
-		CustomerID:      identity.CustomerIDFromString(user.ID).UUID(),
-		PriceID:         price.ID,
-		Mode:            mode,
-		Processor:       models.Processor(processor),
-		Status:          models.CheckoutSessionStatusCreated,
-		Amount:          price.Amount,
-		Currency:        price.Currency,
-		ExpiresAt:       timePtr(now.Add(ttl)),
-		Metadata:        normalizeMetadata(req.Metadata),
-		ProcessorFields: s.buildProcessorFields(processor, &req.Payment),
-		ProcessorState:  map[string]any{},
-		CreatedAt:       now,
-		UpdatedAt:       now,
-		LastFour:        &req.Payment.LastFour,
-		CardType:        &req.Payment.CardType,
-		ExpiryDate:      &req.Payment.ExpiryDate,
+		ID:                uuidutil.NewV7(),
+		CustomerID:        identity.CustomerIDFromString(user.ID).UUID(),
+		PriceID:           price.ID,
+		Mode:              mode,
+		Processor:         models.Processor(processor),
+		Status:            models.CheckoutSessionStatusCreated,
+		Amount:            price.Amount,
+		Currency:          price.Currency,
+		ExpiresAt:         timePtr(now.Add(ttl)),
+		Metadata:          normalizeMetadata(req.Metadata),
+		ProcessorFields:   s.buildProcessorFields(processor, &req.Payment),
+		ProcessorState:    map[string]any{},
+		CreatedAt:         now,
+		UpdatedAt:         now,
+		ProviderAccountID: providerAccountID,
+		LastFour:          &req.Payment.LastFour,
+		CardType:          &req.Payment.CardType,
+		ExpiryDate:        &req.Payment.ExpiryDate,
 	}
 
 	if strings.TrimSpace(req.IdempotencyKey) != "" {
@@ -434,6 +448,50 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	}
 
 	return s.sessionToResponse(session), nil
+}
+
+func (s *CheckoutSessionService) providerAccountIDForCheckout(ctx context.Context, processor string) (*uuid.UUID, error) {
+	if s.providerAccounts == nil || s.db == nil {
+		return nil, nil
+	}
+	providerKey, err := s.providerKeyForCheckout(processor)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	account, err := intents.NewStore(s.db).
+		WithProviderAccounts(s.providerAccounts).
+		VerifyOrBindPrimaryProviderAccount(ctx, tid.UUID(), providerKey)
+	if err != nil {
+		return nil, fmt.Errorf("%w: bind provider account for checkout processor %q: %v", ErrCheckoutSessionValidation, processor, err)
+	}
+	return &account.ID, nil
+}
+
+func (s *CheckoutSessionService) providerKeyForCheckout(processor string) (string, error) {
+	processor = strings.ToLower(strings.TrimSpace(processor))
+	if processor == "" {
+		return "", fmt.Errorf("processor is required")
+	}
+	if s.config == nil {
+		return processor, nil
+	}
+	if proc := s.config.Processors[processor]; proc != nil {
+		return processor, nil
+	}
+	switch processor {
+	case config.ProcessorTypeStripe, config.ProcessorTypeCCBill, config.ProcessorTypeSolana, config.ProcessorTypeNMI:
+		key, _, err := s.config.PrimaryProcessorByType(processor)
+		if err != nil {
+			return "", err
+		}
+		return key, nil
+	default:
+		return processor, nil
+	}
 }
 
 func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.UUID, user *UserIdentity) (*CheckoutSessionResponse, error) {

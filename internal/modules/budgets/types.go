@@ -11,8 +11,8 @@ package budgets
 import "strings"
 
 // BudgetWindow is one fixed money-budget window in a tier/budget policy: at most
-// Limit (the currency's minor units) of spend per WindowSeconds, with the given
-// cadence. The loader maps this onto a spendgate.Window.
+// Limit (the currency's minor units) of spend per WindowSeconds. The loader maps
+// this onto a spendgate.Window (reset boundaries staggered per payer, #337).
 type BudgetWindow struct {
 	// Key is a stable identifier for the window (e.g. "5h", "7d").
 	Key string
@@ -23,9 +23,6 @@ type BudgetWindow struct {
 	// Currency is the window's policy currency (the loader FX-converts the limit to
 	// the request currency when they differ); blank means the request currency.
 	Currency string
-	// Cadence is "session" (per-user-anchored, opens at first charge) or "fixed"
-	// (per-user-anchored, ticks at anchor+k*window) — both staggered per payer (#337).
-	Cadence string
 }
 
 // Invoker spend-limit scopes (#473/#517): a limit is {scope, scope_key, windows[]};

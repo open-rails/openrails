@@ -45,7 +45,7 @@ INSERT INTO openrails.payments (
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.narg(card_brand), sqlc.narg(card_last4), sqlc.arg(customer_id)
 )
-ON CONFLICT (merchant_id, processor, transaction_id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 -- name: GetPaymentByID :one
 SELECT * FROM openrails.payments WHERE id = $1;

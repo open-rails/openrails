@@ -16,23 +16,18 @@
 --   - reconciliation_state: per (merchant, source_domain) fully-reconciled flag +
 --     last-full-pull watermark backing the confirmed-absence gate.
 --
--- Transitional UNION: the new qualified slugs are admitted alongside
--- the legacy PS-1..PS-10 so the existing reconcile engine keeps writing while it
--- is migrated onto the new taxonomy. #511 Phase F drops the PS-* codes from this
--- CHECK once the old engine is fully retired.
+-- ONE taxonomy: every finding_type is a qualified four-plane slug. The legacy
+-- PS-1..PS-10 codes were retired in #511 Phase F — the reconcile engine now
+-- emits pull.* / consistency.* / derive.* / life.* slugs directly (see
+-- internal/reconcile/findings.go), so the transitional PS-* union is gone.
 -- =============================================================================
 
--- --- finding_type: unified four-plane taxonomy (+ legacy PS-* during transition) ---
+-- --- finding_type: unified four-plane taxonomy (slugs only) -------------------
 ALTER TABLE openrails.reconciliation_findings
     DROP CONSTRAINT chk_reconciliation_findings_type;
 ALTER TABLE openrails.reconciliation_findings
     ADD CONSTRAINT chk_reconciliation_findings_type CHECK (
         finding_type ~ '^(pull|derive|life|consistency)\.[a-z0-9_]+(\.[a-z0-9_]+)?$'
-        OR finding_type = ANY (ARRAY[
-            -- legacy PS-* (transitional; removed in #511 Phase F)
-            'PS-1'::text, 'PS-2'::text, 'PS-3'::text, 'PS-4'::text, 'PS-5'::text,
-            'PS-6'::text, 'PS-7'::text, 'PS-8'::text, 'PS-9'::text, 'PS-10'::text
-        ])
     );
 
 -- --- status: add held + indeterminate -----------------------------------------
@@ -50,7 +45,7 @@ ALTER TABLE openrails.reconciliation_findings
     ]));
 
 COMMENT ON COLUMN openrails.reconciliation_findings.provider IS 'Provider for pull.* findings (nmi|ccbill|stripe|solana); the literal ''self'' for internal derive/life/consistency findings (#511).';
-COMMENT ON TABLE openrails.reconciliation_findings IS 'Durable reconciliation findings ledger. Stable identity per (merchant, provider, finding_type, subject_key); finding_type is a qualified name such as pull.charge.missing, derive.grant.excess, life.provider_intent.abandoned, or consistency.amount_mismatch.provider_catalog. Legacy PS-* findings remain transitional until #511 Phase F.';
+COMMENT ON TABLE openrails.reconciliation_findings IS 'Durable reconciliation findings ledger. Stable identity per (merchant, provider, finding_type, subject_key); finding_type is a qualified four-plane slug such as pull.charge.missing, derive.grant_effect.excess, life.provider_intent.abandoned, or consistency.amount_mismatch.provider_catalog (#511).';
 
 -- --- reconciliation_state: per-domain confirmed-absence gate -------------------
 -- One row per (merchant, source_domain). `fully_reconciled` flips true only after

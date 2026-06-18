@@ -16,15 +16,17 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
 func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := context.Background()
+	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
+	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -150,9 +152,10 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	ctx := context.Background()
+	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
+	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()

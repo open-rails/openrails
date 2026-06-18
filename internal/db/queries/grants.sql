@@ -179,3 +179,23 @@ SELECT EXISTS (
       AND source_type = 'grant' AND source_id = sqlc.arg(grant_id)::uuid
       AND revoked_at IS NULL AND deleted_at IS NULL
 ) AS exists;
+
+-- #511 DERIVE merchant-wide fan-out: customers in a merchant that hold any grant,
+-- so Converge(merchant) can run the per-customer DERIVE checks across all of them.
+-- name: ListCustomerIDsWithGrants :many
+SELECT DISTINCT customer_id FROM openrails.grants
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+ORDER BY customer_id;
+
+-- #511 ownership-on-grants: live (un-terminated) ownership grant ids backing a
+-- payment, so a refund/chargeback can revoke product access for that payment.
+-- name: ListLiveOwnershipGrantIDsByPayment :many
+SELECT g.id FROM openrails.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND g.payment_id = sqlc.arg(payment_id)::uuid
+  AND g.kind = 'ownership'
+  AND g.event = 'grant'
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants t
+      WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
+  );

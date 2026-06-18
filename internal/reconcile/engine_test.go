@@ -44,7 +44,7 @@ type fakeLocal struct {
 	payments []LocalPayment
 }
 
-func (l *fakeLocal) Load(ctx context.Context, provider Provider) (*LocalState, error) {
+func (l *fakeLocal) Load(ctx context.Context, provider Provider, _ *uuid.UUID) (*LocalState, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	cp := LocalState{
@@ -56,7 +56,7 @@ func (l *fakeLocal) Load(ctx context.Context, provider Provider) (*LocalState, e
 	return &cp, nil
 }
 
-func (l *fakeLocal) PaymentsByTransactionIDs(ctx context.Context, provider Provider, ids []string) ([]LocalPayment, error) {
+func (l *fakeLocal) PaymentsByTransactionIDs(ctx context.Context, provider Provider, _ *uuid.UUID, ids []string) ([]LocalPayment, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	want := map[string]bool{}
@@ -664,7 +664,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Equal(t, 1, writer.calls["revoke"])
 
 		// Local state converged: the subscription is cancelled, entitlements gone.
-		st, _ := local.Load(ctx, ProviderNMI)
+		st, _ := local.Load(ctx, ProviderNMI, nil)
 		for _, s := range st.Subscriptions {
 			if s.ID == dead.ID {
 				assert.Equal(t, "cancelled", s.Status)
@@ -733,7 +733,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		rec := store.record(ProviderStripe, FindingStatusMismatch, sub.ID.String())
 		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
 
-		st, _ := local.Load(ctx, ProviderStripe)
+		st, _ := local.Load(ctx, ProviderStripe, nil)
 		assert.Equal(t, "active", st.Subscriptions[0].Status)
 		require.NotNil(t, st.Subscriptions[0].CurrentPeriodEndsAt)
 		assert.True(t, st.Subscriptions[0].CurrentPeriodEndsAt.Equal(remoteEnd))
@@ -792,10 +792,10 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
 
 		// Payment exists + entitlement granted for the current period.
-		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, []string{"txn-1001"})
+		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, nil, []string{"txn-1001"})
 		require.Len(t, payments, 1)
 		assert.Equal(t, sub.CustomerID, payments[0].CustomerID)
-		st, _ := local.Load(ctx, ProviderNMI)
+		st, _ := local.Load(ctx, ProviderNMI, nil)
 		require.Len(t, st.Entitlements, 1)
 		assert.Equal(t, "premium", st.Entitlements[0].Entitlement)
 	})
@@ -865,7 +865,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Equal(t, 1, writer.calls["record_refund"])
 		rec := store.record(ProviderNMI, FindingRefundUnrecorded, "txn-5001")
 		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
-		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, []string{"txn-5001"})
+		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, nil, []string{"txn-5001"})
 		require.Len(t, payments, 1)
 		assert.Equal(t, "refunded", payments[0].Status)
 	})
@@ -954,7 +954,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Equal(t, 1, writer.calls["adopt_vault"])
 		rec := store.record(ProviderNMI, FindingVaultMismatch, "vault-7")
 		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
-		st, _ := local.Load(ctx, ProviderNMI)
+		st, _ := local.Load(ctx, ProviderNMI, nil)
 		assert.Equal(t, "2222", st.PaymentMethods[0].LastFour)
 	})
 
@@ -1011,7 +1011,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Equal(t, FindingStatusAutoFixed, store.record(ProviderNMI, FindingEntitlementMismatch, missing.ID.String()).Status)
 		assert.Equal(t, FindingStatusAutoFixed, store.record(ProviderNMI, FindingEntitlementMismatch, orphan.ID.String()).Status)
 
-		st, _ := local.Load(ctx, ProviderNMI)
+		st, _ := local.Load(ctx, ProviderNMI, nil)
 		require.Len(t, st.Entitlements, 1)
 		assert.Equal(t, missing.ID, st.Entitlements[0].SourceID)
 	})
@@ -1418,7 +1418,7 @@ func TestMaterializePS1(t *testing.T) {
 		assert.Equal(t, true, rec.ResolutionEvid["payment_backfilled"])
 
 		// The local subscription exists with remote status/periods…
-		st, _ := local.Load(ctx, ProviderNMI)
+		st, _ := local.Load(ctx, ProviderNMI, nil)
 		var created *LocalSubscription
 		for i := range st.Subscriptions {
 			if st.Subscriptions[i].ProcessorSubscriptionID == "remote-77" {
@@ -1432,7 +1432,7 @@ func TestMaterializePS1(t *testing.T) {
 		assert.True(t, created.CurrentPeriodEndsAt.Equal(*snap.Subscriptions[0].NextBillingAt))
 
 		// …the snapshot charge is backfilled and entitlements granted.
-		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, []string{"txn-mat-1"})
+		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, nil, []string{"txn-mat-1"})
 		require.Len(t, payments, 1)
 		require.Len(t, st.Entitlements, 1)
 		assert.Equal(t, created.ID, st.Entitlements[0].SourceID)

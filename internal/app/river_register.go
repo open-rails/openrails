@@ -84,6 +84,17 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add money window expiry worker: %w", err)
 	}
+	// Convergence Engine sweep (#511): periodically run reconcile.Converge for
+	// every active merchant, catching internal-plane drift (stalled dunning,
+	// elapsed grace, abandoned checkouts, unmaterialized grant effects) that no
+	// inline mutation touched. The background twin of the inline Converge hooks.
+	if err := river.AddWorkerSafely(workers, &riverjobs.ConvergeSweepWorker{
+		DB:     r.DB,
+		Config: r.Config,
+		Clock:  clock,
+	}); err != nil {
+		return fmt.Errorf("add converge sweep worker: %w", err)
+	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CancelSubscriptionWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
@@ -108,20 +119,20 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// resolves ambiguous outcomes via provider reads. These replaced the
 	// NMIDeleteSubscription worker + boot rescan.
 	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentExecuteWorker{
-		DB:           r.DB,
-		Config:       r.Config,
-		Clock:        clock,
-		Registry:     intentRegistry,
-		Fingerprints: r.AccountFingerprints(),
+		DB:               r.DB,
+		Config:           r.Config,
+		Clock:            clock,
+		Registry:         intentRegistry,
+		ProviderAccounts: r.ProviderAccounts(),
 	}); err != nil {
 		return fmt.Errorf("add provider intent execute worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentVerifyWorker{
-		DB:           r.DB,
-		Config:       r.Config,
-		Clock:        clock,
-		Registry:     intentRegistry,
-		Fingerprints: r.AccountFingerprints(),
+		DB:               r.DB,
+		Config:           r.Config,
+		Clock:            clock,
+		Registry:         intentRegistry,
+		ProviderAccounts: r.ProviderAccounts(),
 	}); err != nil {
 		return fmt.Errorf("add provider intent verify worker: %w", err)
 	}
@@ -223,10 +234,10 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 // working — a typed-nil ModeView would panic inside the gate.
 func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock) *intents.Runner {
 	runner := &intents.Runner{
-		Store:        intents.NewStore(r.DB).WithFingerprints(r.AccountFingerprints()),
-		Registry:     registry,
-		Clock:        clock,
-		Fingerprints: r.AccountFingerprints(),
+		Store:            intents.NewStore(r.DB).WithProviderAccounts(r.ProviderAccounts()),
+		Registry:         registry,
+		Clock:            clock,
+		ProviderAccounts: r.ProviderAccounts(),
 	}
 	if r.Config != nil {
 		runner.Config = r.Config
@@ -555,6 +566,22 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 15 minutes: Convergence Engine sweep (#511) — run reconcile.Converge
+	// for every active merchant to remediate internal-plane drift (stalled
+	// dunning, elapsed grace, abandoned checkouts, unmaterialized grant effects).
+	// RunOnStart=true: a reboot after downtime is exactly when accumulated drift
+	// is largest, and a clean merchant sweep is a cheap no-op.
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(15*time.Minute),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.ConvergeSweepArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 
 	return jobs, nil

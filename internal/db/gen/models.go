@@ -196,6 +196,8 @@ type OpenrailsCheckoutSession struct {
 	UpdatedAt       time.Time
 	MerchantID      uuid.UUID
 	CustomerID      uuid.UUID
+	// Provider account selected for this provider checkout/session.
+	ProviderAccountID *uuid.UUID
 }
 
 // Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name.
@@ -370,6 +372,8 @@ type OpenrailsInvoicePayment struct {
 	SettledAt          *time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	// Provider account used for this invoice payment attempt or settled provider payment.
+	ProviderAccountID *uuid.UUID
 }
 
 // Per-invoker spend limits (#473/#517): the payer caps how much a delegated invoker/role can spend of the payer's money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.
@@ -632,6 +636,8 @@ type OpenrailsPayment struct {
 	CardLast4                *string
 	MerchantID               uuid.UUID
 	CustomerID               uuid.UUID
+	// Provider account that produced this payment/charge mirror row.
+	ProviderAccountID *uuid.UUID
 }
 
 // Tenant-scoped blocklist of known-bad payment identifiers (issue #300). customer_id NULL = tenant-wide block; set = tenant-subject scoped. Checkout/admission deny wiring is a separate slice.
@@ -663,6 +669,8 @@ type OpenrailsPaymentMethod struct {
 	UpdatedAt            time.Time
 	MerchantID           uuid.UUID
 	CustomerID           uuid.UUID
+	// Provider account that produced this vaulted payment method mirror row.
+	ProviderAccountID *uuid.UUID
 }
 
 // Pricing tiers for products with processor-specific identifiers
@@ -696,6 +704,8 @@ type OpenrailsProcessorCustomer struct {
 	UpdatedAt           time.Time
 	MerchantID          uuid.UUID
 	CustomerID          uuid.UUID
+	// Provider account that produced this processor customer mirror row.
+	ProviderAccountID *uuid.UUID
 }
 
 // Product definitions that can be purchased or subscribed to
@@ -717,24 +727,6 @@ type OpenrailsProduct struct {
 	MerchantID uuid.UUID
 }
 
-// Durable, application-facing product ownership/access (issue #250). Distinct from feature entitlements: answers "does this user own product X?" / "list products this user can access". A successful one-time purchase creates a grant; refunds/chargebacks/admin revocation revoke it.
-type OpenrailsProductAccessGrant struct {
-	ID           uuid.UUID
-	MerchantID   uuid.UUID
-	ProductID    uuid.UUID
-	SourceType   string
-	SourceID     string
-	PaymentID    *uuid.UUID
-	Status       string
-	StartsAt     time.Time
-	EndsAt       *time.Time
-	RevokedAt    *time.Time
-	RevokeReason *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	CustomerID   uuid.UUID
-}
-
 // Stripe-shaped product_feature attachments (issue #245): which entitlement features a product grants when purchased. duration_days null = indefinite.
 type OpenrailsProductEntitlementFeature struct {
 	ID                   uuid.UUID
@@ -745,6 +737,28 @@ type OpenrailsProductEntitlementFeature struct {
 	Metadata             []byte
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+}
+
+// Merchant-scoped provider account registry (#518). account_id is the provider-returned account/profile identity, not a credential hash.
+type OpenrailsProviderAccount struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// Provider rail/type such as stripe, nmi, ccbill, solana, or a future provider type.
+	ProviderType string
+	// Provider-returned account identity, e.g. Stripe acct_..., NMI profile account id, CCBill account/subaccount, or Solana authority address.
+	AccountID      string
+	DisplayName    *string
+	VaultSecretRef *string
+	// primary routes new work by default; secondary is enabled but explicit/manual; legacy is for old rows/rebills/refunds/webhooks only.
+	Role string
+	// enabled participates in routing/reconcile; disabled is retained for history but should not receive new routine work.
+	Status         string
+	Evidence       []byte
+	FirstSeenAt    time.Time
+	LastVerifiedAt *time.Time
+	ReplacedAt     *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
@@ -778,11 +792,11 @@ type OpenrailsProviderIntent struct {
 	CreatedAt      time.Time
 	ExecutedAt     *time.Time
 	UpdatedAt      time.Time
-	// Fingerprint of the provider account the intent was enqueued against (#365). NULL = pre-guard or unresolvable: executes ungated. Mismatch with the current credentials parks the intent.
-	AccountFingerprint *string
+	// Provider account row the outbound intent was enqueued against. Mismatch with current credentials parks/defers execution.
+	ProviderAccountID *uuid.UUID
 }
 
-// Durable reconciliation findings ledger. Stable identity per (merchant, provider, finding_type, subject_key); finding_type is a qualified name such as pull.charge.missing, derive.grant.excess, life.provider_intent.abandoned, or consistency.amount_mismatch.provider_catalog. Legacy PS-* findings remain transitional until #511 Phase F.
+// Durable reconciliation findings ledger. Stable identity per (merchant, provider, finding_type, subject_key); finding_type is a qualified four-plane slug such as pull.charge.missing, derive.grant_effect.excess, life.provider_intent.abandoned, or consistency.amount_mismatch.provider_catalog (#511).
 type OpenrailsReconciliationFinding struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -890,6 +904,8 @@ type OpenrailsSubscription struct {
 	DeletionScheduledAt *time.Time
 	MerchantID          uuid.UUID
 	CustomerID          uuid.UUID
+	// Provider account that produced this remote subscription mirror row.
+	ProviderAccountID *uuid.UUID
 }
 
 // Persisted tier ladder (#476): rungs declared once per merchant and currency, or as a per-customer/currency override. OpenRails auto-maintains money_settings.tier from same-currency cumulative paid spend unless tier_source=admin.

@@ -352,7 +352,6 @@ func (c *remote) SetMerchantConfiguration(ctx context.Context, in MerchantConfig
 			"window_seconds": w.WindowSeconds,
 			"limit":          w.Limit,
 			"currency":       w.Currency,
-			"cadence":        w.Cadence,
 		})
 	}
 	body := map[string]any{

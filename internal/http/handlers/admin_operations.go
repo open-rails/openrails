@@ -2,11 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -25,6 +25,8 @@ func adminOperationsPagination(r *httprequest.Request) (int, int) {
 	offset, _ := strconv.Atoi(r.Request.URL.Query().Get("offset"))
 	if offset < 0 {
 		offset = 0
+	} else if offset > math.MaxInt32 {
+		offset = math.MaxInt32
 	}
 	return limit, offset
 }
@@ -49,11 +51,9 @@ func GetAdminRepairAlerts(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to count repair alerts")
 		return
 	}
-	limit32, _ := safecast.Convert[int32](limit)
-	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListRepairAlerts(ctx, gen.ListRepairAlertsParams{
 		CustomerID: tsid, EventType: string(models.NotificationSystemAlert), Seen: seen,
-		Column3: limit32, Column4: offset32,
+		Column3: int32(limit), Column4: int32(offset),
 	})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve repair alerts")
@@ -249,7 +249,7 @@ func GetAdminProviderIntents(r *httprequest.Request) {
 			"executed_at":         row.ExecutedAt,
 			"created_at":          row.CreatedAt,
 			"updated_at":          row.UpdatedAt,
-			"account_fingerprint": row.AccountFingerprint,
+			"provider_account_id": row.ProviderAccountID,
 		}
 		if len(row.Payload) > 0 {
 			item["payload"] = json.RawMessage(row.Payload)

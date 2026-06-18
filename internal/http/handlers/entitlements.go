@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -15,11 +17,30 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/merchant"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
+
+// convergeAfterMutation runs the inline Convergence Engine for one customer after
+// a successful state mutation (#511): the customer is left consistent by
+// construction. Best-effort — a convergence failure is logged, never surfaced to
+// the caller (the mutation already succeeded; the background sweep is the
+// backstop). Cheap: a customer-scoped Converge scans only that customer's rows and
+// writes nothing when already consistent.
+func convergeAfterMutation(r *httprequest.Request, customer uuid.UUID) {
+	mID, ok := merchant.FromContext(r.Request.Context())
+	if !ok || customer == uuid.Nil {
+		return
+	}
+	if _, err := converge.AfterMutation(r.Request.Context(), r.State.DB, mID, customer); err != nil {
+		log.WithContext(r.Request.Context()).WithError(err).
+			Warn("inline converge after mutation failed; background sweep will reconcile")
+	}
+}
 
 type ServiceEntitlementRecord struct {
 	ID           string     `json:"id"`
@@ -248,6 +269,7 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
+	convergeAfterMutation(r, tenantSubjectID) // #511: re-converge the customer inline
 	r.JSON(http.StatusCreated, ent)
 }
 
@@ -258,7 +280,7 @@ func tenantSubjectForEntitlementGrantTarget(r *httprequest.Request, subject stri
 		// identity, so resolve (or materialize) its payable tenant subject the
 		// same way commerce writers do (#317) — a UUID subject IS its own
 		// customer_id (UUID-only, #364). Returning uuid.Nil here would
-		// make the admin_grants insert violate its tenant_subject FK and 500
+		// make the entitlement_grants insert violate its tenant_subject FK and 500
 		// every non-delegated admin grant.
 		return repo.EnsureCustomerID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, subject)
 	}
@@ -311,6 +333,7 @@ func RevokeAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
+	convergeAfterMutation(r, ent.CustomerID) // #511: re-converge the customer inline
 	r.SuccessJSONMessage("entitlement revoked")
 }
 

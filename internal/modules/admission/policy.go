@@ -239,7 +239,7 @@ func (s *InvokerSpendLimitStore) Delete(ctx context.Context, payer identity.Cust
 func toBudgetWindows(ws []models.BudgetWindowPolicy) []budgets.BudgetWindow {
 	out := make([]budgets.BudgetWindow, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency, Cadence: w.Cadence})
+		out = append(out, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency})
 	}
 	return out
 }

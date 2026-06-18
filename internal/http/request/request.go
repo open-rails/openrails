@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/message"
 )
 
 // Transport is the framework backend behind a Request. The handler-facing
@@ -114,7 +113,7 @@ func (r *Request) SuccessJSON(data any) {
 }
 
 func (r *Request) SuccessJSONMessage(msg string) {
-	r.t.WriteJSON(http.StatusOK, message.Json{
+	r.t.WriteJSON(http.StatusOK, map[string]any{
 		"message": msg,
 	})
 }
@@ -135,7 +134,7 @@ func (r *Request) SuccessJSONPaginated(data any, total int64, limit, offset int)
 	if r.Request != nil {
 		urlPath = r.Request.URL.Path
 	}
-	r.t.WriteJSON(http.StatusOK, message.Json{
+	r.t.WriteJSON(http.StatusOK, map[string]any{
 		"object":   "list",
 		"data":     data,
 		"total":    total,

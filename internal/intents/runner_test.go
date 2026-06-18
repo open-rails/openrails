@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -17,6 +18,7 @@ import (
 type fakeLedger struct {
 	due        []gen.OpenrailsProviderIntent
 	dueVerify  []gen.OpenrailsProviderIntent
+	accounts   map[uuid.UUID]gen.OpenrailsProviderAccount
 	transition map[uuid.UUID]string // id -> applied transition
 	reasons    map[uuid.UUID]string
 	nextAt     map[uuid.UUID]time.Time
@@ -33,10 +35,19 @@ type fakeLedger struct {
 func newFakeLedger() *fakeLedger {
 	return &fakeLedger{
 		transition: map[uuid.UUID]string{},
+		accounts:   map[uuid.UUID]gen.OpenrailsProviderAccount{},
 		reasons:    map[uuid.UUID]string{},
 		nextAt:     map[uuid.UUID]time.Time{},
 		evidence:   map[uuid.UUID]map[string]any{},
 	}
+}
+
+func (f *fakeLedger) GetProviderAccount(_ context.Context, id uuid.UUID) (gen.OpenrailsProviderAccount, error) {
+	account, ok := f.accounts[id]
+	if !ok {
+		return gen.OpenrailsProviderAccount{}, pgx.ErrNoRows
+	}
+	return account, nil
 }
 
 func (f *fakeLedger) Enqueue(context.Context, EnqueueParams) (gen.OpenrailsProviderIntent, error) {

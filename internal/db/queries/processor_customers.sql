@@ -4,7 +4,7 @@
 INSERT INTO openrails.processor_customers (
     id, merchant_id, customer_id, processor, processor_customer_id, created_at, updated_at
 ) VALUES ($1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6)
-ON CONFLICT (merchant_id, customer_id, processor) DO UPDATE SET
+ON CONFLICT (merchant_id, customer_id, processor) WHERE provider_account_id IS NULL DO UPDATE SET
     processor_customer_id = EXCLUDED.processor_customer_id,
     updated_at = EXCLUDED.updated_at;
 

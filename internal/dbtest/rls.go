@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	_ "github.com/lib/pq" // database/sql driver for the ALTER ROLE statement
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,7 +54,7 @@ func SharedRLSPostgres(t *testing.T) (superDSN, appDSN string) {
 // connect as it. Migration 050 creates the role NOLOGIN; production attaches login
 // credentials out of band. The role keeps NOBYPASSRLS so RLS still enforces.
 func enableAppRoleLogin(ctx context.Context, superDSN string) error {
-	sqlDB, err := sql.Open("postgres", superDSN)
+	sqlDB, err := sql.Open("pgx", superDSN)
 	if err != nil {
 		return fmt.Errorf("open super dsn: %w", err)
 	}

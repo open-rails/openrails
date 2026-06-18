@@ -10,11 +10,11 @@
 //     only the `held` reservation gauge and the window counters live in shared
 //     Redis. A stale/concurrent read can cause bounded over-admission, never
 //     ledger corruption (the durable truth is the #512 ledger).
-//   - Spend-cap windows are PER-USER-STAGGERED (#337): "session" opens at the first
-//     reserve when none is active and closes Duration later; "fixed" ticks at
+//   - Spend-cap windows are PER-USER-STAGGERED (#337): boundaries tick at
 //     offset + k*Duration forever, where offset is a deterministic phase derived
 //     from the customer-scoped window key (no stored anchor). Resets are staggered
-//     per payer so demand spreads instead of every payer resetting at once.
+//     per payer so demand spreads instead of every payer resetting at once. There
+//     is ONE window model — no per-window cadence choice to configure.
 //   - Windows are ESTIMATE-BASED: a reserve counts the ESTIMATE; capture does NOT
 //     true the window up to actual (only the balance, caller-side, trues up).
 //     Release (failure) frees the estimate from the windows. Caps therefore run
@@ -30,35 +30,6 @@ import (
 	"time"
 )
 
-// Cadence selects how a window's reset boundary is derived. Both stagger resets
-// per payer (#337); neither is a globally aligned calendar bucket.
-type Cadence string
-
-const (
-	// CadenceSession: the window opens at the first reserve when none is active and
-	// closes exactly Duration later; the next reserve after expiry opens a fresh
-	// window. Lazily opened (the key's TTL IS the window — no stored anchor).
-	CadenceSession Cadence = "session"
-	// CadenceFixed: boundaries tick at offset + k*Duration forever, where offset is
-	// a deterministic per-(customer,window) phase — the same staggered reset each
-	// period, recomputable (no stored anchor, flush-safe).
-	CadenceFixed Cadence = "fixed"
-)
-
-// NormalizeCadence maps "" to session and rejects unknown values. Mirrors the
-// budgets engine's cadence vocabulary (session|fixed) so the Postgres→Policy
-// loader can pass cadence through verbatim.
-func NormalizeCadence(c string) (Cadence, error) {
-	switch strings.TrimSpace(strings.ToLower(c)) {
-	case "", string(CadenceSession):
-		return CadenceSession, nil
-	case string(CadenceFixed):
-		return CadenceFixed, nil
-	default:
-		return "", fmt.Errorf("spendgate: unknown window cadence %q (want session|fixed)", c)
-	}
-}
-
 // Scope is whose spend a window caps.
 type Scope string
 
@@ -69,11 +40,10 @@ const (
 	ScopeTier    Scope = "tier"    // the payer's tier
 )
 
-// Window is one {scope, cadence, duration, limit} cap. Limit and all reserved
-// amounts are in the currency's minor units.
+// Window is one {scope, duration, limit} cap. Limit and all reserved amounts are
+// in the currency's minor units.
 type Window struct {
 	Scope    Scope         `json:"scope"`
-	Cadence  Cadence       `json:"cadence"`
 	Duration time.Duration `json:"duration"`
 	Limit    int64         `json:"limit"`
 	// Key is a stable per-policy window identifier (e.g. "5h", "7d") so a window's
@@ -143,22 +113,13 @@ func (p Policy) EffectiveWindows(req Request) []resolvedWindow {
 	return out
 }
 
-// identity is the stable Redis key prefix for this window under a payer base. For
-// CadenceSession the counter key IS this prefix (one key, TTL = Duration set at
-// open, never refreshed). For CadenceFixed the Lua appends ":<bucket>" where
-// bucket = floor((now-offset)/Duration) and offset is the deterministic phase
-// fixedOffsetMs(prefix, Duration) — no stored anchor. The base is hash-tagged
-// ({merchant:customer}) so every key the Lua touches co-locates on one Cluster slot.
+// identity is the stable Redis key prefix for this window under a payer base. The
+// Lua appends ":<bucket>" where bucket = floor((now-offset)/Duration) and offset is
+// the deterministic phase fixedOffsetMs(prefix, Duration) — no stored anchor. The
+// base is hash-tagged ({merchant:customer}) so every key the Lua touches co-locates
+// on one Cluster slot.
 func (w resolvedWindow) identity(base string) string {
-	return fmt.Sprintf("%s:w:%s:%s:%s:%s", base, w.Scope, scrub(w.scopeID), scrub(w.Key), w.Cadence)
-}
-
-// cadenceCode encodes the cadence for the Lua (0=session, 1=fixed).
-func (w resolvedWindow) cadenceCode() int {
-	if w.Cadence == CadenceFixed {
-		return 1
-	}
-	return 0
+	return fmt.Sprintf("%s:w:%s:%s:%s", base, w.Scope, scrub(w.scopeID), scrub(w.Key))
 }
 
 // durationMillis is the window length passed to the Lua.
