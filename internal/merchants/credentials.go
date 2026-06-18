@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
+
+// DefaultNMICollectJSURL is the standard NMI Collect.js script URL.
+const DefaultNMICollectJSURL = "https://secure.networkmerchants.com/token/Collect.js"
 
 // StripeCredentials are a tenant's processor credentials, loaded by tenant id at
 // request time (NOT injected process-wide). Empty fields mean "not configured".
@@ -14,6 +18,15 @@ type StripeCredentials struct {
 	SecretKey            string
 	WebhookSigningSecret string
 	WebhookSigningThin   string
+}
+
+// NMITokenizationConfig is browser-facing NMI tokenization configuration for a
+// merchant/provider. The key is public, but it is still loaded from the
+// merchant-scoped provider config so tenant A's browser config does not bleed
+// into tenant B.
+type NMITokenizationConfig struct {
+	TokenizationKey string
+	CollectJSURL    string
 }
 
 // LoadStripeCredentials loads a tenant's Stripe credentials from the secret store
@@ -46,6 +59,48 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 		return creds, err
 	}
 	return creds, nil
+}
+
+// LoadNMITokenizationConfig loads merchant-scoped browser tokenization config
+// for an NMI provider. Missing values return empty fields, except CollectJSURL
+// defaults to NMI's standard URL when a supported provider is selected.
+func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID, provider string) (NMITokenizationConfig, error) {
+	var cfg NMITokenizationConfig
+	if s.secrets == nil || id.IsZero() {
+		return cfg, nil
+	}
+
+	var keyName, urlName string
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "mobius":
+		keyName = SecretNMIMobiusTokenizationKey
+		urlName = SecretNMIMobiusTokenizationURL
+	default:
+		return cfg, nil
+	}
+
+	get := func(name string) (string, error) {
+		sec, err := s.secrets.Get(ctx, id, name)
+		if err != nil {
+			if errors.Is(err, ErrSecretNotFound) {
+				return "", nil
+			}
+			return "", err
+		}
+		return sec.Value, nil
+	}
+
+	var err error
+	if cfg.TokenizationKey, err = get(keyName); err != nil {
+		return cfg, err
+	}
+	if cfg.CollectJSURL, err = get(urlName); err != nil {
+		return cfg, err
+	}
+	if cfg.CollectJSURL == "" {
+		cfg.CollectJSURL = DefaultNMICollectJSURL
+	}
+	return cfg, nil
 }
 
 // PutCredential stores/rotates a single per-tenant credential.

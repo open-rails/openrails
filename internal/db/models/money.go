@@ -43,21 +43,6 @@ type MoneyTransaction struct {
 	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
-// MoneyWindow is a prepaid money window (issue #335): one bulk reservation a
-// host admits requests against locally. See CreditWindow for the mechanics.
-type MoneyWindow struct {
-	ID            uuid.UUID `json:"id"`
-	MerchantID    uuid.UUID `json:"merchant_id"`
-	CustomerID    uuid.UUID `json:"customer_id"`
-	Currency      string    `json:"currency"`
-	HeldAmount    int64     `json:"held_amount"`
-	SettledAmount int64     `json:"settled_amount"`
-	Status        string    `json:"status"` // open | closed | expired
-	ExpiresAt     time.Time `json:"expires_at"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
-
 // MoneyAccount is the per-(merchant, merchant subject) spend policy and money-in
 // configuration (issue #237). NULL cap columns mean "no cap".
 type MoneyAccount struct {

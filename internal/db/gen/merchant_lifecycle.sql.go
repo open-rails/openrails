@@ -33,17 +33,6 @@ func (q *Queries) CountMerchantRowsCheckoutSessions(ctx context.Context, merchan
 	return count, err
 }
 
-const countMerchantRowsEntitlementGrants = `-- name: CountMerchantRowsEntitlementGrants :one
-SELECT count(*) FROM openrails.entitlement_grants WHERE merchant_id = $1
-`
-
-func (q *Queries) CountMerchantRowsEntitlementGrants(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsEntitlementGrants, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countMerchantRowsEntitlements = `-- name: CountMerchantRowsEntitlements :one
 SELECT count(*) FROM openrails.entitlements WHERE merchant_id = $1
 `
@@ -61,17 +50,6 @@ SELECT count(*) FROM openrails.money_settings WHERE merchant_id = $1
 
 func (q *Queries) CountMerchantRowsMoneyAccounts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMerchantRowsMoneyAccounts, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countMerchantRowsMoneyWindows = `-- name: CountMerchantRowsMoneyWindows :one
-SELECT count(*) FROM openrails.money_windows WHERE merchant_id = $1
-`
-
-func (q *Queries) CountMerchantRowsMoneyWindows(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsMoneyWindows, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -188,15 +166,6 @@ func (q *Queries) PurgeMerchantRowsCheckoutSessions(ctx context.Context, merchan
 	return err
 }
 
-const purgeMerchantRowsEntitlementGrants = `-- name: PurgeMerchantRowsEntitlementGrants :exec
-DELETE FROM openrails.entitlement_grants WHERE merchant_id = $1
-`
-
-func (q *Queries) PurgeMerchantRowsEntitlementGrants(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsEntitlementGrants, merchantID)
-	return err
-}
-
 const purgeMerchantRowsEntitlements = `-- name: PurgeMerchantRowsEntitlements :exec
 DELETE FROM openrails.entitlements WHERE merchant_id = $1
 `
@@ -212,15 +181,6 @@ DELETE FROM openrails.money_settings WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsMoneyAccounts(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsMoneyAccounts, merchantID)
-	return err
-}
-
-const purgeMerchantRowsMoneyWindows = `-- name: PurgeMerchantRowsMoneyWindows :exec
-DELETE FROM openrails.money_windows WHERE merchant_id = $1
-`
-
-func (q *Queries) PurgeMerchantRowsMoneyWindows(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsMoneyWindows, merchantID)
 	return err
 }
 

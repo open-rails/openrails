@@ -136,21 +136,6 @@ type Client interface {
 	// token-issuance enrichment and list renders: bake names into token
 	// claims and gate per-request from the token, not from this call.
 	ListActiveEntitlements(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error)
-	// OpenWindow opens a prepaid credit window (#335): a REAL hold — the funds
-	// leave the payer's available balance now. ErrInsufficientCredits on a payer
-	// who can't cover it.
-	OpenWindow(ctx context.Context, req OpenWindowRequest) (*CreditWindow, error)
-	// SettleWindowItems flushes a cross-payer batch of settled actuals. The call
-	// succeeds with per-item results — one item's failure never fails the flush —
-	// and is safe to re-send wholesale (per-item idempotency on RequestID).
-	SettleWindowItems(ctx context.Context, items []WindowSettleItem) ([]WindowSettleResult, error)
-	// RefillWindow extends an open window: amount > 0 reserves more funds
-	// (ErrInsufficientCredits applies exactly like open), ttlSeconds > 0 pushes
-	// expires_at out. At least one must be positive.
-	RefillWindow(ctx context.Context, windowID uuid.UUID, amount, ttlSeconds int64) (*CreditWindow, error)
-	// CloseWindow releases the window's unsettled remainder back to the payer's
-	// available balance. Idempotent: re-closing returns the closed window.
-	CloseWindow(ctx context.Context, windowID uuid.UUID) (*CreditWindow, error)
 	// AdmitBatch performs one cross-payer batch admission (#335): N admit items
 	// (mixed payers) in ONE call with per-item verdicts. Per-item isolation: one
 	// item's deny or error never fails the batch; the returned slice is
@@ -436,14 +421,13 @@ type SpendLimitWindow struct {
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit"`
 	Currency      string `json:"currency,omitempty"`
-	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
 }
 
-// InvokerSpendLimitInput configures a SUBJECT-owned hierarchical budget-scope
-// policy via PUT /v1/service/invoker-spend-limits (#473). Scope is
-// "subject" (self cap), "role" (a (subject, role) pool), "invoker" (a
-// (subject, invoker) grant), or "invoker_tier" (a shared tier grant). ScopeKey
-// is the role uuid, invoker string, or tier key. RoleID is kept as a
+// InvokerSpendLimitInput configures a per-invoker spend limit via
+// PUT /v1/service/invoker-spend-limits (#473/#517) — the payer's cap on its
+// delegated invokers. Scope is "invoker" (a (subject, invoker) grant), "role"
+// (a (subject, role) pool), or "invoker_tier" (a shared tier grant). ScopeKey is
+// the invoker string, role uuid, or tier key. RoleID is kept as a
 // role-compatible alias for older role callers.
 type InvokerSpendLimitInput struct {
 	Scope    string             `json:"scope"`
@@ -489,59 +473,6 @@ type EntitlementRecord struct {
 	RevokeReason *string    `json:"revoke_reason,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
-}
-
-// OpenWindowRequest is the body for POST /v1/service/credits/windows (#335).
-type OpenWindowRequest struct {
-	CustomerID string `json:"customer_id"`
-	Invoker    string `json:"invoker"`
-	Currency   string `json:"currency,omitempty"`
-	Amount     int64  `json:"amount"`
-	TTLSeconds int64  `json:"ttl_seconds,omitempty"`
-}
-
-// CreditWindow is the window snapshot returned by open/refill/close
-// (pkg/service.CreditWindowDTO on the wire).
-type CreditWindow struct {
-	WindowID      uuid.UUID `json:"window_id"`
-	CustomerID    uuid.UUID `json:"customer_id"`
-	Currency      string    `json:"currency"`
-	HeldAmount    int64     `json:"held_amount"`
-	SettledAmount int64     `json:"settled_amount"`
-	Status        string    `json:"status"` // open | closed | expired
-	ExpiresAt     time.Time `json:"expires_at"`
-}
-
-// WindowSettleUsage carries the analytics attribution recorded with a settled
-// item (no second debit) — the window analogue of CaptureUsage.
-type WindowSettleUsage struct {
-	EventType string         `json:"event_type"`
-	Resource  string         `json:"resource,omitempty"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
-}
-
-// WindowSettleItem is one settled actual. Items in one SettleWindowItems call
-// may span windows AND payers (the cross-payer flush). RequestID is the
-// per-item idempotency key.
-type WindowSettleItem struct {
-	WindowID  uuid.UUID          `json:"window_id"`
-	RequestID string             `json:"request_id"`
-	Amount    int64              `json:"amount"`
-	Invoker   string             `json:"invoker,omitempty"`
-	Usage     *WindowSettleUsage `json:"usage,omitempty"`
-}
-
-// WindowSettleResult is one per-item settle outcome. OK with Replayed=true is
-// an idempotent replay (already settled, not charged again). Error is one of
-// window_not_found | window_not_open | window_exceeded | invalid_item |
-// internal_error.
-type WindowSettleResult struct {
-	WindowID      uuid.UUID  `json:"window_id"`
-	RequestID     string     `json:"request_id"`
-	OK            bool       `json:"ok"`
-	Replayed      bool       `json:"replayed,omitempty"`
-	Error         string     `json:"error,omitempty"`
-	TransactionID *uuid.UUID `json:"transaction_id,omitempty"`
 }
 
 // AdmitBatchVerdict is one per-item verdict from POST /v1/service/admit/batch.

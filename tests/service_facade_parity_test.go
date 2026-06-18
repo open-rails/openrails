@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -74,12 +75,13 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// credit_type is accepted-and-ignored on the wire; money needs no type row.
 	creditTypeName := "svc_test_credits_" + uuid.NewString()
 
-	// Seed a starting money balance (USD) as a spendable block (#491: balance is
-	// derived from money_blocks).
-	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.money_blocks (id, merchant_id, customer_id, currency, original_amount, remaining_amount, created_at)
-		VALUES ($1, $2, $3, 'USD', 10000, 10000, $4)`,
-		uuid.New(), dbtest.TestMerchantID.UUID(), tenantSubjectID, time.Now().UTC())
+	// Seed a starting money balance (USD) via the #512 ledger deposit (the
+	// single-entry money_blocks table was dropped in the hard cut; balance is now
+	// derived from ledger_accounts).
+	_, err := money.NewMoneyService(suite.App.Runtime.DB).Deposit(ctx, money.DepositParams{
+		CustomerID: &tenantSubject, Invoker: tenantSubjectID.String(),
+		Currency: money.DefaultCurrency, Amount: 10_000, Source: "seed",
+	})
 	require.NoError(t, err)
 
 	// Seed an entitlement. source_id is NOT NULL (the originating
@@ -211,6 +213,6 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	}
 	require.NoError(t, json.Unmarshal(wJWTBalance.Body.Bytes(), &balanceResp))
 	require.Equal(t, tenantSubjectID.String(), balanceResp.CustomerID)
-	require.Equal(t, int64(9_889), balanceResp.BalanceAmount)
+	require.Equal(t, int64(10_000), balanceResp.BalanceAmount, "the full seed; no spend remains in this parity test")
 	require.Equal(t, int64(0), balanceResp.HeldAmount)
 }

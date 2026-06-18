@@ -18,7 +18,6 @@ Required environment:
 
 - `PROCESSORS_MOBIUS_SECURITY_KEY`
 - `PROCESSORS_MOBIUS_TOKENIZATION_KEY`
-- `PROCESSORS_MOBIUS_TOKENIZATION_URL`
 - `PROCESSORS_MOBIUS_WEBHOOK_SECRET`
 
 Optional environment:
@@ -79,8 +78,7 @@ AUTHKIT_DEV_MINT_SECRET=$(openssl rand -hex 32)
 
 # Mobius/NMI keys
 PROCESSORS_MOBIUS_SECURITY_KEY=...
-PROCESSORS_MOBIUS_TOKENIZATION_KEY=...          # public (Collect.js)
-PROCESSORS_MOBIUS_TOKENIZATION_URL=...          # Collect.js script URL you want to test
+PROCESSORS_MOBIUS_TOKENIZATION_KEY=...          # legacy dev fallback for Collect.js
 PROCESSORS_MOBIUS_WEBHOOK_SECRET=...            # HMAC shared secret for webhooks
 
 # Cloudflared (deterministic webhook hostname)
@@ -94,6 +92,8 @@ E2E_MOBIUS_PLAN_ID=YOUR_SANDBOX_PLAN_ID
 
 Notes:
 - Billing uses fixed NMI gateway endpoints for Mobius/NMI direct-post and query calls. Use sandbox/test credentials when `TEST_MODE=true`.
+- Preferred merchant-scoped tokenization config lives in merchant secrets:
+  `nmi/mobius/tokenization_key` and optional `nmi/mobius/tokenization_url`.
 - Collect.js origin restrictions: if your tokenization key is origin-locked, you must load the harness over **HTTPS** via Cloudflared (not `http://localhost`).
 
 ## 2) Start the local stack (+ local issuer)

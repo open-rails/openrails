@@ -16,7 +16,7 @@ const entitlementExistsForGrant = `-- name: EntitlementExistsForGrant :one
 SELECT EXISTS (
     SELECT 1 FROM openrails.entitlements
     WHERE merchant_id = $1::uuid
-      AND source_type = 'grant' AND source_id = $2::uuid
+      AND grant_id = $2::uuid
       AND entitlement = $3::text
       AND deleted_at IS NULL
 ) AS exists
@@ -166,7 +166,7 @@ const grantHasLiveEntitlement = `-- name: GrantHasLiveEntitlement :one
 SELECT EXISTS (
     SELECT 1 FROM openrails.entitlements
     WHERE merchant_id = $1::uuid
-      AND source_type = 'grant' AND source_id = $2::uuid
+      AND grant_id = $2::uuid
       AND revoked_at IS NULL AND deleted_at IS NULL
 ) AS exists
 `
@@ -568,6 +568,77 @@ func (q *Queries) ListLiveOwnershipGrantIDsByPayment(ctx context.Context, arg Li
 	return items, nil
 }
 
+const listOwnershipGrantsWithStatus = `-- name: ListOwnershipGrantsWithStatus :many
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.source_type, g.source_id,
+       g.payment_id, g.starts_at, g.ends_at, g.created_at,
+       term.created_at AS revoked_at, term.reason AS revoke_reason
+FROM openrails.grants g
+LEFT JOIN openrails.grants term
+  ON term.supersedes_id = g.id AND term.event IN ('revoke', 'expire', 'supersede')
+WHERE g.merchant_id = $1::uuid
+  AND g.customer_id = $2::uuid
+  AND g.kind = 'ownership'
+  AND g.event = 'grant'
+ORDER BY g.created_at
+`
+
+type ListOwnershipGrantsWithStatusParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+type ListOwnershipGrantsWithStatusRow struct {
+	ID           uuid.UUID
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+	ProductID    *uuid.UUID
+	SourceType   string
+	SourceID     string
+	PaymentID    *uuid.UUID
+	StartsAt     time.Time
+	EndsAt       *time.Time
+	CreatedAt    time.Time
+	RevokedAt    *time.Time
+	RevokeReason *string
+}
+
+// #511 ownership-on-grants: every ownership grant-event for a customer with its
+// derived status (the termination event, if any) — so the legacy
+// ProductAccessGrant.{status,revoked_at,revoke_reason} shape can be reconstructed
+// from the append-only ledger in one query.
+func (q *Queries) ListOwnershipGrantsWithStatus(ctx context.Context, arg ListOwnershipGrantsWithStatusParams) ([]ListOwnershipGrantsWithStatusRow, error) {
+	rows, err := q.db.Query(ctx, listOwnershipGrantsWithStatus, arg.MerchantID, arg.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOwnershipGrantsWithStatusRow
+	for rows.Next() {
+		var i ListOwnershipGrantsWithStatusRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.ProductID,
+			&i.SourceType,
+			&i.SourceID,
+			&i.PaymentID,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.CreatedAt,
+			&i.RevokedAt,
+			&i.RevokeReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSpendableCreditLots = `-- name: ListSpendableCreditLots :many
 SELECT g.id, g.amount, g.ends_at,
     (g.amount - COALESCE((
@@ -640,7 +711,7 @@ SET revoked_at = $1::timestamptz,
     revoke_reason = $2::text,
     updated_at = now()
 WHERE merchant_id = $3::uuid
-  AND source_type = 'grant' AND source_id = $4::uuid
+  AND grant_id = $4::uuid
   AND revoked_at IS NULL AND deleted_at IS NULL
 `
 

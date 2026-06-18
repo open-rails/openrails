@@ -30,7 +30,6 @@ func TestConsolidatedSchemaCoversTenantOwnedRLSTables(t *testing.T) {
 	tables = append(tables,
 		"entitlement_features",
 		"product_entitlement_features",
-		"product_access_grants",
 		"usage_events",
 		"invoices",
 		"payer_spend_limits",

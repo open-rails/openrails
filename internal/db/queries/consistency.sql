@@ -24,15 +24,6 @@ WHERE ent.source_type = 'one_off'
   AND purch.id IS NULL
   AND (sqlc.narg(customer_id)::uuid IS NULL OR ent.customer_id = sqlc.narg(customer_id)::uuid);
 
--- name: ConOrphanEntitlementAdminSource :many
-SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
-FROM openrails.entitlements ent
-LEFT JOIN openrails.entitlement_grants ag ON ent.source_id = ag.id
-WHERE ent.source_type = 'admin'
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND ag.id IS NULL
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR ent.customer_id = sqlc.narg(customer_id)::uuid);
 
 -- name: ConDuplicateChargesSamePeriod :many
 -- More than one settled, non-refunded charge for the same customer/product/month.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -107,6 +108,11 @@ func validateSecretValueLocal(name, value string) error {
 		}
 	case SecretStripeWebhookSigning, SecretStripeWebhookSigningThin:
 		if !strings.HasPrefix(value, "whsec_") {
+			return errors.New("invalid_format")
+		}
+	case SecretNMIMobiusTokenizationURL:
+		u, err := url.Parse(value)
+		if err != nil || u.Scheme != "https" || u.Host == "" {
 			return errors.New("invalid_format")
 		}
 	}

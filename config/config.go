@@ -48,9 +48,6 @@ func (p *FlexiblePort) UnmarshalText(text []byte) error {
 	return nil
 }
 
-const EnvProd string = "prod"
-const EnvDev string = "dev"
-
 const ConfigContextKey string = "config"
 
 // DefaultLogoURL is a simple billing/payment icon (white dollar sign on purple circle)
@@ -164,72 +161,15 @@ type Config struct {
 	Logger      *LoggerConfig     `koanf:"logger,omitempty"`
 	SendGrid    *SendGridConfig   `koanf:"sendgrid,omitempty"`
 	CorsOrigins []string          `koanf:"cors_origins,omitempty"`
-	// MerchantCORS configures per-merchant browser-direct allowed origins (issue #222
-	// browser tier). It is keyed by merchant slug; each entry lists the exact
-	// origins a browser on that merchant's domain may use to call OpenRails
-	// directly (e.g. the /v1/self/* self-service surface with a delegated access
-	// token). These origins are added to the allow-list ALONGSIDE CorsOrigins —
-	// they are an additive union, never a wildcard. Preflight succeeds for any
-	// listed origin and is denied for any origin that is not listed in either
-	// CorsOrigins or some merchant's allowed origins.
+	// MerchantCORS is legacy shape. It is NOT per-merchant enforcement: entries
+	// are flattened into the same global CORS allow-list as CorsOrigins. Prefer
+	// CorsOrigins until browser origins move to AuthKit remote_application state.
 	MerchantCORS map[string]*MerchantCORSConfig `koanf:"merchant_cors,omitempty"`
 	RateLimits   *RateLimitsConfig              `koanf:"rate_limits,omitempty"`
 	Captcha      *CaptchaConfig                 `koanf:"captcha,omitempty"`
 	FeatureFlags *FeatureFlags                  `koanf:"feature_flags,omitempty"`
 	Encryption   *EncryptionConfig              `koanf:"encryption,omitempty"`
 	Vault        *VaultConfig                   `koanf:"vault,omitempty"`
-	// BillingHotPath configures the degraded-mode behavior of the per-invocation
-	// billing authorize call (issue #248). EXPLICIT, never a silent default.
-	BillingHotPath *BillingHotPathConfig `koanf:"billing_hot_path,omitempty"`
-}
-
-// Billing hot-path fail policies (issue #248). The per-invocation authorize/hold
-// call is a NETWORK dependency on every generation; when OpenRails is unreachable
-// or slow, the client (gen-orchestrator) must apply an EXPLICIT, documented
-// policy — never an accidental default.
-const (
-	// BillingFailClosed denies the invocation when authorize cannot be reached
-	// (no hold => no run). The safe default for arrears/untrusted payers.
-	BillingFailClosed = "fail_closed"
-	// BillingFailOpen permits the invocation when authorize cannot be reached,
-	// with deferred settlement reconciled on recovery. ONLY for TRUSTED prepaid
-	// payers, bounded/capped per payer per outage window (the cap + replay live in
-	// the gen-orchestrator client, Wave 3).
-	BillingFailOpen = "fail_open"
-)
-
-// BillingHotPathConfig is the OpenRails-side declaration of the billing hot-path
-// degraded-mode contract (issue #248). The per-invocation hold call is a network
-// dependency on every generation; this knob makes the fail policy EXPLICIT.
-//
-// CONTRACT: the ENFORCEMENT (short timeout + circuit breaker + bounded fail-open
-// cap + deferred-hold replay) lives in the gen-orchestrator CLIENT (Wave 3). This
-// config is the documented source of truth the client reads so the policy is
-// never an accidental default:
-//
-//   - fail_closed (DEFAULT): authorize unreachable/slow => DENY the run. No hold,
-//     no run. Required for arrears/untrusted payers.
-//   - fail_open: authorize unreachable => PERMIT the run for TRUSTED prepaid
-//     payers only, bounded per payer per outage window, with deferred holds
-//     queued and replayed idempotently on recovery (reconciliation, #243, is the
-//     backstop). NEVER silently grant unbounded free usage.
-type BillingHotPathConfig struct {
-	// FailPolicy selects the degraded-mode behavior: "fail_closed" (default) or
-	// "fail_open". Validated at config load (config.Validate).
-	FailPolicy string `koanf:"fail_policy,omitempty"`
-}
-
-// EffectiveFailPolicy returns the configured fail policy, defaulting to
-// fail_closed (the safe default) when unset.
-func (c *BillingHotPathConfig) EffectiveFailPolicy() string {
-	if c == nil {
-		return BillingFailClosed
-	}
-	p := strings.ToLower(strings.TrimSpace(c.FailPolicy))
-	if p == "" {
-		return BillingFailClosed
-	}
-	return p
 }
 
 // EncryptionConfig configures per-merchant encryption-at-rest (issue #227). The
@@ -420,13 +360,6 @@ func validateSchema(raw string) error {
 	return nil
 }
 
-type StripeConfig struct {
-	SecretKey     string `koanf:"secret_key"`
-	WebhookSecret string `koanf:"webhook_secret"`
-	SuccessURL    string `koanf:"success_url"`
-	CancelURL     string `koanf:"cancel_url"`
-}
-
 // ProcessorType constants for the unified processor config
 const (
 	ProcessorTypeNMI    = "nmi"
@@ -470,9 +403,6 @@ type ProcessorConfig struct {
 	// --- NMI fields (type: nmi) ---
 	SecurityKey     string `koanf:"security_key"`
 	TokenizationKey string `koanf:"tokenization_key"`
-	// TokenizationURL is the Collect.js script URL used client-side for tokenization (e.g., https://secure.networkmerchants.com/token/Collect.js).
-	// Billing does not fetch this URL; it is intended for configuration parity and sandbox experimentation.
-	TokenizationURL string `koanf:"tokenization_url"`
 	WebhookSecret   string `koanf:"webhook_secret"`
 
 	// --- CCBill fields (type: ccbill) ---
@@ -597,29 +527,6 @@ func (p *ProcessorConfig) ToCCBillConfig() *CCBillConfig {
 	}
 }
 
-// ToStripeConfig converts the processor config to StripeConfig.
-// Only valid for Stripe-type processors.
-func (p *ProcessorConfig) ToStripeConfig() *StripeConfig {
-	return &StripeConfig{
-		SecretKey:     p.SecretKey,
-		WebhookSecret: p.WebhookSecret,
-		SuccessURL:    p.SuccessURL,
-		CancelURL:     p.CancelURL,
-	}
-}
-
-// ToSolanaConfig converts the processor config to SolanaConfig.
-// Only valid for Solana-type processors.
-func (p *ProcessorConfig) ToSolanaConfig() *SolanaConfig {
-	return &SolanaConfig{
-		HeliusAPIKey:                    p.HeliusAPIKey,
-		Network:                         p.Network,
-		RecipientWallet:                 p.RecipientWallet,
-		Tokens:                          p.Tokens,
-		SolanaPayRecurringSubscriptions: p.SolanaPayRecurringSubscriptions,
-	}
-}
-
 type NMIProviderSettings struct {
 	Name            string
 	SecurityKey     string
@@ -650,20 +557,15 @@ type RedisConfig struct {
 
 // AuthConfig holds JWT verification configuration for OpenRails.
 // Billing is a JWT verifier (not issuer) - it validates tokens issued by your IdP.
-// MerchantCORSConfig holds the browser-direct CORS policy for a single merchant
-// (issue #222 browser tier).
+// MerchantCORSConfig is legacy config flattened into the global CORS allow-list.
 type MerchantCORSConfig struct {
-	// AllowedOrigins is the exact set of browser origins (scheme+host+port) on
-	// this merchant's domain that may call OpenRails directly. Exact-match only; no
-	// wildcards. Example: ["https://app.example.com", "https://portal.example.com"].
+	// AllowedOrigins is exact-match only; no wildcards.
 	AllowedOrigins []string `koanf:"allowed_origins,omitempty"`
 }
 
 // AllowedCORSOrigins returns the de-duplicated union of the global CorsOrigins
-// and every merchant's per-merchant allowed origins (issue #222 browser tier). This
-// is the explicit allow-list handed to the CORS middleware so browsers on a
-// configured merchant domain can call OpenRails directly without weakening CORS
-// to a wildcard. Order is stable (global origins first, then merchant origins in
+// and every legacy MerchantCORS origin. This is a global allow-list, not tenant
+// isolation. Order is stable (global origins first, then legacy origins in
 // merchant-slug order) so the allow-list is deterministic.
 func (c *Config) AllowedCORSOrigins() []string {
 	if c == nil {
@@ -812,23 +714,6 @@ func (cp *ControlPlaneConfig) SelfHostedPosture() bool {
 	return !(cp.PublicUserRegistration && cp.PublicTenantRegistration)
 }
 
-type SolanaConfig struct {
-	// Leave empty to use the automatic fallback chain: Helius (if configured) → Solana public.
-
-	// HeliusAPIKey enables Helius as the primary RPC provider (recommended for production).
-	// Get a free API key at https://helius.dev (100k requests/day on free tier).
-	// If not set, falls back to Solana public endpoints.
-	HeliusAPIKey string `koanf:"helius_api_key"`
-
-	Network         string `koanf:"-"` // derived from test_env: devnet (test env) or mainnet
-	RecipientWallet string `koanf:"recipient_wallet"`
-
-	Tokens map[string]TokenConfig `koanf:"tokens,omitempty"`
-	// SolanaPayRecurringSubscriptions controls the public runtime capability flag
-	// for recurring Solana Pay transaction-request checkout.
-	SolanaPayRecurringSubscriptions bool `koanf:"solana_pay_recurring_subscriptions"`
-}
-
 // TokenConfig defines configuration for a specific Solana token
 type TokenConfig struct {
 	Mint     string `json:"mint" koanf:"mint"`         // Token mint address accepted on the configured Solana network.
@@ -898,7 +783,7 @@ type FeatureFlags struct {
 	DisableProcessorSubscriptionDeletions bool `koanf:"disable_processor_subscription_deletions"`
 
 	// DisableEntitlementExpiration stops all entitlement/credit expiration when true.
-	// Affects: CreditExpiryWorker, HoldExpiryWorker, entitlement revocation in FailMembership.
+	// Affects: CreditExpiryWorker, entitlement revocation in FailMembership.
 	// Users keep premium access even after subscription ends.
 	// Default: false (normal expiration behavior)
 	DisableEntitlementExpiration bool `koanf:"disable_entitlement_expiration"`
@@ -1147,27 +1032,7 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("database config validation failed: %w", err)
 	}
 
-	// Billing hot-path fail policy must be an explicit, known value (issue #248).
-	if err := validateBillingHotPath(cfg.BillingHotPath); err != nil {
-		return fmt.Errorf("billing_hot_path config validation failed: %w", err)
-	}
-
 	return nil
-}
-
-// validateBillingHotPath rejects an unknown fail policy (issue #248): only
-// fail_closed / fail_open are permitted. An empty value is allowed and resolves
-// to the fail_closed default (see BillingHotPathConfig.EffectiveFailPolicy).
-func validateBillingHotPath(cfg *BillingHotPathConfig) error {
-	if cfg == nil {
-		return nil
-	}
-	switch p := strings.ToLower(strings.TrimSpace(cfg.FailPolicy)); p {
-	case "", BillingFailClosed, BillingFailOpen:
-		return nil
-	default:
-		return fmt.Errorf("fail_policy must be %q or %q, got %q", BillingFailClosed, BillingFailOpen, cfg.FailPolicy)
-	}
 }
 
 func validateCaptcha(cfg *CaptchaConfig) error {
@@ -1762,9 +1627,6 @@ func Load(configPath string) (*Config, error) {
 		if s == "auth_expected_audience" {
 			return "auth.expected_audience"
 		}
-		if s == "openrails_billing_hot_path_fail_policy" || s == "billing_hot_path_fail_policy" {
-			return "billing_hot_path.fail_policy"
-		}
 
 		// Special case: CORS_ORIGINS -> cors_origins (top-level, not cors.origins)
 		if s == "cors_origins" {
@@ -1857,6 +1719,9 @@ func Load(configPath string) (*Config, error) {
 	// control plane.
 	if k.Exists("auth.control_plane.enabled") {
 		return nil, fmt.Errorf("auth.control_plane.enabled was removed (#469): the control plane is always on in standalone mode — delete the key; use auth.control_plane.public_user_registration / public_tenant_registration to keep registration closed")
+	}
+	if k.Exists("billing_hot_path") || os.Getenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY") != "" || os.Getenv("BILLING_HOT_PATH_FAIL_POLICY") != "" {
+		return nil, fmt.Errorf("billing_hot_path was removed: OpenRails does not enforce client degraded-mode policy; configure any fail-open/fail-closed behavior in the calling client")
 	}
 
 	// Unmarshal into config struct (overlay onto defaults)
@@ -2045,7 +1910,7 @@ func logFeatureFlagsStatus(cfg *Config) {
 	// Log entitlement expiration if disabled
 	if flags.DisableEntitlementExpiration {
 		log.Warn("⚠️  ENTITLEMENT EXPIRATION DISABLED - Credits and entitlements will not expire")
-		log.Info("   CreditExpiryWorker, HoldExpiryWorker, and entitlement revocation are paused")
+		log.Info("   CreditExpiryWorker and entitlement revocation are paused")
 		log.Info("   Users keep premium access even after subscription ends")
 		log.Info("   Set feature_flags.disable_entitlement_expiration=false to resume expiration")
 	}
@@ -2065,8 +1930,8 @@ func logTestEnvStatus(cfg *Config) {
 		log.Warn("🔴 LIVE CREDENTIALS - Real charges enabled")
 		log.Info("   Payment providers will use production environments")
 
-		// Warn if running real charges in dev environment (worth noticing:
-		// the dev default is live credentials unless test_env is set).
+		// Warn if running real charges in dev environment. This only happens when
+		// TEST_ENV=false is set explicitly; omitted test_env defaults to sandbox in dev.
 		if cfg.IsDev() {
 			log.Warn("⚠️  Real payment processing enabled in dev environment")
 			log.Warn("   Set test_env=true (env TEST_ENV=true, flag --test-env) to use sandbox environments")

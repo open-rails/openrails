@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	entitlementmod "github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -363,8 +362,7 @@ func (s *Service) AdminGetUserEntitlements(ctx context.Context, userID string, a
 
 // EntitlementGrantEntitlement grants an entitlement to a user.
 func (s *Service) EntitlementGrantEntitlement(ctx context.Context, adminUserID string, req EntitlementGrantEntitlementRequest) (*EntitlementRecord, error) {
-	database, dbErr := s.requireDB()
-	if dbErr != nil {
+	if _, dbErr := s.requireDB(); dbErr != nil {
 		return nil, dbErr
 	}
 	entitlements := s.entitlementService()
@@ -387,26 +385,10 @@ func (s *Service) EntitlementGrantEntitlement(ctx context.Context, adminUserID s
 
 	now := time.Now().UTC()
 
-	// Create admin grant record for audit
-	adminGrant := &models.EntitlementGrant{
-		ID:         uuidutil.NewV7(),
-		CustomerID: identity.CustomerIDFromString(req.UserID).UUID(),
-		GrantedBy:  adminUserID,
-		Reason:     req.Reason,
-		CreatedAt:  now,
-	}
-
-	// Calculate duration if end time provided
-	if req.EndAt != nil && !req.EndAt.IsZero() {
-		days := int(req.EndAt.Sub(now).Hours() / 24)
-		if days > 0 {
-			adminGrant.DurationDays = &days
-		}
-	}
-
-	if err := repo.NewEntitlementGrantRepo(database).Create(ctx, adminGrant); err != nil {
-		return nil, fmt.Errorf("create admin grant: %w", err)
-	}
+	// #511: a manual entitlement grant is now just an `admin`-sourced grant in the
+	// ledger (the source of truth) — no separate entitlement_grants provenance row.
+	// SourceID is the grant's own identity.
+	adminGrantID := uuidutil.NewV7()
 
 	var ent *models.Entitlement
 	var err error
@@ -419,7 +401,7 @@ func (s *Service) EntitlementGrantEntitlement(ctx context.Context, adminUserID s
 				Entitlement: req.Entitlement,
 				EndAt:       &endAt,
 				SourceType:  models.EntitlementSourceAdmin,
-				SourceID:    adminGrant.ID,
+				SourceID:    adminGrantID,
 			})
 		} else {
 			return nil, fmt.Errorf("end_at must be in the future")
@@ -430,7 +412,7 @@ func (s *Service) EntitlementGrantEntitlement(ctx context.Context, adminUserID s
 			Entitlement: req.Entitlement,
 			Indefinite:  true,
 			SourceType:  models.EntitlementSourceAdmin,
-			SourceID:    adminGrant.ID,
+			SourceID:    adminGrantID,
 		})
 	}
 

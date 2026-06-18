@@ -253,7 +253,6 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 				Type:            config.ProcessorTypeNMI,
 				SecurityKey:     envOrDefault("PROCESSORS_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
 				TokenizationKey: envOrDefault("PROCESSORS_MOBIUS_TOKENIZATION_KEY", ""),
-				TokenizationURL: envOrDefault("PROCESSORS_MOBIUS_TOKENIZATION_URL", ""),
 				WebhookSecret:   envOrDefault("PROCESSORS_MOBIUS_WEBHOOK_SECRET", ""),
 			},
 		},

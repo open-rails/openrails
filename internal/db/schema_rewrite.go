@@ -53,6 +53,16 @@ func (r schemaRewriter) apply(sql string) string {
 	return strings.ReplaceAll(sql, r.from, r.to)
 }
 
+// schema returns the target OpenRails schema this rewriter relocates to — the
+// configured schema when active, else config.DefaultSchema. Lets a *Pool report
+// its true schema even when built straight from a rewriter (DB.DataPool).
+func (r schemaRewriter) schema() string {
+	if !r.active {
+		return config.DefaultSchema
+	}
+	return strings.TrimSuffix(r.to, ".")
+}
+
 // ---- sqlc DBTX wrapper (covers every gen.Queries call site via DB.Qx) ----
 
 // schemaDBTX wraps a gen.DBTX (pool / merchant connection / tx) and rewrites the

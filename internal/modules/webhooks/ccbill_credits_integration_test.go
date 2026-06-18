@@ -33,10 +33,11 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	// tables were dropped (#512). Guard on the current table.
 	var exists bool
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='openrails' AND table_name='grants')").
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name='grants')",
+		dbi.DataPool().Schema()).
 		Scan(&exists))
 	if !exists {
-		t.Skip("openrails.grants not found; run migrations before integration tests")
+		t.Skip("grants not found in the configured schema; run migrations before integration tests")
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)

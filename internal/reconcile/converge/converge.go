@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -100,15 +102,29 @@ type Pass interface {
 // shared reconciliation_findings ledger, applying AUTO repairs through the
 // confirmed-absence gate.
 type ConvergeEngine struct {
-	DB     *db.DB
-	Now    func() time.Time
-	passes []Pass
+	DB  *db.DB
+	Now func() time.Time
+	// lifecycle is the shared subscription local-state core. The LIFE pass's
+	// terminal repairs (grace_exhausted / pending_stale / period_overdue) route
+	// through it instead of bespoke SQL appliers, so a converged cancellation is
+	// identical to a user-driven one (status flip, the #264 Solana cranker
+	// cascade, as-of entitlement revoke) — minus the durable side-effects, which
+	// are deliberately not re-fired for a transition that logically already
+	// happened. Built from db (no import cycle: subscriptions never imports
+	// converge); side-effect deps are intentionally nil.
+	lifecycle *subscriptions.SubscriptionLifecycleService
+	passes    []Pass
 }
 
 // NewConvergeEngine wires the engine with the DERIVE → LIFE → CON passes (each
 // fleshed out across #511 Phase D).
 func NewConvergeEngine(database *db.DB) *ConvergeEngine {
 	e := &ConvergeEngine{DB: database, Now: func() time.Time { return time.Now().UTC() }}
+	// Real clock: the LIFE pass passes its own detection instants (now / grace-end)
+	// explicitly into the cores, so the lifecycle clock only stamps cancelled_at.
+	// Side-effect deps (notifications / event log / payments / deferred delete) are
+	// nil: convergence applies LOCAL state only — converge-not-replay.
+	e.lifecycle = subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, nil, clockwork.NewRealClock())
 	e.passes = []Pass{&derivePass{e: e}, &lifePass{e: e}, &conPass{e: e}}
 	return e
 }

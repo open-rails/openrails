@@ -107,18 +107,29 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 		if job.Args.Feedback != "" {
 			feedback = &job.Args.Feedback
 		}
-		return w.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
+		if err := w.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: &sub.ID,
 			CancelType:     models.CancelTypeUser,
 			CancelFeedback: feedback,
 			RevokeAccess:   false,
-		})
+		}); err != nil {
+			return err
+		}
 	default:
 		if w.UserSubscriptionService == nil {
 			return fmt.Errorf("user subscription service unavailable")
 		}
-		return w.UserSubscriptionService.CancelUserSubscription(ctx, userID, job.Args.Feedback)
+		if err := w.UserSubscriptionService.CancelUserSubscription(ctx, userID, job.Args.Feedback); err != nil {
+			return err
+		}
 	}
+
+	// #511 Phase E: re-converge the customer inline after the cancel commits, so
+	// any drift this lifecycle transition implies (lapsed grace windows, a stalled
+	// dunning schedule, grant effects to retract) is reconciled immediately rather
+	// than waiting for the next sweep. Best-effort — the sweep is the backstop.
+	convergeCustomerInline(ctx, w.DB, sub.MerchantID, sub.CustomerID, KindSubscriptionCancel)
+	return nil
 }
 
 type ResumeSubscriptionWorker struct {

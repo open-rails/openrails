@@ -4,12 +4,12 @@
 -- name: CreateEntitlement :one
 INSERT INTO openrails.entitlements (
     id, merchant_id, customer_id, entitlement, start_at, end_at,
-    source_id, source_type, revoked_at, revoke_reason, created_at, updated_at
+    source_id, source_type, grant_id, revoked_at, revoke_reason, created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF(sqlc.arg(id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
     sqlc.arg(merchant_id)::uuid,
     NULLIF(sqlc.arg(customer_id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-    $1, $2, sqlc.narg(end_at), sqlc.narg(source_id), $3,
+    $1, $2, sqlc.narg(end_at), sqlc.narg(source_id), $3, sqlc.narg(grant_id),
     sqlc.narg(revoked_at), sqlc.narg(revoke_reason),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
@@ -406,3 +406,14 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)
   AND ent.start_at <= sqlc.arg(at)::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
 ORDER BY ent.customer_id, ent.start_at ASC;
+
+-- name: GetEntitlementByGrant :one
+-- #511 fetch-back: the entitlement window MaterializeGrant projected for a given
+-- grant + feature (so PushNewEntitlement can return the created row).
+SELECT * FROM openrails.entitlements
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND grant_id = sqlc.arg(grant_id)::uuid
+  AND entitlement = sqlc.arg(entitlement)::text
+  AND deleted_at IS NULL
+ORDER BY created_at DESC
+LIMIT 1;

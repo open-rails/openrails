@@ -100,9 +100,12 @@ func TestConverge_DeriveGrantEffectExcess_TerminatedNotRetracted(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		customer = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 		gl := grants.New(appDB.Gen(ctx), merchantID)
+		// Grace-sourced so the materialized entitlement (which now preserves its
+		// source via grant_id, #511) isn't also flagged by the CON orphan-source
+		// checks — this test is about grant_effect.excess retraction, not CON.
 		g, err := gl.Grant(ctx, grants.GrantInput{
-			Customer: customer, Kind: grants.Entitlement, Source: grants.Purchase,
-			SourceID: "pay_" + uuid.NewString()[:8], Spec: &grants.Spec{Entitlements: []string{feature}},
+			Customer: customer, Kind: grants.Entitlement, Source: grants.Grace,
+			SourceID: uuid.NewString(), Spec: &grants.Spec{Entitlements: []string{feature}},
 		})
 		require.NoError(t, err)
 		require.NoError(t, gl.MaterializeGrant(ctx, g)) // entitlement window exists

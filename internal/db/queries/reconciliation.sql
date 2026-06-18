@@ -456,17 +456,12 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND current_period_ends_at < sqlc.arg(now)::timestamptz
 ORDER BY current_period_ends_at;
 
--- name: MarkSubscriptionPastDueFromOverdue :execrows
--- Repair for period_overdue: enter dunning. Set past_due + a grace window dated
--- to the period end (not wall-clock), so a long-overdue sub's grace is already
--- exhausted and life.subscription.grace_exhausted terminates it on the next pass
--- (converge-not-replay: no missed charges are re-run).
-UPDATE openrails.subscriptions
-SET status = 'past_due',
-    grace_ends_at = COALESCE(grace_ends_at, sqlc.arg(grace_ends_at)::timestamptz),
-    updated_at = now()
-WHERE id = sqlc.arg(id) AND status = 'active'
-  AND current_period_ends_at IS NOT NULL;
+-- #511: the period_overdue repair (active → past_due + grace window) now routes
+-- through subscriptions.SubscriptionLifecycleService.ApplyLocalPastDue (the shared
+-- lifecycle local-state core), so there is no bespoke SQL applier here. The
+-- ReconcileCancelSubscriptionLocal / ReconcileRevokeSubscriptionEntitlements
+-- appliers above remain: they are the PULL engine's local writers (apply provider
+-- truth), NOT the LIFE-plane's twin.
 
 -- #511 LIFE plane (life.subscription.dunning_overdue): a past_due sub still in
 -- grace but with NO retry scheduled — its dunning schedule stalled. MISSING.

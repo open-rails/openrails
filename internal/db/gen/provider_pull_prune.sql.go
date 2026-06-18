@@ -101,7 +101,6 @@ const paymentHasProtectedDependents = `-- name: PaymentHasProtectedDependents :o
 SELECT
   EXISTS(SELECT 1 FROM openrails.grants WHERE merchant_id = $1::uuid AND payment_id = $2::uuid)
   OR EXISTS(SELECT 1 FROM openrails.payments r WHERE r.merchant_id = $1::uuid AND r.refunded_payment_id = $2::uuid)
-  OR EXISTS(SELECT 1 FROM openrails.entitlement_grants WHERE merchant_id = $1::uuid AND payment_id = $2::uuid)
   OR EXISTS(SELECT 1 FROM openrails.checkout_sessions WHERE merchant_id = $1::uuid AND payment_id = $2::uuid)
   AS protected
 `

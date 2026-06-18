@@ -77,51 +77,6 @@ func (q *Queries) ConDuplicateChargesSamePeriod(ctx context.Context, customerID 
 	return items, nil
 }
 
-const conOrphanEntitlementAdminSource = `-- name: ConOrphanEntitlementAdminSource :many
-SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
-FROM openrails.entitlements ent
-LEFT JOIN openrails.entitlement_grants ag ON ent.source_id = ag.id
-WHERE ent.source_type = 'admin'
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND ag.id IS NULL
-  AND ($1::uuid IS NULL OR ent.customer_id = $1::uuid)
-`
-
-type ConOrphanEntitlementAdminSourceRow struct {
-	EntID       uuid.UUID
-	UserID      string
-	Entitlement string
-	SourceType  string
-	SourceID    uuid.UUID
-}
-
-func (q *Queries) ConOrphanEntitlementAdminSource(ctx context.Context, customerID *uuid.UUID) ([]ConOrphanEntitlementAdminSourceRow, error) {
-	rows, err := q.db.Query(ctx, conOrphanEntitlementAdminSource, customerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ConOrphanEntitlementAdminSourceRow
-	for rows.Next() {
-		var i ConOrphanEntitlementAdminSourceRow
-		if err := rows.Scan(
-			&i.EntID,
-			&i.UserID,
-			&i.Entitlement,
-			&i.SourceType,
-			&i.SourceID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const conOrphanEntitlementPaymentSource = `-- name: ConOrphanEntitlementPaymentSource :many
 SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
 FROM openrails.entitlements ent

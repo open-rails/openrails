@@ -123,22 +123,15 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 
 		now := time.Now().UTC()
 		endAt := now.Add(30 * 24 * time.Hour)
-		adminGrant := &models.EntitlementGrant{
-			ID:           uuid.New(),
-			CustomerID:   suite.ensureCustomer(context.Background(), userID),
-			GrantedBy:    "test-admin",
-			Reason:       "test_admin_entitlement",
-			DurationDays: nil,
-			CreatedAt:    now,
-		}
-		suite.InsertEntitlementGrant(context.Background(), adminGrant)
+		// #511: admin entitlement carries an admin source id (no entitlement_grants row).
+		adminSourceID := uuid.New()
 		suite.InsertEntitlement(context.Background(), &models.Entitlement{
 			ID:          uuid.New(),
 			CustomerID:  suite.ensureCustomer(context.Background(), userID),
 			Entitlement: "premium",
 			StartAt:     now.Add(-time.Second),
 			EndAt:       &endAt,
-			SourceID:    &adminGrant.ID,
+			SourceID:    &adminSourceID,
 			SourceType:  models.EntitlementSourceAdmin,
 			CreatedAt:   now,
 			UpdatedAt:   now,

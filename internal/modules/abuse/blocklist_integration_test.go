@@ -29,10 +29,11 @@ func blocklistEnv(t *testing.T) (*abuse.BlocklistService, *pgxpool.Pool, context
 
 	var hasTable bool
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='payment_blocklist')",
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name='payment_blocklist')",
+		dbi.DataPool().Schema(),
 	).Scan(&hasTable))
 	if !hasTable {
-		t.Skip("openrails.payment_blocklist missing; run migration 067")
+		t.Skip("payment_blocklist missing in the configured schema; run migrations before integration tests")
 	}
 
 	return abuse.NewBlocklistService(dbi), pool, ctx

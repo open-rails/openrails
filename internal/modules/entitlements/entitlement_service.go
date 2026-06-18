@@ -10,11 +10,24 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
+
+// grantSourceType bridges the entitlement source vocabulary
+// (subscription/one_off/admin/grace) to the grant ledger's vocabulary
+// (purchase/subscription/admin/grace): an `one_off` entitlement is a `purchase`
+// grant; the others pass through. (MaterializeGrant maps it back.)
+func grantSourceType(s models.EntitlementSourceType) grants.SourceType {
+	if string(s) == "one_off" {
+		return grants.Purchase
+	}
+	return grants.SourceType(string(s))
+}
 
 type EntitlementService struct {
 	db    *db.DB
@@ -172,6 +185,10 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 	}
 
 	now := s.now().UTC()
+	merchantID, mErr := merchant.Require(ctx)
+	if mErr != nil {
+		return nil, mErr
+	}
 	var created *models.Entitlement
 
 	err := s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -244,18 +261,32 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			endAt = &e
 		}
 
-		created = &models.Entitlement{
-			ID:          uuidutil.NewV7(),
-			CustomerID:  p.CustomerID,
-			Entitlement: p.Entitlement,
-			StartAt:     start,
-			EndAt:       endAt,
-			SourceType:  p.SourceType,
-			SourceID:    &p.SourceID,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+		// #511: the entitlement is a DERIVED effect of a grant — the grant ledger is
+		// the source of truth. Create the entitlement-kind grant for this window,
+		// then derive-2 (MaterializeGrant) projects the entitlement row (carrying
+		// grant_id + its preserved source_type/source_id so existing readers work).
+		// The timeline-window computation above is unchanged; the grant just carries
+		// the computed [start, end).
+		gl := grants.New(gen.New(tx), merchantID.UUID())
+		g, gErr := gl.Grant(ctx, grants.GrantInput{
+			Customer: p.CustomerID, Kind: grants.Entitlement,
+			Source: grantSourceType(p.SourceType), SourceID: p.SourceID.String(),
+			Spec:     &grants.Spec{Entitlements: []string{p.Entitlement}},
+			StartsAt: start, EndsAt: endAt,
+		})
+		if gErr != nil {
+			return gErr
 		}
-		return repo.InsertTimelineWindow(ctx, tx, created)
+		if mErr := gl.MaterializeGrant(ctx, g); mErr != nil {
+			return mErr
+		}
+		// Return the entitlement window MaterializeGrant just projected for this grant.
+		window, fErr := repo.GetEntitlementByGrant(ctx, tx, merchantID.UUID(), g.ID, p.Entitlement)
+		if fErr != nil {
+			return fErr
+		}
+		created = window
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -279,9 +310,18 @@ func (s *EntitlementService) EndActiveByPayment(ctx context.Context, paymentID u
 }
 
 func (s *EntitlementService) RevokeSourcesForSubscription(ctx context.Context, userID string, subscriptionID uuid.UUID, reason models.EntitlementRevokeReason, sourceTypes ...models.EntitlementSourceType) error {
+	return s.RevokeSourcesForSubscriptionAsOf(ctx, userID, subscriptionID, s.now().UTC(), reason, sourceTypes...)
+}
+
+// RevokeSourcesForSubscriptionAsOf is RevokeSourcesForSubscription with an
+// explicit as-of instant: the LIFE-plane grace_exhausted repair revokes access
+// as-of when grace actually lapsed (converge-not-replay), not at convergence
+// time. Pass s.now() for the normal "revoke now" semantics.
+func (s *EntitlementService) RevokeSourcesForSubscriptionAsOf(ctx context.Context, userID string, subscriptionID uuid.UUID, asOf time.Time, reason models.EntitlementRevokeReason, sourceTypes ...models.EntitlementSourceType) error {
 	if s == nil || s.repo == nil {
 		return fmt.Errorf("entitlement service not initialized")
 	}
+	at := asOf.UTC()
 	for _, sourceType := range sourceTypes {
 		names, err := s.ListDistinctEntitlementNamesBySource(ctx, sourceType, subscriptionID)
 		if err != nil {
@@ -296,6 +336,7 @@ func (s *EntitlementService) RevokeSourcesForSubscription(ctx context.Context, u
 				SourceType:  &st,
 				SourceID:    &sid,
 				Reason:      reason,
+				AsOf:        &at,
 			}); err != nil {
 				return fmt.Errorf("revoke %s entitlement %s: %w", sourceType, entName, err)
 			}
@@ -315,6 +356,12 @@ type RevokeExistingEntitlementParams struct {
 	SourceID   *uuid.UUID
 
 	Reason models.EntitlementRevokeReason
+
+	// AsOf is the instant the revocation takes effect (revoked_at value + the
+	// active/future window boundary). Nil = now. The LIFE-plane grace_exhausted
+	// repair sets this to grace-end so access is revoked as-of when it actually
+	// lapsed (converge-not-replay), never re-running the missed dunning charges.
+	AsOf *time.Time
 }
 
 // RevokeExistingEntitlement immediately removes access by:
@@ -334,6 +381,9 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 	}
 
 	now := s.now().UTC()
+	if p.AsOf != nil {
+		now = p.AsOf.UTC()
+	}
 	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		userID := p.UserID
 		entitlement := p.Entitlement

@@ -29,10 +29,11 @@ func authzEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, ident
 
 	var ok bool
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='money_account_settings')",
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name='money_settings')",
+		dbi.DataPool().Schema(),
 	).Scan(&ok))
 	if !ok {
-		t.Skip("openrails.money_account_settings missing; run migrations")
+		t.Skip("money_settings missing in the configured schema; run migrations before integration tests")
 	}
 
 	rt := &app.Runtime{
@@ -49,8 +50,6 @@ func authzEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, ident
 	payerID := payer.UUID()
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_account_settings WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
 	})
 	return svc, money.NewMoneyService(dbi), payer, ctx
 }

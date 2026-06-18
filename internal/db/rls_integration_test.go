@@ -58,7 +58,6 @@ func newDBRetry(t *testing.T, dsn string) *DB {
 }
 
 const rlsSetupDDL = `
-CREATE SCHEMA IF NOT EXISTS billing;
 CREATE SCHEMA IF NOT EXISTS openrails;
 CREATE TABLE IF NOT EXISTS openrails.rls_probe (
     id        UUID PRIMARY KEY,

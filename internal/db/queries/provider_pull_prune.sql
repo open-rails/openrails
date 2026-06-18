@@ -39,7 +39,6 @@ SELECT EXISTS(
 SELECT
   EXISTS(SELECT 1 FROM openrails.grants WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_id = sqlc.arg(payment_id)::uuid)
   OR EXISTS(SELECT 1 FROM openrails.payments r WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.refunded_payment_id = sqlc.arg(payment_id)::uuid)
-  OR EXISTS(SELECT 1 FROM openrails.entitlement_grants WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_id = sqlc.arg(payment_id)::uuid)
   OR EXISTS(SELECT 1 FROM openrails.checkout_sessions WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_id = sqlc.arg(payment_id)::uuid)
   AS protected;
 

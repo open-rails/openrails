@@ -25,8 +25,9 @@ func TestCreditsDepositOverflowGuard(t *testing.T) {
 	userID := uuid.NewString()
 	payerID := identity.CustomerIDFromString(userID).UUID()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", payerID)
+		// money_blocks + money_transactions were dropped (#512); reset the live
+		// per-customer settings instead.
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
 	})
 
 	moneySvc := money.NewMoneyService(dbi)

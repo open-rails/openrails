@@ -72,12 +72,11 @@ func TestLoad_EnvMapping(t *testing.T) {
 		assert.False(t, cfg.IsTestEnv())
 	})
 
-	t.Run("maps canonical OpenRails hot-path env vars", func(t *testing.T) {
+	t.Run("rejects removed hot-path fail policy env vars", func(t *testing.T) {
 		t.Setenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY", "fail_open")
 
-		cfg, err := Load("nonexistent-config.yaml")
-		assert.NoError(t, err)
-		assert.Equal(t, "fail_open", cfg.BillingHotPath.FailPolicy)
+		_, err := Load("nonexistent-config.yaml")
+		assert.ErrorContains(t, err, "billing_hot_path was removed")
 	})
 }
 
@@ -139,6 +138,19 @@ auth:
 	}
 }
 
+func TestLoad_RejectsRemovedBillingHotPathConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+billing_hot_path:
+  fail_policy: fail_open
+`), 0o600))
+
+	_, err := Load(cfgPath)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "billing_hot_path was removed")
+}
+
 func TestLoad_ControlPlaneMaterializedWithDevIssuerDefault(t *testing.T) {
 	// The control plane section is materialized even when omitted (#469); in
 	// development the issuer defaults to the deployment's own base URL.
@@ -184,7 +196,6 @@ processors:
 func TestLoad_MobiusProcessorRequiresExplicitType(t *testing.T) {
 	t.Setenv("PROCESSORS_MOBIUS_TYPE", "")
 	t.Setenv("PROCESSORS_MOBIUS_TOKENIZATION_KEY", "")
-	t.Setenv("PROCESSORS_MOBIUS_TOKENIZATION_URL", "")
 	t.Setenv("PROCESSORS_MOBIUS_WEBHOOK_SECRET", "")
 	t.Setenv("PROCESSORS_MOBIUS_SECURITY_KEY", "test-key")
 
@@ -671,7 +682,7 @@ func TestAllowedCORSOrigins_UnionsGlobalAndMerchantOrigins(t *testing.T) {
 
 	got := cfg.AllowedCORSOrigins()
 
-	// Global origin first, de-duplicated; merchant origins follow in slug order.
+	// Global origin first, de-duplicated; legacy merchant_cors origins follow in slug order.
 	assert.Equal(t, []string{
 		"https://admin.example.com",
 		"https://media.example.com",

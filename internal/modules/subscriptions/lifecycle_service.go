@@ -1145,8 +1145,6 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
-		entSvc := entitlements.NewEntitlementService(db, s.Clock())
-		entSvc.SetClock(s.Clock()) // Propagate clock for testing
 
 		// Use processor name for gateway lookup
 		// Find subscription
@@ -1171,7 +1169,12 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		userID = subscription.CustomerID.String()
 		processor = subscription.Processor
 
-		// Update subscription status
+		// Cancellation policy (caller-owned): an immediate revoke truncates the
+		// paid period to now; a period-end cancel keeps paid access until the term
+		// ends and only forfeits the pre-appended #368 grace window. The terminal
+		// status flip + Solana cascade + entitlement revoke are the shared local-
+		// state core (ApplyLocalCancellation), so this path can never diverge from
+		// the LIFE-plane convergence repairs.
 		now := s.now()
 		endAt := now
 		if params.RevokeAccess {
@@ -1188,18 +1191,31 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 			endAt = *subscription.CurrentPeriodEndsAt
 		}
 
-		subscription.Status = models.StatusCancelled
-		subscription.EndedAt = &endAt
-		subscription.CancelType = &params.CancelType
-		subscription.CancelFeedback = params.CancelFeedback
-		subscription.CancelledAt = &now
-		subscription.ClearRetrySchedule()
+		// Immediate (revoke now / already-ended period): revoke the subscription's
+		// paid windows AND any scheduled grace. Period-end: forfeit only the
+		// scheduled grace window (#368), keep paid access until term end.
+		immediate := params.RevokeAccess || subscription.CurrentPeriodEndsAt == nil || !subscription.CurrentPeriodEndsAt.After(now)
+		revokeReason := models.EntitlementRevokeAdmin
+		revokeSources := []models.EntitlementSourceType{models.EntitlementSourceGrace}
+		if immediate {
+			if params.CancelType == models.CancelTypeChargeback {
+				revokeReason = models.EntitlementRevokeChargeback
+			}
+			revokeSources = []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace}
+		}
 
-		if err := subService.Update(ctx, subscription); err != nil {
+		if err := s.ApplyLocalCancellation(ctx, db, subscription, LocalCancellation{
+			EndedAt:       endAt,
+			CancelType:    params.CancelType,
+			Feedback:      params.CancelFeedback,
+			RevokeReason:  revokeReason,
+			RevokeAsOf:    now,
+			RevokeSources: revokeSources,
+		}); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
-			}).Error("Failed to update subscription during cancellation")
-			return fmt.Errorf("failed to update subscription: %w", err)
+			}).Error("Failed to apply local cancellation")
+			return err
 		}
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id": subscription.ID,
@@ -1208,48 +1224,6 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 			"ended_at":        subscription.EndedAt,
 			"period_end":      subscription.CurrentPeriodEndsAt,
 		}).Info("Updated subscription record during cancellation")
-
-		// Cancel cascade to stop the Solana cranker (#264). OpenRails is the only
-		// puller of recurring Solana subscriptions; the hourly cranker's ListDue
-		// query filters status = active, so flipping the linked solana_subscriptions
-		// row to cancelled stops it from ever pulling again. Runs inside the same
-		// merchant tx (via the tx-bound db handle) so the cascade commits atomically
-		// with the lifecycle cancellation. Idempotent and tolerant of a missing row
-		// (a Solana sub that was never enrolled): we log and continue rather than
-		// failing the cancel. No-op for non-Solana processors.
-		if subscription.Processor == models.ProcessorSolana {
-			if err := cancelSolanaSubscriptionCascade(ctx, db, subscription.ID); err != nil {
-				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"subscription_id": subscription.ID,
-				}).Error("failed to cascade cancellation to solana_subscriptions row; cranker may keep pulling")
-			}
-		}
-
-		// Entitlement windows are immutable; period-end cancellations require no entitlement mutation.
-		// Only immediate cancellations/revocations remove access now by revoking the subscription's entitlement windows.
-		if entSvc != nil && (params.RevokeAccess || subscription.CurrentPeriodEndsAt == nil || !subscription.CurrentPeriodEndsAt.After(now)) {
-			revokeReason := models.EntitlementRevokeAdmin
-			if params.CancelType == models.CancelTypeChargeback {
-				revokeReason = models.EntitlementRevokeChargeback
-			}
-
-			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, revokeReason, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
-				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"subscription_id": subscription.ID,
-				}).Error("failed to revoke entitlements during cancellation")
-			}
-		} else if entSvc != nil {
-			// #368: a deliberate period-end cancellation keeps paid access
-			// until the term ends but forfeits silence generosity — the
-			// pre-appended renewal grace window (scheduled to start at period
-			// end) is deleted NOW, so access ends exactly at the period end
-			// the user expects. No generosity for explicit cancellation.
-			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceGrace); err != nil {
-				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"subscription_id": subscription.ID,
-				}).Error("failed to delete scheduled grace windows during period-end cancellation")
-			}
-		}
 
 		reason := PremiumEndReasonAdmin
 		switch params.CancelType {
@@ -1296,6 +1270,112 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		}
 	}
 
+	return nil
+}
+
+// LocalCancellation describes a side-effect-free terminal cancellation of a
+// subscription — the local-state transition shared by the user-driven
+// CancelMembership path and the LIFE-plane convergence repairs (grace_exhausted /
+// pending_stale).
+type LocalCancellation struct {
+	EndedAt       time.Time                      // subscriptions.ended_at
+	CancelType    models.CancelType              // subscriptions.cancel_type
+	Feedback      *string                        // subscriptions.cancel_feedback
+	RevokeReason  models.EntitlementRevokeReason // entitlement revoke_reason (used only when RevokeSources non-empty)
+	RevokeAsOf    time.Time                      // instant entitlements are revoked as-of (converge-not-replay)
+	RevokeSources []models.EntitlementSourceType // entitlement sources to revoke; empty = revoke nothing
+}
+
+// ApplyLocalCancellation performs the side-effect-free LOCAL-STATE transition of
+// cancelling `sub`: the terminal status flip + ended/cancel fields + cleared
+// retry/grace schedule, the #264 Solana cranker cascade, and revocation of the
+// named entitlement sources as-of RevokeAsOf. It deliberately does NOT send
+// notifications, write the lifecycle event log, or enqueue provider intents —
+// those durable side-effects belong to the caller (CancelMembership layers them
+// on after this returns).
+//
+// It runs every write on the supplied `dbb`, so the CALLER owns atomicity:
+// CancelMembership passes its MerchantTx-bound handle (all writes commit
+// together); the convergence engine passes its merchant-scoped connection (the
+// idempotent sweep heals any partial write). This is the single chokepoint where
+// the local outcome of "cancel a subscription" is defined — the converged path
+// can no longer diverge from the user path (notably: the Solana cascade, whose
+// absence previously left a converged Solana cancel pulling forever).
+//
+// The caller loads `sub` (and may pre-adjust its period bounds — e.g. truncate
+// to now for an immediate revoke) before calling; this method owns only the
+// terminal status/cancel fields + cascade + revoke.
+func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Context, dbb *db.DB, sub *models.Subscription, c LocalCancellation) error {
+	if dbb == nil || sub == nil {
+		return fmt.Errorf("apply local cancellation: db handle and subscription are required")
+	}
+	now := s.now()
+	endedAt := c.EndedAt
+	// cancelled_at is the operation instant, but never after ended_at: the
+	// chk_ended_not_before_cancelled constraint requires ended_at >= cancelled_at,
+	// and an immediate revoke pins ended_at to the caller's `now` (computed a hair
+	// before this method's own s.now()).
+	cancelledAt := now
+	if endedAt.Before(cancelledAt) {
+		cancelledAt = endedAt
+	}
+	cancelType := c.CancelType
+	sub.Status = models.StatusCancelled
+	sub.EndedAt = &endedAt
+	sub.CancelType = &cancelType
+	sub.CancelFeedback = c.Feedback
+	sub.CancelledAt = &cancelledAt
+	sub.ClearRetrySchedule()
+
+	if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
+		return fmt.Errorf("apply local cancellation: update subscription %s: %w", sub.ID, err)
+	}
+
+	// #264 cascade: stop the Solana cranker. Log-and-continue (never fail the
+	// cancel on the cascade), matching the user path; idempotent + tolerant of a
+	// missing solana_subscriptions row.
+	if sub.Processor == models.ProcessorSolana {
+		if err := cancelSolanaSubscriptionCascade(ctx, dbb, sub.ID); err != nil {
+			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
+				Error("failed to cascade cancellation to solana_subscriptions row; cranker may keep pulling")
+		}
+	}
+
+	if len(c.RevokeSources) > 0 {
+		entSvc := entitlements.NewEntitlementService(dbb, s.Clock())
+		entSvc.SetClock(s.Clock())
+		if err := entSvc.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, c.RevokeAsOf, c.RevokeReason, c.RevokeSources...); err != nil {
+			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
+				Error("failed to revoke entitlements during local cancellation")
+		}
+	}
+	return nil
+}
+
+// ApplyLocalPastDue performs the side-effect-free LOCAL-STATE transition of an
+// active subscription into dunning (past_due) with a grace window dated to the
+// supplied instant (the missed period end, not wall-clock — so a long-overdue
+// sub's grace is already exhausted and the grace_exhausted repair terminates it
+// on the next pass; converge-not-replay, no missed charges re-run). The grace
+// window is set only when none exists (COALESCE semantics). No-op unless the sub
+// is currently active. Like ApplyLocalCancellation, it runs on the supplied
+// `dbb` so the caller owns atomicity; the LIFE-plane period_overdue repair is
+// the sole caller today.
+func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, dbb *db.DB, sub *models.Subscription, graceEndsAt time.Time) error {
+	if dbb == nil || sub == nil {
+		return fmt.Errorf("apply local past_due: db handle and subscription are required")
+	}
+	if sub.Status != models.StatusActive {
+		return nil // idempotent: only an active sub enters dunning here
+	}
+	sub.Status = models.StatusPastDue
+	if sub.GraceEndsAt == nil {
+		ge := graceEndsAt
+		sub.GraceEndsAt = &ge
+	}
+	if err := repo.NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
+		return fmt.Errorf("apply local past_due: update subscription %s: %w", sub.ID, err)
+	}
 	return nil
 }
 

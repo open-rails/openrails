@@ -19,13 +19,13 @@ import (
 // has a STATIC generated count/purge query — no runtime SQL assembly).
 var merchantOwnedTables = []string{
 	"products", "prices", "catalog_drift_events", "payment_methods",
-	"subscriptions", "entitlements", "payments", "entitlement_grants",
+	"subscriptions", "entitlements", "payments",
 	"notification_queue", "processor_customers",
 	"checkout_sessions", "provider_intents",
 	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
 	// tables are gone. The append-only ledger_transfers/grants are immutable
 	// (REVOKE DELETE) and intentionally NOT row-purged here.
-	"money_settings", "money_windows",
+	"money_settings",
 }
 
 // countTenantRows dispatches to the table's generated count query.
@@ -45,8 +45,6 @@ func countTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.CountMerchantRowsEntitlements(ctx, id)
 	case "payments":
 		return q.CountMerchantRowsPayments(ctx, id)
-	case "entitlement_grants":
-		return q.CountMerchantRowsEntitlementGrants(ctx, id)
 	case "notification_queue":
 		return q.CountMerchantRowsNotificationQueue(ctx, id)
 	case "processor_customers":
@@ -57,8 +55,6 @@ func countTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.CountMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
 		return q.CountMerchantRowsMoneyAccounts(ctx, id)
-	case "money_windows":
-		return q.CountMerchantRowsMoneyWindows(ctx, id)
 	default:
 		return 0, fmt.Errorf("tenancy: no count query for table %q", table)
 	}
@@ -81,8 +77,6 @@ func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.PurgeMerchantRowsEntitlements(ctx, id)
 	case "payments":
 		return q.PurgeMerchantRowsPayments(ctx, id)
-	case "entitlement_grants":
-		return q.PurgeMerchantRowsEntitlementGrants(ctx, id)
 	case "notification_queue":
 		return q.PurgeMerchantRowsNotificationQueue(ctx, id)
 	case "processor_customers":
@@ -93,8 +87,6 @@ func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.PurgeMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
 		return q.PurgeMerchantRowsMoneyAccounts(ctx, id)
-	case "money_windows":
-		return q.PurgeMerchantRowsMoneyWindows(ctx, id)
 	default:
 		return fmt.Errorf("tenancy: no purge query for table %q", table)
 	}

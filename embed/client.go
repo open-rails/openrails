@@ -955,140 +955,9 @@ func (c *localClient) ResourceRevenueDaily(ctx context.Context, resource, curren
 	return out, nil
 }
 
-// maxWindowBatchItems transcribes the handler bound on one settle/admit batch
-// (service_credit_window.go).
-const maxWindowBatchItems = 1000
-
-func windowFromDTO(w *billingservice.CreditWindowDTO) *openrails.CreditWindow {
-	return &openrails.CreditWindow{
-		WindowID:      w.WindowID,
-		CustomerID:    w.CustomerID,
-		Currency:      w.Currency,
-		HeldAmount:    w.HeldAmount,
-		SettledAmount: w.SettledAmount,
-		Status:        w.Status,
-		ExpiresAt:     w.ExpiresAt,
-	}
-}
-
-// mapWindowErr transcribes handlers.writeWindowError (service_credit_window.go).
-func mapWindowErr(err error, fallback string) error {
-	switch {
-	case errors.Is(err, billingservice.ErrWindowNotFound):
-		return openrails.NewStatusError(http.StatusNotFound, "", "window_not_found")
-	case errors.Is(err, billingservice.ErrWindowNotOpen):
-		return openrails.NewStatusError(http.StatusConflict, "", "window_not_open")
-	case errors.Is(err, billingservice.ErrInsufficientCredits):
-		return openrails.NewStatusError(http.StatusPaymentRequired, "", "insufficient_credits")
-	default:
-		return internalErr(fallback)
-	}
-}
-
-// OpenWindow transcribes handlers.ServiceOpenCreditWindow
-// (service_credit_window.go, #335).
-func (c *localClient) OpenWindow(ctx context.Context, req openrails.OpenWindowRequest) (*openrails.CreditWindow, error) {
-	ctx = c.ensureTenant(ctx)
-	if req.Currency == "" {
-		req.Currency = c.currency
-	}
-	currency, err := requireCurrency(req.Currency)
-	if err != nil {
-		return nil, err
-	}
-	// gin binding: amount is `binding:"required"`.
-	if req.Amount == 0 {
-		return nil, bindRequiredErr("Amount")
-	}
-	payer, err := parseCustomer(req.CustomerID, "customer_id required")
-	if err != nil {
-		return nil, err
-	}
-	w, serr := c.svc.OpenWindow(ctx, billingservice.OpenWindowRequest{
-		CustomerID: payer,
-		Invoker:    req.Invoker,
-		Currency:   currency,
-		Amount:     req.Amount,
-		TTL:        time.Duration(req.TTLSeconds) * time.Second,
-	})
-	switch {
-	case errors.Is(serr, billingservice.ErrInsufficientCredits):
-		return nil, openrails.NewStatusError(http.StatusPaymentRequired, "", "insufficient_credits")
-	case serr != nil:
-		return nil, internalErr("open window failed")
-	}
-	return windowFromDTO(w), nil
-}
-
-// SettleWindowItems transcribes handlers.ServiceSettleCreditWindows
-// (service_credit_window.go). The handler's unparseable-window-id skip is
-// unreachable through typed items (WindowID is a uuid.UUID; a nil one gets the
-// engine's own per-item invalid_item result, same as the wire).
-func (c *localClient) SettleWindowItems(ctx context.Context, items []openrails.WindowSettleItem) ([]openrails.WindowSettleResult, error) {
-	ctx = c.ensureTenant(ctx)
-	if len(items) == 0 {
-		return nil, invalidErr("items required")
-	}
-	if len(items) > maxWindowBatchItems {
-		return nil, invalidErr("too many items")
-	}
-	in := make([]billingservice.WindowSettleItemInput, 0, len(items))
-	for _, it := range items {
-		item := billingservice.WindowSettleItemInput{
-			WindowID:  it.WindowID,
-			RequestID: it.RequestID,
-			Amount:    it.Amount,
-			Invoker:   it.Invoker,
-		}
-		if it.Usage != nil {
-			item.EventType = it.Usage.EventType
-			item.Resource = it.Usage.Resource
-			item.Metadata = it.Usage.Metadata
-		}
-		in = append(in, item)
-	}
-	settled, err := c.svc.SettleWindowItems(ctx, in)
-	if err != nil {
-		return nil, internalErr("settle failed")
-	}
-	out := make([]openrails.WindowSettleResult, 0, len(settled))
-	for _, res := range settled {
-		out = append(out, openrails.WindowSettleResult{
-			WindowID:      res.WindowID,
-			RequestID:     res.RequestID,
-			OK:            res.OK,
-			Replayed:      res.Replayed,
-			Error:         res.ErrorCode,
-			TransactionID: res.TransactionID,
-		})
-	}
-	return out, nil
-}
-
-// RefillWindow transcribes handlers.ServiceRefillCreditWindow
-// (service_credit_window.go).
-func (c *localClient) RefillWindow(ctx context.Context, windowID uuid.UUID, amount, ttlSeconds int64) (*openrails.CreditWindow, error) {
-	ctx = c.ensureTenant(ctx)
-	if amount <= 0 && ttlSeconds <= 0 {
-		return nil, invalidErr("amount or ttl_seconds required")
-	}
-	w, err := c.svc.RefillWindow(ctx, windowID, amount, time.Duration(ttlSeconds)*time.Second)
-	if err != nil {
-		return nil, mapWindowErr(err, "refill failed")
-	}
-	return windowFromDTO(w), nil
-}
-
-// CloseWindow transcribes handlers.ServiceCloseCreditWindow
-// (service_credit_window.go).
-func (c *localClient) CloseWindow(ctx context.Context, windowID uuid.UUID) (*openrails.CreditWindow, error) {
-	ctx = c.ensureTenant(ctx)
-	w, err := c.svc.CloseWindow(ctx, windowID)
-	if err != nil {
-		return nil, mapWindowErr(err, "close failed")
-	}
-	return windowFromDTO(w), nil
-}
+// maxAdmitBatchItems transcribes the handler bound on one admit batch
+// (service_admission.go).
+const maxAdmitBatchItems = 1000
 
 // AdmitBatch transcribes handlers.ServiceAdmitBatch +
 // serviceAdmitBatchVerdicts (service_admission.go, #335) with full per-item
@@ -1100,7 +969,7 @@ func (c *localClient) AdmitBatch(ctx context.Context, items []openrails.AdmitReq
 	if len(items) == 0 {
 		return nil, invalidErr("items required")
 	}
-	if len(items) > maxWindowBatchItems {
+	if len(items) > maxAdmitBatchItems {
 		return nil, invalidErr("too many items")
 	}
 	out := make([]openrails.AdmitBatchVerdict, len(items))

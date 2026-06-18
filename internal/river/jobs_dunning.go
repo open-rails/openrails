@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
@@ -210,6 +211,14 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		outcome := dunningOutcomeFailed
 		if err := w.DB.RunInMerchantConn(merchant.WithID(ctx, merchant.ID(sub.MerchantID)), func(tctx context.Context) error {
 			outcome = w.processSubscription(tctx, &sub, lifecycle, priceSvc, moneySvc, materialize)
+			// #511 Phase E: re-converge this customer inline after the dunning
+			// transition (past_due / grace / terminal cancel / renewal) — already
+			// on the merchant-scoped connection, so call Converge directly. Best-
+			// effort: a convergence error must not fail the dunning run.
+			if _, cerr := converge.AfterMutation(tctx, w.DB, merchant.ID(sub.MerchantID), sub.CustomerID); cerr != nil {
+				log.WithContext(tctx).WithError(cerr).WithField("subscription_id", sub.ID).
+					Warn("Dunning: inline converge failed; the sweep will reconcile")
+			}
 			return nil
 		}); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).

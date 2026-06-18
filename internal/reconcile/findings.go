@@ -41,7 +41,7 @@ const (
 	// FindingDuplicateSubscriptions (PS-8): one subject carries overlapping
 	// active subscriptions. Always admin_pending — the fix (cancel+refund at
 	// the processor) is remote and human.
-	FindingDuplicateSubscriptions FindingType = "consistency.duplicate.remote_subscription"
+	FindingDuplicateSubscriptions FindingType = "consistency.duplicate.subscription"
 	// FindingEntitlementMismatch (PS-9): entitlements disagree with the
 	// subscription, either direction. Enforce: grant/revoke
 	// SUBSCRIPTION-sourced entitlements only.
@@ -77,6 +77,10 @@ const (
 	FindingStatusAdminPending FindingStatus = "admin_pending"
 	FindingStatusResolved     FindingStatus = "resolved"
 	FindingStatusDismissed    FindingStatus = "dismissed"
+	// FindingStatusHeld is a destructive EXCESS repair withheld by the
+	// confirmed-absence gate (§3.2) until its source domain is fully reconciled —
+	// it needs operator triage before approval, so the report surfaces it (#511 G).
+	FindingStatusHeld FindingStatus = "held"
 )
 
 // Mode selects advisory (diff + report, zero local writes) or enforce

@@ -178,29 +178,23 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	assert.False(t, isEntitled)
 
 	// Balance derives from #514 credit lots (grants) → the #512 ledger. Seed a 25
-	// non-expiring lot (the surviving balance) + a 75 lot that expires in 1h; hold
-	// 25 against it.
+	// non-expiring lot (the surviving balance) + a 75 lot that expires in 1h.
+	// (Request holds are Redis-only now (#505), so there is no durable money hold
+	// to expire here — only the credit-lot lapse is swept in Postgres.)
 	creditUserID := uuid.New().String()
 	merchantID := dbtest.TestMerchantID.UUID()
 	customerID := suite.ensureCustomer(ctx, creditUserID)
 	_ = suite.insertMoneyCreditLot(ctx, merchantID, customerID, "USD", 25, nil, mockClock.Now()) // non-expiring
-	holdExpiry := mockClock.Now().Add(time.Hour)
-	hold := suite.createTestMoneyHold(creditUserID, 25, "active", holdExpiry)
 	blockExpiry := mockClock.Now().Add(time.Hour)
 	lotID := suite.insertMoneyCreditLot(ctx, merchantID, customerID, "USD", 75, &blockExpiry, mockClock.Now())
 
-	holdWorker := &riverjobs.HoldExpiryWorker{DB: rt.DB, Config: rt.Config, Clock: rt.Clock}
 	creditWorker := &riverjobs.CreditExpiryWorker{DB: rt.DB, Config: rt.Config, Clock: rt.Clock}
 
-	require.NoError(t, holdWorker.Work(ctx, &river.Job[riverjobs.HoldExpiryArgs]{Args: riverjobs.HoldExpiryArgs{}}))
 	require.NoError(t, creditWorker.Work(ctx, &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
-	assert.Equal(t, "active", suite.getMoneyHold(hold.ID).Status)
 	assert.Equal(t, int64(75), suite.lotRemaining(ctx, merchantID, lotID), "lot intact before expiry")
 
 	mockClock.Advance(2 * time.Hour)
-	require.NoError(t, holdWorker.Work(ctx, &river.Job[riverjobs.HoldExpiryArgs]{Args: riverjobs.HoldExpiryArgs{}}))
 	require.NoError(t, creditWorker.Work(ctx, &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
-	assert.Equal(t, "expired", suite.getMoneyHold(hold.ID).Status)
 	assert.Equal(t, int64(0), suite.lotRemaining(ctx, merchantID, lotID), "lapsed lot remainder clawed to expired_credits")
 }
 

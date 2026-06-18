@@ -114,15 +114,8 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	// Admin manual grant: extra +5 days, should schedule after subscription end too.
-	adminGrant := &models.EntitlementGrant{
-		ID:         uuid.New(),
-		CustomerID: suite.ensureCustomer(ctx, userID),
-		GrantedBy:  "admin",
-		Reason:     "test",
-		CreatedAt:  clock.Now().UTC(),
-	}
-	suite.InsertEntitlementGrant(ctx, adminGrant)
-
+	// #511: a manual grant is just an admin-sourced ledger grant; the source id is its own.
+	adminSourceID := uuid.New()
 	d := 5 * 24 * time.Hour
 	_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 		UserID:      userID,
@@ -130,7 +123,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 		NotBefore:   &notBefore,
 		Duration:    &d,
 		SourceType:  models.EntitlementSourceAdmin,
-		SourceID:    adminGrant.ID,
+		SourceID:    adminSourceID,
 	})
 	require.NoError(t, err)
 
@@ -149,7 +142,6 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", suite.ensureCustomer(ctx, userID))
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.payments WHERE id = $1", payment.ID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlement_grants WHERE id = $1", adminGrant.ID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)

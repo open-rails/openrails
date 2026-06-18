@@ -59,7 +59,7 @@ func startCryptoPostgres(t *testing.T) (*db.Pool, context.Context) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, sqlDB.PingContext(ctx))
 	_, err = sqlDB.ExecContext(ctx, `
-		CREATE SCHEMA IF NOT EXISTS billing;
+		CREATE SCHEMA IF NOT EXISTS openrails;
 		CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 		CREATE EXTENSION IF NOT EXISTS btree_gist;
 	`)

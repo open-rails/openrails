@@ -158,7 +158,7 @@ func (d *DB) DataPool() *Pool {
 	if d == nil || d.pool == nil {
 		return nil
 	}
-	return &Pool{raw: d.pool, rw: d.rw}
+	return &Pool{raw: d.pool, rw: d.rw, schema: d.rw.schema()}
 }
 
 // Pool exposes the pgx pool (nil for tx-scoped wrappers).

@@ -129,16 +129,6 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	group.PUT("/invoker-spend-limits", creditsWrite, wrap(httphandlers.ServiceSetInvokerSpendLimits))
 	group.GET("/invoker-spend-limits", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerSpendLimits))
 
-	// Prepaid credit windows (#335): open reserves a bulk hold the host admits
-	// against locally; settle flushes cross-payer batches of actuals (idempotent
-	// per request_id); refill extends funds+TTL; close releases the remainder.
-	// Open/settle/refill draw down payer funds -> write+spend (the /admit gates);
-	// close releases a remainder (un-bills) -> write only, like hold release.
-	credits.POST("/windows", creditsWrite, creditsSpend, wrap(httphandlers.ServiceOpenCreditWindow))
-	credits.POST("/settle", creditsWrite, creditsSpend, wrap(httphandlers.ServiceSettleCreditWindows))
-	credits.POST("/windows/:id/refill", creditsWrite, creditsSpend, wrap(httphandlers.ServiceRefillCreditWindow))
-	credits.POST("/windows/:id/close", creditsWrite, wrap(httphandlers.ServiceCloseCreditWindow))
-
 	// Payer balance snapshot (issue #235/#247): available = balance - held.
 	credits.GET("/balance", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetCreditsBalance))
 

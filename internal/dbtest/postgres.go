@@ -3,7 +3,7 @@
 // Package dbtest provides a shared Postgres database for integration tests.
 //
 // SharedPostgresDSN spins up a single postgres:18-alpine testcontainer once per
-// test-package process (via sync.Once), bootstraps the billing/profiles schemas,
+// test-package process (via sync.Once), bootstraps the openrails/profiles schemas,
 // applies all migrations via internal/migrate.RunPostgres, and hands the same DSN
 // to every caller. Because the container is shared for the lifetime of the
 // package's test binary, state persists across tests in that package — callers
@@ -216,7 +216,7 @@ func bootstrapAndMigrate(ctx context.Context, dsn string) error {
 	}
 
 	// migrate.RunPostgres owns the full schema: ensurePostgresBootstrap creates
-	// the billing schema + pgcrypto, then the authkit migrations create the
+	// the configured OpenRails schema (default openrails) + pgcrypto, then the authkit migrations create the
 	// profiles schema and all of its tables (users, *_roles, the role_id()
 	// function, etc.). We deliberately do NOT pre-create any profiles tables —
 	// doing so shadows authkit's own migration-managed definitions and breaks

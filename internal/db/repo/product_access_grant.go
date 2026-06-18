@@ -69,34 +69,46 @@ func ownershipModel(g gen.OpenrailsGrant, term *gen.OpenrailsGrant) models.Produ
 }
 
 // ownershipGrants loads every ownership grant-event for a customer with its
-// derived status, by reading the full grant log once and pairing each grant with
-// its termination event (avoids a per-grant termination query).
+// derived status (status='revoked' iff a termination event supersedes the grant),
+// in one query that LEFT JOINs each grant to its termination event.
 func (r *ProductAccessGrantRepo) ownershipGrants(ctx context.Context, merchantID, customerID uuid.UUID) ([]models.ProductAccessGrant, error) {
-	rows, err := r.db.Gen(ctx).ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{
+	rows, err := r.db.Gen(ctx).ListOwnershipGrantsWithStatus(ctx, gen.ListOwnershipGrantsWithStatusParams{
 		MerchantID: merchantID, CustomerID: customerID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	// Index terminations by the grant they supersede.
-	terms := make(map[uuid.UUID]gen.OpenrailsGrant)
-	for i := range rows {
-		t := rows[i]
-		if t.SupersedesID != nil && (t.Event == "revoke" || t.Event == "expire" || t.Event == "supersede") {
-			terms[*t.SupersedesID] = t
-		}
-	}
 	out := make([]models.ProductAccessGrant, 0, len(rows))
 	for i := range rows {
-		g := rows[i]
-		if g.Kind != string(grants.Ownership) || g.Event != "grant" {
-			continue
+		row := rows[i]
+		var productID uuid.UUID
+		if row.ProductID != nil {
+			productID = *row.ProductID
 		}
-		var term *gen.OpenrailsGrant
-		if t, ok := terms[g.ID]; ok {
-			term = &t
+		m := models.ProductAccessGrant{
+			ID:         row.ID,
+			MerchantID: row.MerchantID,
+			CustomerID: row.CustomerID,
+			ProductID:  productID,
+			SourceType: models.ProductAccessSourceType(row.SourceType),
+			SourceID:   row.SourceID,
+			PaymentID:  row.PaymentID,
+			Status:     models.ProductAccessStatusActive,
+			StartsAt:   row.StartsAt,
+			EndsAt:     row.EndsAt,
+			CreatedAt:  row.CreatedAt,
+			UpdatedAt:  row.CreatedAt,
 		}
-		out = append(out, ownershipModel(g, term))
+		if row.RevokedAt != nil {
+			m.Status = models.ProductAccessStatusRevoked
+			m.RevokedAt = row.RevokedAt
+			m.UpdatedAt = *row.RevokedAt
+			if row.RevokeReason != nil {
+				rr := models.ProductAccessRevokeReason(*row.RevokeReason)
+				m.RevokeReason = &rr
+			}
+		}
+		out = append(out, m)
 	}
 	return out, nil
 }

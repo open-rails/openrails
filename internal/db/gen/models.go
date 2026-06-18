@@ -242,6 +242,7 @@ type OpenrailsEntitlement struct {
 	MerchantID   uuid.UUID
 	// OpenRails payable tenant subject for this entitlement window.
 	CustomerID uuid.UUID
+	GrantID    *uuid.UUID
 }
 
 // Stripe-shaped first-class entitlement feature definitions (issue #245). lookup_key is the stable value carried in AuthKit JWT entitlements and host-app checks. The internal openrails.entitlements window ledger remains the source of truth for active access.
@@ -254,24 +255,6 @@ type OpenrailsEntitlementFeature struct {
 	Metadata   []byte
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
-}
-
-// Records admin-initiated product grants (comps, contest winners, manual payments, partnerships)
-type OpenrailsEntitlementGrant struct {
-	ID uuid.UUID
-	// Price/Product being granted - entitlements derived from Product.EntitlementsSpec
-	PriceID *uuid.UUID
-	// Admin user ID who made the grant
-	GrantedBy string
-	// Reason for grant: comp, contest_winner, refund_compensation, partnership, manual_payment, etc.
-	Reason string
-	// Optional link to Payment record if money was received
-	PaymentID *uuid.UUID
-	// Override entitlement duration (NULL=use Product spec, 0=indefinite, N=N days)
-	DurationDays *int32
-	CreatedAt    time.Time
-	MerchantID   uuid.UUID
-	CustomerID   uuid.UUID
 }
 
 // #514 append-only grant ledger: the access-domain sibling of the #512 money ledger. Immutable events (grant/revoke/expire/supersede/adjust); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount+currency and IS the FIFO credit lot (subsumes the old money_blocks role); derive-2 emits its #512 deposit transfer tagged source=grant.
@@ -567,23 +550,6 @@ type OpenrailsMoneySetting struct {
 	Currency string
 	// Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.
 	CreditLimitAmount int64
-}
-
-// Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. Amount values use the row currency internal precision.
-type OpenrailsMoneyWindow struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	// Total reserved for this window (open + refills). Held balance is derived from active holds plus open windows.
-	HeldAmount int64
-	// Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.
-	SettledAmount int64
-	Status        string
-	ExpiresAt     time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
-	Currency string
 }
 
 // Queue for user notifications related to billing and subscriptions

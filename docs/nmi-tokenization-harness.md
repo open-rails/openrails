@@ -3,7 +3,7 @@
 Billing itself never runs Collect.js. It only consumes the resulting `payment_token`.
 
 This repo includes a **dev-only** harness page that helps you:
-- load Collect.js from a configurable script URL,
+- load NMI Collect.js,
 - generate a `payment_token` in the browser,
 - optionally call billing to create a stored payment method with that token.
 
@@ -13,8 +13,10 @@ The debug routes are registered **only when `env=dev`**.
 
 Set (example):
 - `ENV=dev`
-- `PROCESSORS_<PROVIDER>_TOKENIZATION_KEY=...` (public)
-- `PROCESSORS_<PROVIDER>_TOKENIZATION_URL=...` (Collect.js script URL)
+- Configure merchant secret `nmi/mobius/tokenization_key` (public Collect.js key)
+- Optional: configure merchant secret `nmi/mobius/tokenization_url` when the provider uses a non-standard Collect.js host
+
+The harness also accepts legacy process config `PROCESSORS_<PROVIDER>_TOKENIZATION_KEY` as a dev fallback when no configured merchant secret exists.
 
 Then start OpenRails normally.
 
@@ -30,7 +32,7 @@ Stub mode loads `/debug/nmi/collect-stub.js` and generates a fake token like `to
 
 ## Using real Collect.js
 
-Real mode loads Collect.js from `processors.<provider>.tokenization_url` (or `PROCESSORS_<PROVIDER>_TOKENIZATION_URL`).
+Real mode loads Collect.js from merchant secret `nmi/mobius/tokenization_url` when present, otherwise from NMI's default `https://secure.networkmerchants.com/token/Collect.js`.
 
 If tokenization fails, common causes:
 - The tokenization key is not valid for the chosen Collect.js host.

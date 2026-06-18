@@ -179,6 +179,39 @@ func TestServiceCredentialManagement_RejectsUnknownAndInvalidSecrets(t *testing.
 	if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, SecretStripeSecretKey, "not-stripe"); err == nil {
 		t.Fatal("invalid Stripe secret should be rejected")
 	}
+	if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, SecretNMIMobiusTokenizationURL, "http://example.test/Collect.js"); err == nil {
+		t.Fatal("invalid NMI tokenization URL should be rejected")
+	}
+}
+
+func TestServiceLoadNMITokenizationConfig_Mobius(t *testing.T) {
+	ctx := context.Background()
+	id := dbtest.TestMerchantID
+	store := NewMemorySecretStore()
+	svc := &Service{secrets: store}
+
+	cfg, err := svc.LoadNMITokenizationConfig(ctx, id, "mobius")
+	if err != nil {
+		t.Fatalf("load missing tokenization config: %v", err)
+	}
+	if cfg.TokenizationKey != "" || cfg.CollectJSURL != DefaultNMICollectJSURL {
+		t.Fatalf("missing config = %+v, want empty key and default URL", cfg)
+	}
+
+	if _, err := svc.PutCredential(ctx, id, SecretNMIMobiusTokenizationKey, "tok_public_123"); err != nil {
+		t.Fatalf("put tokenization key: %v", err)
+	}
+	if _, err := svc.PutCredential(ctx, id, SecretNMIMobiusTokenizationURL, "https://example.test/Collect.js"); err != nil {
+		t.Fatalf("put tokenization URL: %v", err)
+	}
+
+	cfg, err = svc.LoadNMITokenizationConfig(ctx, id, "MOBIUS")
+	if err != nil {
+		t.Fatalf("load tokenization config: %v", err)
+	}
+	if cfg.TokenizationKey != "tok_public_123" || cfg.CollectJSURL != "https://example.test/Collect.js" {
+		t.Fatalf("config = %+v, want stored values", cfg)
+	}
 }
 
 // fakeVaultKV is an in-memory VaultKV for unit-testing the Vault adapter WITHOUT

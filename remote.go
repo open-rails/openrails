@@ -10,8 +10,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // remote is the HTTP implementation of Client, ported from go-client/client.go
@@ -464,48 +462,6 @@ func (c *remote) InvokerSpendLimits(ctx context.Context, tenantSubjectID string)
 		return nil, err
 	}
 	return resp.Policies, nil
-}
-
-// OpenWindow implements Client (handler ServiceOpenCreditWindow, #335).
-func (c *remote) OpenWindow(ctx context.Context, req OpenWindowRequest) (*CreditWindow, error) {
-	if req.Currency == "" {
-		req.Currency = c.currency
-	}
-	var out CreditWindow
-	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/windows", req, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// SettleWindowItems implements Client (handler ServiceSettleCreditWindows).
-func (c *remote) SettleWindowItems(ctx context.Context, items []WindowSettleItem) ([]WindowSettleResult, error) {
-	var out struct {
-		Items []WindowSettleResult `json:"items"`
-	}
-	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/settle", map[string]any{"items": items}, &out); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}
-
-// RefillWindow implements Client (handler ServiceRefillCreditWindow).
-func (c *remote) RefillWindow(ctx context.Context, windowID uuid.UUID, amount, ttlSeconds int64) (*CreditWindow, error) {
-	body := map[string]any{"amount": amount, "ttl_seconds": ttlSeconds}
-	var out CreditWindow
-	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/windows/"+windowID.String()+"/refill", body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// CloseWindow implements Client (handler ServiceCloseCreditWindow).
-func (c *remote) CloseWindow(ctx context.Context, windowID uuid.UUID) (*CreditWindow, error) {
-	var out CreditWindow
-	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/windows/"+windowID.String()+"/close", map[string]any{}, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }
 
 // AdmitBatch implements Client (handler ServiceAdmitBatch, #335). The batch

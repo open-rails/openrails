@@ -38,10 +38,11 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	var exists bool
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='money_blocks')").
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name='money_blocks')",
+		dbi.DataPool().Schema()).
 		Scan(&exists))
 	if !exists {
-		t.Skip("openrails.money_blocks not found; run migrations before integration tests")
+		t.Skip("money_blocks not found in the configured schema; run migrations before integration tests")
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)

@@ -8,7 +8,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 // pendingStaleAfter is how long a `pending` subscription may sit unconfirmed
@@ -183,15 +186,24 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			Provider:   "self",
 			Evidence:   map[string]any{"subscription_id": subID.String(), "grace_ends_at": asOf},
 			Repair: func(ctx context.Context) error {
-				if _, e := q.ReconcileCancelSubscriptionLocal(ctx, gen.ReconcileCancelSubscriptionLocalParams{
-					ID: subID, Now: now, CancelType: "past_due", Reason: "grace exhausted (converged)",
-				}); e != nil {
-					return e
+				// Terminal cancel through the shared local-state core: status flip +
+				// Solana cranker cascade (#264) + revoke the sub's paid AND grace
+				// windows AS-OF grace end (converge-not-replay — access lapsed then,
+				// no missed dunning charges re-run). ended_at = now (>= cancelled_at,
+				// per chk_ended_not_before_cancelled). No side-effects fired.
+				sub, err := repo.NewSubscriptionRepo(p.e.DB).GetByID(ctx, subID)
+				if err != nil {
+					return fmt.Errorf("life: load grace-exhausted subscription %s: %w", subID, err)
 				}
-				_, e := q.ReconcileRevokeSubscriptionEntitlements(ctx, gen.ReconcileRevokeSubscriptionEntitlementsParams{
-					SubscriptionID: subID, Now: asOf, Reason: "grace exhausted",
+				fb := "grace exhausted (converged)"
+				return p.e.lifecycle.ApplyLocalCancellation(ctx, p.e.DB, sub, subscriptions.LocalCancellation{
+					EndedAt:       now,
+					CancelType:    models.CancelTypeExpired,
+					Feedback:      &fb,
+					RevokeReason:  models.EntitlementRevokeDunning,
+					RevokeAsOf:    asOf,
+					RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
 				})
-				return e
 			},
 		})
 	}
@@ -221,10 +233,14 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			Provider:   "self",
 			Evidence:   map[string]any{"subscription_id": subID.String(), "grace_ends_at": graceEnds},
 			Repair: func(ctx context.Context) error {
-				_, e := q.MarkSubscriptionPastDueFromOverdue(ctx, gen.MarkSubscriptionPastDueFromOverdueParams{
-					ID: subID, GraceEndsAt: graceEnds,
-				})
-				return e
+				// Enter dunning via the shared local-state core: active → past_due
+				// with a grace window dated to the missed period end (a long-overdue
+				// sub then terminates via grace_exhausted next pass).
+				sub, err := repo.NewSubscriptionRepo(p.e.DB).GetByID(ctx, subID)
+				if err != nil {
+					return fmt.Errorf("life: load period-overdue subscription %s: %w", subID, err)
+				}
+				return p.e.lifecycle.ApplyLocalPastDue(ctx, p.e.DB, sub, graceEnds)
 			},
 		})
 	}
@@ -249,10 +265,19 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			Provider:   "self",
 			Evidence:   map[string]any{"subscription_id": subID.String()},
 			Repair: func(ctx context.Context) error {
-				_, e := q.ReconcileCancelSubscriptionLocal(ctx, gen.ReconcileCancelSubscriptionLocalParams{
-					ID: subID, Now: now, CancelType: "expired", Reason: "pending stale (never confirmed)",
+				// Terminal cancel through the shared core. A never-confirmed pending
+				// sub has no entitlements/money to unwind (RevokeSources empty); the
+				// Solana cascade is a tolerant no-op when no row was ever enrolled.
+				sub, err := repo.NewSubscriptionRepo(p.e.DB).GetByID(ctx, subID)
+				if err != nil {
+					return fmt.Errorf("life: load stale-pending subscription %s: %w", subID, err)
+				}
+				fb := "pending stale (never confirmed)"
+				return p.e.lifecycle.ApplyLocalCancellation(ctx, p.e.DB, sub, subscriptions.LocalCancellation{
+					EndedAt:    now,
+					CancelType: models.CancelTypeExpired,
+					Feedback:   &fb,
 				})
-				return e
 			},
 		})
 	}
@@ -350,10 +375,9 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	if err != nil {
 		return nil, fmt.Errorf("con: scan orphan payment sources: %w", err)
 	}
-	orphanAdmin, err := q.ConOrphanEntitlementAdminSource(ctx, cust)
-	if err != nil {
-		return nil, fmt.Errorf("con: scan orphan admin-grant sources: %w", err)
-	}
+	// (No admin-source orphan check: #511 retired entitlement_grants — manually
+	// granted entitlements are now `admin`-sourced grants in the ledger, covered
+	// by DERIVE via grant_id, with no separate provenance row to dangle.)
 
 	emit := func(entID uuid.UUID, userID, entitlement, sourceType string, sourceID uuid.UUID) {
 		out = append(out, ConvergeFinding{
@@ -378,11 +402,6 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	for i := range orphanPays {
 		r := orphanPays[i]
 		emit(r.EntID, r.UserID, r.Entitlement, r.SourceType, r.SourceID)
-	}
-	for i := range orphanAdmin {
-		r := orphanAdmin[i]
-		// AuditOrphanAdminEntitlements filters source_type='admin' in SQL.
-		emit(r.EntID, r.UserID, r.Entitlement, "admin", r.SourceID)
 	}
 
 	// consistency.duplicate.provider_charge — more than one settled, non-refunded

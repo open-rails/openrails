@@ -10,18 +10,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/merchants"
 )
 
 type debugNMITokenizationPageData struct {
 	Provider            string
 	Mode                string
 	TokenizationKey     string
-	TokenizationURL     string
 	EffectiveScriptURL  string
 	EffectiveKeyHint    string
 	ProviderJSON        template.JS
 	HasTokenizationKey  bool
-	HasTokenizationURL  bool
 	IsConfiguredForReal bool
 }
 
@@ -62,13 +61,13 @@ var debugNMITokenizationTemplate = template.Must(template.New("debug_nmi_tokeniz
         <div style="flex:1; min-width: 280px;">
           <div><a href="?mode=real">real Collect.js</a> · <a href="?mode=stub">local stub</a></div>
           <div class="muted" style="margin-top:8px;">
-            Real mode requires <code>processors.&lt;provider&gt;.tokenization_key</code> and <code>processors.&lt;provider&gt;.tokenization_url</code>.
+            Real mode requires a merchant-scoped NMI tokenization key. The Collect.js URL defaults to NMI and can be overridden per merchant/provider.
           </div>
         </div>
       </div>
       {{if not .IsConfiguredForReal}}
       <p class="danger" style="margin-top:12px;">
-        Real tokenization is not fully configured (missing tokenization key and/or URL). Stub mode still works for wiring checks.
+        Real tokenization is not fully configured (missing tokenization key). Stub mode still works for wiring checks.
       </p>
       {{else}}
       <p class="ok" style="margin-top:12px;">Real tokenization appears configured. If tokenization fails, check allowed origins in the NMI portal.</p>
@@ -306,13 +305,26 @@ func (s *Server) debugNMITokenization(c *gin.Context) {
 	proc := s.cfg.GetProcessor(provider)
 	tokenizationKey := ""
 	tokenizationURL := ""
+	if s.merchants != nil && !s.configuredMerchant.IsZero() {
+		tokenization, err := s.merchants.LoadNMITokenizationConfig(c.Request.Context(), s.configuredMerchant, provider)
+		if err != nil {
+			c.String(http.StatusInternalServerError, "load NMI tokenization config: %v", err)
+			return
+		}
+		tokenizationKey = strings.TrimSpace(tokenization.TokenizationKey)
+		tokenizationURL = strings.TrimSpace(tokenization.CollectJSURL)
+	}
 	if proc != nil {
-		tokenizationKey = strings.TrimSpace(proc.TokenizationKey)
-		tokenizationURL = strings.TrimSpace(proc.TokenizationURL)
+		if tokenizationKey == "" {
+			tokenizationKey = strings.TrimSpace(proc.TokenizationKey)
+		}
+	}
+	if tokenizationURL == "" {
+		tokenizationURL = merchants.DefaultNMICollectJSURL
 	}
 
 	effectiveScriptURL := tokenizationURL
-	if mode == "stub" || effectiveScriptURL == "" {
+	if mode == "stub" {
 		effectiveScriptURL = "/debug/nmi/collect-stub.js"
 	}
 
@@ -329,13 +341,11 @@ func (s *Server) debugNMITokenization(c *gin.Context) {
 		Provider:            provider,
 		Mode:                mode,
 		TokenizationKey:     tokenizationKey,
-		TokenizationURL:     tokenizationURL,
 		EffectiveScriptURL:  effectiveScriptURL,
 		EffectiveKeyHint:    hint,
 		ProviderJSON:        jsonStringForScript(provider),
 		HasTokenizationKey:  tokenizationKey != "",
-		HasTokenizationURL:  tokenizationURL != "",
-		IsConfiguredForReal: tokenizationKey != "" && tokenizationURL != "",
+		IsConfiguredForReal: tokenizationKey != "",
 	}
 
 	var buf bytes.Buffer

@@ -250,6 +250,18 @@ func GetTimelineCoveringWindow(ctx context.Context, qx gen.DBTX, tenantSubjectID
 	return entitlementFromGen(row), nil
 }
 
+// GetEntitlementByGrant returns the entitlement window MaterializeGrant projected
+// for a given grant + feature (#511 fetch-back), or ErrNoRows.
+func GetEntitlementByGrant(ctx context.Context, qx gen.DBTX, merchantID, grantID uuid.UUID, entitlement string) (*models.Entitlement, error) {
+	row, err := gen.New(qx).GetEntitlementByGrant(ctx, gen.GetEntitlementByGrantParams{
+		MerchantID: merchantID, GrantID: grantID, Entitlement: entitlement,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entitlementFromGen(row), nil
+}
+
 // InsertTimelineWindow persists a fully-populated new window.
 func InsertTimelineWindow(ctx context.Context, qx gen.DBTX, ent *models.Entitlement) error {
 	var sourceID *uuid.UUID

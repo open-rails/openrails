@@ -383,6 +383,7 @@ func (q *Queries) ListActiveMerchantIDs(ctx context.Context) ([]uuid.UUID, error
 }
 
 const listDunningStalledSubscriptions = `-- name: ListDunningStalledSubscriptions :many
+
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
@@ -398,6 +399,12 @@ type ListDunningStalledSubscriptionsParams struct {
 	Now        time.Time
 }
 
+// #511: the period_overdue repair (active → past_due + grace window) now routes
+// through subscriptions.SubscriptionLifecycleService.ApplyLocalPastDue (the shared
+// lifecycle local-state core), so there is no bespoke SQL applier here. The
+// ReconcileCancelSubscriptionLocal / ReconcileRevokeSubscriptionEntitlements
+// appliers above remain: they are the PULL engine's local writers (apply provider
+// truth), NOT the LIFE-plane's twin.
 // #511 LIFE plane (life.subscription.dunning_overdue): a past_due sub still in
 // grace but with NO retry scheduled — its dunning schedule stalled. MISSING.
 func (q *Queries) ListDunningStalledSubscriptions(ctx context.Context, arg ListDunningStalledSubscriptionsParams) ([]uuid.UUID, error) {
@@ -774,32 +781,6 @@ WHERE id = $1 AND status IN ('open', 'admin_pending')
 
 func (q *Queries) MarkReconciliationFindingVanished(ctx context.Context, id uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, markReconciliationFindingVanished, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const markSubscriptionPastDueFromOverdue = `-- name: MarkSubscriptionPastDueFromOverdue :execrows
-UPDATE openrails.subscriptions
-SET status = 'past_due',
-    grace_ends_at = COALESCE(grace_ends_at, $1::timestamptz),
-    updated_at = now()
-WHERE id = $2 AND status = 'active'
-  AND current_period_ends_at IS NOT NULL
-`
-
-type MarkSubscriptionPastDueFromOverdueParams struct {
-	GraceEndsAt time.Time
-	ID          uuid.UUID
-}
-
-// Repair for period_overdue: enter dunning. Set past_due + a grace window dated
-// to the period end (not wall-clock), so a long-overdue sub's grace is already
-// exhausted and life.subscription.grace_exhausted terminates it on the next pass
-// (converge-not-replay: no missed charges are re-run).
-func (q *Queries) MarkSubscriptionPastDueFromOverdue(ctx context.Context, arg MarkSubscriptionPastDueFromOverdueParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markSubscriptionPastDueFromOverdue, arg.GraceEndsAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}

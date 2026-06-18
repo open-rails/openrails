@@ -49,7 +49,6 @@ func resetMoneyLedger(t *testing.T, pool *pgxpool.Pool, ctx context.Context) {
 		"openrails.grants",
 		"openrails.ledger_accounts",
 		"openrails.money_settings",
-		"openrails.money_windows",
 	} {
 		_, err := pool.Exec(ctx, "DELETE FROM "+table)
 		require.NoError(t, err, "reset %s", table)

@@ -64,7 +64,7 @@ func startOwnerTenantPostgres(t *testing.T) (*db.DB, string, context.Context) {
 
 	// Bootstrap schema + extensions normally created by the deploy init SQL.
 	_, err = sqlDB.ExecContext(ctx, `
-		CREATE SCHEMA IF NOT EXISTS billing;
+		CREATE SCHEMA IF NOT EXISTS openrails;
 		CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 		CREATE EXTENSION IF NOT EXISTS btree_gist;
 	`)

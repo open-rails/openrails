@@ -164,6 +164,17 @@ func (l *Ledger) Materialize(ctx context.Context, customer uuid.UUID) error {
 // MaterializeGrant projects a single grant event (derive-2): entitlement windows
 // for entitlement grants, a #512 deposit for credit grants, nothing for ownership
 // (the grant row is the record). Terminated grants have their projection retracted.
+// entitlementSourceType bridges the grant source vocabulary (purchase/
+// subscription/admin/grace) to the entitlements table's vocabulary
+// (subscription/one_off/admin/grace): a `purchase`-sourced grant projects an
+// `one_off` entitlement; the others pass through unchanged.
+func entitlementSourceType(grantSource string) string {
+	if grantSource == "purchase" {
+		return "one_off"
+	}
+	return grantSource
+}
+
 func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) error {
 	if g.Event != "grant" {
 		return fmt.Errorf("grants: MaterializeGrant needs a grant event, got %q", g.Event)
@@ -196,9 +207,22 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 				continue
 			}
 			gid := g.ID
+			// #511: the entitlement keeps its SEMANTIC source (so source-keyed
+			// readers — revoke-by-subscription, grace, one-off, the CON checks —
+			// work unchanged) and links to its grant via grant_id (DERIVE's
+			// authoritative link). Two vocabulary bridges: grants say 'purchase',
+			// entitlements say 'one_off'; and grant.source_id is free text while
+			// entitlements.source_id is a uuid, so parse it (a real subscription/
+			// payment source is a uuid → revoke-by-source resolves; a non-uuid
+			// source falls back to the grant id).
+			entSourceID := gid
+			if parsed, perr := uuid.Parse(g.SourceID); perr == nil {
+				entSourceID = parsed
+			}
 			if _, err := l.q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
-				Entitlement: f, StartAt: g.StartsAt, SourceType: "grant",
-				MerchantID: l.merchant, CustomerID: g.CustomerID, EndAt: g.EndsAt, SourceID: &gid,
+				Entitlement: f, StartAt: g.StartsAt, SourceType: entitlementSourceType(g.SourceType),
+				MerchantID: l.merchant, CustomerID: g.CustomerID, EndAt: g.EndsAt,
+				SourceID: &entSourceID, GrantID: &gid,
 			}); err != nil {
 				return fmt.Errorf("grants: materialize entitlement %q: %w", f, err)
 			}

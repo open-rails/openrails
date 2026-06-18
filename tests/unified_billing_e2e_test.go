@@ -2,46 +2,39 @@
 
 package tests
 
-// Unified billing e2e harness (issue #244, OpenRails side).
+// Unified billing e2e harness (issue #244, OpenRails side) — #513/#512 model.
 //
 // Issue #244 asks for an end-to-end test of the unified billing money path
 // across gen-orchestrator -> Tensorhub -> embedded OpenRails. The full
-// three-service live flow cannot run inside this single repo: the
-// gen-orchestrator dispatch loop and the Tensorhub metering driver live in
-// other repos and the issue itself notes the suite "lives where the embedding
-// is (tensorhub) or as a cross-repo script". What we CAN (and must) prove here
-// is that OpenRails' own surfaces -- the exact contract gen-orchestrator /
-// Tensorhub call standalone -- implement the unified credit lifecycle
-// correctly: hold for an estimate, capture the actual (full and PARTIAL),
-// release on failure, reject on insufficient balance, dedupe on replay, and
-// scope every operation to a tenant subject.
+// three-service live flow lives in the embedding repo; what we prove HERE is
+// that OpenRails' own standalone surfaces implement the unified money lifecycle
+// correctly: ADMIT for an estimate (places a Redis spendgate hold), CAPTURE the
+// metered actual (full and PARTIAL), RELEASE on failure, REJECT when in-flight
+// holds exhaust the spendable balance, dedupe on replay, and scope every
+// operation to a tenant subject.
 //
-// HOST'S REMAINING PART (cross-service live wiring, intentionally NOT here):
-//   - The gen-orchestrator driver that, on job submit, calls OpenRails
-//     /v1/service/credits/hold for the price estimate, dispatches the worker,
-//     and on completion calls .../holds/:id/capture with the metered actual
-//     (or .../holds/:id/release on failure / zero usage).
-//   - The Tensorhub metering path that turns model output (per_output,
-//     per_output_second, per_million_tokens, tiered) into the captured actual.
-//   - Stripe-test-mode auto-top-up, spend caps, expiry/arrears workers driven
-//     end to end from a real job. Those exercise OpenRails subsystems that have
-//     their own integration coverage in this repo; #244's cross-service driver
-//     is what stitches them to a live job and belongs in the embedding repo.
+// POST-#513/#512 MODEL (what changed from the original single-entry version):
+//   - There is NO /credits/hold create route anymore: placing a hold IS
+//     POST /v1/service/admit (the spendgate). The hold handle is the caller's
+//     request_id; capture/release address it as /credits/holds/<request_id>/...
+//   - Holds live in Redis (#505), NOT as money_transactions rows. The durable
+//     ledger (#512: ledger_transfers/ledger_accounts) records only SETTLED money
+//     (deposits + captured spend). So "held" is observed through ADMIT GATING (a
+//     follow-up admit is denied while a hold is in flight, allowed once it is
+//     captured/released), never through a "hold" ledger row. The public balance
+//     endpoint reports held=0 because durable held was removed in the hard cut.
+//   - Balance/conservation are asserted against the #512 ledger via the money
+//     service (GetBalanceForCustomer / GetTransactionsByCustomer), not the
+//     dropped money_transactions/money_blocks tables.
 //
-// This file drives the lifecycle through the service-token-authenticated PUBLIC service
-// routes (issue #222, /v1/service/credits/*) wherever a public route exists --
-// deposit, hold, capture, release, get-credits, transaction lookup -- because
-// that is the standalone server-to-server contract gen-orchestrator / Tensorhub
-// actually use. Ledger correctness (rows, statuses, balances, conservation) is
-// then asserted directly against the openrails.money_transactions /
-// money_balances tables. We fall back to the in-process facade only where
-// no public route exists; every scenario below has one, so all flow over HTTP.
+// Everything flows over the service-token-authenticated PUBLIC service routes
+// (deposit, admit, capture, release, balance) — the standalone server-to-server
+// contract gen-orchestrator / Tensorhub actually use.
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -57,6 +50,8 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // billingE2EHarness is a small reusable driver over the service-token-authenticated public
@@ -68,10 +63,15 @@ type billingE2EHarness struct {
 	suite      *TestContainerSuite
 	router     *gin.Engine
 	creditType string
+	// ms + ctx read durable money state from the #512 ledger (the dropped
+	// money_transactions/money_blocks tables are gone).
+	ms  *money.MoneyService
+	ctx context.Context
 }
 
 func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHarness {
 	t.Helper()
+	require.NotNil(t, suite.App.Runtime.RedisClient, "spendgate admit needs Redis")
 
 	// credit_type is accepted-and-ignored on the wire; money needs no type row.
 	creditTypeName := "e2e_credits_" + uuid.NewString()
@@ -80,6 +80,8 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 	router := gin.New()
 	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
 	group := router.Group("/v1/service")
+	// Merchant-wide token (no CustomerResource): AllowsCustomer returns true for
+	// every customer under the merchant, so each test's random payer is in scope.
 	resolver := stubServiceTokenResolver{permissions: []string{
 		controlplane.PermCreditsRead,
 		controlplane.PermCreditsWrite,
@@ -87,8 +89,6 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 	}, resources: []authcore.ServiceTokenResource{
 		controlplane.MerchantResource(dbtest.TestMerchantID),
 	}}
-	// nil issuer-admin: the delegated issuer routes are
-	// irrelevant to the money path.
 	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver))
 
 	return &billingE2EHarness{
@@ -96,6 +96,8 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 		suite:      suite,
 		router:     router,
 		creditType: creditTypeName,
+		ms:         money.NewMoneyService(suite.App.Runtime.DB),
+		ctx:        dbtest.WithTestMerchant(context.Background()),
 	}
 }
 
@@ -107,7 +109,7 @@ func (h *billingE2EHarness) do(method, path string, body any) *httptest.Response
 		require.NoError(h.t, err)
 		rdr = bytes.NewReader(b)
 	} else {
-		rdr = bytes.NewReader(nil)
+		rdr = bytes.NewReader([]byte("{}"))
 	}
 	req := httptest.NewRequest(method, path, rdr)
 	req.Header.Set("Authorization", "Bearer openrails_st_testkeyid_testsecret")
@@ -117,7 +119,8 @@ func (h *billingE2EHarness) do(method, path string, body any) *httptest.Response
 	return w
 }
 
-// deposit funds a tenant subject's balance via the public deposit route.
+// deposit funds a tenant subject's balance via the public deposit route (a #512
+// ledger deposit; the deposit path ensures the customer row).
 func (h *billingE2EHarness) deposit(userID string, amount int64) {
 	h.t.Helper()
 	srcID := uuid.New()
@@ -132,58 +135,64 @@ func (h *billingE2EHarness) deposit(userID string, amount int64) {
 	require.Equal(h.t, http.StatusOK, w.Code, "deposit body: %s", w.Body.String())
 }
 
-// holdResult is the parsed id of a created hold.
-type holdResult struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
+type admitView struct {
+	Allowed   bool   `json:"allowed"`
+	BlockedBy string `json:"blocked_by"`
+	DenyCode  string `json:"deny_code"`
 }
 
-// hold reserves credits for an estimate. Returns the recorder so callers can
-// assert on rejection (insufficient balance) too.
-func (h *billingE2EHarness) hold(userID, source, sourceID string, amount int64) *httptest.ResponseRecorder {
+// admit places a spendgate hold for an estimate via POST /v1/service/admit. The
+// request_id IS the hold handle (capture/release address it). Returns the
+// recorder so callers can assert allow (200) vs money-deny (402).
+func (h *billingE2EHarness) admit(userID, source, requestID string, amount int64) *httptest.ResponseRecorder {
 	h.t.Helper()
-	return h.do(http.MethodPost, "/v1/service/credits/hold", map[string]any{
-		"customer_id": personalOwnerID(userID).String(),
-		"invoker":     userID,
-		"credit_type": h.creditType,
-		"amount":      amount,
-		"source":      source,
-		"source_id":   sourceID,
-		"expires_at":  time.Now().Add(15 * time.Minute).Unix(),
+	return h.do(http.MethodPost, "/v1/service/admit", map[string]any{
+		"customer_id":      personalOwnerID(userID).String(),
+		"invoker":          userID,
+		"invoker_type":     "payer",
+		"currency":         money.DefaultCurrency,
+		"estimated_amount": amount,
+		"request_id":       requestID,
+		"source":           source,
+		"expires_at":       time.Now().Add(15 * time.Minute).Unix(),
 	})
 }
 
-func (h *billingE2EHarness) mustHold(userID, source, sourceID string, amount int64) string {
+// mustAdmit admits and asserts the hold was placed (200, allowed=true). Returns
+// the request_id, which is the capture/release handle.
+func (h *billingE2EHarness) mustAdmit(userID, source, requestID string, amount int64) string {
 	h.t.Helper()
-	w := h.hold(userID, source, sourceID, amount)
-	require.Equal(h.t, http.StatusOK, w.Code, "hold body: %s", w.Body.String())
-	var hr holdResult
-	require.NoError(h.t, json.Unmarshal(w.Body.Bytes(), &hr))
-	require.NotEmpty(h.t, hr.ID)
-	return hr.ID
+	w := h.admit(userID, source, requestID, amount)
+	require.Equal(h.t, http.StatusOK, w.Code, "admit body: %s", w.Body.String())
+	var a admitView
+	require.NoError(h.t, json.Unmarshal(w.Body.Bytes(), &a))
+	require.True(h.t, a.Allowed, "admit must be allowed: %s", w.Body.String())
+	return requestID
 }
 
-func (h *billingE2EHarness) capture(holdID string, amount int64) *httptest.ResponseRecorder {
+func (h *billingE2EHarness) capture(requestID string, amount int64) *httptest.ResponseRecorder {
 	h.t.Helper()
-	return h.do(http.MethodPost, "/v1/service/credits/holds/"+holdID+"/capture", map[string]any{
+	return h.do(http.MethodPost, "/v1/service/credits/holds/"+requestID+"/capture", map[string]any{
 		"amount": amount,
 	})
 }
 
-func (h *billingE2EHarness) release(holdID string) *httptest.ResponseRecorder {
+func (h *billingE2EHarness) release(requestID string) *httptest.ResponseRecorder {
 	h.t.Helper()
-	return h.do(http.MethodPost, "/v1/service/credits/holds/"+holdID+"/release", nil)
+	return h.do(http.MethodPost, "/v1/service/credits/holds/"+requestID+"/release", nil)
 }
 
-// balance reads available + held via the public tenant-subject balance route.
+// balance reads available + held via the public balance route. NOTE: under #513
+// held is Redis-only and not surfaced here, so HeldBalance is always 0 — assert
+// in-flight holds via admit gating instead.
 type balanceView struct {
-	Balance     int64 `json:"balance"`
-	HeldBalance int64 `json:"held_balance"`
+	Balance     int64
+	HeldBalance int64
 }
 
 func (h *billingE2EHarness) balance(userID string) balanceView {
 	h.t.Helper()
-	w := h.do(http.MethodGet, "/v1/service/credits/balance?customer_id="+personalOwnerID(userID).String()+"&credit_type="+h.creditType, nil)
+	w := h.do(http.MethodGet, "/v1/service/credits/balance?customer_id="+personalOwnerID(userID).String()+"&currency="+money.DefaultCurrency, nil)
 	require.Equal(h.t, http.StatusOK, w.Code, "balance body: %s", w.Body.String())
 	var payload struct {
 		BalanceAmount int64 `json:"balance_amount"`
@@ -193,54 +202,32 @@ func (h *billingE2EHarness) balance(userID string) balanceView {
 	return balanceView{Balance: payload.BalanceAmount, HeldBalance: payload.HeldAmount}
 }
 
-// ledgerRows returns all money_transactions for a tenant subject (USD), for
-// direct ledger assertions.
-func (h *billingE2EHarness) ledgerRows(userID string) []models.MoneyTransaction {
+// ledgerTxns returns the durable #512 ledger transfers for a tenant subject
+// (USD) as MoneyTransaction DTOs — deposits and captured withdrawals; there are
+// no "hold" rows (holds are Redis-only).
+func (h *billingE2EHarness) ledgerTxns(userID string) []models.MoneyTransaction {
 	h.t.Helper()
-	owner := personalOwnerID(userID)
-	pgRows, err := h.suite.Pool.Query(context.Background(),
-		"SELECT "+moneyTransactionCols+" FROM openrails.money_transactions WHERE customer_id = $1 AND currency = $2 ORDER BY created_at ASC",
-		owner, "USD")
+	payer := identity.CustomerID(personalOwnerID(userID))
+	rows, _, err := h.ms.GetTransactionsByCustomer(h.ctx, payer, money.DefaultCurrency, 200, 0)
 	require.NoError(h.t, err)
-	defer pgRows.Close()
-	var rows []models.MoneyTransaction
-	for pgRows.Next() {
-		trx, err := scanMoneyTransaction(pgRows)
-		require.NoError(h.t, err)
-		rows = append(rows, *trx)
-	}
-	require.NoError(h.t, pgRows.Err())
 	return rows
 }
 
-// rawBalanceRow returns the DERIVED balance for a tenant subject (#491: no cache
-// — balance = SUM spendable blocks, held = SUM active holds).
-func (h *billingE2EHarness) rawBalanceRow(userID string) *models.MoneyBalance {
+// ledgerBalance returns the DERIVED balance from the #512 ledger account.
+func (h *billingE2EHarness) ledgerBalance(userID string) int64 {
 	h.t.Helper()
-	owner := personalOwnerID(userID)
-	bal := &models.MoneyBalance{CustomerID: owner, Currency: "USD"}
-	ctx := context.Background()
-	err := h.suite.Pool.QueryRow(ctx, `
-		SELECT COALESCE(SUM(remaining_amount), 0)::bigint
-		FROM openrails.money_blocks
-		WHERE customer_id = $1 AND currency = $2 AND remaining_amount > 0
-		  AND (expires_at IS NULL OR expires_at > now())`, owner, "USD").Scan(&bal.Balance)
+	payer := identity.CustomerID(personalOwnerID(userID))
+	bal, err := h.ms.GetBalanceForCustomer(h.ctx, payer, money.DefaultCurrency)
 	require.NoError(h.t, err)
-	err = h.suite.Pool.QueryRow(ctx, `
-		SELECT COALESCE(SUM(held_amount - settled_amount), 0)::bigint
-		FROM openrails.money_windows
-		WHERE customer_id = $1 AND currency = $2 AND status = 'open'`,
-		owner, "USD").Scan(&bal.HeldBalance)
-	require.NoError(h.t, err)
-	return bal
+	return bal.Balance
 }
 
-// sumDebits returns the sum of all withdrawal/capture amounts (negative values)
-// recorded in the ledger for this owner. Used for conservation checks.
+// sumLedgerAmounts sums the signed transfer amounts (deposit positive, capture
+// negative) — equals the derived balance when conserved.
 func (h *billingE2EHarness) sumLedgerAmounts(userID string) int64 {
 	h.t.Helper()
 	var total int64
-	for _, r := range h.ledgerRows(userID) {
+	for _, r := range h.ledgerTxns(userID) {
 		total += r.Amount
 	}
 	return total
@@ -256,50 +243,37 @@ func countByType(rows []models.MoneyTransaction, txType string) int {
 	return n
 }
 
-func findHold(rows []models.MoneyTransaction, holdID string) *models.MoneyTransaction {
-	for i := range rows {
-		if rows[i].ID.String() == holdID && rows[i].TransactionType == "hold" {
-			return &rows[i]
-		}
-	}
-	return nil
-}
-
 // --- Scenarios ---------------------------------------------------------------
 
-// TestUnifiedBilling_PrepaidHoldCapture_Full: deposit -> hold estimate ->
-// capture the full authorized amount. Balance reduced by the full amount, held
-// returns to 0, hold row captured.
+// TestUnifiedBilling_PrepaidHoldCapture_Full: deposit -> admit an estimate ->
+// capture the full estimate. The durable balance is debited only at capture, by
+// the full actual; the capture is a single withdrawal transfer.
 func TestUnifiedBilling_PrepaidHoldCapture_Full(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
 	user := uuid.NewString()
 
 	h.deposit(user, 10_000)
-	require.Equal(t, balanceView{Balance: 10_000, HeldBalance: 0}, h.balance(user))
+	require.Equal(t, int64(10_000), h.ledgerBalance(user))
 
-	holdID := h.mustHold(user, "gen_job", "job-full-1", 3_000)
-	// Hold reserves but does not debit: available drops, balance unchanged.
-	require.Equal(t, balanceView{Balance: 10_000, HeldBalance: 3_000}, h.balance(user))
+	req := h.mustAdmit(user, "gen_job", "job-full-1", 3_000)
+	// The hold reserves in Redis but does not debit: durable balance unchanged.
+	require.Equal(t, int64(10_000), h.ledgerBalance(user))
 
-	w := h.capture(holdID, 3_000)
+	w := h.capture(req, 3_000)
 	require.Equal(t, http.StatusOK, w.Code, "capture body: %s", w.Body.String())
 
-	require.Equal(t, balanceView{Balance: 7_000, HeldBalance: 0}, h.balance(user))
-
-	rows := h.ledgerRows(user)
-	hold := findHold(rows, holdID)
-	require.NotNil(t, hold)
-	require.Equal(t, "captured", hold.Status)
-	require.NotNil(t, hold.Captured)
-	require.Equal(t, int64(3_000), *hold.Captured)
-	require.Equal(t, int64(-3_000), hold.Amount)
+	require.Equal(t, int64(7_000), h.ledgerBalance(user))
+	require.Equal(t, int64(7_000), h.sumLedgerAmounts(user))
+	rows := h.ledgerTxns(user)
+	require.Equal(t, 1, countByType(rows, "deposit"), "the seed deposit")
+	require.Equal(t, 1, countByType(rows, "withdrawal"), "one capture withdrawal, no hold rows")
 }
 
 // TestUnifiedBilling_PrepaidHoldCapture_Partial: the core money-path scenario.
-// Deposit, hold a generous estimate, then capture LESS than held (the metered
-// actual). The remainder must be released back to available, held returns to 0,
-// and total credits are conserved (debited == captured actual only).
+// Deposit, admit a generous estimate, then capture LESS than the estimate (the
+// metered actual). Only the actual is debited — the held remainder simply frees
+// (Redis), it is never debited — and total credits are conserved.
 func TestUnifiedBilling_PrepaidHoldCapture_Partial(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
@@ -309,34 +283,19 @@ func TestUnifiedBilling_PrepaidHoldCapture_Partial(t *testing.T) {
 
 	const estimate = 4_000
 	const actual = 1_500
-	holdID := h.mustHold(user, "gen_job", "job-partial-1", estimate)
-	require.Equal(t, balanceView{Balance: 10_000, HeldBalance: estimate}, h.balance(user))
+	req := h.mustAdmit(user, "gen_job", "job-partial-1", estimate)
 
-	w := h.capture(holdID, actual)
+	w := h.capture(req, actual)
 	require.Equal(t, http.StatusOK, w.Code, "capture body: %s", w.Body.String())
 
-	// Captured amount debited; remainder (estimate-actual) released; held -> 0.
-	got := h.balance(user)
-	require.Equal(t, int64(10_000-actual), got.Balance, "only the actual is debited")
-	require.Equal(t, int64(0), got.HeldBalance, "remainder released, no lingering hold")
-
-	rows := h.ledgerRows(user)
-	hold := findHold(rows, holdID)
-	require.NotNil(t, hold)
-	require.Equal(t, "captured", hold.Status)
-	require.NotNil(t, hold.Authorized)
-	require.Equal(t, int64(estimate), *hold.Authorized)
-	require.NotNil(t, hold.Captured)
-	require.Equal(t, int64(actual), *hold.Captured)
-	require.Equal(t, int64(-actual), hold.Amount)
-
-	// Conservation: deposit(+10000) + captured-hold(-1500) == persisted balance.
+	// Only the actual is debited; conservation: deposit(+10000) + capture(-1500).
+	require.Equal(t, int64(10_000-actual), h.ledgerBalance(user))
 	require.Equal(t, int64(10_000-actual), h.sumLedgerAmounts(user))
-	require.Equal(t, int64(10_000-actual), h.rawBalanceRow(user).Balance)
+	require.Equal(t, 1, countByType(h.ledgerTxns(user), "withdrawal"))
 }
 
-// TestUnifiedBilling_InsufficientBalance: holding beyond available is rejected
-// cleanly (402 insufficient_credits) and the balance is untouched.
+// TestUnifiedBilling_InsufficientBalance: admitting beyond available is rejected
+// cleanly (402 on the money axis) and the balance is untouched.
 func TestUnifiedBilling_InsufficientBalance(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
@@ -344,42 +303,40 @@ func TestUnifiedBilling_InsufficientBalance(t *testing.T) {
 
 	h.deposit(user, 1_000)
 
-	w := h.hold(user, "gen_job", "job-overdraw-1", 5_000)
+	w := h.admit(user, "gen_job", "job-overdraw-1", 5_000)
 	require.Equal(t, http.StatusPaymentRequired, w.Code, "body: %s", w.Body.String())
-	require.Contains(t, w.Body.String(), "insufficient_credits")
+	var a admitView
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &a))
+	require.False(t, a.Allowed)
+	require.Equal(t, "money", a.BlockedBy, "denied on the money axis")
 
-	// Balance fully intact, nothing held, no hold row written.
-	require.Equal(t, balanceView{Balance: 1_000, HeldBalance: 0}, h.balance(user))
-	require.Equal(t, 0, countByType(h.ledgerRows(user), "hold"))
+	// Balance fully intact, nothing debited (no capture transfer written).
+	require.Equal(t, int64(1_000), h.ledgerBalance(user))
+	require.Equal(t, 0, countByType(h.ledgerTxns(user), "withdrawal"))
 }
 
-// TestUnifiedBilling_FailureRelease: hold then release (worker failed / zero
-// usage). The full reservation is restored and nothing is debited.
+// TestUnifiedBilling_FailureRelease: admit then release (worker failed / zero
+// usage). Nothing is debited and the hold is freed — proven by a fresh admit for
+// the entire balance succeeding.
 func TestUnifiedBilling_FailureRelease(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
 	user := uuid.NewString()
 
 	h.deposit(user, 8_000)
-	holdID := h.mustHold(user, "gen_job", "job-fail-1", 2_500)
-	require.Equal(t, balanceView{Balance: 8_000, HeldBalance: 2_500}, h.balance(user))
+	req := h.mustAdmit(user, "gen_job", "job-fail-1", 2_500)
 
-	w := h.release(holdID)
+	w := h.release(req)
 	require.Equal(t, http.StatusOK, w.Code, "release body: %s", w.Body.String())
 
-	// Full reservation restored, balance untouched, nothing debited.
-	require.Equal(t, balanceView{Balance: 8_000, HeldBalance: 0}, h.balance(user))
-
-	rows := h.ledgerRows(user)
-	hold := findHold(rows, holdID)
-	require.NotNil(t, hold)
-	require.Equal(t, "released", hold.Status)
-	require.Equal(t, int64(0), hold.Amount, "released hold debits nothing")
-	require.Equal(t, int64(8_000), h.sumLedgerAmounts(user))
+	require.Equal(t, int64(8_000), h.ledgerBalance(user))
+	require.Equal(t, 0, countByType(h.ledgerTxns(user), "withdrawal"), "release debits nothing")
+	require.Equal(t, http.StatusOK, h.admit(user, "gen_job", "job-fail-2", 8_000).Code,
+		"release freed the hold, so the full balance is admittable again")
 }
 
-// TestUnifiedBilling_Idempotency_HoldReplay: replaying the same (source,
-// source_id) hold returns the SAME hold and does not double-reserve.
+// TestUnifiedBilling_Idempotency_HoldReplay: replaying the same request_id is an
+// idempotent no-op (the spendgate hold is not doubled).
 func TestUnifiedBilling_Idempotency_HoldReplay(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
@@ -387,23 +344,24 @@ func TestUnifiedBilling_Idempotency_HoldReplay(t *testing.T) {
 
 	h.deposit(user, 10_000)
 
-	holdID1 := h.mustHold(user, "gen_job", "job-idem-1", 3_000)
-	require.Equal(t, balanceView{Balance: 10_000, HeldBalance: 3_000}, h.balance(user))
+	req := h.mustAdmit(user, "gen_job", "job-idem-1", 3_000)
+	// Replay with the identical request_id: same handle, hold NOT doubled.
+	require.Equal(t, req, h.mustAdmit(user, "gen_job", "job-idem-1", 3_000))
 
-	// Replay with identical source/source_id: same hold id, held NOT doubled.
-	holdID2 := h.mustHold(user, "gen_job", "job-idem-1", 3_000)
-	require.Equal(t, holdID1, holdID2, "replay must return the same hold")
-	require.Equal(t, balanceView{Balance: 10_000, HeldBalance: 3_000}, h.balance(user))
+	// Proof the hold was not doubled: only 3_000 is held, so 7_000 is still
+	// admittable (a doubled 6_000 hold would deny this). Release the probe after.
+	require.Equal(t, http.StatusOK, h.admit(user, "gen_job", "job-idem-probe", 7_000).Code,
+		"replay must not double the hold")
+	require.Equal(t, http.StatusOK, h.release("job-idem-probe").Code)
 
-	require.Equal(t, 1, countByType(h.ledgerRows(user), "hold"), "exactly one hold row")
-
-	// Capturing once debits once; the single hold is now captured.
-	w := h.capture(holdID1, 3_000)
+	// Capturing the original once debits once.
+	w := h.capture(req, 3_000)
 	require.Equal(t, http.StatusOK, w.Code, "capture body: %s", w.Body.String())
-	require.Equal(t, balanceView{Balance: 7_000, HeldBalance: 0}, h.balance(user))
+	require.Equal(t, int64(7_000), h.ledgerBalance(user))
+	require.Equal(t, 1, countByType(h.ledgerTxns(user), "withdrawal"))
 }
 
-// TestUnifiedBilling_OwnerScoping: owner A's hold/capture never touches owner B.
+// TestUnifiedBilling_OwnerScoping: owner A's admit/capture never touches owner B.
 // Owners here are the deterministic personal orgs of two distinct user ids,
 // which is exactly how the service routes scope (resolveOwner(nil, userID)).
 func TestUnifiedBilling_OwnerScoping(t *testing.T) {
@@ -415,56 +373,50 @@ func TestUnifiedBilling_OwnerScoping(t *testing.T) {
 	h.deposit(ownerA, 5_000)
 	h.deposit(ownerB, 9_000)
 
-	// Same logical source_id under each owner: idempotency is per-owner, so both
-	// holds succeed independently and are charged to their own balances.
-	holdA := h.mustHold(ownerA, "gen_job", "shared-job-1", 2_000)
-	holdB := h.mustHold(ownerB, "gen_job", "shared-job-1", 6_000)
-	require.NotEqual(t, holdA, holdB)
-
-	require.Equal(t, balanceView{Balance: 5_000, HeldBalance: 2_000}, h.balance(ownerA))
-	require.Equal(t, balanceView{Balance: 9_000, HeldBalance: 6_000}, h.balance(ownerB))
+	// request_ids are merchant-global (the spendgate keys holds by request_id),
+	// so each owner uses its own id; balances are independently scoped.
+	reqA := h.mustAdmit(ownerA, "gen_job", "job-A-1", 2_000)
+	reqB := h.mustAdmit(ownerB, "gen_job", "job-B-1", 6_000)
+	require.NotEqual(t, reqA, reqB)
 
 	// Capture A only. B is completely unaffected.
-	w := h.capture(holdA, 2_000)
+	w := h.capture(reqA, 2_000)
 	require.Equal(t, http.StatusOK, w.Code, "capture body: %s", w.Body.String())
 
-	require.Equal(t, balanceView{Balance: 3_000, HeldBalance: 0}, h.balance(ownerA))
-	require.Equal(t, balanceView{Balance: 9_000, HeldBalance: 6_000}, h.balance(ownerB),
-		"owner B untouched by owner A's capture")
+	require.Equal(t, int64(3_000), h.ledgerBalance(ownerA))
+	require.Equal(t, int64(9_000), h.ledgerBalance(ownerB), "owner B untouched by owner A's capture")
 
-	// Merchant subject A's ledger has no rows belonging to tenant subject B and vice versa.
-	for _, r := range h.ledgerRows(ownerA) {
+	// Each owner's ledger holds only its own customer's transfers.
+	for _, r := range h.ledgerTxns(ownerA) {
 		require.Equal(t, personalOwnerID(ownerA), r.CustomerID)
 	}
-	for _, r := range h.ledgerRows(ownerB) {
+	for _, r := range h.ledgerTxns(ownerB) {
 		require.Equal(t, personalOwnerID(ownerB), r.CustomerID)
 	}
 }
 
-// TestUnifiedBilling_LifecycleViaPublicServiceTokenRoutes is the end-to-end "happy path"
-// that a gen-orchestrator / Tensorhub driver would run for a single job, all
-// over the service-token-authenticated public surface, proving the standalone-call contract:
-// fund -> lookup confirms hold -> capture actual -> ledger conserved.
+// TestUnifiedBilling_LifecycleViaPublicServiceTokenRoutes is the end-to-end
+// "happy path" a gen-orchestrator / Tensorhub driver runs for a single job, all
+// over the service-token-authenticated public surface: fund -> admit estimate ->
+// capture actual -> ledger conserved, with the public balance endpoint agreeing.
 func TestUnifiedBilling_LifecycleViaPublicServiceTokenRoutes(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
 	user := uuid.NewString()
 
 	h.deposit(user, 20_000)
-	holdID := h.mustHold(user, "gen_job", "lifecycle-job-1", 5_000)
-
-	// Lookup the hold by source the way an orchestrator reconciles state.
-	lookup := h.do(http.MethodGet, fmt.Sprintf(
-		"/v1/service/credits/transactions/lookup?invoker=%s&credit_type=%s&transaction_type=hold&source=gen_job&source_id=lifecycle-job-1",
-		user, h.creditType), nil)
-	require.Equal(t, http.StatusOK, lookup.Code, "lookup body: %s", lookup.Body.String())
-	require.Contains(t, lookup.Body.String(), holdID)
+	req := h.mustAdmit(user, "gen_job", "lifecycle-job-1", 5_000)
 
 	// Metered actual comes in under the estimate -> partial capture.
-	w := h.capture(holdID, 3_200)
+	w := h.capture(req, 3_200)
 	require.Equal(t, http.StatusOK, w.Code, "capture body: %s", w.Body.String())
 
-	require.Equal(t, balanceView{Balance: 16_800, HeldBalance: 0}, h.balance(user))
-	require.Equal(t, int64(16_800), h.rawBalanceRow(user).Balance)
+	require.Equal(t, int64(16_800), h.ledgerBalance(user))
 	require.Equal(t, int64(16_800), h.sumLedgerAmounts(user))
+
+	// The public balance endpoint agrees with the ledger; held is Redis-only so
+	// the endpoint reports 0.
+	bal := h.balance(user)
+	require.Equal(t, int64(16_800), bal.Balance, "balance endpoint reflects the ledger")
+	require.Equal(t, int64(0), bal.HeldBalance, "held is Redis-only; the endpoint reports 0")
 }

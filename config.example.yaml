@@ -34,7 +34,8 @@ env: "development"
 # mode: "full"
 
 # Test Environment (#355): the sandbox-CREDENTIAL axis, orthogonal to mode.
-# Env var: TEST_ENV=, CLI flag: --test-env. Default false (live credentials).
+# Env var: TEST_ENV=, CLI flag: --test-env. Defaults to sandbox in development
+# when omitted, and live outside development.
 # When true, every processor routes to its sandbox AND the credential
 # guarantees attach:
 #   - Stripe: a live key (sk_live_/rk_live_) refuses to boot
@@ -43,10 +44,10 @@ env: "development"
 #   - CCBill: sandbox-api.ccbill.com
 #   - Solana: devnet (derived; not separately configurable)
 # test_env=true is rejected outside env=development — sandbox money is
-# dev-only. NOTE: the dev default is test_env=false, so a dev boot with real
-# credentials in .env and no flags moves real money; set test_env=true for
-# sandbox.
-# test_env: false
+# dev-only. If omitted, Load defaults to sandbox in development and live outside
+# it. Set test_env=false explicitly only when you really want live credentials
+# in a local dev run.
+# test_env: true
 
 # =============================================================================
 # STANDALONE MODE ONLY
@@ -81,30 +82,14 @@ port: 2053             # Public HTTP/HTTPS port (default: 2053)
 #
 api_url: "https://api.example.com"
 
-# CORS origins for frontend access (REQUIRED for browser requests)
-# These are the frontend domains allowed to call billing APIs.
+# CORS origins for frontend access (REQUIRED for browser requests).
+# This is one global browser allow-list, not per-merchant isolation.
 #
-# If not set and api_url is set: derives origin from api_url
-# If dev mode with nothing set: localhost:3000, localhost:5173, localhost:8080
-# If prod with nothing set: blocks all cross-origin requests
+# If development mode leaves this empty, the CORS middleware allows all origins.
+# Outside development, cors_origins is required and startup fails if it is empty.
 cors_origins:
   - "http://localhost:3000"
   - "https://your-frontend-domain.com"
-
-# Per-merchant browser-direct allowed origins (issue #222 browser tier).
-# Keyed by merchant slug. Each merchant lists the exact browser origins on its own
-# domain that may call OpenRails directly (e.g. the /v1/self/* self-service
-# surface with a delegated access token). These are added to the CORS allow-list
-# ALONGSIDE cors_origins (additive union, exact-match only — never a wildcard).
-# A browser preflight from any listed origin succeeds; unlisted origins are denied.
-# merchant_cors:
-#   merchant-a:
-#     allowed_origins:
-#       - "https://app.example.com"
-#       - "https://portal.example.com"
-#   merchant-b:
-#     allowed_origins:
-#       - "https://media.example.com"
 
 # =============================================================================
 # STORE/MERCHANT BRANDING
@@ -264,6 +249,22 @@ encryption:
   # master_key: set via ENCRYPTION_MASTER_KEY env var (base64 of 32 bytes)
 
 # =============================================================================
+# VAULT SECRET BACKEND (OPTIONAL)
+# =============================================================================
+# Disabled by default. When enabled, per-merchant secrets use Vault KV-v2 instead
+# of DB+envelope storage, and Solana signing can use Vault Transit.
+#
+# vault:
+#   enabled: false
+#   address: "http://127.0.0.1:8200"        # or VAULT_ADDR
+#   auth_method: "token"                    # token | approle | kubernetes
+#   # token: set via VAULT_TOKEN
+#   kv_mount: "secret"
+#   transit_mount: "transit"
+#   use_transit_for_solana: false
+#   secret_cache_ttl_seconds: 900
+
+# =============================================================================
 # PAYMENT PROCESSORS
 # =============================================================================
 # All processors are configured under a single "processors" map.
@@ -281,13 +282,15 @@ processors:
   # Non-reserved names require "type: nmi".
   mobius:
     type: nmi
-    # Secrets - set via env: PROCESSORS_MOBIUS_SECURITY_KEY, etc.
+    # Legacy process-wide config. New merchant-specific provider credentials
+    # should be stored as merchant secrets (for example
+    # nmi/mobius/production_key, nmi/mobius/tokenization_key, and optional
+    # nmi/mobius/tokenization_url).
     # security_key: ""
     # tokenization_key: ""
-    # tokenization_url: "https://secure.networkmerchants.com/token/Collect.js"
     # webhook_secret: ""
 
-	  # Example: Another NMI provider (just add config, no code changes needed)
+    # Example: Another NMI provider (just add config, no code changes needed)
   # acme:
   #   type: nmi
   #   security_key: ""  # or via PROCESSORS_ACME_SECURITY_KEY
@@ -469,7 +472,6 @@ captcha:
 #
 # Environment variables:
 #   FEATURE_FLAGS_DUNNING_MODE=on|dry_run_only|off
-#   FEATURE_FLAGS_DUNNING_WINDOW_DAYS=15
 #   FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true|false
 #   FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS=true|false
 #   MODE=full|limited|readonly  (top-level operating mode, see CORE SETTINGS)
@@ -535,7 +537,6 @@ feature_flags:
   # -------------------------------------------------------------------------
   # When true:
   #   - CreditExpiryWorker skips - expired credit batches are preserved
-  #   - HoldExpiryWorker skips - expired holds stay active
   #   - FailMembership skips entitlement revocation (but still cancels subscription)
   #   - Users keep premium access even after subscription ends
   #
@@ -551,29 +552,3 @@ feature_flags:
   #   4. All accumulated expirations will process at once
   #
   disable_entitlement_expiration: false
-
-# =============================================================================
-# BILLING HOT-PATH DEGRADED-MODE POLICY (issue #248)
-# =============================================================================
-# The per-invocation authorize/hold call to OpenRails is a NETWORK dependency on
-# every generation. This knob makes the degraded-mode behavior EXPLICIT — never a
-# silent default — for when OpenRails is unreachable or slow.
-#
-# CONTRACT: this is the documented SOURCE OF TRUTH the gen-orchestrator CLIENT
-# reads. The actual ENFORCEMENT (short timeout + circuit breaker + bounded
-# fail-open cap + deferred-hold replay) lives in that client (Wave 3); OpenRails
-# only declares + validates the policy here.
-#
-# fail_policy values:
-#   "fail_closed" (DEFAULT): authorize unreachable/slow => DENY the run (no hold,
-#                            no run). Required for arrears / untrusted payers.
-#   "fail_open":             authorize unreachable => PERMIT the run, but ONLY for
-#                            TRUSTED PREPAID payers, bounded per payer per outage
-#                            window, with deferred holds queued + replayed
-#                            idempotently on recovery (reconciliation #243 is the
-#                            backstop). NEVER silently grants unbounded free usage.
-#
-# Environment variable: OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY=fail_closed|fail_open
-#
-# billing_hot_path:
-#   fail_policy: "fail_closed"

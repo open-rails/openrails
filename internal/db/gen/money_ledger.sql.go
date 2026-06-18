@@ -7,155 +7,9 @@ package gen
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 )
-
-const addMoneyWindowSettled = `-- name: AddMoneyWindowSettled :exec
-UPDATE openrails.money_windows
-SET settled_amount = settled_amount + $3::bigint, updated_at = $2
-WHERE id = $1
-`
-
-type AddMoneyWindowSettledParams struct {
-	ID        uuid.UUID
-	UpdatedAt time.Time
-	Amount    int64
-}
-
-func (q *Queries) AddMoneyWindowSettled(ctx context.Context, arg AddMoneyWindowSettledParams) error {
-	_, err := q.db.Exec(ctx, addMoneyWindowSettled, arg.ID, arg.UpdatedAt, arg.Amount)
-	return err
-}
-
-const getMoneyWindow = `-- name: GetMoneyWindow :one
-SELECT id, merchant_id, customer_id, held_amount, settled_amount, status, expires_at, created_at, updated_at, currency FROM openrails.money_windows WHERE id = $1 LIMIT 1
-`
-
-func (q *Queries) GetMoneyWindow(ctx context.Context, id uuid.UUID) (OpenrailsMoneyWindow, error) {
-	row := q.db.QueryRow(ctx, getMoneyWindow, id)
-	var i OpenrailsMoneyWindow
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.HeldAmount,
-		&i.SettledAmount,
-		&i.Status,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Currency,
-	)
-	return i, err
-}
-
-const getMoneyWindowForUpdate = `-- name: GetMoneyWindowForUpdate :one
-SELECT id, merchant_id, customer_id, held_amount, settled_amount, status, expires_at, created_at, updated_at, currency FROM openrails.money_windows WHERE id = $1 FOR UPDATE
-`
-
-func (q *Queries) GetMoneyWindowForUpdate(ctx context.Context, id uuid.UUID) (OpenrailsMoneyWindow, error) {
-	row := q.db.QueryRow(ctx, getMoneyWindowForUpdate, id)
-	var i OpenrailsMoneyWindow
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.HeldAmount,
-		&i.SettledAmount,
-		&i.Status,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Currency,
-	)
-	return i, err
-}
-
-const insertMoneyWindow = `-- name: InsertMoneyWindow :exec
-
-INSERT INTO openrails.money_windows (
-    id, merchant_id, customer_id, currency,
-    held_amount, settled_amount, status, expires_at, created_at, updated_at
-) VALUES ($1, $2, $3, $10, $4, $5, $6, $7, $8, $9)
-`
-
-type InsertMoneyWindowParams struct {
-	ID            uuid.UUID
-	MerchantID    uuid.UUID
-	CustomerID    uuid.UUID
-	HeldAmount    int64
-	SettledAmount int64
-	Status        string
-	ExpiresAt     time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	Currency      string
-}
-
-// openrails.money_windows: prepaid bulk reservations (#335).
-func (q *Queries) InsertMoneyWindow(ctx context.Context, arg InsertMoneyWindowParams) error {
-	_, err := q.db.Exec(ctx, insertMoneyWindow,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.HeldAmount,
-		arg.SettledAmount,
-		arg.Status,
-		arg.ExpiresAt,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-		arg.Currency,
-	)
-	return err
-}
-
-const listExpiredOpenMoneyWindowsForUpdate = `-- name: ListExpiredOpenMoneyWindowsForUpdate :many
-SELECT id, merchant_id, customer_id, held_amount, settled_amount, status, expires_at, created_at, updated_at, currency FROM openrails.money_windows
-WHERE status = 'open' AND expires_at <= $1::timestamptz
-ORDER BY expires_at ASC
-LIMIT $2::int
-FOR UPDATE SKIP LOCKED
-`
-
-type ListExpiredOpenMoneyWindowsForUpdateParams struct {
-	Now       time.Time
-	BatchSize int32
-}
-
-// Cross-tenant expiry sweep (the window analogue of hold expiry): open windows
-// past expiry, oldest first, SKIP LOCKED so concurrent sweeps don't contend.
-func (q *Queries) ListExpiredOpenMoneyWindowsForUpdate(ctx context.Context, arg ListExpiredOpenMoneyWindowsForUpdateParams) ([]OpenrailsMoneyWindow, error) {
-	rows, err := q.db.Query(ctx, listExpiredOpenMoneyWindowsForUpdate, arg.Now, arg.BatchSize)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsMoneyWindow
-	for rows.Next() {
-		var i OpenrailsMoneyWindow
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.HeldAmount,
-			&i.SettledAmount,
-			&i.Status,
-			&i.ExpiresAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Currency,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
 
 const lockCustomerForSpend = `-- name: LockCustomerForSpend :one
 
@@ -169,80 +23,17 @@ type LockCustomerForSpendParams struct {
 	MerchantID uuid.UUID
 }
 
-// modules/money serialization + prepaid windows. After the #512 hard cut the
-// single-entry money_blocks / money_transactions tables are gone: balance is
-// derived from the #512 ledger (internal/db/queries/ledger.sql), credit lots are
-// #514 grants (grants.sql), and the per-customer spend mutex is a FOR UPDATE
-// lock on the customers row. Held is the durable open-window unsettled
-// reservation (#335). amounts are integers in the row currency's precision.
-// The per-customer spend mutex (#491): every spend/hold/capture/deposit/expiry
-// path locks this row FOR UPDATE before reading/mutating the customer's ledger,
-// serializing all money mutations per customer. Returns the customer id.
+// modules/money serialization. After the #512 hard cut the single-entry
+// money_blocks / money_transactions tables are gone: balance is derived from the
+// #512 ledger (internal/db/queries/ledger.sql), credit lots are #514 grants
+// (grants.sql), and the per-customer spend mutex is a FOR UPDATE lock on the
+// customers row. Admission holds live in Redis (#513), not Postgres.
+// The per-customer spend mutex (#491): every spend/capture/deposit path locks
+// this row FOR UPDATE before reading/mutating the customer's ledger, serializing
+// all money mutations per customer. Returns the customer id.
 func (q *Queries) LockCustomerForSpend(ctx context.Context, arg LockCustomerForSpendParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, lockCustomerForSpend, arg.ID, arg.MerchantID)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
-}
-
-const setMoneyWindowStatus = `-- name: SetMoneyWindowStatus :exec
-UPDATE openrails.money_windows
-SET status = $2, updated_at = $3
-WHERE id = $1
-`
-
-type SetMoneyWindowStatusParams struct {
-	ID        uuid.UUID
-	Status    string
-	UpdatedAt time.Time
-}
-
-func (q *Queries) SetMoneyWindowStatus(ctx context.Context, arg SetMoneyWindowStatusParams) error {
-	_, err := q.db.Exec(ctx, setMoneyWindowStatus, arg.ID, arg.Status, arg.UpdatedAt)
-	return err
-}
-
-const sumActiveMoneyHeld = `-- name: SumActiveMoneyHeld :one
-SELECT COALESCE((SELECT SUM(w.held_amount - w.settled_amount)
-              FROM openrails.money_windows w
-              WHERE w.merchant_id = $1 AND w.customer_id = $2 AND w.currency = $3
-                AND w.status = 'open'), 0)::bigint
-`
-
-type SumActiveMoneyHeldParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-}
-
-// Derived held (#505): durable open-window unsettled reservations only.
-// Request/admit holds live in Redis and are included by the admission layer.
-func (q *Queries) SumActiveMoneyHeld(ctx context.Context, arg SumActiveMoneyHeldParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumActiveMoneyHeld, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const updateMoneyWindowReservation = `-- name: UpdateMoneyWindowReservation :exec
-UPDATE openrails.money_windows
-SET held_amount = $2, expires_at = $3, updated_at = $4
-WHERE id = $1
-`
-
-type UpdateMoneyWindowReservationParams struct {
-	ID         uuid.UUID
-	HeldAmount int64
-	ExpiresAt  time.Time
-	UpdatedAt  time.Time
-}
-
-func (q *Queries) UpdateMoneyWindowReservation(ctx context.Context, arg UpdateMoneyWindowReservationParams) error {
-	_, err := q.db.Exec(ctx, updateMoneyWindowReservation,
-		arg.ID,
-		arg.HeldAmount,
-		arg.ExpiresAt,
-		arg.UpdatedAt,
-	)
-	return err
 }

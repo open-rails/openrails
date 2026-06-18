@@ -620,21 +620,15 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 	if err != nil {
 		return nil, err
 	}
-	// Held stays on durable open windows (#335): the prepaid bulk reservation a
-	// host meters locally. Two-phase ledger holds are not on the live path (the
-	// admission hold is Redis, #513), so they don't contribute here.
-	held, err := q.SumActiveMoneyHeld(ctx, gen.SumActiveMoneyHeldParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-	})
-	if err != nil {
-		return nil, err
-	}
+	// HeldBalance is always 0 in the durable ledger: admission holds live in Redis
+	// (#513) and the prepaid money_windows reservation was removed (dormant,
+	// superseded by the spendgate). Two-phase ledger holds are not on the live path.
 	return &models.MoneyBalance{
 		MerchantID:  tenantID,
 		CustomerID:  payerID,
 		Currency:    cur,
 		Balance:     bal,
-		HeldBalance: held,
+		HeldBalance: 0,
 	}, nil
 }
 

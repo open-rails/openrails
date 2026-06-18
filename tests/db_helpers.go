@@ -65,11 +65,6 @@ func (suite *TestContainerSuite) InsertEntitlement(ctx context.Context, e *model
 	require.NoError(suite.t, dbrepo.NewEntitlementRepo(suite.App.Runtime.DB).Insert(ctx, e), "Failed to insert entitlement")
 }
 
-func (suite *TestContainerSuite) InsertEntitlementGrant(ctx context.Context, g *models.EntitlementGrant) {
-	suite.t.Helper()
-	require.NoError(suite.t, dbrepo.NewEntitlementGrantRepo(suite.App.Runtime.DB).Create(ctx, g), "Failed to insert admin grant")
-}
-
 func (suite *TestContainerSuite) InsertNotification(ctx context.Context, n *models.NotificationQueue) {
 	suite.t.Helper()
 	require.NoError(suite.t, dbrepo.NewNotificationQueueRepo(suite.App.Runtime.DB).Create(ctx, n), "Failed to insert notification")
@@ -132,14 +127,6 @@ func (suite *TestContainerSuite) GetPaymentMethod(ctx context.Context, id uuid.U
 	pm, err := dbrepo.NewPaymentMethodRepo(suite.App.Runtime.DB).GetByID(ctx, id)
 	require.NoError(suite.t, err, "Failed to get payment method %s", id)
 	return pm
-}
-
-// GetEntitlementGrant loads an admin grant by id (fails the test when missing).
-func (suite *TestContainerSuite) GetEntitlementGrant(ctx context.Context, id uuid.UUID) *models.EntitlementGrant {
-	suite.t.Helper()
-	g, err := dbrepo.NewEntitlementGrantRepo(suite.App.Runtime.DB).GetByID(ctx, id)
-	require.NoError(suite.t, err, "Failed to get admin grant %s", id)
-	return g
 }
 
 // entitlementCols is the explicit column list QueryEntitlements scans; it

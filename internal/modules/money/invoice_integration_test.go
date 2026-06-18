@@ -78,7 +78,6 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "UPDATE openrails.money_transactions SET invoice_id = NULL WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
@@ -143,7 +142,6 @@ func TestInvoiceCollectionDeclineLeavesInvoiceOpenAndBlocksArrears(t *testing.T)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "UPDATE openrails.money_transactions SET invoice_id = NULL WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
@@ -195,7 +193,6 @@ func TestFinalizeThresholdInvoices_CapHitCreatesCollectableInvoice(t *testing.T)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "UPDATE openrails.money_transactions SET invoice_id = NULL WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
@@ -244,7 +241,6 @@ func TestRecordOutOfBandInvoicePayment_PartialThenPaid(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "UPDATE openrails.money_transactions SET invoice_id = NULL WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
@@ -303,7 +299,6 @@ func TestInvoiceVoidAndUncollectibleLifecycle(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "UPDATE openrails.money_transactions SET invoice_id = NULL WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
@@ -328,7 +323,6 @@ func TestInvoiceVoidAndUncollectibleLifecycle(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool2.Exec(ctx2, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer2.UUID())
 		_, _ = pool2.Exec(ctx2, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer2.UUID())
-		_, _ = pool2.Exec(ctx2, "UPDATE openrails.money_transactions SET invoice_id = NULL WHERE customer_id = $1", payer2.UUID())
 		_, _ = pool2.Exec(ctx2, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer2.UUID())
 		_, _ = pool2.Exec(ctx2, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer2.UUID())
 	})

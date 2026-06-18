@@ -463,7 +463,7 @@ func runReconcileReport(cmd *cobra.Command, runIDStr, format, merchantSlug strin
 		// The report shows the standing OPEN findings (incl. the admin queue),
 		// not just the ones touched by that run.
 		var open []reconcile.FindingRecord
-		for _, status := range []string{string(reconcile.FindingStatusOpen), string(reconcile.FindingStatusAdminPending)} {
+		for _, status := range []string{string(reconcile.FindingStatusOpen), string(reconcile.FindingStatusAdminPending), string(reconcile.FindingStatusHeld)} {
 			batch, err := store.ListFindings(ctx, reconcile.FindingFilter{Status: status, Limit: 500})
 			if err != nil {
 				return err

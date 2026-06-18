@@ -14,6 +14,9 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
+// maxAdmitBatchItems bounds one /v1/service/admit-batch request (#335).
+const maxAdmitBatchItems = 1000
+
 type serviceAdmitRequest struct {
 	CustomerID string `json:"customer_id"`
 	// Invoker is the end-user attribution/abuse label (#491).
@@ -188,7 +191,7 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "items required")
 		return
 	}
-	if len(req.Items) > maxWindowBatchItems {
+	if len(req.Items) > maxAdmitBatchItems {
 		r.ErrorJSON(http.StatusBadRequest, "too many items")
 		return
 	}

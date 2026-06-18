@@ -823,16 +823,10 @@ func (suite *TestContainerSuite) CreateTestEntitlement(userID string, entitlemen
 	if sourceID == nil {
 		switch sourceType {
 		case models.EntitlementSourceAdmin:
-			adminGrant := &models.EntitlementGrant{
-				ID:           uuid.New(),
-				CustomerID:   tenantSubjectID,
-				GrantedBy:    "test-admin",
-				Reason:       "test_admin_entitlement",
-				DurationDays: nil,
-				CreatedAt:    now,
-			}
-			suite.InsertEntitlementGrant(ctx, adminGrant)
-			sourceID = &adminGrant.ID
+			// #511: a manual grant is an admin-sourced ledger grant; its source id
+			// is its own (no separate entitlement_grants provenance row).
+			id := uuid.New()
+			sourceID = &id
 		default:
 			require.FailNow(suite.t, "sourceID is required for this sourceType", "sourceType=%s", sourceType)
 		}

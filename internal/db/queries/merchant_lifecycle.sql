@@ -45,11 +45,7 @@ SELECT count(*) FROM openrails.payments WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsPayments :exec
 DELETE FROM openrails.payments WHERE merchant_id = $1;
 
--- name: CountMerchantRowsEntitlementGrants :one
-SELECT count(*) FROM openrails.entitlement_grants WHERE merchant_id = $1;
 
--- name: PurgeMerchantRowsEntitlementGrants :exec
-DELETE FROM openrails.entitlement_grants WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsNotificationQueue :one
 SELECT count(*) FROM openrails.notification_queue WHERE merchant_id = $1;
@@ -80,9 +76,3 @@ SELECT count(*) FROM openrails.money_settings WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsMoneyAccounts :exec
 DELETE FROM openrails.money_settings WHERE merchant_id = $1;
-
--- name: CountMerchantRowsMoneyWindows :one
-SELECT count(*) FROM openrails.money_windows WHERE merchant_id = $1;
-
--- name: PurgeMerchantRowsMoneyWindows :exec
-DELETE FROM openrails.money_windows WHERE merchant_id = $1;

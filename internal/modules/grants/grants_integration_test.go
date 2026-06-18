@@ -78,7 +78,7 @@ func TestGrants_EntitlementProjection(t *testing.T) {
 	require.NoError(t, l.MaterializeGrant(ctx, hg))
 	var gotEnd time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT end_at FROM openrails.entitlements WHERE merchant_id=$1 AND source_type='grant' AND source_id=$2 AND entitlement='legacy90' AND deleted_at IS NULL`,
+		`SELECT end_at FROM openrails.entitlements WHERE merchant_id=$1 AND grant_id=$2 AND entitlement='legacy90' AND deleted_at IS NULL`,
 		merchantID, hg.ID).Scan(&gotEnd))
 	require.True(t, gotEnd.Equal(end), "window dated to the source event")
 	require.True(t, gotEnd.Before(time.Now()), "a 2025 grant replays already-expired")
@@ -193,7 +193,7 @@ func entWindows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchant,
 	}
 	var n int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND source_type='grant' AND source_id=$2 AND entitlement=$3 AND deleted_at IS NULL AND `+cond,
+		`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND grant_id=$2 AND entitlement=$3 AND deleted_at IS NULL AND `+cond,
 		merchant, grantID, feature).Scan(&n))
 	return n
 }

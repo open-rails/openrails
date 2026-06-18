@@ -172,17 +172,12 @@ WITH avail AS (
     SELECT s.merchant_id, s.customer_id, s.currency,
            s.low_balance_threshold, s.auto_topup_enabled, s.auto_topup_amount_cents,
            s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at,
-           (
-             COALESCE((
-                 SELECT a.credits_posted - a.debits_posted
-                 FROM openrails.ledger_accounts a
-                 WHERE a.merchant_id = s.merchant_id AND a.customer_id = s.customer_id
-                   AND a.currency = s.currency AND a.account_type = 'customer_balance'
-             ), 0)
-           - COALESCE((SELECT SUM(w.held_amount - w.settled_amount) FROM openrails.money_windows w
-                       WHERE w.merchant_id = s.merchant_id AND w.customer_id = s.customer_id
-                         AND w.currency = s.currency AND w.status = 'open'), 0)
-           )::bigint AS available
+           COALESCE((
+               SELECT a.credits_posted - a.debits_posted
+               FROM openrails.ledger_accounts a
+               WHERE a.merchant_id = s.merchant_id AND a.customer_id = s.customer_id
+                 AND a.currency = s.currency AND a.account_type = 'customer_balance'
+           ), 0)::bigint AS available
     FROM openrails.money_settings s
     WHERE s.merchant_id = $1 AND s.low_balance_threshold IS NOT NULL
 )
@@ -208,9 +203,8 @@ type ListBelowThresholdMoneyAccountsRow struct {
 }
 
 // Money-in workers (#239/#240): accounts whose DERIVED available balance
-// (#512 ledger customer_balance − durable open-window unsettled) is under their
-// configured low-balance threshold. Request holds live in Redis and are not part
-// of this durable account scan.
+// (#512 ledger customer_balance) is under their configured low-balance
+// threshold. Request holds live in Redis and are not part of this durable scan.
 func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, merchantID uuid.UUID) ([]ListBelowThresholdMoneyAccountsRow, error) {
 	rows, err := q.db.Query(ctx, listBelowThresholdMoneyAccounts, merchantID)
 	if err != nil {

@@ -17,7 +17,10 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-func TestAdminEntitlementGrantCreatesSourceRecord(t *testing.T) {
+// #511: a manual admin entitlement grant is now an `admin`-sourced entry in the
+// grant ledger (the entitlement is the projected effect) — there is no separate
+// entitlement_grants provenance row anymore.
+func TestAdminEntitlementGrantCreatesEntitlement(t *testing.T) {
 	suite, adminToken := setupAdminTestSuite(t)
 
 	userID := uuid.New().String()
@@ -44,11 +47,6 @@ func TestAdminEntitlementGrantCreatesSourceRecord(t *testing.T) {
 	require.Equal(t, "premium", ent.Entitlement)
 	require.Equal(t, models.EntitlementSourceAdmin, ent.SourceType)
 	require.NotNil(t, ent.SourceID)
-
-	grant := suite.GetEntitlementGrant(req.Context(), *ent.SourceID)
-	require.Equal(t, userID, grant.CustomerID.String())
-	require.Equal(t, "admin_entitlement", grant.Reason)
-	require.Nil(t, grant.PriceID)
 }
 
 func TestRemovedEntitlementGrantRoutesReturn404(t *testing.T) {

@@ -32,6 +32,13 @@ const (
 	SecretStripeWebhookSigningThin = "stripe/webhook_signing_secret_thin"
 	// SecretNMIMobiusProductionKey is the merchant's Mobius/NMI production key.
 	SecretNMIMobiusProductionKey = "nmi/mobius/production_key"
+	// SecretNMIMobiusTokenizationKey is the merchant's public Collect.js key.
+	// It is client-side configuration, but it is still merchant-scoped provider
+	// configuration and belongs with the merchant's NMI account setup.
+	SecretNMIMobiusTokenizationKey = "nmi/mobius/tokenization_key"
+	// SecretNMIMobiusTokenizationURL overrides the Collect.js script URL for a
+	// merchant/provider. Most NMI accounts use DefaultNMICollectJSURL.
+	SecretNMIMobiusTokenizationURL = "nmi/mobius/tokenization_url"
 	// SecretCCBillAccountConfig is the merchant's CCBill account/config payload.
 	// Store as an OpenRails-owned JSON string until the CCBill adapter grows a
 	// typed multi-field secret.
@@ -60,6 +67,8 @@ var merchantSecretRegistry = []SecretDefinition{
 	{Name: SecretStripeWebhookSigning, Provider: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
 	{Name: SecretStripeWebhookSigningThin, Provider: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe thin event signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
 	{Name: SecretNMIMobiusProductionKey, Provider: "nmi", Purpose: "mobius_production_key", DisplayLabel: "Mobius/NMI production key", ManualVault: true, MerchantWritable: true, Validation: "presence"},
+	{Name: SecretNMIMobiusTokenizationKey, Provider: "nmi", Purpose: "tokenization_key", DisplayLabel: "Mobius/NMI tokenization key", ManualVault: true, MerchantWritable: true, Validation: "presence", PlaintextReadable: true},
+	{Name: SecretNMIMobiusTokenizationURL, Provider: "nmi", Purpose: "tokenization_url", DisplayLabel: "Mobius/NMI Collect.js URL", ManualVault: true, MerchantWritable: true, Validation: "url", PlaintextReadable: true},
 	{Name: SecretCCBillAccountConfig, Provider: "ccbill", Purpose: "account_config", DisplayLabel: "CCBill account configuration", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 	{Name: SecretSolanaPrivateKey, Provider: "solana", Purpose: "signing_keypair", DisplayLabel: "Solana signing keypair", ManualVault: true, MerchantWritable: false, Validation: "presence"},
 }

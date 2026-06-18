@@ -61,8 +61,7 @@ func TestGrantProductAccess_Idempotent(t *testing.T) {
 		UserID:     userID,
 		ProductID:  productID,
 		SourceType: models.ProductAccessSourcePurchase,
-		SourceID:   paymentID.String(),
-		PaymentID:  &paymentID,
+		SourceID:   paymentID.String(), // SourceID is the idempotency key
 	}
 
 	first, created, err := svc.GrantProductAccess(ctx, params)
@@ -96,7 +95,6 @@ func TestHasProductAccess_And_List(t *testing.T) {
 		ProductID:  productID,
 		SourceType: models.ProductAccessSourcePurchase,
 		SourceID:   paymentID.String(),
-		PaymentID:  &paymentID,
 	})
 	require.NoError(t, err)
 
@@ -116,7 +114,20 @@ func TestRevokeProductAccessByPayment_OnRefund(t *testing.T) {
 	userID := uuid.New().String()
 	paymentID := uuid.New()
 
-	_, _, err := svc.GrantProductAccess(ctx, GrantParams{
+	// grants.payment_id has a real FK to payments (the old product_access_grants
+	// table had none), so seed a real purchase payment for this customer/product.
+	seedPool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+	custID := dbtest.EnsureCustomerIDPgx(ctx, t, seedPool, userID)
+	priceID := uuid.New()
+	_, err := seedPool.Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, billing_cycle_days, merchant_id) VALUES ($1,$2,999,'usd',30,$3)`,
+		priceID, productID, dbtest.TestMerchantID.UUID())
+	require.NoError(t, err)
+	_, err = seedPool.Exec(ctx, `INSERT INTO openrails.payments (id, price_id, processor, transaction_id, amount, list_amount, currency, status, purchased_at, merchant_id, customer_id)
+	                             VALUES ($1,$2,'nmi',$3,999,999,'usd','completed',$4,$5,$6)`,
+		paymentID, priceID, "txn-"+paymentID.String(), now, dbtest.TestMerchantID.UUID(), custID)
+	require.NoError(t, err)
+
+	_, _, err = svc.GrantProductAccess(ctx, GrantParams{
 		UserID:     userID,
 		ProductID:  productID,
 		SourceType: models.ProductAccessSourcePurchase,

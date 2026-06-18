@@ -77,13 +77,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add credit expiry worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.HoldExpiryWorker{
-		DB:     r.DB,
-		Config: r.Config,
-		Clock:  clock,
-	}); err != nil {
-		return fmt.Errorf("add money window expiry worker: %w", err)
-	}
 	// Convergence Engine sweep (#511): periodically run reconcile.Converge for
 	// every active merchant, catching internal-plane drift (stalled dunning,
 	// elapsed grace, abandoned checkouts, unmaterialized grant effects) that no
@@ -449,19 +442,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.CreditExpiryArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
-			}
-		},
-		&river.PeriodicJobOpts{RunOnStart: false},
-	))
-
-	// Every 5 minutes: expire open durable money windows. Request holds are Redis
-	// TTL state and do not need a Postgres expiry sweep.
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(5*time.Minute),
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.HoldExpiryArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

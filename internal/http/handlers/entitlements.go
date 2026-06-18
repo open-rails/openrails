@@ -249,21 +249,16 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve target tenant subject")
 		return
 	}
-	now := time.Now()
-	if r.State.Clock != nil {
-		now = r.State.Clock.Now()
-	}
-	adminGrant := &models.EntitlementGrant{ID: uuidutil.NewV7(), CustomerID: tenantSubjectID, GrantedBy: adminUser.ID, Reason: "admin_entitlement", DurationDays: req.Days, CreatedAt: now}
-	if err := repo.NewEntitlementGrantRepo(r.State.DB).Create(r.Request.Context(), adminGrant); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to create admin grant source record")
-		return
-	}
+	// #511: a manually-granted entitlement is now just an `admin`-sourced grant in
+	// the ledger (the source of truth); no separate entitlement_grants provenance
+	// row. SourceID is the grant's own identity.
+	adminGrantID := uuidutil.NewV7()
 	var ent *models.Entitlement
 	if req.Days != nil {
 		d := time.Duration(*req.Days) * 24 * time.Hour
-		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, CustomerID: tenantSubjectID, Entitlement: req.Entitlement, Duration: &d, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
+		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, CustomerID: tenantSubjectID, Entitlement: req.Entitlement, Duration: &d, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrantID})
 	} else {
-		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, CustomerID: tenantSubjectID, Entitlement: req.Entitlement, Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
+		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, CustomerID: tenantSubjectID, Entitlement: req.Entitlement, Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrantID})
 	}
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())

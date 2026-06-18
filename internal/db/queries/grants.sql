@@ -97,7 +97,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 SELECT EXISTS (
     SELECT 1 FROM openrails.entitlements
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-      AND source_type = 'grant' AND source_id = sqlc.arg(grant_id)::uuid
+      AND grant_id = sqlc.arg(grant_id)::uuid
       AND entitlement = sqlc.arg(entitlement)::text
       AND deleted_at IS NULL
 ) AS exists;
@@ -166,7 +166,7 @@ SET revoked_at = sqlc.arg(revoked_at)::timestamptz,
     revoke_reason = sqlc.arg(revoke_reason)::text,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND source_type = 'grant' AND source_id = sqlc.arg(grant_id)::uuid
+  AND grant_id = sqlc.arg(grant_id)::uuid
   AND revoked_at IS NULL AND deleted_at IS NULL;
 
 -- GrantHasLiveEntitlement: does this grant still have a non-revoked entitlement
@@ -176,7 +176,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 SELECT EXISTS (
     SELECT 1 FROM openrails.entitlements
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-      AND source_type = 'grant' AND source_id = sqlc.arg(grant_id)::uuid
+      AND grant_id = sqlc.arg(grant_id)::uuid
       AND revoked_at IS NULL AND deleted_at IS NULL
 ) AS exists;
 
@@ -199,3 +199,20 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
       SELECT 1 FROM openrails.grants t
       WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
   );
+
+-- #511 ownership-on-grants: every ownership grant-event for a customer with its
+-- derived status (the termination event, if any) — so the legacy
+-- ProductAccessGrant.{status,revoked_at,revoke_reason} shape can be reconstructed
+-- from the append-only ledger in one query.
+-- name: ListOwnershipGrantsWithStatus :many
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.source_type, g.source_id,
+       g.payment_id, g.starts_at, g.ends_at, g.created_at,
+       term.created_at AS revoked_at, term.reason AS revoke_reason
+FROM openrails.grants g
+LEFT JOIN openrails.grants term
+  ON term.supersedes_id = g.id AND term.event IN ('revoke', 'expire', 'supersede')
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND g.customer_id = sqlc.arg(customer_id)::uuid
+  AND g.kind = 'ownership'
+  AND g.event = 'grant'
+ORDER BY g.created_at;
