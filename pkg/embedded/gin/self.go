@@ -72,7 +72,7 @@ func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, c
 	delegatedMW := ginmw.DelegatedPrincipalRequired(authn)
 	base := engine.Group(embedhttp.EmbeddedV1Prefix)
 	ginroutes.RegisterSelfServiceRoutes(base.Group(ginroutes.SelfRoutePrefix), rt, delegatedMW)
-	ginroutes.RegisterMerchantAdminRoutes(base.Group(ginroutes.MerchantAdminRoutePrefix), rt, delegatedMW)
+	ginroutes.RegisterAdminRoutes(base.Group(ginroutes.AdminRoutePrefix), rt, delegatedMW)
 
 	return middleware.ChainHTTP(engine,
 		middleware.SecurityHeadersHTTP(),

@@ -75,8 +75,8 @@ func newMerchantAdminRouter(t *testing.T, perms []string) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	group := e.Group("/v1/merchant-admin")
-	RegisterMerchantAdminRoutes(group, nil, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
+	group := e.Group("/v1/admin")
+	RegisterAdminRoutes(group, nil, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
 	return e
 }
 
@@ -84,9 +84,9 @@ func newMerchantAdminRouterWithRuntime(t *testing.T, perms []string, tenantID me
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	group := e.Group("/v1/merchant-admin")
+	group := e.Group("/v1/admin")
 	rt := &app.Runtime{Merchants: svc}
-	RegisterMerchantAdminRoutes(group, rt, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms, tenantID: tenantID}))
+	RegisterAdminRoutes(group, rt, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms, tenantID: tenantID}))
 	return e
 }
 
@@ -214,10 +214,10 @@ func TestMerchantAdmin_OperationalListsMountedAndGated(t *testing.T) {
 		name string
 		path string
 	}{
-		{"subscriptions-list", "/v1/merchant-admin/subscriptions"},
-		{"subscription-detail", "/v1/merchant-admin/subscriptions/sub_123"},
-		{"repair-alerts", "/v1/merchant-admin/repair-alerts"},
-		{"manual-rebill-attempts", "/v1/merchant-admin/manual-rebill-attempts"},
+		{"subscriptions-list", "/v1/admin/subscriptions"},
+		{"subscription-detail", "/v1/admin/subscriptions/sub_123"},
+		{"repair-alerts", "/v1/admin/repair-alerts"},
+		{"manual-rebill-attempts", "/v1/admin/manual-rebill-attempts"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -237,8 +237,8 @@ func TestMerchantAdmin_PaymentWriteRoutesMountedAndGated(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"off-channel-payment", http.MethodPost, "/v1/merchant-admin/users/user_123/payments/off-channel"},
-		{"payment-refund", http.MethodPost, "/v1/merchant-admin/payments/pay_123/refund"},
+		{"off-channel-payment", http.MethodPost, "/v1/admin/users/user_123/payments/off-channel"},
+		{"payment-refund", http.MethodPost, "/v1/admin/payments/pay_123/refund"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -258,11 +258,11 @@ func TestMerchantAdmin_SecretRoutesMountedAndGated(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"secret-status", http.MethodGet, "/v1/merchant-admin/secrets"},
-		{"secret-registry", http.MethodGet, "/v1/merchant-admin/secrets/registry"},
-		{"secret-put", http.MethodPut, "/v1/merchant-admin/secrets/stripe/secret_key"},
-		{"secret-delete", http.MethodDelete, "/v1/merchant-admin/secrets/stripe/secret_key"},
-		{"secret-validate", http.MethodPost, "/v1/merchant-admin/secrets/validate/stripe/secret_key"},
+		{"secret-status", http.MethodGet, "/v1/admin/secrets"},
+		{"secret-registry", http.MethodGet, "/v1/admin/secrets/registry"},
+		{"secret-put", http.MethodPut, "/v1/admin/secrets/stripe/secret_key"},
+		{"secret-delete", http.MethodDelete, "/v1/admin/secrets/stripe/secret_key"},
+		{"secret-validate", http.MethodPost, "/v1/admin/secrets/validate/stripe/secret_key"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -282,8 +282,8 @@ func TestMerchantAdmin_ConfigurationRoutesMountedAndGated(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"configuration-get", http.MethodGet, "/v1/merchant-admin/merchant-configuration"},
-		{"configuration-put", http.MethodPut, "/v1/merchant-admin/merchant-configuration"},
+		{"configuration-get", http.MethodGet, "/v1/admin/merchant-configuration"},
+		{"configuration-put", http.MethodPut, "/v1/admin/merchant-configuration"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -302,8 +302,8 @@ func TestMerchantAdmin_ConfigurationPermissionsAreDistinct(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"read", []string{controlplane.PermMerchantConfigurationRead}, http.MethodGet, "/v1/merchant-admin/merchant-configuration"},
-		{"write", []string{controlplane.PermMerchantConfigurationWrite}, http.MethodPut, "/v1/merchant-admin/merchant-configuration"},
+		{"read", []string{controlplane.PermMerchantConfigurationRead}, http.MethodGet, "/v1/admin/merchant-configuration"},
+		{"write", []string{controlplane.PermMerchantConfigurationWrite}, http.MethodPut, "/v1/admin/merchant-configuration"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -322,11 +322,11 @@ func TestMerchantAdmin_SecretPermissionsAreDistinct(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"list", []string{controlplane.PermMerchantSecretsList}, http.MethodGet, "/v1/merchant-admin/secrets"},
-		{"registry", []string{controlplane.PermMerchantSecretsList}, http.MethodGet, "/v1/merchant-admin/secrets/registry"},
-		{"write", []string{controlplane.PermMerchantSecretsWrite}, http.MethodPut, "/v1/merchant-admin/secrets/stripe/secret_key"},
-		{"delete", []string{controlplane.PermMerchantSecretsDelete}, http.MethodDelete, "/v1/merchant-admin/secrets/stripe/secret_key"},
-		{"test", []string{controlplane.PermMerchantSecretsTest}, http.MethodPost, "/v1/merchant-admin/secrets/validate/stripe/secret_key"},
+		{"list", []string{controlplane.PermMerchantSecretsList}, http.MethodGet, "/v1/admin/secrets"},
+		{"registry", []string{controlplane.PermMerchantSecretsList}, http.MethodGet, "/v1/admin/secrets/registry"},
+		{"write", []string{controlplane.PermMerchantSecretsWrite}, http.MethodPut, "/v1/admin/secrets/stripe/secret_key"},
+		{"delete", []string{controlplane.PermMerchantSecretsDelete}, http.MethodDelete, "/v1/admin/secrets/stripe/secret_key"},
+		{"test", []string{controlplane.PermMerchantSecretsTest}, http.MethodPost, "/v1/admin/secrets/validate/stripe/secret_key"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -365,34 +365,34 @@ func TestMerchantAdmin_SecretRoutesWriteOnlyRuntimeBehavior(t *testing.T) {
 	}
 
 	eA := newMerchantAdminRouterWithRuntime(t, perms, tenantA, svc)
-	w := doSelfBearerBody(eA, http.MethodPut, "/v1/merchant-admin/secrets/stripe/secret_key", "delegated.jwt.token", `{"value":"sk_test_route_secret"}`)
+	w := doSelfBearerBody(eA, http.MethodPut, "/v1/admin/secrets/stripe/secret_key", "delegated.jwt.token", `{"value":"sk_test_route_secret"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), "sk_test_route_secret")
 	got, err := store.Get(context.Background(), tenantA, merchants.SecretStripeSecretKey)
 	require.NoError(t, err)
 	require.Equal(t, "sk_test_route_secret", got.Value)
 
-	w = doSelfBearer(eA, http.MethodGet, "/v1/merchant-admin/secrets", "delegated.jwt.token")
+	w = doSelfBearer(eA, http.MethodGet, "/v1/admin/secrets", "delegated.jwt.token")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), `"configured":true`)
 	require.NotContains(t, w.Body.String(), "sk_test_route_secret")
 
-	w = doSelfBearerBody(eA, http.MethodPost, "/v1/merchant-admin/secrets/validate/nmi/mobius/production_key", "delegated.jwt.token", `{"value":"mobius-production-key"}`)
+	w = doSelfBearerBody(eA, http.MethodPost, "/v1/admin/secrets/validate/nmi/mobius/production_key", "delegated.jwt.token", `{"value":"mobius-production-key"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), "mobius-production-key")
 
-	w = doSelfBearerBody(eA, http.MethodPut, "/v1/merchant-admin/secrets/solana/private_key", "delegated.jwt.token", `{"value":"private"}`)
+	w = doSelfBearerBody(eA, http.MethodPut, "/v1/admin/secrets/solana/private_key", "delegated.jwt.token", `{"value":"private"}`)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 
 	eB := newMerchantAdminRouterWithRuntime(t, perms, tenantB, svc)
-	w = doSelfBearer(eB, http.MethodGet, "/v1/merchant-admin/secrets", "delegated.jwt.token")
+	w = doSelfBearer(eB, http.MethodGet, "/v1/admin/secrets", "delegated.jwt.token")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), `"version":1`)
 	if _, err := store.Get(context.Background(), tenantB, merchants.SecretStripeSecretKey); err == nil {
 		t.Fatal("tenant B should not see tenant A's Stripe secret")
 	}
 
-	w = doSelfBearer(eA, http.MethodDelete, "/v1/merchant-admin/secrets/stripe/secret_key", "delegated.jwt.token")
+	w = doSelfBearer(eA, http.MethodDelete, "/v1/admin/secrets/stripe/secret_key", "delegated.jwt.token")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), "sk_test_route_secret")
 	_, err = store.Get(context.Background(), tenantA, merchants.SecretStripeSecretKey)

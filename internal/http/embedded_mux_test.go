@@ -77,15 +77,15 @@ func TestEmbeddedMuxAdminAssembles(t *testing.T) {
 
 	h := s.newHTTPHandlerMux(HTTPHandlerOptions{IncludeAdmin: true})
 
+	// #528: the per-user `/admin` surface was removed from the base handler — the
+	// admin surface is now the delegated one mounted via embgin.SelfHandler.
+	// IncludeAdmin assembles the merchant action routes; mounted => 401 (not 404).
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/admin/subscriptions", nil))
-	require.Equal(t, http.StatusUnauthorized, rec.Code)
-
-	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/catalog/products", nil))
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 
+	// /billing/v1/admin/* is no longer on the base handler (404).
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/admin/catalog/products", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/admin/subscriptions", nil))
 	require.Equal(t, http.StatusNotFound, rec.Code)
 }

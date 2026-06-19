@@ -342,7 +342,8 @@ func New(deps Dependencies) (*Server, error) {
 	s.registerDebugRoutes(s.publicHandler)
 	// Canonical: /v1/*
 	s.registerUserRoutes(s.publicHandler)
-	s.registerAdminRoutesOn(s.publicHandler)
+	// #528: the per-user `/v1/admin` surface is retired. The admin surface is the
+	// delegated `/v1/admin` mounted by registerSelfServiceRoutes (issuer→owner).
 	s.registerMerchantActionRoutesOn(s.publicHandler)
 	s.registerWebhookRoutes(s.publicHandler)
 

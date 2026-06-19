@@ -33,15 +33,16 @@ func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("delegated self-service API routes registered on public handler")
 
-	// Browser-direct MERCHANT-ADMIN surface (issue #259): the SAME delegated
-	// middleware authenticates; per-route gates require `openrails:merchant:*`
-	// permissions and the handlers act on a `:user_id` WITHIN the token's pinned
-	// tenant. Mounted on the same public engine alongside /v1/self/*.
-	adminGroup := e.Group(StandaloneV1Prefix + httproutes.MerchantAdminRoutePrefix)
-	httproutes.RegisterMerchantAdminRoutes(adminGroup, s.runtime, delegatedMW)
+	// Browser-direct ADMIN surface (#259, #528): the SAME delegated middleware
+	// authenticates; per-route gates require `openrails:merchant:*` permissions and
+	// the handlers act on a `:user_id` WITHIN the token's pinned tenant. This is
+	// THE admin surface (#528 retired the per-user `/v1/admin`). Mounted on the
+	// same public engine alongside /v1/self/*.
+	adminGroup := e.Group(StandaloneV1Prefix + httproutes.AdminRoutePrefix)
+	httproutes.RegisterAdminRoutes(adminGroup, s.runtime, delegatedMW)
 
-	log.WithField("prefix", StandaloneV1Prefix+httproutes.MerchantAdminRoutePrefix).
-		Info("delegated merchant-admin API routes registered on public handler")
+	log.WithField("prefix", StandaloneV1Prefix+httproutes.AdminRoutePrefix).
+		Info("delegated admin API routes registered on public handler")
 }
 
 // delegatedMiddleware picks the delegated-identity middleware for the

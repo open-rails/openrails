@@ -72,28 +72,8 @@ func RegisterUserRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts Route
 	})
 }
 
-// RegisterAdminRoutes registers admin billing routes on the provided gin router
-// group. These routes include subscription management, payment management, user
-// management, and metrics. All routes require admin authorization.
-//
-// Example:
-//
-//	router := gin.Default()
-//	admin := router.Group("/billing/v1/admin")
-//	embgin.RegisterAdminRoutes(openrails, admin, embgin.RouteOptions{})
-func RegisterAdminRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts RouteOptions) {
-	a := e.App()
-	if a == nil {
-		panic("embedded billing: not initialized")
-	}
-	adminOpts := httproutes.Options{
-		Authenticator: routeAuthenticator(e, opts),
-	}
-	if cp := embcp.Get(a); cp != nil {
-		adminOpts.AdminPermissionChecker = authpolicy.AdminPermissionChecker(cp)
-	}
-	httproutes.RegisterAdminRoutes(ginrouter.New(group, a.Runtime), a.Runtime, adminOpts)
-}
+// (#528) The per-user embgin.RegisterAdminRoutes was removed. The admin surface
+// is now the delegated issuer→owner surface mounted via embgin.SelfHandler.
 
 // RegisterMerchantActionRoutes registers merchant-scoped administrative action
 // routes such as catalog product/price mutation. These routes require the

@@ -134,7 +134,8 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		if s.ServiceCredentialResolver != nil {
 			adminOpts.ServiceCredentialResolver = s.ServiceCredentialResolver
 		}
-		httproutes.RegisterAdminRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/admin", s.Runtime), s.Runtime, adminOpts)
+		// #528: per-user `/admin` retired; the delegated admin surface is mounted
+		// via embgin.SelfHandler (issuer→owner), not the base handler.
 		httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
 	}
 	if opts.IncludeWebhooks {

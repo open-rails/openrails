@@ -26,15 +26,16 @@ const ServiceRoutePrefix = "/service"
 // acting tenant is bound by the token's `tenant` claim — never the URL.
 const SelfRoutePrefix = "/self"
 
-// MerchantAdminRoutePrefix is the path under the merchant-scoped public API where
-// browser-direct MERCHANT-ADMIN billing operations live (issue #259). A merchant's
-// host frontend mints a FEDERATED, TENANT-SIGNED delegated access token carrying
+// AdminRoutePrefix is the path under the merchant-scoped public API where the
+// (delegated) ADMIN billing surface lives (#259, #528). A merchant's host
+// frontend mints a FEDERATED, TENANT-SIGNED delegated access token carrying
 // `openrails:merchant:*` permissions for one of its ADMIN users; the browser
 // presents it as a Bearer token directly against this surface to act on ANY user
 // WITHIN the token's tenant via the `:user_id` path param. The acting admin is
 // the token's `delegated_sub` (recorded for audit) and the acting tenant is
-// pinned from the token's validated issuer — never the URL.
-const MerchantAdminRoutePrefix = "/merchant-admin"
+// pinned from the token's validated issuer — never the URL. (#528 retired the
+// per-user `openrails:admin` surface; this delegated surface IS the admin API.)
+const AdminRoutePrefix = "/admin"
 
 func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -299,7 +300,7 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 // delegatedMW must authenticate the delegated token (ginmw.DelegatedSelfRequired);
 // it pins the resolved tenant + acting admin + tenant-permissions onto the
 // context that the per-route RequireDelegatedPermission gates and handlers read.
-func RegisterMerchantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
+func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
@@ -368,7 +369,12 @@ func RegisterMerchantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delega
 
 	// Off-channel payment recording — payments:write.
 	users.POST("/payments/off-channel", payWrite, wrap(httphandlers.AdminCreateOffChannelPayment))
-	group.POST("/payments/:id/refund", payWrite, wrap(httphandlers.AdminRefundPayment))
+
+	// Merchant-wide payments (#528: ported from the retired per-user surface).
+	payments := group.Group("/payments")
+	payments.GET("", read, wrap(httphandlers.GetAdminPayments))
+	payments.GET("/:id", read, wrap(httphandlers.GetAdminPayment))
+	payments.POST("/:id/refund", payWrite, wrap(httphandlers.AdminRefundPayment))
 
 	// Subscriptions: a merchant admin may cancel a subscription owned by a user in
 	// its tenant. Subscriptions are addressed by id; the handler operates within

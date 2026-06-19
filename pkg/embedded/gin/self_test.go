@@ -82,9 +82,9 @@ func TestSelfHandler_EmbeddedPathsMountedAndGated(t *testing.T) {
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 
-	// The merchant-admin subtree is mounted on the same handler (read perm
-	// missing => 403 proves mount + auth, not 404).
-	w = doSelf(readOnly, http.MethodGet, "/billing/v1/merchant-admin/subscriptions")
+	// The admin subtree is mounted on the same handler (read perm missing => 403
+	// proves mount + auth, not 404). #528: was /billing/v1/merchant-admin.
+	w = doSelf(readOnly, http.MethodGet, "/billing/v1/admin/subscriptions")
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }
 

@@ -7,7 +7,156 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 528
+next_id: 530
+
+---
+
+# #529: Make webhook routing explicit: `/merchants/:merchant`, no bootstrap host/path defaults
+
+**Completed:** no
+
+Private standalone and embedded OpenRails should route provider webhooks through an explicit merchant path, not by guessing from the provider payload and not by storing the deployment mount URL in each merchant's bootstrap config.
+
+Default private/embedded shape:
+
+```text
+/v1/merchants/{merchant}/webhooks/{provider}
+/billing/v1/merchants/{merchant}/webhooks/{provider}   # when embedded under /billing
+```
+
+OpenRails SaaS can use host/subdomain routing instead, e.g. `https://doujins.openrails.com/v1/webhooks/stripe`; that is tracked in `~/openrails-saas` and should not force private/self-hosted operators to configure per-merchant hosts.
+
+## Decisions
+
+- Use `/merchants/:merchant/webhooks/:provider` as the clear operator-facing route. The current `/m/:merchant/webhooks/:provider` is too terse for docs and provider dashboards.
+- Each merchant/provider account should be configured at the provider to call that merchant's exact webhook URL.
+- Merchant routing must happen from a trusted envelope before payload trust: explicit path slug or host/subdomain. Do **not** infer merchant solely from an unverified provider payload.
+- After route resolution, load that merchant/provider account's webhook secret and verify the signature/IP/provider authentication with the merchant-specific credentials.
+- `webhook_host` / `webhook_path` are not normal bootstrap config for private standalone. The OpenRails mount/base URL is deployment config; merchant bootstrap should not repeat it.
+- `billing_tier` and `region` are SaaS/platform hosting metadata, not merchant billing configuration. They should not appear in the ordinary open-source bootstrap example. Keep them internal/optional only if existing admin/platform code still needs them.
+
+## Tasks
+
+- [ ] Rename/add the merchant-scoped webhook route from `/v1/m/:merchant/webhooks/:provider` to `/v1/merchants/:merchant/webhooks/:provider`; decide whether `/m/...` is a temporary alias or hard cut, then document that decision.
+- [ ] Update embedded route docs/examples so hosts configure provider callbacks like `/billing/v1/merchants/{merchant}/webhooks/{provider}` when OpenRails is mounted under `/billing`.
+- [ ] Extend merchant-scoped webhook handling beyond Stripe if needed so NMI/Mobius and CCBill can use the same merchant-path routing model, with provider-specific verification after merchant resolution.
+- [ ] Ensure provider account selection is account-aware: route resolves merchant first, then provider/provider_account credentials are loaded for that merchant, with no cross-merchant fallback.
+- [ ] Remove `webhook_host` and `webhook_path` from `config/merchants.example.yaml` and from the recommended bootstrap shape in docs; leave host-based routing as an advanced/SaaS concern.
+- [ ] Remove `billing_tier` and `region` from the public bootstrap example/docs unless a real private-standalone use remains; if code must retain them for SaaS/platform metrics, mark them internal/optional metadata.
+- [ ] Fix stale docs/comments around webhook routing, including any text implying `webhook_host` is the normal private deployment model.
+- [ ] Add route tests for `/v1/merchants/:merchant/webhooks/:provider` proving unknown merchants do not fall back to a default merchant and known merchants load merchant-scoped credentials before verification.
+- [ ] Add/adjust integration smoke coverage for at least Stripe, and for Mobius/CCBill if their merchant-scoped verification path is implemented in this issue.
+
+---
+
+# #528: Converge billing admin on the delegated model — retire per-user /v1/admin, rename /merchant-admin → /admin
+
+**Completed:** no
+
+The per-user `/v1/admin` model is outdated. The correct model (same as #527's bootstrap): a merchant has an org + issuer in OpenRails' AuthKit; the issuer (host app) mints JWTs that grant ITS users permissions in OpenRails — a user reading/modifying their own billing (`openrails:self:*`), or an admin-user acting on another user (`openrails:merchant:*`). That is the **delegated** model, served today by `/v1/merchant-admin/*` (+ `/v1/self/*`). The per-user `openrails:admin` surface (`/v1/admin/*`, `HasAdminPermission(org,userID)` live check) assumes local users that the standalone model doesn't have.
+
+**Investigation (2026-06-19):**
+- No consumer calls OpenRails' billing `/v1/admin/*`: embedded hosts (cozy-art/doujins/tensorhub) use `/v1/merchant-admin/*` + `/v1/self/*`; their own `/v1/admin/*` paths are app-admin (runpod/fleet/galleries), unrelated. No host imports `embgin.RegisterAdminRoutes`. In standalone it's unreachable (no local users). So the per-user surface is effectively dead.
+- It is NOT a pure rename: the two surfaces each have unique endpoints.
+  - `/v1/admin` only: `GET /payments`+`/payments/:id`, `/intents`, `POST /solana/recurring/plans`, `/users/:id/product-access` (get/grant/revoke), entitlement-features (RegisterEntitlementFeatureRoutes), `/reconcile/*`.
+  - `/v1/merchant-admin` only: `/merchant-configuration` (get/put), `/secrets/*`.
+  - Shared (handlers reused): subscriptions, refund, off-channel, users/* profile+entitlements+nmi+ccbill, metrics, repair-alerts, manual-rebill-attempts.
+
+**Plan:**
+- Phase 1 (OpenRails, non-breaking): port the `/v1/admin`-only endpoints onto the delegated surface (RegisterMerchantAdminRoutes) with `openrails:merchant:*` perms; delete the per-user RegisterAdminRoutes + `registerAdminRoutesOn/At` + server.go mount + embedhttp mount + `embgin.RegisterAdminRoutes`. (Leave `HasAdminPermission`/`IsLiveAdmin` for now — still used by admin-gated catalog reads; migrate those to the delegated principal as a follow-up.)
+- Phase 2 (breaking, cross-repo): rename `MerchantAdminRoutePrefix` `/merchant-admin` → `/admin` and `RegisterMerchantAdminRoutes` → `RegisterAdminRoutes`; update host frontends `/v1/merchant-admin/*` → `/v1/admin/*` (and `/billing/...`) in cozy-art/doujins/tensorhub.
+
+**Sequencing decision (OPEN):** Phase 2 breaks host frontends the moment the path changes. Either (a) hard cut + update all three host repos in lockstep, or (b) mount the delegated surface at BOTH `/admin` and `/merchant-admin` for a deprecation window, migrate hosts, then drop `/merchant-admin`.
+
+**DECIDED:** hard cut (no alias, no old-route support); hosts updated later. Also redesign routes + request/response shapes while consolidating — minimal RESTful surface, only fields actually used, no theoretical/unused routes or fields.
+
+## Proposed minimal RESTful surface (REVIEW)
+
+Single delegated admin surface at `/v1/admin/*` (`openrails:merchant:*` perms). Consolidations vs today in **bold**:
+
+```
+Subscriptions
+  GET    /admin/subscriptions
+  GET    /admin/subscriptions/{id}
+  DELETE /admin/subscriptions/{id}                 # cancel (was POST /:id/cancel)
+
+Payments
+  GET    /admin/payments[?user_id=]                # **folds /users/{id}/payments into a filter**
+  GET    /admin/payments/{id}
+  POST   /admin/payments/{id}/refunds              # was POST /:id/refund
+  POST   /admin/payments                           # record off-channel (body: user_id + fields)
+
+Users (billing)
+  GET    /admin/users/{id}                         # billing profile
+  GET    /admin/users/{id}/payment-methods         # **folds /nmi + /ccbill + their /metrics into one shape**
+  GET    /admin/users/{id}/entitlements
+  POST   /admin/users/{id}/entitlements
+  DELETE /admin/users/{id}/entitlements/{id}
+
+Entitlement features / product features
+  GET/POST        /admin/features
+  GET/POST/DELETE /admin/products/{id}/features
+
+Metrics
+  GET /admin/metrics                               # **one response folding summary/revenue/subscriptions/processors/churn**
+
+Configuration & secrets
+  GET/PUT          /admin/configuration
+  GET              /admin/secrets
+  PUT/DELETE       /admin/secrets/{name}
+  POST             /admin/secrets/{name}/validate
+
+Operational
+  GET /admin/repair-alerts
+  GET /admin/manual-rebill-attempts
+  GET /admin/provider-intents                      # was /intents
+
+Reconciliation (#107)
+  GET/POST /admin/reconcile/runs
+  GET      /admin/reconcile/runs/{id}
+  GET      /admin/reconcile/findings
+  PATCH    /admin/reconcile/findings/{id}          # {status: acknowledged|dismissed}; was POST /ack + /dismiss
+
+Recurring plans (#254)
+  POST /admin/recurring-plans                      # was /solana/recurring/plans
+```
+
+Shapes: trim each request/response to fields a consumer actually reads (ground in host frontend usage during impl); drop pagination/filter knobs nothing uses, collapse single-use nested objects.
+
+**Usage data (host repos, 2026-06-19):** of the merchant-admin surface, hosts only call `merchant-admin/subscriptions`, `merchant-admin/users/{id}`, `merchant-admin/metrics/summary`. (`/v1/self/*` is heavily used for self-service; `/v1/service/*` for s2s — both out of #528 scope. The `/v1/admin/*` paths in host repos are the hosts' OWN app admin — runpod/galleries/creators/etc. — not OpenRails billing.) Admin UIs are incomplete, so "uncalled" ≠ "droppable" for obvious console operations.
+
+**Resolution (FINAL — user decisions 2026-06-19):**
+- DROP (routes + dead handlers): `/provider-intents`, `/reconcile/*` (#107), `/recurring-plans` (#254), entitlement-features + `active_entitlements` (#245).
+- Metrics: fold the 5 into one `GET /admin/metrics`.
+- **Three separate concepts, kept distinct** (NOT merged): entitlements, product-access/ownership (#250), credit balance. Each is its own section in user reads + its own write actions.
+- **No dedicated read endpoints for entitlements/product-access/credits.** Their info is EMBEDDED in user reads (user-detail + user list/search). Writes stay as dedicated actions.
+
+Resulting user surface:
+```
+GET    /admin/users[?entitlement={slug}&...]   # list/search; each row embeds entitlements/product-access/credit summary (NEW — admin user search)
+GET    /admin/users/{id}                        # billing profile: subscriptions + payment-methods + entitlements + product-access + credit-balance sections
+POST   /admin/users/{id}/entitlements           # grant
+DELETE /admin/users/{id}/entitlements/{slug}    # revoke
+POST   /admin/users/{id}/product-access         # grant ownership (#250, separate concept)
+DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
+# credit-balance read embedded; credit write = existing PermMerchantCreditsWrite op (keep if present)
+# DROPPED reads: GET /users/{id}/entitlements, /product-access, /nmi, /ccbill, /nmi/metrics, /ccbill/metrics, active_entitlements
+```
+- `payment-methods` folds /nmi + /ccbill (+ metrics) into one embedded section / `GET /admin/users/{id}/payment-methods`.
+- Self surface (`/v1/self/*`) likewise embeds the caller's active entitlements in their self-detail response.
+- Admin user search (`GET /admin/users?entitlement=`) is NEW capability (no current handler) — build minimal (list + filter), or flag as follow-up if the list query is non-trivial.
+
+**Implementation plan — build-safe increments (DECIDED, in progress):**
+- [x] Surface + drops/merges signed off (above); design data-grounded in host usage.
+- [ ] **Increment 1 (structural, build-safe):** rename `MerchantAdminRoutePrefix` `/merchant-admin`→`/admin` + `RegisterMerchantAdminRoutes`→`RegisterAdminRoutes`; delete per-user `/v1/admin` (old `RegisterAdminRoutes` in routes.go, `registerAdminRoutesOn/At`, server.go mount, embedhttp mount, `embgin.RegisterAdminRoutes`); rewire server.go/routes_self.go/self.go to `/admin`. Port the KEEP-unique read `GET /admin/payments[/{id}]` to the delegated surface (`read`). Commit green.
+- [ ] **Increment 2 (drops):** remove routes + now-dead handlers for `/provider-intents`, `/reconcile/*` (#107), `/recurring-plans` (#254), entitlement-features + `active_entitlements` (#245). Commit green.
+- [ ] **Increment 3 (RESTful routes):** cancel → `DELETE /admin/subscriptions/{id}`; refund → `POST /admin/payments/{id}/refunds`.
+- [ ] **Increment 4 (shapes — handler logic):** new perm `openrails:merchant:product-access:write` (catalog + owner wildcard covers it); port product-access grant/revoke to `/admin/users/{id}/product-access`. Composite `GET /admin/users/{id}` (subscriptions + payment-methods + entitlements + product-access + credit-balance sections); DROP the dedicated entitlements/product-access/nmi/ccbill reads. `payment-methods` folds NMI+CCBill(+metrics). Fold metrics → one `GET /admin/metrics`. Self-detail embeds the caller's active entitlements. Trim shapes to fields actually read.
+- [ ] **Increment 5 (NEW):** `GET /admin/users[?entitlement=]` — admin user list/search embedding entitlement/product-access/credit summary.
+- [ ] Migrate admin-gated catalog reads (`IsLiveAdmin`) off per-user `HasAdminPermission` to the delegated principal.
+- [ ] (Later, separate repos) update host frontends to the new paths/shapes.
+
+Verification each increment: build + vet + route/unit tests. NOT DB-integration-tested here.
 
 ---
 

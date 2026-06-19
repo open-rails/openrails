@@ -48,8 +48,8 @@ func TestRegisterSelfServiceRoutes_MountedWithHostDelegatedAuthenticatorOnly(t *
 	e.ServeHTTP(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 
-	// The merchant-admin surface mounts alongside, gated the same way.
-	req = httptest.NewRequest(http.MethodGet, "/v1/merchant-admin/subscriptions", nil)
+	// The admin surface mounts alongside, gated the same way (#528: was /merchant-admin).
+	req = httptest.NewRequest(http.MethodGet, "/v1/admin/subscriptions", nil)
 	w = httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
