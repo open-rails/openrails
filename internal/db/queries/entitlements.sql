@@ -80,6 +80,21 @@ WHERE ent.merchant_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL;
 
+-- name: ListCustomersWithEntitlement :many
+-- Reverse lookup (#535): customer ids holding an ACTIVE window of `entitlement`,
+-- keyset-paginated by customer_id (after_id is an exclusive lower bound — pass the
+-- zero uuid to start). merchant scoping is RLS (no explicit merchant_id), matching
+-- ListActiveEntitlementNames. Backs AuthKit's EntitlementFilterProvider (#91).
+SELECT DISTINCT ent.customer_id FROM openrails.entitlements ent
+WHERE ent.entitlement = sqlc.arg(entitlement)::text
+  AND ent.start_at <= sqlc.arg(at)::timestamptz
+  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.customer_id > sqlc.arg(after_id)::uuid
+ORDER BY ent.customer_id
+LIMIT sqlc.arg(lim)::int;
+
 -- name: ListActiveEntitlementRecords :many
 SELECT * FROM openrails.entitlements ent
 WHERE ent.customer_id = $1

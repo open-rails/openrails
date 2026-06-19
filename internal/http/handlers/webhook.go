@@ -76,6 +76,18 @@ func Webhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusServiceUnavailable, "Webhook processing is not configured")
 		return
 	}
+	// The global webhook surface attributes events only to the construction-time
+	// configured merchant (set by an embedded host scoped to one merchant). A standalone
+	// multi-merchant deployment pins no process-wide merchant, so there is no
+	// merchant to attribute this event to — fail closed with an explicit pointer
+	// to the per-merchant surface rather than letting a downstream merchant.Require
+	// surface a generic error (audit OR-API-C2).
+	if _, err := merchant.Require(r.Request.Context()); err != nil {
+		log.WithFields(log.Fields{"provider": provider, "client_ip": clientIP}).
+			Warn("global webhook surface hit with no configured merchant; deliver to /v1/merchants/{merchant}/webhooks/{provider}")
+		r.ErrorJSON(http.StatusNotFound, "No merchant is configured for the global webhook surface; deliver this event to /v1/merchants/{merchant}/webhooks/{provider}")
+		return
+	}
 	isTestEnv := r.State.Config.IsTestEnv()
 	if processors.IsNMIBacked(provider) {
 		if enqueueNMIWebhook(r, provider, clientIP) {

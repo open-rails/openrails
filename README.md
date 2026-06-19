@@ -244,7 +244,7 @@ POST /v1/self/checkout                    hosted/tokenized checkout session
 There is no `:user_id` anywhere on this surface — every route is scoped to the token's
 `delegated_sub`, so a browser token can only ever act on its own subject. Browser origin
 policy for delegated calls is configured on the AuthKit `remote_application` issuer record,
-not in OpenRails runtime config. A parallel `/v1/merchant-admin/*`
+not in OpenRails runtime config. A parallel `/v1/admin/*`
 surface exists for your staff, using the same token mechanism with `openrails:merchant:*`
 permissions.
 
@@ -352,7 +352,7 @@ ents, _ := svc.ListActiveEntitlements(ctx, userID, time.Now())
 
 ### 4. Browser self-service in embedded mode (one credential)
 
-The browser-direct self-service surface (`/v1/self/*`, `/v1/merchant-admin/*`) exists in
+The browser-direct self-service surface (`/v1/self/*`, `/v1/admin/*`) exists in
 embedded mode too — authenticated by **your** credential, not a delegated token. Implement
 `billingauth.DelegatedAuthenticator`: verify the request however you like, then return the
 explicitly mapped principal:

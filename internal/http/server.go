@@ -45,7 +45,7 @@ type Dependencies struct {
 	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
 	// the browser-direct self-service surface (issue #339). When set, the host
 	// verifies the incoming credential itself and supplies the explicitly
-	// mapped principal for /v1/self/* + /v1/merchant-admin/*, OVERRIDING the
+	// mapped principal for /v1/self/* + /v1/admin/*, OVERRIDING the
 	// control plane's default delegated-token verifier.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	ConfiguredMerchant     merchant.ID
@@ -82,9 +82,9 @@ type Server struct {
 	// is mounted only when a platform tenant is configured.
 	platformMetrics *platform.Metrics
 
-	// configuredMerchant is optional construction-time state for embedded
-	// single-merchant hosts. Standalone does not load a process-wide merchant from
-	// config; merchant authority comes from bootstrap/DB/AuthKit state.
+	// configuredMerchant scopes THIS engine instance to one merchant — set by embedded
+	// hosts (embed.Options.Merchant) that run one engine per merchant. Zero in standalone,
+	// where the merchant is resolved per-credential. OpenRails is multi-merchant either way.
 	configuredMerchant merchant.ID
 
 	// browserCORSOriginSource is the standalone browser CORS origin source.
@@ -176,11 +176,6 @@ func New(deps Dependencies) (*Server, error) {
 		controlPlane:           deps.ControlPlane,
 		captchaStore:           captcha.NewChallengeStore(deps.Redis),
 	}
-
-	// Wire the live admin-permission checker onto the runtime so mixed
-	// public/admin read endpoints (e.g. catalog inactive rows) can evaluate
-	// openrails:admin for the caller's own tenant (#312).
-	deps.Runtime.AdminChecker = deps.ControlPlane
 
 	// Build the tenant provisioning/lifecycle/secret service (issue #225). It
 	// reuses the control plane's pgx pool (the OpenRails-owned openrails.*

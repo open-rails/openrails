@@ -53,6 +53,9 @@ func ParseMerchantConfigManifest(raw []byte) (*MerchantManifest, error) {
 	if err := yaml.UnmarshalWithOptions(raw, &manifest, yaml.DisallowUnknownField()); err != nil {
 		return nil, fmt.Errorf("parse merchant config manifest: %w", err)
 	}
+	if len(manifest.Merchants) == 0 {
+		return nil, fmt.Errorf("merchant config manifest must declare at least one merchant")
+	}
 	if err := validateMerchantManifestShape(&manifest); err != nil {
 		return nil, err
 	}
@@ -167,11 +170,11 @@ type ProvisionMerchantRequest struct {
 	Options      MerchantManifestReconcileOptions
 }
 
-// ReconcileMerchantManifestData provisions the merchants, service-JWT grants, and
-// issuers declared by a merchant manifest. It is the single merchant-provisioning
-// entry point, consumed by the unified BootstrapManifest apply path (CLI +
-// server first-run startup). Issuer registration is declarative and does not
-// fetch the JWKS, so it succeeds even when the issuer's app is not yet running.
+// ReconcileMerchantManifestData provisions merchants and issuer ownership
+// declared by a merchant config manifest. It is the single
+// merchant-provisioning entry point for push-merchant-config and embedded
+// startup paths. Issuer registration is declarative and does not fetch the
+// JWKS, so it succeeds even when the issuer's app is not yet running.
 func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, manifest *MerchantManifest, opts MerchantManifestReconcileOptions) error {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return fmt.Errorf("merchant bootstrap manifest configured but control plane is not enabled")

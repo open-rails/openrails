@@ -46,7 +46,7 @@ func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 }
 
 // delegatedMiddleware picks the delegated-identity middleware for the
-// self-service + merchant-admin surfaces (#339): the host-supplied
+// self-service + delegated-admin surfaces (#339): the host-supplied
 // DelegatedAuthenticator when present (an explicit override), else the
 // control plane's delegated-token verifier (always available, #469).
 func (s *Server) delegatedMiddleware() gin.HandlerFunc {

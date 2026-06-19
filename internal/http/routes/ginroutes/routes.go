@@ -80,9 +80,17 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	customers := group.Group("/customers/:customer_id")
 	customers.GET("/entitlements", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetCustomerEntitlements))
 
+	// Reverse lookup (#535): customers holding an active window of an entitlement,
+	// keyset-paginated. Backs a host directory's filter-by-entitlement (AuthKit #91).
+	entGroup := group.Group("/entitlements")
+	entGroup.GET("/:entitlement/customers", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetCustomersWithEntitlement))
+
 	users := group.Group("/users/:user_id")
 	users.GET("/product-access", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
 
+	// Canonical invoker credits path. The legacy alias `/credits/invokers/:invoker`
+	// was removed (finishes the #534 service-route dedup): both hit the same
+	// handler, and a duplicate surface only has to be kept permission-symmetric.
 	invokers := group.Group("/invokers/:invoker")
 	invokers.GET("/credits", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
 
@@ -136,16 +144,16 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 
 	credits.POST("/deposit", creditsWrite, wrap(httphandlers.ServiceDepositCredits))
 	credits.POST("/withdraw", creditsWrite, wrap(httphandlers.ServiceWithdrawCredits))
+	// Canonical hold capture/release (plural). The legacy singular `hold/:id`
+	// aliases were removed (#534): the SDK (remote.go) and all consumers use the
+	// plural form, and a duplicate surface only has to be kept permission-symmetric.
 	credits.POST("/holds/:id/capture", creditsWrite, creditsSpend, wrap(httphandlers.ServiceCaptureHold))
 	credits.POST("/holds/:id/release", creditsWrite, wrap(httphandlers.ServiceReleaseHold))
-	credits.POST("/hold/:id/capture", creditsWrite, creditsSpend, wrap(httphandlers.ServiceCaptureHold))
-	credits.POST("/hold/:id/release", creditsWrite, wrap(httphandlers.ServiceReleaseHold))
 	// #311: per-dimension spend rollup for the platform usage/revenue surfaces.
 	credits.POST("/usage/rollup", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceUsageRollup))
 	// #410: per-resource daily revenue (by the usage_event resource column, cross-payer).
 	credits.POST("/usage/resource-revenue", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceResourceRevenue))
 	credits.GET("/transactions/lookup", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
-	credits.GET("/invokers/:invoker", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
 
 	// Merchant billing-account admin surface (issue #242): configure prepaid|arrears
 	// mode + spend caps + auto-top-up, read settings, and list usage. Tensorhub's
@@ -280,7 +288,7 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	funding.GET("/:id", read, wrap(httphandlers.GetUSDCFundingSession))
 }
 
-// RegisterMerchantAdminRoutes mounts the browser-direct MERCHANT-ADMIN billing
+// RegisterAdminRoutes mounts the browser-direct delegated admin billing
 // surface on a merchant-scoped PUBLIC route group authenticated by a FEDERATED,
 // TENANT-SIGNED delegated access token carrying `openrails:merchant:*` permissions
 // (issue #259). Unlike the self-service surface (which has no `:user_id` and acts
@@ -355,11 +363,6 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gi
 	// Reads — the merchant-admin billing:read capability.
 	users.GET("", read, wrap(httphandlers.GetAdminUserBillingProfile))
 	users.GET("/payments", read, wrap(httphandlers.GetAdminUserPayments))
-	users.GET("/entitlements", read, wrap(httphandlers.GetAdminUserEntitlements))
-	users.GET("/nmi", read, wrap(httphandlers.GetAdminUserNMI))
-	users.GET("/nmi/metrics", read, wrap(httphandlers.GetAdminUserNMIMetrics))
-	users.GET("/ccbill", read, wrap(httphandlers.GetAdminUserCCBill))
-	users.GET("/ccbill/metrics", read, wrap(httphandlers.GetAdminUserCCBillMetrics))
 
 	// Entitlement grants/revokes — entitlements:write.
 	users.POST("/entitlements", entWrite, wrap(httphandlers.GrantAdminEntitlement))
@@ -372,6 +375,7 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gi
 
 	// Off-channel payment recording — payments:write.
 	users.POST("/payments/off-channel", payWrite, wrap(httphandlers.AdminCreateOffChannelPayment))
+	users.DELETE("/payment-methods/:id", payWrite, wrap(httphandlers.DeleteAdminUserPaymentMethod))
 
 	// Merchant-wide payments (#528: ported from the retired per-user surface).
 	payments := group.Group("/payments")

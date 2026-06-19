@@ -31,14 +31,14 @@ other customers.
 
 ## Delegated browser/admin surface
 
-`/v1/self/*` and `/v1/merchant-admin/*` are mounted only with
+`/v1/self/*` and `/v1/admin/*` are mounted only with
 `DelegatedSelfRequired`. That middleware resolves an OIDC delegated JWT, pins the
 merchant from the verified issuer mapping, and binds the acting
 `delegated_sub` as request user context. Generated service tokens and
 `token_use=service` JWTs fail this resolver and are rejected before any
 delegated route permission gate runs.
 
-Self routes require `openrails:self:*` permissions. Merchant-admin routes require
+Self routes require `openrails:self:*` permissions. Delegated admin routes require
 `openrails:merchant:*` permissions. Service-token permissions do not satisfy
 delegated route gates.
 

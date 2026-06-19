@@ -22,7 +22,7 @@ import (
 //     ?product_id=... narrows to a has-access check). The service token auth middleware is
 //     applied at the central /service group mount (ginmw.ServiceTokenRequired); this
 //     function adds the per-route service token permission gate.
-//   - ADMIN: GET/POST/DELETE under /admin/users/:user_id/product-access. The
+//   - ADMIN: POST/DELETE under /admin/users/:user_id/product-access. The
 //     caller's /admin group must already apply the operator-admin gate (mirroring
 //     RegisterAdminRoutes).
 //
@@ -50,7 +50,6 @@ func RegisterProductAccessRoutes(group *gin.RouterGroup, rt *app.Runtime) {
 	// ADMIN surface (operator-admin gate applied at the central /admin mount).
 	admin := group.Group("/admin")
 	adminAccess := admin.Group("/users/:user_id/product-access")
-	adminAccess.GET("", wrap(httphandlers.GetAdminUserProductAccess))
 	adminAccess.POST("", wrap(httphandlers.GrantAdminProductAccess))
 	adminAccess.DELETE("/:id", wrap(httphandlers.RevokeAdminProductAccess))
 }

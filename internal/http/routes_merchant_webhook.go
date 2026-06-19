@@ -47,11 +47,11 @@ func (s *Server) merchantWebhookHandler() gin.HandlerFunc {
 		route, err := s.merchants.ResolveBySlug(ctx, c.Param("merchant"))
 		if err != nil {
 			if errors.Is(err, merchants.ErrMerchantRouteUnresolved) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "unknown tenant"})
+				jsonError(c, http.StatusNotFound, "unknown tenant")
 				return
 			}
 			log.WithError(err).Error("merchant webhook: resolve tenant failed")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "merchant resolution failed"})
+			jsonError(c, http.StatusInternalServerError, "merchant resolution failed")
 			return
 		}
 
@@ -63,7 +63,7 @@ func (s *Server) merchantWebhookHandler() gin.HandlerFunc {
 		// providers (CCBill IP-gated, NMI per-client) are not per-merchant secret
 		// routed yet and fall through as unsupported on this surface.
 		if provider != subscriptions.ProcessorStripe {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "provider not supported on merchant webhook surface"})
+			jsonError(c, http.StatusBadRequest, "provider not supported on merchant webhook surface")
 			return
 		}
 
@@ -76,10 +76,10 @@ func (s *Server) merchantWebhookHandler() gin.HandlerFunc {
 			// blip never drops a webhook. We never fall through to "no secret" here —
 			// an unverifiable webhook is rejected, not accepted.
 			if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
-				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "secret backend temporarily unavailable, retry"})
+				jsonError(c, http.StatusServiceUnavailable, "secret backend temporarily unavailable, retry")
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "credential load failed"})
+			jsonError(c, http.StatusInternalServerError, "credential load failed")
 			return
 		}
 		var secrets []string
@@ -93,13 +93,13 @@ func (s *Server) merchantWebhookHandler() gin.HandlerFunc {
 			// No configured signing secret for this merchant: reject rather than
 			// accept an unverifiable webhook. A missing secret is NEVER "skip
 			// verification".
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "merchant webhook signing secret not configured"})
+			jsonError(c, http.StatusUnauthorized, "merchant webhook signing secret not configured")
 			return
 		}
 
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read body"})
+			jsonError(c, http.StatusInternalServerError, "failed to read body")
 			return
 		}
 
@@ -110,15 +110,15 @@ func (s *Server) merchantWebhookHandler() gin.HandlerFunc {
 			case errors.Is(perr, webhookutil.ErrWebhookSignatureRequired),
 				errors.Is(perr, webhookutil.ErrWebhookSignatureMissing),
 				errors.Is(perr, webhookutil.ErrWebhookSignatureInvalid):
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid webhook signature"})
+				jsonError(c, http.StatusUnauthorized, "invalid webhook signature")
 			default:
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid webhook payload"})
+				jsonError(c, http.StatusBadRequest, "invalid webhook payload")
 			}
 			return
 		}
 
 		if s.runtime == nil || s.runtime.WebhookDispatcher == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "webhook processing unavailable"})
+			jsonError(c, http.StatusInternalServerError, "webhook processing unavailable")
 			return
 		}
 		signatureVerified := true
@@ -139,7 +139,7 @@ func (s *Server) merchantWebhookHandler() gin.HandlerFunc {
 				return
 			}
 			log.WithError(err).Error("merchant stripe webhook processing failed")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "processing failed"})
+			jsonError(c, http.StatusInternalServerError, "processing failed")
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "accepted"})

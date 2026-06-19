@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -45,16 +46,34 @@ func (c *ControlPlane) TouchCustomer(ctx context.Context, tenantID merchant.ID, 
 		}
 	}
 
-	q := gen.New(c.pool)
+	tx, err := c.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // harmless after Commit
+	if _, err := tx.Exec(ctx, "SELECT set_config($1, $2, TRUE)", db.MerchantGUC, tenantID.String()); err != nil {
+		return uuid.Nil, err
+	}
+
+	q := gen.New(tx)
+	var id uuid.UUID
 	if strings.TrimSpace(orgID) != "" {
-		return q.UpsertCustomerByOrg(ctx, gen.UpsertCustomerByOrgParams{
+		id, err = q.UpsertCustomerByOrg(ctx, gen.UpsertCustomerByOrgParams{
 			MerchantID: tenantID.UUID(),
 			OrgID:      &orgID,
 		})
+	} else {
+		id, err = q.UpsertCustomerByIssuerSubject(ctx, gen.UpsertCustomerByIssuerSubjectParams{
+			MerchantID: tenantID.UUID(),
+			Issuer:     &issuer,
+			Subject:    &subject,
+		})
 	}
-	return q.UpsertCustomerByIssuerSubject(ctx, gen.UpsertCustomerByIssuerSubjectParams{
-		MerchantID: tenantID.UUID(),
-		Issuer:     &issuer,
-		Subject:    &subject,
-	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, err
+	}
+	return id, nil
 }

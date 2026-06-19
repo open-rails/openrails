@@ -7,75 +7,19 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
-	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
 
 const (
-	KindIdempotencyCleanup = "openrails.idempotency_cleanup"
-	KindCCBillReconcile    = "openrails.ccbill_reconcile"
+	KindCCBillReconcile = "openrails.ccbill_reconcile"
 )
-
-type IdempotencyCleanupArgs struct{}
-
-func (IdempotencyCleanupArgs) Kind() string { return KindIdempotencyCleanup }
-
-type IdempotencyCleanupWorker struct {
-	river.WorkerDefaults[IdempotencyCleanupArgs]
-	Config *config.Config
-}
-
-func (IdempotencyCleanupWorker) Kind() string { return KindIdempotencyCleanup }
-
-func (w IdempotencyCleanupWorker) Work(ctx context.Context, job *river.Job[IdempotencyCleanupArgs]) error {
-	var redisClient *redis.Client
-	if w.Config != nil && w.Config.Redis != nil && w.Config.Redis.Addr != "" {
-		redisOpts := &redis.Options{
-			Addr: w.Config.Redis.Addr,
-			DB:   w.Config.Redis.DB,
-		}
-		if w.Config.Redis.Password != "" {
-			redisOpts.Password = w.Config.Redis.Password
-		}
-		redisClient = redis.NewClient(redisOpts)
-		defer func() {
-			if err := redisClient.Close(); err != nil {
-				log.WithContext(ctx).WithError(err).Warn("IdempotencyCleanup: failed to close redis client")
-			}
-		}()
-
-		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		if _, err := redisClient.Ping(pingCtx).Result(); err != nil {
-			log.WithContext(ctx).WithError(err).Warn("IdempotencyCleanup: Redis ping failed, idempotency will use in-memory fallback")
-		}
-		cancel()
-	}
-
-	const retentionDays = 90
-
-	idempotencyService := idempotency.NewIdempotencyService(redisClient)
-	defer idempotencyService.Close()
-	dedupeService := webhooks.NewDeduplicationService(idempotencyService)
-	deletedRows, err := dedupeService.CleanupOldWebhooks(ctx, retentionDays)
-	if err != nil {
-		return fmt.Errorf("cleanup durable webhook dedupe records: %w", err)
-	}
-
-	log.WithContext(ctx).WithFields(log.Fields{
-		"retention_days": retentionDays,
-		"deleted_rows":   deletedRows,
-	}).Info("IdempotencyCleanup: completed")
-	return nil
-}
 
 type CCBillReconcileArgs struct{}
 

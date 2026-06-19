@@ -30,7 +30,7 @@ import (
 // NewHTTPHandler surface:
 //
 //	/billing/v1/self/*          (RegisterSelfServiceRoutes — openrails:self:*)
-//	/billing/v1/merchant-admin/*  (RegisterMerchantAdminRoutes — openrails:merchant:*)
+//	/billing/v1/admin/*         (RegisterAdminRoutes — openrails:merchant:*)
 //
 // so a host that mounts NewHTTPHandler under /billing without prefix stripping
 // can route these two subtrees to this handler and everything else to the
@@ -64,7 +64,7 @@ func SelfHandler(e *embedded.Embedded) (http.Handler, error) {
 	return newSelfHandler(a.Runtime, a.DelegatedAuthenticator, configured), nil
 }
 
-// newSelfHandler assembles the self + merchant-admin gin engine and wraps it in
+// newSelfHandler assembles the self + delegated-admin gin engine and wraps it in
 // the neutral net/http base middleware stack (the gin-free analogue embedhttp
 // uses). Split from SelfHandler so the routing/auth behavior is unit-testable
 // without a live app graph.
@@ -78,7 +78,7 @@ func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, c
 	ginroutes.RegisterAdminRoutes(base.Group(ginroutes.AdminRoutePrefix), rt, delegatedMW)
 
 	// OpenRails-native rate-limiting + captcha on the embedded self-service +
-	// merchant-admin surface, matching the base NewHTTPHandler chain so an embedded
+	// delegated-admin surface, matching the base NewHTTPHandler chain so an embedded
 	// host does not have to front it with its own gateway. It is IP-keyed: the
 	// delegated principal is pinned per-route (inside the gin engine, after this
 	// outer chain), exactly like the standalone self surface, whose global limiter

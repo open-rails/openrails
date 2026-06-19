@@ -5,30 +5,37 @@ authority that controls it an **org**. Each merchant has its own dedicated
 backing org (1:1); the merchant row carries `owner_org_id` pointing at it
 (`UNIQUE` on non-null, nullable for embedded-without-AuthKit).
 
-## Bootstrap model (#527)
+## Provisioning model (#527/#531)
 
-The bootstrap manifest declares **merchants only** — there is no `auth`/users/
-global-roles section. Each merchant carries an inline `issuer` (the host
-application's JWKS or static public-key trust), which OpenRails registers as the
-**owner** of the merchant's backing org. The host app's delegated tokens then
-fully administer that one merchant — and no other — because federated authority
-claims are stripped on verify and authority is the stored owner role:
+OpenRails splits provisioning into three file-backed surfaces:
+
+- `push-merchant-config` declares merchants, profile/config, provider accounts,
+  provider secrets, and optional host-app issuer ownership.
+- `push-bootstrap` seeds OpenRails/AuthKit control-plane authority for an
+  already-created merchant org.
+- `push-merchant-catalog` declares products, prices, tier groups, and provider
+  catalog links.
+
+The merchant config manifest carries an inline `issuer` (the host application's
+JWKS or static public-key trust), which OpenRails registers as the **owner** of
+the merchant's backing org. The host app's delegated tokens then fully
+administer that one merchant — and no other — because federated authority claims
+are stripped on verify and authority is the stored owner role:
 
 ```text
 host-app issuer (JWKS) -> owner of the merchant's org -> OpenRails merchant
 ```
 
-OpenRails owns authority; the host app owns identity; there are no local
-OpenRails accounts in standalone mode. Startup provisioning is **first-run only**
-(gated by the `openrails.bootstrap_state` marker; a reboot of a provisioned
-deployment skips it, so a stale manifest can never brick a restart). Change
+OpenRails owns authority; the host app owns identity. Startup bootstrap, if
+`/etc/openrails/bootstrap.yaml` exists, is **first-run only** and limited to
+control-plane authority (gated by the `openrails.bootstrap_state` marker). A
+normal server restart never reapplies merchant config or catalog state. Change
 merchants afterward with `openrails push-merchant-config`:
 
-- default: additive + **seed-once** (existing secrets are left untouched, so a
-  secret rotated out of band via the admin API is never reverted to the seed);
+- no mutation flags: plan-only;
+- `--insert`: create missing merchant/config/secret state;
 - `--overwrite`: re-assert manifest secret values;
 - `--prune`: delete secrets absent from the manifest;
-- `--dry-run`: print the plan without mutating.
 
 See `config/merchants.example.yaml` for the manifest shape.
 

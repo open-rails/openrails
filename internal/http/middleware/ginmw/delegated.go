@@ -48,7 +48,7 @@ type DelegatedResolver interface {
 //
 // On success it:
 //   - pins the resolved merchant onto the request context (overriding the default
-//     single-merchant resolution) so all merchant-owned DB access is merchant-scoped,
+//     configured-merchant resolution) so all merchant-owned DB access is merchant-scoped,
 //   - sets the acting user (the token's `delegated_sub`) as the request's
 //     user context, so the existing user-facing `me` handlers naturally scope
 //     every read/write to that user — never another user's data,
@@ -97,7 +97,7 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 		}
 
 		// Pin the resolved merchant for merchant-owned DB access (#223). This
-		// OVERRIDES the default single-merchant resolution from ResolveMerchant.
+		// OVERRIDES the default configured-merchant resolution from ResolveMerchant.
 		ctx := merchant.WithID(c.Request.Context(), resolved.MerchantID)
 
 		// Bind the acting user so the reused user-facing handlers scope to the

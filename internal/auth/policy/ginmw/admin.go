@@ -1,8 +1,8 @@
 // Package ginmw holds the gin middleware variants of the admin authorization
 // gates. It is imported only by the standalone (gin) HTTP path. The gin-free
-// policy core (IsLiveAdmin + the router.Middleware *MW helpers) lives in
-// internal/auth/policy, so that gin-free importers (ultimately pkg/embedded) do
-// not transitively pull in github.com/gin-gonic/gin (#285).
+// policy core lives in internal/auth/policy, so that gin-free importers
+// (ultimately pkg/embedded) do not transitively pull in github.com/gin-gonic/gin
+// (#285).
 package ginmw
 
 import (

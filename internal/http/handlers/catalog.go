@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"strings"
 
-	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/pkg/api"
@@ -40,18 +39,9 @@ func GetProducts(r *httprequest.Request) {
 		return
 	}
 
-	includeInactive := false
-	if req.Active != nil && !*req.Active {
-		if uc, ok := r.UserContext(); ok {
-			if isAdmin, err := authpolicy.IsLiveAdmin(r.Request.Context(), r.State.AdminChecker, uc); err == nil && isAdmin {
-				includeInactive = true
-			}
-		}
-	}
-
 	result, err := r.State.PublicSubscriptionService.GetProductsPaginated(
 		r.Request.Context(),
-		includeInactive,
+		false,
 		req.Limit,
 		req.Offset,
 	)
@@ -86,17 +76,8 @@ func GetPrices(r *httprequest.Request) {
 	} else if *req.Active {
 		filter.Active = req.Active
 	} else {
-		if uc, ok := r.UserContext(); ok {
-			if isAdmin, err := authpolicy.IsLiveAdmin(r.Request.Context(), r.State.AdminChecker, uc); err == nil && isAdmin {
-				filter.Active = req.Active
-			} else {
-				active := true
-				filter.Active = &active
-			}
-		} else {
-			active := true
-			filter.Active = &active
-		}
+		active := true
+		filter.Active = &active
 	}
 
 	if req.Product != "" {

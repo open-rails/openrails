@@ -59,7 +59,7 @@ type RemoteApplicationResolver interface {
 // against public merchant routes.
 //
 // On success it pins the resolved merchant onto the request context (overriding the
-// default single-merchant resolution) and records the service token's permissions for
+// default configured-merchant resolution) and records the service token's permissions for
 // downstream RequireServiceTokenPermission gates. Expired, revoked, unknown, or
 // cross-merchant/unmapped service tokens are rejected.
 //
@@ -104,7 +104,7 @@ func ServiceTokenRequired(resolver ServiceTokenResolver) gin.HandlerFunc {
 		}
 
 		// Pin the resolved merchant for merchant-owned DB access (issue #223). This
-		// OVERRIDES the default single-merchant resolution from ResolveMerchant.
+		// OVERRIDES the default configured-merchant resolution from ResolveMerchant.
 		ctx := merchant.WithID(c.Request.Context(), resolved.MerchantID)
 		c.Request = c.Request.WithContext(ctx)
 		c.Set("openrails.merchant_id", resolved.MerchantID)

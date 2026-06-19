@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -103,6 +104,74 @@ func ServiceGetCustomerEntitlements(r *httprequest.Request) {
 	r.JSON(http.StatusOK, serviceEntitlementRecordsFromService(entitlements))
 }
 
+// ServiceGetCustomersWithEntitlement is the REVERSE entitlement lookup (#535):
+// the customer ids holding an ACTIVE window of the path `entitlement` for the
+// caller's merchant, keyset-paginated by customer_id (?cursor=&limit=, ?at=).
+// Backs a host directory's filter-by-entitlement (AuthKit's
+// EntitlementFilterProvider). Subject == customer_id (#364 UUID-only).
+func ServiceGetCustomersWithEntitlement(r *httprequest.Request) {
+	entitlement := strings.TrimSpace(r.Param("entitlement"))
+	if entitlement == "" {
+		r.ErrorJSON(http.StatusBadRequest, "entitlement required")
+		return
+	}
+	at := r.Clock.Now()
+	if raw := strings.TrimSpace(r.Query("at")); raw != "" {
+		parsed, err := timeutil.ParseRFC3339UTC(raw)
+		if err != nil {
+			r.ErrorJSON(http.StatusBadRequest, "invalid 'at' timestamp format; use RFC3339")
+			return
+		}
+		at = parsed
+	}
+	var afterID uuid.UUID
+	if raw := strings.TrimSpace(r.Query("cursor")); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			r.ErrorJSON(http.StatusBadRequest, "invalid cursor; must be a customer id (uuid)")
+			return
+		}
+		afterID = parsed
+	}
+	limit := 1000
+	if raw := strings.TrimSpace(r.Query("limit")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			r.ErrorJSON(http.StatusBadRequest, "invalid limit")
+			return
+		}
+		limit = n
+	}
+	if limit > entitlements.CustomersWithEntitlementMaxPageSize {
+		limit = entitlements.CustomersWithEntitlementMaxPageSize
+	}
+	svc := r.State.EntitlementService
+	if svc == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "entitlement service unavailable")
+		return
+	}
+	ids, err := svc.ListCustomersWithEntitlement(r.Request.Context(), entitlement, at, afterID, limit)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to list customers")
+		return
+	}
+	customers := make([]string, len(ids))
+	for i, id := range ids {
+		customers[i] = id.String()
+	}
+	// A full page means there may be more; hand back a keyset cursor.
+	hasMore := len(ids) == limit
+	nextCursor := ""
+	if hasMore {
+		nextCursor = ids[len(ids)-1].String()
+	}
+	r.JSON(http.StatusOK, map[string]any{
+		"customers":   customers,
+		"next_cursor": nextCursor,
+		"has_more":    hasMore,
+	})
+}
+
 type serviceExternalSubjectEntitlementsRequest struct {
 	Issuer   string   `json:"issuer"`
 	Subjects []string `json:"subjects"`
@@ -182,38 +251,6 @@ func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
 		out[subject] = serviceEntitlementRecordsFromService(records)
 	}
 	r.JSON(http.StatusOK, out)
-}
-
-func GetAdminUserEntitlements(r *httprequest.Request) {
-	var path adminUserEntitlementsPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	svc := r.State.EntitlementService
-	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "entitlement service unavailable")
-		return
-	}
-	atStr := r.Query("at")
-	queryTime := time.Now()
-	if r.State.Clock != nil {
-		queryTime = r.State.Clock.Now()
-	}
-	if atStr != "" {
-		parsed, err := timeutil.ParseRFC3339UTC(atStr)
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid 'at' timestamp format; use RFC3339")
-			return
-		}
-		queryTime = parsed
-	}
-	entitlements, err := svc.ListActiveRecords(r.Request.Context(), path.UserID, queryTime)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
-		return
-	}
-	r.JSON(http.StatusOK, serviceEntitlementRecordsFromModels(entitlements))
 }
 
 func GrantAdminEntitlement(r *httprequest.Request) {

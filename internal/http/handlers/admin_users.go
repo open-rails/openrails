@@ -1,16 +1,18 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
+	log "github.com/sirupsen/logrus"
 )
 
 type adminUserPath struct {
@@ -18,53 +20,35 @@ type adminUserPath struct {
 }
 
 // adminUserBillingProfile is the composite admin user-detail (#528): one read
-// returns the user's billing sections — subscription, payments, payment-methods,
-// entitlements, product-access — so admins don't fan out across dedicated
-// per-section endpoints. (credit-balance is multi-currency, like metrics, and is
-// embedded once the per-currency shape is settled.)
+// returns the user's billing sections so admins don't fan out across dedicated
+// per-section endpoints.
 type adminUserBillingProfile struct {
-	CustomerID     string                      `json:"customer_id"`
-	Subscription   *models.Subscription        `json:"subscription,omitempty"`
-	Entitlements   []models.Entitlement        `json:"entitlements"`
-	Payments       []*models.Payment           `json:"payments"`
-	PaymentMethods []*models.PaymentMethod     `json:"payment_methods"`
-	ProductAccess  []models.ProductAccessGrant `json:"product_access"`
+	CustomerID     string                       `json:"customer_id"`
+	Subscriptions  []models.Subscription        `json:"subscriptions"`
+	Entitlements   []models.Entitlement         `json:"entitlements"`
+	Payments       []*models.Payment            `json:"payments"`
+	PaymentMethods []paymentMethodResponse      `json:"payment_methods"`
+	CreditBalance  []adminCreditBalanceResponse `json:"credit_balance"`
+	ProductAccess  []models.ProductAccessGrant  `json:"product_access"`
+}
+
+type adminCreditBalanceResponse struct {
+	Currency              string `json:"currency"`
+	DisplayName           string `json:"display_name"`
+	Unit                  string `json:"unit"`
+	DecimalPlaces         int    `json:"decimal_places"`
+	Balance               int64  `json:"balance"`
+	HeldBalance           int64  `json:"held_balance"`
+	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
+}
+
+type adminPaymentMethodPath struct {
+	UserID string `uri:"user_id" binding:"required"`
+	ID     string `uri:"id" binding:"required"`
 }
 
 type adminSubscriptionPath struct {
 	SubscriptionID string `uri:"id" binding:"required"`
-}
-
-type adminNMIPayment struct {
-	VaultID       string  `json:"vault_id,omitempty"`
-	OrderID       string  `json:"order_id,omitempty"`
-	Amount        int64   `json:"amount"`
-	Currency      string  `json:"currency,omitempty"`
-	TransactionID string  `json:"transaction_id,omitempty"`
-	Status        string  `json:"status,omitempty"`
-	StartDate     string  `json:"start_date,omitempty"`
-	ExpiryDate    string  `json:"expiry_date,omitempty"`
-	TotalSoFar    int64   `json:"total_so_far,omitempty"`
-	ManualExpiry  *string `json:"manual_expiry,omitempty"`
-}
-
-type adminNMIMetrics struct {
-	Successful int `json:"successful"`
-	Failed     int `json:"failed"`
-}
-
-type adminCCBillPayment struct {
-	SubscriptionID string  `json:"subscription_id,omitempty"`
-	TransactionID  string  `json:"transaction_id,omitempty"`
-	Status         string  `json:"status,omitempty"`
-	StartDate      string  `json:"start_date,omitempty"`
-	ExpiryDate     string  `json:"expiry_date,omitempty"`
-	ManualExpiry   *string `json:"manual_expiry,omitempty"`
-}
-
-type adminCCBillMetrics struct {
-	Successful int `json:"successful"`
-	Failed     int `json:"failed"`
 }
 
 type adminCancelSubscriptionRequest struct {
@@ -81,15 +65,17 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	now := time.Now()
 	profile := adminUserBillingProfile{
 		CustomerID:     identity.CustomerIDFromString(path.UserID).UUID().String(),
+		Subscriptions:  []models.Subscription{},
 		Entitlements:   []models.Entitlement{},
 		Payments:       []*models.Payment{},
-		PaymentMethods: []*models.PaymentMethod{},
+		PaymentMethods: []paymentMethodResponse{},
+		CreditBalance:  []adminCreditBalanceResponse{},
 		ProductAccess:  []models.ProductAccessGrant{},
 	}
 	if r.State.SubscriptionService != nil {
-		sub, err := r.State.SubscriptionService.GetActiveSubscription(ctx, path.UserID)
-		if err == nil {
-			profile.Subscription = sub
+		subs, err := r.State.SubscriptionService.GetActiveSubscriptionsByUserID(ctx, path.UserID)
+		if err == nil && len(subs) > 0 {
+			profile.Subscriptions = subs
 		}
 	}
 	if r.State.EntitlementService != nil {
@@ -106,7 +92,34 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	}
 	if r.State.PaymentMethodService != nil {
 		if pms, err := r.State.PaymentMethodService.GetByUserID(ctx, path.UserID); err == nil && len(pms) > 0 {
-			profile.PaymentMethods = pms
+			profile.PaymentMethods = paymentMethodsToAPI(pms)
+		}
+	}
+	if r.State.MoneyService != nil {
+		payer := identity.CustomerIDFromString(path.UserID)
+		if !payer.IsZero() {
+			balances, err := r.State.MoneyService.ListBalancesForCustomer(ctx, payer)
+			if err != nil {
+				log.WithError(err).WithField("user_id", path.UserID).Error("failed to load credit balances")
+				r.ErrorJSON(http.StatusInternalServerError, "failed to load credit balances")
+				return
+			}
+			for _, bal := range balances {
+				owed, err := r.State.MoneyService.GetOutstandingOwed(ctx, payer, bal.Currency)
+				if err != nil {
+					r.ErrorJSON(http.StatusInternalServerError, "failed to load outstanding owed amount")
+					return
+				}
+				profile.CreditBalance = append(profile.CreditBalance, adminCreditBalanceResponse{
+					Currency:              bal.Currency,
+					DisplayName:           bal.Currency,
+					Unit:                  bal.Currency,
+					DecimalPlaces:         currencyDecimals(bal.Currency),
+					Balance:               bal.Balance,
+					HeldBalance:           bal.HeldBalance,
+					OutstandingOwedAmount: owed,
+				})
+			}
 		}
 	}
 	if svc := productAccessService(r); svc != nil {
@@ -115,6 +128,52 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 		}
 	}
 	r.SuccessJSON(profile)
+}
+
+func DeleteAdminUserPaymentMethod(r *httprequest.Request) {
+	var path adminPaymentMethodPath
+	if err := r.ShouldBindURI(&path); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	id, err := api.ParsePaymentMethodID(path.ID)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "invalid payment method ID")
+		return
+	}
+	if r.State.PaymentMethodService == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "payment method service unavailable")
+		return
+	}
+	paymentMethod, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(r.Request.Context(), id, path.UserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, vault.ErrPaymentMethodNotFound):
+			r.ErrorJSON(http.StatusNotFound, "payment method not found")
+		case errors.Is(err, vault.ErrPaymentMethodAccessDenied):
+			r.ErrorJSON(http.StatusForbidden, "payment method does not belong to user")
+		default:
+			log.WithError(err).WithFields(log.Fields{"payment_method_id": id, "user_id": path.UserID}).Error("failed to validate admin payment method delete")
+			r.ErrorJSON(http.StatusInternalServerError, "failed to validate payment method")
+		}
+		return
+	}
+	for _, sub := range paymentMethod.Subscriptions {
+		if sub.Status == "active" || sub.Status == "pending" || sub.Status == "past_due" {
+			r.ErrorJSON(http.StatusConflict, "cannot delete payment method linked to active, pending, or past_due subscription")
+			return
+		}
+	}
+	if err := r.State.PaymentMethodService.Delete(r.Request.Context(), id); err != nil {
+		if errors.Is(err, vault.ErrPaymentMethodNotFound) {
+			r.ErrorJSON(http.StatusNotFound, "payment method not found")
+			return
+		}
+		log.WithError(err).WithFields(log.Fields{"payment_method_id": id, "user_id": path.UserID}).Error("failed to delete admin payment method")
+		r.ErrorJSON(http.StatusInternalServerError, "failed to delete payment method")
+		return
+	}
+	r.SuccessJSON(map[string]any{"success": true})
 }
 
 func GetAdminSubscriptions(r *httprequest.Request) {
@@ -164,123 +223,6 @@ func GetAdminSubscription(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(subscription)
-}
-
-func GetAdminUserNMI(r *httprequest.Request) {
-	var path adminUserPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	if r.State.PaymentService == nil || r.State.PaymentMethodService == nil || r.State.SubscriptionService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment services unavailable")
-		return
-	}
-	subscription, err := r.State.SubscriptionService.GetActiveSubscription(r.Request.Context(), path.UserID)
-	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "active subscription not found")
-		return
-	}
-	if !processors.IsNMIBackedProcessor(subscription.Processor) {
-		r.ErrorJSON(http.StatusNotFound, "nmi-backed subscription not found")
-		return
-	}
-	payment, err := r.State.PaymentService.GetLatestBySubscriptionID(r.Request.Context(), subscription.ID)
-	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "nmi-backed payment not found")
-		return
-	}
-	var pmVault string
-	if subscription.PaymentMethodID != nil {
-		if pm, err := r.State.PaymentMethodService.GetByID(r.Request.Context(), *subscription.PaymentMethodID); err == nil {
-			pmVault = pm.VaultID
-		}
-	}
-	resp := adminNMIPayment{VaultID: pmVault, OrderID: subscription.ID.String(), Amount: payment.Amount, Currency: payment.Currency, TransactionID: payment.TransactionID, Status: string(subscription.Status), StartDate: subscription.StartedAt.Format(time.RFC3339), ExpiryDate: func() string {
-		if subscription.CurrentPeriodEndsAt != nil {
-			return subscription.CurrentPeriodEndsAt.Format(time.RFC3339)
-		}
-		return ""
-	}(), TotalSoFar: payment.Amount}
-	r.SuccessJSON(resp)
-}
-
-func GetAdminUserNMIMetrics(r *httprequest.Request) {
-	var path adminUserPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	if r.State.PaymentService == nil || r.State.SubscriptionService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment services unavailable")
-		return
-	}
-	subscription, err := r.State.SubscriptionService.GetActiveSubscription(r.Request.Context(), path.UserID)
-	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "active subscription not found")
-		return
-	}
-	if !processors.IsNMIBackedProcessor(subscription.Processor) {
-		r.ErrorJSON(http.StatusNotFound, "nmi-backed subscription not found")
-		return
-	}
-	success, failed, err := r.State.PaymentService.CountByUserAndProcessor(r.Request.Context(), path.UserID, subscription.Processor)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
-		return
-	}
-	r.SuccessJSON(adminNMIMetrics{Successful: success, Failed: failed})
-}
-
-func GetAdminUserCCBill(r *httprequest.Request) {
-	var path adminUserPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	if r.State.PaymentService == nil || r.State.SubscriptionService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment services unavailable")
-		return
-	}
-	subscription, err := r.State.SubscriptionService.GetActiveSubscription(r.Request.Context(), path.UserID)
-	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "active subscription not found")
-		return
-	}
-	if subscription.Processor != models.ProcessorCCBill {
-		r.ErrorJSON(http.StatusNotFound, "ccbill subscription not found")
-		return
-	}
-	payment, err := r.State.PaymentService.GetLatestBySubscriptionID(r.Request.Context(), subscription.ID)
-	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "ccbill payment not found")
-		return
-	}
-	resp := adminCCBillPayment{SubscriptionID: subscription.ProcessorSubscriptionID, TransactionID: payment.TransactionID, Status: string(subscription.Status), StartDate: subscription.StartedAt.Format(time.RFC3339), ExpiryDate: func() string {
-		if subscription.CurrentPeriodEndsAt != nil {
-			return subscription.CurrentPeriodEndsAt.Format(time.RFC3339)
-		}
-		return ""
-	}()}
-	r.SuccessJSON(resp)
-}
-
-func GetAdminUserCCBillMetrics(r *httprequest.Request) {
-	var path adminUserPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	if r.State.PaymentService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment service unavailable")
-		return
-	}
-	success, failed, err := r.State.PaymentService.CountByUserAndProcessor(r.Request.Context(), path.UserID, models.ProcessorCCBill)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
-		return
-	}
-	r.SuccessJSON(adminCCBillMetrics{Successful: success, Failed: failed})
 }
 
 func AdminCancelSubscription(r *httprequest.Request) {

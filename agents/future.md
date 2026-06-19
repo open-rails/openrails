@@ -376,6 +376,30 @@ separate `openrails-saas` repo. OpenRails itself should ship the source-availabl
 standalone installs; the hosted public platform can build a richer SaaS product on top without changing OpenRails'
 core route/auth model.
 
+## Product vision — the shared dashboard (owner, 2026-06-19)
+Model it like Stripe's dashboard. ONE admin-dashboard codebase, shipped in TWO modes:
+- **standalone-private OpenRails** (source-available, this repo) — public registration PERMANENTLY OFF; operators are seeded via bootstrap/AuthKit.
+- **~/openrails-saas** (separate private repo) — public registration ON: a user signs up, then creates an **org + merchant** (the Stripe "create account" flow). All onboarding/registration/marketing lives in openrails-saas, never here.
+
+In BOTH modes the dashboard is the same product surface; only the entry (registration vs seeded) differs.
+
+**Users (operators) in OpenRails are purely access-control:** "who may access which merchant dashboards, within their limited roles." They are AuthKit users + org membership + RBAC (AuthKit #91) — NOT customers, NOT billing identities. An operator logs in, and (scoped by their roles) can:
+- **Merchant config** — provider configurations (Stripe/NMI/CCBill/Solana credentials, test/live mode, routing). [#228 PROVIDER+CATALOG OPS]
+- **Customer actions, PROVIDER-NEUTRAL** — cancel subscriptions, refund, comp/grant entitlements, off-channel payments, etc. across any processor. *The API for this already exists* — it's the #528 delegated `/v1/admin/*` surface (`DELETE /subscriptions/:id`, `POST /payments/:id/refunds`, entitlement + product-access writes — all provider-neutral). The dashboard is a client of it; the only net-new backend piece is the customer LIST/search to FIND the customer first (domain #2 below).
+- **Catalog items** — products, prices, entitlements (change prices, add products, edit entitlement specs). Backed by catalog-as-code apply + the catalog services.
+
+So the dashboard composes three already-mostly-built backends (AuthKit directory for operators, #528 delegated admin for provider-neutral customer actions, catalog/provider services) + two net-new lists (customers, merchants). It is the productized UI over the existing capability-gated routes (#510), not a new auth model.
+
+**Operators ARE the merchant's AuthKit org members (CONFIRMED, owner 2026-06-19) — no new authz model needed.** Each OpenRails merchant already has a backing AuthKit org whose `owner` is the registered issuer (#527). So "operators of merchant X" == "members of merchant X's AuthKit org, with org roles," and dashboard access scopes by org membership + org RBAC (the same model that gates everything else). The Stripe-style onboarding is literally #527's provisioning shape: **create AuthKit org → provision the backing OpenRails merchant → invite operators as org members with roles.** Standalone-private seeds that via bootstrap; openrails-saas wraps it with public registration. Net: operator management = AuthKit org membership/roles UI (reuses #91 + AuthKit's org-members API), and there is NO OpenRails-side operator/user store.
+
+## Three management domains — who owns the list/search/sort (decided 2026-06-19)
+The standalone console manages THREE distinct entity sets; do NOT conflate them:
+1. **Dashboard operators/staff** (the humans who LOG IN to this console) → **AuthKit** owns this. List/search/sort/invite + role assignment = AuthKit's user directory + RBAC (AuthKit #91, the SAME surface doujins/cozy-art reuse). OpenRails builds NONE of this — the console calls AuthKit's `GET /admin/users` for operator management. (Public/SaaS adds registration/onboarding in the separate `openrails-saas` repo.)
+2. **Customers** (the merchant's PAYERS — delegated subjects from the merchant's issuer; NOT the same people as operators in the SaaS case) → **OpenRails billing domain**. `openrails.customers` holds only `(merchant_id, org_id, issuer, subject, created_at, last_seen_at)` — NO email/username. So OpenRails owns a customer LIST/search/sort by BILLING attributes (subject, subscription status, entitlement, spend, last_seen), and ENRICHES identity from AuthKit when AuthKit is the merchant's issuer (the inverse of the doujins enrich seam); when the issuer is external, it shows subject + billing only. This is net-new OpenRails work (no admin customer-list query exists today).
+3. **Merchants** (the tenants — multi-merchant public/platform deployments) → **OpenRails control-plane / platform-superadmin**. Reuse the existing `/v1/platform/*` superadmin layer (`internal/platform`, `PermPlatformSuperadmin`); add merchant list/search/sort there. Single-merchant private installs skip this.
+
+So: OpenRails DOES build customer + merchant admin listing (billing/control-plane entities it owns); it does NOT build operator/user-directory listing (AuthKit's). In the EMBEDDED-host case (doujins) operators==customers==AuthKit users (one set, two facets), so there's just the enriched user directory and no separate customer page; the separate "Customers" page only appears in standalone where operators ≠ payers.
+
 ## Metadata
 
 - Category: product
@@ -417,6 +441,7 @@ core route/auth model.
   public hosted product.
 
 **Tasks:**
+> TERMINOLOGY (read the "Three management domains" section above first): in the task list below, "user lookup" / the "User Lookup" page / `/v1/admin/users/*` mean **CUSTOMER** lookup (domain #2 — the merchant's payers, keyed by subject, OpenRails billing). They are NOT operator/staff management (domain #1 — that's AuthKit's user directory, #91). The two are separate pages.
 - FOUNDATION:
 - [ ] Choose private admin UI hosting path in this repo:
       serve static assets from the OpenRails binary, or ship a separate static app that calls the OpenRails API.
@@ -443,6 +468,10 @@ core route/auth model.
 - 
 - ADMIN OPS (MUTATIONS):
 - [ ] User lookup + detail view (subscriptions, checkout sessions, payments, entitlements, credits, payment methods, processor IDs)
+- [ ] User SEARCH/LIST/DETAIL for this console — **COMPOSE, don't rebuild** (absorbed the old #108; decided 2026-06-19 after reading ~/authkit + ~/doujins). The user DIRECTORY (list/search/sort/detail by email/username/role/org) is **AuthKit's**, never OpenRails'. This console is a BILLING/merchant console keyed by SUBJECT; customers are delegated subjects from the merchant's issuer, so OpenRails stores only `openrails.customers (issuer, subject, customer_id)` + billing — it has NO email/username. So:
+    - When the merchant's issuer IS an AuthKit instance the console can reach → compose: call AuthKit's `GET /admin/users` (directory: search/list/detail) and enrich each row with OpenRails billing via the `BatchEntitlementsProvider` seam (exactly how doujins' embedded admin already works). Filter-by-entitlement ("premium users") flows through that seam, backed by OpenRails #535's reverse query — NOT a new OpenRails search endpoint.
+    - When the merchant uses a NON-AuthKit identity → the console can only show billing keyed by opaque subject + whatever the issuer's OIDC userinfo exposes; rich identity stays in the merchant's own app.
+    - So OpenRails builds NO `/v1/admin/users?q=` directory/search endpoint. The "sophisticated search" (by email / transaction_id / processor_subscription_id, sort, full-text) is the AuthKit directory's job (generalize AuthKit `AdminListUsers`) plus OpenRails billing-side filters (subscription_status / processor / transaction_id lookups) exposed as enrichment, never as a standalone user list. (Cross-repo: pairs with the AuthKit directory issue + OpenRails #535.)
 - [ ] Add billing timeline per user/subscription that merges payments, subscription events, entitlement changes, credits, webhooks, and admin actions
 - [ ] Support merchant actions through unified capability-gated routes:
       cancel subscription, pause/resume, extend access, comp/refund, grant/revoke entitlement, grant/revoke credits,

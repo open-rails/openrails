@@ -88,7 +88,7 @@ KV-v2 field `value`:
 
 `solana/private_key` remains an OpenRails internal/platform-admin secret for
 signing compatibility. It is in the canonical registry so platform tools and
-startup seed paths can still address it, but delegated merchant-admin APIs do not
+startup seed paths can still address it, but delegated admin APIs do not
 expose it as a writable dashboard secret.
 
 ## Manual placement examples
@@ -108,7 +108,7 @@ read, then keeps the value in memory until the cache TTL expires. No app restart
 is required for out-of-band Vault writes; convergence is bounded by the
 15-minute cache TTL.
 
-## Merchant-admin write-only API examples
+## Delegated admin write-only API examples
 
 Dashboard callers use merchant-signed delegated access tokens with the exact
 merchant-secret permissions from the control-plane catalog. These endpoints never
@@ -118,13 +118,13 @@ List configured status:
 
 ```sh
 curl -H "Authorization: Bearer $DELEGATED_ADMIN_JWT" \
-  "$OPENRAILS_URL/v1/merchant-admin/secrets"
+  "$OPENRAILS_URL/v1/admin/secrets"
 ```
 
 Validate before saving:
 
 ```sh
-curl -X PUT "$OPENRAILS_URL/v1/merchant-admin/secrets/stripe/secret_key" \
+curl -X PUT "$OPENRAILS_URL/v1/admin/secrets/stripe/secret_key" \
   -H "Authorization: Bearer $DELEGATED_ADMIN_JWT" \
   -H "Content-Type: application/json" \
   -d '{"value":"sk_live_...","validate_only":true}'
@@ -133,7 +133,7 @@ curl -X PUT "$OPENRAILS_URL/v1/merchant-admin/secrets/stripe/secret_key" \
 Save and validate:
 
 ```sh
-curl -X PUT "$OPENRAILS_URL/v1/merchant-admin/secrets/stripe/secret_key" \
+curl -X PUT "$OPENRAILS_URL/v1/admin/secrets/stripe/secret_key" \
   -H "Authorization: Bearer $DELEGATED_ADMIN_JWT" \
   -H "Content-Type: application/json" \
   -d '{"value":"sk_live_...","save_and_validate":true}'
@@ -142,7 +142,7 @@ curl -X PUT "$OPENRAILS_URL/v1/merchant-admin/secrets/stripe/secret_key" \
 Delete a configured secret:
 
 ```sh
-curl -X DELETE "$OPENRAILS_URL/v1/merchant-admin/secrets/stripe/webhook_signing_secret" \
+curl -X DELETE "$OPENRAILS_URL/v1/admin/secrets/stripe/webhook_signing_secret" \
   -H "Authorization: Bearer $DELEGATED_ADMIN_JWT"
 ```
 

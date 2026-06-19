@@ -40,8 +40,8 @@ The flags compose. Full reconciliation to the source of truth is
 The primary commands are:
 
 ```bash
-openrails push-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
 openrails push-merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml
+openrails push-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
 openrails push-merchant-catalog --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml
 openrails pull-provider --config /etc/openrails/config.yaml --merchant doujins --provider stripe
 ```
@@ -65,6 +65,23 @@ After import, runtime checkout, webhook, vault/tokenization, provider intent,
 and provider-pull paths use the `provider_accounts` row and scoped secret name;
 they do not read a broad merchant-wide `stripe/secret_key` or
 `nmi/mobius/production_key` when a DB-backed merchant service is running.
+
+## Private Standalone First Run
+
+On an empty private standalone install, run the file-backed push commands as an
+init job or manual operation:
+
+```bash
+openrails push-merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml --insert
+openrails push-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml --insert
+openrails push-merchant-catalog --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml --insert --overwrite
+```
+
+`push-merchant-config` runs first because the control-plane bootstrap seeds
+admin authority against a merchant/backing org; this source-available repo does
+not create a separate global admin org. Normal server restarts never reconcile
+merchant config or catalog files. If `/etc/openrails/bootstrap.yaml` is mounted,
+startup bootstrap is first-run only and limited to control-plane authority.
 
 ## Durability model
 

@@ -7,7 +7,245 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 534
+next_id: 536
+
+---
+
+# #535: Entitlement reverse-query — billing-enrichment FILTER provider for AuthKit's user directory
+
+**Completed:** no
+
+## Metadata
+
+- Category: feature
+- Status: not_started
+- Passes: false
+
+ACTIVE — the OpenRails half of the cross-repo admin-directory work (AuthKit #91 + doujins #414), pulled in 2026-06-19 because doujins's admin dashboard needs it NOW to delete its raw cross-schema premium-filter SQL. Build alongside AuthKit #91.
+
+**Division of responsibility:** the USER DIRECTORY (list/search/sort/detail by email/username/role/org) belongs to **AuthKit** (it owns identity). OpenRails is NOT a user directory; it owns BILLING state keyed by subject and acts as the ENRICHMENT + FILTER PROVIDER behind AuthKit's directory. The composition happens in the host (or OpenRails' own standalone billing console, #228) via AuthKit's pluggable provider seam — NOT raw cross-schema SQL.
+
+The ENRICH direction already ships in doujins: AuthKit's `AdminListUsers` calls a `BatchEntitlementsProvider`; doujins wires OpenRails in (`ListActiveEntitlements(issuer, userIDs, now)` — one batched in-process call per page), so user-list rows already carry entitlements. This #535 issue adds the still-missing REVERSE direction so AuthKit can FILTER the directory BY entitlement.
+
+**FORWARD ("of THESE users, who's premium?") — ALREADY SHIPPED, no work.** `POST /v1/service/customers/by-external-subject/entitlements` (`ServiceGetExternalSubjectEntitlements`, perm `entitlements:read`, #354). Embedded equivalent: `EntitlementService.ListActiveRecordsByExternalSubjects(issuer, subjects, at)`.
+
+**REVERSE ("find ALL users who have premium") — THE GAP (this issue). DONE + DB-VALIDATED 2026-06-19.**
+- [x] `EntitlementService.ListCustomersWithEntitlement(ctx, entitlement, at, afterID uuid.UUID, limit int) ([]uuid.UUID, error)` — customer_ids holding an ACTIVE window (`start_at <= at AND (end_at IS NULL OR end_at > at) AND revoked_at IS NULL AND deleted_at IS NULL`, matching the existing forward queries exactly), ordered by customer_id, keyset-paginated (afterID exclusive). limit clamps to [1, 10000]. sqlc query `ListCustomersWithEntitlement` (+ hand-written gen mirroring sqlc — no live DB for codegen here) + repo method.
+- [x] Identity detail: returns customer_id; in UUID-only mode (#364, doujins) customer_id == host user_id. (Federated issuer+subject return-shape left for when a federated host needs it — the embedded/doujins UUID-only case is what #414 consumes now.)
+- [x] Standalone parity: `GET /v1/service/entitlements/:entitlement/customers?cursor=&limit=&at=` (perm `entitlements:read`), handler `ServiceGetCustomersWithEntitlement` → `{customers[], next_cursor, has_more}` (keyset). Embedded hosts call the Go method directly; standalone hits the same logic over HTTP.
+- [x] Supporting index: migration `017_entitlements_reverse_lookup_index.up.sql` — partial btree `(merchant_id, entitlement, customer_id) WHERE revoked_at IS NULL AND deleted_at IS NULL`.
+- [x] DB-integration-test: `tests/entitlement_reverse_lookup_test.go` (real Postgres) — returns only active/non-revoked/non-deleted matches ordered by customer_id, excludes expired/revoked/deleted/other-entitlement, keyset pagination walks the set, empty entitlement rejected. GREEN.
+- [ ] Ship: tag + bump so AuthKit's provider-filter (#91) + doujins (#414) can consume. Pending user OK to commit/tag — batched with #91/#414.
+
+**STATUS: code-complete + DB-validated (2026-06-19).** `go build ./...` clean. Only the release remains.
+
+**Architectural principle (capture in docs):** an embedded host consumes OpenRails through its Go SERVICE API / the `BatchEntitlementsProvider` seam, NOT raw SQL against `openrails.*` — raw SQL re-implements the entitlement-active semantics (drift), bypasses RLS, and couples the host to the physical schema (the tenant_id→merchant_id rename that broke the test helpers would have broken a raw-SQL host identically). **doujins violates this TODAY** for `?filter=premium` (`internal/api/admin/users/handler.go` runs a `profiles.users ⋈ openrails.entitlements/customers` join); this issue + AuthKit #91 let doujins delete it.
+
+The OpenRails-hosted admin-console "sophisticated user search" is a SEPARATE concern (#228, future); the user DIRECTORY itself is AuthKit's, never OpenRails'.
+
+---
+
+# #534: Unify bearer-auth trust models behind one Principal + RequirePermission; harden shared-handler reuse
+
+**Status:** planned (not started)
+
+The public API *looks* like ~7 distinct trust tiers, but that count conflates
+authentication (how you prove identity) with authorization (what you may do). The
+real shape is much smaller; the apparent sprawl is the error-prone part, and it is
+what makes the heavy handler-reuse across tiers risky.
+
+## Problem
+
+Reality is **2 non-bearer mechanisms + 1 bearer channel carrying 4 credential profiles**:
+
+- **Non-bearer (irreducible):** public (no credential); webhooks (HMAC signature — a
+  payment processor cannot present a bearer).
+- **Bearer channel** (`Authorization: Bearer …`), 4 credential profiles:
+  - AuthKit user session/bearer — backs `/me` and `/platform` (+`platform:superadmin`).
+  - OpenRails API key (currently named service token internally) — `/service`
+    (merchant = API-key owner). This is a shared-secret API key, not a signed JWT.
+  - Remote-application self JWT — `/service` machine/app credential signed by a
+    registered issuer with no `delegated_sub`; internally `ResolveRemoteApplication`
+    returns the same `ResolvedServiceToken` shape as API keys today, but the credential
+    type is distinct.
+  - Delegated JWT — `/self` (`openrails:self:*`) and `/admin` (`openrails:merchant:*`,
+    the #528 delegated admin surface; stale `/merchant-admin` wording should be removed).
+    This is user-delegated and has `delegated_sub`.
+  Standalone is MULTI-MERCHANT: the server leaves `configuredMerchant` zero and resolves the
+  merchant PER-CREDENTIAL (API-key owner / delegated issuer). `configuredMerchant` is
+  the EMBEDDED single-merchant binding only. (#528 retired the per-user `openrails:admin`
+  surface — there is no longer a user-bearer `/admin` operator tier.)
+
+So the "7 tiers" are mostly **authorization granularity** (which is good) layered on
+**4 bearer profiles**, where each format grew its own middleware family + per-tier
+permission-gate helper, applied inconsistently per route group:
+`requiredMW` (+ live admin checker); `ServiceTokenRequired` + `RequireServiceTokenPermission`
+(legacy/internal names for the API-key gate);
+`DelegatedSelfRequired`/`DelegatedPrincipalRequired` + `RequireDelegatedPermission`.
+
+**The risk (ties to #227 / #528):** the same handlers are reused across tiers — the
+admin handlers back operator-admin *and* federated merchant-admin (#528); the user
+handlers back session *and* delegated self. Every handler trusts `r.GetUser()` + the
+pinned merchant, so cross-merchant isolation rests entirely on **four different
+middlewares each pinning the merchant correctly**. One bug in any of them is
+cross-merchant exposure. RLS (`MerchantDBConnMW`, #227) is a backstop, not a boundary
+test.
+
+## Target Model
+
+One authentication boundary resolves **any bearer** into a common, intentionally small principal:
+
+    Principal{ MerchantID, MerchantSource, CredentialType, Subject, Can(ctx, perm) }
+
+(Vocabulary: in OpenRails the data-scoping entity is the **merchant**
+(`pkg/merchant`, `merchant.ID`); the AuthKit/tensorhub equivalent term is **org**. A
+merchant is *owned by* an AuthKit org (`OwnerOrgID`) — a separate axis. "tenant"
+survives only in legacy comments / generic prose below, never as a type.)
+
+Every route then becomes exactly one of: `public` | `webhook(verifySignature)` |
+`RequirePermission("openrails:…")`. The real distinctions (machine vs human vs
+delegated; which merchant; which scope) become **data on the Principal**, not separate
+middleware stacks. The multi-format resolver already exists in embryo —
+`resolveServiceCredential` (`internal/http/routes/routes.go`) already multiplexes
+API-key/service-token / remote-app-JWT / service-JWT, and the merchant-catalog gate
+already does "API-key OR user." Extend that into the unified bearer boundary.
+
+Do not force webhooks into this model. Processor HMAC/webhook authentication is a
+separate non-bearer boundary and should stay outside `Principal`.
+
+### Invariant that makes this safe-or-not
+
+Merchant-binding — the `merchant.ID` that scopes all data access, today pinned per
+request via `merchant.WithID` — differs per credential and MUST be preserved verbatim:
+- user bearer → merchant = ResolveMerchant (URL/config-pinned merchant)
+- API key → merchant = key's owning merchant
+- remote-application self JWT → merchant = the registered remote application's owner org
+  mapped to its OpenRails merchant
+- delegated JWT → merchant = token issuer's merchant
+
+The unified `Principal` carries `MerchantID` + `MerchantSource` (its provenance) +
+`CredentialType` (`api_key`, `remote_application`, `delegated_user`, `user_session`).
+The resolver sets it per format. Centralizing this is the entire point — **one
+place to get merchant-pinning right instead of four.** Webhooks + public stay
+separate by design.
+
+### Second invariant: where permissions come from also differs
+
+The gate becomes uniform (`RequirePermission`), and the permission STRINGS are already
+one catalog today (the colon-form `controlplane.Perm*` constants). But a principal's
+permission SET/evaluator is obtained differently per credential, and the resolver must
+preserve that when it populates `Principal.Permissions` or `Principal.Can(ctx, perm)`:
+- API key (service token internally) → permissions come from server-side API-key
+  resolution; the bearer itself is a shared secret, not a self-verifying JWT.
+- Remote-application self JWT → signature/issuer/audience prove the application,
+  but authority comes from stored AuthKit/OpenRails remote_application grants/roles,
+  not from self-claimed permissions in the JWT.
+- Delegated JWT → permissions are carried in the signed token / delegated grant model.
+- operator-admin / platform-superadmin → permissions are evaluated LIVE against the
+  caller's own org roles at request time (#312 live authority), NOT from a claim.
+
+Do NOT flatten operator-admin/platform into a static token claim — that would silently
+drop the live-authority guarantee. Prefer `Principal.Can(ctx, perm)` or an explicit
+permission-source field over a bare static `[]string` unless the resolver has already
+performed the live authority lookup.
+
+## Phases (smallest / safest first)
+
+### Phase 1 — alias cleanup (cheap, no behavior change)
+- Delete the **dead singular** `POST /v1/service/credits/hold/:id/{capture,release}`
+  routes (`internal/http/routes/ginroutes/routes.go`). The SDK (`remote.go`) and all
+  consumers use only the plural `holds/:id/…`; nothing first-party hits the singular.
+- Document the **intentional** `drift/refresh` ≡ `drift/reconcile-all` alias (both →
+  `AdminRefreshCatalogDrift`, `registerCatalogActionRoutes` in
+  `internal/http/routes/routes.go`) so it does not read as an accident.
+- (optional) tiny test asserting any retained alias maps to the same handler + same
+  permission gate.
+
+### Phase 2 — cross-merchant isolation test suite (cheap, high value, no prod-code change)
+HTTP-boundary tests that pin the reuse invariant BEFORE the refactor. Phase 3 must not
+start until these are green:
+- delegated admin token for merchant A hitting
+  `/v1/admin/users/{B-user}/…` → fail closed (404/forbidden or empty isolated profile,
+  depending on the handler contract).
+- API key for merchant A → cannot read/mutate merchant B's payer on `/v1/service/*`.
+- remote-application self JWT for merchant A → cannot read/mutate merchant B on
+  `/v1/service/*` or other machine surfaces.
+- self token → can only act on its own `delegated_sub` (no `:user_id` reachable).
+- operator-admin in merchant A → cannot touch merchant B.
+These become the regression net for Phase 3 and any future refactor.
+
+### Phase 3 — bearer unification (the simplification; reviewed effort)
+- Introduce `Principal` + a single `Authenticate(bearer) → Principal` resolver
+  (extending `resolveServiceCredential` to the user + delegated formats).
+- Replace the per-tier permission helpers with one `RequirePermission(perm)` gate
+  calling `Principal.Can(ctx, perm)`.
+- Migrate route groups one at a time behind the new gate; keep RLS as backstop.
+- Eng-review before starting — security-critical.
+
+## Tasks
+
+### Phase 1 — alias cleanup (cheap, no behavior change)
+- [x] Delete singular `POST /v1/service/credits/hold/:id/{capture,release}` (`ginroutes/routes.go`); keep plural `holds/:id`
+- [x] Make the `drift/refresh` ≡ `drift/reconcile-all` shared-handler intent explicit in a comment
+- [x] `go build ./...` + service-route tests green
+
+### Phase 2 — cross-merchant isolation suite (no prod-code change)
+`internal/integrationharness/cross_merchant_isolation_test.go` (//go:build integration).
+RLS-real: the server runs under `StartStandaloneRLS` (connects as `openrails_app`,
+NOBYPASSRLS), so real per-merchant RLS enforces — not just the in-app predicate.
+Fixtures are seeded via the super pool.
+- [x] Harness: two merchants A/B + a payer (`ProvisionOwnedMerchant` + `MintServiceToken`)
+- [x] API key / service token (A) → `/v1/service/*` cannot read merchant B's payer balance (green, real server+DB)
+- [x] remote-application self JWT (A) → `/v1/service/*` cannot read/mutate merchant B;
+      prove stored remote_application authority, not self-claimed JWT permissions, is what
+      grants access. Green in real standalone+RLS HTTP suite; includes deny case for
+      a self-token that claims read/write permissions without stored authority.
+- [x] delegated admin token (A) → `/v1/admin/users/{B-user}/…` isolated — building block
+      found: `authcore.MintDelegatedAccessToken(signer, {Issuer, Audiences:["openrails"],
+      DelegatedSubject, Permissions:["openrails:merchant:billing:read"]})` signed by a
+      `RegisterRemoteApplication` issuer (the verifier trusts remote_application issuers, #481);
+      harness helper added. ASSERTION SHAPE: `GetAdminUserBillingProfile` returns
+      200 with an EMPTY profile (not 404) for an unknown user, so the test is "A sees an empty
+      profile / B sees a populated one" — seeded through real service HTTP deposit under B.
+- [x] self token → only its own `delegated_sub`; no `:user_id` reachable — same delegated-mint helper
+- [x] delegated `/v1/admin` (the #528 delegated admin surface) cross-merchant — same
+      delegated-mint dependency as `/self`. CORRECTION: standalone is MULTI-MERCHANT by design.
+      `ginboot.NewServer` leaves `configuredMerchant` ZERO, so the server resolves the merchant
+      PER-CREDENTIAL (API-key owner / delegated token issuer) — proven by THIS suite serving
+      merchants A and B through one standalone server. `configuredMerchant` is the EMBEDDED
+      single-merchant binding only (`embed.Options.Merchant`); it never pins standalone. (#528
+      retired the per-user operator `/admin`; `/admin` IS the delegated multi-merchant surface now.)
+- [x] API-key case green; the cornerstone multi-merchant surface is pinned
+- [x] Phase 2 suite green with real standalone HTTP + `openrails_app` RLS:
+      `go test -tags integration ./internal/integrationharness -run 'TestServiceTokenCrossMerchantIsolationHTTP|TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP|TestDelegatedAdminCrossMerchantIsolationHTTP|TestDelegatedSelfTokenSubjectIsolationHTTP' -count=1`
+
+### Phase 3 — bearer unification (ENG-REVIEW GATED; do not start without review)
+- [ ] Design `Principal{MerchantID, MerchantSource, CredentialType, Subject, Can(ctx, perm)}` + `Authenticate(bearer)` resolver (extend `resolveServiceCredential`)
+- [ ] Preserve both invariants: per-credential merchant-binding + live-vs-claim permission source
+- [ ] One `RequirePermission(perm)` gate calling `Principal.Can(ctx, perm)`
+- [ ] Rename public/operator terminology from service-token to API-key throughout
+      docs, CLI/help, route comments, and response fields where feasible. Keep
+      existing internal code names only as temporary compatibility/migration labels
+      until the auth boundary refactor can safely rename them.
+- [ ] Migrate `/service`
+- [ ] Migrate `/self`
+- [ ] Migrate `/admin` + `/admin/merchants`
+- [ ] Migrate `/me`
+- [ ] Migrate `/platform`
+- [ ] Delete superseded middleware families (admin-checker path, `ServiceTokenRequired`+gate, `DelegatedSelfRequired`/`DelegatedPrincipalRequired`+gate)
+- [ ] Do not start this refactor until the full Phase 2 isolation suite is green.
+- [ ] Phase 2 suite green before + after; per-tier auth tests still pass
+
+## Validation
+- Phase 2 cross-merchant suite green BEFORE and AFTER Phase 3.
+  - Current Phase 2 gate: `go test -tags integration ./internal/integrationharness -run 'TestServiceTokenCrossMerchantIsolationHTTP|TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP|TestDelegatedAdminCrossMerchantIsolationHTTP|TestDelegatedSelfTokenSubjectIsolationHTTP' -count=1`
+  - Existing remote-application harness gate: `go test -tags integration ./embed -run 'TestStandaloneRemoteApplicationAuth|TestMerchantControlBoundary' -count=1`
+- Existing per-tier auth tests still pass (no permission-semantics change).
+- No new public surface; per-credential merchant-binding semantics identical.
+
+## Related
+- #528 (delegated-admin convergence — same admin surface this builds on)
+- #227 (RLS merchant scoping — the backstop these tests + the unified resolver protect)
 
 ---
 
@@ -79,342 +317,23 @@ openrails intents log --merchant doujins --intent <uuid>
 
 ---
 
-# #532: Standardize CLI mutation flags: insert, overwrite, prune
-
-**Completed:** yes
-
-Several OpenRails CLI commands reconcile one source of truth into another. They should share the same operator safety model: by default, commands plan and report only. Mutations happen only when the operator explicitly enables the mutation class.
-
-## Target Semantics
-
-- No mutation flags: dry-run / plan-only. Print what would change and persist no changes unless a command has a separately documented read-only report side effect.
-- `--insert`: create missing records or provider objects.
-- `--overwrite`: update existing records or overwrite mutable/provider-owned fields.
-- `--prune`: remove, disable, archive, or tombstone records/objects absent from the declared or observed source.
-- Flags compose. Full reconcile-to-source is `--insert --overwrite --prune`.
-- Keep remote provider safety explicit: `pull-provider` still never mutates external processors; its flags only mutate the OpenRails local mirror/converged state.
-
-## Command Mapping
-
-- `openrails push-bootstrap`
-  - `--insert`: create missing initial platform/AuthKit/control-plane seed objects.
-  - `--overwrite`: update seeded authority fields, keys, permissions, or other mutable bootstrap-owned data.
-  - `--prune`: remove/disable bootstrap-owned objects absent from the bootstrap file, within a narrowly documented scope.
-
-- `openrails push-merchant-config`
-  - `--insert`: create missing merchants, profiles, issuer links, provider accounts, and secrets.
-  - `--overwrite`: update existing merchant config/profile/provider secret values.
-  - `--prune`: disable/delete config, secrets, or provider accounts absent from the manifest according to the provider-account safety rules.
-
-- `openrails push-merchant-catalog`
-  - `--insert`: create missing products, prices, tier groups, catalog metadata, and provider catalog objects.
-  - `--overwrite`: update existing OpenRails-owned catalog fields/provider catalog mappings.
-  - `--prune`: archive OpenRails-owned catalog extras absent from the desired catalog. Never touch foreign provider objects.
-
-- `openrails pull-provider`
-  - `--insert`: import provider-observed records missing locally.
-  - `--overwrite`: update existing local mirror rows from provider-observed truth.
-  - `--prune`: delete/tombstone/archive eligible local mirror rows attributed to the pulled provider account that are absent from the provider source.
-
-## Tasks
-
-- [x] Replace command-specific "dry-run unless --overwrite" wording with the shared mutation-flag contract.
-- [x] Add `--insert` to `pull-provider`; make current provider-missing materialization require `--insert`, not `--overwrite`.
-- [x] Change `pull-provider --overwrite` to update existing local mirror/derived local rows without importing provider-missing records.
-- [x] Make `pull-provider --prune` the explicit destructive opt-in for eligible provider-account-scoped excess rows; it does not require `--overwrite`.
-- [x] Update `push-merchant-config` to use `--insert --overwrite --prune` rather than "default seed-once plus overwrite/prune" as the public mental model.
-- [x] Update `push-merchant-catalog` so default is plan-only and writes require `--insert` and/or `--overwrite`; preserve `--prune` as archive-only for OpenRails-owned extras.
-- [x] Update `push-bootstrap`/`push-merchant-config` manual runs to default to plan-only; startup first-run behavior remains separately documented and insert-only.
-- [x] Add CLI help tests/smokes proving each command exposes the same mutation flags and dry-run default.
-- [x] Update `docs/operations.md` and examples/runbooks to show plan-only first, then explicit mutation flags.
-- [x] Cross-reference #533 so local mirror mutation logs and external provider mutation logs use consistent terms for planned/applied changes.
-
-Validation:
-
-- `go test ./pkg/catalog ./cmd/openrails ./internal/reconcile ./internal/bootstrap`
-- `go test -tags integration ./internal/integrationharness -run TestStandaloneMerchantCatalogApplyOptionsOverHTTP -count=1`
-- `go test ./...`
-
----
-
-# #531: Split bootstrap, merchant config, and catalog into separate CLI/file surfaces
-
-**Completed:** yes
-
-The current `push-merchant-config` direction is doing too much under one "bootstrap" concept. Separate the lifecycle surfaces so initial empty-DB provisioning can run all three, but normal operations can re-run only the part that changed.
-
-## Target Split
-
-1. **Platform/bootstrap authority**
-   - File: `/etc/openrails/bootstrap.yaml` or `/run/openrails/bootstrap.yaml`
-   - Command: `openrails push-bootstrap --file ...`
-   - Scope: initial OpenRails/AuthKit platform/control-plane authority only: instance issuer/JWKS/signing/public authority wiring, bootstrap administrative authority if needed, and other global control-plane seed state.
-   - Not merchant provider secrets.
-   - Not products/prices.
-   - Startup auto-run, if present, is first-run only and non-destructive.
-
-2. **Merchant config**
-   - File: `/etc/openrails/merchants.yaml` or `/run/openrails/merchants.yaml`
-   - Command: `openrails push-merchant-config --file ...`
-   - Scope: merchant rows/profile, merchant issuer ownership, provider accounts, provider credentials/secrets, webhook route instructions/docs, merchant-level operational settings.
-   - Uses the shared #532 mutation flags: default plan-only, `--insert`, `--overwrite`, and `--prune`.
-
-3. **Merchant catalog**
-   - File: `/etc/openrails/catalog.yaml` or `/run/openrails/catalog.yaml`
-   - Command: `openrails push-merchant-catalog --file ...`
-   - Scope: products, prices, tier groups, entitlements/catalog metadata, provider catalog push/links.
-   - Uses the shared #532 mutation flags. `--prune` means catalog-prune semantics only: archive OpenRails-owned provider/catalog extras absent from desired catalog.
-
-4. **Provider pull**
-   - No YAML file; provider APIs are the source of truth.
-   - Command: `openrails pull-provider --merchant ...`
-   - Scope: pull provider-observed state into OpenRails' local mirror, then converge local derived state.
-   - Uses the shared #532 mutation flags. It never mutates external processors.
-
-## Command Names
-
-Use these four operator-facing commands:
-
-```bash
-openrails push-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
-openrails push-merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml
-openrails push-merchant-catalog --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml
-openrails pull-provider --config /etc/openrails/config.yaml --merchant doujins --provider stripe
-```
-
-The first three are declarative file-backed push commands. They plan only unless `--insert`, `--overwrite`, or `--prune` is present. `pull-provider` is not file-backed; it reconciles from provider-observed state.
-
-Naming rationale: the file-backed commands push declared state into OpenRails-owned/external systems such as AuthKit/control-plane state, HashiCorp Vault or the DB secret backend, and remote provider catalog surfaces. `pull-provider` moves the opposite direction: provider-observed state back into OpenRails' local mirror.
-
-## Operations Manual
-
-Update `docs/operations.md` as the operator manual for running OpenRails. Do not create a root `OPERATIONS.md` unless the docs layout changes; this repo already keeps operational runbooks under `docs/`.
-
-The manual must document at least:
-
-- the four command surfaces:
-
-```bash
-openrails push-bootstrap --file /run/openrails/bootstrap.yaml
-openrails push-merchant-config --file /run/openrails/merchants.yaml
-openrails push-merchant-catalog --file /run/openrails/catalog.yaml
-openrails pull-provider --merchant doujins --provider stripe
-```
-
-- the default plan-only behavior when no mutation flags are supplied.
-- the shared mutation flags: `--insert`, `--overwrite`, `--prune`.
-- empty-DB/private standalone initialization order.
-- normal operational re-runs: config rotation, catalog changes, provider pull/reconcile.
-- the split between declarative file-backed `push-*` commands and provider-observed `pull-provider`.
-- the relation to #533: local mirror changes are reported by `pull-provider`; remote provider mutations are logged by provider-intent/convergence execution.
-
-## Target YAML Shapes
-
-### `bootstrap.yaml`
-
-Initial platform/control-plane authority only. Do not put merchant provider credentials, merchant profiles, products, or prices here. Runtime issuer/signing-key location remains infrastructure config/env, not bootstrap state.
-
-```yaml
-version: 1
-
-authority:
-  api_keys:
-    - name: openrails-bootstrap-admin
-      secret:
-        env: OPENRAILS_BOOTSTRAP_ADMIN_API_KEY
-      permissions:
-        - openrails:instance:admin
-
-  users:
-    - email: admin@example.com
-      password:
-        env: OPENRAILS_BOOTSTRAP_ADMIN_PASSWORD
-      permissions:
-        - openrails:instance:admin
-
-  remote_applications:
-    - issuer: https://ops.example.com
-      jwks_uri: https://ops.example.com/.well-known/jwks.json
-      audiences: [openrails]
-      permissions:
-        - openrails:instance:admin
-```
-
-### `merchants.yaml`
-
-Merchant identity, issuer ownership, browser origins, profile, provider accounts, and provider secrets only. The provider `account_id` should be discovered from credentials wherever possible; the manifest should not require it for providers with a reliable whoami/account endpoint.
-
-```yaml
-version: 1
-
-merchants:
-  - slug: doujins
-    display_name: Doujins
-
-    issuer:
-      uri: https://doujins.com
-      jwks_uri: https://doujins.com/.well-known/jwks.json
-      audiences: [openrails]
-      allowed_origins:
-        - https://doujins.com
-
-    profile:
-      display_name: Doujins
-      logo_url: https://doujins.com/assets/logo.png
-      from_email: billing@doujins.com
-      support_url: https://doujins.com/support
-
-    provider_accounts:
-      - provider_type: stripe
-        environment: live
-        mode: primary
-        secrets:
-          secret_key:
-            env: DOUJINS_STRIPE_SECRET_KEY
-          webhook_signing_secret:
-            env: DOUJINS_STRIPE_WEBHOOK_SECRET
-
-      - provider_type: nmi
-        environment: live
-        mode: secondary
-        secrets:
-          production_key:
-            env: DOUJINS_MOBIUS_PRODUCTION_KEY
-          tokenization_key:
-            env: DOUJINS_MOBIUS_TOKENIZATION_KEY
-          webhook_signing_secret:
-            env: DOUJINS_MOBIUS_WEBHOOK_SECRET
-```
-
-### `catalog.yaml`
-
-Products, prices, tier groups, entitlements, and provider catalog links only. No merchant profile, provider credentials, users, orgs, or API keys.
-
-```yaml
-version: 1
-
-catalogs:
-  - merchant: doujins
-
-    default_providers: [stripe, nmi]
-
-    tier_groups:
-      - slug: memberships
-        display_name: Memberships
-
-        products:
-          - slug: basic
-            display_name: Basic
-            description: Basic recurring membership.
-            tier_rank: 1
-            status: active
-            entitlements:
-              - access.basic
-
-            prices:
-              - currency: usd
-                unit_amount: 999
-                interval: month
-                interval_count: 1
-                provider_links:
-                  stripe:
-                    lookup_key: doujins-basic-monthly
-                  nmi:
-                    plan_id: doujins_basic_monthly
-
-          - slug: premium
-            display_name: Premium
-            description: Premium recurring membership.
-            tier_rank: 2
-            status: active
-            entitlements:
-              - access.basic
-              - access.premium
-
-            prices:
-              - currency: usd
-                unit_amount: 1999
-                interval: month
-                interval_count: 1
-                provider_links:
-                  stripe:
-                    lookup_key: doujins-premium-monthly
-                  nmi:
-                    plan_id: doujins_premium_monthly
-```
-
-## Initial Provisioning
-
-On an empty DB/private standalone install, an operator or init job may run all three in order:
-
-```bash
-openrails push-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml --insert
-openrails push-merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml --insert
-openrails push-merchant-catalog --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml --insert --overwrite
-```
-
-After initial provisioning, each command is run independently based on what changed. Do not make normal server restarts silently reconcile all three surfaces.
-
-## Tasks
-
-- [ ] Rename/restructure CLI commands as `push-bootstrap`, `push-merchant-config`, and `push-merchant-catalog` with no `apply` subcommand; mutation is controlled only by `--insert`, `--overwrite`, and `--prune`.
-- [ ] Split manifest structs/parsers/examples/docs into three files with no overlapping top-level keys.
-- [ ] Keep first-run startup auto-run limited to platform/bootstrap authority only, or require an explicit init mode/job to run all three. Do not run merchant config/catalog reconcile on every server boot.
-- [ ] Preserve manual mutation safety using the shared mutation flag contract from #532: default plan-only, `--insert`, `--overwrite`, and `--prune`.
-- [ ] Update `config/merchants.example.yaml`, `config/catalog.example.yaml`, and add/repair `config/bootstrap.example.yaml` so each file demonstrates only its own scope.
-- [ ] Update `docs/operations.md` to explain the four command surfaces, dry-run default, mutation flags, empty-DB initialization order, and later independent operational re-runs.
-- [ ] Add CLI tests proving each command rejects keys owned by the other manifest types.
-
----
-
-# #530: Bootstrap secrets must use runtime secret backend and provider-account-scoped attribution
-
-**Completed:** yes
-
-Current problem: runtime OpenRails can use a Vault-backed `MerchantSecretStore` when `vault.enabled: true`, but `push-merchant-config` currently builds `merchants.NewDBSecretStore(cp.Pool())` directly. That means a Vault-enabled deployment can import bootstrap provider secrets into the DB secret store while the running server expects them in Vault. Also, provider secrets are still broad merchant secret names like `stripe/secret_key`, which is not enough for multiple same-provider accounts or live/test separation.
-
-Security goal: bootstrap secret import and runtime secret reads must use the same backend and the same provider-account identity model. A secret imported for one merchant/provider account/environment must never be read or applied as another merchant/provider account/environment's credential.
-
-## Target Model
-
-- One secret-store selection function shared by runtime server construction, startup bootstrap, and manual `push-merchant-config`.
-- If `vault.enabled: true`, bootstrap writes imported provider secrets into OpenRails' canonical Vault paths, not DB.
-- If Vault is disabled, bootstrap writes into the DB-backed merchant secret store, with envelope encryption when configured.
-- Provider account identity includes `(merchant_id, provider_type, environment, account_id)`, where `environment` is `live` or `test`.
-- Provider account identity is discovered from credentials whenever possible before account registration:
-  - Stripe: `/v1/account`
-  - NMI/Mobius: profile/account identity
-  - CCBill: account/subaccount config until a better whoami exists
-  - Solana: public wallet/authority
-- Secrets should be stored/addressed in a way that cannot collide across multiple provider accounts of the same type for the same merchant. Broad names like `stripe/secret_key` are only safe for single-account compatibility and should not be the long-term primary addressing model.
-- Bootstrap file/secret material is seed input only. After import, OpenRails' canonical secret backend is runtime truth.
-
-## Tasks
-
-- [x] Extract a shared secret-store builder used by both standalone runtime wiring and `push-merchant-config` / startup bootstrap.
-- [x] Make `push-merchant-config` honor `config.vault.enabled`; Vault-enabled deployments must import provider secrets into Vault-backed `MerchantSecretStore`.
-- [x] Add integration coverage proving bootstrap import writes to Vault when Vault is enabled and runtime reads the same value from Vault.
-- [x] Add integration coverage proving DB-backed bootstrap still works and uses envelope encryption when configured.
-- [x] Add provider-account environment (`live|test`) to DB schema, generated queries, provider account upsert/find/list APIs, and relevant unique indexes.
-- [x] Change provider secret addressing to include provider account identity or provider account id, so multiple Stripe/NMI/etc accounts for one merchant cannot overwrite each other's credentials.
-- [x] Update bootstrap provider-account reconciliation to resolve account identity from credentials before writing/registering account rows; fail clearly if identity cannot be resolved for providers that require discovery.
-- [x] Ensure checkout/session stamping, provider intents, provider-pull, mirror rows, and webhook credential lookup all use the resolved provider account/environment and do not fall back across accounts.
-- [x] Update admin/merchant secret APIs to show/write provider-account-scoped secrets, not only broad merchant-level secret names.
-- [x] Update docs/examples/runbooks to explain seed material vs runtime secret backend, Vault import paths, and provider-account-scoped secret ownership.
-
-Validation:
-
-- `go test ./internal/modules/checkout`
-- `go test ./internal/modules/vault`
-- `go test -tags integration ./internal/bootstrap` (starts real Postgres and real HashiCorp Vault over HTTP; asserts KV-v2 secret import/read)
-- `go test -tags integration ./internal/bootstrap ./internal/merchants`
-- `go test ./...`
-
----
-
 # #528: Converge billing admin on the delegated model — retire per-user /v1/admin, rename /merchant-admin → /admin
 
-**Completed:** yes
+**Completed:** no
+
+**Actual-code audit (2026-06-19):** OpenRails side is complete. The delegated
+billing-admin surface is `/v1/admin/*`; composite user-detail includes
+subscriptions, entitlements, payments, payment methods, product access,
+multi-currency credit balances, and owed money; payment methods have an admin
+delete action; old dedicated admin reads/actions and the old live-admin catalog
+checker path are gone. **Still open only because host repos must update their
+OpenRails billing paths from `/v1/merchant-admin/*` to `/v1/admin/*`.**
+
+**Remaining-scope decision (2026-06-19):** admins MUST be able to inspect a user's
+multi-currency credit balances, owed money, and payment methods, and must be able
+to delete payment methods when needed. Do this in the composite admin user-detail
+plus explicit payment-method delete action; do not keep old processor-specific
+read endpoints. Unused old live-admin catalog/checker paths can be cleaned up.
 
 The per-user `/v1/admin` model is outdated. The correct model (same as #527's bootstrap): a merchant has an org + issuer in OpenRails' AuthKit; the issuer (host app) mints JWTs that grant ITS users permissions in OpenRails — a user reading/modifying their own billing (`openrails:self:*`), or an admin-user acting on another user (`openrails:merchant:*`). That is the **delegated** model, served today by `/v1/merchant-admin/*` (+ `/v1/self/*`). The per-user `openrails:admin` surface (`/v1/admin/*`, `HasAdminPermission(org,userID)` live check) assumes local users that the standalone model doesn't have.
 
@@ -433,7 +352,7 @@ The per-user `/v1/admin` model is outdated. The correct model (same as #527's bo
 
 **DECIDED:** hard cut (no alias, no old-route support); hosts updated later. Also redesign routes + request/response shapes while consolidating — minimal RESTful surface, only fields actually used, no theoretical/unused routes or fields.
 
-## Proposed minimal RESTful surface (REVIEW)
+## Historical proposed minimal RESTful surface (superseded by the resolution below)
 
 Single delegated admin surface at `/v1/admin/*` (`openrails:merchant:*` perms). Consolidations vs today in **bold**:
 
@@ -519,12 +438,12 @@ DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
 
 ### Increment 2 (drops) — DONE (commit a89ca887): dropped features' routes + dead per-user code removed; self handlers + product-access kept; build+vet+route tests green.
 - [x] Delete dead per-user `RegisterAdminRoutes` (internal/http/routes/routes.go) + `registerAdminRoutesAt`/`registerAdminRoutesOn` (internal/http/routes_admin.go).
-- [ ] **Before deleting each handler, grep its callers** — keep any still used by `/self` or `/service`; only delete admin-only ones.
-- [ ] `/provider-intents`: drop route + `httphandlers.GetAdminProviderIntents` (verify not used elsewhere).
-- [ ] `/reconcile/*` (#107): drop routes + `AdminReconcile{Run,ListRuns,GetRun,ListFindings,AckFinding,DismissFinding}`. Leave the underlying convergence-engine service/worker/migration 008 (non-admin paths) unless clearly admin-only — DECIDE + note.
-- [ ] `/recurring-plans` (#254): drop route + `AdminPublishSolanaPlan` + `publishSolanaPlanRequest` (internal/http/handlers/solana_recurring.go). Leave on-chain plan execution / webhook paths.
-- [ ] entitlement-features + `active_entitlements` (#245): delete `RegisterEntitlementFeatureRoutes` (internal/http/routes/entitlement_features.go) + handlers `Create/ListEntitlementFeatures`, `ServiceGetActiveEntitlements`, `List/Attach/DetachProductFeature`. Verify `ServiceGetActiveEntitlements` isn't used by `/self`.
-- [ ] Fix orphaned imports; remove/upd tests referencing dropped handlers. Build + vet + route tests green.
+- [x] **Before deleting each handler, grep its callers** — DONE (2026-06-19): kept lower-level `/self`, `/service`, worker, repo, and catalog-action code; removed only admin-only reads/actions.
+- [x] `/provider-intents`: drop route + `httphandlers.GetAdminProviderIntents` (verify not used elsewhere). DONE (2026-06-19): no handler/function/route remains; provider-intent DB/worker code stays live.
+- [x] `/reconcile/*` (#107): drop routes + `AdminReconcile{Run,ListRuns,GetRun,ListFindings,AckFinding,DismissFinding}`. DONE (2026-06-19): old admin-run handlers are gone; convergence/reconcile services, workers, migrations, and catalog item reconcile actions remain live and intentionally kept.
+- [x] `/recurring-plans` (#254): drop route + `AdminPublishSolanaPlan` + `publishSolanaPlanRequest` (internal/http/handlers/solana_recurring.go). DONE (2026-06-19): old admin plan-publish handler is gone; on-chain execution/webhook paths remain live.
+- [x] entitlement-features + `active_entitlements` (#245): delete `RegisterEntitlementFeatureRoutes` (internal/http/routes/entitlement_features.go) + handlers `Create/ListEntitlementFeatures`, `ServiceGetActiveEntitlements`, `List/Attach/DetachProductFeature`. DONE (2026-06-19): old route/handlers are gone; repo/sqlc code remains for internal product-access/feature data.
+- [x] Fix orphaned imports; remove/upd tests referencing dropped handlers. Build + vet + route tests green. DONE (2026-06-19): focused route/handler packages are green.
 
 ### Increment 3 (RESTful route shapes) — DONE (commit d0336be0)
 - [x] ginroutes/routes.go: subscription cancel `POST /subscriptions/:id/cancel` → `DELETE /subscriptions/:id` (handler `AdminCancelSubscription` unchanged).
@@ -537,17 +456,24 @@ DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
 > - composite user-detail + payment-methods + self-entitlements compose multiple services → DB-integration-test against dbtest/compose.
 - [x] New perm `PermMerchantProductAccessWrite = "openrails:merchant:product-access:write"` in internal/controlplane/catalog.go (const + merchantCatalog map + MerchantCatalogNames — placed beside its sibling `PermMerchantEntitlementsWrite`; merchant perms deliberately live in merchantCatalog, NOT catalogEntries).
 - [x] Port product-access WRITES to ginroutes/routes.go: `POST /admin/users/:user_id/product-access` (`GrantAdminProductAccess`) + `DELETE /admin/users/:user_id/product-access/:id` (`RevokeAdminProductAccess`), gated by the new perm. DB-validated by `tests/admin_product_access_test.go`: grant→201 (customer_id=userID, status active) → appears in composite product_access section → DELETE→200; + 403 gate without the perm. Handlers resolve the target by `path.UserID` (no federated-v7 bug — consistent with reads).
-- [x] Composite `GET /admin/users/:user_id` (`GetAdminUserBillingProfile`): now embeds `payment_methods[]` + `product_access[]` alongside `entitlements[]` (subscriptions/credit_balance sections still TODO). DB-validated by `TestAdminUserDetailComposite_Delegated` (asserts customer_id + entitlements + payment_methods + product_access sections present).
-- [ ] DROP dedicated reads (routes + handlers if now-unused): `GET /users/:id/entitlements`, `/product-access`, `/nmi`, `/nmi/metrics`, `/ccbill`, `/ccbill/metrics`.
-- [ ] `payment-methods`: combined `GET /admin/users/:user_id/payment-methods` folding NMI + CCBill (+ their metrics) into one shape (replaces the 4 dropped reads); also the embedded section in user-detail.
-- [x] Fold metrics → one `GET /admin/metrics` returning `{summary, revenue, subscriptions, processors, churn}`; 5 sub-routes removed. `GetAdminMetrics` composes the 5 analytics calls + generic `resolveMetricSection[T]` (single-currency → bare object; multi-currency needs `?currency` else 400). DB-validated (ClickHouse) by `TestAdminMetricsFolded` (all 5 sections) + `TestAdminMetrics_RequiresMetricsRead` (403 gate).
-- [ ] Self surface: embed caller's active entitlements in the `/v1/self/*` self-detail response (find the self-detail handler in ginroutes self-service + add entitlements section).
-- [ ] Shape trimming: per kept request/response struct, drop fields no consumer reads (ground in host frontend usage); collapse single-use nested objects; drop unused filter/pagination knobs.
-- [ ] DB-integration-test the composite + payment-methods + metrics shapes against the dbtest/compose harness.
+- [x] Composite `GET /admin/users/:user_id` (`GetAdminUserBillingProfile`, `internal/http/handlers/admin_users.go`): embeds `entitlements[]` + `payments[]` + `payment_methods[]` + `product_access[]` + `subscription` (single active). DB-validated by `TestAdminUserDetailComposite_Delegated`. The two remaining sections (`subscriptions[]`, `credit_balance[]`) are the two sub-items below.
+- [x] **`subscription` (single active) → `subscriptions[]` (ALL active).** DONE (2026-06-19): `GetAdminUserBillingProfile` now returns `subscriptions []models.Subscription` via `SubscriptionService.GetActiveSubscriptionsByUserID`; the legacy singular `subscription` field is gone. `TestAdminUserDetailComposite_Delegated` asserts `subscriptions` is present and `subscription` is absent.
+- [x] **`credit_balance[]` + owed-money section is REQUIRED.** DONE (2026-06-19): `MoneyService.ListBalancesForCustomer` lists every currency where the user has balance/settings/owed exposure, and the composite embeds `credit_balance[]` with `{currency,balance,held_balance,outstanding_owed_amount,...}`. `TestAdminUserDetailComposite_Delegated` asserts a funded currency plus an owed-only currency.
+- [x] DROP dedicated reads (routes + handlers if now-unused): `GET /users/:id/entitlements`, `/product-access` (admin), `/nmi`, `/nmi/metrics`, `/ccbill`, `/ccbill/metrics`. DONE (2026-06-19): unmounted the old admin reads from `RegisterAdminRoutes`, removed the dead NMI/CCBill/admin-entitlements/admin-product-access read handlers, and kept write actions plus composite user-detail.
+- [x] `payment_methods[]` admin visibility is REQUIRED, plus a delete action. DONE (2026-06-19): composite user-detail returns payment methods through the existing payment-method API DTO; `DELETE /admin/users/:user_id/payment-methods/:id` is gated by `openrails:merchant:payments:write` and refuses active/pending/past_due subscription-linked methods. `TestAdminUserPaymentMethodDelete_Delegated` validates delete + the composite no longer listing the method.
+- [x] Fold metrics → one `GET /admin/metrics` returning `{summary, revenue, subscriptions, processors, churn}`; 5 sub-routes removed. `GetAdminMetrics` composes the 5 analytics calls + generic `resolveMetricSection[T]` (single-currency → bare object; multi-currency needs `?currency` else 400 — this disambiguation is specific to metrics' SCALAR summaries; credit_balance above does NOT need it). DB-validated (ClickHouse) by `TestAdminMetricsFolded` (all 5 sections) + `TestAdminMetrics_RequiresMetricsRead` (403 gate).
+- [x] Self surface: caller's active entitlements ALREADY embedded — `GET /v1/self/status` (`GetMyBillingStatus`, `billing_status.go`) returns `BillingStatusResponse.Entitlements`; plus the dedicated `GET /v1/self/entitlements/active` (`SelfGetActiveEntitlements`). No further work unless we also want them in another self-detail shape.
+- [x] Shape trimming: DROPPED from #528 (2026-06-19). This is speculative DTO churn without a failing consumer; #528 now limits shape work to the required composite fixes (`subscriptions[]`, `credit_balance[]`, owed money, `payment_methods[]`, delete action) and deleted dead dedicated reads.
+- [x] DB-integration-test the composite (`subscriptions[]` + `credit_balance[]`/owed money + payment-method visibility) and admin payment-method delete against the dbtest/compose harness (extend `tests/admin_user_detail_integration_test.go`). DONE (2026-06-19): `go test ./tests -tags integration -run 'TestAdminUserDetailComposite_Delegated|TestAdminUserPaymentMethodDelete_Delegated|TestAdminSurface_RejectsWithoutBillingRead' -count=1` green.
 
-### Increment 5 (NEW capability — admin user search)
-- [ ] `GET /admin/users[?entitlement={slug}&limit=&cursor=]`: new handler `ListAdminUsers` + query (list billing users for the tenant, optional entitlement filter), each row embedding entitlement/product-access/credit summary. Minimal pagination.
-- [ ] New sqlc query (internal/db) or hand-written; gate with `read`. DB-integration-test the filter.
+### Increment 5 (admin user search) — DROPPED from #528 (2026-06-19, user decision)
+Cut from this issue. #528 is about CONVERGING the admin surface on the delegated model, not building a new search capability — bolting a net-new `GET /admin/users?entitlement=` search on here over-scoped it.
+
+Two DIFFERENT needs were conflated under "user search," neither belongs in #528, and BOTH are deferred (build when needed) — they live in **future.md** now (the old #108 was deleted):
+1. **OpenRails' own admin-dashboard user search** — a human operator browsing/filtering users in an OpenRails-hosted billing console. Embedded hosts (doujins/cozy-art/etc.) DON'T need this: they own their user tables and have their own admin UIs. Only useful once a STANDALONE OpenRails admin GUI exists (it doesn't yet). → folded into **#228** (future.md), the standalone admin-console plan; punt.
+2. **A host-facing "which of my users have entitlement X" query** — useful for BOTH embedded and standalone hosts; now ACTIVE (doujins needs it). → **#535** (progress.md) as the billing-enrichment FILTER provider behind AuthKit's directory, not an OpenRails admin-console search.
+
+Net: #528 ships the delegated admin surface (composite user-DETAIL by id) WITHOUT a user LIST/search. See **#535** (progress.md, active) for the reverse-query provider, and **#228** (future.md) for the standalone admin console.
 
 ### Cross-cutting cleanup
 - [x] **CRITICAL — migrate the `tests/` admin INTEGRATION suite to the delegated model. DONE (2026-06-19) — hard cut, per-user model fully removed.** All admin integration files now authenticate as a delegated merchant principal via `newHostSeamAdminRouter(t, suite, subject, []perms)` (host-seam `DelegatedPrincipalRequired`), hit the new `/v1/admin` paths, and assert the redesigned shapes. `go test ./tests/ -tags integration -run 'TestAdmin|TestRemoved'` is GREEN (57s, real Postgres+ClickHouse+Redis).
@@ -557,84 +483,11 @@ DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
     1. **Grant-target customer-resolution bug (real handler bug, fixed in `internal/http/handlers/entitlements.go`):** `GrantAdminEntitlement`'s delegated branch minted a federated `(issuer,subject)` v7 customer via `UpsertCustomerByIssuerSubject`, but the admin READ path (`GetAdminUserBillingProfile`→`identity.CustomerIDFromString(userID)`), off-channel payments (`RegisterPurchase`→`customerIDFromUser`), and seeds all key on the raw `userID` (#364 UUID-only). So an admin-granted entitlement landed on a DIFFERENT customer than the user's reads/payments — the admin couldn't see what they just granted, and append-after-latest-end couldn't see prior windows. Collapsed `tenantSubjectForEntitlementGrantTarget` to always resolve by `userID` (the #364 subject), identical to reads + commerce writers. This is exactly the "wrong assumption" #528 set out to remove.
     2. **Test-helper bit-rot vs the tenant→merchant rename:** `tests/seed_data.go` (products + prices) and `tests/db_helpers.go` (`entitlementCols`) still inserted/scanned a `tenant_id` column that no longer exists (schema uses `merchant_id`). Fixed all three.
     3. **RLS bit-rot:** `InsertEntitlement` (and `TestAdminRevokeAccess`) called RLS-aware `Runtime.DB` with a bare context. Made `InsertEntitlement` default the canonical test merchant when none is pinned (#336 single-merchant suite); pinned the merchant in `TestAdminRevokeAccess`.
-- [ ] Migrate admin-gated catalog reads (`internal/auth/policy.IsLiveAdmin` + the runtime `AdminChecker`, used to show inactive catalog rows to admins) off per-user `HasAdminPermission(org,userID)` to the delegated principal's perms. Then the per-user `PermAdmin`/`AdminPermissionChecker`/`AdminPermissionRequiredMW`/`HasAdminPermission` machinery can be deleted (controlplane/authority.go, auth/policy/admin*.go).
-- [ ] Docs + comment sweep (deferred from Increment 1): code comments referencing `/v1/merchant-admin` (internal/app/app.go, internal/http/routes_self.go, internal/http/server.go); docs (README.md, docs/api/endpoints.md, docs/principal-boundary-audit.md, docs/vault-secret-ops.md); rename test helper `newMerchantAdminRouter`→`newAdminRouter`.
+- [x] Migrate admin-gated catalog reads off the per-user model (self-contained, DB-testable). DONE (2026-06-19): public catalog `GET /products` and `GET /prices` no longer expose inactive rows through `IsLiveAdmin`; inactive/draft catalog management belongs to `/merchant/catalog/*`. Deleted `runtime.AdminChecker`, the `server.go` runtime wiring, and dead `policy.IsLiveAdmin` + tests. Kept `AdminPermissionChecker`/`AdminPermissionRequired*` because they are still real gates for merchant action routes and `/v1/admin/merchants`, not leftover billing-admin user-detail paths.
+- [x] Docs + comment sweep (deferred from Increment 1): DONE (2026-06-19). Current docs/comments now describe `/v1/admin/*` / `/billing/v1/admin/*` and `RegisterAdminRoutes`; only historical tracker notes/test names still use `merchant-admin` as old-state or conceptual wording.
 - [ ] (Later, separate repos) update host frontends (cozy-art/doujins/tensorhub): `/v1/merchant-admin/*`→`/v1/admin/*` paths + new shapes; cozy-art may switch any per-user `/v1/admin` billing calls to the delegated surface.
 
 **Verification each increment:** build + vet + route/unit tests, AND DB-integration tests via the `internal/dbtest` harness (testcontainers, or `OPENRAILS_TEST_DB_URL` against `docker-compose.yaml`); host-level e2e via `~/cozy/e2e` and the host repos' full-stack compose. (Earlier "not DB-testable" note was WRONG — corrected.)
-
----
-
-# #527: Unified merchant provisioning primitive and embedded auth hardening
-
-**Completed:** yes
-
-#527 originally carried the full bootstrap hard-cut design. Most of that work is now complete or intentionally moved into newer issues. Keep this issue focused on the remaining architectural seams that are still useful to clean up.
-
-## Current Model
-
-OpenRails owns authority; host applications own identity. A merchant is the logical unit that ties together:
-
-- the `openrails.merchants` row,
-- an optional AuthKit backing org + remote_application issuer owner for standalone/private deployments,
-- provider accounts and provider-account-scoped secrets,
-- merchant profile/configuration.
-
-Standalone provisioning is driven by `push-merchant-config` / startup first-run bootstrap. Embedded provisioning is driven by `embed.Options{Merchant, PaymentProviders, MerchantConfiguration}`. Both paths now share the OpenRails-owned `ProvisionMerchant` primitive instead of duplicating merchant setup across manifest code and embedded startup.
-
-## Superseded / Completed Elsewhere
-
-- Secret backend selection, Vault import, provider-account-scoped secret names, and runtime fail-closed secret reads are owned by #530.
-- Shared CLI mutation flags (`--insert`, `--overwrite`, `--prune`) are owned by #532.
-- `push-bootstrap`, `push-merchant-config`, `push-merchant-catalog`, and `pull-provider` command/file split is owned by #531.
-- Merchant profile/bootstrap shape cleanup is covered by #520/#521/#524 and the current `config/merchants.example.yaml`.
-- API-key/service-token terminology cleanup is covered by #525.
-- `/v1/admin` removal was retracted; embedded/standalone admin routing cleanup belongs to #528.
-- Destructive pruning of provider accounts/issuers/merchants is not required for this issue; treat it as future work unless we have an operator need.
-
-## Completed Scope
-
-- Added one `ProvisionMerchant` primitive that owns merchant setup for both standalone manifest and embedded startup.
-- Wired that primitive from `ReconcileMerchantManifestData` and from `embed.New`.
-- Preserved first-run-only behavior for standalone bootstrap; embedded startup does not use the first-run marker.
-- Hardened embedded HTTP construction so user/admin route groups cannot be mounted without an explicit auth boundary. Webhook-only mounts remain allowed without caller auth because they use provider signature/authentication.
-- Simplified issuer-to-merchant resolution to a direct unique `owner_org_id` lookup now that `owner_org_id` is DB-unique when non-null.
-- Kept docs/examples aligned with the single-entity merchant model.
-
-## Rollback Semantics
-
-AuthKit does not yet expose a fully tx-aware provision-org API across OpenRails merchant writes, so this issue should not pretend to provide a literal single SQL transaction across AuthKit and OpenRails. The practical target is:
-
-- one OpenRails `ProvisionMerchant` entry point,
-- one error boundary for standalone and embedded callers,
-- idempotent re-runs,
-- cleanup/compensating rollback where possible,
-- no split-brain steady state after a retry.
-
-If AuthKit later exposes tx-aware org/remote-application provisioning, `ProvisionMerchant` is the place to tighten this into a true single rollback unit.
-
-## Tasks
-
-- [x] Hard-cut manifest schema: `merchants[].issuer`, `provider_accounts[]`, `profile`; no `auth.*`, users, passwords, global roles, or top-level orgs.
-- [x] First-run marker: startup bootstrap checks `openrails.bootstrap_state` under the advisory lock and writes it only after successful apply.
-- [x] DB-enforced 1:1 for standalone merchants: nullable unique `owner_org_id`; merchant-less orgs and embedded ownerless merchants remain valid.
-- [x] Optional signing key / verify-only control plane: standalone can boot as verifier-only when no OpenRails signing key is mounted.
-- [x] Docs/example manifest use the single-entity merchant shape.
-- [x] Add shared `ProvisionMerchant` primitive for merchant row, optional issuer owner, profile, provider accounts, and provider secrets.
-- [x] Wire standalone manifest reconcile through `ProvisionMerchant`.
-- [x] Wire embedded `embed.Options{Merchant, PaymentProviders, MerchantConfiguration}` through `ProvisionMerchant`.
-- [x] Add fail-loud embedded auth-boundary checks for privileged route groups.
-- [x] Simplify `merchantForIssuer` to direct unique `owner_org_id` lookup.
-- [x] Add/refresh integration tests for standalone manifest provisioning, embedded provisioning parity, and missing-auth privileged embedded routes.
-
-## Validation
-
-Completed validation:
-
-- `go test -tags integration ./internal/bootstrap -count=1`
-- `go test -tags integration ./embed -count=1`
-- `go test ./internal/bootstrap ./internal/controlplane ./internal/http ./pkg/embedded/...`
-- `go test ./...`
 
 ---
 
@@ -967,46 +820,6 @@ Plan and implement OpenRails-owned USDC funding sessions for host apps that need
 - [x] Add provider adapter tests with mocked Coinbase responses.
 - [x] Add wallet-balance verification tests proving redirect alone is insufficient through status semantics and frontend polling contract.
 - [x] Document the host-app integration contract for Doujins in config.example.yaml and the tracker issue.
-
----
-
-
-# #108: admin-user-search
-
-**Completed:** no
-
-Sophisticated user search for admin dashboard
-
-## Metadata
-
-- Category: feature
-- Status: not_started
-- Passes: false
-
-**Tasks:**
-- STEPS:
-- [ ] Design search API:
-- [ ]   - GET /v1/admin/users?q=...&filters... - search users with billing data
-- [ ] Search fields:
-- [ ]   - email (partial match from subscriptions/payments)
-- [ ]   - user_id (exact match)
-- [ ]   - processor_subscription_id (exact match for support lookups)
-- [ ]   - transaction_id (exact match for payment support)
-- [ ] Filters:
-- [ ]   - has_subscription=true/false
-- [ ]   - subscription_status=active/cancelled/past_due/etc
-- [ ]   - processor=nmi/ccbill/solana
-- [ ]   - has_entitlement=premium/etc
-- [ ]   - created_after, created_before (date range)
-- [ ] Sorting:
-- [ ]   - sort_by=newest/oldest/last_payment/subscription_start
-- [ ] Pagination:
-- [ ]   - page, page_size, cursor-based pagination for large results
-- [ ] Performance:
-- [ ]   - Add database indexes for search fields
-- [ ]   - Consider full-text search for email
-- [ ]   - Rate limit search queries
-- NOTE: Billing service searches its own data. Full user profile search (username, etc) lives in main host-app API.
 
 ---
 

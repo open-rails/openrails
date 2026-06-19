@@ -93,7 +93,7 @@ const (
 	PermSelfWallets            = "openrails:self:wallets:manage"
 
 	// Merchant-admin (browser-direct) permissions (issue #259). These gate the
-	// `/v1/merchant-admin/users/:user_id/*` surface reached with a FEDERATED,
+	// `/v1/admin/users/:user_id/*` surface reached with a FEDERATED,
 	// TENANT-SIGNED delegated access token whose `delegated_sub` is the ACTING
 	// ADMIN. Unlike `openrails:self:*` (which act on the holder's OWN billing),
 	// a `openrails:merchant:*` token acts on ANY user WITHIN the token's tenant via
@@ -121,7 +121,7 @@ const (
 	PermMerchantSecretsTest        = "openrails:merchant:secrets:test"
 	// PermMerchantMetricsRead lets a merchant admin read THEIR OWN merchant's analytics
 	// metrics (revenue/subscriptions/processors/churn) via the browser-direct
-	// merchant-admin surface. The metrics are merchant-scoped at the query layer
+	// delegated admin surface. The metrics are merchant-scoped at the query layer
 	// (issue #232), so this only ever exposes the token's own tenant — never
 	// cross-tenant (that is the separate platform-superadmin path).
 	PermMerchantMetricsRead = "openrails:merchant:metrics:read"
@@ -198,7 +198,7 @@ func IsSelfPermission(perm string) bool {
 }
 
 // merchantCatalog is the set of merchant-admin permissions accepted on a FEDERATED
-// merchant-signed delegated access token for the `/v1/merchant-admin/*` surface
+// merchant-signed delegated access token for the `/v1/admin/*` surface
 // (issue #259). Exact-match, no wildcard. A token presenting any permission
 // outside selfCatalog ∪ merchantCatalog is rejected: browser tokens must never
 // carry operator/server-to-server grants.

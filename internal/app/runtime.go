@@ -47,25 +47,14 @@ type Runtime struct {
 	RedisClient *redis.Client
 	Config      *config.Config
 
-	// ConfiguredMerchant is construction-time state for embedded single-merchant
-	// hosts. It is deliberately not loaded from config.yaml/.env: standalone
-	// merchant authority lives in bootstrap/DB/AuthKit state.
+	// ConfiguredMerchant scopes this engine instance to one merchant — set by embedded
+	// hosts that run one engine per merchant. Zero in standalone, where the merchant is
+	// resolved per-credential. OpenRails is multi-merchant either way.
 	ConfiguredMerchant merchant.ID
 
 	// Processors is the temporary in-memory provider credential bridge for
 	// embedded/private construction. It is not loaded from config.yaml/.env.
 	Processors config.ProcessorSet
-
-	// AdminChecker, when set, evaluates the LIVE openrails:admin permission for a
-	// caller's OWN tenant (#312). It is used by mixed public/admin read endpoints
-	// (e.g. showing inactive catalog rows to admins). The control plane satisfies
-	// it; it is nil only for embedded hosts without one (admin reads then fail
-	// closed). Declared as an inline interface so this package does not import
-	// internal/auth/policy (which imports app via internal/http/request, which
-	// would cycle).
-	AdminChecker interface {
-		HasAdminPermission(ctx context.Context, tenantSlug, userID, perm string) (bool, error)
-	}
 
 	Clock            clockwork.Clock
 	HealthManager    *health.ServiceHealthManager

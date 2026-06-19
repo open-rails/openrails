@@ -27,7 +27,7 @@ type ID uuid.UUID
 // ErrNoMerchant is returned by Require when no merchant has been resolved onto
 // the context. It signals a programming/wiring error — every merchant-owned code
 // path must resolve a merchant first (HTTP middleware, host authenticator,
-// background-job enqueue, or the host's configured single merchant).
+// background-job enqueue, or the host's configured merchant).
 var ErrNoMerchant = errors.New("merchant: no merchant resolved on context")
 
 // UUID returns the underlying uuid.UUID for use in queries.

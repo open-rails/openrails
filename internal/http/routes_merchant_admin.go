@@ -51,7 +51,7 @@ func (s *Server) registerMerchantAdminRoutes(e *gin.Engine) {
 func merchantIDParam(c *gin.Context) (merchant.ID, bool) {
 	id, err := merchant.ParseID(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid merchant id"})
+		jsonError(c, http.StatusBadRequest, "invalid merchant id")
 		return merchant.ID{}, false
 	}
 	return id, true
@@ -61,13 +61,13 @@ func (s *Server) merchantProvisionHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req merchants.ProvisionRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			jsonError(c, http.StatusBadRequest, "invalid request body")
 			return
 		}
 		t, err := s.merchants.Provision(c.Request.Context(), req)
 		if err != nil {
 			log.WithError(err).Warn("merchant provision failed")
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			jsonError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, merchantView(t))
@@ -139,7 +139,7 @@ func (s *Server) merchantDeleteHandler() gin.HandlerFunc {
 		err := s.merchants.Delete(c.Request.Context(), id, merchants.DeleteOptions{Confirm: body.Confirm})
 		if err != nil {
 			if errors.Is(err, merchants.ErrExportRequired) {
-				c.JSON(http.StatusConflict, gin.H{"error": "export required before delete"})
+				jsonError(c, http.StatusConflict, "export required before delete")
 				return
 			}
 			s.merchantErr(c, err)
@@ -159,12 +159,12 @@ func (s *Server) merchantPutCredentialHandler() gin.HandlerFunc {
 			Value string `json:"value"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil || body.Value == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "value is required"})
+			jsonError(c, http.StatusBadRequest, "value is required")
 			return
 		}
 		name := strings.TrimPrefix(c.Param("name"), "/")
 		if strings.TrimSpace(name) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "credential name is required"})
+			jsonError(c, http.StatusBadRequest, "credential name is required")
 			return
 		}
 		sec, err := s.merchants.RotateCredential(c.Request.Context(), id, name, body.Value)
@@ -199,7 +199,7 @@ func (s *Server) merchantDeleteCredentialHandler() gin.HandlerFunc {
 		}
 		name := strings.TrimPrefix(c.Param("name"), "/")
 		if strings.TrimSpace(name) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "credential name is required"})
+			jsonError(c, http.StatusBadRequest, "credential name is required")
 			return
 		}
 		if err := s.merchants.DeleteCredential(c.Request.Context(), id, name); err != nil {
@@ -218,7 +218,7 @@ func (s *Server) merchantValidateCredentialHandler() gin.HandlerFunc {
 		}
 		name := strings.TrimPrefix(c.Param("name"), "/")
 		if strings.TrimSpace(name) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "credential name is required"})
+			jsonError(c, http.StatusBadRequest, "credential name is required")
 			return
 		}
 		var body struct {
@@ -242,10 +242,10 @@ func (s *Server) merchantTestStripeHandler() gin.HandlerFunc {
 		err := s.merchants.TestStripeCredential(c.Request.Context(), id, nil)
 		if err != nil {
 			if errors.Is(err, merchants.ErrSecretNotFound) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "no stripe secret key configured"})
+				jsonError(c, http.StatusBadRequest, "no stripe secret key configured")
 				return
 			}
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			jsonError(c, http.StatusBadGateway, err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -254,11 +254,11 @@ func (s *Server) merchantTestStripeHandler() gin.HandlerFunc {
 
 func (s *Server) merchantSecretErr(c *gin.Context, err error) {
 	if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "secret backend unavailable"})
+		jsonError(c, http.StatusServiceUnavailable, "secret backend unavailable")
 		return
 	}
 	if errors.Is(err, merchants.ErrSecretNotFound) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "secret not configured"})
+		jsonError(c, http.StatusBadRequest, "secret not configured")
 		return
 	}
 	s.merchantErr(c, err)
@@ -266,11 +266,11 @@ func (s *Server) merchantSecretErr(c *gin.Context, err error) {
 
 func (s *Server) merchantErr(c *gin.Context, err error) {
 	if errors.Is(err, merchants.ErrMerchantNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "merchant not found"})
+		jsonError(c, http.StatusNotFound, "merchant not found")
 		return
 	}
 	log.WithError(err).Warn("merchant admin operation failed")
-	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	jsonError(c, http.StatusInternalServerError, err.Error())
 }
 
 func merchantView(t *merchants.Merchant) gin.H {

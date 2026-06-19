@@ -46,7 +46,7 @@ func (s *Server) platformListMerchantsHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		m, err := s.platformMetrics.Compute(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			jsonError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"merchants": m.Merchants, "count": m.MerchantCount})
@@ -72,12 +72,12 @@ func (s *Server) platformSearchHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		q := strings.TrimSpace(c.Query("q"))
 		if q == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "q is required"})
+			jsonError(c, http.StatusBadRequest, "q is required")
 			return
 		}
 		results, err := s.merchants.SearchMerchants(c.Request.Context(), q, 50)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			jsonError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
 		views := make([]gin.H, 0, len(results))
@@ -92,7 +92,7 @@ func (s *Server) platformMetricsHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		m, err := s.platformMetrics.Compute(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			jsonError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, m)

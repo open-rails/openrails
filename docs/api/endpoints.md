@@ -1,7 +1,7 @@
 # OpenRails API Reference
 
 OpenRails exposes public catalog routes, delegated browser/self-service APIs,
-merchant-admin APIs, processor webhooks, and an API-key server-to-server
+delegated billing-admin APIs, processor webhooks, and an API-key server-to-server
 surface on the same public port. All responses are JSON encoded. Unless
 otherwise stated, errors follow the
 Stripe-style envelope:
@@ -39,8 +39,9 @@ List endpoints use a Stripe-like envelope:
 |---------|---------------------|
 | Public catalog (`/`, `/v1/products`, `/v1/prices`, `/v1/solana/tokens`, health probes) | No auth required |
 | Delegated self routes (`/v1/self/*`) | `Authorization: Bearer <delegated JWT>` signed by a registered issuer; token must carry OIDC `iss`, `sub` via AuthKit `delegated_sub`, accepted `aud`, and `openrails:self:*` permissions |
-| Delegated merchant-admin routes (`/v1/merchant-admin/*`) | Same delegated JWT shape, with `openrails:merchant:*` permissions |
-| Legacy user/admin routes (`/v1/checkout`, `/v1/me/*`, `/v1/admin/*`) | Host JWT auth where still mounted by the embedding deployment |
+| Delegated billing-admin routes (`/v1/admin/*`, except operator provisioning under `/v1/admin/merchants/*`) | Same delegated JWT shape, with `openrails:merchant:*` permissions |
+| User/session routes (`/v1/checkout`, `/v1/me/*`) | Host JWT auth where still mounted by the embedding deployment |
+| Operator merchant provisioning (`/v1/admin/merchants/*`) | Host JWT auth with `openrails:admin` |
 | Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <generated API key or first-party service JWT>`; each route requires an `openrails:*` permission (see Service API section) |
 | Webhooks (`/v1/webhooks/:provider`, `/v1/merchants/:merchant/webhooks/:provider`) | Provider-specific verification (see notes) |
 
@@ -59,9 +60,9 @@ Delegated JWT examples:
   `delegated_sub: "<canonical-user-id>"`, and permissions such as
   `openrails:self:billing:read`, `openrails:self:checkout:create`, or
   `openrails:self:subscriptions:cancel` for `/v1/self/*`.
-- Cozy Art merchant-admin membership UI: an admin browser token is signed by the
+- Cozy Art billing-admin membership UI: an admin browser token is signed by the
   Cozy issuer with `delegated_sub: "<admin-subject>"` and
-  `openrails:merchant:*` permissions for `/v1/merchant-admin/*`.
+  `openrails:merchant:*` permissions for `/v1/admin/*`.
 - Tensorhub merchant balance UI: Cozy Art can present a delegated JWT whose
   subject is the upstream merchant/company subject, with self billing permission,
   to read its own balance through browser/direct OpenRails routes. Backend

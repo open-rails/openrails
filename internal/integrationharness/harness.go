@@ -224,6 +224,18 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 // the real ServiceTokenRequired -> ResolveServiceToken -> AuthKit core chain
 // (#481 role-based merchant authz). No stubs.
 func (h *Harness) StartStandalone(currency string) *Surface {
+	return h.startStandalone(currency, h.DSN, "standalone")
+}
+
+// StartStandaloneRLS is StartStandalone with the server connected as openrails_app
+// (NOBYPASSRLS), so real per-merchant RLS constrains every query it runs. Fixtures
+// are still seeded via the super pool (h.sharedPool), which bypasses RLS.
+func (h *Harness) StartStandaloneRLS(currency string) *Surface {
+	_, appDSN := dbtest.SharedRLSPostgres(h.t)
+	return h.startStandalone(currency, appDSN, "standalone-rls")
+}
+
+func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 	h.t.Helper()
 
 	// The merchant directory row must exist before bootstrap links owner_org_id
@@ -235,7 +247,7 @@ func (h *Harness) StartStandalone(currency string) *Surface {
 		TestEnv: true,
 		Host:    "127.0.0.1",
 		Port:    0, // ephemeral; we serve via httptest below
-		DB:      &config.DBConfig{URL: h.DSN},
+		DB:      &config.DBConfig{URL: appDSN},
 		Auth: &config.AuthConfig{
 			// The control plane's own AuthKit issuer.
 			Issuer: "https://controlplane.openrails.test",
@@ -283,7 +295,7 @@ func (h *Harness) StartStandalone(currency string) *Surface {
 	h.t.Cleanup(srv.Close)
 
 	return &Surface{
-		Name:     "standalone",
+		Name:     name,
 		BaseURL:  srv.URL,
 		Token:    token,
 		h:        h,
@@ -303,6 +315,15 @@ type RemoteAppCaller struct {
 	// the principal's own key. Authority is STORED (assigned role/perms), never
 	// self-claimed.
 	Token string
+}
+
+// DelegatedCaller is a registered remote_application issuer plus a delegated
+// access token signed by that issuer. Present it to /v1/self/* or /v1/admin/*.
+type DelegatedCaller struct {
+	Slug    string
+	Issuer  string
+	Subject string
+	Token   string
 }
 
 // OwnedMerchant is an additional AuthKit-org-owned merchant fixture provisioned
@@ -434,6 +455,20 @@ func (s *Surface) MintUserAccessToken(username string) string {
 // the merchant via the existing #481 role-based authz. Pass role="" to provision
 // a principal with NO authority (the deny case).
 func (s *Surface) RegisterRemoteApplication(slug, ownerOrgSlug, role string) RemoteAppCaller {
+	return s.registerRemoteApplication(slug, ownerOrgSlug, role, nil)
+}
+
+// RegisterRemoteApplicationWithPermissionsClaim is the same JWKS-principal setup
+// as RegisterRemoteApplication, but includes an explicit permissions claim in
+// the self-token. AuthKit treats this as a down-scope request against STORED
+// authority, never as a widening grant; tests use this to prove self-claimed
+// permissions alone do not authorize a principal.
+func (s *Surface) RegisterRemoteApplicationWithPermissionsClaim(slug, ownerOrgSlug, role string, permissions []string) RemoteAppCaller {
+	perms := append([]string(nil), permissions...)
+	return s.registerRemoteApplication(slug, ownerOrgSlug, role, perms)
+}
+
+func (s *Surface) registerRemoteApplication(slug, ownerOrgSlug, role string, permissionsClaim []string) RemoteAppCaller {
 	h := s.h
 	require.NotNil(h.t, s.app, "RegisterRemoteApplication requires the standalone surface")
 	cp := embcp.Get(s.app)
@@ -470,13 +505,57 @@ func (s *Surface) RegisterRemoteApplication(slug, ownerOrgSlug, role string) Rem
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
 	token, err := authcore.MintRemoteApplicationAccessToken(h.ctx, issuer.Signer(), authcore.RemoteApplicationAccessParams{
-		Issuer:    issuer.URL(),
-		Audiences: []string{"openrails"},
-		TTL:       time.Hour,
+		Issuer:      issuer.URL(),
+		Audiences:   []string{"openrails"},
+		TTL:         time.Hour,
+		Permissions: permissionsClaim,
 	})
 	require.NoError(h.t, err, "mint remote_application self-token")
 
 	return RemoteAppCaller{Slug: slug, Issuer: issuer.URL(), Token: token}
+}
+
+// RegisterDelegatedCaller registers an AuthKit remote_application issuer for an
+// owner org and mints a delegated access token from it. The token's issuer maps
+// to the OpenRails merchant through the remote_application registry; the token's
+// delegated_sub remains the acting user/admin subject.
+func (s *Surface) RegisterDelegatedCaller(slug, ownerOrgSlug, subject string, permissions []string) DelegatedCaller {
+	h := s.h
+	h.t.Helper()
+	require.NotNil(h.t, s.app, "RegisterDelegatedCaller requires the standalone surface")
+	require.NotEmpty(h.t, strings.TrimSpace(subject), "delegated subject")
+	cp := embcp.Get(s.app)
+	require.NotNil(h.t, cp, "control plane attached")
+	core := cp.Core()
+	require.NotNil(h.t, core, "authkit core")
+
+	issuer := authtesting.NewTestIssuerWithAudience("openrails")
+	h.t.Cleanup(issuer.Close)
+
+	ownerOrg, err := core.ResolveOrgBySlug(h.ctx, ownerOrgSlug)
+	require.NoError(h.t, err, "resolve owner org")
+	_, err = core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
+		Slug:       slug,
+		OrgID:      ownerOrg.ID,
+		Issuer:     issuer.URL(),
+		Mode:       authcore.RemoteAppModeStatic,
+		PublicKeys: testIssuerRemoteAppKeys(h.t, issuer),
+		Audiences:  []string{"openrails"},
+		Enabled:    true,
+	})
+	require.NoError(h.t, err, "register delegated issuer")
+	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
+
+	token, err := authcore.MintDelegatedAccessToken(h.ctx, issuer.Signer(), authcore.DelegatedAccessParams{
+		Issuer:           issuer.URL(),
+		Audiences:        []string{"openrails"},
+		DelegatedSubject: subject,
+		Permissions:      append([]string(nil), permissions...),
+		TTL:              time.Hour,
+	})
+	require.NoError(h.t, err, "mint delegated access token")
+
+	return DelegatedCaller{Slug: slug, Issuer: issuer.URL(), Subject: subject, Token: token}
 }
 
 // RegisterServiceJWTIssuer registers a remote_application issuer for an org and

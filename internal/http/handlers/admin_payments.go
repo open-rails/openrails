@@ -252,6 +252,23 @@ func adminRefundMetadataString(metadata map[string]any, key string) string {
 	return str
 }
 
+// releaseAdminRefundReservation marks a refund reservation failed after the
+// provider-side refund could not be issued (intent-build error, an unexpected
+// processor reaching the issue stage, or a conflicting in-flight refund). A
+// failure to release is surfaced as 500 reservation_release_failed rather than
+// swallowed: a silently stranded `pending` reservation would otherwise block
+// this idempotency key from ever retrying. cause is the original trigger.
+func releaseAdminRefundReservation(ctx context.Context, paymentService *payments.PaymentService, reservationID uuid.UUID, cause error) error {
+	if err := paymentService.MarkFailed(ctx, reservationID); err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"reservation_id": reservationID,
+			"cause":          cause,
+		}).Error("admin refund: could not release reservation after refund error; reservation stranded in pending")
+		return adminRefundHTTPError(http.StatusInternalServerError, "reservation_release_failed")
+	}
+	return nil
+}
+
 // issuePreparedAdminRefund executes the provider-side money movement through
 // the intent ledger (#358 phase B): enqueue an admin-origin refund intent and
 // run it synchronously through the gate/execute/classify pipeline. The local
@@ -276,13 +293,24 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 	case processors.IsNMIBackedProcessor(prepared.payment.Processor):
 		providerTarget = prepared.payment.TransactionID
 	default:
-		_ = paymentService.MarkFailed(ctx, prepared.reservation.ID)
-		return nil, 0, adminRefundHTTPError(http.StatusBadRequest, fmt.Sprintf("refunds not supported for processor: %s", prepared.payment.Processor))
+		// Unreachable by construction: prepareAdminRefund already rejects CCBill
+		// and unsupported processors before a reservation exists. Reaching here
+		// means the issue-stage switch drifted from the prepare-stage guard —
+		// an internal invariant violation, not a user error.
+		cause := fmt.Errorf("processor %s reached refund issue stage unguarded", prepared.payment.Processor)
+		log.WithError(cause).WithField("payment_id", prepared.payment.ID).Error("admin refund: issue-stage processor switch drifted from prepare-stage guard")
+		if relErr := releaseAdminRefundReservation(ctx, paymentService, prepared.reservation.ID, cause); relErr != nil {
+			return nil, 0, relErr
+		}
+		return nil, 0, adminRefundHTTPError(http.StatusInternalServerError, "refund processing error")
 	}
 
 	intentType, provider, intentKey, err := intents.RefundIntentFor(prepared.payment, providerTarget, req.Amount, req.Reason)
 	if err != nil {
-		_ = paymentService.MarkFailed(ctx, prepared.reservation.ID)
+		log.WithError(err).WithField("payment_id", prepared.payment.ID).Warn("admin refund: building refund intent failed")
+		if relErr := releaseAdminRefundReservation(ctx, paymentService, prepared.reservation.ID, err); relErr != nil {
+			return nil, 0, relErr
+		}
 		return nil, 0, adminRefundHTTPError(http.StatusBadRequest, err.Error())
 	}
 
@@ -322,7 +350,10 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 		_ = json.Unmarshal(intent.Payload, &intentPayload)
 	}
 	if intentPayload.ReservationID != prepared.reservation.ID {
-		_ = paymentService.MarkFailed(ctx, prepared.reservation.ID)
+		cause := fmt.Errorf("content-addressed refund intent already bound to reservation %s", intentPayload.ReservationID)
+		if relErr := releaseAdminRefundReservation(ctx, paymentService, prepared.reservation.ID, cause); relErr != nil {
+			return nil, 0, relErr
+		}
 		if intent.Status == intents.StatusSucceeded {
 			return nil, 0, adminRefundHTTPError(http.StatusConflict, "an identical refund (same payment, amount and reason) was already issued")
 		}

@@ -41,9 +41,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Processors: r.Processors, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.IdempotencyCleanupWorker{Config: r.Config}); err != nil {
-		return fmt.Errorf("add idempotency cleanup worker: %w", err)
-	}
 	// Subscription liveness sync (#367): scheduled provider-truth convergence
 	// for SILENT lapsed subscriptions (active, period lapsed, no webhook
 	// either way). Read-only at the provider; converges through the normal
@@ -327,18 +324,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.SubscriptionLivenessArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 4 * time.Hour},
-			}
-		},
-		&river.PeriodicJobOpts{RunOnStart: true},
-	))
-
-	// Daily: Idempotency cleanup
-	jobs = append(jobs, river.NewPeriodicJob(
-		river.PeriodicInterval(24*time.Hour),
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.IdempotencyCleanupArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},

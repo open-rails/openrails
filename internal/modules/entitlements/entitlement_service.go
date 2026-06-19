@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -123,6 +124,28 @@ func (s *EntitlementService) ListActiveEntitlements(ctx context.Context, userID 
 
 func (s *EntitlementService) ListActiveEntitlementsByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]string, error) {
 	return s.repo.ListActiveEntitlementsByCustomer(ctx, tenantSubjectID, at)
+}
+
+// CustomersWithEntitlementMaxPageSize bounds a single reverse-lookup page; the
+// caller keyset-paginates (afterID) to walk larger result sets.
+const CustomersWithEntitlementMaxPageSize = 10000
+
+// ListCustomersWithEntitlement is the REVERSE entitlement lookup (#535): customer
+// ids holding an active window of `entitlement` for the request's merchant,
+// keyset-paginated by customer_id (afterID exclusive; uuid.Nil starts). Backs the
+// host directory's filter-by-entitlement (AuthKit's EntitlementFilterProvider).
+// limit <= 0 defaults to 1000; it is capped at CustomersWithEntitlementMaxPageSize.
+func (s *EntitlementService) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time, afterID uuid.UUID, limit int) ([]uuid.UUID, error) {
+	if strings.TrimSpace(entitlement) == "" {
+		return nil, fmt.Errorf("entitlement is required")
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	if limit > CustomersWithEntitlementMaxPageSize {
+		limit = CustomersWithEntitlementMaxPageSize
+	}
+	return s.repo.ListCustomersWithEntitlement(ctx, strings.TrimSpace(entitlement), at, afterID, int32(limit))
 }
 
 // GetByID retrieves an entitlement by its ID

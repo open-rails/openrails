@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
 	"sort"
@@ -306,7 +307,7 @@ func (s *Server) debugNMITokenization(c *gin.Context) {
 	if s.merchants != nil && !s.configuredMerchant.IsZero() {
 		tokenization, err := s.merchants.LoadNMITokenizationConfig(c.Request.Context(), s.configuredMerchant, provider)
 		if err != nil {
-			c.String(http.StatusInternalServerError, "load NMI tokenization config: %v", err)
+			jsonError(c, http.StatusInternalServerError, fmt.Sprintf("load NMI tokenization config: %v", err))
 			return
 		}
 		tokenizationKey = strings.TrimSpace(tokenization.TokenizationKey)
@@ -343,7 +344,7 @@ func (s *Server) debugNMITokenization(c *gin.Context) {
 
 	var buf bytes.Buffer
 	if err := debugNMITokenizationTemplate.Execute(&buf, data); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to render debug page"})
+		jsonError(c, http.StatusInternalServerError, "failed to render debug page")
 		return
 	}
 

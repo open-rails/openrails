@@ -1,11 +1,6 @@
 package policy
 
-import (
-	"context"
-	"strings"
-
-	"github.com/open-rails/openrails/pkg/authprovider"
-)
+import "context"
 
 // PermAdmin is the broad OpenRails admin capability evaluated live against the
 // caller's OWN tenant for admin routes (#312). It mirrors controlplane.PermAdmin
@@ -39,17 +34,4 @@ type AdminPermissionChecker interface {
 // in their own tenant) can never pass it.
 type PlatformSuperadminChecker interface {
 	HasPlatformSuperadmin(ctx context.Context, userID string) (bool, error)
-}
-
-// IsLiveAdmin reports whether the given UserContext holds the live openrails:admin
-// permission in its OWN tenant (#312). It is the soft-authorization helper used
-// by mixed public/admin read endpoints (e.g. showing inactive catalog rows to
-// admins). When checker is nil (an embedded host with no control plane) or the
-// caller carries no tenant context, it returns false — there is no
-// operator-tenant or DB-role fallback.
-func IsLiveAdmin(ctx context.Context, checker AdminPermissionChecker, uc authprovider.UserContext) (bool, error) {
-	if checker == nil || strings.TrimSpace(uc.UserID) == "" || strings.TrimSpace(uc.Org) == "" {
-		return false, nil
-	}
-	return checker.HasAdminPermission(ctx, uc.Org, uc.UserID, PermAdmin)
 }

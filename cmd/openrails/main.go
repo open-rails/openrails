@@ -188,9 +188,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
-	// Startup provisioning (#327): apply auth/merchant provisioning on every
-	// start. The apply is idempotent + additive, so it converges authority and
-	// merchant definitions without touching catalog/provider state.
+	// Startup bootstrap (#327/#531): if the conventional bootstrap manifest is
+	// mounted, apply control-plane authority on first run only. Merchant config
+	// and catalog reconciliation stay explicit CLI/init-job operations.
 	if err := applyStartupBootstrap(context.Background(), cfg, embeddedApp.App()); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("startup bootstrap: %w", err)

@@ -319,7 +319,10 @@ func registerCatalogActionRoutes(catalog router.Router) {
 	// reconciled (no catalog-list API), so it never appears in these surfaces.
 	catalog.Handle(http.MethodGet, "/drift", h(httphandlers.AdminListCatalogDrift))
 	catalog.Handle(http.MethodPost, "/drift/refresh", h(httphandlers.AdminRefreshCatalogDrift))
-	// reconcile-all is the spec-named alias for an on-demand synchronous pull.
+	// INTENTIONAL ALIAS (#534): /drift/reconcile-all is the spec-named on-demand
+	// synchronous pull and deliberately maps to the SAME AdminRefreshCatalogDrift
+	// handler as /drift/refresh — it is NOT a duplicate to reconcile away. If you
+	// ever split them, keep them permission-symmetric.
 	catalog.Handle(http.MethodPost, "/drift/reconcile-all", h(httphandlers.AdminRefreshCatalogDrift))
 	// /orphans is provider-filterable (?provider=stripe|nmi); /stripe/orphans is
 	// the operator-friendly convenience alias scoped to Stripe.

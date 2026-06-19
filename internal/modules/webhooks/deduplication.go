@@ -215,21 +215,3 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 
 	return nil
 }
-
-// GetFailedWebhooks retrieves webhooks that failed and can be retried
-// Not supported with TTL-based storage - failed webhooks expire automatically
-func (s *DeduplicationService) GetFailedWebhooks(ctx context.Context, processor models.Processor, limit int) ([]any, error) {
-	return []any{}, nil
-}
-
-func (s *DeduplicationService) CleanupOldWebhooks(ctx context.Context, retentionDays int) (int64, error) {
-	if retentionDays <= 0 {
-		return 0, fmt.Errorf("retentionDays must be > 0")
-	}
-
-	log.WithContext(ctx).WithFields(log.Fields{
-		"retentionDays": retentionDays,
-		"deletedRows":   0,
-	}).Info("Durable webhook dedupe cleanup skipped (Postgres backup removed)")
-	return 0, nil
-}

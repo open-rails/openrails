@@ -1,7 +1,6 @@
 package ginmw
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -84,7 +83,8 @@ func applyGinDecision(c *gin.Context, decision middleware.RateLimitDecision, cap
 	}
 	switch decision.Outcome {
 	case middleware.RateLimitTooLarge:
-		c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request payload too large"})
+		response.RequestEntityTooLarge(c, "request payload too large")
+		c.Abort()
 	case middleware.RateLimitCaptchaRequired:
 		writeCaptchaRequired(c, captchaConfig, decision.Bucket)
 	case middleware.RateLimitCaptchaInvalid:

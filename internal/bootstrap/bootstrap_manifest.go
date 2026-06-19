@@ -31,7 +31,7 @@ type BootstrapAuthorityManifest struct {
 	// BootstrapOrgSlug names the merchant/backing org whose OpenRails admin role
 	// should be seeded. OpenRails does not have a global admin org in this repo;
 	// admin authority is merchant-scoped, so the merchant must already exist.
-	BootstrapOrgSlug string `yaml:"bootstrap_org_slug"`
+	BootstrapOrgSlug   string `yaml:"bootstrap_org_slug"`
 	InitialAdminUserID string `yaml:"initial_admin_user_id,omitempty"`
 	// MintInitialServiceToken defaults true when omitted. Set false when the
 	// deploy will create admin access through another AuthKit path.

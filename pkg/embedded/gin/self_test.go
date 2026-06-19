@@ -15,7 +15,7 @@ import (
 )
 
 // These tests pin the EMBEDDED mount of the host-pluggable self surface
-// (#339/#467): newSelfHandler serves /billing/v1/self/* (and merchant-admin)
+// (#339/#467): newSelfHandler serves /billing/v1/self/* (and delegated admin)
 // at the canonical embedded paths, authenticated by the host-supplied
 // DelegatedAuthenticator, with the per-route permission gates intact.
 // They mirror the ginroutes host-principal tests but assert the EMBEDDED

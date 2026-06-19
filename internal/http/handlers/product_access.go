@@ -209,28 +209,7 @@ func ServiceGetUserProductAccess(r *httprequest.Request) {
 	r.JSON(http.StatusOK, productAccessResponses(r, grants))
 }
 
-// --- Admin (grant/revoke/list under /v1/admin/users/:user_id/product-access) ---
-
-// GetAdminUserProductAccess lists ALL of a user's grants (active + revoked) for
-// support/audit views.
-func GetAdminUserProductAccess(r *httprequest.Request) {
-	var path adminUserProductAccessPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	svc := productAccessService(r)
-	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
-		return
-	}
-	grants, err := svc.ListAllGrantsByUser(r.Request.Context(), path.UserID)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to list product access grants")
-		return
-	}
-	r.JSON(http.StatusOK, productAccessResponses(r, grants))
-}
+// --- Admin (grant/revoke under /v1/admin/users/:user_id/product-access) ---
 
 // GrantAdminProductAccess creates a durable product access grant for a user
 // (support comps / migrations / manual purchases). Idempotent at the service

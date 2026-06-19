@@ -20,6 +20,9 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -66,6 +69,21 @@ func TestAdminUserDetailComposite_Delegated(t *testing.T) {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
+	payer := identity.CustomerIDFromString(userID)
+	_, err := suite.App.Runtime.MoneyService.Deposit(mctx, money.DepositParams{
+		CustomerID: &payer,
+		Invoker:    userID,
+		Currency:   money.DefaultCurrency,
+		Amount:     1200,
+		Source:     "admin-user-detail-test",
+	})
+	require.NoError(t, err)
+	_, err = suite.App.Runtime.MoneyService.AccrueOwed(mctx, payer, "EUR", "usage", "admin-user-detail-"+uuid.NewString(), 700)
+	require.NoError(t, err)
+	seededBalances, err := suite.App.Runtime.MoneyService.ListBalancesForCustomer(mctx, payer)
+	require.NoError(t, err)
+	require.Len(t, seededBalances, 2)
+	pm := suite.CreateTestPaymentMethod(userID)
 
 	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/admin/users/%s", userID), nil)
 	req.Header.Set("Authorization", "Bearer host-credential")
@@ -81,8 +99,56 @@ func TestAdminUserDetailComposite_Delegated(t *testing.T) {
 	require.Len(t, ents, 1, "the seeded entitlement should appear in the composite")
 	_, ok = resp["payment_methods"]
 	require.True(t, ok, "composite must embed a payment_methods section")
+	methods, ok := resp["payment_methods"].([]any)
+	require.True(t, ok, "payment_methods must be an array: %s", w.Body.String())
+	require.Len(t, methods, 1)
+	require.Equal(t, api.FormatPaymentMethodID(pm.ID), methods[0].(map[string]any)["id"])
+	_, ok = resp["subscription"]
+	require.False(t, ok, "legacy singular subscription field should be gone: %s", w.Body.String())
+	subs, ok := resp["subscriptions"].([]any)
+	require.True(t, ok, "composite must embed subscriptions array: %s", w.Body.String())
+	require.Empty(t, subs)
+	creditBalances, ok := resp["credit_balance"].([]any)
+	require.True(t, ok, "composite must embed credit_balance: %s", w.Body.String())
+	require.Len(t, creditBalances, 2)
+	byCurrency := map[string]map[string]any{}
+	for _, item := range creditBalances {
+		row := item.(map[string]any)
+		byCurrency[row["currency"].(string)] = row
+	}
+	require.EqualValues(t, 1200, byCurrency[money.DefaultCurrency]["balance"])
+	require.EqualValues(t, 0, byCurrency[money.DefaultCurrency]["outstanding_owed_amount"])
+	require.EqualValues(t, 0, byCurrency["EUR"]["balance"])
+	require.EqualValues(t, 700, byCurrency["EUR"]["outstanding_owed_amount"])
 	_, ok = resp["product_access"]
 	require.True(t, ok, "composite must embed a product_access section")
+}
+
+func TestAdminUserPaymentMethodDelete_Delegated(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	admin := newHostSeamAdminRouter(t, suite, "b5555555-5555-4555-8555-555555555555",
+		[]string{controlplane.PermMerchantPaymentsWrite})
+
+	userID := uuid.New().String()
+	pm := suite.CreateTestPaymentMethod(userID)
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/v1/admin/users/%s/payment-methods/%s", userID, api.FormatPaymentMethodID(pm.ID)), nil)
+	req.Header.Set("Authorization", "Bearer host-credential")
+	w := httptest.NewRecorder()
+	admin.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	check := newHostSeamAdminRouter(t, suite, "b6666666-6666-4666-8666-666666666666",
+		[]string{controlplane.PermMerchantBillingRead})
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/admin/users/%s", userID), nil)
+	req.Header.Set("Authorization", "Bearer host-credential")
+	w = httptest.NewRecorder()
+	check.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp), w.Body.String())
+	methods, ok := resp["payment_methods"].([]any)
+	require.True(t, ok, "payment_methods must be an array: %s", w.Body.String())
+	require.Empty(t, methods)
 }
 
 // TestAdminSurface_RejectsWithoutDelegatedPrincipal confirms the delegated /admin

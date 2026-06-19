@@ -180,6 +180,18 @@ func (r *EntitlementRepo) ListActiveEntitlementsByCustomer(ctx context.Context, 
 	})
 }
 
+// ListCustomersWithEntitlement is the reverse lookup (#535): customer ids holding
+// an active window of `entitlement` for the RLS-pinned merchant, keyset-paginated
+// by customer_id (afterID exclusive; pass uuid.Nil to start).
+func (r *EntitlementRepo) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time, afterID uuid.UUID, limit int32) ([]uuid.UUID, error) {
+	return r.db.Gen(ctx).ListCustomersWithEntitlement(ctx, gen.ListCustomersWithEntitlementParams{
+		Entitlement: entitlement,
+		At:          at,
+		AfterID:     afterID,
+		Lim:         limit,
+	})
+}
+
 func (r *EntitlementRepo) ListActiveRecords(ctx context.Context, userID string, at time.Time) ([]models.Entitlement, error) {
 	tsid, err := ResolveCustomerID(userID)
 	if err != nil {

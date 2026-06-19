@@ -37,7 +37,7 @@ func newPushBootstrapCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "push-bootstrap",
 		Short: "Push OpenRails control-plane bootstrap authority from YAML",
-		Args:    validatePushBootstrapArgs,
+		Args:  validatePushBootstrapArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runPushBootstrap(cmd, opts)
 		},
@@ -175,7 +175,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 }
 
 // startupBootstrapLockKey is the pg_advisory_lock key serializing concurrent
-// startup auth/merchant bootstraps (#342). The apply is plan-then-execute with
+// startup control-plane bootstraps (#342). The apply is plan-then-execute with
 // no internal transaction, so simultaneous replica cold starts against an empty
 // control plane would each plan the same creates and race the inserts. Holding
 // this lock across plan+apply makes the second replica plan against the
