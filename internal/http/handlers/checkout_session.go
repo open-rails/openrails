@@ -52,6 +52,15 @@ type checkoutSessionCreateRequest struct {
 	SubscriptionID string `json:"subscription_id,omitempty" binding:"omitempty"`
 	// NewPriceID is required for the solana_tier_change mode: the price to change to.
 	NewPriceID string `json:"new_price_id,omitempty" binding:"omitempty"`
+
+	// SuccessURL / CancelURL are the post-checkout redirect targets for hosted
+	// Stripe Checkout. The frontend supplies them (it knows its own origin);
+	// #521 moved these off processor config and onto the request, but only the
+	// direct CheckoutRequest carried them — the session path (this struct) had
+	// no field, so the Stripe hosted flow always errored "success_url required".
+	// Optional here because non-Stripe processors (Solana, NMI, CCBill) don't use them.
+	SuccessURL string `json:"success_url,omitempty" binding:"omitempty,url"`
+	CancelURL  string `json:"cancel_url,omitempty" binding:"omitempty,url"`
 }
 
 type checkoutSessionConfirmRequest struct {
@@ -90,7 +99,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 			req.Metadata["e2e_run_id"] = e2eRunID
 		}
 	}
-	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{Processor: req.Payment.Processor, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
+	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{Processor: req.Payment.Processor, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
 	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
 	if err != nil {
 		log.WithError(err).Error("Failed to create checkout session")

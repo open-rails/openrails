@@ -51,6 +51,13 @@ type CheckoutSessionCreateRequest struct {
 	// TO. For a tier-change session this becomes the session's PriceID; PriceID in
 	// the request is ignored.
 	NewPriceID string
+
+	// SuccessURL / CancelURL are the post-checkout redirect targets for hosted
+	// Stripe Checkout, supplied by the caller (frontend, which knows its own
+	// origin). Empty for non-Stripe processors. Threaded onto the CheckoutRequest
+	// in initializeCheckoutSession; processStripeSubscription/Payment require them.
+	SuccessURL string
+	CancelURL  string
 }
 
 type CheckoutSessionConfirmPayment struct {

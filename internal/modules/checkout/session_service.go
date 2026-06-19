@@ -440,7 +440,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		return nil, fmt.Errorf("failed to create checkout session: %w", err)
 	}
 
-	if err := s.initializeSession(ctx, session, &req.Payment, user); err != nil {
+	if err := s.initializeSession(ctx, session, &req.Payment, req.SuccessURL, req.CancelURL, user); err != nil {
 		_ = s.MarkFailed(ctx, session.ID, err.Error(), "")
 		return nil, err
 	}
@@ -673,7 +673,7 @@ func (s *CheckoutSessionService) validateCCBillInput(payment *CheckoutSessionPay
 	return requireBillingFields(payment)
 }
 
-func (s *CheckoutSessionService) initializeSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
+func (s *CheckoutSessionService) initializeSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest, successURL, cancelURL string, user *UserIdentity) error {
 	if session == nil {
 		return fmt.Errorf("%w: session is required", ErrCheckoutSessionValidation)
 	}
@@ -688,9 +688,9 @@ func (s *CheckoutSessionService) initializeSession(ctx context.Context, session 
 	case processor == "solana":
 		return s.initializeSolanaSession(ctx, session, payment)
 	case processors.IsNMIBacked(processor):
-		return s.initializeCheckoutSession(ctx, session, payment, user)
+		return s.initializeCheckoutSession(ctx, session, payment, successURL, cancelURL, user)
 	case processor == "ccbill" || processor == "stripe":
-		return s.initializeCheckoutSession(ctx, session, payment, user)
+		return s.initializeCheckoutSession(ctx, session, payment, successURL, cancelURL, user)
 	default:
 		return fmt.Errorf("%w: unsupported processor", ErrCheckoutSessionValidation)
 	}
@@ -1372,7 +1372,7 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 	return out, nil
 }
 
-func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
+func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest, successURL, cancelURL string, user *UserIdentity) error {
 	if s.checkoutService == nil {
 		return fmt.Errorf("%w: checkout service unavailable", ErrCheckoutSessionValidation)
 	}
@@ -1382,6 +1382,8 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 		PaymentMethodID: payment.PaymentMethodID,
 		PaymentToken:    payment.PaymentToken,
 		Processor:       string(session.Processor),
+		SuccessURL:      successURL,
+		CancelURL:       cancelURL,
 		Metadata:        session.Metadata,
 		Email:           payment.Email,
 		FirstName:       payment.FirstName,
