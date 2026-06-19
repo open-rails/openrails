@@ -1,70 +1,16 @@
 version: 1
 
-# Apply with:
-#   openrails push-merchant-config --config config.yaml --file config/merchants.local-stack.example.yaml
+# OpenRails merchant provisioning (#527). Seeds merchants into Postgres + the
+# configured secret backend. Apply manually:
+#   openrails push-merchant-config --config config.yaml --file config/merchants.example.yaml
 #
-# This file is not runtime infrastructure config. It seeds AuthKit authority and
-# OpenRails merchant/provider state into Postgres and the configured merchant
-# secret backend.
+# There is NO auth/users section: OpenRails owns authority, the host app owns
+# identity. Each merchant declares its own host-app `issuer`, which is registered
+# as the OWNER of the merchant's backing org — the host app's delegated tokens
+# then fully administer THIS merchant only (and nothing else).
 #
-# Sensitive values appear in this manifest only as explicit provisioning inputs:
-# - AuthKit user passwords are literal plaintext or pre-hashed values.
-# - Merchant provider secrets should normally use {env: ...} or {file: ...}.
-# - {vault: ...} is reserved in the shape, but push-merchant-config does not
-#   read Vault secret-source references yet; use env or file for this release.
-
-auth:
-  users:
-    - ref: local_admin
-      username: local-admin
-      email: admin@local-stack.example
-      email_verified: true
-      password:
-        plaintext: change-me-before-use
-        reset_required: true
-
-  orgs:
-    - slug: local-stack
-      roles:
-        - name: openrails-admin
-          permissions:
-            - openrails:admin
-            - openrails:catalog:write
-            - openrails:merchant:configuration:write
-            - openrails:merchant:secrets:write
-            - openrails:merchant:secrets:test
-            - openrails:merchant:metrics:read
-
-      memberships:
-        - user_ref: local_admin
-          role: openrails-admin
-
-      # Remote applications/JWKS/public-key trust belongs here, not under
-      # merchants[]. A remote app can self-sign JWTs that AuthKit verifies
-      # against this JWKS, then OpenRails authorizes through the org permissions.
-      issuers:
-        - slug: local-stack-web
-          issuer: https://local-stack.example
-          jwks_uri: https://local-stack.example/.well-known/jwks.json
-          audiences: [openrails]
-          allowed_origins:
-            - https://local-stack.example
-          role: openrails-admin
-          permissions:
-            - openrails:catalog:write
-
-      # A bootstrap service token is minted once and written only if the output
-      # file is empty/missing. Keep this path under an ignored secrets directory.
-      service_tokens:
-        - name: local-stack-operator
-          permissions:
-            - openrails:admin
-            - openrails:catalog:write
-          resources:
-            - kind: openrails.merchant
-              id: local-stack
-          output:
-            file: ./.secrets/openrails/local-stack-operator.token
+# Secrets: {env: ...} or {file: ...} normally; {vault: ...} when a Vault backend
+# is wired. Values are stored encrypted at rest (per-merchant DEK), never hashed.
 
 merchants:
   - slug: local-stack
@@ -74,8 +20,16 @@ merchants:
     webhook_host: hooks.local-stack.example
     webhook_path: /v1/m/local-stack/webhooks
 
-    # owner_org_id is optional. When omitted, push-merchant-config creates or
-    # resolves an AuthKit org with the same slug as the merchant.
+    # Host-app JWKS trust → owner of this merchant. Prefer jwks_uri (AuthKit
+    # auto-refetches on key rotation); public_keys is the static alternative
+    # (mutually exclusive, manual rotation).
+    issuer:
+      uri: https://local-stack.example
+      jwks_uri: https://local-stack.example/.well-known/jwks.json
+      audiences: [openrails]
+      allowed_origins:
+        - https://local-stack.example
+
     profile:
       display_name: Local Stack Billing
       logo_url: https://local-stack.example/assets/logo.png
@@ -95,11 +49,7 @@ merchants:
             env: LOCAL_STACK_STRIPE_SECRET_KEY
           webhook_signing_secret:
             env: LOCAL_STACK_STRIPE_WEBHOOK_SECRET
-          webhook_signing_secret_thin:
-            env: LOCAL_STACK_STRIPE_THIN_WEBHOOK_SECRET
 
-      # NMI/Mobius: provider_type is nmi for provider-account identity and
-      # secrets. Catalog provider labels still use "mobius".
       - provider_type: nmi
         account_id: nmi-local-stack-profile
         provider_key: mobius_primary
@@ -111,8 +61,6 @@ merchants:
             env: LOCAL_STACK_MOBIUS_PRODUCTION_KEY
           tokenization_key:
             env: LOCAL_STACK_MOBIUS_TOKENIZATION_KEY
-          tokenization_url:
-            value: https://secure.nmi.com/token/Collect.js
           webhook_signing_secret:
             env: LOCAL_STACK_MOBIUS_WEBHOOK_SECRET
 

@@ -43,7 +43,7 @@ As a result, self-hosted instances only need to meet PCI compliance requirements
 | | **Standalone service** | **Embedded library** |
 |---|---|---|
 | Deployment | Separate HTTP service (own process, port `:3053`) | Compiled into your Go binary |
-| Your backend calls it via | HTTP (`/v1/service/*`, service token) | In-process function calls (`pkg/service`) or HTTP |
+| Your backend calls it via | HTTP (`/v1/service/*`, API key) | In-process function calls (`pkg/service`) or HTTP |
 | Your frontend calls it via | HTTP, browser-direct (`/v1/self/*`, delegated token) | HTTP routes mounted on **your** server, **your** credential |
 | Auth | OpenRails verifies tokens at its network edge | You hand OpenRails an identity; it never sees a credential |
 | Language requirement | None — any stack that speaks HTTP | Host must be Go |
@@ -74,7 +74,7 @@ The rule across both modes is: **one credential per trust domain.**
   belongs in the private OpenRails SaaS layer.)
   Identity claims that cross that boundary must be independently verifiable, so each caller
   class gets a credential scoped to exactly what it may do:
-  - your **backend** uses a **service token** (`openrails_st_...`) or a first-party OIDC
+  - your **backend** uses an **API key** (`openrails_st_...`) or a first-party OIDC
     service JWT — server-to-server, never sent to browsers;
   - your **frontend** uses a short-lived **delegated access token** that *your own backend*
     mints and signs — browser-direct, self-service-scoped.
@@ -136,12 +136,12 @@ The public API listens on `:3053`: user routes, the self-service surface, admin 
 webhooks, and the server-to-server `/v1/service/*` routes all share the port. See
 [docs/api/endpoints.md](docs/api/endpoints.md) for the full HTTP reference and
 [docs/merchant-provisioning.md](docs/merchant-provisioning.md) for creating your merchant and
-its first service token.
+its first API key.
 
-### 2. Backend integration (service tokens)
+### 2. Backend integration (API keys)
 
 Your backend authorizes its user however it normally does, then calls OpenRails
-server-to-server with its service token. The high-traffic surface is credits/usage:
+server-to-server with its API key. The high-traffic surface is credits/usage:
 
 ```bash
 # Pre-authorize + place a hold atomically before doing expensive work
@@ -156,9 +156,9 @@ curl -X POST https://openrails.example/v1/service/credits/holds/{id}/capture \
   -d '{"amount": 43000, "event_type": "chat.completion"}'
 ```
 
-Service tokens carry explicit permissions (`openrails:credits:write`,
+API keys carry explicit permissions (`openrails:credits:write`,
 `openrails:credits:read`, `openrails:catalog:write`, …) and are bound to your merchant —
-a token can never act on another merchant's data. Other `/v1/service/*` groups cover
+a key can never act on another merchant's data. Other `/v1/service/*` groups cover
 admission/rate-limiting (`/admit`, `/budget`, `/tier-policies`), account settings, credit
 windows, usage rollups, and the issuer registry used in the next step.
 
@@ -179,7 +179,7 @@ curl -X POST https://openrails.example/v1/service/merchant/issuers \
        "audiences": ["openrails"]}'
 ```
 
-The merchant is bound from your service token, so you can only register issuers for your own
+The merchant is bound from your API key, so you can only register issuers for your own
 merchant; issuer strings are globally unique, which is what makes cross-merchant token forgery
 impossible. `POST /v1/service/merchant/issuers/disable` is the per-issuer kill switch;
 key *rotation* is just re-`POST`ing with the new JWKS.
@@ -651,7 +651,7 @@ The next pull + Converge independently verifies reality converged.
 - **HTTP API reference:** [docs/api/endpoints.md](docs/api/endpoints.md)
 - **Operations manual:** [docs/operations.md](docs/operations.md) — provider consistency, the durability model, dunning, safety levers, and `openrails pull-provider` (dry-run by default; `--overwrite`/`--prune` + post-pull Converge): the manual batch truth-pull that overwrites the local mirror from the payment processors and converges local state (#107/#511; never writes to a provider).
 - **Entitlements model:** [docs/entitlements_timeline.md](docs/entitlements_timeline.md)
-- **Merchant provisioning & service tokens:** [docs/merchant-provisioning.md](docs/merchant-provisioning.md)
+- **Merchant provisioning & API keys:** [docs/merchant-provisioning.md](docs/merchant-provisioning.md)
 - **Testing with business time:** [docs/business-time.md](docs/business-time.md)
 - More runbooks (Solana, NMI/Mobius sandbox, vault secrets, reconciliation) under `docs/`.
 

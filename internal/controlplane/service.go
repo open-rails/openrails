@@ -88,13 +88,25 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 	// core.NewFromConfig auto-discovers internally and we'd have no handle on the
 	// active signer; in dev it could even generate a different key on a second
 	// call.) Discovery priority is unchanged: env -> /vault/auth -> dev-generated.
-	keySource, err := jwtkit.NewAutoKeySource()
-	if err != nil {
-		return nil, fmt.Errorf("controlplane: discover signing keys: %w", err)
+	//
+	// The signing key is OPTIONAL (#527/#87): when no key is discoverable (the
+	// prod no-key case — dev still auto-generates), the control plane runs as a
+	// pure VERIFIER instead of failing the boot. It verifies inbound host-app
+	// delegated tokens and serves RBAC, but cannot MINT tokens (mint paths return
+	// authkit ErrMissingSigner). This is the expected posture for a standalone
+	// deployment with no login-capable users; mounting a key (env/vault) re-enables
+	// minting automatically. Key presence is the enablement signal — no separate knob.
+	keySource, keyErr := jwtkit.NewAutoKeySource()
+	verifyOnly := false
+	if keyErr != nil {
+		log.WithError(keyErr).Warn("controlplane: no signing key discovered; running VERIFY-ONLY (token minting disabled)")
+		keySource = nil
+		verifyOnly = true
 	}
 
 	coreCfg := authcore.Config{
 		Keys:               keySource,
+		VerifyOnly:         verifyOnly,
 		Issuer:             issuer,
 		BaseURL:            issuer,
 		IssuedAudiences:    []string{"openrails"},

@@ -29,22 +29,39 @@ type MerchantManifest struct {
 }
 
 type ManifestMerchant struct {
-	Slug             string                    `yaml:"slug"`
-	Name             string                    `yaml:"name"`
-	BillingTier      string                    `yaml:"billing_tier"`
-	Region           string                    `yaml:"region"`
-	WebhookHost      string                    `yaml:"webhook_host"`
-	WebhookPath      string                    `yaml:"webhook_path"`
+	Slug        string `yaml:"slug"`
+	Name        string `yaml:"name"`
+	BillingTier string `yaml:"billing_tier"`
+	Region      string `yaml:"region"`
+	WebhookHost string `yaml:"webhook_host"`
+	WebhookPath string `yaml:"webhook_path"`
+	// Issuer is the host application's JWKS/public-key trust for THIS merchant
+	// (#527). When set, it is registered as a remote_application and made the
+	// `owner` of the merchant's backing org, so the host app's delegated tokens
+	// fully administer this merchant — and only this merchant. Optional: a
+	// merchant with no issuer (e.g. embedded mode, where the host authenticates
+	// in-process) is still provisioned with its backing org.
+	Issuer           *ManifestIssuer           `yaml:"issuer,omitempty"`
 	Profile          ManifestMerchantProfile   `yaml:"profile,omitempty"`
 	ProviderAccounts []ManifestProviderAccount `yaml:"provider_accounts,omitempty"`
-	// OwnerOrgID is the AuthKit org uuid that owns this merchant namespace
-	// (#500 ownership link). Optional in the manifest: when empty,
-	// push-merchant-config creates/resolves an AuthKit org with the same slug as
-	// the merchant.
-	OwnerOrgID string `yaml:"owner_org_id"`
-	// Issuers is rejected during validation. Issuer/JWKS trust belongs in the
-	// top-level auth.orgs[].issuers AuthKit bootstrap section.
-	Issuers []any `yaml:"issuers,omitempty"`
+}
+
+// ManifestIssuer declares the host-app issuer trusted for a merchant. Provide
+// exactly one trust source: jwks_uri (preferred — AuthKit auto-refetches on
+// key rotation) or public_keys (static PEMs, manual rotation).
+type ManifestIssuer struct {
+	// URI is the issuer's `iss` value (the host app's token issuer URL).
+	URI string `yaml:"uri"`
+	// JWKSURI is the issuer's JWKS endpoint. Mutually exclusive with PublicKeys.
+	JWKSURI string `yaml:"jwks_uri,omitempty"`
+	// PublicKeys are static verification keys (PEM). Mutually exclusive with JWKSURI.
+	PublicKeys []authcore.RemoteAppKey `yaml:"public_keys,omitempty"`
+	// Audiences the issuer's tokens must carry (defaults to ["openrails"]).
+	Audiences []string `yaml:"audiences,omitempty"`
+	// AllowedOrigins is the browser Origin allow-list for delegated requests.
+	AllowedOrigins []string `yaml:"allowed_origins,omitempty"`
+	// Slug overrides the remote_application slug (defaults to "<merchant>-app").
+	Slug string `yaml:"slug,omitempty"`
 }
 
 type ManifestMerchantProfile struct {
@@ -73,7 +90,21 @@ type ManifestSecretSource struct {
 	Vault string `yaml:"vault,omitempty"`
 }
 
-type MerchantManifestReconcileOptions struct{}
+// MerchantManifestReconcileOptions selects the apply tier (#527). The default
+// (both false) is additive + seed-once. Startup provisioning always uses the
+// default; the destructive tiers are opt-in via the CLI and never run on boot.
+type MerchantManifestReconcileOptions struct {
+	// Overwrite re-asserts manifest values over existing state. Without it,
+	// SECRETS are seed-once: a secret already present is left untouched, so a
+	// value rotated out of band (via the admin API) is never reverted to the
+	// manifest seed. Merchant/org/issuer/profile are idempotently ensured either
+	// way (they are declarative identity, not rotated out of band).
+	Overwrite bool
+	// Prune deletes secrets that exist for a manifest merchant but are absent
+	// from the manifest, reconciling the secret set to the file. Provider-account
+	// and issuer removal stay reversible/manual and are not pruned here.
+	Prune bool
+}
 
 // ReconcileMerchantManifestData provisions the merchants, service-JWT grants, and
 // issuers declared by a merchant manifest. It is the single merchant-provisioning
@@ -110,18 +141,17 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 	}
 
 	for _, mt := range manifest.Merchants {
-		ownerOrgID := strings.TrimSpace(mt.OwnerOrgID)
-		if ownerOrgID == "" {
-			org, err := ensureManifestOwnerOrg(ctx, cp, mt.Slug)
-			if err != nil {
-				return fmt.Errorf("merchant bootstrap: ensure owner org for %q: %w", mt.Slug, err)
-			}
-			ownerOrgID = org.ID
+		// #527: each merchant has a dedicated backing org (slug-derived, 1:1). When
+		// the merchant declares an issuer, it is registered as the org OWNER so the
+		// host app's delegated tokens fully administer this one merchant.
+		org, err := provisionMerchantOrg(ctx, cp, mt)
+		if err != nil {
+			return fmt.Errorf("merchant bootstrap: provision backing org/issuer for %q: %w", mt.Slug, err)
 		}
 		tn, err := svc.Provision(ctx, merchants.ProvisionRequest{
 			Slug:        mt.Slug,
 			Name:        mt.Name,
-			OwnerOrgID:  ownerOrgID,
+			OwnerOrgID:  org.ID,
 			BillingTier: mt.BillingTier,
 			Region:      mt.Region,
 			WebhookHost: mt.WebhookHost,
@@ -134,7 +164,7 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 			"merchant":    tn.Slug,
 			"merchant_id": tn.ID.String(),
 		}).Info("merchant bootstrap: merchant ensured")
-		if err := reconcileManifestMerchantConfiguration(ctx, cfg, cp, tn.ID, mt, secretStore); err != nil {
+		if err := reconcileManifestMerchantConfiguration(ctx, cfg, cp, tn.ID, mt, secretStore, opts); err != nil {
 			return fmt.Errorf("merchant bootstrap: configure %q: %w", mt.Slug, err)
 		}
 	}
@@ -144,7 +174,7 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 	return nil
 }
 
-func reconcileManifestMerchantConfiguration(ctx context.Context, _ *config.Config, cp *controlplane.ControlPlane, merchantID merchant.ID, mt ManifestMerchant, secretStore merchants.MerchantSecretStore) error {
+func reconcileManifestMerchantConfiguration(ctx context.Context, _ *config.Config, cp *controlplane.ControlPlane, merchantID merchant.ID, mt ManifestMerchant, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) error {
 	mctx := merchant.WithID(ctx, merchantID)
 	database, err := db.NewWithPGXPool(cp.Pool().Raw(), cp.Pool().Schema())
 	if err != nil {
@@ -172,9 +202,45 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, _ *config.Confi
 	}
 
 	for _, account := range mt.ProviderAccounts {
-		if err := reconcileManifestProviderAccount(ctx, database, merchantID, account, secretStore); err != nil {
+		if err := reconcileManifestProviderAccount(ctx, database, merchantID, account, secretStore, opts); err != nil {
 			return err
 		}
+	}
+	if opts.Prune {
+		if err := pruneManifestSecrets(ctx, merchantID, mt, secretStore); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pruneManifestSecrets deletes secrets held for the merchant that the manifest
+// no longer declares (#527 --prune), reconciling the stored secret set to the
+// file. Names are derived exactly as Put derives them.
+func pruneManifestSecrets(ctx context.Context, merchantID merchant.ID, mt ManifestMerchant, secretStore merchants.MerchantSecretStore) error {
+	declared := map[string]struct{}{}
+	for _, account := range mt.ProviderAccounts {
+		providerType := strings.ToLower(strings.TrimSpace(account.ProviderType))
+		for key := range account.Secrets {
+			name, err := merchantSecretName(providerType, key)
+			if err != nil {
+				return err
+			}
+			declared[name] = struct{}{}
+		}
+	}
+	existing, err := secretStore.List(ctx, merchantID)
+	if err != nil {
+		return fmt.Errorf("list merchant secrets for prune: %w", err)
+	}
+	for _, name := range existing {
+		if _, ok := declared[name]; ok {
+			continue
+		}
+		if err := secretStore.Delete(ctx, merchantID, name); err != nil {
+			return fmt.Errorf("prune secret %s: %w", name, err)
+		}
+		log.WithField("secret", name).Info("merchant bootstrap: pruned secret absent from manifest")
 	}
 	return nil
 }
@@ -187,7 +253,7 @@ func hasManifestProfile(p ManifestMerchantProfile) bool {
 		strings.TrimSpace(p.SupportEmail) != ""
 }
 
-func reconcileManifestProviderAccount(ctx context.Context, database *db.DB, merchantID merchant.ID, account ManifestProviderAccount, secretStore merchants.MerchantSecretStore) error {
+func reconcileManifestProviderAccount(ctx context.Context, database *db.DB, merchantID merchant.ID, account ManifestProviderAccount, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) error {
 	providerType := strings.ToLower(strings.TrimSpace(account.ProviderType))
 	if providerType == "" {
 		return fmt.Errorf("provider account provider_type is required")
@@ -196,6 +262,15 @@ func reconcileManifestProviderAccount(ctx context.Context, database *db.DB, merc
 		name, err := merchantSecretName(providerType, key)
 		if err != nil {
 			return err
+		}
+		// Seed-once (#527): unless --overwrite, leave an already-present secret
+		// untouched so a value rotated out of band is never reverted to the seed.
+		if !opts.Overwrite {
+			if _, gerr := secretStore.Get(ctx, merchantID, name); gerr == nil {
+				continue
+			} else if !errors.Is(gerr, merchants.ErrSecretNotFound) {
+				return fmt.Errorf("check secret %s: %w", name, gerr)
+			}
 		}
 		value, err := source.Resolve()
 		if err != nil {
@@ -373,26 +448,54 @@ func stringPtrIfNotEmpty(v string) *string {
 	return &v
 }
 
-func ensureManifestOwnerOrg(ctx context.Context, cp *controlplane.ControlPlane, slug string) (*authcore.Org, error) {
-	slug = strings.ToLower(strings.TrimSpace(slug))
+// provisionMerchantOrg ensures the merchant's dedicated backing org exists and,
+// when the merchant declares an issuer, registers it as the org OWNER (wildcard
+// authority over this one merchant). The org slug is derived deterministically
+// from the merchant slug (1:1 backing org). Idempotent: re-applying converges
+// the org + issuer state. (#527)
+func provisionMerchantOrg(ctx context.Context, cp *controlplane.ControlPlane, mt ManifestMerchant) (*authcore.Org, error) {
+	slug := strings.ToLower(strings.TrimSpace(mt.Slug))
 	if slug == "" {
-		return nil, fmt.Errorf("owner org slug is required")
+		return nil, fmt.Errorf("merchant slug is required")
 	}
-	org, err := cp.Core().ResolveOrgBySlug(ctx, slug)
-	if err == nil {
-		return org, nil
+	req := authcore.OrgProvisionRequest{Slug: slug}
+	if mt.Issuer != nil {
+		req.Issuers = []authcore.OrgProvisionIssuer{manifestIssuerToProvision(slug, mt.Issuer)}
 	}
-	if !errors.Is(err, authcore.ErrOrgNotFound) {
+	res, err := cp.Core().ProvisionOrg(ctx, req, nil)
+	if err != nil {
 		return nil, err
 	}
-	org, err = cp.Core().CreateOrg(ctx, slug)
-	if err == nil {
-		return org, nil
+	return &res.Org, nil
+}
+
+// manifestIssuerToProvision maps a merchant's manifest issuer onto an AuthKit
+// remote_application registration, assigning it the `owner` role on the
+// merchant's org (#527: the issuer IS the merchant owner — full authority, but
+// scoped to this merchant alone since federated authority claims are stripped).
+func manifestIssuerToProvision(merchantSlug string, iss *ManifestIssuer) authcore.OrgProvisionIssuer {
+	appSlug := strings.TrimSpace(iss.Slug)
+	if appSlug == "" {
+		appSlug = merchantSlug + "-app"
 	}
-	if !errors.Is(err, authcore.ErrOwnerSlugTaken) {
-		return nil, err
+	mode := authcore.RemoteAppModeJWKS
+	if len(iss.PublicKeys) > 0 {
+		mode = authcore.RemoteAppModeStatic
 	}
-	return cp.Core().ResolveOrgBySlug(ctx, slug)
+	audiences := cleanStrings(iss.Audiences)
+	if len(audiences) == 0 {
+		audiences = []string{"openrails"}
+	}
+	return authcore.OrgProvisionIssuer{
+		Slug:           appSlug,
+		Issuer:         strings.TrimSpace(iss.URI),
+		JWKSURI:        strings.TrimSpace(iss.JWKSURI),
+		Mode:           mode,
+		PublicKeys:     iss.PublicKeys,
+		Audiences:      audiences,
+		AllowedOrigins: cleanStrings(iss.AllowedOrigins),
+		Role:           "owner",
+	}
 }
 
 func lockMerchantManifestBootstrap(ctx context.Context, cp *controlplane.ControlPlane) error {

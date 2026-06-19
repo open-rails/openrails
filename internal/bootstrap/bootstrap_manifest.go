@@ -7,27 +7,28 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
-	authcore "github.com/open-rails/authkit/core"
 )
 
 const (
 	// DefaultBootstrapManifestPath is the conventional mounted bootstrap
-	// provisioning file location for containers and Linux deployments. It
-	// contains auth + merchant definitions only; catalog state lives in the
-	// separate catalog manifest.
+	// provisioning file location for containers and Linux deployments.
 	DefaultBootstrapManifestPath = "/etc/openrails/bootstrap.yaml"
 	BootstrapManifestVersion     = 1
 )
 
-// BootstrapManifest is the auth/merchant declarative provisioning document. It
-// is intentionally separate from config.yaml: config.yaml describes runtime
-// infrastructure, while this file describes desired AuthKit authority and
-// OpenRails merchant state. Catalog state is pushed by
+// BootstrapManifest is OpenRails' declarative merchant-provisioning document
+// (#527 hard cut). It describes ONLY merchants. Each merchant carries its own
+// host-app issuer (JWKS/public-key trust, registered as the `owner` of the
+// merchant's backing org), provider accounts + secrets, and profile.
+//
+// There is no auth/users/global-roles section: OpenRails owns AUTHORITY, the
+// host app owns IDENTITY. A host app authenticates its own users and mints
+// delegated tokens; OpenRails trusts that app as the owner of one merchant and
+// keeps no local accounts. Catalog state is pushed separately by
 // `openrails push-merchant-catalog`.
 type BootstrapManifest struct {
-	Version   int                         `yaml:"version"`
-	Auth      *authcore.BootstrapManifest `yaml:"auth,omitempty"`
-	Merchants []ManifestMerchant          `yaml:"merchants,omitempty"`
+	Version   int                `yaml:"version"`
+	Merchants []ManifestMerchant `yaml:"merchants"`
 }
 
 // LoadBootstrapManifest reads and validates a bootstrap manifest.
@@ -59,31 +60,15 @@ func (m *BootstrapManifest) Validate() error {
 	if m.Version != BootstrapManifestVersion {
 		return fmt.Errorf("bootstrap manifest version must be %d", BootstrapManifestVersion)
 	}
-	if !m.HasAuthBootstrap() && len(m.Merchants) == 0 {
-		return fmt.Errorf("merchant manifest must declare at least one auth or merchant section")
+	if len(m.Merchants) == 0 {
+		return fmt.Errorf("bootstrap manifest must declare at least one merchant")
 	}
-	if len(m.Merchants) > 0 {
-		tm := m.MerchantManifest()
-		if err := validateMerchantManifestShape(tm); err != nil {
-			return err
-		}
-	}
-	return nil
+	return validateMerchantManifestShape(m.MerchantManifest())
 }
 
-// HasAuthBootstrap reports whether the manifest has AuthKit-owned state to
-// reconcile. A nil or empty auth section is allowed so OpenRails manifests can
-// carry only merchant state.
-func (m *BootstrapManifest) HasAuthBootstrap() bool {
-	if m == nil || m.Auth == nil {
-		return false
-	}
-	return len(m.Auth.Users) > 0 || len(m.Auth.GlobalRoles) > 0 || len(m.Auth.Orgs) > 0
-}
-
-// MerchantManifest converts the merchant section to the internal merchant-manifest
-// shape consumed by ReconcileMerchantManifestData. There is a single manifest
-// version (1); this internal representation carries it through unchanged.
+// MerchantManifest converts the manifest to the internal merchant-manifest shape
+// consumed by ReconcileMerchantManifestData. There is a single manifest version
+// (1); this internal representation carries it through unchanged.
 func (m *BootstrapManifest) MerchantManifest() *MerchantManifest {
 	if m == nil {
 		return nil
@@ -108,14 +93,16 @@ func validateMerchantManifestShape(m *MerchantManifest) error {
 		if strings.TrimSpace(t.Name) == "" {
 			return fmt.Errorf("merchant %q name is required", slug)
 		}
-		if len(t.Issuers) > 0 {
-			return fmt.Errorf("merchant %q issuers is removed; declare JWKS/public-key trust in top-level auth.orgs[].issuers (AuthKit remote applications)", slug)
-		}
 		if profileURL := strings.TrimSpace(t.Profile.LogoURL); profileURL != "" && !validHTTPURL(profileURL) {
 			return fmt.Errorf("merchant %q profile.logo_url must be an http or https URL", slug)
 		}
 		if profileURL := strings.TrimSpace(t.Profile.SupportURL); profileURL != "" && !validHTTPURL(profileURL) {
 			return fmt.Errorf("merchant %q profile.support_url must be an http or https URL", slug)
+		}
+		if t.Issuer != nil {
+			if err := validateManifestIssuer(slug, t.Issuer); err != nil {
+				return err
+			}
 		}
 		for j := range t.ProviderAccounts {
 			if err := validateManifestProviderAccount(slug, j, t.ProviderAccounts[j]); err != nil {
@@ -126,6 +113,37 @@ func validateMerchantManifestShape(m *MerchantManifest) error {
 			return fmt.Errorf("duplicate merchant slug %q", slug)
 		}
 		seen[slug] = struct{}{}
+	}
+	return nil
+}
+
+// validateManifestIssuer checks the per-merchant host-app issuer (#527). The
+// issuer is registered as the OWNER of the merchant's backing org, so its
+// delegated tokens administer that one merchant. Exactly one trust source —
+// jwks_uri (preferred, auto-rotating) XOR public_keys (static, manual) — must
+// be declared.
+func validateManifestIssuer(merchantSlug string, iss *ManifestIssuer) error {
+	uri := strings.TrimSpace(iss.URI)
+	if uri == "" {
+		return fmt.Errorf("merchant %q issuer.uri is required", merchantSlug)
+	}
+	if !validHTTPURL(uri) {
+		return fmt.Errorf("merchant %q issuer.uri must be an http or https URL", merchantSlug)
+	}
+	jwks := strings.TrimSpace(iss.JWKSURI)
+	hasStatic := len(iss.PublicKeys) > 0
+	switch {
+	case jwks == "" && !hasStatic:
+		return fmt.Errorf("merchant %q issuer must set jwks_uri or public_keys", merchantSlug)
+	case jwks != "" && hasStatic:
+		return fmt.Errorf("merchant %q issuer must set exactly one of jwks_uri or public_keys, not both", merchantSlug)
+	case jwks != "" && !validHTTPURL(jwks):
+		return fmt.Errorf("merchant %q issuer.jwks_uri must be an http or https URL", merchantSlug)
+	}
+	for _, origin := range iss.AllowedOrigins {
+		if o := strings.TrimSpace(origin); o != "" && !validHTTPURL(o) {
+			return fmt.Errorf("merchant %q issuer.allowed_origins entry %q must be an http or https URL", merchantSlug, origin)
+		}
 	}
 	return nil
 }

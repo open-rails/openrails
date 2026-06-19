@@ -9,25 +9,18 @@ import (
 )
 
 func TestParseBootstrapManifest(t *testing.T) {
-	// A manifest merchant is a billing merchant (#480): slug + name + optional
-	// owner-org ownership link (#481). Issuer/JWKS trust is AuthKit's
-	// remote_application registry (#74), no longer declared here.
+	// #527: a manifest is merchants-only. Each merchant carries its own inline
+	// host-app issuer (registered as owner of its backing org), provider
+	// accounts + secrets, and profile. No auth/users/orgs section.
 	manifest, err := ParseBootstrapManifest([]byte(`
 version: 1
-auth:
-  users:
-    - ref: owner
-      email: owner@example.com
-  orgs:
-    - slug: cozy-art
-      issuers:
-        - slug: cozy-art-app
-          issuer: https://auth.cozy.art
-          jwks_uri: https://auth.cozy.art/.well-known/jwks.json
 merchants:
   - slug: cozy-art
     name: Cozy Art
-    owner_org_id: 11111111-1111-1111-1111-111111111111
+    issuer:
+      uri: https://auth.cozy.art
+      jwks_uri: https://auth.cozy.art/.well-known/jwks.json
+      audiences: [openrails]
     profile:
       display_name: Cozy Art Billing
       logo_url: https://cdn.example/logo.png
@@ -48,11 +41,14 @@ merchants:
             env: MOBIUS_WEBHOOK_SIGNING_SECRET
 `))
 	require.NoError(t, err)
-	require.True(t, manifest.HasAuthBootstrap())
 	require.Len(t, manifest.Merchants, 1)
-	require.Equal(t, "Cozy Art Billing", manifest.Merchants[0].Profile.DisplayName)
-	require.Len(t, manifest.Merchants[0].ProviderAccounts, 2)
-	require.Equal(t, "acct_test_123", manifest.Merchants[0].ProviderAccounts[0].AccountID)
+	m := manifest.Merchants[0]
+	require.Equal(t, "Cozy Art Billing", m.Profile.DisplayName)
+	require.NotNil(t, m.Issuer)
+	require.Equal(t, "https://auth.cozy.art", m.Issuer.URI)
+	require.Equal(t, "https://auth.cozy.art/.well-known/jwks.json", m.Issuer.JWKSURI)
+	require.Len(t, m.ProviderAccounts, 2)
+	require.Equal(t, "acct_test_123", m.ProviderAccounts[0].AccountID)
 }
 
 func TestExampleBootstrapManifestParses(t *testing.T) {
@@ -61,9 +57,10 @@ func TestExampleBootstrapManifestParses(t *testing.T) {
 
 	manifest, err := ParseBootstrapManifest(raw)
 	require.NoError(t, err)
-	require.True(t, manifest.HasAuthBootstrap())
 	require.Len(t, manifest.Merchants, 1)
 	require.Equal(t, "local-stack", manifest.Merchants[0].Slug)
+	require.NotNil(t, manifest.Merchants[0].Issuer)
+	require.Equal(t, "https://local-stack.example/.well-known/jwks.json", manifest.Merchants[0].Issuer.JWKSURI)
 	require.Len(t, manifest.Merchants[0].ProviderAccounts, 4)
 }
 
@@ -82,99 +79,58 @@ merchants:
 		want string
 	}{
 		{
-			name: "unknown key",
-			body: `
-version: 1
-tenantz: []
-`,
+			name: "unknown top-level key",
+			body: "version: 1\ntenantz: []\n",
 			want: "tenantz",
 		},
 		{
+			name: "auth section removed (hard cut)",
+			body: "version: 1\nauth:\n  users: []\nmerchants:\n  - slug: x\n    name: X\n",
+			want: "auth",
+		},
+		{
+			name: "no merchants",
+			body: "version: 1\n",
+			want: "at least one merchant",
+		},
+		{
 			name: "missing merchant name",
-			body: `
-version: 1
-merchants:
-  - slug: cozy-art
-`,
+			body: "version: 1\nmerchants:\n  - slug: cozy-art\n",
 			want: `merchant "cozy-art" name is required`,
 		},
 		{
-			name: "issuers field removed",
-			body: base(`
-    issuers:
-      - issuer: https://auth.cozy.art
-        jwks_uri: https://auth.cozy.art/.well-known/jwks.json
-`),
-			want: "top-level auth.orgs[].issuers",
+			name: "issuer missing uri",
+			body: base("    issuer:\n      jwks_uri: https://auth.cozy.art/.well-known/jwks.json\n"),
+			want: "issuer.uri is required",
 		},
 		{
-			name: "service tokens removed",
-			body: base(`
-	    service_tokens:
-	      - name: runtime
-	        permissions: [openrails:admin]
-        outputs:
-	          - vault:
-	              path: openrails/runtime
-	`),
-			want: "service_tokens",
+			name: "issuer both trust sources",
+			body: base("    issuer:\n      uri: https://auth.cozy.art\n      jwks_uri: https://auth.cozy.art/jwks\n      public_keys:\n        - public_key_pem: x\n"),
+			want: "exactly one of jwks_uri or public_keys",
 		},
 		{
-			name: "service_jwt_principals removed",
-			body: base(`
-    service_jwt_principals:
-      - issuer: https://auth.cozy.art
-        subject: service:runtime
-        permissions: [openrails:entitlements:read]
-`),
-			want: "service_jwt_principals",
+			name: "issuer no trust source",
+			body: base("    issuer:\n      uri: https://auth.cozy.art\n"),
+			want: "must set jwks_uri or public_keys",
 		},
 		{
 			name: "catalogs belong to push-merchant-catalog",
-			body: `
-version: 1
-catalogs:
-  - merchant: cozy-art
-    tier_groups:
-      - slug: g1
-        display_name: G1
-        products:
-          - {slug: p, display_name: P, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-      - slug: g2
-        display_name: G2
-        products:
-          - {slug: p, display_name: P, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
-`,
+			body: "version: 1\ncatalogs: []\n",
 			want: "catalogs",
 		},
 		{
 			name: "invalid profile URL",
-			body: base(`
-    profile:
-      logo_url: ftp://cdn.example/logo.png
-`),
+			body: base("    profile:\n      logo_url: ftp://cdn.example/logo.png\n"),
 			want: "profile.logo_url",
 		},
 		{
 			name: "invalid provider account role",
-			body: base(`
-    provider_accounts:
-      - provider_type: stripe
-        account_id: acct_test_123
-        role: standby
-`),
+			body: base("    provider_accounts:\n      - provider_type: stripe\n        account_id: acct_test_123\n        role: standby\n"),
 			want: "role must be primary, secondary, or legacy",
 		},
 		{
 			name: "invalid provider secret source",
-			body: base(`
-    provider_accounts:
-      - provider_type: stripe
-        secrets:
-          secret_key:
-            value: one
-            env: STRIPE_SECRET_KEY
-`),
+			body: base("    provider_accounts:\n      - provider_type: stripe\n        secrets:\n          secret_key:\n            value: one\n            env: STRIPE_SECRET_KEY\n"),
 			want: "must set exactly one",
 		},
 	} {

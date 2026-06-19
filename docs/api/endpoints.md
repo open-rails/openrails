@@ -1,7 +1,7 @@
 # OpenRails API Reference
 
 OpenRails exposes public catalog routes, delegated browser/self-service APIs,
-merchant-admin APIs, processor webhooks, and a service-token server-to-server
+merchant-admin APIs, processor webhooks, and an API-key server-to-server
 surface on the same public port. All responses are JSON encoded. Unless
 otherwise stated, errors follow the
 Stripe-style envelope:
@@ -41,7 +41,7 @@ List endpoints use a Stripe-like envelope:
 | Delegated self routes (`/v1/self/*`) | `Authorization: Bearer <delegated JWT>` signed by a registered issuer; token must carry OIDC `iss`, `sub` via AuthKit `delegated_sub`, accepted `aud`, and `openrails:self:*` permissions |
 | Delegated merchant-admin routes (`/v1/merchant-admin/*`) | Same delegated JWT shape, with `openrails:merchant:*` permissions |
 | Legacy user/admin routes (`/v1/checkout`, `/v1/me/*`, `/v1/admin/*`) | Host JWT auth where still mounted by the embedding deployment |
-| Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <generated service token or first-party service JWT>`; each route requires an `openrails:*` permission (see Service API section) |
+| Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <generated API key or first-party service JWT>`; each route requires an `openrails:*` permission (see Service API section) |
 | Webhooks (`/v1/webhooks/:provider`) | Provider-specific verification (see notes) |
 
 Delegated JWTs and machine credentials are intentionally different credentials.
@@ -49,7 +49,7 @@ Delegated JWTs are browser/direct-user credentials verified through OIDC issuer,
 JWKS, audience, expiry, and permission checks. OpenRails stores/touches only the
 minimal payable customer reference `(merchant_id, issuer, subject)` needed for billing
 and audit references; it does not create OpenRails-native users for delegated
-subjects. Generated service tokens and first-party service JWTs are backend
+subjects. Generated API keys and first-party service JWTs are backend
 credentials and are rejected by delegated self/admin routes.
 
 Delegated JWT examples:
@@ -269,7 +269,7 @@ Creates a Stripe customer portal session. Response `{ "url": "https://..." }`.
 ## Service API (`/v1/service/*`, machine-credential-authenticated)
 
 Server-to-server endpoints. They live on the SAME public port as everything else
-(issue #222) — there is no private port, mTLS listener, or API key. Machine callers
+(issue #222) — there is no private port, mTLS listener, or separate legacy API-key layer. Machine callers
 present one of:
 
 ```
@@ -277,10 +277,10 @@ Authorization: Bearer <openrails_st_...>
 Authorization: Bearer <service-jwt-signed-by-registered-issuer>
 ```
 
-Generated service tokens are resolved through the OpenRails-owned AuthKit control
+Generated API keys are resolved through the OpenRails-owned AuthKit control
 plane: their owning org maps to an OpenRails merchant, AuthKit resource scopes
 constrain where they may act, and granted permissions gate what they may do.
-Every generated service token must carry
+Every generated API key must carry
 `resources: [{kind:"openrails.merchant", id:"<merchant_uuid>"}]`.
 Subject-scoped tokens additionally carry
 `{kind:"openrails.customer", id:"<customer_uuid>"}` and may only act
@@ -323,7 +323,7 @@ after authorizing the action themselves.
 Terminology for this surface is defined in
 `docs/authkit-merchant-oidc-glossary.md`: OpenRails merchant = billing/integration
 boundary, delegated user = external OIDC `issuer` + `subject`, customer =
-payable identity, generated service token/service JWT = server-to-server
+payable identity, generated API key/service JWT = server-to-server
 credentials.
 
 ### GET /v1/service/customers/{customer_id}/entitlements

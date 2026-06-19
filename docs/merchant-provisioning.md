@@ -1,20 +1,41 @@
 # Merchant Provisioning, Credentials, and Webhook Routing
 
 OpenRails calls the billing/isolation namespace a **merchant**. AuthKit calls the
-authority that controls it an **org**. A merchant row carries `owner_org_id`,
-which is the AuthKit org whose roles, service tokens, and registered issuers can
-administer that merchant.
+authority that controls it an **org**. Each merchant has its own dedicated
+backing org (1:1); the merchant row carries `owner_org_id` pointing at it
+(`UNIQUE` on non-null, nullable for embedded-without-AuthKit).
 
-Bootstrap-created deployments should still keep this chain explicit:
+## Bootstrap model (#527)
+
+The bootstrap manifest declares **merchants only** — there is no `auth`/users/
+global-roles section. Each merchant carries an inline `issuer` (the host
+application's JWKS or static public-key trust), which OpenRails registers as the
+**owner** of the merchant's backing org. The host app's delegated tokens then
+fully administer that one merchant — and no other — because federated authority
+claims are stripped on verify and authority is the stored owner role:
 
 ```text
-credential -> AuthKit org -> OpenRails merchant
+host-app issuer (JWKS) -> owner of the merchant's org -> OpenRails merchant
 ```
 
-For standalone bootstrap, create or reuse the AuthKit org first, then create the
-OpenRails merchant owned by that org. If a deployment is fully bootstrapped and
-not user-managed, the org can be a deployment-owned bootstrap org rather than a
-human-owned account.
+OpenRails owns authority; the host app owns identity; there are no local
+OpenRails accounts in standalone mode. Startup provisioning is **first-run only**
+(gated by the `openrails.bootstrap_state` marker; a reboot of a provisioned
+deployment skips it, so a stale manifest can never brick a restart). Change
+merchants afterward with `openrails push-merchant-config`:
+
+- default: additive + **seed-once** (existing secrets are left untouched, so a
+  secret rotated out of band via the admin API is never reverted to the seed);
+- `--overwrite`: re-assert manifest secret values;
+- `--prune`: delete secrets absent from the manifest;
+- `--dry-run`: print the plan without mutating.
+
+See `config/merchants.example.yaml` for the manifest shape.
+
+Embedded hosts (cozy-art, doujins, tensorhub) instead provision via
+`embed.Options` (one merchant per engine, secrets passed programmatically) and
+authorize the `/v1/admin` surface with their own AuthKit/Authenticator — the
+issuer-as-owner path is the standalone mechanism.
 
 ## Lifecycle
 
@@ -81,7 +102,7 @@ Merchant lifecycle and credential routes are mounted under:
 /v1/admin/merchants
 ```
 
-These routes are gated by live AuthKit org permissions. A user, service token, or
+These routes are gated by live AuthKit org permissions. A user, API key, or
 registered JWKS issuer controls a merchant only through its authority over the
 merchant's `owner_org_id`.
 
@@ -92,8 +113,8 @@ AuthKit-owned authority in `auth:` and OpenRails-owned merchant definitions in
 `merchants:`. Catalog state is pushed separately with
 `openrails push-merchant-catalog`.
 
-See `config/merchants.local-stack.example.yaml` for a fuller example with
-admin users, org roles, remote JWKS issuers, service-token output, merchant
+See `config/merchants.example.yaml` for a fuller example with
+admin users, org roles, remote JWKS issuers, API-key output, merchant
 profile data, provider accounts, and provider secret sources.
 
 ```yaml
@@ -129,7 +150,7 @@ merchants:
 Catalog manifests are explicitly catalog-scoped and may contain one or more
 merchant catalog entries:
 
-See `config/catalog.local-stack.example.yaml` for a fuller example with tier
+See `config/catalog.example.yaml` for a fuller example with tier
 groups, products, prices, provider fan-out, and provider links.
 
 ```yaml
