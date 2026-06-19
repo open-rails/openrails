@@ -61,6 +61,10 @@ func TestEmbeddedMuxAssembles(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"enabled":false`)
 
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/merchants/acme/webhooks/stripe", nil))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, "merchant webhook route registered")
+
 	// Security headers applied by the base middleware stack.
 	require.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
 }

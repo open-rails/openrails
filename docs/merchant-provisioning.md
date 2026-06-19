@@ -43,9 +43,8 @@ The lifecycle service is `internal/merchants.Service`.
 
 | Operation | Behaviour |
 |---|---|
-| `Provision` | Creates or updates `openrails.merchants`, records routing/tier/region, and links `owner_org_id` when an AuthKit org owns the merchant. |
+| `Provision` | Creates or updates `openrails.merchants` and links `owner_org_id` when an AuthKit org owns the merchant. |
 | `Suspend` / `Resume` | Flips `status` and `suspended_at`. Suspended merchants deny writes while reads and processor webhook reconciliation can still proceed. |
-| `TierChange` | Updates OpenRails' own `billing_tier` metadata for the merchant. |
 | `Export` | Writes a completed `merchant_exports` row with row counts and secret names, never secret values. |
 | `Delete` | Requires confirmation and a completed export, purges merchant-owned rows and secrets, then tombstones the merchant directory row. |
 
@@ -74,20 +73,13 @@ process configuration for a multi-merchant OpenRails instance.
 
 ## Webhooks
 
-Processor webhooks can resolve the merchant by explicit path slug or registered
-host.
+Processor webhooks resolve the merchant by explicit path slug.
 
 Path form:
 
 ```text
-POST /v1/m/:merchant/webhooks/:provider
-```
-
-Host form:
-
-```text
-POST /v1/webhooks/:provider
-Host: hooks.example.com
+POST /v1/merchants/:merchant/webhooks/:provider
+POST /billing/v1/merchants/:merchant/webhooks/:provider
 ```
 
 OpenRails always re-derives the merchant and loads that merchant's signing secret
@@ -108,35 +100,28 @@ merchant's `owner_org_id`.
 
 ## Merchant Config Manifest
 
-The merchant config manifest used by `openrails push-merchant-config` keeps
-AuthKit-owned authority in `auth:` and OpenRails-owned merchant definitions in
-`merchants:`. Catalog state is pushed separately with
+The merchant config manifest used by `openrails push-merchant-config` declares
+OpenRails-owned merchants. Catalog state is pushed separately with
 `openrails push-merchant-catalog`.
 
 See `config/merchants.example.yaml` for a fuller example with
-admin users, org roles, remote JWKS issuers, API-key output, merchant
-profile data, provider accounts, and provider secret sources.
+merchant issuer trust, profile data, provider accounts, and provider secret
+sources.
 
 ```yaml
 version: 1
 
-auth:
-  orgs:
-    - slug: doujins
-      issuers:
-        - slug: doujins-app
-          issuer: https://doujins.example
-          jwks_uri: https://doujins.example/.well-known/jwks.json
-
 merchants:
   - slug: doujins
-    name: Doujins
+    display_name: Doujins
+    issuer:
+      uri: https://doujins.example
+      jwks_uri: https://doujins.example/.well-known/jwks.json
     profile:
       display_name: Doujins Billing
       logo_url: https://doujins.example/logo.png
       from_email: billing@doujins.example
       support_url: https://doujins.example/support
-      support_email: support@doujins.example
     provider_accounts:
       - provider_type: nmi
         account_id: mobius-profile-id

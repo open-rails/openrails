@@ -40,7 +40,7 @@ func TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant(t *testing.T) 
 	require.NoError(t, err)
 
 	event := []byte(`{"id":"evt_no_default","type":"customer.created","data":{"object":{"id":"cus_no_default"}}}`)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, surface.BaseURL+"/v1/m/"+dbtest.TestMerchantSlug+"/webhooks/stripe", bytes.NewReader(event))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, surface.BaseURL+"/v1/merchants/"+dbtest.TestMerchantSlug+"/webhooks/stripe", bytes.NewReader(event))
 	require.NoError(t, err)
 	req.Header.Set("Stripe-Signature", stripeSignature(whsec, event))
 	resp, err := http.DefaultClient.Do(req)

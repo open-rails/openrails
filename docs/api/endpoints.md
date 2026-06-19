@@ -42,7 +42,7 @@ List endpoints use a Stripe-like envelope:
 | Delegated merchant-admin routes (`/v1/merchant-admin/*`) | Same delegated JWT shape, with `openrails:merchant:*` permissions |
 | Legacy user/admin routes (`/v1/checkout`, `/v1/me/*`, `/v1/admin/*`) | Host JWT auth where still mounted by the embedding deployment |
 | Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <generated API key or first-party service JWT>`; each route requires an `openrails:*` permission (see Service API section) |
-| Webhooks (`/v1/webhooks/:provider`) | Provider-specific verification (see notes) |
+| Webhooks (`/v1/webhooks/:provider`, `/v1/merchants/:merchant/webhooks/:provider`) | Provider-specific verification (see notes) |
 
 Delegated JWTs and machine credentials are intentionally different credentials.
 Delegated JWTs are browser/direct-user credentials verified through OIDC issuer,
@@ -113,6 +113,9 @@ Receives processor webhooks. `provider` is `ccbill`, `stripe`, or a configured N
   `X-Signature`/`X-NMI-Signature`/`X-Mobius-Signature`.
 - `stripe`: JSON body with `Stripe-Signature` header (if configured).
 Returns 200 with `{ status: "accepted" }` on success, 401/403 for auth failures, 400 for unknown provider.
+
+### POST /v1/merchants/{merchant}/webhooks/{provider}
+Merchant-scoped webhook path for private/embedded multi-merchant installs. OpenRails resolves `{merchant}` first, then verifies with that merchant's provider signing secret. Unknown merchants return 404 and never fall back to a default merchant.
 
 ## Checkout Sessions (Authenticated)
 

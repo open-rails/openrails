@@ -75,10 +75,10 @@ Example ingress snippet:
 - `service: http://localhost:3053`
 
 Then Mobius/NMI will call:
-- `https://openrails-webhooks-sandbox.<your-domain>/v1/webhooks/mobius`
+- `https://openrails-webhooks-sandbox.<your-domain>/v1/merchants/local-stack/webhooks/mobius`
 
 and cloudflared will forward to:
-- `http://localhost:3053/v1/webhooks/mobius`
+- `http://localhost:3053/v1/merchants/local-stack/webhooks/mobius`
 
 ## Security notes (sandbox still matters)
 

@@ -17,11 +17,18 @@ type adminUserPath struct {
 	UserID string `uri:"user_id" binding:"required"`
 }
 
+// adminUserBillingProfile is the composite admin user-detail (#528): one read
+// returns the user's billing sections — subscription, payments, payment-methods,
+// entitlements, product-access — so admins don't fan out across dedicated
+// per-section endpoints. (credit-balance is multi-currency, like metrics, and is
+// embedded once the per-currency shape is settled.)
 type adminUserBillingProfile struct {
-	CustomerID   string               `json:"customer_id"`
-	Subscription *models.Subscription `json:"subscription,omitempty"`
-	Entitlements []models.Entitlement `json:"entitlements"`
-	Payments     []*models.Payment    `json:"payments"`
+	CustomerID     string                      `json:"customer_id"`
+	Subscription   *models.Subscription        `json:"subscription,omitempty"`
+	Entitlements   []models.Entitlement        `json:"entitlements"`
+	Payments       []*models.Payment           `json:"payments"`
+	PaymentMethods []*models.PaymentMethod     `json:"payment_methods"`
+	ProductAccess  []models.ProductAccessGrant `json:"product_access"`
 }
 
 type adminSubscriptionPath struct {
@@ -72,7 +79,13 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	}
 	ctx := r.Request.Context()
 	now := time.Now()
-	profile := adminUserBillingProfile{CustomerID: identity.CustomerIDFromString(path.UserID).UUID().String(), Entitlements: []models.Entitlement{}, Payments: []*models.Payment{}}
+	profile := adminUserBillingProfile{
+		CustomerID:     identity.CustomerIDFromString(path.UserID).UUID().String(),
+		Entitlements:   []models.Entitlement{},
+		Payments:       []*models.Payment{},
+		PaymentMethods: []*models.PaymentMethod{},
+		ProductAccess:  []models.ProductAccessGrant{},
+	}
 	if r.State.SubscriptionService != nil {
 		sub, err := r.State.SubscriptionService.GetActiveSubscription(ctx, path.UserID)
 		if err == nil {
@@ -89,6 +102,16 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 		payments, err := r.State.PaymentService.GetByUserID(ctx, path.UserID)
 		if err == nil && len(payments) > 0 {
 			profile.Payments = payments
+		}
+	}
+	if r.State.PaymentMethodService != nil {
+		if pms, err := r.State.PaymentMethodService.GetByUserID(ctx, path.UserID); err == nil && len(pms) > 0 {
+			profile.PaymentMethods = pms
+		}
+	}
+	if svc := productAccessService(r); svc != nil {
+		if grants, err := svc.ListAllGrantsByUser(ctx, path.UserID); err == nil && len(grants) > 0 {
+			profile.ProductAccess = grants
 		}
 	}
 	r.SuccessJSON(profile)

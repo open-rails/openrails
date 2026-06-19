@@ -35,7 +35,6 @@ CREATE SCHEMA IF NOT EXISTS openrails;
 CREATE TABLE IF NOT EXISTS openrails.merchants (
     id               UUID PRIMARY KEY,
     slug             TEXT NOT NULL UNIQUE,
-    name             TEXT NOT NULL,
     status           TEXT NOT NULL DEFAULT 'active',
     owner_org_id  TEXT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,

@@ -28,6 +28,8 @@ func TestClassifyBucketMatchesRegisteredRoutes(t *testing.T) {
 	}{
 		{name: "webhook", path: "/v1/webhooks/stripe", method: http.MethodPost, want: "webhook"},
 		{name: "embedded webhook", path: "/billing/v1/webhooks/mobius", method: http.MethodPost, want: "webhook"},
+		{name: "merchant webhook", path: "/v1/merchants/acme/webhooks/stripe", method: http.MethodPost, want: "webhook"},
+		{name: "embedded merchant webhook", path: "/billing/v1/merchants/acme/webhooks/stripe", method: http.MethodPost, want: "webhook"},
 		{name: "captcha status", path: "/v1/captcha/status", method: http.MethodGet, want: "captcha"},
 		{name: "embedded captcha client", path: "/billing/v1/captcha/client.js", method: http.MethodGet, want: "captcha"},
 		{name: "checkout create", path: "/v1/checkout", method: http.MethodPost, want: "checkout"},

@@ -46,9 +46,7 @@ func RegisterMerchant(ctx context.Context, qx gen.DBTX, opts RegisterMerchantOpt
 	if opts.Slug == "" {
 		return merchant.ID{}, nil
 	}
-	id, err := gen.New(qx).RegisterMerchant(ctx, gen.RegisterMerchantParams{
-		Slug: opts.Slug,
-	})
+	id, err := gen.New(qx).RegisterMerchant(ctx, opts.Slug)
 	if err != nil {
 		return merchant.ID{}, fmt.Errorf("register merchant slug %q: %w", opts.Slug, err)
 	}

@@ -159,6 +159,11 @@ type Migration struct {
 	MigratedAt time.Time
 }
 
+type OpenrailsBootstrapState struct {
+	Singleton bool
+	AppliedAt time.Time
+}
+
 // Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.
 type OpenrailsCatalogDriftEvent struct {
 	ID                    uuid.UUID
@@ -433,22 +438,13 @@ type OpenrailsMerchant struct {
 	ID uuid.UUID
 	// Stable merchant slug used in merchant-scoped routes and resolution.
 	Slug   string
-	Name   string
 	Status string
-	// OWNERSHIP (not identity) FK to the AuthKit org that owns/administers this merchant (#481). NULL in embedded (no AuthKit). One org owns MANY merchants; never used to resolve a merchant from a token.
-	OwnerOrgID  *string
-	Plan        *string
-	Region      *string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	SuspendedAt *time.Time
-	DeletedAt   *time.Time
-	// The platform's OWN billing tier for this merchant (eats own dogfood, issue #225). Distinct from plan (free-form hosting metadata).
-	BillingTier     *string
-	StripeAccountID *string
-	// Optional host an ingress uses to route inbound webhooks to this merchant. OpenRails verifies the signature AFTER merchant resolution (router is not the trust boundary).
-	WebhookHost   *string
-	WebhookPath   *string
+	// OWNERSHIP FK to the AuthKit org that backs this merchant (#527). One merchant <-> one backing org (UNIQUE on non-null). NULL in embedded (no AuthKit). Injective, not bijective: most orgs have no merchant.
+	OwnerOrgID    *string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	SuspendedAt   *time.Time
+	DeletedAt     *time.Time
 	ProvisionedAt *time.Time
 }
 

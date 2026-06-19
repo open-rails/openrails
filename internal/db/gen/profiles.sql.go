@@ -12,7 +12,7 @@ import (
 )
 
 const getMerchantBySlug = `-- name: GetMerchantBySlug :one
-SELECT id, slug, name, status
+SELECT id, slug, status
 FROM openrails.merchants
 WHERE slug = $1 AND deleted_at IS NULL
 `
@@ -20,19 +20,13 @@ WHERE slug = $1 AND deleted_at IS NULL
 type GetMerchantBySlugRow struct {
 	ID     uuid.UUID
 	Slug   string
-	Name   string
 	Status string
 }
 
 func (q *Queries) GetMerchantBySlug(ctx context.Context, slug string) (GetMerchantBySlugRow, error) {
 	row := q.db.QueryRow(ctx, getMerchantBySlug, slug)
 	var i GetMerchantBySlugRow
-	err := row.Scan(
-		&i.ID,
-		&i.Slug,
-		&i.Name,
-		&i.Status,
-	)
+	err := row.Scan(&i.ID, &i.Slug, &i.Status)
 	return i, err
 }
 
@@ -86,34 +80,16 @@ func (q *Queries) GetUserIDByUsername(ctx context.Context, username *string) (uu
 }
 
 const registerMerchant = `-- name: RegisterMerchant :one
-INSERT INTO openrails.merchants (slug, name, status, webhook_host, webhook_path)
-VALUES ($1, $2, 'active', $3, $4)
-ON CONFLICT (slug) DO UPDATE SET
-    name = EXCLUDED.name,
-    webhook_host = COALESCE(EXCLUDED.webhook_host, openrails.merchants.webhook_host),
-    webhook_path = COALESCE(EXCLUDED.webhook_path, openrails.merchants.webhook_path),
-    updated_at = now()
+INSERT INTO openrails.merchants (slug, status)
+VALUES ($1, 'active')
+ON CONFLICT (slug) DO UPDATE SET updated_at = now()
 RETURNING id
 `
 
-type RegisterMerchantParams struct {
-	Slug        string
-	Name        string
-	WebhookHost *string
-	WebhookPath *string
-}
-
 // Register a merchant (billing bucket) from config, idempotently (#480). The
-// merchant carries ONLY billing/rail state; NO auth. Used by embedded boot and
-// standalone provisioning. Re-registering an existing slug refreshes the
-// billing-only fields and returns the canonical (self-owned) merchant id.
-func (q *Queries) RegisterMerchant(ctx context.Context, arg RegisterMerchantParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, registerMerchant,
-		arg.Slug,
-		arg.Name,
-		arg.WebhookHost,
-		arg.WebhookPath,
-	)
+// merchant carries ONLY billing/rail state; NO auth.
+func (q *Queries) RegisterMerchant(ctx context.Context, slug string) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, registerMerchant, slug)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err

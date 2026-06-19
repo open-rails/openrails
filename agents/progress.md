@@ -96,17 +96,17 @@ Several OpenRails CLI commands reconcile one source of truth into another. They 
 
 ## Command Mapping
 
-- `openrails bootstrap`
+- `openrails push-bootstrap`
   - `--insert`: create missing initial platform/AuthKit/control-plane seed objects.
   - `--overwrite`: update seeded authority fields, keys, permissions, or other mutable bootstrap-owned data.
   - `--prune`: remove/disable bootstrap-owned objects absent from the bootstrap file, within a narrowly documented scope.
 
-- `openrails merchant-config`
+- `openrails push-merchant-config`
   - `--insert`: create missing merchants, profiles, issuer links, provider accounts, and secrets.
   - `--overwrite`: update existing merchant config/profile/provider secret values.
   - `--prune`: disable/delete config, secrets, or provider accounts absent from the manifest according to the provider-account safety rules.
 
-- `openrails merchant-catalog`
+- `openrails push-merchant-catalog`
   - `--insert`: create missing products, prices, tier groups, catalog metadata, and provider catalog objects.
   - `--overwrite`: update existing OpenRails-owned catalog fields/provider catalog mappings.
   - `--prune`: archive OpenRails-owned catalog extras absent from the desired catalog. Never touch foreign provider objects.
@@ -122,11 +122,11 @@ Several OpenRails CLI commands reconcile one source of truth into another. They 
 - [ ] Add `--insert` to `pull-provider`; make current provider-missing materialization require `--insert`, not `--overwrite`.
 - [ ] Change `pull-provider --overwrite` to only update existing local mirror rows.
 - [ ] Keep `pull-provider --prune` dry-run unless paired with a mutation flag that permits the chosen prune action; document whether prune requires `--overwrite`, `--insert`, or only `--prune` as the destructive opt-in.
-- [ ] Update `merchant-config` to use `--insert --overwrite --prune` rather than "default seed-once plus overwrite/prune" as the public mental model.
-- [ ] Update `merchant-catalog` so default is plan-only and writes require `--insert` and/or `--overwrite`; preserve `--prune` as archive-only for OpenRails-owned extras.
-- [ ] Update `bootstrap` to default to plan-only for manual runs; startup first-run behavior must remain separately documented and non-destructive.
+- [ ] Update `push-merchant-config` to use `--insert --overwrite --prune` rather than "default seed-once plus overwrite/prune" as the public mental model.
+- [ ] Update `push-merchant-catalog` so default is plan-only and writes require `--insert` and/or `--overwrite`; preserve `--prune` as archive-only for OpenRails-owned extras.
+- [ ] Update `push-bootstrap` to default to plan-only for manual runs; startup first-run behavior must remain separately documented and non-destructive.
 - [ ] Add CLI help tests/smokes proving each command exposes the same mutation flags and dry-run default.
-- [ ] Update examples/runbooks to show plan-only first, then explicit mutation flags.
+- [ ] Update `docs/operations.md` and examples/runbooks to show plan-only first, then explicit mutation flags.
 - [ ] Cross-reference #533 so local mirror mutation logs and external provider mutation logs use consistent terms for planned/applied changes.
 
 ---
@@ -141,7 +141,7 @@ The current `push-merchant-config` direction is doing too much under one "bootst
 
 1. **Platform/bootstrap authority**
    - File: `/etc/openrails/bootstrap.yaml` or `/run/openrails/bootstrap.yaml`
-   - Command: `openrails bootstrap --file ...`
+   - Command: `openrails push-bootstrap --file ...`
    - Scope: initial OpenRails/AuthKit platform/control-plane authority only: instance issuer/JWKS/signing/public authority wiring, bootstrap administrative authority if needed, and other global control-plane seed state.
    - Not merchant provider secrets.
    - Not products/prices.
@@ -149,13 +149,13 @@ The current `push-merchant-config` direction is doing too much under one "bootst
 
 2. **Merchant config**
    - File: `/etc/openrails/merchants.yaml` or `/run/openrails/merchants.yaml`
-   - Command: `openrails merchant-config --file ...`
+   - Command: `openrails push-merchant-config --file ...`
    - Scope: merchant rows/profile, merchant issuer ownership, provider accounts, provider credentials/secrets, webhook route instructions/docs, merchant-level operational settings.
    - Uses the shared #532 mutation flags: default plan-only, `--insert`, `--overwrite`, and `--prune`.
 
 3. **Merchant catalog**
    - File: `/etc/openrails/catalog.yaml` or `/run/openrails/catalog.yaml`
-   - Command: `openrails merchant-catalog --file ...`
+   - Command: `openrails push-merchant-catalog --file ...`
    - Scope: products, prices, tier groups, entitlements/catalog metadata, provider catalog push/links.
    - Uses the shared #532 mutation flags. `--prune` means catalog-prune semantics only: archive OpenRails-owned provider/catalog extras absent from desired catalog.
 
@@ -170,13 +170,37 @@ The current `push-merchant-config` direction is doing too much under one "bootst
 Use these four operator-facing commands:
 
 ```bash
-openrails bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
-openrails merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml
-openrails merchant-catalog --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml
+openrails push-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
+openrails push-merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml
+openrails push-merchant-catalog --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml
 openrails pull-provider --config /etc/openrails/config.yaml --merchant doujins --provider stripe
 ```
 
-The first three are declarative file-backed commands. They plan only unless `--insert`, `--overwrite`, or `--prune` is present. `pull-provider` is not file-backed; it reconciles from provider-observed state.
+The first three are declarative file-backed push commands. They plan only unless `--insert`, `--overwrite`, or `--prune` is present. `pull-provider` is not file-backed; it reconciles from provider-observed state.
+
+Naming rationale: the file-backed commands push declared state into OpenRails-owned/external systems such as AuthKit/control-plane state, HashiCorp Vault or the DB secret backend, and remote provider catalog surfaces. `pull-provider` moves the opposite direction: provider-observed state back into OpenRails' local mirror.
+
+## Operations Manual
+
+Update `docs/operations.md` as the operator manual for running OpenRails. Do not create a root `OPERATIONS.md` unless the docs layout changes; this repo already keeps operational runbooks under `docs/`.
+
+The manual must document at least:
+
+- the four command surfaces:
+
+```bash
+openrails push-bootstrap --file /run/openrails/bootstrap.yaml
+openrails push-merchant-config --file /run/openrails/merchants.yaml
+openrails push-merchant-catalog --file /run/openrails/catalog.yaml
+openrails pull-provider --merchant doujins --provider stripe
+```
+
+- the default plan-only behavior when no mutation flags are supplied.
+- the shared mutation flags: `--insert`, `--overwrite`, `--prune`.
+- empty-DB/private standalone initialization order.
+- normal operational re-runs: config rotation, catalog changes, provider pull/reconcile.
+- the split between declarative file-backed `push-*` commands and provider-observed `pull-provider`.
+- the relation to #533: local mirror changes are reported by `pull-provider`; remote provider mutations are logged by provider-intent/convergence execution.
 
 ## Target YAML Shapes
 
@@ -318,21 +342,21 @@ catalogs:
 On an empty DB/private standalone install, an operator or init job may run all three in order:
 
 ```bash
-openrails bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml --insert
-openrails merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml --insert
-openrails merchant-catalog --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml --insert --overwrite
+openrails push-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml --insert
+openrails push-merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml --insert
+openrails push-merchant-catalog --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml --insert --overwrite
 ```
 
 After initial provisioning, each command is run independently based on what changed. Do not make normal server restarts silently reconcile all three surfaces.
 
 ## Tasks
 
-- [ ] Rename/restructure CLI commands so bootstrap, merchant config, and merchant catalog are separate top-level bare commands with no `apply` subcommand; mutation is controlled only by `--insert`, `--overwrite`, and `--prune`.
+- [ ] Rename/restructure CLI commands as `push-bootstrap`, `push-merchant-config`, and `push-merchant-catalog` with no `apply` subcommand; mutation is controlled only by `--insert`, `--overwrite`, and `--prune`.
 - [ ] Split manifest structs/parsers/examples/docs into three files with no overlapping top-level keys.
 - [ ] Keep first-run startup auto-run limited to platform/bootstrap authority only, or require an explicit init mode/job to run all three. Do not run merchant config/catalog reconcile on every server boot.
 - [ ] Preserve manual mutation safety using the shared mutation flag contract from #532: default plan-only, `--insert`, `--overwrite`, and `--prune`.
 - [ ] Update `config/merchants.example.yaml`, `config/catalog.example.yaml`, and add/repair `config/bootstrap.example.yaml` so each file demonstrates only its own scope.
-- [ ] Update docs/runbooks to explain empty-DB initialization order and later independent operational re-apply.
+- [ ] Update `docs/operations.md` to explain the four command surfaces, dry-run default, mutation flags, empty-DB initialization order, and later independent operational re-runs.
 - [ ] Add CLI tests proving each command rejects keys owned by the other manifest types.
 
 ---

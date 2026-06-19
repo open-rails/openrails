@@ -97,7 +97,7 @@ Notes:
 version: 1
 merchants:
   - slug: local-stack
-    name: Local Stack
+    display_name: Local Stack
     provider_accounts:
       - provider_type: nmi
         provider_key: mobius
