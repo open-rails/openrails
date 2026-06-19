@@ -19,9 +19,9 @@ import (
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/platform"
-	"github.com/open-rails/openrails/internal/secretstore"
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -86,6 +86,11 @@ type Server struct {
 	// single-merchant hosts. Standalone does not load a process-wide merchant from
 	// config; merchant authority comes from bootstrap/DB/AuthKit state.
 	configuredMerchant merchant.ID
+
+	// browserCORSOriginSource is the standalone browser CORS origin source.
+	// Production leaves this nil and reads AuthKit remote_application state via
+	// controlPlane; tests can override it without a live database.
+	browserCORSOriginSource ginmw.CORSOriginSource
 
 	// publicHandler is the single "full surface" HTTP handler. It includes
 	// health + debug (dev only) + user + admin + webhook routes AND the
@@ -183,18 +188,12 @@ func New(deps Dependencies) (*Server, error) {
 	// store is the self-hosted default and needs no live Vault; a managed
 	// deployment swaps in the Vault-backed store with the same addressing.
 	{
-		// Build the secret store via the shared constructor so this runtime read
-		// path and the bootstrap/provisioning write path can never diverge in how
-		// secrets are protected at rest (OR-CFG-001).
-		secretStore, solanaTransit, sserr := secretstore.Build(context.Background(), deps.Config, deps.ControlPlane.Pool())
-		if sserr != nil {
-			return nil, sserr
+		secretBackend, err := merchantsecrets.Build(context.Background(), deps.Config, deps.ControlPlane.Pool())
+		if err != nil {
+			return nil, err
 		}
-
-		// Front the chosen store with an in-process TTL cache (#251/#322) so workers
-		// and hot paths resolve a merchant's secret once per window instead of per row /
-		// request. A rotation through this node invalidates immediately.
-		secretStore = merchants.NewCachedSecretStore(secretStore, merchants.DefaultSecretCacheTTL)
+		secretStore := secretBackend.Secrets
+		solanaTransit := secretBackend.SolanaTransit
 
 		tsvc, terr := merchants.NewService(deps.ControlPlane.Pool(), secretStore)
 		if terr != nil {
@@ -205,9 +204,11 @@ func New(deps Dependencies) (*Server, error) {
 			deps.Runtime.Merchants = tsvc
 			if deps.Runtime.CheckoutService != nil {
 				deps.Runtime.CheckoutService.SetMerchantSecretStore(secretStore)
+				deps.Runtime.CheckoutService.SetProviderAccountSecretResolver(tsvc)
 			}
 			if deps.Runtime.VaultService != nil {
 				deps.Runtime.VaultService.SetMerchantSecretStore(secretStore)
+				deps.Runtime.VaultService.SetProviderAccountSecretResolver(tsvc)
 			}
 		}
 
@@ -386,10 +387,12 @@ func (s *Server) newPublicEngine() *gin.Engine {
 		SkipPaths: []string{"/health/live", "/health/ready", "/healthz", "/readyz", "/health"},
 	}))
 	e.Use(ginmw.SecurityHeaders())
-	// CORS is only the transport preflight/header layer. Delegated browser
-	// request Origin policy belongs to AuthKit remote_application.allowed_origins
-	// after AuthKit verifies the caller.
-	e.Use(ginmw.CORS(nil))
+	// CORS is browser transport policy, not API authorization. Preflight has no
+	// JWT issuer, so standalone uses the union of enabled AuthKit
+	// remote_application.allowed_origins and fails closed when the registry cannot
+	// be read. JWT signature/issuer/audience/permissions and merchant ownership
+	// remain the real request security boundary.
+	e.Use(ginmw.CORSFromSource(s.browserCORSOrigins))
 	e.Use(ginmw.BodyLimit(middleware.DefaultMaxBodyBytes))
 	// Resolve the tenant / billing namespace before authorization and before any
 	// merchant-owned DB access (issue #223). Pins the construction-time configured
@@ -403,6 +406,16 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	return e
 }
 
+func (s *Server) browserCORSOrigins(ctx context.Context) ([]string, error) {
+	if s != nil && s.browserCORSOriginSource != nil {
+		return s.browserCORSOriginSource(ctx)
+	}
+	if s == nil || s.controlPlane == nil {
+		return nil, controlplane.ErrDelegatedNotConfigured
+	}
+	return s.controlPlane.BrowserCORSOrigins(ctx)
+}
+
 // newHTTPHandlerMux delegates to the gin-free embedhttp assembler (issue
 // #282/#285), which builds the embedded billing surface as a net/http handler
 // with zero gin on the request path. The gin Server holds the standalone surface
@@ -412,6 +425,7 @@ func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
 		Cfg:           s.cfg,
 		Runtime:       s.runtime,
 		CaptchaStore:  s.captchaStore,
+		RDB:           s.rdb,
 		Authenticator: s.embeddedAuthenticator(),
 	}
 	// The control plane is always present on this surface (#469); it is the

@@ -53,6 +53,11 @@ type Engine struct {
 // RunParams bounds one reconcile run.
 type RunParams struct {
 	Mode Mode
+	// Mutations, when non-nil, limits enforce-mode local writes to specific
+	// mutation classes. Nil preserves the historical "apply every safe local
+	// fix" behavior for in-process callers; the operator CLI passes an explicit
+	// policy from --insert/--overwrite.
+	Mutations *LocalMutationPolicy
 	// Providers to reconcile; empty means every wired fetcher.
 	Providers []Provider
 	// ProviderAccounts optionally binds each provider section to one
@@ -62,6 +67,31 @@ type RunParams struct {
 	// Since/Until bound the transaction window passed to the fetchers.
 	Since time.Time
 	Until time.Time
+}
+
+// LocalMutationPolicy limits pull-provider's local mirror writes by operator
+// mutation class. It never permits external provider writes.
+type LocalMutationPolicy struct {
+	Insert    bool
+	Overwrite bool
+}
+
+func (p *LocalMutationPolicy) allowsInsert() bool {
+	return p == nil || p.Insert
+}
+
+func (p *LocalMutationPolicy) allows(f *Finding) bool {
+	if p == nil {
+		return true
+	}
+	switch f.Type {
+	case FindingRemoteSubMissingLocal, FindingChargeMissingLocal, FindingRefundUnrecorded:
+		return p.Insert
+	case FindingLocalActiveRemoteDead, FindingStatusMismatch, FindingVaultMismatch, FindingEntitlementMismatch:
+		return p.Overwrite
+	default:
+		return false
+	}
 }
 
 // ProviderAccountBinding is the account row a provider-pull is authorized to
@@ -331,7 +361,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	now := e.now()
-	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{Materialize: params.Mode == ModeEnforce})
+	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{Materialize: params.Mode == ModeEnforce && params.Mutations.allowsInsert()})
 	bindApplyActions(findings, nullableProviderAccountID(binding))
 
 	if snap.Capabilities.Transactions {
@@ -360,7 +390,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		if rec.Status == FindingStatusAdminPending {
 			rep.AdminPending++
 		}
-		if f.Apply != nil && rec.Status == FindingStatusOpen {
+		if f.Apply != nil && rec.Status == FindingStatusOpen && params.Mutations.allows(f) {
 			applyByID[rec.ID] = f
 		}
 	}

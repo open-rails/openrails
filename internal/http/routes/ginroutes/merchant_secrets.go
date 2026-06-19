@@ -174,8 +174,7 @@ func merchantWritableSecretStatuses(statuses []merchants.MerchantSecretStatus) [
 }
 
 func merchantSecretWritable(name string) bool {
-	def, ok := merchants.SecretDefinitionFor(name)
-	return ok && def.MerchantWritable
+	return merchants.SecretWritable(name)
 }
 
 func merchantSecretError(c *gin.Context, err error) {

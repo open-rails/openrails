@@ -67,8 +67,12 @@ func RegisterUserRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts Route
 	if a == nil {
 		panic("embedded billing: not initialized")
 	}
+	authn := routeAuthenticator(e, opts)
+	if authn == nil {
+		panic("embedded billing: user routes require RouteOptions.AuthProvider or embedded Options.Authenticator")
+	}
 	httproutes.RegisterUserRoutes(ginrouter.New(group, a.Runtime), a.Runtime, httproutes.Options{
-		Authenticator: routeAuthenticator(e, opts),
+		Authenticator: authn,
 	})
 }
 
@@ -83,8 +87,12 @@ func RegisterMerchantActionRoutes(e *embedded.Embedded, group *gin.RouterGroup, 
 	if a == nil {
 		panic("embedded billing: not initialized")
 	}
+	authn := routeAuthenticator(e, opts)
+	if authn == nil {
+		panic("embedded billing: merchant action routes require RouteOptions.AuthProvider or embedded Options.Authenticator")
+	}
 	actionOpts := httproutes.Options{
-		Authenticator: routeAuthenticator(e, opts),
+		Authenticator: authn,
 	}
 	if cp := embcp.Get(a); cp != nil {
 		actionOpts.AdminPermissionChecker = authpolicy.AdminPermissionChecker(cp)

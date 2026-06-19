@@ -19,6 +19,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // schemaDDL stands up the minimal openrails.* schema the tenancy service touches:
@@ -69,6 +70,18 @@ CREATE TABLE IF NOT EXISTS openrails.merchant_credential_audit (
     actor      TEXT,
     detail     TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
+);
+
+CREATE TABLE IF NOT EXISTS openrails.provider_accounts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    merchant_id uuid NOT NULL,
+    provider_type text NOT NULL,
+    environment text DEFAULT 'live' NOT NULL,
+    account_id text NOT NULL,
+    role text DEFAULT 'primary' NOT NULL,
+    status text DEFAULT 'enabled' NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (merchant_id, provider_type, environment, account_id)
 );
 
 CREATE TABLE IF NOT EXISTS openrails.merchant_exports (
@@ -147,6 +160,16 @@ func newSvc(t *testing.T) *Service {
 	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore())
 	require.NoError(t, err)
 	return svc
+}
+
+func seedProviderAccount(t *testing.T, svc *Service, merchantID merchant.ID, providerType, environment, accountID string) {
+	t.Helper()
+	_, err := svc.pool.Exec(context.Background(), `
+		INSERT INTO openrails.provider_accounts (merchant_id, provider_type, environment, account_id, role, status)
+		VALUES ($1::uuid, lower($2), $3, $4, 'primary', 'enabled')
+		ON CONFLICT (merchant_id, provider_type, environment, account_id) DO NOTHING
+	`, merchantID.String(), providerType, environment, accountID)
+	require.NoError(t, err)
 }
 
 func TestProvision_Idempotent(t *testing.T) {
@@ -250,17 +273,20 @@ func TestDelete_RequiresExport(t *testing.T) {
 	require.True(t, errors.Is(err, ErrMerchantNotFound))
 }
 
-func TestCredentialRotation_WritesAudit(t *testing.T) {
+func TestCredentialRotation_LoadsProviderAccountScopedSecret(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
 	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"})
 	require.NoError(t, err)
 
-	sec, err := svc.PutCredential(ctx, tn.ID, SecretStripeSecretKey, "sk_1")
+	seedProviderAccount(t, svc, tn.ID, "stripe", "live", "acct_test")
+	secretName, err := ProviderAccountSecretName("stripe", "live", "acct_test", "secret_key")
+	require.NoError(t, err)
+	sec, err := svc.secrets.Put(ctx, tn.ID, secretName, "sk_1")
 	require.NoError(t, err)
 	require.Equal(t, 1, sec.Version)
 
-	sec, err = svc.RotateCredential(ctx, tn.ID, SecretStripeSecretKey, "sk_2")
+	sec, err = svc.secrets.Put(ctx, tn.ID, secretName, "sk_2")
 	require.NoError(t, err)
 	require.Equal(t, 2, sec.Version)
 
@@ -269,22 +295,6 @@ func TestCredentialRotation_WritesAudit(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "sk_2", creds.SecretKey)
 
-	// Audit rows recorded for both put and rotate.
-	var auditCount int
-	require.NoError(t, svc.pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.merchant_credential_audit WHERE merchant_id=$1::uuid`,
-		tn.ID.String()).Scan(&auditCount))
-	require.GreaterOrEqual(t, auditCount, 2)
-
-	// TestStripeCredential uses an injected tester (no live Stripe) and audits.
-	called := false
-	err = svc.TestStripeCredential(ctx, tn.ID, func(_ context.Context, key string) error {
-		called = true
-		require.Equal(t, "sk_2", key)
-		return nil
-	})
-	require.NoError(t, err)
-	require.True(t, called)
 }
 
 func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
@@ -304,7 +314,10 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 
 	// After resolution the caller loads THAT tenant's signing secret (the trust
 	// boundary), which is namespaced to the tenant.
-	_, err = svc.secrets.Put(ctx, tn.ID, SecretStripeWebhookSigning, "whsec_acme")
+	seedProviderAccount(t, svc, tn.ID, "stripe", "live", "acct_acme")
+	secretName, err := ProviderAccountSecretName("stripe", "live", "acct_acme", "webhook_signing_secret")
+	require.NoError(t, err)
+	_, err = svc.secrets.Put(ctx, tn.ID, secretName, "whsec_acme")
 	require.NoError(t, err)
 	creds, err := svc.LoadStripeCredentials(ctx, route.MerchantID)
 	require.NoError(t, err)

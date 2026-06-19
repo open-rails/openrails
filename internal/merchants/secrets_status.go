@@ -42,6 +42,35 @@ func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]Mer
 		}
 		out = append(out, st)
 	}
+	for name := range configured {
+		if _, ok := SecretDefinitionFor(name); ok {
+			continue
+		}
+		providerType, _, _, key, ok, err := ParseProviderAccountSecretName(name)
+		if !ok || err != nil {
+			continue
+		}
+		st := MerchantSecretStatus{
+			SecretDefinition: SecretDefinition{
+				Name:             name,
+				Provider:         providerType,
+				Purpose:          key,
+				DisplayLabel:     providerType + " " + key,
+				ManualVault:      true,
+				MerchantWritable: true,
+				Validation:       "presence",
+			},
+			Configured: true,
+		}
+		if s.secrets != nil {
+			if sec, err := s.secrets.Get(ctx, id, name); err == nil {
+				st.Version = sec.Version
+			} else if !errors.Is(err, ErrSecretNotFound) {
+				return nil, err
+			}
+		}
+		out = append(out, st)
+	}
 	return out, nil
 }
 
@@ -51,7 +80,7 @@ func (s *Service) DeleteCredential(ctx context.Context, id merchant.ID, name str
 		return errors.New("tenancy: no secret store configured")
 	}
 	name = cleanSecretName(name)
-	if _, ok := SecretDefinitionFor(name); !ok {
+	if !SecretWritable(name) {
 		return fmt.Errorf("tenancy: unknown tenant secret %q", name)
 	}
 	if err := s.secrets.Delete(ctx, id, name); err != nil {
@@ -64,7 +93,7 @@ func (s *Service) DeleteCredential(ctx context.Context, id merchant.ID, name str
 // returning it. When value is empty, the current stored value is loaded.
 func (s *Service) ValidateCredential(ctx context.Context, id merchant.ID, name, value string, stripeTester func(context.Context, string) error) error {
 	name = cleanSecretName(name)
-	if _, ok := SecretDefinitionFor(name); !ok {
+	if !SecretWritable(name) {
 		return fmt.Errorf("tenancy: unknown tenant secret %q", name)
 	}
 	if strings.TrimSpace(value) == "" {
@@ -86,7 +115,7 @@ func validateSecretValue(ctx context.Context, name, value string, stripeTester f
 		return err
 	}
 	value = strings.TrimSpace(value)
-	if name == SecretStripeSecretKey {
+	if isStripeSecretKeyName(name) {
 		if stripeTester == nil {
 			stripeTester = defaultStripeBalanceCheck
 		}
@@ -95,11 +124,35 @@ func validateSecretValue(ctx context.Context, name, value string, stripeTester f
 	return nil
 }
 
+func isStripeSecretKeyName(name string) bool {
+	if cleanSecretName(name) == SecretStripeSecretKey {
+		return true
+	}
+	providerType, _, _, key, ok, err := ParseProviderAccountSecretName(name)
+	return ok && err == nil && providerType == "stripe" && key == "secret_key"
+}
+
 func validateSecretValueLocal(name, value string) error {
 	name = cleanSecretName(name)
 	value = strings.TrimSpace(value)
+	providerType, _, _, key, scoped, err := ParseProviderAccountSecretName(name)
+	if err != nil {
+		return err
+	}
 	if value == "" {
 		return errors.New("empty")
+	}
+	if scoped {
+		switch {
+		case providerType == "stripe" && key == "secret_key":
+			name = SecretStripeSecretKey
+		case providerType == "stripe" && key == "webhook_signing_secret":
+			name = SecretStripeWebhookSigning
+		case providerType == "stripe" && key == "webhook_signing_secret_thin":
+			name = SecretStripeWebhookSigningThin
+		case providerType == "nmi" && key == "tokenization_url":
+			name = SecretNMIMobiusTokenizationURL
+		}
 	}
 	switch name {
 	case SecretStripeSecretKey:

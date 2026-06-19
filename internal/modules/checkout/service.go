@@ -96,6 +96,7 @@ type CheckoutService struct {
 	IdempotencyService   checkoutIdempotencyStore
 	NMIClients           map[string]*nmi.NMIClient
 	MerchantSecrets      merchantSecretGetter
+	ProviderSecrets      providerAccountSecretResolver
 	// ProcessorCustomerService maps app users to processor customer ids so we
 	// reuse a single Stripe customer per user (issue #212) and can record the
 	// mapping at checkout time instead of relying solely on webhooks.

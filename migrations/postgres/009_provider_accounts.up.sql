@@ -9,6 +9,7 @@ CREATE TABLE openrails.provider_accounts (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     provider_type text NOT NULL,
+    environment text DEFAULT 'live'::text NOT NULL,
     account_id text NOT NULL,
     display_name text,
     vault_secret_ref text,
@@ -23,8 +24,10 @@ CREATE TABLE openrails.provider_accounts (
     CONSTRAINT provider_accounts_pkey PRIMARY KEY (id),
     CONSTRAINT provider_accounts_nonempty CHECK (
         btrim(provider_type) <> ''::text
+        AND btrim(environment) <> ''::text
         AND btrim(account_id) <> ''::text
     ),
+    CONSTRAINT provider_accounts_environment_check CHECK (environment = ANY (ARRAY['live'::text, 'test'::text])),
     CONSTRAINT provider_accounts_role_check CHECK (role = ANY (ARRAY['primary'::text, 'secondary'::text, 'legacy'::text])),
     CONSTRAINT provider_accounts_status_check CHECK (status = ANY (ARRAY['enabled'::text, 'disabled'::text])),
     CONSTRAINT provider_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
@@ -32,8 +35,8 @@ CREATE TABLE openrails.provider_accounts (
 
 ALTER TABLE ONLY openrails.provider_accounts FORCE ROW LEVEL SECURITY;
 
-CREATE UNIQUE INDEX uq_provider_accounts_identity ON openrails.provider_accounts USING btree (merchant_id, provider_type, account_id);
-CREATE UNIQUE INDEX uq_provider_accounts_enabled_primary ON openrails.provider_accounts USING btree (merchant_id, provider_type) WHERE (role = 'primary'::text AND status = 'enabled'::text);
+CREATE UNIQUE INDEX uq_provider_accounts_identity ON openrails.provider_accounts USING btree (merchant_id, provider_type, environment, account_id);
+CREATE UNIQUE INDEX uq_provider_accounts_enabled_primary ON openrails.provider_accounts USING btree (merchant_id, provider_type, environment) WHERE (role = 'primary'::text AND status = 'enabled'::text);
 CREATE INDEX idx_provider_accounts_merchant ON openrails.provider_accounts USING btree (merchant_id);
 
 ALTER TABLE openrails.provider_accounts ENABLE ROW LEVEL SECURITY;
@@ -43,6 +46,7 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.provider_accounts TO openra
 
 COMMENT ON TABLE openrails.provider_accounts IS 'Merchant-scoped provider account registry (#518). account_id is the provider-returned account/profile identity, not a credential hash.';
 COMMENT ON COLUMN openrails.provider_accounts.provider_type IS 'Provider rail/type such as stripe, nmi, ccbill, solana, or a future provider type.';
+COMMENT ON COLUMN openrails.provider_accounts.environment IS 'Provider environment: live or test. Live and test accounts are distinct identities and may each have their own primary.';
 COMMENT ON COLUMN openrails.provider_accounts.account_id IS 'Provider-returned account identity, e.g. Stripe acct_..., NMI profile account id, CCBill account/subaccount, or Solana authority address.';
 COMMENT ON COLUMN openrails.provider_accounts.role IS 'primary routes new work by default; secondary is enabled but explicit/manual; legacy is for old rows/rebills/refunds/webhooks only.';
 COMMENT ON COLUMN openrails.provider_accounts.status IS 'enabled participates in routing/reconcile; disabled is retained for history but should not receive new routine work.';
@@ -50,11 +54,12 @@ COMMENT ON COLUMN openrails.provider_accounts.status IS 'enabled participates in
 ALTER TABLE openrails.provider_intents ADD COLUMN provider_account_id uuid;
 
 INSERT INTO openrails.provider_accounts (
-    merchant_id, provider_type, account_id, role, status, evidence, last_verified_at
+    merchant_id, provider_type, environment, account_id, role, status, evidence, last_verified_at
 )
 SELECT DISTINCT
     pi.merchant_id,
     lower(pi.provider),
+    'live',
     CASE
         WHEN pi.account_fingerprint LIKE 'stripe:%' THEN substring(pi.account_fingerprint FROM 8)
         ELSE pi.account_fingerprint
@@ -66,13 +71,14 @@ SELECT DISTINCT
 FROM openrails.provider_intents pi
 WHERE pi.account_fingerprint IS NOT NULL
   AND btrim(pi.account_fingerprint) <> ''
-ON CONFLICT (merchant_id, provider_type, account_id) DO NOTHING;
+ON CONFLICT (merchant_id, provider_type, environment, account_id) DO NOTHING;
 
 UPDATE openrails.provider_intents pi
 SET provider_account_id = pa.id
 FROM openrails.provider_accounts pa
 WHERE pa.merchant_id = pi.merchant_id
   AND pa.provider_type = lower(pi.provider)
+  AND pa.environment = 'live'
   AND pa.account_id = CASE
         WHEN pi.account_fingerprint LIKE 'stripe:%' THEN substring(pi.account_fingerprint FROM 8)
         ELSE pi.account_fingerprint

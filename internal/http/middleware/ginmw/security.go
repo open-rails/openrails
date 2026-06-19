@@ -1,13 +1,15 @@
 package ginmw
 
 import (
+	"context"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	authcore "github.com/open-rails/authkit/core"
 	"github.com/open-rails/openrails/internal/http/response"
 	log "github.com/sirupsen/logrus"
 
@@ -36,48 +38,49 @@ func isDebugNMITokenizationPath(path string) bool {
 	return strings.EqualFold(path, "/debug/nmi/tokenization")
 }
 
-// CORS middleware with billing service specific settings
+// CORSOriginSource returns the browser Origin allow-list for the current
+// request. Standalone wires this to AuthKit remote_application.allowed_origins.
+type CORSOriginSource func(context.Context) ([]string, error)
+
+// CORS middleware with billing service specific settings.
 func CORS(allowedOrigins []string) gin.HandlerFunc {
-	corsConfig := cors.DefaultConfig()
+	return CORSFromSource(func(context.Context) ([]string, error) {
+		return allowedOrigins, nil
+	})
+}
 
-	// If no origins specified, allow all (development mode)
-	if len(allowedOrigins) == 0 {
-		corsConfig.AllowAllOrigins = true
-	} else {
-		corsConfig.AllowOrigins = allowedOrigins
-	}
-
-	// Billing service specific headers
-	corsConfig.AllowHeaders = append(corsConfig.AllowHeaders,
-		"Authorization",
-		"X-Request-ID",
-		"X-Forwarded-For",
-		"X-Real-IP",
-		"X-Idempotency-Key",
-		"X-E2E-Run-ID",
-		"X-Captcha-Token",
-		"Accept-Language",
+// CORSFromSource grants browser CORS headers only to explicit allowed origins.
+// An empty or failing source grants no browser Origin. OPTIONS is still answered
+// with 204 so denied preflight fails in the browser without invoking handlers.
+func CORSFromSource(source CORSOriginSource) gin.HandlerFunc {
+	const (
+		allowHeaders  = "Origin,Content-Length,Content-Type,Authorization,X-Request-ID,X-Forwarded-For,X-Real-IP,X-Idempotency-Key,X-E2E-Run-ID,X-Captcha-Token,Accept-Language"
+		allowMethods  = "GET,POST,PUT,DELETE,OPTIONS"
+		exposeHeaders = "X-Request-ID,X-RateLimit-Remaining,X-RateLimit-Reset,X-Captcha-Required"
 	)
+	maxAge := strconv.Itoa(int((12 * time.Hour).Seconds()))
 
-	corsConfig.AllowMethods = []string{
-		http.MethodGet,
-		http.MethodPost,
-		http.MethodPut,
-		http.MethodDelete,
-		http.MethodOptions,
+	return func(c *gin.Context) {
+		origin := strings.TrimSpace(c.Request.Header.Get("Origin"))
+		if origin != "" && source != nil {
+			origins, err := source(c.Request.Context())
+			if err == nil && authcore.OriginAllowed(origin, origins) {
+				h := c.Writer.Header()
+				h.Set("Access-Control-Allow-Origin", origin)
+				h.Add("Vary", "Origin")
+				h.Set("Access-Control-Allow-Credentials", "true")
+				h.Set("Access-Control-Allow-Headers", allowHeaders)
+				h.Set("Access-Control-Allow-Methods", allowMethods)
+				h.Set("Access-Control-Expose-Headers", exposeHeaders)
+				h.Set("Access-Control-Max-Age", maxAge)
+			}
+		}
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
 	}
-
-	corsConfig.ExposeHeaders = []string{
-		"X-Request-ID",
-		"X-RateLimit-Remaining",
-		"X-RateLimit-Reset",
-		"X-Captcha-Required",
-	}
-
-	corsConfig.AllowCredentials = len(allowedOrigins) > 0
-	corsConfig.MaxAge = 12 * time.Hour
-
-	return cors.New(corsConfig)
 }
 
 // InternalIPWhitelist restricts access to internal networks only (not used by default)

@@ -88,7 +88,7 @@ func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *t
 	require.NoError(t, err)
 	defer preflightResp.Body.Close()
 	require.Equal(t, http.StatusNoContent, preflightResp.StatusCode)
-	require.Equal(t, "*", preflightResp.Header.Get("Access-Control-Allow-Origin"))
+	require.Empty(t, preflightResp.Header.Get("Access-Control-Allow-Origin"))
 	require.Empty(t, preflightResp.Header.Get("Access-Control-Allow-Credentials"))
 
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/self/status", nil)
@@ -102,6 +102,74 @@ func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *t
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 	require.Equal(t, "https://evil.example", resolver.origin)
 	require.Contains(t, responseBody(t, resp), "delegated_origin_not_allowed")
+}
+
+func TestStandaloneCORSUsesEnabledMerchantIssuerOriginUnion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	srv := &Server{
+		cfg: &config.Config{},
+		browserCORSOriginSource: func(context.Context) ([]string, error) {
+			return []string{
+				"https://doujins.com",
+				"https://hentai0.com",
+			}, nil
+		},
+	}
+	e := srv.newPublicEngine()
+	e.GET("/probe", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+
+	ts := httptest.NewServer(e)
+	t.Cleanup(ts.Close)
+
+	preflight := func(origin string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodOptions, ts.URL+"/probe", nil)
+		require.NoError(t, err)
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+		req.Header.Set("Access-Control-Request-Headers", "authorization")
+		resp, err := ts.Client().Do(req)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		return resp
+	}
+
+	allowed := preflight("https://doujins.com")
+	require.Equal(t, http.StatusNoContent, allowed.StatusCode)
+	require.Equal(t, "https://doujins.com", allowed.Header.Get("Access-Control-Allow-Origin"))
+	require.Equal(t, "true", allowed.Header.Get("Access-Control-Allow-Credentials"))
+
+	alsoAllowed := preflight("https://hentai0.com")
+	require.Equal(t, http.StatusNoContent, alsoAllowed.StatusCode)
+	require.Equal(t, "https://hentai0.com", alsoAllowed.Header.Get("Access-Control-Allow-Origin"))
+
+	denied := preflight("https://evil.example")
+	require.Equal(t, http.StatusNoContent, denied.StatusCode)
+	require.Empty(t, denied.Header.Get("Access-Control-Allow-Origin"))
+	require.Empty(t, denied.Header.Get("Access-Control-Allow-Credentials"))
+
+	// No Origin is a non-browser/server-to-server request shape. CORS grants
+	// nothing, and the handler still runs; auth remains the real boundary.
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/probe", nil)
+	require.NoError(t, err)
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
+
+	// A disallowed Origin is not an auth failure. The browser gets no CORS grant,
+	// while an arbitrary HTTP client can still receive the response.
+	req, err = http.NewRequest(http.MethodGet, ts.URL+"/probe", nil)
+	require.NoError(t, err)
+	req.Header.Set("Origin", "https://evil.example")
+	resp, err = ts.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
+	require.Equal(t, "ok", responseBody(t, resp))
 }
 
 func responseBody(t *testing.T, resp *http.Response) string {

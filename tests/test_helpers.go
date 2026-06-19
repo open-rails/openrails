@@ -17,17 +17,8 @@ import (
 	authtesting "github.com/open-rails/authkit/testing"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
-
-// testAdminOrgSlug is the AuthKit org admin authority lives under in this
-// suite. HARDCUT (#312): admin authority is the LIVE openrails:admin permission
-// held in the caller's OWN tenant — the suite bootstraps the test merchant's
-// org (see initializeServer) and grants test admins the operator role there.
-var testAdminOrgSlug = dbtest.TestMerchantSlug
 
 var (
 	// Test issuer for auth verification (shared across tests)
@@ -45,20 +36,6 @@ var (
 // the subject is simply the parsed value.
 func personalOwnerID(userID string) uuid.UUID {
 	return uuid.MustParse(userID)
-}
-
-// adminOrgClaims returns the extra JWT claims that put a token in the admin
-// tenant context. authkit's verifier maps `tenant` / `org_roles` to
-// Claims.Org / Claims.OrgRoles, which OpenRails copies into
-// UserContext.Org / UserContext.OrgRoles. The claims alone carry NO admin
-// authority (#312): the admin permission middleware evaluates the LIVE
-// openrails:admin grant for (UserContext.Org, UserContext.UserID) against
-// the control plane.
-func adminOrgClaims() map[string]any {
-	return map[string]any{
-		"tenant":    testAdminOrgSlug,
-		"org_roles": []string{"admin"},
-	}
 }
 
 func init() {
@@ -170,37 +147,6 @@ func setupTestServerWithRSAuth(t *testing.T) (*server.Server, string) {
 	srv := setupTestServer(t)
 	token := getTestIssuer().CreateToken("b2222222-2222-4222-8222-222222222222", "rs256@openrails.openrails.com")
 	return srv, token
-}
-
-// setupTestSuiteWithAdminAuth returns the shared test suite with an admin JWT token and user ID.
-// Use this for testing admin endpoints that require live admin authority.
-func setupTestSuiteWithAdminAuth(t *testing.T) (*TestContainerSuite, string, string) {
-	suite := getSharedTestSuite(t)
-	userID, token := suite.CreateAdminIdentity(t)
-	return suite, token, userID
-}
-
-// CreateAdminIdentity creates a real AuthKit user, grants it the operator
-// (admin) role in the bootstrap org, and mints a matching test-issuer JWT.
-// HARDCUT (#312): the admin permission middleware evaluates LIVE AuthKit state,
-// so the admin user must exist in profiles.users and hold openrails:admin in
-// their own tenant — admin-looking claims alone carry no authority (and AuthKit
-// owns user IDs, so the harness cannot mint admin tokens for arbitrary IDs).
-func (suite *TestContainerSuite) CreateAdminIdentity(t *testing.T) (userID, token string) {
-	t.Helper()
-	cp := embcp.Get(suite.App)
-	require.NotNil(t, cp, "control plane must be attached to mint admin identities (#312)")
-	core := cp.Core()
-	require.NotNil(t, core, "control plane core unavailable")
-
-	suffix := uuid.NewString()
-	email := "admin-" + suffix + "@test.example.com"
-	user, err := core.CreateUser(suite.ctx, email, "admin-"+suffix[:8])
-	require.NoError(t, err, "create admin AuthKit user")
-	require.NoError(t, core.AddMember(suite.ctx, testAdminOrgSlug, user.ID), "add admin to bootstrap org")
-	require.NoError(t, core.AssignRole(suite.ctx, testAdminOrgSlug, user.ID, controlplane.OperatorRole), "assign operator role")
-
-	return user.ID, getTestIssuer().CreateTokenWithClaims(user.ID, email, adminOrgClaims())
 }
 
 // CreateUserToken creates a JWT token without admin role for the given user ID.

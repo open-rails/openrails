@@ -36,7 +36,17 @@ func TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant(t *testing.T) 
 	secretStore, err := merchants.NewDBSecretStore(cp.Pool())
 	require.NoError(t, err)
 	const whsec = "whsec_no_default_merchant"
-	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, merchants.SecretStripeWebhookSigning, whsec)
+	const accountID = "acct_no_default_merchant"
+	_, err = cp.Pool().Exec(ctx, `
+		INSERT INTO openrails.provider_accounts (merchant_id, provider_type, environment, account_id, role, status)
+		VALUES ($1::uuid, 'stripe', 'live', $2, 'primary', 'enabled')
+		ON CONFLICT (merchant_id, provider_type, environment, account_id) DO UPDATE
+		SET role = 'primary', status = 'enabled', updated_at = now()
+	`, dbtest.TestMerchantID.String(), accountID)
+	require.NoError(t, err)
+	secretName, err := merchants.ProviderAccountSecretName("stripe", "live", accountID, "webhook_signing_secret")
+	require.NoError(t, err)
+	_, err = secretStore.Put(ctx, dbtest.TestMerchantID, secretName, whsec)
 	require.NoError(t, err)
 
 	event := []byte(`{"id":"evt_no_default","type":"customer.created","data":{"object":{"id":"cus_no_default"}}}`)

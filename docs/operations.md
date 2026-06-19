@@ -25,6 +25,47 @@ mechanism:
 | 3 | Outbound action never executed | (intent, not sync) | **durable intent + replay** — see "Durability model" below; reconcile is its *detector* |
 | 4 | Entitlements inconsistent | derived | re-run the derivation once 1–3 are true; `internal/audit` checks the local derivation, reconcile's PS-9 converges it against trued-up inputs |
 
+## Mutation Flags
+
+Operator commands use the same mutation contract:
+
+- no mutation flags: plan/report only
+- `--insert`: create records or provider objects that are missing from the target
+- `--overwrite`: update existing target records or mutable provider-owned fields
+- `--prune`: disable, archive, delete, or tombstone target extras that are absent from the source
+
+The flags compose. Full reconciliation to the source of truth is
+`--insert --overwrite --prune`.
+
+The primary commands are:
+
+```bash
+openrails push-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
+openrails push-merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml
+openrails push-merchant-catalog --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml
+openrails pull-provider --config /etc/openrails/config.yaml --merchant doujins --provider stripe
+```
+
+The three `push-*` commands push declared file state into OpenRails-owned
+state, AuthKit/control-plane state, the merchant secret backend, or provider
+catalog surfaces. `pull-provider` moves the opposite direction: provider
+observed state into OpenRails' local mirror, then local convergence. It never
+mutates external payment processors.
+
+Merchant provider secrets in `push-merchant-config` are seed material, not the
+runtime source of truth. The command resolves each declared provider account
+identity `(merchant, provider_type, environment, account_id)` and imports its
+secret values into the same backend the server will read:
+
+- `vault.enabled: true`: `secret/openrails/merchants/<merchant-slug>/provider_accounts/<provider_type>/<environment>/<account_id>/<secret_key>`
+- Vault disabled: `openrails.merchant_secrets` with the same secret name,
+  envelope-encrypted when `encryption.master_key` is configured
+
+After import, runtime checkout, webhook, vault/tokenization, provider intent,
+and provider-pull paths use the `provider_accounts` row and scoped secret name;
+they do not read a broad merchant-wide `stripe/secret_key` or
+`nmi/mobius/production_key` when a DB-backed merchant service is running.
+
 ## Durability model
 
 **Outbound — durability is OUR job.** Every mutation OpenRails wants to make
@@ -149,27 +190,29 @@ Operational rules:
   (warn logged) rather than blocking the ledger.
 - Legacy intents without `provider_account_id` execute ungated.
 
-## Reconcile (#107)
+## Provider Pull (#107, #511)
 
-Manual-only — **never scheduled**. Two modes, neither ever writes to a
-provider:
+Manual-only — **never scheduled**. It never writes to a provider:
 
-- `openrails reconcile check` (advisory): pull provider truth, diff, persist
-  findings, change nothing.
-- `openrails reconcile fix` (enforce): same pull + converge **local** state to
-  provider truth (status/periods adopted, payments backfilled,
-  subscription-sourced entitlements granted/revoked — admin-grant comps are
-  untouchable). Anything requiring a *remote* action lands in the admin queue
-  for a human.
+- `openrails pull-provider` with no mutation flags: pull provider truth, diff,
+  print what would change, and persist no local mirror changes.
+- `openrails pull-provider --insert`: import provider-observed records missing
+  locally.
+- `openrails pull-provider --overwrite`: update existing local mirror rows from
+  provider truth.
+- `openrails pull-provider --prune`: delete eligible local subscriptions or
+  payments attributed to the pulled provider account that are absent from the
+  provider source.
 - `openrails reconcile report [--run=ID]`: render the latest (or given) run's
   summary, dunning forensics, and standing open findings.
 
-`check` and `fix` take `--provider nmi|ccbill|stripe|solana` (repeatable;
-default = every configured provider), `--since` / `--until` (RFC3339 or
-`YYYY-MM-DD`, bounding the transaction window), `--merchant` (slug or id;
-default merchant otherwise) and `--format table|json`. The same engine sits
-behind the admin API: `POST /v1/admin/reconcile/runs` `{mode, providers,
-since, until}` runs synchronously; `GET .../runs`,
+`pull-provider` takes `--provider nmi|ccbill|stripe|solana` (repeatable;
+default = every configured provider), `--provider-account` (optional explicit
+provider account row id), `--since` / `--until` (RFC3339 or `YYYY-MM-DD`,
+bounding the transaction window), `--merchant` (slug or id; required), and
+`--format table|json`. The same engine sits behind the admin API:
+`POST /v1/admin/reconcile/runs` `{mode, providers, since, until}` runs
+synchronously; `GET .../runs`,
 `GET .../runs/:id`, `GET .../findings?status=&provider=&type=&admin_queue=`,
 and `POST .../findings/:id/{ack,dismiss}` work the queue.
 
@@ -304,12 +347,12 @@ docs/entitlements_timeline.md → "Grace".
 manual batch tool (all PS finding types, findings ledger, admin queue,
 forensics, enforce mode). The liveness sync is the always-on, narrow,
 per-subscription slice for exactly one failure mode (inbound silence); a
-reconcile fix run before/after a liveness pass converges to the same state
-by idempotency. Note: NMI charge detection correlates by the order reference
-OpenRails stamps at signup (the local subscription id). Legacy-imported
-subscriptions whose NMI `orderid` predates OpenRails won't match the charge
-probe — their charged periods converge as period-adoption (no access
-granted) until a webhook or reconcile backfill lands the payment.
+`pull-provider --insert --overwrite` run before/after a liveness pass converges
+to the same state by idempotency. Note: NMI charge detection correlates by the
+order reference OpenRails stamps at signup (the local subscription id).
+Legacy-imported subscriptions whose NMI `orderid` predates OpenRails won't
+match the charge probe — their charged periods converge as period-adoption (no
+access granted) until a webhook or provider-pull backfill lands the payment.
 
 ## Safety levers (recap — full details in README "Operating modes")
 

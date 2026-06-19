@@ -1334,7 +1334,7 @@ func Load(configPath string) (*Config, error) {
 		log.Warn("ignoring retired merchant config (#520/#521): seed merchants with openrails push-merchant-config; standalone no longer pins a process-wide merchant")
 	}
 	if ignoredCORSConfig {
-		log.Warn("ignoring retired cors_origins config (#519): delegated browser origin policy belongs to AuthKit remote_application.allowed_origins")
+		log.Warn("ignoring retired cors_origins config (#519): browser CORS origins come from AuthKit remote_application.allowed_origins")
 	}
 	if ignoredDBRequireRLS {
 		log.Warn("ignoring retired db.require_rls config: RLS enforcement is derived from env; development may bypass RLS, every other env requires an RLS-enforcing DB role")

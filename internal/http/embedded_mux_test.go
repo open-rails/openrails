@@ -93,3 +93,20 @@ func TestEmbeddedMuxAdminAssembles(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/admin/subscriptions", nil))
 	require.Equal(t, http.StatusNotFound, rec.Code)
 }
+
+func TestEmbeddedMuxPrivilegedRoutesRequireAuthenticatorAtConstruction(t *testing.T) {
+	s := &Server{
+		cfg:     &config.Config{},
+		runtime: &app.Runtime{DB: &db.DB{}, Config: &config.Config{}},
+	}
+
+	require.PanicsWithError(t,
+		"embedded billing: user/admin route groups require Options.Authenticator",
+		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{IncludeAdmin: true}) },
+	)
+	require.PanicsWithError(t,
+		"embedded billing: user/admin route groups require Options.Authenticator",
+		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{IncludeUser: true}) },
+	)
+	require.NotPanics(t, func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{IncludeWebhooks: true}) })
+}

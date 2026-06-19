@@ -12,22 +12,20 @@ func corsHandler(origins []string) http.Handler {
 	}))
 }
 
-// In allow-all mode the middleware must NOT reflect the caller's Origin together
-// with Access-Control-Allow-Credentials: true — that combination lets any site
-// make authenticated cross-origin requests and read the response. A bare "*"
-// (which browsers refuse to pair with credentials) is the safe behaviour.
-func TestCORSHTTPAllowAllDoesNotReflectOriginWithCredentials(t *testing.T) {
+// Empty origins are fail-closed: embedded hosts may wrap OpenRails with their
+// own CORS layer, but OpenRails should not silently grant all browser origins.
+func TestCORSHTTPEmptyOriginsGrantsNoBrowserCORS(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Origin", "https://evil.example")
 
 	corsHandler(nil).ServeHTTP(rec, req)
 
-	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
-		t.Fatalf("Access-Control-Allow-Origin = %q, want %q (must not reflect arbitrary origin)", got, "*")
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want empty", got)
 	}
 	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "" {
-		t.Fatalf("Access-Control-Allow-Credentials = %q, want empty in allow-all mode", got)
+		t.Fatalf("Access-Control-Allow-Credentials = %q, want empty", got)
 	}
 }
 

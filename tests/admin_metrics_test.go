@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
@@ -93,92 +94,71 @@ func seedClickHouseDailyMetrics(t *testing.T, suite *TestContainerSuite, amount 
 	require.NoError(t, batch.Send())
 }
 
-func TestAdminMetricsSummary(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
-	products := suite.SeedProducts()
-	priceID := products[0].Prices[0].ID
-	seedMetricsData(t, suite, priceID)
+// TestAdminMetricsFolded exercises the #528 folded GET /v1/admin/metrics endpoint
+// (was /metrics/{summary,revenue,subscriptions,processors,churn}). With a single
+// currency present each section is a bare object; the response carries all five
+// sections in one document. Authorized by openrails:merchant:metrics:read.
+func TestAdminMetricsFolded(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	admin := newHostSeamAdminRouter(t, suite, "bd000000-0000-4000-8000-000000000003",
+		[]string{controlplane.PermMerchantMetricsRead})
 
-	query := "/v1/admin/metrics/summary"
-	req, _ := http.NewRequest("GET", query, nil)
-	req.Header.Set("Authorization", "Bearer "+adminToken)
-	w := httptest.NewRecorder()
-	suite.Server.Handler().ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "summary response")
-
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Contains(t, resp, "mrr")
-	assert.Contains(t, resp, "total_revenue")
-	assert.Contains(t, resp, "active_subscriptions")
-}
-
-func TestAdminMetricsRevenue(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
 	products := suite.SeedProducts()
 	seedMetricsData(t, suite, products[0].Prices[0].ID)
 
-	req, _ := http.NewRequest("GET", "/v1/admin/metrics/revenue?granularity=day", nil)
-	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req, _ := http.NewRequest("GET", "/v1/admin/metrics?granularity=day", nil)
+	req.Header.Set("Authorization", "Bearer host-credential")
 	w := httptest.NewRecorder()
-	suite.Server.Handler().ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code)
+	admin.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	buckets, ok := resp["buckets"].([]interface{})
-	require.True(t, ok, "response should include buckets array: %s", w.Body.String())
-	assert.NotEmpty(t, buckets)
+
+	// summary section
+	summary, ok := resp["summary"].(map[string]any)
+	require.True(t, ok, "response must carry a summary object: %s", w.Body.String())
+	assert.Contains(t, summary, "mrr")
+	assert.Contains(t, summary, "total_revenue")
+	assert.Contains(t, summary, "active_subscriptions")
+
+	// revenue series section
+	revenue, ok := resp["revenue"].(map[string]any)
+	require.True(t, ok, "response must carry a revenue object")
+	revBuckets, ok := revenue["buckets"].([]any)
+	require.True(t, ok, "revenue should include buckets array: %s", w.Body.String())
+	assert.NotEmpty(t, revBuckets)
+
+	// subscription series section
+	subscriptions, ok := resp["subscriptions"].(map[string]any)
+	require.True(t, ok, "response must carry a subscriptions object")
+	subBuckets, ok := subscriptions["buckets"].([]any)
+	require.True(t, ok, "subscriptions should include buckets array: %s", w.Body.String())
+	assert.NotEmpty(t, subBuckets)
+
+	// processors section
+	processors, ok := resp["processors"].(map[string]any)
+	require.True(t, ok, "response must carry a processors object")
+	procList, ok := processors["processors"].([]any)
+	require.True(t, ok, "processors should include processors array: %s", w.Body.String())
+	assert.NotEmpty(t, procList)
+
+	// churn section
+	churn, ok := resp["churn"].(map[string]any)
+	require.True(t, ok, "response must carry a churn object")
+	assert.Contains(t, churn, "monthly_churn")
 }
 
-func TestAdminMetricsSubscriptions(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
-	products := suite.SeedProducts()
-	seedMetricsData(t, suite, products[0].Prices[0].ID)
+// TestAdminMetrics_RequiresMetricsRead proves the delegated gate fails closed:
+// a principal without metrics:read cannot read the dashboard.
+func TestAdminMetrics_RequiresMetricsRead(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	admin := newHostSeamAdminRouter(t, suite, "bd000000-0000-4000-8000-000000000004",
+		[]string{controlplane.PermMerchantBillingRead})
 
-	req, _ := http.NewRequest("GET", "/v1/admin/metrics/subscriptions?granularity=day", nil)
-	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req, _ := http.NewRequest("GET", "/v1/admin/metrics?granularity=day", nil)
+	req.Header.Set("Authorization", "Bearer host-credential")
 	w := httptest.NewRecorder()
-	suite.Server.Handler().ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code)
-
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	buckets, ok := resp["buckets"].([]interface{})
-	require.True(t, ok, "response should include buckets array: %s", w.Body.String())
-	assert.NotEmpty(t, buckets)
-}
-
-func TestAdminMetricsProcessors(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
-	products := suite.SeedProducts()
-	seedMetricsData(t, suite, products[0].Prices[0].ID)
-
-	req, _ := http.NewRequest("GET", "/v1/admin/metrics/processors", nil)
-	req.Header.Set("Authorization", "Bearer "+adminToken)
-	w := httptest.NewRecorder()
-	suite.Server.Handler().ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code)
-
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	processors, ok := resp["processors"].([]interface{})
-	require.True(t, ok, "response should include processors array: %s", w.Body.String())
-	assert.NotEmpty(t, processors)
-}
-
-func TestAdminMetricsChurn(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
-	products := suite.SeedProducts()
-	seedMetricsData(t, suite, products[0].Prices[0].ID)
-
-	req, _ := http.NewRequest("GET", "/v1/admin/metrics/churn", nil)
-	req.Header.Set("Authorization", "Bearer "+adminToken)
-	w := httptest.NewRecorder()
-	suite.Server.Handler().ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code)
-
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Contains(t, resp, "monthly_churn")
+	admin.ServeHTTP(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }

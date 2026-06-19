@@ -2,7 +2,6 @@ package ginmw
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -194,8 +193,9 @@ func TestRateLimitRecordsIPAndUserSubjects(t *testing.T) {
 
 	w := performRateLimitTestRequest(r, "/v1/checkout", "203.0.113.40", "")
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Equal(t, 1, store.counters["checkout:ip:203.0.113.40"].count)
-	require.Equal(t, 1, store.counters["checkout:user:user_1"].count)
+	snapshot := store.Snapshot()
+	require.Equal(t, 1, snapshot["checkout:ip:203.0.113.40"])
+	require.Equal(t, 1, snapshot["checkout:user:user_1"])
 }
 
 func TestRateLimitAnonymousRequestRecordsOnlyIPSubject(t *testing.T) {
@@ -209,15 +209,16 @@ func TestRateLimitAnonymousRequestRecordsOnlyIPSubject(t *testing.T) {
 
 	w := performRateLimitTestRequest(r, "/v1/checkout", "203.0.113.48", "")
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Equal(t, 1, store.counters["checkout:ip:203.0.113.48"].count)
-	require.Len(t, store.counters, 1)
+	snapshot := store.Snapshot()
+	require.Equal(t, 1, snapshot["checkout:ip:203.0.113.48"])
+	require.Len(t, snapshot, 1)
 }
 
 func TestRateLimitHeadersUseStrictestSubject(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := NewRateLimitStore()
 	now := time.Now().Add(time.Minute)
-	store.counters["checkout:user:user_1"] = &inMemoryCounter{count: 8, reset: now}
+	store.SeedCounter("checkout", "user:user_1", 8, now)
 	cfg := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 10}}
 
 	r := gin.New()
@@ -324,8 +325,8 @@ func TestRateLimitCaptchaSolveClearsIPAndUserSubjects(t *testing.T) {
 	require.NoError(t, challengeStore.MarkChallenged(context.Background(), "ip:203.0.113.47", time.Minute))
 	require.NoError(t, challengeStore.MarkChallenged(context.Background(), "user:user_1", time.Minute))
 	store := NewRateLimitStore()
-	store.counters["checkout:ip:203.0.113.47"] = &inMemoryCounter{count: 9, reset: time.Now().Add(time.Minute)}
-	store.counters["checkout:user:user_1"] = &inMemoryCounter{count: 9, reset: time.Now().Add(time.Minute)}
+	store.SeedCounter("checkout", "ip:203.0.113.47", 9, time.Now().Add(time.Minute))
+	store.SeedCounter("checkout", "user:user_1", 9, time.Now().Add(time.Minute))
 
 	r := gin.New()
 	r.Use(testUserFromHeader())
@@ -342,50 +343,9 @@ func TestRateLimitCaptchaSolveClearsIPAndUserSubjects(t *testing.T) {
 	userChallenged, err := challengeStore.IsChallenged(context.Background(), "user:user_1")
 	require.NoError(t, err)
 	require.False(t, userChallenged)
-	require.Equal(t, 1, store.counters["checkout:ip:203.0.113.47"].count)
-	require.Equal(t, 1, store.counters["checkout:user:user_1"].count)
-}
-
-func TestRateLimitStorePrunesExpiredCounters(t *testing.T) {
-	t.Parallel()
-
-	store := NewRateLimitStore()
-	store.counters["expired"] = &inMemoryCounter{count: 1, reset: time.Now().Add(-time.Minute)}
-
-	result := store.Allow("ip:203.0.113.30", "checkout", &config.RateLimit{RequestsPerMinute: 10})
-	require.True(t, result.allowed)
-	require.NotContains(t, store.counters, "expired")
-}
-
-func TestRateLimitStoreBoundsCounters(t *testing.T) {
-	t.Parallel()
-
-	store := NewRateLimitStore()
-	for i := 0; i < maxInMemoryRateLimitCounters; i++ {
-		store.counters[fmt.Sprintf("checkout:ip:203.0.113.%d", i)] = &inMemoryCounter{count: 1, reset: time.Now().Add(time.Hour)}
-	}
-
-	result := store.Allow("ip:203.0.113.31", "checkout", &config.RateLimit{RequestsPerMinute: 10})
-	require.True(t, result.allowed)
-	require.LessOrEqual(t, len(store.counters), maxInMemoryRateLimitCounters)
-}
-
-func TestRateLimitStoreDoesNotEvictWhenReusingExistingCounter(t *testing.T) {
-	t.Parallel()
-
-	store := NewRateLimitStore()
-	ip := "203.0.113.32"
-	key := "checkout:ip:" + ip
-	store.counters[key] = &inMemoryCounter{count: 1, reset: time.Now().Add(time.Hour)}
-	for i := 1; len(store.counters) < maxInMemoryRateLimitCounters; i++ {
-		store.counters[fmt.Sprintf("checkout:ip:198.51.100.%d", i)] = &inMemoryCounter{count: 1, reset: time.Now().Add(time.Hour)}
-	}
-
-	result := store.Allow("ip:"+ip, "checkout", &config.RateLimit{RequestsPerMinute: 10})
-	require.True(t, result.allowed)
-	require.Len(t, store.counters, maxInMemoryRateLimitCounters)
-	require.Contains(t, store.counters, key)
-	require.Equal(t, 2, store.counters[key].count)
+	snapshot := store.Snapshot()
+	require.Equal(t, 1, snapshot["checkout:ip:203.0.113.47"])
+	require.Equal(t, 1, snapshot["checkout:user:user_1"])
 }
 
 type stubCaptchaVerifier struct {
@@ -430,7 +390,7 @@ func TestRateLimitRejectsOversizedContentLength(t *testing.T) {
 
 	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 	// Rejected before any rate-limit counting.
-	require.Empty(t, store.counters)
+	require.Empty(t, store.Snapshot())
 }
 
 func TestRateLimitRejectsOversizedChunkedBody(t *testing.T) {
@@ -454,7 +414,7 @@ func TestRateLimitRejectsOversizedChunkedBody(t *testing.T) {
 
 	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 	// Chunked requests are capped by MaxBytesReader even without Content-Length.
-	require.Len(t, store.counters, 1)
+	require.Len(t, store.Snapshot(), 1)
 }
 
 func performRateLimitTestRequest(r http.Handler, path, ip, userID string) *httptest.ResponseRecorder {

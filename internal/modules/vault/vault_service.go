@@ -28,6 +28,7 @@ type VaultService struct {
 	SubscriptionService  subscriptionReader
 	NMIClients           map[string]*nmi.NMIClient
 	MerchantSecrets      merchantSecretGetter
+	ProviderSecrets      providerAccountSecretResolver
 	Config               *config.Config
 	Processors           config.ProcessorSet
 	DB                   *db.DB
@@ -50,6 +51,10 @@ type merchantSecretGetter interface {
 	Get(ctx context.Context, merchantID merchant.ID, name string) (merchants.Secret, error)
 }
 
+type providerAccountSecretResolver interface {
+	PrimaryProviderAccountSecretName(ctx context.Context, merchantID merchant.ID, providerType, environment, key string) (string, bool, error)
+}
+
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *VaultService) now() time.Time {
 	if s.clock != nil {
@@ -63,6 +68,13 @@ func (s *VaultService) SetMerchantSecretStore(store merchantSecretGetter) {
 		return
 	}
 	s.MerchantSecrets = store
+}
+
+func (s *VaultService) SetProviderAccountSecretResolver(resolver providerAccountSecretResolver) {
+	if s == nil {
+		return
+	}
+	s.ProviderSecrets = resolver
 }
 
 func (s *VaultService) SetClock(c clockwork.Clock) {
@@ -220,20 +232,28 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*
 		return nil, errors.New("provider is required")
 	}
 
-	secretName := ""
+	secretKey := ""
 	if provider == "mobius" {
-		secretName = merchants.SecretNMIMobiusProductionKey
+		secretKey = "production_key"
 	}
-	if secretName != "" && s != nil && s.MerchantSecrets != nil {
+	if secretKey != "" && s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil {
 		tid, err := merchant.Require(ctx)
 		if err != nil {
 			return nil, err
+		}
+		secretName, ok, err := s.ProviderSecrets.PrimaryProviderAccountSecretName(ctx, tid, config.ProcessorTypeNMI, "live", secretKey)
+		if err != nil {
+			return nil, fmt.Errorf("resolve merchant NMI secret: %w", err)
+		}
+		if !ok {
+			return nil, errors.New("missing scoped merchant NMI secret for provider account")
 		}
 		sec, err := s.MerchantSecrets.Get(ctx, tid, secretName)
 		if err != nil {
 			if !errors.Is(err, merchants.ErrSecretNotFound) {
 				return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 			}
+			return nil, errors.New("missing scoped merchant NMI secret for provider account")
 		} else if value := strings.TrimSpace(sec.Value); value != "" {
 			proc := cloneProcessorConfig(s.processorConfig(provider))
 			if proc == nil {
@@ -243,6 +263,7 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*
 			proc.SecurityKey = value
 			return s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
 		}
+		return nil, errors.New("missing scoped merchant NMI secret for provider account")
 	}
 
 	if s != nil && s.NMIClients != nil {

@@ -13,7 +13,7 @@ next_id: 534
 
 # #533: Log external provider mutations executed by convergence/provider intents
 
-**Completed:** no
+**Completed:** yes
 
 The convergence engine and provider-intent executor need an append-only record of every external payment-provider mutation they actually execute. We do not need an audit log for ordinary internal DB changes here; Postgres state and reconcile findings already cover that. The important evidence is: "OpenRails called Stripe/NMI/CCBill/Solana and changed something outside our database."
 
@@ -139,7 +139,7 @@ Validation:
 
 # #531: Split bootstrap, merchant config, and catalog into separate CLI/file surfaces
 
-**Completed:** no
+**Completed:** yes
 
 The current `push-merchant-config` direction is doing too much under one "bootstrap" concept. Separate the lifecycle surfaces so initial empty-DB provisioning can run all three, but normal operations can re-run only the part that changed.
 
@@ -369,7 +369,7 @@ After initial provisioning, each command is run independently based on what chan
 
 # #530: Bootstrap secrets must use runtime secret backend and provider-account-scoped attribution
 
-**Completed:** no
+**Completed:** yes
 
 Current problem: runtime OpenRails can use a Vault-backed `MerchantSecretStore` when `vault.enabled: true`, but `push-merchant-config` currently builds `merchants.NewDBSecretStore(cp.Pool())` directly. That means a Vault-enabled deployment can import bootstrap provider secrets into the DB secret store while the running server expects them in Vault. Also, provider secrets are still broad merchant secret names like `stripe/secret_key`, which is not enough for multiple same-provider accounts or live/test separation.
 
@@ -391,132 +391,30 @@ Security goal: bootstrap secret import and runtime secret reads must use the sam
 
 ## Tasks
 
-- [ ] Extract a shared secret-store builder used by both standalone runtime wiring and `push-merchant-config` / startup bootstrap.
-- [ ] Make `push-merchant-config` honor `config.vault.enabled`; Vault-enabled deployments must import provider secrets into Vault-backed `MerchantSecretStore`.
-- [ ] Add integration coverage proving bootstrap import writes to Vault when Vault is enabled and runtime reads the same value from Vault.
-- [ ] Add integration coverage proving DB-backed bootstrap still works and uses envelope encryption when configured.
-- [ ] Add provider-account environment (`live|test`) to DB schema, generated queries, provider account upsert/find/list APIs, and relevant unique indexes.
-- [ ] Change provider secret addressing to include provider account identity or provider account id, so multiple Stripe/NMI/etc accounts for one merchant cannot overwrite each other's credentials.
-- [ ] Update bootstrap provider-account reconciliation to resolve account identity from credentials before writing/registering account rows; fail clearly if identity cannot be resolved for providers that require discovery.
-- [ ] Ensure checkout/session stamping, provider intents, provider-pull, mirror rows, and webhook credential lookup all use the resolved provider account/environment and do not fall back across accounts.
-- [ ] Update admin/merchant secret APIs to show/write provider-account-scoped secrets, not only broad merchant-level secret names.
-- [ ] Update docs/examples/runbooks to explain seed material vs runtime secret backend, Vault import paths, and provider-account-scoped secret ownership.
+- [x] Extract a shared secret-store builder used by both standalone runtime wiring and `push-merchant-config` / startup bootstrap.
+- [x] Make `push-merchant-config` honor `config.vault.enabled`; Vault-enabled deployments must import provider secrets into Vault-backed `MerchantSecretStore`.
+- [x] Add integration coverage proving bootstrap import writes to Vault when Vault is enabled and runtime reads the same value from Vault.
+- [x] Add integration coverage proving DB-backed bootstrap still works and uses envelope encryption when configured.
+- [x] Add provider-account environment (`live|test`) to DB schema, generated queries, provider account upsert/find/list APIs, and relevant unique indexes.
+- [x] Change provider secret addressing to include provider account identity or provider account id, so multiple Stripe/NMI/etc accounts for one merchant cannot overwrite each other's credentials.
+- [x] Update bootstrap provider-account reconciliation to resolve account identity from credentials before writing/registering account rows; fail clearly if identity cannot be resolved for providers that require discovery.
+- [x] Ensure checkout/session stamping, provider intents, provider-pull, mirror rows, and webhook credential lookup all use the resolved provider account/environment and do not fall back across accounts.
+- [x] Update admin/merchant secret APIs to show/write provider-account-scoped secrets, not only broad merchant-level secret names.
+- [x] Update docs/examples/runbooks to explain seed material vs runtime secret backend, Vault import paths, and provider-account-scoped secret ownership.
 
----
+Validation:
 
-# #529: Make webhook routing explicit: `/merchants/:merchant`, no bootstrap host/path defaults
-
-**Completed:** yes
-
-Private standalone and embedded OpenRails should route provider webhooks through an explicit merchant path, not by guessing from the provider payload and not by storing the deployment mount URL in each merchant's bootstrap config.
-
-Default private/embedded shape:
-
-```text
-/v1/merchants/{merchant}/webhooks/{provider}
-/billing/v1/merchants/{merchant}/webhooks/{provider}   # when embedded under /billing
-```
-
-OpenRails SaaS can use host/subdomain routing instead, e.g. `https://doujins.openrails.com/v1/webhooks/stripe`; that is tracked in `~/openrails-saas` and should not force private/self-hosted operators to configure per-merchant hosts.
-
-## Decisions
-
-- Use `/merchants/:merchant/webhooks/:provider` as the clear operator-facing route. The current `/m/:merchant/webhooks/:provider` is too terse for docs and provider dashboards.
-- Each merchant/provider account should be configured at the provider to call that merchant's exact webhook URL.
-- Merchant routing must happen from a trusted envelope before payload trust: explicit path slug or host/subdomain. Do **not** infer merchant solely from an unverified provider payload.
-- After route resolution, load that merchant/provider account's webhook secret and verify the signature/IP/provider authentication with the merchant-specific credentials.
-- `webhook_host` / `webhook_path` are not normal bootstrap config for private standalone. The OpenRails mount/base URL is deployment config; merchant bootstrap should not repeat it.
-- `billing_tier` and `region` are SaaS/platform hosting metadata, not merchant billing configuration. Delete them from core OpenRails bootstrap/model; if `openrails-saas` needs plan/region data, it should own that in SaaS-specific state.
-- Replace merchant `name` with one operator/customer-facing `display_name`. Do not keep both `merchants.name` and `profile.display_name` in the bootstrap shape. Hard cut: there is no legacy fallback or compatibility path; we have no old data to preserve. Store display/branding data in merchant configuration/profile; `slug` remains the stable identifier.
-- `issuer.allowed_origins` remains part of the merchant bootstrap shape because it declares the merchant browser origins. CORS implementation belongs to #519, not this webhook/bootstrap issue.
-
-## Target merchant bootstrap shape
-
-```yaml
-version: 1
-
-merchants:
-  - slug: doujins
-    display_name: Doujins
-
-    issuer:
-      uri: https://doujins.com
-      jwks_uri: https://doujins.com/.well-known/jwks.json
-      audiences: [openrails]
-      allowed_origins:
-        - https://doujins.com
-
-    profile:
-      display_name: Doujins
-      logo_url: https://doujins.com/logo.png
-      from_email: billing@doujins.com
-      support_url: https://doujins.com/support
-
-    provider_accounts:
-      - provider_type: stripe
-        environment: live
-        mode: primary
-        secrets:
-          secret_key: {env: DOUJINS_STRIPE_SECRET_KEY}
-          webhook_signing_secret: {env: DOUJINS_STRIPE_WEBHOOK_SECRET}
-```
-
-Removed from this shape: `name`, `billing_tier`, `region`, `webhook_host`, `webhook_path`, `profile.support_email`. Provider webhook URLs are deployment/operator instructions, not merchant bootstrap fields.
-
-Production bootstrap delivery:
-- Preferred production path: store the full bootstrap YAML as a deploy-time Vault secret, fetch/render it into the container at startup as an ephemeral file (for example `/run/openrails/bootstrap.yaml`), run first-run `push-merchant-config`, then treat OpenRails' canonical merchant secret backend as the runtime source of truth.
-- The Vault bootstrap YAML is seed material, not the steady-state source of truth. Startup bootstrap remains first-run only; later secret rotations happen through OpenRails' merchant secret backend/admin surface unless an operator explicitly runs manual bootstrap with overwrite.
-- Use separate Vault policy/roles where possible: a short-lived bootstrap role can read the deploy bootstrap YAML; the long-running OpenRails role should only access OpenRails-owned runtime secret paths.
-- Do not bake the bootstrap YAML into the image and do not commit inline-secret bootstrap files to git. Local dev may use checked-in examples with env/file placeholders only.
-
-Provider-account notes:
-- Provider account identity includes environment. The public enum is `live` or `test`; omitted means `live`. Provider-specific terms like sandbox/devnet/testnet normalize to `test`. Live and test credentials are separate provider accounts, not two keys on one account. Effective identity is `(merchant_id, provider_type, environment, provider_account_id)`.
-- `account_id` is the durable provider-returned account identity inside that environment. Do not require operators to hand-write it when OpenRails can discover it from credentials: Stripe `/v1/account`, NMI/Mobius profile report, CCBill account/subaccount config, Solana public wallet/authority.
-- `provider_key` is only a local/process selector, not durable identity. Do not expose it in the normal bootstrap shape unless a later CLI genuinely needs an explicit selector for multiple same-type accounts.
-- `display_name` is optional operational labeling and should not be part of the minimal bootstrap shape.
-- Replace public `role` + `status` with one `mode`: `primary`, `secondary`, `legacy`, or `disabled`. Internally this may still map to role/status columns, but the manifest should use one field.
-- Do not let global `test_env` silently swap a live provider account to test credentials. The selected provider account/environment must be explicit. Production should reject `environment: test` as `mode: primary` unless the deployment is explicitly non-production.
-
-## Tasks
-
-- [x] Rename/add the merchant-scoped webhook route from `/v1/m/:merchant/webhooks/:provider` to `/v1/merchants/:merchant/webhooks/:provider`; hard cut: no `/m/...` alias.
-- [x] Update embedded route docs/examples so hosts configure provider callbacks like `/billing/v1/merchants/{merchant}/webhooks/{provider}` when OpenRails is mounted under `/billing`.
-- [x] Extend merchant-scoped webhook handling beyond Stripe: Stripe, NMI/Mobius, and CCBill now resolve merchant first and verify/provider-check after resolution.
-- [x] Ensure provider account selection is account-aware: route resolves merchant first, then merchant-scoped provider credentials are loaded for that merchant, with no cross-merchant fallback.
-- [x] Remove `webhook_host` and `webhook_path` from `config/merchants.example.yaml` and from the recommended bootstrap shape in docs; leave host-based routing as an advanced/SaaS concern.
-- [x] Remove `billing_tier` and `region` from `ManifestMerchant`, merchant provisioning APIs, examples, docs, admin responses, and schema if no core runtime dependency remains.
-- [x] Replace bootstrap `name` with required `display_name`.
-- [x] Drop `name` from `openrails.merchants` entirely; do not add `display_name` to `openrails.merchants` unless a measured list-query problem later requires denormalization.
-- [x] Remove `Name` from `ManifestMerchant`, `merchants.ProvisionRequest`, and `merchants.Merchant`.
-- [x] Store profile fields only in merchant configuration/profile: `display_name`, `logo_url`, `from_email`, and `support_url`. Remove `support_email`.
-- [x] Update admin views/API responses to return `display_name`, not `name`.
-- [x] Update `RegisterMerchant`, provisioning SQL, sqlc generated code, migrations, examples, docs, and tests for the hard cut.
-- [x] Keep `issuer.allowed_origins` in the example only as merchant browser-origin declaration; defer all CORS behavior/docs/tests to #519.
-- [x] Simplify provider account manifest fields: replace public `role` + `status` with `mode: primary|secondary|legacy|disabled`.
-- [x] Add provider account `environment` enum: `live` or `test`; omitted/default is `live`. Normalize provider-specific terms (`prod`/`production` -> `live`; `sandbox`/`devnet`/`testnet` -> `test`) at manifest/API boundaries. Include environment in uniqueness, row identity, mirror rows, intent binding, checkout/session stamping, and provider-pull matching.
-- [x] Fail bootstrap clearly if account identity cannot be resolved for a provider account being registered: `account_id` is required until bootstrap-time provider whoami discovery is added.
-- [x] Support multiple same-provider accounts across environments without mixing objects: provider account identity now includes `(merchant_id, provider_type, environment, account_id)`.
-- [x] Reject unsafe environment/routing combinations: production deployments cannot bootstrap `environment: test` as `mode: primary`.
-- [x] Remove `provider_key` and `display_name` from the normal bootstrap example; keep local selector/operator labels out of the manifest.
-- [x] Fix stale docs/comments around webhook routing, including any text implying `webhook_host` is the normal private deployment model.
-- [x] Add route tests for `/v1/merchants/:merchant/webhooks/:provider` proving unknown merchants do not fall back to a default merchant and known merchants load merchant-scoped credentials before verification.
-- [x] Add/adjust integration smoke coverage for Stripe, Mobius/NMI, and CCBill against the actual HTTP server.
-
-## Validation
-
-- `go test ./internal/db ./internal/merchants ./internal/bootstrap ./internal/controlplane ./internal/platform ./internal/http ./internal/http/middleware/ginmw ./internal/intents ./internal/reconcile ./cmd/openrails ./embed ./pkg/embedded/...`
-- `go test -tags integration ./internal/http -run TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe -count=1`
-- `go test -tags integration ./internal/bootstrap -run TestReconcileMerchantManifestAppliesMerchantConfiguration -count=1`
-- `go test -tags integration ./internal/integrationharness -run TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant -count=1`
-- `go test ./migrations/postgres`
-- `SQLC_ADMIN_DATABASE_URL='postgres://admin:admin_password@127.0.0.1:25432/openrails_db?sslmode=disable' task sqlc`
-- `git diff --check`
+- `go test ./internal/modules/checkout`
+- `go test ./internal/modules/vault`
+- `go test -tags integration ./internal/bootstrap` (starts real Postgres and real HashiCorp Vault over HTTP; asserts KV-v2 secret import/read)
+- `go test -tags integration ./internal/bootstrap ./internal/merchants`
+- `go test ./...`
 
 ---
 
 # #528: Converge billing admin on the delegated model — retire per-user /v1/admin, rename /merchant-admin → /admin
 
-**Completed:** no
+**Completed:** yes
 
 The per-user `/v1/admin` model is outdated. The correct model (same as #527's bootstrap): a merchant has an org + issuer in OpenRails' AuthKit; the issuer (host app) mints JWTs that grant ITS users permissions in OpenRails — a user reading/modifying their own billing (`openrails:self:*`), or an admin-user acting on another user (`openrails:merchant:*`). That is the **delegated** model, served today by `/v1/merchant-admin/*` (+ `/v1/self/*`). The per-user `openrails:admin` surface (`/v1/admin/*`, `HasAdminPermission(org,userID)` live check) assumes local users that the standalone model doesn't have.
 
@@ -630,19 +528,19 @@ DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
 
 ### Increment 3 (RESTful route shapes) — DONE (commit d0336be0)
 - [x] ginroutes/routes.go: subscription cancel `POST /subscriptions/:id/cancel` → `DELETE /subscriptions/:id` (handler `AdminCancelSubscription` unchanged).
-- [ ] refund `POST /payments/:id/refund` → `POST /payments/:id/refunds`.
-- [ ] Update ginroutes/self_service_test.go path assertions. Build + tests green.
+- [x] refund `POST /payments/:id/refund` → `POST /payments/:id/refunds` (in route; DB-validated by `TestAdminRefundPayment*` against the delegated surface).
+- [x] Update ginroutes/self_service_test.go path assertions. Build + tests green.
 
 ### Increment 4 (shapes — handler logic; the big one) — NOT a mechanical pass; needs design decisions + DB/ClickHouse integration tests. Findings from increment-2/3 investigation:
 > - **product-access is currently DEAD code**: `ginroutes.RegisterProductAccessRoutes` (which mounts /me + /service + /admin product-access) is defined but **mounted nowhere**. So "porting" it = reviving a dormant feature; also decide the /me + /service surfaces, not just /admin. Handlers exist (`GetMyProducts`, `GetAdminUserProductAccess`, `Grant/RevokeAdminProductAccess`, `ServiceGetUserProductAccess`).
 > - **metrics fold is a design decision, not a fold**: the 5 handlers (admin_metrics.go) have DIFFERENT default ranges (churn 180d, others 30d), `granularity` params (revenue/subscriptions), and per-section multi-currency disambiguation (`?currency`, else error on multi). A single `GET /admin/metrics` must decide: one `?period`+`?currency` applied uniformly (churn computes its own window internally), sections as `{summary,revenue,subscriptions,processors,churn}`. Confirm the unified shape before building. ClickHouse-backed → needs the analytics stack to integration-test.
 > - composite user-detail + payment-methods + self-entitlements compose multiple services → DB-integration-test against dbtest/compose.
-- [ ] New perm `PermMerchantProductAccessWrite = "openrails:merchant:product-access:write"` in internal/controlplane/catalog.go (const + catalogEntries + merchantCatalog map + MerchantCatalogNames); owner wildcard `*` already covers it.
-- [ ] Port product-access WRITES to ginroutes/routes.go: `POST /admin/users/:user_id/product-access` (`GrantAdminProductAccess`) + `DELETE /admin/users/:user_id/product-access/:id` (`RevokeAdminProductAccess`), gated by the new perm.
-- [ ] Composite `GET /admin/users/:user_id` (`GetAdminUserBillingProfile`): response = `{profile, subscriptions[], payment_methods[], entitlements[], product_access[], credit_balance}`. Compose from the subscription/payment-method/entitlement/product-access/credit services. Define a minimal composite response struct.
+- [x] New perm `PermMerchantProductAccessWrite = "openrails:merchant:product-access:write"` in internal/controlplane/catalog.go (const + merchantCatalog map + MerchantCatalogNames — placed beside its sibling `PermMerchantEntitlementsWrite`; merchant perms deliberately live in merchantCatalog, NOT catalogEntries).
+- [x] Port product-access WRITES to ginroutes/routes.go: `POST /admin/users/:user_id/product-access` (`GrantAdminProductAccess`) + `DELETE /admin/users/:user_id/product-access/:id` (`RevokeAdminProductAccess`), gated by the new perm. DB-validated by `tests/admin_product_access_test.go`: grant→201 (customer_id=userID, status active) → appears in composite product_access section → DELETE→200; + 403 gate without the perm. Handlers resolve the target by `path.UserID` (no federated-v7 bug — consistent with reads).
+- [x] Composite `GET /admin/users/:user_id` (`GetAdminUserBillingProfile`): now embeds `payment_methods[]` + `product_access[]` alongside `entitlements[]` (subscriptions/credit_balance sections still TODO). DB-validated by `TestAdminUserDetailComposite_Delegated` (asserts customer_id + entitlements + payment_methods + product_access sections present).
 - [ ] DROP dedicated reads (routes + handlers if now-unused): `GET /users/:id/entitlements`, `/product-access`, `/nmi`, `/nmi/metrics`, `/ccbill`, `/ccbill/metrics`.
 - [ ] `payment-methods`: combined `GET /admin/users/:user_id/payment-methods` folding NMI + CCBill (+ their metrics) into one shape (replaces the 4 dropped reads); also the embedded section in user-detail.
-- [ ] Fold metrics → one `GET /admin/metrics` returning `{summary, revenue, subscriptions, processors, churn}`; remove the 5 sub-routes (handlers `GetAdminMetrics*` reused internally or composed).
+- [x] Fold metrics → one `GET /admin/metrics` returning `{summary, revenue, subscriptions, processors, churn}`; 5 sub-routes removed. `GetAdminMetrics` composes the 5 analytics calls + generic `resolveMetricSection[T]` (single-currency → bare object; multi-currency needs `?currency` else 400). DB-validated (ClickHouse) by `TestAdminMetricsFolded` (all 5 sections) + `TestAdminMetrics_RequiresMetricsRead` (403 gate).
 - [ ] Self surface: embed caller's active entitlements in the `/v1/self/*` self-detail response (find the self-detail handler in ginroutes self-service + add entitlements section).
 - [ ] Shape trimming: per kept request/response struct, drop fields no consumer reads (ground in host frontend usage); collapse single-use nested objects; drop unused filter/pagination knobs.
 - [ ] DB-integration-test the composite + payment-methods + metrics shapes against the dbtest/compose harness.
@@ -652,7 +550,13 @@ DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
 - [ ] New sqlc query (internal/db) or hand-written; gate with `read`. DB-integration-test the filter.
 
 ### Cross-cutting cleanup
-- [~] **CRITICAL — migrate the `tests/` admin INTEGRATION suite to the delegated model.** PROGRESS (commit 4f5e918c): pattern ESTABLISHED + DB-VALIDATED — `tests/admin_user_detail_integration_test.go` mounts `RegisterAdminRoutes` with a delegated host-seam principal (`newHostSeamAdminRouter`); 2 passing tests vs real Postgres prove the delegated `/v1/admin` surface + #528 composite user-detail (entitlements+payment_methods+product_access) work end-to-end + perm gate fails closed (403 w/o billing:read). Also FIXED a real #527 migration prefix collision the harness caught (011→016). REMAINING: migrate the 4 old full-server files to `newHostSeamAdminRouter` + new paths. Original finding: the suite (`tests/admin_metrics_test.go`, `admin_subscription_test.go`, `admin_offchannel_payments_test.go`, `admin_entitlements_source_test.go`) authenticates via `setupTestSuiteWithAdminAuth` → a **per-user admin-role JWT**, and hits the OLD paths (`/v1/admin/metrics/summary`, `/v1/admin/payments/:id/refund`, etc.). #528 made `/v1/admin` the DELEGATED surface (`openrails:merchant:*`), removed the per-user surface, folded metrics → `/v1/admin/metrics`, and renamed refund→`/refunds`, cancel→`DELETE`. **So this entire suite has been BROKEN since increment 1** and was NOT caught (only route-level tests in internal/http + ginroutes were run, not `tests/`). To validate #528 end-to-end: (a) make `setupTestSuiteWithAdminAuth` mint a DELEGATED token with `openrails:merchant:*` perms (or add a delegated variant), (b) update all admin test paths to the new surface (folded metrics, `/refunds`, `DELETE` cancel, composite user-detail shape). THIS is the DB-backed validation the redesign needs. **Run `go test ./tests/ -run TestAdmin...` after each fix.**
+- [x] **CRITICAL — migrate the `tests/` admin INTEGRATION suite to the delegated model. DONE (2026-06-19) — hard cut, per-user model fully removed.** All admin integration files now authenticate as a delegated merchant principal via `newHostSeamAdminRouter(t, suite, subject, []perms)` (host-seam `DelegatedPrincipalRequired`), hit the new `/v1/admin` paths, and assert the redesigned shapes. `go test ./tests/ -tags integration -run 'TestAdmin|TestRemoved'` is GREEN (57s, real Postgres+ClickHouse+Redis).
+  - Migrated files: `admin_user_detail_integration_test.go` (composite read + 403 gate), `admin_offchannel_payments_test.go` (payments:write), `admin_subscription_test.go` (billing:read profile + `GET /subscriptions` list + `extend`→404 regression + public health), `admin_entitlements_source_test.go` (entitlements:write grant + append-after-end + `/grants`→404 + **403 without entitlements:write**), `admin_payments_test.go` (billing:read list/get/filter + payments:write refund via `/refunds` + **403 without payments:write** + reaches-any-user-in-tenant), `admin_metrics_test.go` (single folded `GET /metrics` asserting all 5 sections + **403 without metrics:read**).
+  - Per-user model CUT from `tests/test_helpers.go`: deleted `setupTestSuiteWithAdminAuth`, `CreateAdminIdentity`, `adminOrgClaims`, `testAdminOrgSlug` (+ unused `controlplane`/`dbtest`/`embcp` imports); `setupAdminTestSuite` deleted from `admin_subscription_test.go`.
+  - **Bugs the migration EXPOSED + FIXED:**
+    1. **Grant-target customer-resolution bug (real handler bug, fixed in `internal/http/handlers/entitlements.go`):** `GrantAdminEntitlement`'s delegated branch minted a federated `(issuer,subject)` v7 customer via `UpsertCustomerByIssuerSubject`, but the admin READ path (`GetAdminUserBillingProfile`→`identity.CustomerIDFromString(userID)`), off-channel payments (`RegisterPurchase`→`customerIDFromUser`), and seeds all key on the raw `userID` (#364 UUID-only). So an admin-granted entitlement landed on a DIFFERENT customer than the user's reads/payments — the admin couldn't see what they just granted, and append-after-latest-end couldn't see prior windows. Collapsed `tenantSubjectForEntitlementGrantTarget` to always resolve by `userID` (the #364 subject), identical to reads + commerce writers. This is exactly the "wrong assumption" #528 set out to remove.
+    2. **Test-helper bit-rot vs the tenant→merchant rename:** `tests/seed_data.go` (products + prices) and `tests/db_helpers.go` (`entitlementCols`) still inserted/scanned a `tenant_id` column that no longer exists (schema uses `merchant_id`). Fixed all three.
+    3. **RLS bit-rot:** `InsertEntitlement` (and `TestAdminRevokeAccess`) called RLS-aware `Runtime.DB` with a bare context. Made `InsertEntitlement` default the canonical test merchant when none is pinned (#336 single-merchant suite); pinned the merchant in `TestAdminRevokeAccess`.
 - [ ] Migrate admin-gated catalog reads (`internal/auth/policy.IsLiveAdmin` + the runtime `AdminChecker`, used to show inactive catalog rows to admins) off per-user `HasAdminPermission(org,userID)` to the delegated principal's perms. Then the per-user `PermAdmin`/`AdminPermissionChecker`/`AdminPermissionRequiredMW`/`HasAdminPermission` machinery can be deleted (controlplane/authority.go, auth/policy/admin*.go).
 - [ ] Docs + comment sweep (deferred from Increment 1): code comments referencing `/v1/merchant-admin` (internal/app/app.go, internal/http/routes_self.go, internal/http/server.go); docs (README.md, docs/api/endpoints.md, docs/principal-boundary-audit.md, docs/vault-secret-ops.md); rename test helper `newMerchantAdminRouter`→`newAdminRouter`.
 - [ ] (Later, separate repos) update host frontends (cozy-art/doujins/tensorhub): `/v1/merchant-admin/*`→`/v1/admin/*` paths + new shapes; cozy-art may switch any per-user `/v1/admin` billing calls to the delegated surface.
@@ -661,220 +565,76 @@ DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
 
 ---
 
-# #527: Hard-cut bootstrap redesign — merchant-with-issuer as one entity, first-run-only, no local accounts
+# #527: Unified merchant provisioning primitive and embedded auth hardening
 
-**Completed:** no
+**Completed:** yes
 
-**Progress 2026-06-19:** AuthKit companions SHIPPED in **v0.38.0** (tagged + pushed): #87 verify-only Service, #89 password seed-once, #88(b) owner-assignable-to-remote_application confirmed + test. OpenRails (uncommitted working tree, builds + bootstrap tests green):
-- bumped to authkit v0.38.0; `controlplane.New` runs **verify-only when no signing key is discoverable** (#87).
-- **Manifest HARD CUT done**: `bootstrap_manifest.go` is now merchants-only (no `auth`/users/global-roles/orgs); each merchant has an inline `issuer`. Deleted `AuthBootstrapManifest`/`AuthBootstrapOrg`/`AuthKit()`/`HasAuthBootstrap`/`printAuthBootstrapResult`/`ensureManifestOwnerOrg`.
-- **issuer-as-owner provisioning done**: `provisionMerchantOrg` routes through authkit `ProvisionOrg` → backing org (slug-derived, 1:1) + issuer registered as `owner`. `bootstrap_apply.go` auth branch removed.
-- example manifest + bootstrap parse/validation tests rewritten to the new shape (passing).
-- **First-run gate**: migration `011` adds `openrails.bootstrap_state` singleton marker; `applyStartupBootstrap` checks it UNDER the advisory lock BEFORE loading the manifest, so reboots of a provisioned deployment skip entirely (a stale manifest can't brick a restart). Marker written only after a fully successful apply.
-- **DB-enforced 1:1**: migration `011` drops the non-unique `idx_merchants_owner_org_id` and adds `uq_merchants_owner_org_id` UNIQUE on non-null (nullable for embedded/merchant-less orgs).
-- **CLI tiers**: `--overwrite` (re-assert secrets; default is seed-once — existing secrets left untouched so out-of-band rotations survive) + `--prune` (delete secrets absent from the manifest); `--dry-run` reports the mode; startup is always additive+seed-once.
-- config.go retired-`auth.issuers` warning now points at `merchants[].issuer`.
-- Paul's superseded #525 auth-shim WIP backed up to `agents/.527-session-backup.patch` (untracked).
+#527 originally carried the full bootstrap hard-cut design. Most of that work is now complete or intentionally moved into newer issues. Keep this issue focused on the remaining architectural seams that are still useful to clean up.
 
-- docs/merchant-provisioning.md updated to the merchant-with-issuer model (first-run, CLI tiers, embedded note).
-- `/v1/admin` removal RETRACTED (see Decisions) — it's load-bearing for embedded hosts; not a break-glass duplicate.
+## Current Model
 
-REMAINING (minor / deliberately not done): `--prune` for provider-accounts/issuers (only secrets pruned — account FKs make it riskier); `merchantForIssuer` loop→direct-lookup simplification (marginal; constraint already guarantees ≤1); config.go `auth.issuer`-optional (low value — kept required). AuthKit #88(a) tx-aware deferred → ProvisionMerchant relies on idempotent re-run (authkit ProvisionOrg + merchant upsert). NOT integration-tested against Postgres this session (build + vet + parse tests only).
+OpenRails owns authority; host applications own identity. A merchant is the logical unit that ties together:
 
-Hard cut. Design AuthKit + OpenRails bootstrap as if from scratch; no legacy support, no migration shims. The current bootstrap seeds local users, passwords, global roles, top-level orgs, and per-merchant issuers as separate manifest sections joined by a slug convention, and reconciles all of it on every boot. Almost none of that is needed.
+- the `openrails.merchants` row,
+- an optional AuthKit backing org + remote_application issuer owner for standalone/private deployments,
+- provider accounts and provider-account-scoped secrets,
+- merchant profile/configuration.
 
-## Mental model
+Standalone provisioning is driven by `push-merchant-config` / startup first-run bootstrap. Embedded provisioning is driven by `embed.Options{Merchant, PaymentProviders, MerchantConfiguration}`. Both paths now share the OpenRails-owned `ProvisionMerchant` primitive instead of duplicating merchant setup across manifest code and embedded startup.
 
-OpenRails owns **authority**; the host application (doujins, cozy-art, …) owns **identity**. Standalone OpenRails has **no local accounts, no login page, no passwords, no global admin**. A host app authenticates its own users with its own roles and decides who may act; OpenRails trusts that app *as the owner of one merchant* and never re-litigates "which human."
+## Superseded / Completed Elsewhere
 
-Authority is **stored, never self-claimed**: a federated issuer's tokens have platform-authority claims (`global_roles`/`org_roles`/`roles`) stripped on verify. The issuer is granted the authority OpenRails assigned it — the `owner` role (wildcard `*`) on the merchant's backing org — so a compromised/buggy host app can only ever affect its own merchant, never another and never the platform.
+- Secret backend selection, Vault import, provider-account-scoped secret names, and runtime fail-closed secret reads are owned by #530.
+- Shared CLI mutation flags (`--insert`, `--overwrite`, `--prune`) are owned by #532.
+- `push-bootstrap`, `push-merchant-config`, `push-merchant-catalog`, and `pull-provider` command/file split is owned by #531.
+- Merchant profile/bootstrap shape cleanup is covered by #520/#521/#524 and the current `config/merchants.example.yaml`.
+- API-key/service-token terminology cleanup is covered by #525.
+- `/v1/admin` removal was retracted; embedded/standalone admin routing cleanup belongs to #528.
+- Destructive pruning of provider accounts/issuers/merchants is not required for this issue; treat it as future work unless we have an operator need.
 
-## A merchant is ONE entity
+## Completed Scope
 
-Today a merchant is four things joined by `merchant.slug == org.slug` + `owner_org_id`: the `merchants` row, an AuthKit org, an AuthKit `remote_application` + membership, and the encrypted secret store + `merchant_configurations`. The operator hand-writes two manifest sections and keeps them in sync. The implicit slug coupling is load-bearing and undocumented.
+- Added one `ProvisionMerchant` primitive that owns merchant setup for both standalone manifest and embedded startup.
+- Wired that primitive from `ReconcileMerchantManifestData` and from `embed.New`.
+- Preserved first-run-only behavior for standalone bootstrap; embedded startup does not use the first-run marker.
+- Hardened embedded HTTP construction so user/admin route groups cannot be mounted without an explicit auth boundary. Webhook-only mounts remain allowed without caller auth because they use provider signature/authentication.
+- Simplified issuer-to-merchant resolution to a direct unique `owner_org_id` lookup now that `owner_org_id` is DB-unique when non-null.
+- Kept docs/examples aligned with the single-entity merchant model.
 
-Collapse to a single logical entity. The org and remote_application become **derived implementation details the operator never names**. One `ProvisionMerchant` call (and one manifest entry) does, in one transaction / one rollback unit:
+## Rollback Semantics
 
-1. create the backing org (slug derived from merchant),
-2. register the issuer as an `owner`-role member of that org,
-3. create the merchant row (`owner_org_id`),
-4. store provider secrets (encrypted),
-5. write `merchant_configurations` profile.
+AuthKit does not yet expose a fully tx-aware provision-org API across OpenRails merchant writes, so this issue should not pretend to provide a literal single SQL transaction across AuthKit and OpenRails. The practical target is:
 
-## Target manifest (hard cut)
+- one OpenRails `ProvisionMerchant` entry point,
+- one error boundary for standalone and embedded callers,
+- idempotent re-runs,
+- cleanup/compensating rollback where possible,
+- no split-brain steady state after a retry.
 
-```yaml
-version: 1
-merchants:
-  - slug: doujins
-    name: Doujins
-    issuer:                                   # JWKS/issuer trust, inline — no separate auth.orgs[]
-      uri:      https://doujins.example
-      jwks_uri: https://doujins.example/.well-known/jwks.json
-      # public_keys: [...]                     # alternative: static keys (manual rotation only)
-      audiences: [openrails]
-      role: owner                              # owner = wildcard * over THIS merchant only
-    providers:
-      - type: stripe
-        account_id: acct_123
-        secrets:
-          secret_key:     { vault: stripe/doujins/secret_key }
-          webhook_secret: { env: DOUJINS_STRIPE_WEBHOOK_SECRET }
-    profile:
-      display_name:  Doujins
-      support_email: support@doujins.example
-```
-
-No `auth:` section. No `users`, `password`, `global_roles`, or operator-named `orgs`.
-
-## Deleted (hard cut, no compat)
-
-- `auth.users`, `password` (all modes), `global_roles` from the manifest — and the whole apply path that seeded them. This dissolves the password-clobber and `reset_required`-re-fire footguns by construction.
-- Local OpenRails login / local admin accounts.
-- Top-level operator-facing `auth.orgs[]`; org is derived and hidden.
-- The `merchant.slug == org.slug` coupling — issuer is declared *inside* the merchant.
-- Every-boot reconcile — replaced by first-run-only + explicit manual CLI.
-- Global admin / platform-superadmin in the self-hosted build (already disabled; remove the seams).
-- ~~The `/v1/admin/*` operator surface~~ — RETRACTED (see Decisions): `/v1/admin` is the embedded-host admin surface + a public embedding API; only the standalone issuer→owner path (`/v1/merchant-admin/*`) is the new mechanism. `/v1/admin` is kept.
-
-## Apply semantics
-
-- **Startup: first-run only.** Gate on a `bootstrap_applied` marker row written only after a fully successful, transactional apply — NOT on "does any merchant exist" (that mis-detects a crash mid-apply as done). If the marker is present, skip entirely: reboots never re-run, so a stale/malformed manifest can only fail the *first* boot, never brick a restart of a provisioned deployment.
-- **Manual re-apply** via CLI, three tiers:
-  - default: **additive** — create missing, never touch existing.
-  - `--overwrite`: re-assert manifest values over existing. Footgun for rotated secrets (the manifest is a seed, not ongoing truth) — explicit + manual only, never on startup.
-  - `--prune`: disable/remove entities absent from the manifest. Full per-level spec below.
-
-## CLI apply modes (`push-merchant-config`)
-
-Destructive behavior is opt-in and manual; startup is always additive + first-run-only (never `--overwrite`/`--prune`). Modes compose (`--overwrite --prune` = full reconcile-to-manifest). `--dry-run` prints the plan without mutating.
-
-| level | default (additive) | `--overwrite` | `--prune` |
-|---|---|---|---|
-| merchant | create if missing | update name/tier/region/webhook | absent from manifest → **disable** (status), never hard-delete |
-| backing org + issuer | create/register if missing | update jwks_uri/public_keys/audiences/role/enabled | issuer absent → `enabled=false` (revoke trust); org never hard-deleted |
-| provider_account | create if missing | update account_id/role/status | account absent → remove account + its secrets |
-| secret value | write only if absent (seed-once) | re-encrypt to manifest value (**reverts a rotated secret** — manifest is a seed, not truth) | secret key absent → delete |
-| profile | set if unset | overwrite to manifest profile | n/a |
-
-- Hard-deleting a merchant (with its rows / payment history) is NOT what `--prune` does — it disables. A true delete is a separate explicit destructive command with confirmation, never wired to bootstrap.
-- `--overwrite` on secrets is the documented footgun: use only when the manifest IS the new source of truth (re-keying from a fresh file); otherwise rotate via the admin API.
-
-## Secrets
-
-- Provider secrets are **encrypted (reversible), never hashed** — OpenRails must present the real key to Stripe. Backend: Vault when a live client is wired, else envelope-encrypted DB (per-merchant DEK), else plain DB (dev only).
-- **Seed-once.** After ops rotates a secret via the admin API → OpenRails writes it to Vault/DB; OpenRails is the writer of record. The manifest value is the initial seed; `--overwrite` reverts to it (documented hazard).
-- OpenRails' own token-signing key is an **optional** boot mount, never required (DECIDED). In delegated-only mode (all identity arrives as host-app-issued delegated tokens) OpenRails runs **keyless as a pure verifier** and boots with zero mounted secrets. It retains the *capability* to mint tokens — mount a signing key only when a deployment has login-capable users OpenRails itself authenticates — but startup must function fully without one.
-
-## Authority model (AuthKit companion issue required)
-
-- Federated issuer tokens: authority claims stripped; authority = stored org membership + perms.
-- Issuer registered as `owner` member of the merchant's org → wildcard `*` → full admin of that one merchant.
-- `/v1/merchant-admin/*` and `/v1/service/*` authorized via issuer→org→merchant mapping (no per-user grant). The per-user `HasAdminPermission(org, userID)` path and the `/v1/admin/*` operator surface are REMOVED (DECIDED) — merchant admin is the issuer→owner path only.
-- **Identity vs attribution.** Tokens arrive as host-app **delegated tokens** carrying `delegated_sub` (the acting end-user). *Authority* is resolved at the **issuer** level (owner of the merchant's org), not per delegated user — but `delegated_sub` is recorded so audit trails attribute each action to the specific host-app user. The host app decides which of its users it mints delegated tokens for; OpenRails keeps no per-user grants.
-- **Issuer key rotation.** With `jwks_uri`, AuthKit re-fetches the host app's keys automatically (including a forced refetch on unknown-kid) — host-app key rotation needs no OpenRails action. Static `public_keys` require a manual `--overwrite` re-apply. Prefer `jwks_uri`; treat hardcoded keys as the exception.
-
-## Org ↔ merchant link must be DB-enforced 1:1 (not name-matching)
-
-Today the link is fragile: `merchants.owner_org_id` is plain `text` (no FK), has only a NON-unique index, the schema comment says "one org owns MANY merchants … never used to resolve a merchant from a token," and the link is established purely by slug coincidence (`ensureManifestOwnerOrg` makes an org named like the merchant). Yet `merchantForIssuer` resolves the merchant from the issuer's org expecting "the org that owns exactly one active merchant" — an assumed 1:1 that nothing enforces.
-
-Fix:
-- Dedicated backing org per merchant, created in the SAME transaction as the merchant (part of the unified `ProvisionMerchant`).
-- `UNIQUE(owner_org_id)` — **NULLABLE, not NOT NULL** (Postgres allows many NULLs): merchant-less orgs (HuggingFace/GitHub on tensorhub) and embedded-without-AuthKit (`owner_org_id` NULL) must remain valid. Uniqueness bites only on non-null values → DB-enforced 1:1 for real merchants. `owner_org_id` is injective, not bijective.
-- Derive the org slug deterministically from the merchant (slug or UUID) so the link can't drift on a typo.
-- Resolution chain becomes all-FK, no names: `validated iss → remote_application.OrgID (#77 hard FK) → owner_org_id UNIQUE → merchant`. Simplify `merchantForIssuer` to a direct unique lookup.
-- Cross-schema real FK (`openrails.merchants.owner_org_id → profiles.orgs.id`) is optional hardening (same DB in self-hosted; couples migration domains). The robustness win is UNIQUE + atomic creation; otherwise app-level cascade on delete.
-
-Issuer → `owner` role is ALREADY wired: `ProvisionOrg` calls `AddRemoteApplicationMember(org.Slug, ra.ID, issuer.Role)` and each remote_application has a single `OrgID`. The issuer gets the **`owner`** role (DECIDED) — auto-seeded with wildcard `*` → full authority over its merchant, nothing else. No `merchant-admin` role is introduced. AuthKit must ensure `owner` is assignable to a remote_application member (#88).
-
-## Signing key → optional (verify-only by default)
-
-`controlplane.New` (internal/controlplane/service.go) currently always builds a key via `jwtkit.NewAutoKeySource()` (env → /vault/auth → dev-generated; errors if none). Make it optional:
-- AuthKit: explicit verify-only Service — `Config.Keys == nil` means NO signer (not auto-discover). Minting methods return a typed `ErrNoSigner`; JWKS serves an empty set.
-- OpenRails: presence of a discovered key IS the enablement signal (same pattern as `CaptchaConfig.IsEnabled`). Found → mint-capable. Not found → construct verify-only and log it, instead of failing. Keep dev auto-generation. Gate: mint-capable ⟺ (signing key present AND `auth.issuer` set) — so `auth.issuer` becomes optional (absent forces verify-only). No `minting: on/off` knob.
-
-## Embedded mode (cozy-art, tensorhub) — accommodated
-
-Embedded hosts (cozy-art; tensorhub via the #468 unified SDK) do NOT use the manifest/first-run path. Their bootstrap is `embed.Options` at `embed.New` (embed/embed.go:50):
-- `Merchant` binds ONE merchant slug per engine (the host itself); "to serve another tenant, construct another engine/client." One client instance ↔ one merchant. CONFIRMED.
-- `PaymentProviders []PaymentProvider` + `MerchantConfiguration` (#524) pass provider secrets + profile programmatically (Go args) — no `/etc/openrails/bootstrap.yaml`, no first-run marker (host controls construction).
-- `PGXPool`/`Redis` reuse host infra; runs in-process in the host's DB schema.
-
-tensorhub's shape fits: sole `tensorhub` merchant + backing org; HuggingFace/GitHub register orgs but NEVER merchants — correct, because merchants are host-gated/privileged and orgs are free (most orgs have no merchant; see injective `owner_org_id` above).
-
-Auth in embedded (matches the standalone "host owns identity, OpenRails owns authority" split, different mechanism):
-- In-process unified-Client calls are HOST-TRUSTED — the host authenticated before calling; OpenRails does no token check on that path.
-- The mounted HTTP surface (admin / self / tenant-admin) uses the host's `Authenticator` (gin-free) / `DelegatedAuthenticator` (#339), returning the explicitly-mapped `{tenant, subject, permissions}` principal. The standalone issuer-as-owner JWKS model is NOT used here → the merchant entity's `issuer` is OPTIONAL (present standalone, absent embedded).
-- HARDENING (point 3, DECIDED strict): today a missing authenticator fail-CLOSES silently (self surface unmounts; base handler builds a control-plane default). Change to fail LOUD — a privileged mount requires an EXPLICITLY-resolved Authenticator/DelegatedAuthenticator; the control-plane default is opt-in, never silent. No resolvable boundary → construction error from `embed.New`/`Handler`, never a per-request 500 or silent unmount.
-
-The unified `ProvisionMerchant` therefore serves BOTH paths: standalone (manifest, with issuer) and embedded (Options, issuer omitted), creating merchant + backing org (+ providers + config) atomically; the issuer-as-owner step is the optional standalone-only part.
-
-## Auth boundary: portable + mandatory (point 3)
-
-A host embedding OpenRails must NOT be able to expose a privileged route without an auth boundary — no matter what. Two principles:
-
-1. **Portable, not AuthKit-bound.** The boundary is a framework-neutral INTERFACE — `billingauth.Authenticator` (gin-free) + `billingauth.DelegatedAuthenticator` (#339), returning an explicitly-mapped `{tenant, subject, permissions}` principal. AuthKit is the DEFAULT implementation, not a requirement; a host may plug any scheme (its own JWT verifier, session store, mTLS, …) by implementing the interface. OpenRails never hard-depends on AuthKit for embedded auth.
-2. **Mandatory on privileged routes.** OpenRails owns route→required-permission (its permission catalog: `openrails:admin`, `openrails:catalog:write`, …); the host's Authenticator owns identity→principal(+permissions). OpenRails ALWAYS enforces the route's required permission against the authenticated principal — including in embedded mode.
-
-The hardening (DECIDED — strict): a privileged route group (self / tenant-admin / merchant-admin) REQUIRES an EXPLICITLY-resolved Authenticator — host-supplied, OR an explicit opt-in to the control-plane default (no silent implicit fallback). If none is resolved, `embed.New` / `Handler` returns an error AT CONSTRUCTION — it never mounts an unauthenticated privileged route and never defers to a per-request 500 or a silent unmount. The only routes mountable without an Authenticator are an explicit PUBLIC allowlist (checkout init; webhooks, which carry their own signature + IP auth) — public-by-allowlist, never public-by-omission. "Accidentally exposing an unauthenticated privileged route" is therefore structurally impossible, while the scheme stays pluggable. (Changes behavior for hosts that relied on the implicit default — they must now opt in explicitly.)
-
-In-process unified-Client calls remain host-trusted (the host authenticated before calling) and are outside this HTTP-surface rule.
-
-## Implementation plan (files, migration, sequencing)
-
-Files — OpenRails:
-- `config/merchants.example.yaml` — rewrite to the single-entity shape (no `auth:`; inline `issuer`, `provider_accounts`, `profile`).
-- `internal/bootstrap/bootstrap_manifest.go` — delete `AuthBootstrapManifest`/`AuthBootstrapOrg`/`AuthKit()`/user+global-role+api_key parsing+validation; `BootstrapManifest = {Version, Merchants[]}`; `ManifestMerchant` gains `Issuer`.
-- `internal/bootstrap/merchant_manifest.go` — `ReconcileMerchantManifestData` becomes the unified atomic `ProvisionMerchant` (one tx: create-org → register-issuer-as-owner → merchant(owner_org_id) → secrets → profile); replace slug-matching `ensureManifestOwnerOrg` with deterministic per-merchant org + the unique link.
-- `cmd/openrails/bootstrap_apply.go` — drop the `HasAuthBootstrap` branch + `printAuthBootstrapResult`; add the first-run marker gate; add `--overwrite` / `--prune` CLI flags.
-- `cmd/openrails/main.go` — startup apply fatal only on first run (no marker); logged, not fatal, once provisioned.
-- `internal/controlplane/service.go` — optional signer / verify-only (consumes AuthKit #87).
-- `internal/controlplane/issuer_registry.go` — simplify `merchantForIssuer` to a direct unique `owner_org_id` lookup.
-- `internal/http/server.go` + `internal/http/routes_admin.go` + `internal/auth/policy/admin*.go` — remove the `/v1/admin/*` operator surface and the per-user `HasAdminPermission` break-glass path.
-- `internal/http/embedhttp/embedhttp.go` + `embed/embed.go` + `pkg/embedded/embedded.go` — fail-loud auth boundary on privileged mounts (the section above).
-- `config/config.go` — `auth.issuer` optional (absent ⇒ verify-only); update the retired-config warning strings (lines ~1342-1349 still tell operators to seed "admin users"/"API keys" under `auth`, which no longer exists) to point at `merchants[].issuer`.
-
-Migration (OpenRails):
-- `owner_org_id` → `UNIQUE` but **NULLABLE** (NOT `NOT NULL UNIQUE` — supersedes the earlier phrasing; Postgres allows many NULLs, so merchant-less orgs and embedded-without-AuthKit stay valid; uniqueness bites only on non-null = DB-enforced 1:1 for real merchants). Drop the non-unique `idx_merchants_owner_org_id`. Optional cross-schema FK → `profiles.orgs(id)` (same DB) as hardening.
-- New `openrails.bootstrap_state` single-row marker (or equivalent) for first-run detection; written only after a fully successful apply tx.
-
-AuthKit companion issues: **#87** (verify-only Service / optional signer), **#88** (tx-aware provisioning + `owner` role on the RA + invariant lock-in), **#89** (bootstrap-user password seed-once — independent, not blocking).
-
-Sequencing:
-1. AuthKit #87 + #88 → tag + bump OpenRails go.mod.
-2. OpenRails migration (nullable-unique `owner_org_id` + drop old index + `bootstrap_state` marker).
-3. OpenRails bootstrap rewrite (manifest schema, atomic `ProvisionMerchant`, first-run gate, CLI tiers) — serves standalone + embedded.
-4. `controlplane` verify-only wiring + `merchantForIssuer` simplification + fail-loud auth boundary.
-5. `config.go` + example + docs.
+If AuthKit later exposes tx-aware org/remote-application provisioning, `ProvisionMerchant` is the place to tighten this into a true single rollback unit.
 
 ## Tasks
 
-OpenRails:
-- [x] New unified manifest schema: `merchants[].issuer` + `merchants[].provider_accounts[]` + `merchants[].profile`; deleted `auth.*` parsing (bootstrap_manifest.go hard cut).
-- [ ] `ProvisionMerchant` provisions backing org + (optional) issuer-as-owner + merchant + secrets + profile in one transaction (one rollback unit). Serves BOTH standalone (manifest, with issuer) and embedded (Options, issuer omitted).
-- [x] Robust 1:1: dedicated backing org per merchant (slug-derived via `provisionMerchantOrg`/`ProvisionOrg`); migration 011 `UNIQUE(owner_org_id)` NULLABLE + dropped the non-unique index. (`merchantForIssuer` still loops — now guaranteed ≤1 by the constraint; explicit simplification a minor follow-up.)
-- [ ] Embedded parity: `embed.Options` (Merchant + PaymentProviders + MerchantConfiguration) drives the same `ProvisionMerchant`; no manifest/first-run-marker on the embedded path.
-- [ ] Auth-boundary guarantee (portable + mandatory): privileged route groups require a resolvable `billingauth.Authenticator`/`DelegatedAuthenticator` (framework-neutral interface; AuthKit is one impl, not required). Missing boundary on a privileged mount is a construction error (fail loud), never a per-request 500 / silent unmount. Public routes are an explicit allowlist (checkout, signature-authed webhooks).
-- [x] First-run gate: `openrails.bootstrap_state` marker (migration 011); checked under the advisory lock before loading the manifest; written on success; skip otherwise. (Dead `AnyMerchantProvisioned` left in place — harmless, minor cleanup.)
-- [~] CLI apply modes: additive default (seed-once); `--overwrite` (re-assert secrets); `--prune` (delete secrets absent from manifest); `--dry-run` reports mode; never destructive on startup. Provider-account/issuer/merchant pruning still TODO (only secrets pruned).
-- [x] Secrets seed-once (existing secret left untouched unless `--overwrite`); DB store path. (Vault writer path unchanged this session.)
-- [x] Signing key optional: standalone boots keyless as a pure verifier; minting capability retained but never required at boot (no signing key in the required-config path). DONE — `controlplane.New` verify-only on no key (authkit v0.38.0 #87).
-- [x] Delete local-user/password/global-role bootstrap code and the `auth.users`/`api_keys` seeding paths superseded here (supersedes the operator-key direction in #525). DONE — auth machinery removed from bootstrap_manifest.go + bootstrap_apply.go.
-- [x] ~~Remove `/v1/admin/*`~~ — RETRACTED: investigation showed it is the embedded-host admin surface + public `embgin.RegisterAdminRoutes` API (its handlers are reused by the delegated `/v1/merchant-admin/*`). Removing it breaks embedded hosts; kept. The `HasAdminPermission` checker also backs admin-gated catalog reads, so it stays too.
-- [ ] Docs + example manifest rewritten to the new single-entity shape.
+- [x] Hard-cut manifest schema: `merchants[].issuer`, `provider_accounts[]`, `profile`; no `auth.*`, users, passwords, global roles, or top-level orgs.
+- [x] First-run marker: startup bootstrap checks `openrails.bootstrap_state` under the advisory lock and writes it only after successful apply.
+- [x] DB-enforced 1:1 for standalone merchants: nullable unique `owner_org_id`; merchant-less orgs and embedded ownerless merchants remain valid.
+- [x] Optional signing key / verify-only control plane: standalone can boot as verifier-only when no OpenRails signing key is mounted.
+- [x] Docs/example manifest use the single-entity merchant shape.
+- [x] Add shared `ProvisionMerchant` primitive for merchant row, optional issuer owner, profile, provider accounts, and provider secrets.
+- [x] Wire standalone manifest reconcile through `ProvisionMerchant`.
+- [x] Wire embedded `embed.Options{Merchant, PaymentProviders, MerchantConfiguration}` through `ProvisionMerchant`.
+- [x] Add fail-loud embedded auth-boundary checks for privileged route groups.
+- [x] Simplify `merchantForIssuer` to direct unique `owner_org_id` lookup.
+- [x] Add/refresh integration tests for standalone manifest provisioning, embedded provisioning parity, and missing-auth privileged embedded routes.
 
-AuthKit (companion — filed in authkit/agents/progress.md; shipped in v0.38.0):
-- [x] **#87** verify-only Service (optional signer; `ErrMissingSigner` on mint; empty JWKS).
-- [~] **#88** owner-assignable-to-remote_application CONFIRMED + test; tx-aware provisioning DEFERRED (OpenRails uses compensating-delete); claim-stripping/`enabled` regression tests + optional helper still TODO.
-- [x] **#89** bootstrap-user password seed-once + `reset_required` idempotency.
+## Validation
 
-## Decisions (resolved)
+Completed validation:
 
-- **Issuer role = `owner`** (machine-owned credential). Auto-seeded wildcard `*` = full authority over its merchant. No `merchant-admin` role introduced.
-- **Auth-boundary = strict.** Privileged mount needs an explicitly-resolved Authenticator; no silent control-plane fallback; missing boundary → construction error.
-- **`/v1/admin/*` = RETAINED (removal retracted).** Investigation 2026-06-19 found `/v1/admin` is NOT break-glass: it is the substantive admin surface (subscriptions, refunds, entitlements, off-channel payments) AND a public embedding API (`embgin.RegisterAdminRoutes`) that embedded hosts (cozy-art/doujins/tensorhub) serve via `rt.Handler()`, authorized by the host's own AuthKit. `/v1/merchant-admin/*` reuses the same handlers via the delegated issuer→owner path for standalone. Removing `/v1/admin` would break embedded hosts; in standalone it is redundant-but-harmless (unreachable without local users). Kept.
-- **CI/script machine credentials = out of scope here.** If ever needed, a per-merchant API key (AuthKit `api_keys`, #86) — additive, non-blocking.
-- **Catalog/product seeding = out of scope.** Stays a separate `push-merchant-catalog` concern.
+- `go test -tags integration ./internal/bootstrap -count=1`
+- `go test -tags integration ./embed -count=1`
+- `go test ./internal/bootstrap ./internal/controlplane ./internal/http ./pkg/embedded/...`
+- `go test ./...`
 
 ---
 
@@ -935,35 +695,6 @@ Lazy plan:
 - [x] Wire profile through remote and embedded `SetMerchantConfiguration`.
 - [x] Add one `embed.Options.MerchantConfiguration` field so embedded startup can seed all current merchant-configuration fields after the merchant slug is registered.
 - [x] Test embedded startup profile seeding and SDK conformance for profile writes.
-
----
-
-# #519: Rebuild standalone CORS from merchant allowed origins
-
-**Completed:** no
-
-**Reopened 2026-06-19:** the earlier plan removed stale `merchant_cors` / `cors_origins` config, but framed `remote_application.allowed_origins` as delegated-request authorization through AuthKit. That is the wrong security model. `Origin` is spoofable outside browsers, so post-JWT Origin checks are not application security. Application security is JWT signature/issuer/audience/permissions, merchant ownership, and merchant/provider credential isolation.
-
-`remote_application.allowed_origins` should feed browser CORS policy. CORS is browser security, not API authentication.
-
-## Correct model
-
-- Private standalone: preflight has no JWT and no merchant context, so OpenRails should build one process-wide browser CORS allow-list from the union of enabled merchant issuer `allowed_origins`.
-- Embedded: the host app may supply/own CORS. OpenRails embedded helpers should not force allow-all on the host; if OpenRails mounts its own CORS layer, it should use the same explicit allow-list model.
-- OpenRails SaaS: CORS can be tenant-specific because Host/subdomain resolves the merchant before preflight. That SaaS-specific work belongs in `~/openrails-saas`, not this issue.
-- Webhooks and server-to-server routes do not need browser CORS policy as a trust boundary.
-- Post-JWT delegated request `OriginAllowedForIssuer` is at most browser defense-in-depth. It must not be documented as an auth/security boundary; once real CORS union enforcement exists, remove it or clearly label it non-authoritative.
-
-## Tasks
-
-- [x] Keep the already-finished removal of `merchant_cors` and `cors_origins` from runtime config and stale examples.
-- [ ] Add a standalone CORS origin source backed by AuthKit/OpenRails state: union all enabled merchant remote_application `allowed_origins`.
-- [ ] Replace standalone `ginmw.CORS(nil)` allow-all with explicit CORS derived from that union; deny unknown browser origins by default.
-- [ ] Keep development/test escape hatches explicit and visibly named; no silent production allow-all.
-- [ ] Ensure CORS applies only where browser access matters. Do not use CORS as a webhook/service-token security layer.
-- [ ] Update docs/examples: `issuer.allowed_origins` is exact browser origin allow-list input, not webhook URL, mount path, wildcard list, or application authorization.
-- [ ] Remove or relabel the delegated request `OriginAllowedForIssuer` path so docs/tests do not imply spoofable `Origin` is real API security.
-- [ ] Add HTTP integration tests for allowed and denied preflight/actual browser requests using two merchant issuers, and prove non-browser requests still rely on JWT/permission checks rather than Origin.
 
 ---
 

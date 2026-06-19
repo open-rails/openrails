@@ -32,6 +32,8 @@ package integrationharness
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -41,6 +43,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	authcore "github.com/open-rails/authkit/core"
+	jwtkit "github.com/open-rails/authkit/jwt"
 	authtesting "github.com/open-rails/authkit/testing"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -363,14 +366,13 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 	}
 }
 
-// ProvisionMerchantForOrg adds another active OpenRails merchant owned by an
-// existing AuthKit org. It deliberately does not mint a token; tests use it to
-// prove implicit single-merchant inference fails closed once an org owns several
-// merchant namespaces.
-func (s *Surface) ProvisionMerchantForOrg(slug, orgSlug string) merchant.ID {
+// RequireProvisionMerchantForOrgRejected proves the OpenRails merchant directory
+// enforces a single merchant per AuthKit owner org. The runtime relies on that
+// invariant for direct issuer -> owner_org_id -> merchant resolution.
+func (s *Surface) RequireProvisionMerchantForOrgRejected(slug, orgSlug string) {
 	h := s.h
 	h.t.Helper()
-	require.NotNil(h.t, s.app, "ProvisionMerchantForOrg requires the standalone surface")
+	require.NotNil(h.t, s.app, "RequireProvisionMerchantForOrgRejected requires the standalone surface")
 	slug = strings.ToLower(strings.TrimSpace(slug))
 	orgSlug = strings.ToLower(strings.TrimSpace(orgSlug))
 	require.NotEmpty(h.t, slug, "owned merchant slug")
@@ -386,8 +388,8 @@ func (s *Surface) ProvisionMerchantForOrg(slug, orgSlug string) merchant.ID {
 		INSERT INTO openrails.merchants (id, slug, status, owner_org_id, provisioned_at)
 		VALUES ($1, $2, 'active', $3, current_timestamp)
 	`, mid.UUID(), slug, org.ID)
-	require.NoError(h.t, err, "insert additional owned merchant")
-	return mid
+	require.Error(h.t, err, "insert additional owned merchant must fail")
+	require.Contains(h.t, err.Error(), "uq_merchants_owner_org_id")
 }
 
 // CreateAuthKitOrg creates an AuthKit org through the standalone control plane
@@ -422,10 +424,10 @@ func (s *Surface) MintUserAccessToken(username string) string {
 	return token
 }
 
-// RegisterRemoteApplication provisions a JWKS principal (#484) on the standalone
+// RegisterRemoteApplication provisions a static-key principal (#484) on the standalone
 // surface's REAL control plane and returns a minted self-token. It stands up a
-// test JWKS issuer for the principal, registers the remote_application (jwks
-// mode), assigns it role (when non-empty) on ownerOrgSlug — the tenant that
+// test issuer for the principal, registers the remote_application, assigns it
+// role (when non-empty) on ownerOrgSlug — the tenant that
 // owns the test merchant — and signs a self-token with the principal's own key.
 //
 // With OperatorRole on the merchant's owner_org, the principal can administer
@@ -439,21 +441,22 @@ func (s *Surface) RegisterRemoteApplication(slug, ownerOrgSlug, role string) Rem
 	core := cp.Core()
 	require.NotNil(h.t, core, "authkit core")
 
-	// The principal's own signing key + JWKS endpoint (its credential, #74 jwks mode).
-	issuer := authtesting.NewTestIssuerWithAudience("openrails-app")
+	// The principal's own signing key. AuthKit rejects loopback HTTP JWKS URLs
+	// now, so integration tests register the same key through static public_keys.
+	issuer := authtesting.NewTestIssuerWithAudience("openrails")
 	h.t.Cleanup(issuer.Close)
 
 	// #77: a remote_application is owned by exactly one org (org_id NOT NULL).
 	ownerOrg, err := core.ResolveOrgBySlug(h.ctx, ownerOrgSlug)
 	require.NoError(h.t, err, "resolve owner org")
 	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
-		Slug:      slug,
-		OrgID:     ownerOrg.ID,
-		Issuer:    issuer.URL(),
-		JWKSURI:   issuer.URL() + "/.well-known/jwks.json",
-		Mode:      authcore.RemoteAppModeJWKS,
-		Audiences: []string{"openrails-app"},
-		Enabled:   true,
+		Slug:       slug,
+		OrgID:      ownerOrg.ID,
+		Issuer:     issuer.URL(),
+		Mode:       authcore.RemoteAppModeStatic,
+		PublicKeys: testIssuerRemoteAppKeys(h.t, issuer),
+		Audiences:  []string{"openrails"},
+		Enabled:    true,
 	})
 	require.NoError(h.t, err, "register remote_application")
 
@@ -468,7 +471,7 @@ func (s *Surface) RegisterRemoteApplication(slug, ownerOrgSlug, role string) Rem
 
 	token, err := authcore.MintRemoteApplicationAccessToken(h.ctx, issuer.Signer(), authcore.RemoteApplicationAccessParams{
 		Issuer:    issuer.URL(),
-		Audiences: []string{"openrails-app"},
+		Audiences: []string{"openrails"},
 		TTL:       time.Hour,
 	})
 	require.NoError(h.t, err, "mint remote_application self-token")
@@ -489,19 +492,19 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 	core := cp.Core()
 	require.NotNil(h.t, core, "authkit core")
 
-	issuer := authtesting.NewTestIssuerWithAudience("openrails-app")
+	issuer := authtesting.NewTestIssuerWithAudience("openrails")
 	h.t.Cleanup(issuer.Close)
 
 	ownerOrg, err := core.ResolveOrgBySlug(h.ctx, ownerOrgSlug)
 	require.NoError(h.t, err, "resolve owner org")
 	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
-		Slug:      slug,
-		OrgID:     ownerOrg.ID,
-		Issuer:    issuer.URL(),
-		JWKSURI:   issuer.URL() + "/.well-known/jwks.json",
-		Mode:      authcore.RemoteAppModeJWKS,
-		Audiences: []string{"openrails-app"},
-		Enabled:   true,
+		Slug:       slug,
+		OrgID:      ownerOrg.ID,
+		Issuer:     issuer.URL(),
+		Mode:       authcore.RemoteAppModeStatic,
+		PublicKeys: testIssuerRemoteAppKeys(h.t, issuer),
+		Audiences:  []string{"openrails"},
+		Enabled:    true,
 	})
 	require.NoError(h.t, err, "register service-JWT issuer")
 	require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ownerOrgSlug, ra.ID, "member"), "assign org membership")
@@ -520,7 +523,7 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 
 	token, _, err := authcore.MintServiceJWT(h.ctx, issuer.Signer(), issuer.URL(), authcore.ServiceJWTMintOptions{
 		Subject:     "service:" + slug,
-		Audiences:   []string{"openrails-app"},
+		Audiences:   []string{"openrails"},
 		Permissions: permissions,
 		Resources:   resources,
 		JTI:         uuid.NewString(),
@@ -561,4 +564,16 @@ func (h *Harness) mintFreshServiceToken(a *app.App) string {
 	})
 	require.NoError(h.t, err, "mint fresh service token")
 	return secret
+}
+
+func testIssuerRemoteAppKeys(t *testing.T, issuer *authtesting.TestIssuer) []authcore.RemoteAppKey {
+	t.Helper()
+	signer, ok := issuer.Signer().(jwtkit.PublicKeySigner)
+	require.True(t, ok, "test issuer signer must expose a public key")
+	der, err := x509.MarshalPKIXPublicKey(signer.PublicKey())
+	require.NoError(t, err, "marshal test issuer public key")
+	return []authcore.RemoteAppKey{{
+		KID:          issuer.Signer().KID(),
+		PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})),
+	}}
 }

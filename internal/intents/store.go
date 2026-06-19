@@ -116,6 +116,7 @@ func (s *Store) upsertProviderAccount(ctx context.Context, merchantID uuid.UUID,
 	return s.db.Gen(ctx).UpsertProviderAccount(ctx, gen.UpsertProviderAccountParams{
 		MerchantID:     merchantID,
 		ProviderType:   identity.ProviderType,
+		Environment:    stringPtr(normalizedProviderEnvironment(identity.Environment)),
 		AccountID:      identity.AccountID,
 		DisplayName:    displayName,
 		VaultSecretRef: nil,
@@ -127,6 +128,8 @@ func (s *Store) upsertProviderAccount(ctx context.Context, merchantID uuid.UUID,
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }
+
+func stringPtr(v string) *string { return &v }
 
 // VerifyOrBindPrimaryProviderAccount resolves providerKey with the current
 // credentials, records that provider-returned account identity, and promotes it
@@ -151,6 +154,7 @@ func (s *Store) VerifyOrBindPrimaryProviderAccount(ctx context.Context, merchant
 		ID:           account.ID,
 		MerchantID:   merchantID,
 		ProviderType: account.ProviderType,
+		Environment:  stringPtr(account.Environment),
 	}); err != nil {
 		return gen.OpenrailsProviderAccount{}, err
 	}
@@ -158,7 +162,16 @@ func (s *Store) VerifyOrBindPrimaryProviderAccount(ctx context.Context, merchant
 		ID:           account.ID,
 		MerchantID:   merchantID,
 		ProviderType: account.ProviderType,
+		Environment:  stringPtr(account.Environment),
 	})
+}
+
+func normalizedProviderEnvironment(raw string) string {
+	env, err := normalizeProviderEnvironment(raw)
+	if err != nil {
+		return "live"
+	}
+	return env
 }
 
 // RebindProviderIntentsToCurrentAccount rebinds every LIVE intent of the

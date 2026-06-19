@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -327,7 +328,9 @@ func TestCancelAccessAtPeriodEnd(t *testing.T) {
 // TestAdminRevokeAccess tests that admin revocation removes access immediately
 func TestAdminRevokeAccess(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	// RLS-aware services (EntitlementService, SubscriptionLifecycleService) need
+	// the merchant pinned on the context; the suite is single-merchant (#336).
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a known starting point
 	startTime := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)

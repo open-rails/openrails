@@ -13,11 +13,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
 func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
+	// #528 hard cut: the off-channel write is on the delegated /v1/admin surface,
+	// authorized by openrails:merchant:payments:write — no per-user admin model.
+	suite := getSharedTestSuite(t)
+	admin := newHostSeamAdminRouter(t, suite, "b5555555-5555-4555-8555-555555555555",
+		[]string{controlplane.PermMerchantPaymentsWrite})
 	products := suite.SeedProducts()
 
 	// Use the one-time "lifetime" product so the entitlements granted are sensible as a one-off.
@@ -41,10 +46,10 @@ func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/admin/users/"+userID+"/payments/off-channel", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req.Header.Set("Authorization", "Bearer host-credential")
 	req.Header.Set("Content-Type", "application/json")
 
-	suite.Server.Handler().ServeHTTP(w, req)
+	admin.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 
 	var resp struct {

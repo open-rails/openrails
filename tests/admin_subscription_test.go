@@ -3,7 +3,6 @@
 package tests
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,119 +14,54 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-// setupAdminTestSuite sets up the test suite for admin tests.
-// Admin endpoints require JWT with "admin" role (via AuthRequired + AdminRequired middleware).
-func setupAdminTestSuite(t *testing.T) (*TestContainerSuite, string) {
-	suite, token, _ := setupTestSuiteWithAdminAuth(t)
-	return suite, token
-}
+// #528 hard cut: the admin surface is the delegated /v1/admin model — a host-app
+// issuer registered as the merchant's `owner` mints delegated tokens carrying
+// openrails:merchant:* permissions. The retired per-user admin-JWT model
+// (openrails:admin via a live AuthKit grant) is gone, so these tests authenticate
+// as a delegated merchant principal via newHostSeamAdminRouter.
 
-// TestAdminEndpointsRequireAuth tests that admin endpoints require JWT with admin role
-func TestAdminEndpointsRequireAuth(t *testing.T) {
-	suite, _ := setupAdminTestSuite(t)
-
-	t.Run("GET subscriptions returns 401 without auth", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/admin/subscriptions", nil)
-
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 Unauthorized")
-	})
-
-	t.Run("GET metrics summary returns 401 without auth", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/admin/metrics/summary", nil)
-
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 Unauthorized")
-	})
-
-	t.Run("GET user billing profile returns 401 without auth", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/admin/users/"+uuid.New().String(), nil)
-
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 Unauthorized")
-	})
-
-	t.Run("returns 403 with non-admin JWT", func(t *testing.T) {
-		// Create a regular user token (no admin role)
-		userID := uuid.New().String()
-		userToken := CreateUserToken(t, userID)
-
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/admin/subscriptions", nil)
-		req.Header.Set("Authorization", "Bearer "+userToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusForbidden, w.Code, "Should return 403 Forbidden for non-admin user")
-	})
-}
-
-func TestRemovedAdminSubscriptionExtendRoute(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
-
-	t.Run("returns 404 without auth", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/admin/subscriptions/"+uuid.New().String()+"/extend", nil)
-
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusNotFound, w.Code)
-	})
-
-	t.Run("returns 404 with admin auth", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/admin/subscriptions/"+uuid.New().String()+"/extend", nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusNotFound, w.Code)
-	})
-}
-
-// TestAdminGetUserBillingProfile tests the GET user billing profile endpoint
+// TestAdminGetUserBillingProfile exercises GET /v1/admin/users/:id under the
+// billing:read capability: an empty profile for a new user, and the embedded
+// entitlements section for a user who holds one.
 func TestAdminGetUserBillingProfile(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
+	suite := getSharedTestSuite(t)
+	admin := newHostSeamAdminRouter(t, suite, "b3333333-3333-4333-8333-333333333333",
+		[]string{controlplane.PermMerchantBillingRead})
 
 	t.Run("returns empty profile for new user", func(t *testing.T) {
 		userID := uuid.New().String()
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/users/%s", userID), nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		require.Equal(t, http.StatusOK, w.Code, "Should return 200 OK")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
-		require.NoError(t, err)
-
-		// #317: the profile is keyed by the payable tenant subject (for the
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		// The profile is keyed by the payable tenant subject (for the
 		// personal/self-hosted case this is the user's own UUID).
-		assert.Equal(t, userID, response["customer_id"], "Merchant subject ID should match")
+		assert.Equal(t, userID, response["customer_id"], "customer_id should match")
 	})
 
 	t.Run("returns entitlements in user profile", func(t *testing.T) {
 		userID := uuid.New().String()
+		// The RLS-aware Runtime.DB insert needs the merchant pinned on the context.
+		ctx := dbtest.WithTestMerchant(t.Context())
 
 		now := time.Now().UTC()
 		endAt := now.Add(30 * 24 * time.Hour)
 		// #511: admin entitlement carries an admin source id (no entitlement_grants row).
 		adminSourceID := uuid.New()
-		suite.InsertEntitlement(context.Background(), &models.Entitlement{
+		suite.InsertEntitlement(ctx, &models.Entitlement{
 			ID:          uuid.New(),
-			CustomerID:  suite.ensureCustomer(context.Background(), userID),
+			CustomerID:  suite.ensureCustomer(ctx, userID),
 			Entitlement: "premium",
 			StartAt:     now.Add(-time.Second),
 			EndAt:       &endAt,
@@ -139,42 +73,74 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/users/%s", userID), nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		require.Equal(t, http.StatusOK, w.Code, "Should return 200 OK")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
-		require.NoError(t, err)
-
-		assert.Equal(t, userID, response["customer_id"], "Merchant subject ID should match")
-		// The profile includes entitlements as part of the response
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		assert.Equal(t, userID, response["customer_id"], "customer_id should match")
 		entitlements, ok := response["entitlements"].([]interface{})
-		require.True(t, ok, "Response should have entitlements array")
-		assert.Len(t, entitlements, 1, "Should have one entitlement")
+		require.True(t, ok, "response should embed entitlements array: %s", w.Body.String())
+		assert.Len(t, entitlements, 1, "should have one entitlement")
 	})
 }
 
-// TestAdminHealth tests the health endpoint (public, no auth required)
+// TestAdminListSubscriptions exercises GET /v1/admin/subscriptions under
+// billing:read: a seeded subscription appears in the merchant-scoped list.
+func TestAdminListSubscriptions(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	admin := newHostSeamAdminRouter(t, suite, "b6666666-6666-4666-8666-666666666666",
+		[]string{controlplane.PermMerchantBillingRead})
+
+	products := suite.SeedProducts()
+	priceID := products[0].Prices[0].ID
+	suite.CreateTestSubscription(uuid.New().String(), priceID, models.StatusActive)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/v1/admin/subscriptions?limit=10", nil)
+	req.Header.Set("Authorization", "Bearer host-credential")
+	admin.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var response map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	data, ok := response["data"].([]interface{})
+	require.True(t, ok, "paginated response should carry a data array: %s", w.Body.String())
+	assert.GreaterOrEqual(t, len(data), 1, "the seeded subscription should appear")
+}
+
+// TestRemovedAdminSubscriptionExtendRoute is a regression guard: the old
+// PUT /subscriptions/:id/extend route stays removed. Cancellation is the only
+// subscription mutation on the delegated surface (DELETE /subscriptions/:id).
+func TestRemovedAdminSubscriptionExtendRoute(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	admin := newHostSeamAdminRouter(t, suite, "b7777777-7777-4777-8777-777777777777",
+		[]string{controlplane.PermMerchantSubscriptionsWrite})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/v1/admin/subscriptions/"+uuid.New().String()+"/extend", nil)
+	req.Header.Set("Authorization", "Bearer host-credential")
+	admin.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code, "extend route must stay removed")
+}
+
+// TestAdminHealth tests the public health endpoint (no auth required). It runs
+// against the production server handler, not the admin surface.
 func TestAdminHealth(t *testing.T) {
-	suite, _ := setupAdminTestSuite(t)
+	suite := getSharedTestSuite(t)
 
-	t.Run("health/live endpoint returns ok without auth", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/health/live", nil)
-		// No auth header - health endpoint should be public
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/health/live", nil)
+	suite.Server.Handler().ServeHTTP(w, req)
 
-		suite.Server.Handler().ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "Should return 200 OK")
 
-		assert.Equal(t, http.StatusOK, w.Code, "Should return 200 OK")
-
-		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
-		require.NoError(t, err)
-
-		assert.Equal(t, "ok", response["status"], "Status should be ok")
-		assert.Equal(t, "billing", response["service"], "Service should be billing")
-	})
+	var response map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(t, "ok", response["status"], "Status should be ok")
+	assert.Equal(t, "billing", response["service"], "Service should be billing")
 }

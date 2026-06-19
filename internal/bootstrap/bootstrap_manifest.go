@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/merchants"
 )
 
 const (
@@ -16,19 +19,23 @@ const (
 	BootstrapManifestVersion     = 1
 )
 
-// BootstrapManifest is OpenRails' declarative merchant-provisioning document
-// (#527 hard cut). It describes ONLY merchants. Each merchant carries its own
-// host-app issuer (JWKS/public-key trust, registered as the `owner` of the
-// merchant's backing org), provider accounts + secrets, and profile.
-//
-// There is no auth/users/global-roles section: OpenRails owns AUTHORITY, the
-// host app owns IDENTITY. A host app authenticates its own users and mints
-// delegated tokens; OpenRails trusts that app as the owner of one merchant and
-// keeps no local accounts. Catalog state is pushed separately by
-// `openrails push-merchant-catalog`.
+// BootstrapManifest is the OpenRails control-plane authority document (#531).
+// It is intentionally not a merchant config or catalog document: merchants,
+// provider credentials, and products/prices live in their own files.
 type BootstrapManifest struct {
-	Version   int                `yaml:"version"`
-	Merchants []ManifestMerchant `yaml:"merchants"`
+	Version   int                        `yaml:"version"`
+	Authority BootstrapAuthorityManifest `yaml:"authority"`
+}
+
+type BootstrapAuthorityManifest struct {
+	// BootstrapOrgSlug names the merchant/backing org whose OpenRails admin role
+	// should be seeded. OpenRails does not have a global admin org in this repo;
+	// admin authority is merchant-scoped, so the merchant must already exist.
+	BootstrapOrgSlug string `yaml:"bootstrap_org_slug"`
+	InitialAdminUserID string `yaml:"initial_admin_user_id,omitempty"`
+	// MintInitialServiceToken defaults true when omitted. Set false when the
+	// deploy will create admin access through another AuthKit path.
+	MintInitialServiceToken *bool `yaml:"mint_initial_service_token,omitempty"`
 }
 
 // LoadBootstrapManifest reads and validates a bootstrap manifest.
@@ -60,20 +67,25 @@ func (m *BootstrapManifest) Validate() error {
 	if m.Version != BootstrapManifestVersion {
 		return fmt.Errorf("bootstrap manifest version must be %d", BootstrapManifestVersion)
 	}
-	if len(m.Merchants) == 0 {
-		return fmt.Errorf("bootstrap manifest must declare at least one merchant")
+	if strings.TrimSpace(m.Authority.BootstrapOrgSlug) == "" {
+		return fmt.Errorf("bootstrap manifest authority.bootstrap_org_slug is required")
 	}
-	return validateMerchantManifestShape(m.MerchantManifest())
+	return nil
 }
 
-// MerchantManifest converts the manifest to the internal merchant-manifest shape
-// consumed by ReconcileMerchantManifestData. There is a single manifest version
-// (1); this internal representation carries it through unchanged.
-func (m *BootstrapManifest) MerchantManifest() *MerchantManifest {
+func (m *BootstrapManifest) BootstrapOptions() controlplane.BootstrapOptions {
 	if m == nil {
-		return nil
+		return controlplane.BootstrapOptions{}
 	}
-	return &MerchantManifest{Version: BootstrapManifestVersion, Merchants: append([]ManifestMerchant(nil), m.Merchants...)}
+	mintInitialServiceToken := true
+	if m.Authority.MintInitialServiceToken != nil {
+		mintInitialServiceToken = *m.Authority.MintInitialServiceToken
+	}
+	return controlplane.BootstrapOptions{
+		BootstrapOrgSlug:        strings.ToLower(strings.TrimSpace(m.Authority.BootstrapOrgSlug)),
+		InitialAdminUserID:      strings.TrimSpace(m.Authority.InitialAdminUserID),
+		MintInitialServiceToken: mintInitialServiceToken,
+	}
 }
 
 func validateMerchantManifestShape(m *MerchantManifest) error {
@@ -153,32 +165,44 @@ func validateManifestProviderAccount(slug string, idx int, account ManifestProvi
 	if providerType == "" {
 		return fmt.Errorf("merchant %q provider_accounts[%d].provider_type is required", slug, idx)
 	}
-	if role := strings.ToLower(strings.TrimSpace(account.Role)); role != "" {
-		switch role {
-		case configProcessorRolePrimary, configProcessorRoleSecondary, configProcessorRoleLegacy:
-		default:
-			return fmt.Errorf("merchant %q provider_accounts[%d].role must be primary, secondary, or legacy", slug, idx)
-		}
+	if _, err := normalizeProviderEnvironment(account.Environment); err != nil {
+		return fmt.Errorf("merchant %q provider_accounts[%d].%w", slug, idx, err)
 	}
-	if status := strings.ToLower(strings.TrimSpace(account.Status)); status != "" {
-		switch status {
-		case "enabled", "disabled":
-		default:
-			return fmt.Errorf("merchant %q provider_accounts[%d].status must be enabled or disabled", slug, idx)
-		}
-	}
-	if strings.TrimSpace(account.AccountID) == "" && len(account.Secrets) == 0 {
-		return fmt.Errorf("merchant %q provider_accounts[%d] must declare account_id, secrets, or both", slug, idx)
+	if _, _, err := manifestProviderAccountMode(account.Mode); err != nil {
+		return fmt.Errorf("merchant %q provider_accounts[%d].%w", slug, idx, err)
 	}
 	for key, source := range account.Secrets {
-		if _, err := merchantSecretName(providerType, key); err != nil {
+		if _, err := merchants.NormalizeProviderAccountSecretKey(providerType, key); err != nil {
 			return fmt.Errorf("merchant %q provider_accounts[%d]: %w", slug, idx, err)
 		}
 		if source.RefCount() != 1 {
 			return fmt.Errorf("merchant %q provider_accounts[%d].secrets.%s must set exactly one of value, env, file, vault", slug, idx, key)
 		}
 	}
+	if strings.TrimSpace(account.AccountID) == "" && !manifestProviderAccountHasDiscoverableIdentity(providerType, account.Secrets) {
+		return fmt.Errorf("merchant %q provider_accounts[%d].account_id is required unless provider secrets can identify the account", slug, idx)
+	}
 	return nil
+}
+
+func manifestProviderAccountHasDiscoverableIdentity(providerType string, secrets map[string]ManifestSecretSource) bool {
+	values, err := newManifestSecretValues(normalizeManifestProviderType(providerType), secrets)
+	if err != nil {
+		return false
+	}
+	switch normalizeManifestProviderType(providerType) {
+	case config.ProcessorTypeStripe:
+		_, ok := values.sources["secret_key"]
+		return ok
+	case config.ProcessorTypeNMI:
+		_, ok := values.sources["production_key"]
+		return ok
+	case config.ProcessorTypeCCBill:
+		_, ok := values.sources["account_config"]
+		return ok
+	default:
+		return false
+	}
 }
 
 const (

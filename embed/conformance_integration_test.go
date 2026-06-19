@@ -673,10 +673,10 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	wastedActor := "user:wasted-" + env.side
 	require.NoError(t, c.SetMerchantConfiguration(ctx, openrails.MerchantConfigurationInput{
 		Profile: &openrails.MerchantProfileInput{
-			DisplayName:  "Conformance Billing",
-			LogoURL:      "https://example.com/logo.png",
-			FromEmail:    "billing@example.com",
-			SupportURL:   "https://example.com/support",
+			DisplayName: "Conformance Billing",
+			LogoURL:     "https://example.com/logo.png",
+			FromEmail:   "billing@example.com",
+			SupportURL:  "https://example.com/support",
 		},
 		DelegatedInvokerWastedSpendWindows: []openrails.BudgetWindowInput{
 			{Key: "burst", WindowSeconds: 900, Limit: 1_000_000},
@@ -716,10 +716,10 @@ func observeMerchantProfile(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 	var cfg models.MerchantConfiguration
 	require.NoError(t, json.Unmarshal(raw, &cfg))
 	return obsMerchantProfile{
-		DisplayName:  cfg.Profile.DisplayName,
-		LogoURL:      cfg.Profile.LogoURL,
-		FromEmail:    cfg.Profile.FromEmail,
-		SupportURL:   cfg.Profile.SupportURL,
+		DisplayName: cfg.Profile.DisplayName,
+		LogoURL:     cfg.Profile.LogoURL,
+		FromEmail:   cfg.Profile.FromEmail,
+		SupportURL:  cfg.Profile.SupportURL,
 	}
 }
 

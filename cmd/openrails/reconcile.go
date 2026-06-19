@@ -22,17 +22,15 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// newReconcileCmd wires the #107 processor-reconcile CLI:
+// newPullProviderCmd wires the #107/#511 provider-pull CLI:
 //
-//	openrails reconcile check  [--provider=... --since=... --until=...]  advisory diff
-//	openrails reconcile fix    [--provider=... --since=... --until=...]  enforce (LOCAL writes only, incl. PS-1 materialization)
-//	openrails reconcile report [--run=ID]                                latest/specified run report
+//	openrails pull-provider [--provider=... --since=... --until=...] [--insert|--overwrite|--prune]
+//	openrails pull-provider report [--run=ID] latest/specified run report
 //
 // Reconciliation is manual-only by design (no scheduled runs). The remote
-// processors are NEVER mutated: fix converges local state only. Remote-provider
-// writes are queued by the operation that requests them through the provider
-// intent ledger, not by reconciliation, so reconcile is safe under
-// mode=readonly.
+// processors are NEVER mutated: mutation flags converge local state only.
+// Remote-provider writes are queued by the operation that requests them through
+// the provider intent ledger, not by provider pull.
 func newPullProviderCmd() *cobra.Command {
 	var (
 		providers       []string
@@ -42,23 +40,23 @@ func newPullProviderCmd() *cobra.Command {
 		merchantSlug    string
 		providerAccount string
 		runIDStr        string
+		insert          bool
 		overwrite       bool
 		prune           bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "pull-provider",
-		Short: "Pull provider-observed state into the local mirror, then converge (#511). Dry-run unless --overwrite.",
+		Short: "Pull provider-observed state into the local mirror, then converge (#511). Plan-only unless mutation flags are set.",
 		Long: "Pull provider-observed truth (subscriptions, payments, refunds, vault) into the local mirror, " +
 			"then run a one-shot Converge(merchant).\n\n" +
-			"Safety-first: a bare `pull-provider` is a DRY-RUN — it discovers every PULL-class divergence and logs " +
-			"the changes it WOULD make, writing nothing. `--overwrite` is the explicit opt-in that applies the mirror " +
-			"upserts (missing→insert, mismatch→overwrite provider-owned fields) and then converges. `--prune` " +
-			"additionally deletes local subscriptions/payments attributed to the pulled provider account that are " +
-			"ABSENT from the provider source (still dry-run unless --overwrite); without --prune the pull never acts " +
-			"on excess. The remote processors are NEVER mutated.",
+			"Safety-first: a bare `pull-provider` is plan-only — it discovers every PULL-class divergence and logs " +
+			"the changes it WOULD make, writing nothing. Mutation classes are explicit and compose: `--insert` imports " +
+			"provider-observed records missing locally; `--overwrite` updates existing local mirror rows from provider " +
+			"truth; `--prune` deletes eligible local subscriptions/payments attributed to the pulled provider account " +
+			"that are ABSENT from the provider source. The remote processors are NEVER mutated.",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runPullProvider(c, providers, providerAccount, since, until, format, merchantSlug, overwrite, prune)
+			return runPullProvider(c, providers, providerAccount, since, until, format, merchantSlug, insert, overwrite, prune)
 		},
 	}
 	cmd.Flags().StringSliceVar(&providers, "provider", nil, "Provider(s) to pull: nmi, ccbill, stripe, solana (default: all configured)")
@@ -67,8 +65,9 @@ func newPullProviderCmd() *cobra.Command {
 	cmd.Flags().StringVar(&until, "until", "", "Transaction window end (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
 	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (required)")
-	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "Apply changes (default is a non-destructive dry-run that only logs what it would do)")
-	cmd.Flags().BoolVar(&prune, "prune", false, "Also delete local subscriptions/payments for the pulled provider account that are ABSENT from the provider source (destructive; honors dry-run unless --overwrite)")
+	cmd.Flags().BoolVar(&insert, "insert", false, "Insert provider-observed records that are missing locally")
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "Overwrite existing local mirror rows from provider-observed truth")
+	cmd.Flags().BoolVar(&prune, "prune", false, "Delete eligible local subscriptions/payments for the pulled provider account that are ABSENT from the provider source")
 
 	reportCmd := &cobra.Command{
 		Use:   "report",
@@ -241,10 +240,10 @@ func parseReconcileCLITime(s, name string) (time.Time, error) {
 	return t, nil
 }
 
-func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccountStr, sinceStr, untilStr, format, merchantSlug string, overwrite, prune bool) error {
-	// Dry-run is the safe default; --overwrite is the explicit opt-in to apply.
+func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccountStr, sinceStr, untilStr, format, merchantSlug string, insert, overwrite, prune bool) error {
+	// Plan-only is the safe default; local writes require explicit mutation flags.
 	mode := reconcile.ModeAdvisory
-	if overwrite {
+	if insert || overwrite {
 		mode = reconcile.ModeEnforce
 	}
 	sinceT, err := parseReconcileCLITime(sinceStr, "since")
@@ -300,6 +299,7 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccount
 
 		res, runErr := eng.Run(ctx, reconcile.RunParams{
 			Mode:             mode,
+			Mutations:        &reconcile.LocalMutationPolicy{Insert: insert, Overwrite: overwrite},
 			Providers:        provs,
 			ProviderAccounts: bindings,
 			Since:            sinceT,
@@ -311,7 +311,6 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccount
 
 		// --prune (opt-in): delete local subscriptions/payments attributed to the
 		// pulled provider account(s) that are ABSENT from the provider source.
-		// Honors dry-run: only deletes when --overwrite is also set, otherwise logs.
 		if prune && runErr == nil {
 			for provider, binding := range bindings {
 				fetcher, ok := fetchers[provider]
@@ -319,24 +318,20 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccount
 					continue
 				}
 				pr, err := reconcile.PruneProviderAccountExcess(ctx, rt.DB, fetcher, provider, binding, reconcile.PruneParams{
-					Since: sinceT, Until: untilT, Apply: overwrite,
+					Since: sinceT, Until: untilT, Apply: true,
 				})
 				if err != nil {
 					return fmt.Errorf("prune %s (%s): %w", provider, binding.AccountID, err)
 				}
-				verb := "would delete"
-				if overwrite {
-					verb = "deleted"
-				}
-				fmt.Fprintf(os.Stdout, "prune %s: %s %d excess subscription(s), %d excess payment(s) absent from provider source\n",
-					provider, verb, pr.Subscriptions, pr.Payments)
+				fmt.Fprintf(os.Stdout, "prune %s: deleted %d excess subscription(s), %d excess payment(s) absent from provider source\n",
+					provider, pr.Subscriptions, pr.Payments)
 			}
 		}
 
-		// After a successful --overwrite pull, run one idempotent Converge(merchant):
+		// After successful local mutations, run one idempotent Converge(merchant):
 		// the mirror now reflects provider truth, so DERIVE/LIFE/CON converge grant
-		// effects + lifecycle to it. Dry-run never converges (it wrote nothing).
-		if overwrite && runErr == nil {
+		// effects + lifecycle to it. Plan-only never converges (it wrote nothing).
+		if (insert || overwrite || prune) && runErr == nil {
 			merchantID, mErr := merchant.Require(ctx)
 			if mErr != nil {
 				return mErr
@@ -346,7 +341,7 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccount
 			// the confirmed-absence gate (§3.2) for destructive EXCESS repairs. A
 			// provider-filtered or windowed (--since) pull does NOT prove full
 			// absence, so it must not flip the gate.
-			fullHead := len(provs) == 0 && sinceT.IsZero()
+			fullHead := len(provs) == 0 && sinceT.IsZero() && (insert || overwrite || prune)
 			if fullHead {
 				now := time.Now().UTC()
 				for _, domain := range []string{"subscriptions", "payments"} {
@@ -391,9 +386,9 @@ func resolveReconcileProviderAccountTarget(ctx context.Context, rt *reconcileRun
 		return "", "", reconcile.ProviderAccountBinding{}, fmt.Errorf("load provider account %s: %w", id, err)
 	}
 	resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.Processors, rt.NMIClients)
-	identity, ok := resolver.FindProviderAccount(ctx, account.ProviderType, account.AccountID)
+	identity, ok := resolver.FindProviderAccount(ctx, account.ProviderType, account.Environment, account.AccountID)
 	if !ok {
-		return "", "", reconcile.ProviderAccountBinding{}, fmt.Errorf("provider account %s (%s:%s) is not configured in this runtime", id, account.ProviderType, account.AccountID)
+		return "", "", reconcile.ProviderAccountBinding{}, fmt.Errorf("provider account %s (%s:%s:%s) is not configured in this runtime", id, account.ProviderType, account.Environment, account.AccountID)
 	}
 	provider := reconcile.Provider(account.ProviderType)
 	return provider, identity.ProviderKey, reconcile.ProviderAccountBinding{

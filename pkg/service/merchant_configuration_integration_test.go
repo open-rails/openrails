@@ -104,16 +104,16 @@ func TestMerchantConfiguration_TwoMerchantsKeepDistinctProfiles(t *testing.T) {
 
 	require.NoError(t, svc.SetMerchantConfiguration(ctxA, billingservice.MerchantConfiguration{
 		Profile: &models.MerchantProfileConfiguration{
-			DisplayName:  "Merchant A Billing",
-			FromEmail:    "billing-a@example.com",
-			SupportURL:   "https://a.example/support",
+			DisplayName: "Merchant A Billing",
+			FromEmail:   "billing-a@example.com",
+			SupportURL:  "https://a.example/support",
 		},
 	}))
 	require.NoError(t, svc.SetMerchantConfiguration(ctxB, billingservice.MerchantConfiguration{
 		Profile: &models.MerchantProfileConfiguration{
-			DisplayName:  "Merchant B Billing",
-			FromEmail:    "billing-b@example.com",
-			SupportURL:   "https://b.example/support",
+			DisplayName: "Merchant B Billing",
+			FromEmail:   "billing-b@example.com",
+			SupportURL:  "https://b.example/support",
 		},
 	}))
 

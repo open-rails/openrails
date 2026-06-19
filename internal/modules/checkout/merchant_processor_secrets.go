@@ -19,9 +19,15 @@ type merchantSecretGetter interface {
 	Get(ctx context.Context, merchantID merchant.ID, name string) (merchants.Secret, error)
 }
 
-// SetMerchantSecretStore wires the dynamic OpenRails merchant-secret store into the
-// checkout money paths. Static processor config remains the fallback for
-// embedded/self-hosted installs; merchant secrets take precedence when present.
+type providerAccountSecretResolver interface {
+	PrimaryProviderAccountSecretName(ctx context.Context, merchantID merchant.ID, providerType, environment, key string) (string, bool, error)
+}
+
+// SetMerchantSecretStore wires the dynamic OpenRails merchant-secret store into
+// checkout money paths. Static processor config remains available only when no
+// provider-account resolver is configured; once scoped provider accounts are in
+// use, missing scoped secrets fail closed instead of falling back across
+// accounts.
 func (s *CheckoutService) SetMerchantSecretStore(store merchantSecretGetter) {
 	if s == nil {
 		return
@@ -30,6 +36,13 @@ func (s *CheckoutService) SetMerchantSecretStore(store merchantSecretGetter) {
 	if s.NMISaleService != nil {
 		s.NMISaleService.ResolveNMIClient = s.resolveNMIClient
 	}
+}
+
+func (s *CheckoutService) SetProviderAccountSecretResolver(resolver providerAccountSecretResolver) {
+	if s == nil {
+		return
+	}
+	s.ProviderSecrets = resolver
 }
 
 func (s *CheckoutService) merchantSecret(ctx context.Context, name string) (string, bool, error) {
@@ -54,18 +67,37 @@ func (s *CheckoutService) merchantSecret(ctx context.Context, name string) (stri
 	return value, true, nil
 }
 
+func (s *CheckoutService) merchantProviderSecret(ctx context.Context, providerType, environment, key string) (string, bool, error) {
+	if s == nil || s.MerchantSecrets == nil || s.ProviderSecrets == nil {
+		return "", false, nil
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	name, ok, err := s.ProviderSecrets.PrimaryProviderAccountSecretName(ctx, tid, providerType, environment, key)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	return s.merchantSecret(ctx, name)
+}
+
+func (s *CheckoutService) scopedProviderSecretsEnabled() bool {
+	return s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil
+}
+
 func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
 		return nil, errors.New("provider is required")
 	}
 
-	secretName := ""
+	secretKey := ""
 	if provider == "mobius" {
-		secretName = merchants.SecretNMIMobiusProductionKey
+		secretKey = "production_key"
 	}
-	if secretName != "" {
-		if value, ok, err := s.merchantSecret(ctx, secretName); err != nil {
+	if secretKey != "" {
+		if value, ok, err := s.merchantProviderSecret(ctx, config.ProcessorTypeNMI, "live", secretKey); err != nil {
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
 		} else if ok {
 			proc := cloneProcessorConfig(s.processorConfig(provider))
@@ -75,6 +107,8 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 			proc.Type = config.ProcessorTypeNMI
 			proc.SecurityKey = value
 			return nmi.NewClient(provider, proc.ToNMIProviderSettings(provider), s.Config != nil && s.Config.IsTestEnv())
+		} else if s.scopedProviderSecretsEnabled() {
+			return nil, fmt.Errorf("missing scoped merchant NMI secret for provider account")
 		}
 	}
 
@@ -106,7 +140,7 @@ func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 		base = &config.CCBillConfig{}
 	}
 
-	value, ok, err := s.merchantSecret(ctx, merchants.SecretCCBillAccountConfig)
+	value, ok, err := s.merchantProviderSecret(ctx, config.ProcessorTypeCCBill, "live", "account_config")
 	if err != nil {
 		return nil, fmt.Errorf("load merchant CCBill secret: %w", err)
 	}
@@ -116,6 +150,9 @@ func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 			return nil, err
 		}
 		return cfg, nil
+	}
+	if s.scopedProviderSecretsEnabled() {
+		return nil, errors.New("missing scoped merchant CCBill account_config secret for provider account")
 	}
 
 	if baseProc == nil {

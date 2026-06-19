@@ -373,10 +373,21 @@ func TestMerchantAdmin_SecretRoutesWriteOnlyRuntimeBehavior(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "sk_test_route_secret", got.Value)
 
+	scopedName, err := merchants.ProviderAccountSecretName("stripe", "live", "acct_route_secret", "secret_key")
+	require.NoError(t, err)
+	w = doSelfBearerBody(eA, http.MethodPut, "/v1/admin/secrets/"+scopedName, "delegated.jwt.token", `{"value":"sk_test_scoped_route_secret"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), "sk_test_scoped_route_secret")
+	got, err = store.Get(context.Background(), tenantA, scopedName)
+	require.NoError(t, err)
+	require.Equal(t, "sk_test_scoped_route_secret", got.Value)
+
 	w = doSelfBearer(eA, http.MethodGet, "/v1/admin/secrets", "delegated.jwt.token")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), `"configured":true`)
+	require.Contains(t, w.Body.String(), scopedName)
 	require.NotContains(t, w.Body.String(), "sk_test_route_secret")
+	require.NotContains(t, w.Body.String(), "sk_test_scoped_route_secret")
 
 	w = doSelfBearerBody(eA, http.MethodPost, "/v1/admin/secrets/validate/nmi/mobius/production_key", "delegated.jwt.token", `{"value":"mobius-production-key"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -397,5 +408,11 @@ func TestMerchantAdmin_SecretRoutesWriteOnlyRuntimeBehavior(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), "sk_test_route_secret")
 	_, err = store.Get(context.Background(), tenantA, merchants.SecretStripeSecretKey)
+	require.ErrorIs(t, err, merchants.ErrSecretNotFound)
+
+	w = doSelfBearer(eA, http.MethodDelete, "/v1/admin/secrets/"+scopedName, "delegated.jwt.token")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), "sk_test_scoped_route_secret")
+	_, err = store.Get(context.Background(), tenantA, scopedName)
 	require.ErrorIs(t, err, merchants.ErrSecretNotFound)
 }

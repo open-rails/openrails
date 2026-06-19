@@ -100,9 +100,9 @@ merchants:
     display_name: Local Stack
     provider_accounts:
       - provider_type: nmi
-        provider_key: mobius
+        environment: live
         account_id: mobius-profile-id
-        role: primary
+        mode: primary
         secrets:
           production_key: {env: MOBIUS_PRODUCTION_KEY}
           tokenization_key: {env: MOBIUS_TOKENIZATION_KEY}

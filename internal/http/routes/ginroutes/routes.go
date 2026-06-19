@@ -315,6 +315,7 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gi
 	read := ginmw.RequireDelegatedPermission(controlplane.PermMerchantBillingRead)
 	subRead := ginmw.RequireDelegatedPermission(controlplane.PermMerchantBillingRead)
 	entWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantEntitlementsWrite)
+	productAccessWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantProductAccessWrite)
 	payWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantPaymentsWrite)
 	subWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantSubscriptionsWrite)
 	configRead := ginmw.RequireDelegatedPermission(controlplane.PermMerchantConfigurationRead)
@@ -363,6 +364,11 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gi
 	// Entitlement grants/revokes — entitlements:write.
 	users.POST("/entitlements", entWrite, wrap(httphandlers.GrantAdminEntitlement))
 	users.DELETE("/entitlements/:id", entWrite, wrap(httphandlers.RevokeAdminEntitlement))
+
+	// Product access (ownership) grants/revokes — product-access:write (#250, #528).
+	// A separate concept from entitlements: durable per-(user,product) ownership.
+	users.POST("/product-access", productAccessWrite, wrap(httphandlers.GrantAdminProductAccess))
+	users.DELETE("/product-access/:id", productAccessWrite, wrap(httphandlers.RevokeAdminProductAccess))
 
 	// Off-channel payment recording — payments:write.
 	users.POST("/payments/off-channel", payWrite, wrap(httphandlers.AdminCreateOffChannelPayment))

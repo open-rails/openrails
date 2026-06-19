@@ -13,55 +13,40 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
-// TestAdminPaymentsRequireAuth verifies that payment endpoints require admin JWT
-func TestAdminPaymentsRequireAuth(t *testing.T) {
-	suite, _ := setupAdminTestSuite(t)
+// #528 hard cut: the admin payments surface is the delegated /v1/admin model.
+// Reads require openrails:merchant:billing:read; refunds require
+// openrails:merchant:payments:write. Tests authenticate as a delegated merchant
+// principal via newHostSeamAdminRouter (the retired per-user admin JWT is gone).
 
-	t.Run("GET payments returns 401 without auth", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/admin/payments", nil)
+// adminPaymentsReader mounts the delegated admin surface with billing:read.
+func adminPaymentsReader(t *testing.T, suite *TestContainerSuite) *gin.Engine {
+	return newHostSeamAdminRouter(t, suite, "bc000000-0000-4000-8000-000000000001",
+		[]string{controlplane.PermMerchantBillingRead})
+}
 
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 Unauthorized")
-	})
-
-	t.Run("GET payment by ID returns 401 without auth", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/admin/payments/"+uuid.New().String(), nil)
-
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 Unauthorized")
-	})
-
-	t.Run("returns 403 with non-admin JWT", func(t *testing.T) {
-		userID := uuid.New().String()
-		userToken := CreateUserToken(t, userID)
-
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/admin/payments", nil)
-		req.Header.Set("Authorization", "Bearer "+userToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusForbidden, w.Code, "Should return 403 Forbidden for non-admin user")
-	})
+// adminPaymentsWriter mounts the delegated admin surface with payments:write
+// (and billing:read, which a refund operator naturally also holds).
+func adminPaymentsWriter(t *testing.T, suite *TestContainerSuite) *gin.Engine {
+	return newHostSeamAdminRouter(t, suite, "bc000000-0000-4000-8000-000000000002",
+		[]string{controlplane.PermMerchantBillingRead, controlplane.PermMerchantPaymentsWrite})
 }
 
 // TestAdminListPayments tests GET /v1/admin/payments
 func TestAdminListPayments(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
+	suite := getSharedTestSuite(t)
+	admin := adminPaymentsReader(t, suite)
 
 	// Seed test data
 	products := suite.SeedProducts()
@@ -90,9 +75,8 @@ func TestAdminListPayments(t *testing.T) {
 	t.Run("returns paginated payments list with Stripe-like format", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/v1/admin/payments?limit=10", nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code, "Should return 200 OK, got: %s", w.Body.String())
 
@@ -127,10 +111,8 @@ func TestAdminListPayments(t *testing.T) {
 	t.Run("filters by user_id", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/payments?user_id=%s", userID), nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-		req.Header.Set("X-Idempotency-Key", "refund-missing-"+uuid.NewString())
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
 
@@ -152,9 +134,8 @@ func TestAdminListPayments(t *testing.T) {
 	t.Run("filters by processor", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/v1/admin/payments?processor=mobius", nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
 
@@ -172,9 +153,8 @@ func TestAdminListPayments(t *testing.T) {
 	t.Run("filters by amount range", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/v1/admin/payments?min_amount=500&max_amount=1500", nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
 
@@ -203,9 +183,8 @@ func TestAdminListPayments(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/v1/admin/payments?refunds_only=true", nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
 
@@ -227,9 +206,8 @@ func TestAdminListPayments(t *testing.T) {
 	t.Run("sorts by created descending", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/payments?user_id=%s&sort_by=created_at&sort_order=desc", userID), nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
 
@@ -253,9 +231,8 @@ func TestAdminListPayments(t *testing.T) {
 	t.Run("sorts by amount ascending", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/v1/admin/payments?sort_by=amount&sort_order=asc&limit=100", nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
 
@@ -279,9 +256,8 @@ func TestAdminListPayments(t *testing.T) {
 	t.Run("filters by subscription_id", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/payments?subscription_id=%s", sub.ID.String()), nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
 
@@ -302,7 +278,8 @@ func TestAdminListPayments(t *testing.T) {
 
 // TestAdminGetPayment tests GET /v1/admin/payments/:id
 func TestAdminGetPayment(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
+	suite := getSharedTestSuite(t)
+	admin := adminPaymentsReader(t, suite)
 
 	// Seed test data
 	products := suite.SeedProducts()
@@ -322,9 +299,8 @@ func TestAdminGetPayment(t *testing.T) {
 	t.Run("returns payment with Stripe-like format", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/payments/%s", payment.ID.String()), nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code, "Should return 200 OK, got: %s", w.Body.String())
 
@@ -369,9 +345,8 @@ func TestAdminGetPayment(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/payments/%s", payment.ID.String()), nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
 
@@ -399,9 +374,8 @@ func TestAdminGetPayment(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/payments/%s", nonExistentID.String()), nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusNotFound, w.Code, "Should return 404 Not Found")
 	})
@@ -409,9 +383,8 @@ func TestAdminGetPayment(t *testing.T) {
 	t.Run("returns 400 for invalid payment ID", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/v1/admin/payments/not-a-uuid", nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 Bad Request")
 	})
@@ -419,7 +392,8 @@ func TestAdminGetPayment(t *testing.T) {
 
 // TestAdminPaymentsTransactionIDFilter tests filtering by transaction_id
 func TestAdminPaymentsTransactionIDFilter(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
+	suite := getSharedTestSuite(t)
+	admin := adminPaymentsReader(t, suite)
 
 	// Seed test data
 	products := suite.SeedProducts()
@@ -438,9 +412,8 @@ func TestAdminPaymentsTransactionIDFilter(t *testing.T) {
 	t.Run("finds payment by transaction_id", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/payments?transaction_id=%s", transactionID), nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
 
@@ -459,9 +432,8 @@ func TestAdminPaymentsTransactionIDFilter(t *testing.T) {
 	t.Run("returns empty for non-existent transaction_id", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/v1/admin/payments?transaction_id=non-existent-txn", nil)
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
 
@@ -474,65 +446,52 @@ func TestAdminPaymentsTransactionIDFilter(t *testing.T) {
 	})
 }
 
-// TestAdminRefundPayment tests POST /v1/admin/payments/:id/refund
+// TestAdminRefund_RequiresPaymentsWrite proves the delegated gate fails closed:
+// a principal holding only billing:read cannot drive a refund (403), even though
+// it can read payments.
+func TestAdminRefund_RequiresPaymentsWrite(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	reader := adminPaymentsReader(t, suite)
+
+	products := suite.SeedProducts()
+	priceID := products[0].Prices[0].ID
+	payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
+		UserID:    uuid.New().String(),
+		PriceID:   priceID,
+		Processor: models.ProcessorMobius,
+		Amount:    1000,
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refunds", payment.ID.String()),
+		strings.NewReader(`{"amount": 500}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer host-credential")
+	reader.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code, "billing:read must not authorize a refund")
+}
+
+// TestAdminRefundPayment tests POST /v1/admin/payments/:id/refunds
 func TestAdminRefundPayment(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
+	suite := getSharedTestSuite(t)
+	admin := adminPaymentsWriter(t, suite)
 
 	// Seed test data
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
 	userID := uuid.New().String()
 
-	t.Run("requires admin auth", func(t *testing.T) {
-		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
-			UserID:    userID,
-			PriceID:   priceID,
-			Processor: models.ProcessorMobius,
-			Amount:    1000,
-		})
-
-		w := httptest.NewRecorder()
-		body := `{"amount": 500}`
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 without auth")
-	})
-
-	t.Run("returns 403 for non-admin user", func(t *testing.T) {
-		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
-			UserID:    userID,
-			PriceID:   priceID,
-			Processor: models.ProcessorMobius,
-			Amount:    1000,
-		})
-
-		userToken := CreateUserToken(t, uuid.New().String())
-
-		w := httptest.NewRecorder()
-		body := `{"amount": 500}`
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+userToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusForbidden, w.Code, "Should return 403 for non-admin")
-	})
-
 	t.Run("returns 404 for non-existent payment", func(t *testing.T) {
 		nonExistentID := uuid.New()
 
 		w := httptest.NewRecorder()
 		body := `{"amount": 500}`
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", nonExistentID.String()), strings.NewReader(body))
+		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refunds", nonExistentID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("Authorization", "Bearer host-credential")
 		req.Header.Set("X-Idempotency-Key", "refund-missing-payment-"+uuid.NewString())
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusNotFound, w.Code, "Should return 404 for non-existent payment")
 	})
@@ -540,11 +499,10 @@ func TestAdminRefundPayment(t *testing.T) {
 	t.Run("returns 400 for invalid payment ID", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		body := `{"amount": 500}`
-		req, _ := http.NewRequest("POST", "/v1/admin/payments/not-a-uuid/refund", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/v1/admin/payments/not-a-uuid/refunds", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid payment ID")
 	})
@@ -559,12 +517,11 @@ func TestAdminRefundPayment(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		body := `{}`
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
+		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("Authorization", "Bearer host-credential")
 		req.Header.Set("X-Idempotency-Key", "refund-missing-amount-"+uuid.NewString())
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for missing amount")
 	})
@@ -579,12 +536,11 @@ func TestAdminRefundPayment(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		body := `{"amount": 0}`
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
+		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("Authorization", "Bearer host-credential")
 		req.Header.Set("X-Idempotency-Key", "refund-zero-amount-"+uuid.NewString())
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for zero amount")
 	})
@@ -600,12 +556,11 @@ func TestAdminRefundPayment(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		body := `{"amount": 500}`
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
+		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("Authorization", "Bearer host-credential")
 		req.Header.Set("X-Idempotency-Key", "refund-stripe-old-"+uuid.NewString())
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return actionable 400 for unsupported Stripe transaction ID")
 
@@ -628,12 +583,11 @@ func TestAdminRefundPayment(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		body := `{"amount": 500}`
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
+		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("Authorization", "Bearer host-credential")
 		req.Header.Set("X-Idempotency-Key", "refund-ccbill-"+uuid.NewString())
-
-		suite.Server.Handler().ServeHTTP(w, req)
+		admin.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for CCBill")
 
@@ -648,83 +602,48 @@ func TestAdminRefundPayment(t *testing.T) {
 	})
 }
 
-// TestAdminRefundPaymentAuthBoundaries tests that admin refund properly enforces admin-only access
-func TestAdminRefundPaymentAuthBoundaries(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
+// TestAdminRefundReachesAnyUserInTenant confirms a merchant admin holding
+// payments:write can drive a refund against ANY user's payment within its
+// tenant — the operator is merchant-scoped, not user-scoped. (CCBill returns a
+// processor error, which proves the request reached the handler, not an auth gate.)
+func TestAdminRefundReachesAnyUserInTenant(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	admin := adminPaymentsWriter(t, suite)
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
 
-	// Create two different users' payments
-	userA := uuid.New().String()
-	userB := uuid.New().String()
-
 	paymentA := suite.CreateTestPaymentWithOptions(PaymentOptions{
-		UserID:    userA,
+		UserID:    uuid.New().String(),
 		PriceID:   priceID,
-		Processor: models.ProcessorCCBill, // Use CCBill so we don't need processor mock
+		Processor: models.ProcessorCCBill, // CCBill so we don't need a processor mock
 		Amount:    2000,
 	})
-
 	paymentB := suite.CreateTestPaymentWithOptions(PaymentOptions{
-		UserID:    userB,
+		UserID:    uuid.New().String(),
 		PriceID:   priceID,
 		Processor: models.ProcessorCCBill,
 		Amount:    3000,
 	})
 
-	t.Run("admin can attempt refund on any user's payment", func(t *testing.T) {
-		// Admin can access both payments (though CCBill will return error)
-		for _, payment := range []*models.Payment{paymentA, paymentB} {
-			w := httptest.NewRecorder()
-			body := `{"amount": 500}`
-			req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", "Bearer "+adminToken)
-			req.Header.Set("X-Idempotency-Key", "refund-boundary-"+uuid.NewString())
-
-			suite.Server.Handler().ServeHTTP(w, req)
-
-			// Should get CCBill error, not auth error
-			assert.Equal(t, http.StatusBadRequest, w.Code, "Admin should be able to access payment")
-
-			var response map[string]interface{}
-			err := json.Unmarshal(w.Body.Bytes(), &response)
-			require.NoError(t, err)
-
-			errorObj := response["error"].(map[string]interface{})
-			message := errorObj["message"].(string)
-			assert.Contains(t, message, "CCBill", "Should get CCBill error, not auth error")
-		}
-	})
-
-	t.Run("regular user cannot refund even their own payment", func(t *testing.T) {
-		userToken := CreateUserToken(t, userA)
-
+	for _, payment := range []*models.Payment{paymentA, paymentB} {
 		w := httptest.NewRecorder()
 		body := `{"amount": 500}`
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", paymentA.ID.String()), strings.NewReader(body))
+		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+userToken)
+		req.Header.Set("Authorization", "Bearer host-credential")
+		req.Header.Set("X-Idempotency-Key", "refund-boundary-"+uuid.NewString())
+		admin.ServeHTTP(w, req)
 
-		suite.Server.Handler().ServeHTTP(w, req)
+		// Should get the CCBill processor error, not an auth error.
+		assert.Equal(t, http.StatusBadRequest, w.Code, "Admin should be able to reach payment")
 
-		assert.Equal(t, http.StatusForbidden, w.Code, "User should get 403 even for their own payment")
-	})
-
-	t.Run("regular user cannot refund another user's payment", func(t *testing.T) {
-		userToken := CreateUserToken(t, userA)
-
-		w := httptest.NewRecorder()
-		body := `{"amount": 500}`
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", paymentB.ID.String()), strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+userToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusForbidden, w.Code, "User should get 403 for another user's payment")
-	})
+		var response map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		errorObj := response["error"].(map[string]interface{})
+		message := errorObj["message"].(string)
+		assert.Contains(t, message, "CCBill", "Should get CCBill error, not auth error")
+	}
 }
 
 // TestAdminRefundPaymentThroughIntentLedger drives the full HTTP admin refund
@@ -734,7 +653,8 @@ func TestAdminRefundPaymentAuthBoundaries(t *testing.T) {
 // movement across DIFFERENT admin idempotency keys, and the admin-key replay
 // returns the recorded refund.
 func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
-	suite, adminToken := setupAdminTestSuite(t)
+	suite := getSharedTestSuite(t)
+	admin := adminPaymentsWriter(t, suite)
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
 	userID := uuid.New().String()
@@ -770,12 +690,12 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 
 	refundReq := func(idempotencyKey string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()),
+		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refunds", payment.ID.String()),
 			strings.NewReader(`{"amount": 400}`))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("Authorization", "Bearer host-credential")
 		req.Header.Set("X-Idempotency-Key", idempotencyKey)
-		suite.Server.Handler().ServeHTTP(w, req)
+		admin.ServeHTTP(w, req)
 		return w
 	}
 

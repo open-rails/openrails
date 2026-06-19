@@ -27,9 +27,11 @@ const defaultCatalogManifestPath = "/etc/openrails/catalog.yaml"
 
 // catalogOptions holds the flags for `openrails push-merchant-catalog`.
 type catalogOptions struct {
-	file   string
-	dryRun bool
-	prune  bool
+	file      string
+	dryRun    bool
+	insert    bool
+	overwrite bool
+	prune     bool
 }
 
 type catalogApplyTarget struct {
@@ -62,12 +64,12 @@ func newPushCatalogCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "push-merchant-catalog",
 		Aliases: []string{"push-catalog"},
-		Short:   "Apply a YAML merchant catalog manifest into OpenRails and configured providers",
+		Short:   "Push a YAML merchant catalog manifest into OpenRails and configured providers",
 		Long: "Loads a declarative catalog manifest (catalogs[] > tier_groups > products > prices), " +
-			"computes a terraform-style plan per merchant, prints it, and — unless --dry-run — " +
-			"converges OpenRails onto it. Products are identified by slug within their merchant; " +
-			"prices by financial substance (currency, amount, interval). Undeclared active prices " +
-			"are archived; the per-product/price providers list fans the apply out to Stripe/NMI/CCBill/Solana.",
+			"computes a terraform-style plan per merchant, and prints it. A bare command is plan-only. " +
+			"Mutation classes are explicit and compose: --insert creates missing products/prices/provider objects; " +
+			"--overwrite updates existing OpenRails-owned catalog rows; --prune archives OpenRails-owned extras. " +
+			"Products are identified by slug within their merchant; prices by financial substance (currency, amount, interval).",
 		Args: validateCatalogArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runPushCatalog(cmd, opts)
@@ -75,7 +77,10 @@ func newPushCatalogCmd() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	flags.StringVarP(&opts.file, "file", "f", defaultCatalogManifestPath, "catalog manifest YAML file")
-	flags.BoolVar(&opts.dryRun, "dry-run", false, "compute and print the plan without mutating anything")
+	flags.BoolVar(&opts.dryRun, "dry-run", false, "deprecated alias for the default plan-only behavior")
+	_ = flags.MarkHidden("dry-run")
+	flags.BoolVar(&opts.insert, "insert", false, "Create missing OpenRails/provider catalog objects from the manifest")
+	flags.BoolVar(&opts.overwrite, "overwrite", false, "Update existing OpenRails-owned catalog objects from the manifest")
 	flags.BoolVar(&opts.prune, "prune", false, "archive OpenRails-owned provider objects absent from the local catalog; foreign provider objects are never touched")
 	return cmd
 }
@@ -143,31 +148,40 @@ func runPushCatalog(cmd *cobra.Command, opts catalogOptions) error {
 			if len(targets) > 1 {
 				fmt.Fprintf(out, "\n%s plan:\n", label)
 			}
-			plan.Print(out, opts.dryRun)
+			planOnly := opts.planOnly()
+			plan.Print(out, planOnly)
 
-			if opts.dryRun {
+			if planOnly {
 				if !plan.HasChanges() {
 					fmt.Fprintln(out, "\nno changes — catalog is up to date")
 				}
-				return reportCatalogExtras(ctx, svc, out, opts.dryRun, opts.prune)
+				return reportCatalogExtras(ctx, svc, out, true, opts.prune)
 			}
 			if !plan.HasChanges() {
 				fmt.Fprintln(out, "\nno changes — catalog is up to date")
-				return reportCatalogExtras(ctx, svc, out, opts.dryRun, opts.prune)
+				return reportCatalogExtras(ctx, svc, out, false, opts.prune)
 			}
 
-			result, err := catalog.Apply(ctx, applier, plan)
+			result, err := catalog.ApplyWithOptions(ctx, applier, plan, catalog.ApplyOptions{
+				Insert:    opts.insert,
+				Overwrite: opts.overwrite,
+				Prune:     opts.prune,
+			})
 			if err != nil {
 				return fmt.Errorf("apply %s: %w", label, err)
 			}
 			fmt.Fprintln(out)
 			result.Print(out)
-			return reportCatalogExtras(ctx, svc, out, opts.dryRun, opts.prune)
+			return reportCatalogExtras(ctx, svc, out, false, opts.prune)
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (o catalogOptions) planOnly() bool {
+	return o.dryRun || (!o.insert && !o.overwrite && !o.prune)
 }
 
 func loadCatalogTargets(path string) ([]catalogApplyTarget, error) {

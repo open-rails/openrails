@@ -1,0 +1,9 @@
+# Control-plane bootstrap only: no merchants, provider secrets, or catalog here.
+# Run after push-merchant-config has created the merchant/backing org referenced below.
+version: 1
+
+authority:
+  bootstrap_org_slug: local-stack
+  # Optional existing AuthKit user id to grant openrails:admin in this org.
+  # initial_admin_user_id: usr_admin
+  mint_initial_service_token: true

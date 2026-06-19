@@ -12,6 +12,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"path"
 	"strings"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -75,6 +77,122 @@ var merchantSecretRegistry = []SecretDefinition{
 	{Name: SecretNMIMobiusWebhookSigning, Provider: "nmi", Purpose: "webhook_signing", DisplayLabel: "Mobius/NMI webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 	{Name: SecretCCBillAccountConfig, Provider: "ccbill", Purpose: "account_config", DisplayLabel: "CCBill account configuration", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 	{Name: SecretSolanaPrivateKey, Provider: "solana", Purpose: "signing_keypair", DisplayLabel: "Solana signing keypair", ManualVault: true, MerchantWritable: false, Validation: "presence"},
+}
+
+// ProviderAccountSecretName returns the canonical secret-store name for a
+// provider-account-owned credential. The merchant id still namespaces the store;
+// this path adds provider identity so one merchant can rotate or run multiple
+// accounts of the same provider without credential collisions.
+func ProviderAccountSecretName(providerType, environment, accountID, key string) (string, error) {
+	providerType = normalizeProviderSecretType(providerType)
+	environment = normalizeProviderSecretEnvironment(environment)
+	accountID = strings.TrimSpace(accountID)
+	key, err := NormalizeProviderAccountSecretKey(providerType, key)
+	if err != nil {
+		return "", err
+	}
+	if providerType == "" {
+		return "", fmt.Errorf("provider account secret requires provider type")
+	}
+	if environment == "" {
+		return "", fmt.Errorf("provider account secret environment must be live or test")
+	}
+	if accountID == "" {
+		return "", fmt.Errorf("provider account secret requires account id")
+	}
+	return path.Join("provider_accounts", providerType, environment, url.PathEscape(accountID), key), nil
+}
+
+// ParseProviderAccountSecretName parses a provider-account-scoped secret name.
+func ParseProviderAccountSecretName(name string) (providerType, environment, accountID, key string, ok bool, err error) {
+	name = cleanSecretName(name)
+	parts := strings.Split(name, "/")
+	if len(parts) != 5 || parts[0] != "provider_accounts" {
+		return "", "", "", "", false, nil
+	}
+	providerType = normalizeProviderSecretType(parts[1])
+	environment = normalizeProviderSecretEnvironment(parts[2])
+	accountID, err = url.PathUnescape(parts[3])
+	if err != nil {
+		return "", "", "", "", true, fmt.Errorf("invalid provider account id escape: %w", err)
+	}
+	key, err = NormalizeProviderAccountSecretKey(providerType, parts[4])
+	if err != nil {
+		return "", "", "", "", true, err
+	}
+	if providerType == "" || environment == "" || strings.TrimSpace(accountID) == "" {
+		return "", "", "", "", true, fmt.Errorf("invalid provider account secret name %q", name)
+	}
+	return providerType, environment, accountID, key, true, nil
+}
+
+// SecretWritable reports whether a merchant operator may write the secret name.
+func SecretWritable(name string) bool {
+	name = cleanSecretName(name)
+	if def, ok := SecretDefinitionFor(name); ok {
+		return def.MerchantWritable
+	}
+	_, _, _, _, ok, err := ParseProviderAccountSecretName(name)
+	return ok && err == nil
+}
+
+// NormalizeProviderAccountSecretKey canonicalizes manifest/admin secret keys for
+// a provider account. It deliberately returns key fragments, not legacy broad
+// merchant secret names.
+func NormalizeProviderAccountSecretKey(providerType, key string) (string, error) {
+	providerType = normalizeProviderSecretType(providerType)
+	key = strings.ToLower(strings.TrimSpace(key))
+	switch providerType {
+	case "stripe":
+		switch key {
+		case "secret_key":
+			return "secret_key", nil
+		case "webhook_signing_secret", "webhook_secret":
+			return "webhook_signing_secret", nil
+		case "webhook_signing_secret_thin", "webhook_secret_thin":
+			return "webhook_signing_secret_thin", nil
+		}
+	case "nmi":
+		switch key {
+		case "production_key", "security_key", "secret_key":
+			return "production_key", nil
+		case "tokenization_key":
+			return "tokenization_key", nil
+		case "tokenization_url":
+			return "tokenization_url", nil
+		case "webhook_signing_secret", "webhook_secret":
+			return "webhook_signing_secret", nil
+		}
+	case "ccbill":
+		if key == "account_config" {
+			return "account_config", nil
+		}
+	case "solana":
+		if key == "private_key" {
+			return "private_key", nil
+		}
+	}
+	return "", fmt.Errorf("unknown provider account secret %s.%s", providerType, key)
+}
+
+func normalizeProviderSecretType(providerType string) string {
+	switch strings.ToLower(strings.TrimSpace(providerType)) {
+	case "mobius":
+		return "nmi"
+	default:
+		return strings.ToLower(strings.TrimSpace(providerType))
+	}
+}
+
+func normalizeProviderSecretEnvironment(environment string) string {
+	switch strings.ToLower(strings.TrimSpace(environment)) {
+	case "", "live", "prod", "production", "mainnet":
+		return "live"
+	case "test", "sandbox", "devnet", "testnet":
+		return "test"
+	default:
+		return ""
+	}
 }
 
 // MerchantSecretRegistry returns the canonical OpenRails merchant-secret registry.

@@ -50,15 +50,19 @@ The lifecycle service is `internal/merchants.Service`.
 
 ## Secrets
 
-Merchant credentials are addressed by `(merchant_id, name)`.
+Merchant credentials are addressed by `(merchant_id, name)`. Provider credentials
+use provider-account-scoped names:
 
-Canonical secret names include:
+```text
+provider_accounts/<provider_type>/<environment>/<provider_account_id>/<secret_key>
+```
 
-- `stripe/secret_key`
-- `stripe/webhook_signing_secret`
-- `stripe/webhook_signing_secret_thin`
-- `nmi/<account>/production_key`
-- `ccbill/account_config`
+Examples:
+
+- `provider_accounts/stripe/live/acct_123/secret_key`
+- `provider_accounts/stripe/live/acct_123/webhook_signing_secret`
+- `provider_accounts/nmi/live/mobius-profile-id/production_key`
+- `provider_accounts/ccbill/live/900000-0000/account_config`
 
 Secret stores:
 
@@ -69,7 +73,12 @@ Secret stores:
   `secret/openrails/merchants/<merchant-slug>/<name>`.
 
 Credentials are loaded by merchant id at request time. They are never global
-process configuration for a multi-merchant OpenRails instance.
+process configuration for a multi-merchant OpenRails instance. The
+`push-merchant-config` manifest is seed material: it reads values from env/file
+references and imports them into the configured runtime backend. With
+`vault.enabled: true`, provider secrets are written to Vault paths; otherwise
+they are written to `openrails.merchant_secrets` and envelope-encrypted when an
+`encryption.master_key` is configured.
 
 ## Webhooks
 
@@ -124,12 +133,13 @@ merchants:
       support_url: https://doujins.example/support
     provider_accounts:
       - provider_type: nmi
+        environment: live
         account_id: mobius-profile-id
-        provider_key: mobius
-        role: primary
+        mode: primary
         secrets:
           production_key: {env: DOUJINS_MOBIUS_PRODUCTION_KEY}
           tokenization_key: {env: DOUJINS_MOBIUS_TOKENIZATION_KEY}
+          webhook_signing_secret: {env: DOUJINS_MOBIUS_WEBHOOK_SECRET}
 ```
 
 Catalog manifests are explicitly catalog-scoped and may contain one or more

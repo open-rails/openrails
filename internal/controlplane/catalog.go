@@ -109,6 +109,7 @@ const (
 	// must opt each admin in explicitly), matching how `openrails:self:*` works.
 	PermMerchantBillingRead        = "openrails:merchant:billing:read"
 	PermMerchantEntitlementsWrite  = "openrails:merchant:entitlements:write"
+	PermMerchantProductAccessWrite = "openrails:merchant:product-access:write"
 	PermMerchantCreditsWrite       = "openrails:merchant:credits:write"
 	PermMerchantPaymentsWrite      = "openrails:merchant:payments:write"
 	PermMerchantSubscriptionsWrite = "openrails:merchant:subscriptions:write"
@@ -204,6 +205,7 @@ func IsSelfPermission(perm string) bool {
 var merchantCatalog = map[string]struct{}{
 	PermMerchantBillingRead:        {},
 	PermMerchantEntitlementsWrite:  {},
+	PermMerchantProductAccessWrite: {},
 	PermMerchantCreditsWrite:       {},
 	PermMerchantPaymentsWrite:      {},
 	PermMerchantSubscriptionsWrite: {},
@@ -221,6 +223,7 @@ func MerchantCatalogNames() []string {
 	return []string{
 		PermMerchantBillingRead,
 		PermMerchantEntitlementsWrite,
+		PermMerchantProductAccessWrite,
 		PermMerchantCreditsWrite,
 		PermMerchantPaymentsWrite,
 		PermMerchantSubscriptionsWrite,

@@ -14,7 +14,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Gen returns the sqlc query catalog bound to the suite's pgx pool.
@@ -62,6 +64,13 @@ func (suite *TestContainerSuite) InsertPayment(ctx context.Context, p *models.Pa
 
 func (suite *TestContainerSuite) InsertEntitlement(ctx context.Context, e *models.Entitlement) {
 	suite.t.Helper()
+	// The entitlement repo writes through the RLS-aware Runtime.DB, which requires
+	// a merchant on the context to set app.merchant_id. The suite is single-merchant
+	// (#336: no default tenant), so default to the canonical test merchant when a
+	// caller didn't pin one — keeping bare-context seeders working post-RLS.
+	if _, err := merchant.Require(ctx); err != nil {
+		ctx = dbtest.WithTestMerchant(ctx)
+	}
 	require.NoError(suite.t, dbrepo.NewEntitlementRepo(suite.App.Runtime.DB).Insert(ctx, e), "Failed to insert entitlement")
 }
 
@@ -132,7 +141,7 @@ func (suite *TestContainerSuite) GetPaymentMethod(ctx context.Context, id uuid.U
 // entitlementCols is the explicit column list QueryEntitlements scans; it
 // deliberately includes deleted_at so callers control soft-delete visibility
 // in their WHERE clause (bun's implicit `deleted_at IS NULL` is gone).
-const entitlementCols = `id, tenant_id, customer_id, entitlement, start_at, end_at,
+const entitlementCols = `id, merchant_id, customer_id, entitlement, start_at, end_at,
 	source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at`
 
 // QueryEntitlements runs a SELECT over openrails.entitlements with the given

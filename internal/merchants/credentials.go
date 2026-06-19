@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -38,27 +39,55 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 	if s.secrets == nil {
 		return creds, nil
 	}
-	get := func(name string) (string, error) {
-		sec, err := s.secrets.Get(ctx, id, name)
-		if err != nil {
-			if errors.Is(err, ErrSecretNotFound) {
-				return "", nil
-			}
-			return "", err
-		}
-		return sec.Value, nil
+	if s.pool == nil {
+		return s.loadStripeCredentialsByName(ctx, id, SecretStripeSecretKey, SecretStripeWebhookSigning, SecretStripeWebhookSigningThin)
 	}
-	var err error
-	if creds.SecretKey, err = get(SecretStripeSecretKey); err != nil {
+	scope, ok, err := s.primaryProviderAccountSecretScope(ctx, id, "stripe", "live")
+	if err != nil {
 		return creds, err
 	}
-	if creds.WebhookSigningSecret, err = get(SecretStripeWebhookSigning); err != nil {
+	if !ok {
+		return creds, nil
+	}
+	secretKeyName, err := scope.secretName("secret_key")
+	if err != nil {
 		return creds, err
 	}
-	if creds.WebhookSigningThin, err = get(SecretStripeWebhookSigningThin); err != nil {
+	webhookName, err := scope.secretName("webhook_signing_secret")
+	if err != nil {
 		return creds, err
 	}
-	return creds, nil
+	thinName, err := scope.secretName("webhook_signing_secret_thin")
+	if err != nil {
+		return creds, err
+	}
+	return s.loadStripeCredentialsByName(ctx, id, secretKeyName, webhookName, thinName)
+}
+
+func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id merchant.ID, provider string) (string, error) {
+	if s.secrets == nil || id.IsZero() {
+		return "", nil
+	}
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "mobius", "nmi":
+	default:
+		return "", nil
+	}
+	if s.pool == nil {
+		return s.secretValue(ctx, id, SecretNMIMobiusWebhookSigning)
+	}
+	scope, ok, err := s.primaryProviderAccountSecretScope(ctx, id, "nmi", "live")
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", nil
+	}
+	secretName, err := scope.secretName("webhook_signing_secret")
+	if err != nil {
+		return "", err
+	}
+	return s.secretValue(ctx, id, secretName)
 }
 
 // LoadNMITokenizationConfig loads merchant-scoped browser tokenization config
@@ -73,8 +102,27 @@ func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID,
 	var keyName, urlName string
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "mobius":
-		keyName = SecretNMIMobiusTokenizationKey
-		urlName = SecretNMIMobiusTokenizationURL
+		if s.pool == nil {
+			keyName = SecretNMIMobiusTokenizationKey
+			urlName = SecretNMIMobiusTokenizationURL
+			break
+		}
+		scope, ok, err := s.primaryProviderAccountSecretScope(ctx, id, "nmi", "live")
+		if err != nil {
+			return cfg, err
+		}
+		if !ok {
+			cfg.CollectJSURL = DefaultNMICollectJSURL
+			return cfg, nil
+		}
+		keyName, err = scope.secretName("tokenization_key")
+		if err != nil {
+			return cfg, err
+		}
+		urlName, err = scope.secretName("tokenization_url")
+		if err != nil {
+			return cfg, err
+		}
 	default:
 		return cfg, nil
 	}
@@ -103,13 +151,95 @@ func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID,
 	return cfg, nil
 }
 
+func (s *Service) loadStripeCredentialsByName(ctx context.Context, id merchant.ID, secretKeyName, webhookName, thinName string) (StripeCredentials, error) {
+	var creds StripeCredentials
+	var err error
+	if creds.SecretKey, err = s.secretValue(ctx, id, secretKeyName); err != nil {
+		return creds, err
+	}
+	if creds.WebhookSigningSecret, err = s.secretValue(ctx, id, webhookName); err != nil {
+		return creds, err
+	}
+	if creds.WebhookSigningThin, err = s.secretValue(ctx, id, thinName); err != nil {
+		return creds, err
+	}
+	return creds, nil
+}
+
+func (s *Service) secretValue(ctx context.Context, id merchant.ID, name string) (string, error) {
+	sec, err := s.secrets.Get(ctx, id, name)
+	if err != nil {
+		if errors.Is(err, ErrSecretNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	return sec.Value, nil
+}
+
+type providerAccountSecretScope struct {
+	providerType string
+	environment  string
+	accountID    string
+}
+
+func (s providerAccountSecretScope) secretName(key string) (string, error) {
+	return ProviderAccountSecretName(s.providerType, s.environment, s.accountID, key)
+}
+
+// PrimaryProviderAccountSecretName resolves the enabled primary provider account
+// for a merchant/provider/environment and returns that account's scoped secret
+// name for key.
+func (s *Service) PrimaryProviderAccountSecretName(ctx context.Context, id merchant.ID, providerType, environment, key string) (string, bool, error) {
+	scope, ok, err := s.primaryProviderAccountSecretScope(ctx, id, providerType, environment)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	name, err := scope.secretName(key)
+	if err != nil {
+		return "", false, err
+	}
+	return name, true, nil
+}
+
+func (s *Service) primaryProviderAccountSecretScope(ctx context.Context, id merchant.ID, providerType, environment string) (providerAccountSecretScope, bool, error) {
+	if s == nil || s.pool == nil || id.IsZero() {
+		return providerAccountSecretScope{}, false, nil
+	}
+	environment = normalizeProviderSecretEnvironment(environment)
+	if environment == "" {
+		return providerAccountSecretScope{}, false, fmt.Errorf("provider account environment must be live or test")
+	}
+	providerType = normalizeProviderSecretType(providerType)
+	var scope providerAccountSecretScope
+	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT provider_type, environment, account_id
+			  FROM openrails.provider_accounts
+			 WHERE merchant_id = $1::uuid
+			   AND provider_type = lower($2)
+			   AND environment = $3
+			   AND role = 'primary'
+			   AND status = 'enabled'
+			 LIMIT 1
+		`, id.String(), providerType, environment).Scan(&scope.providerType, &scope.environment, &scope.accountID)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return providerAccountSecretScope{}, false, nil
+	}
+	if err != nil {
+		return providerAccountSecretScope{}, false, fmt.Errorf("load primary provider account %s/%s: %w", providerType, environment, err)
+	}
+	return scope, true, nil
+}
+
 // PutCredential stores/rotates a single per-tenant credential.
 func (s *Service) PutCredential(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
 	if s.secrets == nil {
 		return Secret{}, errors.New("tenancy: no secret store configured")
 	}
 	name = cleanSecretName(name)
-	if _, ok := SecretDefinitionFor(name); !ok {
+	if !SecretWritable(name) {
 		return Secret{}, fmt.Errorf("tenancy: unknown tenant secret %q", name)
 	}
 	if err := validateSecretValueLocal(name, value); err != nil {

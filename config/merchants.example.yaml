@@ -16,9 +16,11 @@ merchants:
   - slug: local-stack
     display_name: Local Stack
 
-    # Host-app JWKS trust → owner of this merchant. Prefer jwks_uri (AuthKit
+    # Host-app JWKS trust -> owner of this merchant. Prefer jwks_uri (AuthKit
     # auto-refetches on key rotation); public_keys is the static alternative
-    # (mutually exclusive, manual rotation).
+    # (mutually exclusive, manual rotation). allowed_origins is the exact browser
+    # Origin allow-list used for standalone CORS preflight, not a webhook URL or
+    # an authorization boundary.
     issuer:
       uri: https://local-stack.example
       jwks_uri: https://local-stack.example/.well-known/jwks.json
@@ -34,9 +36,9 @@ merchants:
 
     provider_accounts:
       - provider_type: stripe
+        environment: live
         account_id: acct_localstack123
-        role: primary
-        status: enabled
+        mode: primary
         secrets:
           secret_key:
             env: LOCAL_STACK_STRIPE_SECRET_KEY
@@ -44,9 +46,9 @@ merchants:
             env: LOCAL_STACK_STRIPE_WEBHOOK_SECRET
 
       - provider_type: nmi
+        environment: live
         account_id: nmi-local-stack-profile
-        role: primary
-        status: enabled
+        mode: primary
         secrets:
           production_key:
             env: LOCAL_STACK_MOBIUS_PRODUCTION_KEY
@@ -56,17 +58,17 @@ merchants:
             env: LOCAL_STACK_MOBIUS_WEBHOOK_SECRET
 
       - provider_type: ccbill
+        environment: live
         account_id: "900000-0000"
-        role: secondary
-        status: enabled
+        mode: secondary
         secrets:
           account_config:
             file: ./.secrets/openrails/local-stack-ccbill-account.json
 
       - provider_type: solana
+        environment: live
         account_id: 11111111111111111111111111111111
-        role: secondary
-        status: enabled
+        mode: secondary
         secrets:
           private_key:
             file: ./.secrets/openrails/local-stack-solana-keypair.json

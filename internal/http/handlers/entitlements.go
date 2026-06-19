@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,11 +9,8 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
-	"github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -268,35 +264,19 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, ent)
 }
 
+// tenantSubjectForEntitlementGrantTarget resolves the payable customer for an
+// admin entitlement-grant TARGET. #528: the admin surface addresses users by
+// their UUID user_id and READS them by that same id (GetAdminUserBillingProfile
+// → identity.CustomerIDFromString; EntitlementService.ListActiveRecords), exactly
+// as commerce writers resolve a payer (RegisterPurchase → customerIDFromUser). A
+// grant must therefore land on the SAME #364 UUID subject, or an admin could not
+// see the entitlement they just granted. Resolution is identical for delegated
+// and non-delegated callers; the merchant comes from the pinned request context.
+// (This replaces the old delegated-only federated (issuer, subject) mint, which
+// produced a different customer id than every read on the admin surface — the
+// "wrong assumption" #528 removes.)
 func tenantSubjectForEntitlementGrantTarget(r *httprequest.Request, subject string) (uuid.UUID, error) {
-	value, ok := r.Get(ginmw.DelegatedContextKey)
-	if !ok {
-		// Non-delegated (org-admin JWT) caller: the target is a self-service
-		// identity, so resolve (or materialize) its payable tenant subject the
-		// same way commerce writers do (#317) — a UUID subject IS its own
-		// customer_id (UUID-only, #364). Returning uuid.Nil here would
-		// make the entitlement_grants insert violate its tenant_subject FK and 500
-		// every non-delegated admin grant.
-		return repo.EnsureCustomerID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, subject)
-	}
-	resolved, ok := value.(*controlplane.ResolvedDelegated)
-	if !ok || resolved == nil {
-		return uuid.Nil, errors.New("delegated state invalid")
-	}
-	issuer := strings.TrimSpace(resolved.Issuer)
-	subject = strings.TrimSpace(subject)
-	if resolved.MerchantID.IsZero() || issuer == "" || subject == "" {
-		return uuid.Nil, controlplane.ErrCustomerInvalid
-	}
-	// #491: resolve the federated (issuer, subject) payer by its natural key (the
-	// re-added org-less unique key); uuidv7 pk minted once, looked up + materialized.
-	// The org-bound switch lives on the delegated request path (TouchCustomer); an
-	// admin grant TARGET is an org-less external subject here.
-	return r.State.DB.Gen(r.Request.Context()).UpsertCustomerByIssuerSubject(r.Request.Context(), gen.UpsertCustomerByIssuerSubjectParams{
-		MerchantID: resolved.MerchantID.UUID(),
-		Issuer:     &issuer,
-		Subject:    &subject,
-	})
+	return repo.EnsureCustomerID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, subject)
 }
 
 func RevokeAdminEntitlement(r *httprequest.Request) {

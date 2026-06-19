@@ -151,3 +151,5 @@ docker-compose.test.yml
 # Test/runtime-generated AuthKit keys and scratch state
 .runtime/
 **/.runtime/
+
+audit-*.md

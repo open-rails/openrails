@@ -36,13 +36,23 @@ func (c *ControlPlane) ReloadRemoteApplications(ctx context.Context) error {
 	return c.loadRemoteApplications(ctx)
 }
 
+// BrowserCORSOrigins returns the browser Origin allow-list for standalone CORS:
+// the union of enabled AuthKit remote_application.allowed_origins values.
+// Preflight has no JWT issuer, so this is process-wide browser policy only; API
+// authorization remains JWT signature/issuer/audience/permissions plus merchant
+// ownership checks.
+func (c *ControlPlane) BrowserCORSOrigins(ctx context.Context) ([]string, error) {
+	if c == nil || c.delegatedVerifier == nil {
+		return nil, ErrDelegatedNotConfigured
+	}
+	return c.delegatedVerifier.RemoteApplicationAllowedOrigins(ctx)
+}
+
 // merchantForIssuer resolves the OpenRails MERCHANT a VALIDATED token issuer may
 // act on (#481). The chain is role-based, never identity: validated `iss` ->
-// AuthKit remote_application -> the org(s) it controls (its org memberships) ->
-// the merchant namespace owned by that org (merchants.owner_org_id).
-// A remote_application controls an org and an org owns merchant namespaces, so this is
-// the runtime billing-authz path: the remote_application is authorized to bill
-// the merchant namespace its owning org owns.
+// AuthKit remote_application -> its owning org -> the merchant namespace owned by
+// that org (`merchants.owner_org_id`). `owner_org_id` is unique when non-null, so
+// this is a direct lookup rather than a membership scan.
 //
 // Returns ErrDelegatedIssuerUnknown when the issuer is unregistered, controls no
 // org, or that org owns no active merchant (fail closed).
@@ -59,25 +69,25 @@ func (c *ControlPlane) merchantForIssuer(ctx context.Context, issuer string) (me
 	if err != nil || ra == nil || !ra.Enabled {
 		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
 	}
-
-	// The org(s) the remote_application controls (its memberships). Resolve the
-	// first one that owns exactly one active merchant namespace.
-	memberships, err := c.Core().RemoteApplicationOrgRoles(ctx, ra.ID)
+	if strings.TrimSpace(ra.OrgID) == "" {
+		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
+	}
+	org, err := c.Core().ResolveOrgByID(ctx, ra.OrgID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
+		}
+		return merchant.ID{}, "", "", "", "", err
+	}
+	if org == nil {
+		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
+	}
+	mid, mslug, err := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, org.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
+	}
 	if err != nil {
 		return merchant.ID{}, "", "", "", "", err
 	}
-	for _, m := range memberships {
-		t, terr := c.Core().ResolveOrgBySlug(ctx, m.Org)
-		if terr != nil || t == nil {
-			continue
-		}
-		mid, mslug, merr := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, t.ID)
-		if merr == nil {
-			return mid, mslug, t.ID, t.Slug, ra.ID, nil
-		}
-		if !errors.Is(merr, pgx.ErrNoRows) {
-			return merchant.ID{}, "", "", "", "", merr
-		}
-	}
-	return merchant.ID{}, "", "", "", "", ErrDelegatedIssuerUnknown
+	return mid, mslug, org.ID, org.Slug, ra.ID, nil
 }

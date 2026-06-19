@@ -131,12 +131,30 @@ func MerchantWebhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "Merchant resolution failed")
 		return
 	}
+	ctx := merchant.WithID(r.Request.Context(), route.MerchantID)
+	r.Request = r.Request.WithContext(ctx)
+
+	if processors.IsNMIBacked(provider) {
+		if processMerchantNMIWebhook(r, provider, route.MerchantID) {
+			r.SuccessJSON(map[string]string{"status": "accepted"})
+		}
+		return
+	}
+	if provider == subscriptions.ProcessorCCBill {
+		clientIP := r.GetRemoteIP()
+		if r.State.Config != nil && !r.State.Config.IsTestEnv() && !iputil.IsValidCCBillIP(clientIP) {
+			r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
+			return
+		}
+		if processMerchantCCBillWebhook(r, clientIP) {
+			r.SuccessJSON(map[string]string{"status": "accepted"})
+		}
+		return
+	}
 	if provider != subscriptions.ProcessorStripe {
 		r.ErrorJSON(http.StatusBadRequest, "Provider not supported on merchant webhook surface")
 		return
 	}
-	ctx := merchant.WithID(r.Request.Context(), route.MerchantID)
-	r.Request = r.Request.WithContext(ctx)
 
 	body, ok := readLimitedWebhookBody(r, maxStripeWebhookBytes)
 	if !ok {
@@ -200,6 +218,109 @@ func MerchantWebhook(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(map[string]string{"status": "accepted"})
+}
+
+func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchantID merchant.ID) bool {
+	body, ok := readLimitedWebhookBody(r, maxNMIWebhookBytes)
+	if !ok {
+		return false
+	}
+	signingKey, err := r.State.Merchants.LoadNMIWebhookSigningSecret(r.Request.Context(), merchantID, provider)
+	if err != nil {
+		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
+			r.ErrorJSON(http.StatusServiceUnavailable, "Secret backend temporarily unavailable, retry")
+			return false
+		}
+		log.WithError(err).Error("merchant webhook: load nmi signing secret failed")
+		r.ErrorJSON(http.StatusInternalServerError, "Credential load failed")
+		return false
+	}
+	prepared, err := webhookutil.PrepareNMI(provider, body, signingKey, firstPresentHeader(r.Request.Header, "Webhook-Signature", "X-Signature", "X-NMI-Signature", "X-Mobius-Signature"))
+	if err != nil {
+		switch {
+		case errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing),
+			errors.Is(err, webhookutil.ErrNMIWebhookSignatureMissing):
+			r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
+		case errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid):
+			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
+		case errors.Is(err, webhookutil.ErrWebhookPayloadInvalid):
+			r.ErrorJSON(http.StatusBadRequest, "Invalid JSON data")
+		case errors.Is(err, webhookutil.ErrWebhookEventIDMissing):
+			r.ErrorJSON(http.StatusBadRequest, "Missing event_id in payload")
+		default:
+			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
+		}
+		return false
+	}
+	if r.State.WebhookDispatcher == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
+		return false
+	}
+	signatureVerified := true
+	msg := &webhooks.WebhookMessage{
+		Processor:      prepared.Provider,
+		EventID:        prepared.EventID,
+		EventType:      prepared.EventType,
+		Payload:        prepared.Body,
+		IPAddress:      r.GetRemoteIP(),
+		Signature:      prepared.Signature,
+		SignatureValid: &signatureVerified,
+		ReceivedAt:     time.Now(),
+	}
+	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
+		if webhooks.IsWebhookErrorNonRetryable(err) {
+			return true
+		}
+		log.WithError(err).Error("merchant nmi webhook processing failed")
+		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing failed")
+		return false
+	}
+	return true
+}
+
+func processMerchantCCBillWebhook(r *httprequest.Request, clientIP string) bool {
+	body, ok := readLimitedWebhookBody(r, maxCCBillWebhookBytes)
+	if !ok {
+		return false
+	}
+	prepared, err := webhookutil.PrepareCCBill(body, r.Query("eventType"))
+	if err != nil {
+		switch {
+		case errors.Is(err, webhookutil.ErrWebhookPayloadInvalid):
+			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
+		case errors.Is(err, webhookutil.ErrWebhookEventTypeMissing):
+			r.ErrorJSON(http.StatusBadRequest, "Missing eventType parameter")
+		case errors.Is(err, webhookutil.ErrWebhookEventTypeMismatch):
+			r.ErrorJSON(http.StatusBadRequest, "Webhook event type mismatch")
+		default:
+			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
+		}
+		return false
+	}
+	if r.State.WebhookDispatcher == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
+		return false
+	}
+	signatureVerified := true
+	msg := &webhooks.WebhookMessage{
+		Processor:      subscriptions.ProcessorCCBill,
+		EventID:        prepared.EventID,
+		EventType:      prepared.EventType,
+		Payload:        prepared.Body,
+		IPAddress:      clientIP,
+		Signature:      prepared.Signature,
+		SignatureValid: &signatureVerified,
+		ReceivedAt:     time.Now(),
+	}
+	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
+		if webhooks.IsWebhookErrorNonRetryable(err) {
+			return true
+		}
+		log.WithError(err).Error("merchant ccbill webhook processing failed")
+		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing failed")
+		return false
+	}
+	return true
 }
 
 func enqueueCCBillWebhook(r *httprequest.Request, clientIP string) bool {

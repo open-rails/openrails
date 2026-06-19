@@ -94,8 +94,10 @@ var ErrDelegatedNotConfigured = errors.New("controlplane: delegated access verif
 // internal verifier detail to the response.
 var ErrDelegatedInvalid = errors.New("controlplane: invalid delegated access token")
 
-// ErrDelegatedOriginNotAllowed indicates a delegated browser request came from
-// an Origin not allowed by the verified issuer's AuthKit remote_application.
+// ErrDelegatedOriginNotAllowed indicates a delegated browser request failed the
+// defense-in-depth Origin check against the verified issuer's AuthKit
+// remote_application. This is not API authorization: Origin is a browser header
+// and can be spoofed by non-browser clients.
 var ErrDelegatedOriginNotAllowed = errors.New("controlplane: delegated origin not allowed")
 
 // DelegatedVerifier returns the control plane's delegated-access-token verifier.
@@ -166,8 +168,8 @@ func newDelegatedVerifier(coreSvc *authcore.Service, tokenPrefix string) (*authh
 //   - authcore.ErrAccessTokenExpired for an expired token,
 //   - ErrDelegatedIssuerUnknown when a federated token's issuer is not
 //     registered+enabled for an active tenant (cross-tenant / unmapped),
-//   - ErrDelegatedOriginNotAllowed when a browser Origin is not allowed by the
-//     verified issuer's AuthKit remote_application,
+//   - ErrDelegatedOriginNotAllowed when the optional browser Origin
+//     defense-in-depth check fails for the verified issuer,
 //   - ErrDelegatedInvalid for any other rejection (bad signature/audience/type,
 //     normal-sub token, missing/forbidden permission, forbidden merchant claim).
 func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origin string) (*ResolvedDelegated, error) {
@@ -206,6 +208,9 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origi
 	}
 
 	issuer := strings.TrimSpace(principal.Issuer)
+	// Browser defense-in-depth only: real authorization is already the validated
+	// delegated JWT shape, issuer, audience, permission catalog, and merchant
+	// owner mapping below. Do not treat Origin as an API security boundary.
 	allowed, err := c.delegatedVerifier.OriginAllowedForIssuer(ctx, issuer, origin, true)
 	if err != nil || !allowed {
 		return nil, ErrDelegatedOriginNotAllowed

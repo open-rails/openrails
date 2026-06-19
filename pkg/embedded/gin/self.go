@@ -5,8 +5,11 @@ import (
 	"net/http"
 
 	gingonic "github.com/gin-gonic/gin"
+	redis "github.com/redis/go-redis/v9"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
@@ -74,10 +77,28 @@ func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, c
 	ginroutes.RegisterSelfServiceRoutes(base.Group(ginroutes.SelfRoutePrefix), rt, delegatedMW)
 	ginroutes.RegisterAdminRoutes(base.Group(ginroutes.AdminRoutePrefix), rt, delegatedMW)
 
+	// OpenRails-native rate-limiting + captcha on the embedded self-service +
+	// merchant-admin surface, matching the base NewHTTPHandler chain so an embedded
+	// host does not have to front it with its own gateway. It is IP-keyed: the
+	// delegated principal is pinned per-route (inside the gin engine, after this
+	// outer chain), exactly like the standalone self surface, whose global limiter
+	// also runs before the per-route delegated middleware. Config + Redis are read
+	// off the runtime; nil (e.g. unit tests) makes the limiter a pass-through.
+	var rateLimits *config.RateLimitsConfig
+	var captchaCfg *config.CaptchaConfig
+	var rdb *redis.Client
+	if rt != nil {
+		rdb = rt.RedisClient
+		if rt.Config != nil {
+			rateLimits = rt.Config.RateLimits
+			captchaCfg = rt.Config.Captcha
+		}
+	}
 	return middleware.ChainHTTP(engine,
 		middleware.SecurityHeadersHTTP(),
 		middleware.CORSHTTP(nil),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
 		middleware.ResolveMerchantHTTP(configured),
+		middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, captcha.NewChallengeStore(rdb)),
 	)
 }

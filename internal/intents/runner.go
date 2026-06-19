@@ -31,7 +31,7 @@ type ledger interface {
 }
 
 type providerAccountFinder interface {
-	FindProviderAccount(ctx context.Context, providerType, accountID string) (ProviderAccountIdentity, bool)
+	FindProviderAccount(ctx context.Context, providerType, environment, accountID string) (ProviderAccountIdentity, bool)
 }
 
 const (
@@ -81,9 +81,9 @@ func (r *Runner) accountMismatch(ctx context.Context, intent gen.OpenrailsProvid
 		return fmt.Sprintf("provider account binding %s could not be loaded: %v", intent.ProviderAccountID.String(), err), true
 	}
 	if finder, ok := r.ProviderAccounts.(providerAccountFinder); ok {
-		current, ok := finder.FindProviderAccount(ctx, expected.ProviderType, expected.AccountID)
+		current, ok := finder.FindProviderAccount(ctx, expected.ProviderType, expected.Environment, expected.AccountID)
 		if !ok || current.AccountID == "" {
-			return fmt.Sprintf("provider account %s:%s is not configured in this runtime", expected.ProviderType, expected.AccountID), true
+			return fmt.Sprintf("provider account %s:%s:%s is not configured in this runtime", expected.ProviderType, expected.Environment, expected.AccountID), true
 		}
 		return "", false
 	}
@@ -91,12 +91,14 @@ func (r *Runner) accountMismatch(ctx context.Context, intent gen.OpenrailsProvid
 	if !ok || current.AccountID == "" {
 		return "", false
 	}
-	if expected.ProviderType == current.ProviderType && expected.AccountID == current.AccountID {
+	currentEnv := normalizedProviderEnvironment(current.Environment)
+	expectedEnv := normalizedProviderEnvironment(expected.Environment)
+	if expected.ProviderType == current.ProviderType && expectedEnv == currentEnv && expected.AccountID == current.AccountID {
 		return "", false
 	}
 	return accountMismatchReason(
-		expected.ProviderType+":"+expected.AccountID,
-		current.ProviderType+":"+current.AccountID,
+		expected.ProviderType+":"+expectedEnv+":"+expected.AccountID,
+		current.ProviderType+":"+currentEnv+":"+current.AccountID,
 	), true
 }
 

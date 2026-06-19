@@ -700,6 +700,8 @@ type OpenrailsProviderAccount struct {
 	MerchantID uuid.UUID
 	// Provider rail/type such as stripe, nmi, ccbill, solana, or a future provider type.
 	ProviderType string
+	// Provider environment: live or test. Live and test accounts are distinct identities and may each have their own primary.
+	Environment string
 	// Provider-returned account identity, e.g. Stripe acct_..., NMI profile account id, CCBill account/subaccount, or Solana authority address.
 	AccountID      string
 	DisplayName    *string

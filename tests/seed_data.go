@@ -386,7 +386,7 @@ func (suite *TestContainerSuite) upsertProduct(ctx context.Context, p *models.Pr
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.products (
 			id, slug, display_name, description, entitlements_spec, credits_spec,
-			tier_group, tier_rank, status, created_at, updated_at, tenant_id
+			tier_group, tier_rank, status, created_at, updated_at, merchant_id
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (id) DO UPDATE SET `+onConflictSet,
 		p.ID, p.Slug, p.DisplayName, p.Description,
@@ -414,7 +414,7 @@ func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price 
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.prices (
 			id, product_id, status, amount, currency, billing_cycle_days,
-			processors, created_at, updated_at, tenant_id
+			processors, created_at, updated_at, merchant_id
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (id) DO NOTHING`,
 		price.ID, price.ProductID, status, price.Amount, price.Currency,

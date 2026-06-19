@@ -22,6 +22,7 @@ import (
 type ProviderAccountIdentity struct {
 	ProviderKey  string
 	ProviderType string
+	Environment  string
 	AccountID    string
 	DisplayName  string
 	Evidence     map[string]any
@@ -102,6 +103,7 @@ func (r *RuntimeProviderAccounts) ResolveProviderAccount(ctx context.Context, pr
 				return ProviderAccountIdentity{
 					ProviderKey:  p,
 					ProviderType: config.ProcessorTypeStripe,
+					Environment:  "live",
 					AccountID:    accountID,
 					Evidence:     map[string]any{"source": "stripe.get_account"},
 				}, true
@@ -116,6 +118,7 @@ func (r *RuntimeProviderAccounts) ResolveProviderAccount(ctx context.Context, pr
 					return ProviderAccountIdentity{
 						ProviderKey:  p,
 						ProviderType: config.ProcessorTypeCCBill,
+						Environment:  "live",
 						AccountID:    accountID,
 						Evidence:     map[string]any{"source": "config.client_acc_num"},
 					}, true
@@ -125,6 +128,7 @@ func (r *RuntimeProviderAccounts) ResolveProviderAccount(ctx context.Context, pr
 					return ProviderAccountIdentity{
 						ProviderKey:  p,
 						ProviderType: config.ProcessorTypeSolana,
+						Environment:  "live",
 						AccountID:    accountID,
 						Evidence:     map[string]any{"source": "config.recipient_wallet"},
 					}, true
@@ -139,11 +143,15 @@ func (r *RuntimeProviderAccounts) ResolveProviderAccount(ctx context.Context, pr
 // resolves to providerType/accountID. It intentionally searches every configured
 // local provider key: keys such as "stripe_primary" are convenience labels, not
 // durable account identity.
-func (r *RuntimeProviderAccounts) FindProviderAccount(ctx context.Context, providerType, accountID string) (ProviderAccountIdentity, bool) {
+func (r *RuntimeProviderAccounts) FindProviderAccount(ctx context.Context, providerType, environment, accountID string) (ProviderAccountIdentity, bool) {
 	if r == nil {
 		return ProviderAccountIdentity{}, false
 	}
 	providerType = strings.ToLower(strings.TrimSpace(providerType))
+	environment, err := normalizeProviderEnvironment(environment)
+	if err != nil {
+		return ProviderAccountIdentity{}, false
+	}
 	accountID = strings.TrimSpace(accountID)
 	if providerType == "" || accountID == "" {
 		return ProviderAccountIdentity{}, false
@@ -151,7 +159,8 @@ func (r *RuntimeProviderAccounts) FindProviderAccount(ctx context.Context, provi
 	keys := r.providerKeysByType(providerType)
 	for _, key := range keys {
 		identity, ok := r.ResolveProviderAccount(ctx, key)
-		if ok && identity.ProviderType == providerType && identity.AccountID == accountID {
+		identity.Environment, _ = normalizeProviderEnvironment(identity.Environment)
+		if ok && identity.ProviderType == providerType && identity.Environment == environment && identity.AccountID == accountID {
 			return identity, true
 		}
 	}
@@ -193,6 +202,7 @@ func (r *RuntimeProviderAccounts) nmiAccount(ctx context.Context, provider strin
 		return ProviderAccountIdentity{
 			ProviderKey:  provider,
 			ProviderType: config.ProcessorTypeNMI,
+			Environment:  "live",
 			AccountID:    accountID,
 			DisplayName:  accountID,
 			Evidence:     map[string]any{"source": "nmi.profile"},
@@ -217,10 +227,22 @@ func (r *RuntimeProviderAccounts) nmiAccount(ctx context.Context, provider strin
 	return ProviderAccountIdentity{
 		ProviderKey:  provider,
 		ProviderType: config.ProcessorTypeNMI,
+		Environment:  "live",
 		AccountID:    accountID,
 		DisplayName:  accountID,
 		Evidence:     map[string]any{"source": "nmi.profile"},
 	}, true
+}
+
+func normalizeProviderEnvironment(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "live", "prod", "production", "mainnet":
+		return "live", nil
+	case "test", "sandbox", "devnet", "testnet":
+		return "test", nil
+	default:
+		return "", fmt.Errorf("invalid provider environment %q", raw)
+	}
 }
 
 func (r *RuntimeProviderAccounts) stripeAccountID(ctx context.Context, key string) (string, bool) {

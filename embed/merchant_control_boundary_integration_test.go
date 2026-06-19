@@ -111,9 +111,7 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	assertBalance(t, ctx, merchantBClient, customerB, 9_000)
 	assertBalance(t, ctx, standalone.Client(), customerA, 1_000)
 
-	standalone.ProvisionMerchantForOrg("or502-b2", merchantB.OrgSlug)
-	status, body = postDepositCredits(t, standalone.BaseURL, merchantB.ServiceToken, uuid.New(), 10)
-	require.Equal(t, http.StatusForbidden, status, body)
+	standalone.RequireProvisionMerchantForOrgRejected("or502-b2", merchantB.OrgSlug)
 }
 
 func postDepositCredits(t *testing.T, baseURL, token string, customer uuid.UUID, amount int64) (int, string) {

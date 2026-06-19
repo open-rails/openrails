@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
 )
 
@@ -35,7 +37,10 @@ func TestEmbedNew_RegistersBoundMerchant(t *testing.T) {
 
 	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}
 	rt, err := embed.New(ctx, embed.Options{
-		Options:  embedded.Options{Config: cfg},
+		Options: embedded.Options{
+			Config:        cfg,
+			Authenticator: testEmbedAuthenticator{},
+		},
 		Merchant: slug,
 		MerchantConfiguration: openrails.MerchantConfigurationInput{
 			Profile: &openrails.MerchantProfileInput{
@@ -86,7 +91,10 @@ func TestEmbedNew_RegistersBoundMerchant(t *testing.T) {
 	// Second New on the SAME slug is an idempotent no-op (INSERT ... ON CONFLICT
 	// DO NOTHING): boots fine, exactly one row.
 	rt2, err := embed.New(ctx, embed.Options{
-		Options:  embedded.Options{Config: &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}},
+		Options: embedded.Options{
+			Config:        &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}},
+			Authenticator: testEmbedAuthenticator{},
+		},
 		Merchant: slug,
 	})
 	require.NoError(t, err, "second embed.New on the same slug must be idempotent")
@@ -98,4 +106,10 @@ func TestEmbedNew_RegistersBoundMerchant(t *testing.T) {
 	).Scan(&count)
 	require.NoError(t, err)
 	require.Equal(t, 1, count, "ensure is idempotent — exactly one merchant row")
+}
+
+type testEmbedAuthenticator struct{}
+
+func (testEmbedAuthenticator) Authenticate(context.Context, *http.Request) (billingauth.UserContext, error) {
+	return billingauth.UserContext{UserID: "embed-test-user"}, nil
 }

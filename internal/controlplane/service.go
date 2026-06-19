@@ -52,6 +52,16 @@ type ControlPlane struct {
 // verifier also refetches on-demand when a presented `kid` is unknown.
 const delegatedIssuerJWKSCacheTTL = time.Hour
 
+// registrationMode maps the lock flag to an AuthKit registration mode.
+//
+// INVARIANT (see SelfHostedPosture): in THIS repo both call sites pass locked=true
+// unconditionally, so registration is always RegistrationModeAdminBootstrapOnly —
+// there is no public user self-registration and no public merchant/org onboarding,
+// and no config knob exists to change that. The RegistrationModeOpen branch is
+// reachable ONLY from a caller that passes locked=false, which this repo never
+// does. PUBLIC, OPEN REGISTRATION IS A FEATURE OF THE SEPARATE, PRIVATE
+// openrails-saas REPO — NOT THIS ONE. Do not wire `locked` to config here; if you
+// need open registration you are working in the wrong repo.
 func registrationMode(locked bool) authcore.RegistrationMode {
 	if locked {
 		return authcore.RegistrationModeAdminBootstrapOnly
@@ -198,8 +208,25 @@ func (c *ControlPlane) Pool() *db.Pool {
 }
 
 // SelfHostedPosture reports whether this control plane mounts only the
-// intentional AuthKit route groups. Standalone OpenRails is private-only in this
-// repo; public hosted registration belongs in openrails-saas.
+// intentional AuthKit route groups (RouteCore + RoutePassword + RouteUser) rather
+// than the full DefaultAPI surface.
+//
+// IT IS HARDCODED TRUE AND IS NOT CONFIGURABLE. This is the single switch that
+// keeps OpenRails "private by construction":
+//
+//   - RouteSpecs() therefore NEVER returns DefaultAPI(), so the public-onboarding
+//     groups RouteRegister (user self-registration) and RouteOrganizations
+//     (tenant onboarding/management) are NEVER mounted on /auth/* in this repo —
+//     that branch is dead code here.
+//   - registrationMode is likewise hardcoded to the locked mode (see its doc).
+//   - config.go HARD-REJECTS the old auth.control_plane.enabled knob (#469) so a
+//     deployment cannot believe it is toggling posture.
+//
+// PUBLIC, HOSTED, SELF-SERVE REGISTRATION OF USERS AND MERCHANTS IS OWNED ENTIRELY
+// BY THE SEPARATE, PRIVATE openrails-saas REPO, which overrides this posture. It
+// must never become reachable/configurable from this repo. If you are reaching for
+// a way to flip this to false, you are in the wrong repo. The companion test
+// TestPrivatePostureIsLockedInThisRepo guards this invariant.
 func (c *ControlPlane) SelfHostedPosture() bool {
 	return true
 }

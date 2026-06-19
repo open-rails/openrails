@@ -23,6 +23,15 @@ type ApplyResult struct {
 	PendingActions   []PendingActionFor
 }
 
+// ApplyOptions limits which mutation classes ApplyWithOptions executes. The
+// zero value intentionally applies nothing; use Apply for the historical full
+// convergence behavior.
+type ApplyOptions struct {
+	Insert    bool
+	Overwrite bool
+	Prune     bool
+}
+
 // PendingActionFor pairs a returned service.PendingAction with the price it
 // belongs to, so the apply output can tell the operator which price needs a
 // manual link.
@@ -36,18 +45,30 @@ type PendingActionFor struct {
 // idempotent: re-running a converged plan is a no-op. Manual provider actions
 // surfaced on price creation are collected into the result rather than failing.
 func Apply(ctx context.Context, applier Applier, plan *ApplyPlan) (*ApplyResult, error) {
+	return ApplyWithOptions(ctx, applier, plan, ApplyOptions{Insert: true, Overwrite: true, Prune: true})
+}
+
+// ApplyWithOptions converges only the requested mutation classes from a plan.
+// It is used by the operator CLI's --insert/--overwrite/--prune contract.
+func ApplyWithOptions(ctx context.Context, applier Applier, plan *ApplyPlan, opts ApplyOptions) (*ApplyResult, error) {
 	res := &ApplyResult{}
 	for gi := range plan.Groups {
 		gp := &plan.Groups[gi]
 		for pi := range gp.Products {
 			pp := &gp.Products[pi]
-			productID, err := applyProduct(ctx, applier, pp, res)
+			productID, err := applyProduct(ctx, applier, pp, res, opts)
 			if err != nil {
 				return res, err
 			}
-			if err := applyPrices(ctx, applier, pp, productID, res); err != nil {
+			if productID == uuid.Nil {
+				continue
+			}
+			if err := applyPrices(ctx, applier, pp, productID, res, opts); err != nil {
 				return res, err
 			}
+		}
+		if !opts.Prune {
+			continue
 		}
 		for i := range gp.RemovedProducts {
 			rp := &gp.RemovedProducts[i]
@@ -60,9 +81,12 @@ func Apply(ctx context.Context, applier Applier, plan *ApplyPlan) (*ApplyResult,
 	return res, nil
 }
 
-func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *ApplyResult) (uuid.UUID, error) {
+func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *ApplyResult, opts ApplyOptions) (uuid.UUID, error) {
 	switch pp.Action {
 	case ProductCreate:
+		if !opts.Insert {
+			return uuid.Nil, nil
+		}
 		created, err := applier.CreateProduct(ctx, pp.CreateReq)
 		if err != nil {
 			return uuid.Nil, fmt.Errorf("create product %s: %w", pp.Slug, err)
@@ -70,6 +94,9 @@ func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *Ap
 		res.ProductsCreated++
 		return created.ID, nil
 	case ProductUpdate:
+		if !opts.Overwrite {
+			return pp.UpdateID, nil
+		}
 		updated, err := applier.UpdateProduct(ctx, pp.UpdateID, pp.UpdateReq)
 		if err != nil {
 			return uuid.Nil, fmt.Errorf("update product %s: %w", pp.Slug, err)
@@ -81,11 +108,14 @@ func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *Ap
 	}
 }
 
-func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productID uuid.UUID, res *ApplyResult) error {
+func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productID uuid.UUID, res *ApplyResult, opts ApplyOptions) error {
 	for i := range pp.Prices {
 		plp := &pp.Prices[i]
 		switch plp.Action {
 		case PriceCreate:
+			if !opts.Insert {
+				continue
+			}
 			req := plp.CreateReq
 			req.ProductID = productID
 			out, err := applier.CreatePrice(ctx, req)
@@ -101,11 +131,17 @@ func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productI
 				})
 			}
 		case PriceActivate:
+			if !opts.Overwrite {
+				continue
+			}
 			if _, err := applier.ActivatePrice(ctx, plp.ExistingID); err != nil {
 				return fmt.Errorf("activate price %s: %w", plp.Label, err)
 			}
 			res.PricesActivated++
 		case PriceArchive:
+			if !opts.Prune {
+				continue
+			}
 			if _, err := applier.DeactivatePrice(ctx, plp.ExistingID); err != nil {
 				return fmt.Errorf("archive price %s: %w", plp.Label, err)
 			}

@@ -8,11 +8,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseBootstrapManifest(t *testing.T) {
+func TestParseMerchantConfigManifest(t *testing.T) {
 	// #527: a manifest is merchants-only. Each merchant carries its own inline
 	// host-app issuer (registered as owner of its backing org), provider
 	// accounts + secrets, and profile. No auth/users/orgs section.
-	manifest, err := ParseBootstrapManifest([]byte(`
+	manifest, err := ParseMerchantConfigManifest([]byte(`
 version: 1
 merchants:
   - slug: cozy-art
@@ -28,12 +28,14 @@ merchants:
       support_url: https://example.com/support
     provider_accounts:
       - provider_type: stripe
+        environment: test
         account_id: acct_test_123
-        role: primary
+        mode: primary
         secrets:
           secret_key:
             env: STRIPE_SECRET_KEY
       - provider_type: nmi
+        environment: live
         account_id: mobius-profile-id
         secrets:
           webhook_signing_secret:
@@ -50,11 +52,11 @@ merchants:
 	require.Equal(t, "acct_test_123", m.ProviderAccounts[0].AccountID)
 }
 
-func TestExampleBootstrapManifestParses(t *testing.T) {
+func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "merchants.example.yaml"))
 	require.NoError(t, err)
 
-	manifest, err := ParseBootstrapManifest(raw)
+	manifest, err := ParseMerchantConfigManifest(raw)
 	require.NoError(t, err)
 	require.Len(t, manifest.Merchants, 1)
 	require.Equal(t, "local-stack", manifest.Merchants[0].Slug)
@@ -63,7 +65,73 @@ func TestExampleBootstrapManifestParses(t *testing.T) {
 	require.Len(t, manifest.Merchants[0].ProviderAccounts, 4)
 }
 
+func TestParseBootstrapManifest(t *testing.T) {
+	raw := []byte(`
+version: 1
+authority:
+  bootstrap_org_slug: local-stack
+  initial_admin_user_id: usr_admin
+  mint_initial_service_token: false
+`)
+	manifest, err := ParseBootstrapManifest(raw)
+	require.NoError(t, err)
+
+	opts := manifest.BootstrapOptions()
+	require.Equal(t, "local-stack", opts.BootstrapOrgSlug)
+	require.Equal(t, "usr_admin", opts.InitialAdminUserID)
+	require.False(t, opts.MintInitialServiceToken)
+}
+
+func TestExampleBootstrapManifestParses(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "bootstrap.example.yaml"))
+	require.NoError(t, err)
+
+	manifest, err := ParseBootstrapManifest(raw)
+	require.NoError(t, err)
+	require.Equal(t, "local-stack", manifest.BootstrapOptions().BootstrapOrgSlug)
+}
+
 func TestParseBootstrapManifestValidationErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "unknown top-level key",
+			body: "version: 1\ntenantz: []\n",
+			want: "tenantz",
+		},
+		{
+			name: "merchant config belongs elsewhere",
+			body: "version: 1\nmerchants: []\n",
+			want: "merchants",
+		},
+		{
+			name: "catalog belongs elsewhere",
+			body: "version: 1\ncatalogs: []\n",
+			want: "catalogs",
+		},
+		{
+			name: "missing authority",
+			body: "version: 1\n",
+			want: "authority.bootstrap_org_slug",
+		},
+		{
+			name: "missing bootstrap org slug",
+			body: "version: 1\nauthority: {}\n",
+			want: "authority.bootstrap_org_slug",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseBootstrapManifest([]byte(tc.body))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+func TestParseMerchantConfigManifestValidationErrors(t *testing.T) {
 	base := func(fragment string) string {
 		return `
 version: 1
@@ -84,8 +152,13 @@ merchants:
 		},
 		{
 			name: "auth section removed (hard cut)",
-			body: "version: 1\nauth:\n  users: []\nmerchants:\n  - slug: x\n    name: X\n",
+			body: "version: 1\nauth:\n  users: []\nmerchants:\n  - slug: x\n    display_name: X\n",
 			want: "auth",
+		},
+		{
+			name: "bootstrap authority belongs to push-bootstrap",
+			body: "version: 1\nauthority:\n  bootstrap_org_slug: local-stack\n",
+			want: "authority",
 		},
 		{
 			name: "no merchants",
@@ -100,7 +173,7 @@ merchants:
 		{
 			name: "merchant name removed",
 			body: "version: 1\nmerchants:\n  - slug: cozy-art\n    name: Cozy Art\n",
-			want: "field name not found",
+			want: "unknown field \"name\"",
 		},
 		{
 			name: "support email removed",
@@ -133,9 +206,19 @@ merchants:
 			want: "profile.logo_url",
 		},
 		{
-			name: "invalid provider account role",
-			body: base("    provider_accounts:\n      - provider_type: stripe\n        account_id: acct_test_123\n        role: standby\n"),
-			want: "role must be primary, secondary, or legacy",
+			name: "invalid provider account mode",
+			body: base("    provider_accounts:\n      - provider_type: stripe\n        account_id: acct_test_123\n        mode: standby\n"),
+			want: "mode must be primary, secondary, legacy, or disabled",
+		},
+		{
+			name: "provider account role removed",
+			body: base("    provider_accounts:\n      - provider_type: stripe\n        account_id: acct_test_123\n        role: primary\n"),
+			want: "unknown field \"role\"",
+		},
+		{
+			name: "invalid provider account environment",
+			body: base("    provider_accounts:\n      - provider_type: stripe\n        environment: moon\n        account_id: acct_test_123\n"),
+			want: "environment must be live or test",
 		},
 		{
 			name: "invalid provider secret source",
@@ -144,7 +227,7 @@ merchants:
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseBootstrapManifest([]byte(tc.body))
+			_, err := ParseMerchantConfigManifest([]byte(tc.body))
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.want)
 		})

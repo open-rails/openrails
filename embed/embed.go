@@ -15,7 +15,7 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/db"
+	boot "github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
@@ -127,25 +127,25 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Idempotently REGISTER the bound merchant (a billing bucket) from the
-	// explicit embedded construction option. Embedded OpenRails runs
-	// NO AuthKit and stores ZERO auth — RegisterMerchant carries billing-only
-	// state (NO issuer/JWKS). The host owns the embed + DB, so registration is
-	// safe and idempotent. Runs after migrations so the merchants table exists; a
-	// second New is an idempotent no-op.
+	// Idempotently provision the bound merchant (a billing bucket) from the
+	// explicit embedded construction option through the same #527 merchant
+	// provisioning boundary used by standalone manifests. Embedded OpenRails runs
+	// NO AuthKit here and stores ZERO auth: the issuer/owner-org step is omitted.
 	var boundMerchant merchant.ID
 	if opts.Merchant != "" {
 		if a := emb.App(); a != nil && a.Runtime != nil && a.Runtime.DB != nil {
-			ectx := ctx
-			id, rerr := db.RegisterMerchant(ectx, a.Runtime.DB.Qx(ectx), db.RegisterMerchantOptions{
-				Slug: opts.Merchant,
+			tn, rerr := boot.ProvisionMerchant(ctx, boot.ProvisionMerchantRequest{
+				Config:   opts.Config,
+				Database: a.Runtime.DB,
+				Merchant: embeddedManifestMerchant(opts.Merchant, opts.MerchantConfiguration),
+				Options:  boot.MerchantManifestReconcileOptions{Insert: true},
 			})
 			if rerr != nil {
 				_ = emb.Close(ctx)
 				return nil, fmt.Errorf("openrails embed: %w", rerr)
 			}
-			boundMerchant = id
-			a.Runtime.ConfiguredMerchant = id
+			boundMerchant = tn.ID
+			a.Runtime.ConfiguredMerchant = boundMerchant
 		}
 	}
 	svc, err := emb.Service()
@@ -185,6 +185,28 @@ func startupMerchantConfiguration(merchantSlug string, in openrails.MerchantConf
 		in.Profile = &profile
 	}
 	return in
+}
+
+func embeddedManifestMerchant(merchantSlug string, cfg openrails.MerchantConfigurationInput) boot.ManifestMerchant {
+	displayName := merchantSlug
+	profile := boot.ManifestMerchantProfile{}
+	if cfg.Profile != nil {
+		displayName = cfg.Profile.DisplayName
+		profile = boot.ManifestMerchantProfile{
+			DisplayName: cfg.Profile.DisplayName,
+			LogoURL:     cfg.Profile.LogoURL,
+			FromEmail:   cfg.Profile.FromEmail,
+			SupportURL:  cfg.Profile.SupportURL,
+		}
+	}
+	if displayName == "" {
+		displayName = merchantSlug
+	}
+	return boot.ManifestMerchant{
+		Slug:        merchantSlug,
+		DisplayName: displayName,
+		Profile:     profile,
+	}
 }
 
 // Client returns the openrails.Client adapter over the in-process engine. Each

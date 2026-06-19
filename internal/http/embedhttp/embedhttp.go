@@ -11,9 +11,12 @@ package embedhttp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+
+	redis "github.com/redis/go-redis/v9"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
@@ -67,8 +70,11 @@ type Assembler struct {
 	AdminChecker              authpolicy.AdminPermissionChecker
 	ServiceCredentialResolver httproutes.ServiceCredentialResolver
 	CaptchaStore              *captcha.ChallengeStore
-	Authenticator             billingauth.Authenticator
-	ConfiguredMerchant        merchant.ID
+	// RDB is the Redis/Garnet client backing the rate-limit counters + captcha
+	// challenge store. nil falls back to per-process in-memory rate-limit windows.
+	RDB                *redis.Client
+	Authenticator      billingauth.Authenticator
+	ConfiguredMerchant merchant.ID
 }
 
 // FromApp builds an Assembler from the gin-free application graph (the same
@@ -94,6 +100,7 @@ func FromApp(a *app.App) *Assembler {
 		AdminChecker:              checker,
 		ServiceCredentialResolver: resolver,
 		CaptchaStore:              captcha.NewChallengeStore(a.RedisClient),
+		RDB:                       a.RedisClient,
 		Authenticator:             a.Authenticator,
 	}
 	if a.Runtime != nil {
@@ -109,11 +116,17 @@ func FromApp(a *app.App) *Assembler {
 // CORS, body limit, tenant resolution) — the gin-free analogue of the global
 // engine middleware. The returned handler imports zero gin on the request path.
 //
-// NOTE: rate-limiting + the captcha challenge flow are NOT applied here (they are
-// gin/captcha-flow-coupled; the standalone gin surface keeps them, and embedded
-// hosts front billing with their own gateway). See middleware/http_base.go.
+// Rate-limiting + the captcha challenge flow ARE enforced here: the embedded
+// surface runs OpenRails' own per-IP/per-user rate limits and captcha via the
+// gin-free middleware.RateLimitHTTP, so an embedded host does not need to front
+// billing with its own gateway. billingauth.Optional runs ahead of the limiter so
+// an authenticated caller is keyed per-user, not only per-IP (mirroring the
+// standalone engine's authProvider.Optional() → RateLimit order).
 func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	opts = opts.withDefaults()
+	if err := s.validateAuthBoundary(opts); err != nil {
+		panic(err)
+	}
 	mux := http.NewServeMux()
 
 	if opts.IncludeUser {
@@ -147,12 +160,32 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	// bootstrap (#336): the resolver pins it per request. A non-empty-but-
 	// unknown slug is a configuration error. EMBEDDED boot (embed.New) ensures
 	// the bound tenant row before this runs, so it never trips here; a
+	var rateLimits *config.RateLimitsConfig
+	var captchaCfg *config.CaptchaConfig
+	if s.Cfg != nil {
+		rateLimits = s.Cfg.RateLimits
+		captchaCfg = s.Cfg.Captcha
+	}
 	return middleware.ChainHTTP(mux,
 		middleware.SecurityHeadersHTTP(),
 		middleware.CORSHTTP(nil),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
 		middleware.ResolveMerchantHTTP(s.ConfiguredMerchant),
+		// Best-effort auth so the rate limiter can key by user, not only IP.
+		middleware.HTTPMiddleware(billingauth.Optional(s.Authenticator)),
+		// OpenRails-native rate-limiting + captcha for embedded hosts.
+		middleware.RateLimitHTTP(rateLimits, captchaCfg, s.RDB, s.CaptchaStore),
 	)
+}
+
+func (s *Assembler) validateAuthBoundary(opts Options) error {
+	if !opts.IncludeUser && !opts.IncludeAdmin {
+		return nil
+	}
+	if s == nil || s.Authenticator == nil {
+		return fmt.Errorf("embedded billing: user/admin route groups require Options.Authenticator")
+	}
+	return nil
 }
 
 // captchaStatusHandler is the gin-free captcha status endpoint (issue #282).
