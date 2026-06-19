@@ -81,7 +81,7 @@ openrails intents log --merchant doujins --intent <uuid>
 
 # #532: Standardize CLI mutation flags: insert, overwrite, prune
 
-**Completed:** no
+**Completed:** yes
 
 Several OpenRails CLI commands reconcile one source of truth into another. They should share the same operator safety model: by default, commands plan and report only. Mutations happen only when the operator explicitly enables the mutation class.
 
@@ -118,16 +118,22 @@ Several OpenRails CLI commands reconcile one source of truth into another. They 
 
 ## Tasks
 
-- [ ] Replace command-specific "dry-run unless --overwrite" wording with the shared mutation-flag contract.
-- [ ] Add `--insert` to `pull-provider`; make current provider-missing materialization require `--insert`, not `--overwrite`.
-- [ ] Change `pull-provider --overwrite` to only update existing local mirror rows.
-- [ ] Keep `pull-provider --prune` dry-run unless paired with a mutation flag that permits the chosen prune action; document whether prune requires `--overwrite`, `--insert`, or only `--prune` as the destructive opt-in.
-- [ ] Update `push-merchant-config` to use `--insert --overwrite --prune` rather than "default seed-once plus overwrite/prune" as the public mental model.
-- [ ] Update `push-merchant-catalog` so default is plan-only and writes require `--insert` and/or `--overwrite`; preserve `--prune` as archive-only for OpenRails-owned extras.
-- [ ] Update `push-bootstrap` to default to plan-only for manual runs; startup first-run behavior must remain separately documented and non-destructive.
-- [ ] Add CLI help tests/smokes proving each command exposes the same mutation flags and dry-run default.
-- [ ] Update `docs/operations.md` and examples/runbooks to show plan-only first, then explicit mutation flags.
-- [ ] Cross-reference #533 so local mirror mutation logs and external provider mutation logs use consistent terms for planned/applied changes.
+- [x] Replace command-specific "dry-run unless --overwrite" wording with the shared mutation-flag contract.
+- [x] Add `--insert` to `pull-provider`; make current provider-missing materialization require `--insert`, not `--overwrite`.
+- [x] Change `pull-provider --overwrite` to update existing local mirror/derived local rows without importing provider-missing records.
+- [x] Make `pull-provider --prune` the explicit destructive opt-in for eligible provider-account-scoped excess rows; it does not require `--overwrite`.
+- [x] Update `push-merchant-config` to use `--insert --overwrite --prune` rather than "default seed-once plus overwrite/prune" as the public mental model.
+- [x] Update `push-merchant-catalog` so default is plan-only and writes require `--insert` and/or `--overwrite`; preserve `--prune` as archive-only for OpenRails-owned extras.
+- [x] Update `push-bootstrap`/`push-merchant-config` manual runs to default to plan-only; startup first-run behavior remains separately documented and insert-only.
+- [x] Add CLI help tests/smokes proving each command exposes the same mutation flags and dry-run default.
+- [x] Update `docs/operations.md` and examples/runbooks to show plan-only first, then explicit mutation flags.
+- [x] Cross-reference #533 so local mirror mutation logs and external provider mutation logs use consistent terms for planned/applied changes.
+
+Validation:
+
+- `go test ./pkg/catalog ./cmd/openrails ./internal/reconcile ./internal/bootstrap`
+- `go test -tags integration ./internal/integrationharness -run TestStandaloneMerchantCatalogApplyOptionsOverHTTP -count=1`
+- `go test ./...`
 
 ---
 
@@ -400,7 +406,7 @@ Security goal: bootstrap secret import and runtime secret reads must use the sam
 
 # #529: Make webhook routing explicit: `/merchants/:merchant`, no bootstrap host/path defaults
 
-**Completed:** no
+**Completed:** yes
 
 Private standalone and embedded OpenRails should route provider webhooks through an explicit merchant path, not by guessing from the provider payload and not by storing the deployment mount URL in each merchant's bootstrap config.
 
@@ -473,28 +479,38 @@ Provider-account notes:
 
 ## Tasks
 
-- [ ] Rename/add the merchant-scoped webhook route from `/v1/m/:merchant/webhooks/:provider` to `/v1/merchants/:merchant/webhooks/:provider`; decide whether `/m/...` is a temporary alias or hard cut, then document that decision.
-- [ ] Update embedded route docs/examples so hosts configure provider callbacks like `/billing/v1/merchants/{merchant}/webhooks/{provider}` when OpenRails is mounted under `/billing`.
-- [ ] Extend merchant-scoped webhook handling beyond Stripe if needed so NMI/Mobius and CCBill can use the same merchant-path routing model, with provider-specific verification after merchant resolution.
-- [ ] Ensure provider account selection is account-aware: route resolves merchant first, then provider/provider_account credentials are loaded for that merchant, with no cross-merchant fallback.
-- [ ] Remove `webhook_host` and `webhook_path` from `config/merchants.example.yaml` and from the recommended bootstrap shape in docs; leave host-based routing as an advanced/SaaS concern.
-- [ ] Remove `billing_tier` and `region` from `ManifestMerchant`, merchant provisioning APIs, examples, docs, admin responses, and schema if no core runtime dependency remains.
-- [ ] Replace bootstrap `name` with required `display_name`.
-- [ ] Drop `name` from `openrails.merchants` entirely; do not add `display_name` to `openrails.merchants` unless a measured list-query problem later requires denormalization.
-- [ ] Remove `Name` from `ManifestMerchant`, `merchants.ProvisionRequest`, and `merchants.Merchant`.
-- [ ] Store profile fields only in merchant configuration/profile: `display_name`, `logo_url`, `from_email`, and `support_url`. Remove `support_email`.
-- [ ] Update admin views/API responses to return `display_name`, not `name`.
-- [ ] Update `RegisterMerchant`, provisioning SQL, sqlc generated code, migrations, examples, docs, and tests for the hard cut.
-- [ ] Keep `issuer.allowed_origins` in the example only as merchant browser-origin declaration; defer all CORS behavior/docs/tests to #519.
-- [ ] Simplify provider account manifest fields: replace public `role` + `status` with `mode: primary|secondary|legacy|disabled`.
-- [ ] Add provider account `environment` enum: `live` or `test`; omitted/default is `live`. Normalize provider-specific terms (`prod`/`production` -> `live`; `sandbox`/`devnet`/`testnet` -> `test`) at manifest/API boundaries. Include environment in uniqueness, row identity, mirror rows, intent binding, checkout/session stamping, and provider-pull matching.
-- [ ] Make `account_id` discovered from credentials wherever possible; fail bootstrap clearly if account identity cannot be resolved for a provider account that is being registered. Keep manual account id only as an explicit advanced override if a provider has no reliable whoami path.
-- [ ] Support multiple same-provider accounts across environments without mixing objects: Stripe live vs test, NMI/Mobius live vs test/sandbox, CCBill live vs test if applicable, Solana live/mainnet vs test/devnet/testnet.
-- [ ] Reject unsafe environment/routing combinations: production deployments cannot silently route new work to `environment: test` provider accounts; test accounts should normally be `disabled` or only enabled in development/staging.
-- [ ] Remove `provider_key` and `display_name` from the normal bootstrap example; keep any local selector/operator label support out of the default shape unless proven necessary.
-- [ ] Fix stale docs/comments around webhook routing, including any text implying `webhook_host` is the normal private deployment model.
-- [ ] Add route tests for `/v1/merchants/:merchant/webhooks/:provider` proving unknown merchants do not fall back to a default merchant and known merchants load merchant-scoped credentials before verification.
-- [ ] Add/adjust integration smoke coverage for at least Stripe, and for Mobius/CCBill if their merchant-scoped verification path is implemented in this issue.
+- [x] Rename/add the merchant-scoped webhook route from `/v1/m/:merchant/webhooks/:provider` to `/v1/merchants/:merchant/webhooks/:provider`; hard cut: no `/m/...` alias.
+- [x] Update embedded route docs/examples so hosts configure provider callbacks like `/billing/v1/merchants/{merchant}/webhooks/{provider}` when OpenRails is mounted under `/billing`.
+- [x] Extend merchant-scoped webhook handling beyond Stripe: Stripe, NMI/Mobius, and CCBill now resolve merchant first and verify/provider-check after resolution.
+- [x] Ensure provider account selection is account-aware: route resolves merchant first, then merchant-scoped provider credentials are loaded for that merchant, with no cross-merchant fallback.
+- [x] Remove `webhook_host` and `webhook_path` from `config/merchants.example.yaml` and from the recommended bootstrap shape in docs; leave host-based routing as an advanced/SaaS concern.
+- [x] Remove `billing_tier` and `region` from `ManifestMerchant`, merchant provisioning APIs, examples, docs, admin responses, and schema if no core runtime dependency remains.
+- [x] Replace bootstrap `name` with required `display_name`.
+- [x] Drop `name` from `openrails.merchants` entirely; do not add `display_name` to `openrails.merchants` unless a measured list-query problem later requires denormalization.
+- [x] Remove `Name` from `ManifestMerchant`, `merchants.ProvisionRequest`, and `merchants.Merchant`.
+- [x] Store profile fields only in merchant configuration/profile: `display_name`, `logo_url`, `from_email`, and `support_url`. Remove `support_email`.
+- [x] Update admin views/API responses to return `display_name`, not `name`.
+- [x] Update `RegisterMerchant`, provisioning SQL, sqlc generated code, migrations, examples, docs, and tests for the hard cut.
+- [x] Keep `issuer.allowed_origins` in the example only as merchant browser-origin declaration; defer all CORS behavior/docs/tests to #519.
+- [x] Simplify provider account manifest fields: replace public `role` + `status` with `mode: primary|secondary|legacy|disabled`.
+- [x] Add provider account `environment` enum: `live` or `test`; omitted/default is `live`. Normalize provider-specific terms (`prod`/`production` -> `live`; `sandbox`/`devnet`/`testnet` -> `test`) at manifest/API boundaries. Include environment in uniqueness, row identity, mirror rows, intent binding, checkout/session stamping, and provider-pull matching.
+- [x] Fail bootstrap clearly if account identity cannot be resolved for a provider account being registered: `account_id` is required until bootstrap-time provider whoami discovery is added.
+- [x] Support multiple same-provider accounts across environments without mixing objects: provider account identity now includes `(merchant_id, provider_type, environment, account_id)`.
+- [x] Reject unsafe environment/routing combinations: production deployments cannot bootstrap `environment: test` as `mode: primary`.
+- [x] Remove `provider_key` and `display_name` from the normal bootstrap example; keep local selector/operator labels out of the manifest.
+- [x] Fix stale docs/comments around webhook routing, including any text implying `webhook_host` is the normal private deployment model.
+- [x] Add route tests for `/v1/merchants/:merchant/webhooks/:provider` proving unknown merchants do not fall back to a default merchant and known merchants load merchant-scoped credentials before verification.
+- [x] Add/adjust integration smoke coverage for Stripe, Mobius/NMI, and CCBill against the actual HTTP server.
+
+## Validation
+
+- `go test ./internal/db ./internal/merchants ./internal/bootstrap ./internal/controlplane ./internal/platform ./internal/http ./internal/http/middleware/ginmw ./internal/intents ./internal/reconcile ./cmd/openrails ./embed ./pkg/embedded/...`
+- `go test -tags integration ./internal/http -run TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe -count=1`
+- `go test -tags integration ./internal/bootstrap -run TestReconcileMerchantManifestAppliesMerchantConfiguration -count=1`
+- `go test -tags integration ./internal/integrationharness -run TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant -count=1`
+- `go test ./migrations/postgres`
+- `SQLC_ADMIN_DATABASE_URL='postgres://admin:admin_password@127.0.0.1:25432/openrails_db?sslmode=disable' task sqlc`
+- `git diff --check`
 
 ---
 
@@ -636,7 +652,7 @@ DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
 - [ ] New sqlc query (internal/db) or hand-written; gate with `read`. DB-integration-test the filter.
 
 ### Cross-cutting cleanup
-- [ ] **CRITICAL — migrate the `tests/` admin INTEGRATION suite to the delegated model.** Found 2026-06-19: the suite (`tests/admin_metrics_test.go`, `admin_subscription_test.go`, `admin_offchannel_payments_test.go`, `admin_entitlements_source_test.go`) authenticates via `setupTestSuiteWithAdminAuth` → a **per-user admin-role JWT**, and hits the OLD paths (`/v1/admin/metrics/summary`, `/v1/admin/payments/:id/refund`, etc.). #528 made `/v1/admin` the DELEGATED surface (`openrails:merchant:*`), removed the per-user surface, folded metrics → `/v1/admin/metrics`, and renamed refund→`/refunds`, cancel→`DELETE`. **So this entire suite has been BROKEN since increment 1** and was NOT caught (only route-level tests in internal/http + ginroutes were run, not `tests/`). To validate #528 end-to-end: (a) make `setupTestSuiteWithAdminAuth` mint a DELEGATED token with `openrails:merchant:*` perms (or add a delegated variant), (b) update all admin test paths to the new surface (folded metrics, `/refunds`, `DELETE` cancel, composite user-detail shape). THIS is the DB-backed validation the redesign needs. **Run `go test ./tests/ -run TestAdmin...` after each fix.**
+- [~] **CRITICAL — migrate the `tests/` admin INTEGRATION suite to the delegated model.** PROGRESS (commit 4f5e918c): pattern ESTABLISHED + DB-VALIDATED — `tests/admin_user_detail_integration_test.go` mounts `RegisterAdminRoutes` with a delegated host-seam principal (`newHostSeamAdminRouter`); 2 passing tests vs real Postgres prove the delegated `/v1/admin` surface + #528 composite user-detail (entitlements+payment_methods+product_access) work end-to-end + perm gate fails closed (403 w/o billing:read). Also FIXED a real #527 migration prefix collision the harness caught (011→016). REMAINING: migrate the 4 old full-server files to `newHostSeamAdminRouter` + new paths. Original finding: the suite (`tests/admin_metrics_test.go`, `admin_subscription_test.go`, `admin_offchannel_payments_test.go`, `admin_entitlements_source_test.go`) authenticates via `setupTestSuiteWithAdminAuth` → a **per-user admin-role JWT**, and hits the OLD paths (`/v1/admin/metrics/summary`, `/v1/admin/payments/:id/refund`, etc.). #528 made `/v1/admin` the DELEGATED surface (`openrails:merchant:*`), removed the per-user surface, folded metrics → `/v1/admin/metrics`, and renamed refund→`/refunds`, cancel→`DELETE`. **So this entire suite has been BROKEN since increment 1** and was NOT caught (only route-level tests in internal/http + ginroutes were run, not `tests/`). To validate #528 end-to-end: (a) make `setupTestSuiteWithAdminAuth` mint a DELEGATED token with `openrails:merchant:*` perms (or add a delegated variant), (b) update all admin test paths to the new surface (folded metrics, `/refunds`, `DELETE` cancel, composite user-detail shape). THIS is the DB-backed validation the redesign needs. **Run `go test ./tests/ -run TestAdmin...` after each fix.**
 - [ ] Migrate admin-gated catalog reads (`internal/auth/policy.IsLiveAdmin` + the runtime `AdminChecker`, used to show inactive catalog rows to admins) off per-user `HasAdminPermission(org,userID)` to the delegated principal's perms. Then the per-user `PermAdmin`/`AdminPermissionChecker`/`AdminPermissionRequiredMW`/`HasAdminPermission` machinery can be deleted (controlplane/authority.go, auth/policy/admin*.go).
 - [ ] Docs + comment sweep (deferred from Increment 1): code comments referencing `/v1/merchant-admin` (internal/app/app.go, internal/http/routes_self.go, internal/http/server.go); docs (README.md, docs/api/endpoints.md, docs/principal-boundary-audit.md, docs/vault-secret-ops.md); rename test helper `newMerchantAdminRouter`→`newAdminRouter`.
 - [ ] (Later, separate repos) update host frontends (cozy-art/doujins/tensorhub): `/v1/merchant-admin/*`→`/v1/admin/*` paths + new shapes; cozy-art may switch any per-user `/v1/admin` billing calls to the delegated surface.
