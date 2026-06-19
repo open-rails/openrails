@@ -13,12 +13,11 @@ backends ship behind one interface:
 | `memSecretStore` | tests | in-process |
 
 All three are fronted by an in-process **TTL cache** (`cachedSecretStore`,
-default 15 minutes, `vault.secret_cache_ttl_seconds`) so a worker or webhook
-handler resolves a merchant's secret once per window instead of per row/request. A
-rotation *through this node* invalidates the entry immediately; an out-of-band
-admin Vault write or rotation on another node converges within one TTL. Set the
-TTL negative to disable. Vault WebSocket/event notifications are not required for
-the baseline design.
+15 minutes) so a worker or webhook handler resolves a merchant's secret once per
+window instead of per row/request. A rotation *through this node* invalidates the
+entry immediately; an out-of-band admin Vault write or rotation on another node
+converges within one TTL. Vault WebSocket/event notifications are not required
+for the baseline design.
 
 > **Caller addressing is identical across backends.** Switching to Vault changes
 > neither the code-level `(merchant_id, name)` calls nor the secret *names*
@@ -57,10 +56,6 @@ vault:
   auth_method: approle        # or "kubernetes" / "token"
   role_id: <approle-role-id>
   secret_id: <approle-secret-id>
-  kv_mount: secret            # KV-v2 mount (default "secret")
-  transit_mount: transit      # only if use_transit_for_solana
-  use_transit_for_solana: true
-  secret_cache_ttl_seconds: 900
 ```
 
 The app authenticates **once** as itself (AppRole / K8s service-account JWT) and
@@ -110,8 +105,8 @@ vault kv put secret/openrails/merchants/tensorhub/stripe/webhook_signing_secret 
 
 OpenRails discovers those values lazily by merchant slug on first use or status
 read, then keeps the value in memory until the cache TTL expires. No app restart
-is required for out-of-band Vault writes; convergence is bounded by
-`vault.secret_cache_ttl_seconds`.
+is required for out-of-band Vault writes; convergence is bounded by the
+15-minute cache TTL.
 
 ## Merchant-admin write-only API examples
 
@@ -179,9 +174,9 @@ managed Vault:
   prior version; OpenRails always reads the latest.
 - A rotation through an OpenRails node refreshes that node's cache immediately;
   other nodes pick it up within one cache TTL (default 15m). For an instant
-  cluster-wide cutover, set `secret_cache_ttl_seconds` low or roll the nodes.
+  cluster-wide cutover, roll the nodes.
 - **Solana signing key:** rotating `solana/private_key` changes the merchant's
   on-chain merchant/signer identity. It **forces a plan re-publish and re-enroll**
   — existing on-chain subscription authorizations are bound to the old key and do
-  not transfer. Prefer Vault **Transit** (`use_transit_for_solana: true`) so the
-  key never leaves Vault and rotation is a Transit key-version bump.
+  not transfer. Vault-backed deployments use **Transit** so the key never leaves
+  Vault and rotation is a Transit key-version bump.

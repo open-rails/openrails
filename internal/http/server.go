@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -28,6 +27,11 @@ import (
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/merchant"
+)
+
+const (
+	vaultKVMount      = "secret"
+	vaultTransitMount = "transit"
 )
 
 type Dependencies struct {
@@ -190,28 +194,18 @@ func New(deps Dependencies) (*Server, error) {
 
 		if deps.Config != nil && deps.Config.Vault != nil && deps.Config.Vault.Enabled {
 			// Managed: Vault KV-v2 backend (#251), same (tenant, name) addressing.
-			// Vault encrypts at rest, so no envelope wrapper. Optional Transit signer
-			// keeps the per-tenant Solana key non-extractable.
+			// Vault encrypts at rest, so no envelope wrapper. Transit keeps the
+			// per-tenant Solana key non-extractable.
 			vc := deps.Config.Vault
-			kvMount := vc.KVMount
-			if kvMount == "" {
-				kvMount = "secret"
-			}
 			vclient, verr := vault.Login(context.Background(), vault.Config{
 				Address: vc.Address, AuthMethod: vc.AuthMethod, Token: vc.Token, RoleID: vc.RoleID,
-				SecretID: vc.SecretID, K8sRole: vc.K8sRole, KVMount: kvMount, TransitMount: vc.TransitMount,
+				SecretID: vc.SecretID, K8sRole: vc.K8sRole,
 			})
 			if verr != nil {
 				return nil, fmt.Errorf("vault login: %w", verr)
 			}
-			secretStore = merchants.NewVaultSecretStore(kvMount, vault.NewKVv2Adapter(vclient, kvMount), merchants.NewDBMerchantSlugResolver(deps.ControlPlane.Pool()))
-			if vc.UseTransitForSolana {
-				tMount := vc.TransitMount
-				if tMount == "" {
-					tMount = "transit"
-				}
-				solanaTransit = vault.NewTransitAdapter(vclient, tMount)
-			}
+			secretStore = merchants.NewVaultSecretStore(vaultKVMount, vault.NewKVv2Adapter(vclient, vaultKVMount), merchants.NewDBMerchantSlugResolver(deps.ControlPlane.Pool()))
+			solanaTransit = vault.NewTransitAdapter(vclient, vaultTransitMount)
 		} else {
 			// Self-hosted default: DB-backed store + per-tenant envelope encryption
 			// (issue #227). With no master key, most secrets keep the legacy
@@ -246,13 +240,8 @@ func New(deps Dependencies) (*Server, error) {
 
 		// Front the chosen store with an in-process TTL cache (#251/#322) so workers
 		// and hot paths resolve a merchant's secret once per window instead of per row /
-		// request. Default ~15m; a rotation through this node invalidates immediately.
-		// Negative TTL disables it (NewCachedSecretStore returns the store unchanged).
-		secretCacheTTL := merchants.DefaultSecretCacheTTL
-		if deps.Config != nil && deps.Config.Vault != nil && deps.Config.Vault.SecretCacheTTLSeconds != 0 {
-			secretCacheTTL = time.Duration(deps.Config.Vault.SecretCacheTTLSeconds) * time.Second
-		}
-		secretStore = merchants.NewCachedSecretStore(secretStore, secretCacheTTL)
+		// request. A rotation through this node invalidates immediately.
+		secretStore = merchants.NewCachedSecretStore(secretStore, merchants.DefaultSecretCacheTTL)
 
 		tsvc, terr := merchants.NewService(deps.ControlPlane.Pool(), secretStore)
 		if terr != nil {

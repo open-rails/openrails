@@ -22,10 +22,9 @@ db:
   port: "5432"
   database: openrails_db
   username: admin
-  password: ""
+  password: admin_password
   sslmode: disable
-  schema: openrails
-  require_rls: false
+  schema: openrails # defaults to 'openrails' if not specified
 
 redis:
   addr: garnet:6379
@@ -33,11 +32,9 @@ redis:
   db: 0
 
 auth:
-  control_plane:
-    issuer: http://localhost:2053
-    token_prefix: openrails
-    public_hosted: false
-    bootstrap_admin_service_token_name: openrails-bootstrap-admin
+  issuer: http://localhost:2053 # issuer URL; JWKS is served under this authority
+  # signing keys are loaded by AuthKit from env, /vault/auth/keys.json,
+  # or development-only generated keys under .runtime/authkit
 
 encryption:
   master_key: ""    # base64-encoded 32-byte AES-256 key; empty disables it
@@ -50,10 +47,6 @@ vault:
   role_id: ""
   secret_id: ""
   k8s_role: ""
-  kv_mount: secret
-  transit_mount: transit
-  use_transit_for_solana: false
-  secret_cache_ttl_seconds: 900
 
 clickhouse:
   http_addr: http://localhost:8123
@@ -83,6 +76,7 @@ captcha:
   site_key: ""
   secret_key: ""
 
+# Still a work in progress; TODO later
 usdc_funding:
   providers:
     robinhood:

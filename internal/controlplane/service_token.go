@@ -13,6 +13,9 @@ import (
 )
 
 const (
+	// ServiceTokenPrefix is the fixed OpenRails service-token brand marker.
+	ServiceTokenPrefix = "openrails"
+
 	// ResourceKindMerchant scopes a service token to one OpenRails merchant. Resource
 	// IDs are canonical openrails.merchants UUID strings.
 	ResourceKindMerchant = "openrails.merchant"
@@ -127,13 +130,10 @@ func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.
 	return mid, slug, MerchantResource(mid), nil
 }
 
-// TokenPrefix returns the configured service token brand prefix (e.g. "openrails"), used to
-// recognize and parse presented service tokens. Empty -> bare "st_" marker.
+// TokenPrefix returns the fixed service token brand prefix used to recognize and
+// parse presented service tokens.
 func (c *ControlPlane) TokenPrefix() string {
-	if c == nil || c.cfg == nil || c.cfg.Auth == nil || c.cfg.Auth.ControlPlane == nil {
-		return ""
-	}
-	return strings.TrimSpace(c.cfg.Auth.ControlPlane.TokenPrefix)
+	return ServiceTokenPrefix
 }
 
 // LooksLikeServiceToken reports whether token carries this deployment's service token marker. Used

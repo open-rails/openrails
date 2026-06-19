@@ -320,13 +320,8 @@ func applyMerchantManifestTestSchema(t *testing.T, ctx context.Context, pool *pg
 func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlplane.ControlPlane {
 	t.Helper()
 	cfg := &config.Config{
-		Env: "test",
-		Auth: &config.AuthConfig{
-			ControlPlane: &config.ControlPlaneConfig{
-				Issuer:      "https://openrails.test",
-				TokenPrefix: "openrails",
-			},
-		},
+		Env:  "test",
+		Auth: &config.AuthConfig{Issuer: "https://openrails.test"},
 	}
 	cp, err := controlplane.New(context.Background(), cfg, pool)
 	require.NoError(t, err)

@@ -448,12 +448,12 @@ func createDatabase(cfg *config.Config) (*db.DB, error) {
 		return nil, err
 	}
 
-	// Surface (and, in managed multi-tenant mode, enforce) the Row Level Security
+	// Surface (and, outside development, enforce) the Row Level Security
 	// posture of the connected role (issue #227): RLS policies only constrain a
-	// non-superuser, non-BYPASSRLS role. With DB.RequireRLS set this FAILS startup
-	// if the app would connect as a privileged role that silently bypasses every
-	// per-tenant policy.
-	if err := database.EnforceRLSPosture(context.Background(), cfg.DB != nil && cfg.DB.RequireRLS); err != nil {
+	// non-superuser, non-BYPASSRLS role. Non-development boots fail if the app
+	// would connect as a privileged role that silently bypasses every per-tenant
+	// policy.
+	if err := database.EnforceRLSPosture(context.Background(), cfg.RequiresRLS()); err != nil {
 		return nil, err
 	}
 	return database, nil

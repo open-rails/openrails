@@ -100,13 +100,8 @@ func applyBootstrapTestSchema(t *testing.T, ctx context.Context, pool *pgxpool.P
 func newTestControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 	t.Helper()
 	cfg := &config.Config{
-		Env: "test",
-		Auth: &config.AuthConfig{
-			ControlPlane: &config.ControlPlaneConfig{
-				Issuer:      "https://openrails.test",
-				TokenPrefix: "openrails",
-			},
-		},
+		Env:  "test",
+		Auth: &config.AuthConfig{Issuer: "https://openrails.test"},
 	}
 	cp, err := New(context.Background(), cfg, pool)
 	require.NoError(t, err)
@@ -214,13 +209,8 @@ func TestBootstrapPlatform_NoopsInSelfHostedOpenRails(t *testing.T) {
 	pool := newBootstrapTestPool(t)
 
 	cfg := &config.Config{
-		Env: "test",
-		Auth: &config.AuthConfig{
-			ControlPlane: &config.ControlPlaneConfig{
-				Issuer:      "https://openrails.test",
-				TokenPrefix: "openrails",
-			},
-		},
+		Env:  "test",
+		Auth: &config.AuthConfig{Issuer: "https://openrails.test"},
 	}
 	cp, err := New(ctx, cfg, pool)
 	require.NoError(t, err)

@@ -48,7 +48,6 @@ func TestLoad_EnvMapping(t *testing.T) {
 		t.Setenv("VAULT_ADDR", "http://127.0.0.1:8200")
 		t.Setenv("VAULT_TOKEN", "root")
 		t.Setenv("VAULT_AUTH_METHOD", "token")
-		t.Setenv("VAULT_KV_MOUNT", "secret")
 
 		cfg, err := Load("nonexistent-config.yaml")
 		assert.NoError(t, err)
@@ -57,7 +56,6 @@ func TestLoad_EnvMapping(t *testing.T) {
 			assert.Equal(t, "http://127.0.0.1:8200", cfg.Vault.Address)
 			assert.Equal(t, "root", cfg.Vault.Token)
 			assert.Equal(t, "token", cfg.Vault.AuthMethod)
-			assert.Equal(t, "secret", cfg.Vault.KVMount)
 		}
 	})
 
@@ -132,6 +130,39 @@ clickhouse:
 	assert.Equal(t, "envuser", cfg.DB.Username)
 	assert.Equal(t, "envpass", cfg.DB.Password)
 	assert.Equal(t, "envclickhouse:9000", cfg.ClickHouse.ClientAddr)
+}
+
+func TestConfigExampleShowsCodeDefaults(t *testing.T) {
+	cfg, err := Load(filepath.Join("..", "config.example.yaml"))
+	require.NoError(t, err)
+	defaults := GetDefaultBillingConfig()
+
+	require.NotNil(t, cfg.DB)
+	require.NotNil(t, cfg.Redis)
+	require.NotNil(t, cfg.ClickHouse)
+	require.NotNil(t, cfg.Auth)
+
+	assert.Equal(t, defaults.Env, cfg.Env)
+	assert.Equal(t, defaults.Host, cfg.Host)
+	assert.Equal(t, defaults.Port, cfg.Port)
+	assert.Equal(t, defaults.APIURL, cfg.APIURL)
+	assert.Equal(t, defaults.DB.Host, cfg.DB.Host)
+	assert.Equal(t, defaults.DB.Port, cfg.DB.Port)
+	assert.Equal(t, defaults.DB.Database, cfg.DB.Database)
+	assert.Equal(t, defaults.DB.Username, cfg.DB.Username)
+	assert.Equal(t, defaults.DB.Password, cfg.DB.Password)
+	assert.Equal(t, defaults.DB.SSLMode, cfg.DB.SSLMode)
+	assert.Equal(t, defaults.DB.SchemaName(), cfg.DB.SchemaName())
+	assert.Equal(t, defaults.Redis.Addr, cfg.Redis.Addr)
+	assert.Equal(t, defaults.Redis.Password, cfg.Redis.Password)
+	assert.Equal(t, defaults.Redis.DB, cfg.Redis.DB)
+	assert.Equal(t, defaults.ClickHouse.HTTPAddr, cfg.ClickHouse.HTTPAddr)
+	assert.Equal(t, defaults.ClickHouse.ClientAddr, cfg.ClickHouse.ClientAddr)
+	assert.Equal(t, defaults.ClickHouse.Database, cfg.ClickHouse.Database)
+	assert.Equal(t, defaults.ClickHouse.Username, cfg.ClickHouse.Username)
+	assert.Equal(t, defaults.ClickHouse.Password, cfg.ClickHouse.Password)
+	assert.Equal(t, defaults.ClickHouse.Cluster, cfg.ClickHouse.Cluster)
+	assert.Equal(t, "http://localhost:2053", cfg.Auth.Issuer)
 }
 
 func TestLoad_RejectsRemovedControlPlaneEnabledKnob(t *testing.T) {
@@ -210,8 +241,8 @@ merchant: doujins
 }
 
 func TestLoad_ControlPlaneMaterializedWithDevIssuerDefault(t *testing.T) {
-	// The control plane section is materialized even when omitted (#469); in
-	// development the issuer defaults to the deployment's own base URL.
+	// The control plane is mandatory (#469); in development auth.issuer defaults
+	// to the deployment's own base URL.
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
 	require.NoError(t, os.WriteFile(cfgPath, []byte("env: development\n"), 0o600))
@@ -219,9 +250,7 @@ func TestLoad_ControlPlaneMaterializedWithDevIssuerDefault(t *testing.T) {
 	cfg, err := Load(cfgPath)
 	require.NoError(t, err)
 	require.NotNil(t, cfg.Auth)
-	require.NotNil(t, cfg.Auth.ControlPlane)
-	require.Equal(t, "http://localhost:2053", cfg.Auth.ControlPlane.Issuer)
-	require.True(t, cfg.Auth.ControlPlane.SelfHostedPosture())
+	require.Equal(t, "http://localhost:2053", cfg.Auth.Issuer)
 }
 
 func TestLoad_ControlPlaneIssuerFromAPIURLInDev(t *testing.T) {
@@ -231,7 +260,15 @@ func TestLoad_ControlPlaneIssuerFromAPIURLInDev(t *testing.T) {
 
 	cfg, err := Load(cfgPath)
 	require.NoError(t, err)
-	require.Equal(t, "http://openrails:2053", cfg.Auth.ControlPlane.Issuer)
+	require.Equal(t, "http://openrails:2053", cfg.Auth.Issuer)
+}
+
+func TestLoad_AuthIssuerFromEnv(t *testing.T) {
+	t.Setenv("AUTH_ISSUER", "https://billing.example.com/")
+
+	cfg, err := Load("nonexistent-config.yaml")
+	require.NoError(t, err)
+	require.Equal(t, "https://billing.example.com/", cfg.Auth.Issuer)
 }
 
 func TestLoad_IgnoresProcessorConfigFile(t *testing.T) {
@@ -390,6 +427,26 @@ func TestIsDev(t *testing.T) {
 		cfg := &Config{Env: "DEV"}
 		assert.False(t, cfg.IsDev(), "uppercase DEV is not recognized as dev")
 	})
+}
+
+func TestRequiresRLS(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		want bool
+	}{
+		{"empty env is development", "", false},
+		{"dev allows local privileged DB role", "dev", false},
+		{"development allows local privileged DB role", "development", false},
+		{"prod requires RLS-enforcing DB role", "prod", true},
+		{"production requires RLS-enforcing DB role", "production", true},
+		{"unknown non-dev env requires RLS", "staging", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, (&Config{Env: tc.env}).RequiresRLS())
+		})
+	}
 }
 
 func TestProductionTestEnvValidation(t *testing.T) {

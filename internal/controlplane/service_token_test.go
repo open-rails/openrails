@@ -37,11 +37,11 @@ func TestResolvedServiceToken_EmptyDeniesAll(t *testing.T) {
 
 func TestControlPlane_TokenPrefix_NilSafe(t *testing.T) {
 	var c *ControlPlane
-	if got := c.TokenPrefix(); got != "" {
-		t.Errorf("nil control plane TokenPrefix() = %q, want empty", got)
+	if got := c.TokenPrefix(); got != ServiceTokenPrefix {
+		t.Errorf("nil control plane TokenPrefix() = %q, want %q", got, ServiceTokenPrefix)
 	}
-	if c.LooksLikeServiceToken("anything") {
-		t.Error("nil control plane should not match service tokens")
+	if !c.LooksLikeServiceToken(ServiceTokenPrefix + "_st_key_secret") {
+		t.Error("service token prefix should be fixed even for nil control plane")
 	}
 }
 

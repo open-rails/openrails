@@ -49,15 +49,13 @@ func (d *DB) CheckRLSPosture(ctx context.Context) (RLSPosture, error) {
 	return RLSPosture{CurrentUser: user, Enforcing: !bypass}, nil
 }
 
-// EnforceRLSPosture logs the connection's RLS posture and, when require is true
-// (managed multi-merchant deployments), FAILS startup if the connected role does
-// not enforce RLS. This is the guard that prevents shipping a managed/hosted
-// OpenRails that believes it has merchant isolation while actually connecting as a
-// privileged role that bypasses every policy (issue #227).
+// EnforceRLSPosture logs the connection's RLS posture and, when require is true,
+// FAILS startup if the connected role does not enforce RLS. OpenRails passes
+// require=true outside development so production cannot boot while connected as
+// a privileged role that bypasses every policy (issue #227).
 //
-// For self-hosted single-merchant deployments require is false: RLS is still a
-// useful backstop but running as a privileged role is acceptable because there is
-// only one merchant.
+// Development passes require=false: RLS is still reported, but a privileged
+// local database role is allowed.
 func (d *DB) EnforceRLSPosture(ctx context.Context, require bool) error {
 	posture, err := d.CheckRLSPosture(ctx)
 	if err != nil {
@@ -77,11 +75,11 @@ func (d *DB) EnforceRLSPosture(ctx context.Context, require bool) error {
 	}
 	logrus.WithFields(fields).Warn(
 		"db: connected role bypasses Row Level Security; merchant isolation relies on explicit query predicates only " +
-			"(acceptable for self-hosted single-merchant; set the RLS-required flag + connect as openrails_app for managed multi-merchant)")
+			"(acceptable only in development; non-development envs must connect as openrails_app or another non-BYPASSRLS role)")
 	return nil
 }
 
-// rlsPostureError returns a startup-fatal error when RLS enforcement is required
+// rlsPostureError returns a startup-fatal error when RLS enforcement is required,
 // but the connected role bypasses RLS. Pure (no DB) so the decision is unit
 // testable independent of a live Postgres.
 func rlsPostureError(posture RLSPosture, require bool) error {

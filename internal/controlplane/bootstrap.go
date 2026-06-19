@@ -13,6 +13,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
+const BootstrapAdminServiceTokenName = "openrails-bootstrap-admin"
+
 // BootstrapResult reports what the idempotent bootstrap did/ensured.
 type BootstrapResult struct {
 	BootstrapOrgSlug string
@@ -143,14 +145,8 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 			return nil, fmt.Errorf("controlplane: list admin service tokens: %w", lerr)
 		}
 		if !anyLiveServiceToken(existing) {
-			name := "openrails-bootstrap-admin"
-			if c.cfg != nil && c.cfg.Auth != nil && c.cfg.Auth.ControlPlane != nil {
-				if n := strings.TrimSpace(c.cfg.Auth.ControlPlane.BootstrapAdminServiceTokenName); n != "" {
-					name = n
-				}
-			}
 			serviceToken, secret, merr := core.MintServiceTokenWithOptions(ctx, slug, authcore.ServiceTokenMintOptions{
-				Name:        name,
+				Name:        BootstrapAdminServiceTokenName,
 				Permissions: OperatorRolePermissions(),
 				Resources:   []authcore.ServiceTokenResource{MerchantResource(bootstrapMerchantID)},
 			})

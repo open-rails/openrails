@@ -67,17 +67,16 @@ func registrationMode(locked bool) authcore.RegistrationMode {
 // The control plane is mandatory in standalone mode (#469): every input is
 // required and a failure here is a boot failure, never a silent downgrade.
 func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlPlane, error) {
-	if cfg == nil || cfg.Auth == nil || cfg.Auth.ControlPlane == nil {
-		return nil, errors.New("controlplane: auth.control_plane configuration is required (the control plane is mandatory in standalone mode, #469)")
+	if cfg == nil || cfg.Auth == nil {
+		return nil, errors.New("controlplane: auth.issuer is required (the control plane is mandatory in standalone mode, #469)")
 	}
 	if pool == nil {
 		return nil, errors.New("controlplane: pgx pool is required")
 	}
-	cp := cfg.Auth.ControlPlane
 
-	issuer := strings.TrimSpace(cp.Issuer)
+	issuer := strings.TrimSpace(cfg.Auth.Issuer)
 	if issuer == "" {
-		return nil, errors.New("controlplane: auth.control_plane.issuer is required")
+		return nil, errors.New("controlplane: auth.issuer is required")
 	}
 
 	// (authkit issue 60) Tenants are always a supported primitive — no tenant-mode
@@ -100,7 +99,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		BaseURL:            issuer,
 		IssuedAudiences:    []string{"openrails"},
 		ExpectedAudiences:  []string{"openrails"},
-		ServiceTokenPrefix: strings.TrimSpace(cp.TokenPrefix),
+		ServiceTokenPrefix: ServiceTokenPrefix,
 		Environment:        strings.TrimSpace(cfg.Env),
 		PermissionCatalog:  Catalog(),
 		DefaultRoles: []authcore.DefaultRole{
@@ -109,11 +108,12 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 			// bootstrap path. Bootstrap still defines+sets it explicitly.
 			{Name: OperatorRole, Permissions: OperatorRolePermissions()},
 		},
-		// Self-hosted locked-down posture (#47 switches): no public user
-		// self-registration, no public tenant onboarding/management. Embedded
-		// bootstrap/core calls (CreateOrg/AssignRole/MintServiceToken) are unaffected.
-		NativeUserRegistrationMode: registrationMode(!cp.PublicHosted),
-		OrgRegistrationMode:        registrationMode(!cp.PublicHosted),
+		// Private standalone posture: no public user self-registration, no public
+		// org onboarding/management. Embedded bootstrap/core calls
+		// (CreateOrg/AssignRole/MintServiceToken) are unaffected. Public hosted
+		// registration belongs in the private openrails-saas layer, not this repo.
+		NativeUserRegistrationMode: registrationMode(true),
+		OrgRegistrationMode:        registrationMode(true),
 	}
 
 	authSvc, err := authhttp.NewService(coreCfg)
@@ -125,7 +125,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 	// Build the browser-direct delegated-access-token verifier (#222 browser
 	// tier). It accepts ONLY this control plane's own delegated tokens with the
 	// canonical `openrails` audience and `openrails:self:*` permissions.
-	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), strings.TrimSpace(cp.TokenPrefix))
+	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), ServiceTokenPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
 	}
@@ -186,11 +186,8 @@ func (c *ControlPlane) Pool() *db.Pool {
 }
 
 // SelfHostedPosture reports whether this control plane mounts only the
-// intentional AuthKit route groups (self-hosted) rather than the full hosted-SaaS
-// DefaultAPI surface. True unless BOTH registration axes are public.
+// intentional AuthKit route groups. Standalone OpenRails is private-only in this
+// repo; public hosted registration belongs in openrails-saas.
 func (c *ControlPlane) SelfHostedPosture() bool {
-	if c == nil || c.cfg == nil || c.cfg.Auth == nil || c.cfg.Auth.ControlPlane == nil {
-		return true
-	}
-	return c.cfg.Auth.ControlPlane.SelfHostedPosture()
+	return true
 }

@@ -363,14 +363,10 @@ secretStore, _  = tenancy.NewEncryptedSecretStore(secretStore, enc)
 // Managed (NEW): swap in Vault KV with the SAME addressing — no caller change.
 if cfg.Vault != nil && cfg.Vault.Enabled {
     vc, _ := vault.Login(ctx, cfg.Vault)
-    secretStore = tenancy.NewVaultSecretStore(cfg.Vault.KVMount, vault.NewKVv2Adapter(vc, cfg.Vault.KVMount))
+    secretStore = tenancy.NewVaultSecretStore("secret", vault.NewKVv2Adapter(vc, "secret"))
 
-    // Solana signer selection:
-    if cfg.Vault.UseTransitForSolana {
-        solanaSigner = solana.NewTransitSigner(&vault.TransitAdapter{client: vc, mount: cfg.Vault.TransitMount})
-    } else {
-        solanaSigner = solana.NewKeypairSigner(secretStore) // KV-fetch
-    }
+    // Solana signing uses Vault Transit; the key never leaves Vault.
+    solanaSigner = solana.NewTransitSigner(&vault.TransitAdapter{client: vc, mount: "transit"})
 } else {
     solanaSigner = solana.NewKeypairSigner(secretStore)      // self-hosted: DB+envelope
 }

@@ -31,10 +31,6 @@ type Config struct {
 	KubernetesMount string // defaults to "kubernetes"
 	AppRoleMount    string // defaults to "approle"
 
-	// KVMount is the KV-v2 mount for tenant secrets (e.g. "secret").
-	KVMount string
-	// TransitMount is the Transit mount for tenant signing keys (e.g. "transit").
-	TransitMount string
 }
 
 const defaultK8sJWTPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"

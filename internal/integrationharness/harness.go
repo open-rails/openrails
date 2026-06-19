@@ -234,12 +234,8 @@ func (h *Harness) StartStandalone(currency string) *Surface {
 		Port:    0, // ephemeral; we serve via httptest below
 		DB:      &config.DBConfig{URL: h.DSN},
 		Auth: &config.AuthConfig{
-			// The control plane's own AuthKit issuer + service-token brand prefix;
-			// service-token resolution needs only these.
-			ControlPlane: &config.ControlPlaneConfig{
-				Issuer:      "https://controlplane.openrails.test",
-				TokenPrefix: "openrails",
-			},
+			// The control plane's own AuthKit issuer.
+			Issuer: "https://controlplane.openrails.test",
 		},
 	}
 	if h.Redis != nil {

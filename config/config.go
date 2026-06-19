@@ -121,9 +121,10 @@ type EncryptionConfig struct {
 
 // VaultConfig selects a HashiCorp Vault backend for per-merchant secrets (issue
 // #251). When Enabled, the merchant secret store resolves to Vault KV-v2 (same
-// (merchant, name) addressing) instead of DB+envelope, and Solana signing can use
+// (merchant, name) addressing) instead of DB+envelope, and Solana signing uses
 // Vault Transit (the key never leaves Vault). Disabled by default; self-hosted
-// uses the DB+envelope store.
+// uses the DB+envelope store. KV and Transit mounts are fixed to "secret" and
+// "transit"; the secret cache TTL is fixed in code.
 type VaultConfig struct {
 	Enabled    bool   `koanf:"enabled,omitempty"`
 	Address    string `koanf:"address,omitempty"`     // VAULT_ADDR; empty uses the api default
@@ -134,19 +135,6 @@ type VaultConfig struct {
 	RoleID   string `koanf:"role_id,omitempty"`
 	SecretID string `koanf:"secret_id,omitempty"`
 	K8sRole  string `koanf:"k8s_role,omitempty"`
-	// KVMount is the KV-v2 mount for tenant secrets (default "secret").
-	KVMount string `koanf:"kv_mount,omitempty"`
-	// TransitMount is the Transit mount for tenant signing keys (default "transit").
-	TransitMount string `koanf:"transit_mount,omitempty"`
-	// UseTransitForSolana signs the per-tenant Solana key via Vault Transit
-	// (non-extractable) rather than fetching solana/private_key from KV.
-	UseTransitForSolana bool `koanf:"use_transit_for_solana,omitempty"`
-	// SecretCacheTTLSeconds is the in-process per-(tenant,name) secret cache TTL.
-	// Workers/handlers resolve a tenant's secret once per TTL window instead of
-	// hitting the backend per row/request. 0 uses the default (15m); negative
-	// disables caching. A rotation (Put/Delete in this process) invalidates the
-	// entry immediately; cross-process rotations take effect within one TTL.
-	SecretCacheTTLSeconds int `koanf:"secret_cache_ttl_seconds,omitempty"`
 }
 
 // DBConfig holds database configuration.
@@ -180,15 +168,6 @@ type DBConfig struct {
 	// Read the effective value via DBConfig.SchemaName() (it applies the default and
 	// normalization). Do not read this field directly.
 	Schema string `koanf:"schema"`
-
-	// RequireRLS makes startup FAIL if the connected role does not enforce Row
-	// Level Security (i.e. it is a superuser or a BYPASSRLS role). Set this in
-	// managed multi-tenant deployments, where the app MUST connect as the
-	// unprivileged openrails_app role (created by 001_schema.up.sql) so the per-tenant RLS
-	// policies actually constrain queries (issue #227). Left false for self-hosted
-	// single-tenant deployments, where RLS is a backstop and running as a
-	// privileged role is acceptable.
-	RequireRLS bool `koanf:"require_rls"`
 }
 
 // GetConnectionString returns the database connection string.
@@ -512,48 +491,10 @@ type AuthConfig struct {
 	// membership in a separate "operator" AuthKit org. Load rejects the
 	// deprecated keys.
 
-	// ControlPlane configures OpenRails' OpenRails-owned AuthKit control plane
-	// (issue #224). HARD CUT (#469): the control plane is MANDATORY in standalone
-	// mode — there is no "verifier-only" deployment. Standalone boot always
-	// builds the in-process AuthKit core/service, mounts the selective AuthKit
-	// route groups, and runs control-plane bootstrap; construction failure is
-	// fatal. Load materializes this section when omitted (dev defaults the issuer);
-	// the former `enabled` knob is rejected.
-	ControlPlane *ControlPlaneConfig `koanf:"control_plane,omitempty"`
-}
-
-// ControlPlaneConfig configures the OpenRails-owned AuthKit control plane
-// (issue #224). HARD CUT (#469): the control plane is always on in standalone
-// mode. The section tunes it (issuer, token prefix, hosted posture); it does not
-// switch it off. pkg/embedded hosts that want it opt in by calling
-// pkg/embedded/controlplane.Attach.
-type ControlPlaneConfig struct {
-	// Issuer is the AuthKit token issuer this OpenRails control plane signs as
+	// Issuer is the AuthKit token issuer OpenRails signs as
 	// (e.g. "https://openrails.mysite.com"). Required outside development; in
 	// development Load defaults it to api_url (or http://localhost:<port>).
 	Issuer string `koanf:"issuer,omitempty"`
-
-	// TokenPrefix is the brand prefix for minted service tokens (e.g. "openrails" ->
-	// `openrails_st_<key_id>_<secret>`). Empty -> bare service-token marker.
-	TokenPrefix string `koanf:"token_prefix,omitempty"`
-
-	// PublicHosted opens AuthKit native user + org registration and mounts the
-	// full hosted-SaaS AuthKit surface. Default false is the private/self-hosted
-	// posture: admin/bootstrap-only users and orgs, with only the intentional
-	// login/session/user route groups mounted. This should only be set by the
-	// private OpenRails SaaS deployment layer, not normal self-hosted installs.
-	PublicHosted bool `koanf:"public_hosted,omitempty"`
-
-	// BootstrapAdminServiceTokenName is the human-readable name of the initial
-	// deployment admin service token minted at bootstrap (#312). Defaults to
-	// "openrails-bootstrap-admin".
-	BootstrapAdminServiceTokenName string `koanf:"bootstrap_admin_service_token_name,omitempty"`
-}
-
-// SelfHostedPosture reports whether to mount only the intentional AuthKit route
-// groups (self-hosted) rather than the full hosted-SaaS DefaultAPI surface.
-func (cp *ControlPlaneConfig) SelfHostedPosture() bool {
-	return cp == nil || !cp.PublicHosted
 }
 
 // TokenConfig defines configuration for a specific Solana token
@@ -1131,6 +1072,13 @@ func (cfg *Config) IsDev() bool {
 	return cfg.Env == "" || cfg.Env == "dev" || cfg.Env == "development"
 }
 
+// RequiresRLS reports whether startup must fail if the connected Postgres role
+// bypasses row-level security. Development may use a privileged local DB role;
+// every non-development environment must connect as an RLS-enforcing role.
+func (cfg *Config) RequiresRLS() bool {
+	return cfg != nil && !cfg.IsDev()
+}
+
 // assembleDBURL builds the database URL from atomic parameters if not explicitly set
 func assembleDBURL(cfg *Config) {
 	if cfg.DB == nil {
@@ -1173,9 +1121,10 @@ func validateDatabase(cfg *DBConfig) error {
 // GetDefaultBillingConfig returns a billing configuration with sensible defaults
 func GetDefaultBillingConfig() *Config {
 	return &Config{
-		Env:  "development",
-		Host: "0.0.0.0",
-		Port: 2053,
+		Env:    "development",
+		Host:   "0.0.0.0",
+		Port:   2053,
+		APIURL: "http://localhost:2053",
 		DB: &DBConfig{
 			Host:     "localhost",
 			Port:     "5432",
@@ -1371,8 +1320,8 @@ func Load(configPath string) (*Config, error) {
 	// mode; the verifier-only deployment mode is gone. The former
 	// auth.control_plane.enabled knob is rejected — not silently ignored — so a
 	// deployment that believed it was toggling the control plane finds out at
-	// load time. Private posture is the registration axes, not a disabled
-	// control plane.
+	// load time. Private posture is fixed in this repo, not a disabled control
+	// plane.
 	if k.Exists("auth.control_plane.enabled") {
 		return nil, fmt.Errorf("auth.control_plane.enabled was removed (#469): the control plane is always on in standalone mode — delete the key; private/self-hosted registration is the default")
 	}
@@ -1386,19 +1335,28 @@ func Load(configPath string) (*Config, error) {
 	ignoredStoreConfig := k.Exists("store") || hasEnvPrefix("STORE_")
 	ignoredMerchantConfig := k.Exists("merchant") || os.Getenv("MERCHANT") != ""
 	ignoredCORSConfig := k.Exists("cors_origins") || os.Getenv("CORS_ORIGINS") != ""
+	ignoredDBRequireRLS := k.Exists("db.require_rls") || os.Getenv("DB_REQUIRE_RLS") != ""
 	ignoredAuthIssuers := k.Exists("auth.issuers") || k.Exists("auth.expected_audience") ||
 		os.Getenv("AUTH_ISSUERS") != "" || os.Getenv("AUTH_EXPECTED_AUDIENCE") != ""
 	ignoredProcessors := k.Exists("processors") || hasEnvPrefix("PROCESSORS_")
-	ignoredControlPlaneLegacy := k.Exists("auth.control_plane.issued_audiences") ||
+	ignoredControlPlaneLegacy := k.Exists("auth.control_plane.issuer") ||
+		k.Exists("auth.control_plane.issued_audiences") ||
 		k.Exists("auth.control_plane.expected_audiences") ||
 		k.Exists("auth.control_plane.public_user_registration") ||
 		k.Exists("auth.control_plane.public_tenant_registration") ||
+		k.Exists("auth.control_plane.public_hosted") ||
+		k.Exists("auth.control_plane.token_prefix") ||
+		k.Exists("auth.control_plane.bootstrap_admin_service_token_name") ||
 		k.Exists("auth.control_plane.platform_org_slug") ||
 		k.Exists("auth.control_plane.platform_admin_user_id") ||
+		os.Getenv("AUTH_CONTROL_PLANE_ISSUER") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_ISSUED_AUDIENCES") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_EXPECTED_AUDIENCES") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_PUBLIC_USER_REGISTRATION") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_PUBLIC_TENANT_REGISTRATION") != "" ||
+		os.Getenv("AUTH_CONTROL_PLANE_PUBLIC_HOSTED") != "" ||
+		os.Getenv("AUTH_CONTROL_PLANE_TOKEN_PREFIX") != "" ||
+		os.Getenv("AUTH_CONTROL_PLANE_BOOTSTRAP_ADMIN_SERVICE_TOKEN_NAME") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_PLATFORM_ORG_SLUG") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_PLATFORM_ADMIN_USER_ID") != ""
 	if ignoredStoreConfig {
@@ -1410,6 +1368,9 @@ func Load(configPath string) (*Config, error) {
 	if ignoredCORSConfig {
 		log.Warn("ignoring retired cors_origins config (#519): delegated browser origin policy belongs to AuthKit remote_application.allowed_origins")
 	}
+	if ignoredDBRequireRLS {
+		log.Warn("ignoring retired db.require_rls config: RLS enforcement is derived from env; development may bypass RLS, every other env requires an RLS-enforcing DB role")
+	}
 	if ignoredAuthIssuers {
 		log.Warn("ignoring retired auth issuer/audience config (#521): seed AuthKit remote applications, JWKS, service tokens, and admin users with openrails push-merchant-config under auth")
 	}
@@ -1417,7 +1378,7 @@ func Load(configPath string) (*Config, error) {
 		log.Warn("ignoring retired processors config (#521): seed merchant provider_accounts and secrets with openrails push-merchant-config under merchants[].provider_accounts")
 	}
 	if ignoredControlPlaneLegacy {
-		log.Warn("ignoring retired control-plane config (#521): audiences are fixed to openrails, public hosted mode is auth.control_plane.public_hosted, and platform-superadmin belongs in openrails-saas")
+		log.Warn("ignoring retired auth.control_plane config (#521): use auth.issuer / AUTH_ISSUER; audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in openrails-saas")
 	}
 
 	// Unmarshal into config struct (overlay onto defaults)
@@ -1443,17 +1404,14 @@ func Load(configPath string) (*Config, error) {
 		cfg.TestEnv = cfg.IsDev()
 	}
 
-	// The control plane is mandatory in standalone mode (#469): materialize the
-	// config section when omitted. In development the issuer defaults to the
-	// deployment's own base URL so zero-config dev boots; outside development a
-	// missing issuer fails fast at control-plane construction.
+	// The control plane is mandatory in standalone mode (#469). In development
+	// auth.issuer defaults to the deployment's own base URL so zero-config dev
+	// boots; outside development a missing issuer fails fast at control-plane
+	// construction.
 	if cfg.Auth == nil {
 		cfg.Auth = &AuthConfig{}
 	}
-	if cfg.Auth.ControlPlane == nil {
-		cfg.Auth.ControlPlane = &ControlPlaneConfig{}
-	}
-	if strings.TrimSpace(cfg.Auth.ControlPlane.Issuer) == "" {
+	if strings.TrimSpace(cfg.Auth.Issuer) == "" {
 		if isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""; isDev {
 			issuer := strings.TrimSpace(cfg.APIURL)
 			if issuer == "" {
@@ -1463,7 +1421,7 @@ func Load(configPath string) (*Config, error) {
 				}
 				issuer = fmt.Sprintf("http://localhost:%d", port)
 			}
-			cfg.Auth.ControlPlane.Issuer = strings.TrimRight(issuer, "/")
+			cfg.Auth.Issuer = strings.TrimRight(issuer, "/")
 		}
 	}
 

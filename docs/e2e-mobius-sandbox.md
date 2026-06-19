@@ -69,7 +69,7 @@ Minimum set (fill in real values):
 
 ```bash
 # sandbox mode
-TEST_MODE=true
+TEST_ENV=true
 
 # AuthKit devserver mint secret (used by scripts/mint_jwt.sh); choose a local-only random value
 AUTHKIT_DEV_MINT_SECRET=$(openssl rand -hex 32)
@@ -89,7 +89,7 @@ E2E_MOBIUS_PLAN_ID=YOUR_SANDBOX_PLAN_ID
 ```
 
 Notes:
-- Billing uses fixed NMI gateway endpoints for Mobius/NMI direct-post and query calls. Use sandbox/test credentials when `TEST_MODE=true`.
+- Billing uses fixed NMI gateway endpoints for Mobius/NMI direct-post and query calls. Use sandbox/test credentials when `TEST_ENV=true`.
 - OpenRails does not read PROCESSORS_* from `.env`. Seed merchant-scoped
   provider credentials through `openrails push-merchant-config`:
 

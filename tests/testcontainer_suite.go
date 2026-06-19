@@ -222,10 +222,7 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			// tenant. Admin-route integration tests therefore require the embedded
 			// control plane wired with the test admin granted openrails:admin, so
 			// the suite enables it here exactly like a production standalone boot.
-			ControlPlane: &config.ControlPlaneConfig{
-				Issuer:      "https://controlplane.openrails.test",
-				TokenPrefix: "openrails",
-			},
+			Issuer: "https://controlplane.openrails.test",
 		},
 	}
 	// Payment processor credentials are construction-time merchant/provider

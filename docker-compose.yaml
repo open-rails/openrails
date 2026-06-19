@@ -217,8 +217,17 @@ services:
     environment:
       # Service runtime mode
       ENV: "${ENV:-development}"
-      TEST_MODE: "${TEST_MODE:-true}"
+      TEST_ENV: "${TEST_ENV:-true}"
       API_URL: "${API_URL:-http://localhost:22053}"
+      AUTH_ISSUER: "${AUTH_ISSUER:-http://localhost:22053}"
+      # AuthKit signing keys for OpenRails' own issuer:
+      #   1. ACTIVE_KEY_ID / ACTIVE_PRIVATE_KEY_PEM / PUBLIC_KEYS envs, or
+      #   2. /vault/auth/keys.json injected by Vault/External Secrets, or
+      #   3. development-only generated keys persisted at /.runtime/authkit.
+      AUTHKIT_KEYS_PATH: "${AUTHKIT_KEYS_PATH:-/vault/auth}"
+      ACTIVE_KEY_ID: "${ACTIVE_KEY_ID:-}"
+      ACTIVE_PRIVATE_KEY_PEM: "${ACTIVE_PRIVATE_KEY_PEM:-}"
+      PUBLIC_KEYS: "${PUBLIC_KEYS:-}"
       # Closed-registration provisioning is explicit:
       #   openrails push-merchant-config -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
       #   openrails push-merchant-catalog -c /etc/openrails/config.yaml -f /etc/openrails/catalog.yaml
@@ -245,6 +254,8 @@ services:
     command: ["server"]
     volumes:
       - openrails_spool:/var/lib/openrails/spool
+      - openrails_runtime_keys:/.runtime/authkit
+      - ${AUTHKIT_KEYS_HOST_DIR:-./.secrets/authkit}:/vault/auth:ro
     networks:
       - local-openrails
 
@@ -293,6 +304,8 @@ volumes:
   clickhouse_logs:
   clickhouse_keeper_data:
   openrails_spool:
+  openrails_runtime_keys:
+  issuer_postgres_data:
   issuer_runtime_keys:
 
 networks:

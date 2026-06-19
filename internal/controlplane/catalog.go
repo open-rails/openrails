@@ -128,9 +128,9 @@ const (
 	// PermPlatformSuperadmin is the PLATFORM-level cross-merchant administrative
 	// capability (issue #226), DISTINCT from PermAdmin. PermAdmin is per-tenant
 	// operator authority: it is held by an operator org and only governs THAT
-	// tenant. PermPlatformSuperadmin is held by a SEPARATE platform org/role
-	// (cfg.Auth.ControlPlane.PlatformOrgSlug) and authorizes managed-hosting
-	// platform operators to administer ANY tenant via the control plane:
+	// tenant. PermPlatformSuperadmin is held by a SEPARATE platform org/role in
+	// the private openrails-saas layer and authorizes managed-hosting platform
+	// operators to administer ANY tenant via the control plane:
 	// the cross-tenant `/v1/platform/*` surface, cross-tenant search, platform
 	// metrics. A org operator admin does NOT hold
 	// this permission (it is never seeded into operator orgs), so it cannot pass
@@ -281,8 +281,8 @@ const (
 	// their own tenant is an OpenRails admin (#312).
 	OperatorRole = "openrails-operator"
 
-	// PlatformRole is the OpenRails role seeded in the SEPARATE platform org
-	// (cfg.Auth.ControlPlane.PlatformOrgSlug, issue #226). It holds
+	// PlatformRole is the OpenRails role seeded in the SEPARATE platform org by
+	// the private openrails-saas layer. It holds
 	// PermPlatformSuperadmin — the cross-tenant managed-hosting authority — and
 	// is the only role granted that permission. It is distinct from OperatorRole
 	// so that a per-merchant admin can never reach the platform surface.

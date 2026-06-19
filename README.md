@@ -70,8 +70,8 @@ The rule across both modes is: **one credential per trust domain.**
   runs its own AuthKit control plane — the in-process authority that issues and verifies
   these credentials, holds the runtime merchant/issuer registry, and gates admin routes.
   (There is no control-plane-less "verifier-only" standalone; private/self-hosted
-  registration is the default. `public_hosted` is reserved for the private
-  OpenRails SaaS layer.)
+  registration is the only standalone mode in this repo. Public hosted registration
+  belongs in the private OpenRails SaaS layer.)
   Identity claims that cross that boundary must be independently verifiable, so each caller
   class gets a credential scoped to exactly what it may do:
   - your **backend** uses a **service token** (`openrails_st_...`) or a first-party OIDC
@@ -406,14 +406,14 @@ or your own tooling instead — admin routes without a permission checker fail c
   the caller's own org (see embedded guide §5). Never derived from role names.
 - **Sandbox vs live:** `TEST_ENV=true` routes every processor to its test/sandbox
   environment and enforces sandbox credentials so you can't accidentally charge a real
-  card. It is **off by default — including in dev** — and is rejected outside
-  development (see Operating modes below).
+  card. It defaults on in development, must be explicit for live local runs, and is
+  rejected outside development (see Operating modes below).
 
 ## Configuration
 
 Zero-config against the bundled compose stack. Override with a `config.yaml` (repo root or
 `./config/`) or env vars (koanf mapping, e.g. `DB_URL` → `db.url`,
-`AUTH_CONTROL_PLANE_ISSUER` → `auth.control_plane.issuer`). See `config.example.yaml`
+`AUTH_ISSUER` → `auth.issuer`). See `config.example.yaml`
 and `.env.example`.
 
 ## Operating Modes

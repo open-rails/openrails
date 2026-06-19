@@ -37,7 +37,7 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 	}
 	cp := embcp.Get(application)
 	if cp == nil || cp.Core() == nil {
-		return fmt.Errorf("control plane unavailable (set auth.control_plane.issuer)")
+		return fmt.Errorf("control plane unavailable (set auth.issuer)")
 	}
 
 	if _, berr := embcp.RunBootstrap(ctx, application, controlplane.BootstrapOptions{
