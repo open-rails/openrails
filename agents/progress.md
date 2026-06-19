@@ -146,17 +146,49 @@ DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
 - Self surface (`/v1/self/*`) likewise embeds the caller's active entitlements in their self-detail response.
 - Admin user search (`GET /admin/users?entitlement=`) is NEW capability (no current handler) — build minimal (list + filter), or flag as follow-up if the list query is non-trivial.
 
-**Implementation plan — build-safe increments (DECIDED, in progress):**
-- [x] Surface + drops/merges signed off (above); design data-grounded in host usage.
-- [ ] **Increment 1 (structural, build-safe):** rename `MerchantAdminRoutePrefix` `/merchant-admin`→`/admin` + `RegisterMerchantAdminRoutes`→`RegisterAdminRoutes`; delete per-user `/v1/admin` (old `RegisterAdminRoutes` in routes.go, `registerAdminRoutesOn/At`, server.go mount, embedhttp mount, `embgin.RegisterAdminRoutes`); rewire server.go/routes_self.go/self.go to `/admin`. Port the KEEP-unique read `GET /admin/payments[/{id}]` to the delegated surface (`read`). Commit green.
-- [ ] **Increment 2 (drops):** remove routes + now-dead handlers for `/provider-intents`, `/reconcile/*` (#107), `/recurring-plans` (#254), entitlement-features + `active_entitlements` (#245). Commit green.
-- [ ] **Increment 3 (RESTful routes):** cancel → `DELETE /admin/subscriptions/{id}`; refund → `POST /admin/payments/{id}/refunds`.
-- [ ] **Increment 4 (shapes — handler logic):** new perm `openrails:merchant:product-access:write` (catalog + owner wildcard covers it); port product-access grant/revoke to `/admin/users/{id}/product-access`. Composite `GET /admin/users/{id}` (subscriptions + payment-methods + entitlements + product-access + credit-balance sections); DROP the dedicated entitlements/product-access/nmi/ccbill reads. `payment-methods` folds NMI+CCBill(+metrics). Fold metrics → one `GET /admin/metrics`. Self-detail embeds the caller's active entitlements. Trim shapes to fields actually read.
-- [ ] **Increment 5 (NEW):** `GET /admin/users[?entitlement=]` — admin user list/search embedding entitlement/product-access/credit summary.
-- [ ] Migrate admin-gated catalog reads (`IsLiveAdmin`) off per-user `HasAdminPermission` to the delegated principal.
-- [ ] (Later, separate repos) update host frontends to the new paths/shapes.
+**Implementation plan — build-safe increments (DECIDED, in progress). Detailed checklists below.**
 
-Verification each increment: build + vet + route/unit tests. NOT DB-integration-tested here.
+### Increment 1 (structural) — DONE (commit 53fbbe3c)
+- [x] ginroutes/routes.go: `MerchantAdminRoutePrefix`→`AdminRoutePrefix` ("/admin"); `RegisterMerchantAdminRoutes`→`RegisterAdminRoutes`; ported `GET /admin/payments` + `/payments/:id` (`read`).
+- [x] Unmount per-user surface: `server.go` (drop `registerAdminRoutesOn` call), `embedhttp.go` (drop `RegisterAdminRoutes` mount), `pkg/embedded/gin/gin.go` (delete `embgin.RegisterAdminRoutes`).
+- [x] Rewire callers: routes_self.go, pkg/embedded/gin/self.go. Update tests: ginroutes/self_service_test.go, routes_self_test.go, pkg/embedded/gin/self_test.go, embedded_mux_test.go.
+- [x] Validated via HTTP route harness (`go test ./internal/http/... ./pkg/embedded/gin/...`).
+
+### Increment 2 (drops) — remove dropped features' routes + dead per-user code
+- [ ] Delete dead per-user `RegisterAdminRoutes` (internal/http/routes/routes.go) + `registerAdminRoutesAt`/`registerAdminRoutesOn` (internal/http/routes_admin.go).
+- [ ] **Before deleting each handler, grep its callers** — keep any still used by `/self` or `/service`; only delete admin-only ones.
+- [ ] `/provider-intents`: drop route + `httphandlers.GetAdminProviderIntents` (verify not used elsewhere).
+- [ ] `/reconcile/*` (#107): drop routes + `AdminReconcile{Run,ListRuns,GetRun,ListFindings,AckFinding,DismissFinding}`. Leave the underlying convergence-engine service/worker/migration 008 (non-admin paths) unless clearly admin-only — DECIDE + note.
+- [ ] `/recurring-plans` (#254): drop route + `AdminPublishSolanaPlan` + `publishSolanaPlanRequest` (internal/http/handlers/solana_recurring.go). Leave on-chain plan execution / webhook paths.
+- [ ] entitlement-features + `active_entitlements` (#245): delete `RegisterEntitlementFeatureRoutes` (internal/http/routes/entitlement_features.go) + handlers `Create/ListEntitlementFeatures`, `ServiceGetActiveEntitlements`, `List/Attach/DetachProductFeature`. Verify `ServiceGetActiveEntitlements` isn't used by `/self`.
+- [ ] Fix orphaned imports; remove/upd tests referencing dropped handlers. Build + vet + route tests green.
+
+### Increment 3 (RESTful route shapes)
+- [ ] ginroutes/routes.go: subscription cancel `POST /subscriptions/:id/cancel` → `DELETE /subscriptions/:id` (handler `AdminCancelSubscription` unchanged).
+- [ ] refund `POST /payments/:id/refund` → `POST /payments/:id/refunds`.
+- [ ] Update ginroutes/self_service_test.go path assertions. Build + tests green.
+
+### Increment 4 (shapes — handler logic; the big one)
+- [ ] New perm `PermMerchantProductAccessWrite = "openrails:merchant:product-access:write"` in internal/controlplane/catalog.go; add to the permission catalog (owner wildcard `*` already covers it).
+- [ ] Port product-access WRITES to ginroutes/routes.go: `POST /admin/users/:user_id/product-access` (`GrantAdminProductAccess`) + `DELETE /admin/users/:user_id/product-access/:id` (`RevokeAdminProductAccess`), gated by the new perm.
+- [ ] Composite `GET /admin/users/:user_id` (`GetAdminUserBillingProfile`): response = `{profile, subscriptions[], payment_methods[], entitlements[], product_access[], credit_balance}`. Compose from the subscription/payment-method/entitlement/product-access/credit services. Define a minimal composite response struct.
+- [ ] DROP dedicated reads (routes + handlers if now-unused): `GET /users/:id/entitlements`, `/product-access`, `/nmi`, `/nmi/metrics`, `/ccbill`, `/ccbill/metrics`.
+- [ ] `payment-methods`: combined `GET /admin/users/:user_id/payment-methods` folding NMI + CCBill (+ their metrics) into one shape (replaces the 4 dropped reads); also the embedded section in user-detail.
+- [ ] Fold metrics → one `GET /admin/metrics` returning `{summary, revenue, subscriptions, processors, churn}`; remove the 5 sub-routes (handlers `GetAdminMetrics*` reused internally or composed).
+- [ ] Self surface: embed caller's active entitlements in the `/v1/self/*` self-detail response (find the self-detail handler in ginroutes self-service + add entitlements section).
+- [ ] Shape trimming: per kept request/response struct, drop fields no consumer reads (ground in host frontend usage); collapse single-use nested objects; drop unused filter/pagination knobs.
+- [ ] DB-integration-test the composite + payment-methods + metrics shapes against the dbtest/compose harness.
+
+### Increment 5 (NEW capability — admin user search)
+- [ ] `GET /admin/users[?entitlement={slug}&limit=&cursor=]`: new handler `ListAdminUsers` + query (list billing users for the tenant, optional entitlement filter), each row embedding entitlement/product-access/credit summary. Minimal pagination.
+- [ ] New sqlc query (internal/db) or hand-written; gate with `read`. DB-integration-test the filter.
+
+### Cross-cutting cleanup
+- [ ] Migrate admin-gated catalog reads (`internal/auth/policy.IsLiveAdmin` + the runtime `AdminChecker`, used to show inactive catalog rows to admins) off per-user `HasAdminPermission(org,userID)` to the delegated principal's perms. Then the per-user `PermAdmin`/`AdminPermissionChecker`/`AdminPermissionRequiredMW`/`HasAdminPermission` machinery can be deleted (controlplane/authority.go, auth/policy/admin*.go).
+- [ ] Docs + comment sweep (deferred from Increment 1): code comments referencing `/v1/merchant-admin` (internal/app/app.go, internal/http/routes_self.go, internal/http/server.go); docs (README.md, docs/api/endpoints.md, docs/principal-boundary-audit.md, docs/vault-secret-ops.md); rename test helper `newMerchantAdminRouter`→`newAdminRouter`.
+- [ ] (Later, separate repos) update host frontends (cozy-art/doujins/tensorhub): `/v1/merchant-admin/*`→`/v1/admin/*` paths + new shapes; cozy-art may switch any per-user `/v1/admin` billing calls to the delegated surface.
+
+**Verification each increment:** build + vet + route/unit tests, AND DB-integration tests via the `internal/dbtest` harness (testcontainers, or `OPENRAILS_TEST_DB_URL` against `docker-compose.yaml`); host-level e2e via `~/cozy/e2e` and the host repos' full-stack compose. (Earlier "not DB-testable" note was WRONG — corrected.)
 
 ---
 
