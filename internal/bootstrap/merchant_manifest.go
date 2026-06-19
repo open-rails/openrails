@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/secretstore"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -104,7 +105,12 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 	if err != nil {
 		return err
 	}
-	secretStore, err := merchants.NewDBSecretStore(cp.Pool())
+	// OR-CFG-001: build the secret store via the shared constructor — the SAME
+	// wiring the runtime read path uses — so provisioning never writes provider /
+	// processor / Solana secrets less protected (e.g. plaintext) than the runtime
+	// expects. Vault-backed when configured, otherwise per-merchant envelope
+	// encryption with a plaintext-Solana write-block.
+	secretStore, _, err := secretstore.Build(ctx, cfg, cp.Pool())
 	if err != nil {
 		return fmt.Errorf("merchant bootstrap: build secret store: %w", err)
 	}

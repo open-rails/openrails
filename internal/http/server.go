@@ -13,25 +13,19 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/crypto"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
-	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/platform"
+	"github.com/open-rails/openrails/internal/secretstore"
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/merchant"
-)
-
-const (
-	vaultKVMount      = "secret"
-	vaultTransitMount = "transit"
 )
 
 type Dependencies struct {
@@ -189,53 +183,12 @@ func New(deps Dependencies) (*Server, error) {
 	// store is the self-hosted default and needs no live Vault; a managed
 	// deployment swaps in the Vault-backed store with the same addressing.
 	{
-		var secretStore merchants.MerchantSecretStore
-		var solanaTransit solanaint.TransitClient
-
-		if deps.Config != nil && deps.Config.Vault != nil && deps.Config.Vault.Enabled {
-			// Managed: Vault KV-v2 backend (#251), same (tenant, name) addressing.
-			// Vault encrypts at rest, so no envelope wrapper. Transit keeps the
-			// per-tenant Solana key non-extractable.
-			vc := deps.Config.Vault
-			vclient, verr := vault.Login(context.Background(), vault.Config{
-				Address: vc.Address, AuthMethod: vc.AuthMethod, Token: vc.Token, RoleID: vc.RoleID,
-				SecretID: vc.SecretID, K8sRole: vc.K8sRole,
-			})
-			if verr != nil {
-				return nil, fmt.Errorf("vault login: %w", verr)
-			}
-			secretStore = merchants.NewVaultSecretStore(vaultKVMount, vault.NewKVv2Adapter(vclient, vaultKVMount), merchants.NewDBMerchantSlugResolver(deps.ControlPlane.Pool()))
-			solanaTransit = vault.NewTransitAdapter(vclient, vaultTransitMount)
-		} else {
-			// Self-hosted default: DB-backed store + per-tenant envelope encryption
-			// (issue #227). With no master key, most secrets keep the legacy
-			// plaintext behavior, but Solana private keys are write-blocked below so
-			// recurring signing keys are never newly stored plaintext.
-			dbStore, sserr := merchants.NewDBSecretStore(deps.ControlPlane.Pool())
-			if sserr != nil {
-				return nil, fmt.Errorf("build tenant secret store: %w", sserr)
-			}
-			var masterKey string
-			if deps.Config != nil && deps.Config.Encryption != nil {
-				masterKey = deps.Config.Encryption.MasterKey
-			}
-			dekStore, dkerr := crypto.NewDBDEKStore(deps.ControlPlane.Pool())
-			if dkerr != nil {
-				return nil, fmt.Errorf("build tenant DEK store: %w", dkerr)
-			}
-			enc, encerr := crypto.NewEncryptor(masterKey, dekStore)
-			if encerr != nil {
-				return nil, fmt.Errorf("build tenant encryptor: %w", encerr)
-			}
-			secretStore, sserr = merchants.NewEncryptedSecretStore(dbStore, enc)
-			if sserr != nil {
-				return nil, fmt.Errorf("wrap tenant secret store with encryption: %w", sserr)
-			}
-			if !enc.Enabled() {
-				secretStore = merchants.NewWriteRestrictedSecretStore(secretStore, map[string]string{
-					solanaint.SecretSolanaPrivateKey: "ENCRYPTION_MASTER_KEY is required before storing DB-backed Solana private keys",
-				})
-			}
+		// Build the secret store via the shared constructor so this runtime read
+		// path and the bootstrap/provisioning write path can never diverge in how
+		// secrets are protected at rest (OR-CFG-001).
+		secretStore, solanaTransit, sserr := secretstore.Build(context.Background(), deps.Config, deps.ControlPlane.Pool())
+		if sserr != nil {
+			return nil, sserr
 		}
 
 		// Front the chosen store with an in-process TTL cache (#251/#322) so workers
