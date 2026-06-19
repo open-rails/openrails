@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -51,9 +52,11 @@ func GetAdminRepairAlerts(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to count repair alerts")
 		return
 	}
+	limit32, _ := safecast.Convert[int32](limit)
+	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListRepairAlerts(ctx, gen.ListRepairAlertsParams{
 		CustomerID: tsid, EventType: string(models.NotificationSystemAlert), Seen: seen,
-		Column3: int32(limit), Column4: int32(offset),
+		Column3: limit32, Column4: offset32,
 	})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve repair alerts")

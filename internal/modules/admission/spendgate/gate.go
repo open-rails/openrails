@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -326,7 +327,10 @@ func fixedOffsetMs(prefix string, durMs int64) int64 {
 	}
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(prefix))
-	return int64(h.Sum64() % uint64(durMs))
+	// durMs > 0 is guaranteed above, so the modulo result is in [0, durMs) and
+	// always fits a non-negative int64; safecast keeps the conversion checked.
+	off, _ := safecast.Convert[int64](h.Sum64() % uint64(durMs))
+	return off
 }
 
 func toInt64(v any) int64 {
