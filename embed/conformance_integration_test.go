@@ -146,11 +146,10 @@ type obsBudgetPolicy struct {
 }
 
 type obsMerchantProfile struct {
-	DisplayName  string
-	LogoURL      string
-	FromEmail    string
-	SupportURL   string
-	SupportEmail string
+	DisplayName string
+	LogoURL     string
+	FromEmail   string
+	SupportURL  string
 }
 
 func observeBudgetPolicies(ps []openrails.InvokerSpendLimit) []obsBudgetPolicy {
@@ -678,7 +677,6 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 			LogoURL:      "https://example.com/logo.png",
 			FromEmail:    "billing@example.com",
 			SupportURL:   "https://example.com/support",
-			SupportEmail: "support@example.com",
 		},
 		DelegatedInvokerWastedSpendWindows: []openrails.BudgetWindowInput{
 			{Key: "burst", WindowSeconds: 900, Limit: 1_000_000},
@@ -722,7 +720,6 @@ func observeMerchantProfile(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		LogoURL:      cfg.Profile.LogoURL,
 		FromEmail:    cfg.Profile.FromEmail,
 		SupportURL:   cfg.Profile.SupportURL,
-		SupportEmail: cfg.Profile.SupportEmail,
 	}
 }
 

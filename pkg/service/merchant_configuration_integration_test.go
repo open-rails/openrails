@@ -91,10 +91,10 @@ func TestMerchantConfiguration_TwoMerchantsKeepDistinctProfiles(t *testing.T) {
 
 	merchantB := merchant.ID(uuid.New())
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO openrails.merchants (id, slug, name, status)
-		VALUES ($1, $2, $3, 'active')
-		ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
-	`, merchantB.UUID(), "profile-b", "Profile B")
+		INSERT INTO openrails.merchants (id, slug, status)
+		VALUES ($1, $2, 'active')
+		ON CONFLICT (slug) DO UPDATE SET updated_at = now()
+	`, merchantB.UUID(), "profile-b")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.merchant_configurations WHERE merchant_id = $1", merchantB.UUID())
@@ -107,7 +107,6 @@ func TestMerchantConfiguration_TwoMerchantsKeepDistinctProfiles(t *testing.T) {
 			DisplayName:  "Merchant A Billing",
 			FromEmail:    "billing-a@example.com",
 			SupportURL:   "https://a.example/support",
-			SupportEmail: "support-a@example.com",
 		},
 	}))
 	require.NoError(t, svc.SetMerchantConfiguration(ctxB, billingservice.MerchantConfiguration{
@@ -115,7 +114,6 @@ func TestMerchantConfiguration_TwoMerchantsKeepDistinctProfiles(t *testing.T) {
 			DisplayName:  "Merchant B Billing",
 			FromEmail:    "billing-b@example.com",
 			SupportURL:   "https://b.example/support",
-			SupportEmail: "support-b@example.com",
 		},
 	}))
 
@@ -129,11 +127,9 @@ func TestMerchantConfiguration_TwoMerchantsKeepDistinctProfiles(t *testing.T) {
 	require.Equal(t, "Merchant A Billing", cfgA.Profile.DisplayName)
 	require.Equal(t, "billing-a@example.com", cfgA.Profile.FromEmail)
 	require.Equal(t, "https://a.example/support", cfgA.Profile.SupportURL)
-	require.Equal(t, "support-a@example.com", cfgA.Profile.SupportEmail)
 	require.Equal(t, "Merchant B Billing", cfgB.Profile.DisplayName)
 	require.Equal(t, "billing-b@example.com", cfgB.Profile.FromEmail)
 	require.Equal(t, "https://b.example/support", cfgB.Profile.SupportURL)
-	require.Equal(t, "support-b@example.com", cfgB.Profile.SupportEmail)
 }
 
 func TestMerchantConfiguration_SetWindowsPreservesProfile(t *testing.T) {

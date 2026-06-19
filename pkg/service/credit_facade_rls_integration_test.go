@@ -46,7 +46,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	require.NoError(t, err)
 	defer super.Close()
 	_, err = super.Pool().Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, name) VALUES ($1, $2, 'CF') ON CONFLICT (id) DO NOTHING`,
+		`INSERT INTO openrails.merchants (id, slug) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
 		tenantID, "merchant-cf-"+tenantID[:8])
 	require.NoError(t, err)
 	_, err = super.Pool().Exec(ctx,

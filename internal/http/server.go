@@ -362,7 +362,7 @@ func New(deps Dependencies) (*Server, error) {
 	// delegated-token verifier (#339).
 	s.registerSelfServiceRoutes(s.publicHandler)
 
-	// Merchant-scoped webhook routing (issue #225): /v1/m/:merchant/webhooks/:provider
+	// Merchant-scoped webhook routing (issue #529): /v1/merchants/:merchant/webhooks/:provider
 	// resolves the merchant from the path slug, then loads THAT merchant's signing
 	// secret and verifies the signature AFTER merchant resolution.
 	s.registerMerchantWebhookRoutes(s.publicHandler)

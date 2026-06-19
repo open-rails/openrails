@@ -33,15 +33,8 @@ CREATE SCHEMA IF NOT EXISTS openrails;
 CREATE TABLE IF NOT EXISTS openrails.merchants (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug                TEXT NOT NULL UNIQUE,
-    name                TEXT NOT NULL,
     status              TEXT NOT NULL DEFAULT 'active',
     owner_org_id     TEXT,
-    plan                TEXT,
-    region              TEXT,
-    billing_tier        TEXT,
-    stripe_account_id   TEXT,
-    webhook_host        TEXT,
-    webhook_path        TEXT,
     provisioned_at      TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -116,46 +109,39 @@ func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
-	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, cozyArtMerchantManifest("starter", "us-west", "/hooks/v1"), MerchantManifestReconcileOptions{}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, cozyArtMerchantManifest(), MerchantManifestReconcileOptions{}))
 
-	var tenantID, ownerOrgID, billingTier, region, webhookPath string
+	var tenantID, ownerOrgID string
 	require.NoError(t, pool.QueryRow(ctx, `
-			SELECT id::text, owner_org_id, billing_tier, region, webhook_path
+			SELECT id::text, owner_org_id
 		  FROM openrails.merchants
 		 WHERE slug = 'cozy-art'
-	`).Scan(&tenantID, &ownerOrgID, &billingTier, &region, &webhookPath))
-	require.Equal(t, "starter", billingTier)
-	require.Equal(t, "us-west", region)
-	require.Equal(t, "/hooks/v1", webhookPath)
+	`).Scan(&tenantID, &ownerOrgID))
 
 	ownerOrg, err := cp.Core().ResolveOrgBySlug(ctx, "cozy-art")
 	require.NoError(t, err)
 	require.Equal(t, ownerOrg.ID, ownerOrgID, "manifest bootstrap should bind the merchant namespace to a bootstrap-created owner org")
 
-	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, cozyArtMerchantManifest("pro", "us-east", "/hooks/v2"), MerchantManifestReconcileOptions{}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, cozyArtMerchantManifest(), MerchantManifestReconcileOptions{}))
 
 	require.NoError(t, pool.QueryRow(ctx, `
-			SELECT owner_org_id, billing_tier, region, webhook_path
+			SELECT owner_org_id
 		  FROM openrails.merchants
 		 WHERE slug = 'cozy-art'
-	`).Scan(&ownerOrgID, &billingTier, &region, &webhookPath))
+	`).Scan(&ownerOrgID))
 	require.Equal(t, ownerOrg.ID, ownerOrgID)
-	require.Equal(t, "pro", billingTier)
-	require.Equal(t, "us-east", region)
-	require.Equal(t, "/hooks/v2", webhookPath)
 }
 
 func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
-	manifest := cozyArtMerchantManifest("starter", "us-west", "/hooks/v1")
+	manifest := cozyArtMerchantManifest()
 	manifest.Merchants[0].Profile = ManifestMerchantProfile{
-		DisplayName:  "Cozy Art Billing",
-		LogoURL:      "https://cdn.example/logo.png",
-		FromEmail:    "billing@example.com",
-		SupportURL:   "https://example.com/support",
-		SupportEmail: "support@example.com",
+		DisplayName: "Cozy Art Billing",
+		LogoURL:     "https://cdn.example/logo.png",
+		FromEmail:   "billing@example.com",
+		SupportURL:  "https://example.com/support",
 	}
 	manifest.Merchants[0].ProviderAccounts = []ManifestProviderAccount{{
 		ProviderType: "stripe",
@@ -172,22 +158,20 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	var merchantID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
 
-	var displayName, logoURL, fromEmail, supportURL, supportEmail string
+	var displayName, logoURL, fromEmail, supportURL string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT
 			config #>> '{profile,display_name}',
 			config #>> '{profile,logo_url}',
 			config #>> '{profile,from_email}',
-			config #>> '{profile,support_url}',
-			config #>> '{profile,support_email}'
+			config #>> '{profile,support_url}'
 		FROM openrails.merchant_configurations
 		WHERE merchant_id = $1::uuid
-	`, merchantID).Scan(&displayName, &logoURL, &fromEmail, &supportURL, &supportEmail))
+	`, merchantID).Scan(&displayName, &logoURL, &fromEmail, &supportURL))
 	require.Equal(t, "Cozy Art Billing", displayName)
 	require.Equal(t, "https://cdn.example/logo.png", logoURL)
 	require.Equal(t, "billing@example.com", fromEmail)
 	require.Equal(t, "https://example.com/support", supportURL)
-	require.Equal(t, "support@example.com", supportEmail)
 
 	var secretValue string
 	require.NoError(t, pool.QueryRow(ctx, `
@@ -214,7 +198,7 @@ func TestReconcileMerchantManifestSerializesConcurrentReplicas(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
-	manifest := cozyArtMerchantManifest("starter", "us-west", "/hooks/v1")
+	manifest := cozyArtMerchantManifest()
 
 	start := make(chan struct{})
 	var successes atomic.Int32
@@ -329,16 +313,12 @@ func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlp
 	return cp
 }
 
-func cozyArtMerchantManifest(tier, region, webhookPath string) *MerchantManifest {
+func cozyArtMerchantManifest() *MerchantManifest {
 	return &MerchantManifest{
 		Version: BootstrapManifestVersion,
 		Merchants: []ManifestMerchant{{
 			Slug:        "cozy-art",
-			Name:        "Cozy Art",
-			BillingTier: tier,
-			Region:      region,
-			WebhookHost: "cozy.example",
-			WebhookPath: webhookPath,
+			DisplayName: "Cozy Art",
 		}},
 	}
 }

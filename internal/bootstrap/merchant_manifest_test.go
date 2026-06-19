@@ -16,7 +16,7 @@ func TestParseBootstrapManifest(t *testing.T) {
 version: 1
 merchants:
   - slug: cozy-art
-    name: Cozy Art
+    display_name: Cozy Art
     issuer:
       uri: https://auth.cozy.art
       jwks_uri: https://auth.cozy.art/.well-known/jwks.json
@@ -26,7 +26,6 @@ merchants:
       logo_url: https://cdn.example/logo.png
       from_email: billing@example.com
       support_url: https://example.com/support
-      support_email: support@example.com
     provider_accounts:
       - provider_type: stripe
         account_id: acct_test_123
@@ -70,7 +69,7 @@ func TestParseBootstrapManifestValidationErrors(t *testing.T) {
 version: 1
 merchants:
   - slug: cozy-art
-    name: Cozy Art
+    display_name: Cozy Art
 ` + fragment
 	}
 	for _, tc := range []struct {
@@ -94,9 +93,19 @@ merchants:
 			want: "at least one merchant",
 		},
 		{
-			name: "missing merchant name",
+			name: "missing merchant display name",
 			body: "version: 1\nmerchants:\n  - slug: cozy-art\n",
-			want: `merchant "cozy-art" name is required`,
+			want: `merchant "cozy-art" display_name is required`,
+		},
+		{
+			name: "merchant name removed",
+			body: "version: 1\nmerchants:\n  - slug: cozy-art\n    name: Cozy Art\n",
+			want: "field name not found",
+		},
+		{
+			name: "support email removed",
+			body: base("    profile:\n      support_email: support@example.com\n"),
+			want: "support_email",
 		},
 		{
 			name: "issuer missing uri",

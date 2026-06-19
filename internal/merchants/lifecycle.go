@@ -26,13 +26,8 @@ const (
 type Merchant struct {
 	ID          merchant.ID
 	Slug        string
-	Name        string
 	Status      MerchantStatus
 	OwnerOrgID  string // AuthKit org that owns/administers this merchant namespace (#500).
-	BillingTier string
-	Region      string
-	WebhookHost string
-	WebhookPath string
 	SuspendedAt *time.Time
 }
 
@@ -40,19 +35,10 @@ type Merchant struct {
 type ProvisionRequest struct {
 	// Slug is the stable org slug (used in routes and tenant resolution).
 	Slug string `json:"slug"`
-	// Name is the human-readable merchant name.
-	Name string `json:"name"`
 	// OwnerOrgID is the AuthKit org uuid that owns/administers this merchant
 	// namespace (#500 ownership link, NOT identity). Required for control-plane
 	// provisioning; embedded/no-AuthKit registration uses internal/db.RegisterMerchant.
 	OwnerOrgID string `json:"owner_org_id"`
-	// BillingTier is the platform's own billing tier for this tenant (dogfood).
-	BillingTier string `json:"billing_tier"`
-	// Region is optional hosting metadata.
-	Region string `json:"region"`
-	// WebhookHost / WebhookPath register ingress webhook routing for this tenant.
-	WebhookHost string `json:"webhook_host"`
-	WebhookPath string `json:"webhook_path"`
 }
 
 // ErrMerchantNotFound indicates no openrails.merchants row matched.
@@ -98,11 +84,10 @@ func NewSecretManagementService(secrets MerchantSecretStore) (*Service, error) {
 // Secrets exposes the per-tenant secret store (may be nil).
 func (s *Service) Secrets() MerchantSecretStore { return s.secrets }
 
-// Provision idempotently provisions a tenant (issue #225):
+// Provision idempotently provisions a merchant:
 //
 //  1. create/ensure the openrails.merchants namespace row (resolve by slug),
-//  2. record the owning AuthKit org id supplied by the caller,
-//  3. record routing (webhook host/path) + billing tier + region.
+//  2. record the owning AuthKit org id supplied by the caller.
 //
 // Re-running with the same slug returns the existing tenant (no duplicate row,
 // so provisioning is safe to retry. Default-tenant seeding of catalog/credit
@@ -117,20 +102,15 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 	if ownerOrgID == "" {
 		return nil, ErrOwnerOrgRequired
 	}
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		name = slug
-	}
 
 	// 1. Upsert the merchant directory row. ON CONFLICT(slug) DO NOTHING keeps the
 	//    existing row, then we re-read so provision is idempotent. The AuthKit org
 	//    owner is resolved/created by the caller and recorded here.
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (slug, name, status, owner_org_id, billing_tier, region, webhook_host, webhook_path, provisioned_at)
-		VALUES ($1, $2, 'active', NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), current_timestamp)
+		INSERT INTO openrails.merchants (slug, status, owner_org_id, provisioned_at)
+		VALUES ($1, 'active', NULLIF($2,''), current_timestamp)
 		ON CONFLICT (slug) DO NOTHING
-	`, slug, name, ownerOrgID, strings.TrimSpace(req.BillingTier), strings.TrimSpace(req.Region),
-		strings.TrimSpace(req.WebhookHost), strings.TrimSpace(req.WebhookPath))
+	`, slug, ownerOrgID)
 	if err != nil {
 		return nil, fmt.Errorf("tenancy: insert merchant %q: %w", slug, err)
 	}
@@ -151,21 +131,6 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 	}
 	t.OwnerOrgID = ownerOrgID
 
-	// 3. Reconcile routing / tier / region for an already-existing row (provision
-	//    is idempotent AND patches routing on re-run).
-	if _, err := s.pool.Exec(ctx, `
-		UPDATE openrails.merchants
-		   SET billing_tier  = COALESCE(NULLIF($2,''), billing_tier),
-		       region        = COALESCE(NULLIF($3,''), region),
-		       webhook_host  = COALESCE(NULLIF($4,''), webhook_host),
-		       webhook_path  = COALESCE(NULLIF($5,''), webhook_path),
-		       updated_at    = current_timestamp
-		 WHERE id = $1::uuid
-	`, t.ID.String(), strings.TrimSpace(req.BillingTier), strings.TrimSpace(req.Region),
-		strings.TrimSpace(req.WebhookHost), strings.TrimSpace(req.WebhookPath)); err != nil {
-		return nil, fmt.Errorf("tenancy: reconcile tenant routing: %w", err)
-	}
-
 	return s.merchantBySlug(ctx, slug)
 }
 
@@ -178,26 +143,6 @@ func (s *Service) Suspend(ctx context.Context, id merchant.ID) error {
 // Resume clears suspension and returns the tenant to active. Idempotent.
 func (s *Service) Resume(ctx context.Context, id merchant.ID) error {
 	return s.setStatus(ctx, id, StatusActive, false)
-}
-
-// TierChange upgrades/downgrades the platform's own billing tier for this tenant
-// (dogfood). Idempotent.
-func (s *Service) TierChange(ctx context.Context, id merchant.ID, tier string) error {
-	tier = strings.TrimSpace(tier)
-	if tier == "" {
-		return errors.New("tenancy: tier change requires a tier")
-	}
-	ct, err := s.pool.Exec(ctx, `
-		UPDATE openrails.merchants SET billing_tier = $2, updated_at = current_timestamp
-		 WHERE id = $1::uuid AND deleted_at IS NULL
-	`, id.String(), tier)
-	if err != nil {
-		return fmt.Errorf("tenancy: tier change: %w", err)
-	}
-	if ct.RowsAffected() == 0 {
-		return ErrMerchantNotFound
-	}
-	return nil
 }
 
 func (s *Service) setStatus(ctx context.Context, id merchant.ID, status MerchantStatus, suspended bool) error {
@@ -245,8 +190,8 @@ func (s *Service) GetBySlug(ctx context.Context, slug string) (*Merchant, error)
 	return s.merchantBySlug(ctx, normalizeSlug(slug))
 }
 
-// SearchMerchants returns active tenant directory rows whose slug or name matches
-// the (case-insensitive) query substring. It is the cross-tenant search backing
+// SearchMerchants returns active tenant directory rows whose slug matches the
+// (case-insensitive) query substring. It is the cross-tenant search backing
 // the platform-superadmin API (issue #226); the CALLER is responsible for
 // auditing the search (it is a sensitive cross-tenant read). limit is clamped.
 func (s *Service) SearchMerchants(ctx context.Context, q string, limit int) ([]Merchant, error) {
@@ -261,7 +206,7 @@ func (s *Service) SearchMerchants(ctx context.Context, q string, limit int) ([]M
 	rows, err := s.pool.Query(ctx, `SELECT `+merchantSelectCols+`
 		FROM openrails.merchants
 		WHERE deleted_at IS NULL
-		  AND (lower(slug) LIKE $1 OR lower(name) LIKE $1)
+		  AND lower(slug) LIKE $1
 		ORDER BY slug LIMIT $2`, pattern, limit)
 	if err != nil {
 		return nil, fmt.Errorf("tenancy: search tenants: %w", err)
@@ -282,10 +227,7 @@ func normalizeSlug(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-const merchantSelectCols = `id::text, slug, name, status,
-	COALESCE(owner_org_id,''),
-	COALESCE(billing_tier,''), COALESCE(region,''),
-	COALESCE(webhook_host,''), COALESCE(webhook_path,''), suspended_at`
+const merchantSelectCols = `id::text, slug, status, COALESCE(owner_org_id,''), suspended_at`
 
 func scanMerchant(row pgx.Row) (*Merchant, error) {
 	var (
@@ -294,9 +236,7 @@ func scanMerchant(row pgx.Row) (*Merchant, error) {
 		status      string
 		suspendedAt *time.Time
 	)
-	if err := row.Scan(&idStr, &t.Slug, &t.Name, &status,
-		&t.OwnerOrgID, &t.BillingTier, &t.Region,
-		&t.WebhookHost, &t.WebhookPath, &suspendedAt); err != nil {
+	if err := row.Scan(&idStr, &t.Slug, &status, &t.OwnerOrgID, &suspendedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrMerchantNotFound
 		}

@@ -31,15 +31,8 @@ CREATE SCHEMA IF NOT EXISTS openrails;
 CREATE TABLE IF NOT EXISTS openrails.merchants (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug             TEXT NOT NULL UNIQUE,
-    name             TEXT NOT NULL,
     status           TEXT NOT NULL DEFAULT 'active',
     owner_org_id  TEXT,
-    plan             TEXT,
-    region           TEXT,
-    billing_tier     TEXT,
-    stripe_account_id TEXT,
-    webhook_host     TEXT,
-    webhook_path     TEXT,
     provisioned_at   TIMESTAMPTZ,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -162,12 +155,11 @@ func TestProvision_Idempotent(t *testing.T) {
 
 	// #500: provisioning a merchant namespace requires the caller to provide the
 	// durable AuthKit owner org id. The lifecycle service does not mint it.
-	req := ProvisionRequest{Slug: "acme", Name: "Acme", OwnerOrgID: "org-acme", WebhookHost: "acme.example.com", BillingTier: "pro"}
+	req := ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"}
 	first, err := svc.Provision(ctx, req)
 	require.NoError(t, err)
 	require.Equal(t, "acme", first.Slug)
 	require.Equal(t, "org-acme", first.OwnerOrgID, "explicit owner-org link recorded (never auto-minted)")
-	require.Equal(t, "pro", first.BillingTier)
 
 	// Re-provision: same merchant id, no duplicate row (idempotent).
 	second, err := svc.Provision(ctx, req)
@@ -178,14 +170,14 @@ func TestProvision_Idempotent(t *testing.T) {
 	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchants WHERE slug='acme'`).Scan(&count))
 	require.Equal(t, 1, count, "provision must not create a duplicate merchant row")
 
-	_, err = svc.Provision(ctx, ProvisionRequest{Slug: "noown", Name: "NoOwner"})
+	_, err = svc.Provision(ctx, ProvisionRequest{Slug: "noown"})
 	require.ErrorIs(t, err, ErrOwnerOrgRequired, "control-plane provisioning must not create an ownerless merchant")
 }
 
 func TestSuspend_DeniesWritesAllowsReads(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", Name: "Acme", OwnerOrgID: "org-acme"})
+	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"})
 	require.NoError(t, err)
 
 	// Active tenant is writable.
@@ -217,7 +209,7 @@ func TestSuspend_DeniesWritesAllowsReads(t *testing.T) {
 func TestDelete_RequiresExport(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", Name: "Acme", OwnerOrgID: "org-acme"})
+	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"})
 	require.NoError(t, err)
 
 	// Seed a tenant-owned row + a secret so the purge has something to remove.
@@ -261,7 +253,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 func TestCredentialRotation_WritesAudit(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", Name: "Acme", OwnerOrgID: "org-acme"})
+	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"})
 	require.NoError(t, err)
 
 	sec, err := svc.PutCredential(ctx, tn.ID, SecretStripeSecretKey, "sk_1")
@@ -298,7 +290,7 @@ func TestCredentialRotation_WritesAudit(t *testing.T) {
 func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", Name: "Acme", OwnerOrgID: "org-acme", WebhookHost: "hooks.acme.com"})
+	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"})
 	require.NoError(t, err)
 
 	// Resolve by slug.
@@ -306,15 +298,8 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, tn.ID, route.MerchantID)
 
-	// Resolve by host (with a port, which must be stripped).
-	route, err = svc.ResolveByHost(ctx, "hooks.acme.com:443")
-	require.NoError(t, err)
-	require.Equal(t, tn.ID, route.MerchantID)
-
-	// Unknown slug/host is unresolved (caller must reject; never default-fallback).
+	// Unknown slug is unresolved (caller must reject; never default-fallback).
 	_, err = svc.ResolveBySlug(ctx, "nope")
-	require.True(t, errors.Is(err, ErrMerchantRouteUnresolved))
-	_, err = svc.ResolveByHost(ctx, "nope.example.com")
 	require.True(t, errors.Is(err, ErrMerchantRouteUnresolved))
 
 	// After resolution the caller loads THAT tenant's signing secret (the trust

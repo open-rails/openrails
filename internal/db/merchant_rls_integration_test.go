@@ -127,8 +127,8 @@ func seedTenantsAndEntitlements(t *testing.T, ctx context.Context, superDSN stri
 
 	for _, id := range []merchant.ID{tA, tB} {
 		_, err = pool.Exec(ctx, `
-			INSERT INTO openrails.merchants (id, slug, name, status)
-			VALUES ($1::uuid, $2, $2, 'active') ON CONFLICT (id) DO NOTHING
+			INSERT INTO openrails.merchants (id, slug, status)
+			VALUES ($1::uuid, $2, 'active') ON CONFLICT (id) DO NOTHING
 		`, id.String(), "t-"+id.String()[:8])
 		require.NoError(t, err)
 		tenantSubjectID := uuid.New()
@@ -254,8 +254,8 @@ func seedMerchantBoundaryRows(t *testing.T, ctx context.Context, superDSN string
 	suffix := strings.ReplaceAll(merchantID.String()[:13], "-", "")
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (id, slug, name, status)
-		VALUES ($1::uuid, $2, $2, 'active')
+		INSERT INTO openrails.merchants (id, slug, status)
+		VALUES ($1::uuid, $2, 'active')
 		ON CONFLICT (id) DO NOTHING
 	`, merchantID.String(), "merchant-"+suffix)
 	require.NoError(t, err)

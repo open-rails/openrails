@@ -28,8 +28,8 @@ var (
 func EnsureTestMerchant(ctx context.Context, t testing.TB, qx gen.DBTX) {
 	t.Helper()
 	_, err := qx.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, name, status)
-		 VALUES ($1, $2, 'Test Merchant', 'active')
+		`INSERT INTO openrails.merchants (id, slug, status)
+		 VALUES ($1, $2, 'active')
 		 ON CONFLICT (slug) DO NOTHING`,
 		TestMerchantID.UUID(), TestMerchantSlug)
 	require.NoError(t, err, "ensure test merchant")

@@ -215,8 +215,7 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 		// Tombstone the directory row.
 		if _, err := tx.Exec(ctx, `
 			UPDATE openrails.merchants
-			   SET status = 'deleted', deleted_at = current_timestamp, updated_at = current_timestamp,
-			       webhook_host = NULL, webhook_path = NULL
+			   SET status = 'deleted', deleted_at = current_timestamp, updated_at = current_timestamp
 			 WHERE id = $1::uuid
 		`, id.String()); err != nil {
 			return fmt.Errorf("tenancy: tombstone tenant: %w", err)

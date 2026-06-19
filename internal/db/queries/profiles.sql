@@ -20,20 +20,14 @@ FROM profiles.users
 WHERE username = $1 AND deleted_at IS NULL;
 
 -- name: GetMerchantBySlug :one
-SELECT id, slug, name, status
+SELECT id, slug, status
 FROM openrails.merchants
 WHERE slug = $1 AND deleted_at IS NULL;
 
 -- name: RegisterMerchant :one
 -- Register a merchant (billing bucket) from config, idempotently (#480). The
--- merchant carries ONLY billing/rail state; NO auth. Used by embedded boot and
--- standalone provisioning. Re-registering an existing slug refreshes the
--- billing-only fields and returns the canonical (self-owned) merchant id.
-INSERT INTO openrails.merchants (slug, name, status, webhook_host, webhook_path)
-VALUES ($1, $2, 'active', sqlc.narg('webhook_host'), sqlc.narg('webhook_path'))
-ON CONFLICT (slug) DO UPDATE SET
-    name = EXCLUDED.name,
-    webhook_host = COALESCE(EXCLUDED.webhook_host, openrails.merchants.webhook_host),
-    webhook_path = COALESCE(EXCLUDED.webhook_path, openrails.merchants.webhook_path),
-    updated_at = now()
+-- merchant carries ONLY billing/rail state; NO auth.
+INSERT INTO openrails.merchants (slug, status)
+VALUES ($1, 'active')
+ON CONFLICT (slug) DO UPDATE SET updated_at = now()
 RETURNING id;

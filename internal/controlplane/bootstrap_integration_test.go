@@ -257,20 +257,20 @@ func TestMerchantForOwnerOrg(t *testing.T) {
 	require.NoError(t, err)
 	// A SECOND merchant owned by the SAME tenant (#481: one tenant -> many merchants).
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (id, slug, name, status, owner_org_id)
-		VALUES ('00000000-0000-0000-0000-000000000004', 'second', 'Second', 'active', 'ak-default-id')
+		INSERT INTO openrails.merchants (id, slug, status, owner_org_id)
+		VALUES ('00000000-0000-0000-0000-000000000004', 'second', 'active', 'ak-default-id')
 		ON CONFLICT (id) DO NOTHING`)
 	require.NoError(t, err)
 	// A suspended merchant owned by a distinct tenant.
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (id, slug, name, status, owner_org_id)
-		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'Acme', 'suspended', 'ak-acme-id')
+		INSERT INTO openrails.merchants (id, slug, status, owner_org_id)
+		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'suspended', 'ak-acme-id')
 		ON CONFLICT (id) DO NOTHING`)
 	require.NoError(t, err)
 	// A single-merchant owner still supports the inferred common path.
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (id, slug, name, status, owner_org_id)
-		VALUES ('00000000-0000-0000-0000-000000000003', 'solo', 'Solo', 'active', 'ak-solo-id')
+		INSERT INTO openrails.merchants (id, slug, status, owner_org_id)
+		VALUES ('00000000-0000-0000-0000-000000000003', 'solo', 'active', 'ak-solo-id')
 		ON CONFLICT (id) DO NOTHING`)
 	require.NoError(t, err)
 

@@ -90,8 +90,8 @@ func validateMerchantManifestShape(m *MerchantManifest) error {
 		if slug == "" {
 			return fmt.Errorf("merchant #%d slug is required", i+1)
 		}
-		if strings.TrimSpace(t.Name) == "" {
-			return fmt.Errorf("merchant %q name is required", slug)
+		if strings.TrimSpace(t.DisplayName) == "" {
+			return fmt.Errorf("merchant %q display_name is required", slug)
 		}
 		if profileURL := strings.TrimSpace(t.Profile.LogoURL); profileURL != "" && !validHTTPURL(profileURL) {
 			return fmt.Errorf("merchant %q profile.logo_url must be an http or https URL", slug)

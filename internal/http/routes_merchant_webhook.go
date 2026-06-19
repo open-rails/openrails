@@ -16,12 +16,12 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// MerchantWebhookPrefix is the merchant-scoped webhook surface (issue #225). An
-// ingress resolves the merchant and forwards to /v1/m/:merchant/webhooks/:provider;
+// MerchantWebhookPrefix is the merchant-scoped webhook surface (issue #529). An
+// operator configures each provider to call /v1/merchants/:merchant/webhooks/:provider;
 // OpenRails re-resolves the merchant from the slug, loads THAT merchant's signing
 // secret, and verifies the signature AFTER merchant resolution. The router is NOT
 // the trust boundary — OpenRails always re-derives the secret and re-verifies.
-const MerchantWebhookPrefix = "/m/:merchant/webhooks"
+const MerchantWebhookPrefix = "/merchants/:merchant/webhooks"
 
 // registerMerchantWebhookRoutes mounts the merchant-scoped webhook surface. The
 // single default merchant may still use the global /v1/webhooks/:provider surface.

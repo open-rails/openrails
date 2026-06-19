@@ -12,143 +12,92 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
-// Admin metrics handlers (issue #232).
+// Admin metrics handler (issue #232; #528 folded the 5 sub-routes into one).
 //
-// These endpoints are the PER-MERCHANT admin dashboard surface. Every handler
-// passes r.Request.Context() into AdminMetricsService, which resolves the
-// merchant id from that context (merchant.Require) and pins every
-// ClickHouse query to WHERE merchant_id = ?. A merchant operator therefore can only
-// ever read their OWN metrics; there is no cross-merchant read on this path.
+// GET /admin/metrics is the PER-MERCHANT admin dashboard surface. AdminMetricsService
+// resolves the merchant id from the request context (merchant.Require) and pins
+// every ClickHouse query to WHERE merchant_id = ?, so a merchant operator can only
+// ever read their OWN metrics — never cross-tenant (that is the separate
+// platform-superadmin path).
 //
-// Platform-wide (cross-merchant) metrics are a SEPARATE, explicit control-plane
-// concern gated on controlplane.PermPlatformSuperadmin and served by
-// AdminMetricsService's *CrossMerchant methods. They are intentionally NOT wired
-// here. TODO(#232): add a dedicated platform-superadmin metrics surface that
-// calls the *CrossMerchant methods once that control-plane surface exists.
-//
-// ClickHouse is OPTIONAL and DERIVED: Postgres is the system of record. A
-// ClickHouse outage degrades these dashboards but never blocks openrails.
+// Query params control the shape: ?period/?start/?end (date range), ?granularity
+// (revenue + subscription series), ?currency (disambiguates multi-currency
+// merchants — required when more than one currency is present, else that section
+// would be ambiguous). ClickHouse is OPTIONAL and DERIVED: Postgres is the system
+// of record; a ClickHouse outage degrades this dashboard but never blocks openrails.
 
-func GetAdminMetricsSummary(r *httprequest.Request) {
+// GetAdminMetrics returns the merchant's billing analytics in one response:
+// {summary, revenue, subscriptions, processors, churn}.
+func GetAdminMetrics(r *httprequest.Request) {
 	rng, err := parseMetricsRange(r, 30)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 	currency := strings.TrimSpace(r.Query("currency"))
-	svc := analytics.NewAdminMetricsService(r.State.Config.ClickHouse)
-	resp, err := svc.GetSummary(r.Request.Context(), rng, currency)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
-		return
-	}
-	if len(resp) == 1 {
-		r.SuccessJSON(resp[0])
-		return
-	}
-	if currency == "" && len(resp) > 1 {
-		r.ErrorJSON(http.StatusBadRequest, "multiple currencies present; specify ?currency=XXX")
-		return
-	}
-	r.SuccessJSON(resp)
-}
-
-func GetAdminMetricsRevenue(r *httprequest.Request) {
-	rng, err := parseMetricsRange(r, 30)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
 	granularity := r.Query("granularity")
-	currency := strings.TrimSpace(r.Query("currency"))
+	ctx := r.Request.Context()
 	svc := analytics.NewAdminMetricsService(r.State.Config.ClickHouse)
-	resp, err := svc.GetRevenueSeries(r.Request.Context(), rng, granularity, currency)
+
+	summary, err := svc.GetSummary(ctx, rng, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	if len(resp) == 1 {
-		r.SuccessJSON(resp[0])
+	revenue, err := svc.GetRevenueSeries(ctx, rng, granularity, currency)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	if currency == "" && len(resp) > 1 {
-		r.ErrorJSON(http.StatusBadRequest, "multiple currencies present; specify ?currency=XXX")
+	subscriptions, err := svc.GetSubscriptionSeries(ctx, rng, granularity, currency)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	r.SuccessJSON(resp)
+	processors, err := svc.GetProcessorMetrics(ctx, rng, currency)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	churn, err := svc.GetChurn(ctx, rng, currency)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	out := map[string]any{}
+	var ok bool
+	if out["summary"], ok = resolveMetricSection(r, summary, currency); !ok {
+		return
+	}
+	if out["revenue"], ok = resolveMetricSection(r, revenue, currency); !ok {
+		return
+	}
+	if out["subscriptions"], ok = resolveMetricSection(r, subscriptions, currency); !ok {
+		return
+	}
+	if out["processors"], ok = resolveMetricSection(r, processors, currency); !ok {
+		return
+	}
+	if out["churn"], ok = resolveMetricSection(r, churn, currency); !ok {
+		return
+	}
+	r.SuccessJSON(out)
 }
 
-func GetAdminMetricsSubscriptions(r *httprequest.Request) {
-	rng, err := parseMetricsRange(r, 30)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	granularity := r.Query("granularity")
-	currency := strings.TrimSpace(r.Query("currency"))
-	svc := analytics.NewAdminMetricsService(r.State.Config.ClickHouse)
-	resp, err := svc.GetSubscriptionSeries(r.Request.Context(), rng, granularity, currency)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
-		return
-	}
+// resolveMetricSection applies the multi-currency rule for one metric section: a
+// single-currency merchant gets the bare object; a multi-currency merchant with
+// ?currency set gets that currency's object; a multi-currency merchant with no
+// ?currency is ambiguous → 400 (and the handler aborts). Returns (section, ok).
+func resolveMetricSection[T any](r *httprequest.Request, resp []T, currency string) (any, bool) {
 	if len(resp) == 1 {
-		r.SuccessJSON(resp[0])
-		return
+		return resp[0], true
 	}
 	if currency == "" && len(resp) > 1 {
 		r.ErrorJSON(http.StatusBadRequest, "multiple currencies present; specify ?currency=XXX")
-		return
+		return nil, false
 	}
-	r.SuccessJSON(resp)
-}
-
-func GetAdminMetricsProcessors(r *httprequest.Request) {
-	rng, err := parseMetricsRange(r, 30)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	currency := strings.TrimSpace(r.Query("currency"))
-	svc := analytics.NewAdminMetricsService(r.State.Config.ClickHouse)
-	resp, err := svc.GetProcessorMetrics(r.Request.Context(), rng, currency)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
-		return
-	}
-	if len(resp) == 1 {
-		r.SuccessJSON(resp[0])
-		return
-	}
-	if currency == "" && len(resp) > 1 {
-		r.ErrorJSON(http.StatusBadRequest, "multiple currencies present; specify ?currency=XXX")
-		return
-	}
-	r.SuccessJSON(resp)
-}
-
-func GetAdminMetricsChurn(r *httprequest.Request) {
-	rng, err := parseMetricsRange(r, 180)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	currency := strings.TrimSpace(r.Query("currency"))
-	svc := analytics.NewAdminMetricsService(r.State.Config.ClickHouse)
-	resp, err := svc.GetChurn(r.Request.Context(), rng, currency)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
-		return
-	}
-	if len(resp) == 1 {
-		r.SuccessJSON(resp[0])
-		return
-	}
-	if currency == "" && len(resp) > 1 {
-		r.ErrorJSON(http.StatusBadRequest, "multiple currencies present; specify ?currency=XXX")
-		return
-	}
-	r.SuccessJSON(resp)
+	return resp, true
 }
 
 func parseMetricsRange(r *httprequest.Request, defaultDays int) (analytics.MetricsDateRange, error) {

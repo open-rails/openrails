@@ -31,11 +31,7 @@ type MerchantManifest struct {
 
 type ManifestMerchant struct {
 	Slug        string `yaml:"slug"`
-	Name        string `yaml:"name"`
-	BillingTier string `yaml:"billing_tier"`
-	Region      string `yaml:"region"`
-	WebhookHost string `yaml:"webhook_host"`
-	WebhookPath string `yaml:"webhook_path"`
+	DisplayName string `yaml:"display_name"`
 	// Issuer is the host application's JWKS/public-key trust for THIS merchant
 	// (#527). When set, it is registered as a remote_application and made the
 	// `owner` of the merchant's backing org, so the host app's delegated tokens
@@ -66,11 +62,10 @@ type ManifestIssuer struct {
 }
 
 type ManifestMerchantProfile struct {
-	DisplayName  string `yaml:"display_name,omitempty"`
-	LogoURL      string `yaml:"logo_url,omitempty"`
-	FromEmail    string `yaml:"from_email,omitempty"`
-	SupportURL   string `yaml:"support_url,omitempty"`
-	SupportEmail string `yaml:"support_email,omitempty"`
+	DisplayName string `yaml:"display_name,omitempty"`
+	LogoURL     string `yaml:"logo_url,omitempty"`
+	FromEmail   string `yaml:"from_email,omitempty"`
+	SupportURL  string `yaml:"support_url,omitempty"`
 }
 
 type ManifestProviderAccount struct {
@@ -155,13 +150,8 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 			return fmt.Errorf("merchant bootstrap: provision backing org/issuer for %q: %w", mt.Slug, err)
 		}
 		tn, err := svc.Provision(ctx, merchants.ProvisionRequest{
-			Slug:        mt.Slug,
-			Name:        mt.Name,
-			OwnerOrgID:  org.ID,
-			BillingTier: mt.BillingTier,
-			Region:      mt.Region,
-			WebhookHost: mt.WebhookHost,
-			WebhookPath: mt.WebhookPath,
+			Slug:       mt.Slug,
+			OwnerOrgID: org.ID,
 		})
 		if err != nil {
 			return fmt.Errorf("merchant bootstrap: provision %q: %w", mt.Slug, err)
@@ -193,14 +183,13 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, _ *config.Confi
 			return fmt.Errorf("load merchant configuration: %w", err)
 		}
 		cfg.Profile = models.MerchantProfileConfiguration{
-			DisplayName:  strings.TrimSpace(mt.Profile.DisplayName),
-			LogoURL:      strings.TrimSpace(mt.Profile.LogoURL),
-			FromEmail:    strings.TrimSpace(mt.Profile.FromEmail),
-			SupportURL:   strings.TrimSpace(mt.Profile.SupportURL),
-			SupportEmail: strings.TrimSpace(mt.Profile.SupportEmail),
+			DisplayName: strings.TrimSpace(mt.Profile.DisplayName),
+			LogoURL:     strings.TrimSpace(mt.Profile.LogoURL),
+			FromEmail:   strings.TrimSpace(mt.Profile.FromEmail),
+			SupportURL:  strings.TrimSpace(mt.Profile.SupportURL),
 		}
 		if cfg.Profile.DisplayName == "" {
-			cfg.Profile.DisplayName = strings.TrimSpace(mt.Name)
+			cfg.Profile.DisplayName = strings.TrimSpace(mt.DisplayName)
 		}
 		if err := store.Upsert(mctx, cfg); err != nil {
 			return fmt.Errorf("upsert merchant profile: %w", err)
@@ -255,8 +244,7 @@ func hasManifestProfile(p ManifestMerchantProfile) bool {
 	return strings.TrimSpace(p.DisplayName) != "" ||
 		strings.TrimSpace(p.LogoURL) != "" ||
 		strings.TrimSpace(p.FromEmail) != "" ||
-		strings.TrimSpace(p.SupportURL) != "" ||
-		strings.TrimSpace(p.SupportEmail) != ""
+		strings.TrimSpace(p.SupportURL) != ""
 }
 
 func reconcileManifestProviderAccount(ctx context.Context, database *db.DB, merchantID merchant.ID, account ManifestProviderAccount, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) error {

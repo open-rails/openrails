@@ -34,10 +34,8 @@ CREATE SCHEMA IF NOT EXISTS openrails;
 CREATE TABLE IF NOT EXISTS openrails.merchants (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug         TEXT NOT NULL UNIQUE,
-    name         TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'active',
     owner_org_id TEXT,
-    billing_tier TEXT, region TEXT, webhook_host TEXT, webhook_path TEXT,
     provisioned_at TIMESTAMPTZ,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -45,7 +43,7 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
 );
 CREATE TABLE IF NOT EXISTS openrails.subscriptions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), merchant_id UUID, status TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS openrails.payments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), merchant_id UUID, amount BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'completed');
-INSERT INTO openrails.merchants (slug, name, status, billing_tier) VALUES ('acme','Acme','active','pro') ON CONFLICT DO NOTHING;
+INSERT INTO openrails.merchants (slug, status) VALUES ('acme','active') ON CONFLICT DO NOTHING;
 `
 
 func newPlatformTestPool(t *testing.T) *pgxpool.Pool {

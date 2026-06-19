@@ -79,19 +79,12 @@ SET default_table_access_method = heap;
 CREATE TABLE openrails.merchants (
     id uuid DEFAULT uuidv7() NOT NULL,
     slug text NOT NULL,
-    name text NOT NULL,
     status text DEFAULT 'active'::text NOT NULL,
     owner_org_id text,
-    plan text,
-    region text,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     suspended_at timestamp with time zone,
     deleted_at timestamp with time zone,
-    billing_tier text,
-    stripe_account_id text,
-    webhook_host text,
-    webhook_path text,
     provisioned_at timestamp with time zone,
     CONSTRAINT merchants_pkey PRIMARY KEY (id),
     CONSTRAINT uq_merchants_slug UNIQUE (slug),
@@ -99,15 +92,12 @@ CREATE TABLE openrails.merchants (
 );
 
 CREATE INDEX idx_merchants_owner_org_id ON openrails.merchants USING btree (owner_org_id) WHERE (owner_org_id IS NOT NULL);
-CREATE UNIQUE INDEX uq_merchants_webhook_host ON openrails.merchants USING btree (lower(webhook_host)) WHERE (webhook_host IS NOT NULL);
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchants TO openrails_app;
 
 COMMENT ON TABLE openrails.merchants IS 'Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant.';
 COMMENT ON COLUMN openrails.merchants.slug IS 'Stable merchant slug used in merchant-scoped routes and resolution.';
 COMMENT ON COLUMN openrails.merchants.owner_org_id IS 'OWNERSHIP (not identity) FK to the AuthKit org that owns/administers this merchant (#481). NULL in embedded (no AuthKit). One org owns MANY merchants; never used to resolve a merchant from a token.';
-COMMENT ON COLUMN openrails.merchants.billing_tier IS 'The platform''s OWN billing tier for this merchant (eats own dogfood, issue #225). Distinct from plan (free-form hosting metadata).';
-COMMENT ON COLUMN openrails.merchants.webhook_host IS 'Optional host an ingress uses to route inbound webhooks to this merchant. OpenRails verifies the signature AFTER merchant resolution (router is not the trust boundary).';
 
 -- =============================================================================
 -- customers

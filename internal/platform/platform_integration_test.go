@@ -27,9 +27,7 @@ CREATE SCHEMA IF NOT EXISTS openrails;
 CREATE TABLE IF NOT EXISTS openrails.merchants (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug         TEXT NOT NULL UNIQUE,
-    name         TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'active',
-    billing_tier TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at   TIMESTAMPTZ
@@ -109,13 +107,13 @@ func newExternalPlatformTestPool(t *testing.T, ctx context.Context, adminDSN str
 	return pool
 }
 
-func seedMerchant(t *testing.T, pool *pgxpool.Pool, slug, status, tier string) merchant.ID {
+func seedMerchant(t *testing.T, pool *pgxpool.Pool, slug, status string) merchant.ID {
 	t.Helper()
 	var idStr string
 	err := pool.QueryRow(context.Background(), `
-		INSERT INTO openrails.merchants (slug, name, status, billing_tier)
-		VALUES ($1, $1, $2, NULLIF($3,'')) RETURNING id::text
-	`, slug, status, tier).Scan(&idStr)
+		INSERT INTO openrails.merchants (slug, status)
+		VALUES ($1, $2) RETURNING id::text
+	`, slug, status).Scan(&idStr)
 	require.NoError(t, err)
 	id, err := merchant.ParseID(idStr)
 	require.NoError(t, err)
@@ -125,9 +123,9 @@ func seedMerchant(t *testing.T, pool *pgxpool.Pool, slug, status, tier string) m
 func TestMetrics_AggregatesAcrossMerchants(t *testing.T) {
 	ctx := context.Background()
 	pool := newTestPool(t)
-	acme := seedMerchant(t, pool, "acme", "active", "pro")
-	globex := seedMerchant(t, pool, "globex", "suspended", "free")
-	_ = seedMerchant(t, pool, "empty", "active", "")
+	acme := seedMerchant(t, pool, "acme", "active")
+	globex := seedMerchant(t, pool, "globex", "suspended")
+	_ = seedMerchant(t, pool, "empty", "active")
 
 	exec := func(q string, args ...any) {
 		_, err := pool.Exec(ctx, q, args...)
@@ -159,6 +157,5 @@ func TestMetrics_AggregatesAcrossMerchants(t *testing.T) {
 	require.Equal(t, int64(1), byMerchant["acme"].WebhookFailures)
 	require.Equal(t, int64(1), byMerchant["globex"].ActiveSubs)
 	require.Equal(t, int64(300), byMerchant["globex"].RevenueMinor)
-	require.Equal(t, "free", byMerchant["globex"].BillingTier)
 	require.Zero(t, byMerchant["empty"].ActiveSubs)
 }

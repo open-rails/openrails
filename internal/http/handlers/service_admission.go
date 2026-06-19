@@ -545,11 +545,10 @@ type serviceMerchantConfigurationRequest struct {
 }
 
 type serviceMerchantProfileConfiguration struct {
-	DisplayName  string `json:"display_name,omitempty"`
-	LogoURL      string `json:"logo_url,omitempty"`
-	FromEmail    string `json:"from_email,omitempty"`
-	SupportURL   string `json:"support_url,omitempty"`
-	SupportEmail string `json:"support_email,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	LogoURL     string `json:"logo_url,omitempty"`
+	FromEmail   string `json:"from_email,omitempty"`
+	SupportURL  string `json:"support_url,omitempty"`
 }
 
 func ServiceGetMerchantConfiguration(r *httprequest.Request) {
@@ -606,11 +605,10 @@ func merchantProfileInput(in *serviceMerchantProfileConfiguration) *models.Merch
 		return nil
 	}
 	return &models.MerchantProfileConfiguration{
-		DisplayName:  strings.TrimSpace(in.DisplayName),
-		LogoURL:      strings.TrimSpace(in.LogoURL),
-		FromEmail:    strings.TrimSpace(in.FromEmail),
-		SupportURL:   strings.TrimSpace(in.SupportURL),
-		SupportEmail: strings.TrimSpace(in.SupportEmail),
+		DisplayName: strings.TrimSpace(in.DisplayName),
+		LogoURL:     strings.TrimSpace(in.LogoURL),
+		FromEmail:   strings.TrimSpace(in.FromEmail),
+		SupportURL:  strings.TrimSpace(in.SupportURL),
 	}
 }
 
@@ -619,11 +617,10 @@ func merchantProfileResponse(in *models.MerchantProfileConfiguration) serviceMer
 		return serviceMerchantProfileConfiguration{}
 	}
 	return serviceMerchantProfileConfiguration{
-		DisplayName:  in.DisplayName,
-		LogoURL:      in.LogoURL,
-		FromEmail:    in.FromEmail,
-		SupportURL:   in.SupportURL,
-		SupportEmail: in.SupportEmail,
+		DisplayName: in.DisplayName,
+		LogoURL:     in.LogoURL,
+		FromEmail:   in.FromEmail,
+		SupportURL:  in.SupportURL,
 	}
 }
 

@@ -34,7 +34,6 @@ func (s *Server) registerMerchantAdminRoutes(e *gin.Engine) {
 	group.GET("/:id", s.merchantGetHandler())
 	group.POST("/:id/suspend", s.merchantLifecycleHandler("suspend"))
 	group.POST("/:id/resume", s.merchantLifecycleHandler("resume"))
-	group.POST("/:id/tier", s.merchantTierHandler())
 	group.POST("/:id/export", s.merchantExportHandler())
 	group.POST("/:id/delete", s.merchantDeleteHandler())
 
@@ -104,27 +103,6 @@ func (s *Server) merchantLifecycleHandler(op string) gin.HandlerFunc {
 			err = s.merchants.Resume(c.Request.Context(), id)
 		}
 		if err != nil {
-			s.merchantErr(c, err)
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	}
-}
-
-func (s *Server) merchantTierHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, ok := merchantIDParam(c)
-		if !ok {
-			return
-		}
-		var body struct {
-			Tier string `json:"tier"`
-		}
-		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-			return
-		}
-		if err := s.merchants.TierChange(c.Request.Context(), id, body.Tier); err != nil {
 			s.merchantErr(c, err)
 			return
 		}
@@ -299,12 +277,7 @@ func merchantView(t *merchants.Merchant) gin.H {
 	return gin.H{
 		"id":           t.ID.String(),
 		"slug":         t.Slug,
-		"name":         t.Name,
 		"status":       string(t.Status),
 		"owner_org_id": t.OwnerOrgID,
-		"billing_tier": t.BillingTier,
-		"region":       t.Region,
-		"webhook_host": t.WebhookHost,
-		"webhook_path": t.WebhookPath,
 	}
 }

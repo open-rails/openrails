@@ -13,9 +13,7 @@ import (
 type MerchantMetric struct {
 	MerchantID      string `json:"merchant_id"`
 	Slug            string `json:"slug"`
-	Name            string `json:"name"`
 	Status          string `json:"status"`
-	BillingTier     string `json:"billing_tier,omitempty"`
 	ActiveSubs      int64  `json:"active_subscriptions"`
 	RevenueMinor    int64  `json:"revenue_minor"`    // sum of completed payment amounts (minor units)
 	WebhookFailures int64  `json:"webhook_failures"` // proxy: subscriptions in 'failed' status (see TODO)
@@ -65,9 +63,7 @@ func (m *Metrics) Compute(ctx context.Context) (*PlatformMetrics, error) {
 	rows, err := m.pool.Query(ctx, `
 		SELECT t.id::text,
 		       t.slug,
-		       t.name,
 		       t.status,
-		       COALESCE(t.billing_tier, ''),
 		       COALESCE(s.active_subs, 0)        AS active_subs,
 		       COALESCE(p.revenue_minor, 0)      AS revenue_minor,
 		       COALESCE(s.failed_subs, 0)        AS webhook_failures
@@ -119,8 +115,8 @@ func scanMerchantMetrics(rows pgx.Rows) ([]MerchantMetric, error) {
 	var out []MerchantMetric
 	for rows.Next() {
 		var tm MerchantMetric
-		if err := rows.Scan(&tm.MerchantID, &tm.Slug, &tm.Name, &tm.Status,
-			&tm.BillingTier, &tm.ActiveSubs, &tm.RevenueMinor, &tm.WebhookFailures); err != nil {
+		if err := rows.Scan(&tm.MerchantID, &tm.Slug, &tm.Status,
+			&tm.ActiveSubs, &tm.RevenueMinor, &tm.WebhookFailures); err != nil {
 			return nil, err
 		}
 		out = append(out, tm)

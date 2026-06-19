@@ -346,9 +346,9 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 
 	mid := merchant.ID(uuid.New())
 	_, err = h.sharedPool().Exec(h.ctx, `
-		INSERT INTO openrails.merchants (id, slug, name, status, owner_org_id, provisioned_at)
-		VALUES ($1, $2, $3, 'active', $4, current_timestamp)
-	`, mid.UUID(), slug, slug, org.ID)
+		INSERT INTO openrails.merchants (id, slug, status, owner_org_id, provisioned_at)
+		VALUES ($1, $2, 'active', $3, current_timestamp)
+	`, mid.UUID(), slug, org.ID)
 	require.NoError(h.t, err, "insert owned merchant")
 
 	token := s.MintServiceToken(slug, slug+"-operator", controlplane.OperatorRolePermissions(),
@@ -383,9 +383,9 @@ func (s *Surface) ProvisionMerchantForOrg(slug, orgSlug string) merchant.ID {
 
 	mid := merchant.ID(uuid.New())
 	_, err = h.sharedPool().Exec(h.ctx, `
-		INSERT INTO openrails.merchants (id, slug, name, status, owner_org_id, provisioned_at)
-		VALUES ($1, $2, $3, 'active', $4, current_timestamp)
-	`, mid.UUID(), slug, slug, org.ID)
+		INSERT INTO openrails.merchants (id, slug, status, owner_org_id, provisioned_at)
+		VALUES ($1, $2, 'active', $3, current_timestamp)
+	`, mid.UUID(), slug, org.ID)
 	require.NoError(h.t, err, "insert additional owned merchant")
 	return mid
 }

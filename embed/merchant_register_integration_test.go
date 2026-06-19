@@ -39,8 +39,8 @@ func TestEmbedNew_RegistersBoundMerchant(t *testing.T) {
 		Merchant: slug,
 		MerchantConfiguration: openrails.MerchantConfigurationInput{
 			Profile: &openrails.MerchantProfileInput{
-				FromEmail:    "billing@example.com",
-				SupportEmail: "support@example.com",
+				FromEmail:  "billing@example.com",
+				SupportURL: "https://example.com/support",
 			},
 			DelegatedInvokerWastedSpendWindows: []openrails.BudgetWindowInput{
 				{Key: "burst", WindowSeconds: 900, Limit: 123, Currency: money.DefaultCurrency},
@@ -50,18 +50,16 @@ func TestEmbedNew_RegistersBoundMerchant(t *testing.T) {
 	require.NoError(t, err, "embed.New with an unprovisioned merchant slug must NOT panic/error")
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	// The merchant row now exists, active, name == slug.
+	// The merchant row now exists and is active.
 	var (
 		gotSlug   string
-		gotName   string
 		gotStatus string
 	)
 	err = pool.QueryRow(ctx,
-		`SELECT slug, name, status FROM openrails.merchants WHERE slug = $1`, slug,
-	).Scan(&gotSlug, &gotName, &gotStatus)
+		`SELECT slug, status FROM openrails.merchants WHERE slug = $1`, slug,
+	).Scan(&gotSlug, &gotStatus)
 	require.NoError(t, err, "bound merchant row must exist after embed.New")
 	require.Equal(t, slug, gotSlug)
-	require.Equal(t, slug, gotName)
 	require.Equal(t, "active", gotStatus)
 
 	var rawConfig []byte
@@ -76,7 +74,7 @@ func TestEmbedNew_RegistersBoundMerchant(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rawConfig, &gotConfig))
 	require.Equal(t, slug, gotConfig.Profile.DisplayName, "embedded startup matches manifest display-name fallback")
 	require.Equal(t, "billing@example.com", gotConfig.Profile.FromEmail)
-	require.Equal(t, "support@example.com", gotConfig.Profile.SupportEmail)
+	require.Equal(t, "https://example.com/support", gotConfig.Profile.SupportURL)
 	require.Len(t, gotConfig.DelegatedInvokerWastedSpendWindows, 1)
 	require.Equal(t, int64(123), gotConfig.DelegatedInvokerWastedSpendWindows[0].Limit)
 

@@ -330,12 +330,9 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gi
 	// (resolved from the delegated token's issuer + pinned above), so these never
 	// expose another merchant's numbers — cross-tenant aggregation is the separate
 	// platform-superadmin path, not reachable here.
-	metrics := group.Group("/metrics")
-	metrics.GET("/summary", metricsRead, wrap(httphandlers.GetAdminMetricsSummary))
-	metrics.GET("/revenue", metricsRead, wrap(httphandlers.GetAdminMetricsRevenue))
-	metrics.GET("/subscriptions", metricsRead, wrap(httphandlers.GetAdminMetricsSubscriptions))
-	metrics.GET("/processors", metricsRead, wrap(httphandlers.GetAdminMetricsProcessors))
-	metrics.GET("/churn", metricsRead, wrap(httphandlers.GetAdminMetricsChurn))
+	// #528: one folded metrics endpoint (was /metrics/{summary,revenue,subscriptions,
+	// processors,churn}); ?period/?currency/?granularity control the shape.
+	group.GET("/metrics", metricsRead, wrap(httphandlers.GetAdminMetrics))
 
 	group.GET("/merchant-configuration", configRead, wrap(httphandlers.ServiceGetMerchantConfiguration))
 	group.PUT("/merchant-configuration", configWrite, wrap(httphandlers.ServiceSetMerchantConfiguration))

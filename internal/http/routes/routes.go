@@ -330,3 +330,7 @@ func registerCatalogActionRoutes(catalog router.Router) {
 func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/:provider", h(httphandlers.Webhook))
 }
+
+func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
+	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider", h(httphandlers.MerchantWebhook))
+}

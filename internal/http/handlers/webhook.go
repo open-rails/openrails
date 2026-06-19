@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/funding"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -25,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -111,6 +113,93 @@ func Webhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid provider")
 		return
 	}
+}
+
+func MerchantWebhook(r *httprequest.Request) {
+	if r.State == nil || r.State.Merchants == nil {
+		r.ErrorJSON(http.StatusServiceUnavailable, "Merchant webhook routing is not configured")
+		return
+	}
+	provider := webhookutil.CanonicalProvider(r.Param("provider"))
+	route, err := r.State.Merchants.ResolveBySlug(r.Request.Context(), r.Param("merchant"))
+	if err != nil {
+		if errors.Is(err, merchants.ErrMerchantRouteUnresolved) {
+			r.ErrorJSON(http.StatusNotFound, "Unknown merchant")
+			return
+		}
+		log.WithError(err).Error("merchant webhook: resolve merchant failed")
+		r.ErrorJSON(http.StatusInternalServerError, "Merchant resolution failed")
+		return
+	}
+	if provider != subscriptions.ProcessorStripe {
+		r.ErrorJSON(http.StatusBadRequest, "Provider not supported on merchant webhook surface")
+		return
+	}
+	ctx := merchant.WithID(r.Request.Context(), route.MerchantID)
+	r.Request = r.Request.WithContext(ctx)
+
+	body, ok := readLimitedWebhookBody(r, maxStripeWebhookBytes)
+	if !ok {
+		return
+	}
+	creds, err := r.State.Merchants.LoadStripeCredentials(ctx, route.MerchantID)
+	if err != nil {
+		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
+			r.ErrorJSON(http.StatusServiceUnavailable, "Secret backend temporarily unavailable, retry")
+			return
+		}
+		log.WithError(err).Error("merchant webhook: load merchant credentials failed")
+		r.ErrorJSON(http.StatusInternalServerError, "Credential load failed")
+		return
+	}
+	var secrets []string
+	if s := strings.TrimSpace(creds.WebhookSigningSecret); s != "" {
+		secrets = append(secrets, s)
+	}
+	if s := strings.TrimSpace(creds.WebhookSigningThin); s != "" {
+		secrets = append(secrets, s)
+	}
+	if len(secrets) == 0 {
+		r.ErrorJSON(http.StatusUnauthorized, "Merchant webhook signing secret not configured")
+		return
+	}
+	prepared, err := prepareStripeMultiSecret(body, secrets, r.Header("Stripe-Signature"), 5*time.Minute)
+	if err != nil {
+		switch {
+		case errors.Is(err, webhookutil.ErrWebhookSignatureRequired),
+			errors.Is(err, webhookutil.ErrWebhookSignatureMissing),
+			errors.Is(err, webhookutil.ErrWebhookSignatureInvalid):
+			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
+		default:
+			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
+		}
+		return
+	}
+	if r.State.WebhookDispatcher == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
+		return
+	}
+	signatureVerified := true
+	msg := &webhooks.WebhookMessage{
+		Processor:      subscriptions.ProcessorStripe,
+		EventID:        prepared.EventID,
+		EventType:      prepared.EventType,
+		Payload:        prepared.Body,
+		IPAddress:      r.GetRemoteIP(),
+		Signature:      prepared.Signature,
+		SignatureValid: &signatureVerified,
+		ReceivedAt:     time.Now(),
+	}
+	if err := r.State.WebhookDispatcher.Process(ctx, msg); err != nil {
+		if webhooks.IsWebhookErrorNonRetryable(err) {
+			r.SuccessJSON(map[string]string{"status": "accepted"})
+			return
+		}
+		log.WithError(err).Error("merchant stripe webhook processing failed")
+		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing failed")
+		return
+	}
+	r.SuccessJSON(map[string]string{"status": "accepted"})
 }
 
 func enqueueCCBillWebhook(r *httprequest.Request, clientIP string) bool {

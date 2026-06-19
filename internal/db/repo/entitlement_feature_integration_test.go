@@ -46,7 +46,7 @@ func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid m
 	t.Helper()
 	require.NoError(t, appDB.MerchantTx(merchant.WithID(ctx, tid), func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO openrails.merchants (id, slug, name, status) VALUES ($1, $2, $2, 'active') ON CONFLICT (id) DO NOTHING`,
+			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (id) DO NOTHING`,
 			tid.UUID(), "t-"+tid.String()[:8],
 		); err != nil {
 			return err

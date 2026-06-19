@@ -40,23 +40,14 @@ func ResolveMerchantSlug(ctx context.Context, qx gen.DBTX, slug string) (merchan
 
 // RegisterMerchant registers a merchant (a billing bucket) from config,
 // idempotently (#480). It carries ONLY billing/rail state and NO auth. Embedded
-// boot calls it after migrations (the host owns the embed + DB, so registering the
-// configured merchant is safe); standalone provisioning also routes through it.
-// Re-registering an existing slug refreshes the billing-only fields. Returns the
-// canonical (self-owned) merchant id. An empty slug is a no-op.
+// boot calls it after migrations. Returns the canonical merchant id. An empty
+// slug is a no-op.
 func RegisterMerchant(ctx context.Context, qx gen.DBTX, opts RegisterMerchantOptions) (merchant.ID, error) {
 	if opts.Slug == "" {
 		return merchant.ID{}, nil
 	}
-	name := opts.Name
-	if name == "" {
-		name = opts.Slug
-	}
 	id, err := gen.New(qx).RegisterMerchant(ctx, gen.RegisterMerchantParams{
-		Slug:        opts.Slug,
-		Name:        name,
-		WebhookHost: opts.WebhookHost,
-		WebhookPath: opts.WebhookPath,
+		Slug: opts.Slug,
 	})
 	if err != nil {
 		return merchant.ID{}, fmt.Errorf("register merchant slug %q: %w", opts.Slug, err)
@@ -69,8 +60,5 @@ func RegisterMerchant(ctx context.Context, qx gen.DBTX, opts RegisterMerchantOpt
 // (standalone). Provider account identity is owned by provider_accounts, not
 // merchants.
 type RegisterMerchantOptions struct {
-	Slug        string
-	Name        string
-	WebhookHost *string
-	WebhookPath *string
+	Slug string
 }

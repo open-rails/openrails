@@ -14,11 +14,7 @@ version: 1
 
 merchants:
   - slug: local-stack
-    name: Local Stack
-    billing_tier: self-hosted
-    region: local
-    webhook_host: hooks.local-stack.example
-    webhook_path: /v1/m/local-stack/webhooks
+    display_name: Local Stack
 
     # Host-app JWKS trust → owner of this merchant. Prefer jwks_uri (AuthKit
     # auto-refetches on key rotation); public_keys is the static alternative
@@ -35,13 +31,10 @@ merchants:
       logo_url: https://local-stack.example/assets/logo.png
       from_email: billing@local-stack.example
       support_url: https://local-stack.example/support
-      support_email: support@local-stack.example
 
     provider_accounts:
       - provider_type: stripe
         account_id: acct_localstack123
-        provider_key: stripe_primary
-        display_name: Local Stack Stripe Primary
         role: primary
         status: enabled
         secrets:
@@ -52,8 +45,6 @@ merchants:
 
       - provider_type: nmi
         account_id: nmi-local-stack-profile
-        provider_key: mobius_primary
-        display_name: Local Stack Mobius Primary
         role: primary
         status: enabled
         secrets:
@@ -66,8 +57,6 @@ merchants:
 
       - provider_type: ccbill
         account_id: "900000-0000"
-        provider_key: ccbill_primary
-        display_name: Local Stack CCBill Primary
         role: secondary
         status: enabled
         secrets:
@@ -76,8 +65,6 @@ merchants:
 
       - provider_type: solana
         account_id: 11111111111111111111111111111111
-        provider_key: solana_devnet
-        display_name: Local Stack Solana Devnet
         role: secondary
         status: enabled
         secrets:

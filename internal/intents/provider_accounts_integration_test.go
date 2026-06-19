@@ -39,9 +39,9 @@ func TestProviderAccountsConstraints(t *testing.T) {
 	merchantA := uuid.New()
 	merchantB := uuid.New()
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, name, status)
-		 VALUES ($1, $2, 'Provider Account A', 'active'),
-		        ($3, $4, 'Provider Account B', 'active')`,
+		`INSERT INTO openrails.merchants (id, slug, status)
+		 VALUES ($1, $2, 'active'),
+		        ($3, $4, 'active')`,
 		merchantA, "pa-"+merchantA.String()[:8],
 		merchantB, "pa-"+merchantB.String()[:8])
 	require.NoError(t, err)
@@ -100,8 +100,8 @@ func TestVerifyOrBindPrimaryProviderAccountPromotesConfiguredAccountSwap(t *test
 
 	merchantID := uuid.New()
 	_, err := dbi.Pool().Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, name, status)
-		 VALUES ($1, $2, 'Provider Account Swap', 'active')`,
+		`INSERT INTO openrails.merchants (id, slug, status)
+		 VALUES ($1, $2, 'active')`,
 		merchantID, "pa-swap-"+merchantID.String()[:8])
 	require.NoError(t, err)
 
@@ -276,9 +276,9 @@ func seedProviderAccountTestMerchant(t *testing.T, ctx context.Context, qx gen.D
 	t.Helper()
 	merchantID := uuid.New()
 	_, err := qx.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, name, status)
-		 VALUES ($1, $2, $3, 'active')`,
-		merchantID, prefix+"-"+merchantID.String()[:8], "Provider Account "+prefix)
+		`INSERT INTO openrails.merchants (id, slug, status)
+		 VALUES ($1, $2, 'active')`,
+		merchantID, prefix+"-"+merchantID.String()[:8])
 	require.NoError(t, err)
 	return merchantID
 }

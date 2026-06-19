@@ -686,11 +686,10 @@ func merchantProfileInput(in *openrails.MerchantProfileInput) *models.MerchantPr
 		return nil
 	}
 	return &models.MerchantProfileConfiguration{
-		DisplayName:  strings.TrimSpace(in.DisplayName),
-		LogoURL:      strings.TrimSpace(in.LogoURL),
-		FromEmail:    strings.TrimSpace(in.FromEmail),
-		SupportURL:   strings.TrimSpace(in.SupportURL),
-		SupportEmail: strings.TrimSpace(in.SupportEmail),
+		DisplayName: strings.TrimSpace(in.DisplayName),
+		LogoURL:     strings.TrimSpace(in.LogoURL),
+		FromEmail:   strings.TrimSpace(in.FromEmail),
+		SupportURL:  strings.TrimSpace(in.SupportURL),
 	}
 }
 

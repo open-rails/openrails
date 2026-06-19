@@ -336,11 +336,10 @@ type MerchantConfigurationInput struct {
 
 // MerchantProfileInput is public/communication metadata stored per merchant.
 type MerchantProfileInput struct {
-	DisplayName  string `json:"display_name,omitempty"`
-	LogoURL      string `json:"logo_url,omitempty"`
-	FromEmail    string `json:"from_email,omitempty"`
-	SupportURL   string `json:"support_url,omitempty"`
-	SupportEmail string `json:"support_email,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	LogoURL     string `json:"logo_url,omitempty"`
+	FromEmail   string `json:"from_email,omitempty"`
+	SupportURL  string `json:"support_url,omitempty"`
 }
 
 // BudgetWindow is one computed window from POST /v1/service/budget/check,

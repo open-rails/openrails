@@ -9,13 +9,9 @@ func TestConsolidatedSchemaIncludesMerchantProvisioningState(t *testing.T) {
 	c := loadSchema001(t)
 
 	for _, want := range []string{
-		"billing_tier text",
-		"webhook_host text",
-		"webhook_path text",
 		"CREATE TABLE openrails.merchant_secrets",
 		"CREATE TABLE openrails.merchant_credential_audit",
 		"CREATE TABLE openrails.merchant_exports",
-		"uq_merchants_webhook_host",
 	} {
 		if !strings.Contains(c, want) {
 			t.Errorf("001 schema missing merchant provisioning final state %q", want)
@@ -29,6 +25,10 @@ func TestConsolidatedSchemaOmitsProvisioningTransitionDDL(t *testing.T) {
 	for _, forbidden := range []string{
 		"ADD COLUMN IF NOT EXISTS billing_tier",
 		"ADD COLUMN IF NOT EXISTS webhook_host",
+		"billing_tier text",
+		"webhook_host text",
+		"webhook_path text",
+		"uq_merchants_webhook_host",
 		"DROP TABLE openrails.merchants",
 		"DROP COLUMN",
 		"ALTER COLUMN status",

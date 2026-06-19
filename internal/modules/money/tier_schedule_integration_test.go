@@ -88,7 +88,7 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 	tenantB := uuid.New()
 	slugB := "tier-iso-" + tenantB.String()[:8]
 	_, err := pool.Exec(ctx,
-		"INSERT INTO openrails.merchants (id, slug, name, status) VALUES ($1,$2,$2,'active')",
+		"INSERT INTO openrails.merchants (id, slug, status) VALUES ($1,$2,'active')",
 		tenantB, slugB)
 	require.NoError(t, err)
 	ctxB := merchant.WithID(ctx, merchant.ID(tenantB))
