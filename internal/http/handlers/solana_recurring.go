@@ -20,76 +20,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// publishSolanaPlanRequest is the admin body for publishing an on-chain recurring
-// plan (#254). The plan terms are immutable on-chain, so this is a create-only
-// surface; editing core terms means sunsetting the plan and publishing a new one.
-type publishSolanaPlanRequest struct {
-	PlanID          uint64 `json:"plan_id" binding:"required"`
-	TokenSymbol     string `json:"token_symbol" binding:"required"`
-	AmountBaseUnits uint64 `json:"amount_base_units" binding:"required"`
-	PeriodHours     uint64 `json:"period_hours" binding:"required"`
-	ReceivingWallet string `json:"receiving_wallet"`
-	MetadataURI     string `json:"metadata_uri"`
-	EndTs           int64  `json:"end_ts"`
-	// PriceID, when set, attaches the published plan to that price's Solana
-	// processor config so the enroll flow can read the canonical terms back.
-	PriceID string `json:"price_id"`
-}
-
-// AdminPublishSolanaPlan signs + submits create_plan from the tenant's merchant
-// (cranker) key and returns the durable plan handle (#254). Admin-gated.
-func AdminPublishSolanaPlan(r *httprequest.Request) {
-	svc := r.State.SolanaPlanService
-	if svc == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
-		return
-	}
-	var req publishSolanaPlanRequest
-	if !r.BindJSON(&req) {
-		return
-	}
-
-	tenantID, err := merchant.Require(r.Request.Context())
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "no tenant resolved on request")
-		return
-	}
-	handle, err := svc.PublishPlan(r.Request.Context(), recurring.PublishPlanInput{
-		MerchantID:      tenantID,
-		PlanID:          req.PlanID,
-		TokenSymbol:     req.TokenSymbol,
-		AmountBaseUnits: req.AmountBaseUnits,
-		PeriodHours:     req.PeriodHours,
-		ReceivingWallet: req.ReceivingWallet,
-		MetadataURI:     req.MetadataURI,
-		EndTs:           req.EndTs,
-	})
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// Optionally bind the plan to a price so enroll can read canonical terms.
-	if req.PriceID != "" && r.State.PriceService != nil {
-		priceID, perr := uuid.Parse(req.PriceID)
-		if perr != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
-			return
-		}
-		price, gerr := r.State.PriceService.GetByID(r.Request.Context(), priceID)
-		if gerr != nil || price == nil {
-			r.ErrorJSON(http.StatusNotFound, "price not found")
-			return
-		}
-		price.SetProcessorConfig(models.ProcessorSolana, handle.ToProcessorConfig())
-		if uerr := r.State.PriceService.UpdateProcessors(r.Request.Context(), priceID, price.Processors); uerr != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "failed to attach plan to price")
-			return
-		}
-	}
-
-	r.SuccessJSON(handle)
-}
+// #528: AdminPublishSolanaPlan (#254 admin plan-publish) was dropped — it lived
+// only on the retired per-user admin surface. On-chain plan execution + the
+// self-service enroll/cancel/tier-change handlers below are unchanged.
 
 // confirmSolanaEnrollmentRequest is the user body for activating a recurring
 // subscription after the wallet has signed init_subscription_authority +

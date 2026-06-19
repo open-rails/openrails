@@ -33,7 +33,47 @@ OpenRails SaaS can use host/subdomain routing instead, e.g. `https://doujins.ope
 - Merchant routing must happen from a trusted envelope before payload trust: explicit path slug or host/subdomain. Do **not** infer merchant solely from an unverified provider payload.
 - After route resolution, load that merchant/provider account's webhook secret and verify the signature/IP/provider authentication with the merchant-specific credentials.
 - `webhook_host` / `webhook_path` are not normal bootstrap config for private standalone. The OpenRails mount/base URL is deployment config; merchant bootstrap should not repeat it.
-- `billing_tier` and `region` are SaaS/platform hosting metadata, not merchant billing configuration. They should not appear in the ordinary open-source bootstrap example. Keep them internal/optional only if existing admin/platform code still needs them.
+- `billing_tier` and `region` are SaaS/platform hosting metadata, not merchant billing configuration. Delete them from core OpenRails bootstrap/model; if `openrails-saas` needs plan/region data, it should own that in SaaS-specific state.
+- Replace merchant `name` with one operator/customer-facing `display_name`. Do not keep both `merchants.name` and `profile.display_name` in the bootstrap shape. Hard cut: there is no legacy fallback or compatibility path; we have no old data to preserve. Store display/branding data in merchant configuration/profile; `slug` remains the stable identifier.
+- `issuer.allowed_origins` remains part of the merchant bootstrap shape because it declares the merchant browser origins. CORS implementation belongs to #519, not this webhook/bootstrap issue.
+
+## Target merchant bootstrap shape
+
+```yaml
+version: 1
+
+merchants:
+  - slug: doujins
+    display_name: Doujins
+
+    issuer:
+      uri: https://doujins.com
+      jwks_uri: https://doujins.com/.well-known/jwks.json
+      audiences: [openrails]
+      allowed_origins:
+        - https://doujins.com
+
+    profile:
+      display_name: Doujins
+      logo_url: https://doujins.com/logo.png
+      from_email: billing@doujins.com
+      support_url: https://doujins.com/support
+
+    provider_accounts:
+      - provider_type: stripe
+        mode: primary
+        secrets:
+          secret_key: {env: DOUJINS_STRIPE_SECRET_KEY}
+          webhook_signing_secret: {env: DOUJINS_STRIPE_WEBHOOK_SECRET}
+```
+
+Removed from this shape: `name`, `billing_tier`, `region`, `webhook_host`, `webhook_path`, `profile.support_email`. Provider webhook URLs are deployment/operator instructions, not merchant bootstrap fields.
+
+Provider-account notes:
+- `account_id` is the durable provider-returned account identity. Do not require operators to hand-write it when OpenRails can discover it from credentials: Stripe `/v1/account`, NMI/Mobius profile report, CCBill account/subaccount config, Solana public wallet/authority.
+- `provider_key` is only a local/process selector, not durable identity. Do not expose it in the normal bootstrap shape unless a later CLI genuinely needs an explicit selector for multiple same-type accounts.
+- `display_name` is optional operational labeling and should not be part of the minimal bootstrap shape.
+- Replace public `role` + `status` with one `mode`: `primary`, `secondary`, `legacy`, or `disabled`. Internally this may still map to role/status columns, but the manifest should use one field.
 
 ## Tasks
 
@@ -42,7 +82,17 @@ OpenRails SaaS can use host/subdomain routing instead, e.g. `https://doujins.ope
 - [ ] Extend merchant-scoped webhook handling beyond Stripe if needed so NMI/Mobius and CCBill can use the same merchant-path routing model, with provider-specific verification after merchant resolution.
 - [ ] Ensure provider account selection is account-aware: route resolves merchant first, then provider/provider_account credentials are loaded for that merchant, with no cross-merchant fallback.
 - [ ] Remove `webhook_host` and `webhook_path` from `config/merchants.example.yaml` and from the recommended bootstrap shape in docs; leave host-based routing as an advanced/SaaS concern.
-- [ ] Remove `billing_tier` and `region` from the public bootstrap example/docs unless a real private-standalone use remains; if code must retain them for SaaS/platform metrics, mark them internal/optional metadata.
+- [ ] Remove `billing_tier` and `region` from `ManifestMerchant`, merchant provisioning APIs, examples, docs, admin responses, and schema if no core runtime dependency remains.
+- [ ] Replace bootstrap `name` with required `display_name`.
+- [ ] Drop `name` from `openrails.merchants` entirely; do not add `display_name` to `openrails.merchants` unless a measured list-query problem later requires denormalization.
+- [ ] Remove `Name` from `ManifestMerchant`, `merchants.ProvisionRequest`, and `merchants.Merchant`.
+- [ ] Store profile fields only in merchant configuration/profile: `display_name`, `logo_url`, `from_email`, and `support_url`. Remove `support_email`.
+- [ ] Update admin views/API responses to return `display_name`, not `name`.
+- [ ] Update `RegisterMerchant`, provisioning SQL, sqlc generated code, migrations, examples, docs, and tests for the hard cut.
+- [ ] Keep `issuer.allowed_origins` in the example only as merchant browser-origin declaration; defer all CORS behavior/docs/tests to #519.
+- [ ] Simplify provider account manifest fields: replace public `role` + `status` with `mode: primary|secondary|legacy|disabled`.
+- [ ] Make `account_id` discovered from credentials wherever possible; fail bootstrap clearly if account identity cannot be resolved for a provider account that is being registered. Keep manual account id only as an explicit advanced override if a provider has no reliable whoami path.
+- [ ] Remove `provider_key` and `display_name` from the normal bootstrap example; keep any local selector/operator label support out of the default shape unless proven necessary.
 - [ ] Fix stale docs/comments around webhook routing, including any text implying `webhook_host` is the normal private deployment model.
 - [ ] Add route tests for `/v1/merchants/:merchant/webhooks/:provider` proving unknown merchants do not fall back to a default merchant and known merchants load merchant-scoped credentials before verification.
 - [ ] Add/adjust integration smoke coverage for at least Stripe, and for Mobius/CCBill if their merchant-scoped verification path is implemented in this issue.
@@ -469,21 +519,32 @@ Lazy plan:
 
 ---
 
-# #519: Remove merchant_cors and delegate browser origin policy to AuthKit
+# #519: Rebuild standalone CORS from merchant allowed origins
 
-**Completed:** yes
+**Completed:** no
 
-OpenRails `merchant_cors` and `cors_origins` should go away. They are global runtime-config browser-origin trust lists, not tenant isolation. In public merchant registration, a global preflight union is misleading because every registered merchant origin would be allowed before the request carries a JWT issuer.
+**Reopened 2026-06-19:** the earlier plan removed stale `merchant_cors` / `cors_origins` config, but framed `remote_application.allowed_origins` as delegated-request authorization through AuthKit. That is the wrong security model. `Origin` is spoofable outside browsers, so post-JWT Origin checks are not application security. Application security is JWT signature/issuer/audience/permissions, merchant ownership, and merchant/provider credential isolation.
 
-AuthKit issue #85 owns the replacement: `remote_application.allowed_origins` plus AuthKit-owned middleware/helpers. OpenRails should not grow its own delegated-user issuer/origin policy.
+`remote_application.allowed_origins` should feed browser CORS policy. CORS is browser security, not API authentication.
 
-**Tasks:**
-- [x] After AuthKit #85 lands, delete `merchant_cors` from `config.Config`, `config.example.yaml`, `.env.example` docs, and validation/tests.
-- [x] Remove `cors_origins` from runtime config. CORS middleware remains only as the transport preflight/header layer; delegated browser origin policy belongs to AuthKit `remote_application.allowed_origins`.
-- [x] Replace current flattened CORS use on delegated browser surfaces with AuthKit-provided CORS/delegated middleware or host-provided `DelegatedAuthenticator` integration.
-- [x] Ensure `/v1/self/*` and `/v1/merchant-admin/*` receive an AuthKit-resolved principal; OpenRails should not inspect JWT issuer/origin itself when AuthKit can do it.
-- [x] Do not apply browser origin policy to webhooks or server-to-server service-token routes.
-- [x] Tests: `merchant_cors` config is rejected/absent, stale examples are gone, delegated browser route uses AuthKit integration, actual HTTP server CORS preflight passes while issuer-origin mismatch fails closed, and webhook/service-token routes are unaffected.
+## Correct model
+
+- Private standalone: preflight has no JWT and no merchant context, so OpenRails should build one process-wide browser CORS allow-list from the union of enabled merchant issuer `allowed_origins`.
+- Embedded: the host app may supply/own CORS. OpenRails embedded helpers should not force allow-all on the host; if OpenRails mounts its own CORS layer, it should use the same explicit allow-list model.
+- OpenRails SaaS: CORS can be tenant-specific because Host/subdomain resolves the merchant before preflight. That SaaS-specific work belongs in `~/openrails-saas`, not this issue.
+- Webhooks and server-to-server routes do not need browser CORS policy as a trust boundary.
+- Post-JWT delegated request `OriginAllowedForIssuer` is at most browser defense-in-depth. It must not be documented as an auth/security boundary; once real CORS union enforcement exists, remove it or clearly label it non-authoritative.
+
+## Tasks
+
+- [x] Keep the already-finished removal of `merchant_cors` and `cors_origins` from runtime config and stale examples.
+- [ ] Add a standalone CORS origin source backed by AuthKit/OpenRails state: union all enabled merchant remote_application `allowed_origins`.
+- [ ] Replace standalone `ginmw.CORS(nil)` allow-all with explicit CORS derived from that union; deny unknown browser origins by default.
+- [ ] Keep development/test escape hatches explicit and visibly named; no silent production allow-all.
+- [ ] Ensure CORS applies only where browser access matters. Do not use CORS as a webhook/service-token security layer.
+- [ ] Update docs/examples: `issuer.allowed_origins` is exact browser origin allow-list input, not webhook URL, mount path, wildcard list, or application authorization.
+- [ ] Remove or relabel the delegated request `OriginAllowedForIssuer` path so docs/tests do not imply spoofable `Origin` is real API security.
+- [ ] Add HTTP integration tests for allowed and denied preflight/actual browser requests using two merchant issuers, and prove non-browser requests still rely on JWT/permission checks rather than Origin.
 
 ---
 

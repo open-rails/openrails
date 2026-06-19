@@ -152,79 +152,11 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	stripe.Handle(http.MethodPost, "/portal", h(httphandlers.CreatePortalSession))
 }
 
-func RegisterAdminRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	// HARDCUT (#312): admin authority is the LIVE openrails:admin permission held
-	// in the caller's OWN tenant — evaluated at request time by the control plane,
-	// not a claim-based operator-tenant gate. When an embedded host wires no
-	// control plane the checker is nil and the gate fails closed.
-	mw := []router.Middleware{
-		opts.requiredMW(),
-		authpolicy.AdminPermissionRequiredMW(opts.AdminPermissionChecker, authpolicy.PermAdmin),
-	}
-	// Pin a tenant-scoped DB connection for the request so RLS constrains
-	// tenant-owned admin queries (issue #227).
-	if rt != nil && rt.DB != nil {
-		mw = append(mw, middleware.MerchantDBConnMW(rt.DB))
-	}
-
-	group := rr.Group("", mw...)
-
-	group.Handle(http.MethodGet, "/subscriptions", h(httphandlers.GetAdminSubscriptions))
-	group.Handle(http.MethodGet, "/subscriptions/:id", h(httphandlers.GetAdminSubscription))
-	group.Handle(http.MethodPost, "/subscriptions/:id/cancel", h(httphandlers.AdminCancelSubscription))
-
-	group.Handle(http.MethodGet, "/payments", h(httphandlers.GetAdminPayments))
-	group.Handle(http.MethodGet, "/payments/:id", h(httphandlers.GetAdminPayment))
-	group.Handle(http.MethodPost, "/payments/:id/refund", h(httphandlers.AdminRefundPayment))
-	group.Handle(http.MethodGet, "/users/:user_id/payments", h(httphandlers.GetAdminUserPayments))
-	group.Handle(http.MethodPost, "/users/:user_id/payments/off-channel", h(httphandlers.AdminCreateOffChannelPayment))
-	group.Handle(http.MethodGet, "/repair-alerts", h(httphandlers.GetAdminRepairAlerts))
-	group.Handle(http.MethodGet, "/manual-rebill-attempts", h(httphandlers.GetAdminManualRebillAttempts))
-	// Provider intent ledger (#358): the queued outbound provider mutations.
-	// Under mode=limited/readonly this is the dry-run view of what the
-	// executor will drain when the mode lifts.
-	group.Handle(http.MethodGet, "/intents", h(httphandlers.GetAdminProviderIntents))
-
-	group.Handle(http.MethodGet, "/users/:user_id", h(httphandlers.GetAdminUserBillingProfile))
-	group.Handle(http.MethodGet, "/users/:user_id/entitlements", h(httphandlers.GetAdminUserEntitlements))
-	group.Handle(http.MethodGet, "/users/:user_id/nmi", h(httphandlers.GetAdminUserNMI))
-	group.Handle(http.MethodGet, "/users/:user_id/nmi/metrics", h(httphandlers.GetAdminUserNMIMetrics))
-	group.Handle(http.MethodGet, "/users/:user_id/ccbill", h(httphandlers.GetAdminUserCCBill))
-	group.Handle(http.MethodGet, "/users/:user_id/ccbill/metrics", h(httphandlers.GetAdminUserCCBillMetrics))
-	group.Handle(http.MethodPost, "/users/:user_id/entitlements", h(httphandlers.GrantAdminEntitlement))
-	group.Handle(http.MethodDelete, "/users/:user_id/entitlements/:id", h(httphandlers.RevokeAdminEntitlement))
-
-	group.Handle(http.MethodGet, "/metrics/summary", h(httphandlers.GetAdminMetricsSummary))
-	group.Handle(http.MethodGet, "/metrics/revenue", h(httphandlers.GetAdminMetricsRevenue))
-	group.Handle(http.MethodGet, "/metrics/subscriptions", h(httphandlers.GetAdminMetricsSubscriptions))
-	group.Handle(http.MethodGet, "/metrics/processors", h(httphandlers.GetAdminMetricsProcessors))
-	group.Handle(http.MethodGet, "/metrics/churn", h(httphandlers.GetAdminMetricsChurn))
-
-	// Stripe-shaped entitlement features (issue #245): features CRUD,
-	// product-feature attachment, active-entitlements read. Operator-admin gated.
-	RegisterEntitlementFeatureRoutes(group, rt)
-
-	// Solana recurring plans — admin surface (#254). Create-only: on-chain plan
-	// terms are immutable, so editing core terms = sunset + publish a new plan.
-	group.Handle(http.MethodPost, "/solana/recurring/plans", h(httphandlers.AdminPublishSolanaPlan))
-
-	// Product access grants — admin surface (issue #250).
-	adminAccess := group.Group("/users/:user_id/product-access")
-	adminAccess.Handle(http.MethodGet, "", h(httphandlers.GetAdminUserProductAccess))
-	adminAccess.Handle(http.MethodPost, "", h(httphandlers.GrantAdminProductAccess))
-	adminAccess.Handle(http.MethodDelete, "/:id", h(httphandlers.RevokeAdminProductAccess))
-
-	// Processor reconciliation (#107 phase 2). Manual-only: POST /runs executes
-	// synchronously (advisory or enforce); enforce writes LOCAL state only —
-	// remote actions live in the findings admin queue (ack/dismiss below).
-	adminReconcile := group.Group("/reconcile")
-	adminReconcile.Handle(http.MethodPost, "/runs", h(httphandlers.AdminReconcileRun))
-	adminReconcile.Handle(http.MethodGet, "/runs", h(httphandlers.AdminReconcileListRuns))
-	adminReconcile.Handle(http.MethodGet, "/runs/:id", h(httphandlers.AdminReconcileGetRun))
-	adminReconcile.Handle(http.MethodGet, "/findings", h(httphandlers.AdminReconcileListFindings))
-	adminReconcile.Handle(http.MethodPost, "/findings/:id/ack", h(httphandlers.AdminReconcileAckFinding))
-	adminReconcile.Handle(http.MethodPost, "/findings/:id/dismiss", h(httphandlers.AdminReconcileDismissFinding))
-}
+// #528: the per-user `/v1/admin` surface (RegisterAdminRoutes) was retired. The
+// admin API is the delegated issuer→owner surface (ginroutes.RegisterAdminRoutes,
+// `openrails:merchant:*`). The dropped features (provider-intents, reconcile,
+// solana recurring plans, entitlement-features) live only on the dead surface and
+// are removed; product-access moves to the delegated surface (#528 increment 4).
 
 func RegisterMerchantActionRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	mw := []router.Middleware{
