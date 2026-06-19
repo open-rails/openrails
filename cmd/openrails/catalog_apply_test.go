@@ -98,7 +98,7 @@ catalogs:
 }
 
 func TestExampleCatalogManifestParses(t *testing.T) {
-	targets, err := loadCatalogTargets(filepath.Join("..", "..", "config", "catalog.local-stack.example.yaml"))
+	targets, err := loadCatalogTargets(filepath.Join("..", "..", "config", "catalog.example.yaml"))
 	if err != nil {
 		t.Fatalf("loadCatalogTargets example: %v", err)
 	}

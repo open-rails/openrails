@@ -56,7 +56,7 @@ merchants:
 }
 
 func TestExampleBootstrapManifestParses(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "merchants.local-stack.example.yaml"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "merchants.example.yaml"))
 	require.NoError(t, err)
 
 	manifest, err := ParseBootstrapManifest(raw)
