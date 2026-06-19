@@ -7,7 +7,149 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 530
+next_id: 533
+
+---
+
+# #532: Standardize CLI mutation flags: insert, overwrite, prune
+
+**Completed:** no
+
+Several OpenRails CLI commands reconcile one source of truth into another. They should share the same operator safety model: by default, commands plan and report only. Mutations happen only when the operator explicitly enables the mutation class.
+
+## Target Semantics
+
+- No mutation flags: dry-run / plan-only. Print what would change and persist no changes unless a command has a separately documented read-only report side effect.
+- `--insert`: create missing records or provider objects.
+- `--overwrite`: update existing records or overwrite mutable/provider-owned fields.
+- `--prune`: remove, disable, archive, or tombstone records/objects absent from the declared or observed source.
+- Flags compose. Full reconcile-to-source is `--insert --overwrite --prune`.
+- Keep remote provider safety explicit: `pull-provider` still never mutates external processors; its flags only mutate the OpenRails local mirror/converged state.
+
+## Command Mapping
+
+- `openrails bootstrap apply`
+  - `--insert`: create missing initial platform/AuthKit/control-plane seed objects.
+  - `--overwrite`: update seeded authority fields, keys, permissions, or other mutable bootstrap-owned data.
+  - `--prune`: remove/disable bootstrap-owned objects absent from the bootstrap file, within a narrowly documented scope.
+
+- `openrails merchant-config apply`
+  - `--insert`: create missing merchants, profiles, issuer links, provider accounts, and secrets.
+  - `--overwrite`: update existing merchant config/profile/provider secret values.
+  - `--prune`: disable/delete config, secrets, or provider accounts absent from the manifest according to the provider-account safety rules.
+
+- `openrails merchant-catalog apply`
+  - `--insert`: create missing products, prices, tier groups, catalog metadata, and provider catalog objects.
+  - `--overwrite`: update existing OpenRails-owned catalog fields/provider catalog mappings.
+  - `--prune`: archive OpenRails-owned catalog extras absent from the desired catalog. Never touch foreign provider objects.
+
+- `openrails pull-provider`
+  - `--insert`: import provider-observed records missing locally.
+  - `--overwrite`: update existing local mirror rows from provider-observed truth.
+  - `--prune`: delete/tombstone/archive eligible local mirror rows attributed to the pulled provider account that are absent from the provider source.
+
+## Tasks
+
+- [ ] Replace command-specific "dry-run unless --overwrite" wording with the shared mutation-flag contract.
+- [ ] Add `--insert` to `pull-provider`; make current provider-missing materialization require `--insert`, not `--overwrite`.
+- [ ] Change `pull-provider --overwrite` to only update existing local mirror rows.
+- [ ] Keep `pull-provider --prune` dry-run unless paired with a mutation flag that permits the chosen prune action; document whether prune requires `--overwrite`, `--insert`, or only `--prune` as the destructive opt-in.
+- [ ] Update merchant-config apply to use `--insert --overwrite --prune` rather than "default seed-once plus overwrite/prune" as the public mental model.
+- [ ] Update merchant-catalog apply so default is plan-only and writes require `--insert` and/or `--overwrite`; preserve `--prune` as archive-only for OpenRails-owned extras.
+- [ ] Update bootstrap apply to default to plan-only for manual runs; startup first-run behavior must remain separately documented and non-destructive.
+- [ ] Add CLI help tests/smokes proving each command exposes the same mutation flags and dry-run default.
+- [ ] Update examples/runbooks to show plan-only first, then explicit mutation flags.
+
+---
+
+# #531: Split bootstrap, merchant config, and catalog into separate CLI/file surfaces
+
+**Completed:** no
+
+The current `push-merchant-config` direction is doing too much under one "bootstrap" concept. Separate the lifecycle surfaces so initial empty-DB provisioning can run all three, but normal operations can re-run only the part that changed.
+
+## Target Split
+
+1. **Platform/bootstrap authority**
+   - File: `/etc/openrails/bootstrap.yaml` or `/run/openrails/bootstrap.yaml`
+   - Command: `openrails bootstrap apply --file ...`
+   - Scope: initial OpenRails/AuthKit platform/control-plane authority only: instance issuer/JWKS/signing/public authority wiring, bootstrap administrative authority if needed, and other global control-plane seed state.
+   - Not merchant provider secrets.
+   - Not products/prices.
+   - Startup auto-run, if present, is first-run only and non-destructive.
+
+2. **Merchant config**
+   - File: `/etc/openrails/merchants.yaml` or `/run/openrails/merchants.yaml`
+   - Command: `openrails merchant-config apply --file ...`
+   - Scope: merchant rows/profile, merchant issuer ownership, provider accounts, provider credentials/secrets, webhook route instructions/docs, merchant-level operational settings.
+   - Default apply is seed-once/additive for secrets.
+   - `--overwrite` re-imports/replaces declared secret values.
+   - `--prune` deletes missing declared secret values / disables missing provider accounts as specified by that issue's prune semantics.
+
+3. **Merchant catalog**
+   - File: `/etc/openrails/catalog.yaml` or `/run/openrails/catalog.yaml`
+   - Command: `openrails merchant-catalog apply --file ...`
+   - Scope: products, prices, tier groups, entitlements/catalog metadata, provider catalog push/links.
+   - `--prune` means catalog-prune semantics only: archive OpenRails-owned provider/catalog extras absent from desired catalog.
+
+## Initial Provisioning
+
+On an empty DB/private standalone install, an operator or init job may run all three in order:
+
+```bash
+openrails bootstrap apply --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
+openrails merchant-config apply --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml
+openrails merchant-catalog apply --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml
+```
+
+After initial provisioning, each command is run independently based on what changed. Do not make normal server restarts silently reconcile all three surfaces.
+
+## Tasks
+
+- [ ] Rename/restructure CLI commands so bootstrap, merchant config, and merchant catalog are separate top-level command groups with explicit `apply` subcommands.
+- [ ] Split manifest structs/parsers/examples/docs into three files with no overlapping top-level keys.
+- [ ] Keep first-run startup auto-apply limited to platform/bootstrap authority only, or require an explicit init mode/job to run all three. Do not run merchant config/catalog reconcile on every server boot.
+- [ ] Preserve manual apply safety using the shared mutation flag contract from #532: default plan-only, `--insert`, `--overwrite`, and `--prune`.
+- [ ] Update `config/merchants.example.yaml`, `config/catalog.example.yaml`, and add/repair `config/bootstrap.example.yaml` so each file demonstrates only its own scope.
+- [ ] Update docs/runbooks to explain empty-DB initialization order and later independent operational re-apply.
+- [ ] Add CLI tests proving each command rejects keys owned by the other manifest types.
+
+---
+
+# #530: Bootstrap secrets must use runtime secret backend and provider-account-scoped attribution
+
+**Completed:** no
+
+Current problem: runtime OpenRails can use a Vault-backed `MerchantSecretStore` when `vault.enabled: true`, but `push-merchant-config` currently builds `merchants.NewDBSecretStore(cp.Pool())` directly. That means a Vault-enabled deployment can import bootstrap provider secrets into the DB secret store while the running server expects them in Vault. Also, provider secrets are still broad merchant secret names like `stripe/secret_key`, which is not enough for multiple same-provider accounts or live/test separation.
+
+Security goal: bootstrap secret import and runtime secret reads must use the same backend and the same provider-account identity model. A secret imported for one merchant/provider account/environment must never be read or applied as another merchant/provider account/environment's credential.
+
+## Target Model
+
+- One secret-store selection function shared by runtime server construction, startup bootstrap, and manual `push-merchant-config`.
+- If `vault.enabled: true`, bootstrap writes imported provider secrets into OpenRails' canonical Vault paths, not DB.
+- If Vault is disabled, bootstrap writes into the DB-backed merchant secret store, with envelope encryption when configured.
+- Provider account identity includes `(merchant_id, provider_type, environment, account_id)`, where `environment` is `live` or `test`.
+- Provider account identity is discovered from credentials whenever possible before account registration:
+  - Stripe: `/v1/account`
+  - NMI/Mobius: profile/account identity
+  - CCBill: account/subaccount config until a better whoami exists
+  - Solana: public wallet/authority
+- Secrets should be stored/addressed in a way that cannot collide across multiple provider accounts of the same type for the same merchant. Broad names like `stripe/secret_key` are only safe for single-account compatibility and should not be the long-term primary addressing model.
+- Bootstrap file/secret material is seed input only. After import, OpenRails' canonical secret backend is runtime truth.
+
+## Tasks
+
+- [ ] Extract a shared secret-store builder used by both standalone runtime wiring and `push-merchant-config` / startup bootstrap.
+- [ ] Make `push-merchant-config` honor `config.vault.enabled`; Vault-enabled deployments must import provider secrets into Vault-backed `MerchantSecretStore`.
+- [ ] Add integration coverage proving bootstrap import writes to Vault when Vault is enabled and runtime reads the same value from Vault.
+- [ ] Add integration coverage proving DB-backed bootstrap still works and uses envelope encryption when configured.
+- [ ] Add provider-account environment (`live|test`) to DB schema, generated queries, provider account upsert/find/list APIs, and relevant unique indexes.
+- [ ] Change provider secret addressing to include provider account identity or provider account id, so multiple Stripe/NMI/etc accounts for one merchant cannot overwrite each other's credentials.
+- [ ] Update bootstrap provider-account reconciliation to resolve account identity from credentials before writing/registering account rows; fail clearly if identity cannot be resolved for providers that require discovery.
+- [ ] Ensure checkout/session stamping, provider intents, provider-pull, mirror rows, and webhook credential lookup all use the resolved provider account/environment and do not fall back across accounts.
+- [ ] Update admin/merchant secret APIs to show/write provider-account-scoped secrets, not only broad merchant-level secret names.
+- [ ] Update docs/examples/runbooks to explain seed material vs runtime secret backend, Vault import paths, and provider-account-scoped secret ownership.
 
 ---
 
@@ -69,6 +211,12 @@ merchants:
 ```
 
 Removed from this shape: `name`, `billing_tier`, `region`, `webhook_host`, `webhook_path`, `profile.support_email`. Provider webhook URLs are deployment/operator instructions, not merchant bootstrap fields.
+
+Production bootstrap delivery:
+- Preferred production path: store the full bootstrap YAML as a deploy-time Vault secret, fetch/render it into the container at startup as an ephemeral file (for example `/run/openrails/bootstrap.yaml`), run first-run `push-merchant-config`, then treat OpenRails' canonical merchant secret backend as the runtime source of truth.
+- The Vault bootstrap YAML is seed material, not the steady-state source of truth. Startup bootstrap remains first-run only; later secret rotations happen through OpenRails' merchant secret backend/admin surface unless an operator explicitly runs manual bootstrap with overwrite.
+- Use separate Vault policy/roles where possible: a short-lived bootstrap role can read the deploy bootstrap YAML; the long-running OpenRails role should only access OpenRails-owned runtime secret paths.
+- Do not bake the bootstrap YAML into the image and do not commit inline-secret bootstrap files to git. Local dev may use checked-in examples with env/file placeholders only.
 
 Provider-account notes:
 - Provider account identity includes environment. The public enum is `live` or `test`; omitted means `live`. Provider-specific terms like sandbox/devnet/testnet normalize to `test`. Live and test credentials are separate provider accounts, not two keys on one account. Effective identity is `(merchant_id, provider_type, environment, provider_account_id)`.
@@ -224,8 +372,11 @@ DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
 - [ ] refund `POST /payments/:id/refund` → `POST /payments/:id/refunds`.
 - [ ] Update ginroutes/self_service_test.go path assertions. Build + tests green.
 
-### Increment 4 (shapes — handler logic; the big one)
-- [ ] New perm `PermMerchantProductAccessWrite = "openrails:merchant:product-access:write"` in internal/controlplane/catalog.go; add to the permission catalog (owner wildcard `*` already covers it).
+### Increment 4 (shapes — handler logic; the big one) — NOT a mechanical pass; needs design decisions + DB/ClickHouse integration tests. Findings from increment-2/3 investigation:
+> - **product-access is currently DEAD code**: `ginroutes.RegisterProductAccessRoutes` (which mounts /me + /service + /admin product-access) is defined but **mounted nowhere**. So "porting" it = reviving a dormant feature; also decide the /me + /service surfaces, not just /admin. Handlers exist (`GetMyProducts`, `GetAdminUserProductAccess`, `Grant/RevokeAdminProductAccess`, `ServiceGetUserProductAccess`).
+> - **metrics fold is a design decision, not a fold**: the 5 handlers (admin_metrics.go) have DIFFERENT default ranges (churn 180d, others 30d), `granularity` params (revenue/subscriptions), and per-section multi-currency disambiguation (`?currency`, else error on multi). A single `GET /admin/metrics` must decide: one `?period`+`?currency` applied uniformly (churn computes its own window internally), sections as `{summary,revenue,subscriptions,processors,churn}`. Confirm the unified shape before building. ClickHouse-backed → needs the analytics stack to integration-test.
+> - composite user-detail + payment-methods + self-entitlements compose multiple services → DB-integration-test against dbtest/compose.
+- [ ] New perm `PermMerchantProductAccessWrite = "openrails:merchant:product-access:write"` in internal/controlplane/catalog.go (const + catalogEntries + merchantCatalog map + MerchantCatalogNames); owner wildcard `*` already covers it.
 - [ ] Port product-access WRITES to ginroutes/routes.go: `POST /admin/users/:user_id/product-access` (`GrantAdminProductAccess`) + `DELETE /admin/users/:user_id/product-access/:id` (`RevokeAdminProductAccess`), gated by the new perm.
 - [ ] Composite `GET /admin/users/:user_id` (`GetAdminUserBillingProfile`): response = `{profile, subscriptions[], payment_methods[], entitlements[], product_access[], credit_balance}`. Compose from the subscription/payment-method/entitlement/product-access/credit services. Define a minimal composite response struct.
 - [ ] DROP dedicated reads (routes + handlers if now-unused): `GET /users/:id/entitlements`, `/product-access`, `/nmi`, `/nmi/metrics`, `/ccbill`, `/ccbill/metrics`.
