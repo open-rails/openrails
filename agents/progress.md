@@ -71,12 +71,12 @@ merchants:
 Removed from this shape: `name`, `billing_tier`, `region`, `webhook_host`, `webhook_path`, `profile.support_email`. Provider webhook URLs are deployment/operator instructions, not merchant bootstrap fields.
 
 Provider-account notes:
-- Provider account identity includes environment. Live and test/sandbox credentials are separate provider accounts, not two keys on one account. Effective identity is `(merchant_id, provider_type, environment, provider_account_id)`.
+- Provider account identity includes environment. The public enum is `live` or `test`; omitted means `live`. Provider-specific terms like sandbox/devnet/testnet normalize to `test`. Live and test credentials are separate provider accounts, not two keys on one account. Effective identity is `(merchant_id, provider_type, environment, provider_account_id)`.
 - `account_id` is the durable provider-returned account identity inside that environment. Do not require operators to hand-write it when OpenRails can discover it from credentials: Stripe `/v1/account`, NMI/Mobius profile report, CCBill account/subaccount config, Solana public wallet/authority.
 - `provider_key` is only a local/process selector, not durable identity. Do not expose it in the normal bootstrap shape unless a later CLI genuinely needs an explicit selector for multiple same-type accounts.
 - `display_name` is optional operational labeling and should not be part of the minimal bootstrap shape.
 - Replace public `role` + `status` with one `mode`: `primary`, `secondary`, `legacy`, or `disabled`. Internally this may still map to role/status columns, but the manifest should use one field.
-- Do not let global `test_env` silently swap a live provider account to test credentials. The selected provider account/environment must be explicit. Production should reject `environment: test` / `sandbox` as `mode: primary` unless the deployment is explicitly non-production.
+- Do not let global `test_env` silently swap a live provider account to test credentials. The selected provider account/environment must be explicit. Production should reject `environment: test` as `mode: primary` unless the deployment is explicitly non-production.
 
 ## Tasks
 
@@ -94,10 +94,10 @@ Provider-account notes:
 - [ ] Update `RegisterMerchant`, provisioning SQL, sqlc generated code, migrations, examples, docs, and tests for the hard cut.
 - [ ] Keep `issuer.allowed_origins` in the example only as merchant browser-origin declaration; defer all CORS behavior/docs/tests to #519.
 - [ ] Simplify provider account manifest fields: replace public `role` + `status` with `mode: primary|secondary|legacy|disabled`.
-- [ ] Add provider account `environment` (`live`, `test`, `sandbox`, or provider-specific canonical values) and include it in uniqueness, row identity, mirror rows, intent binding, checkout/session stamping, and provider-pull matching.
+- [ ] Add provider account `environment` enum: `live` or `test`; omitted/default is `live`. Normalize provider-specific terms (`prod`/`production` -> `live`; `sandbox`/`devnet`/`testnet` -> `test`) at manifest/API boundaries. Include environment in uniqueness, row identity, mirror rows, intent binding, checkout/session stamping, and provider-pull matching.
 - [ ] Make `account_id` discovered from credentials wherever possible; fail bootstrap clearly if account identity cannot be resolved for a provider account that is being registered. Keep manual account id only as an explicit advanced override if a provider has no reliable whoami path.
-- [ ] Support multiple same-provider accounts across environments without mixing objects: Stripe live vs test, NMI/Mobius live vs sandbox, CCBill live vs test if applicable, Solana mainnet/devnet/testnet.
-- [ ] Reject unsafe environment/routing combinations: production deployments cannot silently route new work to test/sandbox provider accounts; test/sandbox accounts should normally be `disabled` or only enabled in development/staging.
+- [ ] Support multiple same-provider accounts across environments without mixing objects: Stripe live vs test, NMI/Mobius live vs test/sandbox, CCBill live vs test if applicable, Solana live/mainnet vs test/devnet/testnet.
+- [ ] Reject unsafe environment/routing combinations: production deployments cannot silently route new work to `environment: test` provider accounts; test accounts should normally be `disabled` or only enabled in development/staging.
 - [ ] Remove `provider_key` and `display_name` from the normal bootstrap example; keep any local selector/operator label support out of the default shape unless proven necessary.
 - [ ] Fix stale docs/comments around webhook routing, including any text implying `webhook_host` is the normal private deployment model.
 - [ ] Add route tests for `/v1/merchants/:merchant/webhooks/:provider` proving unknown merchants do not fall back to a default merchant and known merchants load merchant-scoped credentials before verification.
@@ -210,8 +210,8 @@ DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
 - [x] Rewire callers: routes_self.go, pkg/embedded/gin/self.go. Update tests: ginroutes/self_service_test.go, routes_self_test.go, pkg/embedded/gin/self_test.go, embedded_mux_test.go.
 - [x] Validated via HTTP route harness (`go test ./internal/http/... ./pkg/embedded/gin/...`).
 
-### Increment 2 (drops) — remove dropped features' routes + dead per-user code
-- [ ] Delete dead per-user `RegisterAdminRoutes` (internal/http/routes/routes.go) + `registerAdminRoutesAt`/`registerAdminRoutesOn` (internal/http/routes_admin.go).
+### Increment 2 (drops) — DONE (commit a89ca887): dropped features' routes + dead per-user code removed; self handlers + product-access kept; build+vet+route tests green.
+- [x] Delete dead per-user `RegisterAdminRoutes` (internal/http/routes/routes.go) + `registerAdminRoutesAt`/`registerAdminRoutesOn` (internal/http/routes_admin.go).
 - [ ] **Before deleting each handler, grep its callers** — keep any still used by `/self` or `/service`; only delete admin-only ones.
 - [ ] `/provider-intents`: drop route + `httphandlers.GetAdminProviderIntents` (verify not used elsewhere).
 - [ ] `/reconcile/*` (#107): drop routes + `AdminReconcile{Run,ListRuns,GetRun,ListFindings,AckFinding,DismissFinding}`. Leave the underlying convergence-engine service/worker/migration 008 (non-admin paths) unless clearly admin-only — DECIDE + note.
@@ -219,8 +219,8 @@ DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
 - [ ] entitlement-features + `active_entitlements` (#245): delete `RegisterEntitlementFeatureRoutes` (internal/http/routes/entitlement_features.go) + handlers `Create/ListEntitlementFeatures`, `ServiceGetActiveEntitlements`, `List/Attach/DetachProductFeature`. Verify `ServiceGetActiveEntitlements` isn't used by `/self`.
 - [ ] Fix orphaned imports; remove/upd tests referencing dropped handlers. Build + vet + route tests green.
 
-### Increment 3 (RESTful route shapes)
-- [ ] ginroutes/routes.go: subscription cancel `POST /subscriptions/:id/cancel` → `DELETE /subscriptions/:id` (handler `AdminCancelSubscription` unchanged).
+### Increment 3 (RESTful route shapes) — DONE (commit d0336be0)
+- [x] ginroutes/routes.go: subscription cancel `POST /subscriptions/:id/cancel` → `DELETE /subscriptions/:id` (handler `AdminCancelSubscription` unchanged).
 - [ ] refund `POST /payments/:id/refund` → `POST /payments/:id/refunds`.
 - [ ] Update ginroutes/self_service_test.go path assertions. Build + tests green.
 
