@@ -7,7 +7,47 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 525
+next_id: 527
+
+---
+
+# #525: Use API-key terminology in bootstrap authority seeding
+
+**Completed:** no
+
+OpenRails bootstrap should use `api_keys` for long-lived machine credentials instead of exposing AuthKit's internal/service-token terminology.
+
+AuthKit issue #86 owns the primitive and manifest alias. OpenRails owns the bootstrap YAML/docs/examples that seed OpenRails authority through AuthKit.
+
+Target bootstrap shape:
+
+```yaml
+auth:
+  orgs:
+    - slug: local-stack
+      api_keys:
+        - name: local-stack-operator
+          permissions:
+            - openrails:admin
+            - openrails:catalog:write
+          resources:
+            - kind: openrails.merchant
+              id: local-stack
+          output:
+            file: ./.secrets/openrails/local-stack-operator.key
+```
+
+Prefix direction:
+- Prefer self-describing keys like `openrails_st_...` or a future `openrails_ak_...` / `or_live_...` form.
+- Prefix is the issuing application/deployment brand, not the merchant/org/user.
+- Do not put tenant identifiers or secrets in the prefix.
+
+**Tasks:**
+- [ ] After AuthKit #86 lands, update `bootstrap.yaml` parsing/examples from `service_tokens` to `api_keys`.
+- [ ] Update `config/merchants*.yaml`, docs, CLI text, and tests to say API key.
+- [ ] Keep any accepted legacy `service_tokens` alias undocumented and temporary, if AuthKit keeps one.
+- [ ] Ensure generated outputs use `.key` or similarly clear filenames, not `.token`.
+- [ ] Tests: example bootstrap manifest with `api_keys` parses and produces the same AuthKit provisioning request.
 
 ---
 

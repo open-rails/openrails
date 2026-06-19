@@ -12072,3 +12072,17 @@ Current runtime config has `StoreConfig{Name, LogoURL, FromEmail, CustomerPortal
 
 ---
 
+# #526: Restore session-based Stripe checkout success_url/cancel_url (regression from #521)
+
+Completed: yes
+
+#521 moved Stripe hosted-checkout return URLs off processor config (`ProcessorConfig.SuccessURL/CancelURL`, deleted) and onto the checkout request — but only wired them into the *direct* `CheckoutRequest` (contracts.go). The public `/v1/checkout` SESSION path (`checkoutSessionCreateRequest` → `CheckoutSessionService.CreateSession` → `initializeSession` → `initializeCheckoutSession`) had no field to carry them, so `processStripeSubscription`/`processStripePayment` always failed with "stripe success_url and cancel_url are required". No unit test exercised that path, so v0.41.0 shipped with hosted Stripe checkout broken. Only the Stripe path requires the URLs — NMI/CCBill/Solana have their own init paths and are unaffected — so among consumers only cozy-art (Stripe) hit it; doujins/hentai0 (mobius/ccbill/solana) and tensorhub (no checkout) were fine.
+
+**Tasks:**
+- [x] Add top-level `success_url`/`cancel_url` to `checkoutSessionCreateRequest` (handler) + `CheckoutSessionCreateRequest` (service); thread through `initializeSession`→`initializeCheckoutSession` onto the `CheckoutRequest`. Optional fields; empty stays valid for non-Stripe processors.
+- [x] Regression test `internal/modules/checkout/session_checkout_returnurls_test.go`: a capturing `checkoutSessionExecutor` proves the request URLs reach the downstream `CheckoutRequest`.
+- [x] Fix two stale example-config test paths (`{catalog,merchants}.local-stack.example.yaml` → `{catalog,merchants}.example.yaml`) that failed at v0.41.0 after the config rename.
+- [x] Tagged v0.42.0. cozy-art frontend `startBillingCheckout` now sends `success_url`/`cancel_url` = `${window.location.origin}/account?subscription=success|canceled` (matches AccountPage's `searchParams.get('subscription')` contract). All four consumers bumped to v0.42.0; builds + full unit suites green.
+
+---
+
