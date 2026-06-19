@@ -10,9 +10,7 @@
 package embedhttp
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,7 +20,6 @@ import (
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/captcha"
 	captchaembed "github.com/open-rails/openrails/internal/captcha/embed"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -71,6 +68,7 @@ type Assembler struct {
 	ServiceCredentialResolver httproutes.ServiceCredentialResolver
 	CaptchaStore              *captcha.ChallengeStore
 	Authenticator             billingauth.Authenticator
+	ConfiguredMerchant        merchant.ID
 }
 
 // FromApp builds an Assembler from the gin-free application graph (the same
@@ -90,7 +88,7 @@ func FromApp(a *app.App) *Assembler {
 	if c, ok := a.ControlPlane.(httproutes.ServiceCredentialResolver); ok {
 		resolver = c
 	}
-	return &Assembler{
+	asm := &Assembler{
 		Cfg:                       a.Config,
 		Runtime:                   a.Runtime,
 		AdminChecker:              checker,
@@ -98,6 +96,10 @@ func FromApp(a *app.App) *Assembler {
 		CaptchaStore:              captcha.NewChallengeStore(a.RedisClient),
 		Authenticator:             a.Authenticator,
 	}
+	if a.Runtime != nil {
+		asm.ConfiguredMerchant = a.Runtime.ConfiguredMerchant
+	}
+	return asm
 }
 
 // NewHTTPHandler assembles the embedded billing surface as a gin-free
@@ -139,43 +141,16 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.Runtime), s.Runtime)
 	}
 
-	var origins []string
-	if s.Cfg != nil {
-		origins = s.Cfg.AllowedCORSOrigins()
-	}
 	// Resolve the configured tenant SLUG → internal merchant.ID once at
 	// bootstrap (#336): the resolver pins it per request. A non-empty-but-
 	// unknown slug is a configuration error. EMBEDDED boot (embed.New) ensures
 	// the bound tenant row before this runs, so it never trips here; a
-	// STANDALONE/REMOTE deployment with an unprovisioned slug gets a CLEAR,
-	// actionable error via a fail-closed handler instead of a panic (#478). (The
-	// standalone server also pre-resolves at boot and fails fast there.)
-	configured, err := s.resolveConfiguredTenant()
-	if err != nil {
-		return failClosedHandler(fmt.Sprintf("embedhttp: %v", err))
-	}
 	return middleware.ChainHTTP(mux,
 		middleware.SecurityHeadersHTTP(),
-		middleware.CORSHTTP(origins),
+		middleware.CORSHTTP(nil),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.ResolveMerchantHTTP(configured),
+		middleware.ResolveMerchantHTTP(s.ConfiguredMerchant),
 	)
-}
-
-// resolveConfiguredTenant resolves the construction-time tenant SLUG
-// (Cfg.Merchant) to the internal merchant.ID via the Runtime's pool (#336). An
-// empty slug yields the zero id (no tenant pinned; tenant-owned ops hard-fail
-// downstream by design); a non-empty-but-unknown slug is an error.
-func (s *Assembler) resolveConfiguredTenant() (merchant.ID, error) {
-	var slug string
-	if s.Cfg != nil {
-		slug = s.Cfg.Merchant
-	}
-	if slug == "" || s.Runtime == nil || s.Runtime.DB == nil {
-		return merchant.ID{}, nil
-	}
-	ctx := context.Background()
-	return db.ResolveMerchantSlug(ctx, s.Runtime.DB.Qx(ctx), slug)
 }
 
 // captchaStatusHandler is the gin-free captcha status endpoint (issue #282).
@@ -230,16 +205,6 @@ func captchaClientScriptURL(r *http.Request) string {
 		return strings.TrimSuffix(path, "/status") + "/client.js"
 	}
 	return "/v1/captcha/client.js"
-}
-
-// failClosedHandler returns an http.Handler that responds 500 with a clear
-// message on every request — used when the configured tenant slug is not
-// provisioned (#478) so a misconfigured standalone/remote deployment surfaces an
-// actionable error rather than panicking at boot or per request.
-func failClosedHandler(msg string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": msg})
-	})
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {

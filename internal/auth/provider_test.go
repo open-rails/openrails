@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	authhttp "github.com/open-rails/authkit/http"
-	"github.com/open-rails/openrails/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,6 +24,6 @@ func TestUserContextFromClaimsMapsFields(t *testing.T) {
 func TestNewVerifierRejectsOnlyBlankIssuers(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewVerifier(&config.AuthConfig{Issuers: []string{" ", ""}, ExpectedAudience: "openrails-app"})
+	_, err := NewIssuerVerifier([]string{" ", ""}, "openrails")
 	require.ErrorContains(t, err, "at least one non-empty auth issuer is required")
 }

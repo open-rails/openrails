@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	authhttp "github.com/open-rails/authkit/http"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	log "github.com/sirupsen/logrus"
@@ -21,13 +20,11 @@ type Authenticator struct {
 	verifier Verifier
 }
 
-// NewAuthenticator builds the gin-free AuthKit-backed Authenticator.
-func NewAuthenticator(cfg *config.AuthConfig) (*Authenticator, error) {
-	v, err := NewVerifier(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return &Authenticator{verifier: v}, nil
+// NewAuthenticator builds the gin-free AuthKit-backed Authenticator around a
+// verifier supplied by the caller. Standalone passes the control-plane verifier;
+// embedded hosts may pass their own explicit verifier.
+func NewAuthenticator(v Verifier) *Authenticator {
+	return &Authenticator{verifier: v}
 }
 
 // Authenticate implements billingauth.Authenticator so the AuthKit-backed

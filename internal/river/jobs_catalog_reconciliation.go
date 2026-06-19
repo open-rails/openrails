@@ -48,6 +48,7 @@ type CatalogReconciliationPullWorker struct {
 	river.WorkerDefaults[CatalogReconciliationPullArgs]
 	DB         *db.DB
 	Config     *config.Config
+	Processors config.ProcessorSet
 	NMIClients map[string]*nmi.NMIClient
 }
 
@@ -77,8 +78,8 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 	scannedProducts, scannedPrices, scannedPlans := 0, 0, 0
 
 	// --- Stripe pass (skipped if unconfigured) ---
-	if stripeProc := w.Config.GetStripeProcessor(); stripeProc != nil && stripeProc.SecretKey != "" {
-		stripeSvc := &catalog.StripeCatalogService{Config: w.Config}
+	if stripeProc := w.Processors.GetStripeProcessor(); stripeProc != nil && stripeProc.SecretKey != "" {
+		stripeSvc := &catalog.StripeCatalogService{Config: w.Config, Processors: w.Processors}
 		products, err := listAllStripeProducts(ctx, stripeSvc)
 		if err != nil {
 			return err

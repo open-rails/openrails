@@ -41,13 +41,11 @@ func (c *ControlPlane) IsAdmin(ctx context.Context, tenantSlug, userID string) (
 	return c.HasAdminPermission(ctx, tenantSlug, userID, PermAdmin)
 }
 
-// PlatformOrgSlug returns the configured managed-hosting platform-superadmin org
-// slug (issue #226), or "" when no platform org is configured.
+// PlatformOrgSlug returns "" because OpenRails no longer supports a config-seeded
+// platform-superadmin org. Cross-merchant SaaS administration belongs in the
+// private openrails-saas layer, not the source-available self-hosted control plane.
 func (c *ControlPlane) PlatformOrgSlug() string {
-	if c == nil || c.cfg == nil || c.cfg.Auth == nil || c.cfg.Auth.ControlPlane == nil {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSpace(c.cfg.Auth.ControlPlane.PlatformOrgSlug))
+	return ""
 }
 
 // HasPlatformSuperadmin reports whether userID holds PermPlatformSuperadmin in

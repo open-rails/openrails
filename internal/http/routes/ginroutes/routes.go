@@ -110,6 +110,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// then auto-maintains each payer's tier (no host cranking of GraduateTier).
 	group.PUT("/tier-schedules", creditsWrite, wrap(httphandlers.ServiceSetTierSchedule))
 	// Merchant-scoped configuration. Missing keys use hardcoded service defaults.
+	group.GET("/merchant-configuration", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetMerchantConfiguration))
 	group.PUT("/merchant-configuration", creditsWrite, wrap(httphandlers.ServiceSetMerchantConfiguration))
 	// Graduated-tier READ (#477): the payer's current auto-maintained tier, for a
 	// host that drives its OWN per-tier capacity (e.g. tensorhub's scheduler cap).
@@ -315,6 +316,8 @@ func RegisterMerchantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delega
 	entWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantEntitlementsWrite)
 	payWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantPaymentsWrite)
 	subWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantSubscriptionsWrite)
+	configRead := ginmw.RequireDelegatedPermission(controlplane.PermMerchantConfigurationRead)
+	configWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantConfigurationWrite)
 	metricsRead := ginmw.RequireDelegatedPermission(controlplane.PermMerchantMetricsRead)
 	secretsList := ginmw.RequireDelegatedPermission(controlplane.PermMerchantSecretsList)
 	secretsWrite := ginmw.RequireDelegatedPermission(controlplane.PermMerchantSecretsWrite)
@@ -332,6 +335,9 @@ func RegisterMerchantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delega
 	metrics.GET("/subscriptions", metricsRead, wrap(httphandlers.GetAdminMetricsSubscriptions))
 	metrics.GET("/processors", metricsRead, wrap(httphandlers.GetAdminMetricsProcessors))
 	metrics.GET("/churn", metricsRead, wrap(httphandlers.GetAdminMetricsChurn))
+
+	group.GET("/merchant-configuration", configRead, wrap(httphandlers.ServiceGetMerchantConfiguration))
+	group.PUT("/merchant-configuration", configWrite, wrap(httphandlers.ServiceSetMerchantConfiguration))
 
 	secretGroup := group.Group("/secrets")
 	secretGroup.GET("", secretsList, merchantSecretListHandler(rt))

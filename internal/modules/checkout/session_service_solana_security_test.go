@@ -19,6 +19,7 @@ func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *tes
 
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
+		processors:               testSolanaCheckoutProcessors(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 	}
 	session := &models.CheckoutSession{
@@ -44,6 +45,7 @@ func TestInitializeSolanaSession_TransactionRequestRejectsZeroTokenAmount(t *tes
 
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
+		processors:               testSolanaCheckoutProcessors(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 	}
 	session := &models.CheckoutSession{
@@ -69,6 +71,7 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
+		processors:               testSolanaCheckoutProcessors(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 		checkoutService:          &stubCheckoutExecutor{},
 	}
@@ -99,6 +102,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 
 	svc := &CheckoutSessionService{
 		config:                   testSolanaCheckoutConfig(),
+		processors:               testSolanaCheckoutProcessors(),
 		solanaTransactionService: &stubSolanaTransactionService{},
 		checkoutService:          &stubCheckoutExecutor{},
 	}
@@ -230,7 +234,7 @@ func TestSessionToResponse_TransactionRequestSolanaPayURLUsesCanonicalV1Path(t *
 			cfg := testSolanaCheckoutConfig()
 			cfg.APIURL = tc.apiURL
 
-			svc := &CheckoutSessionService{config: cfg}
+			svc := &CheckoutSessionService{config: cfg, processors: testSolanaCheckoutProcessors()}
 			session := &models.CheckoutSession{
 				ID:        uuid.New(),
 				Status:    models.CheckoutSessionStatusRequiresAction,
@@ -296,16 +300,20 @@ const (
 
 func testSolanaCheckoutConfig() *config.Config {
 	return &config.Config{
-		Processors: map[string]*config.ProcessorConfig{
-			"solana": {
-				Type:            config.ProcessorTypeSolana,
-				Network:         "devnet",
-				RecipientWallet: testRecipientWallet,
-				Tokens: map[string]config.TokenConfig{
-					"USDC": {
-						Mint:     devnetUSDCMint,
-						Decimals: 6,
-					},
+		TestEnv: true,
+	}
+}
+
+func testSolanaCheckoutProcessors() config.ProcessorSet {
+	return config.ProcessorSet{
+		"solana": {
+			Type:            config.ProcessorTypeSolana,
+			Network:         "devnet",
+			RecipientWallet: testRecipientWallet,
+			Tokens: map[string]config.TokenConfig{
+				"USDC": {
+					Mint:     devnetUSDCMint,
+					Decimals: 6,
 				},
 			},
 		},

@@ -94,6 +94,10 @@ var ErrDelegatedNotConfigured = errors.New("controlplane: delegated access verif
 // internal verifier detail to the response.
 var ErrDelegatedInvalid = errors.New("controlplane: invalid delegated access token")
 
+// ErrDelegatedOriginNotAllowed indicates a delegated browser request came from
+// an Origin not allowed by the verified issuer's AuthKit remote_application.
+var ErrDelegatedOriginNotAllowed = errors.New("controlplane: delegated origin not allowed")
+
 // DelegatedVerifier returns the control plane's delegated-access-token verifier.
 // Exposed for the middleware and tests.
 func (c *ControlPlane) DelegatedVerifier() *authhttp.Verifier {
@@ -162,9 +166,11 @@ func newDelegatedVerifier(coreSvc *authcore.Service, tokenPrefix string) (*authh
 //   - authcore.ErrAccessTokenExpired for an expired token,
 //   - ErrDelegatedIssuerUnknown when a federated token's issuer is not
 //     registered+enabled for an active tenant (cross-tenant / unmapped),
+//   - ErrDelegatedOriginNotAllowed when a browser Origin is not allowed by the
+//     verified issuer's AuthKit remote_application,
 //   - ErrDelegatedInvalid for any other rejection (bad signature/audience/type,
 //     normal-sub token, missing/forbidden permission, forbidden merchant claim).
-func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*ResolvedDelegated, error) {
+func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origin string) (*ResolvedDelegated, error) {
 	if c == nil || c.delegatedVerifier == nil {
 		return nil, ErrDelegatedNotConfigured
 	}
@@ -200,6 +206,10 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 	}
 
 	issuer := strings.TrimSpace(principal.Issuer)
+	allowed, err := c.delegatedVerifier.OriginAllowedForIssuer(ctx, issuer, origin, true)
+	if err != nil || !allowed {
+		return nil, ErrDelegatedOriginNotAllowed
+	}
 
 	// FEDERATED merchant-signed token (issue #259): the merchant is pinned from the
 	// VALIDATED `iss` via the issuer registry. Because `issuer` is globally unique,

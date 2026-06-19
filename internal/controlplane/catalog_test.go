@@ -28,6 +28,9 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 		"openrails:self:subscriptions:cancel",
 		"openrails:self:payment-methods:manage",
 		"openrails:self:wallets:manage",
+		// Merchant-admin configuration/profile management (#520).
+		PermMerchantConfigurationRead,
+		PermMerchantConfigurationWrite,
 		// Merchant-admin write-only secret management (#323).
 		PermMerchantSecretsList,
 		PermMerchantSecretsWrite,

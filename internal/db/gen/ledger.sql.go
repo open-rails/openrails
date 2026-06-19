@@ -67,7 +67,7 @@ func (q *Queries) CountLedgerTransfersByCustomer(ctx context.Context, arg CountL
 
 const getLedgerAccount = `-- name: GetLedgerAccount :one
 
-SELECT id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits, credits_posted, debits_posted, credits_pending, debits_pending, created_at FROM openrails.ledger_accounts
+SELECT id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits, credits_posted, debits_posted, created_at FROM openrails.ledger_accounts
 WHERE merchant_id = $1::uuid
   AND account_type = $2::text
   AND currency = $3::text
@@ -101,15 +101,13 @@ func (q *Queries) GetLedgerAccount(ctx context.Context, arg GetLedgerAccountPara
 		&i.CreditsMustNotExceedDebits,
 		&i.CreditsPosted,
 		&i.DebitsPosted,
-		&i.CreditsPending,
-		&i.DebitsPending,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getLedgerAccountByID = `-- name: GetLedgerAccountByID :one
-SELECT id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits, credits_posted, debits_posted, credits_pending, debits_pending, created_at FROM openrails.ledger_accounts
+SELECT id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits, credits_posted, debits_posted, created_at FROM openrails.ledger_accounts
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -131,15 +129,13 @@ func (q *Queries) GetLedgerAccountByID(ctx context.Context, arg GetLedgerAccount
 		&i.CreditsMustNotExceedDebits,
 		&i.CreditsPosted,
 		&i.DebitsPosted,
-		&i.CreditsPending,
-		&i.DebitsPending,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getLedgerSpendByCoords = `-- name: GetLedgerSpendByCoords :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, phase, pending_id, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
@@ -177,8 +173,6 @@ func (q *Queries) GetLedgerSpendByCoords(ctx context.Context, arg GetLedgerSpend
 		&i.Amount,
 		&i.Currency,
 		&i.TransferType,
-		&i.Phase,
-		&i.PendingID,
 		&i.AllowDebitNegativeUpTo,
 		&i.Source,
 		&i.SourceID,
@@ -193,7 +187,7 @@ func (q *Queries) GetLedgerSpendByCoords(ctx context.Context, arg GetLedgerSpend
 }
 
 const getLedgerTransfer = `-- name: GetLedgerTransfer :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, phase, pending_id, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -213,8 +207,6 @@ func (q *Queries) GetLedgerTransfer(ctx context.Context, arg GetLedgerTransferPa
 		&i.Amount,
 		&i.Currency,
 		&i.TransferType,
-		&i.Phase,
-		&i.PendingID,
 		&i.AllowDebitNegativeUpTo,
 		&i.Source,
 		&i.SourceID,
@@ -229,7 +221,7 @@ func (q *Queries) GetLedgerTransfer(ctx context.Context, arg GetLedgerTransferPa
 }
 
 const getLedgerTransferByCoords = `-- name: GetLedgerTransferByCoords :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, phase, pending_id, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
@@ -270,8 +262,6 @@ func (q *Queries) GetLedgerTransferByCoords(ctx context.Context, arg GetLedgerTr
 		&i.Amount,
 		&i.Currency,
 		&i.TransferType,
-		&i.Phase,
-		&i.PendingID,
 		&i.AllowDebitNegativeUpTo,
 		&i.Source,
 		&i.SourceID,
@@ -294,7 +284,7 @@ INSERT INTO openrails.ledger_accounts (
     $3::text, $4::text,
     $5::boolean, $6::boolean
 )
-RETURNING id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits, credits_posted, debits_posted, credits_pending, debits_pending, created_at
+RETURNING id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits, credits_posted, debits_posted, created_at
 `
 
 type InsertLedgerAccountParams struct {
@@ -326,8 +316,6 @@ func (q *Queries) InsertLedgerAccount(ctx context.Context, arg InsertLedgerAccou
 		&i.CreditsMustNotExceedDebits,
 		&i.CreditsPosted,
 		&i.DebitsPosted,
-		&i.CreditsPending,
-		&i.DebitsPending,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -335,18 +323,17 @@ func (q *Queries) InsertLedgerAccount(ctx context.Context, arg InsertLedgerAccou
 
 const insertLedgerTransfer = `-- name: InsertLedgerTransfer :one
 INSERT INTO openrails.ledger_transfers (
-    merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, phase, pending_id,
+    merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
     allow_debit_negative_up_to,
     source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
-    $4::bigint, $5::text, $6::text, $7::text,
-    $8::uuid,
-    $9::bigint,
-    $10::text, $11::text, $12::uuid, $13::uuid,
-    $14::text, $15::text, $16::uuid
+    $4::bigint, $5::text, $6::text,
+    $7::bigint,
+    $8::text, $9::text, $10::uuid, $11::uuid,
+    $12::text, $13::text, $14::uuid
 )
-RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, phase, pending_id, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at
+RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at
 `
 
 type InsertLedgerTransferParams struct {
@@ -356,8 +343,6 @@ type InsertLedgerTransferParams struct {
 	Amount                 int64
 	Currency               string
 	TransferType           string
-	Phase                  string
-	PendingID              *uuid.UUID
 	AllowDebitNegativeUpTo int64
 	Source                 *string
 	SourceID               *string
@@ -376,8 +361,6 @@ func (q *Queries) InsertLedgerTransfer(ctx context.Context, arg InsertLedgerTran
 		arg.Amount,
 		arg.Currency,
 		arg.TransferType,
-		arg.Phase,
-		arg.PendingID,
 		arg.AllowDebitNegativeUpTo,
 		arg.Source,
 		arg.SourceID,
@@ -396,8 +379,6 @@ func (q *Queries) InsertLedgerTransfer(ctx context.Context, arg InsertLedgerTran
 		&i.Amount,
 		&i.Currency,
 		&i.TransferType,
-		&i.Phase,
-		&i.PendingID,
 		&i.AllowDebitNegativeUpTo,
 		&i.Source,
 		&i.SourceID,
@@ -409,25 +390,6 @@ func (q *Queries) InsertLedgerTransfer(ctx context.Context, arg InsertLedgerTran
 		&i.CreatedAt,
 	)
 	return i, err
-}
-
-const isLedgerPendingResolved = `-- name: IsLedgerPendingResolved :one
-SELECT EXISTS (
-    SELECT 1 FROM openrails.ledger_transfers
-    WHERE merchant_id = $1::uuid AND pending_id = $2::uuid
-) AS resolved
-`
-
-type IsLedgerPendingResolvedParams struct {
-	MerchantID uuid.UUID
-	PendingID  uuid.UUID
-}
-
-func (q *Queries) IsLedgerPendingResolved(ctx context.Context, arg IsLedgerPendingResolvedParams) (bool, error) {
-	row := q.db.QueryRow(ctx, isLedgerPendingResolved, arg.MerchantID, arg.PendingID)
-	var resolved bool
-	err := row.Scan(&resolved)
-	return resolved, err
 }
 
 const ledgerAccountBalance = `-- name: LedgerAccountBalance :one
@@ -455,28 +417,8 @@ const ledgerAccountCounterDrift = `-- name: LedgerAccountCounterDrift :many
 WITH actual AS (
     SELECT
         a.id,
-        COALESCE(SUM(t.amount) FILTER (
-            WHERE t.credit_account_id = a.id AND t.phase IN ('posted', 'post_pending')
-        ), 0)::bigint AS credits_posted,
-        COALESCE(SUM(t.amount) FILTER (
-            WHERE t.debit_account_id = a.id AND t.phase IN ('posted', 'post_pending')
-        ), 0)::bigint AS debits_posted,
-        COALESCE(SUM(t.amount) FILTER (
-            WHERE t.credit_account_id = a.id
-              AND t.phase = 'pending'
-              AND NOT EXISTS (
-                  SELECT 1 FROM openrails.ledger_transfers r
-                  WHERE r.merchant_id = t.merchant_id AND r.pending_id = t.id
-              )
-        ), 0)::bigint AS credits_pending,
-        COALESCE(SUM(t.amount) FILTER (
-            WHERE t.debit_account_id = a.id
-              AND t.phase = 'pending'
-              AND NOT EXISTS (
-                  SELECT 1 FROM openrails.ledger_transfers r
-                  WHERE r.merchant_id = t.merchant_id AND r.pending_id = t.id
-              )
-        ), 0)::bigint AS debits_pending
+        COALESCE(SUM(t.amount) FILTER (WHERE t.credit_account_id = a.id), 0)::bigint AS credits_posted,
+        COALESCE(SUM(t.amount) FILTER (WHERE t.debit_account_id = a.id), 0)::bigint AS debits_posted
     FROM openrails.ledger_accounts a
     LEFT JOIN openrails.ledger_transfers t
       ON t.merchant_id = a.merchant_id
@@ -488,9 +430,7 @@ WITH actual AS (
 SELECT
     a.id,
     (a.credits_posted - actual.credits_posted)::bigint AS credits_posted_delta,
-    (a.debits_posted - actual.debits_posted)::bigint AS debits_posted_delta,
-    (a.credits_pending - actual.credits_pending)::bigint AS credits_pending_delta,
-    (a.debits_pending - actual.debits_pending)::bigint AS debits_pending_delta
+    (a.debits_posted - actual.debits_posted)::bigint AS debits_posted_delta
 FROM openrails.ledger_accounts a
 JOIN actual ON actual.id = a.id
 WHERE a.merchant_id = $1::uuid
@@ -498,8 +438,6 @@ WHERE a.merchant_id = $1::uuid
   AND (
       a.credits_posted <> actual.credits_posted
       OR a.debits_posted <> actual.debits_posted
-      OR a.credits_pending <> actual.credits_pending
-      OR a.debits_pending <> actual.debits_pending
   )
 `
 
@@ -509,11 +447,9 @@ type LedgerAccountCounterDriftParams struct {
 }
 
 type LedgerAccountCounterDriftRow struct {
-	ID                  uuid.UUID
-	CreditsPostedDelta  int64
-	DebitsPostedDelta   int64
-	CreditsPendingDelta int64
-	DebitsPendingDelta  int64
+	ID                 uuid.UUID
+	CreditsPostedDelta int64
+	DebitsPostedDelta  int64
 }
 
 // LedgerAccountCounterDrift: hard-gate invariant for the maintained account
@@ -528,13 +464,7 @@ func (q *Queries) LedgerAccountCounterDrift(ctx context.Context, arg LedgerAccou
 	var items []LedgerAccountCounterDriftRow
 	for rows.Next() {
 		var i LedgerAccountCounterDriftRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.CreditsPostedDelta,
-			&i.DebitsPostedDelta,
-			&i.CreditsPendingDelta,
-			&i.DebitsPendingDelta,
-		); err != nil {
+		if err := rows.Scan(&i.ID, &i.CreditsPostedDelta, &i.DebitsPostedDelta); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -543,26 +473,6 @@ func (q *Queries) LedgerAccountCounterDrift(ctx context.Context, arg LedgerAccou
 		return nil, err
 	}
 	return items, nil
-}
-
-const ledgerAccountHeld = `-- name: LedgerAccountHeld :one
-SELECT debits_pending::bigint AS held
-FROM openrails.ledger_accounts
-WHERE merchant_id = $1::uuid
-  AND id = $2::uuid
-`
-
-type LedgerAccountHeldParams struct {
-	MerchantID uuid.UUID
-	AccountID  uuid.UUID
-}
-
-// LedgerAccountHeld: unresolved pending debits from maintained account counters.
-func (q *Queries) LedgerAccountHeld(ctx context.Context, arg LedgerAccountHeldParams) (int64, error) {
-	row := q.db.QueryRow(ctx, ledgerAccountHeld, arg.MerchantID, arg.AccountID)
-	var held int64
-	err := row.Scan(&held)
-	return held, err
 }
 
 const ledgerLedgerNet = `-- name: LedgerLedgerNet :one
@@ -587,7 +497,7 @@ func (q *Queries) LedgerLedgerNet(ctx context.Context, arg LedgerLedgerNetParams
 }
 
 const listLedgerTransfersByCustomer = `-- name: ListLedgerTransfersByCustomer :many
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, phase, pending_id, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
@@ -629,8 +539,6 @@ func (q *Queries) ListLedgerTransfersByCustomer(ctx context.Context, arg ListLed
 			&i.Amount,
 			&i.Currency,
 			&i.TransferType,
-			&i.Phase,
-			&i.PendingID,
 			&i.AllowDebitNegativeUpTo,
 			&i.Source,
 			&i.SourceID,
@@ -657,7 +565,6 @@ FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
-  AND phase IN ('posted', 'post_pending')
   AND created_at >= $4::timestamptz
   AND created_at < $5::timestamptz
 GROUP BY transfer_type

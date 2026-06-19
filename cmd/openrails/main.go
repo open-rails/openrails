@@ -18,7 +18,6 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
@@ -189,30 +188,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
-	// Bootstrap the OpenRails-owned AuthKit control plane (#224). Idempotent;
-	// runs after migrations have been applied (migrations are a separate
-	// `openrails migrate` step) and at startup.
-	//
-	// #336: no default merchant — the control-plane bootstrap seeds the org for the
-	// merchant this engine is bound to (cfg.Merchant, the construction-time merchant
-	// slug; standalone sets `merchant:` / MERCHANT, embedded sets embed.Options.Merchant).
-	// A matching openrails.merchants row must already exist (registered via migrate/
-	// provisioning); empty merchant means there is nothing to bootstrap.
-	if strings.TrimSpace(cfg.Merchant) == "" {
-		cleanupOnError = true
-		return fmt.Errorf("control plane bootstrap: no merchant configured — set `merchant:` (MERCHANT) to the deployment's merchant slug")
-	}
-	if res, err := embcp.RunBootstrap(context.Background(), embeddedApp.App(), controlplane.BootstrapOptions{BootstrapOrgSlug: cfg.Merchant, MintInitialServiceToken: true}); err != nil {
-		cleanupOnError = true
-		return fmt.Errorf("control plane bootstrap: %w", err)
-	} else if res != nil && res.ServiceTokenMinted {
-		log.WithFields(log.Fields{
-			"service_token_key_id": res.ServiceTokenKeyID,
-			"service_token_secret": res.ServiceTokenSecret,
-		}).
-			Warn("control plane: initial operator service token minted; capture the secret from logs now (shown once)")
-	}
-
 	// Startup provisioning (#327): apply auth/merchant provisioning on every
 	// start. The apply is idempotent + additive, so it converges authority and
 	// merchant definitions without touching catalog/provider state.
@@ -228,7 +203,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// Public API server (user/admin JWT auth). The full standalone gin surface
 	// lives in the pkg/embedded/gin subpackage now (#285).
-	publicHandler, err := embgin.Handler(embeddedApp)
+	publicHandler, err := embgin.StandaloneHandler(embeddedApp)
 	if err != nil {
 		return fmt.Errorf("build billing http handler: %w", err)
 	}

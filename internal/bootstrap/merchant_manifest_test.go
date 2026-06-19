@@ -26,10 +26,31 @@ merchants:
   - slug: cozy-art
     name: Cozy Art
     owner_org_id: 11111111-1111-1111-1111-111111111111
+    profile:
+      display_name: Cozy Art Billing
+      logo_url: https://cdn.example/logo.png
+      from_email: billing@example.com
+      support_url: https://example.com/support
+      support_email: support@example.com
+    provider_accounts:
+      - provider_type: stripe
+        account_id: acct_test_123
+        role: primary
+        secrets:
+          secret_key:
+            env: STRIPE_SECRET_KEY
+      - provider_type: nmi
+        account_id: mobius-profile-id
+        secrets:
+          webhook_signing_secret:
+            env: MOBIUS_WEBHOOK_SIGNING_SECRET
 `))
 	require.NoError(t, err)
 	require.True(t, manifest.HasAuthBootstrap())
 	require.Len(t, manifest.Merchants, 1)
+	require.Equal(t, "Cozy Art Billing", manifest.Merchants[0].Profile.DisplayName)
+	require.Len(t, manifest.Merchants[0].ProviderAccounts, 2)
+	require.Equal(t, "acct_test_123", manifest.Merchants[0].ProviderAccounts[0].AccountID)
 }
 
 func TestParseBootstrapManifestValidationErrors(t *testing.T) {
@@ -95,7 +116,7 @@ merchants:
 			want: "service_jwt_principals",
 		},
 		{
-			name: "catalogs belong to push-catalog",
+			name: "catalogs belong to push-merchant-catalog",
 			body: `
 version: 1
 catalogs:
@@ -111,6 +132,36 @@ catalogs:
           - {slug: p, display_name: P, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, interval: month}]}
 `,
 			want: "catalogs",
+		},
+		{
+			name: "invalid profile URL",
+			body: base(`
+    profile:
+      logo_url: ftp://cdn.example/logo.png
+`),
+			want: "profile.logo_url",
+		},
+		{
+			name: "invalid provider account role",
+			body: base(`
+    provider_accounts:
+      - provider_type: stripe
+        account_id: acct_test_123
+        role: standby
+`),
+			want: "role must be primary, secondary, or legacy",
+		},
+		{
+			name: "invalid provider secret source",
+			body: base(`
+    provider_accounts:
+      - provider_type: stripe
+        secrets:
+          secret_key:
+            value: one
+            env: STRIPE_SECRET_KEY
+`),
+			want: "must set exactly one",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

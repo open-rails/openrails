@@ -20,19 +20,13 @@ type PaymentProvider struct {
 	Config config.ProcessorConfig
 }
 
-// ApplyPaymentProviders merges host-supplied embedded provider credentials into
-// cfg.Processors. It is useful for hosts that construct config in code instead
-// of YAML. Local names are not durable identity; provider account rows store the
-// provider-returned account id.
-func ApplyPaymentProviders(cfg *config.Config, providers []PaymentProvider) error {
+// ApplyPaymentProviders converts host-supplied embedded provider credentials
+// into an in-memory ProcessorSet. Local names are not durable identity; provider
+// account rows store the provider-returned account id.
+func ApplyPaymentProviders(providers []PaymentProvider) (config.ProcessorSet, error) {
+	set := config.ProcessorSet{}
 	if len(providers) == 0 {
-		return nil
-	}
-	if cfg == nil {
-		return fmt.Errorf("embedded payment providers require config")
-	}
-	if cfg.Processors == nil {
-		cfg.Processors = map[string]*config.ProcessorConfig{}
+		return set, nil
 	}
 	seen := map[string]struct{}{}
 	for _, provider := range providers {
@@ -43,21 +37,21 @@ func ApplyPaymentProviders(cfg *config.Config, providers []PaymentProvider) erro
 			providerType = proc.GetEffectiveType(key)
 		}
 		if providerType == "" {
-			return fmt.Errorf("embedded payment provider %q requires config type", key)
+			return nil, fmt.Errorf("embedded payment provider %q requires config type", key)
 		}
 		if proc.Type == "" {
 			proc.Type = providerType
 		}
 		if key == "" {
-			key = generatedProviderName(cfg.Processors, seen, providerType)
+			key = generatedProviderName(set, seen, providerType)
 		}
 		if _, ok := seen[key]; ok {
-			return fmt.Errorf("duplicate embedded payment provider name %q", key)
+			return nil, fmt.Errorf("duplicate embedded payment provider name %q", key)
 		}
 		seen[key] = struct{}{}
-		cfg.Processors[key] = cloneProcessorConfig(&proc)
+		set[key] = cloneProcessorConfig(&proc)
 	}
-	return nil
+	return set, nil
 }
 
 func generatedProviderName(existing map[string]*config.ProcessorConfig, seen map[string]struct{}, providerType string) string {

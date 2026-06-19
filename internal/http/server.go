@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/crypto"
-	"github.com/open-rails/openrails/internal/db"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -51,6 +50,7 @@ type Dependencies struct {
 	// mapped principal for /v1/self/* + /v1/merchant-admin/*, OVERRIDING the
 	// control plane's default delegated-token verifier.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
+	ConfiguredMerchant     merchant.ID
 }
 
 type Server struct {
@@ -69,6 +69,7 @@ type Server struct {
 	// the self-service surface (#339); see Dependencies.DelegatedAuthenticator.
 	delegatedAuthenticator billingauth.DelegatedAuthenticator
 	controlPlane           *controlplane.ControlPlane
+	delegatedResolver      ginmw.DelegatedResolver
 	captchaStore           *captcha.ChallengeStore
 
 	// tenancy is the tenant provisioning + lifecycle + per-merchant secret service
@@ -83,11 +84,9 @@ type Server struct {
 	// is mounted only when a platform tenant is configured.
 	platformMetrics *platform.Metrics
 
-	// configuredMerchant is the construction-time tenant this engine is bound to
-	// (#336), resolved ONCE at boot from cfg.Merchant (a SLUG) → internal
-	// merchant.ID. Zero when no tenant is configured (merchant-owned operations
-	// then hard-fail downstream by design — there is no default merchant). The
-	// gin tenant-resolution middleware and the Solana-secret seed pin it.
+	// configuredMerchant is optional construction-time state for embedded
+	// single-merchant hosts. Standalone does not load a process-wide merchant from
+	// config; merchant authority comes from bootstrap/DB/AuthKit state.
 	configuredMerchant merchant.ID
 
 	// publicHandler is the single "full surface" HTTP handler. It includes
@@ -170,21 +169,9 @@ func New(deps Dependencies) (*Server, error) {
 		authProvider:           ginauth.ProviderFromAuthenticator(deps.Authenticator),
 		authenticator:          deps.Authenticator,
 		delegatedAuthenticator: deps.DelegatedAuthenticator,
+		configuredMerchant:     deps.ConfiguredMerchant,
 		controlPlane:           deps.ControlPlane,
 		captchaStore:           captcha.NewChallengeStore(deps.Redis),
-	}
-
-	// Resolve the construction-time tenant SLUG (cfg.Merchant) → internal
-	// merchant.ID exactly once at boot (#336). An empty slug yields the zero id
-	// (no tenant pinned; merchant-owned ops hard-fail downstream by design — no
-	// default merchant); a non-empty-but-unknown slug fails boot.
-	{
-		ctx := context.Background()
-		configured, terr := db.ResolveMerchantSlug(ctx, deps.Runtime.DB.Qx(ctx), deps.Config.Merchant)
-		if terr != nil {
-			return nil, fmt.Errorf("resolve configured tenant: %w", terr)
-		}
-		s.configuredMerchant = configured
 	}
 
 	// Wire the live admin-permission checker onto the runtime so mixed
@@ -282,14 +269,14 @@ func New(deps Dependencies) (*Server, error) {
 			}
 		}
 
-		// Single-install bridge (#253): a global-config Solana private key is seeded
+		// Single-install bridge (#253): an in-memory Solana private key is seeded
 		// only into the CONFIGURED merchant's secret store as solana/private_key
 		// (#336: no default merchant — the seed no-ops when no tenant is configured).
 		// Named tenants must be configured explicitly by an operator credential
 		// rotation. Idempotent; never overwrites an existing secret. No-op when
 		// Solana is unconfigured or uses Vault Transit (non-extractable key, so no
 		// global private key is set).
-		if pc := deps.Config.GetSolanaProcessor(); pc != nil {
+		if pc := deps.Runtime.Processors.GetSolanaProcessor(); pc != nil {
 			if err := recurring.SeedConfiguredTenantSolanaSecret(context.Background(), secretStore, s.configuredMerchant, pc.PrivateKey); err != nil {
 				return nil, fmt.Errorf("seed configured tenant solana secret: %w", err)
 			}
@@ -314,11 +301,11 @@ func New(deps Dependencies) (*Server, error) {
 				submitter = recurring.NewSignerSubmitterFromStore(secretStore, deps.Runtime.SolanaRPC, 0)
 			}
 			network := "mainnet"
-			if pc := deps.Config.GetSolanaProcessor(); pc != nil && pc.Network != "" {
+			if pc := deps.Runtime.Processors.GetSolanaProcessor(); pc != nil && pc.Network != "" {
 				network = pc.Network
 			}
 			var solanaTokens map[string]config.SolanaToken
-			if pc := deps.Config.GetSolanaProcessor(); pc != nil {
+			if pc := deps.Runtime.Processors.GetSolanaProcessor(); pc != nil {
 				solanaTokens = pc.Tokens
 			}
 			cranker := recurring.NewCrankService(submitter)
@@ -456,11 +443,10 @@ func (s *Server) newPublicEngine() *gin.Engine {
 		SkipPaths: []string{"/health/live", "/health/ready", "/healthz", "/readyz", "/health"},
 	}))
 	e.Use(ginmw.SecurityHeaders())
-	// Allow-list = global CorsOrigins UNION every merchant's browser-direct
-	// allowed origins (issue #222 browser tier). Preflight from a configured
-	// tenant origin succeeds; unlisted origins are denied (never a wildcard
-	// outside development).
-	e.Use(ginmw.CORS(s.cfg.AllowedCORSOrigins()))
+	// CORS is only the transport preflight/header layer. Delegated browser
+	// request Origin policy belongs to AuthKit remote_application.allowed_origins
+	// after AuthKit verifies the caller.
+	e.Use(ginmw.CORS(nil))
 	e.Use(ginmw.BodyLimit(middleware.DefaultMaxBodyBytes))
 	// Resolve the tenant / billing namespace before authorization and before any
 	// merchant-owned DB access (issue #223). Pins the construction-time configured

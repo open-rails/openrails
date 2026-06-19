@@ -82,7 +82,7 @@ tasks:
       - bash scripts/e2e_dump_local.sh
 
   nmi-query:
-    desc: Call NMI Query API (requires PROCESSORS_MOBIUS_SECURITY_KEY)
+    desc: Call NMI Query API (requires NMI_QUERY_SECURITY_KEY or MOBIUS_PRODUCTION_KEY)
     cmds:
       - bash scripts/nmi_query.sh {{if .TXN_ID}}--transaction-id "{{.TXN_ID}}"{{end}} {{if .SUB_ID}}--subscription-id "{{.SUB_ID}}"{{end}}
 

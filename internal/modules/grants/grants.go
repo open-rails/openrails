@@ -343,6 +343,45 @@ func (l *Ledger) LiveGrants(ctx context.Context, customer uuid.UUID) ([]gen.Open
 	return l.q.ListLiveGrantsByCustomer(ctx, gen.ListLiveGrantsByCustomerParams{MerchantID: l.merchant, CustomerID: customer})
 }
 
+// RevokeBySource appends a revoke event to every LIVE grant of the customer that
+// matches `kind` + one of `sourceTypes` + `sourceID` — the write-path companion
+// to a source-keyed effect revocation. Effect revocation (entitlement-window
+// revoke / credit clawback) historically wrote the EFFECT directly while leaving
+// the grant "live", so the ledger drifted from reality and the DERIVE grant-tier
+// checks would mis-fire. Calling this alongside the effect revoke keeps the grant
+// ledger the source of truth: the grant is terminated, so DERIVE sees a terminated
+// grant with a (separately) retracted effect — consistent. Idempotent: a grant
+// that is already terminated is skipped (a grant terminates at most once). The
+// `sourceID` is compared as the grant's free-text source_id (e.g. a subscription
+// or payment UUID string).
+func (l *Ledger) RevokeBySource(ctx context.Context, customer uuid.UUID, kind Kind, sourceTypes []SourceType, sourceID, reason string) error {
+	all, err := l.q.ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{MerchantID: l.merchant, CustomerID: customer})
+	if err != nil {
+		return fmt.Errorf("grants: list grants for revoke-by-source: %w", err)
+	}
+	want := make(map[string]bool, len(sourceTypes))
+	for _, st := range sourceTypes {
+		want[string(st)] = true
+	}
+	for i := range all {
+		g := all[i]
+		if g.Event != "grant" || Kind(g.Kind) != kind || !want[g.SourceType] || g.SourceID != sourceID {
+			continue
+		}
+		terminated, err := l.q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: l.merchant, GrantID: g.ID})
+		if err != nil {
+			return fmt.Errorf("grants: termination check for %s: %w", g.ID, err)
+		}
+		if terminated {
+			continue
+		}
+		if _, err := l.Revoke(ctx, g.ID, reason); err != nil {
+			return fmt.Errorf("grants: revoke %s by source: %w", g.ID, err)
+		}
+	}
+	return nil
+}
+
 // MissingEffects returns the customer's live grants whose derived grant effects
 // are NOT fully materialized — the read-only detection behind the Convergence
 // Engine's `derive.grant_effect.missing` check (#511 DERIVE plane). The repair is
@@ -394,6 +433,29 @@ func (l *Ledger) UnretractedTerminations(ctx context.Context, customer uuid.UUID
 		}
 	}
 	return out, nil
+}
+
+// UngrantedGrantablePayments returns the customer's completed, positive, one-off
+// payments for a product that PROMISES grants (non-empty entitlements/credits
+// spec) yet produced NO grant — the spec-aware detection behind
+// `derive.grant.missing` (grant tier, #511). The product's own grant spec is the
+// positive "this payment should grant X" signal, so empty-spec products / pure
+// fees are never flagged. Surface-only.
+func (l *Ledger) UngrantedGrantablePayments(ctx context.Context, customer uuid.UUID) ([]gen.ListUngrantedGrantablePaymentsByCustomerRow, error) {
+	return l.q.ListUngrantedGrantablePaymentsByCustomer(ctx, gen.ListUngrantedGrantablePaymentsByCustomerParams{
+		MerchantID: l.merchant, CustomerID: customer,
+	})
+}
+
+// RefundedSourceGrants returns the customer's LIVE grants whose backing payment
+// was refunded — the detection behind `derive.grant.excess` (grant tier, #511):
+// the source no longer justifies the grant (money came back, access still live).
+// Surface-only — an operator decides (a goodwill refund may intentionally keep
+// access), so there is no auto-repair here.
+func (l *Ledger) RefundedSourceGrants(ctx context.Context, customer uuid.UUID) ([]gen.ListLiveGrantsWithRefundedPaymentByCustomerRow, error) {
+	return l.q.ListLiveGrantsWithRefundedPaymentByCustomer(ctx, gen.ListLiveGrantsWithRefundedPaymentByCustomerParams{
+		MerchantID: l.merchant, CustomerID: customer,
+	})
 }
 
 // effectStillLive reports whether a grant's derived effect is still active: a

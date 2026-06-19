@@ -52,9 +52,8 @@ func main() {
 
 ## Payment Providers
 
-Embedded hosts can configure payment providers either by filling
-`config.Config.Processors` directly or by passing `PaymentProviders` to
-`embedded.New`.
+Embedded hosts configure payment providers by passing `PaymentProviders` to
+`embedded.New`. `config.yaml` does not carry provider credentials.
 
 ```go
 openrails, err := embedded.New(embedded.Options{

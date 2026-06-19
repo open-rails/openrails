@@ -105,6 +105,7 @@ type CheckoutSessionService struct {
 	priceProvider            solanamodule.TokenPriceProvider
 	providerAccounts         intents.ProviderAccountResolver
 	config                   *config.Config
+	processors               config.ProcessorSet
 	clock                    clockwork.Clock
 
 	// Recurring Solana (#261/#262), injected via SetSolanaRecurring at the
@@ -233,6 +234,7 @@ func NewCheckoutSessionService(
 	fxProvider fx.Provider,
 	priceProvider solanamodule.TokenPriceProvider,
 	cfg *config.Config,
+	processors config.ProcessorSet,
 	clocks ...clockwork.Clock,
 ) *CheckoutSessionService {
 	return &CheckoutSessionService{
@@ -248,6 +250,7 @@ func NewCheckoutSessionService(
 		fxProvider:               fxProvider,
 		priceProvider:            priceProvider,
 		config:                   cfg,
+		processors:               processors,
 		clock:                    timeutil.FirstClock(clocks...),
 	}
 }
@@ -476,15 +479,15 @@ func (s *CheckoutSessionService) providerKeyForCheckout(processor string) (strin
 	if processor == "" {
 		return "", fmt.Errorf("processor is required")
 	}
-	if s.config == nil {
+	if s.processors == nil {
 		return processor, nil
 	}
-	if proc := s.config.Processors[processor]; proc != nil {
+	if proc := s.processors.GetProcessor(processor); proc != nil {
 		return processor, nil
 	}
 	switch processor {
 	case config.ProcessorTypeStripe, config.ProcessorTypeCCBill, config.ProcessorTypeSolana, config.ProcessorTypeNMI:
-		key, _, err := s.config.PrimaryProcessorByType(processor)
+		key, _, err := s.processors.PrimaryProcessorByType(processor)
 		if err != nil {
 			return "", err
 		}
@@ -701,7 +704,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		return s.initializeSolanaSubscriptionSession(ctx, session, payment)
 	}
 
-	solanaProc, err := solanamodule.RequireSolanaProcessorConfig(s.config)
+	solanaProc, err := solanamodule.RequireSolanaProcessorConfig(s.processors)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
@@ -1705,7 +1708,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	if s.checkoutService == nil {
 		return nil, fmt.Errorf("%w: checkout service unavailable", ErrCheckoutSessionValidation)
 	}
-	solanaProc, err := solanamodule.RequireSolanaProcessorConfig(s.config)
+	solanaProc, err := solanamodule.RequireSolanaProcessorConfig(s.processors)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}

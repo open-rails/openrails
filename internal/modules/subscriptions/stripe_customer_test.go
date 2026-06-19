@@ -13,10 +13,12 @@ import (
 )
 
 func testStripeConfig() *config.Config {
-	return &config.Config{
-		Processors: map[string]*config.ProcessorConfig{
-			"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_123"},
-		},
+	return &config.Config{}
+}
+
+func testStripeProcessors() config.ProcessorSet {
+	return config.ProcessorSet{
+		"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_123"},
 	}
 }
 
@@ -45,7 +47,7 @@ func TestCreateCustomer_SendsMetadataAndIdempotency(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"cus_created"}`))
 	})
 
-	svc := &StripeService{Config: testStripeConfig()}
+	svc := &StripeService{Config: testStripeConfig(), Processors: testStripeProcessors()}
 	svc.SetBaseURLForTest(srv.URL)
 
 	id, err := svc.CreateCustomer(context.Background(), "a@b.com", "user-123")
@@ -57,7 +59,7 @@ func TestCreateCustomer_SendsMetadataAndIdempotency(t *testing.T) {
 }
 
 func TestCreateCustomer_RequiresAppUserID(t *testing.T) {
-	svc := &StripeService{Config: testStripeConfig()}
+	svc := &StripeService{Config: testStripeConfig(), Processors: testStripeProcessors()}
 	_, err := svc.CreateCustomer(context.Background(), "a@b.com", "  ")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "app_user_id is required")
@@ -70,7 +72,7 @@ func TestFindCustomerIDByAppUserID_Found(t *testing.T) {
 		assert.Contains(t, q, "metadata['app_user_id']:'user-9'")
 		_, _ = w.Write([]byte(`{"data":[{"id":"cus_found"}]}`))
 	})
-	svc := &StripeService{Config: testStripeConfig()}
+	svc := &StripeService{Config: testStripeConfig(), Processors: testStripeProcessors()}
 	svc.SetBaseURLForTest(srv.URL)
 
 	id, err := svc.FindCustomerIDByAppUserID(context.Background(), "user-9")
@@ -82,7 +84,7 @@ func TestFindCustomerIDByAppUserID_NoneReturnsEmpty(t *testing.T) {
 	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[]}`))
 	})
-	svc := &StripeService{Config: testStripeConfig()}
+	svc := &StripeService{Config: testStripeConfig(), Processors: testStripeProcessors()}
 	svc.SetBaseURLForTest(srv.URL)
 
 	id, err := svc.FindCustomerIDByAppUserID(context.Background(), "user-9")
@@ -103,7 +105,7 @@ func TestListActiveSubscriptionsForCustomer_QueriesActiveAndTrialing(t *testing.
 		}
 		_, _ = w.Write([]byte(`{"data":[{"id":"sub_t","status":"trialing","items":{"data":[{"price":{"id":"price_2"}}]}}]}`))
 	})
-	svc := &StripeService{Config: testStripeConfig()}
+	svc := &StripeService{Config: testStripeConfig(), Processors: testStripeProcessors()}
 	svc.SetBaseURLForTest(srv.URL)
 
 	subs, err := svc.ListActiveSubscriptionsForCustomer(context.Background(), "cus_1")
@@ -125,7 +127,7 @@ func TestListActiveSubscriptionsForCustomer_PropagatesAPIError(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":{"message":"bad customer"}}`))
 	})
-	svc := &StripeService{Config: testStripeConfig()}
+	svc := &StripeService{Config: testStripeConfig(), Processors: testStripeProcessors()}
 	svc.SetBaseURLForTest(srv.URL)
 
 	_, err := svc.ListActiveSubscriptionsForCustomer(context.Background(), "cus_1")

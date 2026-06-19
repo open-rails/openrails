@@ -183,13 +183,14 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 }
 
 func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequest) (*WebhookResult, error) {
-	cfg, err := s.requireConfig()
-	if err != nil {
+	if _, err := s.requireConfig(); err != nil {
 		return nil, err
 	}
 	secret := ""
-	if stripeProc := cfg.GetStripeProcessor(); stripeProc != nil {
-		secret = stripeProc.WebhookSecret
+	if s.rt != nil {
+		if stripeProc := s.rt.Processors.GetStripeProcessor(); stripeProc != nil {
+			secret = stripeProc.WebhookSecret
+		}
 	}
 
 	prepared, err := webhookutil.PrepareStripe(req.Body, secret, getHeaderValue(req.Headers, "Stripe-Signature"), 5*time.Minute)

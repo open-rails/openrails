@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Options controls optional dependency overrides during application construction.
@@ -26,6 +27,8 @@ type Options struct {
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	Cache                  cache.Cache
 	Clock                  clockwork.Clock
+	ConfiguredMerchant     merchant.ID
+	Processors             config.ProcessorSet
 }
 
 // NewApp constructs the long-lived application runtime.
@@ -37,6 +40,8 @@ func NewApp(cfg *config.Config, opts *Options) (*app.App, error) {
 		DelegatedAuthenticator: optsValue(opts, func(o *Options) billingauth.DelegatedAuthenticator { return o.DelegatedAuthenticator }),
 		Cache:                  optsValue(opts, func(o *Options) cache.Cache { return o.Cache }),
 		Clock:                  optsValue(opts, func(o *Options) clockwork.Clock { return o.Clock }),
+		ConfiguredMerchant:     optsValue(opts, func(o *Options) merchant.ID { return o.ConfiguredMerchant }),
+		Processors:             optsValue(opts, func(o *Options) config.ProcessorSet { return o.Processors }),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)

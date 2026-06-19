@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	authhttp "github.com/open-rails/authkit/http"
-
-	"github.com/open-rails/openrails/config"
 )
 
 // Verifier validates bearer tokens against configured issuers/JWKS.
@@ -15,26 +13,19 @@ type Verifier interface {
 	Verify(token string) (authhttp.Claims, error)
 }
 
-// NewVerifier builds an authkit-backed verifier over the config-declared
-// FIRST-PARTY issuer allowlist (auth.issuers): host-app-issued user/admin JWTs
-// verify against each issuer's published JWKS. This is an input to the always-on
-// auth stack — not a deployment mode (#469 removed "verifier-only" standalone;
-// the AuthKit control plane always runs alongside it and owns delegated/service
-// credentials via its live issuer registry).
-// Supports multiple issuers to accept tokens from multiple IdPs/environments.
-func NewVerifier(cfg *config.AuthConfig) (Verifier, error) {
-	if cfg == nil {
-		return nil, errors.New("auth config is required")
-	}
-	if len(cfg.Issuers) == 0 {
+// NewIssuerVerifier builds an AuthKit-backed verifier over an explicit issuer
+// allowlist. This is only for embedded hosts that deliberately opt into trusting
+// their own host-app JWTs; standalone OpenRails uses its control-plane verifier.
+func NewIssuerVerifier(issuers []string, expectedAudience string) (Verifier, error) {
+	if len(issuers) == 0 {
 		return nil, errors.New("at least one auth issuer is required")
 	}
 
-	expectedAudience := strings.TrimSpace(cfg.ExpectedAudience)
+	expectedAudience = strings.TrimSpace(expectedAudience)
 	v := authhttp.NewVerifier()
 
 	addedIssuers := 0
-	for _, issuer := range cfg.Issuers {
+	for _, issuer := range issuers {
 		issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
 		if issuer == "" {
 			continue

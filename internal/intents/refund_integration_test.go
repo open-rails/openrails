@@ -396,15 +396,19 @@ func newFakeStripeServer(t *testing.T) *fakeStripeServer {
 func stripeIntegrationConfig(mode string) *config.Config {
 	return &config.Config{
 		Mode: mode,
-		Processors: map[string]*config.ProcessorConfig{
-			"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_123"},
-		},
+	}
+}
+
+func stripeIntegrationProcessors() config.ProcessorSet {
+	return config.ProcessorSet{
+		"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_123"},
 	}
 }
 
 func (fx refundFixture) stripeRunner(cfg *config.Config, baseURL string) *Runner {
-	handler := NewStripeRefundHandler(fx.db, cfg, nil)
-	handler.Stripe = &subscriptions.StripeRefundService{Config: cfg, BaseURL: baseURL}
+	processors := stripeIntegrationProcessors()
+	handler := NewStripeRefundHandler(fx.db, cfg, processors, nil)
+	handler.Stripe = &subscriptions.StripeRefundService{Config: cfg, Processors: processors, BaseURL: baseURL}
 	return &Runner{Store: fx.store, Registry: NewRegistry(handler), Config: cfg}
 }
 

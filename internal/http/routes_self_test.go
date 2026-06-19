@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -52,4 +53,61 @@ func TestRegisterSelfServiceRoutes_MountedWithHostDelegatedAuthenticatorOnly(t *
 	w = httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+}
+
+type originRejectingDelegatedResolver struct {
+	origin string
+}
+
+func (r *originRejectingDelegatedResolver) ResolveDelegated(_ context.Context, _ string, origin string) (*controlplane.ResolvedDelegated, error) {
+	r.origin = origin
+	return nil, controlplane.ErrDelegatedOriginNotAllowed
+}
+
+func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	resolver := &originRejectingDelegatedResolver{}
+	srv := &Server{
+		cfg:               &config.Config{},
+		delegatedResolver: resolver,
+	}
+	e := srv.newPublicEngine()
+	srv.registerSelfServiceRoutes(e)
+
+	ts := httptest.NewServer(e)
+	t.Cleanup(ts.Close)
+
+	preflight, err := http.NewRequest(http.MethodOptions, ts.URL+"/v1/self/status", nil)
+	require.NoError(t, err)
+	preflight.Header.Set("Origin", "https://evil.example")
+	preflight.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	preflight.Header.Set("Access-Control-Request-Headers", "authorization")
+
+	preflightResp, err := ts.Client().Do(preflight)
+	require.NoError(t, err)
+	defer preflightResp.Body.Close()
+	require.Equal(t, http.StatusNoContent, preflightResp.StatusCode)
+	require.Equal(t, "*", preflightResp.Header.Get("Access-Control-Allow-Origin"))
+	require.Empty(t, preflightResp.Header.Get("Access-Control-Allow-Credentials"))
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/self/status", nil)
+	require.NoError(t, err)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Authorization", "Bearer delegated.jwt.token")
+
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.Equal(t, "https://evil.example", resolver.origin)
+	require.Contains(t, responseBody(t, resp), "delegated_origin_not_allowed")
+}
+
+func responseBody(t *testing.T, resp *http.Response) string {
+	t.Helper()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return string(body)
 }

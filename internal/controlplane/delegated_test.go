@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -81,6 +83,32 @@ func mintDelegated(t *testing.T, signer jwtkit.Signer, p authhttp.DelegatedAcces
 	return tok
 }
 
+type delegatedRemoteAppSource []authcore.RemoteApplication
+
+func (s delegatedRemoteAppSource) ListRemoteApplications(context.Context, bool) ([]authcore.RemoteApplication, error) {
+	return append([]authcore.RemoteApplication(nil), s...), nil
+}
+
+func (s delegatedRemoteAppSource) GetRemoteApplication(_ context.Context, issuer string) (*authcore.RemoteApplication, error) {
+	for i := range s {
+		if s[i].Issuer == issuer {
+			app := s[i]
+			return &app, nil
+		}
+	}
+	return nil, authcore.ErrRemoteApplicationNotFound
+}
+
+func testJWKS(t *testing.T, signer *jwtkit.RSASigner) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		jwk := jwtkit.PublicToJWK(signer.PublicKey(), signer.KID(), signer.Algorithm())
+		jwtkit.ServeJWKS(w, r, jwtkit.JWKS{Keys: []jwtkit.JWK{jwk}})
+	})
+	return httptest.NewServer(mux)
+}
+
 func TestDelegatedVerify_SucceedsWithSelfPermissionAndAudience(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
@@ -92,6 +120,30 @@ func TestDelegatedVerify_SucceedsWithSelfPermissionAndAudience(t *testing.T) {
 	require.Equal(t, testDelegatedSubject, dp.DelegatedSubject)
 	require.Equal(t, testDelegatedIssuer, dp.Issuer, "the validated iss is the tenant identity")
 	require.Contains(t, dp.Permissions, PermSelfBillingRead)
+}
+
+func TestResolveDelegatedRejectsOriginNotAllowedByIssuer(t *testing.T) {
+	signer, err := jwtkit.NewRSASigner(2048, testDelegatedKID)
+	require.NoError(t, err)
+	jwks := testJWKS(t, signer)
+	defer jwks.Close()
+
+	v, err := newDelegatedVerifier(&authcore.Service{}, "")
+	require.NoError(t, err)
+	require.NoError(t, v.LoadRemoteApplications(context.Background(), delegatedRemoteAppSource{{
+		Slug:           "doujins",
+		Issuer:         testDelegatedIssuer,
+		JWKSURI:        jwks.URL + "/.well-known/jwks.json",
+		AllowedOrigins: []string{"https://doujins.com"},
+		Enabled:        true,
+	}}, []string{canonicalAudience}))
+	cp := &ControlPlane{delegatedVerifier: v}
+	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
+		Permissions: []string{PermSelfBillingRead},
+	})
+
+	_, err = cp.ResolveDelegated(context.Background(), tok, "https://evil.example")
+	require.ErrorIs(t, err, ErrDelegatedOriginNotAllowed)
 }
 
 func TestDelegatedVerify_RejectsWrongAudience(t *testing.T) {

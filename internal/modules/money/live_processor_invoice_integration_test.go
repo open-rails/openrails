@@ -63,13 +63,12 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	inv, err := svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
-	stripeSvc := &subscriptions.StripeService{Config: &config.Config{
-		Env:     "dev",
-		TestEnv: true,
-		Processors: map[string]*config.ProcessorConfig{
+	stripeSvc := &subscriptions.StripeService{
+		Config: &config.Config{Env: "dev", TestEnv: true},
+		Processors: config.ProcessorSet{
 			"stripe": {Type: config.ProcessorTypeStripe, SecretKey: secretKey},
 		},
-	}}
+	}
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.ProcessorStripe): money.NewStripeCollectionAdapter(dbi, stripeSvc),
 	})

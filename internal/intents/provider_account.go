@@ -61,8 +61,9 @@ type ProviderAccountResolver interface {
 // A fetch failure resolves to ok=false (check skipped this pass, warn logged)
 // rather than blocking the ledger on provider availability.
 type RuntimeProviderAccounts struct {
-	Config *config.Config
-	NMI    map[string]*nmi.NMIClient
+	Config     *config.Config
+	Processors config.ProcessorSet
+	NMI        map[string]*nmi.NMIClient
 	// StripeBaseURL overrides https://api.stripe.com in tests.
 	StripeBaseURL string
 
@@ -77,8 +78,8 @@ type nmiIdentityEntry struct {
 }
 
 // NewRuntimeProviderAccounts builds the resolver over the live clients/config.
-func NewRuntimeProviderAccounts(cfg *config.Config, nmiClients map[string]*nmi.NMIClient) *RuntimeProviderAccounts {
-	return &RuntimeProviderAccounts{Config: cfg, NMI: nmiClients}
+func NewRuntimeProviderAccounts(cfg *config.Config, processors config.ProcessorSet, nmiClients map[string]*nmi.NMIClient) *RuntimeProviderAccounts {
+	return &RuntimeProviderAccounts{Config: cfg, Processors: processors, NMI: nmiClients}
 }
 
 func (r *RuntimeProviderAccounts) ResolveProviderAccount(ctx context.Context, provider string) (ProviderAccountIdentity, bool) {
@@ -89,8 +90,8 @@ func (r *RuntimeProviderAccounts) ResolveProviderAccount(ctx context.Context, pr
 	if c, ok := r.NMI[p]; ok && c != nil {
 		return r.nmiAccount(ctx, p, c)
 	}
-	if r.Config != nil {
-		if proc, ok := r.Config.Processors[p]; ok && proc != nil {
+	if r.Processors != nil {
+		if proc, ok := r.Processors[p]; ok && proc != nil {
 			providerType := proc.GetEffectiveType(p)
 			isStripe := providerType == config.ProcessorTypeStripe
 			if key := strings.TrimSpace(proc.SecretKey); isStripe && key != "" {
@@ -167,8 +168,8 @@ func (r *RuntimeProviderAccounts) providerKeysByType(providerType string) []stri
 			}
 		}
 	}
-	if r.Config != nil {
-		for key, proc := range r.Config.Processors {
+	if r.Processors != nil {
+		for key, proc := range r.Processors {
 			key = strings.ToLower(strings.TrimSpace(key))
 			if key == "" || proc == nil || proc.GetEffectiveType(key) != providerType {
 				continue

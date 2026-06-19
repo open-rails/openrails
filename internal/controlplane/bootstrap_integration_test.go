@@ -102,7 +102,6 @@ func newTestControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 	cfg := &config.Config{
 		Env: "test",
 		Auth: &config.AuthConfig{
-			ExpectedAudience: "openrails-app",
 			ControlPlane: &config.ControlPlaneConfig{
 				Issuer:      "https://openrails.test",
 				TokenPrefix: "openrails",
@@ -210,22 +209,16 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	require.ElementsMatch(t, eff, eff2, fmt.Sprintf("permissions should be stable across reruns: %v vs %v", eff, eff2))
 }
 
-// TestBootstrapPlatform_SeedsSuperadminInSeparateTenant proves the #226 platform
-// layer: BootstrapPlatform seeds a SEPARATE platform org whose role holds ONLY
-// openrails:platform:superadmin, and HasPlatformSuperadmin authorizes a member
-// of that org while a org operator admin (in the operator org) is denied.
-func TestBootstrapPlatform_SeedsSuperadminInSeparateTenant(t *testing.T) {
+func TestBootstrapPlatform_NoopsInSelfHostedOpenRails(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
 
 	cfg := &config.Config{
 		Env: "test",
 		Auth: &config.AuthConfig{
-			ExpectedAudience: "openrails-app",
 			ControlPlane: &config.ControlPlaneConfig{
-				Issuer:          "https://openrails.test",
-				TokenPrefix:     "openrails",
-				PlatformOrgSlug: "openrails-platform",
+				Issuer:      "https://openrails.test",
+				TokenPrefix: "openrails",
 			},
 		},
 	}
@@ -233,37 +226,18 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateTenant(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cp)
 
-	// Bootstrap the org operator org AND the platform org.
 	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialServiceToken: false})
 	require.NoError(t, err)
 	pres, err := cp.BootstrapPlatform(ctx)
 	require.NoError(t, err)
-	require.NotNil(t, pres)
-	require.Equal(t, "openrails-platform", pres.PlatformOrgSlug)
+	require.Nil(t, pres)
+	require.Equal(t, "", cp.PlatformOrgSlug())
 
-	// The platform role holds ONLY the platform-superadmin permission.
-	perms, err := cp.Core().GetRolePermissions(ctx, "openrails-platform", PlatformRole)
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{PermPlatformSuperadmin}, perms)
-
-	// AuthKit user IDs are UUIDs of real profiles.users rows; create them.
-	pAdmin, err := cp.Core().CreateUser(ctx, "platform-admin@test.local", "platformadmin")
-	require.NoError(t, err)
-	platformAdminID := pAdmin.ID
+	// A per-merchant admin is still not a platform superadmin. The cross-merchant
+	// SaaS admin layer belongs in openrails-saas, not this self-hosted control plane.
 	tAdmin, err := cp.Core().CreateUser(ctx, "merchant-admin@test.local", "tenantadmin")
 	require.NoError(t, err)
 	tenantOperatorAdminID := tAdmin.ID
-
-	// A platform-org member with the platform role passes HasPlatformSuperadmin.
-	require.NoError(t, cp.Core().AddMember(ctx, "openrails-platform", platformAdminID))
-	require.NoError(t, cp.Core().AssignRole(ctx, "openrails-platform", platformAdminID, PlatformRole))
-	ok, err := cp.HasPlatformSuperadmin(ctx, platformAdminID)
-	require.NoError(t, err)
-	require.True(t, ok, "platform identity must hold platform superadmin")
-
-	// A per-merchant admin (openrails:admin in their OWN tenant) is NOT a platform
-	// superadmin: HasPlatformSuperadmin evaluates the platform org, where they are
-	// not a member.
 	require.NoError(t, cp.Core().AddMember(ctx, dbtest.TestMerchantSlug, tenantOperatorAdminID))
 	require.NoError(t, cp.Core().AssignRole(ctx, dbtest.TestMerchantSlug, tenantOperatorAdminID, OperatorRole))
 	opIsAdmin, err := cp.IsAdmin(ctx, dbtest.TestMerchantSlug, tenantOperatorAdminID)
@@ -272,10 +246,6 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateTenant(t *testing.T) {
 	opIsPlatform, err := cp.HasPlatformSuperadmin(ctx, tenantOperatorAdminID)
 	require.NoError(t, err)
 	require.False(t, opIsPlatform, "per-merchant admin must NOT be a platform superadmin")
-
-	// Idempotent re-run.
-	_, err = cp.BootstrapPlatform(ctx)
-	require.NoError(t, err)
 }
 
 // TestMerchantForOwnerOrg exercises the #500 ROLE-BASED merchant resolution

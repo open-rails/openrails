@@ -16,6 +16,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -30,7 +31,7 @@ import (
 // the browser-direct self-service surface: a host that verifies its own
 // credentials supplies a billingauth.DelegatedAuthenticator returning the
 // explicitly mapped {tenant, subject, permissions} principal, and the
-// standalone gin handler (pkg/embedded/gin.Handler over Runtime.Embedded())
+// standalone gin handler (pkg/embedded/gin.StandaloneHandler over Runtime.Embedded())
 // mounts /v1/self/* + /v1/merchant-admin/* authenticated by it — no control
 // plane required. For example:
 //
@@ -64,13 +65,10 @@ type Options struct {
 	// Leave false to drive workers yourself via Runtime.RunWorkers.
 	RunWorkers bool
 
-	// Merchant binds this embedded engine to a single tenant at construction
-	// (#336): doujins/hentai0 set it to their 'doujins' tenant SLUG. There is
-	// no default tenant — leave it empty only if you resolve a tenant per
-	// request some other way, otherwise merchant-owned operations hard-fail. It
-	// is propagated to Config.Merchant in New; the slug is resolved to the
-	// internal tenant id once at bootstrap so the HTTP resolver and the
-	// Solana-secret seed pin it. To serve another tenant, construct another
+	// Merchant binds this embedded engine to a single tenant at construction:
+	// doujins/hentai0 set it to their merchant slug. It is resolved to an
+	// internal merchant id during New and stored as construction state, not
+	// loaded from config.yaml/.env. To serve another tenant, construct another
 	// engine/client.
 	Merchant string
 }
@@ -91,12 +89,10 @@ type Runtime struct {
 	emb *embedded.Embedded
 	svc *service.Service
 
-	// tenantID is the engine's construction-time bound tenant (#336/#478),
-	// resolved once from Config.Merchant. The unified Client adapter injects it
-	// onto each call's context so an embedded host can call the service-token-
-	// equivalent surface with a plain context (the host IS the principal and is
-	// trusted for its own tenant); the standalone/gin surface still resolves the
-	// tenant from the request/credential instead. Zero when no tenant is bound.
+	// tenantID is the engine's construction-time bound tenant, resolved once from
+	// Options.Merchant. The unified Client adapter injects it onto each call's
+	// context so an embedded host can call the service-token-equivalent surface
+	// with a plain context. Zero when no tenant is bound.
 	tenantID merchant.ID
 
 	workersCancel context.CancelFunc
@@ -108,12 +104,6 @@ type Runtime struct {
 func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
-	}
-	// Bind the engine to its construction-time tenant (#336): propagate the
-	// slug to Config.Merchant so the HTTP resolver and merchant-owned boot work pin
-	// it (resolved slug→id once at bootstrap, downstream).
-	if opts.Merchant != "" {
-		opts.Config.Merchant = opts.Merchant
 	}
 	if opts.RunMigrations {
 		if opts.Config.DB == nil || opts.Config.DB.URL == "" {
@@ -133,26 +123,25 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Idempotently REGISTER the bound merchant (a billing bucket) from config
-	// (#480, supersedes #478). A host binds the engine to a merchant SLUG
-	// (opts.Merchant), but nothing else creates that row; without it, merchant
-	// resolution (HTTP handler / self handler) would fail. Embedded OpenRails runs
+	// Idempotently REGISTER the bound merchant (a billing bucket) from the
+	// explicit embedded construction option. Embedded OpenRails runs
 	// NO AuthKit and stores ZERO auth — RegisterMerchant carries billing-only
 	// state (NO issuer/JWKS). The host owns the embed + DB, so registration is
 	// safe and idempotent. Runs after migrations so the merchants table exists; a
 	// second New is an idempotent no-op.
 	var boundMerchant merchant.ID
-	if opts.Config.Merchant != "" {
+	if opts.Merchant != "" {
 		if a := emb.App(); a != nil && a.Runtime != nil && a.Runtime.DB != nil {
 			ectx := ctx
 			id, rerr := db.RegisterMerchant(ectx, a.Runtime.DB.Qx(ectx), db.RegisterMerchantOptions{
-				Slug: opts.Config.Merchant,
+				Slug: opts.Merchant,
 			})
 			if rerr != nil {
 				_ = emb.Close(ctx)
 				return nil, fmt.Errorf("openrails embed: %w", rerr)
 			}
 			boundMerchant = id
+			a.Runtime.ConfiguredMerchant = id
 		}
 	}
 	svc, err := emb.Service()
@@ -197,10 +186,17 @@ func (r *Runtime) Embedded() *embedded.Embedded { return r.emb }
 
 // Handler returns the mountable embedded HTTP surface (/billing/v1/*) — a thin
 // passthrough to pkg/embedded.NewHTTPHandler. The service-token-authenticated
-// /v1/service/* surface is part of the standalone server (pkg/embedded/gin
-// Handler / internal/http); an embedded host normally uses Client() instead.
+// /v1/service/* surface is part of the standalone server
+// (pkg/embedded/gin.StandaloneHandler / internal/http); an embedded host
+// normally uses Client() instead.
 func (r *Runtime) Handler(opts HandlerOptions) http.Handler {
-	return r.emb.NewHTTPHandler(opts)
+	asm := embedhttp.FromApp(r.emb.App())
+	asm.ConfiguredMerchant = r.tenantID
+	return asm.NewHTTPHandler(embedhttp.Options{
+		IncludeUser:     opts.IncludeUser,
+		IncludeAdmin:    opts.IncludeAdmin,
+		IncludeWebhooks: opts.IncludeWebhooks,
+	})
 }
 
 // RunWorkers runs the River workers, blocking until ctx is done — a thin

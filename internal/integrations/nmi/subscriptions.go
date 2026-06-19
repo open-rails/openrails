@@ -215,24 +215,14 @@ func (c *NMIClient) UpdateSubscriptionPaymentSource(subscriptionID, customerVaul
 	return nil
 }
 
-// ErrSubscriptionDeletesDisabled is returned by DeleteRecurringSubscription when
-// processor-side subscription deletions are blocked by feature flag. Callers
-// must treat it as "deliberately skipped": proceed with local lifecycle changes
-// and leave the remote subscription for reconciliation — never as success.
-var ErrSubscriptionDeletesDisabled = errors.New("nmi: processor subscription deletes are disabled (feature_flags.disable_processor_subscription_deletions)")
-
 // ErrProviderReadOnly is returned by every NMI mutation when the provider is
-// read-only (mode=readonly, #346). Unlike ErrSubscriptionDeletesDisabled it is
-// NOT a "skip and continue" signal — a reactive operation that needed the write
-// (a charge, a vault save) has genuinely failed and must surface as an error.
+// read-only (mode=readonly, #346). A reactive operation that needed the write
+// has genuinely failed and must surface as an error.
 var ErrProviderReadOnly = errors.New("nmi: provider writes are blocked (mode=readonly)")
 
 func (c *NMIClient) DeleteRecurringSubscription(subscriptionID string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
-	}
-	if c.SubscriptionDeletesDisabled {
-		return ErrSubscriptionDeletesDisabled
 	}
 	if strings.TrimSpace(subscriptionID) == "" {
 		return errors.New("subscriptionID is required")

@@ -1527,10 +1527,6 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 }
 
 // FailMembership marks a subscription as failed due to payment issues.
-//
-// Behavior depends on config.FeatureFlags.DunningMode:
-//   - "on" or "dry_run_only": Normal dunning flow - go to past_due, schedule retries
-//   - "off": Immediate cancellation - no grace period, no retries
 func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, params *FailMembershipParams) error {
 	if params == nil || params.SubscriptionID == nil || *params.SubscriptionID == uuid.Nil {
 		return fmt.Errorf("subscription_id is required")
@@ -1546,18 +1542,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	// remote NMI recurring subscription; the job is enqueued after commit.
 	var scheduleDeferredDelete bool
 
-	// Check dunning mode from feature flags
-	dunningMode := config.DunningModeOn
-	if s.Config != nil {
-		dunningMode = s.Config.GetDunningMode()
-	}
-
 	log.WithContext(ctx).WithFields(log.Fields{
 		"processor":                 params.Processor,
 		"processor_subscription_id": params.SubscriptionID,
 		"failure_reason":            normalize.FromPtr(params.FailureReason),
 		"failure_code":              normalize.FromPtr(params.FailureCode),
-		"dunning_mode":              dunningMode,
 	}).Warn("Starting membership failure flow")
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -1583,23 +1572,15 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		now := s.now()
 
 		// Hard declines (stolen card, do-not-honor, account closed, expired card,
-		// pickup card) or dunning-off both terminate immediately: cancel now with
-		// no grace period and no further retry scheduling. Retrying a hard decline
-		// cannot succeed and risks flagging the merchant with the card networks.
-		if params.HardDecline || dunningMode == config.DunningModeOff {
-			if params.HardDecline {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id": subscription.ID,
-					"user_id":         subscription.CustomerID,
-					"failure_code":    normalize.FromPtr(params.FailureCode),
-				}).Warn("Hard decline received; immediately cancelling subscription (no retry)")
-			} else {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id": subscription.ID,
-					"user_id":         subscription.CustomerID,
-				}).Warn("Dunning mode is 'off'; immediately cancelling subscription (no recovery)")
-			}
-
+		// pickup card) terminate immediately: cancel now with no grace period and
+		// no further retry scheduling. Retrying a hard decline cannot succeed and
+		// risks flagging the merchant with the card networks.
+		if params.HardDecline {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+				"user_id":         subscription.CustomerID,
+				"failure_code":    normalize.FromPtr(params.FailureCode),
+			}).Warn("Hard decline received; immediately cancelling subscription (no retry)")
 			expired := models.CancelTypeExpired
 			reason := normalize.FromPtr(params.FailureReason)
 			if reason == "" {
@@ -1612,7 +1593,6 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			subscription.EndedAt = &now
 			subscription.ClearRetrySchedule()
 		} else {
-			// Normal dunning flow (for "on" or "dry_run_only" modes)
 			// Update subscription status - failed payment = past_due (still trying to recover)
 			subscription.Status = models.StatusPastDue
 
@@ -1760,59 +1740,53 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// Capture final status for event logging
 		finalStatus = subscription.Status
 
-		// Revoke entitlements if subscription is cancelled (after max retries)
-		// Skip revocation if disable_entitlement_expiration flag is set
-		if subscription.Status == models.StatusCancelled {
-			if s.Config != nil && s.Config.IsEntitlementExpirationDisabled() {
+		// Revoke entitlements if subscription is cancelled after max retries or a
+		// terminal decline.
+		if subscription.Status == models.StatusCancelled && entSvc != nil {
+			names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
+			if err != nil {
+				log.WithContext(ctx).WithError(err).Error("failed to list entitlements for failed subscription")
+			} else {
+				st := models.EntitlementSourceSubscription
+				sid := subscription.ID
+				for _, entName := range names {
+					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+						UserID:      subscription.CustomerID.String(),
+						Entitlement: entName,
+						SourceType:  &st,
+						SourceID:    &sid,
+						Reason:      models.EntitlementRevokeDunning,
+					}); err != nil {
+						log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+							"subscription_id": subscription.ID,
+							"entitlement":     entName,
+						}).Error("failed to revoke entitlement for failed subscription")
+					}
+				}
 				log.WithContext(ctx).WithFields(log.Fields{
 					"subscription_id": subscription.ID,
-				}).Warn("Entitlement expiration disabled; skipping entitlement revocation (subscription still cancelled)")
-			} else if entSvc != nil {
-				names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
-				if err != nil {
-					log.WithContext(ctx).WithError(err).Error("failed to list entitlements for failed subscription")
-				} else {
-					st := models.EntitlementSourceSubscription
-					sid := subscription.ID
-					for _, entName := range names {
-						if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-							UserID:      subscription.CustomerID.String(),
-							Entitlement: entName,
-							SourceType:  &st,
-							SourceID:    &sid,
-							Reason:      models.EntitlementRevokeDunning,
-						}); err != nil {
-							log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-								"subscription_id": subscription.ID,
-								"entitlement":     entName,
-							}).Error("failed to revoke entitlement for failed subscription")
-						}
-					}
-					log.WithContext(ctx).WithFields(log.Fields{
-						"subscription_id": subscription.ID,
-					}).Warn("Revoked entitlements after max dunning failures")
-				}
+				}).Warn("Revoked entitlements after max dunning failures")
+			}
 
-				// Terminal dunning failure: remove any grace windows too so access doesn't continue.
-				graceNames, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceGrace, subscription.ID)
-				if err != nil {
-					log.WithContext(ctx).WithError(err).Error("failed to list grace entitlements for failed subscription")
-				} else {
-					st := models.EntitlementSourceGrace
-					sid := subscription.ID
-					for _, entName := range graceNames {
-						if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-							UserID:      subscription.CustomerID.String(),
-							Entitlement: entName,
-							SourceType:  &st,
-							SourceID:    &sid,
-							Reason:      models.EntitlementRevokeDunning,
-						}); err != nil {
-							log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-								"subscription_id": subscription.ID,
-								"entitlement":     entName,
-							}).Error("failed to revoke grace entitlement for failed subscription")
-						}
+			// Terminal dunning failure: remove any grace windows too so access doesn't continue.
+			graceNames, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceGrace, subscription.ID)
+			if err != nil {
+				log.WithContext(ctx).WithError(err).Error("failed to list grace entitlements for failed subscription")
+			} else {
+				st := models.EntitlementSourceGrace
+				sid := subscription.ID
+				for _, entName := range graceNames {
+					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+						UserID:      subscription.CustomerID.String(),
+						Entitlement: entName,
+						SourceType:  &st,
+						SourceID:    &sid,
+						Reason:      models.EntitlementRevokeDunning,
+					}); err != nil {
+						log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+							"subscription_id": subscription.ID,
+							"entitlement":     entName,
+						}).Error("failed to revoke grace entitlement for failed subscription")
 					}
 				}
 			}

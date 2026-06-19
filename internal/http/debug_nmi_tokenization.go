@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
@@ -299,10 +298,9 @@ func (s *Server) debugNMITokenization(c *gin.Context) {
 
 	provider := strings.TrimSpace(strings.ToLower(c.Query("provider")))
 	if provider == "" {
-		provider = defaultNMIProvider(s.cfg)
+		provider = defaultNMIProvider(s)
 	}
 
-	proc := s.cfg.GetProcessor(provider)
 	tokenizationKey := ""
 	tokenizationURL := ""
 	if s.merchants != nil && !s.configuredMerchant.IsZero() {
@@ -313,11 +311,6 @@ func (s *Server) debugNMITokenization(c *gin.Context) {
 		}
 		tokenizationKey = strings.TrimSpace(tokenization.TokenizationKey)
 		tokenizationURL = strings.TrimSpace(tokenization.CollectJSURL)
-	}
-	if proc != nil {
-		if tokenizationKey == "" {
-			tokenizationKey = strings.TrimSpace(proc.TokenizationKey)
-		}
 	}
 	if tokenizationURL == "" {
 		tokenizationURL = merchants.DefaultNMICollectJSURL
@@ -388,11 +381,11 @@ window.CollectJS = {
 	c.Data(http.StatusOK, "application/javascript; charset=utf-8", []byte(js))
 }
 
-func defaultNMIProvider(cfg *config.Config) string {
-	if cfg == nil {
+func defaultNMIProvider(s *Server) string {
+	if s == nil || s.runtime == nil {
 		return "mobius"
 	}
-	processors := cfg.GetNMIProcessors()
+	processors := s.runtime.Processors.GetNMIProcessors()
 	if len(processors) == 0 {
 		return "mobius"
 	}

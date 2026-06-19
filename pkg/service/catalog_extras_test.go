@@ -488,10 +488,10 @@ func TestLiveStripeExtrasListing(t *testing.T) {
 	if key == "" {
 		t.Skip("set OPENRAILS_LIVE_STRIPE_KEY (a Stripe TEST key) to run the live read-only extras listing")
 	}
-	cfg := &config.Config{Processors: map[string]*config.ProcessorConfig{
+	processors := config.ProcessorSet{
 		"stripe": {Type: config.ProcessorTypeStripe, SecretKey: key},
-	}}
-	lister := &catalog.StripeCatalogService{Config: cfg}
+	}
+	lister := &catalog.StripeCatalogService{Config: &config.Config{}, Processors: processors}
 	products, prices, err := fetchStripeCatalog(context.Background(), lister)
 	if err != nil {
 		t.Fatalf("live stripe listing: %v", err)

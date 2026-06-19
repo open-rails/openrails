@@ -82,23 +82,6 @@ func TestAttemptManualRebill_SendsStableOrderReferences(t *testing.T) {
 	<-requestSeen
 }
 
-func TestDeleteRecurringSubscriptionBlockedByKillSwitch(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("no request must reach NMI while subscription deletes are disabled")
-	}))
-	defer server.Close()
-
-	client, err := NewClient("mobius", &config.NMIProviderSettings{
-		SecurityKey: "test-security-key",
-	}, false)
-	require.NoError(t, err)
-	client.DirectPostURL = server.URL
-	client.SubscriptionDeletesDisabled = true
-
-	err = client.DeleteRecurringSubscription("12345")
-	require.ErrorIs(t, err, ErrSubscriptionDeletesDisabled)
-}
-
 func TestReadOnlyBlocksAllDirectPostMutations(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("no direct-post request may reach NMI while the client is read-only")

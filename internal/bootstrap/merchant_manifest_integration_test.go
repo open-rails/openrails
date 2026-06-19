@@ -27,6 +27,7 @@ import (
 )
 
 const merchantManifestSchemaDDL = `
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE SCHEMA IF NOT EXISTS openrails;
 
 CREATE TABLE IF NOT EXISTS openrails.merchants (
@@ -47,6 +48,68 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
     suspended_at        TIMESTAMPTZ,
     deleted_at          TIMESTAMPTZ
 );
+
+CREATE TABLE IF NOT EXISTS openrails.merchant_configurations (
+    merchant_id uuid NOT NULL,
+    config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    created_at timestamptz DEFAULT now() NOT NULL,
+    updated_at timestamptz DEFAULT now() NOT NULL,
+    CONSTRAINT merchant_configurations_pkey PRIMARY KEY (merchant_id),
+    CONSTRAINT merchant_configurations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id)
+);
+ALTER TABLE ONLY openrails.merchant_configurations FORCE ROW LEVEL SECURITY;
+ALTER TABLE openrails.merchant_configurations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS merchant_isolation ON openrails.merchant_configurations;
+CREATE POLICY merchant_isolation ON openrails.merchant_configurations
+    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
+    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
+
+CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (
+    merchant_id uuid NOT NULL,
+    name text NOT NULL,
+    value text NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT pk_merchant_secrets PRIMARY KEY (merchant_id, name)
+);
+ALTER TABLE ONLY openrails.merchant_secrets FORCE ROW LEVEL SECURITY;
+ALTER TABLE openrails.merchant_secrets ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS merchant_isolation ON openrails.merchant_secrets;
+CREATE POLICY merchant_isolation ON openrails.merchant_secrets
+    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
+    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
+
+CREATE TABLE IF NOT EXISTS openrails.provider_accounts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    merchant_id uuid NOT NULL,
+    provider_type text NOT NULL,
+    account_id text NOT NULL,
+    display_name text,
+    vault_secret_ref text,
+    role text DEFAULT 'primary' NOT NULL,
+    status text DEFAULT 'enabled' NOT NULL,
+    evidence jsonb,
+    first_seen_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    last_verified_at timestamptz,
+    replaced_at timestamptz,
+    created_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT provider_accounts_pkey PRIMARY KEY (id),
+    CONSTRAINT provider_accounts_nonempty CHECK (btrim(provider_type) <> '' AND btrim(account_id) <> ''),
+    CONSTRAINT provider_accounts_role_check CHECK (role = ANY (ARRAY['primary','secondary','legacy'])),
+    CONSTRAINT provider_accounts_status_check CHECK (status = ANY (ARRAY['enabled','disabled'])),
+    CONSTRAINT provider_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
+);
+ALTER TABLE ONLY openrails.provider_accounts FORCE ROW LEVEL SECURITY;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_accounts_identity ON openrails.provider_accounts (merchant_id, provider_type, account_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_accounts_enabled_primary ON openrails.provider_accounts (merchant_id, provider_type) WHERE (role = 'primary' AND status = 'enabled');
+ALTER TABLE openrails.provider_accounts ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS merchant_isolation ON openrails.provider_accounts;
+CREATE POLICY merchant_isolation ON openrails.provider_accounts
+    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
+    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
 `
 
 func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
@@ -80,6 +143,71 @@ func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 	require.Equal(t, "pro", billingTier)
 	require.Equal(t, "us-east", region)
 	require.Equal(t, "/hooks/v2", webhookPath)
+}
+
+func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
+	ctx := context.Background()
+	pool := newMerchantManifestTestPool(t)
+	cp := newMerchantManifestControlPlane(t, pool)
+	manifest := cozyArtMerchantManifest("starter", "us-west", "/hooks/v1")
+	manifest.Merchants[0].Profile = ManifestMerchantProfile{
+		DisplayName:  "Cozy Art Billing",
+		LogoURL:      "https://cdn.example/logo.png",
+		FromEmail:    "billing@example.com",
+		SupportURL:   "https://example.com/support",
+		SupportEmail: "support@example.com",
+	}
+	manifest.Merchants[0].ProviderAccounts = []ManifestProviderAccount{{
+		ProviderType: "stripe",
+		AccountID:    "acct_test_123",
+		DisplayName:  "Stripe primary",
+		Role:         "primary",
+		Secrets: map[string]ManifestSecretSource{
+			"secret_key": {Value: "sk_test_bootstrap"},
+		},
+	}}
+
+	require.NoError(t, ReconcileMerchantManifestData(ctx, &config.Config{}, cp, manifest, MerchantManifestReconcileOptions{}))
+
+	var merchantID string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
+
+	var displayName, logoURL, fromEmail, supportURL, supportEmail string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT
+			config #>> '{profile,display_name}',
+			config #>> '{profile,logo_url}',
+			config #>> '{profile,from_email}',
+			config #>> '{profile,support_url}',
+			config #>> '{profile,support_email}'
+		FROM openrails.merchant_configurations
+		WHERE merchant_id = $1::uuid
+	`, merchantID).Scan(&displayName, &logoURL, &fromEmail, &supportURL, &supportEmail))
+	require.Equal(t, "Cozy Art Billing", displayName)
+	require.Equal(t, "https://cdn.example/logo.png", logoURL)
+	require.Equal(t, "billing@example.com", fromEmail)
+	require.Equal(t, "https://example.com/support", supportURL)
+	require.Equal(t, "support@example.com", supportEmail)
+
+	var secretValue string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT value
+		FROM openrails.merchant_secrets
+		WHERE merchant_id = $1::uuid AND name = 'stripe/secret_key'
+	`, merchantID).Scan(&secretValue))
+	require.Equal(t, "sk_test_bootstrap", secretValue)
+
+	var providerType, accountID, display, role, status string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT provider_type, account_id, display_name, role, status
+		FROM openrails.provider_accounts
+		WHERE merchant_id = $1::uuid
+	`, merchantID).Scan(&providerType, &accountID, &display, &role, &status))
+	require.Equal(t, "stripe", providerType)
+	require.Equal(t, "acct_test_123", accountID)
+	require.Equal(t, "Stripe primary", display)
+	require.Equal(t, "primary", role)
+	require.Equal(t, "enabled", status)
 }
 
 func TestReconcileMerchantManifestSerializesConcurrentReplicas(t *testing.T) {
@@ -194,7 +322,6 @@ func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlp
 	cfg := &config.Config{
 		Env: "test",
 		Auth: &config.AuthConfig{
-			ExpectedAudience: "openrails",
 			ControlPlane: &config.ControlPlaneConfig{
 				Issuer:      "https://openrails.test",
 				TokenPrefix: "openrails",

@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/response"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/auth"
 	provauth "github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -26,14 +25,9 @@ type authKitProvider struct {
 	authenticator *auth.Authenticator
 }
 
-// NewProvider builds the gin provider for the standalone HTTP server. The
-// gin-free Authenticator is built from the same AuthKit config.
-func NewProvider(cfg *config.AuthConfig) (provauth.Provider, error) {
-	a, err := auth.NewAuthenticator(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return &authKitProvider{authenticator: a}, nil
+// NewProvider builds the gin provider around an already-constructed verifier.
+func NewProvider(verifier auth.Verifier) provauth.Provider {
+	return &authKitProvider{authenticator: auth.NewAuthenticator(verifier)}
 }
 
 // Authenticate forwards to the gin-free authenticator so this provider also

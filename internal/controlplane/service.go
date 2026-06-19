@@ -80,24 +80,6 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		return nil, errors.New("controlplane: auth.control_plane.issuer is required")
 	}
 
-	// Audiences default to the verifier's expected audience so issued/accepted
-	// tokens line up with the existing verifier wiring when not overridden.
-	issued := cp.IssuedAudiences
-	expected := cp.ExpectedAudiences
-	if len(issued) == 0 {
-		if a := strings.TrimSpace(cfg.Auth.ExpectedAudience); a != "" {
-			issued = []string{a}
-		}
-	}
-	if len(expected) == 0 {
-		if a := strings.TrimSpace(cfg.Auth.ExpectedAudience); a != "" {
-			expected = []string{a}
-		}
-	}
-	if len(issued) == 0 || len(expected) == 0 {
-		return nil, errors.New("controlplane: issued_audiences/expected_audiences are required (or set auth.expected_audience)")
-	}
-
 	// (authkit issue 60) Tenants are always a supported primitive — no tenant-mode
 	// config or core flag.
 
@@ -116,8 +98,8 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		Keys:               keySource,
 		Issuer:             issuer,
 		BaseURL:            issuer,
-		IssuedAudiences:    issued,
-		ExpectedAudiences:  expected,
+		IssuedAudiences:    []string{"openrails"},
+		ExpectedAudiences:  []string{"openrails"},
 		ServiceTokenPrefix: strings.TrimSpace(cp.TokenPrefix),
 		Environment:        strings.TrimSpace(cfg.Env),
 		PermissionCatalog:  Catalog(),
@@ -130,8 +112,8 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		// Self-hosted locked-down posture (#47 switches): no public user
 		// self-registration, no public tenant onboarding/management. Embedded
 		// bootstrap/core calls (CreateOrg/AssignRole/MintServiceToken) are unaffected.
-		NativeUserRegistrationMode: registrationMode(!cp.UserRegistrationOpen()),
-		OrgRegistrationMode:        registrationMode(!cp.TenantRegistrationOpen()),
+		NativeUserRegistrationMode: registrationMode(!cp.PublicHosted),
+		OrgRegistrationMode:        registrationMode(!cp.PublicHosted),
 	}
 
 	authSvc, err := authhttp.NewService(coreCfg)
@@ -158,7 +140,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		pool:               db.WrapPool(pool, cfg.DB.SchemaName()),
 		delegatedVerifier:  delegatedVerifier,
 		issuer:             issuer,
-		delegatedAudiences: append([]string(nil), expected...),
+		delegatedAudiences: []string{"openrails"},
 	}
 
 	// Load AuthKit's ACTIVE remote_applications into the multi-issuer verifier

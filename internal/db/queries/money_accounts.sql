@@ -23,7 +23,9 @@ LIMIT 1;
 -- spendgate, not here.
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
-    a.debits_pending::bigint AS held,
+    -- Holds are Redis-only (#513); the durable ledger has no pending balance, so
+    -- held is always 0 here (the two-phase pending columns were dropped, #512).
+    0::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount
 FROM openrails.ledger_accounts a

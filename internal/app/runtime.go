@@ -38,6 +38,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/services/health"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Runtime aggregates infrastructure clients and application services.
@@ -45,6 +46,15 @@ type Runtime struct {
 	DB          *db.DB
 	RedisClient *redis.Client
 	Config      *config.Config
+
+	// ConfiguredMerchant is construction-time state for embedded single-merchant
+	// hosts. It is deliberately not loaded from config.yaml/.env: standalone
+	// merchant authority lives in bootstrap/DB/AuthKit state.
+	ConfiguredMerchant merchant.ID
+
+	// Processors is the temporary in-memory provider credential bridge for
+	// embedded/private construction. It is not loaded from config.yaml/.env.
+	Processors config.ProcessorSet
 
 	// AdminChecker, when set, evaluates the LIVE openrails:admin permission for a
 	// caller's OWN tenant (#312). It is used by mixed public/admin read endpoints
@@ -165,7 +175,7 @@ type Runtime struct {
 // account.
 func (r *Runtime) ProviderAccounts() intents.ProviderAccountResolver {
 	r.intentProviderAccountsOnce.Do(func() {
-		r.intentProviderAccounts = intents.NewRuntimeProviderAccounts(r.Config, r.NMIClients)
+		r.intentProviderAccounts = intents.NewRuntimeProviderAccounts(r.Config, r.Processors, r.NMIClients)
 	})
 	return r.intentProviderAccounts
 }
@@ -279,7 +289,7 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 	}
 
 	// Start Solana Pay poller if configured (regardless of River setup).
-	if r.SolanaPayPoller != nil && r.Config != nil && r.Config.GetSolanaProcessor() != nil {
+	if r.SolanaPayPoller != nil && r.Processors.GetSolanaProcessor() != nil {
 		go r.SolanaPayPoller.Start(ctx)
 	}
 

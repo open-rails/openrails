@@ -342,7 +342,44 @@ func (s *EntitlementService) RevokeSourcesForSubscriptionAsOf(ctx context.Contex
 			}
 		}
 	}
+	// #511 write-path unification: the windows above are the EFFECT; terminate the
+	// matching live entitlement grants too, so the grant ledger (the source of
+	// truth) reflects the retraction rather than drifting (a live grant whose
+	// effect is revoked). This keeps the DERIVE grant-tier checks precise — a
+	// properly-cancelled subscription leaves no "live grant, dead effect" residue.
+	if err := s.revokeGrantsForSubscriptionSources(ctx, userID, subscriptionID, sourceTypes); err != nil {
+		return fmt.Errorf("revoke grants for subscription sources: %w", err)
+	}
 	return nil
+}
+
+// revokeGrantsForSubscriptionSources terminates the live entitlement-kind grants
+// of one subscription for the given entitlement source types (subscription /
+// grace), keeping the grant ledger consistent with a source-keyed effect
+// revocation (#511 write-path unification). The grant's free-text source_id is the
+// subscription UUID string (set by PushNewEntitlement). Best-effort vocabulary
+// bridge via grantSourceType (subscription→subscription, grace→grace).
+func (s *EntitlementService) revokeGrantsForSubscriptionSources(ctx context.Context, userID string, subscriptionID uuid.UUID, sourceTypes []models.EntitlementSourceType) error {
+	if len(sourceTypes) == 0 {
+		return nil
+	}
+	mID, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	customerID, err := repo.ResolveCustomerID(userID)
+	if err != nil {
+		return err
+	}
+	gsources := make([]grants.SourceType, 0, len(sourceTypes))
+	for _, st := range sourceTypes {
+		gsources = append(gsources, grantSourceType(st))
+	}
+	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		gl := grants.New(gen.New(tx), mID.UUID())
+		gl.SetClock(func() time.Time { return s.now().UTC() })
+		return gl.RevokeBySource(ctx, customerID, grants.Entitlement, gsources, subscriptionID.String(), "subscription source revoked")
+	})
 }
 
 type RevokeExistingEntitlementParams struct {

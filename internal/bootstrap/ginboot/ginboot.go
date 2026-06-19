@@ -12,9 +12,9 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	internalauth "github.com/open-rails/openrails/internal/auth"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	server "github.com/open-rails/openrails/internal/http"
-	embauthkit "github.com/open-rails/openrails/pkg/embedded/authkit"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
@@ -40,19 +40,6 @@ func NewServer(cfg *config.Config, opts *bootstrap.Options) (*Result, error) {
 		}
 	}()
 
-	// Standalone wires the AuthKit first-party JWT verifier (#284): the embedded
-	// core no longer builds a default verifier, so when no Authenticator was
-	// injected we construct the AuthKit-backed one from the config-declared
-	// first-party issuers (auth.issuers) here. This is an input to the user/admin
-	// JWT surface, not an auth mode (#469).
-	if application.Authenticator == nil && cfg.Auth != nil && len(cfg.Auth.Issuers) > 0 {
-		authn, aerr := embauthkit.NewVerifierAuthenticatorFromConfig(cfg.Auth)
-		if aerr != nil {
-			return nil, fmt.Errorf("build authkit verifier: %w", aerr)
-		}
-		application.Authenticator = authn
-	}
-
 	// Standalone always attaches the OpenRails-owned AuthKit control plane
 	// (#284/#469), reusing an injected pool when present. Failure is fatal.
 	var injectedPool = func() *pgxpool.Pool {
@@ -64,6 +51,13 @@ func NewServer(cfg *config.Config, opts *bootstrap.Options) (*Result, error) {
 	if cperr := embcp.Attach(context.Background(), application, cfg, injectedPool); cperr != nil {
 		return nil, fmt.Errorf("attach control plane: %w", cperr)
 	}
+	if application.Authenticator == nil {
+		cp := embcp.Get(application)
+		if cp == nil || cp.AuthService() == nil || cp.AuthService().Verifier() == nil {
+			return nil, fmt.Errorf("control plane verifier unavailable")
+		}
+		application.Authenticator = internalauth.NewAuthenticator(cp.AuthService().Verifier())
+	}
 
 	billingServer, err := server.New(server.Dependencies{
 		Config:                 application.Config,
@@ -72,6 +66,7 @@ func NewServer(cfg *config.Config, opts *bootstrap.Options) (*Result, error) {
 		Redis:                  application.RedisClient,
 		Authenticator:          application.Authenticator,
 		DelegatedAuthenticator: application.DelegatedAuthenticator,
+		ConfiguredMerchant:     application.Runtime.ConfiguredMerchant,
 		ControlPlane:           embcp.Get(application),
 	})
 	if err != nil {

@@ -634,7 +634,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 	}
 	network := ""
 	var tokens map[string]config.SolanaToken
-	if pc := r.State.Config.GetSolanaProcessor(); pc != nil {
+	if pc := r.State.Processors.GetSolanaProcessor(); pc != nil {
 		network = pc.Network
 		tokens = pc.Tokens
 	}

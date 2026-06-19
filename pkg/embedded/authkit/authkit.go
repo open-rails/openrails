@@ -10,7 +10,6 @@
 package authkit
 
 import (
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/auth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
@@ -20,21 +19,13 @@ import (
 // issuers, optionally constraining the token audience. Pass the returned value
 // as embedded.Options.Authenticator.
 //
-// This is the first-party issuer verifier that used to be wired implicitly
-// from Config.Auth.Issuers inside the embedded core. It is an INPUT to the
-// auth stack (the user/admin JWT surface), not a standalone auth mode — #469
-// removed the "verifier-only" deployment; standalone always also runs the
-// AuthKit control plane.
+// This is an explicit embedded-host bridge. Standalone OpenRails does not read
+// issuers from config; it authenticates with its own control-plane/AuthKit
+// tokens and merchant remote applications.
 func NewVerifierAuthenticator(issuers []string, expectedAud string) (billingauth.Authenticator, error) {
-	return auth.NewAuthenticator(&config.AuthConfig{
-		Issuers:          issuers,
-		ExpectedAudience: expectedAud,
-	})
-}
-
-// NewVerifierAuthenticatorFromConfig builds the AuthKit-backed authenticator
-// directly from a *config.AuthConfig (issuers + expected audience). Convenience
-// for hosts/standalone that already hold the parsed config.
-func NewVerifierAuthenticatorFromConfig(cfg *config.AuthConfig) (billingauth.Authenticator, error) {
-	return auth.NewAuthenticator(cfg)
+	v, err := auth.NewIssuerVerifier(issuers, expectedAud)
+	if err != nil {
+		return nil, err
+	}
+	return auth.NewAuthenticator(v), nil
 }

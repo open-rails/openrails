@@ -71,7 +71,7 @@ func TestCheckoutResolvesMobiusClientFromVaultMerchantSecret(t *testing.T) {
 	_, err := store.Put(ctx, dbtest.TestMerchantID, merchants.SecretNMIMobiusProductionKey, "merchant-mobius-key")
 	require.NoError(t, err)
 
-	svc := &CheckoutService{Config: checkoutProcessorConfig(true, "static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutProcessorConfig(true), Processors: checkoutProcessorSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(store)
 
 	client, err := svc.resolveNMIClient(ctx, "mobius")
@@ -82,7 +82,7 @@ func TestCheckoutResolvesMobiusClientFromVaultMerchantSecret(t *testing.T) {
 
 func TestCheckoutFallsBackToStaticMobiusClientWhenMerchantSecretMissing(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	svc := &CheckoutService{Config: checkoutProcessorConfig(true, "static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutProcessorConfig(true), Processors: checkoutProcessorSet("static-mobius-key")}
 
 	client, err := svc.resolveNMIClient(ctx, "mobius")
 	require.NoError(t, err)
@@ -91,7 +91,7 @@ func TestCheckoutFallsBackToStaticMobiusClientWhenMerchantSecretMissing(t *testi
 
 func TestCheckoutFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	svc := &CheckoutService{Config: checkoutProcessorConfig(true, "static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutProcessorConfig(true), Processors: checkoutProcessorSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(unavailableSecretStore{})
 
 	_, err := svc.resolveNMIClient(ctx, "mobius")
@@ -109,7 +109,7 @@ func TestCheckoutResolvesCCBillConfigFromMerchantSecret(t *testing.T) {
 	}`)
 	require.NoError(t, err)
 
-	svc := &CheckoutService{Config: checkoutProcessorConfig(true, "static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutProcessorConfig(true), Processors: checkoutProcessorSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(store)
 
 	client, err := svc.resolveCCBillClient(ctx)
@@ -137,7 +137,7 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 	}`)
 	require.NoError(t, err)
 
-	svc := &CheckoutService{Config: checkoutProcessorConfig(true, "static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutProcessorConfig(true), Processors: checkoutProcessorSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(store)
 
 	email := "alice@example.com"
@@ -161,21 +161,24 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 	require.Equal(t, "merchant-sub", parsed.Query().Get("clientSubacc"))
 }
 
-func checkoutProcessorConfig(testEnv bool, mobiusKey string) *config.Config {
+func checkoutProcessorConfig(testEnv bool) *config.Config {
 	return &config.Config{
 		Mode:    config.ModeFull,
 		TestEnv: testEnv,
-		Processors: map[string]*config.ProcessorConfig{
-			"mobius": {
-				Type:        config.ProcessorTypeNMI,
-				SecurityKey: mobiusKey,
-			},
-			"ccbill": {
-				Type:         config.ProcessorTypeCCBill,
-				ClientAccNum: "static-acc",
-				ClientSubAcc: "static-sub",
-				Salt:         "static-salt",
-			},
+	}
+}
+
+func checkoutProcessorSet(mobiusKey string) config.ProcessorSet {
+	return config.ProcessorSet{
+		"mobius": {
+			Type:        config.ProcessorTypeNMI,
+			SecurityKey: mobiusKey,
+		},
+		"ccbill": {
+			Type:         config.ProcessorTypeCCBill,
+			ClientAccNum: "static-acc",
+			ClientSubAcc: "static-sub",
+			Salt:         "static-salt",
 		},
 	}
 }

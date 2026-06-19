@@ -15,7 +15,15 @@ import (
 )
 
 type StripeCatalogService struct {
-	Config *config.Config
+	Config     *config.Config
+	Processors config.ProcessorSet
+}
+
+func (s *StripeCatalogService) stripeProcessor() *config.ProcessorConfig {
+	if s == nil {
+		return nil
+	}
+	return s.Processors.GetStripeProcessor()
 }
 
 // httpClient returns the choke-point Stripe client (internal/integrations/
@@ -69,7 +77,7 @@ type CreateProductParams struct {
 // CreateProduct creates a Stripe Product. The metadata is merged into the request
 // so reruns of an idempotent caller can be located via metadata search.
 func (s *StripeCatalogService) CreateProduct(ctx context.Context, params CreateProductParams) (string, error) {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return "", fmt.Errorf("stripe is not configured")
 	}
@@ -115,7 +123,7 @@ type CreatePriceParams struct {
 // CreatePrice creates a Stripe Price with lookup_key and metadata so reruns and
 // reconciliation paths can find the object without retaining its Stripe ID.
 func (s *StripeCatalogService) CreatePrice(ctx context.Context, params CreatePriceParams) (string, error) {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return "", fmt.Errorf("stripe is not configured")
 	}
@@ -179,7 +187,7 @@ type UpdateProductParams struct {
 
 // UpdateProduct propagates mutable fields to an existing Stripe Product.
 func (s *StripeCatalogService) UpdateProduct(ctx context.Context, stripeProductID string, params UpdateProductParams) error {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return fmt.Errorf("stripe is not configured")
 	}
@@ -224,7 +232,7 @@ type UpdatePriceParams struct {
 
 // UpdatePrice propagates mutable fields to an existing Stripe Price.
 func (s *StripeCatalogService) UpdatePrice(ctx context.Context, stripePriceID string, params UpdatePriceParams) error {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return fmt.Errorf("stripe is not configured")
 	}
@@ -270,7 +278,7 @@ type StripeProduct struct {
 // (wrapped as fmt error containing "not found") when the ID 404s, so callers
 // can distinguish drift from missing.
 func (s *StripeCatalogService) RetrieveProduct(ctx context.Context, stripeProductID string) (*StripeProduct, error) {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, fmt.Errorf("stripe is not configured")
 	}
@@ -299,7 +307,7 @@ func (s *StripeCatalogService) RetrieveProduct(ctx context.Context, stripeProduc
 // answer: a 404 returns (nil, false, nil) so verify-then-execute callers (#358
 // archive intents) can distinguish "gone" from "read failed".
 func (s *StripeCatalogService) FindProduct(ctx context.Context, stripeProductID string) (*StripeProduct, bool, error) {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, false, fmt.Errorf("stripe is not configured")
 	}
@@ -327,7 +335,7 @@ func (s *StripeCatalogService) FindProduct(ctx context.Context, stripeProductID 
 // FindPrice fetches a Stripe Price by ID; 404 returns (nil, false, nil). See
 // FindProduct.
 func (s *StripeCatalogService) FindPrice(ctx context.Context, stripePriceID string) (*StripePrice, bool, error) {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, false, fmt.Errorf("stripe is not configured")
 	}
@@ -377,7 +385,7 @@ type StripePrice struct {
 // detect operator-pre-created products). For normal create flows, the Stripe
 // ID stored on the OpenRails row is the primary lookup.
 func (s *StripeCatalogService) SearchProductsByMetadata(ctx context.Context, key, value string) ([]StripeProduct, error) {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, fmt.Errorf("stripe is not configured")
 	}
@@ -411,7 +419,7 @@ func (s *StripeCatalogService) SearchProductsByMetadata(ctx context.Context, key
 // is typical; multiple results indicate prior duplicate creation that should
 // be cleaned up.
 func (s *StripeCatalogService) ListPricesByLookupKey(ctx context.Context, lookupKey string) ([]StripePrice, error) {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, fmt.Errorf("stripe is not configured")
 	}
@@ -452,7 +460,7 @@ const stripeListPageLimit = 100
 // (Stripe's has_more=false). Used by the catalog reconciliation loop to
 // enumerate the full catalog and detect orphans / drift.
 func (s *StripeCatalogService) ListProducts(ctx context.Context, startingAfter string) (products []StripeProduct, nextCursor string, err error) {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, "", fmt.Errorf("stripe is not configured")
 	}
@@ -484,7 +492,7 @@ func (s *StripeCatalogService) ListProducts(ctx context.Context, startingAfter s
 // semantics match ListProducts: pass startingAfter="" for the first page and
 // the returned nextCursor for subsequent pages; nextCursor is "" when exhausted.
 func (s *StripeCatalogService) ListPrices(ctx context.Context, startingAfter string) (prices []StripePrice, nextCursor string, err error) {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, "", fmt.Errorf("stripe is not configured")
 	}
@@ -514,7 +522,7 @@ func (s *StripeCatalogService) ListPrices(ctx context.Context, startingAfter str
 
 // RetrievePrice fetches a Stripe Price by ID.
 func (s *StripeCatalogService) RetrievePrice(ctx context.Context, stripePriceID string) (*StripePrice, error) {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return nil, fmt.Errorf("stripe is not configured")
 	}
@@ -540,7 +548,7 @@ func (s *StripeCatalogService) RetrievePrice(ctx context.Context, stripePriceID 
 }
 
 func (s *StripeCatalogService) VerifyPriceExists(ctx context.Context, priceID string) error {
-	stripeProc := s.Config.GetStripeProcessor()
+	stripeProc := s.stripeProcessor()
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return fmt.Errorf("stripe is not configured")
 	}

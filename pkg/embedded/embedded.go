@@ -40,9 +40,9 @@ type Options struct {
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	Cache                  cache.Cache
 	// PaymentProviders lets embedding hosts supply one or more payment-provider
-	// credential sets programmatically. This is merged into Config.Processors
-	// before the runtime is built. Local provider names are optional selectors;
-	// durable provider-account identity is resolved from the provider itself.
+	// credential sets programmatically. Local provider names are optional
+	// selectors; durable provider-account identity is resolved from the provider
+	// itself.
 	PaymentProviders []PaymentProvider
 }
 
@@ -54,7 +54,8 @@ func New(opts Options) (*Embedded, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	if err := ApplyPaymentProviders(opts.Config, opts.PaymentProviders); err != nil {
+	processors, err := ApplyPaymentProviders(opts.PaymentProviders)
+	if err != nil {
 		return nil, err
 	}
 
@@ -68,6 +69,7 @@ func New(opts Options) (*Embedded, error) {
 		Authenticator:          opts.Authenticator,
 		DelegatedAuthenticator: opts.DelegatedAuthenticator,
 		Cache:                  opts.Cache,
+		Processors:             processors,
 	})
 	if err != nil {
 		return nil, err

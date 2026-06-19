@@ -78,7 +78,6 @@ CREATE POLICY merchant_isolation ON openrails.rls_probe
 	    END IF;
 	END $$;
 	ALTER ROLE openrails_app WITH LOGIN PASSWORD 'app_pw';
-	GRANT USAGE ON SCHEMA billing TO openrails_app;
 	GRANT USAGE ON SCHEMA openrails TO openrails_app;
 	GRANT SELECT, INSERT, UPDATE, DELETE ON openrails.rls_probe TO openrails_app;
 	`

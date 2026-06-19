@@ -76,7 +76,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	if !processors.IsConfigured(r.State.Config, req.Payment.Processor) {
+	if !processors.IsConfigured(r.State.Processors, req.Payment.Processor) {
 		r.ErrorJSON(http.StatusBadRequest, "unsupported processor")
 		return
 	}

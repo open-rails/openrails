@@ -105,6 +105,7 @@ type CheckoutService struct {
 	StripeService *subscriptions.StripeService
 	clock         clockwork.Clock
 	Config        *config.Config
+	Processors    config.ProcessorSet
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -139,6 +140,7 @@ func NewCheckoutService(
 	nmiClients map[string]*nmi.NMIClient,
 	processorCustomerService *payments.ProcessorCustomerService,
 	cfg *config.Config,
+	processorSet config.ProcessorSet,
 	clocks ...clockwork.Clock,
 ) *CheckoutService {
 	clock := timeutil.FirstClock(clocks...)
@@ -155,9 +157,10 @@ func NewCheckoutService(
 		IdempotencyService:       idempotencyService,
 		NMIClients:               nmiClients,
 		ProcessorCustomerService: processorCustomerService,
-		StripeService:            &subscriptions.StripeService{Config: cfg},
+		StripeService:            &subscriptions.StripeService{Config: cfg, Processors: processorSet},
 		clock:                    clock,
 		Config:                   cfg,
+		Processors:               processorSet,
 	}
 	service.NMISaleService = NewCheckoutNMISaleService(
 		service.PurchaseService,
@@ -1143,7 +1146,7 @@ func (s *CheckoutService) processStripeSubscription(
 	price *models.Price,
 	coverage *CoverageInfo,
 ) (*CheckoutResponse, error) {
-	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Config)
+	_, _, err := subscriptions.RequireStripeSecretKey(s.Processors)
 	if err != nil {
 		return nil, err
 	}
@@ -1153,14 +1156,8 @@ func (s *CheckoutService) processStripeSubscription(
 	}
 	successURL := strings.TrimSpace(req.SuccessURL)
 	cancelURL := strings.TrimSpace(req.CancelURL)
-	if successURL == "" {
-		successURL = strings.TrimSpace(stripeProc.SuccessURL)
-	}
-	if cancelURL == "" {
-		cancelURL = strings.TrimSpace(stripeProc.CancelURL)
-	}
 	if successURL == "" || cancelURL == "" {
-		return nil, errors.New("stripe success/cancel URLs not available")
+		return nil, errors.New("stripe success_url and cancel_url are required")
 	}
 
 	// Resolve a single, durable Stripe customer for this user (issue #212) so we
@@ -1204,7 +1201,7 @@ func (s *CheckoutService) processStripePayment(
 	user *UserIdentity,
 	price *models.Price,
 ) (*CheckoutResponse, error) {
-	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Config)
+	_, _, err := subscriptions.RequireStripeSecretKey(s.Processors)
 	if err != nil {
 		return nil, err
 	}
@@ -1214,14 +1211,8 @@ func (s *CheckoutService) processStripePayment(
 	}
 	successURL := strings.TrimSpace(req.SuccessURL)
 	cancelURL := strings.TrimSpace(req.CancelURL)
-	if successURL == "" {
-		successURL = strings.TrimSpace(stripeProc.SuccessURL)
-	}
-	if cancelURL == "" {
-		cancelURL = strings.TrimSpace(stripeProc.CancelURL)
-	}
 	if successURL == "" || cancelURL == "" {
-		return nil, errors.New("stripe success/cancel URLs not available")
+		return nil, errors.New("stripe success_url and cancel_url are required")
 	}
 
 	urlStr, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
@@ -1475,7 +1466,7 @@ type stripeCheckoutParams struct {
 }
 
 func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (string, error) {
-	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Config)
+	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Processors)
 	if err != nil {
 		return "", err
 	}
@@ -2204,16 +2195,6 @@ func (s *CheckoutService) cancelNMISubscription(ctx context.Context, sub *models
 	}
 
 	if err := client.DeleteRecurringSubscription(sub.ProcessorSubscriptionID); err != nil {
-		if errors.Is(err, nmi.ErrSubscriptionDeletesDisabled) {
-			// Kill switch: the superseded subscription stays alive at NMI (a remote
-			// duplicate) until reconciliation disposes of it; the tier change must
-			// still proceed locally.
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id": sub.ID,
-				"processor":       provider,
-			}).Warn("processor subscription deletes disabled; superseded subscription left alive at NMI for reconciliation")
-			return nil
-		}
 		return err
 	}
 	return nil
@@ -2502,7 +2483,7 @@ func (s *CheckoutService) processTierChangeStripe(
 			currentPeriodStart = *existingSub.CurrentPeriodStartsAt
 		}
 
-		stripeService := &subscriptions.StripeService{Config: s.Config}
+		stripeService := &subscriptions.StripeService{Config: s.Config, Processors: s.Processors}
 		if _, err := stripeService.ScheduleSubscriptionPriceChange(ctx, existingSub.ProcessorSubscriptionID, currentStripePriceID, stripePriceID, currentPeriodStart, *existingSub.CurrentPeriodEndsAt, newPrice.BillingCycleDays); err != nil {
 			return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 		}
@@ -2553,7 +2534,7 @@ func (s *CheckoutService) processTierChangeStripe(
 	// of truth for Stripe-billed amounts. If exact parity with the NMI math is
 	// later required, switch to an explicit invoice-item + price-update flow.
 	// Verify the live invoice amount on a real Stripe test upgrade before deploy.
-	stripeService := &subscriptions.StripeService{Config: s.Config}
+	stripeService := &subscriptions.StripeService{Config: s.Config, Processors: s.Processors}
 	itemID, err := stripeService.GetSubscriptionItemID(ctx, existingSub.ProcessorSubscriptionID)
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}

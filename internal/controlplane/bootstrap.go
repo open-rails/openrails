@@ -176,76 +176,14 @@ type PlatformBootstrapResult struct {
 	AdminAssigned   bool
 }
 
-// BootstrapPlatform idempotently ensures the managed-hosting PLATFORM org
-// (issue #226), DISTINCT from any org operator org: the platform AuthKit org
-// exists, the openrails-platform-superadmin role is defined and granted ONLY the
-// openrails:platform:superadmin permission, and (optionally) an initial platform
-// admin user is assigned that role.
-//
-// It runs through in-process AuthKit CORE calls (CreateOrg / DefineRole /
-// SetRolePermissions / AssignRole) — never raw SQL. Re-running is safe (upserts).
-//
-// No-op (returns nil, nil) when no platform org is configured: a single-tenant
-// or non-managed deployment never grows a cross-tenant superadmin.
+// BootstrapPlatform is intentionally inert in the source-available OpenRails
+// control plane. Cross-merchant platform administration belongs in the private
+// openrails-saas deployment layer, not in self-hosted OpenRails config.
 func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstrapResult, error) {
 	if c == nil {
 		return nil, errors.New("controlplane: nil control plane")
 	}
-	slug := c.PlatformOrgSlug()
-	if slug == "" {
-		return nil, nil
-	}
-	core := c.Core()
-	if core == nil {
-		return nil, errors.New("controlplane: core service unavailable")
-	}
-
-	res := &PlatformBootstrapResult{PlatformOrgSlug: slug}
-
-	authkitOrg, err := core.ResolveOrgBySlug(ctx, slug)
-	if err != nil {
-		if !errors.Is(err, authcore.ErrOrgNotFound) {
-			return nil, fmt.Errorf("controlplane: resolve platform org %q: %w", slug, err)
-		}
-		created, cerr := core.CreateOrg(ctx, slug)
-		if cerr != nil {
-			if !errors.Is(cerr, authcore.ErrOwnerSlugTaken) {
-				return nil, fmt.Errorf("controlplane: create platform org %q: %w", slug, cerr)
-			}
-			created, cerr = core.ResolveOrgBySlug(ctx, slug)
-			if cerr != nil {
-				return nil, fmt.Errorf("controlplane: resolve concurrently-created platform org %q: %w", slug, cerr)
-			}
-		} else {
-			res.OrgCreated = true
-			log.WithField("platform_org", slug).Info("controlplane: created platform superadmin org")
-		}
-		authkitOrg = created
-	}
-	res.PlatformOrgID = authkitOrg.ID
-
-	if err := core.DefineRole(ctx, slug, PlatformRole); err != nil {
-		return nil, fmt.Errorf("controlplane: define platform superadmin role: %w", err)
-	}
-	if err := core.SetRolePermissions(ctx, slug, PlatformRole, PlatformRolePermissions()); err != nil {
-		return nil, fmt.Errorf("controlplane: seed platform superadmin permissions: %w", err)
-	}
-
-	if c.cfg != nil && c.cfg.Auth != nil && c.cfg.Auth.ControlPlane != nil {
-		if adminID := strings.TrimSpace(c.cfg.Auth.ControlPlane.PlatformAdminUserID); adminID != "" {
-			if err := core.AddMember(ctx, slug, adminID); err != nil {
-				return nil, fmt.Errorf("controlplane: add platform admin to platform org: %w", err)
-			}
-			if err := core.AssignRole(ctx, slug, adminID, PlatformRole); err != nil {
-				return nil, fmt.Errorf("controlplane: assign platform superadmin role: %w", err)
-			}
-			res.AdminAssigned = true
-			log.WithFields(log.Fields{"platform_org": slug, "user_id": adminID}).
-				Info("controlplane: assigned platform superadmin role to initial platform admin")
-		}
-	}
-
-	return res, nil
+	return nil, nil
 }
 
 // anyLiveServiceToken reports whether the AuthKit org already has at least one non-revoked service token,

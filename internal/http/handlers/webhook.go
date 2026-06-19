@@ -148,7 +148,7 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 	}
 	var secrets []string
 	stripeSecretKey := ""
-	if stripeProc := r.State.Config.GetStripeProcessor(); stripeProc != nil {
+	if stripeProc := r.State.Processors.GetStripeProcessor(); stripeProc != nil {
 		stripeSecretKey = strings.TrimSpace(stripeProc.SecretKey)
 		if s := strings.TrimSpace(stripeProc.WebhookSecret); s != "" {
 			secrets = append(secrets, s)
@@ -259,7 +259,7 @@ func applyCoinbaseUSDCFundingWebhook(r *httprequest.Request) bool {
 		r.APIError(api.InvalidIDError("usdc_funding_session"))
 		return false
 	}
-	svc := funding.NewService(repo.NewUSDCFundingSessionRepo(r.State.DB), r.State.Config)
+	svc := funding.NewService(repo.NewUSDCFundingSessionRepo(r.State.DB), r.State.Config, r.State.Processors)
 	if r.State.SolanaRPC != nil {
 		svc.WithSolanaBalanceReader(r.State.SolanaRPC)
 	}

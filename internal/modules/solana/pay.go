@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
@@ -95,6 +96,7 @@ type SolanaPayService struct {
 	db                 *db.DB
 	redis              *redis.Client
 	cfg                *config.Config
+	processors         config.ProcessorSet
 	clock              clockwork.Clock
 	priceService       *catalog.PriceService
 	productService     *catalog.ProductService
@@ -108,6 +110,7 @@ func NewSolanaPayService(
 	db *db.DB,
 	redis *redis.Client,
 	cfg *config.Config,
+	processorSet config.ProcessorSet,
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
 	eligibilityChecker purchaseEligibilityChecker,
@@ -119,6 +122,7 @@ func NewSolanaPayService(
 		db:                 db,
 		redis:              redis,
 		cfg:                cfg,
+		processors:         processorSet,
 		priceService:       priceService,
 		productService:     productService,
 		eligibilityChecker: eligibilityChecker,
@@ -197,7 +201,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	// Validate Solana config
-	solanaProc, err := RequireSolanaProcessorConfig(s.cfg)
+	solanaProc, err := RequireSolanaProcessorConfig(s.processors)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +260,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	// Build Solana Pay Transfer Request URL
-	url := s.buildTransferRequestURL(recipient, tokenUnits, tokenMint, tokenSymbol, reference)
+	url := s.buildTransferRequestURL(ctx, recipient, tokenUnits, tokenMint, tokenSymbol, reference)
 
 	return &PayResult{
 		URL:            url,
@@ -278,12 +282,12 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 }
 
 // buildTransferRequestURL constructs the solana: URL per the Solana Pay spec
-func (s *SolanaPayService) buildTransferRequestURL(recipient string, amount uint64, tokenMint, tokenSymbol, reference string) string {
+func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipient string, amount uint64, tokenMint, tokenSymbol, reference string) string {
 	// Base URL: solana:<recipient>
 	baseURL := fmt.Sprintf("solana:%s", recipient)
 
 	// Get token config for decimals
-	solanaProc, err := RequireSolanaProcessorConfig(s.cfg)
+	solanaProc, err := RequireSolanaProcessorConfig(s.processors)
 	if err != nil {
 		return baseURL // fallback without params if not configured
 	}
@@ -305,9 +309,11 @@ func (s *SolanaPayService) buildTransferRequestURL(recipient string, amount uint
 
 	// Add label
 	label := "Purchase"
-	if s.cfg != nil && s.cfg.Store != nil {
-		if name := strings.TrimSpace(s.cfg.Store.Name); name != "" {
-			label = name + " Purchase"
+	if s.db != nil {
+		if cfg, _, err := merchantconfig.NewStore(s.db).Get(ctx); err == nil {
+			if name := strings.TrimSpace(cfg.Profile.DisplayName); name != "" {
+				label = name + " Purchase"
+			}
 		}
 	}
 	params += fmt.Sprintf("&label=%s", url.QueryEscape(label))

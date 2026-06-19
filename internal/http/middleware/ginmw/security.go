@@ -74,7 +74,7 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 		"X-Captcha-Required",
 	}
 
-	corsConfig.AllowCredentials = true
+	corsConfig.AllowCredentials = len(allowedOrigins) > 0
 	corsConfig.MaxAge = 12 * time.Hour
 
 	return cors.New(corsConfig)

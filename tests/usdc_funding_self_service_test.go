@@ -31,7 +31,7 @@ type usdcFundingDelegatedResolver struct {
 	tenantID    merchant.ID
 }
 
-func (r usdcFundingDelegatedResolver) ResolveDelegated(context.Context, string) (*controlplane.ResolvedDelegated, error) {
+func (r usdcFundingDelegatedResolver) ResolveDelegated(context.Context, string, string) (*controlplane.ResolvedDelegated, error) {
 	tenantID := r.tenantID
 	if tenantID.IsZero() {
 		tenantID = dbtest.TestMerchantID

@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -38,11 +39,11 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	var exists bool
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name='money_blocks')",
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name='ledger_transfers')",
 		dbi.DataPool().Schema()).
 		Scan(&exists))
 	if !exists {
-		t.Skip("money_blocks not found in the configured schema; run migrations before integration tests")
+		t.Skip("ledger_transfers not found in the configured schema; run migrations before integration tests")
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -164,8 +165,9 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE customer_id = $1", tenantSubjectID)
+		// money_blocks + money_transactions were dropped (#512); the ledger is
+		// append-only and this test uses a unique customer, so there is no money
+		// state to reset here.
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
@@ -202,15 +204,17 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
 
-	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(dbtest.WithTestMerchant(ctx), sub, lifecycle, priceSvc, moneySvc, false))
+	mctx := dbtest.WithTestMerchant(ctx)
+	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, false))
 
-	var depositCount int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.money_transactions
-		 WHERE customer_id = $1 AND currency = 'USD'
-		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'`,
-		tenantSubjectID).Scan(&depositCount))
-	require.Equal(t, 1, depositCount)
+	// The successful rebill granted the renewal's 100 USD credit lot exactly once.
+	// Post-#512/#514 a credit grant materializes a SINGLE ledger deposit and the
+	// balance is DERIVED (the old money_transactions 'deposit'/'subscription_renewal'
+	// row is now a ledger_transfers deposit). Balance read through the money service
+	// is schema-rewritten; a double grant would read 200.
+	bal, err := moneySvc.GetBalanceForCustomer(mctx, identity.CustomerID(tenantSubjectID), "USD")
+	require.NoError(t, err)
+	require.Equal(t, int64(100), bal.Balance, "renewal granted the 100 USD credit lot exactly once")
 }
 
 // TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent pins the

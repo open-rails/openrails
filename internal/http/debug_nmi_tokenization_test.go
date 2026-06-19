@@ -21,12 +21,6 @@ func TestRegisterDebugRoutes_NMITokenizationPage(t *testing.T) {
 	srv := &Server{
 		cfg: &config.Config{
 			Env: "dev",
-			Processors: map[string]*config.ProcessorConfig{
-				"mobius": {
-					Type:            config.ProcessorTypeNMI,
-					TokenizationKey: "abcdef123456",
-				},
-			},
 		},
 	}
 
@@ -40,7 +34,7 @@ func TestRegisterDebugRoutes_NMITokenizationPage(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Header().Get("Content-Type"), "text/html")
 	require.Contains(t, w.Body.String(), "https://secure.networkmerchants.com/token/Collect.js")
-	require.Contains(t, w.Body.String(), "abc...456")
+	require.Contains(t, w.Body.String(), "missing tokenization key")
 }
 
 func TestRegisterDebugRoutes_NMITokenizationPageUsesMerchantSecrets(t *testing.T) {
@@ -59,12 +53,6 @@ func TestRegisterDebugRoutes_NMITokenizationPageUsesMerchantSecrets(t *testing.T
 	srv := &Server{
 		cfg: &config.Config{
 			Env: "dev",
-			Processors: map[string]*config.ProcessorConfig{
-				"mobius": {
-					Type:            config.ProcessorTypeNMI,
-					TokenizationKey: "legacy123456",
-				},
-			},
 		},
 		merchants:          merchantSvc,
 		configuredMerchant: dbtest.TestMerchantID,
@@ -80,7 +68,6 @@ func TestRegisterDebugRoutes_NMITokenizationPageUsesMerchantSecrets(t *testing.T
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), "https://example.test/Collect.js")
 	require.Contains(t, w.Body.String(), "sec...456")
-	require.NotContains(t, w.Body.String(), "legacy")
 }
 
 func TestRegisterDebugRoutes_NMICollectStubJS(t *testing.T) {

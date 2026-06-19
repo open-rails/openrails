@@ -282,37 +282,6 @@ func TestVerifierStillPresentReturnsToExecutor(t *testing.T) {
 	assert.Equal(t, StatusSucceeded, fx.intent(t, row.ID).Status)
 }
 
-// TestKillSwitchParksPending pins #344 on the ledger: kill switch on -> the
-// intent stays PENDING with the reason recorded (not failed), attempts not
-// burned; lifting the switch lets the next pass execute it.
-func TestKillSwitchParksPending(t *testing.T) {
-	fx := seedCancelledNMISubscription(t, time.Now().Add(-time.Minute))
-	fake, client := newFakeNMI(t, fx.psid, true)
-	client.SubscriptionDeletesDisabled = true
-	row := fx.enqueueDelete(t, OriginUser, time.Now().Add(-time.Minute))
-
-	_, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
-	require.NoError(t, err)
-
-	got := fx.intent(t, row.ID)
-	assert.Equal(t, StatusPending, got.Status, "kill switch parks, never fails")
-	require.NotNil(t, got.LastFailureReason)
-	assert.Contains(t, *got.LastFailureReason, "kill switch")
-	assert.EqualValues(t, 0, got.Attempts, "a park does not burn an attempt")
-	assert.Zero(t, fake.deleteCalls.Load())
-	assert.Zero(t, fake.queryCalls.Load(), "parks before any provider traffic")
-	assert.NotNil(t, fx.deletionMarker(t))
-
-	// Switch lifts -> queue drains on the next due pass.
-	client.SubscriptionDeletesDisabled = false
-	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.provider_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
-	require.NoError(t, err)
-	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, StatusSucceeded, fx.intent(t, row.ID).Status)
-}
-
 // TestLimitedModeOriginGating: user-origin executes under limited (reactive
 // completion), system-origin parks until full mode.
 func TestLimitedModeOriginGating(t *testing.T) {

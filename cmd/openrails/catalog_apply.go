@@ -25,7 +25,7 @@ import (
 
 const defaultCatalogManifestPath = "/etc/openrails/catalog.yaml"
 
-// catalogOptions holds the flags for `openrails push-catalog`.
+// catalogOptions holds the flags for `openrails push-merchant-catalog`.
 type catalogOptions struct {
 	file   string
 	dryRun bool
@@ -50,7 +50,7 @@ type catalogFileCatalogEntry struct {
 	TierGroups       []catalog.TierGroup `yaml:"tier_groups"`
 }
 
-// newPushCatalogCmd builds the `openrails push-catalog` command — a terraform-style
+// newPushCatalogCmd builds the `openrails push-merchant-catalog` command — a terraform-style
 // declarative apply of a YAML catalog manifest
 // (issue #162). It mirrors cozy-art's sync-product-catalog pipeline:
 // load -> validate -> plan -> print -> (dry-run? stop : apply).
@@ -60,8 +60,9 @@ type catalogFileCatalogEntry struct {
 func newPushCatalogCmd() *cobra.Command {
 	opts := catalogOptions{file: defaultCatalogManifestPath}
 	cmd := &cobra.Command{
-		Use:   "push-catalog",
-		Short: "Apply a YAML catalog manifest into OpenRails and configured providers",
+		Use:     "push-merchant-catalog",
+		Aliases: []string{"push-catalog"},
+		Short:   "Apply a YAML merchant catalog manifest into OpenRails and configured providers",
 		Long: "Loads a declarative catalog manifest (catalogs[] > tier_groups > products > prices), " +
 			"computes a terraform-style plan per merchant, prints it, and — unless --dry-run — " +
 			"converges OpenRails onto it. Products are identified by slug within their merchant; " +
@@ -243,7 +244,7 @@ func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out i
 		if prune {
 			return fmt.Errorf("catalog extras detection: %w", err)
 		}
-		log.WithError(err).Warn("push-catalog: catalog extras detection failed")
+		log.WithError(err).Warn("push-merchant-catalog: catalog extras detection failed")
 		fmt.Fprintf(out, "\ncatalog extras: detection failed (apply unaffected): %v\n", err)
 		return nil
 	}
@@ -271,7 +272,7 @@ func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out i
 			"owned":       extra.Owned,
 			"active":      extra.Active,
 			"marker_key":  extra.MarkerKey,
-		}).Warn("push-catalog: provider-side catalog extra not present in local manifest")
+		}).Warn("push-merchant-catalog: provider-side catalog extra not present in local manifest")
 	}
 	for _, note := range report.Notes {
 		fmt.Fprintf(out, "  note[%s]: %s\n", note.Provider, note.Note)
@@ -300,7 +301,7 @@ func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out i
 			"external_id": outcome.Extra.ExternalID,
 			"action":      outcome.Action,
 			"intent_id":   outcome.IntentID,
-		}).Info("push-catalog --prune: catalog extra archive outcome")
+		}).Info("push-merchant-catalog --prune: catalog extra archive outcome")
 	}
 	if archiveErr != nil {
 		return fmt.Errorf("archive catalog extras: %w", archiveErr)
@@ -334,7 +335,7 @@ func newCatalogRuntime(cfg *config.Config, manifests ...*catalog.Manifest) (*app
 	return &app.Runtime{
 		DB:                 database,
 		Config:             cfg,
-		NMIClients:         catalogNMIClients(cfg, usesMobius),
+		NMIClients:         catalogNMIClients(cfg, config.ProcessorSet{}, usesMobius),
 		ProductService:     catalogmodule.NewProductService(database),
 		PriceService:       catalogmodule.NewPriceService(database),
 		MoneyService:       money.NewMoneyService(database),
@@ -342,12 +343,12 @@ func newCatalogRuntime(cfg *config.Config, manifests ...*catalog.Manifest) (*app
 	}, nil
 }
 
-func catalogNMIClients(cfg *config.Config, enabled bool) map[string]*nmi.NMIClient {
+func catalogNMIClients(cfg *config.Config, processors config.ProcessorSet, enabled bool) map[string]*nmi.NMIClient {
 	clients := make(map[string]*nmi.NMIClient)
 	if cfg == nil || !enabled {
 		return clients
 	}
-	for name, procConfig := range cfg.GetNMIProcessors() {
+	for name, procConfig := range processors.GetNMIProcessors() {
 		providerKey := strings.TrimSpace(strings.ToLower(name))
 		if providerKey == "" || procConfig == nil || strings.TrimSpace(procConfig.SecurityKey) == "" {
 			continue
@@ -357,7 +358,6 @@ func catalogNMIClients(cfg *config.Config, enabled bool) map[string]*nmi.NMIClie
 			log.WithError(err).WithField("provider", providerKey).Warn("NMI catalog client unavailable")
 			continue
 		}
-		client.SubscriptionDeletesDisabled = cfg.IsProcessorSubscriptionDeletionDisabled()
 		client.ReadOnly = cfg.IsProviderReadOnly()
 		clients[providerKey] = client
 	}

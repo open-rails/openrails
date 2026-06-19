@@ -353,16 +353,18 @@ type stripeRefundAPI interface {
 // matched on the metadata mirror of the key).
 type StripeRefundHandler struct {
 	refundReservations
-	Config *config.Config
-	Stripe stripeRefundAPI
-	Policy BackoffPolicy
+	Config     *config.Config
+	Processors config.ProcessorSet
+	Stripe     stripeRefundAPI
+	Policy     BackoffPolicy
 }
 
-func NewStripeRefundHandler(d *db.DB, cfg *config.Config, clock clockwork.Clock) *StripeRefundHandler {
+func NewStripeRefundHandler(d *db.DB, cfg *config.Config, processors config.ProcessorSet, clock clockwork.Clock) *StripeRefundHandler {
 	return &StripeRefundHandler{
 		refundReservations: refundReservations{DB: d, Clock: clock},
 		Config:             cfg,
-		Stripe:             &subscriptions.StripeRefundService{Config: cfg},
+		Processors:         processors,
+		Stripe:             &subscriptions.StripeRefundService{Config: cfg, Processors: processors},
 		Policy:             DefaultBackoff,
 	}
 }
@@ -379,7 +381,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsP
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	if _, _, err := subscriptions.RequireStripeSecretKey(h.Config); err != nil {
+	if _, _, err := subscriptions.RequireStripeSecretKey(h.Processors); err != nil {
 		return Parked("stripe not configured: " + err.Error())
 	}
 

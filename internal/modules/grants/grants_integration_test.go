@@ -206,3 +206,41 @@ func containsGrant(gs []gen.OpenrailsGrant, id uuid.UUID) bool {
 	}
 	return false
 }
+
+// TestGrants_RevokeBySource proves the #511 write-path unification: revoking an
+// effect by source also terminates the matching live grants, so the ledger
+// reflects the retraction (no "live grant, dead effect" residue). Scoped to the
+// (kind, source_types, source_id) tuple; other grants are untouched; idempotent.
+func TestGrants_RevokeBySource(t *testing.T) {
+	l, pool, ctx, customer, _, merchantID := testGrants(t)
+	q := gen.New(pool)
+	now := time.Now().UTC()
+	subID := uuid.New()
+	otherSubID := uuid.New()
+
+	// Two entitlement grants for subID (subscription + grace source) + one for a
+	// different subscription + one credit grant for subID (different kind).
+	gSub, err := l.Grant(ctx, grants.GrantInput{Customer: customer, Kind: grants.Entitlement, Source: grants.Subscription, SourceID: subID.String(), Spec: &grants.Spec{Entitlements: []string{"premium"}}, StartsAt: now})
+	require.NoError(t, err)
+	gGrace, err := l.Grant(ctx, grants.GrantInput{Customer: customer, Kind: grants.Entitlement, Source: grants.Grace, SourceID: subID.String(), Spec: &grants.Spec{Entitlements: []string{"premium"}}, StartsAt: now})
+	require.NoError(t, err)
+	gOther, err := l.Grant(ctx, grants.GrantInput{Customer: customer, Kind: grants.Entitlement, Source: grants.Subscription, SourceID: otherSubID.String(), Spec: &grants.Spec{Entitlements: []string{"premium"}}, StartsAt: now})
+	require.NoError(t, err)
+
+	require.NoError(t, l.RevokeBySource(ctx, customer, grants.Entitlement,
+		[]grants.SourceType{grants.Subscription, grants.Grace}, subID.String(), "subscription source revoked"))
+
+	termd := func(id uuid.UUID) bool {
+		v, e := q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: merchantID, GrantID: id})
+		require.NoError(t, e)
+		return v
+	}
+	require.True(t, termd(gSub.ID), "subscription-source grant terminated")
+	require.True(t, termd(gGrace.ID), "grace-source grant terminated")
+	require.False(t, termd(gOther.ID), "other-subscription grant untouched")
+
+	// Idempotent: a second call terminates nothing new (a grant terminates once).
+	require.NoError(t, l.RevokeBySource(ctx, customer, grants.Entitlement,
+		[]grants.SourceType{grants.Subscription, grants.Grace}, subID.String(), "subscription source revoked"))
+	require.True(t, termd(gSub.ID))
+}

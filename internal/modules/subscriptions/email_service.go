@@ -27,16 +27,19 @@ var errUserEmailUnavailable = errors.New("user email unavailable")
 // EmailService handles all email notifications including subscription-related emails.
 // It wraps the SendGrid SDK and has domain knowledge for building subscription/payment emails.
 type EmailService struct {
-	client *sendgrid.Client
-	from   *mail.Email
-	store  *config.StoreConfig
-	clock  clockwork.Clock
+	client       *sendgrid.Client
+	profileStore merchantConfigurationReader
+	clock        clockwork.Clock
 
 	// Domain dependencies for building subscription emails
 	subscriptionService *SubscriptionService
 	productService      *catalog.ProductService
 	priceService        *catalog.PriceService
 	users               identity.UserDirectory
+}
+
+type merchantConfigurationReader interface {
+	Get(ctx context.Context) (models.MerchantConfiguration, bool, error)
 }
 
 // OneOffPurchaseEmailData contains data for one-off purchase receipts
@@ -50,29 +53,20 @@ type OneOffPurchaseEmailData struct {
 }
 
 // NewEmailService wires the SendGrid SDK into the billing domain service.
-// Sender info (from_email, from_name) comes from StoreConfig.
-func NewEmailService(sendgridCfg *config.SendGridConfig, storeCfg *config.StoreConfig, clocks ...clockwork.Clock) (*EmailService, error) {
+// Sender info is merchant-scoped and loaded from merchant_configurations.
+func NewEmailService(sendgridCfg *config.SendGridConfig, profileStore merchantConfigurationReader, clocks ...clockwork.Clock) (*EmailService, error) {
 	if sendgridCfg == nil {
 		return nil, fmt.Errorf("sendgrid configuration not provided")
 	}
-	if storeCfg == nil {
-		return nil, fmt.Errorf("store configuration not provided")
-	}
 
 	apiKey := strings.TrimSpace(sendgridCfg.APIKey)
-	fromEmail := strings.TrimSpace(storeCfg.FromEmail)
-	fromName := strings.TrimSpace(storeCfg.Name)
 	if apiKey == "" {
 		return nil, fmt.Errorf("sendgrid api_key is required")
 	}
-	if fromEmail == "" {
-		return nil, fmt.Errorf("store.from_email is required when sendgrid is configured")
-	}
 
 	client := sendgrid.NewSendClient(apiKey)
-	from := mail.NewEmail(fromName, fromEmail)
 
-	return &EmailService{client: client, from: from, store: storeCfg, clock: timeutil.FirstClock(clocks...)}, nil
+	return &EmailService{client: client, profileStore: profileStore, clock: timeutil.FirstClock(clocks...)}, nil
 }
 
 func (s *EmailService) SetClock(c clockwork.Clock) {
@@ -107,7 +101,7 @@ func (s *EmailService) now() time.Time {
 
 // IsEnabled returns true when delivery is possible.
 func (s *EmailService) IsEnabled() bool {
-	return s != nil && s.client != nil && s.from != nil
+	return s != nil && s.client != nil
 }
 
 // SendEmail sends a basic email using the configured provider.
@@ -116,59 +110,74 @@ func (s *EmailService) SendEmail(ctx context.Context, to, subject, htmlContent, 
 		log.WithContext(ctx).Debug("email service disabled - skipping send")
 		return nil
 	}
+	from, err := s.sender(ctx)
+	if err != nil {
+		return err
+	}
 
 	toMail := mail.NewEmail("", to)
-	msg := mail.NewSingleEmail(s.from, subject, toMail, plainContent, htmlContent)
+	msg := mail.NewSingleEmail(from, subject, toMail, plainContent, htmlContent)
 
 	return s.send(ctx, msg)
 }
 
-func (s *EmailService) storeName() string {
-	if s == nil || s.store == nil {
-		return "My Store"
+func (s *EmailService) sender(ctx context.Context) (*mail.Email, error) {
+	profile := s.merchantProfile(ctx)
+	fromEmail := strings.TrimSpace(profile.FromEmail)
+	if fromEmail == "" {
+		return nil, fmt.Errorf("merchant profile from_email is required when sending email")
 	}
-	name := strings.TrimSpace(s.store.Name)
+	return mail.NewEmail(s.storeName(ctx), fromEmail), nil
+}
+
+func (s *EmailService) merchantProfile(ctx context.Context) models.MerchantProfileConfiguration {
+	if s == nil || s.profileStore == nil {
+		return models.MerchantProfileConfiguration{}
+	}
+	cfg, _, err := s.profileStore.Get(ctx)
+	if err != nil {
+		log.WithContext(ctx).WithError(err).Debug("merchant profile unavailable for email")
+		return models.MerchantProfileConfiguration{}
+	}
+	return cfg.Profile
+}
+
+func (s *EmailService) storeName(ctx context.Context) string {
+	name := strings.TrimSpace(s.merchantProfile(ctx).DisplayName)
 	if name == "" {
-		return "My Store"
+		return "OpenRails"
 	}
 	return name
 }
 
-func (s *EmailService) storeCustomerPortalURL() string {
-	if s == nil || s.store == nil {
-		return ""
-	}
-	return strings.TrimSpace(s.store.CustomerPortalURL)
-}
-
 func (s *EmailService) SendSubscriptionConfirmation(ctx context.Context, data SubscriptionEmailData) error {
-	rendered := RenderSubscriptionConfirmationEmail(s.storeName(), data)
+	rendered := RenderSubscriptionConfirmationEmail(s.storeName(ctx), data)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
 func (s *EmailService) SendSubscriptionRenewal(ctx context.Context, data SubscriptionEmailData) error {
-	rendered := RenderSubscriptionRenewalEmail(s.storeName(), data)
+	rendered := RenderSubscriptionRenewalEmail(s.storeName(ctx), data)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
 func (s *EmailService) SendSubscriptionCancellation(ctx context.Context, data SubscriptionEmailData, reason PremiumEndReason) error {
-	rendered := RenderSubscriptionCancellationEmail(s.storeName(), data, reason)
+	rendered := RenderSubscriptionCancellationEmail(s.storeName(ctx), data, reason)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
 func (s *EmailService) SendSubscriptionExpired(ctx context.Context, data SubscriptionEmailData) error {
-	rendered := RenderSubscriptionExpiredEmail(s.storeName(), s.storeCustomerPortalURL(), data)
+	rendered := RenderSubscriptionExpiredEmail(s.storeName(ctx), "", data)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
 func (s *EmailService) sendPaymentFailed(ctx context.Context, data SubscriptionEmailData) error {
-	rendered := RenderPaymentFailedEmail(s.storeName(), s.storeCustomerPortalURL(), data)
+	rendered := RenderPaymentFailedEmail(s.storeName(ctx), "", data)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
 func (s *EmailService) SendEntitlementExpiration(ctx context.Context, userEmail, username, entitlementName string, expiresAt time.Time) error {
 	subject := fmt.Sprintf("Your %s access expires soon", entitlementName)
-	storeName := s.storeName()
+	storeName := s.storeName(ctx)
 	daysUntilExpiry := int(time.Until(expiresAt).Hours() / 24)
 	htmlContent := fmt.Sprintf(`
 		<h2>Access Expiring Soon</h2>
@@ -202,7 +211,11 @@ func (s *EmailService) SendTemplatedEmail(ctx context.Context, to, templateID st
 
 	toMail := mail.NewEmail("", to)
 	msg := mail.NewV3Mail()
-	msg.SetFrom(s.from)
+	from, err := s.sender(ctx)
+	if err != nil {
+		return err
+	}
+	msg.SetFrom(from)
 	msg.SetTemplateID(templateID)
 	personalization := mail.NewPersonalization()
 	personalization.AddTos(toMail)
@@ -233,10 +246,7 @@ func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOf
 	paymentMethod := strings.ToLower(data.PaymentMethod)
 	isSolana := paymentMethod == "solana"
 
-	storeName := "My Store"
-	if s.store != nil && strings.TrimSpace(s.store.Name) != "" {
-		storeName = strings.TrimSpace(s.store.Name)
-	}
+	storeName := s.storeName(ctx)
 
 	subject := fmt.Sprintf("Thanks for supporting %s!", storeName)
 	if isSolana {

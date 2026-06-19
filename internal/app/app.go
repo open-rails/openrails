@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // App encapsulates the long-lived dependencies shared across transports.
@@ -82,6 +83,8 @@ type BootstrapOptions struct {
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	Cache                  cache.Cache
 	Clock                  clockwork.Clock
+	ConfiguredMerchant     merchant.ID
+	Processors             config.ProcessorSet
 }
 
 // Bootstrap initialises core services, caches, and auth verifier.
@@ -142,9 +145,18 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 			}
 			return nil
 		}(),
+		Processors: func() config.ProcessorSet {
+			if opts != nil {
+				return opts.Processors
+			}
+			return nil
+		}(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialise runtime: %w", err)
+	}
+	if opts != nil {
+		runtime.ConfiguredMerchant = opts.ConfiguredMerchant
 	}
 
 	var appCache cache.Cache

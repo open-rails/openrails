@@ -7,7 +7,6 @@ import (
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/grants"
@@ -28,11 +27,9 @@ func (CreditExpiryArgs) Kind() string { return KindCreditExpiry }
 // lapsed lot — conserved, append-only, idempotent (an already-clawed lot has
 // zero remainder and is skipped). The credit lot IS the grant; there is no
 // money_blocks table to compact anymore.
-// Controlled by config.FeatureFlags.DisableEntitlementExpiration - when true, skips.
 type CreditExpiryWorker struct {
 	river.WorkerDefaults[CreditExpiryArgs]
 	DB        *db.DB
-	Config    *config.Config
 	Clock     clockwork.Clock
 	BatchSize int
 }
@@ -40,13 +37,6 @@ type CreditExpiryWorker struct {
 func (CreditExpiryWorker) Kind() string { return KindCreditExpiry }
 
 func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpiryArgs]) error {
-	// Check if entitlement expiration is disabled via feature flags
-	if w.Config != nil && w.Config.IsEntitlementExpirationDisabled() {
-		log.WithContext(ctx).WithField("worker", KindCreditExpiry).
-			Warn("Entitlement expiration disabled via feature flag; skipping credit expiry")
-		return nil
-	}
-
 	clock := w.Clock
 	if clock == nil {
 		clock = clockwork.NewRealClock()

@@ -55,11 +55,11 @@ type HTTPStripeLivenessProber struct {
 	BaseURL string
 }
 
-// NewStripeLivenessProber builds a prober from the OpenRails config, reusing
+// NewStripeLivenessProber builds a prober from the OpenRails processor set, reusing
 // RequireStripeSecretKey for auth. Returns an error when Stripe is not
 // configured — callers skip the Stripe slice of the cohort in that case.
-func NewStripeLivenessProber(cfg *config.Config) (*HTTPStripeLivenessProber, error) {
-	_, secretKey, err := RequireStripeSecretKey(cfg)
+func NewStripeLivenessProber(processors config.ProcessorSet) (*HTTPStripeLivenessProber, error) {
+	_, secretKey, err := RequireStripeSecretKey(processors)
 	if err != nil {
 		return nil, err
 	}

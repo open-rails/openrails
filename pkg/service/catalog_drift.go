@@ -594,8 +594,10 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftRe
 	}
 
 	var stripeLister stripeProductLister
-	if stripeProc := cfg.GetStripeProcessor(); stripeProc != nil && stripeProc.SecretKey != "" {
-		stripeLister = &catalog.StripeCatalogService{Config: cfg}
+	if s.rt != nil {
+		if stripeProc := s.rt.Processors.GetStripeProcessor(); stripeProc != nil && stripeProc.SecretKey != "" {
+			stripeLister = &catalog.StripeCatalogService{Config: cfg, Processors: s.rt.Processors}
+		}
 	}
 
 	var nmiLister nmiPlanLister

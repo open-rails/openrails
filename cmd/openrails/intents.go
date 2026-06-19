@@ -81,7 +81,7 @@ func runIntentsRebindAccount(cmd *cobra.Command, provider, merchantSlug string, 
 		if !ok {
 			return fmt.Errorf("merchant context not set")
 		}
-		resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.NMIClients)
+		resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.Processors, rt.NMIClients)
 		account, n, err := intents.NewStore(rt.DB).WithProviderAccounts(resolver).
 			RebindProviderIntentsToCurrentAccount(ctx, uuid.UUID(merchantID), provider)
 		if err != nil {

@@ -16,9 +16,9 @@ ingestion/idempotent replay, and cancels the subscription.
 
 Required environment:
 
-- `PROCESSORS_MOBIUS_SECURITY_KEY`
-- `PROCESSORS_MOBIUS_TOKENIZATION_KEY`
-- `PROCESSORS_MOBIUS_WEBHOOK_SECRET`
+- `MOBIUS_PRODUCTION_KEY`
+- `MOBIUS_TOKENIZATION_KEY`
+- `MOBIUS_WEBHOOK_SIGNING_SECRET`
 
 Optional environment:
 
@@ -59,7 +59,9 @@ The manual flow below covers the same surfaces:
 - Create a sandbox recurring plan (recommended: **1 day** cadence to test rebills quickly).
 - Register billing webhook endpoint:
   - URL: `https://$CLOUDFLARED_PUBLIC_HOSTNAME/v1/webhooks/mobius`
-  - Signing secret: **exactly** `PROCESSORS_MOBIUS_WEBHOOK_SECRET` (shared secret/HMAC)
+  - Signing secret: **exactly** the merchant secret value you seed as
+    `webhook_signing_secret` (the helper scripts read
+    `MOBIUS_WEBHOOK_SIGNING_SECRET`)
 
 ## 1) Configure `.env`
 
@@ -69,17 +71,13 @@ Minimum set (fill in real values):
 # sandbox mode
 TEST_MODE=true
 
-# OpenRails must accept tokens minted by the local issuer container (issuer claim is http://issuer:8080)
-AUTH_ISSUERS='["http://issuer:8080"]'
-AUTH_EXPECTED_AUDIENCE=openrails-app
-
 # AuthKit devserver mint secret (used by scripts/mint_jwt.sh); choose a local-only random value
 AUTHKIT_DEV_MINT_SECRET=$(openssl rand -hex 32)
 
-# Mobius/NMI keys
-PROCESSORS_MOBIUS_SECURITY_KEY=...
-PROCESSORS_MOBIUS_TOKENIZATION_KEY=...          # legacy dev fallback for Collect.js
-PROCESSORS_MOBIUS_WEBHOOK_SECRET=...            # HMAC shared secret for webhooks
+# Mobius/NMI values used by the bootstrap manifest and helper scripts.
+MOBIUS_PRODUCTION_KEY=...
+MOBIUS_TOKENIZATION_KEY=...
+MOBIUS_WEBHOOK_SIGNING_SECRET=...               # HMAC shared secret for webhooks
 
 # Cloudflared (deterministic webhook hostname)
 CLOUDFLARED_TUNNEL_TOKEN=...
@@ -92,8 +90,25 @@ E2E_MOBIUS_PLAN_ID=YOUR_SANDBOX_PLAN_ID
 
 Notes:
 - Billing uses fixed NMI gateway endpoints for Mobius/NMI direct-post and query calls. Use sandbox/test credentials when `TEST_MODE=true`.
-- Preferred merchant-scoped tokenization config lives in merchant secrets:
-  `nmi/mobius/tokenization_key` and optional `nmi/mobius/tokenization_url`.
+- OpenRails does not read PROCESSORS_* from `.env`. Seed merchant-scoped
+  provider credentials through `openrails push-merchant-config`:
+
+```yaml
+version: 1
+merchants:
+  - slug: local-stack
+    name: Local Stack
+    provider_accounts:
+      - provider_type: nmi
+        provider_key: mobius
+        account_id: mobius-profile-id
+        role: primary
+        secrets:
+          production_key: {env: MOBIUS_PRODUCTION_KEY}
+          tokenization_key: {env: MOBIUS_TOKENIZATION_KEY}
+          webhook_signing_secret: {env: MOBIUS_WEBHOOK_SIGNING_SECRET}
+```
+
 - Collect.js origin restrictions: if your tokenization key is origin-locked, you must load the harness over **HTTPS** via Cloudflared (not `http://localhost`).
 
 ## 2) Start the local stack (+ local issuer)

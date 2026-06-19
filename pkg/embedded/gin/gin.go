@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	internalauth "github.com/open-rails/openrails/internal/auth"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/http/router/ginrouter"
@@ -22,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
-	embauthkit "github.com/open-rails/openrails/pkg/embedded/authkit"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
@@ -33,16 +33,24 @@ type RouteOptions struct {
 	AuthProvider ginauth.Provider
 }
 
-// Handler returns the full standalone gin HTTP surface for the embedded app:
+// StandaloneHandler returns the full standalone gin HTTP surface for the embedded app:
 // health + debug (dev only) + user + admin + webhooks + the service token-authenticated
 // server-to-server service routes. It is built from the gin-free app graph and
 // is intended for the standalone server entrypoint (cmd/openrails).
-func Handler(e *embedded.Embedded) (http.Handler, error) {
+func StandaloneHandler(e *embedded.Embedded) (http.Handler, error) {
 	srv, err := newServer(e)
 	if err != nil {
 		return nil, err
 	}
 	return srv.Handler(), nil
+}
+
+// Handler returns the full standalone gin HTTP surface.
+//
+// Deprecated: use StandaloneHandler. Embedded hosts should usually use
+// pkg/embedded.NewHTTPHandler or embed.Runtime.Handler instead.
+func Handler(e *embedded.Embedded) (http.Handler, error) {
+	return StandaloneHandler(e)
 }
 
 // RegisterUserRoutes registers user-facing billing routes on the provided gin
@@ -139,29 +147,26 @@ func routeAuthenticator(e *embedded.Embedded, opts RouteOptions) billingauth.Aut
 
 // newServer constructs the gin billing server graph from the embedded app.
 //
-// This is the standalone surface, so it wires the AuthKit verifier and the
-// OpenRails-owned control plane (#284) that the embedded core does not wire
-// implicitly: it builds the first-party JWT verifier from config when none was
-// injected and ALWAYS attaches the control plane (#469 — there is no
-// verifier-only standalone mode; attach failure is fatal). Both steps are
-// no-ops if already present.
+// This is the standalone surface, so it wires the OpenRails-owned control plane
+// (#284/#469) and uses that control plane's AuthKit verifier when no host
+// authenticator was injected. There is no config-declared verifier-only mode.
 func newServer(e *embedded.Embedded) (*server.Server, error) {
 	a := e.App()
 	if a == nil {
 		return nil, fmt.Errorf("embedded billing: not initialized")
 	}
 	cfg := a.Config
-	if a.Authenticator == nil && cfg != nil && cfg.Auth != nil && len(cfg.Auth.Issuers) > 0 {
-		authn, err := embauthkit.NewVerifierAuthenticatorFromConfig(cfg.Auth)
-		if err != nil {
-			return nil, fmt.Errorf("build authkit verifier: %w", err)
-		}
-		a.Authenticator = authn
-	}
 	if embcp.Get(a) == nil {
 		if err := embcp.Attach(context.Background(), a, cfg, nil); err != nil {
 			return nil, fmt.Errorf("attach control plane: %w", err)
 		}
+	}
+	if a.Authenticator == nil {
+		cp := embcp.Get(a)
+		if cp == nil || cp.AuthService() == nil || cp.AuthService().Verifier() == nil {
+			return nil, fmt.Errorf("control plane verifier unavailable")
+		}
+		a.Authenticator = internalauth.NewAuthenticator(cp.AuthService().Verifier())
 	}
 	return server.New(server.Dependencies{
 		Config:                 a.Config,
@@ -170,6 +175,7 @@ func newServer(e *embedded.Embedded) (*server.Server, error) {
 		Redis:                  a.RedisClient,
 		Authenticator:          a.Authenticator,
 		DelegatedAuthenticator: a.DelegatedAuthenticator,
+		ConfiguredMerchant:     a.Runtime.ConfiguredMerchant,
 		ControlPlane:           embcp.Get(a),
 	})
 }

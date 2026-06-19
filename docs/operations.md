@@ -20,7 +20,7 @@ mechanism:
 
 | # | Divergence | Direction | Mechanism |
 |---|---|---|---|
-| 1 | Catalog wrong at the provider | push (OpenRails → provider) | `push-catalog` — verify-or-create at apply time; alert-only drift watching; provider extras are logged, and archived only under the explicit `--prune` flag (#357) |
+| 1 | Catalog wrong at the provider | push (OpenRails → provider) | `push-merchant-catalog` — verify-or-create at apply time; alert-only drift watching; provider extras are logged, and archived only under the explicit `--prune` flag (#357) |
 | 2 | Money state wrong locally | pull (provider → OpenRails) | webhooks in real time; **reconcile (#107)** as the batch truth-pull: advisory diffs, enforce converges local state |
 | 3 | Outbound action never executed | (intent, not sync) | **durable intent + replay** — see "Durability model" below; reconcile is its *detector* |
 | 4 | Entitlements inconsistent | derived | re-run the derivation once 1–3 are true; `internal/audit` checks the local derivation, reconcile's PS-9 converges it against trued-up inputs |
@@ -39,7 +39,7 @@ intents execute under `limited`; system intents need `full`; nothing writes
 under `readonly`), executes, and classifies the outcome; the **verifier**
 (every 5 minutes) resolves `unknown_needs_verify` intents via provider READS
 before any retry. Failure reasons — provider down, `readonly`/`limited` mode,
-kill switch, bad credentials — are not errors, they are reasons an intent
+bad credentials — are not errors, they are reasons an intent
 stays *pending*, recorded on the row. When the blocker lifts, the queue
 drains. Intents that outlive their relevance window (a delete after the
 subscription resumed; a rebill past the dunning window) are superseded or
@@ -63,8 +63,9 @@ the dunning window as the relevance window; the verifier resolves ambiguous
 charges by querying NMI for the period's order reference and repairs the
 subscription lifecycle on late-confirmed success. Phase D routed catalog
 archive ops through the ledger (`stripe_archive_product`,
-`stripe_archive_price`, `solana_sunset_plan`; admin-origin): `push-catalog
---prune` (#357) enqueues+executes an intent per extra, so a provider
+`stripe_archive_price`, `solana_sunset_plan`; admin-origin):
+`push-merchant-catalog --prune` (#357) enqueues+executes an intent per extra,
+so a provider
 being down no longer aborts the sweep — items park and drain durably, and an
 intent expires if its object joins the local catalog before execution. NMI
 deliberately has NO archive write path (plan edits affect live subscribers);
@@ -210,8 +211,8 @@ reading only the local ledger — flags provider intents sitting non-terminal
 too long: `pending`/`failed_retryable` older than 24h, and
 `in_flight`/`unknown_needs_verify` older than 2h (a healthy verifier resolves
 unknowns in minutes). Thresholds are hardcoded — no knobs. Intents parked by
-operating mode or the kill switch are *informational* (that wait is by
-design; the executor drains them when the blocker lifts); everything else
+operating mode are *informational* (that wait is by design; the executor drains
+them when the blocker lifts); everything else
 stuck is admin-queued — it means provider failures, bad credentials, or a
 dead worker. Findings auto-resolve when the intent completes or recovers;
 `fix` never touches intent rows (the executor/verifier own them). NMI safety note: cancelled
@@ -256,9 +257,7 @@ span always well inside one cycle:
 The staleness window ("never charge a months-old failure") is derived from
 the same schedule, so it cannot be misconfigured. Terminal failure = cancel +
 revoke entitlements + scheduled processor-side delete through the one shared
-deferred-delete mechanism. `feature_flags.dunning_mode`
-(on / dry_run_only / off) still dials *whether* dunning runs; `dry_run_only`
-is the pause that preserves retry state.
+deferred-delete mechanism.
 
 (Benchmark: Stripe's own default for monthly billing is 8 ML-timed retries
 over 2 weeks — same span, more attempts; ours is sparser because each NMI
@@ -327,15 +326,9 @@ granted) until a webhook or reconcile backfill lands the payment.
   one declined auth total), a fresh `simulated` verdict skips the probe, a
   rotated key or stale verdict re-probes, and cache failures degrade to
   probing. Dev-only.
-- `feature_flags.disable_processor_subscription_deletions` — kill switch on
-  NMI deletes, stricter than `limited` (blocks even user-asked deletes);
-  blocked deletes PARK as pending intents on the ledger (reason recorded) and
-  the intent executor drains them once the switch lifts.
-
 **Cutover posture** (migration/reconciliation against production
-credentials): `MODE=limited` +
-`FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS=true` (+ optionally
-`FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true`). Exit in order: lift the
-deletion switch (the intent executor drains the parked deletes within a
-minute — no restart needed), then `MODE=full`. All paused work is delayed,
+credentials): use `MODE=limited` when OpenRails should keep serving reactive
+customer/admin flows while system-origin provider writes stay parked, or
+`MODE=readonly` for strict observation. Exit by moving to `MODE=full`. All
+paused work is delayed,
 not lost; missed billing periods are never back-billed.

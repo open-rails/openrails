@@ -69,8 +69,9 @@ The rule across both modes is: **one credential per trust domain.**
 - **Standalone:** OpenRails is a separate system across a network boundary, and it always
   runs its own AuthKit control plane — the in-process authority that issues and verifies
   these credentials, holds the runtime merchant/issuer registry, and gates admin routes.
-  (There is no control-plane-less "verifier-only" standalone; a private deployment keeps
-  `public_user_registration` / `public_tenant_registration` closed, which is the default.)
+  (There is no control-plane-less "verifier-only" standalone; private/self-hosted
+  registration is the default. `public_hosted` is reserved for the private
+  OpenRails SaaS layer.)
   Identity claims that cross that boundary must be independently verifiable, so each caller
   class gets a credential scoped to exactly what it may do:
   - your **backend** uses a **service token** (`openrails_st_...`) or a first-party OIDC
@@ -241,9 +242,11 @@ POST /v1/self/checkout                    hosted/tokenized checkout session
 ```
 
 There is no `:user_id` anywhere on this surface — every route is scoped to the token's
-`delegated_sub`, so a browser token can only ever act on its own subject. CORS origins for
-browser-direct calls are configured per merchant. A parallel `/v1/merchant-admin/*` surface
-exists for your staff, using the same token mechanism with `openrails:merchant:*` permissions.
+`delegated_sub`, so a browser token can only ever act on its own subject. Browser origin
+policy for delegated calls is configured on the AuthKit `remote_application` issuer record,
+not in OpenRails runtime config. A parallel `/v1/merchant-admin/*`
+surface exists for your staff, using the same token mechanism with `openrails:merchant:*`
+permissions.
 
 ### 4. Webhooks
 
@@ -320,7 +323,7 @@ mux.Handle("/billing/v1/", handler) // plain net/http; or gin.WrapH(handler) / c
 
 The handler is framework-neutral `net/http` with zero gin on the request path. Hosts on gin
 can instead use `pkg/embedded/gin` (`embgin.RegisterUserRoutes(e, group, …)` /
-`embgin.Handler(e)` for the full standalone surface).
+`embgin.StandaloneHandler(e)` for the full standalone surface).
 
 Your frontend now calls these routes with its **normal session credential** — your
 `Authenticator` is the only gate. One system, one token.
@@ -376,7 +379,7 @@ The mapping is **explicit and fail-closed**: an empty merchant or subject is rej
 401, and a principal carrying any non-`self`/`merchant` permission is refused — the same
 catalog gate real delegated tokens pass through. This interface is the in-process twin of
 the standalone delegated token: same translation, no wire credential, because there is no
-wire. The self surface is mounted by the gin/standalone handler (`embgin.Handler`); the
+wire. The self surface is mounted by the gin/standalone handler (`embgin.StandaloneHandler`); the
 plain `NewHTTPHandler` mux carries the user/admin/webhook groups.
 
 ### 5. Admin routes
@@ -410,12 +413,12 @@ or your own tooling instead — admin routes without a permission checker fail c
 
 Zero-config against the bundled compose stack. Override with a `config.yaml` (repo root or
 `./config/`) or env vars (koanf mapping, e.g. `DB_URL` → `db.url`,
-`AUTH_EXPECTED_AUDIENCE` → `auth.expected_audience`). See `config.example.yaml` and
-`.env.example`.
+`AUTH_CONTROL_PLANE_ISSUER` → `auth.control_plane.issuer`). See `config.example.yaml`
+and `.env.example`.
 
-## Operating modes & feature flags
+## Operating Modes
 
-Two orthogonal settings, plus fine-grained feature flags:
+Two orthogonal settings:
 
 - **`mode`** (yaml) / `MODE` (env) / `--mode` (CLI flag; flag beats env beats yaml) —
   the pure **behavior** dial: how much OpenRails may do against the payment providers.
@@ -423,16 +426,11 @@ Two orthogonal settings, plus fine-grained feature flags:
 - **`test_env`** (yaml) / `TEST_ENV` (env) / `--test-env` (CLI flag) — the
   **credential** axis: `true` enforces sandbox processor credentials. Default `false`.
 
-Fine-grained feature flags under `feature_flags.*` (env: `FEATURE_FLAGS_<NAME>`)
-remain as overrides on top — **the strictest setting always wins**. Every restrictive
-setting is announced with a `⚠️` warning at startup; if you expected a safety posture and
-don't see its warning in the boot log, it isn't on. Full docs in `config.example.yaml`.
-
 | `MODE=` | What runs |
 |---|---|
 | `full` | Full behavior — charges, dunning, deletes all run. |
-| `limited` | **Reactive-only.** Nothing system-initiated touches a provider: no dunning charges or window-expiry cancellations (dunning runs dry), no auto-top-ups, no arrears collection, no Solana pulls, no catalog provider-object writes (provider slots defer to `pending_manual_link` and converge on a later apply). Everything user/admin-initiated works — checkout charges, card/vault saves, tier changes, cancels (including their processor-side delete), resumes, refunds, webhooks. |
-| `readonly` | **Zero provider writes, even reactive ones** — a checkout/charge attempt fails loudly (`ErrProviderReadOnly`). Wire-enforced on all three rails: NMI (direct-post gate), Stripe (transport gate), Solana (transaction-submission gate). Provider *reads* (query APIs, catalog verification) and local serving still work. Implies `limited` + the deletion kill switch. For reconciliation/forensics boots. |
+| `limited` | **Reactive-only provider writes.** Nothing system-initiated touches a provider: no dunning charges, no auto-top-ups, no arrears collection, no Solana pulls, no catalog provider-object writes (provider slots defer to `pending_manual_link` and converge on a later apply). Local dunning decisions still materialize: stale past-due subscriptions cancel/downgrade locally, and in-window charges become parked system-origin intents. Everything user/admin-initiated works — checkout charges, card/vault saves, tier changes, cancels (including their processor-side delete), resumes, refunds, webhooks. |
+| `readonly` | **Zero provider writes, even reactive ones** — a checkout/charge attempt fails loudly (`ErrProviderReadOnly`). Wire-enforced on all three rails: NMI (direct-post gate), Stripe (transport gate), Solana (transaction-submission gate). Provider *reads* (query APIs, catalog verification) and local serving still work. For reconciliation/forensics boots. |
 
 ### `test_env` — sandbox credentials, orthogonal to mode
 
@@ -463,7 +461,7 @@ move in any mode):
 | User/admin cancel → processor-side delete | ✅ | ✅ | ❌ marker left for replay |
 | Dunning charges + window-expiry cancellations | ✅ | ❌ runs dry | ❌ |
 | Auto-top-ups, arrears collection, Solana pulls | ✅ | ❌ | ❌ |
-| Catalog provider-object writes (`push-catalog`) | ✅ | ❌ deferred | ❌ deferred |
+| Catalog provider-object writes (`push-merchant-catalog`) | ✅ | ❌ deferred | ❌ deferred |
 | Provider reads (query APIs, catalog verification) | ✅ | ✅ | ✅ |
 | Webhook ingestion + local serving | ✅ | ✅ | ✅ |
 
@@ -479,14 +477,6 @@ unset in dev defaults to `full`. **Behavior change (#355):** the dev default is 
 `.env` and no flags will move real money. Set `TEST_ENV=true` (or `--test-env`) for the
 old sandbox-by-default behavior. The old `mode=test` and `mode=production` values and
 the `test_mode` boolean no longer exist.
-
-Feature-flag dials on top:
-
-| Flag | Default | What it does |
-|---|---|---|
-| `disable_processor_subscription_deletions` | `false` | Kill switch for outbound NMI `delete_subscription` — **stricter than `limited`**: blocks even the deletes that finalize user-asked cancels. Local cancellation proceeds; each skipped delete leaves a durable `deletion_scheduled_at` marker, and a boot-time rescan re-enqueues all of them once the flag is lifted. Implied by `mode=readonly`. |
-| `dunning_mode` | `on` | `on` = retry failed rebills on the cadence-relative schedule below; `dry_run_only` = workflow runs and logs due subscriptions but never charges (retry state preserved — this is "pause"); `off` = no dunning at all AND rebill failures cancel immediately with no recovery (changes failure semantics — not a pause). |
-| `disable_entitlement_expiration` | `false` | Freezes local access lifecycle: credit/hold expiry and entitlement revocation pause; users keep premium even after their subscription ends. Orthogonal to the provider-facing settings. |
 
 The dunning **schedule** is not a knob — it is a hardcoded function of the price's
 billing cycle (#359):
@@ -526,9 +516,6 @@ and full-behavior modes would start charging them within hours:
 
 ```bash
 MODE=limited
-FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS=true
-# optional: also freeze local downgrades while reconciling
-FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true
 ```
 
 (or `MODE=readonly` for a strictly-observing boot where even user checkouts must fail.)
@@ -548,8 +535,8 @@ period), and dunning past the window cancels instead of charging.
 
 Under `MODE=limited` the paused backlog is also **visible, not just implied** (#366): the
 dunning scan still runs and *materializes* its decisions — months-stale past_due subs
-(the migration-import shape) are cancelled + downgraded locally right away (no charge;
-respects the entitlement-expiration kill switch), and in-window charges are enqueued as
+(the migration-import shape) are cancelled + downgraded locally right away (no charge),
+and in-window charges are enqueued as
 **parked** system-origin intents. So after a migration the cutover sequence is: boot
 `limited` → the first dunning cycle materializes the backlog → `openrails intents` shows
 the real drain forecast → review (and `refingerprint` if credentials moved) → `MODE=full`
@@ -558,52 +545,44 @@ pure observer for forensics.
 
 ## Consistency checks & corrections
 
-**`audit`** — checks internal DB consistency. Read-only, report-only:
- - active checks across internal OpenRails finding categories:
-   - duplicates
-   - foreign keys
-   - subscription/entitlement state
-   - payment↔entitlement
-   - payment methods
-   - admin grants
-   - temporal sanity
+**The Convergence Engine** — OpenRails keeps every grant effect (entitlements,
+credits, product access), subscription lifecycle state, and internal accounting
+consistent with the source events, *continuously*. It runs inline after a mutation
+(scoped to the affected customer) and on a 15-minute background sweep; a clean
+scope does zero writes. There is no separate `audit` command and no enforce crank —
+convergence is always on. Findings carry a self-describing four-plane slug —
+`pull.*` (provider-observed truth), `derive.*` (source → grant → grant effect),
+`life.*` (clock / state machine), `consistency.*` (internal accounting /
+references) — replacing the old `PS-*` / `P-E-*` codes. The model and the full
+taxonomy live in [docs/consistency-invariants.md](docs/consistency-invariants.md).
+
+**`pull-provider`** — pull the payment processors' state (the source of truth for
+observed charges / refunds / disputes / subscription / vault state) into the local
+mirror, then run one idempotent `Converge` pass. Safety-first: a bare
+`pull-provider` is a **DRY-RUN** (discovers divergences, logs, writes nothing);
+`--overwrite` applies the mirror upserts; `--prune` additionally deletes local rows
+absent from the provider source (account-bound, ledger-safe). Every pull resolves +
+verifies the provider account and **aborts on a credential/account mismatch**.
 
 ```bash
-openrails audit                                  # full audit, table output
-openrails audit --details-file=/tmp/audit.log    # detailed per-account table log
-openrails audit --format=json                    # json | csv | table
-openrails audit --severity=HIGH                  # CRITICAL | HIGH | MEDIUM | LOW floor
-openrails audit --category=duplicates,temporal   # repeatable filter
-openrails audit --user-id=<uuid>                 # single user
-```
-
-Table output keeps stdout summary-focused and writes the individual affected
-accounts/entities to a detailed audit log. Audit finding codes such as `P-E-1`
-and `SS-1` are internal OpenRails check IDs. The consistency model and the target
-invariant taxonomy live in
-[docs/consistency-invariants.md](docs/consistency-invariants.md).
-
-**`reconcile`** — local state vs. the payment processors as the source of truth.
-Pulls the payment processor's records and compares to OpenRails local records, looking for inconsistencies.
-Reports error codes from PS-1...PS-10.
-
-```bash
-openrails reconcile check --merchant=<slug>                 # advisory: fetch + diff + persist findings, zero writes
-openrails reconcile fix --merchant=<slug>                   # enforce: same diff + local convergence writes; every applied change is logged and recorded on the finding
-openrails reconcile report --merchant=<slug>                # latest run: summary, open findings, dunning forensics
-openrails reconcile report --merchant=<slug> --run=<uuid>   # a specific run
+openrails pull-provider --merchant=<slug>                       # DRY-RUN: fetch + diff + log, zero writes
+openrails pull-provider --merchant=<slug> --overwrite           # apply mirror upserts, then post-pull Converge
+openrails pull-provider --merchant=<slug> --overwrite --prune   # also delete provider-absent local rows
+openrails pull-provider report --merchant=<slug>                # latest run: open + admin-pending + held findings
+openrails pull-provider report --merchant=<slug> --run=<uuid>   # a specific run
 
 # common flags:
-#   --merchant=<slug-or-id>                 (default: the seeded "default" merchant —
-#                                          on multi-merchant installs you almost always want this set)
+#   --merchant=<slug-or-id>
 #   --provider=nmi,ccbill,stripe,solana   (default: all configured)
-#   --since=2026-01-01 --until=2026-06-01 (transaction window)
+#   --provider-account=<uuid>             (target one provider account explicitly)
+#   --since=2026-01-01 --until=2026-06-01 (historical backfill window; default: head)
 #   --format=table|json
 ```
 
 The same runs are exposed behind the admin API (`POST /v1/admin/reconcile/runs`);
-see [docs/operations.md](docs/operations.md) for the full finding taxonomy and
-enforcement semantics.
+see [docs/operations.md](docs/operations.md) for the finding taxonomy and the
+confirmed-absence gate (destructive repairs are held until the source domain is
+fully reconciled).
 
 **`intents`** — read-only view of the provider intent ledger (#358): every queued
 outbound provider mutation. Under `MODE=limited`/`readonly` this is the dry-run
@@ -646,14 +625,16 @@ If the forecast shows something you do NOT want to fire (e.g. a backlog of dunni
 charges), resolve it before raising the mode — the staleness window already protects
 against months-old charges, but review is cheap and irreversible mistakes aren't.
 
-**2. What never fires automatically — the admin findings queue.** Reconcile findings
-whose fix requires a *remote* mutation or a judgment call (PS-1 ghost subscriptions,
-PS-6 chargebacks, PS-8 duplicate subs needing cancel + refund at the processor) are
-queued for a human and stay `admin_pending` forever until acted on. Raising the mode
-does nothing to this queue — that is the safety design, not an oversight:
+**2. What never fires automatically — the admin findings queue.** Findings whose
+fix requires a *remote* mutation or a judgment call (`pull.subscription.missing`
+ghost subscriptions, `pull.dispute.chargeback`, `consistency.duplicate.subscription`
+needing cancel + refund at the processor, a `derive.grant.excess` refunded-payment
+grant) are queued for a human and stay `admin_pending` (or `held`, behind the
+confirmed-absence gate) until acted on. Raising the mode does nothing to this
+queue — that is the safety design, not an oversight:
 
 ```bash
-openrails reconcile report --merchant=<slug>   # open findings of the latest run, incl. the admin queue
+openrails pull-provider report --merchant=<slug>   # open + admin-pending + held findings of the latest run
 
 # HTTP, filterable across runs:
 #   GET  /v1/admin/reconcile/findings?admin_queue=true&status=admin_pending
@@ -663,12 +644,12 @@ openrails reconcile report --merchant=<slug>   # open findings of the latest run
 
 Work the queue by doing the remote action yourself at the processor (cancel, refund,
 investigate), then `ack` the finding with notes; `dismiss` records a false positive.
-The next reconcile run independently verifies reality converged.
+The next pull + Converge independently verifies reality converged.
 
 ## Documentation
 
 - **HTTP API reference:** [docs/api/endpoints.md](docs/api/endpoints.md)
-- **Operations manual:** [docs/operations.md](docs/operations.md) — provider consistency, the durability model, dunning, safety levers, and `openrails reconcile check|fix|report`: the manual batch truth-pull that diffs and (on `fix`) converges local state to the payment processors (#107; never writes to a provider).
+- **Operations manual:** [docs/operations.md](docs/operations.md) — provider consistency, the durability model, dunning, safety levers, and `openrails pull-provider` (dry-run by default; `--overwrite`/`--prune` + post-pull Converge): the manual batch truth-pull that overwrites the local mirror from the payment processors and converges local state (#107/#511; never writes to a provider).
 - **Entitlements model:** [docs/entitlements_timeline.md](docs/entitlements_timeline.md)
 - **Merchant provisioning & service tokens:** [docs/merchant-provisioning.md](docs/merchant-provisioning.md)
 - **Testing with business time:** [docs/business-time.md](docs/business-time.md)

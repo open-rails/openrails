@@ -36,7 +36,8 @@ type StripeAPICallError struct {
 func (e *StripeAPICallError) Error() string { return e.Message }
 
 type StripeRefundService struct {
-	Config *config.Config
+	Config     *config.Config
+	Processors config.ProcessorSet
 
 	// BaseURL overrides the Stripe API root. Empty means the production
 	// Stripe API (https://api.stripe.com). Tests set this to an httptest
@@ -73,7 +74,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	if s == nil {
 		return nil, fmt.Errorf("stripe refund service is not initialized")
 	}
-	_, secretKey, err := RequireStripeSecretKey(s.Config)
+	_, secretKey, err := RequireStripeSecretKey(s.Processors)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +191,7 @@ func (s *StripeRefundService) GetRefund(ctx context.Context, refundID string) (*
 	if s == nil {
 		return nil, fmt.Errorf("stripe refund service is not initialized")
 	}
-	_, secretKey, err := RequireStripeSecretKey(s.Config)
+	_, secretKey, err := RequireStripeSecretKey(s.Processors)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +242,7 @@ func (s *StripeRefundService) FindRefundByIdempotencyKey(ctx context.Context, ch
 	if s == nil {
 		return nil, false, fmt.Errorf("stripe refund service is not initialized")
 	}
-	_, secretKey, err := RequireStripeSecretKey(s.Config)
+	_, secretKey, err := RequireStripeSecretKey(s.Processors)
 	if err != nil {
 		return nil, false, err
 	}

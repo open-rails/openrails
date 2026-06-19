@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // These tests pin the EMBEDDED mount of the host-pluggable self surface
@@ -53,9 +54,9 @@ func doSelf(h http.Handler, method, path string) *httptest.ResponseRecorder {
 // the auth + permission gates ADMITTED the request — a 401/403/404 would mean
 // the surface is unmounted or gated wrong.
 func TestSelfHandler_EmbeddedPathsMountedAndGated(t *testing.T) {
-	readOnly := newSelfHandler(nil, nil, stubSelfAuthenticator{
+	readOnly := newSelfHandler(nil, stubSelfAuthenticator{
 		principal: selfPrincipal("openrails:self:billing:read"),
-	})
+	}, merchant.ID{})
 
 	// Read route past both gates (500 = nil-runtime handler reached).
 	w := doSelf(readOnly, http.MethodGet, "/billing/v1/self/account")
@@ -74,9 +75,9 @@ func TestSelfHandler_EmbeddedPathsMountedAndGated(t *testing.T) {
 		"settings PUT must be mounted and write-gated (403, not 404/401): %s", w.Body.String())
 
 	// A write principal passes the settings gate.
-	writer := newSelfHandler(nil, nil, stubSelfAuthenticator{
+	writer := newSelfHandler(nil, stubSelfAuthenticator{
 		principal: selfPrincipal("openrails:self:billing:write"),
-	})
+	}, merchant.ID{})
 	w = doSelf(writer, http.MethodPut, "/billing/v1/self/account/settings")
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
@@ -90,25 +91,25 @@ func TestSelfHandler_EmbeddedPathsMountedAndGated(t *testing.T) {
 // Host authenticator rejection and invalid principals map to 401 (fail closed),
 // exactly like the standalone host-pluggable mode.
 func TestSelfHandler_FailClosed(t *testing.T) {
-	h := newSelfHandler(nil, nil, stubSelfAuthenticator{err: billingauth.ErrUnauthenticated})
+	h := newSelfHandler(nil, stubSelfAuthenticator{err: billingauth.ErrUnauthenticated}, merchant.ID{})
 	w := doSelf(h, http.MethodGet, "/billing/v1/self/account")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 
 	// Principal missing its explicit tenant mapping => 401.
-	h = newSelfHandler(nil, nil, stubSelfAuthenticator{
+	h = newSelfHandler(nil, stubSelfAuthenticator{
 		principal: &billingauth.DelegatedPrincipal{
 			SubjectID:   "user-1",
 			Permissions: []string{"openrails:self:billing:read"},
 		},
-	})
+	}, merchant.ID{})
 	w = doSelf(h, http.MethodGet, "/billing/v1/self/account")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "delegated_principal_invalid")
 
 	// A service/operator grant can never be smuggled onto the self surface.
-	h = newSelfHandler(nil, nil, stubSelfAuthenticator{
+	h = newSelfHandler(nil, stubSelfAuthenticator{
 		principal: selfPrincipal("openrails:credits:write"),
-	})
+	}, merchant.ID{})
 	w = doSelf(h, http.MethodGet, "/billing/v1/self/account")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 }

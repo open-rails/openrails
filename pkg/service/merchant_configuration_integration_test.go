@@ -15,6 +15,7 @@ import (
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/abuse"
@@ -82,6 +83,81 @@ func grantDelegatedSpend(t *testing.T, svc *billingservice.Service, ctx context.
 			{Key: "delegated", WindowSeconds: 3600, Limit: 100_000_000},
 		},
 	}))
+}
+
+func TestMerchantConfiguration_TwoMerchantsKeepDistinctProfiles(t *testing.T) {
+	svc, _, _, ctxA := wastedSvcEnv(t)
+	pool := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
+
+	merchantB := merchant.ID(uuid.New())
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO openrails.merchants (id, slug, name, status)
+		VALUES ($1, $2, $3, 'active')
+		ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+	`, merchantB.UUID(), "profile-b", "Profile B")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.merchant_configurations WHERE merchant_id = $1", merchantB.UUID())
+		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.merchants WHERE id = $1", merchantB.UUID())
+	})
+	ctxB := merchant.WithID(context.Background(), merchantB)
+
+	require.NoError(t, svc.SetMerchantConfiguration(ctxA, billingservice.MerchantConfiguration{
+		Profile: &models.MerchantProfileConfiguration{
+			DisplayName:  "Merchant A Billing",
+			FromEmail:    "billing-a@example.com",
+			SupportURL:   "https://a.example/support",
+			SupportEmail: "support-a@example.com",
+		},
+	}))
+	require.NoError(t, svc.SetMerchantConfiguration(ctxB, billingservice.MerchantConfiguration{
+		Profile: &models.MerchantProfileConfiguration{
+			DisplayName:  "Merchant B Billing",
+			FromEmail:    "billing-b@example.com",
+			SupportURL:   "https://b.example/support",
+			SupportEmail: "support-b@example.com",
+		},
+	}))
+
+	cfgA, foundA, err := svc.GetMerchantConfiguration(ctxA)
+	require.NoError(t, err)
+	require.True(t, foundA)
+	cfgB, foundB, err := svc.GetMerchantConfiguration(ctxB)
+	require.NoError(t, err)
+	require.True(t, foundB)
+
+	require.Equal(t, "Merchant A Billing", cfgA.Profile.DisplayName)
+	require.Equal(t, "billing-a@example.com", cfgA.Profile.FromEmail)
+	require.Equal(t, "https://a.example/support", cfgA.Profile.SupportURL)
+	require.Equal(t, "support-a@example.com", cfgA.Profile.SupportEmail)
+	require.Equal(t, "Merchant B Billing", cfgB.Profile.DisplayName)
+	require.Equal(t, "billing-b@example.com", cfgB.Profile.FromEmail)
+	require.Equal(t, "https://b.example/support", cfgB.Profile.SupportURL)
+	require.Equal(t, "support-b@example.com", cfgB.Profile.SupportEmail)
+}
+
+func TestMerchantConfiguration_SetWindowsPreservesProfile(t *testing.T) {
+	svc, _, _, ctx := wastedSvcEnv(t)
+
+	require.NoError(t, svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{
+		Profile: &models.MerchantProfileConfiguration{
+			DisplayName: "Profile survives",
+			FromEmail:   "survives@example.com",
+		},
+	}))
+	require.NoError(t, svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{
+		DelegatedInvokerWastedSpendWindows: []abuse.WastedWindow{
+			{Key: "burst", Window: time.Minute, Limit: 123},
+		},
+	}))
+
+	cfg, found, err := svc.GetMerchantConfiguration(ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "Profile survives", cfg.Profile.DisplayName)
+	require.Equal(t, "survives@example.com", cfg.Profile.FromEmail)
+	require.Len(t, cfg.DelegatedInvokerWastedSpendWindows, 1)
+	require.EqualValues(t, 123, cfg.DelegatedInvokerWastedSpendWindows[0].Limit)
 }
 
 // #499: with merchant config SMALLER than the hardcoded default

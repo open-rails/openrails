@@ -1,15 +1,12 @@
 package gin
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 
 	gingonic "github.com/gin-gonic/gin"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
@@ -37,7 +34,8 @@ import (
 // gin-free handler. The same neutral base middleware stack wraps it (security
 // headers, CORS, body limit, default-tenant resolution — the delegated
 // middleware then pins the principal's tenant), keeping the two embedded
-// handlers behaviorally consistent.
+// handlers behaviorally consistent. Host-supplied delegated authenticators own
+// their own browser-origin policy before returning a principal.
 //
 // This lives in the gin-coupled pkg/embedded/gin subpackage (#285) because the
 // self surface registration is gin (ginroutes); the core pkg/embedded handler
@@ -56,14 +54,18 @@ func SelfHandler(e *embedded.Embedded) (http.Handler, error) {
 	if a.DelegatedAuthenticator == nil {
 		return nil, fmt.Errorf("embedded billing: self surface requires Options.DelegatedAuthenticator (#339)")
 	}
-	return newSelfHandler(a.Config, a.Runtime, a.DelegatedAuthenticator), nil
+	var configured merchant.ID
+	if a.Runtime != nil {
+		configured = a.Runtime.ConfiguredMerchant
+	}
+	return newSelfHandler(a.Runtime, a.DelegatedAuthenticator, configured), nil
 }
 
 // newSelfHandler assembles the self + merchant-admin gin engine and wraps it in
 // the neutral net/http base middleware stack (the gin-free analogue embedhttp
 // uses). Split from SelfHandler so the routing/auth behavior is unit-testable
 // without a live app graph.
-func newSelfHandler(cfg *config.Config, rt *app.Runtime, authn billingauth.DelegatedAuthenticator) http.Handler {
+func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, configured merchant.ID) http.Handler {
 	engine := gingonic.New()
 	engine.Use(gingonic.Recovery())
 
@@ -72,35 +74,9 @@ func newSelfHandler(cfg *config.Config, rt *app.Runtime, authn billingauth.Deleg
 	ginroutes.RegisterSelfServiceRoutes(base.Group(ginroutes.SelfRoutePrefix), rt, delegatedMW)
 	ginroutes.RegisterMerchantAdminRoutes(base.Group(ginroutes.MerchantAdminRoutePrefix), rt, delegatedMW)
 
-	var origins []string
-	if cfg != nil {
-		origins = cfg.AllowedCORSOrigins()
-	}
-	// Resolve the configured tenant SLUG → internal merchant.ID once at bootstrap
-	// (#336): the resolver pins it per request. A non-empty-but-unknown slug is
-	// a configuration error. EMBEDDED boot (embed.New) ensures the bound tenant
-	// row before this handler is built, so it never trips here; a
-	// standalone/remote deployment with an unprovisioned slug gets a CLEAR,
-	// actionable error via a fail-closed handler instead of a panic (#478).
-	var (
-		configured merchant.ID
-		err        error
-	)
-	if cfg != nil && cfg.Merchant != "" && rt != nil && rt.DB != nil {
-		ctx := context.Background()
-		configured, err = db.ResolveMerchantSlug(ctx, rt.DB.Qx(ctx), cfg.Merchant)
-		if err != nil {
-			msg := fmt.Sprintf("embedded billing self handler: %v", err)
-			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte(fmt.Sprintf("{%q:%q}", "error", msg)))
-			})
-		}
-	}
 	return middleware.ChainHTTP(engine,
 		middleware.SecurityHeadersHTTP(),
-		middleware.CORSHTTP(origins),
+		middleware.CORSHTTP(nil),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
 		middleware.ResolveMerchantHTTP(configured),
 	)

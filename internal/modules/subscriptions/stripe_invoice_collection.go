@@ -188,7 +188,7 @@ func addStripeCollectionMetadata(values url.Values, p StripeInvoiceCollectionPar
 }
 
 func (s *StripeService) stripePostForm(ctx context.Context, path string, values url.Values, idempotencyKey string) ([]byte, error) {
-	_, secretKey, err := RequireStripeSecretKey(s.Config)
+	_, secretKey, err := RequireStripeSecretKey(s.Processors)
 	if err != nil {
 		return nil, err
 	}

@@ -125,10 +125,10 @@ func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 }
 
 func (s *CheckoutService) processorConfig(name string) *config.ProcessorConfig {
-	if s == nil || s.Config == nil {
+	if s == nil || s.Processors == nil {
 		return nil
 	}
-	return s.Config.GetProcessor(name)
+	return s.Processors.GetProcessor(name)
 }
 
 func cloneProcessorConfig(in *config.ProcessorConfig) *config.ProcessorConfig {

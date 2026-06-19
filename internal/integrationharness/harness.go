@@ -227,24 +227,13 @@ func (h *Harness) StartStandalone(currency string) *Surface {
 	// onto it (#480: no default merchant).
 	dbtest.EnsureTestMerchant(h.ctx, h.t, h.sharedPool())
 
-	// The standalone server builds its first-party JWT verifier from auth.issuers
-	// for the user/admin surface (server.New requires an authenticator). The
-	// /v1/service/* surface the conformance script drives uses SERVICE TOKENS, not
-	// this verifier, but a real standalone boot always wires it — so we stand up a
-	// real AuthKit JWKS test issuer, exactly like the integration suite does.
-	issuer := authtesting.NewTestIssuerWithAudience("openrails-app")
-	h.t.Cleanup(issuer.Close)
-
 	cfg := &config.Config{
-		Env:      "dev",
-		TestEnv:  true,
-		Host:     "127.0.0.1",
-		Port:     0, // ephemeral; we serve via httptest below
-		Merchant: dbtest.TestMerchantSlug,
-		DB:       &config.DBConfig{URL: h.DSN},
+		Env:     "dev",
+		TestEnv: true,
+		Host:    "127.0.0.1",
+		Port:    0, // ephemeral; we serve via httptest below
+		DB:      &config.DBConfig{URL: h.DSN},
 		Auth: &config.AuthConfig{
-			Issuers:          []string{issuer.URL()},
-			ExpectedAudience: "openrails-app",
 			// The control plane's own AuthKit issuer + service-token brand prefix;
 			// service-token resolution needs only these.
 			ControlPlane: &config.ControlPlaneConfig{

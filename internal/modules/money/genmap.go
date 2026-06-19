@@ -52,13 +52,9 @@ func moneyTransactionFromTransfer(r gen.OpenrailsLedgerTransfer) *models.MoneyTr
 		amount = -amount
 		txType = "expiry"
 	}
+	// Every ledger transfer is posted (single-phase) since migration 014 retired
+	// the in-ledger two-phase pending apparatus (holds are Redis-only, #513).
 	status := "posted"
-	switch r.Phase {
-	case "pending":
-		status = "pending"
-	case "void_pending":
-		status = "voided"
-	}
 	var customerID uuid.UUID
 	if r.CustomerID != nil {
 		customerID = *r.CustomerID

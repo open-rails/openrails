@@ -38,7 +38,7 @@ func reconcileEngineFromRuntime(r *httprequest.Request) (*reconcile.Engine, *rec
 		r.ErrorJSON(http.StatusInternalServerError, "runtime unavailable")
 		return nil, nil, false
 	}
-	fetchers := reconcile.BuildFetchers(rt.Config, reconcile.FetcherClients{
+	fetchers := reconcile.BuildFetchers(rt.Config, rt.Processors, reconcile.FetcherClients{
 		NMIClients:     rt.NMIClients,
 		CCBillDataLink: rt.CCBillDataLink,
 		SolanaRPC:      rt.SolanaRPC,

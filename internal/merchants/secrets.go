@@ -39,6 +39,9 @@ const (
 	// SecretNMIMobiusTokenizationURL overrides the Collect.js script URL for a
 	// merchant/provider. Most NMI accounts use DefaultNMICollectJSURL.
 	SecretNMIMobiusTokenizationURL = "nmi/mobius/tokenization_url"
+	// SecretNMIMobiusWebhookSigning is the merchant's Mobius/NMI webhook signing
+	// secret, used to verify inbound webhooks after merchant/provider resolution.
+	SecretNMIMobiusWebhookSigning = "nmi/mobius/webhook_signing_secret"
 	// SecretCCBillAccountConfig is the merchant's CCBill account/config payload.
 	// Store as an OpenRails-owned JSON string until the CCBill adapter grows a
 	// typed multi-field secret.
@@ -69,6 +72,7 @@ var merchantSecretRegistry = []SecretDefinition{
 	{Name: SecretNMIMobiusProductionKey, Provider: "nmi", Purpose: "mobius_production_key", DisplayLabel: "Mobius/NMI production key", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 	{Name: SecretNMIMobiusTokenizationKey, Provider: "nmi", Purpose: "tokenization_key", DisplayLabel: "Mobius/NMI tokenization key", ManualVault: true, MerchantWritable: true, Validation: "presence", PlaintextReadable: true},
 	{Name: SecretNMIMobiusTokenizationURL, Provider: "nmi", Purpose: "tokenization_url", DisplayLabel: "Mobius/NMI Collect.js URL", ManualVault: true, MerchantWritable: true, Validation: "url", PlaintextReadable: true},
+	{Name: SecretNMIMobiusWebhookSigning, Provider: "nmi", Purpose: "webhook_signing", DisplayLabel: "Mobius/NMI webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 	{Name: SecretCCBillAccountConfig, Provider: "ccbill", Purpose: "account_config", DisplayLabel: "CCBill account configuration", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 	{Name: SecretSolanaPrivateKey, Provider: "solana", Purpose: "signing_keypair", DisplayLabel: "Solana signing keypair", ManualVault: true, MerchantWritable: false, Validation: "presence"},
 }

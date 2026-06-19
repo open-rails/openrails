@@ -18,7 +18,7 @@ func TestSessionToResponse_SolanaPayURLForAllModes(t *testing.T) {
 
 	cfg := testSolanaCheckoutConfig()
 	cfg.APIURL = "https://api.test.com"
-	svc := &CheckoutSessionService{config: cfg}
+	svc := &CheckoutSessionService{config: cfg, processors: testSolanaCheckoutProcessors()}
 
 	cases := []struct {
 		name  string

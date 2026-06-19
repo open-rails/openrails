@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -867,11 +868,13 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, currency st
 
 // GetSupportedTokens returns the list of supported Solana tokens with prices.
 func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResult, error) {
-	cfg, err := s.requireConfig()
-	if err != nil {
+	if _, err := s.requireConfig(); err != nil {
 		return nil, err
 	}
-	solanaProc := cfg.GetSolanaProcessor()
+	var solanaProc *config.ProcessorConfig
+	if s.rt != nil {
+		solanaProc = s.rt.Processors.GetSolanaProcessor()
+	}
 	if solanaProc == nil {
 		return nil, fmt.Errorf("solana not configured")
 	}
@@ -902,16 +905,19 @@ func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResul
 
 // CreateStripePortalSession creates a Stripe customer portal session.
 func (s *Service) CreateStripePortalSession(ctx context.Context, userID string, req CreateStripePortalSessionRequest) (*StripePortalSession, error) {
-	processorCustomers, cfg, err := s.requireProcessorCustomerAndConfig()
+	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
+	}
+	if rt.ProcessorCustomerService == nil || rt.Config == nil {
+		return nil, fmt.Errorf("billing service: not initialized")
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
 	}
 
-	customerID, err := processorCustomers.GetCustomerID(ctx, userID, "stripe")
+	customerID, err := rt.ProcessorCustomerService.GetCustomerID(ctx, userID, "stripe")
 	if err != nil || strings.TrimSpace(customerID) == "" {
 		return nil, fmt.Errorf("stripe customer not found")
 	}
@@ -921,7 +927,7 @@ func (s *Service) CreateStripePortalSession(ctx context.Context, userID string, 
 		return nil, fmt.Errorf("return_url required")
 	}
 
-	service := &subscriptions.StripePortalService{Config: cfg}
+	service := &subscriptions.StripePortalService{Config: rt.Config, Processors: rt.Processors}
 	urlStr, err := service.CreatePortalSession(ctx, customerID, returnURL)
 	if err != nil {
 		return nil, err

@@ -32,7 +32,7 @@ type DelegatedResolver interface {
 	// ResolveDelegated verifies the delegated access token (aud=openrails, no
 	// sub, self-permissions) and resolves its merchant + acting user
 	// (delegated_sub).
-	ResolveDelegated(ctx context.Context, token string) (*controlplane.ResolvedDelegated, error)
+	ResolveDelegated(ctx context.Context, token string, origin string) (*controlplane.ResolvedDelegated, error)
 }
 
 // DelegatedSelfRequired authenticates a merchant-scoped self-service route with a
@@ -72,7 +72,7 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 			return
 		}
 
-		resolved, err := resolver.ResolveDelegated(c.Request.Context(), token)
+		resolved, err := resolver.ResolveDelegated(c.Request.Context(), token, c.Request.Header.Get("Origin"))
 		if err != nil {
 			switch {
 			case errors.Is(err, authcore.ErrAccessTokenExpired):
@@ -84,6 +84,8 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 				// Token's merchant/issuer maps to no active merchant (cross-merchant /
 				// unmapped / unregistered or disabled federated issuer).
 				response.ForbiddenWithMessage(c, "delegated_tenant_unresolved")
+			case errors.Is(err, controlplane.ErrDelegatedOriginNotAllowed):
+				response.ForbiddenWithMessage(c, "delegated_origin_not_allowed")
 			case errors.Is(err, controlplane.ErrDelegatedNotConfigured):
 				response.InternalError(c, "delegated authentication not configured")
 			default:

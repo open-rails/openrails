@@ -101,7 +101,7 @@ func TestValidateSolanaProcessorNeverFatal(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
 	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
 	cfg.Mode = ModeFull
-	cfg.Processors = map[string]*ProcessorConfig{
+	processors := ProcessorSet{
 		"solana": {
 			Tokens: map[string]TokenConfig{
 				"NOPE": {Name: "Mystery", Mint: "NopeMint1111111111111111111111111111111111", Decimals: 6},
@@ -110,9 +110,9 @@ func TestValidateSolanaProcessorNeverFatal(t *testing.T) {
 			},
 		},
 	}
-	require.NoError(t, Validate(cfg))
+	require.NoError(t, ValidateProcessorSet(cfg, processors))
 
 	// And under test_env (devnet) there is no pricing requirement at all.
 	cfg.TestEnv = true
-	require.NoError(t, Validate(cfg))
+	require.NoError(t, ValidateProcessorSet(cfg, processors))
 }

@@ -43,6 +43,7 @@ type CancelSubscriptionWorker struct {
 	river.WorkerDefaults[CancelSubscriptionArgs]
 	DB                           *db.DB
 	Config                       *config.Config
+	Processors                   config.ProcessorSet
 	UserSubscriptionService      *subscriptions.UserSubscriptionService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
@@ -99,7 +100,7 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 		if w.SubscriptionLifecycleService == nil {
 			return fmt.Errorf("subscription lifecycle service unavailable")
 		}
-		stripeSvc := &subscriptions.StripeService{Config: w.Config}
+		stripeSvc := &subscriptions.StripeService{Config: w.Config, Processors: w.Processors}
 		if err := stripeSvc.CancelSubscription(ctx, sub.ProcessorSubscriptionID); err != nil {
 			return err
 		}
@@ -136,6 +137,7 @@ type ResumeSubscriptionWorker struct {
 	river.WorkerDefaults[ResumeSubscriptionArgs]
 	DB                           *db.DB
 	Config                       *config.Config
+	Processors                   config.ProcessorSet
 	EntitlementService           *entitlements.EntitlementService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
@@ -212,7 +214,7 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 	}).Info("processing subscription resume")
 
 	if sub.Processor == models.ProcessorStripe {
-		stripeSvc := &subscriptions.StripeService{Config: w.Config}
+		stripeSvc := &subscriptions.StripeService{Config: w.Config, Processors: w.Processors}
 		if err := stripeSvc.ResumeSubscription(ctx, sub.ProcessorSubscriptionID); err != nil {
 			return err
 		}

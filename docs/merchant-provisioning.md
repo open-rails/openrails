@@ -85,11 +85,12 @@ These routes are gated by live AuthKit org permissions. A user, service token, o
 registered JWKS issuer controls a merchant only through its authority over the
 merchant's `owner_org_id`.
 
-## Merchant Manifest
+## Merchant Config Manifest
 
-The bootstrap manifest used by `openrails push-bootstrap` keeps AuthKit-owned
-authority in `auth:` and OpenRails-owned merchant definitions in `merchants:`.
-Catalog state is pushed separately with `openrails push-catalog`.
+The merchant config manifest used by `openrails push-merchant-config` keeps
+AuthKit-owned authority in `auth:` and OpenRails-owned merchant definitions in
+`merchants:`. Catalog state is pushed separately with
+`openrails push-merchant-catalog`.
 
 ```yaml
 version: 1
@@ -105,6 +106,20 @@ auth:
 merchants:
   - slug: doujins
     name: Doujins
+    profile:
+      display_name: Doujins Billing
+      logo_url: https://doujins.example/logo.png
+      from_email: billing@doujins.example
+      support_url: https://doujins.example/support
+      support_email: support@doujins.example
+    provider_accounts:
+      - provider_type: nmi
+        account_id: mobius-profile-id
+        provider_key: mobius
+        role: primary
+        secrets:
+          production_key: {env: DOUJINS_MOBIUS_PRODUCTION_KEY}
+          tokenization_key: {env: DOUJINS_MOBIUS_TOKENIZATION_KEY}
 ```
 
 Catalog manifests are explicitly catalog-scoped and may contain one or more
@@ -119,4 +134,5 @@ catalogs:
 
 Issuer/JWKS registration belongs in AuthKit remote applications through the
 `auth.orgs[].issuers` bootstrap section. OpenRails stores only the merchant
-ownership link and billing configuration.
+ownership link, merchant profile/configuration, provider-account bindings, and
+merchant secret values/references.

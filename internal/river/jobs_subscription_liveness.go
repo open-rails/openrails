@@ -97,6 +97,7 @@ type SubscriptionLivenessWorker struct {
 	river.WorkerDefaults[SubscriptionLivenessArgs]
 	DB              *db.DB
 	Config          *config.Config
+	Processors      config.ProcessorSet
 	Clock           clockwork.Clock
 	NMIClients      map[string]*nmi.NMIClient
 	EventLogService *analytics.EventLogService
@@ -544,16 +545,16 @@ func (w *SubscriptionLivenessWorker) adoptRemotePeriodEnd(
 	return livenessOutcomeAdopted
 }
 
-// stripeProber returns the injected prober or self-assembles one from config
+// stripeProber returns the injected prober or self-assembles one from processors
 // (nil when Stripe is not configured).
 func (w *SubscriptionLivenessWorker) stripeProber() subscriptions.StripeLivenessProber {
 	if w.StripeProber != nil {
 		return w.StripeProber
 	}
-	if w.Config == nil {
+	if w.Processors == nil {
 		return nil
 	}
-	prober, err := subscriptions.NewStripeLivenessProber(w.Config)
+	prober, err := subscriptions.NewStripeLivenessProber(w.Processors)
 	if err != nil {
 		return nil
 	}

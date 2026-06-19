@@ -29,11 +29,6 @@ type NMIClient struct {
 	DirectPostURL string
 	QueryURL      string
 	TestMode      bool
-	// SubscriptionDeletesDisabled blocks DeleteRecurringSubscription (returns
-	// ErrSubscriptionDeletesDisabled) so a cutover/reconciliation can run without
-	// bulk-deleting remote subscriptions. Set from
-	// feature_flags.disable_processor_subscription_deletions at client build.
-	SubscriptionDeletesDisabled bool
 	// ReadOnly blocks EVERY direct-post mutation (sales, vault writes, plan
 	// creates, deletes — all NMI writes flow through sendDirectRequest) with
 	// ErrProviderReadOnly; the query API stays available. Set when mode=readonly

@@ -501,7 +501,6 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	// period end is unknown/past, we delete IMMEDIATELY exactly as before.
 	deleteAt, defer_ := NMIDeferredDeleteAt(subscription, now)
 	deferScheduled := defer_ && s.deferDelete != nil
-	scheduleKillSwitchedDelete := false
 	if deferScheduled {
 		// The delete intent is enqueued below, in the SAME transaction as the
 		// cancellation update, so marker and intent commit atomically.
@@ -512,19 +511,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		if s.NMIClients != nil {
 			if client, ok := s.NMIClients[provider]; ok && subscription.ProcessorSubscriptionID != "" {
 				if err := client.DeleteRecurringSubscription(subscription.ProcessorSubscriptionID); err != nil {
-					if errors.Is(err, nmi.ErrSubscriptionDeletesDisabled) {
-						// Kill switch: cancel locally but keep a deferred-delete marker so
-						// the pending remote delete stays discoverable for replay or
-						// reconciliation once deletions are re-enabled.
-						log.WithFields(log.Fields{
-							"subscription_id": subscription.ID,
-							"processor":       provider,
-						}).Warn("processor subscription deletes disabled; cancelling locally, remote subscription left for reconciliation")
-						subscription.DeletionScheduledAt = &now
-						scheduleKillSwitchedDelete = true
-					} else {
-						return fmt.Errorf("failed to cancel subscription with processor '%s': %w", provider, err)
-					}
+					return fmt.Errorf("failed to cancel subscription with processor '%s': %w", provider, err)
 				}
 			}
 		}
@@ -540,18 +527,14 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		subscription.CancelFeedback = &feedback
 	}
 
-	// Persist the cancellation; when a deferred (undo-window) or
-	// kill-switched delete is involved, enqueue its intent IN THE SAME
-	// TRANSACTION: the DeletionScheduledAt marker and the
-	// nmi_delete_subscription intent commit or roll back together, so the
-	// marker<->intent invariant cannot be broken by a crash between the two
+	// Persist the cancellation; when a deferred undo-window delete is involved,
+	// enqueue its intent IN THE SAME TRANSACTION. The DeletionScheduledAt marker
+	// and the nmi_delete_subscription intent commit or roll back together, so
+	// the marker<->intent invariant cannot be broken by a crash between the two
 	// writes. Atomic commit also kills the old relevance race (the executor
 	// cannot observe the intent before the cancellation is visible).
-	if (deferScheduled || scheduleKillSwitchedDelete) && s.deferDelete != nil {
+	if deferScheduled && s.deferDelete != nil {
 		runAt := deleteAt
-		if scheduleKillSwitchedDelete {
-			runAt = now
-		}
 		if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			txdb := openrailsdb.NewWithPgxTx(tx)
 			txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, nil, nil, s.clock)

@@ -96,6 +96,7 @@ func dbCatalogRowsLoader(d *db.DB) catalogRowsLoader {
 // handlers; the per-type bits (object kind, read, write) are parameterized.
 type stripeArchiveCore struct {
 	Config      *config.Config
+	Processors  config.ProcessorSet
 	Stripe      stripeCatalogAPI
 	LoadCatalog catalogRowsLoader
 	Policy      BackoffPolicy
@@ -104,11 +105,11 @@ type stripeArchiveCore struct {
 func (h *stripeArchiveCore) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 
 func (h *stripeArchiveCore) stripeConfigured() bool {
-	if h.Config == nil {
+	if h.Processors == nil {
 		// nil config = unit-test harness; the injected API decides.
 		return h.Stripe != nil
 	}
-	proc := h.Config.GetStripeProcessor()
+	proc := h.Processors.GetStripeProcessor()
 	return proc != nil && strings.TrimSpace(proc.SecretKey) != "" && h.Stripe != nil
 }
 
@@ -207,10 +208,11 @@ type StripeArchiveProductHandler struct {
 	stripeArchiveCore
 }
 
-func NewStripeArchiveProductHandler(d *db.DB, cfg *config.Config, _ clockwork.Clock) *StripeArchiveProductHandler {
+func NewStripeArchiveProductHandler(d *db.DB, cfg *config.Config, processors config.ProcessorSet, _ clockwork.Clock) *StripeArchiveProductHandler {
 	return &StripeArchiveProductHandler{stripeArchiveCore{
 		Config:      cfg,
-		Stripe:      &catalog.StripeCatalogService{Config: cfg},
+		Processors:  processors,
+		Stripe:      &catalog.StripeCatalogService{Config: cfg, Processors: processors},
 		LoadCatalog: dbCatalogRowsLoader(d),
 		Policy:      DefaultBackoff,
 	}}
@@ -256,10 +258,11 @@ type StripeArchivePriceHandler struct {
 	stripeArchiveCore
 }
 
-func NewStripeArchivePriceHandler(d *db.DB, cfg *config.Config, _ clockwork.Clock) *StripeArchivePriceHandler {
+func NewStripeArchivePriceHandler(d *db.DB, cfg *config.Config, processors config.ProcessorSet, _ clockwork.Clock) *StripeArchivePriceHandler {
 	return &StripeArchivePriceHandler{stripeArchiveCore{
 		Config:      cfg,
-		Stripe:      &catalog.StripeCatalogService{Config: cfg},
+		Processors:  processors,
+		Stripe:      &catalog.StripeCatalogService{Config: cfg, Processors: processors},
 		LoadCatalog: dbCatalogRowsLoader(d),
 		Policy:      DefaultBackoff,
 	}}

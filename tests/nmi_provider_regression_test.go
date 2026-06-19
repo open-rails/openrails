@@ -151,11 +151,11 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	t.Helper()
 
 	provider = strings.ToLower(provider)
-	suite.Config.Processors[provider] = &config.ProcessorConfig{
+	suite.Processors[provider] = &config.ProcessorConfig{
 		Type:        config.ProcessorTypeNMI,
 		SecurityKey: "test-security-key-" + provider,
 	}
-	processors.InitNMIBackedProcessors(suite.Config)
+	processors.InitNMIBackedProcessors(suite.Processors)
 
 	settings := &config.NMIProviderSettings{
 		Name:        provider,

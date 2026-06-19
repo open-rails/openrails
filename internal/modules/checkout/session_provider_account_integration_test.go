@@ -76,9 +76,10 @@ func TestCheckoutSessionStampsPrimaryProviderAccount(t *testing.T) {
 		}
 		insertProductAndPrice(ctx, t, dbi.Qx(ctx), product, price)
 
-		cfg := &config.Config{Processors: map[string]*config.ProcessorConfig{
+		processors := config.ProcessorSet{
 			"stripe_primary": {Type: config.ProcessorTypeStripe, Role: config.ProcessorRolePrimary},
-		}}
+		}
+		cfg := &config.Config{}
 		svc := NewCheckoutSessionService(
 			dbi,
 			catalog.NewPriceService(dbi),
@@ -91,6 +92,7 @@ func TestCheckoutSessionStampsPrimaryProviderAccount(t *testing.T) {
 			nil,
 			nil,
 			cfg,
+			processors,
 		)
 		svc.SetProviderAccounts(checkoutProviderAccountResolver{})
 

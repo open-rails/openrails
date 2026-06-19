@@ -88,6 +88,7 @@ func newPullProviderCmd() *cobra.Command {
 type reconcileRuntime struct {
 	DB             *db.DB
 	Config         *config.Config
+	Processors     config.ProcessorSet
 	NMIClients     map[string]*nmi.NMIClient
 	CCBillDataLink *ccbill.DataLinkClient
 	SolanaRPC      *solanaint.RPCClient
@@ -125,17 +126,18 @@ func newReconcileRuntime(cfg *config.Config) (*reconcileRuntime, func(), error) 
 	}
 	cleanup := func() { _ = database.Close() }
 
-	nmiClients, err := reconcileNMIClients(cfg)
+	processors := config.ProcessorSet{}
+	nmiClients, err := reconcileNMIClients(cfg, processors)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
 	}
-	ccbillDataLink, err := reconcileCCBillDataLink(cfg)
+	ccbillDataLink, err := reconcileCCBillDataLink(cfg, processors)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
 	}
-	solanaRPC, err := reconcileSolanaRPC(cfg)
+	solanaRPC, err := reconcileSolanaRPC(cfg, processors)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
@@ -143,15 +145,16 @@ func newReconcileRuntime(cfg *config.Config) (*reconcileRuntime, func(), error) 
 	return &reconcileRuntime{
 		DB:             database,
 		Config:         cfg,
+		Processors:     processors,
 		NMIClients:     nmiClients,
 		CCBillDataLink: ccbillDataLink,
 		SolanaRPC:      solanaRPC,
 	}, cleanup, nil
 }
 
-func reconcileNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
+func reconcileNMIClients(cfg *config.Config, processors config.ProcessorSet) (map[string]*nmi.NMIClient, error) {
 	clients := map[string]*nmi.NMIClient{}
-	for name, procConfig := range cfg.GetNMIProcessors() {
+	for name, procConfig := range processors.GetNMIProcessors() {
 		providerKey := strings.TrimSpace(strings.ToLower(name))
 		if providerKey == "" {
 			return nil, fmt.Errorf("nmi provider name cannot be empty")
@@ -164,14 +167,13 @@ func reconcileNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) 
 			return nil, err
 		}
 		client.ReadOnly = true
-		client.SubscriptionDeletesDisabled = true
 		clients[providerKey] = client
 	}
 	return clients, nil
 }
 
-func reconcileCCBillDataLink(cfg *config.Config) (*ccbill.DataLinkClient, error) {
-	_, proc, err := cfg.PrimaryProcessorByType(config.ProcessorTypeCCBill)
+func reconcileCCBillDataLink(cfg *config.Config, processors config.ProcessorSet) (*ccbill.DataLinkClient, error) {
+	_, proc, err := processors.PrimaryProcessorByType(config.ProcessorTypeCCBill)
 	if err != nil {
 		return nil, err
 	}
@@ -183,8 +185,8 @@ func reconcileCCBillDataLink(cfg *config.Config) (*ccbill.DataLinkClient, error)
 	return ccbill.NewDataLinkClient(ccbillConfig), nil
 }
 
-func reconcileSolanaRPC(cfg *config.Config) (*solanaint.RPCClient, error) {
-	_, proc, err := cfg.PrimaryProcessorByType(config.ProcessorTypeSolana)
+func reconcileSolanaRPC(cfg *config.Config, processors config.ProcessorSet) (*solanaint.RPCClient, error) {
+	_, proc, err := processors.PrimaryProcessorByType(config.ProcessorTypeSolana)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +281,7 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, providerAccount
 			explicitBindings[provider] = binding
 		}
 
-		fetchers, err := reconcile.BuildFetchersWithOptions(rt.Config, reconcile.FetcherClients{
+		fetchers, err := reconcile.BuildFetchersWithOptions(rt.Config, rt.Processors, reconcile.FetcherClients{
 			NMIClients:     rt.NMIClients,
 			CCBillDataLink: rt.CCBillDataLink,
 			SolanaRPC:      rt.SolanaRPC,
@@ -388,7 +390,7 @@ func resolveReconcileProviderAccountTarget(ctx context.Context, rt *reconcileRun
 	if err != nil {
 		return "", "", reconcile.ProviderAccountBinding{}, fmt.Errorf("load provider account %s: %w", id, err)
 	}
-	resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.NMIClients)
+	resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.Processors, rt.NMIClients)
 	identity, ok := resolver.FindProviderAccount(ctx, account.ProviderType, account.AccountID)
 	if !ok {
 		return "", "", reconcile.ProviderAccountBinding{}, fmt.Errorf("provider account %s (%s:%s) is not configured in this runtime", id, account.ProviderType, account.AccountID)
@@ -413,7 +415,7 @@ func reconcileProviderAccountBindings(ctx context.Context, rt *reconcileRuntime,
 			providers = append(providers, p)
 		}
 	}
-	resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.NMIClients)
+	resolver := intents.NewRuntimeProviderAccounts(rt.Config, rt.Processors, rt.NMIClients)
 	store := intents.NewStore(rt.DB).WithProviderAccounts(resolver)
 	out := make(map[reconcile.Provider]reconcile.ProviderAccountBinding, len(providers))
 	for _, provider := range providers {

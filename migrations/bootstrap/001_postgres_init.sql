@@ -1,5 +1,5 @@
 -- PostgreSQL Bootstrap
--- Simple initialization: create required billing schema and install extensions.
+-- Simple initialization: create the required OpenRails schema (default openrails) and install extensions.
 -- Open Rails Billing is designed to run standalone; do not create schemas for other apps here.
 
 -- Create schemas

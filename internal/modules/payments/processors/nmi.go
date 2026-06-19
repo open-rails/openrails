@@ -13,17 +13,17 @@ var NMIBackedProcessors = map[string]bool{
 	string(models.ProcessorMobius): true, // Default NMI-backed processor
 }
 
-// InitNMIBackedProcessors initializes the NMI-backed processors set from configuration.
-// Call this at application startup after loading config.
-func InitNMIBackedProcessors(cfg *config.Config) {
-	if cfg == nil {
+// InitNMIBackedProcessors initializes the NMI-backed processors set from the
+// runtime provider credential set.
+func InitNMIBackedProcessors(processors config.ProcessorSet) {
+	if processors == nil {
 		return
 	}
 
 	// Clear and rebuild from config
 	NMIBackedProcessors = make(map[string]bool)
 
-	nmiProcessors := cfg.GetNMIProcessors()
+	nmiProcessors := processors.GetNMIProcessors()
 	for name := range nmiProcessors {
 		key := normalize.Lower(name)
 		if key != "" {
@@ -44,11 +44,8 @@ func IsNMIBacked(processor string) bool {
 	return NMIBackedProcessors[key]
 }
 
-func IsConfigured(cfg *config.Config, processor string) bool {
-	if cfg == nil {
-		return false
-	}
-	return cfg.GetProcessorType(normalize.Lower(processor)) != ""
+func IsConfigured(processors config.ProcessorSet, processor string) bool {
+	return processors.GetProcessorType(normalize.Lower(processor)) != ""
 }
 
 // IsNMIBackedProcessor returns true if the given models.Processor uses NMI as its gateway.

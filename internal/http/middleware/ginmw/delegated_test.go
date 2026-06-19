@@ -23,7 +23,7 @@ type fakeDelegatedResolver struct {
 	err      error
 }
 
-func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string) (*controlplane.ResolvedDelegated, error) {
+func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string, string) (*controlplane.ResolvedDelegated, error) {
 	return f.resolved, f.err
 }
 
@@ -161,6 +161,14 @@ func TestDelegatedSelfRequired_DeniesCrossTenant(t *testing.T) {
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.Contains(t, w.Body.String(), "delegated_tenant_unresolved")
+}
+
+func TestDelegatedSelfRequired_DeniesOriginMismatch(t *testing.T) {
+	resolver := fakeDelegatedResolver{err: controlplane.ErrDelegatedOriginNotAllowed}
+	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
+	w := doDelegatedRequest(r, true)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "delegated_origin_not_allowed")
 }
 
 func TestDelegatedSelfRequired_DeniesMissingBearer(t *testing.T) {

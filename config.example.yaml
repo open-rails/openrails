@@ -1,554 +1,105 @@
-# OpenRails Configuration Example
-# Copy this to config.yaml and fill in your actual values
-# All settings can also be set via environment variables (see .env.example)
-
-# =============================================================================
-# CORE SETTINGS
-# =============================================================================
-
-# Environment: prod, dev, development, production
-# Controls logging verbosity and debug features (NOT payment mode)
-env: "development"
-
-# Operating Mode (#346, #355): the pure-BEHAVIOR dial — how much OpenRails may
-# do against the payment providers. It applies identically with sandbox or
-# live credentials (that is the orthogonal test_env axis below). Feature flags
-# below remain fine-grained overrides on top; the strictest setting always
-# wins. Env var: MODE=, CLI flag: --mode
+# OpenRails runtime infrastructure config.
 #
-#   - "full":     everything runs - charges, dunning, deletes.
-#   - "limited":  REACTIVE-ONLY - no system-initiated provider actions: no
-#                 dunning charges or window-expiry cancellations (dunning runs
-#                 dry), no auto-top-ups, no arrears collection, no Solana
-#                 pulls, and no catalog provider-object writes (slots defer to
-#                 pending_manual_link and converge on a later apply).
-#                 User/admin-initiated operations work normally, including
-#                 their processor-side deletes. Cutover/incident posture.
-#   - "readonly": ZERO provider writes - even reactive charges fail loudly.
-#                 Provider reads + local serving only. Implies limited + the
-#                 processor-deletion kill switch. Reconciliation/forensics
-#                 posture.
-#
-# Unset defaults to "full" in development. Outside development an explicit
-# mode is REQUIRED — the server refuses to boot without one.
-# mode: "full"
+# Merchant/provider/catalog/auth authority is seeded with the bootstrap/catalog
+# commands and stored in OpenRails/AuthKit state. Keep config.yaml for process
+# infrastructure: listeners, databases, Vault, rate limits, captcha, and similar
+# deployment concerns.
 
-# Test Environment (#355): the sandbox-CREDENTIAL axis, orthogonal to mode.
-# Env var: TEST_ENV=, CLI flag: --test-env. Defaults to sandbox in development
-# when omitted, and live outside development.
-# When true, every processor routes to its sandbox AND the credential
-# guarantees attach:
-#   - Stripe: a live key (sk_live_/rk_live_) refuses to boot
-#   - NMI: each account is probed at boot with the non-issued test card —
-#     a decline proves production credentials and refuses the boot
-#   - CCBill: sandbox-api.ccbill.com
-#   - Solana: devnet (derived; not separately configurable)
-# test_env=true is rejected outside env=development — sandbox money is
-# dev-only. If omitted, Load defaults to sandbox in development and live outside
-# it. Set test_env=false explicitly only when you really want live credentials
-# in a local dev run.
-# test_env: true
+env: development
+mode: full          # full | limited | readonly; required outside development
+test_env: true      # sandbox credentials; development only
 
-# =============================================================================
-# STANDALONE MODE ONLY
-# =============================================================================
-# These settings only apply when running OpenRails as a standalone service.
-# In embedded mode, the host application handles binding and routing.
-
-host: "0.0.0.0"        # Address to bind to (default: 0.0.0.0)
-port: 2053             # Public HTTP/HTTPS port (default: 2053)
-
-# Server-to-server calls (credits, entitlements) authenticate on this SAME public
-# port with either generated OpenRails service tokens or first-party OIDC service
-# JWTs from registered tenant issuers. There is no separate private/mTLS service
-# listener, no service port, and no API key (issue #222). Any infrastructure TLS
-# / service mesh is deployment-owned and is NOT part of OpenRails authorization.
-
-# =============================================================================
-# BOTH MODES (standalone + embedded)
-# =============================================================================
-# These settings apply in both standalone and embedded modes.
-
-# API URL: Base URL where OpenRails' /v1/* routes are mounted.
-# REQUIRED for Solana Pay transaction_request URLs and webhook generation.
-#
-# Standalone mode: Routes are at /v1/*, so just the origin:
-#   api_url: "https://api.mysite.com"
-#   → Generated URL: https://api.mysite.com/v1/checkout/:id/solana-pay
-#
-# Embedded mode: Routes are at /{mount_prefix}/v1/*, include the mount prefix:
-#   api_url: "https://api.mysite.com/openrails"
-#   → Generated URL: https://api.mysite.com/openrails/v1/checkout/:id/solana-pay
-#
-api_url: "https://api.example.com"
-
-# CORS origins for frontend access (REQUIRED for browser requests).
-# This is one global browser allow-list, not per-merchant isolation.
-#
-# If development mode leaves this empty, the CORS middleware allows all origins.
-# Outside development, cors_origins is required and startup fails if it is empty.
-cors_origins:
-  - "http://localhost:3000"
-  - "https://your-frontend-domain.com"
-
-# =============================================================================
-# STORE/MERCHANT BRANDING
-# =============================================================================
-# Used across the system for consistent branding (Solana Pay, emails, receipts)
-
-store:
-  name: "My Store"                              # Merchant name (default: "My Store")
-  logo_url: "https://your-domain.com/logo.png"  # Logo URL (default: embedded $ icon)
-  from_email: "noreply@your-domain.com"         # Sender email for all outgoing emails (required if sendgrid configured)
-  customer_portal_url: "https://your-domain.com/account" # Customer portal URL (used in emails)
-
-# =============================================================================
-# LOGGING
-# =============================================================================
+host: 0.0.0.0
+port: 2053
+api_url: http://localhost:2053
 
 logger:
-  level: "info"  # debug, info, warn, error, fatal, panic (default: info)
-
-# =============================================================================
-# DATABASE (PostgreSQL)
-# =============================================================================
-# Provide DB_URL via environment (.env) instead of secrets here
+  level: info       # debug | info | warn | error | fatal | panic
 
 db:
-  # Option 1: Full connection string (set via DB_URL env var)
-  # url: "postgres://user:pass@host:5432/dbname?sslmode=disable"
-
-  # Option 2: Atomic parameters (preferred for Kubernetes/Vault)
-  host: "localhost"
+  url: ""           # optional; overrides the fields below when set
+  host: localhost
   port: "5432"
-  database: "openrails_db"
-  username: "admin"
-  # password: set via DB_PASSWORD env var
-  sslmode: "disable"
-
-# =============================================================================
-# REDIS (for caching, sessions, rate limiting)
-# =============================================================================
+  database: openrails_db
+  username: admin
+  password: ""
+  sslmode: disable
+  schema: openrails
+  require_rls: false
 
 redis:
-  addr: "garnet:6379"   # Redis/Garnet address (default: garnet:6379)
-  # password: ""        # Set via REDIS_PASSWORD env var if needed
-  db: 0                 # Redis database number (default: 0)
-
-# =============================================================================
-# AUTHENTICATION
-# =============================================================================
-# Standalone OpenRails has ONE auth model (#469): it always runs its own
-# AuthKit control plane (delegated browser tokens, service tokens, the runtime
-# tenant/issuer registry, /auth routes, admin authority), with both
-# registration axes CLOSED by default. There is no "verifier-only" mode.
-#
-# auth.issuers is the config-declared FIRST-PARTY issuer allowlist for the
-# user/admin JWT surface: host-app-issued JWTs verify against each issuer's
-# {issuer}/.well-known/jwks.json (OIDC). It is an input to the auth stack, not
-# an alternative mode. Delegated/service credentials use the control plane's
-# live issuer registry instead (register via POST /v1/service/merchant/issuers
-# or the bootstrap manifest).
+  addr: garnet:6379
+  password: ""
+  db: 0
 
 auth:
-  # First-party issuers - array of token issuer URLs for host-app user JWTs.
-  issuers:
-    - "http://localhost:8080"
-    - "http://localhost:8081"
-  # Production example:
-  # issuers:
-  #   - "https://issuer.example.com"
+  control_plane:
+    issuer: http://localhost:2053
+    token_prefix: openrails
+    public_hosted: false
+    bootstrap_admin_service_token_name: openrails-bootstrap-admin
 
-  # Expected audience - the expected "aud" claim in incoming JWTs
-  expected_audience: "openrails-app"
-
-  # ---------------------------------------------------------------------------
-  # OpenRails-owned AuthKit control plane (#224). ALWAYS ON in standalone mode
-  # (#469): this section tunes it, it cannot switch it off. The control plane
-  #   * selectively mounts only intentional AuthKit route groups under /auth
-  #     (NEVER AuthKit DefaultAPI in the locked-down posture),
-  #   * issues + verifies delegated browser tokens and tenant service tokens,
-  #   * provides the in-process AuthKit core used by tenant manifest bootstrap.
-  # It needs a database holding AuthKit's profiles.* schema (`billing migrate up`
-  # applies those migrations).
-  #
-  # `issuer` is REQUIRED outside development; in development it defaults to
-  # api_url (or http://localhost:<port>). Private/self-hosted posture is the
-  # registration axes below (both default false = closed) — never a disabled
-  # control plane.
-  # ---------------------------------------------------------------------------
-  # control_plane:
-  #   issuer: "https://openrails.mysite.com" # AuthKit token issuer this CP signs as
-  #   token_prefix: "openrails"               # generated service token brand prefix -> openrails_st_...
-  #   # public_user_registration: false       # default false: native-user signup is admin/bootstrap-only
-  #   # public_tenant_registration: false     # default false: tenant onboarding is admin/bootstrap-only
-  #   # issued_audiences: ["openrails-app"]   # defaults to expected_audience
-  #   # expected_audiences: ["openrails-app"]
-
-# Declarative setup for closed-registration deployments is explicit:
-#
-#   billing migrate up -c /etc/openrails/config.yaml
-#   billing push-bootstrap -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
-#   billing push-catalog -c /etc/openrails/config.yaml -f /etc/openrails/catalog.yaml
-#   billing run-server -c /etc/openrails/config.yaml
-#
-# The mounted merchant file uses two explicit sections: AuthKit-owned `auth:`
-# and OpenRails-owned `merchants:`.
-#
-# Example /etc/openrails/bootstrap.yaml:
-# version: 1
-# auth:
-#   orgs:
-#     - slug: local-stack
-#       issuers: []
-# merchants:
-#   - slug: local-stack
-#     name: Local Stack
-#     owner_org_id: 11111111-1111-1111-1111-111111111111
-#
-# Example /etc/openrails/catalog.yaml:
-# version: 1
-# catalogs:
-#   - merchant: local-stack
-#     name: default
-#     tier_groups: []   # each price declares its own `currency`
-#
-# A price may either let OpenRails find-or-create each provider object
-# (content-addressed, idempotent across DB rebuilds) or pin external objects with
-# `provider_links`. Linked objects are validated against the provider (existence
-# + amount/currency/cycle/mint); a mismatch fails the apply loudly and ids are
-# never renamed by OpenRails. A MISSING object is created where the linked id is
-# client-creatable (NMI plan_id, Stripe lookup_key) and errors where it is
-# provider-generated (Stripe price_id, Solana plan_pda).
-# The recommended manual-link fields are the operator-chosen identifiers — Stripe
-# `lookup_key` and NMI `plan_id` — both find-or-create (human-readable, stable,
-# portable across DB rebuilds and Stripe test/live).
-#         prices:
-#           - currency: usd
-#             unit_amount: 2300
-#             interval: month
-#             provider_links:
-#               stripe: { lookup_key: premium }   # find-or-create at this key (recommended)
-#               mobius: { plan_id: premium }      # find-or-create the NMI plan at this id
-#               solana: { plan_pda: 7Xy...PdA }   # must already exist on-chain
-#               ccbill: { form_name: premium, flex_id: abc-123 }
-#       # To pin an exact pre-existing Stripe price instead of find-or-create:
-#       #   stripe: { price_id: price_123, product_id: prod_123 }  # require-exists
-
-# =============================================================================
-# ENCRYPTION AT REST (issue #227)
-# =============================================================================
-# Per-merchant envelope encryption. The master key wraps each merchant's Data
-# Encryption Key (DEK); the DEK encrypts sensitive at-rest values (e.g. per-merchant
-# processor credentials in openrails.merchant_secrets). The wrapped DEKs live in the
-# DB; the master key NEVER does.
-#
-# Self-hosted/dev: set ENCRYPTION_MASTER_KEY (base64 of 32 random bytes).
-# Production: source the master key from a KMS. Empty disables at-rest encryption.
 encryption:
-  # master_key: set via ENCRYPTION_MASTER_KEY env var (base64 of 32 bytes)
+  master_key: ""    # base64-encoded 32-byte AES-256 key; empty disables it
 
-# =============================================================================
-# VAULT SECRET BACKEND (OPTIONAL)
-# =============================================================================
-# Disabled by default. When enabled, per-merchant secrets use Vault KV-v2 instead
-# of DB+envelope storage, and Solana signing can use Vault Transit.
-#
-# vault:
-#   enabled: false
-#   address: "http://127.0.0.1:8200"        # or VAULT_ADDR
-#   auth_method: "token"                    # token | approle | kubernetes
-#   # token: set via VAULT_TOKEN
-#   kv_mount: "secret"
-#   transit_mount: "transit"
-#   use_transit_for_solana: false
-#   secret_cache_ttl_seconds: 900
-
-# =============================================================================
-# PAYMENT PROCESSORS
-# =============================================================================
-# All processors are configured under a single "processors" map.
-# Reserved names (ccbill, stripe, solana) don't need explicit "type" field.
-# Non-reserved names (e.g., "mobius", "acme") require "type: nmi".
-#
-# Environment variables: PROCESSORS_<NAME>_<FIELD>
-# Example: PROCESSORS_MOBIUS_SECURITY_KEY, PROCESSORS_CCBILL_CLIENT_ACC_NUM
-
-processors:
-  # ---------------------------------------------------------------------------
-  # NMI-backed processors (type: nmi)
-  # ---------------------------------------------------------------------------
-  # Add any NMI/Mobius gateway providers here.
-  # Non-reserved names require "type: nmi".
-  mobius:
-    type: nmi
-    # Legacy process-wide config. New merchant-specific provider credentials
-    # should be stored as merchant secrets (for example
-    # nmi/mobius/production_key, nmi/mobius/tokenization_key, and optional
-    # nmi/mobius/tokenization_url).
-    # security_key: ""
-    # tokenization_key: ""
-    # webhook_secret: ""
-
-    # Example: Another NMI provider (just add config, no code changes needed)
-  # acme:
-  #   type: nmi
-  #   security_key: ""  # or via PROCESSORS_ACME_SECURITY_KEY
-
-  # ---------------------------------------------------------------------------
-  # CCBill (reserved name - type implied)
-  # ---------------------------------------------------------------------------
-  ccbill:
-    client_acc_num: "your-ccbill-account-number"
-    client_sub_acc: "your-ccbill-subaccount"
-    # salt: set via PROCESSORS_CCBILL_SALT env var
-
-    # CCBill retry/dunning behavior is controlled by CCBill itself. OpenRails follows the
-    # webhook-provided nextRetryDate schedule and does not offer grace tuning knobs here.
-
-    # DataLink credentials (enables reconciliation worker)
-    # datalink_username: set via PROCESSORS_CCBILL_DATALINK_USERNAME env var
-    # datalink_password: set via PROCESSORS_CCBILL_DATALINK_PASSWORD env var
-
-    # Webhook source IP allowlist (CIDR notation). Overrides the documented
-    # built-in default ranges so they can be rotated without a code deploy when
-    # CCBill adds/changes IPs. Parsed at boot; invalid entries fail startup.
-    # Changes require a service restart to take effect.
-    # allowed_cidrs:
-    #   - "64.38.212.0/24"
-    #   - "64.38.215.0/24"
-    #   - "64.38.240.0/24"
-    #   - "64.38.241.0/24"
-
-  # ---------------------------------------------------------------------------
-  # Stripe (reserved name - type implied)
-  # ---------------------------------------------------------------------------
-  stripe:
-    # secret_key: set via PROCESSORS_STRIPE_SECRET_KEY env var
-    # webhook_secret: set via PROCESSORS_STRIPE_WEBHOOK_SECRET env var
-    success_url: "https://your-domain.com/checkout/success"
-    cancel_url: "https://your-domain.com/checkout/cancel"
-
-  # ---------------------------------------------------------------------------
-  # Solana (reserved name - type implied)
-  # ---------------------------------------------------------------------------
-  solana:
-    recipient_wallet: "your-solana-wallet-address"
-    # network is auto-derived from test_env: devnet if test_env=true, mainnet
-    # otherwise. It is deliberately not configurable.
-
-    # Advertise recurring Solana Pay v2 transaction-request support to clients.
-    # Keep false until the deployment has validated target wallets with merchant
-    # co-signed recurring subscription transactions.
-    solana_pay_recurring_subscriptions: false
-
-    # -------------------------------------------------------------------------
-    # RPC Configuration (choose one approach)
-    # -------------------------------------------------------------------------
-    #
-    # OPTION 1: Automatic RPC fallback chain (RECOMMENDED)
-    # Add helius_api_key for Helius as primary (100k req/day free tier)
-    #
-    # helius_api_key: ""  # Get free API key at https://helius.dev
-    #
-    # OPTION 2: Custom RPC endpoint (bypasses fallback chain)
-
-    # -------------------------------------------------------------------------
-    # Token Configuration
-    # -------------------------------------------------------------------------
-    #
-    tokens:
-      SOL:
-        mint: "So11111111111111111111111111111111111111112"
-        name: "Solana"
-        decimals: 9
-      USDC:
-        mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
-        name: "USD Coin (Devnet)"
-        decimals: 6
-      PYUSD:
-        mint: "CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM"
-        name: "PayPal USD (Devnet)"
-        decimals: 6
-
-# =============================================================================
-# USDC WALLET FUNDING (OPTIONAL)
-# =============================================================================
-# External provider handoffs that move USDC into the user's own live wallet.
-# OpenRails does not custody these funds and does not treat provider return as
-# checkout payment. The wallet balance must still satisfy the normal checkout.
-#
-# Host apps should call /v1/self/usdc-funding-* and never build provider URLs
-# themselves.
-#
-# usdc_funding:
-#   providers:
-#     robinhood:
-#       enabled: false
-#       supported_networks: ["solana"]
-#       # Supplied by Robinhood partner docs/access. Supported placeholders:
-#       # {wallet}, {network}, {asset}, {amount}, {session_id}, {return_url}
-#       launch_url_template: "https://robinhood.example/connect?asset={asset}&network={network}&address={wallet}&amount={amount}&redirect={return_url}"
-#     coinbase:
-#       enabled: false
-#       # Coinbase is only used if it can deliver USDC to the user's Solana wallet.
-#       # Do not configure Base/EVM networks for this app.
-#       supported_networks: ["solana"]
-#       api_base_url: "https://api.cdp.coinbase.com"
-#       # Preferred: CDP Secret API Key credentials. OpenRails generates the
-#       # short-lived JWT bearer token for each server-side request.
-#       # api_key_id: set via USDC_FUNDING_PROVIDERS_COINBASE_API_KEY_ID env var
-#       # api_key_secret: set via USDC_FUNDING_PROVIDERS_COINBASE_API_KEY_SECRET env var
-#       # Webhook subscription secret for X-Hook0-Signature verification.
-#       # webhook_secret: set via USDC_FUNDING_PROVIDERS_COINBASE_WEBHOOK_SECRET env var
-#       # Escape hatch only: pre-generated short-lived bearer token.
-#       # api_key: set via USDC_FUNDING_PROVIDERS_COINBASE_API_KEY env var
-
-# =============================================================================
-# ANALYTICS (ClickHouse)
-# =============================================================================
+vault:
+  enabled: false
+  address: ""       # defaults to the Vault client default / VAULT_ADDR
+  auth_method: ""   # token | approle | kubernetes
+  token: ""
+  role_id: ""
+  secret_id: ""
+  k8s_role: ""
+  kv_mount: secret
+  transit_mount: transit
+  use_transit_for_solana: false
+  secret_cache_ttl_seconds: 900
 
 clickhouse:
-  http_addr: "http://clickhouse:8123"
-  client_addr: "clickhouse:9000"
-  db: "analytics"
-  cluster: "billing"  # ClickHouse cluster name
-  # user: set via CLICKHOUSE_USER env var
-  # password: set via CLICKHOUSE_PASSWORD env var
-
-# =============================================================================
-# EMAIL (SendGrid)
-# =============================================================================
-# Sender info (from_email, from_name) comes from store config above.
+  http_addr: http://localhost:8123
+  client_addr: localhost:9000
+  db: analytics
+  user: analytics_user
+  password: analytics_password
+  cluster: openrails
 
 sendgrid:
-  # api_key: set via SENDGRID_API_KEY env var
-  # Sender email uses store.from_email, sender name uses store.name
-
-# =============================================================================
-# RATE LIMITING
-# =============================================================================
-# All rate limits use a fixed 1-minute window.
+  api_key: ""
 
 rate_limits:
   subscribe:
-    requests_per_minute: 20   # Mutations; per-user limit is the real fraud control
-
+    requests_per_minute: 20
   checkout:
-    requests_per_minute: 10   # Kept tight to deter card-testing/abuse
-
+    requests_per_minute: 10
   webhook:
-    # Per source IP. All webhooks from a processor share one bucket (fixed
-    # processor IPs), so this absorbs rebill runs / event bursts without 429-ing
-    # legit payment events. Webhooks are already authenticated (signature + IP
-    # allowlist + body caps); this is a DoS floor, not the primary control.
     requests_per_minute: 1200
-
   payment:
-    requests_per_minute: 40   # Payment method operations
-
+    requests_per_minute: 40
   default:
-    requests_per_minute: 300  # Other endpoints; SPA/NAT friendly
+    requests_per_minute: 300
 
-# Captcha is enabled after an IP exceeds an extreme rate-limit threshold.
-# The frontend should retry the same request with X-Captcha-Token.
-# Everything else about captcha behavior is hardcoded (#353): provider verify/
-# script URLs, the 15m challenge TTL, the 3x extreme-threshold escalation, the
-# 0.5 recaptcha-v3 min score, and the challenged buckets (checkout,
-# payment-methods, subscriptions).
-# There is no enabled knob: setting BOTH keys enables captcha; leaving them
-# empty disables it (half a pair refuses to boot).
 captcha:
-  provider: turnstile # turnstile | recaptcha-v3 | hcaptcha
+  provider: turnstile   # turnstile | recaptcha-v3 | hcaptcha
   site_key: ""
   secret_key: ""
 
-# =============================================================================
-# FEATURE FLAGS (Safety Controls)
-# =============================================================================
-# These flags control potentially destructive background operations.
-# Use them to quickly disable operations when bugs are suspected,
-# without requiring a code deployment.
-#
-# Environment variables:
-#   FEATURE_FLAGS_DUNNING_MODE=on|dry_run_only|off
-#   FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true|false
-#   FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS=true|false
-#   MODE=full|limited|readonly  (top-level operating mode, see CORE SETTINGS)
-#   TEST_ENV=true|false         (sandbox-credential axis, see CORE SETTINGS)
-
-feature_flags:
-  # -------------------------------------------------------------------------
-  # Dunning Mode - Controls retry charging for failed subscription rebills
-  # -------------------------------------------------------------------------
-  # Values:
-  #   "on" (default):     Normal dunning - retry charges, grace period, recovery workflow
-  #   "dry_run_only":     Workflow runs but no charges attempted
-  #                       - Subscriptions stay in past_due state
-  #                       - Retry counts preserved (not incremented)
-  #                       - Use when debugging charge logic bugs
-  #   "off":              No dunning - immediate cancellation on rebill failure
-  #                       - No grace period, no retry attempts
-  #                       - Use when dunning itself is broken or business decision
-  #
-  # Example: If charge logic has a bug causing incorrect amounts:
-  #   1. Set dunning_mode: dry_run_only
-  #   2. Fix the bug, deploy
-  #   3. Set dunning_mode: on
-  #   4. All accumulated past_due subscriptions will be retried
-  #
-  dunning_mode: "on"
-
-  # NOTE: the dunning SCHEDULE is not configurable (#359). It is a hardcoded
-  # function of the price's billing cycle (retry offsets from the failed rebill):
-  #   cycle < 4 days -> no retries (the first failure is terminal)
-  #   4..27 days     -> +1d, +2d (3 attempts total)
-  #   >= 28 days     -> +2d, +5d, +9d, +13d (5 attempts over ~2 weeks, capped;
-  #                     yearly == monthly)
-  # The staleness window ("never charge a months-old failure") is DERIVED from
-  # the same schedule: period_end + last retry offset + one day of slack
-  # (14 days for monthly subs). A past_due subscription whose missed rebill is
-  # OLDER than that window is cancelled and the user downgraded WITHOUT a
-  # charge attempt.
-
-  # (Limited mode moved: it is now the top-level `mode: limited` operating
-  # mode - see CORE SETTINGS. feature_flags.limited_mode no longer exists.)
-
-  # -------------------------------------------------------------------------
-  # Disable Processor Subscription Deletions - Blocks remote delete_subscription
-  # -------------------------------------------------------------------------
-  # When true:
-  #   - Every outbound NMI delete_subscription call is skipped (user cancels,
-  #     admin cancels, tier-change supersedes, deferred deletes, dunning expiry)
-  #   - Local cancellation/downgrade proceeds normally
-  #   - The remote subscription stays alive and is flagged for reconciliation
-  #     (deferred-delete markers are kept for replay)
-  #
-  # When false (default):
-  #   - Normal behavior: OpenRails deletes the NMI subscription, then downgrades
-  #
-  # Use case: migration cutovers / reconciliation runs where bulk remote
-  # deletions on possibly-wrong local state would be unrecoverable.
-  #
-  disable_processor_subscription_deletions: false
-
-  # -------------------------------------------------------------------------
-  # Disable Entitlement Expiration - Stops credits/entitlements from expiring
-  # -------------------------------------------------------------------------
-  # When true:
-  #   - CreditExpiryWorker skips - expired credit batches are preserved
-  #   - FailMembership skips entitlement revocation (but still cancels subscription)
-  #   - Users keep premium access even after subscription ends
-  #
-  # When false (default):
-  #   - Normal expiration behavior
-  #
-  # Use case: Bug in expiration logic causing premature credit/entitlement loss
-  #
-  # Example: If credits are expiring too early due to timezone bug:
-  #   1. Set disable_entitlement_expiration: true
-  #   2. Fix the bug, deploy
-  #   3. Set disable_entitlement_expiration: false
-  #   4. All accumulated expirations will process at once
-  #
-  disable_entitlement_expiration: false
+usdc_funding:
+  providers:
+    robinhood:
+      enabled: false
+      supported_networks: [solana]
+      launch_url_template: ""
+      api_base_url: ""
+      api_key_id: ""
+      api_key_secret: ""
+      api_key: ""
+      webhook_secret: ""
+    coinbase:
+      enabled: false
+      supported_networks: [solana]
+      launch_url_template: ""
+      api_base_url: https://api.cdp.coinbase.com
+      api_key_id: ""
+      api_key_secret: ""
+      api_key: ""
+      webhook_secret: ""

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -539,7 +540,34 @@ type serviceMerchantConfigWindow struct {
 }
 
 type serviceMerchantConfigurationRequest struct {
-	DelegatedInvokerWastedSpendWindows []serviceMerchantConfigWindow `json:"delegated_invoker_wasted_spend_windows"`
+	Profile                            *serviceMerchantProfileConfiguration `json:"profile,omitempty"`
+	DelegatedInvokerWastedSpendWindows []serviceMerchantConfigWindow        `json:"delegated_invoker_wasted_spend_windows"`
+}
+
+type serviceMerchantProfileConfiguration struct {
+	DisplayName  string `json:"display_name,omitempty"`
+	LogoURL      string `json:"logo_url,omitempty"`
+	FromEmail    string `json:"from_email,omitempty"`
+	SupportURL   string `json:"support_url,omitempty"`
+	SupportEmail string `json:"support_email,omitempty"`
+}
+
+func ServiceGetMerchantConfiguration(r *httprequest.Request) {
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	cfg, found, err := svc.GetMerchantConfiguration(r.Request.Context())
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "get merchant configuration failed")
+		return
+	}
+	r.SuccessJSON(map[string]any{
+		"found":                                  found,
+		"profile":                                merchantProfileResponse(cfg.Profile),
+		"delegated_invoker_wasted_spend_windows": serviceMerchantConfigWindows(cfg.DelegatedInvokerWastedSpendWindows),
+	})
 }
 
 // ServiceSetMerchantConfiguration persists the merchant-scoped configuration
@@ -564,12 +592,52 @@ func ServiceSetMerchantConfiguration(r *httprequest.Request) {
 		})
 	}
 	if err := svc.SetMerchantConfiguration(r.Request.Context(), billingservice.MerchantConfiguration{
+		Profile:                            merchantProfileInput(req.Profile),
 		DelegatedInvokerWastedSpendWindows: windows,
 	}); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "set merchant configuration failed")
 		return
 	}
 	r.SuccessJSONMessage("ok")
+}
+
+func merchantProfileInput(in *serviceMerchantProfileConfiguration) *models.MerchantProfileConfiguration {
+	if in == nil {
+		return nil
+	}
+	return &models.MerchantProfileConfiguration{
+		DisplayName:  strings.TrimSpace(in.DisplayName),
+		LogoURL:      strings.TrimSpace(in.LogoURL),
+		FromEmail:    strings.TrimSpace(in.FromEmail),
+		SupportURL:   strings.TrimSpace(in.SupportURL),
+		SupportEmail: strings.TrimSpace(in.SupportEmail),
+	}
+}
+
+func merchantProfileResponse(in *models.MerchantProfileConfiguration) serviceMerchantProfileConfiguration {
+	if in == nil {
+		return serviceMerchantProfileConfiguration{}
+	}
+	return serviceMerchantProfileConfiguration{
+		DisplayName:  in.DisplayName,
+		LogoURL:      in.LogoURL,
+		FromEmail:    in.FromEmail,
+		SupportURL:   in.SupportURL,
+		SupportEmail: in.SupportEmail,
+	}
+}
+
+func serviceMerchantConfigWindows(in []abuse.WastedWindow) []serviceMerchantConfigWindow {
+	out := make([]serviceMerchantConfigWindow, 0, len(in))
+	for _, w := range in {
+		out = append(out, serviceMerchantConfigWindow{
+			Key:           w.Key,
+			WindowSeconds: int64(w.Window / time.Second),
+			Limit:         w.Limit,
+			Currency:      w.Currency,
+		})
+	}
+	return out
 }
 
 // spendLimitWindow is one fixed money-budget window in a budget-scope policy

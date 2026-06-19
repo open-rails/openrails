@@ -6,6 +6,7 @@ import (
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -45,11 +46,13 @@ func GetSolanaPay(r *httprequest.Request) {
 	}
 	label := "Payment"
 	icon := ""
-	if r.State.Config != nil && r.State.Config.Store != nil {
-		if r.State.Config.Store.Name != "" {
-			label = r.State.Config.Store.Name
+	if r.State.DB != nil {
+		if cfg, _, err := merchantconfig.NewStore(r.State.DB).Get(r.Request.Context()); err == nil {
+			if displayName := strings.TrimSpace(cfg.Profile.DisplayName); displayName != "" {
+				label = displayName
+			}
+			icon = strings.TrimSpace(cfg.Profile.LogoURL)
 		}
-		icon = r.State.Config.Store.LogoURL
 	}
 	if session.ProductName != "" {
 		label = session.ProductName

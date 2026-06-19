@@ -32,24 +32,24 @@ type FetcherOptions struct {
 // BuildFetchers wires a ProcessorFetcher for every provider the runtime has
 // clients/credentials for. Reads only; providers without configuration are
 // simply absent from the map.
-func BuildFetchers(cfg *config.Config, clients FetcherClients, d *db.DB) map[Provider]ProcessorFetcher {
-	fetchers, _ := BuildFetchersWithOptions(cfg, clients, d, FetcherOptions{})
+func BuildFetchers(cfg *config.Config, processors config.ProcessorSet, clients FetcherClients, d *db.DB) map[Provider]ProcessorFetcher {
+	fetchers, _ := BuildFetchersWithOptions(cfg, processors, clients, d, FetcherOptions{})
 	return fetchers
 }
 
 // BuildFetchersWithOptions is the strict builder used by operator commands.
 // It respects processor role selection and returns config errors instead of
 // silently picking an arbitrary account.
-func BuildFetchersWithOptions(cfg *config.Config, clients FetcherClients, d *db.DB, opts FetcherOptions) (map[Provider]ProcessorFetcher, error) {
+func BuildFetchersWithOptions(cfg *config.Config, processors config.ProcessorSet, clients FetcherClients, d *db.DB, opts FetcherOptions) (map[Provider]ProcessorFetcher, error) {
 	fetchers := map[Provider]ProcessorFetcher{}
 
-	if key, c, err := selectNMIClient(cfg, clients.NMIClients, opts.providerKey(ProviderNMI)); err != nil {
+	if key, c, err := selectNMIClient(processors, clients.NMIClients, opts.providerKey(ProviderNMI)); err != nil {
 		return nil, err
 	} else if c != nil {
 		fetchers[ProviderNMI] = keyedFetcher{ProcessorFetcher: NewNMIFetcher(c), key: key}
 	}
 	if clients.CCBillDataLink != nil {
-		key, proc, err := selectProcessorByType(cfg, config.ProcessorTypeCCBill, opts.providerKey(ProviderCCBill))
+		key, proc, err := selectProcessorByType(processors, config.ProcessorTypeCCBill, opts.providerKey(ProviderCCBill))
 		if err != nil {
 			return nil, err
 		}
@@ -57,8 +57,8 @@ func BuildFetchersWithOptions(cfg *config.Config, clients FetcherClients, d *db.
 			fetchers[ProviderCCBill] = keyedFetcher{ProcessorFetcher: NewCCBillFetcher(clients.CCBillDataLink), key: key}
 		}
 	}
-	if cfg != nil {
-		key, sp, err := selectProcessorByType(cfg, config.ProcessorTypeStripe, opts.providerKey(ProviderStripe))
+	{
+		key, sp, err := selectProcessorByType(processors, config.ProcessorTypeStripe, opts.providerKey(ProviderStripe))
 		if err != nil {
 			return nil, err
 		}
@@ -67,7 +67,7 @@ func BuildFetchersWithOptions(cfg *config.Config, clients FetcherClients, d *db.
 		}
 	}
 	if clients.SolanaRPC != nil && d != nil {
-		key, proc, err := selectProcessorByType(cfg, config.ProcessorTypeSolana, opts.providerKey(ProviderSolana))
+		key, proc, err := selectProcessorByType(processors, config.ProcessorTypeSolana, opts.providerKey(ProviderSolana))
 		if err != nil {
 			return nil, err
 		}
@@ -86,12 +86,9 @@ func (o FetcherOptions) providerKey(provider Provider) string {
 	return strings.ToLower(strings.TrimSpace(o.ProviderKeys[provider]))
 }
 
-func selectProcessorByType(cfg *config.Config, providerType, explicitKey string) (string, *config.ProcessorConfig, error) {
-	if cfg == nil {
-		return "", nil, nil
-	}
+func selectProcessorByType(processors config.ProcessorSet, providerType, explicitKey string) (string, *config.ProcessorConfig, error) {
 	if explicitKey != "" {
-		proc := cfg.GetProcessor(explicitKey)
+		proc := processors.GetProcessor(explicitKey)
 		if proc == nil {
 			return "", nil, fmt.Errorf("processor %q is not configured", explicitKey)
 		}
@@ -100,10 +97,10 @@ func selectProcessorByType(cfg *config.Config, providerType, explicitKey string)
 		}
 		return explicitKey, proc, nil
 	}
-	return cfg.PrimaryProcessorByType(providerType)
+	return processors.PrimaryProcessorByType(providerType)
 }
 
-func selectNMIClient(cfg *config.Config, clients map[string]*nmi.NMIClient, explicitKey string) (string, *nmi.NMIClient, error) {
+func selectNMIClient(processors config.ProcessorSet, clients map[string]*nmi.NMIClient, explicitKey string) (string, *nmi.NMIClient, error) {
 	if explicitKey != "" {
 		c := clients[explicitKey]
 		if c == nil {
@@ -111,18 +108,16 @@ func selectNMIClient(cfg *config.Config, clients map[string]*nmi.NMIClient, expl
 		}
 		return explicitKey, c, nil
 	}
-	if cfg != nil {
-		key, proc, err := cfg.PrimaryProcessorByType(config.ProcessorTypeNMI)
-		if err != nil {
-			return "", nil, err
+	key, proc, err := processors.PrimaryProcessorByType(config.ProcessorTypeNMI)
+	if err != nil {
+		return "", nil, err
+	}
+	if proc != nil {
+		c := clients[key]
+		if c == nil {
+			return "", nil, fmt.Errorf("primary nmi processor %q is not configured for reconciliation", key)
 		}
-		if proc != nil {
-			c := clients[key]
-			if c == nil {
-				return "", nil, fmt.Errorf("primary nmi processor %q is not configured for reconciliation", key)
-			}
-			return key, c, nil
-		}
+		return key, c, nil
 	}
 	key, c := pickNMIClient(clients)
 	return key, c, nil
@@ -159,7 +154,6 @@ func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]ProcessorFetc
 		Intents:  &PGStuckIntentSource{DB: d},
 	}
 	if cfg != nil {
-		e.DisableEntitlementRevocation = cfg.IsEntitlementExpirationDisabled()
 		// Third dunning-forensics evidence source: OpenRails' own ClickHouse
 		// analytics events (incl. imported legacy history). Optional — when
 		// ClickHouse is absent the report carries a note instead.

@@ -38,7 +38,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// dunning worker's synchronous rebill path and (via Runtime.IntentRunner)
 	// the admin refund producer — per-type semantics can never diverge.
 	intentRegistry := r.buildIntentRegistry(clock)
-	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
+	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Processors: r.Processors, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.IdempotencyCleanupWorker{Config: r.Config}); err != nil {
@@ -51,6 +51,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.SubscriptionLivenessWorker{
 		DB:              r.DB,
 		Config:          r.Config,
+		Processors:      r.Processors,
 		Clock:           clock,
 		NMIClients:      r.NMIClients,
 		EventLogService: r.EventLogService,
@@ -71,9 +72,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add cleanup expired data worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CreditExpiryWorker{
-		DB:     r.DB,
-		Config: r.Config,
-		Clock:  clock,
+		DB:    r.DB,
+		Clock: clock,
 	}); err != nil {
 		return fmt.Errorf("add credit expiry worker: %w", err)
 	}
@@ -91,6 +91,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.CancelSubscriptionWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
+		Processors:                   r.Processors,
 		UserSubscriptionService:      r.UserSubscriptionService,
 		SubscriptionService:          r.SubscriptionService,
 		SubscriptionLifecycleService: r.SubscriptionLifecycleService,
@@ -100,6 +101,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.ResumeSubscriptionWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
+		Processors:                   r.Processors,
 		EntitlementService:           r.EntitlementService,
 		SubscriptionService:          r.SubscriptionService,
 		SubscriptionLifecycleService: r.SubscriptionLifecycleService,
@@ -137,6 +139,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.CatalogReconciliationPullWorker{
 		DB:         r.DB,
 		Config:     r.Config,
+		Processors: r.Processors,
 		NMIClients: r.NMIClients,
 	}); err != nil {
 		return fmt.Errorf("add catalog reconciliation worker: %w", err)
@@ -214,10 +217,10 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	return intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.NMIClients, clock),
 		intents.NewNMIRefundHandler(r.DB, r.NMIClients, clock),
-		intents.NewStripeRefundHandler(r.DB, r.Config, clock),
+		intents.NewStripeRefundHandler(r.DB, r.Config, r.Processors, clock),
 		intents.NewManualRebillHandler(r.DB, r.Config, r.NMIClients, clock, r.EventLogService),
-		intents.NewStripeArchiveProductHandler(r.DB, r.Config, clock),
-		intents.NewStripeArchivePriceHandler(r.DB, r.Config, clock),
+		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.Processors, clock),
+		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.Processors, clock),
 		intents.NewSolanaSunsetPlanHandler(r.DB, r.SolanaPlanService, r.SolanaRPC, clock),
 	)
 }

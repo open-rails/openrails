@@ -79,19 +79,19 @@ Implement more granular rate limiting within the OpenRails service: by IP, by au
 
 ---
 
-# #SEC-5: hard-stop-empty-expected-audience
+# #SEC-5: remove-static-expected-audience-verifier
 
-**Status:** implemented — verified in code 2026-06-12 (automated review). Boot-time validation refuses to start outside development when `auth.expected_audience` is empty (config/config.go ~1095), alongside hard stops for empty issuers, default issuers, default ClickHouse credentials, and empty cors_origins.
+**Status:** superseded — the config-declared static JWT verifier was removed. `auth.expected_audience` is now a retired/ignored config key; standalone OpenRails authenticates users/admins through its own AuthKit control plane, whose audience is fixed to `openrails`.
 
 **Priority:** high
 **Files:** internal/auth/verifier.go, config/config.go
 
-When expected_audience config is empty, the JWT verifier accepts tokens with any audience claim. Make this a hard deployment failure — refuse to boot if expected_audience is not set in non-test/non-dev environments.
+The old risk was: when `expected_audience` config was empty, the static JWT verifier accepted tokens with any audience claim. The long-term fix is stronger than validation: remove the static verifier config surface entirely.
 
 **Tasks:**
-- [ ] In config validation (boot time): if env != development/test AND expected_audience is empty, log.Fatal with clear error message
-- [ ] Same pattern for other critical empty fields: api_key, trusted_proxies (non-dev)
-- [ ] Add unit test that verifies boot fails when expected_audience is empty in production mode
+- [x] Remove `auth.expected_audience` from runtime config.
+- [x] Remove standalone verifier construction from `auth.issuers` / `expected_audience`.
+- [x] Use the control-plane AuthKit verifier for standalone user/admin tokens.
 
 ---
 

@@ -141,7 +141,7 @@ func GetUSDCFundingSession(r *httprequest.Request) {
 }
 
 func newUSDCFundingService(r *httprequest.Request) *funding.Service {
-	svc := funding.NewService(repo.NewUSDCFundingSessionRepo(r.State.DB), r.State.Config)
+	svc := funding.NewService(repo.NewUSDCFundingSessionRepo(r.State.DB), r.State.Config, r.State.Processors)
 	if r.State.SolanaRPC != nil {
 		svc.WithSolanaBalanceReader(r.State.SolanaRPC)
 	}

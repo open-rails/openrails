@@ -39,11 +39,6 @@ type Engine struct {
 	// a missing or unreachable ClickHouse is NEVER a run error.
 	History HistoryEventSource
 
-	// DisableEntitlementRevocation mirrors config.IsEntitlementExpirationDisabled:
-	// when true, every entitlement-revoking applier is skipped with a logged
-	// note (grants and other appliers still run).
-	DisableEntitlementRevocation bool
-
 	// Now is the clock (defaults to time.Now UTC).
 	Now func() time.Time
 
@@ -537,12 +532,6 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 			return nil, false, err
 		}
 		evidence["cancelled_locally"] = changed
-		if e.DisableEntitlementRevocation {
-			log.WithField("subscription_id", a.CancelLocal.SubscriptionID).
-				Warn("reconcile: entitlement expiration disabled; skipping subscription-entitlement revocation for PS-2 cancel")
-			evidence["entitlement_revocation_skipped"] = "entitlement expiration disabled"
-			return evidence, changed, nil
-		}
 		revoked, err := e.Writer.RevokeSubscriptionEntitlements(ctx, RevokeEntitlementsAction{
 			SubscriptionID: a.CancelLocal.SubscriptionID,
 			Reason:         a.CancelLocal.Reason,
@@ -616,11 +605,6 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 		return evidence, true, nil
 
 	case a.RevokeEntitlements != nil:
-		if e.DisableEntitlementRevocation {
-			log.WithField("subscription_id", a.RevokeEntitlements.SubscriptionID).
-				Warn("reconcile: entitlement expiration disabled; skipping PS-9 entitlement revocation")
-			return nil, false, nil
-		}
 		revoked, err := e.Writer.RevokeSubscriptionEntitlements(ctx, *a.RevokeEntitlements)
 		if err != nil {
 			return nil, false, err

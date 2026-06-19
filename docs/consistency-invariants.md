@@ -382,6 +382,29 @@ and should be handled conservatively.
 > spent credits are left as-is. An expired admin grant (`created_at + duration_days`)
 > is a `derive.grant.excess` grant whose source no longer justifies it -> its grant effects become `derive.grant_effect.excess`.
 
+> **Implementation status (2026-06-18).** `derive.grant_effect.missing` and
+> `derive.grant_effect.excess` are implemented; `derive.grant.excess` is implemented
+> for the refunded-payment case (a live grant whose backing payment was refunded →
+> ADMIN surface-only). The two **`*.mismatch`** rows above are **NOT runtime checks
+> and intentionally so** — they are *guaranteed by construction* (the §9 category),
+> not pending work: `MaterializeGrant` is the sole writer of grant effects and writes
+> them to match the grant, grants are immutable snapshots, and revocation now flows
+> through the ledger too. So an effect cannot drift from its grant through normal
+> operation — the only remaining mutation path is the admin `ExtendActiveBySubscription`
+> (legitimately lengthens a window), against which a strict effect==grant check would
+> merely *false-positive*. (`derive.grant.mismatch` — "grant matches its source" — is
+> likewise not a drift check: a grant is a historical snapshot that is *supposed* to
+> diverge from the evolving source.) These become real runtime checks only if a future
+> architecture introduces an independent effect-mutation path. `derive.grant.missing`
+> IS implemented (spec-aware): the positive "this payment should grant X" signal is the
+> product's own grant spec via `payment → price → product`, so a completed one-off
+> payment for a product whose `entitlements_spec`/`credits_spec` promises grants but that
+> produced none is flagged (`ListUngrantedGrantablePaymentsByCustomer` → ADMIN,
+> surface-only). Empty-spec products / pure fees are never flagged (no promised grant),
+> and a refunded purchase keeps its `grant` event so it is not flagged (existence, not
+> liveness). An earlier naive absence check ("any payment with no grant") was rejected for
+> false-positiving on empty-spec/backfilled payments — the product spec is the signal.
+
 ### Plane LIFE — Lifecycle (clock/state-machine authoritative; converge forward, §3.1)
 
 | Finding type | Invariant — must hold | Shape | Class |

@@ -112,6 +112,8 @@ const (
 	PermMerchantCreditsWrite       = "openrails:merchant:credits:write"
 	PermMerchantPaymentsWrite      = "openrails:merchant:payments:write"
 	PermMerchantSubscriptionsWrite = "openrails:merchant:subscriptions:write"
+	PermMerchantConfigurationRead  = "openrails:merchant:configuration:read"
+	PermMerchantConfigurationWrite = "openrails:merchant:configuration:write"
 	PermMerchantSecretsList        = "openrails:merchant:secrets:list"
 	PermMerchantSecretsWrite       = "openrails:merchant:secrets:write"
 	PermMerchantSecretsDelete      = "openrails:merchant:secrets:delete"
@@ -154,6 +156,8 @@ var catalogEntries = []Permission{
 	{Name: PermSelfSubscriptionCancel, Description: "Self-service: cancel your own subscriptions."},
 	{Name: PermSelfPaymentMethods, Description: "Self-service: manage your own payment methods."},
 	{Name: PermSelfWallets, Description: "Self-service: manage your own verified linked wallets."},
+	{Name: PermMerchantConfigurationRead, Description: "Merchant admin: read merchant profile and operational configuration."},
+	{Name: PermMerchantConfigurationWrite, Description: "Merchant admin: update merchant profile and operational configuration."},
 	{Name: PermMerchantSecretsList, Description: "Merchant admin: list configured merchant-secret status without plaintext."},
 	{Name: PermMerchantSecretsWrite, Description: "Merchant admin: create or rotate write-only merchant secrets."},
 	{Name: PermMerchantSecretsDelete, Description: "Merchant admin: delete merchant secrets."},
@@ -203,6 +207,8 @@ var merchantCatalog = map[string]struct{}{
 	PermMerchantCreditsWrite:       {},
 	PermMerchantPaymentsWrite:      {},
 	PermMerchantSubscriptionsWrite: {},
+	PermMerchantConfigurationRead:  {},
+	PermMerchantConfigurationWrite: {},
 	PermMerchantSecretsList:        {},
 	PermMerchantSecretsWrite:       {},
 	PermMerchantSecretsDelete:      {},
@@ -218,6 +224,8 @@ func MerchantCatalogNames() []string {
 		PermMerchantCreditsWrite,
 		PermMerchantPaymentsWrite,
 		PermMerchantSubscriptionsWrite,
+		PermMerchantConfigurationRead,
+		PermMerchantConfigurationWrite,
 		PermMerchantSecretsList,
 		PermMerchantSecretsWrite,
 		PermMerchantSecretsDelete,

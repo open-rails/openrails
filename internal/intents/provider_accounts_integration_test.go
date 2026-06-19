@@ -168,10 +168,10 @@ func TestVerifyOrBindPrimaryProviderAccountStripeUsesHTTPAccountIdentity(t *test
 	}))
 	defer srv.Close()
 
-	cfg := &config.Config{Processors: map[string]*config.ProcessorConfig{
+	processors := config.ProcessorSet{
 		"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_original"},
-	}}
-	resolver := NewRuntimeProviderAccounts(cfg, nil)
+	}
+	resolver := NewRuntimeProviderAccounts(&config.Config{}, processors, nil)
 	resolver.StripeBaseURL = srv.URL
 	store := NewStore(dbi).WithProviderAccounts(resolver)
 
@@ -181,12 +181,12 @@ func TestVerifyOrBindPrimaryProviderAccountStripeUsesHTTPAccountIdentity(t *test
 	require.Equal(t, "acct_original", bound.AccountID)
 	require.Equal(t, "primary", bound.Role)
 
-	cfg.Processors["stripe"].SecretKey = "sk_test_rotated"
+	processors["stripe"].SecretKey = "sk_test_rotated"
 	rotated, err := store.VerifyOrBindPrimaryProviderAccount(ctx, merchantID, "stripe")
 	require.NoError(t, err, "key rotation inside the same Stripe account should not create a mismatch")
 	require.Equal(t, bound.ID, rotated.ID)
 
-	cfg.Processors["stripe"].SecretKey = "sk_test_other"
+	processors["stripe"].SecretKey = "sk_test_other"
 	other, err := store.VerifyOrBindPrimaryProviderAccount(ctx, merchantID, "stripe")
 	require.NoError(t, err, "different Stripe account returned by /v1/account should be recorded and promoted")
 	require.Equal(t, "acct_other", other.AccountID)
@@ -238,7 +238,7 @@ func TestVerifyOrBindPrimaryProviderAccountNMIUsesHTTPProfileIdentity(t *testing
 	defer srv.Close()
 
 	client := &nmi.NMIClient{SecurityKey: "sec-original", QueryURL: srv.URL}
-	resolver := NewRuntimeProviderAccounts(nil, map[string]*nmi.NMIClient{"mobius": client})
+	resolver := NewRuntimeProviderAccounts(nil, nil, map[string]*nmi.NMIClient{"mobius": client})
 	store := NewStore(dbi).WithProviderAccounts(resolver)
 
 	bound, err := store.VerifyOrBindPrimaryProviderAccount(ctx, merchantID, "mobius")

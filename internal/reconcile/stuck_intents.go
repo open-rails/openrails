@@ -99,17 +99,15 @@ func (s *PGStuckIntentSource) ListStuck(ctx context.Context, actionCutoff, verif
 }
 
 // isModeParkedReason reports whether an intent's last_failure_reason records a
-// deliberate park by the operating mode or a kill switch. The executor records
-// these via intents.GateExecution ("mode=readonly blocks all provider writes",
-// "mode=limited blocks proactive (system-origin) provider writes") and the
-// handlers' execution-time checks ("... (feature_flags.… kill switch)",
-// "... (mode=readonly)"), so matching on the "mode=" and "kill switch" markers
-// covers every mode/kill-switch park. Mode-parked is not broken: the executor
-// drains the queue when the blocker lifts, so the finding is informational.
+// deliberate park by the operating mode. The executor records these via
+// intents.GateExecution ("mode=readonly blocks all provider writes",
+// "mode=limited blocks proactive (system-origin) provider writes") and handler
+// checks ("... (mode=readonly)"). Mode-parked is not broken: the executor drains
+// the queue when the blocker lifts, so the finding is informational.
 // Every OTHER park reason (unconfigured client, relevance-check failure) and
 // every genuine failure stays admin-queued.
 func isModeParkedReason(reason string) bool {
-	return strings.Contains(reason, "mode=") || strings.Contains(reason, "kill switch")
+	return strings.Contains(reason, "mode=")
 }
 
 // makeStuckIntentFinding diagnoses one stuck intent as a PS-10 finding.

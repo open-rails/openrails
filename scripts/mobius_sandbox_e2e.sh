@@ -35,8 +35,9 @@ if [ -z "${CLOUDFLARED_PUBLIC_HOSTNAME:-}" ]; then
   echo "Missing CLOUDFLARED_PUBLIC_HOSTNAME" >&2
   exit 1
 fi
-if [ -z "${PROCESSORS_MOBIUS_WEBHOOK_SECRET:-}" ]; then
-  echo "Missing PROCESSORS_MOBIUS_WEBHOOK_SECRET (OpenRails will reject unsigned webhooks)" >&2
+MOBIUS_WEBHOOK_SIGNING_SECRET="${MOBIUS_WEBHOOK_SIGNING_SECRET:-${MOBIUS_WEBHOOK_SECRET:-}}"
+if [ -z "$MOBIUS_WEBHOOK_SIGNING_SECRET" ]; then
+  echo "Missing MOBIUS_WEBHOOK_SIGNING_SECRET (OpenRails will reject unsigned webhooks)" >&2
   exit 1
 fi
 
@@ -85,7 +86,7 @@ echo "5) Sending signed test webhook to public URL..."
 EVENT_ID="e2e_test_$(date +%s%N)"
 BODY="{\"event_id\":\"$EVENT_ID\",\"event_type\":\"test\",\"event_body\":{}}"
 TS="$(date +%s)"
-SIG="$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$PROCESSORS_MOBIUS_WEBHOOK_SECRET" | awk '{print $NF}')"
+SIG="$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$MOBIUS_WEBHOOK_SIGNING_SECRET" | awk '{print $NF}')"
 
 curl -i "$PUBLIC_BASE/v1/webhooks/mobius" \
   -H "Content-Type: application/json" \

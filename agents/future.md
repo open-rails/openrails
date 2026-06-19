@@ -1176,3 +1176,27 @@ or consistency math. DERIVE/LIFE/CON then clean up consequences through append-o
 - Tombstoned rows remain queryable as audit evidence.
 - Invalidated payments no longer produce grants, entitlements, credits, invoice settlement, or consistency math inputs.
 - All destructive consequences are produced by DERIVE/LIFE/CON through append-only repair paths, not by hard deletion.
+
+---
+
+# #523: Convergence Engine follow-ups (lower-priority tails split from #511)
+
+**Completed:** no — follow-up tails de-scoped from #511 when its core landed (2026-06-18).
+
+#511 (the unified Convergence Engine) is complete: all four planes (PULL/DERIVE/LIFE/CON) built + integration-tested, runs in-server (inline hooks on high-value mutation paths + a 15-min sweep), provider pull account-bound, audit + PS-* retired, grant ledger the single source of truth for creation AND revocation. These remaining items are genuine but lower-priority enhancements — NOT correctness gaps in the shipped engine. (Items deliberately NOT built because they are structurally unnecessary — the `*.mismatch` checks and webhook/checkout inline hooks — are documented in #511's completed entry and are NOT part of this issue. `derive.grant.missing` IS built, spec-aware.)
+
+## Scope
+
+1. **CON `consistency.amount_mismatch.*` subtypes.** The CON plane is bootstrapped (`consistency.reference.source_reference` + `consistency.duplicate.provider_charge`). Remaining qualified subtypes from `docs/consistency-invariants.md` §5:
+   - `amount_mismatch.provider_catalog` (provider plan/price drift vs OpenRails catalog) and `amount_mismatch.refund_math` (refund totals exceed original charge) — both need **provider-observed data** from the PULL plane, so wire them onto the pull snapshot.
+   - `amount_mismatch.invoice_math` — invoices use a DUAL representation (arrears `money_movements`/`owed_paid` + a separate Stripe `invoice_items`/`invoice_payments` flow). A cross-table check needs both flows mapped first to avoid false positives; the safe intra-row invariant (`amount_due = total − paid`) is already maintained by construction (≈zero value). Map the flows, then decide which (if any) cross-table check is reliable.
+   - Extra `consistency.duplicate.*` (`invoice_usage`, `invoice_payment`) — same invoice-flow-mapping prerequisite.
+
+2. **LIFE `grace_exhausted` → provider-cancel ACTION emission.** Today the LIFE pass terminates a grace-exhausted subscription LOCALLY (status flip + #264 Solana cranker cascade + as-of entitlement revoke, via the shared `ApplyLocalCancellation` core). The linked REMOTE provider-cancel (enqueue a `provider_intents` row to cancel the still-live remote subscription at NMI/Stripe) is not yet emitted — so a converged terminal cancel relies on the existing deferred-delete / caller paths for the remote side. Wire the provider-action emission into the grace_exhausted repair so the remote subscription is durably cancelled too.
+
+3. **Pull "pure-overwrite" framing (cosmetic).** `pull-provider` already syncs the local mirror (missing→insert, mismatch→overwrite provider-owned fields) and emits four-plane `pull.*` slugs, but internally it still runs the legacy diff+selectively-apply machinery rather than a literal "pull head → overwrite mirror" rewrite. Purely cosmetic (behavior + taxonomy are already correct); reframe only if the engine is otherwise touched. The PS-8/9/10 checks also still physically live in the pull engine (they emit the correct plane's slug) rather than inside the Converge CON/DERIVE/LIFE passes — physical relocation only, no behavior change.
+
+## Notes
+
+- None of these block the engine's correctness: access is read off entitlement windows, money off the ledger, and the sweep + inline hooks already converge all drift. These improve coverage breadth (CON), durability of the remote-cancel side-effect (LIFE action), and code tidiness (pull framing).
+- Design reference: `docs/consistency-invariants.md` §5 (the check catalogue) + §9 (construction-guaranteed invariants that are intentionally NOT runtime checks).

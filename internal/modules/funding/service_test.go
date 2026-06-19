@@ -161,7 +161,7 @@ func TestCoinbaseSessionCreationGeneratesCDPJWT(t *testing.T) {
 }
 
 func TestRefreshSolanaFundingStatusMarksFundedFromWalletBalance(t *testing.T) {
-	svc := NewService(nil, testFundingConfig()).WithSolanaBalanceReader(fakeSolanaBalanceReader{
+	svc := NewService(nil, testFundingConfig(), testFundingProcessors()).WithSolanaBalanceReader(fakeSolanaBalanceReader{
 		balance: 12_500_000,
 	})
 	now := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
@@ -194,7 +194,7 @@ func TestRefreshSolanaFundingStatusMarksFundedFromWalletBalance(t *testing.T) {
 }
 
 func TestRefreshSolanaFundingStatusDoesNotMarkFundedWhenBalanceShort(t *testing.T) {
-	svc := NewService(nil, testFundingConfig()).WithSolanaBalanceReader(fakeSolanaBalanceReader{
+	svc := NewService(nil, testFundingConfig(), testFundingProcessors()).WithSolanaBalanceReader(fakeSolanaBalanceReader{
 		balance: 12_499_999,
 	})
 	session := &models.USDCFundingSession{
@@ -272,17 +272,18 @@ func (f fakeSolanaBalanceReader) GetTokenBalanceForMint(context.Context, solanag
 }
 
 func testFundingConfig() *config.Config {
-	return &config.Config{
-		Processors: map[string]*config.ProcessorConfig{
-			"solana": {
-				Tokens: map[string]config.TokenConfig{
-					"USDC": {
-						Mint:     "11111111111111111111111111111111",
-						Decimals: 6,
-					},
+	return &config.Config{}
+}
+
+func testFundingProcessors() config.ProcessorSet {
+	return config.ProcessorSet{
+		"solana": {
+			Tokens: map[string]config.TokenConfig{
+				"USDC": {
+					Mint:     "11111111111111111111111111111111",
+					Decimals: 6,
 				},
 			},
 		},
-		USDCFunding: &config.USDCFundingConfig{},
 	}
 }

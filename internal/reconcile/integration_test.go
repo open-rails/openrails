@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -547,7 +548,7 @@ func TestReconcileStuckIntentIntegration(t *testing.T) {
 			require.NoError(t, err)
 		}
 		failure := "nmi error: connection refused"
-		park := "processor subscription deletes disabled (feature_flags.disable_processor_subscription_deletions kill switch)"
+		park := "nmi client is read-only (mode=readonly)"
 		ambiguous := "ambiguous: timeout after send"
 		seed(oldPending, "pending", 26*time.Hour, &failure)
 		seed(parkedPending, "pending", 26*time.Hour, &park)
@@ -696,6 +697,74 @@ func TestReconcileRunRecordsFailure(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "failed", run.Status)
 		assert.Contains(t, run.Error, "query.php unreachable")
+		return nil
+	}))
+}
+
+// TestReconcileAdoptPreservesScheduledProviderActions covers #511 Phase H
+// schedule-awareness: a pull that observes a subscription still LIVE at the
+// provider (because a cancel/downgrade is scheduled for the FUTURE, not yet
+// effective — "Jun 15 cancel / Jun 28 delete / Jun 17 pull is consistent") adopts
+// the provider-observed status/period but MUST NOT clobber the standing local
+// provider-action intents. The adopt applier writes only status + period, so
+// deletion_scheduled_at / scheduled_price_id survive by construction; this locks
+// that in against a regression that widens the UPDATE.
+func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
+	appDB := startReconcilePostgres(t)
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	merchantID := dbtest.TestMerchantID.UUID()
+	suffix := uuid.NewString()[:8]
+	productID, priceID, schedPriceID, subID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	deleteAt := time.Now().UTC().Add(11 * 24 * time.Hour).Truncate(time.Second)
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		customer := dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		exec := func(sql string, args ...any) {
+			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
+			require.NoError(t, err)
+		}
+		exec(`INSERT INTO openrails.products (id, slug, display_name, merchant_id) VALUES ($1,$2,$2,$3)`, productID, "sa-prod-"+suffix, merchantID)
+		// Two prices for the SAME product (the scheduled downgrade target), so the
+		// subscriptions_price_product_merchant composite FK is satisfied.
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,999,'usd',$3),($4,$2,499,'usd',$3)`,
+			priceID, productID, merchantID, schedPriceID)
+		exec(`INSERT INTO openrails.subscriptions
+		        (id, price_id, product_id, status, processor, processor_subscription_id,
+		         current_period_starts_at, current_period_ends_at, started_at,
+		         deletion_scheduled_at, scheduled_price_id, entitlements_spec_snapshot, customer_id, merchant_id)
+		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$5,$7,$8,'{}'::jsonb,$9,$10)`,
+			subID, priceID, productID, "sa-sub-"+suffix,
+			time.Now().Add(-20*24*time.Hour), time.Now().Add(10*24*time.Hour), deleteAt, schedPriceID, customer, merchantID)
+		return nil
+	}))
+
+	t.Cleanup(func() {
+		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=ANY($1)`, []uuid.UUID{priceID, schedPriceID})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			return nil
+		})
+	})
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		newEnd := time.Now().UTC().Add(40 * 24 * time.Hour)
+		_, err := appDB.Gen(ctx).ReconcileAdoptSubscriptionStatus(ctx, gen.ReconcileAdoptSubscriptionStatusParams{
+			ID: subID, Status: gen.OpenrailsSubscriptionStatus("active"), PeriodEndsAt: &newEnd,
+		})
+		require.NoError(t, err)
+
+		var delAt *time.Time
+		var schedPrice *uuid.UUID
+		var status string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT deletion_scheduled_at, scheduled_price_id, status::text FROM openrails.subscriptions WHERE id=$1`, subID).
+			Scan(&delAt, &schedPrice, &status))
+		require.Equal(t, "active", status)
+		require.NotNil(t, delAt, "scheduled delete must survive the adopt")
+		require.WithinDuration(t, deleteAt, *delAt, time.Second)
+		require.NotNil(t, schedPrice, "scheduled downgrade must survive the adopt")
+		require.Equal(t, schedPriceID, *schedPrice)
 		return nil
 	}))
 }

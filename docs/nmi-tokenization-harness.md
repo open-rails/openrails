@@ -16,8 +16,6 @@ Set (example):
 - Configure merchant secret `nmi/mobius/tokenization_key` (public Collect.js key)
 - Optional: configure merchant secret `nmi/mobius/tokenization_url` when the provider uses a non-standard Collect.js host
 
-The harness also accepts legacy process config `PROCESSORS_<PROVIDER>_TOKENIZATION_KEY` as a dev fallback when no configured merchant secret exists.
-
 Then start OpenRails normally.
 
 ## Open the harness

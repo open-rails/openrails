@@ -16,16 +16,15 @@ import (
 func TestGetSolanaConfig(t *testing.T) {
 	t.Run("default disables recurring Solana Pay", func(t *testing.T) {
 		runtime := &app.Runtime{
-			Config: &config.Config{
-				Processors: map[string]*config.ProcessorConfig{
-					"solana": {
-						Network: "devnet",
-						Tokens: map[string]config.TokenConfig{
-							"USDC": {
-								Name:     "Dev USDC",
-								Mint:     "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ",
-								Decimals: 6,
-							},
+			Config: &config.Config{},
+			Processors: config.ProcessorSet{
+				"solana": {
+					Network: "devnet",
+					Tokens: map[string]config.TokenConfig{
+						"USDC": {
+							Name:     "Dev USDC",
+							Mint:     "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ",
+							Decimals: 6,
 						},
 					},
 				},
@@ -43,17 +42,16 @@ func TestGetSolanaConfig(t *testing.T) {
 	})
 
 	runtime := &app.Runtime{
-		Config: &config.Config{
-			Processors: map[string]*config.ProcessorConfig{
-				"solana": {
-					Network:                         "devnet",
-					SolanaPayRecurringSubscriptions: true,
-					Tokens: map[string]config.TokenConfig{
-						"USDC": {
-							Name:     "Dev USDC",
-							Mint:     "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ",
-							Decimals: 6,
-						},
+		Config: &config.Config{},
+		Processors: config.ProcessorSet{
+			"solana": {
+				Network:                         "devnet",
+				SolanaPayRecurringSubscriptions: true,
+				Tokens: map[string]config.TokenConfig{
+					"USDC": {
+						Name:     "Dev USDC",
+						Mint:     "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ",
+						Decimals: 6,
 					},
 				},
 			},

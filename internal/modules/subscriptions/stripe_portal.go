@@ -15,11 +15,12 @@ import (
 )
 
 type StripePortalService struct {
-	Config *config.Config
+	Config     *config.Config
+	Processors config.ProcessorSet
 }
 
 func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerID, returnURL string) (string, error) {
-	_, secretKey, err := RequireStripeSecretKey(s.Config)
+	_, secretKey, err := RequireStripeSecretKey(s.Processors)
 	if err != nil {
 		return "", err
 	}

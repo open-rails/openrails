@@ -529,6 +529,60 @@ func (q *Queries) ListLiveGrantsByCustomer(ctx context.Context, arg ListLiveGran
 	return items, nil
 }
 
+const listLiveGrantsWithRefundedPaymentByCustomer = `-- name: ListLiveGrantsWithRefundedPaymentByCustomer :many
+SELECT g.id, g.kind, g.payment_id
+FROM openrails.grants g
+WHERE g.merchant_id = $1::uuid
+  AND g.customer_id = $2::uuid
+  AND g.event = 'grant'
+  AND g.payment_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants tt
+      WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
+  )
+  AND EXISTS (
+      SELECT 1 FROM openrails.payments p
+      WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.status = 'refunded'
+  )
+ORDER BY g.id
+`
+
+type ListLiveGrantsWithRefundedPaymentByCustomerParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+type ListLiveGrantsWithRefundedPaymentByCustomerRow struct {
+	ID        uuid.UUID
+	Kind      string
+	PaymentID *uuid.UUID
+}
+
+// #511 DERIVE `derive.grant.excess`: a customer's LIVE grants whose backing
+// payment was refunded — the source no longer justifies the grant (money came
+// back, access is still live). Surface-only ADMIN: a refund that intentionally
+// keeps access (goodwill) is legitimate, so an operator decides; the source
+// (refund) is a PRESENT recorded fact, so this is NOT confirmed-absence-gated.
+func (q *Queries) ListLiveGrantsWithRefundedPaymentByCustomer(ctx context.Context, arg ListLiveGrantsWithRefundedPaymentByCustomerParams) ([]ListLiveGrantsWithRefundedPaymentByCustomerRow, error) {
+	rows, err := q.db.Query(ctx, listLiveGrantsWithRefundedPaymentByCustomer, arg.MerchantID, arg.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLiveGrantsWithRefundedPaymentByCustomerRow
+	for rows.Next() {
+		var i ListLiveGrantsWithRefundedPaymentByCustomerRow
+		if err := rows.Scan(&i.ID, &i.Kind, &i.PaymentID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLiveOwnershipGrantIDsByPayment = `-- name: ListLiveOwnershipGrantIDsByPayment :many
 SELECT g.id FROM openrails.grants g
 WHERE g.merchant_id = $1::uuid
@@ -695,6 +749,69 @@ func (q *Queries) ListSpendableCreditLots(ctx context.Context, arg ListSpendable
 			&i.EndsAt,
 			&i.Remaining,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUngrantedGrantablePaymentsByCustomer = `-- name: ListUngrantedGrantablePaymentsByCustomer :many
+SELECT p.id, p.amount, p.currency
+FROM openrails.payments p
+JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
+JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
+WHERE p.merchant_id = $1::uuid
+  AND p.customer_id = $2::uuid
+  AND p.status = 'completed'
+  AND p.amount > 0
+  AND p.subscription_id IS NULL
+  AND (
+        (pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb)
+     OR (pd.credits_spec IS NOT NULL AND pd.credits_spec <> '{}'::jsonb)
+      )
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.grants g
+      WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
+        AND (g.payment_id = p.id OR g.source_id = p.id::text)
+  )
+ORDER BY p.id
+`
+
+type ListUngrantedGrantablePaymentsByCustomerParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+type ListUngrantedGrantablePaymentsByCustomerRow struct {
+	ID       uuid.UUID
+	Amount   int64
+	Currency string
+}
+
+// #511 DERIVE `derive.grant.missing` (grant tier): a customer's completed,
+// positive, one-off (non-subscription) payments for a product that PROMISES
+// grants — a non-empty `entitlements_spec` or `credits_spec` — yet produced NO
+// grant at all. "Paid for a grantable product, got nothing." Spec-aware (the
+// positive signal is the product's own grant spec via payment→price→product), so
+// empty-spec products / pure fees are never flagged; subscription payments are
+// excluded (their entitlement grant is subscription-sourced, not payment-linked);
+// refund rows are negative-amount (amount > 0 excludes them); a refunded purchase
+// still has its `grant` event (existence, not liveness), so it is not flagged.
+// Surface-only ADMIN: auto-granting re-runs derive-1 (owned by the purchase path).
+func (q *Queries) ListUngrantedGrantablePaymentsByCustomer(ctx context.Context, arg ListUngrantedGrantablePaymentsByCustomerParams) ([]ListUngrantedGrantablePaymentsByCustomerRow, error) {
+	rows, err := q.db.Query(ctx, listUngrantedGrantablePaymentsByCustomer, arg.MerchantID, arg.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUngrantedGrantablePaymentsByCustomerRow
+	for rows.Next() {
+		var i ListUngrantedGrantablePaymentsByCustomerRow
+		if err := rows.Scan(&i.ID, &i.Amount, &i.Currency); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

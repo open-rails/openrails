@@ -388,11 +388,7 @@ type OpenrailsLedgerAccount struct {
 	CreditsPosted int64
 	// Phase H maintained counter: posted debits for O(1) balance reads.
 	DebitsPosted int64
-	// Phase H maintained counter: unresolved pending credits.
-	CreditsPending int64
-	// Phase H maintained counter: unresolved pending debits / held amount.
-	DebitsPending int64
-	CreatedAt     time.Time
+	CreatedAt    time.Time
 }
 
 // #512 immutable double-entry transfers. Append-only (role granted SELECT,INSERT only). A transfer moves amount debit->credit within ONE (merchant, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters are a maintained projection of this table.
@@ -404,9 +400,6 @@ type OpenrailsLedgerTransfer struct {
 	Amount          int64
 	Currency        string
 	TransferType    string
-	// posted = single-phase (counts in balance); pending = two-phase hold (counts in held until resolved); post_pending/void_pending = resolves the pending named by pending_id.
-	Phase     string
-	PendingID *uuid.UUID
 	// Debit-account floor used by the counter trigger for debits_must_not_exceed_credits accounts. Usually 0; arrears paths pass the current credit-line allowance.
 	AllowDebitNegativeUpTo int64
 	// Opaque origin key (e.g. 'grant'/grant_id, 'payment'/transaction_id). Ledger purity: business joins live in control-plane tables.

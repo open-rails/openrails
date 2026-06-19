@@ -25,9 +25,10 @@ type pushBootstrapOptions struct {
 func newPushBootstrapCmd() *cobra.Command {
 	opts := pushBootstrapOptions{file: bootstrap.DefaultBootstrapManifestPath}
 	cmd := &cobra.Command{
-		Use:   "push-bootstrap",
-		Short: "Apply AuthKit authority and OpenRails merchant definitions from YAML",
-		Args:  validatePushBootstrapArgs,
+		Use:     "push-merchant-config",
+		Aliases: []string{"push-bootstrap"},
+		Short:   "Apply AuthKit authority and OpenRails merchant configuration from YAML",
+		Args:    validatePushBootstrapArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runPushBootstrap(cmd, opts)
 		},
@@ -70,13 +71,13 @@ func runPushBootstrap(cmd *cobra.Command, opts pushBootstrapOptions) error {
 
 	cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
 	if cfg == nil {
-		return fmt.Errorf("config not loaded; push-bootstrap requires --config")
+		return fmt.Errorf("config not loaded; push-merchant-config requires --config")
 	}
 
 	application := &app.App{Config: cfg}
 	defer func() {
 		if closeErr := application.Close(context.Background()); closeErr != nil {
-			log.WithError(closeErr).Error("push-bootstrap cleanup failed")
+			log.WithError(closeErr).Error("push-merchant-config cleanup failed")
 		}
 	}()
 
@@ -98,7 +99,7 @@ const startupBootstrapLockKey = int64(0x6f72_626f_6f74) // "orboot"
 // applyStartupBootstrap applies the bootstrap manifest on EVERY server
 // start (#327). The apply is idempotent + additive: merchant data is reconciled
 // and AuthKit authority is ensured. Catalog state is never pushed from startup;
-// operators use `openrails push-catalog` for that.
+// operators use `openrails push-merchant-catalog` for that.
 func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) error {
 	path := resolveBootstrapManifestPath(cfg)
 	if path == "" {

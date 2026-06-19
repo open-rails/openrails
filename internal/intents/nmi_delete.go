@@ -98,11 +98,6 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsProv
 	if !ok || client == nil {
 		return Parked(fmt.Sprintf("nmi client not configured for provider %q", intent.Provider))
 	}
-	// Kill switch (#344): checked at execution time, before any provider
-	// call. The intent stays pending and drains when the flag lifts.
-	if client.SubscriptionDeletesDisabled || (h.Config != nil && h.Config.IsProcessorSubscriptionDeletionDisabled()) {
-		return Parked("processor subscription deletes disabled (feature_flags.disable_processor_subscription_deletions kill switch)")
-	}
 	if client.ReadOnly {
 		return Parked("nmi client is read-only (mode=readonly)")
 	}
@@ -135,9 +130,6 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsProv
 	}
 
 	if err := client.DeleteRecurringSubscription(psid); err != nil {
-		if errors.Is(err, nmi.ErrSubscriptionDeletesDisabled) {
-			return Parked("processor subscription deletes disabled (feature_flags.disable_processor_subscription_deletions kill switch)")
-		}
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return Parked("nmi provider writes blocked (mode=readonly)")
 		}

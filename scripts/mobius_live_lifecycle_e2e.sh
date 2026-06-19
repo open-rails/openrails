@@ -34,6 +34,9 @@ if [ -z "${E2E_MOBIUS_RECURRING_AMOUNT:-}" ]; then
 fi
 PLAYWRIGHT_DIR="${PLAYWRIGHT_DIR:-$ROOT_DIR/.runtime/mobius-live-playwright}"
 RESULT_DIR="${RESULT_DIR:-$ROOT_DIR/.runtime/mobius-live-results}"
+MOBIUS_PRODUCTION_KEY="${MOBIUS_PRODUCTION_KEY:-${NMI_QUERY_SECURITY_KEY:-}}"
+MOBIUS_TOKENIZATION_KEY="${MOBIUS_TOKENIZATION_KEY:-}"
+MOBIUS_WEBHOOK_SIGNING_SECRET="${MOBIUS_WEBHOOK_SIGNING_SECRET:-${MOBIUS_WEBHOOK_SECRET:-}}"
 
 require() {
   local name="$1"
@@ -127,7 +130,7 @@ query_nmi() {
   local value="$3"
   local out="$4"
   curl -fsS -m 60 -X POST "https://secure.nmi.com/api/query.php" \
-    -d "security_key=$PROCESSORS_MOBIUS_SECURITY_KEY" \
+    -d "security_key=$MOBIUS_PRODUCTION_KEY" \
     -d "report_type=$report_type" \
     -d "$key=$value" >"$out"
   if [ ! -s "$out" ]; then
@@ -172,7 +175,7 @@ sign_nmi_webhook_header() {
   local timestamp
   timestamp="$(date +%s)"
   local signature
-  signature="$(printf '%s.%s' "$timestamp" "$body" | openssl dgst -sha256 -hmac "$PROCESSORS_MOBIUS_WEBHOOK_SECRET" | awk '{print $NF}')"
+  signature="$(printf '%s.%s' "$timestamp" "$body" | openssl dgst -sha256 -hmac "$MOBIUS_WEBHOOK_SIGNING_SECRET" | awk '{print $NF}')"
   printf 't=%s,s=%s' "$timestamp" "$signature"
 }
 
@@ -202,9 +205,9 @@ require node
 require openssl
 require pnpm
 
-need_env PROCESSORS_MOBIUS_SECURITY_KEY
-need_env PROCESSORS_MOBIUS_TOKENIZATION_KEY
-need_env PROCESSORS_MOBIUS_WEBHOOK_SECRET
+need_env MOBIUS_PRODUCTION_KEY
+need_env MOBIUS_TOKENIZATION_KEY
+need_env MOBIUS_WEBHOOK_SIGNING_SECRET
 
 mkdir -p "$RESULT_DIR"
 
@@ -258,7 +261,7 @@ if [ -z "${E2E_MOBIUS_PLAN_ID:-}" ]; then
   echo "Creating Mobius/NMI sandbox recurring plan for this run..."
   ADD_PLAN_OUT="$RESULT_DIR/nmi_add_plan.txt"
   curl -fsS -m 60 -X POST "https://secure.networkmerchants.com/api/transact.php" \
-    -d "security_key=$PROCESSORS_MOBIUS_SECURITY_KEY" \
+    -d "security_key=$MOBIUS_PRODUCTION_KEY" \
     -d "recurring=add_plan" \
     -d "plan_id=$E2E_MOBIUS_PLAN_ID" \
     -d "plan_name=OpenRails E2E $E2E_RUN_ID" \

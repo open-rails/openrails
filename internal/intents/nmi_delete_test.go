@@ -49,29 +49,6 @@ func TestNMIDeleteIdempotencyKeyIsDeterministic(t *testing.T) {
 	assert.Equal(t, key, NMIDeleteIdempotencyKey(id), "stable across calls (re-cancels revive the same intent)")
 }
 
-// TestNMIDeleteExecuteKillSwitchParks pins the #344 contract: kill switch on
-// -> the intent PARKS pending with the reason recorded, before any provider
-// or database access (handler has nil DB and no reachable gateway).
-func TestNMIDeleteExecuteKillSwitchParks(t *testing.T) {
-	client := newTestNMIClient(t, "")
-	client.SubscriptionDeletesDisabled = true
-	h := NewNMIDeleteHandler(nil, nil, map[string]*nmi.NMIClient{"mobius": client}, nil)
-
-	out := h.Execute(context.Background(), nmiDeleteIntent())
-	assert.Equal(t, OutcomeParked, out.Class, "kill switch must park, NOT fail")
-	assert.Contains(t, out.Reason, "kill switch")
-}
-
-func TestNMIDeleteExecuteConfigKillSwitchParks(t *testing.T) {
-	client := newTestNMIClient(t, "")
-	cfg := &config.Config{FeatureFlags: &config.FeatureFlags{DisableProcessorSubscriptionDeletions: true}}
-	h := NewNMIDeleteHandler(nil, cfg, map[string]*nmi.NMIClient{"mobius": client}, nil)
-
-	out := h.Execute(context.Background(), nmiDeleteIntent())
-	assert.Equal(t, OutcomeParked, out.Class)
-	assert.Contains(t, out.Reason, "kill switch")
-}
-
 func TestNMIDeleteExecuteReadOnlyClientParks(t *testing.T) {
 	client := newTestNMIClient(t, "")
 	client.ReadOnly = true

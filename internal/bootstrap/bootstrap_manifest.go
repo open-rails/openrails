@@ -22,7 +22,8 @@ const (
 // BootstrapManifest is the auth/merchant declarative provisioning document. It
 // is intentionally separate from config.yaml: config.yaml describes runtime
 // infrastructure, while this file describes desired AuthKit authority and
-// OpenRails merchant state. Catalog state is pushed by `openrails push-catalog`.
+// OpenRails merchant state. Catalog state is pushed by
+// `openrails push-merchant-catalog`.
 type BootstrapManifest struct {
 	Version   int                         `yaml:"version"`
 	Auth      *authcore.BootstrapManifest `yaml:"auth,omitempty"`
@@ -110,6 +111,17 @@ func validateMerchantManifestShape(m *MerchantManifest) error {
 		if len(t.Issuers) > 0 {
 			return fmt.Errorf("merchant %q issuers is removed; declare JWKS/public-key trust in top-level auth.orgs[].issuers (AuthKit remote applications)", slug)
 		}
+		if profileURL := strings.TrimSpace(t.Profile.LogoURL); profileURL != "" && !validHTTPURL(profileURL) {
+			return fmt.Errorf("merchant %q profile.logo_url must be an http or https URL", slug)
+		}
+		if profileURL := strings.TrimSpace(t.Profile.SupportURL); profileURL != "" && !validHTTPURL(profileURL) {
+			return fmt.Errorf("merchant %q profile.support_url must be an http or https URL", slug)
+		}
+		for j := range t.ProviderAccounts {
+			if err := validateManifestProviderAccount(slug, j, t.ProviderAccounts[j]); err != nil {
+				return err
+			}
+		}
 		if _, ok := seen[slug]; ok {
 			return fmt.Errorf("duplicate merchant slug %q", slug)
 		}
@@ -117,6 +129,45 @@ func validateMerchantManifestShape(m *MerchantManifest) error {
 	}
 	return nil
 }
+
+func validateManifestProviderAccount(slug string, idx int, account ManifestProviderAccount) error {
+	providerType := strings.ToLower(strings.TrimSpace(account.ProviderType))
+	if providerType == "" {
+		return fmt.Errorf("merchant %q provider_accounts[%d].provider_type is required", slug, idx)
+	}
+	if role := strings.ToLower(strings.TrimSpace(account.Role)); role != "" {
+		switch role {
+		case configProcessorRolePrimary, configProcessorRoleSecondary, configProcessorRoleLegacy:
+		default:
+			return fmt.Errorf("merchant %q provider_accounts[%d].role must be primary, secondary, or legacy", slug, idx)
+		}
+	}
+	if status := strings.ToLower(strings.TrimSpace(account.Status)); status != "" {
+		switch status {
+		case "enabled", "disabled":
+		default:
+			return fmt.Errorf("merchant %q provider_accounts[%d].status must be enabled or disabled", slug, idx)
+		}
+	}
+	if strings.TrimSpace(account.AccountID) == "" && len(account.Secrets) == 0 {
+		return fmt.Errorf("merchant %q provider_accounts[%d] must declare account_id, secrets, or both", slug, idx)
+	}
+	for key, source := range account.Secrets {
+		if _, err := merchantSecretName(providerType, key); err != nil {
+			return fmt.Errorf("merchant %q provider_accounts[%d]: %w", slug, idx, err)
+		}
+		if source.RefCount() != 1 {
+			return fmt.Errorf("merchant %q provider_accounts[%d].secrets.%s must set exactly one of value, env, file, vault", slug, idx, key)
+		}
+	}
+	return nil
+}
+
+const (
+	configProcessorRolePrimary   = "primary"
+	configProcessorRoleSecondary = "secondary"
+	configProcessorRoleLegacy    = "legacy"
+)
 
 func validHTTPURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))

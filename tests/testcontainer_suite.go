@@ -58,6 +58,7 @@ type TestContainerSuite struct {
 	Server     *server.Server
 	httpServer *http.Server
 	Config     *config.Config
+	Processors config.ProcessorSet
 	ServerURL  string
 
 	// Context for container operations
@@ -190,8 +191,6 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 
 	// Create configuration
 	// Use "dev" to skip NMI/CCBill validation in config.Validate()
-	// Use the JWKS server URL as the issuer so auth verification works
-	jwksIssuer := GetTestIssuerURL()
 	suite.Config = &config.Config{
 		Env: "dev",
 		// Sandbox semantics MUST be explicit (#355): the dev default is now
@@ -217,8 +216,6 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			Password:   envOrDefault("OPENRAILS_TEST_CH_PASSWORD", "test_password"),
 		},
 		Auth: &config.AuthConfig{
-			Issuers:          []string{jwksIssuer},
-			ExpectedAudience: "test-app",
 			// HARDCUT (#312): admin authority is the LIVE openrails:admin permission
 			// held in the caller's OWN tenant (control-plane evaluated), or a
 			// deployment-minted admin service token — NOT a claim-based operator
@@ -230,31 +227,26 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 				TokenPrefix: "openrails",
 			},
 		},
-		// All payment processor configs use the unified Processors map
-		Processors: map[string]*config.ProcessorConfig{
-			// CCBill config with test_env enabled to bypass IP verification in webhook tests
-			"ccbill": {
-				Type:         config.ProcessorTypeCCBill,
-				ClientAccNum: "945280",
-				ClientSubAcc: "0000",
-				Salt:         "test-salt",
-			},
-			// Solana config for testing Solana payment endpoints
-			"solana": {
-				Type:            config.ProcessorTypeSolana,
-				RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
-				Tokens:          config.DefaultDevnetTokens(),
-				// RPCEndpoint and Network are derived from test_env
-			},
-			// NMI/Mobius config for integration tests. Prefer real sandbox
-			// credentials from .env; fall back to NMI's public demo key when
-			// running offline/local tests without external credentials.
-			"mobius": {
-				Type:            config.ProcessorTypeNMI,
-				SecurityKey:     envOrDefault("PROCESSORS_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
-				TokenizationKey: envOrDefault("PROCESSORS_MOBIUS_TOKENIZATION_KEY", ""),
-				WebhookSecret:   envOrDefault("PROCESSORS_MOBIUS_WEBHOOK_SECRET", ""),
-			},
+	}
+	// Payment processor credentials are construction-time merchant/provider
+	// state, not infrastructure config.yaml state.
+	suite.Processors = config.ProcessorSet{
+		"ccbill": {
+			Type:         config.ProcessorTypeCCBill,
+			ClientAccNum: "945280",
+			ClientSubAcc: "0000",
+			Salt:         "test-salt",
+		},
+		"solana": {
+			Type:            config.ProcessorTypeSolana,
+			RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
+			Tokens:          config.DefaultDevnetTokens(),
+		},
+		"mobius": {
+			Type:            config.ProcessorTypeNMI,
+			SecurityKey:     envOrDefault("PROCESSORS_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
+			TokenizationKey: envOrDefault("PROCESSORS_MOBIUS_TOKENIZATION_KEY", ""),
+			WebhookSecret:   envOrDefault("PROCESSORS_MOBIUS_WEBHOOK_SECRET", ""),
 		},
 	}
 	if suite.port != 0 {
@@ -285,7 +277,6 @@ func (suite *TestContainerSuite) prepareDatastores() {
 	require.NoError(suite.t, perr)
 	defer seedPool.Close()
 	dbtest.EnsureTestMerchant(suite.ctx, suite.t, seedPool)
-	suite.Config.Merchant = dbtest.TestMerchantSlug
 }
 
 func envOrDefault(key, fallback string) string {
@@ -350,7 +341,9 @@ func (suite *TestContainerSuite) initializeServer() {
 
 	// Bootstrap the application (creates runtime, cache, auth verifier, etc.)
 	assembled, err := ginboot.NewServer(suite.Config, &bootstrap.Options{
-		Clock: suite.clock,
+		Clock:              suite.clock,
+		ConfiguredMerchant: dbtest.TestMerchantID,
+		Processors:         suite.Processors,
 	})
 	require.NoError(suite.t, err)
 	suite.App = assembled.App

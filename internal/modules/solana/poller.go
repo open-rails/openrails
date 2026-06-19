@@ -83,6 +83,7 @@ func NewSolanaPayPoller(
 	db *db.DB,
 	redis *redis.Client,
 	cfg *config.Config,
+	processors config.ProcessorSet,
 	solanaPayService *SolanaPayService,
 	solanaTransactionService *SolanaTransactionService,
 	purchaseRegistrar purchaseRegistrar,
@@ -90,7 +91,7 @@ func NewSolanaPayPoller(
 	checkoutSessionService checkoutSessionMarker,
 ) *SolanaPayPoller {
 	var rpc *solanarpc.RPCClient
-	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
+	if solanaProc := processors.GetSolanaProcessor(); solanaProc != nil {
 		solanaNetwork := strings.ToLower(strings.TrimSpace(solanaProc.Network))
 		if solanaNetwork == "" {
 			solanaNetwork = "mainnet"

@@ -4,9 +4,9 @@
 // A ledger is a (merchant, currency) pair. Accounts belong to one ledger;
 // transfers move an amount debit->credit within one ledger and are immutable
 // (the openrails_app role is granted SELECT,INSERT only). Balances are maintained
-// on account counters, with transfers as the immutable truth. Two-phase transfers
-// (Authorize -> Capture/Release) model real money movement; the throwaway
-// admission hold lives in Redis (#513), not here.
+// on account counters, with transfers as the immutable truth. Every transfer is
+// posted (single-phase): the admission hold lives in Redis (#513), never as an
+// in-ledger pending (the two-phase apparatus was retired, migration 014).
 package ledger
 
 import (
@@ -38,20 +38,6 @@ const (
 	RevokedCredits AccountType = "revoked_credits"
 	FXLiquidity    AccountType = "fx_liquidity"
 	World          AccountType = "world"
-)
-
-// Phase is a transfer's two-phase state.
-type Phase string
-
-const (
-	// Posted is a single-phase transfer; it counts in the balance immediately.
-	Posted Phase = "posted"
-	// Pending is a two-phase hold; it counts in held (not balance) until resolved.
-	Pending Phase = "pending"
-	// PostPending resolves a pending by posting (up to) its amount.
-	PostPending Phase = "post_pending"
-	// VoidPending resolves a pending by cancelling it (no balance effect).
-	VoidPending Phase = "void_pending"
 )
 
 // ErrInsufficientFunds is returned when a posting transfer would push the debit
@@ -114,8 +100,6 @@ type Transfer struct {
 	Amount        int64
 	Currency      string
 	Type          string
-	Phase         Phase      // default Posted
-	PendingID     *uuid.UUID // set for PostPending / VoidPending
 	// Opaque control-plane references (ledger purity — no business logic here).
 	Source, SourceID *string
 	// GrantID attributes a credit_spend/credit_expire/deposit to its #514 credit
@@ -129,17 +113,11 @@ type Transfer struct {
 	AllowDebitNegativeUpTo int64
 }
 
-// Apply appends one transfer, enforcing the debit account's sign constraint for
-// transfers that post to the balance (posted / post_pending).
+// Apply appends one (posted, single-phase) transfer, enforcing the debit
+// account's sign constraint before it posts to the balance counters.
 func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTransfer, error) {
-	phase := t.Phase
-	if phase == "" {
-		phase = Posted
-	}
-	if phase == Posted || phase == PostPending {
-		if err := l.checkDebitFloor(ctx, t.Debit, t.Amount, t.AllowDebitNegativeUpTo); err != nil {
-			return gen.OpenrailsLedgerTransfer{}, err
-		}
+	if err := l.checkDebitFloor(ctx, t.Debit, t.Amount, t.AllowDebitNegativeUpTo); err != nil {
+		return gen.OpenrailsLedgerTransfer{}, err
 	}
 	tr, err := l.q.InsertLedgerTransfer(ctx, gen.InsertLedgerTransferParams{
 		MerchantID:             l.merchant,
@@ -148,8 +126,6 @@ func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTran
 		Amount:                 t.Amount,
 		Currency:               t.Currency,
 		TransferType:           t.Type,
-		Phase:                  string(phase),
-		PendingID:              t.PendingID,
 		AllowDebitNegativeUpTo: t.AllowDebitNegativeUpTo,
 		Source:                 t.Source,
 		SourceID:               t.SourceID,
@@ -188,24 +164,6 @@ func (l *Ledger) checkDebitFloor(ctx context.Context, account uuid.UUID, amount,
 // (credits_posted - debits_posted).
 func (l *Ledger) Balance(ctx context.Context, account uuid.UUID) (int64, error) {
 	return l.q.LedgerAccountBalance(ctx, gen.LedgerAccountBalanceParams{AccountID: account, MerchantID: l.merchant})
-}
-
-// Held returns the account's maintained unresolved-pending-debits counter.
-func (l *Ledger) Held(ctx context.Context, account uuid.UUID) (int64, error) {
-	return l.q.LedgerAccountHeld(ctx, gen.LedgerAccountHeldParams{MerchantID: l.merchant, AccountID: account})
-}
-
-// Available returns Balance - Held.
-func (l *Ledger) Available(ctx context.Context, account uuid.UUID) (int64, error) {
-	bal, err := l.Balance(ctx, account)
-	if err != nil {
-		return 0, err
-	}
-	held, err := l.Held(ctx, account)
-	if err != nil {
-		return 0, err
-	}
-	return bal - held, nil
 }
 
 // Conservation returns the sum of every account's balance in the (merchant,
@@ -315,60 +273,7 @@ func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency strin
 	})
 }
 
-// Authorize places a two-phase hold debiting the customer balance (pending).
-func (l *Ledger) Authorize(ctx context.Context, customer uuid.UUID, currency string, amount int64, invoker, resource string) (gen.OpenrailsLedgerTransfer, error) {
-	cust, err := l.EnsureCustomerBalance(ctx, customer, currency)
-	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
-	}
-	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
-	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
-	}
-	c := customer
-	return l.Apply(ctx, Transfer{
-		Debit: cust, Credit: rev, Amount: amount, Currency: currency, Type: "authorize", Phase: Pending,
-		Invoker: &invoker, Resource: &resource, Customer: &c,
-	})
-}
-
-// Capture posts (some of) a pending hold's amount; actual must be in (0, pending].
-// The remaining hold is released implicitly once the pending is resolved.
-func (l *Ledger) Capture(ctx context.Context, pendingID uuid.UUID, actual, floor int64) (gen.OpenrailsLedgerTransfer, error) {
-	p, err := l.pending(ctx, pendingID)
-	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
-	}
-	if actual <= 0 || actual > p.Amount {
-		return gen.OpenrailsLedgerTransfer{}, fmt.Errorf("ledger: capture amount %d out of range (pending %d)", actual, p.Amount)
-	}
-	pid := pendingID
-	return l.Apply(ctx, Transfer{
-		Debit: p.DebitAccountID, Credit: p.CreditAccountID, Amount: actual, Currency: p.Currency,
-		Type: "capture", Phase: PostPending, PendingID: &pid, Customer: p.CustomerID, AllowDebitNegativeUpTo: floor,
-	})
-}
-
-// Release voids a pending hold (no balance effect).
-func (l *Ledger) Release(ctx context.Context, pendingID uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
-	p, err := l.pending(ctx, pendingID)
-	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
-	}
-	pid := pendingID
-	return l.Apply(ctx, Transfer{
-		Debit: p.DebitAccountID, Credit: p.CreditAccountID, Amount: p.Amount, Currency: p.Currency,
-		Type: "release", Phase: VoidPending, PendingID: &pid, Customer: p.CustomerID,
-	})
-}
-
-func (l *Ledger) pending(ctx context.Context, pendingID uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
-	p, err := l.q.GetLedgerTransfer(ctx, gen.GetLedgerTransferParams{MerchantID: l.merchant, ID: pendingID})
-	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, fmt.Errorf("ledger: load pending %s: %w", pendingID, err)
-	}
-	if Phase(p.Phase) != Pending {
-		return gen.OpenrailsLedgerTransfer{}, fmt.Errorf("ledger: transfer %s is not pending (phase %s)", pendingID, p.Phase)
-	}
-	return p, nil
-}
+// NOTE: in-ledger two-phase (Authorize/Capture/Release over pending transfers)
+// was retired in migration 014 — admission holds live in Redis (#513), so every
+// transfer here is posted. Re-add a durable two-phase path here (with an expiry
+// sweep) if a future flow genuinely needs in-ledger holds.

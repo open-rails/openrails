@@ -60,15 +60,11 @@ func (DunningArgs) Kind() string { return KindDunning }
 // DunningWorker queries all past_due subscriptions where next_retry_at is in the past
 // and attempts to rebill them via NMI. It processes each subscription inline and
 // updates the database after each attempt for idempotency.
-//
-// Behavior is controlled by config.FeatureFlags.DunningMode:
-//   - "on": Normal dunning - query due subscriptions and attempt charges
-//   - "dry_run_only": Query due subscriptions but skip charges (preserves state)
-//   - "off": Skip entirely (FailMembership handles immediate cancellation)
 type DunningWorker struct {
 	river.WorkerDefaults[DunningArgs]
 	DB                 *db.DB
 	Config             *config.Config
+	Processors         config.ProcessorSet
 	Clock              clockwork.Clock
 	NMIClients         map[string]*nmi.NMIClient
 	EventLogService    *analytics.EventLogService
@@ -95,7 +91,7 @@ func (w *DunningWorker) intentRunner() *intents.Runner {
 	if w.Intents != nil {
 		return w.Intents
 	}
-	providerAccounts := intents.NewRuntimeProviderAccounts(w.Config, w.NMIClients)
+	providerAccounts := intents.NewRuntimeProviderAccounts(w.Config, w.Processors, w.NMIClients)
 	runner := &intents.Runner{
 		Store: intents.NewStore(w.DB).WithProviderAccounts(providerAccounts),
 		Registry: intents.NewRegistry(
@@ -121,38 +117,25 @@ func (w *DunningWorker) now() time.Time {
 }
 
 func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) error {
-	// Check dunning mode from feature flags
-	dunningMode := config.DunningModeOn
-	if w.Config != nil {
-		dunningMode = w.Config.GetDunningMode()
-	}
-
 	// Mode handling (#345/#366). Dunning is a PROACTIVE operation, so provider
 	// charges never fire outside mode=full — but the SCAN still runs under
 	// limited and MATERIALIZES its decisions (#366): window-expired subs are
-	// cancelled + downgraded locally NOW (the no-charge path; local writes are
-	// limited-legal, and the lifecycle respects the entitlement-expiration
-	// kill switch), and in-window charges are enqueued as parked system-origin
-	// intents the ledger executor drains at mode=full. That makes a freshly
-	// migrated backlog VISIBLE in `openrails intents` instead of implicit in
-	// subscription rows. Readonly stays a pure observer: demote to
-	// dry_run_only exactly as before (forensics boots must not mutate state).
+	// cancelled + downgraded locally NOW, and in-window charges are enqueued as
+	// parked system-origin intents the ledger executor drains at mode=full. That
+	// makes a freshly migrated backlog VISIBLE in `openrails intents` instead of
+	// implicit in subscription rows. Readonly stays a pure observer: no charges,
+	// cancellations, or intents.
 	materialize := false
-	if w.Config != nil && dunningMode == config.DunningModeOn {
+	observeOnly := false
+	if w.Config != nil {
 		switch {
 		case w.Config.IsProviderReadOnly():
-			log.WithContext(ctx).Warn("Readonly mode: dunning demoted to dry_run_only (no charges, no cancellations, no intents)")
-			dunningMode = config.DunningModeDryRunOnly
+			observeOnly = true
+			log.WithContext(ctx).Warn("Readonly mode: dunning observes due subscriptions only (no charges, no cancellations, no intents)")
 		case w.Config.IsLimitedMode():
 			materialize = true
 			log.WithContext(ctx).Warn("Limited mode: dunning materializes decisions — local window-expiry cancellations apply, charge intents enqueue PARKED (no provider writes until mode=full)")
 		}
-	}
-
-	// If dunning is completely off, skip - FailMembership handles immediate cancellation
-	if dunningMode == config.DunningModeOff {
-		log.WithContext(ctx).Info("Dunning mode is 'off'; skipping dunning run (FailMembership handles immediate cancellation)")
-		return nil
 	}
 
 	if w.NMIClients == nil {
@@ -173,13 +156,9 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		return nil
 	}
 
-	// If dry_run_only mode, log the subscriptions but don't process them
-	// This preserves retry counts and next_retry_at for when dunning is re-enabled
-	if dunningMode == config.DunningModeDryRunOnly {
+	if observeOnly {
 		log.WithContext(ctx).WithField("count", len(dueSubscriptions)).
-			Warn("Dunning mode is 'dry_run_only'; found due subscriptions but skipping charges")
-		log.WithContext(ctx).Info("   Subscriptions remain in past_due state with retry counts preserved")
-		log.WithContext(ctx).Info("   Set feature_flags.dunning_mode=on to resume charging")
+			Warn("Readonly mode: found due subscriptions but skipping dunning mutations")
 		return nil
 	}
 
@@ -192,7 +171,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	notifSvc := subscriptions.NewNotificationService(w.DB, nil)
 	paymentSvc := payments.NewPaymentService(w.DB, w.Clock)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService, w.Clock)
-	lifecycle.SetConfig(w.Config) // For feature flag access
+	lifecycle.SetConfig(w.Config)
 	if w.DeferDelete != nil {
 		// Terminal cancellations (window expiry, retry exhaustion) schedule
 		// the remote NMI delete through the shared mechanism (#344).

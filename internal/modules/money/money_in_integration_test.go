@@ -554,9 +554,12 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	}))
 	t.Cleanup(server.Close)
 
-	stripeSvc := &subscriptions.StripeService{Config: &config.Config{Processors: map[string]*config.ProcessorConfig{
-		"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_invoice"},
-	}}}
+	stripeSvc := &subscriptions.StripeService{
+		Config: &config.Config{},
+		Processors: config.ProcessorSet{
+			"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_invoice"},
+		},
+	}
 	stripeSvc.SetBaseURLForTest(server.URL)
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.ProcessorStripe): money.NewStripeCollectionAdapter(dbi, stripeSvc),
@@ -628,9 +631,12 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 	}))
 	t.Cleanup(server.Close)
 
-	stripeSvc := &subscriptions.StripeService{Config: &config.Config{Processors: map[string]*config.ProcessorConfig{
-		"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_invoice"},
-	}}}
+	stripeSvc := &subscriptions.StripeService{
+		Config: &config.Config{},
+		Processors: config.ProcessorSet{
+			"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_invoice"},
+		},
+	}
 	stripeSvc.SetBaseURLForTest(server.URL)
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.ProcessorStripe): money.NewStripeCollectionAdapter(dbi, stripeSvc),

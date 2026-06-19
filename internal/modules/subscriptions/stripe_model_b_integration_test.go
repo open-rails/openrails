@@ -207,11 +207,12 @@ func TestStripeModelBUpgrade_Integration(t *testing.T) {
 
 	// 4) UPGRADE through OpenRails' OWN code path. These are exactly the Model-B
 	//    params the checkout upgrade branch passes.
-	svc := &StripeService{Config: &config.Config{
-		Processors: map[string]*config.ProcessorConfig{
+	svc := &StripeService{
+		Config: &config.Config{},
+		Processors: config.ProcessorSet{
 			"stripe": {Type: config.ProcessorTypeStripe, SecretKey: key},
 		},
-	}}
+	}
 	require.NoError(t, svc.UpdateSubscriptionPrice(
 		context.Background(),
 		sub.ID,

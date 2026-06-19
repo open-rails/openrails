@@ -170,8 +170,10 @@ func (s *Service) DetectCatalogExtras(ctx context.Context) (*CatalogExtrasReport
 		return nil, err
 	}
 	var stripeLister stripeProductLister
-	if stripeProc := cfg.GetStripeProcessor(); stripeProc != nil && strings.TrimSpace(stripeProc.SecretKey) != "" {
-		stripeLister = &catalog.StripeCatalogService{Config: cfg}
+	if s.rt != nil {
+		if stripeProc := s.rt.Processors.GetStripeProcessor(); stripeProc != nil && strings.TrimSpace(stripeProc.SecretKey) != "" {
+			stripeLister = &catalog.StripeCatalogService{Config: cfg, Processors: s.rt.Processors}
+		}
 	}
 	var nmiLister nmiPlanLister
 	if s.rt != nil && s.rt.NMIClients != nil {

@@ -73,47 +73,6 @@ func TestLedger_ConservationAndFlows(t *testing.T) {
 	requireNoCounterDrift(t, ctx, pool, merchantID, cur)
 }
 
-// Authorize holds funds; Capture posts the actual; the remainder is released;
-// a pending may be resolved at most once.
-func TestLedger_TwoPhase(t *testing.T) {
-	l, pool, ctx, customer, merchantID, cur := testLedger(t)
-	_, err := l.Deposit(ctx, customer, cur, 1000, "grant", uuid.NewString(), uuid.New())
-	require.NoError(t, err)
-	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
-	require.NoError(t, err)
-
-	hold, err := l.Authorize(ctx, customer, cur, 400, "invoker-1", "gpt")
-	require.NoError(t, err)
-	mustBalance(t, ctx, l, custAcc, 1000) // pending does not post
-	mustHeld(t, ctx, l, custAcc, 400)
-	mustAvailable(t, ctx, l, custAcc, 600)
-
-	_, err = l.Capture(ctx, hold.ID, 250, 0) // actual < authorized
-	require.NoError(t, err)
-	mustBalance(t, ctx, l, custAcc, 750) // 1000 - 250
-	mustHeld(t, ctx, l, custAcc, 0)      // hold resolved -> remainder freed
-
-	// A resolved pending cannot be resolved again (unique resolution index).
-	_, err = l.Capture(ctx, hold.ID, 100, 0)
-	require.Error(t, err)
-	_, err = l.Release(ctx, hold.ID)
-	require.Error(t, err)
-
-	// A released hold frees its reservation without touching the balance.
-	hold2, err := l.Authorize(ctx, customer, cur, 100, "invoker-1", "gpt")
-	require.NoError(t, err)
-	mustHeld(t, ctx, l, custAcc, 100)
-	_, err = l.Release(ctx, hold2.ID)
-	require.NoError(t, err)
-	mustHeld(t, ctx, l, custAcc, 0)
-	mustBalance(t, ctx, l, custAcc, 750)
-
-	net, err := l.Conservation(ctx, cur)
-	require.NoError(t, err)
-	require.Equal(t, int64(0), net)
-	requireNoCounterDrift(t, ctx, pool, merchantID, cur)
-}
-
 // A customer_balance cannot be overdrawn past its arrears floor.
 func TestLedger_SignConstraint(t *testing.T) {
 	l, pool, ctx, customer, merchantID, cur := testLedger(t)
@@ -195,48 +154,14 @@ func mustBalance(t *testing.T, ctx context.Context, l *ledger.Ledger, acc uuid.U
 	require.Equal(t, want, got, "balance of %s", acc)
 }
 
-func mustHeld(t *testing.T, ctx context.Context, l *ledger.Ledger, acc uuid.UUID, want int64) {
-	t.Helper()
-	got, err := l.Held(ctx, acc)
-	require.NoError(t, err)
-	require.Equal(t, want, got, "held of %s", acc)
-}
-
-func mustAvailable(t *testing.T, ctx context.Context, l *ledger.Ledger, acc uuid.UUID, want int64) {
-	t.Helper()
-	got, err := l.Available(ctx, acc)
-	require.NoError(t, err)
-	require.Equal(t, want, got, "available of %s", acc)
-}
-
 func requireNoCounterDrift(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchantID uuid.UUID, currency string) {
 	t.Helper()
 	rows, err := pool.Query(ctx, `
 WITH actual AS (
     SELECT
         a.id,
-        COALESCE(SUM(t.amount) FILTER (
-            WHERE t.credit_account_id = a.id AND t.phase IN ('posted', 'post_pending')
-        ), 0)::bigint AS credits_posted,
-        COALESCE(SUM(t.amount) FILTER (
-            WHERE t.debit_account_id = a.id AND t.phase IN ('posted', 'post_pending')
-        ), 0)::bigint AS debits_posted,
-        COALESCE(SUM(t.amount) FILTER (
-            WHERE t.credit_account_id = a.id
-              AND t.phase = 'pending'
-              AND NOT EXISTS (
-                  SELECT 1 FROM openrails.ledger_transfers r
-                  WHERE r.merchant_id = t.merchant_id AND r.pending_id = t.id
-              )
-        ), 0)::bigint AS credits_pending,
-        COALESCE(SUM(t.amount) FILTER (
-            WHERE t.debit_account_id = a.id
-              AND t.phase = 'pending'
-              AND NOT EXISTS (
-                  SELECT 1 FROM openrails.ledger_transfers r
-                  WHERE r.merchant_id = t.merchant_id AND r.pending_id = t.id
-              )
-        ), 0)::bigint AS debits_pending
+        COALESCE(SUM(t.amount) FILTER (WHERE t.credit_account_id = a.id), 0)::bigint AS credits_posted,
+        COALESCE(SUM(t.amount) FILTER (WHERE t.debit_account_id = a.id), 0)::bigint AS debits_posted
     FROM openrails.ledger_accounts a
     LEFT JOIN openrails.ledger_transfers t
       ON t.merchant_id = a.merchant_id
@@ -252,8 +177,6 @@ WHERE a.merchant_id = $1
   AND (
       a.credits_posted <> actual.credits_posted
       OR a.debits_posted <> actual.debits_posted
-      OR a.credits_pending <> actual.credits_pending
-      OR a.debits_pending <> actual.debits_pending
   )`, merchantID, currency)
 	require.NoError(t, err)
 	defer rows.Close()

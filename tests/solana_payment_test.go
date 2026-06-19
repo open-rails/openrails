@@ -59,11 +59,11 @@ func TestSolanaTokensNoAuth(t *testing.T) {
 func setupTestSuiteWithSolana(t *testing.T) (*TestContainerSuite, string, string) {
 	suite, token, userID := setupTestSuiteWithAuth(t)
 
-	// Add Solana configuration to the Processors map
-	if suite.Config.Processors == nil {
-		suite.Config.Processors = make(map[string]*config.ProcessorConfig)
+	// Add Solana configuration to the construction-time processor set.
+	if suite.Processors == nil {
+		suite.Processors = make(config.ProcessorSet)
 	}
-	suite.Config.Processors["solana"] = &config.ProcessorConfig{
+	suite.Processors["solana"] = &config.ProcessorConfig{
 		Type:            config.ProcessorTypeSolana,
 		RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
 		Tokens:          config.DefaultDevnetTokens(),

@@ -1245,28 +1245,6 @@ func TestAdvisoryNeverWrites(t *testing.T) {
 	assert.Equal(t, FindingStatusOpen, rec.Status)
 }
 
-func TestEntitlementRevocationDisabledSkipsRevokes(t *testing.T) {
-	ctx := context.Background()
-	local := &fakeLocal{}
-	orphan := liveLocalSub(ProviderNMI, "nmi-norevoke")
-	orphan.Status = "cancelled"
-	orphan.CancelType = "user"
-	local.state.Subscriptions = []LocalSubscription{orphan}
-	withLiveEntitlement(local, &orphan)
-	snap := &RemoteSnapshot{Provider: ProviderNMI, Capabilities: Capabilities{Subscriptions: true}}
-	eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-	eng.DisableEntitlementRevocation = true
-
-	res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
-	require.NoError(t, err)
-	ps9 := findByType(res.Findings, FindingEntitlementMismatch)
-	require.Len(t, ps9, 1)
-	assert.Zero(t, writer.calls["revoke"], "revocation must be skipped when entitlement expiration is disabled")
-	rec := store.record(ProviderNMI, FindingEntitlementMismatch, orphan.ID.String())
-	assert.Equal(t, FindingStatusOpen, rec.Status, "skipped applies stay open")
-	assert.Equal(t, 1, res.Summary.Providers["nmi"].ApplySkipped)
-}
-
 func TestDismissedFindingsStayDismissed(t *testing.T) {
 	ctx := context.Background()
 	local := &fakeLocal{}

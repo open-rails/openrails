@@ -6,11 +6,11 @@ import (
 	"github.com/open-rails/openrails/config"
 )
 
-func requireCCBillProcessorConfig(cfg *config.Config) (*config.ProcessorConfig, error) {
-	if cfg == nil {
+func requireCCBillProcessorConfig(processors config.ProcessorSet) (*config.ProcessorConfig, error) {
+	if processors == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	ccbillProc := cfg.GetCCBillProcessor()
+	ccbillProc := processors.GetCCBillProcessor()
 	if ccbillProc == nil {
 		return nil, fmt.Errorf("ccbill processor is not configured")
 	}

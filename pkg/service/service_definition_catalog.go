@@ -229,7 +229,7 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 	if !req.SkipProcessorSync && (req.DisplayName != nil || req.Description != nil || req.Status != nil) && s.rt.Config != nil {
 		stripeProductID := s.lookupStripeProductID(ctx, productID)
 		if stripeProductID != "" {
-			stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
+			stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Processors: s.rt.Processors}
 			params := catalog.UpdateProductParams{}
 			if req.DisplayName != nil {
 				name := strings.TrimSpace(*req.DisplayName)
@@ -267,7 +267,7 @@ func (s *Service) propagateProductActiveToStripe(ctx context.Context, productID 
 	if stripeProductID == "" {
 		return
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
+	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Processors: s.rt.Processors}
 	a := active
 	_ = stripeSvc.UpdateProduct(ctx, stripeProductID, catalog.UpdateProductParams{Active: &a})
 }

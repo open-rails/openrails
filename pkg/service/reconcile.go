@@ -54,7 +54,7 @@ type StripeReconcileReport = reconcile.Report
 //	report, err := svc.ReconcileStripe(ctx, service.StripeReconcileOptions{Apply: true})
 //
 // The host needs nothing beyond a configured Stripe secret key (read from the
-// runtime config); the Stripe listers are built internally.
+// runtime processor set); the Stripe listers are built internally.
 func (s *Service) ReconcileStripe(ctx context.Context, opts StripeReconcileOptions) (*StripeReconcileReport, error) {
 	rt, err := s.runtime()
 	if err != nil {
@@ -64,14 +64,14 @@ func (s *Service) ReconcileStripe(ctx context.Context, opts StripeReconcileOptio
 		return nil, fmt.Errorf("billing service: config unavailable for stripe reconcile")
 	}
 
-	subLister, err := subscriptions.NewStripeSubscriptionLister(rt.Config)
+	subLister, err := subscriptions.NewStripeSubscriptionLister(rt.Processors)
 	if err != nil {
 		return nil, fmt.Errorf("stripe subscription lister init failed: %w", err)
 	}
 
 	var chargeLister subscriptions.StripeChargeLister
 	if !opts.SkipPayments {
-		cl, err := subscriptions.NewStripeChargeLister(rt.Config)
+		cl, err := subscriptions.NewStripeChargeLister(rt.Processors)
 		if err != nil {
 			return nil, fmt.Errorf("stripe charge lister init failed: %w", err)
 		}

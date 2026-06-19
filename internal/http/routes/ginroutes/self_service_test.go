@@ -38,7 +38,7 @@ type fakeDelegatedResolver struct {
 	err         error
 }
 
-func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string) (*controlplane.ResolvedDelegated, error) {
+func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string, string) (*controlplane.ResolvedDelegated, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -270,6 +270,47 @@ func TestMerchantAdmin_SecretRoutesMountedAndGated(t *testing.T) {
 			w := doSelf(e, tc.method, tc.path, true)
 			require.Equal(t, http.StatusForbidden, w.Code,
 				"%s must be mounted and gated (403, not 404): %s", tc.name, w.Body.String())
+		})
+	}
+}
+
+func TestMerchantAdmin_ConfigurationRoutesMountedAndGated(t *testing.T) {
+	readless := []string{controlplane.PermMerchantBillingRead}
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"configuration-get", http.MethodGet, "/v1/merchant-admin/merchant-configuration"},
+		{"configuration-put", http.MethodPut, "/v1/merchant-admin/merchant-configuration"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newMerchantAdminRouter(t, readless)
+			w := doSelf(e, tc.method, tc.path, true)
+			require.Equal(t, http.StatusForbidden, w.Code,
+				"%s must be mounted and gated (403, not 404): %s", tc.name, w.Body.String())
+		})
+	}
+}
+
+func TestMerchantAdmin_ConfigurationPermissionsAreDistinct(t *testing.T) {
+	cases := []struct {
+		name   string
+		perms  []string
+		method string
+		path   string
+	}{
+		{"read", []string{controlplane.PermMerchantConfigurationRead}, http.MethodGet, "/v1/merchant-admin/merchant-configuration"},
+		{"write", []string{controlplane.PermMerchantConfigurationWrite}, http.MethodPut, "/v1/merchant-admin/merchant-configuration"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newMerchantAdminRouter(t, tc.perms)
+			w := doSelf(e, tc.method, tc.path, true)
+			require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
+			require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 		})
 	}
 }

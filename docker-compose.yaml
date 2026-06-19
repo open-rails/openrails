@@ -219,18 +219,11 @@ services:
       ENV: "${ENV:-development}"
       TEST_MODE: "${TEST_MODE:-true}"
       API_URL: "${API_URL:-http://localhost:22053}"
-      # For docker-compose E2E sandbox, the default issuer is the in-network `issuer` service (profile: e2e-sandbox).
-      AUTH_ISSUERS: '${AUTH_ISSUERS:-["http://issuer:8080"]}'
-      AUTH_EXPECTED_AUDIENCE: "${AUTH_EXPECTED_AUDIENCE:-openrails-app}"
       # Closed-registration provisioning is explicit:
-      #   billing push-bootstrap -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
-      #   billing push-catalog -c /etc/openrails/config.yaml -f /etc/openrails/catalog.yaml
-
-      # Processor env passthrough (for local sandbox/E2E)
-      PROCESSORS_MOBIUS_TYPE: "nmi"
-      PROCESSORS_MOBIUS_SECURITY_KEY: "${PROCESSORS_MOBIUS_SECURITY_KEY:-dev-test-security-key}"
-      PROCESSORS_MOBIUS_WEBHOOK_SECRET: "${PROCESSORS_MOBIUS_WEBHOOK_SECRET:-}"
-      PROCESSORS_MOBIUS_TOKENIZATION_KEY: "${PROCESSORS_MOBIUS_TOKENIZATION_KEY:-}"
+      #   openrails push-merchant-config -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
+      #   openrails push-merchant-catalog -c /etc/openrails/config.yaml -f /etc/openrails/catalog.yaml
+      # Auth authority and provider credentials are merchant configuration, not
+      # config/env runtime infrastructure.
 
       # Database connection (admin superuser)
       DB_HOST: "postgres"

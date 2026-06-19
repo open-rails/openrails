@@ -10,20 +10,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+const testSolanaPayLogoURL = "https://example.com/logo.png"
 
 // TestSolanaPayTransactionRequestFlow tests the full transaction_request flow
 // which uses the Solana Pay Transaction Request spec endpoints
 func TestSolanaPayTransactionRequestFlow(t *testing.T) {
 	suite, token, _ := setupTestSuiteWithSolana(t)
-	// Add store branding for testing
-	suite.Config.Store = &config.StoreConfig{
-		Name:    "Test Store",
-		LogoURL: config.DefaultLogoURL,
-	}
+	seedSolanaPayMerchantProfile(t, suite)
 	// Set the public API base URL for solana_pay_url generation.
 	suite.Config.APIURL = "https://api.test.com"
 
@@ -78,10 +76,7 @@ func TestSolanaPayTransactionRequestFlow(t *testing.T) {
 // TestSolanaPayGetEndpoint tests GET /v1/checkout/:id/solana-pay
 func TestSolanaPayGetEndpoint(t *testing.T) {
 	suite, token, _ := setupTestSuiteWithSolana(t)
-	suite.Config.Store = &config.StoreConfig{
-		Name:    "Test Store",
-		LogoURL: config.DefaultLogoURL,
-	}
+	seedSolanaPayMerchantProfile(t, suite)
 	suite.Config.APIURL = "https://api.test.com"
 
 	products := suite.SeedProducts()
@@ -126,10 +121,10 @@ func TestSolanaPayGetEndpoint(t *testing.T) {
 		require.True(t, ok)
 		assert.NotEmpty(t, label, "label should not be empty")
 
-		// Should return icon from config
+		// Should return icon from merchant profile config.
 		icon, ok := resp["icon"].(string)
 		require.True(t, ok)
-		assert.Equal(t, config.DefaultLogoURL, icon)
+		assert.Equal(t, testSolanaPayLogoURL, icon)
 	})
 
 	t.Run("returns 404 for invalid session ID", func(t *testing.T) {
@@ -152,10 +147,7 @@ func TestSolanaPayGetEndpoint(t *testing.T) {
 // TestSolanaPayPostEndpoint tests POST /v1/checkout/:id/solana-pay
 func TestSolanaPayPostEndpoint(t *testing.T) {
 	suite, token, _ := setupTestSuiteWithSolana(t)
-	suite.Config.Store = &config.StoreConfig{
-		Name:    "Test Store",
-		LogoURL: config.DefaultLogoURL,
-	}
+	seedSolanaPayMerchantProfile(t, suite)
 	suite.Config.APIURL = "https://api.test.com"
 
 	products := suite.SeedProducts()
@@ -215,7 +207,7 @@ func TestSolanaPayPostEndpoint(t *testing.T) {
 
 		// Use mock NMI to allow this request to succeed
 		suiteWithNMI, _ := SetupSuiteWithMockNMI(t)
-		suiteWithNMI.Config.Processors["solana"] = suite.Config.Processors["solana"]
+		suiteWithNMI.Processors["solana"] = suite.Processors["solana"]
 		products2 := suiteWithNMI.SeedProducts()
 		mobiusPriceID2 := products2[0].Prices[0].ID
 
@@ -288,13 +280,23 @@ func TestSolanaPayTransferRequestNotAffected(t *testing.T) {
 	assert.False(t, hasSolanaPayURL || payment["solana_pay_url"] == "", "transfer_request should not have solana_pay_url")
 }
 
-// setupTestSuiteWithSolanaPayConfig extends setupTestSuiteWithSolana with Store config
+// setupTestSuiteWithSolanaPayConfig extends setupTestSuiteWithSolana with
+// merchant profile config.
 func setupTestSuiteWithSolanaPayConfig(t *testing.T) (*TestContainerSuite, string, string) {
 	suite, token, userID := setupTestSuiteWithSolana(t)
-	suite.Config.Store = &config.StoreConfig{
-		Name:    "Test Store",
-		LogoURL: config.DefaultLogoURL,
-	}
+	seedSolanaPayMerchantProfile(t, suite)
 	suite.Config.APIURL = "https://api.test.com"
 	return suite, token, userID
+}
+
+func seedSolanaPayMerchantProfile(t *testing.T, suite *TestContainerSuite) {
+	t.Helper()
+	_, err := suite.Pool.Exec(suite.ctx, `
+		INSERT INTO openrails.merchant_configurations (merchant_id, config)
+		VALUES ($1::uuid, $2::jsonb)
+		ON CONFLICT (merchant_id) DO UPDATE
+		SET config = EXCLUDED.config,
+		    updated_at = now()
+	`, dbtest.TestMerchantID.UUID(), `{"profile":{"display_name":"Test Store","logo_url":"`+testSolanaPayLogoURL+`","from_email":"billing@example.com"}}`)
+	require.NoError(t, err)
 }

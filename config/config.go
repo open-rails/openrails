@@ -50,62 +50,18 @@ func (p *FlexiblePort) UnmarshalText(text []byte) error {
 
 const ConfigContextKey string = "config"
 
-// DefaultLogoURL is a simple billing/payment icon (white dollar sign on purple circle)
-// SVG: <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-//
-//	<circle cx="32" cy="32" r="30" fill="#9945FF"/>
-//	<text x="32" y="44" font-family="Arial" font-size="36" font-weight="bold" fill="white" text-anchor="middle">$</text>
-//	</svg>
-const DefaultLogoURL = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0Ij48Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMCIgZmlsbD0iIzk5NDVGRiIvPjx0ZXh0IHg9IjMyIiB5PSI0NCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjM2IiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPiQ8L3RleHQ+PC9zdmc+"
-
-// StoreConfig holds merchant/store branding configuration.
-// Used across the system for consistent branding (Solana Pay, emails, etc.)
-type StoreConfig struct {
-	// Name is the merchant/store name displayed to customers (e.g., in Solana Pay QR codes, emails)
-	Name string `koanf:"name"`
-	// LogoURL is the URL to the store logo/icon (used in Solana Pay QR codes, etc.)
-	// Must be an absolute HTTPS URL to an SVG, PNG, or WebP image
-	LogoURL string `koanf:"logo_url"`
-	// FromEmail is the sender email address for all outgoing emails (receipts, notifications, etc.)
-	// Example: "noreply@mystore.com" or "billing@mystore.com"
-	FromEmail string `koanf:"from_email"`
-	// CustomerPortalURL is the customer-facing URL where users can manage billing settings
-	// (e.g., update payment method, manage subscription).
-	CustomerPortalURL string `koanf:"customer_portal_url"`
-}
-
 type Config struct {
 	Env  string       `koanf:"env,omitempty"`
 	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 2053)
 	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
 
-	// Merchant is the construction-time merchant this OpenRails engine is bound
-	// to (#336): a merchant SLUG (the public-surface identifier; the UUID is an
-	// internal detail resolved once at bootstrap via db.ResolveMerchantSlug).
-	// There is NO default merchant — every merchant-owned write resolves its
-	// merchant from here (later: per-request resolution). When empty, no
-	// merchant is pinned and merchant-owned operations hard-fail by design.
-	// Embedded hosts set it via embed.Options.Merchant; standalone via
-	// `merchant:` / MERCHANT.
-	Merchant string `koanf:"merchant,omitempty"`
-
-	// Mode is the pure-behavior operating dial (#346, #355): how much OpenRails
-	// is allowed to do against the payment providers. It applies identically in
-	// test and live environments (sandbox vs live is the orthogonal TestEnv
-	// axis). One of:
-	//   - "full":     everything runs — charges, dunning, deletes
-	//   - "limited":  REACTIVE-ONLY — no system-initiated provider actions
-	//                 (no dunning charges or window-expiry cancellations, no
-	//                 auto-top-ups, no arrears collection, no Solana pulls,
-	//                 no catalog provider-object writes). User/admin-initiated
-	//                 operations work normally, including their processor-side
-	//                 deletes.
-	//   - "readonly": ZERO provider writes — even reactive ones fail loudly.
-	//                 For reconciliation/forensics boots. Implies limited +
-	//                 the processor-deletion kill switch.
+	// Mode is the behavior dial (#346, #355): how much OpenRails is allowed to
+	// do against payment providers. It is independent from TestEnv. One of:
+	//   - "full":     normal operation
+	//   - "limited":  no system-initiated provider writes
+	//   - "readonly": no provider writes
 	// Unset defaults to "full" in development; outside development an explicit
-	// mode is REQUIRED (Validate refuses to boot without one). Feature flags
-	// remain fine-grained dials on top; the strictest setting always wins.
+	// mode is REQUIRED (Validate refuses to boot without one).
 	Mode string `koanf:"mode,omitempty"`
 
 	// TestEnv is the sandbox-credential axis (#355), orthogonal to Mode. When
@@ -128,48 +84,23 @@ type Config struct {
 	// Embedded mode:   "https://api.mysite.com/billing" (routes at /billing/v1/*)
 	//
 	// Formula: generated_url = APIURL + {version_path} + "/checkout/:id/solana-pay"
-	APIURL string       `koanf:"api_url,omitempty"`
-	Store  *StoreConfig `koanf:"store,omitempty"`
-
-	// Processors is the unified configuration for all payment processors.
-	// Each key is the processor name (e.g., "mobius", "ccbill", "stripe", "solana").
-	// Reserved names (ccbill, stripe, solana) don't need explicit "type" field.
-	// Non-reserved names (e.g., "mobius", "acme") require "type: nmi".
-	//
-	// Example:
-	//   processors:
-	//     mobius:
-	//       type: nmi
-	//       security_key: "..."
-	//     ccbill:
-	//       client_acc_num: "..."
-	//     stripe:
-	//       secret_key: "sk_..."
-	//     solana:
-	//       recipient_wallet: "..."
-	Processors map[string]*ProcessorConfig `koanf:"processors,omitempty"`
+	APIURL string `koanf:"api_url,omitempty"`
 
 	// USDCFunding configures external wallet-funding providers. These providers
 	// only move USDC into the user's self-custody wallet; OpenRails checkout still
 	// collects payment from that wallet afterwards.
 	USDCFunding *USDCFundingConfig `koanf:"usdc_funding,omitempty"`
 
-	DB          *DBConfig         `koanf:"db,omitempty"`
-	Redis       *RedisConfig      `koanf:"redis,omitempty"`
-	Auth        *AuthConfig       `koanf:"auth,omitempty"`
-	ClickHouse  *ClickHouseConfig `koanf:"clickhouse,omitempty"`
-	Logger      *LoggerConfig     `koanf:"logger,omitempty"`
-	SendGrid    *SendGridConfig   `koanf:"sendgrid,omitempty"`
-	CorsOrigins []string          `koanf:"cors_origins,omitempty"`
-	// MerchantCORS is legacy shape. It is NOT per-merchant enforcement: entries
-	// are flattened into the same global CORS allow-list as CorsOrigins. Prefer
-	// CorsOrigins until browser origins move to AuthKit remote_application state.
-	MerchantCORS map[string]*MerchantCORSConfig `koanf:"merchant_cors,omitempty"`
-	RateLimits   *RateLimitsConfig              `koanf:"rate_limits,omitempty"`
-	Captcha      *CaptchaConfig                 `koanf:"captcha,omitempty"`
-	FeatureFlags *FeatureFlags                  `koanf:"feature_flags,omitempty"`
-	Encryption   *EncryptionConfig              `koanf:"encryption,omitempty"`
-	Vault        *VaultConfig                   `koanf:"vault,omitempty"`
+	DB         *DBConfig         `koanf:"db,omitempty"`
+	Redis      *RedisConfig      `koanf:"redis,omitempty"`
+	Auth       *AuthConfig       `koanf:"auth,omitempty"`
+	ClickHouse *ClickHouseConfig `koanf:"clickhouse,omitempty"`
+	Logger     *LoggerConfig     `koanf:"logger,omitempty"`
+	SendGrid   *SendGridConfig   `koanf:"sendgrid,omitempty"`
+	RateLimits *RateLimitsConfig `koanf:"rate_limits,omitempty"`
+	Captcha    *CaptchaConfig    `koanf:"captcha,omitempty"`
+	Encryption *EncryptionConfig `koanf:"encryption,omitempty"`
+	Vault      *VaultConfig      `koanf:"vault,omitempty"`
 }
 
 // EncryptionConfig configures per-merchant encryption-at-rest (issue #227). The
@@ -360,6 +291,15 @@ func validateSchema(raw string) error {
 	return nil
 }
 
+func hasEnvPrefix(prefix string) bool {
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // ProcessorType constants for the unified processor config
 const (
 	ProcessorTypeNMI    = "nmi"
@@ -384,7 +324,7 @@ var ReservedProcessorNames = map[string]string{
 // The Type field determines which fields are relevant:
 //   - type: nmi     → NMI fields (security_key, webhook_secret, etc.)
 //   - type: ccbill  → CCBill fields (client_acc_num, client_sub_acc, salt, etc.)
-//   - type: stripe  → Stripe fields (secret_key, webhook_secret, success_url, cancel_url)
+//   - type: stripe  → Stripe fields (secret_key, webhook_secret)
 //   - type: solana  → Solana fields (recipient_wallet, rpc_endpoint, etc.)
 //
 // Reserved names (ccbill, stripe, solana) don't need explicit type - it's implied.
@@ -418,9 +358,7 @@ type ProcessorConfig struct {
 	AllowedCIDRs []string `koanf:"allowed_cidrs"`
 
 	// --- Stripe fields (type: stripe) ---
-	SecretKey  string `koanf:"secret_key"`
-	SuccessURL string `koanf:"success_url"`
-	CancelURL  string `koanf:"cancel_url"`
+	SecretKey string `koanf:"secret_key"`
 	// WebhookSecret is shared with NMI (same field name); for Stripe it is the
 	// signing secret of the classic / "snapshot" event destination.
 	// WebhookSecretThin is the signing secret of a Stripe "thin" Event
@@ -454,6 +392,12 @@ type ProcessorConfig struct {
 	// multi-tenant / Vault deployments, where each tenant supplies its own key.
 	PrivateKey string `koanf:"private_key"`
 }
+
+// ProcessorSet is an in-memory set of payment-provider credential entries. It
+// is not part of config.yaml/.env; private standalone installs seed provider
+// credentials through merchant bootstrap/Vault state, and embedded hosts may
+// pass a set programmatically during construction.
+type ProcessorSet map[string]*ProcessorConfig
 
 // GetEffectiveType returns the processor type, inferring from reserved names if needed.
 func (p *ProcessorConfig) GetEffectiveType(name string) string {
@@ -555,65 +499,12 @@ type RedisConfig struct {
 	DB       int    `koanf:"db"`
 }
 
-// AuthConfig holds JWT verification configuration for OpenRails.
-// Billing is a JWT verifier (not issuer) - it validates tokens issued by your IdP.
-// MerchantCORSConfig is legacy config flattened into the global CORS allow-list.
-type MerchantCORSConfig struct {
-	// AllowedOrigins is exact-match only; no wildcards.
-	AllowedOrigins []string `koanf:"allowed_origins,omitempty"`
-}
-
-// AllowedCORSOrigins returns the de-duplicated union of the global CorsOrigins
-// and every legacy MerchantCORS origin. This is a global allow-list, not tenant
-// isolation. Order is stable (global origins first, then legacy origins in
-// merchant-slug order) so the allow-list is deterministic.
-func (c *Config) AllowedCORSOrigins() []string {
-	if c == nil {
-		return nil
-	}
-	seen := make(map[string]struct{})
-	var out []string
-	add := func(o string) {
-		o = strings.TrimSpace(o)
-		if o == "" {
-			return
-		}
-		if _, ok := seen[o]; ok {
-			return
-		}
-		seen[o] = struct{}{}
-		out = append(out, o)
-	}
-	for _, o := range c.CorsOrigins {
-		add(o)
-	}
-	slugs := make([]string, 0, len(c.MerchantCORS))
-	for slug := range c.MerchantCORS {
-		slugs = append(slugs, slug)
-	}
-	sort.Strings(slugs)
-	for _, slug := range slugs {
-		tc := c.MerchantCORS[slug]
-		if tc == nil {
-			continue
-		}
-		for _, o := range tc.AllowedOrigins {
-			add(o)
-		}
-	}
-	return out
-}
-
+// AuthConfig holds OpenRails' AuthKit control-plane configuration. Standalone
+// OpenRails authenticates users/admins through this control plane; remote
+// applications, JWKS/public keys, service tokens, users, orgs, roles, and
+// permissions are seeded as AuthKit state rather than trusted from runtime
+// config.yaml/.env issuer allow-lists.
 type AuthConfig struct {
-	// Issuers is the config-declared allowlist of FIRST-PARTY token issuers for
-	// the user/admin JWT surface: OpenRails fetches each issuer's JWKS and
-	// verifies host-app-issued user JWTs against it. This is an INPUT to the
-	// always-on auth stack — NOT a standalone auth mode (#469 removed the
-	// "verifier-only" deployment). Delegated browser tokens use the control
-	// plane's live issuer registry instead.
-	Issuers          []string `koanf:"issuers"`
-	ExpectedAudience string   `koanf:"expected_audience"` // Accept token only if it contains this audience (e.g., "openrails-app")
-
 	// HARDCUT (#312): there is no `auth.operator_tenant_slug` /
 	// `auth.operator_tenant_admin_roles`. Admin authority is the LIVE
 	// openrails:admin permission held in the caller's OWN tenant (or carried on a
@@ -626,17 +517,15 @@ type AuthConfig struct {
 	// mode — there is no "verifier-only" deployment. Standalone boot always
 	// builds the in-process AuthKit core/service, mounts the selective AuthKit
 	// route groups, and runs control-plane bootstrap; construction failure is
-	// fatal. Load materializes this section when omitted (dev defaults the
-	// issuer); the former `enabled` knob is rejected. Private/self-hosted
-	// posture is expressed by the registration axes below, never by removing
-	// the control plane.
+	// fatal. Load materializes this section when omitted (dev defaults the issuer);
+	// the former `enabled` knob is rejected.
 	ControlPlane *ControlPlaneConfig `koanf:"control_plane,omitempty"`
 }
 
 // ControlPlaneConfig configures the OpenRails-owned AuthKit control plane
 // (issue #224). HARD CUT (#469): the control plane is always on in standalone
-// mode. The section tunes it (issuer, audiences, registration posture); it does
-// not switch it off. pkg/embedded hosts that want it opt in by calling
+// mode. The section tunes it (issuer, token prefix, hosted posture); it does not
+// switch it off. pkg/embedded hosts that want it opt in by calling
 // pkg/embedded/controlplane.Attach.
 type ControlPlaneConfig struct {
 	// Issuer is the AuthKit token issuer this OpenRails control plane signs as
@@ -644,74 +533,27 @@ type ControlPlaneConfig struct {
 	// development Load defaults it to api_url (or http://localhost:<port>).
 	Issuer string `koanf:"issuer,omitempty"`
 
-	// IssuedAudiences are the audiences placed on tokens this control plane
-	// issues. ExpectedAudiences are the audiences it accepts. Both default to
-	// the verifier's ExpectedAudience when left empty.
-	IssuedAudiences   []string `koanf:"issued_audiences,omitempty"`
-	ExpectedAudiences []string `koanf:"expected_audiences,omitempty"`
-
 	// TokenPrefix is the brand prefix for minted service tokens (e.g. "openrails" ->
 	// `openrails_st_<key_id>_<secret>`). Empty -> bare service-token marker.
 	TokenPrefix string `koanf:"token_prefix,omitempty"`
 
-	// PublicUserRegistration enables public native-user self-registration. Default
-	// false (restricted: admin/bootstrap-only). Maps to authkit
-	// NativeUserRegistrationMode. (authkit issue 60 — independent registration axes.)
-	PublicUserRegistration bool `koanf:"public_user_registration,omitempty"`
-
-	// PublicTenantRegistration enables public tenant onboarding/management. Default
-	// false (restricted). Maps to authkit TenantRegistrationMode. Independent of
-	// PublicUserRegistration — restrict either, both (the typical self-hosted
-	// posture), or neither.
-	PublicTenantRegistration bool `koanf:"public_tenant_registration,omitempty"`
+	// PublicHosted opens AuthKit native user + org registration and mounts the
+	// full hosted-SaaS AuthKit surface. Default false is the private/self-hosted
+	// posture: admin/bootstrap-only users and orgs, with only the intentional
+	// login/session/user route groups mounted. This should only be set by the
+	// private OpenRails SaaS deployment layer, not normal self-hosted installs.
+	PublicHosted bool `koanf:"public_hosted,omitempty"`
 
 	// BootstrapAdminServiceTokenName is the human-readable name of the initial
 	// deployment admin service token minted at bootstrap (#312). Defaults to
 	// "openrails-bootstrap-admin".
 	BootstrapAdminServiceTokenName string `koanf:"bootstrap_admin_service_token_name,omitempty"`
-
-	// PlatformOrgSlug is the AuthKit org slug for the managed-hosting PLATFORM
-	// superadmin org (issue #226), DISTINCT from any org operator org. The
-	// platform org holds the openrails-platform-superadmin role with the
-	// openrails:platform:superadmin permission and gates the cross-tenant
-	// /v1/platform/* surface. When empty (the default), platform-superadmin
-	// bootstrap and the /v1/platform/* routes are NOT enabled — a single-tenant
-	// or non-managed deployment never grows a cross-tenant superadmin.
-	PlatformOrgSlug string `koanf:"platform_org_slug,omitempty"`
-
-	// PlatformAdminUserID, when set, is assigned the platform-superadmin role in
-	// the platform org at bootstrap (issue #226). Optional: the platform org can
-	// be seeded empty and admins added later.
-	PlatformAdminUserID string `koanf:"platform_admin_user_id,omitempty"`
-}
-
-// PlatformOrgEnabled reports whether a managed-hosting platform-superadmin org
-// is configured (issue #226). When false, the cross-tenant /v1/platform/*
-// surface is not mounted and no platform-superadmin is bootstrapped.
-func (cp *ControlPlaneConfig) PlatformOrgEnabled() bool {
-	return cp != nil && strings.TrimSpace(cp.PlatformOrgSlug) != ""
-}
-
-// UserRegistrationOpen reports whether public native-user self-registration is
-// enabled (default false = restricted to admin/bootstrap).
-func (cp *ControlPlaneConfig) UserRegistrationOpen() bool {
-	return cp != nil && cp.PublicUserRegistration
-}
-
-// TenantRegistrationOpen reports whether public tenant onboarding/management is
-// enabled (default false = restricted to admin/bootstrap).
-func (cp *ControlPlaneConfig) TenantRegistrationOpen() bool {
-	return cp != nil && cp.PublicTenantRegistration
 }
 
 // SelfHostedPosture reports whether to mount only the intentional AuthKit route
-// groups (self-hosted) rather than the full hosted-SaaS DefaultAPI surface. True
-// unless BOTH registration axes are public (the fully-open hosted-SaaS posture).
+// groups (self-hosted) rather than the full hosted-SaaS DefaultAPI surface.
 func (cp *ControlPlaneConfig) SelfHostedPosture() bool {
-	if cp == nil {
-		return true
-	}
-	return !(cp.PublicUserRegistration && cp.PublicTenantRegistration)
+	return cp == nil || !cp.PublicHosted
 }
 
 // TokenConfig defines configuration for a specific Solana token
@@ -723,16 +565,6 @@ type TokenConfig struct {
 
 // RateLimitsConfig is a map of endpoint identifier -> rate limit config
 type RateLimitsConfig map[string]*RateLimit
-
-// DunningMode constants define the dunning behavior modes
-const (
-	// DunningModeOn is the default mode - normal dunning with retry charges, grace period, and recovery workflow
-	DunningModeOn = "on"
-	// DunningModeDryRunOnly runs the dunning workflow but does not attempt charges - for debugging charge logic bugs
-	DunningModeDryRunOnly = "dry_run_only"
-	// DunningModeOff disables dunning entirely - rebill failures result in immediate cancellation with no recovery
-	DunningModeOff = "off"
-)
 
 // Operating modes (#346, #355) — see Config.Mode. The former mode=test is
 // gone (sandbox is the orthogonal test_env axis) and "production" is renamed
@@ -751,80 +583,8 @@ var ValidModes = map[string]bool{
 	ModeReadOnly: true,
 }
 
-// ValidDunningModes contains all valid dunning mode values
-var ValidDunningModes = map[string]bool{
-	DunningModeOn:         true,
-	DunningModeDryRunOnly: true,
-	DunningModeOff:        true,
-}
-
-// FeatureFlags holds feature flag configuration for controlling system behavior.
-// These flags are primarily used for safety - disabling destructive operations
-// when bugs are suspected, without requiring a code deployment.
-type FeatureFlags struct {
-	// DunningMode controls dunning (retry charging) behavior for failed subscription rebills.
-	// Values:
-	//   - "on" (default): Normal dunning - retry charges, grace period, recovery workflow
-	//   - "dry_run_only": Workflow runs but no charges attempted - for debugging
-	//   - "off": No dunning - immediate cancellation on rebill failure, no recovery
-	DunningMode string `koanf:"dunning_mode"`
-
-	// NOTE (#359): there is no dunning schedule/window knob. The dunning
-	// cadence AND the staleness window are hardcoded functions of the price's
-	// billing cycle — see internal/modules/subscriptions.DunningRetryOffsets.
-
-	// DisableProcessorSubscriptionDeletions, when true, blocks every outbound
-	// processor-side delete_subscription call (NMI/Mobius recurring deletes)
-	// while local cancellation and entitlement changes proceed normally. The
-	// remote subscription is left alive for later reconciliation. Safety switch
-	// for migration cutovers — prevents bulk remote deletions while local state
-	// is still being converged. STRICTER than LimitedMode: blocks even the
-	// deletes that finalize user-asked cancellations.
-	DisableProcessorSubscriptionDeletions bool `koanf:"disable_processor_subscription_deletions"`
-
-	// DisableEntitlementExpiration stops all entitlement/credit expiration when true.
-	// Affects: CreditExpiryWorker, entitlement revocation in FailMembership.
-	// Users keep premium access even after subscription ends.
-	// Default: false (normal expiration behavior)
-	DisableEntitlementExpiration bool `koanf:"disable_entitlement_expiration"`
-}
-
-// GetDunningMode returns the effective dunning mode, defaulting to "on" if not set or invalid.
-func (f *FeatureFlags) GetDunningMode() string {
-	if f == nil || f.DunningMode == "" {
-		return DunningModeOn
-	}
-	mode := strings.ToLower(strings.TrimSpace(f.DunningMode))
-	if !ValidDunningModes[mode] {
-		return DunningModeOn
-	}
-	return mode
-}
-
-// IsDunningEnabled returns true if dunning charges should be attempted.
-// Returns false for "off" and "dry_run_only" modes.
-func (f *FeatureFlags) IsDunningEnabled() bool {
-	return f.GetDunningMode() == DunningModeOn
-}
-
-// IsDunningDryRun returns true if dunning is in dry-run mode (workflow runs, no charges).
-func (f *FeatureFlags) IsDunningDryRun() bool {
-	return f.GetDunningMode() == DunningModeDryRunOnly
-}
-
-// IsDunningOff returns true if dunning is completely disabled (immediate cancel on failure).
-func (f *FeatureFlags) IsDunningOff() bool {
-	return f.GetDunningMode() == DunningModeOff
-}
-
-// IsProcessorSubscriptionDeletionDisabled returns true if outbound
-// processor-side subscription deletions are blocked.
-func (f *FeatureFlags) IsProcessorSubscriptionDeletionDisabled() bool {
-	return f != nil && f.DisableProcessorSubscriptionDeletions
-}
-
-// SendGridConfig holds SendGrid email configuration.
-// Sender info (from_email, from_name) comes from StoreConfig.
+// SendGridConfig holds process-wide SendGrid API configuration. Sender/display
+// metadata is merchant-scoped and loaded from merchant_configurations.
 type SendGridConfig struct {
 	APIKey string `koanf:"api_key"`
 }
@@ -995,33 +755,6 @@ func Validate(cfg *Config) error {
 				return fmt.Errorf("default ClickHouse credentials are not allowed outside development")
 			}
 		}
-		if cfg.Auth == nil || len(cfg.Auth.Issuers) == 0 {
-			return fmt.Errorf("auth issuers must be configured outside development")
-		}
-		if strings.TrimSpace(cfg.Auth.ExpectedAudience) == "" {
-			return fmt.Errorf("auth expected_audience must be configured outside development")
-		}
-		for _, issuer := range cfg.Auth.Issuers {
-			issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
-			if issuer == "" || issuer == "http://localhost:8080" || issuer == "http://api:2052" || issuer == "http://issuer:8080" {
-				return fmt.Errorf("default auth issuer is not allowed outside development")
-			}
-		}
-		if len(cfg.CorsOrigins) == 0 {
-			return fmt.Errorf("cors_origins must be configured outside development")
-		}
-	}
-	// Validate Processors map
-	if len(cfg.Processors) > 0 {
-		if err := validateProcessors(cfg, isDev); err != nil {
-			return fmt.Errorf("processors validation failed: %w", err)
-		}
-	}
-
-	// Validate Stripe key prefix matches test_env
-	// This runs after processor validation to check the key we'll actually use
-	if err := validateStripeKeyForTestEnv(cfg); err != nil {
-		return err
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
 		return fmt.Errorf("captcha config validation failed: %w", err)
@@ -1060,8 +793,25 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 // test_env axis. If there's a mismatch, it logs a warning and clears the key to
 // disable Stripe. This prevents accidentally processing real charges in a test
 // environment or test charges in a live one.
-func validateStripeKeyForTestEnv(cfg *Config) error {
-	for name, stripeProc := range cfg.Processors {
+func ValidateProcessorSet(cfg *Config, processors ProcessorSet) error {
+	if len(processors) == 0 {
+		return nil
+	}
+	isDev := true
+	if cfg != nil {
+		isDev = cfg.IsDev()
+	}
+	if err := validateProcessors(cfg, processors, isDev); err != nil {
+		return fmt.Errorf("processors validation failed: %w", err)
+	}
+	return validateStripeKeyForTestEnv(cfg, processors)
+}
+
+func validateStripeKeyForTestEnv(cfg *Config, processors ProcessorSet) error {
+	if cfg == nil {
+		cfg = &Config{}
+	}
+	for name, stripeProc := range processors {
 		if stripeProc == nil || stripeProc.GetEffectiveType(name) != ProcessorTypeStripe {
 			continue
 		}
@@ -1092,9 +842,9 @@ func validateStripeKeyForTestEnv(cfg *Config) error {
 }
 
 // validateProcessors validates all processors in the new Processors map
-func validateProcessors(cfg *Config, isDev bool) error {
+func validateProcessors(cfg *Config, processors ProcessorSet, isDev bool) error {
 	primaryByType := map[string]string{}
-	for name, proc := range cfg.Processors {
+	for name, proc := range processors {
 		if proc == nil {
 			continue
 		}
@@ -1232,14 +982,14 @@ func validateSolanaProcessor(cfg *Config, name string, proc *ProcessorConfig, is
 	return nil
 }
 
-// GetNMIProcessors returns all NMI-backed processor configs from the Processors map.
-func (cfg *Config) GetNMIProcessors() map[string]*ProcessorConfig {
+// GetNMIProcessors returns all NMI-backed processor configs.
+func (set ProcessorSet) GetNMIProcessors() map[string]*ProcessorConfig {
 	result := make(map[string]*ProcessorConfig)
-	if cfg == nil || cfg.Processors == nil {
+	if set == nil {
 		return result
 	}
 
-	for name, proc := range cfg.Processors {
+	for name, proc := range set {
 		if proc != nil && proc.IsNMI(name) {
 			result[strings.ToLower(name)] = proc
 		}
@@ -1250,13 +1000,13 @@ func (cfg *Config) GetNMIProcessors() map[string]*ProcessorConfig {
 
 // ProcessorKeysByType returns configured processor names for the provider type,
 // sorted for deterministic diagnostics and selection.
-func (cfg *Config) ProcessorKeysByType(providerType string) []string {
-	if cfg == nil || cfg.Processors == nil {
+func (set ProcessorSet) ProcessorKeysByType(providerType string) []string {
+	if set == nil {
 		return nil
 	}
 	providerType = strings.ToLower(strings.TrimSpace(providerType))
 	keys := make([]string, 0)
-	for name, proc := range cfg.Processors {
+	for name, proc := range set {
 		if proc == nil {
 			continue
 		}
@@ -1273,14 +1023,14 @@ func (cfg *Config) ProcessorKeysByType(providerType string) []string {
 // provider type. Existing configs with one entry and no role keep working
 // because an empty role is primary. Multiple primaries are a configuration
 // error: OpenRails cannot guess where default new work should route.
-func (cfg *Config) PrimaryProcessorByType(providerType string) (string, *ProcessorConfig, error) {
-	keys := cfg.ProcessorKeysByType(providerType)
+func (set ProcessorSet) PrimaryProcessorByType(providerType string) (string, *ProcessorConfig, error) {
+	keys := set.ProcessorKeysByType(providerType)
 	var (
 		primaryKey string
 		primary    *ProcessorConfig
 	)
 	for _, key := range keys {
-		proc := cfg.Processors[key]
+		proc := set[key]
 		if proc.EffectiveRole() != ProcessorRolePrimary {
 			continue
 		}
@@ -1293,30 +1043,30 @@ func (cfg *Config) PrimaryProcessorByType(providerType string) (string, *Process
 }
 
 // GetCCBillProcessor returns the configured primary CCBill processor.
-func (cfg *Config) GetCCBillProcessor() *ProcessorConfig {
-	_, proc, _ := cfg.PrimaryProcessorByType(ProcessorTypeCCBill)
+func (set ProcessorSet) GetCCBillProcessor() *ProcessorConfig {
+	_, proc, _ := set.PrimaryProcessorByType(ProcessorTypeCCBill)
 	return proc
 }
 
 // GetStripeProcessor returns the configured primary Stripe processor.
-func (cfg *Config) GetStripeProcessor() *ProcessorConfig {
-	_, proc, _ := cfg.PrimaryProcessorByType(ProcessorTypeStripe)
+func (set ProcessorSet) GetStripeProcessor() *ProcessorConfig {
+	_, proc, _ := set.PrimaryProcessorByType(ProcessorTypeStripe)
 	return proc
 }
 
 // GetSolanaProcessor returns the configured primary Solana processor.
-func (cfg *Config) GetSolanaProcessor() *ProcessorConfig {
-	_, proc, _ := cfg.PrimaryProcessorByType(ProcessorTypeSolana)
+func (set ProcessorSet) GetSolanaProcessor() *ProcessorConfig {
+	_, proc, _ := set.PrimaryProcessorByType(ProcessorTypeSolana)
 	return proc
 }
 
-// GetProcessor returns a processor config by name from the Processors map.
-func (cfg *Config) GetProcessor(name string) *ProcessorConfig {
-	if cfg == nil || cfg.Processors == nil {
+// GetProcessor returns a processor config by name.
+func (set ProcessorSet) GetProcessor(name string) *ProcessorConfig {
+	if set == nil {
 		return nil
 	}
 	normalizedName := strings.ToLower(strings.TrimSpace(name))
-	if proc, ok := cfg.Processors[normalizedName]; ok && proc != nil {
+	if proc, ok := set[normalizedName]; ok && proc != nil {
 		return proc
 	}
 	return nil
@@ -1324,8 +1074,8 @@ func (cfg *Config) GetProcessor(name string) *ProcessorConfig {
 
 // GetProcessorType returns the type of a processor by name.
 // Returns empty string if processor not found.
-func (cfg *Config) GetProcessorType(name string) string {
-	proc := cfg.GetProcessor(name)
+func (set ProcessorSet) GetProcessorType(name string) string {
+	proc := set.GetProcessor(name)
 	if proc == nil {
 		return ""
 	}
@@ -1333,8 +1083,8 @@ func (cfg *Config) GetProcessorType(name string) string {
 }
 
 // IsNMIProcessor returns true if the named processor is NMI-backed.
-func (cfg *Config) IsNMIProcessor(name string) bool {
-	return cfg.GetProcessorType(name) == ProcessorTypeNMI
+func (set ProcessorSet) IsNMIProcessor(name string) bool {
+	return set.GetProcessorType(name) == ProcessorTypeNMI
 }
 
 // GetMode returns the normalized operating mode ("" when unset).
@@ -1379,49 +1129,6 @@ func (cfg *Config) IsProviderReadOnly() bool {
 // IsDev returns true if the environment is development.
 func (cfg *Config) IsDev() bool {
 	return cfg.Env == "" || cfg.Env == "dev" || cfg.Env == "development"
-}
-
-// GetFeatureFlags returns the feature flags config, or a default config if not set.
-func (cfg *Config) GetFeatureFlags() *FeatureFlags {
-	if cfg.FeatureFlags == nil {
-		return &FeatureFlags{
-			DunningMode:                  DunningModeOn,
-			DisableEntitlementExpiration: false,
-		}
-	}
-	return cfg.FeatureFlags
-}
-
-// GetDunningMode returns the current dunning mode from feature flags.
-func (cfg *Config) GetDunningMode() string {
-	return cfg.GetFeatureFlags().GetDunningMode()
-}
-
-// IsDunningEnabled returns true if normal dunning charges should be attempted.
-func (cfg *Config) IsDunningEnabled() bool {
-	return cfg.GetFeatureFlags().IsDunningEnabled()
-}
-
-// IsDunningDryRun returns true if dunning is in dry-run mode.
-func (cfg *Config) IsDunningDryRun() bool {
-	return cfg.GetFeatureFlags().IsDunningDryRun()
-}
-
-// IsDunningOff returns true if dunning is completely disabled.
-func (cfg *Config) IsDunningOff() bool {
-	return cfg.GetFeatureFlags().IsDunningOff()
-}
-
-// IsProcessorSubscriptionDeletionDisabled returns true if outbound
-// processor-side subscription deletions are blocked — by the feature flag, or
-// implicitly by readonly mode (zero provider writes).
-func (cfg *Config) IsProcessorSubscriptionDeletionDisabled() bool {
-	return cfg.GetFeatureFlags().IsProcessorSubscriptionDeletionDisabled() || cfg.IsProviderReadOnly()
-}
-
-// IsEntitlementExpirationDisabled returns true if entitlement/credit expiration is disabled.
-func (cfg *Config) IsEntitlementExpirationDisabled() bool {
-	return cfg.GetFeatureFlags().DisableEntitlementExpiration
 }
 
 // assembleDBURL builds the database URL from atomic parameters if not explicitly set
@@ -1484,10 +1191,7 @@ func GetDefaultBillingConfig() *Config {
 			Password: "",
 			DB:       0,
 		},
-		Auth: &AuthConfig{
-			Issuers:          []string{"http://localhost:8080"},
-			ExpectedAudience: "openrails-app",
-		},
+		Auth: &AuthConfig{},
 		ClickHouse: &ClickHouseConfig{
 			HTTPAddr:   "http://localhost:8123",
 			ClientAddr: "localhost:9000",
@@ -1523,10 +1227,6 @@ func GetDefaultBillingConfig() *Config {
 		},
 		Captcha: &CaptchaConfig{
 			Provider: CaptchaProviderTurnstile,
-		},
-		FeatureFlags: &FeatureFlags{
-			DunningMode:                  DunningModeOn,
-			DisableEntitlementExpiration: false,
 		},
 	}
 }
@@ -1600,7 +1300,6 @@ func Load(configPath string) (*Config, error) {
 	// Examples:
 	// - DB_URL -> db.url
 	// - CLICKHOUSE_HTTP_ADDR -> clickhouse.http_addr
-	// - STORE_FROM_EMAIL -> store.from_email
 	envKeyToConfigKey := func(s string) string {
 		s = strings.ToLower(s)
 
@@ -1621,38 +1320,12 @@ func Load(configPath string) (*Config, error) {
 			return "vault.address"
 		}
 
-		if s == "auth_issuers" {
-			return "auth.issuers"
-		}
-		if s == "auth_expected_audience" {
-			return "auth.expected_audience"
-		}
-
-		// Special case: CORS_ORIGINS -> cors_origins (top-level, not cors.origins)
-		if s == "cors_origins" {
-			return "cors_origins"
-		}
-
-		// FEATURE_FLAGS_* -> feature_flags.*
-		if strings.HasPrefix(s, "feature_flags_") {
-			return "feature_flags." + strings.TrimPrefix(s, "feature_flags_")
-		}
-
 		// USDC_FUNDING_PROVIDERS_<NAME>_<FIELD> -> usdc_funding.providers.<name>.<field>
 		if strings.HasPrefix(s, "usdc_funding_providers_") {
 			rest := strings.TrimPrefix(s, "usdc_funding_providers_")
 			parts := strings.SplitN(rest, "_", 2)
 			if len(parts) == 2 {
 				return fmt.Sprintf("usdc_funding.providers.%s.%s", parts[0], parts[1])
-			}
-		}
-
-		// PROCESSORS_<NAME>_<FIELD> -> processors.<name>.<field>
-		// Example: PROCESSORS_MOBIUS_SECURITY_KEY -> processors.mobius.security_key
-		if strings.HasPrefix(s, "processors_") {
-			parts := strings.SplitN(s, "_", 3)
-			if len(parts) == 3 {
-				return fmt.Sprintf("processors.%s.%s", parts[1], parts[2])
 			}
 		}
 
@@ -1664,6 +1337,11 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	envCallbackWithValue := func(key string, value string) (string, interface{}) {
+		upperKey := strings.ToUpper(key)
+		if upperKey == "MERCHANT" || upperKey == "AUTH_ISSUERS" || upperKey == "CORS_ORIGINS" || strings.HasPrefix(upperKey, "PROCESSORS_") || strings.HasPrefix(upperKey, "STORE_") {
+			return "", nil
+		}
+
 		mapped := envKeyToConfigKey(key)
 		if mapped == "" {
 			return "", nil
@@ -1671,7 +1349,8 @@ func Load(configPath string) (*Config, error) {
 
 		v := strings.TrimSpace(value)
 
-		// Allow JSON for arrays/objects (common in docker-compose: AUTH_ISSUERS='["..."]').
+		// Allow JSON for arrays/objects where the remaining infrastructure config
+		// uses structured values.
 		if len(v) >= 2 {
 			if (v[0] == '[' && v[len(v)-1] == ']') || (v[0] == '{' && v[len(v)-1] == '}') {
 				var decoded interface{}
@@ -1681,29 +1360,6 @@ func Load(configPath string) (*Config, error) {
 			}
 		}
 
-		// Convenience: allow comma-separated lists for common slice env vars.
-		if mapped == "cors_origins" && strings.Contains(v, ",") {
-			parts := strings.Split(v, ",")
-			out := make([]string, 0, len(parts))
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					out = append(out, p)
-				}
-			}
-			return mapped, out
-		}
-		if mapped == "auth.issuers" {
-			parts := strings.Split(v, ",")
-			out := make([]string, 0, len(parts))
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					out = append(out, p)
-				}
-			}
-			return mapped, out
-		}
 		return mapped, v
 	}
 
@@ -1718,10 +1374,50 @@ func Load(configPath string) (*Config, error) {
 	// load time. Private posture is the registration axes, not a disabled
 	// control plane.
 	if k.Exists("auth.control_plane.enabled") {
-		return nil, fmt.Errorf("auth.control_plane.enabled was removed (#469): the control plane is always on in standalone mode — delete the key; use auth.control_plane.public_user_registration / public_tenant_registration to keep registration closed")
+		return nil, fmt.Errorf("auth.control_plane.enabled was removed (#469): the control plane is always on in standalone mode — delete the key; private/self-hosted registration is the default")
+	}
+	if k.Exists("merchant_cors") {
+		return nil, fmt.Errorf("merchant_cors was removed (#519): configure browser origins on AuthKit remote_application.allowed_origins")
 	}
 	if k.Exists("billing_hot_path") || os.Getenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY") != "" || os.Getenv("BILLING_HOT_PATH_FAIL_POLICY") != "" {
 		return nil, fmt.Errorf("billing_hot_path was removed: OpenRails does not enforce client degraded-mode policy; configure any fail-open/fail-closed behavior in the calling client")
+	}
+
+	ignoredStoreConfig := k.Exists("store") || hasEnvPrefix("STORE_")
+	ignoredMerchantConfig := k.Exists("merchant") || os.Getenv("MERCHANT") != ""
+	ignoredCORSConfig := k.Exists("cors_origins") || os.Getenv("CORS_ORIGINS") != ""
+	ignoredAuthIssuers := k.Exists("auth.issuers") || k.Exists("auth.expected_audience") ||
+		os.Getenv("AUTH_ISSUERS") != "" || os.Getenv("AUTH_EXPECTED_AUDIENCE") != ""
+	ignoredProcessors := k.Exists("processors") || hasEnvPrefix("PROCESSORS_")
+	ignoredControlPlaneLegacy := k.Exists("auth.control_plane.issued_audiences") ||
+		k.Exists("auth.control_plane.expected_audiences") ||
+		k.Exists("auth.control_plane.public_user_registration") ||
+		k.Exists("auth.control_plane.public_tenant_registration") ||
+		k.Exists("auth.control_plane.platform_org_slug") ||
+		k.Exists("auth.control_plane.platform_admin_user_id") ||
+		os.Getenv("AUTH_CONTROL_PLANE_ISSUED_AUDIENCES") != "" ||
+		os.Getenv("AUTH_CONTROL_PLANE_EXPECTED_AUDIENCES") != "" ||
+		os.Getenv("AUTH_CONTROL_PLANE_PUBLIC_USER_REGISTRATION") != "" ||
+		os.Getenv("AUTH_CONTROL_PLANE_PUBLIC_TENANT_REGISTRATION") != "" ||
+		os.Getenv("AUTH_CONTROL_PLANE_PLATFORM_ORG_SLUG") != "" ||
+		os.Getenv("AUTH_CONTROL_PLANE_PLATFORM_ADMIN_USER_ID") != ""
+	if ignoredStoreConfig {
+		log.Warn("ignoring retired store config (#520): seed merchant profile fields with openrails push-merchant-config under merchants[].profile")
+	}
+	if ignoredMerchantConfig {
+		log.Warn("ignoring retired merchant config (#520/#521): seed merchants with openrails push-merchant-config; standalone no longer pins a process-wide merchant")
+	}
+	if ignoredCORSConfig {
+		log.Warn("ignoring retired cors_origins config (#519): delegated browser origin policy belongs to AuthKit remote_application.allowed_origins")
+	}
+	if ignoredAuthIssuers {
+		log.Warn("ignoring retired auth issuer/audience config (#521): seed AuthKit remote applications, JWKS, service tokens, and admin users with openrails push-merchant-config under auth")
+	}
+	if ignoredProcessors {
+		log.Warn("ignoring retired processors config (#521): seed merchant provider_accounts and secrets with openrails push-merchant-config under merchants[].provider_accounts")
+	}
+	if ignoredControlPlaneLegacy {
+		log.Warn("ignoring retired control-plane config (#521): audiences are fixed to openrails, public hosted mode is auth.control_plane.public_hosted, and platform-superadmin belongs in openrails-saas")
 	}
 
 	// Unmarshal into config struct (overlay onto defaults)
@@ -1729,6 +1425,10 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
+	// These sections are intentionally tolerated for operator visibility during
+	// migration, but they no longer participate in runtime configuration. Keep
+	// Load permissive while ensuring the returned struct reflects the supported
+	// infrastructure-only config surface.
 	// Sandbox-by-default in development (#355): when test_env is not explicitly
 	// provided, a dev-like boot defaults to sandbox credentials so a local run
 	// can never accidentally move real money against live processor credentials
@@ -1741,57 +1441,6 @@ func Load(configPath string) (*Config, error) {
 	// build the Config programmatically and supply their own value.
 	if !k.Exists("test_env") {
 		cfg.TestEnv = cfg.IsDev()
-	}
-
-	// Store defaults (used across the system for branding)
-	if cfg.Store == nil {
-		cfg.Store = &StoreConfig{}
-	}
-	if cfg.Store.Name == "" {
-		cfg.Store.Name = "My Store"
-	}
-	if cfg.Store.LogoURL == "" {
-		cfg.Store.LogoURL = DefaultLogoURL
-	}
-
-	// Initialize and normalize Processors map
-	if cfg.Processors == nil {
-		cfg.Processors = make(map[string]*ProcessorConfig)
-	}
-
-	if len(cfg.Processors) > 0 {
-		normalized := make(map[string]*ProcessorConfig, len(cfg.Processors))
-		for name, proc := range cfg.Processors {
-			key := strings.TrimSpace(strings.ToLower(name))
-			if key == "" {
-				log.Warnf("ignoring processor with empty name (original key: %q)", name)
-				continue
-			}
-			if proc == nil {
-				log.Warnf("ignoring processor '%s' with nil config", key)
-				continue
-			}
-
-			if existing, exists := normalized[key]; exists && existing != nil {
-				log.Warnf("duplicate processor configuration detected for key '%s'; overriding previous value", key)
-			}
-
-			// Non-reserved processor names must declare an explicit type.
-			effectiveType := proc.GetEffectiveType(key)
-			if effectiveType == "" {
-				return nil, fmt.Errorf("processor '%s' must declare a type", key)
-			}
-
-			// Warn if reserved name has conflicting type
-			if impliedType, isReserved := ReservedProcessorNames[key]; isReserved && proc.Type != "" && proc.Type != impliedType {
-				log.Warnf("processor '%s' has type '%s' but '%s' is a reserved name implying type '%s'; using implied type",
-					key, proc.Type, key, impliedType)
-				proc.Type = impliedType
-			}
-
-			normalized[key] = proc
-		}
-		cfg.Processors = normalized
 	}
 
 	// The control plane is mandatory in standalone mode (#469): materialize the
@@ -1823,7 +1472,7 @@ func Load(configPath string) (*Config, error) {
 
 	// Normalize the OpenRails Postgres schema to its canonical form (#165) so the
 	// stored config value matches what SchemaName() resolves to. Validation of the
-	// identifier happens in Validate(). Defaults to `billing`.
+	// identifier happens in Validate(). Defaults to `openrails` (config.DefaultSchema).
 	if cfg.DB != nil {
 		cfg.DB.Schema = normalizeSchema(cfg.DB.Schema)
 	}
@@ -1847,11 +1496,7 @@ func ConfigureProcessGlobals(cfg *Config) error {
 
 	// Configure the CCBill webhook IP allowlist from config. Empty list falls
 	// back to the documented default ranges.
-	var ccbillCIDRs []string
-	if ccbillProc := cfg.GetCCBillProcessor(); ccbillProc != nil {
-		ccbillCIDRs = ccbillProc.AllowedCIDRs
-	}
-	if err := iputil.Configure(ccbillCIDRs); err != nil {
+	if err := iputil.Configure(nil); err != nil {
 		return fmt.Errorf("config validation failed: ccbill allowed_cidrs: %w", err)
 	}
 	return nil
@@ -1862,17 +1507,10 @@ func ConfigureProcessGlobals(cfg *Config) error {
 // they started the payment server.
 func LogStartupStatus(cfg *Config) {
 	logTestEnvStatus(cfg)
-	logFeatureFlagsStatus(cfg)
+	logOperatingModeStatus(cfg)
 }
 
-// logFeatureFlagsStatus logs the operating mode + feature flags at startup.
-// This helps operators understand any non-default behavior.
-func logFeatureFlagsStatus(cfg *Config) {
-	flags := cfg.GetFeatureFlags()
-
-	// Operating-mode banner (#346/#355). The mode dial is the headline; the
-	// flag logs below cover the fine-grained dials. Sandbox vs live is the
-	// orthogonal test_env banner (logTestEnvStatus).
+func logOperatingModeStatus(cfg *Config) {
 	switch cfg.GetMode() {
 	case ModeReadOnly:
 		log.Warn("⚠️  MODE=readonly - ZERO payment-provider writes; even user-initiated charges fail loudly")
@@ -1885,34 +1523,6 @@ func logFeatureFlagsStatus(cfg *Config) {
 		log.Info("   Set mode=full to resume proactive operations")
 	case ModeFull:
 		log.Info("Mode: full (complete behavior - charges, dunning, deletes all run)")
-	}
-
-	// Log dunning mode if not default
-	dunningMode := flags.GetDunningMode()
-	switch dunningMode {
-	case DunningModeDryRunOnly:
-		log.Warn("⚠️  DUNNING DRY-RUN MODE - Dunning workflow runs but no charges will be attempted")
-		log.Info("   Subscriptions will stay in past_due state, retry counts preserved")
-		log.Info("   Set feature_flags.dunning_mode=on to enable charges")
-	case DunningModeOff:
-		log.Warn("⚠️  DUNNING DISABLED - Failed rebills will result in immediate cancellation")
-		log.Info("   No grace period, no retry attempts, no recovery workflow")
-		log.Info("   Set feature_flags.dunning_mode=on to enable normal dunning")
-	}
-
-	// Log processor subscription deletions if disabled
-	if flags.IsProcessorSubscriptionDeletionDisabled() {
-		log.Warn("⚠️  PROCESSOR SUBSCRIPTION DELETIONS DISABLED - delete_subscription calls to NMI will be skipped")
-		log.Info("   Local cancellations and downgrades proceed; remote subscriptions stay alive for reconciliation")
-		log.Info("   Set feature_flags.disable_processor_subscription_deletions=false to resume deletions")
-	}
-
-	// Log entitlement expiration if disabled
-	if flags.DisableEntitlementExpiration {
-		log.Warn("⚠️  ENTITLEMENT EXPIRATION DISABLED - Credits and entitlements will not expire")
-		log.Info("   CreditExpiryWorker and entitlement revocation are paused")
-		log.Info("   Users keep premium access even after subscription ends")
-		log.Info("   Set feature_flags.disable_entitlement_expiration=false to resume expiration")
 	}
 }
 

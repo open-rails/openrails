@@ -101,7 +101,8 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 	svc := &VaultService{
 		PaymentMethodService: pms,
 		MerchantSecrets:      store,
-		Config:               vaultTestConfig(true, ""),
+		Config:               vaultTestConfig(true),
+		Processors:           vaultTestProcessors(""),
 		newNMIClient: func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error) {
 			client, err := nmi.NewClient(provider, cfg, testMode)
 			if err != nil {
@@ -141,7 +142,8 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 func TestVaultFallsBackToStaticMobiusClientWhenMerchantSecretMissing(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &VaultService{
-		Config: vaultTestConfig(true, "static-mobius-key"),
+		Config:     vaultTestConfig(true),
+		Processors: vaultTestProcessors("static-mobius-key"),
 	}
 
 	client, err := svc.resolveNMIClient(ctx, "mobius")
@@ -164,7 +166,8 @@ func TestVaultFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &VaultService{
 		MerchantSecrets: vaultUnavailableSecretStore{},
-		Config:          vaultTestConfig(true, "static-mobius-key"),
+		Config:          vaultTestConfig(true),
+		Processors:      vaultTestProcessors("static-mobius-key"),
 	}
 
 	_, err := svc.resolveNMIClient(ctx, "mobius")
@@ -183,7 +186,8 @@ func TestVaultMerchantSecretResolutionIsMerchantScoped(t *testing.T) {
 
 	svc := &VaultService{
 		MerchantSecrets: store,
-		Config:          vaultTestConfig(true, ""),
+		Config:          vaultTestConfig(true),
+		Processors:      vaultTestProcessors(""),
 	}
 
 	clientA, err := svc.resolveNMIClient(merchant.WithID(context.Background(), merchantA), "mobius")
@@ -194,15 +198,18 @@ func TestVaultMerchantSecretResolutionIsMerchantScoped(t *testing.T) {
 	require.Equal(t, "merchant-b-key", clientB.SecurityKey)
 }
 
-func vaultTestConfig(testEnv bool, mobiusKey string) *config.Config {
+func vaultTestConfig(testEnv bool) *config.Config {
 	return &config.Config{
 		Mode:    config.ModeFull,
 		TestEnv: testEnv,
-		Processors: map[string]*config.ProcessorConfig{
-			"mobius": {
-				Type:        config.ProcessorTypeNMI,
-				SecurityKey: mobiusKey,
-			},
+	}
+}
+
+func vaultTestProcessors(mobiusKey string) config.ProcessorSet {
+	return config.ProcessorSet{
+		"mobius": {
+			Type:        config.ProcessorTypeNMI,
+			SecurityKey: mobiusKey,
 		},
 	}
 }

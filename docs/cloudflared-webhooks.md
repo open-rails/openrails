@@ -21,7 +21,9 @@ Pick a stable hostname you can register once in the Mobius/NMI portal, for examp
 
 1) Run OpenRails locally (example port `2053`):
 
-- Ensure webhook signature verification is configured (Mobius/NMI): `PROCESSORS_MOBIUS_WEBHOOK_SECRET=...`
+- Ensure webhook signature verification is seeded in merchant config, for
+  example `webhook_signing_secret: {env: MOBIUS_WEBHOOK_SIGNING_SECRET}` under
+  the merchant's NMI provider account.
 
 2) Run cloudflared with a named tunnel (choose one approach):
 

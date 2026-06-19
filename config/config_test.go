@@ -20,12 +20,27 @@ func TestLoad_EnvMapping(t *testing.T) {
 		assert.Equal(t, "postgres://u:p@localhost:5432/db?sslmode=disable", cfg.DB.URL)
 	})
 
-	t.Run("loads JSON arrays for slices (auth.issuers)", func(t *testing.T) {
+	t.Run("ignores auth issuers from env (#521)", func(t *testing.T) {
 		t.Setenv("AUTH_ISSUERS", `["http://a.test","http://b.test"]`)
+		t.Setenv("AUTH_EXPECTED_AUDIENCE", "legacy-audience")
 
 		cfg, err := Load("nonexistent-config.yaml")
-		assert.NoError(t, err)
-		assert.Equal(t, []string{"http://a.test", "http://b.test"}, cfg.Auth.Issuers)
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Auth)
+	})
+
+	t.Run("ignores merchant from env (#520/#521)", func(t *testing.T) {
+		t.Setenv("MERCHANT", "doujins")
+
+		_, err := Load("nonexistent-config.yaml")
+		require.NoError(t, err)
+	})
+
+	t.Run("ignores cors origins from env (#519)", func(t *testing.T) {
+		t.Setenv("CORS_ORIGINS", "https://app.example.com")
+
+		_, err := Load("nonexistent-config.yaml")
+		require.NoError(t, err)
 	})
 
 	t.Run("maps canonical Vault env vars to vault.* (#251)", func(t *testing.T) {
@@ -151,6 +166,49 @@ billing_hot_path:
 	require.ErrorContains(t, err, "billing_hot_path was removed")
 }
 
+func TestLoad_RejectsRemovedMerchantCORSConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+merchant_cors:
+  doujins:
+    allowed_origins:
+      - https://doujins.com
+`), 0o600))
+
+	_, err := Load(cfgPath)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "merchant_cors was removed")
+}
+
+func TestLoad_IgnoresRemovedStoreConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+store:
+  name: Doujins
+  from_email: billing@example.com
+`), 0o600))
+
+	_, err := Load(cfgPath)
+	require.NoError(t, err)
+
+	t.Setenv("STORE_FROM_EMAIL", "billing@example.com")
+	_, err = Load("nonexistent-config.yaml")
+	require.NoError(t, err)
+}
+
+func TestLoad_IgnoresRemovedMerchantConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+merchant: doujins
+`), 0o600))
+
+	_, err := Load(cfgPath)
+	require.NoError(t, err)
+}
+
 func TestLoad_ControlPlaneMaterializedWithDevIssuerDefault(t *testing.T) {
 	// The control plane section is materialized even when omitted (#469); in
 	// development the issuer defaults to the deployment's own base URL.
@@ -163,9 +221,7 @@ func TestLoad_ControlPlaneMaterializedWithDevIssuerDefault(t *testing.T) {
 	require.NotNil(t, cfg.Auth)
 	require.NotNil(t, cfg.Auth.ControlPlane)
 	require.Equal(t, "http://localhost:2053", cfg.Auth.ControlPlane.Issuer)
-	// Registration axes default closed.
-	require.False(t, cfg.Auth.ControlPlane.UserRegistrationOpen())
-	require.False(t, cfg.Auth.ControlPlane.TenantRegistrationOpen())
+	require.True(t, cfg.Auth.ControlPlane.SelfHostedPosture())
 }
 
 func TestLoad_ControlPlaneIssuerFromAPIURLInDev(t *testing.T) {
@@ -178,7 +234,7 @@ func TestLoad_ControlPlaneIssuerFromAPIURLInDev(t *testing.T) {
 	require.Equal(t, "http://openrails:2053", cfg.Auth.ControlPlane.Issuer)
 }
 
-func TestLoad_RequiresExplicitTypeForCustomProcessors(t *testing.T) {
+func TestLoad_IgnoresProcessorConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
 	err := os.WriteFile(cfgPath, []byte(`
@@ -188,20 +244,20 @@ processors:
 `), 0o600)
 	assert.NoError(t, err)
 
-	_, err = Load(cfgPath)
-	assert.Error(t, err)
-	assert.ErrorContains(t, err, "processor 'acme' must declare a type")
+	cfg, err := Load(cfgPath)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
 }
 
-func TestLoad_MobiusProcessorRequiresExplicitType(t *testing.T) {
+func TestLoad_IgnoresProcessorConfigEnv(t *testing.T) {
 	t.Setenv("PROCESSORS_MOBIUS_TYPE", "")
 	t.Setenv("PROCESSORS_MOBIUS_TOKENIZATION_KEY", "")
 	t.Setenv("PROCESSORS_MOBIUS_WEBHOOK_SECRET", "")
 	t.Setenv("PROCESSORS_MOBIUS_SECURITY_KEY", "test-key")
 
-	_, err := Load("nonexistent-config.yaml")
-	assert.Error(t, err)
-	assert.ErrorContains(t, err, "processor 'mobius' must declare a type")
+	cfg, err := Load("nonexistent-config.yaml")
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
 }
 
 func TestValidateCaptchaRejectsHalfConfiguredCredentials(t *testing.T) {
@@ -352,8 +408,6 @@ func TestProductionTestEnvValidation(t *testing.T) {
 		cfg.Env = "prod"
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
-		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
-		cfg.CorsOrigins = []string{"https://app.example.com"}
 		cfg.ClickHouse.Username = "prod_analytics"
 		cfg.ClickHouse.Password = "production-clickhouse-password"
 		assembleDBURL(cfg)
@@ -388,41 +442,10 @@ func TestProductionTestEnvValidation(t *testing.T) {
 		cfg.Mode = ModeFull
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
-		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
-		cfg.CorsOrigins = []string{"https://app.example.com"}
 		cfg.ClickHouse.Username = "prod_analytics"
 		cfg.ClickHouse.Password = "production-clickhouse-password"
 		assembleDBURL(cfg)
 		assert.NoError(t, Validate(cfg))
-	})
-
-	t.Run("prod env rejects missing auth audience", func(t *testing.T) {
-		cfg := GetDefaultBillingConfig()
-		cfg.Env = "prod"
-		cfg.Mode = ModeFull
-		cfg.DB.Username = "billing_app"
-		cfg.DB.Password = "production-db-password"
-		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
-		cfg.Auth.ExpectedAudience = ""
-		cfg.CorsOrigins = []string{"https://app.example.com"}
-		cfg.ClickHouse.Username = "prod_analytics"
-		cfg.ClickHouse.Password = "production-clickhouse-password"
-		assembleDBURL(cfg)
-		assert.ErrorContains(t, Validate(cfg), "auth expected_audience must be configured outside development")
-	})
-
-	t.Run("prod env rejects missing cors origins", func(t *testing.T) {
-		cfg := GetDefaultBillingConfig()
-		cfg.Env = "prod"
-		cfg.Mode = ModeFull
-		cfg.DB.Username = "billing_app"
-		cfg.DB.Password = "production-db-password"
-		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
-		cfg.CorsOrigins = nil
-		cfg.ClickHouse.Username = "prod_analytics"
-		cfg.ClickHouse.Password = "production-clickhouse-password"
-		assembleDBURL(cfg)
-		assert.ErrorContains(t, Validate(cfg), "cors_origins must be configured outside development")
 	})
 }
 
@@ -443,267 +466,127 @@ func TestStripeKeyModeCompatibility(t *testing.T) {
 	})
 }
 
-// stripeTestEnvConfig builds a minimal Config with a single Stripe processor
-// carrying the given secret key and the given test_env setting (mode stays
-// full — the behavior dial is orthogonal to the credential axis).
-func stripeTestEnvConfig(secretKey string, testEnv bool) *Config {
+// stripeTestEnvConfig builds a minimal Config plus in-memory ProcessorSet with a
+// single Stripe processor carrying the given secret key and test_env setting.
+func stripeTestEnvConfig(secretKey string, testEnv bool) (*Config, ProcessorSet) {
 	return &Config{
-		Mode:    ModeFull,
-		TestEnv: testEnv,
-		Processors: map[string]*ProcessorConfig{
+			Mode:    ModeFull,
+			TestEnv: testEnv,
+		}, ProcessorSet{
 			"stripe": {
 				Type:      string(ProcessorTypeStripe),
 				SecretKey: secretKey,
 			},
-		},
-	}
+		}
 }
 
 func TestValidateStripeKeyForTestEnv(t *testing.T) {
 	// Standard secret keys (sk_*)
 	t.Run("sk_live_ + test_env=true is a hard error (#347)", func(t *testing.T) {
-		cfg := stripeTestEnvConfig("sk_live_abc123", true)
-		assert.Error(t, validateStripeKeyForTestEnv(cfg), "live key in test env must refuse to boot")
+		cfg, processors := stripeTestEnvConfig("sk_live_abc123", true)
+		assert.Error(t, validateStripeKeyForTestEnv(cfg, processors), "live key in test env must refuse to boot")
 	})
 
 	t.Run("sk_test_ + test_env=true allowed", func(t *testing.T) {
-		cfg := stripeTestEnvConfig("sk_test_abc123", true)
-		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
-		assert.Equal(t, "sk_test_abc123", cfg.Processors["stripe"].SecretKey, "test key in test env should be kept")
+		cfg, processors := stripeTestEnvConfig("sk_test_abc123", true)
+		assert.NoError(t, validateStripeKeyForTestEnv(cfg, processors))
+		assert.Equal(t, "sk_test_abc123", processors["stripe"].SecretKey, "test key in test env should be kept")
 	})
 
 	t.Run("sk_test_ + test_env=false disables Stripe", func(t *testing.T) {
-		cfg := stripeTestEnvConfig("sk_test_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
-		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "test key in live env should be disabled")
+		cfg, processors := stripeTestEnvConfig("sk_test_abc123", false)
+		assert.NoError(t, validateStripeKeyForTestEnv(cfg, processors))
+		assert.Empty(t, processors["stripe"].SecretKey, "test key in live env should be disabled")
 	})
 
 	t.Run("sk_live_ + test_env=false allowed", func(t *testing.T) {
-		cfg := stripeTestEnvConfig("sk_live_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
-		assert.Equal(t, "sk_live_abc123", cfg.Processors["stripe"].SecretKey, "live key in live env should be kept")
+		cfg, processors := stripeTestEnvConfig("sk_live_abc123", false)
+		assert.NoError(t, validateStripeKeyForTestEnv(cfg, processors))
+		assert.Equal(t, "sk_live_abc123", processors["stripe"].SecretKey, "live key in live env should be kept")
 	})
 
 	// Restricted keys (rk_*) — these must be classified the same as sk_* keys.
 	t.Run("rk_live_ + test_env=true is a hard error (#347)", func(t *testing.T) {
-		cfg := stripeTestEnvConfig("rk_live_abc123", true)
-		assert.Error(t, validateStripeKeyForTestEnv(cfg), "restricted live key in test env must refuse to boot")
+		cfg, processors := stripeTestEnvConfig("rk_live_abc123", true)
+		assert.Error(t, validateStripeKeyForTestEnv(cfg, processors), "restricted live key in test env must refuse to boot")
 	})
 
 	t.Run("rk_test_ + test_env=true allowed", func(t *testing.T) {
-		cfg := stripeTestEnvConfig("rk_test_abc123", true)
-		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
-		assert.Equal(t, "rk_test_abc123", cfg.Processors["stripe"].SecretKey, "restricted test key in test env should be kept")
+		cfg, processors := stripeTestEnvConfig("rk_test_abc123", true)
+		assert.NoError(t, validateStripeKeyForTestEnv(cfg, processors))
+		assert.Equal(t, "rk_test_abc123", processors["stripe"].SecretKey, "restricted test key in test env should be kept")
 	})
 
 	t.Run("rk_test_ + test_env=false disables Stripe", func(t *testing.T) {
-		cfg := stripeTestEnvConfig("rk_test_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
-		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "restricted test key in live env should be disabled")
+		cfg, processors := stripeTestEnvConfig("rk_test_abc123", false)
+		assert.NoError(t, validateStripeKeyForTestEnv(cfg, processors))
+		assert.Empty(t, processors["stripe"].SecretKey, "restricted test key in live env should be disabled")
 	})
 
 	t.Run("rk_live_ + test_env=false allowed", func(t *testing.T) {
-		cfg := stripeTestEnvConfig("rk_live_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
-		assert.Equal(t, "rk_live_abc123", cfg.Processors["stripe"].SecretKey, "restricted live key in live env should be kept")
+		cfg, processors := stripeTestEnvConfig("rk_live_abc123", false)
+		assert.NoError(t, validateStripeKeyForTestEnv(cfg, processors))
+		assert.Equal(t, "rk_live_abc123", processors["stripe"].SecretKey, "restricted live key in live env should be kept")
 	})
 
 	t.Run("validates every stripe processor", func(t *testing.T) {
-		cfg := &Config{
-			Mode:    ModeFull,
-			TestEnv: false,
-			Processors: map[string]*ProcessorConfig{
-				"stripe_primary": {Type: ProcessorTypeStripe, SecretKey: "sk_live_primary"},
-				"stripe_legacy":  {Type: ProcessorTypeStripe, Role: ProcessorRoleLegacy, SecretKey: "sk_test_legacy"},
-			},
+		cfg := &Config{Mode: ModeFull, TestEnv: false}
+		processors := ProcessorSet{
+			"stripe_primary": {Type: ProcessorTypeStripe, SecretKey: "sk_live_primary"},
+			"stripe_legacy":  {Type: ProcessorTypeStripe, Role: ProcessorRoleLegacy, SecretKey: "sk_test_legacy"},
 		}
-		require.NoError(t, validateStripeKeyForTestEnv(cfg))
-		require.Equal(t, "sk_live_primary", cfg.Processors["stripe_primary"].SecretKey)
-		require.Empty(t, cfg.Processors["stripe_legacy"].SecretKey)
+		require.NoError(t, validateStripeKeyForTestEnv(cfg, processors))
+		require.Equal(t, "sk_live_primary", processors["stripe_primary"].SecretKey)
+		require.Empty(t, processors["stripe_legacy"].SecretKey)
 	})
 }
 
 func TestPrimaryProcessorByType(t *testing.T) {
-	cfg := &Config{Processors: map[string]*ProcessorConfig{
+	processors := ProcessorSet{
 		"stripe_old": {Type: ProcessorTypeStripe, Role: ProcessorRoleLegacy, SecretKey: "sk_live_old"},
 		"stripe_new": {Type: ProcessorTypeStripe, SecretKey: "sk_live_new"},
 		"mobius":     {Type: ProcessorTypeNMI, SecurityKey: "sec"},
-	}}
-	key, proc, err := cfg.PrimaryProcessorByType(ProcessorTypeStripe)
+	}
+	key, proc, err := processors.PrimaryProcessorByType(ProcessorTypeStripe)
 	require.NoError(t, err)
 	require.Equal(t, "stripe_new", key)
 	require.Equal(t, "sk_live_new", proc.SecretKey)
-	require.Equal(t, proc, cfg.GetStripeProcessor())
+	require.Equal(t, proc, processors.GetStripeProcessor())
 
-	cfg.Processors["stripe_other"] = &ProcessorConfig{Type: ProcessorTypeStripe, SecretKey: "sk_live_other"}
-	_, _, err = cfg.PrimaryProcessorByType(ProcessorTypeStripe)
+	processors["stripe_other"] = &ProcessorConfig{Type: ProcessorTypeStripe, SecretKey: "sk_live_other"}
+	_, _, err = processors.PrimaryProcessorByType(ProcessorTypeStripe)
 	require.ErrorContains(t, err, "multiple primary processors")
-	require.ErrorContains(t, Validate(&Config{
-		Mode: ModeFull,
-		DB:   &DBConfig{URL: "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"},
-		Processors: map[string]*ProcessorConfig{
-			"stripe_a": {Type: ProcessorTypeStripe, SecretKey: "sk_live_a"},
-			"stripe_b": {Type: ProcessorTypeStripe, SecretKey: "sk_live_b"},
-		},
+	require.ErrorContains(t, ValidateProcessorSet(&Config{Mode: ModeFull}, ProcessorSet{
+		"stripe_a": {Type: ProcessorTypeStripe, SecretKey: "sk_live_a"},
+		"stripe_b": {Type: ProcessorTypeStripe, SecretKey: "sk_live_b"},
 	}), "multiple primary processors")
 }
 
-// =============================================================================
-// Feature Flags Tests
-// =============================================================================
-
-func TestFeatureFlags_DunningMode(t *testing.T) {
-	t.Run("defaults to 'on' when nil", func(t *testing.T) {
-		var flags *FeatureFlags
-		assert.Equal(t, DunningModeOn, flags.GetDunningMode())
-	})
-
-	t.Run("defaults to 'on' when empty", func(t *testing.T) {
-		flags := &FeatureFlags{DunningMode: ""}
-		assert.Equal(t, DunningModeOn, flags.GetDunningMode())
-	})
-
-	t.Run("returns 'on' for explicit 'on'", func(t *testing.T) {
-		flags := &FeatureFlags{DunningMode: "on"}
-		assert.Equal(t, DunningModeOn, flags.GetDunningMode())
-		assert.True(t, flags.IsDunningEnabled())
-		assert.False(t, flags.IsDunningDryRun())
-		assert.False(t, flags.IsDunningOff())
-	})
-
-	t.Run("returns 'dry_run_only' for explicit 'dry_run_only'", func(t *testing.T) {
-		flags := &FeatureFlags{DunningMode: "dry_run_only"}
-		assert.Equal(t, DunningModeDryRunOnly, flags.GetDunningMode())
-		assert.False(t, flags.IsDunningEnabled())
-		assert.True(t, flags.IsDunningDryRun())
-		assert.False(t, flags.IsDunningOff())
-	})
-
-	t.Run("returns 'off' for explicit 'off'", func(t *testing.T) {
-		flags := &FeatureFlags{DunningMode: "off"}
-		assert.Equal(t, DunningModeOff, flags.GetDunningMode())
-		assert.False(t, flags.IsDunningEnabled())
-		assert.False(t, flags.IsDunningDryRun())
-		assert.True(t, flags.IsDunningOff())
-	})
-
-	t.Run("invalid mode defaults to 'on'", func(t *testing.T) {
-		flags := &FeatureFlags{DunningMode: "invalid_mode"}
-		assert.Equal(t, DunningModeOn, flags.GetDunningMode())
-	})
-
-	t.Run("handles case insensitivity", func(t *testing.T) {
-		flags := &FeatureFlags{DunningMode: "DRY_RUN_ONLY"}
-		assert.Equal(t, DunningModeDryRunOnly, flags.GetDunningMode())
-	})
-
-	t.Run("trims whitespace", func(t *testing.T) {
-		flags := &FeatureFlags{DunningMode: "  off  "}
-		assert.Equal(t, DunningModeOff, flags.GetDunningMode())
-	})
-}
-
-func TestFeatureFlags_DisableEntitlementExpiration(t *testing.T) {
-	t.Run("defaults to false when nil", func(t *testing.T) {
-		cfg := &Config{FeatureFlags: nil}
-		assert.False(t, cfg.IsEntitlementExpirationDisabled())
-	})
-
-	t.Run("returns false when explicitly false", func(t *testing.T) {
-		cfg := &Config{
-			FeatureFlags: &FeatureFlags{DisableEntitlementExpiration: false},
-		}
-		assert.False(t, cfg.IsEntitlementExpirationDisabled())
-	})
-
-	t.Run("returns true when explicitly true", func(t *testing.T) {
-		cfg := &Config{
-			FeatureFlags: &FeatureFlags{DisableEntitlementExpiration: true},
-		}
-		assert.True(t, cfg.IsEntitlementExpirationDisabled())
-	})
-}
-
-func TestConfig_DunningMode(t *testing.T) {
-	t.Run("GetDunningMode defaults to 'on' when no feature flags", func(t *testing.T) {
-		cfg := &Config{FeatureFlags: nil}
-		assert.Equal(t, DunningModeOn, cfg.GetDunningMode())
-	})
-
-	t.Run("IsDunningEnabled returns true by default", func(t *testing.T) {
-		cfg := &Config{FeatureFlags: nil}
-		assert.True(t, cfg.IsDunningEnabled())
-	})
-
-	t.Run("IsDunningOff returns true when mode is off", func(t *testing.T) {
-		cfg := &Config{
-			FeatureFlags: &FeatureFlags{DunningMode: "off"},
-		}
-		assert.True(t, cfg.IsDunningOff())
-		assert.False(t, cfg.IsDunningEnabled())
-	})
-
-	t.Run("IsDunningDryRun returns true when mode is dry_run_only", func(t *testing.T) {
-		cfg := &Config{
-			FeatureFlags: &FeatureFlags{DunningMode: "dry_run_only"},
-		}
-		assert.True(t, cfg.IsDunningDryRun())
-		assert.False(t, cfg.IsDunningEnabled())
-	})
-}
-
-func TestGetDefaultBillingConfig_FeatureFlags(t *testing.T) {
+func TestStripeLiveKeyRejectedInTestEnv(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
+	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
+	cfg.TestEnv = true
+	processors := ProcessorSet{
+		"stripe": {Type: "stripe", SecretKey: "sk_live_abc123"},
+	}
+	require.Error(t, ValidateProcessorSet(cfg, processors))
 
-	t.Run("has feature flags initialized", func(t *testing.T) {
-		assert.NotNil(t, cfg.FeatureFlags)
-	})
+	// test key in the test env is fine
+	processors["stripe"].SecretKey = "sk_test_abc123"
+	require.NoError(t, ValidateProcessorSet(cfg, processors))
 
-	t.Run("dunning_mode defaults to 'on'", func(t *testing.T) {
-		assert.Equal(t, DunningModeOn, cfg.FeatureFlags.DunningMode)
-		assert.True(t, cfg.IsDunningEnabled())
-	})
-
-	t.Run("disable_entitlement_expiration defaults to false", func(t *testing.T) {
-		assert.False(t, cfg.FeatureFlags.DisableEntitlementExpiration)
-		assert.False(t, cfg.IsEntitlementExpirationDisabled())
-	})
-}
-
-func TestAllowedCORSOrigins_UnionsGlobalAndMerchantOrigins(t *testing.T) {
-	cfg := &Config{
-		CorsOrigins: []string{"https://admin.example.com", "https://admin.example.com"}, // dup
-		MerchantCORS: map[string]*MerchantCORSConfig{
-			"merchant-a": {AllowedOrigins: []string{"https://media.example.com", "https://admin.example.com"}}, // dup w/ global
-			"merchant-b": {AllowedOrigins: []string{"https://app.example.com", "https://portal.example.com"}},
-			"empty":      nil,
+	// test key with live credentials expected: disabled with a warning, not fatal
+	cfg2 := GetDefaultBillingConfig()
+	cfg2.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
+	cfg2.Mode = ModeLimited
+	processors2 := ProcessorSet{
+		"stripe": {
+			Type:      "stripe",
+			SecretKey: "sk_test_abc123",
 		},
 	}
-
-	got := cfg.AllowedCORSOrigins()
-
-	// Global origin first, de-duplicated; legacy merchant_cors origins follow in slug order.
-	assert.Equal(t, []string{
-		"https://admin.example.com",
-		"https://media.example.com",
-		"https://app.example.com",
-		"https://portal.example.com",
-	}, got)
-}
-
-func TestAllowedCORSOrigins_NoWildcardWhenConfigured(t *testing.T) {
-	cfg := &Config{MerchantCORS: map[string]*MerchantCORSConfig{
-		"t": {AllowedOrigins: []string{"https://t.example.com"}},
-	}}
-	got := cfg.AllowedCORSOrigins()
-	assert.Equal(t, []string{"https://t.example.com"}, got)
-	assert.NotContains(t, got, "*")
-}
-
-func TestAllowedCORSOrigins_NilSafe(t *testing.T) {
-	var cfg *Config
-	assert.Nil(t, cfg.AllowedCORSOrigins())
-	assert.Empty(t, (&Config{}).AllowedCORSOrigins())
+	require.NoError(t, ValidateProcessorSet(cfg2, processors2))
+	require.Equal(t, "", processors2["stripe"].SecretKey)
 }
 
 // TestDBConfig_SchemaName covers the issue #165 schema accessor: default `billing`,
@@ -770,16 +653,6 @@ func TestLoad_DBSchemaEnv(t *testing.T) {
 	})
 }
 
-func TestFeatureFlagsProcessorSubscriptionDeletionKillSwitch(t *testing.T) {
-	var nilFlags *FeatureFlags
-	require.False(t, nilFlags.IsProcessorSubscriptionDeletionDisabled())
-	require.False(t, (&FeatureFlags{}).IsProcessorSubscriptionDeletionDisabled())
-	require.True(t, (&FeatureFlags{DisableProcessorSubscriptionDeletions: true}).IsProcessorSubscriptionDeletionDisabled())
-
-	cfg := &Config{FeatureFlags: &FeatureFlags{DisableProcessorSubscriptionDeletions: true}}
-	require.True(t, cfg.IsProcessorSubscriptionDeletionDisabled())
-}
-
 func TestOperatingModes(t *testing.T) {
 	// unset: nothing limited (dev default = full); test_env defaults off
 	require.False(t, (&Config{}).IsLimitedMode())
@@ -792,12 +665,10 @@ func TestOperatingModes(t *testing.T) {
 	limited := &Config{Mode: ModeLimited}
 	require.True(t, limited.IsLimitedMode())
 	require.False(t, limited.IsProviderReadOnly())
-	require.False(t, limited.IsProcessorSubscriptionDeletionDisabled())
 
 	ro := &Config{Mode: ModeReadOnly}
 	require.True(t, ro.IsLimitedMode())
 	require.True(t, ro.IsProviderReadOnly())
-	require.True(t, ro.IsProcessorSubscriptionDeletionDisabled()) // readonly implies the kill switch
 
 	// mode is pure behavior: test_env does not change the behavior gates
 	roSandbox := &Config{Mode: ModeReadOnly, TestEnv: true}
@@ -812,30 +683,6 @@ func TestOperatingModes(t *testing.T) {
 	// hard cut (#355): the old mode values are gone, not aliased
 	require.ErrorContains(t, Validate(&Config{Mode: "test"}), "must be one of full, limited, readonly")
 	require.ErrorContains(t, Validate(&Config{Mode: "production"}), "must be one of full, limited, readonly")
-}
-
-func TestStripeLiveKeyRejectedInTestEnv(t *testing.T) {
-	cfg := GetDefaultBillingConfig()
-	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
-	cfg.TestEnv = true
-	cfg.Processors = map[string]*ProcessorConfig{
-		"stripe": {Type: "stripe", SecretKey: "sk_live_abc123"},
-	}
-	require.Error(t, Validate(cfg))
-
-	// test key in the test env is fine
-	cfg.Processors["stripe"].SecretKey = "sk_test_abc123"
-	require.NoError(t, Validate(cfg))
-
-	// test key with live credentials expected: disabled with a warning, not fatal
-	cfg2 := GetDefaultBillingConfig()
-	cfg2.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
-	cfg2.Mode = ModeLimited
-	cfg2.Processors = map[string]*ProcessorConfig{
-		"stripe": {Type: "stripe", SecretKey: "sk_test_abc123"},
-	}
-	require.NoError(t, Validate(cfg2))
-	require.Equal(t, "", cfg2.Processors["stripe"].SecretKey)
 }
 
 func TestFlexiblePortRange(t *testing.T) {

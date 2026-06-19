@@ -71,7 +71,7 @@ func stuckTestIntent(status string, age time.Duration, reason string) StuckInten
 func TestStuckIntentFindings(t *testing.T) {
 	oldPending := stuckTestIntent("pending", 26*time.Hour, "nmi error: connection refused")
 	parked := stuckTestIntent("pending", 26*time.Hour,
-		"processor subscription deletes disabled (feature_flags.disable_processor_subscription_deletions kill switch)")
+		"nmi client is read-only (mode=readonly)")
 	freshPending := stuckTestIntent("pending", time.Hour, "")
 	oldUnknown := stuckTestIntent("unknown_needs_verify", 3*time.Hour, "ambiguous: timeout after send")
 	freshUnknown := stuckTestIntent("unknown_needs_verify", 30*time.Minute, "ambiguous: timeout after send")
@@ -188,7 +188,6 @@ func TestIsModeParkedReason(t *testing.T) {
 	parked := []string{
 		"mode=readonly blocks all provider writes",
 		"mode=limited blocks proactive (system-origin) provider writes",
-		"processor subscription deletes disabled (feature_flags.disable_processor_subscription_deletions kill switch)",
 		"nmi client is read-only (mode=readonly)",
 		"nmi provider writes blocked (mode=readonly)",
 	}

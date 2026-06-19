@@ -117,6 +117,62 @@ func (p *derivePass) runForCustomer(ctx context.Context, scope Scope, customer u
 			Repair:     func(ctx context.Context) error { return gl.MaterializeGrant(ctx, g) },
 		})
 	}
+
+	// derive.grant.excess (grant tier) — a LIVE grant whose backing payment was
+	// REFUNDED: the source no longer justifies the grant. Surface-only ADMIN, NOT
+	// gated: the refund is a PRESENT recorded fact (not confirmed-absence), but a
+	// refund that intentionally keeps access (goodwill) is legitimate, so an
+	// operator decides whether to revoke — never auto-retracted. (The
+	// subscription-cancelled case is handled at write time by the #511 revocation
+	// unification, which terminates the grant when the effect is revoked, so it
+	// does not surface here.)
+	// derive.grant.missing (grant tier) — a completed, positive, one-off payment
+	// for a product that PROMISES grants (non-empty entitlements/credits spec) yet
+	// produced NO grant: "paid for a grantable product, got nothing" (a derive-1
+	// failure). SPEC-AWARE — the product's own grant spec (payment→price→product)
+	// is the positive signal, so empty-spec products / pure fees are never flagged.
+	// MISSING → ADMIN surface-only: auto-granting re-runs derive-1 (product-spec-
+	// dependent, owned by the purchase path), so an operator investigates the
+	// creation failure and re-triggers rather than the engine guessing the window.
+	ungranted, err := gl.UngrantedGrantablePayments(ctx, customer)
+	if err != nil {
+		return nil, fmt.Errorf("derive: scan ungranted grantable payments: %w", err)
+	}
+	for i := range ungranted {
+		p := ungranted[i]
+		out = append(out, ConvergeFinding{
+			Type:       "derive.grant.missing",
+			Shape:      ShapeMissing,
+			Class:      ClassAdmin,
+			Severity:   "high",
+			SubjectKey: "payment:" + p.ID.String(),
+			Provider:   "self",
+			Evidence:   map[string]any{"payment_id": p.ID.String(), "amount": p.Amount, "currency": p.Currency, "cause": "grantable_payment_without_grant"},
+			// surface-only: re-granting re-runs derive-1 (product-spec-dependent).
+		})
+	}
+
+	refunded, err := gl.RefundedSourceGrants(ctx, customer)
+	if err != nil {
+		return nil, fmt.Errorf("derive: scan grants with refunded source: %w", err)
+	}
+	for i := range refunded {
+		g := refunded[i]
+		pid := ""
+		if g.PaymentID != nil {
+			pid = g.PaymentID.String()
+		}
+		out = append(out, ConvergeFinding{
+			Type:       "derive.grant.excess",
+			Shape:      ShapeExcess,
+			Class:      ClassAdmin,
+			Severity:   "high",
+			SubjectKey: "grant:" + g.ID.String(),
+			Provider:   "self",
+			Evidence:   map[string]any{"grant_id": g.ID.String(), "kind": g.Kind, "payment_id": pid, "cause": "refunded_payment"},
+			// surface-only: revoking access on a refund is an operator decision.
+		})
+	}
 	return out, nil
 }
 

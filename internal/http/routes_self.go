@@ -52,5 +52,9 @@ func (s *Server) delegatedMiddleware() gin.HandlerFunc {
 	if s.delegatedAuthenticator != nil {
 		return ginmw.DelegatedPrincipalRequired(s.delegatedAuthenticator)
 	}
-	return ginmw.DelegatedSelfRequired(s.controlPlane)
+	resolver := ginmw.DelegatedResolver(s.controlPlane)
+	if s.delegatedResolver != nil {
+		resolver = s.delegatedResolver
+	}
+	return ginmw.DelegatedSelfRequired(resolver)
 }

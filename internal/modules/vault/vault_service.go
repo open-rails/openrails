@@ -29,6 +29,7 @@ type VaultService struct {
 	NMIClients           map[string]*nmi.NMIClient
 	MerchantSecrets      merchantSecretGetter
 	Config               *config.Config
+	Processors           config.ProcessorSet
 	DB                   *db.DB
 	clock                clockwork.Clock
 	newNMIClient         func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error)
@@ -134,12 +135,13 @@ func (e *VaultError) Unwrap() error {
 	return e.Err
 }
 
-func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB, cfg *config.Config, clocks ...clockwork.Clock) *VaultService {
+func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB, cfg *config.Config, processors config.ProcessorSet, clocks ...clockwork.Clock) *VaultService {
 	return &VaultService{
 		PaymentMethodService: pm,
 		SubscriptionService:  sub,
 		NMIClients:           nmiClients,
 		Config:               cfg,
+		Processors:           processors,
 		DB:                   dbx,
 		clock:                timeutil.FirstClock(clocks...),
 	}
@@ -263,10 +265,10 @@ func (s *VaultService) buildNMIClient(provider string, cfg *config.NMIProviderSe
 }
 
 func (s *VaultService) processorConfig(name string) *config.ProcessorConfig {
-	if s == nil || s.Config == nil {
+	if s == nil {
 		return nil
 	}
-	return s.Config.GetProcessor(name)
+	return s.Processors.GetProcessor(name)
 }
 
 func cloneProcessorConfig(in *config.ProcessorConfig) *config.ProcessorConfig {

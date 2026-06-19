@@ -318,19 +318,53 @@ func DefaultInvokerWastedWindows() []abuse.WastedWindow {
 // MerchantConfiguration is the service-level representation of a merchant's
 // one-row configuration payload.
 type MerchantConfiguration struct {
+	Profile                            *models.MerchantProfileConfiguration
 	DelegatedInvokerWastedSpendWindows []abuse.WastedWindow
+}
+
+// GetMerchantConfiguration returns the stored merchant-scoped configuration row.
+func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfiguration, bool, error) {
+	if s == nil || s.rt == nil {
+		return MerchantConfiguration{}, false, fmt.Errorf("service not initialized")
+	}
+	cfg, found, err := merchantconfig.NewStore(s.rt.DB).Get(ctx)
+	if err != nil {
+		return MerchantConfiguration{}, false, err
+	}
+	out := MerchantConfiguration{
+		Profile:                            &cfg.Profile,
+		DelegatedInvokerWastedSpendWindows: make([]abuse.WastedWindow, 0, len(cfg.DelegatedInvokerWastedSpendWindows)),
+	}
+	for _, w := range cfg.DelegatedInvokerWastedSpendWindows {
+		if w.WindowSeconds <= 0 {
+			continue
+		}
+		out.DelegatedInvokerWastedSpendWindows = append(out.DelegatedInvokerWastedSpendWindows, abuse.WastedWindow{
+			Key:      w.Key,
+			Window:   time.Duration(w.WindowSeconds) * time.Second,
+			Limit:    w.Limit,
+			Currency: w.Currency,
+		})
+	}
+	return out, found, nil
 }
 
 // SetMerchantConfiguration persists the merchant-scoped configuration row. An
 // empty DelegatedInvokerWastedSpendWindows slice clears that key to the
-// DefaultInvokerWastedWindows fallback.
+// DefaultInvokerWastedWindows fallback. A nil Profile preserves the current
+// profile; a non-nil empty Profile intentionally clears it.
 func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfiguration) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	cfg := models.MerchantConfiguration{
-		DelegatedInvokerWastedSpendWindows: make([]models.BudgetWindowPolicy, 0, len(in.DelegatedInvokerWastedSpendWindows)),
+	cfg, _, err := merchantconfig.NewStore(s.rt.DB).Get(ctx)
+	if err != nil {
+		return err
 	}
+	if in.Profile != nil {
+		cfg.Profile = *in.Profile
+	}
+	cfg.DelegatedInvokerWastedSpendWindows = make([]models.BudgetWindowPolicy, 0, len(in.DelegatedInvokerWastedSpendWindows))
 	for _, w := range in.DelegatedInvokerWastedSpendWindows {
 		if w.Window <= 0 {
 			continue

@@ -158,10 +158,10 @@ func TestRuntimeProviderAccountsStripe(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := &config.Config{Processors: map[string]*config.ProcessorConfig{
+	processors := config.ProcessorSet{
 		"stripe": {Type: "stripe", SecretKey: "sk_test_aaa"},
-	}}
-	resolver := NewRuntimeProviderAccounts(cfg, nil)
+	}
+	resolver := NewRuntimeProviderAccounts(&config.Config{}, processors, nil)
 	resolver.StripeBaseURL = srv.URL
 
 	ctx := context.Background()
@@ -175,14 +175,14 @@ func TestRuntimeProviderAccountsStripe(t *testing.T) {
 	assert.Equal(t, int64(1), calls.Load())
 
 	// Same-account key rotation: refetch, same account id, no false park.
-	cfg.Processors["stripe"].SecretKey = "sk_test_bbb"
+	processors["stripe"].SecretKey = "sk_test_bbb"
 	account2, ok := resolver.ResolveProviderAccount(ctx, "stripe")
 	require.True(t, ok)
 	assert.Equal(t, account.AccountID, account2.AccountID)
 	assert.Equal(t, int64(2), calls.Load())
 
 	// Fetch failure -> ok=false (guard skipped), not an error.
-	cfg.Processors["stripe"].SecretKey = "rk_live_denied"
+	processors["stripe"].SecretKey = "rk_live_denied"
 	_, ok = resolver.ResolveProviderAccount(ctx, "stripe")
 	assert.False(t, ok)
 
@@ -202,7 +202,7 @@ func TestRuntimeProviderAccountsNMIProvider(t *testing.T) {
 	ctx := context.Background()
 
 	client := &nmi.NMIClient{SecurityKey: "sec-one", QueryURL: srv.URL}
-	resolver := NewRuntimeProviderAccounts(nil, map[string]*nmi.NMIClient{"mobius": client})
+	resolver := NewRuntimeProviderAccounts(nil, nil, map[string]*nmi.NMIClient{"mobius": client})
 
 	account, ok := resolver.ResolveProviderAccount(ctx, "Mobius")
 	require.True(t, ok)
