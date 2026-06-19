@@ -13,7 +13,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ADMIN_URL="${SQLC_ADMIN_DATABASE_URL:-postgres://admin:admin_password@127.0.0.1:25432/openrails_db?sslmode=disable}"
+ADMIN_URL="${SQLC_ADMIN_DATABASE_URL:-postgres://admin:admin_password@127.0.0.1:5433/openrails_db?sslmode=disable}"
 VET_DB="${SQLC_VET_DB:-openrails_sqlc_vet}"
 
 psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q \

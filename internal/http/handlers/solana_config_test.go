@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
 func TestGetSolanaConfig(t *testing.T) {
@@ -70,7 +71,7 @@ func TestGetSolanaConfig(t *testing.T) {
 	// RPCURL is always empty (#352): no rpc_endpoint knob, and the Helius key must never reach a browser.
 	require.Equal(t, "", response.RPCURL)
 	require.Equal(t, "devnet", response.ExplorerCluster)
-	require.Equal(t, config.PreferredStablecoin, response.PreferredToken)
+	require.Equal(t, solanatokens.PreferredStablecoin, response.PreferredToken)
 	require.True(t, response.Features.SolanaPay)
 	require.True(t, response.Features.RecurringSubscriptions)
 	require.True(t, response.Features.SolanaPayRecurringSubscriptions)

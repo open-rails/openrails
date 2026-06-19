@@ -325,9 +325,22 @@ type BudgetWindowInput struct {
 // MerchantConfigurationInput is the public SDK shape for
 // PUT /v1/service/merchant-configuration.
 type MerchantConfigurationInput struct {
+	// Profile is merchant-owned branding and sender metadata. Nil preserves the
+	// stored profile; a non-nil empty value clears it.
+	Profile *MerchantProfileInput `json:"profile,omitempty"`
+
 	// DelegatedInvokerWastedSpendWindows configures the flat delegated-invoker
 	// abuse backstop. Amounts use the request currency's internal precision.
 	DelegatedInvokerWastedSpendWindows []BudgetWindowInput `json:"delegated_invoker_wasted_spend_windows,omitempty"`
+}
+
+// MerchantProfileInput is public/communication metadata stored per merchant.
+type MerchantProfileInput struct {
+	DisplayName  string `json:"display_name,omitempty"`
+	LogoURL      string `json:"logo_url,omitempty"`
+	FromEmail    string `json:"from_email,omitempty"`
+	SupportURL   string `json:"support_url,omitempty"`
+	SupportEmail string `json:"support_email,omitempty"`
 }
 
 // BudgetWindow is one computed window from POST /v1/service/budget/check,

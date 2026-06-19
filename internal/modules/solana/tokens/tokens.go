@@ -1,8 +1,10 @@
-package config
+package tokens
 
-import "strings"
+import (
+	"strings"
 
-type SolanaToken = TokenConfig
+	"github.com/open-rails/openrails/config"
+)
 
 const (
 	DefaultPythHermesURL        = "https://hermes.pyth.network"
@@ -33,8 +35,8 @@ func DefaultPythPriceFeeds() map[string]string {
 	}
 }
 
-func DefaultSupportedTokens() map[string]SolanaToken {
-	return map[string]SolanaToken{
+func DefaultSupportedTokens() map[string]config.TokenConfig {
+	return map[string]config.TokenConfig{
 		"SOL": {
 			Name:     "Solana",
 			Mint:     "So11111111111111111111111111111111111111112",
@@ -79,7 +81,7 @@ type StablecoinInfo struct {
 
 // knownStablecoins is the hardcoded stablecoin registry (#360). It lives next
 // to DefaultPythPriceFeeds and, together with it, drives the mainnet
-// token-pricing policy (see ClassifySolanaTokenPricing):
+// token-pricing policy (see ClassifyPricing):
 //
 //   - token has a Pyth feed            -> the feed is used. For a stablecoin
 //     the feed IS the depeg protection (see CalculateTokenQuote's failsafe).
@@ -145,10 +147,10 @@ const (
 	TokenPricingDisabled
 )
 
-// ClassifySolanaTokenPricing applies the MAINNET pricing policy to one
+// ClassifyPricing applies the MAINNET pricing policy to one
 // configured token. It is never consulted on devnet (test_env): devnet money
 // is fake and has no pricing requirements at all.
-func ClassifySolanaTokenPricing(symbol, mint string) (TokenPricing, StablecoinInfo) {
+func ClassifyPricing(symbol, mint string) (TokenPricing, StablecoinInfo) {
 	normalized := strings.ToUpper(strings.TrimSpace(symbol))
 	if strings.TrimSpace(DefaultPythPriceFeeds()[normalized]) != "" {
 		sc, _ := KnownStablecoinByMint(mint)
@@ -199,8 +201,8 @@ func IsFeedlessStablecoin(symbol string) bool {
 	return strings.TrimSpace(DefaultPythPriceFeeds()[normalized]) == ""
 }
 
-func DefaultDevnetTokens() map[string]SolanaToken {
-	return map[string]SolanaToken{
+func DefaultDevnetTokens() map[string]config.TokenConfig {
+	return map[string]config.TokenConfig{
 		"SOL": {
 			Name:     "Solana",
 			Mint:     "So11111111111111111111111111111111111111112",
@@ -219,14 +221,14 @@ func DefaultDevnetTokens() map[string]SolanaToken {
 	}
 }
 
-func GetTokenBySymbol(symbol string, useDevnet bool) (SolanaToken, bool) {
+func GetTokenBySymbol(symbol string, useDevnet bool) (config.TokenConfig, bool) {
 	var network string
 	if useDevnet {
 		network = "devnet"
 	} else {
 		network = "mainnet"
 	}
-	tokens := TokensForNetwork(network)
+	tokens := ForNetwork(network)
 	token, exists := tokens[symbol]
 	return token, exists
 }
@@ -236,7 +238,7 @@ func IsValidToken(symbol string) bool {
 	return exists
 }
 
-func TokensForNetwork(network string) map[string]SolanaToken {
+func ForNetwork(network string) map[string]config.TokenConfig {
 	switch strings.ToLower(network) {
 	case "devnet":
 		return DefaultDevnetTokens()

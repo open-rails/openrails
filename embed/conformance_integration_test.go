@@ -29,9 +29,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -143,6 +145,14 @@ type obsBudgetPolicy struct {
 	Windows []obsBudgetPolicyWindow
 }
 
+type obsMerchantProfile struct {
+	DisplayName  string
+	LogoURL      string
+	FromEmail    string
+	SupportURL   string
+	SupportEmail string
+}
+
 func observeBudgetPolicies(ps []openrails.InvokerSpendLimit) []obsBudgetPolicy {
 	out := make([]obsBudgetPolicy, 0, len(ps))
 	for _, p := range ps {
@@ -219,6 +229,7 @@ type scriptResult struct {
 	// Merchant-configured flat delegated-invoker wasted-spend windows: the
 	// configured limit + over-budget state observed via AbuseUsage.
 	InvokerWastedUsage []openrails.AbuseUsageWindow
+	MerchantProfile    obsMerchantProfile
 
 	SettingsAccount obsAccount
 
@@ -295,6 +306,7 @@ type scriptEnv struct {
 	resource string // per-side: ResourceRevenueDaily is cross-payer within the tenant
 	side     string
 	from, to time.Time
+	pool     *pgxpool.Pool
 	// issuer/subject are the payer's EXTERNAL identity (its
 	// openrails.customers row) for the entitlements steps.
 	issuer  string
@@ -661,10 +673,18 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// remote must produce identical observable state.
 	wastedActor := "user:wasted-" + env.side
 	require.NoError(t, c.SetMerchantConfiguration(ctx, openrails.MerchantConfigurationInput{
+		Profile: &openrails.MerchantProfileInput{
+			DisplayName:  "Conformance Billing",
+			LogoURL:      "https://example.com/logo.png",
+			FromEmail:    "billing@example.com",
+			SupportURL:   "https://example.com/support",
+			SupportEmail: "support@example.com",
+		},
 		DelegatedInvokerWastedSpendWindows: []openrails.BudgetWindowInput{
 			{Key: "burst", WindowSeconds: 900, Limit: 1_000_000},
 		},
 	}), "%s set-merchant-configuration", env.side)
+	r.MerchantProfile = observeMerchantProfile(t, ctx, env.pool)
 	_, err = c.ReportWastedSpend(ctx, openrails.WastedSpendReport{
 		CustomerID: payerID,
 		Invoker:    wastedActor,
@@ -684,6 +704,26 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.True(t, r.InvokerWastedUsage[0].OverBudget, "%s invoker-wasted-usage: $2 over the configured $1", env.side)
 
 	return r
+}
+
+func observeMerchantProfile(t *testing.T, ctx context.Context, pool *pgxpool.Pool) obsMerchantProfile {
+	t.Helper()
+	var raw []byte
+	err := pool.QueryRow(ctx, `
+		SELECT config
+		FROM openrails.merchant_configurations
+		WHERE merchant_id = $1
+	`, dbtest.TestMerchantID).Scan(&raw)
+	require.NoError(t, err)
+	var cfg models.MerchantConfiguration
+	require.NoError(t, json.Unmarshal(raw, &cfg))
+	return obsMerchantProfile{
+		DisplayName:  cfg.Profile.DisplayName,
+		LogoURL:      cfg.Profile.LogoURL,
+		FromEmail:    cfg.Profile.FromEmail,
+		SupportURL:   cfg.Profile.SupportURL,
+		SupportEmail: cfg.Profile.SupportEmail,
+	}
 }
 
 func observeAccount(a *openrails.CreditAccount, payerID string) obsAccount {
@@ -744,12 +784,12 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	resEmbedded := runScript(t, ctx, embeddedClient, scriptEnv{
 		payer: payerEmbedded, invoker: "user:conf", currency: currency,
 		resource: "ep-embedded", side: "embedded", from: from, to: to,
-		issuer: issuer, subject: subjectEmbedded,
+		pool: pool, issuer: issuer, subject: subjectEmbedded,
 	})
 	resStandalone := runScript(t, ctx, standaloneClient, scriptEnv{
 		payer: payerStandalone, invoker: "user:conf", currency: currency,
 		resource: "ep-standalone", side: "standalone", from: from, to: to,
-		issuer: issuer, subject: subjectStandalone,
+		pool: pool, issuer: issuer, subject: subjectStandalone,
 	})
 
 	// THE assertion: identical observable behavior across the two real surfaces.

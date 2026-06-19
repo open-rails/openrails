@@ -18,7 +18,7 @@ import (
 
 // ReplayService replays saved webhook payloads against a target endpoint.
 type ReplayService struct {
-	TargetEndpoint string        // Base URL for webhook endpoints (e.g., http://localhost:2053)
+	TargetEndpoint string        // Base URL for webhook endpoints (e.g., http://localhost:3053)
 	Concurrent     int           // Number of concurrent requests
 	Delay          time.Duration // Delay between requests
 	DryRun         bool          // Validate payloads without sending

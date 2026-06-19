@@ -343,19 +343,7 @@ func (c *remote) SetTierSchedule(ctx context.Context, tenantSubjectID, currency 
 
 // SetMerchantConfiguration implements Client.
 func (c *remote) SetMerchantConfiguration(ctx context.Context, in MerchantConfigurationInput) error {
-	ws := make([]map[string]any, 0, len(in.DelegatedInvokerWastedSpendWindows))
-	for _, w := range in.DelegatedInvokerWastedSpendWindows {
-		ws = append(ws, map[string]any{
-			"key":            w.Key,
-			"window_seconds": w.WindowSeconds,
-			"limit":          w.Limit,
-			"currency":       w.Currency,
-		})
-	}
-	body := map[string]any{
-		"delegated_invoker_wasted_spend_windows": ws,
-	}
-	return c.do(ctx, http.MethodPut, "/v1/service/merchant-configuration", body, nil)
+	return c.do(ctx, http.MethodPut, "/v1/service/merchant-configuration", in, nil)
 }
 
 // GetTier implements Client (handler ServiceGetTier, #477).

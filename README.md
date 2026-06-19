@@ -42,7 +42,7 @@ As a result, self-hosted instances only need to meet PCI compliance requirements
 
 | | **Standalone service** | **Embedded library** |
 |---|---|---|
-| Deployment | Separate HTTP service (own process, port `:2053`) | Compiled into your Go binary |
+| Deployment | Separate HTTP service (own process, port `:3053`) | Compiled into your Go binary |
 | Your backend calls it via | HTTP (`/v1/service/*`, service token) | In-process function calls (`pkg/service`) or HTTP |
 | Your frontend calls it via | HTTP, browser-direct (`/v1/self/*`, delegated token) | HTTP routes mounted on **your** server, **your** credential |
 | Auth | OpenRails verifies tokens at its network edge | You hand OpenRails an identity; it never sees a credential |
@@ -129,10 +129,10 @@ JWKS). Same seam, two serializations.
 
 ```bash
 task docker-up            # Postgres + Garnet(Redis) + ClickHouse + OpenRails, zero-config
-curl http://localhost:2053/health
+curl http://localhost:3053/health
 ```
 
-The public API listens on `:2053`: user routes, the self-service surface, admin routes,
+The public API listens on `:3053`: user routes, the self-service surface, admin routes,
 webhooks, and the server-to-server `/v1/service/*` routes all share the port. See
 [docs/api/endpoints.md](docs/api/endpoints.md) for the full HTTP reference and
 [docs/merchant-provisioning.md](docs/merchant-provisioning.md) for creating your merchant and

@@ -15,22 +15,22 @@
 # read settings back. A FRESH credit type per run makes balances deterministic.
 #
 # POSIX sh + curl only (runs in alpine/curl). Usage:
-#   OPENRAILS_API_KEY=openrails_st_xxx BASE_URL=http://openrails:2053 \
+#   OPENRAILS_API_KEY=openrails_st_xxx BASE_URL=http://openrails:3053 \
 #   USER_ID=66666666-6666-6666-6666-666666666666 \
 #     sh scripts/unified_billing_e2e.sh
 #
 # In ~/cozy/e2e: mint the API key with
 #   docker compose exec -T openrails /usr/local/bin/openrails \
 #     --config /app/config/openrails.config.yaml mint-merchant-api-key
-# then run this from a container ON the e2e_default network (openrails:2053 is
+# then run this from a container ON the e2e_default network (openrails:3053 is
 # not host-published):
 #   docker run --rm --network e2e_default \
 #     -v "$PWD/scripts/unified_billing_e2e.sh:/h.sh:ro" \
-#     -e OPENRAILS_API_KEY=... -e BASE_URL=http://openrails:2053 \
+#     -e OPENRAILS_API_KEY=... -e BASE_URL=http://openrails:3053 \
 #     --entrypoint sh alpine/curl:latest /h.sh
 set -u
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:22053}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:3053}"
 : "${OPENRAILS_API_KEY:?set OPENRAILS_API_KEY to a minted merchant API key}"
 USER_ID="${USER_ID:-66666666-6666-6666-6666-666666666666}"
 SVC="$BASE_URL/v1/service"

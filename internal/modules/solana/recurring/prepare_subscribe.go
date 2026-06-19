@@ -99,13 +99,13 @@ type PrepareSubscribeService struct {
 	signer  solanaint.Signer
 	rpc     prepareRPC
 	network string
-	tokens  map[string]config.SolanaToken
+	tokens  map[string]config.TokenConfig
 }
 
 // NewPrepareSubscribeService builds a PrepareSubscribeService. signer is the
 // cranker key used to pre-sign the atomic subscribe bundle's transfer slot (#286)
 // and MUST be the same key the Submitter resolves as the merchant address.
-func NewPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rpc prepareRPC, network string, tokens ...map[string]config.SolanaToken) *PrepareSubscribeService {
+func NewPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rpc prepareRPC, network string, tokens ...map[string]config.TokenConfig) *PrepareSubscribeService {
 	return &PrepareSubscribeService{submitter: submitter, signer: signer, rpc: rpc, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens))}
 }
 

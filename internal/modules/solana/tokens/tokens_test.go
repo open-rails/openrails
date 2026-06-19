@@ -1,4 +1,4 @@
-package config
+package tokens
 
 import (
 	"testing"
@@ -8,58 +8,58 @@ import (
 
 // #360: every default mainnet token MUST be coverable by the pricing policy —
 // either a built-in Pyth feed or a USD-pegged registry entry. This is the
-// config-level regression for the doujins crash-loop ("solana token USD1
+// token-registry regression for the doujins crash-loop ("solana token USD1
 // missing pyth price feed"): defaults and the feed map must never diverge into
 // a fatal state again.
 func TestDefaultMainnetTokensAllPriceable(t *testing.T) {
 	t.Parallel()
 	for symbol, token := range DefaultSupportedTokens() {
-		decision, _ := ClassifySolanaTokenPricing(symbol, token.Mint)
+		decision, _ := ClassifyPricing(symbol, token.Mint)
 		require.NotEqual(t, TokenPricingDisabled, decision,
 			"default mainnet token %s must be priceable (feed or USD parity)", symbol)
 	}
 	// USD1/USDG specifically graduated from feedless to feed-backed with
 	// verified Pyth feed ids.
 	for _, symbol := range []string{"USD1", "USDG"} {
-		decision, _ := ClassifySolanaTokenPricing(symbol, DefaultSupportedTokens()[symbol].Mint)
+		decision, _ := ClassifyPricing(symbol, DefaultSupportedTokens()[symbol].Mint)
 		require.Equal(t, TokenPricingFeed, decision, "%s has a verified Pyth feed", symbol)
 		require.False(t, IsFeedlessStablecoin(symbol), "%s is no longer feedless", symbol)
 	}
 }
 
-func TestClassifySolanaTokenPricing(t *testing.T) {
+func TestClassifyPricing(t *testing.T) {
 	t.Parallel()
 
 	t.Run("feed-backed symbol uses the feed", func(t *testing.T) {
-		decision, _ := ClassifySolanaTokenPricing("USDC", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+		decision, _ := ClassifyPricing("USDC", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
 		require.Equal(t, TokenPricingFeed, decision)
 	})
 
 	t.Run("USD-pegged registry mint without feed degrades to parity", func(t *testing.T) {
-		decision, sc := ClassifySolanaTokenPricing("USDT", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB")
+		decision, sc := ClassifyPricing("USDT", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB")
 		require.Equal(t, TokenPricingUSDParity, decision)
 		require.Equal(t, "usd", sc.Peg)
 	})
 
 	t.Run("non-USD-pegged stablecoin without feed is disabled", func(t *testing.T) {
-		decision, sc := ClassifySolanaTokenPricing("EURC", "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr")
+		decision, sc := ClassifyPricing("EURC", "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr")
 		require.Equal(t, TokenPricingDisabled, decision)
 		require.Equal(t, "eur", sc.Peg)
 	})
 
 	t.Run("unknown token without feed is disabled", func(t *testing.T) {
-		decision, sc := ClassifySolanaTokenPricing("NOPE", "NopeMint1111111111111111111111111111111111")
+		decision, sc := ClassifyPricing("NOPE", "NopeMint1111111111111111111111111111111111")
 		require.Equal(t, TokenPricingDisabled, decision)
 		require.Empty(t, sc.Symbol)
 	})
 
 	t.Run("parity is mint-anchored: stablecoin SYMBOL with unknown mint gets no parity", func(t *testing.T) {
-		decision, _ := ClassifySolanaTokenPricing("USDT", "FakeMint1111111111111111111111111111111111")
+		decision, _ := ClassifyPricing("USDT", "FakeMint1111111111111111111111111111111111")
 		require.Equal(t, TokenPricingDisabled, decision)
 	})
 
 	t.Run("custom symbol pointing at a known USD mint gets parity", func(t *testing.T) {
-		decision, sc := ClassifySolanaTokenPricing("TETHER", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB")
+		decision, sc := ClassifyPricing("TETHER", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB")
 		require.Equal(t, TokenPricingUSDParity, decision)
 		require.Equal(t, "USDT", sc.Symbol)
 	})
@@ -90,29 +90,4 @@ func TestStablecoinRegistryHelpers(t *testing.T) {
 	require.True(t, IsFeedlessStablecoin("USDT"))
 	require.False(t, IsFeedlessStablecoin("USDC"))
 	require.False(t, IsFeedlessStablecoin("EURC"))
-}
-
-// #360 Validate-ordering pin: a solana processor with unpriceable tokens must
-// pass Validate (warn-only) — the runtime pass disables tokens; the container
-// always boots.
-func TestValidateSolanaProcessorNeverFatal(t *testing.T) {
-	t.Parallel()
-
-	cfg := GetDefaultBillingConfig()
-	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
-	cfg.Mode = ModeFull
-	processors := ProcessorSet{
-		"solana": {
-			Tokens: map[string]TokenConfig{
-				"NOPE": {Name: "Mystery", Mint: "NopeMint1111111111111111111111111111111111", Decimals: 6},
-				"EURC": {Name: "Euro Coin", Mint: "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr", Decimals: 6},
-				"":     {Name: "Empty", Mint: "x", Decimals: 6},
-			},
-		},
-	}
-	require.NoError(t, ValidateProcessorSet(cfg, processors))
-
-	// And under test_env (devnet) there is no pricing requirement at all.
-	cfg.TestEnv = true
-	require.NoError(t, ValidateProcessorSet(cfg, processors))
 }

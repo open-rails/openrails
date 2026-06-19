@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -672,11 +673,25 @@ func (c *localClient) SetMerchantConfiguration(ctx context.Context, in openrails
 		})
 	}
 	if err := c.svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{
+		Profile:                            merchantProfileInput(in.Profile),
 		DelegatedInvokerWastedSpendWindows: ws,
 	}); err != nil {
 		return internalErr("set merchant configuration failed")
 	}
 	return nil
+}
+
+func merchantProfileInput(in *openrails.MerchantProfileInput) *models.MerchantProfileConfiguration {
+	if in == nil {
+		return nil
+	}
+	return &models.MerchantProfileConfiguration{
+		DisplayName:  strings.TrimSpace(in.DisplayName),
+		LogoURL:      strings.TrimSpace(in.LogoURL),
+		FromEmail:    strings.TrimSpace(in.FromEmail),
+		SupportURL:   strings.TrimSpace(in.SupportURL),
+		SupportEmail: strings.TrimSpace(in.SupportEmail),
+	}
 }
 
 // GetTier transcribes handlers.ServiceGetTier (service_admission.go, #477).

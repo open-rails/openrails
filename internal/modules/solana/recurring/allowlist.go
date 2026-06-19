@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/config"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
 // RecurringStablecoins is the launch allowlist of token SYMBOLS eligible to back
@@ -32,7 +33,7 @@ import (
 //     stablecoin keeps a fixed base-unit amount ≈ a fixed USD amount across cycles.
 //
 // Mint extensions are immutable, so a rejected token can never become eligible.
-// One-off purchases are unaffected — they accept the full DefaultSupportedTokens
+// One-off purchases are unaffected — they accept the full solanatokens defaults
 // set and FX-quote at purchase time.
 var RecurringStablecoins = []string{"USDC", "USD1"}
 
@@ -59,14 +60,14 @@ func (e ErrTokenNotRecurringEligible) Error() string {
 // without a configured mint for the network all return an error, so a caller can
 // never publish a plan against an ineligible or misconfigured mint.
 func ResolveRecurringMint(symbol, network string) (mint string, decimals int, err error) {
-	return ResolveRecurringMintFromTokens(symbol, config.TokensForNetwork(network))
+	return ResolveRecurringMintFromTokens(symbol, solanatokens.ForNetwork(network))
 }
 
 // ResolveRecurringMintFromTokens validates that symbol is recurring-eligible and
 // resolves it from the runtime-configured token map. Production callers must use
 // this so deployed token config is the source of truth; hard-coded network
 // defaults are only used by legacy tests/helpers that call ResolveRecurringMint.
-func ResolveRecurringMintFromTokens(symbol string, tokens map[string]config.SolanaToken) (mint string, decimals int, err error) {
+func ResolveRecurringMintFromTokens(symbol string, tokens map[string]config.TokenConfig) (mint string, decimals int, err error) {
 	sym := strings.ToUpper(strings.TrimSpace(symbol))
 	if sym == "" {
 		return "", 0, fmt.Errorf("recurring: token symbol is required")
@@ -81,8 +82,8 @@ func ResolveRecurringMintFromTokens(symbol string, tokens map[string]config.Sola
 	return tok.Mint, tok.Decimals, nil
 }
 
-func normalizeRecurringTokens(tokens map[string]config.SolanaToken) map[string]config.SolanaToken {
-	normalized := make(map[string]config.SolanaToken, len(tokens))
+func normalizeRecurringTokens(tokens map[string]config.TokenConfig) map[string]config.TokenConfig {
+	normalized := make(map[string]config.TokenConfig, len(tokens))
 	for symbol, token := range tokens {
 		s := strings.ToUpper(strings.TrimSpace(symbol))
 		if s == "" {
@@ -93,7 +94,7 @@ func normalizeRecurringTokens(tokens map[string]config.SolanaToken) map[string]c
 	return normalized
 }
 
-func firstTokenMap(tokens []map[string]config.SolanaToken) map[string]config.SolanaToken {
+func firstTokenMap(tokens []map[string]config.TokenConfig) map[string]config.TokenConfig {
 	if len(tokens) == 0 {
 		return nil
 	}

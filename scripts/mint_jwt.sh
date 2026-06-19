@@ -30,7 +30,7 @@ new_uuid() {
 }
 
 AUD="${AUTHKIT_AUDIENCE:-openrails-app}"
-MINT_URL="${AUTHKIT_MINT_URL:-http://localhost:28080/api/v1/dev/mint}"
+MINT_URL="${AUTHKIT_MINT_URL:-http://localhost:8081/api/v1/dev/mint}"
 
 if [ -z "${AUTHKIT_DEV_MINT_SECRET:-}" ]; then
   echo "Missing AUTHKIT_DEV_MINT_SECRET (set it in .env or your shell)" >&2

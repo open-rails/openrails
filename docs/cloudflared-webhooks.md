@@ -19,7 +19,7 @@ Pick a stable hostname you can register once in the Mobius/NMI portal, for examp
 
 ## Minimal local workflow
 
-1) Run OpenRails locally (example port `2053`):
+1) Run OpenRails locally (example port `3053`):
 
 - Ensure webhook signature verification is seeded in merchant config, for
   example `webhook_signing_secret: {env: MOBIUS_WEBHOOK_SIGNING_SECRET}` under
@@ -72,13 +72,13 @@ See `docs/cloudflared-config.example.yaml` for a minimal config template.
 Example ingress snippet:
 
 - `hostname: openrails-webhooks-sandbox.<your-domain>`
-- `service: http://localhost:2053`
+- `service: http://localhost:3053`
 
 Then Mobius/NMI will call:
 - `https://openrails-webhooks-sandbox.<your-domain>/v1/webhooks/mobius`
 
 and cloudflared will forward to:
-- `http://localhost:2053/v1/webhooks/mobius`
+- `http://localhost:3053/v1/webhooks/mobius`
 
 ## Security notes (sandbox still matters)
 

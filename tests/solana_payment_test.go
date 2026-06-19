@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
 // TestSolanaTokensNoAuth tests that /v1/solana/tokens doesn't require auth
@@ -66,7 +67,7 @@ func setupTestSuiteWithSolana(t *testing.T) (*TestContainerSuite, string, string
 	suite.Processors["solana"] = &config.ProcessorConfig{
 		Type:            config.ProcessorTypeSolana,
 		RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
-		Tokens:          config.DefaultDevnetTokens(),
+		Tokens:          solanatokens.DefaultDevnetTokens(),
 		// RPCEndpoint and Network are derived from test_env
 	}
 

@@ -1,7 +1,0 @@
-version: 1
-# Bootstrap declares OpenRails merchant namespaces. Issuer/JWKS trust belongs in
-# AuthKit remote_applications; this file only binds the merchant to its owner org
-# and billing metadata.
-merchants:
-  - slug: local-stack
-    name: Local Stack

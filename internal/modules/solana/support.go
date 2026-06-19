@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/fx"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -23,7 +24,7 @@ const stablecoinPegTolerance = 0.01
 // token charge so the merchant still nets the USD amount). Feedless stablecoins,
 // a nil provider, or an unavailable/invalid feed all fall back to the $1.00 peg.
 func stablecoinPriceUSD(ctx context.Context, symbol string, priceProvider TokenPriceProvider) float64 {
-	if priceProvider == nil || config.IsFeedlessStablecoin(symbol) {
+	if priceProvider == nil || solanatokens.IsFeedlessStablecoin(symbol) {
 		return 1.0
 	}
 	p, err := priceProvider.PriceUSD(ctx, symbol)
@@ -101,7 +102,7 @@ type TokenPriceProvider interface {
 }
 
 // CalculateTokenQuote converts a fiat amount into token units based on live prices.
-func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg config.SolanaToken, amountCents int64, currency string, fxProvider fx.Provider, priceProvider TokenPriceProvider) (*TokenQuote, error) {
+func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg config.TokenConfig, amountCents int64, currency string, fxProvider fx.Provider, priceProvider TokenPriceProvider) (*TokenQuote, error) {
 	if amountCents <= 0 {
 		return &TokenQuote{Units: 0, Decimal: 0, FXRate: 1.0, FXCurrency: strings.ToLower(currency), QuotedAt: time.Now()}, nil
 	}
@@ -145,7 +146,7 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 	// custom-symbol token pointing at a known USD-pegged mint still gets parity
 	// pricing. Everything else (SOL, EURC, ...) always requires a live price.
 	var tokenPriceUSD float64
-	if config.IsUSDPeggedToken(tokenSymbol, tokenCfg.Mint) {
+	if solanatokens.IsUSDPeggedToken(tokenSymbol, tokenCfg.Mint) {
 		tokenPriceUSD = stablecoinPriceUSD(ctx, tokenSymbol, priceProvider)
 	} else {
 		if priceProvider == nil {

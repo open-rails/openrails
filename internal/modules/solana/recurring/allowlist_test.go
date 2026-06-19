@@ -63,7 +63,7 @@ func TestResolveRecurringMint(t *testing.T) {
 
 func TestResolveRecurringMintFromTokensUsesConfiguredMint(t *testing.T) {
 	const configuredMint = "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ"
-	mint, decimals, err := ResolveRecurringMintFromTokens("USDC", map[string]config.SolanaToken{
+	mint, decimals, err := ResolveRecurringMintFromTokens("USDC", map[string]config.TokenConfig{
 		"USDC": {Mint: configuredMint, Decimals: 6},
 	})
 	if err != nil {

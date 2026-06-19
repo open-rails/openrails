@@ -10,8 +10,8 @@ mode: full          # full | limited | readonly; required outside development
 test_env: true      # sandbox credentials; development only
 
 host: 0.0.0.0
-port: 2053
-api_url: http://localhost:2053
+port: 3053
+api_url: http://localhost:3053
 
 logger:
   level: info       # debug | info | warn | error | fatal | panic
@@ -19,7 +19,7 @@ logger:
 db:
   url: ""           # optional; overrides the fields below when set
   host: localhost
-  port: "5432"
+  port: "5433"
   database: openrails_db
   username: admin
   password: admin_password
@@ -27,12 +27,12 @@ db:
   schema: openrails # defaults to 'openrails' if not specified
 
 redis:
-  addr: garnet:6379
+  addr: localhost:6380
   password: ""
   db: 0
 
 auth:
-  issuer: http://localhost:2053 # issuer URL; JWKS is served under this authority
+  issuer: http://localhost:3053 # issuer URL; JWKS is served under this authority
   # signing keys are loaded by AuthKit from env, /vault/auth/keys.json,
   # or development-only generated keys under .runtime/authkit
 
@@ -49,8 +49,8 @@ vault:
   k8s_role: ""
 
 clickhouse:
-  http_addr: http://localhost:8123
-  client_addr: localhost:9000
+  http_addr: http://localhost:8124
+  client_addr: localhost:9003
   db: analytics
   user: analytics_user
   password: analytics_password

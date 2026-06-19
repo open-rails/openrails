@@ -4,15 +4,19 @@ package embed_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/embedded"
 )
 
@@ -33,6 +37,15 @@ func TestEmbedNew_RegistersBoundMerchant(t *testing.T) {
 	rt, err := embed.New(ctx, embed.Options{
 		Options:  embedded.Options{Config: cfg},
 		Merchant: slug,
+		MerchantConfiguration: openrails.MerchantConfigurationInput{
+			Profile: &openrails.MerchantProfileInput{
+				FromEmail:    "billing@example.com",
+				SupportEmail: "support@example.com",
+			},
+			DelegatedInvokerWastedSpendWindows: []openrails.BudgetWindowInput{
+				{Key: "burst", WindowSeconds: 900, Limit: 123, Currency: money.DefaultCurrency},
+			},
+		},
 	})
 	require.NoError(t, err, "embed.New with an unprovisioned merchant slug must NOT panic/error")
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
@@ -50,6 +63,22 @@ func TestEmbedNew_RegistersBoundMerchant(t *testing.T) {
 	require.Equal(t, slug, gotSlug)
 	require.Equal(t, slug, gotName)
 	require.Equal(t, "active", gotStatus)
+
+	var rawConfig []byte
+	err = pool.QueryRow(ctx, `
+		SELECT mc.config
+		FROM openrails.merchant_configurations mc
+		JOIN openrails.merchants m ON m.id = mc.merchant_id
+		WHERE m.slug = $1
+	`, slug).Scan(&rawConfig)
+	require.NoError(t, err, "merchant configuration must be seeded")
+	var gotConfig models.MerchantConfiguration
+	require.NoError(t, json.Unmarshal(rawConfig, &gotConfig))
+	require.Equal(t, slug, gotConfig.Profile.DisplayName, "embedded startup matches manifest display-name fallback")
+	require.Equal(t, "billing@example.com", gotConfig.Profile.FromEmail)
+	require.Equal(t, "support@example.com", gotConfig.Profile.SupportEmail)
+	require.Len(t, gotConfig.DelegatedInvokerWastedSpendWindows, 1)
+	require.Equal(t, int64(123), gotConfig.DelegatedInvokerWastedSpendWindows[0].Limit)
 
 	// The HTTP handler builds — merchant resolution succeeds (would have panicked
 	// pre-#480 on an unprovisioned slug).

@@ -35,7 +35,7 @@ create credit-type → deposit → GET balance (#247) → atomic authorize+hold 
 → partial capture → balance reflects actual → over-balance authorize DENIED
 (prepaid gate) → set arrears + cap (#242) → read settings back.
 
-Run against `~/cozy/e2e` (openrails:2053 is not host-published, so run from a
+Run against `~/cozy/e2e` (openrails:3053 is not host-published, so run from a
 container on the e2e network):
 
 ```sh
@@ -45,7 +45,7 @@ OPENRAILS_API_KEY=$(docker compose exec -T openrails /usr/local/bin/openrails \
 
 docker run --rm --network e2e_default \
   -v "$PWD/scripts/unified_billing_e2e.sh:/h.sh:ro" \
-  -e OPENRAILS_API_KEY="$OPENRAILS_API_KEY" -e BASE_URL=http://openrails:2053 \
+  -e OPENRAILS_API_KEY="$OPENRAILS_API_KEY" -e BASE_URL=http://openrails:3053 \
   --entrypoint sh alpine/curl:latest /h.sh
 # => 12 passed, 0 failed
 ```

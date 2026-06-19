@@ -162,7 +162,7 @@ func TestConfigExampleShowsCodeDefaults(t *testing.T) {
 	assert.Equal(t, defaults.ClickHouse.Username, cfg.ClickHouse.Username)
 	assert.Equal(t, defaults.ClickHouse.Password, cfg.ClickHouse.Password)
 	assert.Equal(t, defaults.ClickHouse.Cluster, cfg.ClickHouse.Cluster)
-	assert.Equal(t, "http://localhost:2053", cfg.Auth.Issuer)
+	assert.Equal(t, "http://localhost:3053", cfg.Auth.Issuer)
 }
 
 func TestLoad_RejectsRemovedControlPlaneEnabledKnob(t *testing.T) {
@@ -250,17 +250,17 @@ func TestLoad_ControlPlaneMaterializedWithDevIssuerDefault(t *testing.T) {
 	cfg, err := Load(cfgPath)
 	require.NoError(t, err)
 	require.NotNil(t, cfg.Auth)
-	require.Equal(t, "http://localhost:2053", cfg.Auth.Issuer)
+	require.Equal(t, "http://localhost:3053", cfg.Auth.Issuer)
 }
 
 func TestLoad_ControlPlaneIssuerFromAPIURLInDev(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(cfgPath, []byte("env: development\napi_url: \"http://openrails:2053/\"\n"), 0o600))
+	require.NoError(t, os.WriteFile(cfgPath, []byte("env: development\napi_url: \"http://openrails:3053/\"\n"), 0o600))
 
 	cfg, err := Load(cfgPath)
 	require.NoError(t, err)
-	require.Equal(t, "http://openrails:2053", cfg.Auth.Issuer)
+	require.Equal(t, "http://openrails:3053", cfg.Auth.Issuer)
 }
 
 func TestLoad_AuthIssuerFromEnv(t *testing.T) {
@@ -749,8 +749,8 @@ func TestFlexiblePortRange(t *testing.T) {
 	require.Equal(t, FlexiblePort(44553), p)
 	require.NoError(t, p.UnmarshalText([]byte("65535")))
 	require.Equal(t, FlexiblePort(65535), p)
-	require.NoError(t, p.UnmarshalText([]byte(" 2053 ")))
-	require.Equal(t, FlexiblePort(2053), p)
+	require.NoError(t, p.UnmarshalText([]byte(" 3053 ")))
+	require.Equal(t, FlexiblePort(3053), p)
 	require.NoError(t, p.UnmarshalText([]byte("")))
 	require.Equal(t, FlexiblePort(0), p)
 

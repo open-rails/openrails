@@ -29,8 +29,8 @@ Optional environment:
 - `E2E_MOBIUS_RECURRING_AMOUNT` defaults to the existing-plan amount `999`
   cents when `E2E_MOBIUS_PLAN_ID` is supplied; otherwise it defaults to a
   per-run amount from 1000 to 1399 cents for the auto-created sandbox plan.
-- `OPENRAILS_HOST_PORT` defaults to `2053`; use another free port when a
-  different local E2E stack already owns `2053`.
+- `OPENRAILS_HOST_PORT` defaults to `3053`; use another free port when a
+  different local E2E stack already owns `3053`.
 - `MOBIUS_E2E_BASE_URL` defaults to `http://localhost:$OPENRAILS_HOST_PORT`.
 - `MOBIUS_E2E_TOKENIZATION_BASE_URL` defaults to `MOBIUS_E2E_BASE_URL`.
 - `MOBIUS_E2E_START_COMPOSE` defaults to `true`.

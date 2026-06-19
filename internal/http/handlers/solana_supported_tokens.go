@@ -15,6 +15,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
@@ -94,7 +95,7 @@ func GetSupportedTokens(r *httprequest.Request) {
 
 	tokenMap := normalizeTokenMap(solanaProc.Tokens)
 	if len(tokenMap) == 0 {
-		tokenMap = normalizeTokenMap(config.TokensForNetwork(solanaProc.Network))
+		tokenMap = normalizeTokenMap(solanatokens.ForNetwork(solanaProc.Network))
 	}
 
 	mintSet := make(map[string]struct{})
@@ -168,7 +169,7 @@ func GetSupportedTokens(r *httprequest.Request) {
 			Mint:              mint,
 			Decimals:          t.Decimals,
 			Price:             price,
-			Preferred:         symbol == config.PreferredStablecoin,
+			Preferred:         symbol == solanatokens.PreferredStablecoin,
 			RecurringEligible: recurring.IsRecurringStablecoinSymbol(symbol),
 		}
 
@@ -204,7 +205,7 @@ func GetSolanaConfig(r *httprequest.Request) {
 	network := normalizeSolanaNetwork(solanaProc.Network)
 	tokenMap := normalizeTokenMap(solanaProc.Tokens)
 	if len(tokenMap) == 0 {
-		tokenMap = normalizeTokenMap(config.TokensForNetwork(network))
+		tokenMap = normalizeTokenMap(solanatokens.ForNetwork(network))
 	}
 
 	symbols := make([]string, 0, len(tokenMap))
@@ -225,7 +226,7 @@ func GetSolanaConfig(r *httprequest.Request) {
 			Name:              name,
 			Mint:              strings.TrimSpace(t.Mint),
 			Decimals:          t.Decimals,
-			Preferred:         symbol == config.PreferredStablecoin,
+			Preferred:         symbol == solanatokens.PreferredStablecoin,
 			RecurringEligible: recurring.IsRecurringStablecoinSymbol(symbol),
 		})
 	}
@@ -238,7 +239,7 @@ func GetSolanaConfig(r *httprequest.Request) {
 		// Wallets/frontends bring their own RPC.
 		RPCURL:          "",
 		ExplorerCluster: explorerCluster(network),
-		PreferredToken:  config.PreferredStablecoin,
+		PreferredToken:  solanatokens.PreferredStablecoin,
 		Tokens:          tokens,
 	}
 	resp.Features.SolanaPay = true
@@ -270,8 +271,8 @@ func explorerCluster(network string) string {
 	}
 }
 
-func normalizeTokenMap(tokens map[string]config.SolanaToken) map[string]config.SolanaToken {
-	normalized := make(map[string]config.SolanaToken, len(tokens))
+func normalizeTokenMap(tokens map[string]config.TokenConfig) map[string]config.TokenConfig {
+	normalized := make(map[string]config.TokenConfig, len(tokens))
 	for symbol, token := range tokens {
 		normalizedSymbol := strings.ToUpper(strings.TrimSpace(symbol))
 		if normalizedSymbol == "" {
@@ -352,7 +353,7 @@ func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr 
 	return balances, solBalance, ""
 }
 
-func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSymbol string, tokenCfg config.SolanaToken, amountCents int64, currency string, quotedAt, expiresAt time.Time) *TokenQuote {
+func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSymbol string, tokenCfg config.TokenConfig, amountCents int64, currency string, quotedAt, expiresAt time.Time) *TokenQuote {
 	quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, amountCents, currency, r.State.FXProvider, r.State.SolanaPriceProvider)
 	if err != nil {
 		log.WithError(err).WithField("token", tokenSymbol).Warn("Failed to calculate token quote")
@@ -370,7 +371,7 @@ func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSy
 	}
 }
 
-func calculateBalanceForToken(tokenSymbol string, tokenCfg config.SolanaToken, mint string, balances map[string]uint64, solBalance uint64) *TokenBalance {
+func calculateBalanceForToken(tokenSymbol string, tokenCfg config.TokenConfig, mint string, balances map[string]uint64, solBalance uint64) *TokenBalance {
 	var units uint64
 
 	if strings.EqualFold(tokenSymbol, "SOL") {

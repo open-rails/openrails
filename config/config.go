@@ -52,7 +52,7 @@ const ConfigContextKey string = "config"
 
 type Config struct {
 	Env  string       `koanf:"env,omitempty"`
-	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 2053)
+	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 3053)
 	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
 
 	// Mode is the behavior dial (#346, #355): how much OpenRails is allowed to
@@ -816,7 +816,7 @@ func validateProcessors(cfg *Config, processors ProcessorSet, isDev bool) error 
 				return err
 			}
 		case ProcessorTypeSolana:
-			if err := validateSolanaProcessor(cfg, name, proc, isDev); err != nil {
+			if err := validateSolanaProcessor(name, proc); err != nil {
 				return err
 			}
 		default:
@@ -880,44 +880,12 @@ func validateStripeProcessor(name string, proc *ProcessorConfig, isDev bool) err
 	return nil
 }
 
-// validateSolanaProcessor validates a Solana-type processor. Solana token
-// misconfiguration NEVER fails the boot (#360): tokens that cannot be priced
-// degrade per the policy in ClassifySolanaTokenPricing (USD-pegged stablecoins
-// fall back to $1.00 parity; everything else is disabled per-token), mirroring
-// the recipient_wallet pattern below. The authoritative pass — including the
-// actual dropping of unpriceable tokens — happens at runtime in
-// configureSolanaProcessor, because an EMPTY token map is only defaulted there
-// (after Validate), so Validate never sees defaulted tokens; this sibling check
-// merely surfaces the same warnings early for explicitly-configured tokens.
-func validateSolanaProcessor(cfg *Config, name string, proc *ProcessorConfig, isDev bool) error {
-	_ = isDev
+// validateSolanaProcessor validates only config-loading concerns. Solana token
+// pricing/default policy belongs to internal/modules/solana/tokens and is
+// applied at runtime by configureSolanaProcessor.
+func validateSolanaProcessor(name string, proc *ProcessorConfig) error {
 	if strings.TrimSpace(proc.RecipientWallet) == "" {
 		log.Warnf("processor '%s' (solana): recipient_wallet not configured; Solana payments disabled", name)
-	}
-	// Pricing applies to MAINNET only. Under test_env (=> devnet) money is
-	// fake and there is no feed requirement at all.
-	if cfg.IsTestEnv() {
-		return nil
-	}
-	// Pyth is NOT configurable (#352): Hermes URL, freshness bounds and the
-	// price-feed map are protocol constants (DefaultPyth*).
-	for symbol, token := range proc.Tokens {
-		normalized := strings.ToUpper(strings.TrimSpace(symbol))
-		if normalized == "" {
-			log.Warnf("processor '%s' (solana): token with empty symbol will be dropped at startup", name)
-			continue
-		}
-		switch decision, sc := ClassifySolanaTokenPricing(normalized, token.Mint); decision {
-		case TokenPricingFeed:
-		case TokenPricingUSDParity:
-			log.Warnf("⚠️  processor '%s' (solana): token %s has no pyth price feed; will degrade to $1.00 USD parity (known USD-pegged stablecoin, NO depeg protection)", name, normalized)
-		case TokenPricingDisabled:
-			if sc.Symbol != "" {
-				log.Warnf("⚠️  processor '%s' (solana): token %s is pegged to %s and has no price feed; payments in %s will be unavailable", name, normalized, strings.ToUpper(sc.Peg), normalized)
-			} else {
-				log.Warnf("⚠️  processor '%s' (solana): token %s has no pyth price feed and is not a known stablecoin; payments in %s will be unavailable", name, normalized, normalized)
-			}
-		}
 	}
 
 	return nil
@@ -1123,11 +1091,11 @@ func GetDefaultBillingConfig() *Config {
 	return &Config{
 		Env:    "development",
 		Host:   "0.0.0.0",
-		Port:   2053,
-		APIURL: "http://localhost:2053",
+		Port:   3053,
+		APIURL: "http://localhost:3053",
 		DB: &DBConfig{
 			Host:     "localhost",
-			Port:     "5432",
+			Port:     "5433",
 			Database: "openrails_db",
 			Username: "admin",
 			Password: "admin_password",
@@ -1135,15 +1103,15 @@ func GetDefaultBillingConfig() *Config {
 			Schema:   DefaultSchema,
 		},
 		Redis: &RedisConfig{
-			// Match docker-compose Garnet (service: garnet)
-			Addr:     "garnet:6379",
+			// Match docker-compose's host-published Garnet port.
+			Addr:     "localhost:6380",
 			Password: "",
 			DB:       0,
 		},
 		Auth: &AuthConfig{},
 		ClickHouse: &ClickHouseConfig{
-			HTTPAddr:   "http://localhost:8123",
-			ClientAddr: "localhost:9000",
+			HTTPAddr:   "http://localhost:8124",
+			ClientAddr: "localhost:9003",
 			Database:   "analytics",
 			Username:   "analytics_user",     // Match docker-compose CLICKHOUSE_USER
 			Password:   "analytics_password", // Match docker-compose CLICKHOUSE_PASSWORD
@@ -1417,7 +1385,7 @@ func Load(configPath string) (*Config, error) {
 			if issuer == "" {
 				port := int(cfg.Port)
 				if port == 0 {
-					port = 2053
+					port = 3053
 				}
 				issuer = fmt.Sprintf("http://localhost:%d", port)
 			}

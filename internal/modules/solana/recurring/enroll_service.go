@@ -51,7 +51,7 @@ type EnrollService struct {
 	rpc       accountReader
 	submitter Submitter // for MerchantAddress
 	network   string
-	tokens    map[string]config.SolanaToken
+	tokens    map[string]config.TokenConfig
 	now       func() time.Time
 }
 
@@ -59,7 +59,7 @@ type EnrollService struct {
 // of confirm (#286): the first pull is bundled into the atomic subscribe tx, so
 // confirm only verifies + creates the membership. Recurring rebills still use
 // CrankService elsewhere.
-func NewEnrollService(lifecycle membershipCreator, repo subscriptionStore, rpc accountReader, submitter Submitter, network string, tokens ...map[string]config.SolanaToken) *EnrollService {
+func NewEnrollService(lifecycle membershipCreator, repo subscriptionStore, rpc accountReader, submitter Submitter, network string, tokens ...map[string]config.TokenConfig) *EnrollService {
 	return &EnrollService{lifecycle: lifecycle, repo: repo, rpc: rpc, submitter: submitter, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens)), now: time.Now}
 }
 

@@ -41,34 +41,34 @@ import (
 	"github.com/gagliardetto/solana-go/programs/token"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
-// devnetUSDCMintStr is the devnet USDC mint (must match config DefaultDevnetTokens).
+// devnetUSDCMintStr is the devnet USDC mint (must match solanatokens.DefaultDevnetTokens).
 const devnetUSDCMintStr = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
 
 // newDevnetPlanService builds a PlanService wired with the devnet token map, the
 // same way production wiring supplies runtime-configured tokens. Without it the
 // service has no USDC mint and PublishPlan fails with "no configured mint".
 func newDevnetPlanService(submitter Submitter) *PlanService {
-	return NewPlanService(submitter, "devnet", config.TokensForNetwork("devnet"))
+	return NewPlanService(submitter, "devnet", solanatokens.ForNetwork("devnet"))
 }
 
 // newDevnetPrepareSubscribeService / newDevnetPrepareTierChangeService likewise
 // wire the devnet token map; both resolve the USDC mint via the configured
 // tokens, so an empty map fails with "no configured mint".
 func newDevnetPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rc *solanaint.RPCClient) *PrepareSubscribeService {
-	return NewPrepareSubscribeService(submitter, signer, rc, "devnet", config.TokensForNetwork("devnet"))
+	return NewPrepareSubscribeService(submitter, signer, rc, "devnet", solanatokens.ForNetwork("devnet"))
 }
 
 func newDevnetPrepareTierChangeService(signer solanaint.Signer, rc *solanaint.RPCClient) *PrepareTierChangeService {
-	return NewPrepareTierChangeService(signer, rc, "devnet", config.TokensForNetwork("devnet"))
+	return NewPrepareTierChangeService(signer, rc, "devnet", solanatokens.ForNetwork("devnet"))
 }
 
 // devnetEnv returns the named env var or skips the test when it is unset.

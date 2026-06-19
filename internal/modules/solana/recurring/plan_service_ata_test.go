@@ -12,8 +12,8 @@ import (
 
 const testDevnetUSDCMint = "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ"
 
-func testSolanaTokens() map[string]config.SolanaToken {
-	return map[string]config.SolanaToken{
+func testSolanaTokens() map[string]config.TokenConfig {
+	return map[string]config.TokenConfig{
 		"USDC": {Mint: testDevnetUSDCMint, Decimals: 6},
 	}
 }

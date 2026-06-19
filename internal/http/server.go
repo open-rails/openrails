@@ -293,7 +293,7 @@ func New(deps Dependencies) (*Server, error) {
 			if pc := deps.Runtime.Processors.GetSolanaProcessor(); pc != nil && pc.Network != "" {
 				network = pc.Network
 			}
-			var solanaTokens map[string]config.SolanaToken
+			var solanaTokens map[string]config.TokenConfig
 			if pc := deps.Runtime.Processors.GetSolanaProcessor(); pc != nil {
 				solanaTokens = pc.Tokens
 			}

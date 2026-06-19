@@ -24,7 +24,7 @@ func (f fakeTokenPriceProvider) PriceUSD(_ context.Context, symbol string) (floa
 }
 
 func TestCalculateTokenQuote_USDPrice(t *testing.T) {
-	tokenCfg := config.SolanaToken{
+	tokenCfg := config.TokenConfig{
 		Mint:     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 		Decimals: 6,
 	}
@@ -38,7 +38,7 @@ func TestCalculateTokenQuote_USDPrice(t *testing.T) {
 }
 
 func TestCalculateTokenQuote_NonUSDPrice_RequiresFXProvider(t *testing.T) {
-	tokenCfg := config.SolanaToken{
+	tokenCfg := config.TokenConfig{
 		Mint:     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 		Decimals: 6,
 	}
@@ -48,7 +48,7 @@ func TestCalculateTokenQuote_NonUSDPrice_RequiresFXProvider(t *testing.T) {
 }
 
 func TestCalculateTokenQuote_ZeroAmount(t *testing.T) {
-	tokenCfg := config.SolanaToken{
+	tokenCfg := config.TokenConfig{
 		Mint:     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 		Decimals: 6,
 	}
@@ -60,7 +60,7 @@ func TestCalculateTokenQuote_ZeroAmount(t *testing.T) {
 }
 
 func TestCalculateTokenQuote_EmptyCurrencyDefaultsToUSD(t *testing.T) {
-	tokenCfg := config.SolanaToken{
+	tokenCfg := config.TokenConfig{
 		Mint:     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 		Decimals: 6,
 	}
@@ -71,14 +71,14 @@ func TestCalculateTokenQuote_EmptyCurrencyDefaultsToUSD(t *testing.T) {
 }
 
 func TestCalculateTokenQuote_MissingMint(t *testing.T) {
-	tokenCfg := config.SolanaToken{Decimals: 6}
+	tokenCfg := config.TokenConfig{Decimals: 6}
 
 	_, err := CalculateTokenQuote(context.Background(), "TEST", tokenCfg, 1000, "usd", nil, fakeTokenPriceProvider{"TEST": 1.0})
 	require.Error(t, err)
 }
 
 func TestCalculateTokenQuote_WithMockFXProvider(t *testing.T) {
-	tokenCfg := config.SolanaToken{
+	tokenCfg := config.TokenConfig{
 		Mint:     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 		Decimals: 6,
 	}
@@ -163,7 +163,7 @@ func TestGeneratePaymentRequiresCheckoutSession(t *testing.T) {
 }
 
 func TestStablecoinPegAndDepegFailsafe(t *testing.T) {
-	cfg := config.SolanaToken{Mint: "mint", Decimals: 6}
+	cfg := config.TokenConfig{Mint: "mint", Decimals: 6}
 	ctx := context.Background()
 
 	// USDC within 1% of peg -> use clean $1.00 (ignore sub-penny noise).

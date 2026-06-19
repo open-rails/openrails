@@ -64,7 +64,7 @@ type PlanService struct {
 	submitter Submitter
 	reader    planReader // optional; enables the idempotent re-publish guard
 	network   string     // "mainnet" | "devnet"
-	tokens    map[string]config.SolanaToken
+	tokens    map[string]config.TokenConfig
 	now       func() time.Time
 }
 
@@ -72,7 +72,7 @@ type PlanService struct {
 // re-publish guard is disabled (no plan reader); prefer NewPlanServiceWithReader
 // in production so a re-publish of an already-created plan is a no-op rather than
 // a loud on-chain create_plan failure.
-func NewPlanService(submitter Submitter, network string, tokens ...map[string]config.SolanaToken) *PlanService {
+func NewPlanService(submitter Submitter, network string, tokens ...map[string]config.TokenConfig) *PlanService {
 	return &PlanService{submitter: submitter, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens)), now: time.Now}
 }
 
@@ -80,7 +80,7 @@ func NewPlanService(submitter Submitter, network string, tokens ...map[string]co
 // before submitting create_plan, so a re-publish with MATCHING terms is an
 // idempotent no-op and a re-publish with DIFFERING terms is rejected (plans are
 // immutable on-chain — see PublishPlan).
-func NewPlanServiceWithReader(submitter Submitter, reader planReader, network string, tokens ...map[string]config.SolanaToken) *PlanService {
+func NewPlanServiceWithReader(submitter Submitter, reader planReader, network string, tokens ...map[string]config.TokenConfig) *PlanService {
 	return &PlanService{submitter: submitter, reader: reader, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens)), now: time.Now}
 }
 

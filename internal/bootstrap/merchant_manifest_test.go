@@ -1,6 +1,8 @@
 package bootstrap
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -51,6 +53,18 @@ merchants:
 	require.Equal(t, "Cozy Art Billing", manifest.Merchants[0].Profile.DisplayName)
 	require.Len(t, manifest.Merchants[0].ProviderAccounts, 2)
 	require.Equal(t, "acct_test_123", manifest.Merchants[0].ProviderAccounts[0].AccountID)
+}
+
+func TestExampleBootstrapManifestParses(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "merchants.local-stack.example.yaml"))
+	require.NoError(t, err)
+
+	manifest, err := ParseBootstrapManifest(raw)
+	require.NoError(t, err)
+	require.True(t, manifest.HasAuthBootstrap())
+	require.Len(t, manifest.Merchants, 1)
+	require.Equal(t, "local-stack", manifest.Merchants[0].Slug)
+	require.Len(t, manifest.Merchants[0].ProviderAccounts, 4)
 }
 
 func TestParseBootstrapManifestValidationErrors(t *testing.T) {

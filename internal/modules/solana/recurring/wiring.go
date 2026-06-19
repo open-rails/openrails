@@ -111,7 +111,7 @@ func NewCrankServiceFromStore(store merchants.MerchantSecretStore, rpc *solanain
 // NewPlanServiceFromStore builds a PlanService backed by the merchant secret store
 // + RPC for the given network (mainnet/devnet). The same RPC client serves as the
 // plan reader, enabling the idempotent re-publish guard (#254).
-func NewPlanServiceFromStore(store merchants.MerchantSecretStore, rpc *solanaint.RPCClient, network string, tokens map[string]config.SolanaToken, ttl time.Duration) *PlanService {
+func NewPlanServiceFromStore(store merchants.MerchantSecretStore, rpc *solanaint.RPCClient, network string, tokens map[string]config.TokenConfig, ttl time.Duration) *PlanService {
 	return NewPlanServiceWithReader(NewSignerSubmitterFromStore(store, rpc, ttl), rpc, network, tokens)
 }
 

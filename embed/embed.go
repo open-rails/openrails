@@ -71,6 +71,10 @@ type Options struct {
 	// loaded from config.yaml/.env. To serve another tenant, construct another
 	// engine/client.
 	Merchant string
+
+	// MerchantConfiguration seeds merchant_configurations for the bound
+	// Merchant at startup, mirroring push-merchant-config for embedded hosts.
+	MerchantConfiguration openrails.MerchantConfigurationInput
 }
 
 // HandlerOptions selects the HTTP route groups for Runtime.Handler. It is
@@ -151,6 +155,16 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	}
 
 	r := &Runtime{emb: emb, svc: svc, tenantID: boundMerchant}
+	if hasMerchantConfiguration(opts.MerchantConfiguration) {
+		if boundMerchant.IsZero() {
+			_ = emb.Close(ctx)
+			return nil, fmt.Errorf("openrails embed: MerchantConfiguration requires Merchant")
+		}
+		if err := r.Client().SetMerchantConfiguration(ctx, startupMerchantConfiguration(opts.Merchant, opts.MerchantConfiguration)); err != nil {
+			_ = emb.Close(ctx)
+			return nil, fmt.Errorf("openrails embed: seed merchant configuration: %w", err)
+		}
+	}
 	if opts.RunWorkers {
 		wctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		r.workersCancel = cancel
@@ -158,6 +172,19 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		go func() { r.workersDone <- emb.RunWorkers(wctx) }()
 	}
 	return r, nil
+}
+
+func hasMerchantConfiguration(in openrails.MerchantConfigurationInput) bool {
+	return in.Profile != nil || len(in.DelegatedInvokerWastedSpendWindows) > 0
+}
+
+func startupMerchantConfiguration(merchantSlug string, in openrails.MerchantConfigurationInput) openrails.MerchantConfigurationInput {
+	if in.Profile != nil && in.Profile.DisplayName == "" {
+		profile := *in.Profile
+		profile.DisplayName = merchantSlug
+		in.Profile = &profile
+	}
+	return in
 }
 
 // Client returns the openrails.Client adapter over the in-process engine. Each

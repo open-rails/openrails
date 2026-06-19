@@ -1,0 +1,98 @@
+version: 1
+
+# Apply with:
+#   openrails push-merchant-catalog --config config.yaml --file config/catalog.local-stack.example.yaml
+#
+# This file contains desired catalog state only. It does not contain merchant
+# profile data, provider credentials, users, orgs, or service tokens.
+
+catalogs:
+  - merchant: local-stack
+    name: local-stack-default
+
+    # Provider labels here are catalog-provider adapters. Use "mobius" for the
+    # NMI/Mobius catalog adapter, even though merchant provider_accounts use
+    # provider_type: nmi.
+    default_providers: [stripe, mobius]
+
+    tier_groups:
+      - slug: memberships
+        display_name: Memberships
+        products:
+          - slug: basic
+            display_name: Basic
+            description: Basic recurring membership.
+            tier_rank: 1
+            status: active
+            entitlements:
+              - access.basic
+            prices:
+              - currency: usd
+                unit_amount: 999
+                interval: month
+                interval_count: 1
+                provider_links:
+                  stripe:
+                    lookup_key: local-stack-basic-monthly
+                  mobius:
+                    plan_id: local_stack_basic_monthly
+
+              - currency: usd
+                unit_amount: 9990
+                interval: year
+                interval_count: 1
+                providers: [stripe]
+                provider_links:
+                  stripe:
+                    lookup_key: local-stack-basic-yearly
+
+          - slug: premium
+            display_name: Premium
+            description: Premium recurring membership.
+            tier_rank: 2
+            status: active
+            entitlements:
+              - access.basic
+              - access.premium
+            prices:
+              - currency: usd
+                unit_amount: 1999
+                interval: month
+                interval_count: 1
+                provider_links:
+                  stripe:
+                    lookup_key: local-stack-premium-monthly
+                  mobius:
+                    plan_id: local_stack_premium_monthly
+
+              - currency: usd
+                unit_amount: 19990
+                interval: year
+                interval_count: 1
+                providers: [stripe, solana]
+                provider_links:
+                  stripe:
+                    lookup_key: local-stack-premium-yearly
+                  # Solana plan accounts are provider-generated. Include
+                  # plan_pda only when linking an existing on-chain plan.
+                  # solana:
+                  #   plan_pda: 7XyExistingPlanAccount...
+
+      - slug: legacy
+        display_name: Legacy Imports
+        products:
+          - slug: legacy-vip
+            display_name: Legacy VIP
+            description: Historical plan kept for migrated subscriptions.
+            tier_rank: 99
+            status: archived
+            entitlements:
+              - access.premium
+            providers: []
+            prices:
+              - currency: usd
+                unit_amount: 1499
+                interval: month
+                interval_count: 1
+                legacy_import: true
+                providers: []

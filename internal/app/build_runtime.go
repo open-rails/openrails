@@ -45,6 +45,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
@@ -111,7 +112,7 @@ func configureSolanaProcessor(cfg *config.Config, processors config.ProcessorSet
 	}
 	proc.Network = effectiveSolanaNetwork(cfg)
 	if len(proc.Tokens) == 0 {
-		proc.Tokens = config.TokensForNetwork(proc.Network)
+		proc.Tokens = solanatokens.ForNetwork(proc.Network)
 	}
 
 	normalized := make(map[string]config.TokenConfig, len(proc.Tokens))
@@ -136,13 +137,13 @@ func configureSolanaProcessor(cfg *config.Config, processors config.ProcessorSet
 		// Pricing policy applies to MAINNET only: devnet money is fake, so a
 		// devnet deployment never needs price feeds (or Hermes) at all.
 		if proc.Network != "devnet" {
-			switch decision, sc := config.ClassifySolanaTokenPricing(normalizedSymbol, token.Mint); decision {
-			case config.TokenPricingFeed:
+			switch decision, sc := solanatokens.ClassifyPricing(normalizedSymbol, token.Mint); decision {
+			case solanatokens.TokenPricingFeed:
 				// Live Pyth pricing; for stablecoins the feed doubles as the
 				// depeg failsafe.
-			case config.TokenPricingUSDParity:
+			case solanatokens.TokenPricingUSDParity:
 				log.Warnf("⚠️  solana token %s has no pyth price feed; degrading to $1.00 USD parity (known USD-pegged stablecoin, NO depeg protection)", normalizedSymbol)
-			case config.TokenPricingDisabled:
+			case solanatokens.TokenPricingDisabled:
 				if sc.Symbol != "" {
 					log.Warnf("⚠️  solana token %s is pegged to %s and has no price feed; payments in %s unavailable (cannot default a non-USD peg to USD parity)", normalizedSymbol, strings.ToUpper(sc.Peg), normalizedSymbol)
 				} else {
@@ -184,10 +185,10 @@ func createPythPriceProvider(cfg *config.Config, processors config.ProcessorSet)
 	}
 	// Pyth is not configurable (#352): Hermes URL, freshness bounds and the
 	// price-feed map are protocol constants.
-	hermesURL := config.DefaultPythHermesURL
-	maxPriceAgeText := config.DefaultPythMaxPriceAge
-	maxConfidenceBPS := config.DefaultPythMaxConfidenceBPS
-	priceFeeds := config.DefaultPythPriceFeeds()
+	hermesURL := solanatokens.DefaultPythHermesURL
+	maxPriceAgeText := solanatokens.DefaultPythMaxPriceAge
+	maxConfidenceBPS := solanatokens.DefaultPythMaxConfidenceBPS
+	priceFeeds := solanatokens.DefaultPythPriceFeeds()
 	maxPriceAge, err := time.ParseDuration(strings.TrimSpace(maxPriceAgeText))
 	if err != nil {
 		return nil, fmt.Errorf("parse pyth max price age: %w", err)

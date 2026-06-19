@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/migrate"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 
 	"github.com/google/uuid"
@@ -237,7 +238,7 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 		"solana": {
 			Type:            config.ProcessorTypeSolana,
 			RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
-			Tokens:          config.DefaultDevnetTokens(),
+			Tokens:          solanatokens.DefaultDevnetTokens(),
 		},
 		"mobius": {
 			Type:            config.ProcessorTypeNMI,
@@ -312,7 +313,7 @@ func (suite *TestContainerSuite) redisAddress() (string, error) {
 
 func (suite *TestContainerSuite) clickhouseAddresses() (string, string, error) {
 	if httpAddr := firstNonEmptyEnv("OPENRAILS_TEST_CH_HTTP_ADDR", "OPENRAILS_TEST_CH_HTTP_URL"); httpAddr != "" {
-		return httpAddr, envOrDefault("OPENRAILS_TEST_CH_ADDR", envOrDefault("OPENRAILS_TEST_CH_NATIVE_ADDR", "localhost:9000")), nil
+		return httpAddr, envOrDefault("OPENRAILS_TEST_CH_ADDR", envOrDefault("OPENRAILS_TEST_CH_NATIVE_ADDR", "localhost:9003")), nil
 	}
 	if suite.clickhouseContainer == nil {
 		return "", "", fmt.Errorf("clickhouse test container is not initialized")

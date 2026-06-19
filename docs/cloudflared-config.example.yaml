@@ -13,5 +13,5 @@ credentials-file: /path/to/<tunnel-uuid>.json
 
 ingress:
   - hostname: openrails-webhooks-sandbox.<your-domain>
-    service: http://localhost:2053
+    service: http://localhost:3053
   - service: http_status:404

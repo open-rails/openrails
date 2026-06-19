@@ -24,7 +24,7 @@ Then start OpenRails normally.
 - Stub mode (no external calls): `GET /debug/nmi/tokenization?mode=stub&provider=<provider>`
 
 Tip: if your NMI tokenization key enforces an allowed-origin list, load this page via your Cloudflared hostname
-(not `http://localhost:2053`) so the browser origin matches what you registered.
+(not `http://localhost:3053`) so the browser origin matches what you registered.
 
 Stub mode loads `/debug/nmi/collect-stub.js` and generates a fake token like `tok_stub_<timestamp>`.
 

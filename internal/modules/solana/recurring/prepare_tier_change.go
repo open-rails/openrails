@@ -40,11 +40,11 @@ type PrepareTierChangeService struct {
 	signer  solanaint.Signer // the cranker: provides the merchant address + co-signs upgrades
 	rpc     tierChangeRPC
 	network string
-	tokens  map[string]config.SolanaToken
+	tokens  map[string]config.TokenConfig
 }
 
 // NewPrepareTierChangeService builds a PrepareTierChangeService.
-func NewPrepareTierChangeService(signer solanaint.Signer, rpc tierChangeRPC, network string, tokens ...map[string]config.SolanaToken) *PrepareTierChangeService {
+func NewPrepareTierChangeService(signer solanaint.Signer, rpc tierChangeRPC, network string, tokens ...map[string]config.TokenConfig) *PrepareTierChangeService {
 	return &PrepareTierChangeService{signer: signer, rpc: rpc, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens))}
 }
 

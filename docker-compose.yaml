@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin_password
     ports:
-      - "127.0.0.1:25432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       # PG18+ requires the mount at /var/lib/postgresql (not .../data) so it can
       # manage the version-specific data subdirectory (e.g. 18/main) itself.
@@ -49,7 +49,7 @@ services:
     volumes:
       - garnet_data:/data
     ports:
-      - "127.0.0.1:26379:6379"
+      - "127.0.0.1:${GARNET_HOST_PORT:-6380}:6379"
     healthcheck:
       test:
         [
@@ -70,7 +70,7 @@ services:
       - ./config/clickhouse-keeper.xml:/etc/clickhouse-keeper/keeper_config.xml:ro
       - clickhouse_keeper_data:/var/lib/clickhouse
     ports:
-      - "127.0.0.1:29181:9181" # Keeper port
+      - "127.0.0.1:${CLICKHOUSE_KEEPER_HOST_PORT:-9182}:9181" # Keeper port
     networks:
       - local-openrails
     healthcheck:
@@ -88,8 +88,8 @@ services:
       clickhouse-keeper:
         condition: service_healthy
     ports:
-      - "127.0.0.1:28123:8123"  # HTTP interface
-      - "127.0.0.1:29002:9000"  # Native client (avoiding conflict with MinIO)
+      - "127.0.0.1:${CLICKHOUSE_HTTP_HOST_PORT:-8124}:8123"  # HTTP interface
+      - "127.0.0.1:${CLICKHOUSE_NATIVE_HOST_PORT:-9003}:9000"  # Native client
     volumes:
       # Mount configs as config.d fragments so they merge with default config.xml
       - ./config/clickhouse.yaml:/etc/clickhouse-server/config.d/local.yaml:ro
@@ -213,13 +213,14 @@ services:
       # Single public API surface. Server-to-server callers authenticate with
       # generated service tokens or first-party service JWTs on this same port
       # (issue #222) — there is no separate private/mTLS service port.
-      - "127.0.0.1:${OPENRAILS_HOST_PORT:-22053}:2053"  # API (public + admin + service token service routes)
+      - "127.0.0.1:${OPENRAILS_HOST_PORT:-3053}:3053"  # API (public + admin + service token service routes)
     environment:
       # Service runtime mode
       ENV: "${ENV:-development}"
       TEST_ENV: "${TEST_ENV:-true}"
-      API_URL: "${API_URL:-http://localhost:22053}"
-      AUTH_ISSUER: "${AUTH_ISSUER:-http://localhost:22053}"
+      PORT: "3053"
+      API_URL: "${API_URL:-http://localhost:3053}"
+      AUTH_ISSUER: "${AUTH_ISSUER:-http://localhost:3053}"
       # AuthKit signing keys for OpenRails' own issuer:
       #   1. ACTIVE_KEY_ID / ACTIVE_PRIVATE_KEY_PEM / PUBLIC_KEYS envs, or
       #   2. /vault/auth/keys.json injected by Vault/External Secrets, or
@@ -269,7 +270,7 @@ services:
   #   docker compose -f docker-compose.yaml --profile all --profile e2e-sandbox up -d
   #
   # Then mint tokens:
-  #   curl -fsS http://localhost:28080/api/v1/dev/mint ...
+  #   curl -fsS http://localhost:8081/api/v1/dev/mint ...
   issuer:
     profiles: ["e2e-sandbox"]
     image: "${AUTHKIT_DEVSERVER_IMAGE:-authkit-devserver:local}"
@@ -287,7 +288,7 @@ services:
       DEVSERVER_DEV_MINT_SECRET: "${AUTHKIT_DEV_MINT_SECRET:-dev-mint-secret-localhost-only}"
       DEVSERVER_REGISTRATION_VERIFICATION: "none"
     ports:
-      - "127.0.0.1:28080:8080"
+      - "127.0.0.1:${AUTHKIT_ISSUER_HOST_PORT:-8081}:8080"
     volumes:
       - issuer_postgres_data:/var/lib/postgresql
       - issuer_runtime_keys:/.runtime/authkit

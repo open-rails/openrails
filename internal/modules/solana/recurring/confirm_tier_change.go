@@ -124,7 +124,7 @@ type ConfirmTierChangeService struct {
 	lifecycle  tierChangeLifecycle
 	store      tierChangeStore
 	network    string
-	tokens     map[string]config.SolanaToken
+	tokens     map[string]config.TokenConfig
 	commitment rpc.CommitmentType
 	timeout    time.Duration
 	now        func() time.Time
@@ -133,7 +133,7 @@ type ConfirmTierChangeService struct {
 // NewConfirmTierChangeService builds a ConfirmTierChangeService. It confirms to
 // the Confirmed commitment with the RPC client's default watch timeout. network
 // ("mainnet"/"devnet") resolves the recurring mint for the new row.
-func NewConfirmTierChangeService(rpcClient tierChangeConfirmRPC, lifecycle tierChangeLifecycle, store tierChangeStore, network string, tokens ...map[string]config.SolanaToken) *ConfirmTierChangeService {
+func NewConfirmTierChangeService(rpcClient tierChangeConfirmRPC, lifecycle tierChangeLifecycle, store tierChangeStore, network string, tokens ...map[string]config.TokenConfig) *ConfirmTierChangeService {
 	return &ConfirmTierChangeService{
 		rpc:        rpcClient,
 		lifecycle:  lifecycle,

@@ -665,11 +665,11 @@ Add a frontend UI + backend support that lets a user swap any token they hold (S
 
 ## User problem + flow
 
-A user wants to pay or subscribe in USDC (the preferred stablecoin; config.PreferredStablecoin) but holds value in another token — e.g. $100 of SOL. Today the supported-tokens API (GET supported tokens) returns each token's balance + a fiat->token quote and a `preferred`/`recurring_eligible` flag, but there is no way to CONVERT a non-USDC holding into USDC. The flow we are adding: user opens a "Top up USDC" panel -> sees their held balances (from the existing wallet-balance fetch) -> picks a source token + an amount (or a target USDC output) -> we fetch a Jupiter quote -> show estimated USDC output, price impact, slippage, and minimum received -> user confirms -> we return the Jupiter swap transaction -> THE USER signs and submits it from their own wallet -> their on-chain USDC balance is topped up. The supported-tokens API re-fetches and the new USDC balance is reflected.
+A user wants to pay or subscribe in USDC (the preferred stablecoin; solanatokens.PreferredStablecoin) but holds value in another token — e.g. $100 of SOL. Today the supported-tokens API (GET supported tokens) returns each token's balance + a fiat->token quote and a `preferred`/`recurring_eligible` flag, but there is no way to CONVERT a non-USDC holding into USDC. The flow we are adding: user opens a "Top up USDC" panel -> sees their held balances (from the existing wallet-balance fetch) -> picks a source token + an amount (or a target USDC output) -> we fetch a Jupiter quote -> show estimated USDC output, price impact, slippage, and minimum received -> user confirms -> we return the Jupiter swap transaction -> THE USER signs and submits it from their own wallet -> their on-chain USDC balance is topped up. The supported-tokens API re-fetches and the new USDC balance is reflected.
 
 ## Jupiter integration
 
-Jupiter is Solana's standard swap aggregator. Two calls drive the flow: (1) the Quote API (GET /quote with inputMint, outputMint=USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, amount, slippageBps, and routing filters) which returns the best route, out amount, price impact, and per-leg market info; and (2) the Swap API (POST /swap with the quote response + the user's wallet pubkey) which returns a base64 serialized (versioned) transaction. CRITICAL — consistent with the rest of this project (see pay.go: the user signs and submits Solana Pay transfers; there is no fee-payer delegation): the USER signs and submits the Jupiter swap transaction and THE USER pays the gas/priority fee. We do NOT set ourselves as feePayer and do NOT co-sign. The backend is a thin authenticated proxy/helper around Jupiter (to inject routing/dex preferences, slippage guards, and our USDC mint) plus optional quote caching; it never holds keys or custody. We should reuse the existing token config (config/solana_tokens.go) for the USDC mint + decimals and respect mainnet vs devnet (DefaultDevnetTokens) — note Jupiter routing liquidity is mainnet-centric, so devnet may be a stubbed/quote-only path.
+Jupiter is Solana's standard swap aggregator. Two calls drive the flow: (1) the Quote API (GET /quote with inputMint, outputMint=USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, amount, slippageBps, and routing filters) which returns the best route, out amount, price impact, and per-leg market info; and (2) the Swap API (POST /swap with the quote response + the user's wallet pubkey) which returns a base64 serialized (versioned) transaction. CRITICAL — consistent with the rest of this project (see pay.go: the user signs and submits Solana Pay transfers; there is no fee-payer delegation): the USER signs and submits the Jupiter swap transaction and THE USER pays the gas/priority fee. We do NOT set ourselves as feePayer and do NOT co-sign. The backend is a thin authenticated proxy/helper around Jupiter (to inject routing/dex preferences, slippage guards, and our USDC mint) plus optional quote caching; it never holds keys or custody. We should reuse the existing token registry (internal/modules/solana/tokens) for the USDC mint + decimals and respect mainnet vs devnet (solanatokens.DefaultDevnetTokens) — note Jupiter routing liquidity is mainnet-centric, so devnet may be a stubbed/quote-only path.
 
 ## Orderbook-preference design (prefer orderbook venues over AMMs)
 
@@ -685,7 +685,7 @@ Handle: insufficient source balance (cross-check against the wallet balance the 
 
 ## Ties into existing supported-tokens API + quote flow
 
-Reuse: the wallet-balance fetch and per-token balance/quote shape in solana_supported_tokens.go; TokenPriceProvider + CalculateTokenQuote (support.go) for a sanity USD reference on the swap (compare Jupiter's implied price against our Pyth price to flag suspicious quotes); config.PreferredStablecoin / IsStablecoin and the USDC mint from config/solana_tokens.go. The new swap endpoints live alongside the Solana module (internal/modules/solana) with their own handler(s), mirroring how GetSupportedTokens and GeneratePayment are structured.
+Reuse: the wallet-balance fetch and per-token balance/quote shape in solana_supported_tokens.go; TokenPriceProvider + CalculateTokenQuote (support.go) for a sanity USD reference on the swap (compare Jupiter's implied price against our Pyth price to flag suspicious quotes); solanatokens.PreferredStablecoin / IsStablecoin and the USDC mint from internal/modules/solana/tokens. The new swap endpoints live alongside the Solana module (internal/modules/solana) with their own handler(s), mirroring how GetSupportedTokens and GeneratePayment are structured.
 
 ## UX
 
@@ -707,7 +707,7 @@ Slippage abuse (clamp bps server-side, reject excessive values); stale quotes (s
 **Tasks:**
 - BACKEND:
 - [ ] Add a Jupiter client in internal/integrations (or internal/modules/solana) wrapping the Quote API (GET /quote) and Swap API (POST /swap), with configurable base URL + optional API key
-- [ ] Add backend config: USDC output mint (reuse config/solana_tokens.go), default slippageBps, max slippageBps, max price-impact ceiling, quote TTL, orderbook-preference toggle, and an allowlisted-dexes list (Phoenix, OpenBook/OpenBook V2)
+- [ ] Add backend config: USDC output mint (reuse internal/modules/solana/tokens), default slippageBps, max slippageBps, max price-impact ceiling, quote TTL, orderbook-preference toggle, and an allowlisted-dexes list (Phoenix, OpenBook/OpenBook V2)
 - [ ] Implement routing/dex-preference logic: bias Jupiter toward orderbook venues via `dexes` allowlist + restrictIntermediateTokens/onlyDirectRoutes, consider RFQ/Metis order-flow, with soft fallback to best route when no/worse orderbook route exists
 - [ ] Add POST quote endpoint (authenticated): inputs source token symbol/mint, amount, slippageBps; returns USDC out, price impact, min received, route/venues, quoted_at/expires_at
 - [ ] Add POST swap endpoint (authenticated): takes a fresh quote + user wallet pubkey, returns the base64 serialized swap transaction for the USER to sign and submit (no fee-payer delegation, no co-sign)
@@ -720,7 +720,7 @@ Slippage abuse (clamp bps server-side, reject excessive values); stale quotes (s
 - [ ] Add a Confirm button that requests the swap tx, has the user's wallet sign + submit it, and shows pending/confirmed/failed states
 - [ ] Refresh held + USDC balances on success and surface clear errors (no route, price-impact too high, expired quote, insufficient balance, on-chain revert)
 - INTEGRATION:
-- [ ] Wire the panel to the existing supported-tokens API (balances + preferred/recurring_eligible) and reuse the USDC mint/decimals from config/solana_tokens.go
+- [ ] Wire the panel to the existing supported-tokens API (balances + preferred/recurring_eligible) and reuse the USDC mint/decimals from internal/modules/solana/tokens
 - [ ] After a successful swap, reflect the topped-up USDC balance in the supported-tokens / balance view used by the Solana payment flow
 - [ ] Respect mainnet vs devnet token config (DefaultDevnetTokens); decide + implement the devnet behavior (stub/quote-only vs swap path)
 - VERIFICATION:

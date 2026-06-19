@@ -7,7 +7,25 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 524
+next_id: 525
+
+---
+
+# #524: embedded merchant configuration startup parity
+
+**Completed:** yes
+
+DONE 2026-06-19: embedded startup now has parity with standalone merchant-config seeding. `embed.Options.MerchantConfiguration` accepts the public SDK merchant configuration shape, registers the bound merchant first, then seeds `merchant_configurations` through `Runtime.Client().SetMerchantConfiguration`. Public `openrails.MerchantConfigurationInput` now includes `Profile`, and both remote and embedded client adapters write profile plus delegated wasted-spend windows.
+
+Embedded hosts should be able to seed the same merchant-scoped configuration that standalone/SaaS OpenRails seeds through `openrails push-merchant-config`.
+
+Original gap: `merchant_configurations.config.profile` is the correct home for sender/display branding, and the service HTTP route already supported it, but `openrails.Client.SetMerchantConfiguration` only exposed delegated wasted-spend windows and `embed.New` only registered the merchant row.
+
+Lazy plan:
+- [x] Add profile to the public `openrails.MerchantConfigurationInput`.
+- [x] Wire profile through remote and embedded `SetMerchantConfiguration`.
+- [x] Add one `embed.Options.MerchantConfiguration` field so embedded startup can seed all current merchant-configuration fields after the merchant slug is registered.
+- [x] Test embedded startup profile seeding and SDK conformance for profile writes.
 
 ---
 

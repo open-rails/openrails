@@ -208,7 +208,7 @@ Replace db.NewRaw(...) usage with proper parameterized queries or direct Bun que
 **Priority:** medium
 **Files:** internal/http/middleware/apikey.go, internal/http/routes/routes.go, cmd/openrails/main.go, docs/mtls-vault-pki.md
 
-Replace the shared X-API-KEY bearer-secret model for service-to-service auth with mTLS using HashiCorp Vault PKI certs. This eliminates the single-secret-equals-full-access problem and enables per-service identity without key rotation downtime. Tracked in implementation issue 220. This is a hard cut: remove API-key service auth entirely, with no deprecated compatibility path or legacy fallback. The default standalone service listener should be `SERVICE_MTLS_PORT=2054`, separate from public `PORT=2053`, replacing the old `PRIVATE_PORT=8060` model. Local Docker Compose/dev should use a Vault PKI profile/service, not OpenRails-owned root CA or self-signed certificate generation.
+Replace the shared X-API-KEY bearer-secret model for service-to-service auth with mTLS using HashiCorp Vault PKI certs. This eliminates the single-secret-equals-full-access problem and enables per-service identity without key rotation downtime. Tracked in implementation issue 220. This is a hard cut: remove API-key service auth entirely, with no deprecated compatibility path or legacy fallback. The default standalone service listener should be `SERVICE_MTLS_PORT=3054`, separate from public `PORT=3053`, replacing the old `PRIVATE_PORT=8060` model. Local Docker Compose/dev should use a Vault PKI profile/service, not OpenRails-owned root CA or self-signed certificate generation.
 
 **Tasks:**
 - [x] Set up HashiCorp Vault PKI secret engine for issuing short-lived service/client certs

@@ -92,6 +92,10 @@ AuthKit-owned authority in `auth:` and OpenRails-owned merchant definitions in
 `merchants:`. Catalog state is pushed separately with
 `openrails push-merchant-catalog`.
 
+See `config/merchants.local-stack.example.yaml` for a fuller example with
+admin users, org roles, remote JWKS issuers, service-token output, merchant
+profile data, provider accounts, and provider secret sources.
+
 ```yaml
 version: 1
 
@@ -125,11 +129,14 @@ merchants:
 Catalog manifests are explicitly catalog-scoped and may contain one or more
 merchant catalog entries:
 
+See `config/catalog.local-stack.example.yaml` for a fuller example with tier
+groups, products, prices, provider fan-out, and provider links.
+
 ```yaml
 version: 1
 catalogs:
   - merchant: doujins
-    default_providers: [nmi]
+    default_providers: [mobius]
 ```
 
 Issuer/JWKS registration belongs in AuthKit remote applications through the

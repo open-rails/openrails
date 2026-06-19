@@ -96,3 +96,19 @@ catalogs:
 		t.Fatalf("merchants = %q, %q", targets[0].Merchant, targets[1].Merchant)
 	}
 }
+
+func TestExampleCatalogManifestParses(t *testing.T) {
+	targets, err := loadCatalogTargets(filepath.Join("..", "..", "config", "catalog.local-stack.example.yaml"))
+	if err != nil {
+		t.Fatalf("loadCatalogTargets example: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("len(targets) = %d, want 1", len(targets))
+	}
+	if targets[0].Merchant != "local-stack" {
+		t.Fatalf("merchant = %q, want local-stack", targets[0].Merchant)
+	}
+	if len(targets[0].Manifest.TierGroups) != 2 {
+		t.Fatalf("len(tier_groups) = %d, want 2", len(targets[0].Manifest.TierGroups))
+	}
+}

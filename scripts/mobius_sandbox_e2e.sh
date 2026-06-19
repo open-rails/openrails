@@ -11,7 +11,7 @@ if [ -f "$ROOT_DIR/.env" ]; then
 fi
 
 COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/docker-compose.yaml}"
-OPENRAILS_LOCAL_URL="${OPENRAILS_LOCAL_URL:-${BILLING_LOCAL_URL:-http://localhost:22053}}"
+OPENRAILS_LOCAL_URL="${OPENRAILS_LOCAL_URL:-${BILLING_LOCAL_URL:-http://localhost:3053}}"
 COMPOSE_PROFILES="${COMPOSE_PROFILES:-all}"
 
 require() {
