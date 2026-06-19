@@ -238,7 +238,8 @@ func TestMerchantAdmin_PaymentWriteRoutesMountedAndGated(t *testing.T) {
 		path   string
 	}{
 		{"off-channel-payment", http.MethodPost, "/v1/admin/users/user_123/payments/off-channel"},
-		{"payment-refund", http.MethodPost, "/v1/admin/payments/pay_123/refund"},
+		{"payment-refund", http.MethodPost, "/v1/admin/payments/pay_123/refunds"},
+		{"subscription-cancel", http.MethodDelete, "/v1/admin/subscriptions/sub_123"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

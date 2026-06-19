@@ -61,6 +61,7 @@ merchants:
 
     provider_accounts:
       - provider_type: stripe
+        environment: live
         mode: primary
         secrets:
           secret_key: {env: DOUJINS_STRIPE_SECRET_KEY}
@@ -70,10 +71,12 @@ merchants:
 Removed from this shape: `name`, `billing_tier`, `region`, `webhook_host`, `webhook_path`, `profile.support_email`. Provider webhook URLs are deployment/operator instructions, not merchant bootstrap fields.
 
 Provider-account notes:
-- `account_id` is the durable provider-returned account identity. Do not require operators to hand-write it when OpenRails can discover it from credentials: Stripe `/v1/account`, NMI/Mobius profile report, CCBill account/subaccount config, Solana public wallet/authority.
+- Provider account identity includes environment. Live and test/sandbox credentials are separate provider accounts, not two keys on one account. Effective identity is `(merchant_id, provider_type, environment, provider_account_id)`.
+- `account_id` is the durable provider-returned account identity inside that environment. Do not require operators to hand-write it when OpenRails can discover it from credentials: Stripe `/v1/account`, NMI/Mobius profile report, CCBill account/subaccount config, Solana public wallet/authority.
 - `provider_key` is only a local/process selector, not durable identity. Do not expose it in the normal bootstrap shape unless a later CLI genuinely needs an explicit selector for multiple same-type accounts.
 - `display_name` is optional operational labeling and should not be part of the minimal bootstrap shape.
 - Replace public `role` + `status` with one `mode`: `primary`, `secondary`, `legacy`, or `disabled`. Internally this may still map to role/status columns, but the manifest should use one field.
+- Do not let global `test_env` silently swap a live provider account to test credentials. The selected provider account/environment must be explicit. Production should reject `environment: test` / `sandbox` as `mode: primary` unless the deployment is explicitly non-production.
 
 ## Tasks
 
@@ -91,7 +94,10 @@ Provider-account notes:
 - [ ] Update `RegisterMerchant`, provisioning SQL, sqlc generated code, migrations, examples, docs, and tests for the hard cut.
 - [ ] Keep `issuer.allowed_origins` in the example only as merchant browser-origin declaration; defer all CORS behavior/docs/tests to #519.
 - [ ] Simplify provider account manifest fields: replace public `role` + `status` with `mode: primary|secondary|legacy|disabled`.
+- [ ] Add provider account `environment` (`live`, `test`, `sandbox`, or provider-specific canonical values) and include it in uniqueness, row identity, mirror rows, intent binding, checkout/session stamping, and provider-pull matching.
 - [ ] Make `account_id` discovered from credentials wherever possible; fail bootstrap clearly if account identity cannot be resolved for a provider account that is being registered. Keep manual account id only as an explicit advanced override if a provider has no reliable whoami path.
+- [ ] Support multiple same-provider accounts across environments without mixing objects: Stripe live vs test, NMI/Mobius live vs sandbox, CCBill live vs test if applicable, Solana mainnet/devnet/testnet.
+- [ ] Reject unsafe environment/routing combinations: production deployments cannot silently route new work to test/sandbox provider accounts; test/sandbox accounts should normally be `disabled` or only enabled in development/staging.
 - [ ] Remove `provider_key` and `display_name` from the normal bootstrap example; keep any local selector/operator label support out of the default shape unless proven necessary.
 - [ ] Fix stale docs/comments around webhook routing, including any text implying `webhook_host` is the normal private deployment model.
 - [ ] Add route tests for `/v1/merchants/:merchant/webhooks/:provider` proving unknown merchants do not fall back to a default merchant and known merchants load merchant-scoped credentials before verification.

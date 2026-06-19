@@ -374,7 +374,7 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gi
 	payments := group.Group("/payments")
 	payments.GET("", read, wrap(httphandlers.GetAdminPayments))
 	payments.GET("/:id", read, wrap(httphandlers.GetAdminPayment))
-	payments.POST("/:id/refund", payWrite, wrap(httphandlers.AdminRefundPayment))
+	payments.POST("/:id/refunds", payWrite, wrap(httphandlers.AdminRefundPayment))
 
 	// Subscriptions: a merchant admin may cancel a subscription owned by a user in
 	// its tenant. Subscriptions are addressed by id; the handler operates within
@@ -382,5 +382,5 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gi
 	subs := group.Group("/subscriptions")
 	subs.GET("", subRead, wrap(httphandlers.GetAdminSubscriptions))
 	subs.GET("/:id", subRead, wrap(httphandlers.GetAdminSubscription))
-	subs.POST("/:id/cancel", subWrite, wrap(httphandlers.AdminCancelSubscription))
+	subs.DELETE("/:id", subWrite, wrap(httphandlers.AdminCancelSubscription)) // #528: cancel = DELETE
 }
