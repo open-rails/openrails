@@ -13821,3 +13821,206 @@ Hard cut = every consumer moves to the new contract in ONE coordinated openrails
 - Current code: `internal/modules/admission/admitter.go`, `internal/modules/budgets/{budgets_service,scopes}.go`, `internal/modules/abuse/wasted_spend.go` (the Redis pattern to copy), `internal/modules/money/{authorize,unified_spend,windows,spend_policy}.go`, `pkg/service/{admission,spend,windows}.go`.
 - Tables: `budget_window_state`, `budget_inflight_holds`, `budget_policies`, `tier_policies`, `tier_schedules`, `money_spend_limits`, `money_settings`, `money_windows`.
 - Relationship: realizes decision 8 of #512 across the whole admission path; #512 Phase C defers here for the admission/holds detail.
+
+---
+
+# #549: fix-money-account-settings-units-and-self-editable-surface
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-20: customer money-account settings now use the real ledger currency contract, customer self-service is flat/narrow, USDC/SOL are no longer account currencies, saved OpenRails wallet linking and self-service USDC funding routes are removed, and Solana receipt metadata stays on `payments.metadata`.
+
+Validation: `go test ./internal/http/routes/ginroutes ./internal/http/handlers ./internal/modules/money ./internal/modules/solana ./internal/modules/solana/recurring ./internal/river -run 'Test(SelfService|HostPrincipal|RunAutoTopups|ConfirmEnrollment|Solana|Bearer)'`; `go test -tags=integration ./tests -run TestSelfAccountSurface_HostPrincipalFullLoopAndScoping -count=1`; `go test -tags=integration ./internal/modules/money -run TestRunAutoTopups_ChargesAndDeposits -count=1 -timeout=60s`.
+
+The `/v1/me/account/settings` contract currently mixes correct ledger-currency behavior with misleading field names and too much customer authority. OpenRails uses per-currency ledgers; `currency` means the actual accounting currency for the account, not a display preference or FX presentation layer. Amounts use that currency's registered internal precision. For USD, that means micro-USD (`decimals=6`), not cents. Fields like `auto_topup_amount_cents` are therefore wrong for this API and invite bugs. USDC and SOL also do not belong in the money-account currency registry: USDC is a USD-denominated stablecoin/payment rail, not a separate account currency; SOL is a crypto asset and not useful as a customer billing-account currency.
+
+## Metadata
+
+- Category: cleanup
+- Status: complete
+- Passes: true
+
+## Decisions
+
+- `currency` on money/account APIs is the actual ledger currency.
+- Do not auto-display a USD balance as JPY/EUR/etc. through this API; display preferences belong in the host/app presentation layer.
+- Every settings/balance amount is in the native decimal precision OpenRails registers for that currency.
+- USD amounts are micro-USD everywhere in the OpenRails money system.
+- Remove USDC and SOL from account/billing currencies. Stablecoins and crypto assets may remain processor/payment assets, but account ledgers should use real billing currencies such as USD.
+- Customer self-settings should be narrow. Merchant/admin/service routes own billing policy and credit-risk knobs.
+- Spend-cap breaches hard-stop by default. Near-limit alerts, if any, use platform constants instead of per-customer `hard_stop_on_breach` / `alert_threshold_pct` settings.
+- `billing_mode` remains meaningful account policy/read-state (`prepaid` vs `arrears`), but it is platform-owned and must not be customer-editable.
+- Self-service should stay flat under `/v1/me` because host apps already mount OpenRails under paths such as `/billing/v1`. Use `/v1/me/balance`, `/v1/me/transactions`, and `/v1/me/settings`; cut `/v1/me/account*` and `/v1/me/credits*` instead of keeping aliases.
+- Customer transaction history should expose understandable movement types (`deposit`, `spend`, `expiry`, `arrears_accrual`, `arrears_payment`) even if internal ledger transfer names stay `owed_accrual` / `owed_payment`.
+- Delete the unfinished USDC funding self-service feature; it is not part of the core customer billing surface.
+- Do not model AuthKit/account-control wallet linking inside OpenRails. AuthKit may link Solana wallets as an authentication factor; OpenRails should only record wallet/token-account data when it is needed for a concrete payment/subscription flow.
+- Delete OpenRails saved-wallet linking entirely: no customer wallet-link routes, no `linked_wallets` table, no linked-wallet repo/model. A customer may pay into their OpenRails account with any Solana wallet; the payment/subscription record is the audit trail.
+- `payments.transaction_id` is the provider-specific external payment id. For Solana this is the chain transaction signature. Do not duplicate it in metadata.
+- Do not add a one-off Solana payments table. `openrails.payments` is the durable receipt; Solana-specific receipt details live in `payments.metadata`. `openrails.solana_subscriptions` remains only for recurring on-chain subscription state.
+- Keep `POST /v1/me/stripe/portal` while Stripe is supported; it is the provider handoff that returns a Stripe Billing Portal URL.
+- Keep internal notification storage/email delivery. Downstream audit found Doujins still renders OpenRails billing notifications via `/v1/me/notifications*`, so customer notification inbox routes stay until that host migrates.
+
+## Current Customer-Editable Fields To Review
+
+- `billing_mode` (meaningful, but platform-owned; not customer-editable)
+- `max_spend_per_day`
+- `max_spend_per_month`
+- `max_outstanding_owed_amount`
+- `low_balance_threshold`
+- `auto_topup_enabled`
+- `auto_topup_amount_cents` (wrong; replace with native-precision `auto_topup_amount`)
+- `auto_topup_payment_method_id`
+- `default_credit_expiry_days` (wrong for customer self-service; platform/merchant decides credit expiry)
+- `hard_stop_on_breach` (wrong for customer self-service; hard-stop should be default behavior)
+- `alert_threshold_pct` (wrong for customer self-service; near-limit alert threshold should be a platform constant)
+
+## Proposed Customer Self-Service Surface
+
+Final `PUT /v1/me/settings` request body:
+
+```json
+{
+  "currency": "USD",
+  "low_balance_threshold": 10000000,
+  "auto_topup_enabled": true,
+  "auto_topup_amount": 25000000,
+  "auto_topup_payment_method_id": "pm_uuid",
+  "max_spend_per_day": 100000000,
+  "max_spend_per_month": 1000000000
+}
+```
+
+- Keep:
+  - `currency`
+  - `low_balance_threshold`
+  - `auto_topup_enabled`
+  - `auto_topup_amount`
+  - `auto_topup_payment_method_id`
+  - `max_spend_per_day`
+  - `max_spend_per_month`
+- Remove from customer self-service:
+  - `billing_mode`
+  - `max_outstanding_owed_amount`
+  - `default_credit_expiry_days`
+  - `hard_stop_on_breach`
+  - `alert_threshold_pct`
+  - `credit_limit_amount`
+  - `tier`
+  - `tier_source`
+  - `suspended_at`
+  - `suspend_reason`
+  - `verified_payment_method`
+
+## Customer Route Cuts
+
+- Delete:
+  - `GET /v1/me/account`
+  - `PUT /v1/me/account/settings`
+  - `GET /v1/me/account/transactions`
+  - `GET /v1/me/credits`
+  - `GET /v1/me/credits/:currency`
+  - `GET /v1/me/credits/:currency/transactions`
+  - `GET /v1/me/usdc-funding-options`
+  - `POST /v1/me/usdc-funding-sessions`
+  - `GET /v1/me/wallets/solana`
+  - `PUT /v1/me/wallets/solana`
+  - `DELETE /v1/me/wallets/solana`
+- Keep/replace with:
+  - `GET /v1/me/balance?currency=USD`
+  - `GET /v1/me/transactions?currency=USD`
+  - `PUT /v1/me/settings`
+  - `GET /v1/me/payments`
+  - `GET /v1/me/usage?currency=USD&from=YYYY-MM-DD&to=YYYY-MM-DD`
+  - `GET /v1/me/invoices`
+  - `GET /v1/me/invoices/:id`
+  - `POST /v1/me/stripe/portal`
+
+**Tasks:**
+- [x] Document that account-setting amount fields use the registered currency precision; for USD this is micro-USD.
+- [x] Remove USDC and SOL from the OpenRails account/billing currency registry and tests/docs that present them as customer account currencies.
+- [x] Keep stablecoin/crypto asset handling, where needed, in payment/processor-specific flows instead of the money-account currency enum.
+- [x] Replace the customer wire field `auto_topup_amount_cents` with native-precision `auto_topup_amount`; do not expose cents-specific names in a multi-currency API.
+- [x] Audit service/admin account-settings routes for the same `auto_topup_amount_cents` naming bug and either rename them too or document a short compatibility alias.
+- [x] Keep `auto_topup_payment_method_id` as the saved payment method selector, but make it a real FK to `openrails.payment_methods(id)` with `ON DELETE SET NULL`.
+- [x] In customer self-settings writes, verify `auto_topup_payment_method_id` belongs to the authenticated customer and current merchant before storing it.
+- [x] In service/admin settings writes, verify `auto_topup_payment_method_id` belongs to the target customer and current merchant before storing it.
+- [x] Replace customer routes with flat names: `GET /v1/me/balance?currency=USD`, `GET /v1/me/transactions?currency=USD`, and `PUT /v1/me/settings`.
+- [x] Make `GET /v1/me/transactions` return customer-facing transaction type names; do not leak confusing `owed_*` labels unless explicitly kept as internal metadata.
+- [x] Delete customer `/v1/me/account`, `/v1/me/account/settings`, and `/v1/me/account/transactions` route registrations after moving them to the flat routes.
+- [x] Narrow `PUT /v1/me/settings` so customers cannot change merchant/admin-owned policy knobs.
+- [x] Make the customer self-settings request body exactly: `currency`, `low_balance_threshold`, `auto_topup_enabled`, `auto_topup_amount`, `auto_topup_payment_method_id`, `max_spend_per_day`, `max_spend_per_month`.
+- [x] Remove `default_credit_expiry_days` from customer self-settings; credit expiry is platform/merchant policy.
+- [x] Remove `hard_stop_on_breach` and `alert_threshold_pct` from customer self-settings; hard-stop is the default and alert thresholds are platform constants.
+- [x] Delete self-service `GET /v1/me/credits`, `GET /v1/me/credits/:currency`, and `GET /v1/me/credits/:currency/transactions`.
+- [x] Delete now-unused self-service credits handlers/tests/docs after the route cut; keep service/admin account-credit APIs as needed.
+- [x] Delete unfinished self-service USDC funding routes: `GET /v1/me/usdc-funding-options` and `POST /v1/me/usdc-funding-sessions`.
+- [x] Delete saved Solana wallet self-service routes: `GET /v1/me/wallets/solana`, `PUT /v1/me/wallets/solana`, and `DELETE /v1/me/wallets/solana`; do not confuse billing payment state with AuthKit wallet-as-auth-factor identity.
+- [x] Delete the saved-wallet storage surface: `openrails.linked_wallets`, `internal/db/models/linked_wallet.go`, `internal/db/repo/linked_wallet.go`, `internal/db/queries/linked_wallets.sql`, generated sqlc code, RLS/docs/tests that only exist for linked wallets.
+- [x] Ensure Solana payment receipts persist where the money came from. The chain signature remains `payments.transaction_id`; do not duplicate it in metadata.
+- [x] Harden Solana one-off receipt metadata. For transaction-request checkout, copy the bound `processor_state.payer` into `payments.metadata.solana_payer_wallet`; keep `solana_reference`, `checkout_session_id`, token symbol/mint/base-unit amount, recipient wallet, and quote timestamp/FX metadata when present.
+- [x] Harden Solana transfer-request receipt metadata. Plain transfer-request receipts keep signature/reference/recipient/token amount but no payer wallet because the poller does not currently derive fee-payer/source wallet from chain transaction details; transaction-request checkout is the audited wallet-provenance path.
+- [x] Harden Solana recurring payment metadata. Initial subscribe payment and renewal/crank payments include `solana_subscriber_wallet`, `solana_subscription_pda`, `solana_token_mint`, `solana_token_amount`, and `solana_recipient_wallet`; authority/plan PDA stay on `solana_subscriptions`.
+- [x] Audit customer notification inbox routes (`GET /v1/me/notifications`, `GET /v1/me/notifications/unread-count`, `POST /v1/me/notifications/:id/read`): Doujins consumes them through `billingApiService`, so they remain mounted for now.
+- [x] Delete now-unused USDC funding handlers/tests/docs after the route cut.
+- [x] Keep service/admin account-settings routes capable of setting operator-owned policy fields where still needed.
+- [x] Update docs and tests for micro-USD examples, especially any `$25.00 == 25_000_000` style values.
+- [x] Audit downstream consumers for `auto_topup_amount_cents` and account-settings fields before removing any wire name.
+- [x] Run focused account-settings tests.
+
+## Acceptance
+
+- No customer-facing OpenRails docs imply USD cents for money-account settings.
+- USDC and SOL are not accepted or documented as customer money-account currencies.
+- The customer settings API does not expose `billing_mode`, arrears/owed caps, credit-line, tier, suspension, or verification knobs.
+- The customer settings API does not expose credit-expiry or enforcement-policy knobs.
+- `auto_topup_payment_method_id` cannot point at another customer's saved payment method and is cleared safely when that payment method is deleted.
+- The customer self-service `/v1/me/account*` and `/v1/me/credits*` route families are gone; balance/history/settings use `/v1/me/balance`, `/v1/me/transactions`, and `/v1/me/settings`.
+- The unfinished self-service USDC funding route family is gone.
+- The saved Solana wallet route/table/repo/model family is gone; Solana payment receipts record wallet/source metadata in `payments.metadata` while `payments.transaction_id` remains the provider id / chain signature, and subscriptions carry their own `subscriber_wallet`.
+- Customer notification inbox routes remain because Doujins is a confirmed downstream consumer; internal notification/email workflows remain.
+- USD examples use micro-USD.
+- `currency` is documented as real ledger currency, not preferred display currency.
+
+---
+
+# #550: `auth recreate` registers the host issuer (one-command federated embedded→standalone)
+
+**Completed:** yes
+
+**Status:** PLAN — 2026-06-20. Decided (Paul): one step is simpler. Builds on #544's `auth recreate`.
+
+**Requires code change:** yes (OpenRails).
+
+## Problem
+`auth recreate` (cmd/openrails/auth.go) creates each merchant's backing org + owner + optional admin key, but does NOT register the host's issuer / remote-application. For a FEDERATED standalone (e.g. tensorhub as issuer-owner), that linkage lives in AuthKit, not in the billing export, so it can't be reconstructed from the dump — today it's a separate manifest step. Fold it in so federated embedded→standalone is ONE command.
+
+**Status update 2026-06-20:** DONE + VERIFIED LIVE. `auth recreate --issuers <merchant-config.yaml>` reuses the tested merchant-config reconcile (`ReconcileMerchantManifestData` → `provisionMerchantOrg`); merchants without a manifest issuer fall back to `cp.Bootstrap` (org+owner+key). Builds + vets.
+
+## Tasks
+- [x] Added `--issuers <manifest.yaml>` to `auth recreate` (cmd/openrails/auth.go).
+- [x] Per manifest merchant: backing org + issuer registered as org `owner` remote-application — via `ReconcileMerchantManifestData`/`provisionMerchantOrg` (no duplicated logic).
+- [x] Idempotent (Insert+Overwrite); merchants not in the manifest get `cp.Bootstrap` (org+owner+key).
+- [x] VERIFIED LIVE (docker Postgres): `auth recreate --issuers` on a fresh standalone DB → merchant `monkey` (owner_org_id set) + backing org `monkey` (same id, slug==slug) + remote-app `monkey-app` for `https://monkey.example` assigned **role=owner**.
+- [x] Doc: docs/embedded-standalone-mode-switch.md updated to the `--issuers` one-command federated flow.
+
+Related: #544 (data move), #259/#527 (federated issuer-as-owner), #551 (slug==slug).
+
+---
+
+# #551: Enforce merchant.slug == backing-org.slug (hard invariant)
+
+**Completed:** yes
+
+**Status:** PLAN — 2026-06-20. Decided (Paul): a merchant's slug MUST equal its backing-org slug; any divergence invites confusion and must be rejected. `owner_org_id` stays the authority link, but the linked org's slug MUST match.
+
+**Requires code change:** yes (OpenRails).
+
+## Problem
+slug==slug holds by construction in standalone today (`provisionMerchantOrg` creates the org with the merchant slug), but nothing REJECTS a divergence, and embedded relies on an unenforced host convention. Make it a hard boundary where it is code-enforceable.
+
+## Tasks
+- [x] Standalone hard guard: `provisionMerchantOrg` now asserts `res.Org.Slug == merchant.slug` and REJECTs a mismatch; `merchants.Service.Provision` validates the slug. (Manifest can't point at a divergent org — `ManifestMerchant` has no separate org field; the backing org is derived from the merchant slug.)
+- [x] Align merchant-slug validation with AuthKit's org-slug ruleset: added `merchant.NormalizeSlug` + `merchant.ValidateSlug` (mirrors `authkit/core validateOrgSlug` regex `^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`), enforced at `db.RegisterMerchant` (embedded) + `merchants.Service.Provision` (standalone). Unit-tested (`TestValidateSlug`, passes).
+- [x] Embedded: single-slug shape kept (BackingOrgID already reverted); `db.RegisterMerchant` now validates the slug so embedded merchants stay standalone-compatible; no cross-AuthKit check (keeps #541/#543 decoupling).
+- [x] Tests: `TestValidateSlug` (pkg/merchant) passes; `./internal/controlplane` + `./internal/bootstrap` integration suites pass LIVE against docker Postgres (exercise provisioning with the new slug validation + the `provisionMerchantOrg` `org.slug == merchant.slug` assert — valid path unaffected). The federated `auth recreate` run (#547) further confirmed `owner_org_id` links to the same-slug org.
+
+Related: #541 (`owner_org_id` bridge), #543 (no OpenRails-seeded roles), #544 (mode switch), #550.

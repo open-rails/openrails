@@ -18,6 +18,8 @@ next_id: 553
 
 OpenRails currently still carries old "platform org" language and gate wiring around the cross-merchant admin routes. That is the wrong model. AuthKit's useful lesson is the boundary inside one RBAC system: `platform:orgs:recover` and `org:roles:update` are different permission scopes, not separate product-specific auth systems. OpenRails should extend AuthKit's permission set with OpenRails-defined permissions: `platform:*` permissions authorize OpenRails platform/control-plane actions, while OpenRails org-local permissions authorize a user/admin/API key acting inside one merchant-owned org.
 
+The same cleanup applies to merchant lookup routes. `/v1/service/*` currently means "merchant-owned server/API-key routes", but the URL describes the credential type instead of the resource boundary. These routes should move under `/v1/merchant/*` and accept any credential that resolves to the org owning the merchant with the needed permission: regular logged-in user, delegated JWT, self-service/browser JWT with org authority, or API key.
+
 ## Metadata
 
 - Category: auth
@@ -32,6 +34,15 @@ OpenRails currently still carries old "platform org" language and gate wiring ar
 - OpenRails owns the permission names and route gates; AuthKit owns the single RBAC model, role assignment, and effective-permission resolution.
 - Platform permissions use `platform:<resource>:<action>` and are global to the OpenRails installation.
 - Org-local OpenRails permissions use the AuthKit org RBAC plane and are scoped to exactly one merchant/org.
+- Merchant route authorization is tied to the AuthKit org that owns the OpenRails merchant.
+- Route paths should describe the resource boundary, not the auth mechanism: use `/v1/merchant/*`, not `/v1/service/*`, for merchant-owned operations.
+- Do not add `/admin` inside merchant routes. `/v1/merchant/*` already means "authorized actor operating inside the authenticated merchant/org"; admin-ness comes from the permission gate, not the path.
+- API keys, delegated JWTs, self-service/browser JWTs with org authority, and regular logged-in users should all normalize into the same org/merchant principal check on merchant routes.
+- Core merchant lookup APIs should be customer-forward: list a customer's entitlements, check one entitlement, list a customer's product access, check one product access, and read a customer's balance.
+- Reverse lookups such as "which customers have entitlement X" are directory/filter APIs, not the common embedded host path.
+- Drop `issuer` from merchant entitlement lookup request bodies once customer identity is `(merchant_id, subject)`; merchant/org comes from auth, subject comes from the request.
+- Merchant HTTP routes should be classified by deployment need: standalone/remote needs HTTP APIs; embedded hosts should prefer the Go interface into OpenRails and direct DB access through OpenRails services.
+- Embedded mode should mount browser-facing/customer/admin/webhook routes as needed, but should not require internal merchant lookup HTTP routes just to let the host call back into OpenRails.
 - `platform:*` must never imply any org-local OpenRails permission inside a merchant/org.
 - Org-local OpenRails permissions must never imply any `platform:*` permission.
 - Standalone mode uses OpenRails' bundled AuthKit control plane for RBAC.
@@ -43,11 +54,10 @@ OpenRails currently still carries old "platform org" language and gate wiring ar
 - `platform:merchants:create`
 - `platform:merchants:update`
 - `platform:merchants:delete`
-- `platform:merchant-secrets:read`
-- `platform:merchant-secrets:update`
-- `platform:merchant-secrets:delete`
-- `platform:merchant-secrets:test`
-- `platform:metrics:read`
+- `platform:payment-providers:read`
+- `platform:payment-providers:update`
+- `platform:payment-providers:delete`
+- `platform:payment-providers:test`
 - `platform:roles:read`
 - `platform:roles:create`
 - `platform:roles:update`
@@ -67,11 +77,10 @@ OpenRails currently still carries old "platform org" language and gate wiring ar
 - `org:subscriptions:update`
 - `org:entitlements:update`
 - `org:product-access:update`
-- `org:metrics:read`
-- `org:merchant-secrets:read`
-- `org:merchant-secrets:update`
-- `org:merchant-secrets:delete`
-- `org:merchant-secrets:test`
+- `org:payment-providers:read`
+- `org:payment-providers:update`
+- `org:payment-providers:delete`
+- `org:payment-providers:test`
 
 ## Current Smells To Remove
 
@@ -80,6 +89,449 @@ OpenRails currently still carries old "platform org" language and gate wiring ar
 - Route comments that imply platform administration is tied to an AuthKit org.
 - Any test setup that grants platform route access by creating or referencing an org-like authority.
 - Any route-specific permission name that still says `merchant:*` if the route is actually governed by AuthKit org-local RBAC.
+- `/v1/service/*` as the primary path for merchant-owned APIs.
+- `POST /v1/service/customers/by-external-subject/entitlements`: badly named, carries obsolete `issuer`, and mixes standalone remote identity lookup with the simpler merchant/customer model.
+- Auth middleware split by credential type instead of normalizing credentials into one org/merchant principal.
+
+## Proposed Merchant Lookup API
+
+Core HTTP surface:
+
+```text
+GET  /v1/merchant/customers/:customer_id/entitlements
+POST /v1/merchant/customers/entitlements:batch
+GET  /v1/merchant/customers/:customer_id/entitlements/:name
+GET  /v1/merchant/customers/:customer_id/products
+GET  /v1/merchant/customers/:customer_id/products/:product_id/access
+GET  /v1/merchant/customers/:customer_id/balance?currency=USD
+```
+
+Batch entitlements request after dropping issuer:
+
+```json
+{
+  "subjects": ["user-uuid-1", "user-uuid-2"],
+  "at": "2026-06-20T12:00:00Z"
+}
+```
+
+Response remains keyed by subject, with unknown subjects returning `[]`.
+
+Directory/filter API, if still needed:
+
+```text
+GET /v1/merchant/entitlements/:name/customers
+```
+
+Go library surface should stay as close as possible to HTTP:
+
+```go
+ListEntitlements(ctx, customerID)
+HasEntitlement(ctx, customerID, name)
+ListEntitlementsBatch(ctx, []customerID)
+ListProductAccess(ctx, customerID)
+HasProductAccess(ctx, customerID, productID)
+GetBalance(ctx, customerID, currency)
+ListCustomersWithEntitlement(ctx, name, page) // directory/filter only
+```
+
+## Route Mounting By Deployment Mode
+
+Standalone/remote mode should mount merchant HTTP routes because the host calls OpenRails over the network:
+
+```text
+GET  /v1/merchant/customers/:customer_id/entitlements
+POST /v1/merchant/customers/entitlements:batch
+GET  /v1/merchant/customers/:customer_id/entitlements/:name
+GET  /v1/merchant/customers/:customer_id/products
+GET  /v1/merchant/customers/:customer_id/products/:product_id/access
+GET  /v1/merchant/customers/:customer_id/balance?currency=USD
+GET  /v1/merchant/entitlements/:name/customers
+```
+
+Embedded mode should prefer the Go interface for those same operations:
+
+```go
+ListEntitlements(...)
+HasEntitlement(...)
+ListEntitlementsBatch(...)
+ListProductAccess(...)
+HasProductAccess(...)
+GetBalance(...)
+ListCustomersWithEntitlement(...)
+```
+
+Embedded mode still mounts HTTP for browser/user flows, delegated merchant-admin UI flows, and webhooks. It should not need HTTP routes for host-internal lookups when the host can call OpenRails in-process.
+
+## Embedded Route Group API
+
+Host applications should not have to infer route groups from booleans like
+`IncludeUser`, `IncludeAdmin`, and `IncludeWebhooks`. Expose boring named route
+sets and presets instead:
+
+```go
+type RouteSet string
+
+const (
+	RouteSetPublicCatalog RouteSet = "public_catalog" // /products, /prices, solana config/pay helpers
+	RouteSetCustomer      RouteSet = "customer"       // /me/* browser self-service
+	RouteSetMerchantAdmin RouteSet = "merchant_admin" // /merchant/* delegated merchant UI/support
+	RouteSetMerchantAPI   RouteSet = "merchant_api"   // /merchant/* host-internal or remote merchant API
+	RouteSetWebhooks      RouteSet = "webhooks"       // processor callbacks
+)
+
+var EmbeddedDefaultRouteSets = []RouteSet{
+	RouteSetPublicCatalog,
+	RouteSetCustomer,
+	RouteSetMerchantAdmin,
+	RouteSetWebhooks,
+}
+
+var StandaloneDefaultRouteSets = []RouteSet{
+	RouteSetPublicCatalog,
+	RouteSetCustomer,
+	RouteSetMerchantAdmin,
+	RouteSetMerchantAPI,
+	RouteSetWebhooks,
+}
+```
+
+Lazy rule: embedded defaults exclude `RouteSetMerchantAPI` because the host can
+call OpenRails' Go service directly. Hosts may opt in when they intentionally
+want HTTP loopback parity or expose a remote-compatible API surface.
+
+## Tensorhub Merchant API Recut
+
+Tensorhub is the only real consumer of the broad `/v1/service/*` credit/admit
+surface. Its production path does not need a generic service-account grab bag.
+It needs three boring OpenRails client surfaces:
+
+```go
+type AdmissionClient interface {
+	Admit(ctx, batchReq)
+	Capture(ctx, requestID, capturedAmount, usage)
+	Release(ctx, requestID)
+	ReportWastedSpend(ctx, report)
+	GetTier(ctx, customerID, currency)
+}
+
+type PolicySyncClient interface {
+	SetTierSchedule(ctx, currency, schedule)
+	SetTierSpendLimits(ctx, currency, tier, limits)
+	SetDelegatedInvokerWastedSpendLimits(ctx, windows)
+}
+
+type AdminFundingClient interface {
+	DepositCredits(ctx, request)
+	SetCreditLimit(ctx, customerID, currency, limit)
+	UsageRollup(ctx, customerID, currency, from, to, groupBy)
+	ResourceRevenueDaily(ctx, resourceID, currency, from, to)
+}
+```
+
+Tensorhub owns request pricing, endpoint/resource identity, endpoint access,
+capacity/scheduler decisions, local platform-abuse event display, and the UI
+meaning of its tiers/roles. OpenRails owns the money ledger, balances,
+holds/captures/releases, arrears credit-limit enforcement, spend counters,
+wasted-spend counters, tier graduation from paid spend, usage rollups from
+captured ledger events, payments, subscriptions, and invoicing.
+
+Remote/standalone Tensorhub should only need this merchant HTTP surface:
+
+```text
+POST /v1/merchant/admissions                    # always batch-shaped; one item is still an array
+POST /v1/merchant/admissions/:request_id/capture
+POST /v1/merchant/admissions/:request_id/release
+POST /v1/merchant/wasted-spend
+GET  /v1/merchant/customers/:customer_id/tier?currency=USD
+
+GET  /v1/merchant/settings
+PUT  /v1/merchant/settings
+
+POST /v1/merchant/customers/:customer_id/balance-adjustments
+PUT  /v1/merchant/customers/:customer_id/credit-limit
+POST /v1/merchant/customers/:customer_id/usage/rollup
+POST /v1/merchant/usage/resource-revenue
+```
+
+Routes to cut from the Tensorhub-required surface unless another downstream
+proves a real need:
+
+```text
+GET  /v1/service/budget
+GET  /v1/service/merchant-configuration
+GET  /v1/service/abuse-usage
+GET  /v1/service/credit-limit
+GET  /v1/service/credits/balance
+POST /v1/service/credits/withdraw
+GET  /v1/service/credits/transactions/lookup
+PUT  /v1/service/credits/account-settings
+GET  /v1/service/credits/account-settings
+GET  /v1/service/credits/transactions
+```
+
+Reasoning:
+
+- Tensorhub's hot path is `Admit` before work, `Capture` on success, `Release`
+  on failure/cancel, and `ReportWastedSpend` for rejected or failed provider
+  spend. Admit is always batch-shaped; a single request is just a one-item batch.
+  Direct `withdraw` bypasses that lifecycle.
+- Tensorhub reads local abuse/platform event tables for its abuse UI; it does
+  not need OpenRails' `abuse-usage` endpoint.
+- Tensorhub's previous admin proxy for OpenRails account settings and
+  transaction history was already removed; customers/orgs should use the
+  OpenRails customer/merchant surfaces directly.
+- OpenRails invoicing remains internal to OpenRails. Tensorhub should not need
+  routes to crank invoices, charge arrears, or inspect processor internals.
+- Embedded Tensorhub should use the same Go interfaces directly and should not
+  mount these merchant HTTP routes unless it wants remote parity.
+
+## Merchant Admin Frontend Surface
+
+There are two different admin surfaces and they should not blur together:
+
+- Platform admin: cross-merchant OpenRails operations such as creating,
+  disabling, exporting, or deleting merchants.
+- Merchant admin: actions by an admin of exactly one merchant/org, usually from
+  a host frontend or OpenRails standalone merchant dashboard.
+
+Merchant admins should not manage `owner_org_id`, platform status, platform
+exports, or hard deletes. Those stay under `platform:*`.
+
+### Merchant Route Contracts
+
+Keep merchant settings boring: display/support metadata, checkout/webhook URLs,
+and merchant-owned billing policy. Payment-provider routing and credentials live
+under `/v1/merchant/payment-providers/*`. Do not put platform lifecycle fields
+here.
+
+Settings and payment providers:
+
+| Route | Purpose | Request | Response |
+|---|---|---|---|
+| `GET /v1/merchant/payment-providers` | List configured payment providers. | `?provider=&environment=&status=` | `{data:[payment_provider]}` |
+| `GET /v1/merchant/payment-providers/:provider` | Read one payment provider's status/config. | optional `?environment=live` | `{payment_provider}` |
+| `PUT /v1/merchant/payment-providers/:provider` | Create/update one provider config as a block. Supplied credentials are validated before storage. | `{environment,enabled,account_id?,public_config?,credentials?}` | `{payment_provider}` |
+| `DELETE /v1/merchant/payment-providers/:provider` | Disable/remove one payment provider from future use. | optional `{environment,reason}` | `{payment_provider}` |
+
+`payment_provider` responses expose metadata and configured-field status, never
+secret plaintext:
+
+```json
+{
+  "id": "uuid",
+  "provider_type": "stripe",
+  "environment": "live",
+  "account_id": "acct_...",
+  "role": "primary",
+  "status": "enabled",
+  "public_config": {
+    "publishable_key": "pk_..."
+  },
+  "credentials": {
+    "secret_key": {"configured": true, "updated_at": "..."},
+    "webhook_signing_secret": {"configured": true, "updated_at": "..."}
+  }
+}
+```
+
+Current merchant credential/config fields by provider:
+
+- Stripe: `secret_key`, `webhook_signing_secret`,
+  `webhook_signing_secret_thin`, and optional public `publishable_key`.
+- NMI/Mobius: `production_key`, `tokenization_key`, `tokenization_url`, and
+  `webhook_signing_secret`. `tokenization_key`/URL are browser-facing config,
+  but still belong on the provider account.
+- CCBill: `account_config` for now, until it is split into typed fields.
+- Solana: `private_key` exists but is OpenRails/platform-owned, not
+  merchant-admin writable.
+
+Credential updates are atomic: validate first, store only if validation passes.
+There is no separate `/validate` route in the primary API. Direct
+`/v1/merchant/secrets/*name` CRUD should be retired or compatibility-only.
+The storage layer may still store values under provider-account-scoped secret
+names like `provider_accounts/{provider}/{environment}/{account_id}/{key}`.
+
+Catalog:
+
+| Route | Purpose | Request | Response |
+|---|---|---|---|
+| `GET /v1/merchant/catalog/products` | List products for admin UI. | query filters/page | `{data:[product],page}` |
+| `POST /v1/merchant/catalog/products` | Create product. | product fields | `{product}` |
+| `GET /v1/merchant/catalog/products/:id` | Read product. | none | `{product}` |
+| `PATCH /v1/merchant/catalog/products/:id` | Update product fields. | partial product fields | `{product}` |
+| `POST /v1/merchant/catalog/products/:id/activate` | Make product sellable/visible. | optional `{reason}` | `{product}` |
+| `POST /v1/merchant/catalog/products/:id/deactivate` | Stop new sales without deleting history. | optional `{reason}` | `{product}` |
+| `GET /v1/merchant/catalog/prices` | List prices. | query filters/page | `{data:[price],page}` |
+| `POST /v1/merchant/catalog/prices` | Create price. | price fields | `{price}` |
+| `GET /v1/merchant/catalog/prices/:id` | Read price. | none | `{price}` |
+| `PATCH /v1/merchant/catalog/prices/:id` | Update price fields. | partial price fields | `{price}` |
+| `POST /v1/merchant/catalog/prices/:id/activate` | Make price available for new purchases. | optional `{reason}` | `{price}` |
+| `POST /v1/merchant/catalog/prices/:id/deactivate` | Retire price for new purchases. | optional `{reason}` | `{price}` |
+| `POST /v1/merchant/catalog/publish` | Plan/apply the catalog-as-code manifest, mirroring `openrails push-merchant-catalog`. | `{catalog:{version,default_providers?,tier_groups},insert?,overwrite?,prune?,plan_only?}` | `{plan,result?,extras?}` |
+| `GET /v1/merchant/catalog/drift` | List provider/catalog drift findings, including provider-side orphans. | `?provider=&kind=&resource_type=&limit=&offset=` | `{data:[finding],page}` |
+| `POST /v1/merchant/catalog/drift/refresh` | Run drift detection now. | optional `{provider}` | `{summary}` |
+
+Product/price writes should enqueue provider sync automatically where a provider
+mirror is needed. Do not require a merchant admin UI to call per-object
+`reconcile` routes after saving. Keep drift reads as ops visibility; provider
+orphans are just `GET /v1/merchant/catalog/drift?kind=orphan`, not a separate
+route. If manual repair is needed later, add one boring bulk repair endpoint
+rather than per-product/per-price buttons.
+
+`POST /v1/merchant/catalog/publish` is the HTTP form of the existing
+`openrails push-merchant-catalog` CLI. The route is merchant-scoped from auth, so
+the body should contain one catalog entry, not the CLI file's multi-merchant
+`catalogs[]` wrapper. The `catalog` object is the same desired-state shape used
+inside `config/catalog.example.yaml`: `default_providers`, `tier_groups`,
+products, prices, and `provider_links`. Default behavior should be plan-only;
+mutation requires explicit `insert`, `overwrite`, or `prune`, matching the CLI.
+
+Customer support:
+
+| Route | Purpose | Request | Response |
+|---|---|---|---|
+| `GET /v1/merchant/customers` | Search/list merchant customers. | query filters/page | `{data:[customer],page}` |
+| `GET /v1/merchant/customers/:customer_id` | Customer billing/support profile. | none | `{customer,balance_summary,active_entitlements,subscriptions}` |
+| `GET /v1/merchant/customers/:customer_id/balance` | Per-currency balance. | `?currency=USD` | `{currency,balance}` |
+| `GET /v1/merchant/customers/:customer_id/transactions` | Customer ledger history. | `?currency=&limit=&offset=` | `{data:[transaction],page}` |
+| `GET /v1/merchant/customers/:customer_id/entitlements` | List active/history entitlement grants. | query filters/page | `{data:[entitlement],page}` |
+| `GET /v1/merchant/customers/:customer_id/entitlements/:name` | Check one entitlement. | optional `?at=` | `{active,entitlement?}` |
+| `POST /v1/merchant/customers/:customer_id/entitlements` | Manual entitlement grant. | `{entitlement,starts_at?,ends_at?,reason}` | `{grant,entitlements}` |
+| `DELETE /v1/merchant/customers/:customer_id/entitlements/:grant_id` | Revoke manual grant. | optional `{reason,refund?}` | `{grant,revoked:true}` |
+| `GET /v1/merchant/customers/:customer_id/products` | List owned/product access. | query filters/page | `{data:[product_access],page}` |
+| `GET /v1/merchant/customers/:customer_id/products/:product_id/access` | Check one product. | none | `{has_access,access?}` |
+| `POST /v1/merchant/customers/:customer_id/product-access` | Manual product ownership grant. | `{product_id,starts_at?,ends_at?,reason}` | `{grant,product_access}` |
+| `DELETE /v1/merchant/customers/:customer_id/product-access/:grant_id` | Revoke manual product grant. | optional `{reason}` | `{grant,revoked:true}` |
+| `GET /v1/merchant/customers/:customer_id/payments` | Customer payment history. | query filters/page | `{data:[payment],page}` |
+| `POST /v1/merchant/customers/:customer_id/payments/off-channel` | Record manual/off-channel payment for an existing price and run the normal purchase side effects. | `{price_id,transaction_id,amount?,currency?,purchased_at?,discount_code?,discount_reason?,discount_metadata?}` | `{payment_id,entitlements,delayed_start,eligibility}` |
+| `DELETE /v1/merchant/customers/:customer_id/payment-methods/:id` | Remove saved payment method for support. | none | `{deleted:true}` |
+| `GET /v1/merchant/customers/:customer_id/subscriptions` | Customer subscriptions, current and historical. | `?status=&limit=&offset=` | `{data:[subscription],page}` |
+| `POST /v1/merchant/customers/:customer_id/balance-adjustments` | Append-only support adjustment to the customer's prepaid balance; for comp credits, corrections, or migrations, not normal purchases. | `{currency,amount,reason,idempotency_key?}` | `{transaction}` |
+| `PUT /v1/merchant/customers/:customer_id/credit-limit` | Set platform/merchant-approved arrears exposure for this customer. | `{currency,limit,reason}` | `{currency,limit}` |
+| `GET /v1/merchant/customers/:customer_id/tier` | Read auto-maintained payer trust/spend tier. | `?currency=USD` | `{currency,tier}` |
+
+Merchant-wide payments and subscriptions:
+
+| Route | Purpose | Request | Response |
+|---|---|---|---|
+| `GET /v1/merchant/payments` | Search merchant payments. | query filters/page | `{data:[payment],page}` |
+| `GET /v1/merchant/payments/:id` | Read payment detail. | none | `{payment}` |
+| `POST /v1/merchant/payments/:id/refunds` | Refund payment through provider/ledger. | `{amount?,reason,revoke_access?}` | `{refund,payment}` |
+| `GET /v1/merchant/subscriptions` | Search merchant subscriptions. | query filters/page | `{data:[subscription],page}` |
+| `GET /v1/merchant/subscriptions/:id` | Read subscription detail. | none | `{subscription}` |
+| `POST /v1/merchant/subscriptions/:id/cancel` | Stop future rebilling. | `{reason?,revoke_access?,effective_at?}` | `{subscription}` |
+
+Usage/admission and policy:
+
+| Route | Purpose | Request | Response |
+|---|---|---|---|
+| `POST /v1/merchant/admissions` | Batch authorize work and create holds. | `{items:[{payer,invoker?,resource?,currency,estimated_amount,idempotency_key?}]}` | `{items:[{request_id,admitted,reason?,hold?}]}` |
+| `POST /v1/merchant/admissions/:request_id/capture` | Capture an admitted hold after work succeeds. | `{amount,usage?}` | `{transaction}` |
+| `POST /v1/merchant/admissions/:request_id/release` | Release an admitted hold after failure/cancel. | optional `{reason}` | `{released:true}` |
+| `POST /v1/merchant/wasted-spend` | Report provider spend that produced no billable result. | `{payer,invoker?,currency,amount,reason,resource?}` | `{recorded:true}` |
+| `POST /v1/merchant/usage/rollup` | Usage/spend rollup for analytics/support. | `{customer_id?,currency,from,to,group_by}` | `{data:[row]}` |
+| `POST /v1/merchant/usage/resource-revenue` | Revenue rollup by resource. | `{currency,from,to,resource?}` | `{data:[row]}` |
+| `GET /v1/merchant/settings` | Read merchant-owned settings, including admission policy. | none | `{settings}` |
+| `PUT /v1/merchant/settings` | Update merchant-owned settings as one document. | `{display?,checkout?,admission_policy?}` | `{settings}` |
+
+Policy split:
+
+- `settings.admission_policy.tier_schedule` is merchant-wide. Tensorhub uses it
+  to declare the cumulative paid-spend ladder once; OpenRails auto-graduates each
+  payer.
+- `settings.admission_policy.tier_spend_limits` is merchant-wide default policy
+  for a resolved payer tier: in-flight/held spend caps, single-charge caps, and
+  payer wasted-spend windows.
+- `settings.admission_policy.delegated_invoker_wasted_spend_limits` is
+  merchant-wide. OpenRails can provide defaults, but multi-merchant deployments
+  need a per-merchant override.
+- Delegated spend authority is host/org policy, not a merchant-admin override.
+  Tensorhub-style org delegation should stay in the host app and reach
+  OpenRails through the embedded Go API or a future host-internal sync path only
+  if standalone deployment needs it.
+- OpenRails should still trivially accommodate Tensorhub org-delegated spend:
+  admission already has the right generic shape — payer/customer id, invoker,
+  invoker type, tier, role UUIDs, estimated amount, request id, and resource.
+  Tensorhub decides whether the invoker may spend the org's balance through
+  AuthKit + Tensorhub policy; OpenRails meters the resulting windows and money.
+- Merchant-wide invoker safety policy lives in settings, but payer authorization
+  still lives on the payer/customer. Do not add a merchant-level "invoker may
+  spend anyone's balance" grant.
+
+Admission policy shape:
+
+```json
+{
+  "admission_policy": {
+    "currency": "USD",
+    "tier_schedule": [
+      {"tier": "free", "min_cumulative_paid_amount": 0},
+      {"tier": "pro", "min_cumulative_paid_amount": 100000000}
+    ],
+    "tier_spend_limits": [
+      {
+        "tier": "free",
+        "windows": [],
+        "wasted_spend_windows": []
+      }
+    ],
+    "delegated_invoker_wasted_spend_limits": []
+  }
+}
+```
+
+Ops reads:
+
+| Route | Purpose | Request | Response |
+|---|---|---|---|
+| `GET /v1/merchant/repair-alerts` | Ledger/provider repair alerts. | query filters/page | `{data:[alert],page}` |
+
+Routes to skip until a real caller needs them:
+
+```text
+POST /v1/merchant/customers/entitlements:batch
+GET  /v1/merchant/entitlements/:name/customers
+```
+
+The first can come back as `POST /v1/merchant/entitlements:batch` if JWT
+enrichment over HTTP needs it. The second is a directory/filter query, not a
+core customer support workflow.
+
+Rules:
+
+- Customer rows should still be created naturally by checkout/usage/auth flows;
+  admin routes may upsert by subject only when recording an off-channel payment
+  or manual grant.
+- Manual entitlements and product access should be recorded through the grant
+  ledger with `source_type=admin`, explicit `starts_at`, optional `ends_at`,
+  reason, and acting admin for audit.
+- Off-channel payments are for payments tied to an existing catalog price. They
+  use the same purchase registration path as checkout/webhooks so entitlements,
+  product access, and idempotency stay consistent. Arbitrary free access uses
+  the manual entitlement/product-access grant routes instead.
+- Customer subscriptions should include current and historical subscriptions plus
+  lifecycle dates the admin UI needs: started, current period start/end, cancel
+  time, next retry/renewal where available, status, price/product, and processor
+  references.
+- Customer balance checks use `GET /v1/merchant/customers/:customer_id/balance`.
+  `balance-adjustments` is append-only support/migration/correction credit,
+  not a purchase path. `credit-limit` is explicit arrears exposure, not a
+  billing-mode toggle. Tier is read-only and auto-maintained from spend/trust
+  rules; do not add a merchant-admin tier override unless a real support
+  workflow proves it is needed.
+- Usage rollups are reporting/analytics, not core customer support CRUD, so keep
+  them under `/v1/merchant/usage/*`.
+- Refunds should not automatically revoke access. Revoking access is a separate
+  admin decision unless the refund workflow explicitly asks for `revoke_access`.
+- Cancel subscription means "do not rebill"; whether existing access is revoked
+  immediately or ends at period end must be an explicit request flag.
+- Deleting a payment method is support cleanup only; it must be scoped to the
+  same merchant/customer and must not delete historical payment records.
+- Payment-provider credentials are managed as payment-provider fields, not as a
+  flat secret-name CRUD API. Admin UI can list configured status, update supplied
+  fields, and delete/disable accounts; it never reads plaintext. Supplied
+  credentials are validated immediately and are not stored if validation fails.
 
 ## Tasks
 
@@ -94,7 +546,56 @@ OpenRails currently still carries old "platform org" language and gate wiring ar
 - [ ] Rename merchant-local permission constants/routes/docs to the chosen org-local OpenRails permission names where needed.
 - [ ] Ensure standalone mode checks the bundled AuthKit control plane for both platform and org-local OpenRails permissions.
 - [ ] Ensure embedded mode checks the same permission names from the host/AuthKit principal mapping.
+- [ ] Move merchant-owned `/v1/service/*` routes to `/v1/merchant/*`; keep only a temporary compatibility alias if downstreams still require it.
+- [ ] Make `/v1/merchant/*` routes accept every supported credential type that resolves to the owning org/merchant and required permission: logged-in user, delegated JWT, self-service/browser JWT with org authority, and API key.
+- [ ] Replace route-level "service credential required" assumptions with a shared principal resolver for merchant routes.
+- [ ] Remove nested `/admin` naming from merchant-owned routes; use resource paths such as `/v1/merchant/subscriptions/:id`, with permissions deciding who may call them.
+- [ ] Replace `POST /v1/service/customers/by-external-subject/entitlements` with `POST /v1/merchant/customers/entitlements:batch`; remove `issuer` from the request once customer identity is `(merchant_id, subject)`.
+- [ ] Split customer-forward lookups from directory/filter reverse lookups in both HTTP and Go APIs.
+- [ ] Keep the Go library API and HTTP API names/shapes aligned so embedded and standalone hosts use the same concepts.
+- [ ] Separate merchant route registration by deployment mode: standalone mounts merchant HTTP lookup APIs; embedded exposes the same operations primarily through the Go interface and avoids unnecessary host-internal HTTP routes.
+- [ ] Replace/augment embedded `IncludeUser`, `IncludeAdmin`, `IncludeWebhooks` booleans with explicit named route sets or presets so hosts can see what should be mounted.
+- [ ] Make embedded defaults exclude merchant host-internal HTTP lookup routes; provide an opt-in route set for HTTP parity.
+- [ ] Audit Doujins, Tensorhub, and Cozy Art usage before removing compatibility aliases; expected common needs are account balance, check/list entitlements for JWT/auth, check/list product access, and Tensorhub `Admit`.
+- [ ] Recut Tensorhub's OpenRails dependency into explicit admission, policy-sync, and admin-funding/reporting Go interfaces; keep HTTP only for standalone/remote mode.
+- [ ] Make admission batch-native: one `POST /v1/merchant/admissions` endpoint and one Go method that both accept an item array; no separate single-admit route.
+- [ ] Replace Tensorhub's broad `/v1/service/*` expectations with the smaller `/v1/merchant/*` route set above.
+- [ ] Remove or compatibility-gate Tensorhub-unused service routes: `budget`, merchant configuration read, `abuse-usage`, credit-limit read, direct credit withdraw, transaction lookup, account settings, and generic credit transactions.
+- [ ] Keep OpenRails invoicing, payment processor state, and arrears charging internal to OpenRails; Tensorhub should only configure limits/policies and consume ledger/admission results.
+- [ ] Fold the existing delegated `/v1/admin/*` merchant-admin routes into the resource-named `/v1/merchant/*` surface; keep compatibility aliases only if downstreams still need them.
+- [ ] Keep platform merchant provisioning routes separate from merchant self-admin routes: platform can create/delete/export/disable merchants; merchant admins can only manage their own merchant settings, payment providers, catalog, and customers.
+- [ ] Replace direct merchant secret-key CRUD with payment-provider configuration routes; store individual credentials as write-only fields under the provider account internally.
+- [ ] Cut generic `/v1/merchant/configuration`; use `/v1/merchant/settings` for merchant-owned settings and `/v1/merchant/payment-providers/*` for provider configuration.
+- [ ] Implement `/v1/merchant/payment-providers` list/read/update/delete using provider names in the path and `{environment}` in query/body; keep `provider_accounts` as internal storage only.
+- [ ] Make payment-provider update atomic: validate supplied credentials against the provider first, then store config/credentials only on success.
+- [ ] Return payment-provider credential status as redacted field metadata (`configured`, `updated_at`, `last_validated_at` if available), never plaintext.
+- [ ] Support test/live provider environments explicitly; enforce one active config per `{merchant, provider, environment}` until multiple active accounts are actually needed.
+- [ ] Expose catalog-as-code publish/apply over HTTP with the same plan/apply engine as `openrails push-merchant-catalog`; HTTP is single-merchant because the merchant comes from auth.
+- [ ] Add `POST /v1/merchant/catalog/publish` that accepts the inner single-merchant catalog manifest shape from `config/catalog.example.yaml`, not the CLI `catalogs[]` wrapper.
+- [ ] Keep catalog publish plan-only by default; require explicit `insert`, `overwrite`, or `prune` for mutation, matching `openrails push-merchant-catalog`.
+- [ ] Remove product/price per-object reconcile routes from the planned primary surface; product/price writes and catalog publish should enqueue safe provider sync automatically.
+- [ ] Fold catalog orphan listing into `GET /v1/merchant/catalog/drift?kind=orphan`; do not keep a separate `/orphans` route.
+- [ ] Add or normalize customer-management routes for merchant admins: customer profile/read, manual entitlement grant/revoke, product-access grant/revoke, off-channel payment record, payment refund, payment-method removal, and subscription cancel.
+- [ ] Keep product access write routes named `/product-access`, not `/products`, because the written resource is the customer's access grant, not a catalog product.
+- [ ] Make off-channel payment recording require `price_id` and `transaction_id`, then route through the existing normal purchase registration path for entitlements/product access/idempotency.
+- [ ] Ensure customer subscription list returns current and historical subscriptions with lifecycle dates, status, product/price, processor refs, renewal/retry data where available, and pagination/status filtering.
+- [ ] Move usage rollup out of customer CRUD into `/v1/merchant/usage/rollup` with optional `customer_id`.
+- [ ] Keep `balance-adjustments` and `credit-limit` as explicit money admin writes, not balance reads; customer balance stays `GET /v1/merchant/customers/:customer_id/balance`.
+- [ ] Make manual grants go through the grant ledger with acting-admin audit fields; do not write raw entitlement/product-access rows from HTTP handlers.
+- [ ] Make refund and subscription-cancel workflows explicit about access revocation instead of silently coupling money reversal to entitlement revocation.
+- [ ] Replace separate merchant policy routes with `GET/PUT /v1/merchant/settings`, containing merchant-owned admission policy as one document.
+- [ ] Rename/update Go library policy methods to prefer one merchant settings call, e.g. `GetMerchantSettings` and `SetMerchantSettings`; do not add customer delegated-spend methods unless a real standalone host sync path requires them.
+- [ ] Keep broad merchant-level "invoker can spend" grants out of the model; invoker/role spend authority must be attached to the payer/customer whose balance is being spent.
+- [ ] Preserve OpenRails admission support for Tensorhub org-delegated spend budgets with generic fields: payer/customer id, invoker, invoker type, tier, role UUIDs, estimated amount, request id, and resource.
+- [ ] Do not expose Tensorhub org delegated-spend budgets as OpenRails merchant-admin routes; if standalone Tensorhub needs remote sync later, add a host-internal API, not a customer-support override.
+- [ ] Keep `ResourceRevenueDaily` / `/v1/merchant/usage/resource-revenue` as reporting-only endpoint analytics, not admission settlement.
+- [ ] Cut planned `GET /v1/merchant/manual-rebill-attempts`; rebill attempts are dunning/provider-intent events, so surface failures needing attention through `repair-alerts` and defer aggregate dashboard counts/history drill-downs to the future admin dashboard work.
 - [ ] Add integration coverage proving platform RBAC is independent from merchant RBAC: platform admin can list merchants, merchant admin cannot; platform admin cannot mutate a merchant customer/subscription through merchant routes unless separately authorized.
+- [ ] Add integration coverage for payment-provider credential validation failure proving invalid credentials are not persisted.
+- [ ] Add integration coverage for `POST /v1/merchant/catalog/publish` plan-only and mutating modes against the same catalog engine as the CLI.
+- [ ] Add integration coverage for remote merchant admission batch shape, capture, release, and wasted-spend against live HTTP server + DB/Redis stack.
+- [ ] Add integration coverage for customer manual grants, off-channel payment registration, refund with explicit revoke flag behavior, and subscription cancel with explicit access behavior.
+- [ ] Add integration coverage for settings/policy split: Tensorhub-style merchant settings install tier schedule, tier spend limits, and delegated-invoker wasted-spend defaults without exposing customer delegated-spend overrides as merchant-admin routes.
 - [ ] Update docs and comments to use "platform RBAC" and "org-local merchant RBAC", not "platform org".
 
 ## Acceptance
@@ -102,167 +603,23 @@ OpenRails currently still carries old "platform org" language and gate wiring ar
 - No OpenRails route requires or references a "platform org".
 - Platform admin routes are protected by OpenRails-defined AuthKit `platform:*` permissions.
 - Merchant admin routes are protected by OpenRails-defined AuthKit org-local permissions.
+- Merchant-owned routes are exposed under `/v1/merchant/*`; `/v1/service/*` is gone or compatibility-only.
+- The same merchant permission gate works for regular users, delegated JWTs, self-service/browser JWTs with org authority, and API keys.
+- Batch entitlement lookup no longer accepts or requires `issuer`; merchant/org is resolved from auth.
+- Customer-forward lookup APIs are simple and mirrored between HTTP and Go.
+- Standalone/remote merchant lookup routes are available over HTTP; embedded hosts can use the Go API without routing through HTTP.
+- Tensorhub's hot path uses only admission/capture/release/wasted-spend/tier reads, with policy sync and admin funding/reporting kept separate.
+- Tensorhub org-delegated spend budgets can be enforced by OpenRails admission without adding merchant-admin delegated-spend override routes.
+- Admission has one batch-shaped API; a one-item admission request uses the same route and response shape.
+- Routes removed from the Tensorhub-required surface either have no downstream caller or are replaced by the OpenRails Go interface/customer/merchant surface.
+- Merchant admin routes are resource-named under `/v1/merchant/*`, not hidden under credential-shaped `/v1/admin/*` or `/v1/service/*` paths.
+- Merchant admins cannot create, delete, export, disable, or reassign merchants; those stay platform-only.
+- Merchant customer-management actions are audited with the acting admin and scoped to the authenticated merchant/org.
+- Merchant provider credentials are configured through payment-provider routes with redacted field status; direct secret-name routes are compatibility-only or gone.
+- Catalog publish/apply is available through both CLI and HTTP, using one shared engine and the same plan-only-by-default semantics.
 - A platform role cannot contain org-local permissions, bare `*`, or negated permissions.
 - A merchant role/token cannot grant `platform:*`.
 - Integration tests prove the platform and merchant permission planes are disjoint.
-
----
-
-# #549: fix-money-account-settings-units-and-self-editable-surface
-
-**Completed:** yes
-**Status:** COMPLETE 2026-06-20: customer money-account settings now use the real ledger currency contract, customer self-service is flat/narrow, USDC/SOL are no longer account currencies, saved OpenRails wallet linking and self-service USDC funding routes are removed, and Solana receipt metadata stays on `payments.metadata`.
-
-Validation: `go test ./internal/http/routes/ginroutes ./internal/http/handlers ./internal/modules/money ./internal/modules/solana ./internal/modules/solana/recurring ./internal/river -run 'Test(SelfService|HostPrincipal|RunAutoTopups|ConfirmEnrollment|Solana|Bearer)'`; `go test -tags=integration ./tests -run TestSelfAccountSurface_HostPrincipalFullLoopAndScoping -count=1`; `go test -tags=integration ./internal/modules/money -run TestRunAutoTopups_ChargesAndDeposits -count=1 -timeout=60s`.
-
-The `/v1/me/account/settings` contract currently mixes correct ledger-currency behavior with misleading field names and too much customer authority. OpenRails uses per-currency ledgers; `currency` means the actual accounting currency for the account, not a display preference or FX presentation layer. Amounts use that currency's registered internal precision. For USD, that means micro-USD (`decimals=6`), not cents. Fields like `auto_topup_amount_cents` are therefore wrong for this API and invite bugs. USDC and SOL also do not belong in the money-account currency registry: USDC is a USD-denominated stablecoin/payment rail, not a separate account currency; SOL is a crypto asset and not useful as a customer billing-account currency.
-
-## Metadata
-
-- Category: cleanup
-- Status: complete
-- Passes: true
-
-## Decisions
-
-- `currency` on money/account APIs is the actual ledger currency.
-- Do not auto-display a USD balance as JPY/EUR/etc. through this API; display preferences belong in the host/app presentation layer.
-- Every settings/balance amount is in the native decimal precision OpenRails registers for that currency.
-- USD amounts are micro-USD everywhere in the OpenRails money system.
-- Remove USDC and SOL from account/billing currencies. Stablecoins and crypto assets may remain processor/payment assets, but account ledgers should use real billing currencies such as USD.
-- Customer self-settings should be narrow. Merchant/admin/service routes own billing policy and credit-risk knobs.
-- Spend-cap breaches hard-stop by default. Near-limit alerts, if any, use platform constants instead of per-customer `hard_stop_on_breach` / `alert_threshold_pct` settings.
-- `billing_mode` remains meaningful account policy/read-state (`prepaid` vs `arrears`), but it is platform-owned and must not be customer-editable.
-- Self-service should stay flat under `/v1/me` because host apps already mount OpenRails under paths such as `/billing/v1`. Use `/v1/me/balance`, `/v1/me/transactions`, and `/v1/me/settings`; cut `/v1/me/account*` and `/v1/me/credits*` instead of keeping aliases.
-- Customer transaction history should expose understandable movement types (`deposit`, `spend`, `expiry`, `arrears_accrual`, `arrears_payment`) even if internal ledger transfer names stay `owed_accrual` / `owed_payment`.
-- Delete the unfinished USDC funding self-service feature; it is not part of the core customer billing surface.
-- Do not model AuthKit/account-control wallet linking inside OpenRails. AuthKit may link Solana wallets as an authentication factor; OpenRails should only record wallet/token-account data when it is needed for a concrete payment/subscription flow.
-- Delete OpenRails saved-wallet linking entirely: no customer wallet-link routes, no `linked_wallets` table, no linked-wallet repo/model. A customer may pay into their OpenRails account with any Solana wallet; the payment/subscription record is the audit trail.
-- `payments.transaction_id` is the provider-specific external payment id. For Solana this is the chain transaction signature. Do not duplicate it in metadata.
-- Do not add a one-off Solana payments table. `openrails.payments` is the durable receipt; Solana-specific receipt details live in `payments.metadata`. `openrails.solana_subscriptions` remains only for recurring on-chain subscription state.
-- Keep `POST /v1/me/stripe/portal` while Stripe is supported; it is the provider handoff that returns a Stripe Billing Portal URL.
-- Keep internal notification storage/email delivery. Downstream audit found Doujins still renders OpenRails billing notifications via `/v1/me/notifications*`, so customer notification inbox routes stay until that host migrates.
-
-## Current Customer-Editable Fields To Review
-
-- `billing_mode` (meaningful, but platform-owned; not customer-editable)
-- `max_spend_per_day`
-- `max_spend_per_month`
-- `max_outstanding_owed_amount`
-- `low_balance_threshold`
-- `auto_topup_enabled`
-- `auto_topup_amount_cents` (wrong; replace with native-precision `auto_topup_amount`)
-- `auto_topup_payment_method_id`
-- `default_credit_expiry_days` (wrong for customer self-service; platform/merchant decides credit expiry)
-- `hard_stop_on_breach` (wrong for customer self-service; hard-stop should be default behavior)
-- `alert_threshold_pct` (wrong for customer self-service; near-limit alert threshold should be a platform constant)
-
-## Proposed Customer Self-Service Surface
-
-Final `PUT /v1/me/settings` request body:
-
-```json
-{
-  "currency": "USD",
-  "low_balance_threshold": 10000000,
-  "auto_topup_enabled": true,
-  "auto_topup_amount": 25000000,
-  "auto_topup_payment_method_id": "pm_uuid",
-  "max_spend_per_day": 100000000,
-  "max_spend_per_month": 1000000000
-}
-```
-
-- Keep:
-  - `currency`
-  - `low_balance_threshold`
-  - `auto_topup_enabled`
-  - `auto_topup_amount`
-  - `auto_topup_payment_method_id`
-  - `max_spend_per_day`
-  - `max_spend_per_month`
-- Remove from customer self-service:
-  - `billing_mode`
-  - `max_outstanding_owed_amount`
-  - `default_credit_expiry_days`
-  - `hard_stop_on_breach`
-  - `alert_threshold_pct`
-  - `credit_limit_amount`
-  - `tier`
-  - `tier_source`
-  - `suspended_at`
-  - `suspend_reason`
-  - `verified_payment_method`
-
-## Customer Route Cuts
-
-- Delete:
-  - `GET /v1/me/account`
-  - `PUT /v1/me/account/settings`
-  - `GET /v1/me/account/transactions`
-  - `GET /v1/me/credits`
-  - `GET /v1/me/credits/:currency`
-  - `GET /v1/me/credits/:currency/transactions`
-  - `GET /v1/me/usdc-funding-options`
-  - `POST /v1/me/usdc-funding-sessions`
-  - `GET /v1/me/wallets/solana`
-  - `PUT /v1/me/wallets/solana`
-  - `DELETE /v1/me/wallets/solana`
-- Keep/replace with:
-  - `GET /v1/me/balance?currency=USD`
-  - `GET /v1/me/transactions?currency=USD`
-  - `PUT /v1/me/settings`
-  - `GET /v1/me/payments`
-  - `GET /v1/me/usage?currency=USD&from=YYYY-MM-DD&to=YYYY-MM-DD`
-  - `GET /v1/me/invoices`
-  - `GET /v1/me/invoices/:id`
-  - `POST /v1/me/stripe/portal`
-
-**Tasks:**
-- [x] Document that account-setting amount fields use the registered currency precision; for USD this is micro-USD.
-- [x] Remove USDC and SOL from the OpenRails account/billing currency registry and tests/docs that present them as customer account currencies.
-- [x] Keep stablecoin/crypto asset handling, where needed, in payment/processor-specific flows instead of the money-account currency enum.
-- [x] Replace the customer wire field `auto_topup_amount_cents` with native-precision `auto_topup_amount`; do not expose cents-specific names in a multi-currency API.
-- [x] Audit service/admin account-settings routes for the same `auto_topup_amount_cents` naming bug and either rename them too or document a short compatibility alias.
-- [x] Keep `auto_topup_payment_method_id` as the saved payment method selector, but make it a real FK to `openrails.payment_methods(id)` with `ON DELETE SET NULL`.
-- [x] In customer self-settings writes, verify `auto_topup_payment_method_id` belongs to the authenticated customer and current merchant before storing it.
-- [x] In service/admin settings writes, verify `auto_topup_payment_method_id` belongs to the target customer and current merchant before storing it.
-- [x] Replace customer routes with flat names: `GET /v1/me/balance?currency=USD`, `GET /v1/me/transactions?currency=USD`, and `PUT /v1/me/settings`.
-- [x] Make `GET /v1/me/transactions` return customer-facing transaction type names; do not leak confusing `owed_*` labels unless explicitly kept as internal metadata.
-- [x] Delete customer `/v1/me/account`, `/v1/me/account/settings`, and `/v1/me/account/transactions` route registrations after moving them to the flat routes.
-- [x] Narrow `PUT /v1/me/settings` so customers cannot change merchant/admin-owned policy knobs.
-- [x] Make the customer self-settings request body exactly: `currency`, `low_balance_threshold`, `auto_topup_enabled`, `auto_topup_amount`, `auto_topup_payment_method_id`, `max_spend_per_day`, `max_spend_per_month`.
-- [x] Remove `default_credit_expiry_days` from customer self-settings; credit expiry is platform/merchant policy.
-- [x] Remove `hard_stop_on_breach` and `alert_threshold_pct` from customer self-settings; hard-stop is the default and alert thresholds are platform constants.
-- [x] Delete self-service `GET /v1/me/credits`, `GET /v1/me/credits/:currency`, and `GET /v1/me/credits/:currency/transactions`.
-- [x] Delete now-unused self-service credits handlers/tests/docs after the route cut; keep service/admin account-credit APIs as needed.
-- [x] Delete unfinished self-service USDC funding routes: `GET /v1/me/usdc-funding-options` and `POST /v1/me/usdc-funding-sessions`.
-- [x] Delete saved Solana wallet self-service routes: `GET /v1/me/wallets/solana`, `PUT /v1/me/wallets/solana`, and `DELETE /v1/me/wallets/solana`; do not confuse billing payment state with AuthKit wallet-as-auth-factor identity.
-- [x] Delete the saved-wallet storage surface: `openrails.linked_wallets`, `internal/db/models/linked_wallet.go`, `internal/db/repo/linked_wallet.go`, `internal/db/queries/linked_wallets.sql`, generated sqlc code, RLS/docs/tests that only exist for linked wallets.
-- [x] Ensure Solana payment receipts persist where the money came from. The chain signature remains `payments.transaction_id`; do not duplicate it in metadata.
-- [x] Harden Solana one-off receipt metadata. For transaction-request checkout, copy the bound `processor_state.payer` into `payments.metadata.solana_payer_wallet`; keep `solana_reference`, `checkout_session_id`, token symbol/mint/base-unit amount, recipient wallet, and quote timestamp/FX metadata when present.
-- [x] Harden Solana transfer-request receipt metadata. Plain transfer-request receipts keep signature/reference/recipient/token amount but no payer wallet because the poller does not currently derive fee-payer/source wallet from chain transaction details; transaction-request checkout is the audited wallet-provenance path.
-- [x] Harden Solana recurring payment metadata. Initial subscribe payment and renewal/crank payments include `solana_subscriber_wallet`, `solana_subscription_pda`, `solana_token_mint`, `solana_token_amount`, and `solana_recipient_wallet`; authority/plan PDA stay on `solana_subscriptions`.
-- [x] Audit customer notification inbox routes (`GET /v1/me/notifications`, `GET /v1/me/notifications/unread-count`, `POST /v1/me/notifications/:id/read`): Doujins consumes them through `billingApiService`, so they remain mounted for now.
-- [x] Delete now-unused USDC funding handlers/tests/docs after the route cut.
-- [x] Keep service/admin account-settings routes capable of setting operator-owned policy fields where still needed.
-- [x] Update docs and tests for micro-USD examples, especially any `$25.00 == 25_000_000` style values.
-- [x] Audit downstream consumers for `auto_topup_amount_cents` and account-settings fields before removing any wire name.
-- [x] Run focused account-settings tests.
-
-## Acceptance
-
-- No customer-facing OpenRails docs imply USD cents for money-account settings.
-- USDC and SOL are not accepted or documented as customer money-account currencies.
-- The customer settings API does not expose `billing_mode`, arrears/owed caps, credit-line, tier, suspension, or verification knobs.
-- The customer settings API does not expose credit-expiry or enforcement-policy knobs.
-- `auto_topup_payment_method_id` cannot point at another customer's saved payment method and is cleared safely when that payment method is deleted.
-- The customer self-service `/v1/me/account*` and `/v1/me/credits*` route families are gone; balance/history/settings use `/v1/me/balance`, `/v1/me/transactions`, and `/v1/me/settings`.
-- The unfinished self-service USDC funding route family is gone.
-- The saved Solana wallet route/table/repo/model family is gone; Solana payment receipts record wallet/source metadata in `payments.metadata` while `payments.transaction_id` remains the provider id / chain signature, and subscriptions carry their own `subscriber_wallet`.
-- Customer notification inbox routes remain because Doujins is a confirmed downstream consumer; internal notification/email workflows remain.
-- USD examples use micro-USD.
-- `currency` is documented as real ledger currency, not preferred display currency.
 
 ---
 
@@ -420,41 +777,6 @@ Add rate limiting to admin endpoints to limit blast radius of compromised JWT
 
 ---
 
-# #118: admin-dashboard-metrics-overhaul
-
-**Completed:** no
-
-Overhaul admin dashboard metrics to provide useful business intelligence
-
-## Metadata
-
-- Category: feature
-- Status: not_started
-- Passes: false
-
-## Details
-
-- api_design: {"dashboard_summary":{"endpoint":"GET /v1/admin/metrics/summary","returns":"Key KPIs for dashboard cards (MRR, active subs, churn rate, etc.)"},"revenue_over_time":{"endpoint":"GET /v1/admin/metrics/revenue?start=DATE&end=DATE&granularity=day|week|month","returns":"Time series of revenue data"},"subscriptions_over_time":{"endpoint":"GET /v1/admin/metrics/subscriptions?start=DATE&end=DATE&granularity=day|week|month","returns":"Time series of subscription counts"},"churn_analysis":{"endpoint":"GET /v1/admin/metrics/churn?start=DATE&end=DATE","returns":"Churn breakdown by reason, cohort retention"},"processor_breakdown":{"endpoint":"GET /v1/admin/metrics/processors","returns":"Revenue and counts by processor"}}
-- implementation_notes: ["MRR calculation: sum(price.amount / (price.billing_cycle_days / 30)) for active subs","Need to handle different billing cycles (monthly, quarterly, annual)","Solana one-time payments are not subscriptions - track separately","Consider caching expensive aggregations (refresh every 5 min)","Use PostgreSQL window functions for period-over-period comparisons","May want ClickHouse for historical analytics at scale"]
-- problems: ["Limited metrics - only subscription counts, no revenue or business KPIs","Confusing naming - 'without_auto_renew' actually means 'cancelled but still in period'","No revenue metrics - MRR, ARR, total revenue, average revenue per user","No churn metrics - churn rate, retention rate, LTV","No Solana support - processor metrics exclude Solana one-time payments","No period comparisons - can't compare this week/month vs previous","No cohort analysis - can't track retention by signup month","No conversion funnel - signups to first payment to recurring","Tests are minimal - just verify response structure, not actual data accuracy"]
-- proposed_metrics: {"revenue_metrics":["MRR (Monthly Recurring Revenue) - sum of active subscription monthly values","ARR (Annual Recurring Revenue) - MRR * 12","Total revenue this period - sum of all payments in date range","Revenue by processor - breakdown by CCBill, NMI, Solana","ARPU (Average Revenue Per User) - total revenue / active users"],"subscription_metrics":["Total active subscriptions","New subscriptions this period","Cancelled subscriptions this period (with breakdown by reason)","Net subscriber change (new - cancelled)","Subscriptions by status (active, past_due, cancelled)","Subscriptions by product/tier"],"churn_metrics":["Monthly churn rate - cancelled / active at start of month","Voluntary churn - user/merchant initiated","Involuntary churn - payment failures","Retention rate by cohort - % of month-N signups still active"],"payment_metrics":["Successful payments this period","Failed payments this period","Payment success rate","Refunds issued","Chargebacks received","Average payment amount"],"one_time_purchases":["Solana payments count and value","One-time purchase revenue (non-subscription)"]}
-
-**Tasks:**
-- STEPS:
-- [ ] Define exact metrics needed for admin dashboard UI
-- [ ] Design API response formats for each endpoint
-- [ ] Implement MRR/ARR calculation logic
-- [ ] Implement churn rate calculation
-- [ ] Add revenue aggregation queries
-- [ ] Add one-time purchase tracking (Solana)
-- [ ] Add period comparison support (vs last period)
-- [ ] Add caching layer for expensive queries
-- [ ] Update existing metrics endpoints or create new ones
-- [ ] Write comprehensive tests with seeded data
-- [ ] Document all metrics definitions
-
----
-
 # #126: test-architecture-improvements
 
 **Completed:** no
@@ -527,7 +849,6 @@ Adjust CCBill subscription entitlement logic to model paid term + retries (dunni
 - [x] Add unit test for `EntitlementRepo.IsEntitled` to ensure deleted rows are excluded (regression guard)
 
 ---
-
 
 # #164: cloudflared-managed-dev-tunnel
 
@@ -769,57 +1090,9 @@ NOTE: the admin-METRICS tests' 'Table test_analytics.daily_metrics does not exis
 
 ---
 
-
 # #340: e2e: 5 tier/lifecycle tests fail on master (pre-existing, surfaced by #334 verification)
 
 **Completed:** no
 **Status:** open (filed 2026-06-10 during #334 verification)
 
 TestTierGroupDetection, TestEntitlementChangesOnTierChange, TestScheduledDowngrade, TestRenewMembershipDuplicateTransactionIsNoOp, TestLifecycleServiceUsesMockClock fail identically on origin/master (bun era) and on the sqlc-migration branch — verified via worktree runs on 2026-06-10 during #334 final verification, so they are NOT migration regressions. Observed modes: duplicate key on uq_subscriptions_tenant_subject_tier_group_active across subtests (CleanupSubscriptionsForUser resolves non-UUID test user ids to uuid.Nil via identity.TenantSubjectIDFromString, so per-user cleanup deletes nothing), and mock-clock/lifecycle assertion failures. Distinct from the admin_* family (#333). Suspect shared-suite state + the broken per-user cleanup; fix the cleanup to resolve the tenant subject through billing.tenant_subjects (issuer 'openrails:legacy-user') instead of pure-parsing.
-
----
-
-
-# #550: `auth recreate` registers the host issuer (one-command federated embedded→standalone)
-
-**Completed:** no
-
-**Status:** PLAN — 2026-06-20. Decided (Paul): one step is simpler. Builds on #544's `auth recreate`.
-
-**Requires code change:** yes (OpenRails).
-
-## Problem
-`auth recreate` (cmd/openrails/auth.go) creates each merchant's backing org + owner + optional admin key, but does NOT register the host's issuer / remote-application. For a FEDERATED standalone (e.g. tensorhub as issuer-owner), that linkage lives in AuthKit, not in the billing export, so it can't be reconstructed from the dump — today it's a separate manifest step. Fold it in so federated embedded→standalone is ONE command.
-
-**Status update 2026-06-20:** DONE + VERIFIED LIVE. `auth recreate --issuers <merchant-config.yaml>` reuses the tested merchant-config reconcile (`ReconcileMerchantManifestData` → `provisionMerchantOrg`); merchants without a manifest issuer fall back to `cp.Bootstrap` (org+owner+key). Builds + vets.
-
-## Tasks
-- [x] Added `--issuers <manifest.yaml>` to `auth recreate` (cmd/openrails/auth.go).
-- [x] Per manifest merchant: backing org + issuer registered as org `owner` remote-application — via `ReconcileMerchantManifestData`/`provisionMerchantOrg` (no duplicated logic).
-- [x] Idempotent (Insert+Overwrite); merchants not in the manifest get `cp.Bootstrap` (org+owner+key).
-- [x] VERIFIED LIVE (docker Postgres): `auth recreate --issuers` on a fresh standalone DB → merchant `monkey` (owner_org_id set) + backing org `monkey` (same id, slug==slug) + remote-app `monkey-app` for `https://monkey.example` assigned **role=owner**.
-- [x] Doc: docs/embedded-standalone-mode-switch.md updated to the `--issuers` one-command federated flow.
-
-Related: #544 (data move), #259/#527 (federated issuer-as-owner), #551 (slug==slug).
-
----
-
-
-# #551: Enforce merchant.slug == backing-org.slug (hard invariant)
-
-**Completed:** no
-
-**Status:** PLAN — 2026-06-20. Decided (Paul): a merchant's slug MUST equal its backing-org slug; any divergence invites confusion and must be rejected. `owner_org_id` stays the authority link, but the linked org's slug MUST match.
-
-**Requires code change:** yes (OpenRails).
-
-## Problem
-slug==slug holds by construction in standalone today (`provisionMerchantOrg` creates the org with the merchant slug), but nothing REJECTS a divergence, and embedded relies on an unenforced host convention. Make it a hard boundary where it is code-enforceable.
-
-## Tasks
-- [x] Standalone hard guard: `provisionMerchantOrg` now asserts `res.Org.Slug == merchant.slug` and REJECTs a mismatch; `merchants.Service.Provision` validates the slug. (Manifest can't point at a divergent org — `ManifestMerchant` has no separate org field; the backing org is derived from the merchant slug.)
-- [x] Align merchant-slug validation with AuthKit's org-slug ruleset: added `merchant.NormalizeSlug` + `merchant.ValidateSlug` (mirrors `authkit/core validateOrgSlug` regex `^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`), enforced at `db.RegisterMerchant` (embedded) + `merchants.Service.Provision` (standalone). Unit-tested (`TestValidateSlug`, passes).
-- [x] Embedded: single-slug shape kept (BackingOrgID already reverted); `db.RegisterMerchant` now validates the slug so embedded merchants stay standalone-compatible; no cross-AuthKit check (keeps #541/#543 decoupling).
-- [x] Tests: `TestValidateSlug` (pkg/merchant) passes; `./internal/controlplane` + `./internal/bootstrap` integration suites pass LIVE against docker Postgres (exercise provisioning with the new slug validation + the `provisionMerchantOrg` `org.slug == merchant.slug` assert — valid path unaffected). The federated `auth recreate` run (#547) further confirmed `owner_org_id` links to the same-slug org.
-
-Related: #541 (`owner_org_id` bridge), #543 (no OpenRails-seeded roles), #544 (mode switch), #550.
