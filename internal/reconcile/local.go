@@ -117,7 +117,7 @@ type LocalPrice struct {
 	Processors map[string]map[string]string
 }
 
-// LocalState is one provider's local billing state, loaded tenant-scoped.
+// LocalState is one provider's local billing state, loaded merchant-scoped.
 type LocalState struct {
 	Subscriptions  []LocalSubscription
 	Entitlements   []LocalEntitlement
@@ -137,7 +137,7 @@ type LocalStateLoader interface {
 }
 
 // PGLocalStateLoader loads local state through the sqlc layer on a
-// tenant-pinned connection.
+// merchant-pinned connection.
 type PGLocalStateLoader struct {
 	DB *db.DB
 }

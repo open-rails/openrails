@@ -51,7 +51,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 	logger := log.WithContext(ctx).WithField("worker", KindCreditExpiry)
 
 	batchSize32, _ := safecast.Convert[int32](batchSize)
-	// Privileged (no-GUC) cross-tenant sweep: find customers with lapsed,
+	// Privileged (no-GUC) cross-merchant sweep: find customers with lapsed,
 	// not-yet-clawed credit lots, then expire each via the grant ledger.
 	var rows []gen.ListCustomersWithLapsedCreditLotsRow
 	if err := w.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
@@ -35,11 +36,12 @@ func TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant(t *testing.T) 
 
 	cp := embcp.Get(surface.app)
 	require.NotNil(t, cp)
-	secretStore, err := merchants.NewDBSecretStore(cp.Pool())
+	fixturePool := h.Pool()
+	secretStore, err := merchants.NewDBSecretStore(db.WrapPool(fixturePool, ""))
 	require.NoError(t, err)
 	const whsec = "whsec_no_default_merchant"
 	const accountID = "acct_no_default_merchant"
-	_, err = cp.Pool().Exec(ctx, `
+	_, err = fixturePool.Exec(ctx, `
 		INSERT INTO openrails.provider_accounts (merchant_id, provider_type, environment, account_id, role, status)
 		VALUES ($1::uuid, 'stripe', 'live', $2, 'primary', 'enabled')
 		ON CONFLICT (merchant_id, provider_type, environment, account_id) DO UPDATE

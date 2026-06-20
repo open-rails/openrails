@@ -77,7 +77,7 @@ func TestSecurityHeadersSkipsCSPForNMITokenizationDebugPage(t *testing.T) {
 // CORS allow-list tests: a browser on a configured origin can preflight + call
 // OpenRails directly; an unlisted origin is denied. The allow-list never weakens
 // to "*" when origins are configured.
-func TestCORS_AllowsConfiguredTenantOrigin(t *testing.T) {
+func TestCORS_AllowsConfiguredMerchantOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(CORS([]string{"https://app.example.com", "https://app.example.com"}))

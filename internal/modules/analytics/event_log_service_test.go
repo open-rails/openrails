@@ -91,9 +91,9 @@ func TestLogPaymentEventRequiresCurrencyWithAmount(t *testing.T) {
 	}
 }
 
-// TestLogPaymentEventStampsResolvedTenant proves the spooled analytics event is
+// TestLogPaymentEventStampsResolvedMerchant proves the spooled analytics event is
 // merchant-scoped to the merchant resolved on the context (issue #232).
-func TestLogPaymentEventStampsResolvedTenant(t *testing.T) {
+func TestLogPaymentEventStampsResolvedMerchant(t *testing.T) {
 	sp, err := spool.New(t.TempDir())
 	if err != nil {
 		t.Fatalf("create spool: %v", err)
@@ -116,9 +116,9 @@ func TestLogPaymentEventStampsResolvedTenant(t *testing.T) {
 	}
 }
 
-// TestLogPaymentEventCarriesResolvedTenant proves the event is scoped to the
+// TestLogPaymentEventCarriesResolvedMerchant proves the event is scoped to the
 // merchant resolved onto the request context, not the default (issue #232).
-func TestLogPaymentEventCarriesResolvedTenant(t *testing.T) {
+func TestLogPaymentEventCarriesResolvedMerchant(t *testing.T) {
 	sp, err := spool.New(t.TempDir())
 	if err != nil {
 		t.Fatalf("create spool: %v", err)
@@ -129,21 +129,21 @@ func TestLogPaymentEventCarriesResolvedTenant(t *testing.T) {
 		clock:  clockwork.NewFakeClockAt(time.Date(2026, 5, 12, 10, 30, 0, 0, time.UTC)),
 	}
 
-	tenantID := merchant.ID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
-	ctx, cancel := context.WithTimeout(merchant.WithID(context.Background(), tenantID), 50*time.Millisecond)
+	merchantID := merchant.ID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
+	ctx, cancel := context.WithTimeout(merchant.WithID(context.Background(), merchantID), 50*time.Millisecond)
 	defer cancel()
 	if err := svc.LogPaymentEvent(ctx, PaymentEventData{UserID: "user-1", EventType: PaymentEventChargeSuccess, Processor: "test"}); err != nil {
 		t.Fatalf("log payment event: %v", err)
 	}
 
 	event := readOnlySpooledPayment(t, sp)
-	if event.MerchantID != tenantID.String() {
-		t.Fatalf("merchant_id = %q, want %q", event.MerchantID, tenantID.String())
+	if event.MerchantID != merchantID.String() {
+		t.Fatalf("merchant_id = %q, want %q", event.MerchantID, merchantID.String())
 	}
 }
 
-// TestLogSubscriptionEventStampsTenant proves subscription events are merchant-scoped.
-func TestLogSubscriptionEventStampsTenant(t *testing.T) {
+// TestLogSubscriptionEventStampsMerchant proves subscription events are merchant-scoped.
+func TestLogSubscriptionEventStampsMerchant(t *testing.T) {
 	sp, err := spool.New(t.TempDir())
 	if err != nil {
 		t.Fatalf("create spool: %v", err)

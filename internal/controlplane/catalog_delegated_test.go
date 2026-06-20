@@ -8,36 +8,27 @@ import (
 )
 
 // These tests pin the LOAD-BEARING permission gate for federated merchant-signed
-// browser tokens (issue #259): since the tenant signs, the verify-time catalog is
+// browser tokens (issue #259): since the merchant signs, the verify-time catalog is
 // the SOLE authority for what a browser token may carry. A regression that let a
 // service/operator grant through would be a privilege-escalation hole.
 
-func TestIsDelegatedPermission_AcceptsSelfAndTenant(t *testing.T) {
-	for _, p := range SelfCatalogNames() {
-		require.True(t, IsDelegatedPermission(p), "self perm %q must be accepted", p)
-	}
+func TestIsDelegatedPermission_AcceptsMerchantAdminOnly(t *testing.T) {
 	for _, p := range MerchantCatalogNames() {
-		require.True(t, IsDelegatedPermission(p), "tenant perm %q must be accepted", p)
+		require.True(t, IsDelegatedPermission(p), "merchant perm %q must be accepted", p)
 		require.True(t, IsMerchantPermission(p))
-		require.False(t, IsSelfPermission(p), "tenant perm %q must not be a self perm", p)
 	}
 }
 
-func TestIsDelegatedPermission_HardRejectsServiceAndOperatorGrants(t *testing.T) {
-	// None of these may EVER ride a browser token. Includes the deprecated mint
-	// permission, every coarse server-to-server capability, and both admin tiers.
+func TestIsDelegatedPermission_HardRejectsPlatformAndUnknownGrants(t *testing.T) {
+	// None of these may EVER ride a browser token.
 	forbidden := []string{
 		PermAdmin,
-		PermCreditsRead,
-		PermCreditsWrite,
-		PermEntitlementsRead,
-		PermCatalogWrite,
-		PermPaymentsRefund,
-		PermSubscriptionsCancel,
 		PermPlatformSuperadmin,
-		"openrails:merchant:*", // no wildcard is ever a real permission
-		"openrails:merchant",   // coarse super-grant must not exist
-		"openrails:self:*",     // wildcard, not a concrete self perm
+		"platform:*",
+		"platform:metrics:read",
+		"org:totally_unknown:read",
+		"org:*",
+		"self:*",
 		"totally-unknown-perm",
 	}
 	for _, p := range forbidden {
@@ -46,8 +37,8 @@ func TestIsDelegatedPermission_HardRejectsServiceAndOperatorGrants(t *testing.T)
 }
 
 // TestDelegatedVerify_AcceptsMerchantAdminPermission proves a merchant-signed token
-// carrying a concrete openrails:merchant:* grant verifies through the same catalog
-// the real verifier uses.
+// carrying browser-safe org grants verifies through the same allowlist the real
+// verifier uses.
 func TestDelegatedVerify_AcceptsMerchantAdminPermission(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
@@ -58,26 +49,32 @@ func TestDelegatedVerify_AcceptsMerchantAdminPermission(t *testing.T) {
 	require.Contains(t, dp.Permissions, PermMerchantBillingRead)
 }
 
-// TestDelegatedVerify_RejectsServicePermissionEvenWhenTenantSigned proves the
+// TestDelegatedVerify_RejectsServicePermissionEvenWhenMerchantSigned proves the
 // catalog gate rejects a service grant regardless of a valid signature — the
-// whole point of moving signing to the tenant is that the catalog, not the
+// whole point of moving signing to the merchant is that the catalog, not the
 // signer, bounds authority.
-func TestDelegatedVerify_RejectsServicePermissionEvenWhenTenantSigned(t *testing.T) {
+func TestDelegatedVerify_RejectsPlatformPermissionEvenWhenMerchantSigned(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Permissions: []string{PermCreditsWrite},
+		Permissions: []string{PermPlatformSuperadmin},
 	})
 	_, _, err := v.VerifyDelegatedAccess(tok)
-	require.Error(t, err, "a credits:write grant must be rejected even on a validly-signed token")
+	require.Error(t, err, "a platform grant must be rejected even on a validly-signed token")
 }
 
-// TestDelegatedVerify_RejectsMixedSelfAndService proves the gate is all-or-nothing
-// per token: one bad permission in an otherwise-self token rejects the whole token.
-func TestDelegatedVerify_RejectsMixedSelfAndService(t *testing.T) {
+func TestDelegatedVerify_RejectsUnknownPermission(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Permissions: []string{PermSelfBillingRead, PermCatalogWrite},
+		Permissions: []string{"org:not_in_browser_catalog:read"},
 	})
 	_, _, err := v.VerifyDelegatedAccess(tok)
 	require.Error(t, err, "a single non-delegated permission must reject the whole token")
+}
+
+func TestDelegatedVerify_AcceptsNoPermissions(t *testing.T) {
+	v, signer := newTestDelegatedVerifier(t)
+	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{})
+	_, dp, err := v.VerifyDelegatedAccess(tok)
+	require.NoError(t, err)
+	require.Empty(t, dp.Permissions)
 }

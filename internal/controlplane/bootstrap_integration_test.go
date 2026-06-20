@@ -24,13 +24,13 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// minimalTenantsDDL creates just the openrails.merchants directory table the
+// minimalMerchantsDDL creates just the openrails.merchants directory table the
 // control plane updates (#480/#481). OpenRails 001_schema.up.sql owns the full
 // table in production; the control-plane bootstrap only needs the table (plus a
 // row, seeded via dbtest.EnsureTestMerchant) to exist. slug is UNIQUE to match
 // EnsureTestMerchant's ON CONFLICT (slug). owner_org_id is the #481 ownership
 // link (the AuthKit org that administers the merchant), NOT an identity-equation.
-const minimalTenantsDDL = `
+const minimalMerchantsDDL = `
 CREATE SCHEMA IF NOT EXISTS openrails;
 CREATE TABLE IF NOT EXISTS openrails.merchants (
     id               UUID PRIMARY KEY,
@@ -57,6 +57,7 @@ func newBootstrapTestPool(t *testing.T) *pgxpool.Pool {
 		postgres.WithDatabase("openrails"),
 		postgres.WithUsername("test"),
 		postgres.WithPassword("test"),
+		dbtest.WithPostgresLimits(),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(60*time.Second)),
@@ -91,7 +92,7 @@ func applyBootstrapTestSchema(t *testing.T, ctx context.Context, pool *pgxpool.P
 		_, eerr := pool.Exec(ctx, string(b))
 		require.NoErrorf(t, eerr, "apply authkit migration %s", name)
 	}
-	_, err = pool.Exec(ctx, minimalTenantsDDL)
+	_, err = pool.Exec(ctx, minimalMerchantsDDL)
 	require.NoError(t, err)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 }
@@ -113,13 +114,14 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	pool := newBootstrapTestPool(t)
 	cp := newTestControlPlane(t, pool)
 
-	// First run: creates the operator org, seeds role/perms, mints service token, records tenant.
-	res1, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialServiceToken: true})
+	// First run: creates the operator org, seeds role/perms, mints an API key,
+	// and records the merchant owner.
+	res1, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.NotNil(t, res1)
 	require.True(t, res1.OrgCreated, "first run should create the bootstrap (default) org")
-	require.True(t, res1.ServiceTokenMinted, "first run should mint the initial admin service token")
-	require.NotEmpty(t, res1.ServiceTokenSecret)
+	require.True(t, res1.APIKeyMinted, "first run should mint the initial admin API key")
+	require.NotEmpty(t, res1.APIKeySecret)
 	require.NotEmpty(t, res1.BootstrapOrgID)
 
 	// #481: the owning AuthKit org is recorded on the merchant via the
@@ -130,30 +132,30 @@ func TestBootstrap_Idempotent(t *testing.T) {
 		dbtest.TestMerchantID.String()).Scan(&ownerOrgID))
 	require.Equal(t, res1.BootstrapOrgID, ownerOrgID)
 
-	// The admin role holds the per-tenant catalog (full catalog EXCEPT the
-	// cross-tenant platform-superadmin permission, #226).
+	// The admin role holds the per-merchant catalog (full catalog EXCEPT the
+	// cross-merchant platform-superadmin permission, #226).
 	perms, err := cp.Core().GetRolePermissions(ctx, dbtest.TestMerchantSlug, OperatorRole)
 	require.NoError(t, err)
 	require.ElementsMatch(t, OperatorRolePermissions(), perms)
 	require.NotContains(t, perms, PermPlatformSuperadmin)
 
-	// Second run: idempotent. No new org, no new service token.
-	res2, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialServiceToken: true})
+	// Second run: idempotent. No new org, no new API key.
+	res2, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.NotNil(t, res2)
 	require.False(t, res2.OrgCreated, "re-run must not recreate the bootstrap org org")
-	require.False(t, res2.ServiceTokenMinted, "re-run must not mint a second service token")
-	require.Empty(t, res2.ServiceTokenSecret)
+	require.False(t, res2.APIKeyMinted, "re-run must not mint a second API key")
+	require.Empty(t, res2.APIKeySecret)
 	require.Equal(t, res1.BootstrapOrgID, res2.BootstrapOrgID)
 
-	// Exactly one service token exists after two runs.
-	serviceTokens, err := cp.Core().ListAPIKeys(ctx, dbtest.TestMerchantSlug)
+	// Exactly one API key exists after two runs.
+	apiKeys, err := cp.Core().ListAPIKeys(ctx, dbtest.TestMerchantSlug)
 	require.NoError(t, err)
-	require.Len(t, serviceTokens, 1, "exactly one admin service token after two bootstrap runs")
-	require.ElementsMatch(t, []string{ResourceKindMerchant}, resourceKinds(serviceTokens[0].Resources))
-	require.Contains(t, resourceIDs(serviceTokens[0].Resources, ResourceKindMerchant), dbtest.TestMerchantID.String())
+	require.Len(t, apiKeys, 1, "exactly one admin API key after two bootstrap runs")
+	require.ElementsMatch(t, []string{ResourceKindMerchant}, resourceKinds(apiKeys[0].Resources))
+	require.Contains(t, resourceIDs(apiKeys[0].Resources, ResourceKindMerchant), dbtest.TestMerchantID.String())
 
-	resolved, err := cp.ResolveServiceToken(ctx, res1.ServiceTokenSecret)
+	resolved, err := cp.ResolveAPIKey(ctx, res1.APIKeySecret)
 	require.NoError(t, err)
 	require.Equal(t, dbtest.TestMerchantID, resolved.MerchantID)
 	require.Contains(t, resourceIDs(resolved.Resources, ResourceKindMerchant), dbtest.TestMerchantID.String())
@@ -182,11 +184,11 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	pool := newBootstrapTestPool(t)
 	cp := newTestControlPlane(t, pool)
 
-	_, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialServiceToken: false})
+	_, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: false})
 	require.NoError(t, err)
 
 	// Every per-org operator permission is granted to the operator role and
-	// shows up as an effective role permission; the cross-tenant platform
+	// shows up as an effective role permission; the cross-merchant platform
 	// superadmin permission is NOT (it is seeded only to the platform role, #226).
 	eff, err := cp.Core().EffectiveRolePermissions(ctx, dbtest.TestMerchantSlug, OperatorRole)
 	require.NoError(t, err)
@@ -196,7 +198,7 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	require.NotContains(t, eff, PermPlatformSuperadmin)
 
 	// Re-running with the same catalog keeps the grant stable (replace, not grow).
-	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialServiceToken: false})
+	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: false})
 	require.NoError(t, err)
 	eff2, err := cp.Core().EffectiveRolePermissions(ctx, dbtest.TestMerchantSlug, OperatorRole)
 	require.NoError(t, err)
@@ -215,7 +217,7 @@ func TestBootstrapPlatform_NoopsInSelfHostedOpenRails(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cp)
 
-	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialServiceToken: false})
+	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: false})
 	require.NoError(t, err)
 	pres, err := cp.BootstrapPlatform(ctx)
 	require.NoError(t, err)
@@ -226,13 +228,13 @@ func TestBootstrapPlatform_NoopsInSelfHostedOpenRails(t *testing.T) {
 	// SaaS admin layer belongs in openrails-saas, not this self-hosted control plane.
 	tAdmin, err := cp.Core().CreateUser(ctx, "merchant-admin@test.local", "tenantadmin")
 	require.NoError(t, err)
-	tenantOperatorAdminID := tAdmin.ID
-	require.NoError(t, cp.Core().AddMember(ctx, dbtest.TestMerchantSlug, tenantOperatorAdminID))
-	require.NoError(t, cp.Core().AssignRole(ctx, dbtest.TestMerchantSlug, tenantOperatorAdminID, OperatorRole))
-	opIsAdmin, err := cp.IsAdmin(ctx, dbtest.TestMerchantSlug, tenantOperatorAdminID)
+	orgOperatorAdminID := tAdmin.ID
+	require.NoError(t, cp.Core().AddMember(ctx, dbtest.TestMerchantSlug, orgOperatorAdminID))
+	require.NoError(t, cp.Core().AssignRole(ctx, dbtest.TestMerchantSlug, orgOperatorAdminID, OperatorRole))
+	opIsAdmin, err := cp.IsAdmin(ctx, dbtest.TestMerchantSlug, orgOperatorAdminID)
 	require.NoError(t, err)
-	require.True(t, opIsAdmin, "per-merchant admin should hold openrails:admin in their own tenant")
-	opIsPlatform, err := cp.HasPlatformSuperadmin(ctx, tenantOperatorAdminID)
+	require.True(t, opIsAdmin, "per-merchant admin should hold merchant-local org authority in their own org")
+	opIsPlatform, err := cp.HasPlatformSuperadmin(ctx, orgOperatorAdminID)
 	require.NoError(t, err)
 	require.False(t, opIsPlatform, "per-merchant admin must NOT be a platform superadmin")
 }
@@ -254,13 +256,13 @@ func TestMerchantForOwnerOrg(t *testing.T) {
 		   SET owner_org_id = 'ak-default-id', status = 'active'
 		 WHERE id = $1::uuid`, dbtest.TestMerchantID.String())
 	require.NoError(t, err)
-	// A SECOND merchant owned by the SAME tenant (#481: one tenant -> many merchants).
+	// A SECOND merchant owned by the SAME org (#481: one org -> many merchants).
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.merchants (id, slug, status, owner_org_id)
 		VALUES ('00000000-0000-0000-0000-000000000004', 'second', 'active', 'ak-default-id')
 		ON CONFLICT (id) DO NOTHING`)
 	require.NoError(t, err)
-	// A suspended merchant owned by a distinct tenant.
+	// A suspended merchant owned by a distinct org.
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.merchants (id, slug, status, owner_org_id)
 		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'suspended', 'ak-acme-id')
@@ -280,19 +282,19 @@ func TestMerchantForOwnerOrg(t *testing.T) {
 
 	// An org that owns multiple merchants must name one explicitly.
 	_, _, err = cp.merchantForOwnerOrg(ctx, "ak-default-id")
-	require.ErrorIs(t, err, ErrServiceTokenMerchantUnresolved)
+	require.ErrorIs(t, err, ErrServiceCredentialMerchantUnresolved)
 
 	// A credential with no owning org is rejected.
 	_, _, err = cp.merchantForOwnerOrg(ctx, "")
-	require.ErrorIs(t, err, ErrServiceTokenMerchantUnresolved)
+	require.ErrorIs(t, err, ErrServiceCredentialMerchantUnresolved)
 
 	// An owner that owns no merchant is rejected.
 	_, _, err = cp.merchantForOwnerOrg(ctx, "ak-nobody-id")
-	require.ErrorIs(t, err, ErrServiceTokenMerchantUnresolved)
+	require.ErrorIs(t, err, ErrServiceCredentialMerchantUnresolved)
 
 	// A suspended merchant's owner resolves to no ACTIVE merchant.
 	_, _, err = cp.merchantForOwnerOrg(ctx, "ak-acme-id")
-	require.ErrorIs(t, err, ErrServiceTokenMerchantUnresolved)
+	require.ErrorIs(t, err, ErrServiceCredentialMerchantUnresolved)
 
 	// #481 role-based AuthorizeMerchant: the owning org may act on EITHER of its
 	// merchants when the request NAMES one (an org owning many merchants).
@@ -300,8 +302,8 @@ func TestMerchantForOwnerOrg(t *testing.T) {
 	second, perr := merchant.ParseID("00000000-0000-0000-0000-000000000004")
 	require.NoError(t, perr)
 	require.NoError(t, cp.AuthorizeMerchant(ctx, "ak-default-id", second))
-	// A different tenant may NOT act on a merchant it does not own.
-	require.ErrorIs(t, cp.AuthorizeMerchant(ctx, "ak-acme-id", dbtest.TestMerchantID), ErrServiceTokenScopeDenied)
+	// A different org may NOT act on a merchant it does not own.
+	require.ErrorIs(t, cp.AuthorizeMerchant(ctx, "ak-acme-id", dbtest.TestMerchantID), ErrServiceCredentialScopeDenied)
 
 	// The control plane built a delegated verifier (browser-tier prerequisite).
 	require.NotNil(t, cp.DelegatedVerifier())

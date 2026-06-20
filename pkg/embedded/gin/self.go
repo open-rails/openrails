@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/captcha"
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
@@ -25,20 +24,19 @@ import (
 // surface for an embedded host (issues #339/#467). A host-supplied
 // billingauth.DelegatedAuthenticator wins when present. Otherwise OpenRails
 // adapts the embedded billingauth.Authenticator into a self-service principal
-// pinned to the configured embedded merchant and carrying the full
-// openrails:self:* permission catalog.
+// pinned to the configured embedded merchant.
 //
 // Routes are served at the CANONICAL embedded paths, alongside the
 // NewHTTPHandler surface:
 //
-//	/billing/v1/me/*            (RegisterSelfServiceRoutes — openrails:self:*)
-//	/billing/v1/admin/*         (RegisterAdminRoutes — openrails:merchant:*)
+//	/billing/v1/me/*            (RegisterSelfServiceRoutes)
+//	/billing/v1/admin/*         (RegisterAdminRoutes — browser-safe org:*)
 //
 // so a host that mounts NewHTTPHandler under /billing without prefix stripping
 // can route these two subtrees to this handler and everything else to the
 // gin-free handler. The same neutral base middleware stack wraps it (security
-// headers, CORS, body limit, default-tenant resolution — the delegated
-// middleware then pins the principal's tenant), keeping the two embedded
+// headers, CORS, body limit, default merchant resolution — the delegated
+// middleware then pins the principal's merchant), keeping the two embedded
 // handlers behaviorally consistent. Host-supplied delegated authenticators own
 // their own browser-origin policy before returning a principal.
 //
@@ -84,7 +82,6 @@ func delegatedAuthenticatorFromUserAuthenticator(authn billingauth.Authenticator
 			MerchantID:    configured.String(),
 			SubjectID:     uc.UserID,
 			Issuer:        "embedded",
-			Permissions:   controlplane.SelfCatalogNames(),
 			Email:         uc.Email,
 			EmailVerified: uc.EmailVerified,
 			Username:      uc.Username,

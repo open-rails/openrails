@@ -39,7 +39,7 @@ func blocklistEnv(t *testing.T) (*abuse.BlocklistService, *pgxpool.Pool, context
 	return abuse.NewBlocklistService(dbi), pool, ctx
 }
 
-func TestBlocklist_TenantWideAddIsBlockedRemove(t *testing.T) {
+func TestBlocklist_MerchantWideAddIsBlockedRemove(t *testing.T) {
 	svc, pool, ctx := blocklistEnv(t)
 
 	// Use unique values so the shared (persistent) container doesn't collide

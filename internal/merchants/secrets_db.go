@@ -23,7 +23,7 @@ type dbSecretStore struct {
 // pgx pool (the pool that holds the openrails.* schema).
 func NewDBSecretStore(pool *db.Pool) (MerchantSecretStore, error) {
 	if pool == nil {
-		return nil, errors.New("tenancy: pgx pool is required for the DB-backed secret store")
+		return nil, errors.New("merchants: pgx pool is required for the DB-backed secret store")
 	}
 	return &dbSecretStore{pool: pool}, nil
 }

@@ -17,7 +17,7 @@ import (
 
 // TestAdminProductAccessGrantAndRevoke exercises the #528 delegated product-access
 // WRITE surface end-to-end against Postgres: a merchant admin holding
-// openrails:merchant:product-access:write grants a user ownership of a product
+// org:product_access:update grants a user ownership of a product
 // (POST /v1/admin/users/:id/product-access), the grant appears in the composite
 // user-detail product_access section, and a DELETE revokes it. Product access
 // (#250) is a SEPARATE concept from entitlements, with its own write capability.

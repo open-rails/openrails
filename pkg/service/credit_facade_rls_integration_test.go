@@ -72,12 +72,12 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	svc, err := billingservice.New(rt)
 	require.NoError(t, err)
 
-	tctx := merchant.WithID(ctx, mustTenantID(t, tenantID))
+	tctx := merchant.WithID(ctx, mustMerchantID(t, tenantID))
 
 	// Deposit 1000 — exercises BeginMerchantTx under RLS.
 	depSrc := uuid.New()
 	_, err = svc.DepositCredits(tctx, billingservice.DepositCreditsRequest{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 1000, Source: "test", SourceID: &depSrc,
+		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Source: "test", SourceID: &depSrc,
 	})
 	require.NoError(t, err, "DepositCredits must work under openrails_app (GUC set)")
 
@@ -105,7 +105,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	// path that proves writes work under the openrails_app role.
 	wSrc := uuid.New()
 	_, err = svc.WithdrawCredits(tctx, billingservice.WithdrawCreditsRequest{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Amount: 400, Source: "test", SourceID: &wSrc,
+		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 400, Source: "test", SourceID: &wSrc,
 	})
 	require.NoError(t, err, "WithdrawCredits must work under openrails_app")
 
@@ -131,9 +131,9 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	require.NotEmpty(t, txns)
 }
 
-// mustTenantID parses a merchant id for tests (re-homed from the removed
+// mustMerchantID parses a merchant id for tests (re-homed from the removed
 // authorize_and_hold test).
-func mustTenantID(t *testing.T, s string) merchant.ID {
+func mustMerchantID(t *testing.T, s string) merchant.ID {
 	t.Helper()
 	id, err := merchant.ParseID(s)
 	require.NoError(t, err)

@@ -23,10 +23,10 @@ type Options struct {
 	// neutral Required/Optional middleware for these routes (issue #282/#285).
 	Authenticator billingauth.Authenticator
 
-	// AdminPermissionChecker is the LIVE authority for admin routes (#312): admin
-	// routes require the openrails:admin permission evaluated live against the
-	// CALLER'S OWN tenant. nil for embedded hosts without a control plane, in
-	// which case admin routes fail closed (there is no operator-tenant or
+	// AdminPermissionChecker is the LIVE authority for admin routes (#312/#537):
+	// admin routes require merchant-local `org:` authority evaluated live against
+	// the CALLER'S OWN org. nil for embedded hosts without a control plane, in
+	// which case admin routes fail closed (there is no operator-org or
 	// role-claim fallback).
 	AdminPermissionChecker authpolicy.AdminPermissionChecker
 
@@ -37,16 +37,16 @@ type Options struct {
 }
 
 type ServiceCredentialResolver interface {
-	LooksLikeServiceToken(token string) bool
-	ResolveServiceToken(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
+	LooksLikeAPIKey(token string) bool
+	ResolveAPIKey(ctx context.Context, token string) (*controlplane.ResolvedServiceCredential, error)
 }
 
 type serviceJWTResolver interface {
-	ResolveServiceJWT(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
+	ResolveServiceJWT(ctx context.Context, token string) (*controlplane.ResolvedServiceCredential, error)
 }
 
 type remoteApplicationResolver interface {
-	ResolveRemoteApplication(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
+	ResolveRemoteApplication(ctx context.Context, token string) (*controlplane.ResolvedServiceCredential, error)
 }
 
 // requiredMW builds the neutral "authentication required" middleware for the
@@ -100,8 +100,8 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	required := opts.requiredMW()
 	optional := opts.optionalMW()
 
-	// Pin a tenant-scoped DB connection for the request (tenant resolved by the
-	// global ResolveMerchant middleware) so RLS constrains tenant-owned queries
+	// Pin a merchant-scoped DB connection for the request (merchant resolved by the
+	// global ResolveMerchant middleware) so RLS constrains merchant-owned queries
 	// (issue #227). It applies to every route in this group.
 	var group router.Router = rr
 	if rt != nil && rt.DB != nil {
@@ -127,8 +127,8 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 }
 
 // #528: the per-user `/v1/admin` surface (RegisterAdminRoutes) was retired. The
-// admin API is the delegated issuer→owner surface (ginroutes.RegisterAdminRoutes,
-// `openrails:merchant:*`). The dropped features (provider-intents, reconcile,
+// admin API is the delegated issuer-owner surface (ginroutes.RegisterAdminRoutes,
+// browser-safe `org:` permissions). The dropped features (provider-intents, reconcile,
 // solana recurring plans, entitlement-features) live only on the dead surface and
 // are removed; product-access moves to the delegated surface (#528 increment 4).
 
@@ -158,7 +158,7 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 				if r.Request != nil {
 					r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), resolved.MerchantID))
 				}
-				r.Set("openrails.service_token", resolved)
+				r.Set("openrails.service_credential", resolved)
 				next(r)
 				return
 			}
@@ -204,7 +204,7 @@ func (opts Options) authenticateUser(r *httprequest.Request) (billingauth.UserCo
 	return uc, true
 }
 
-func (opts Options) resolveServiceCredential(r *httprequest.Request) (*controlplane.ResolvedServiceToken, bool) {
+func (opts Options) resolveServiceCredential(r *httprequest.Request) (*controlplane.ResolvedServiceCredential, bool) {
 	resolver := opts.ServiceCredentialResolver
 	if resolver == nil || r == nil || r.Request == nil {
 		return nil, false
@@ -213,8 +213,8 @@ func (opts Options) resolveServiceCredential(r *httprequest.Request) (*controlpl
 	if token == "" {
 		return nil, false
 	}
-	if resolver.LooksLikeServiceToken(token) {
-		resolved, err := resolver.ResolveServiceToken(r.Request.Context(), token)
+	if resolver.LooksLikeAPIKey(token) {
+		resolved, err := resolver.ResolveAPIKey(r.Request.Context(), token)
 		if err != nil {
 			writeServiceCredentialError(r, err)
 			return nil, true
@@ -255,15 +255,15 @@ func bearerToken(header string) string {
 func writeServiceCredentialError(r *httprequest.Request, err error) {
 	switch {
 	case errors.Is(err, authcore.ErrAccessTokenExpired):
-		r.AbortJSON(http.StatusUnauthorized, "service_token_expired")
+		r.AbortJSON(http.StatusUnauthorized, "service_credential_expired")
 	case errors.Is(err, authcore.ErrAccessTokenRevoked):
-		r.AbortJSON(http.StatusUnauthorized, "service_token_revoked")
-	case errors.Is(err, controlplane.ErrServiceTokenMerchantUnresolved):
-		r.AbortJSON(http.StatusForbidden, "service_token_merchant_unresolved")
-	case errors.Is(err, controlplane.ErrServiceTokenScopeDenied):
-		r.AbortJSON(http.StatusForbidden, "service_token_resource_scope_denied")
+		r.AbortJSON(http.StatusUnauthorized, "service_credential_revoked")
+	case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved):
+		r.AbortJSON(http.StatusForbidden, "service_credential_merchant_unresolved")
+	case errors.Is(err, controlplane.ErrServiceCredentialScopeDenied):
+		r.AbortJSON(http.StatusForbidden, "service_credential_resource_scope_denied")
 	default:
-		r.AbortJSON(http.StatusUnauthorized, "service_token_invalid")
+		r.AbortJSON(http.StatusUnauthorized, "service_credential_invalid")
 	}
 }
 

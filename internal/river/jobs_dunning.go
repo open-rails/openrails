@@ -185,7 +185,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	materializedCount := 0
 
 	for _, sub := range dueSubscriptions {
-		// #336: pin the subscription's tenant so writes in processSubscription
+		// #336: pin the subscription's merchant so writes in processSubscription
 		// (payment inserts, lifecycle updates) carry the app.tenant_id GUC.
 		outcome := dunningOutcomeFailed
 		if err := w.DB.RunInMerchantConn(merchant.WithID(ctx, merchant.ID(sub.MerchantID)), func(tctx context.Context) error {
@@ -201,7 +201,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 			return nil
 		}); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
-				Error("Dunning: failed to pin tenant connection; counting subscription as failed")
+				Error("Dunning: failed to pin merchant connection; counting subscription as failed")
 		}
 		switch outcome {
 		case dunningOutcomeSucceeded:
@@ -292,7 +292,7 @@ func (w *DunningWorker) processSubscription(
 	if materialize {
 		genSub, err := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID)
 		if err != nil {
-			logEntry.WithError(err).Warn("Dunning (materialize): failed to load subscription tenant for rebill intent")
+			logEntry.WithError(err).Warn("Dunning (materialize): failed to load subscription merchant for rebill intent")
 			return dunningOutcomeFailed
 		}
 		attemptOrdinal := 0
@@ -364,7 +364,7 @@ func (w *DunningWorker) processSubscription(
 	// key and gets the durable outcome back instead of double-charging.
 	genSub, err := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID)
 	if err != nil {
-		logEntry.WithError(err).Warn("Dunning: failed to load subscription tenant for rebill intent")
+		logEntry.WithError(err).Warn("Dunning: failed to load subscription merchant for rebill intent")
 		return dunningOutcomeFailed
 	}
 	attemptOrdinal := 0

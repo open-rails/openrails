@@ -4,6 +4,6 @@ version: 1
 
 authority:
   bootstrap_org_slug: local-stack
-  # Optional existing AuthKit user id to grant openrails:admin in this org.
+  # Optional existing AuthKit user id to grant the merchant-local operator role in this org.
   # initial_admin_user_id: usr_admin
-  mint_initial_service_token: true
+  mint_initial_api_key: true

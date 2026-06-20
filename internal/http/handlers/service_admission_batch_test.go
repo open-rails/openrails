@@ -76,9 +76,9 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, out[4].Status)
 	require.Equal(t, "admission check failed", out[4].Error)
 
-	// Item 5: token tenant-subject scope denied -> per-item 403.
+	// Item 5: token merchant-subject scope denied -> per-item 403.
 	require.Equal(t, http.StatusForbidden, out[5].Status)
-	require.Equal(t, "service_token_tenant_subject_scope_denied", out[5].Error)
+	require.Equal(t, "service_credential_customer_scope_denied", out[5].Error)
 
 	// Item 6: negative estimate -> per-item 400.
 	require.Equal(t, http.StatusBadRequest, out[6].Status)

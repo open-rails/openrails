@@ -144,7 +144,7 @@ func pickNMIClient(clients map[string]*nmi.NMIClient) (string, *nmi.NMIClient) {
 }
 
 // NewEngine assembles a DB-backed engine over the given fetchers. The caller
-// supplies a tenant-scoped context at Run time.
+// supplies a merchant-scoped context at Run time.
 func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]ProcessorFetcher) *Engine {
 	e := &Engine{
 		Fetchers: fetchers,

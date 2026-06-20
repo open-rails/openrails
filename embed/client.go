@@ -30,9 +30,9 @@ import (
 // status+message the handler would have written, which is what makes errors.Is
 // behave identically across transports.
 //
-// The service-token tenant-subject scope gate (requireServiceCustomerScope)
+// The service-credential customer scope gate (requireServiceCustomerScope)
 // is intentionally NOT transcribed: in embedded mode the host IS the principal
-// and is trusted for its own tenant, exactly like a tenant-wide service token.
+// and is trusted for its own merchant.
 type localClient struct {
 	svc *billingservice.Service
 	// currency is the default currency applied to Authorize/Balance/window
@@ -899,7 +899,7 @@ func wireEntitlementRecords(recs []billingservice.EntitlementRecord) []openrails
 
 // ListActiveEntitlements transcribes
 // handlers.ServiceGetExternalSubjectEntitlements (entitlements.go): trim +
-// dedupe, cap, one query, an entry per requested subject. The service-token
+// dedupe, cap, one query, an entry per requested subject. The service-credential
 // scope gate is not transcribed — embedded hosts are the principal.
 func (c *localClient) ListActiveEntitlements(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]openrails.EntitlementRecord, error) {
 	ctx = c.ensureTenant(ctx)
@@ -939,6 +939,33 @@ func (c *localClient) ListActiveEntitlements(ctx context.Context, issuer string,
 	return out, nil
 }
 
+// ListCustomersWithEntitlement transcribes
+// handlers.ServiceGetCustomersWithEntitlement (entitlements.go): trim,
+// require entitlement, default page size, and keyset pagination to completion.
+func (c *localClient) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]string, error) {
+	ctx = c.ensureTenant(ctx)
+	entitlement = strings.TrimSpace(entitlement)
+	if entitlement == "" {
+		return nil, invalidErr("entitlement required")
+	}
+	var all []string
+	afterID := uuid.Nil
+	for {
+		ids, err := c.svc.ListCustomersWithEntitlement(ctx, entitlement, at, afterID, 1000)
+		if err != nil {
+			return nil, internalErr("failed to list customers")
+		}
+		for _, id := range ids {
+			all = append(all, id.String())
+		}
+		if len(ids) < 1000 {
+			break
+		}
+		afterID = ids[len(ids)-1]
+	}
+	return all, nil
+}
+
 // ResourceRevenueDaily transcribes handlers.ServiceResourceRevenue
 // (service_credits.go), including the handler-side total summation.
 func (c *localClient) ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*openrails.ResourceRevenueResponse, error) {
@@ -975,7 +1002,7 @@ const maxAdmitBatchItems = 1000
 
 // AdmitBatch transcribes handlers.ServiceAdmitBatch +
 // serviceAdmitBatchVerdicts (service_admission.go, #335) with full per-item
-// isolation. The per-item service-token tenant-subject scope gate is not
+// isolation. The per-item API-key tenant-subject scope gate is not
 // transcribed — in embedded mode the host IS the principal, exactly like a
 // tenant-wide token (so its `allows` is always true).
 func (c *localClient) AdmitBatch(ctx context.Context, items []openrails.AdmitRequest) ([]openrails.AdmitBatchVerdict, error) {

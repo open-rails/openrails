@@ -13,17 +13,18 @@ import (
 )
 
 // ErrRemoteApplicationNotConfigured indicates the control plane has no verifier
-// to validate a JWKS-principal self-token. A wiring bug (#469): fail closed.
+// to validate a remote application access token. A wiring bug (#469): fail closed.
 var ErrRemoteApplicationNotConfigured = errors.New("controlplane: remote_application verifier not configured")
 
-// ErrNotRemoteApplicationToken indicates the presented credential verified but is
-// not a JWKS-principal self-token (typ=remote-application-access+jwt). The caller
-// must NOT treat it as a remote_application credential.
-var ErrNotRemoteApplicationToken = errors.New("controlplane: not a remote_application self-token")
+// ErrNotRemoteApplicationToken indicates the presented credential verified but
+// is not a remote application access token
+// (typ=remote-application-access+jwt). The caller must NOT treat it as a
+// remote_application credential.
+var ErrNotRemoteApplicationToken = errors.New("controlplane: not a remote application access token")
 
 // LooksLikeJWT reports whether token has the three-segment compact-JWS shape, so
-// the middleware can route a non-service-token bearer to JWT verification rather
-// than rejecting it. It does NOT validate the token.
+// the middleware can route a non-API-key bearer to JWT verification rather than
+// rejecting it. It does NOT validate the token.
 func LooksLikeJWT(token string) bool {
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -32,24 +33,24 @@ func LooksLikeJWT(token string) bool {
 	return strings.Count(token, ".") == 2
 }
 
-// ResolveRemoteApplication validates a JWKS-principal SELF-token (#76/#484) and
-// resolves the caller into a *ResolvedServiceToken — the SAME shape service-token
-// auth produces — so the existing #481 role-based merchant authz runs unchanged.
+// ResolveRemoteApplication validates a remote application access token
+// (#76/#484) and resolves the caller into the same merchant-scoped service-credential result
+// used by API keys and service JWTs, so the existing #481 role-based merchant
+// authz runs unchanged.
 //
 // AuthKit's verifier resolves the principal's STORED authority from the VALIDATED
 // `iss` (its registered remote_application -> assigned org roles + direct
 // permissions); the token's own self-claimed permissions/roles are IGNORED. The
 // merchant the caller administers is resolved by ROLE on the merchant's
-// owner_org_id (#481), never by an identity-equation — exactly the
-// service-token model.
+// owner_org_id (#481), never by an identity-equation.
 //
 // Returns:
 //   - ErrNotRemoteApplicationToken when the token verifies but is not a
-//     remote_application self-token (caller falls through / rejects),
+//     remote application access token (caller falls through / rejects),
 //   - ErrDelegatedInvalid for any verification failure (sanitized),
-//   - ErrServiceTokenMerchantUnresolved when the principal's org owns no
+//   - ErrServiceCredentialMerchantUnresolved when the principal's org owns no
 //     active merchant (fail closed).
-func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token string) (*ResolvedServiceToken, error) {
+func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token string) (*ResolvedServiceCredential, error) {
 	if c == nil || c.delegatedVerifier == nil {
 		return nil, ErrRemoteApplicationNotConfigured
 	}
@@ -81,15 +82,15 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 		return nil, err
 	}
 
-	return &ResolvedServiceToken{
+	return &ResolvedServiceCredential{
 		OwnerOrgID:   ownerOrgID,
 		OwnerOrgSlug: strings.TrimSpace(cl.Org),
 		MerchantID:   mid,
 		MerchantSlug: mslug,
 		Permissions:  append([]string(nil), cl.Permissions...),
-		// A JWKS principal carries merchant-WIDE authority over the merchant its
-		// owning org owns; scope it to that merchant resource so subject-scope
-		// checks (AllowsCustomer) behave like a merchant-wide service token.
+		// A remote application carries merchant-wide authority over the merchant
+		// its owning org owns; scope it to that merchant resource so subject-scope
+		// checks (AllowsCustomer) behave like a merchant-wide credential.
 		Resources: []authcore.APIKeyResource{MerchantResource(mid)},
 	}, nil
 }
@@ -102,7 +103,7 @@ func isRemoteApplicationWrongType(err error) bool {
 	return msg == "access_token_wrong_typ" || msg == "delegated_access_wrong_typ"
 }
 
-// merchantForRemoteApplication resolves the OpenRails merchant a JWKS principal
+// merchantForRemoteApplication resolves the OpenRails merchant a remote application
 // administers (#481), by ROLE on the owning AuthKit org: the principal's
 // STORED org memberships -> the AuthKit org uuid -> the merchant whose
 // owner_org_id is that uuid. Returns the merchant id/slug and the resolved
@@ -118,15 +119,15 @@ func (c *ControlPlane) merchantForRemoteApplication(ctx context.Context, cl auth
 	// AuthKit uuid, then the merchant owned by it.
 	slug := strings.TrimSpace(cl.Org)
 	if slug == "" {
-		return merchant.ID{}, "", "", ErrServiceTokenMerchantUnresolved
+		return merchant.ID{}, "", "", ErrServiceCredentialMerchantUnresolved
 	}
 	t, err := c.Core().ResolveOrgBySlug(ctx, slug)
 	if err != nil || t == nil {
-		return merchant.ID{}, "", "", ErrServiceTokenMerchantUnresolved
+		return merchant.ID{}, "", "", ErrServiceCredentialMerchantUnresolved
 	}
 	mid, mslug, err := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, t.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return merchant.ID{}, "", "", ErrServiceTokenMerchantUnresolved
+		return merchant.ID{}, "", "", ErrServiceCredentialMerchantUnresolved
 	}
 	if err != nil {
 		return merchant.ID{}, "", "", err

@@ -2,6 +2,8 @@ package intents
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -23,6 +25,8 @@ type fakeLedger struct {
 	reasons    map[uuid.UUID]string
 	nextAt     map[uuid.UUID]time.Time
 	evidence   map[uuid.UUID]map[string]any
+	logs       []MutationLogParams
+	logErr     error
 
 	// Synchronous-path state: Enqueue returns enqueued (scripted conflict
 	// row); ClaimByID claims it unless claimByIDRefused.
@@ -87,6 +91,13 @@ func (f *fakeLedger) ClaimDueVerify(context.Context, time.Time, time.Time, int64
 	return f.dueVerify, nil
 }
 func (f *fakeLedger) ExpireOverdue(context.Context, time.Time) (int64, error) { return 0, nil }
+func (f *fakeLedger) LogExternalMutation(_ context.Context, p MutationLogParams) error {
+	if f.logErr != nil {
+		return f.logErr
+	}
+	f.logs = append(f.logs, p)
+	return nil
+}
 func (f *fakeLedger) MarkSucceeded(_ context.Context, id uuid.UUID, _ time.Time, ev map[string]any) error {
 	f.transition[id] = StatusSucceeded
 	f.evidence[id] = ev
@@ -151,12 +162,14 @@ func (h *fakeHandler) Backoff(attempts int32) time.Duration {
 
 func testIntent(typ string, origin Origin, attempts int32) gen.OpenrailsProviderIntent {
 	return gen.OpenrailsProviderIntent{
-		ID:         uuid.New(),
-		IntentType: typ,
-		Provider:   "mobius",
-		Origin:     string(origin),
-		Attempts:   attempts,
-		Status:     StatusInFlight,
+		ID:             uuid.New(),
+		MerchantID:     uuid.New(),
+		IntentType:     typ,
+		Provider:       "mobius",
+		IdempotencyKey: "intent-" + uuid.NewString(),
+		Origin:         string(origin),
+		Attempts:       attempts,
+		Status:         StatusInFlight,
 	}
 }
 
@@ -438,4 +451,71 @@ func TestRunnerTerminalEvidencePersisted(t *testing.T) {
 	runOnce(t, ledger, h, modeFull())
 	assert.Equal(t, StatusFailedTerminal, ledger.transition[intent.ID])
 	assert.Equal(t, map[string]any{"response_code": 252}, ledger.evidence[intent.ID])
+}
+
+func TestRunnerLogsExternalMutationAttemptsAppendOnly(t *testing.T) {
+	ledger := newFakeLedger()
+	h := &fakeHandler{typ: "t", relevance: StillRelevant(),
+		execute: Succeeded(map[string]any{"remote_id": "sub_123"})}
+	intent := testIntent("t", OriginUser, 2)
+	ledger.due = []gen.OpenrailsProviderIntent{intent}
+
+	runOnce(t, ledger, h, modeFull())
+
+	require.Len(t, ledger.logs, 2)
+	assert.Equal(t, MutationLogPhaseAttempting, ledger.logs[0].Phase)
+	assert.Equal(t, MutationLogPhaseSucceeded, ledger.logs[1].Phase)
+	assert.Equal(t, intent.ID, *ledger.logs[0].ProviderIntentID)
+	assert.Equal(t, intent.ID, *ledger.logs[1].ProviderIntentID)
+	assert.Equal(t, intent.Attempts, ledger.logs[0].Attempt)
+	assert.Equal(t, intent.IdempotencyKey, ledger.logs[0].IdempotencyKey)
+	assert.Equal(t, "sub_123", ledger.logs[1].Evidence["remote_id"])
+}
+
+func TestRunnerDoesNotLogReadOnlyVerify(t *testing.T) {
+	ledger := newFakeLedger()
+	h := &fakeHandler{typ: "t", relevance: StillRelevant(), verify: Succeeded(nil)}
+	intent := testIntent("t", OriginUser, 2)
+	intent.Status = StatusUnknownNeedsVerify
+	ledger.dueVerify = []gen.OpenrailsProviderIntent{intent}
+
+	r := &Runner{Store: ledger, Registry: NewRegistry(h)}
+	_, err := r.RunVerifyOnce(context.Background())
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, h.verified)
+	assert.Empty(t, ledger.logs)
+}
+
+func TestRunnerDoesNotExecuteWhenAttemptLogFails(t *testing.T) {
+	ledger := newFakeLedger()
+	ledger.logErr = errors.New("write failed")
+	h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Succeeded(nil)}
+	intent := testIntent("t", OriginUser, 1)
+	ledger.due = []gen.OpenrailsProviderIntent{intent}
+
+	runOnce(t, ledger, h, modeFull())
+
+	assert.Zero(t, h.executed)
+	assert.Equal(t, StatusPending, ledger.transition[intent.ID])
+	assert.Contains(t, ledger.reasons[intent.ID], "mutation log unavailable")
+}
+
+func TestMutationLogScrubsSensitiveFields(t *testing.T) {
+	got := scrubMutationEvidence(map[string]any{
+		"remote_id":      "sub_123",
+		"security_key":   "raw-secret",
+		"message":        "provider failed security_key=raw-secret card_number=4111111111111111",
+		"nested":         map[string]any{"authorization": "Bearer token", "status": "failed"},
+		"privateKeyFile": "/tmp/key.pem",
+	})
+
+	body, err := json.Marshal(got)
+	require.NoError(t, err)
+	text := string(body)
+	assert.NotContains(t, text, "raw-secret")
+	assert.NotContains(t, text, "4111111111111111")
+	assert.NotContains(t, text, "Bearer token")
+	assert.NotContains(t, text, "/tmp/key.pem")
+	assert.Contains(t, text, "sub_123")
 }

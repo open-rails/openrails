@@ -60,40 +60,31 @@ func doSelf(h http.Handler, method, path string) *httptest.ResponseRecorder {
 
 // The #339 account routes answer at the CANONICAL embedded paths. rt==nil:
 // reaching the handler panics (gin Recovery turns it into a 500), which proves
-// the auth + permission gates ADMITTED the request — a 401/403/404 would mean
-// the surface is unmounted or gated wrong.
-func TestSelfHandler_EmbeddedPathsMountedAndGated(t *testing.T) {
-	readOnly := newSelfHandler(nil, stubSelfAuthenticator{
-		principal: selfPrincipal("openrails:self:billing:read"),
+// auth admitted the request — a 401/403/404 would mean the surface is unmounted
+// or gated wrong.
+func TestSelfHandler_EmbeddedPathsMountedWithoutSelfPermissions(t *testing.T) {
+	self := newSelfHandler(nil, stubSelfAuthenticator{
+		principal: selfPrincipal(),
 	}, merchant.ID{})
 
-	// Read route past both gates (500 = nil-runtime handler reached).
-	w := doSelf(readOnly, http.MethodGet, "/billing/v1/me/account")
+	w := doSelf(self, http.MethodGet, "/billing/v1/me/account")
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 
-	// Transactions list rides the read permission.
-	w = doSelf(readOnly, http.MethodGet, "/billing/v1/me/account/transactions")
+	w = doSelf(self, http.MethodGet, "/billing/v1/me/account/transactions")
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
+	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 
-	// Settings PUT is mounted but write-gated: read-only principal => 403.
-	w = doSelf(readOnly, http.MethodPut, "/billing/v1/me/account/settings")
-	require.Equal(t, http.StatusForbidden, w.Code,
-		"settings PUT must be mounted and write-gated (403, not 404/401): %s", w.Body.String())
-
-	// A write principal passes the settings gate.
-	writer := newSelfHandler(nil, stubSelfAuthenticator{
-		principal: selfPrincipal("openrails:self:billing:write"),
-	}, merchant.ID{})
-	w = doSelf(writer, http.MethodPut, "/billing/v1/me/account/settings")
+	w = doSelf(self, http.MethodPut, "/billing/v1/me/account/settings")
+	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 
-	// The admin subtree is mounted on the same handler (read perm missing => 403
+	// The admin subtree is mounted on the same handler (org perm missing => 403
 	// proves mount + auth, not 404). #528: was /billing/v1/merchant-admin.
-	w = doSelf(readOnly, http.MethodGet, "/billing/v1/admin/subscriptions")
+	w = doSelf(self, http.MethodGet, "/billing/v1/admin/subscriptions")
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }
 
@@ -104,26 +95,25 @@ func TestSelfHandler_FailClosed(t *testing.T) {
 	w := doSelf(h, http.MethodGet, "/billing/v1/me/account")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 
-	// Principal missing its explicit tenant mapping => 401.
+	// Principal missing its explicit merchant mapping => 401.
 	h = newSelfHandler(nil, stubSelfAuthenticator{
 		principal: &billingauth.DelegatedPrincipal{
-			SubjectID:   "user-1",
-			Permissions: []string{"openrails:self:billing:read"},
+			SubjectID: "user-1",
 		},
 	}, merchant.ID{})
 	w = doSelf(h, http.MethodGet, "/billing/v1/me/account")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "delegated_principal_invalid")
 
-	// A service/operator grant can never be smuggled onto the self surface.
+	// A platform grant can never be smuggled onto the self surface.
 	h = newSelfHandler(nil, stubSelfAuthenticator{
-		principal: selfPrincipal("openrails:credits:write"),
+		principal: selfPrincipal("platform:metrics:read"),
 	}, merchant.ID{})
 	w = doSelf(h, http.MethodGet, "/billing/v1/me/account")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 }
 
-func TestSelfHandler_DefaultUserAuthenticatorGetsFullSelfSurface(t *testing.T) {
+func TestSelfHandler_DefaultUserAuthenticatorGetsSelfSurface(t *testing.T) {
 	authn := delegatedAuthenticatorFromUserAuthenticator(stubUserAuthenticator{
 		user: billingauth.UserContext{
 			UserID:        "0d4cdb35-9f3f-4a16-bb83-90a8aa20a2c1",
@@ -136,10 +126,9 @@ func TestSelfHandler_DefaultUserAuthenticatorGetsFullSelfSurface(t *testing.T) {
 
 	h := newSelfHandler(nil, authn, dbtest.TestMerchantID)
 
-	// Default embedded auth receives the complete self permission catalog: a
-	// write route must pass the permission gate. With rt==nil, reaching the
-	// handler produces a 500 through gin Recovery, which proves auth/gating
-	// admitted the request.
+	// Default embedded auth produces a permissionless self principal. With
+	// rt==nil, reaching the handler produces a 500 through gin Recovery, which
+	// proves auth admitted the request.
 	w := doSelf(h, http.MethodPut, "/billing/v1/me/account/settings")
 	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())

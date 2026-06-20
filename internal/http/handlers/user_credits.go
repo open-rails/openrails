@@ -170,7 +170,7 @@ func parseTimeParam(v string) (time.Time, error) {
 // GetMyUsage returns the authenticated payer's metered usage rolled up by
 // event_type (endpoint/model) over a [from, to) window, with summed per-dimension
 // counts (issue #289). The acting user is the delegated token's subject
-// (r.GetUser()); their tenant subject is that subject's personal org
+// (r.GetUser()); their customer is that subject's personal org
 // (identity.CustomerIDFromString), matching how the self-service surface resolves
 // the payer. from/to accept RFC3339 timestamps or plain YYYY-MM-DD dates; when
 // omitted the window defaults to the current calendar month [firstOfMonthUTC, now).
@@ -219,7 +219,7 @@ func GetMyUsage(r *httprequest.Request) {
 
 // GetMyInvoices lists the authenticated payer's finalized monthly invoices,
 // newest period first, paginated via limit/offset query params (issue #303). The
-// acting user is the delegated token's subject (r.GetUser()); their tenant subject is
+// acting user is the delegated token's subject (r.GetUser()); their customer is
 // that subject's personal org (identity.CustomerIDFromString), matching how the
 // rest of the self-service surface resolves the payer (mirrors GetMyUsage).
 func GetMyInvoices(r *httprequest.Request) {
@@ -258,7 +258,7 @@ func GetMyInvoices(r *httprequest.Request) {
 
 // GetMyInvoice returns one of the authenticated payer's invoices with its line
 // items, addressed by :id (issue #303). RLS + the payer filter scope it to the
-// acting user's own invoices: an id belonging to another payer/tenant returns
+// acting user's own invoices: an id belonging to another payer/merchant returns
 // 404 (fail closed). The acting payer is resolved exactly as in GetMyInvoices.
 func GetMyInvoice(r *httprequest.Request) {
 	user := r.GetUser()

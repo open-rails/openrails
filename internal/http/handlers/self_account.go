@@ -14,7 +14,7 @@ import (
 )
 
 // Self-service credit-ACCOUNT surface (issue #339 gap-fill): the authenticated
-// tenant_subject reads and configures its OWN billing account — settings
+// merchant_subject reads and configures its OWN billing account — settings
 // (billing mode, spend caps, auto-top-up) + balance/outstanding + transaction
 // history. These mirror the service-side account-settings routes
 // (service_credits.go, issue #242) but the subject is ALWAYS the delegated
@@ -24,7 +24,7 @@ import (
 // The payer is resolved exactly like the rest of /v1/me
 // (identity.CustomerIDFromString over the acting subject — see
 // GetMyUsage/GetMyInvoices), and every query runs RLS-scoped to the pinned
-// tenant.
+// merchant.
 
 // selfAccountPayer resolves the acting payer from the delegated principal, or
 // writes the error response and returns false.
@@ -115,7 +115,7 @@ type selfAccountSettingsRequest struct {
 // SetMyCreditAccountSettings (PUT /v1/me/account/settings) configures the
 // authenticated subject's OWN billing account (issue #339): billing mode,
 // spend caps, auto-top-up, expiry default. Gated by the dedicated
-// openrails:self:billing:write permission (read tokens cannot reconfigure).
+// authenticated customer principal.
 // Returns the stored settings after the update, like the service-side route.
 func SetMyCreditAccountSettings(r *httprequest.Request) {
 	payer, ok := selfAccountPayer(r)

@@ -265,9 +265,9 @@ func applyPushBootstrapManifest(ctx context.Context, a *app.App, manifest *boots
 	if err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
-	fmt.Fprintf(out, "bootstrap authority: org %q reconciled (insert=%t overwrite=%t prune=%t api_key_minted=%t)\n", res.BootstrapOrgSlug, reconcileOpts.Insert, reconcileOpts.Overwrite, reconcileOpts.Prune, res.ServiceTokenMinted)
-	if res.ServiceTokenMinted && res.ServiceTokenSecret != "" {
-		fmt.Fprintf(out, "bootstrap admin API key: %s\n", res.ServiceTokenSecret)
+	fmt.Fprintf(out, "bootstrap authority: org %q reconciled (insert=%t overwrite=%t prune=%t api_key_minted=%t)\n", res.BootstrapOrgSlug, reconcileOpts.Insert, reconcileOpts.Overwrite, reconcileOpts.Prune, res.APIKeyMinted)
+	if res.APIKeyMinted && res.APIKeySecret != "" {
+		fmt.Fprintf(out, "bootstrap admin API key: %s\n", res.APIKeySecret)
 	}
 	return nil
 }

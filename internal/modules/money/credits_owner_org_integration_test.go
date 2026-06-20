@@ -44,6 +44,7 @@ func startOwnerTenantPostgres(t *testing.T) (*db.DB, string, context.Context) {
 			postgres.WithDatabase("test_db"),
 			postgres.WithUsername("test_user"),
 			postgres.WithPassword("test_password"),
+			dbtest.WithPostgresLimits(),
 			testcontainers.WithWaitStrategy(
 				wait.ForLog("database system is ready to accept connections").
 					WithOccurrence(2).

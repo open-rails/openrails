@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -83,7 +84,7 @@ func TestCheckoutSupportsConfiguredSecondaryNMIProvider(t *testing.T) {
 	}
 	require.NotNil(t, completedPayment, "expected a completed payment linked to the activated subscription")
 
-	entitled, err := suite.App.Runtime.EntitlementService.IsEntitled(context.Background(), userID, "premium", suite.GetClock().Now().UTC())
+	entitled, err := suite.App.Runtime.EntitlementService.IsEntitled(dbtest.WithTestMerchant(context.Background()), userID, "premium", suite.GetClock().Now().UTC())
 	require.NoError(t, err)
 	assert.True(t, entitled, "NMI checkout should grant premium access synchronously after approval")
 	assert.GreaterOrEqual(t, int(mock.RequestCount), 1, "should have used the configured NMI client")
@@ -110,7 +111,8 @@ func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 	defer suite.CleanupSubscriptionsForUser(userID)
 
 	txnID := "nmi-renew-" + uuid.New().String()[:8]
-	err := suite.App.Runtime.SubscriptionLifecycleService.RenewMembership(context.Background(), &subscriptions.RenewMembershipParams{
+	ctx := dbtest.WithTestMerchant(context.Background())
+	err := suite.App.Runtime.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 		Processor:               models.Processor("nmi"),
 		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
 		TransactionID:           txnID,
@@ -123,7 +125,7 @@ func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 	require.NotNil(t, afterFirst.CurrentPeriodEndsAt)
 	firstPeriodEnd := *afterFirst.CurrentPeriodEndsAt
 
-	err = suite.App.Runtime.SubscriptionLifecycleService.RenewMembership(context.Background(), &subscriptions.RenewMembershipParams{
+	err = suite.App.Runtime.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 		Processor:               models.Processor("nmi"),
 		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
 		TransactionID:           txnID,

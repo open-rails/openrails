@@ -105,7 +105,7 @@ type Runtime struct {
 		LastRefresh() time.Time
 	}
 	// SolanaCranker drives recurring Solana pulls (#256). Injected by the
-	// composition root once the tenant secret store is available; nil -> the
+	// composition root once the merchant secret store is available; nil -> the
 	// cranker worker log-and-skips.
 	SolanaCranker *recurring.CrankService
 	// SolanaPlanService publishes on-chain recurring plans (#254) and
@@ -364,7 +364,7 @@ func (r *Runtime) HasExternalRiverClient() bool {
 	return r.externalRiverClient
 }
 
-// SetSolanaCranker injects the recurring Solana cranker built once the tenant
+// SetSolanaCranker injects the recurring Solana cranker built once the merchant
 // secret store is available (composition root). It must be called before
 // InitRiver so the cranker worker picks it up.
 func (r *Runtime) SetSolanaCranker(cranker *recurring.CrankService) {
@@ -372,21 +372,21 @@ func (r *Runtime) SetSolanaCranker(cranker *recurring.CrankService) {
 }
 
 // SetSolanaRecurringServices injects the plan-publish (#254) and enroll (#255)
-// services built once the tenant secret store is available (composition root).
+// services built once the merchant secret store is available (composition root).
 func (r *Runtime) SetSolanaRecurringServices(plan *recurring.PlanService, enroll *recurring.EnrollService) {
 	r.SolanaPlanService = plan
 	r.SolanaEnrollService = enroll
 }
 
 // SetSolanaPrepareCancelService injects the on-chain cancel-tx builder (#266),
-// built once the tenant secret store + RPC are available (composition root).
+// built once the merchant secret store + RPC are available (composition root).
 func (r *Runtime) SetSolanaPrepareCancelService(svc *recurring.PrepareCancelService) {
 	r.SolanaPrepareCancelService = svc
 }
 
 // SetSolanaPrepareTierChangeService injects the atomic co-signed tier-change tx
-// builder (#272), built once the tenant secret store + RPC are available
-// (composition root). It uses the SAME per-tenant signer + RPC + network as the
+// builder (#272), built once the merchant secret store + RPC are available
+// (composition root). It uses the SAME per-merchant signer + RPC + network as the
 // cranker so the cranker slot it co-signs is the merchant's own key.
 func (r *Runtime) SetSolanaPrepareTierChangeService(svc *recurring.PrepareTierChangeService) {
 	r.SolanaPrepareTierChangeService = svc

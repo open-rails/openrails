@@ -403,13 +403,13 @@ func TestWastedSpendDirectPayer_DoesNotHitDelegatedInvokerCutoff(t *testing.T) {
 	}))
 
 	_, err := svc.ReportWastedSpend(ctx, billingservice.WastedSpendInput{
-		CustomerID: payer, Invoker: "service-token:payer-owned", InvokerType: string(identity.InvokerTypePayer),
+		CustomerID: payer, Invoker: "API-key:payer-owned", InvokerType: string(identity.InvokerTypePayer),
 		Currency: money.DefaultCurrency, Amount: 2_000_000, Source: "waste", SourceID: "direct-over-flat", Reason: "test",
 	})
 	require.NoError(t, err)
 
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
-		CustomerID: payer, Invoker: "service-token:payer-owned", InvokerType: string(identity.InvokerTypePayer),
+		CustomerID: payer, Invoker: "API-key:payer-owned", InvokerType: string(identity.InvokerTypePayer),
 		Tier: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
 		Source: "usage", SourceID: "direct-admit",

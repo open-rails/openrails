@@ -65,6 +65,12 @@ SELECT count(*) FROM openrails.checkout_sessions WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsCheckoutSessions :exec
 DELETE FROM openrails.checkout_sessions WHERE merchant_id = $1;
 
+-- name: CountMerchantRowsExternalProviderMutationLogs :one
+SELECT count(*) FROM openrails.external_provider_mutation_logs WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsExternalProviderMutationLogs :exec
+DELETE FROM openrails.external_provider_mutation_logs WHERE merchant_id = $1;
+
 -- name: CountMerchantRowsProviderIntents :one
 SELECT count(*) FROM openrails.provider_intents WHERE merchant_id = $1;
 

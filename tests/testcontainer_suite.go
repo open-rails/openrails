@@ -20,6 +20,9 @@ import (
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/migrate"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
@@ -75,6 +78,8 @@ type TestContainerSuite struct {
 // TestSuiteOption customizes an integration test suite before it boots.
 type TestSuiteOption func(*TestContainerSuite)
 
+const testNMIProviderAccountID = "OpenRails Test Merchant <billing@test.example>"
+
 // WithSuiteClock injects a clock before the runtime, services, workers, and
 // seed helpers are created. Prefer this over SetMockClock for new tests.
 func WithSuiteClock(clock clockwork.Clock) TestSuiteOption {
@@ -121,7 +126,7 @@ func (suite *TestContainerSuite) SetupSuite() {
 	// Initialize config with container connection details
 	suite.initializeDatabaseConnections()
 
-	// Run non-Postgres migrations and seed the tenant before app connects.
+	// Run non-Postgres migrations and seed the merchant before app connects.
 	suite.prepareDatastores()
 
 	// Initialize server (bootstraps the app and sets up DB connection)
@@ -141,6 +146,7 @@ func (suite *TestContainerSuite) startRedisContainer() {
 
 	container, err := redismodule.Run(suite.ctx,
 		"redis:7-alpine",
+		dbtest.WithRedisLimits(),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("Ready to accept connections").
 				WithStartupTimeout(30*time.Second),
@@ -165,6 +171,7 @@ func (suite *TestContainerSuite) startClickHouseContainer() {
 		clickhousecontainer.WithUsername("test_user"),
 		clickhousecontainer.WithPassword("test_password"),
 		clickhousecontainer.WithDatabase("test_analytics"),
+		dbtest.WithClickHouseLimits(),
 		testcontainers.WithWaitStrategy(
 			wait.ForHTTP("/ping").
 				WithPort("8123/tcp").
@@ -217,11 +224,11 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			Password:   envOrDefault("OPENRAILS_TEST_CH_PASSWORD", "test_password"),
 		},
 		Auth: &config.AuthConfig{
-			// HARDCUT (#312): admin authority is the LIVE openrails:admin permission
-			// held in the caller's OWN tenant (control-plane evaluated), or a
-			// deployment-minted admin service token — NOT a claim-based operator
-			// tenant. Admin-route integration tests therefore require the embedded
-			// control plane wired with the test admin granted openrails:admin, so
+			// HARDCUT (#312/#537): admin authority is LIVE merchant-local AuthKit
+			// org permission state (control-plane evaluated), or a
+			// deployment-minted admin API key - NOT a claim-based operator
+			// merchant. Admin-route integration tests therefore require the embedded
+			// control plane wired with the test admin granted the operator role, so
 			// the suite enables it here exactly like a production standalone boot.
 			Issuer: "https://controlplane.openrails.test",
 		},
@@ -269,7 +276,7 @@ func (suite *TestContainerSuite) prepareDatastores() {
 	err := migrate.RunClickHouse(suite.ctx, suite.Config)
 	require.NoError(suite.t, err)
 
-	// #336: no default merchant — seed the tenant this suite's engine binds to,
+	// #336: no default merchant — seed the merchant this suite's engine binds to,
 	// then configure it (slug) so ResolveMerchant pins it.
 	seedPool, perr := pgxpool.New(suite.ctx, suite.Config.DB.URL)
 	require.NoError(suite.t, perr)
@@ -339,9 +346,11 @@ func (suite *TestContainerSuite) initializeServer() {
 
 	// Bootstrap the application (creates runtime, cache, auth verifier, etc.)
 	assembled, err := ginboot.NewServer(suite.Config, &bootstrap.Options{
-		Clock:              suite.clock,
-		ConfiguredMerchant: dbtest.TestMerchantID,
-		Processors:         suite.Processors,
+		Clock:                  suite.clock,
+		ConfiguredMerchant:     dbtest.TestMerchantID,
+		Processors:             suite.Processors,
+		Authenticator:          suiteTestAuthenticator{},
+		DelegatedAuthenticator: suiteTestDelegatedAuthenticator{},
 	})
 	require.NoError(suite.t, err)
 	suite.App = assembled.App
@@ -349,16 +358,17 @@ func (suite *TestContainerSuite) initializeServer() {
 	// Get the pgx pool from the app runtime
 	suite.Pool = assembled.App.Runtime.DB.Pool()
 	suite.Server = assembled.Server
+	suite.seedProviderAccountFixtures()
 
 	// Bootstrap the control plane exactly like the standalone serve path (#312):
 	// ensure the test merchant's AuthKit org exists with the operator role holding
-	// the full openrails:* catalog, so admin identities created by the test
-	// helpers carry LIVE openrails:admin authority. Idempotent; runs after
+	// the concrete merchant-local org catalog, so admin identities created by the
+	// test helpers carry LIVE merchant-local org authority. Idempotent; runs after
 	// migrations (profiles.* + openrails.merchants exist). #336: bootstrap is
 	// pinned to an explicit merchant slug (no default merchant).
 	_, err = embcp.RunBootstrap(suite.ctx, suite.App, controlplane.BootstrapOptions{
-		BootstrapOrgSlug:        dbtest.TestMerchantSlug,
-		MintInitialServiceToken: false,
+		BootstrapOrgSlug:  dbtest.TestMerchantSlug,
+		MintInitialAPIKey: false,
 	})
 	require.NoError(suite.t, err, "control plane bootstrap")
 
@@ -402,6 +412,59 @@ func (suite *TestContainerSuite) initializeServer() {
 	// Store the HTTP server for cleanup
 	suite.httpServer = httpServer
 	suite.ServerURL = fmt.Sprintf("http://localhost:%d", suite.Config.Port)
+}
+
+func (suite *TestContainerSuite) seedProviderAccountFixtures() {
+	suite.t.Helper()
+	ctx := dbtest.WithTestMerchant(context.Background())
+
+	suite.seedProviderAccount(ctx, "nmi", testNMIProviderAccountID)
+	nmiSecret, err := merchants.ProviderAccountSecretName("nmi", "live", testNMIProviderAccountID, "production_key")
+	require.NoError(suite.t, err)
+	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, nmiSecret, "test-security-key")
+	require.NoError(suite.t, err)
+
+	ccbillAccountID := "945280/0000"
+	suite.seedProviderAccount(ctx, "ccbill", ccbillAccountID)
+	ccbillSecret, err := merchants.ProviderAccountSecretName("ccbill", "live", ccbillAccountID, "account_config")
+	require.NoError(suite.t, err)
+	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, ccbillSecret, `{"client_acc_num":"945280","client_sub_acc":"0000","salt":"test-salt"}`)
+	require.NoError(suite.t, err)
+}
+
+func (suite *TestContainerSuite) seedProviderAccount(ctx context.Context, providerType, accountID string) {
+	suite.t.Helper()
+	tx, err := suite.Pool.Begin(ctx)
+	require.NoError(suite.t, err)
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `
+		UPDATE openrails.provider_accounts
+		   SET role = 'legacy',
+		       replaced_at = COALESCE(replaced_at, now()),
+		       updated_at = now()
+		 WHERE merchant_id = $1::uuid
+		   AND provider_type = $2
+		   AND environment = 'live'
+		   AND account_id <> $3
+		   AND role = 'primary'
+		   AND status = 'enabled'
+	`, dbtest.TestMerchantID.UUID(), providerType, accountID)
+	require.NoError(suite.t, err)
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO openrails.provider_accounts
+		    (merchant_id, provider_type, environment, account_id, role, status, evidence, last_verified_at)
+		VALUES ($1::uuid, $2, 'live', $3, 'primary', 'enabled', '{"source":"test_fixture"}'::jsonb, now())
+		ON CONFLICT (merchant_id, provider_type, environment, account_id) DO UPDATE
+		   SET role = 'primary',
+		       status = 'enabled',
+		       evidence = EXCLUDED.evidence,
+		       last_verified_at = EXCLUDED.last_verified_at,
+		       updated_at = now()
+	`, dbtest.TestMerchantID.UUID(), providerType, accountID)
+	require.NoError(suite.t, err)
+	require.NoError(suite.t, tx.Commit(ctx))
 }
 
 // waitForServerReady waits for the server to be ready to accept requests
@@ -517,6 +580,45 @@ func (suite *TestContainerSuite) SetMockClock(t ...time.Time) *clockwork.FakeClo
 	}
 	suite.setClock(clock)
 	return clock
+}
+
+func (suite *TestContainerSuite) ResetMutableRuntimeState() {
+	suite.t.Helper()
+	suite.setClock(clockwork.NewRealClock())
+	suite.resetNMIClients()
+}
+
+func (suite *TestContainerSuite) resetNMIClients() {
+	suite.t.Helper()
+	if suite == nil || suite.App == nil || suite.App.Runtime == nil {
+		return
+	}
+	clients := make(map[string]*nmi.NMIClient)
+	for name, proc := range suite.Processors.GetNMIProcessors() {
+		settings := proc.ToNMIProviderSettings(name)
+		client, err := nmi.NewClient(name, settings, suite.Config.IsTestEnv())
+		require.NoError(suite.t, err)
+		client.ReadOnly = suite.Config.IsProviderReadOnly()
+		clients[name] = client
+	}
+
+	rt := suite.App.Runtime
+	rt.NMIClients = clients
+	if rt.SubscriptionService != nil {
+		rt.SubscriptionService.NMIClients = clients
+	}
+	if rt.VaultService != nil {
+		rt.VaultService.NMIClients = clients
+	}
+	if rt.CheckoutService != nil {
+		rt.CheckoutService.NMIClients = clients
+		if rt.CheckoutService.NMISaleService != nil {
+			rt.CheckoutService.NMISaleService.NMIClients = clients
+		}
+	}
+	if rt.CheckoutSessionService != nil {
+		rt.CheckoutSessionService.SetProviderAccounts(intents.NewRuntimeProviderAccounts(suite.Config, suite.Processors, clients))
+	}
 }
 
 func (suite *TestContainerSuite) setClock(clock clockwork.Clock) {

@@ -588,7 +588,7 @@ func TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites(t *testing.T)
 // given billing cycle, for exercising the cadence-relative dunning tiers (#359).
 func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cycleDays int) uuid.UUID {
 	t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	now := suite.GetClock().Now().UTC()
 	productID := uuid.New()
 	priceID := uuid.New()
@@ -600,6 +600,7 @@ func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cyc
 		Description:      "cadence-relative dunning fixture",
 		EntitlementsSpec: map[string]*int{"premium": nil},
 		Status:           models.CatalogStatusActive,
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	})
@@ -610,6 +611,7 @@ func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cyc
 		Amount:           999,
 		Currency:         "usd",
 		BillingCycleDays: &cycleDays,
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		Processors: map[string]map[string]string{
 			string(models.ProcessorMobius): {
 				models.ProcessorKeyPlanID: "plan_dunning_cycle",
@@ -732,6 +734,7 @@ func TestDunningWorkerDailyCycleImmediatelyTerminal(t *testing.T) {
 func TestDunningWorkerFailMembershipDailyCycleFirstFailureTerminal(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	rt := suite.App.Runtime
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	priceID := createDunningCycleProductPrice(t, suite, 1)
 
@@ -750,7 +753,7 @@ func TestDunningWorkerFailMembershipDailyCycleFirstFailureTerminal(t *testing.T)
 	})
 
 	reason := "rebill declined"
-	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(context.Background(), &subscriptions.FailMembershipParams{
+	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
 		Processor:      models.ProcessorMobius,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &reason,
@@ -769,7 +772,7 @@ func TestDunningWorkerFailMembershipDailyCycleFirstFailureTerminal(t *testing.T)
 func TestDunningWorkerFailMembershipWeeklyCycleSchedule(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	rt := suite.App.Runtime
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	priceID := createDunningCycleProductPrice(t, suite, 7)
 

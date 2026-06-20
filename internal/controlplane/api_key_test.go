@@ -8,8 +8,8 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-func TestResolvedServiceToken_HasPermission(t *testing.T) {
-	r := &ResolvedServiceToken{Permissions: []string{PermCreditsRead, PermCreditsWrite}}
+func TestResolvedServiceCredential_HasPermission(t *testing.T) {
+	r := &ResolvedServiceCredential{Permissions: []string{PermCreditsRead, PermCreditsWrite}}
 
 	if !r.HasPermission(PermCreditsWrite) {
 		t.Errorf("expected granted permission %q to be held", PermCreditsWrite)
@@ -19,19 +19,19 @@ func TestResolvedServiceToken_HasPermission(t *testing.T) {
 	}
 }
 
-func TestResolvedServiceToken_AdminSatisfiesAnyPermission(t *testing.T) {
-	r := &ResolvedServiceToken{Permissions: []string{PermAdmin}}
+func TestResolvedServiceCredential_ApexGrantDoesNotBypassPermissionChecks(t *testing.T) {
+	r := &ResolvedServiceCredential{Permissions: []string{PermAdmin}}
 	for _, p := range CatalogNames() {
-		if !r.HasPermission(p) {
-			t.Errorf("admin service token should satisfy %q", p)
+		if r.HasPermission(p) {
+			t.Errorf("apex grant %q must not bypass exact check for %q", PermAdmin, p)
 		}
 	}
 }
 
-func TestResolvedServiceToken_EmptyDeniesAll(t *testing.T) {
-	r := &ResolvedServiceToken{}
+func TestResolvedServiceCredential_EmptyDeniesAll(t *testing.T) {
+	r := &ResolvedServiceCredential{}
 	if r.HasPermission(PermCreditsRead) {
-		t.Error("empty service token should grant nothing")
+		t.Error("empty API key should grant nothing")
 	}
 }
 
@@ -40,8 +40,8 @@ func TestControlPlane_TokenPrefix_NilSafe(t *testing.T) {
 	if got := c.TokenPrefix(); got != APIKeyPrefix {
 		t.Errorf("nil control plane TokenPrefix() = %q, want %q", got, APIKeyPrefix)
 	}
-	if !c.LooksLikeServiceToken(APIKeyPrefix + "_st_key_secret") {
-		t.Error("service token prefix should be fixed even for nil control plane")
+	if !c.LooksLikeAPIKey(APIKeyPrefix + "_st_key_secret") {
+		t.Error("API key prefix should be fixed even for nil control plane")
 	}
 }
 
@@ -62,16 +62,16 @@ func TestValidateAPIKeyResourcesRejectsLegacyPayableKinds(t *testing.T) {
 				MerchantResource(dbtest.TestMerchantID),
 				{Kind: kind, ID: "legacy"},
 			})
-			if err != ErrServiceTokenScopeDenied {
-				t.Fatalf("validateAPIKeyResources(%q) error = %v, want %v", kind, err, ErrServiceTokenScopeDenied)
+			if err != ErrServiceCredentialScopeDenied {
+				t.Fatalf("validateAPIKeyResources(%q) error = %v, want %v", kind, err, ErrServiceCredentialScopeDenied)
 			}
 		})
 	}
 }
 
 // Service-JWT authority is no longer an intersection of a requested permission
-// set against a server-side grant. Registering an issuer to a tenant grants that
-// tenant full authority over its own resources; the self-signed token's claims
-// are authoritative, bounded only by validateAPIKeyResources (own-tenant
+// set against a server-side grant. Registering an issuer to a merchant grants that
+// merchant full authority over its own resources; the self-signed token's claims
+// are authoritative, bounded only by validateAPIKeyResources (own-merchant
 // scope). The former intersectPermissions/intersectResources tests were removed
 // with that logic.

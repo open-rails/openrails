@@ -38,7 +38,7 @@ func (SolanaCrankArgs) Kind() string { return KindSolanaCrank }
 
 // solanaCranker is the on-chain pull surface (satisfied by *recurring.CrankService).
 type solanaCranker interface {
-	Crank(ctx context.Context, tenantID merchant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error)
+	Crank(ctx context.Context, merchantID merchant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error)
 }
 
 // membershipManager is the lifecycle surface the cranker drives (satisfied by
@@ -158,7 +158,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 }
 
 func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription) error {
-	tenantID := merchant.ID(row.MerchantID)
+	merchantID := merchant.ID(row.MerchantID)
 
 	// Resolve the plan amount (token base units) + period + ghost-plan fingerprint
 	// from the linked price's Solana processor config.
@@ -184,7 +184,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 		return repo.SetStatus(ctx, row.ID, models.SolanaSubscriptionExpired)
 	}
 
-	sig, crankErr := w.Cranker.Crank(ctx, tenantID, row, amountBaseUnits)
+	sig, crankErr := w.Cranker.Crank(ctx, merchantID, row, amountBaseUnits)
 	if crankErr != nil {
 		// One classifier maps the on-chain error onto the shared billing
 		// decline-code vocabulary + the action to take (#270). Codes confirmed on
@@ -200,7 +200,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 		switch cf.Category {
 		case declinecode.Operational:
 			// RPC/network or the cranker wallet out of SOL gas: retry next run, NEVER
-			// dun — a shared outage would wrongly past-due a tenant's whole book.
+			// dun — a shared outage would wrongly past-due a merchant's whole book.
 			// Leave next_pull_at unchanged so it stays due.
 			llog.Warn("Solana cranker: operational pull failure; retry next run (no dunning)")
 			return crankErr

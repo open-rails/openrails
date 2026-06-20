@@ -11,13 +11,13 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// There is no "default tenant" (#336). Integration fixtures that insert
-// tenant-owned rows must run under an explicit tenant; tests use this canonical
+// There is no "default merchant" (#336). Integration fixtures that insert
+// merchant-owned rows must run under an explicit merchant; tests use this canonical
 // test merchant. EnsureTestMerchant materializes the openrails.merchants row, and
 // MerchantID()/WithTestMerchant pin it on the context so merchant.Require resolves and
 // WithMerchantConn sets the app.merchant_id GUC.
 var (
-	// TestMerchantID is the canonical tenant id for integration fixtures.
+	// TestMerchantID is the canonical merchant id for integration fixtures.
 	TestMerchantID = merchant.ID(uuid.MustParse("a5a5a5a5-0000-4000-8000-000000000001"))
 	// TestMerchantSlug is its stable slug.
 	TestMerchantSlug = "test"
@@ -36,7 +36,7 @@ func EnsureTestMerchant(ctx context.Context, t testing.TB, qx gen.DBTX) {
 }
 
 // WithTestMerchant returns a context pinned to the canonical test merchant, so
-// merchant.Require resolves and tenant-conn helpers set the app.merchant_id GUC.
+// merchant.Require resolves and merchant-conn helpers set the app.merchant_id GUC.
 func WithTestMerchant(ctx context.Context) context.Context {
 	return merchant.WithID(ctx, TestMerchantID)
 }

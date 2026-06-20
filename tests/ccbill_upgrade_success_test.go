@@ -14,7 +14,7 @@ import (
 )
 
 func TestCCBillUpgradeSuccess_ParsesBilledInitialPrice(t *testing.T) {
-	suite := getSharedTestSuite(t)
+	suite := setupTestSuite(t)
 	products := suite.SeedProducts()
 	require.NotEmpty(t, products)
 	require.GreaterOrEqual(t, len(products[0].Prices), 2)

@@ -11,35 +11,24 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 	// Issue #224 fixed permission catalog. If this list changes, the seeding and
 	// the operator-role grant must be reviewed together.
 	want := []string{
-		"openrails:admin",
-		"openrails:credits:read",
-		"openrails:credits:write",
-		// billing:spend (payer) hot-path capability (#246).
-		"openrails:credits:spend",
-		"openrails:entitlements:read",
-		"openrails:catalog:write",
-		"openrails:payments:refund",
-		"openrails:subscriptions:cancel",
-		// Self-service (browser-direct) permissions (#222 browser tier).
-		"openrails:self:billing:read",
-		// Self account-settings write (#339 gap-fill).
-		"openrails:self:billing:write",
-		"openrails:self:checkout:create",
-		"openrails:self:subscriptions:cancel",
-		"openrails:self:payment-methods:manage",
-		"openrails:self:wallets:manage",
-		// Merchant-admin configuration/profile management (#520).
+		PermCreditsRead,
+		PermCreditsWrite,
+		PermCreditsSpend,
+		PermEntitlementsRead,
+		PermCatalogWrite,
+		PermPaymentsRefund,
+		PermSubscriptionsCancel,
+		PermMerchantBillingRead,
+		PermMerchantEntitlementsWrite,
+		PermMerchantProductAccessWrite,
+		PermMerchantPaymentsWrite,
 		PermMerchantConfigurationRead,
 		PermMerchantConfigurationWrite,
-		// Merchant-admin write-only secret management (#323).
 		PermMerchantSecretsList,
 		PermMerchantSecretsWrite,
 		PermMerchantSecretsDelete,
 		PermMerchantSecretsTest,
-		// Cross-tenant managed-hosting platform superadmin (#226). It is in the
-		// catalog (a valid grantable permission) but is NOT seeded into operator
-		// orgs — see TestOperatorRolePermissions_ExcludesPlatformSuperadmin.
-		"openrails:platform:superadmin",
+		PermMerchantMetricsRead,
 	}
 	got := map[string]bool{}
 	for _, p := range Catalog() {
@@ -72,15 +61,11 @@ func TestCatalog_IsACopy(t *testing.T) {
 	}
 }
 
-// TestOperatorRolePermissions_ExcludesPlatformSuperadmin proves the #226
-// separation: a tenant operator role holds the FULL catalog EXCEPT the
-// cross-tenant platform-superadmin permission (which is seeded only to the
-// platform role). Every other catalog permission must be present.
-func TestOperatorRolePermissions_ExcludesPlatformSuperadmin(t *testing.T) {
+func TestOperatorRolePermissions_AreOrgCatalog(t *testing.T) {
 	perms := OperatorRolePermissions()
 	names := CatalogNames()
-	if len(perms) != len(names)-1 {
-		t.Fatalf("operator role perms = %d, want catalog-1 = %d", len(perms), len(names)-1)
+	if len(perms) != len(names) {
+		t.Fatalf("operator role perms = %d, want catalog = %d", len(perms), len(names))
 	}
 	set := map[string]bool{}
 	for _, p := range perms {
@@ -90,9 +75,6 @@ func TestOperatorRolePermissions_ExcludesPlatformSuperadmin(t *testing.T) {
 		t.Fatalf("operator role must NOT include %q", PermPlatformSuperadmin)
 	}
 	for _, n := range names {
-		if n == PermPlatformSuperadmin {
-			continue
-		}
 		if !set[n] {
 			t.Errorf("operator role missing catalog permission %q", n)
 		}
@@ -110,88 +92,80 @@ func TestCatalogNames_StableOrder(t *testing.T) {
 	}
 }
 
-func TestAnyLiveServiceToken(t *testing.T) {
+func TestAnyLiveAPIKey(t *testing.T) {
 	now := time.Now()
 	revoked := &now
-	if anyLiveServiceToken(nil) {
-		t.Error("nil service tokens should not be live")
+	if anyLiveAPIKey(nil) {
+		t.Error("nil API keys should not be live")
 	}
-	if anyLiveServiceToken([]authcore.APIKey{{RevokedAt: revoked}}) {
-		t.Error("only-revoked service tokens should not count as live")
+	if anyLiveAPIKey([]authcore.APIKey{{RevokedAt: revoked}}) {
+		t.Error("only-revoked API keys should not count as live")
 	}
-	if !anyLiveServiceToken([]authcore.APIKey{{RevokedAt: nil}}) {
-		t.Error("a non-revoked service token should count as live")
+	if !anyLiveAPIKey([]authcore.APIKey{{RevokedAt: nil}}) {
+		t.Error("a non-revoked API key should count as live")
 	}
-	if !anyLiveServiceToken([]authcore.APIKey{{RevokedAt: revoked}, {RevokedAt: nil}}) {
-		t.Error("a mix with one live service token should count as live")
+	if !anyLiveAPIKey([]authcore.APIKey{{RevokedAt: revoked}, {RevokedAt: nil}}) {
+		t.Error("a mix with one live API key should count as live")
 	}
 }
 
-// TestOperatorRoleExcludesPlatformSuperadmin proves the #226 separation: a
-// tenant operator role is granted the full catalog EXCEPT the cross-tenant
-// platform-superadmin permission, so a tenant operator admin can never reach the
-// platform surface via their operator tenant.
+// TestOperatorRoleExcludesPlatformSuperadmin proves the layer separation: a
+// merchant operator role is granted only org-layer catalog permissions.
 func TestOperatorRoleExcludesPlatformSuperadmin(t *testing.T) {
 	for _, p := range OperatorRolePermissions() {
 		if p == PermPlatformSuperadmin {
 			t.Fatalf("operator role must NOT include %q", PermPlatformSuperadmin)
 		}
 	}
-	// Operator role still has the broad per-merchant admin permission.
-	if !contains(OperatorRolePermissions(), PermAdmin) {
-		t.Fatalf("operator role must include %q", PermAdmin)
+	if contains(OperatorRolePermissions(), PermAdmin) {
+		t.Fatalf("operator role must not include apex grant %q", PermAdmin)
 	}
 }
 
 // TestCreditsSpendPermission_GateSemantics proves the billing:spend (#246) gate:
 // the operator role holds credits:spend by default (member role default-grant),
-// a service token WITHOUT it fails the spend gate while still passing credits:write, and
-// PermAdmin satisfies it.
+// and an API key WITHOUT it fails the spend gate while still passing credits:write.
 func TestCreditsSpendPermission_GateSemantics(t *testing.T) {
 	// Default-grant: the operator role includes billing:spend.
 	if !contains(OperatorRolePermissions(), PermCreditsSpend) {
 		t.Fatalf("operator role must include %q (default member grant, #246)", PermCreditsSpend)
 	}
 
-	// A cost-governed service token with write but NOT spend fails the spend gate.
-	writeOnly := &ResolvedServiceToken{Permissions: []string{PermCreditsWrite}}
+	// A cost-governed API key with write but NOT spend fails the spend gate.
+	writeOnly := &ResolvedServiceCredential{Permissions: []string{PermCreditsWrite}}
 	if writeOnly.HasPermission(PermCreditsSpend) {
 		t.Fatalf("credits:write must NOT imply credits:spend (#246: separate gates)")
 	}
 	if !writeOnly.HasPermission(PermCreditsWrite) {
-		t.Fatalf("write-only service token must still pass the write gate")
+		t.Fatalf("write-only API key must still pass the write gate")
 	}
 
-	// A service token holding billing:spend passes the spend gate.
-	spender := &ResolvedServiceToken{Permissions: []string{PermCreditsWrite, PermCreditsSpend}}
+	// An API key holding billing:spend passes the spend gate.
+	spender := &ResolvedServiceCredential{Permissions: []string{PermCreditsWrite, PermCreditsSpend}}
 	if !spender.HasPermission(PermCreditsSpend) {
-		t.Fatalf("service token holding %q must pass the spend gate", PermCreditsSpend)
+		t.Fatalf("API key holding %q must pass the spend gate", PermCreditsSpend)
 	}
 
-	// PermAdmin satisfies the spend gate (broad operator authority).
-	admin := &ResolvedServiceToken{Permissions: []string{PermAdmin}}
-	if !admin.HasPermission(PermCreditsSpend) {
-		t.Fatalf("PermAdmin must satisfy the spend gate")
+	admin := &ResolvedServiceCredential{Permissions: []string{PermAdmin}}
+	if admin.HasPermission(PermCreditsSpend) {
+		t.Fatalf("apex grant %q must not bypass exact spend gate", PermAdmin)
 	}
 }
 
-// TestPlatformRoleHoldsOnlySuperadmin proves the platform role is narrow: it
-// holds ONLY the platform-superadmin permission.
+// TestPlatformRoleHoldsSuperadminGlob proves the platform role uses AuthKit's
+// platform-layer apex grant.
 func TestPlatformRoleHoldsOnlySuperadmin(t *testing.T) {
 	perms := PlatformRolePermissions()
-	if len(perms) != 1 || perms[0] != PermPlatformSuperadmin {
-		t.Fatalf("platform role must hold only %q, got %v", PermPlatformSuperadmin, perms)
+	if len(perms) != 1 || perms[0] != authcore.PlatformSuperAdminGrant {
+		t.Fatalf("platform role must hold only %q, got %v", authcore.PlatformSuperAdminGrant, perms)
 	}
 }
 
-// TestSuperadminPermInCatalog proves the permission is a real catalog entry (so
-// AuthKit accepts grants of it) and is NOT a self/browser permission.
+// TestSuperadminPermNotInOrgCatalog proves platform authority is outside the
+// OpenRails org permission catalog.
 func TestSuperadminPermInCatalog(t *testing.T) {
-	if !contains(CatalogNames(), PermPlatformSuperadmin) {
-		t.Fatalf("catalog must include %q", PermPlatformSuperadmin)
-	}
-	if IsSelfPermission(PermPlatformSuperadmin) {
-		t.Fatalf("%q must never be a self/browser permission", PermPlatformSuperadmin)
+	if contains(CatalogNames(), PermPlatformSuperadmin) {
+		t.Fatalf("org catalog must not include %q", PermPlatformSuperadmin)
 	}
 }
 

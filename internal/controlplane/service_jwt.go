@@ -17,9 +17,9 @@ import (
 // AuthKit) is the source of truth for what that issuer MAY do. The token's
 // self-asserted `permissions` claim is treated as a REQUESTED SUBSET — it is
 // intersected against stored authority so a compromised or malicious issuer
-// cannot escalate by self-claiming permissions (including openrails:admin) that
+// cannot escalate by self-claiming permissions (including `org:*`) that
 // were never explicitly granted.
-func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*ResolvedServiceToken, error) {
+func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*ResolvedServiceCredential, error) {
 	if c == nil || c.delegatedVerifier == nil {
 		return nil, ErrNoControlPlane
 	}
@@ -40,7 +40,7 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 	// BND-C1: intersect the token's self-asserted permissions against the
 	// remote_application's STORED authority. A service JWT may only DOWN-SCOPE
 	// its stored grants, never widen them. This prevents a merchant from minting
-	// a token that claims openrails:admin (or any other permission not explicitly
+	// a token that claims `org:*` (or any other permission not explicitly
 	// granted to their remote_application).
 	_, storedPerms, err := c.Core().ResolveRemoteApplicationAuthority(ctx, raID)
 	if err != nil {
@@ -48,7 +48,7 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 	}
 	permissions := intersectPermissions(cleanPermissionList(principal.Permissions), storedPerms)
 	if len(permissions) == 0 {
-		return nil, ErrServiceTokenScopeDenied
+		return nil, ErrServiceCredentialScopeDenied
 	}
 
 	// Self-assigned resources, defaulting to the resolved merchant when the token
@@ -63,7 +63,7 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 		return nil, err
 	}
 
-	return &ResolvedServiceToken{
+	return &ResolvedServiceCredential{
 		OwnerOrgID:   ownerOrgID,
 		OwnerOrgSlug: ownerOrgSlug,
 		MerchantID:   mid,

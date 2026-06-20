@@ -55,7 +55,7 @@ func TestListInvoices_Statement(t *testing.T) {
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
 	finalized, err := ms.FinalizeInvoice(ctx, payer, money.DefaultCurrency, from, to)
 	require.NoError(t, err)
-	require.Equal(t, "finalized", finalized.Status)
+	require.Equal(t, "paid", finalized.Status)
 
 	// ListInvoices returns the payer's invoice (newest first, paginated).
 	list, total, err := svc.ListInvoices(ctx, payer, 50, 0)

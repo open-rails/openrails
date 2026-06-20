@@ -58,8 +58,8 @@ Then `docker compose up -d postgres openrails` (the `:5446` Postgres in the stac
 is the billing DB; the integration notes flag it as flaky — recreate the volume
 if connections reset).
 
-### 3. Provision the tenant cranker key + a USDC recurring price
-- Seed the tenant secret `solana/private_key` (the cranker wallet) — DB-backed
+### 3. Provision the merchant cranker key + a USDC recurring price
+- Seed the merchant secret `solana/private_key` (the cranker wallet) — DB-backed
   store (self-hosted) or Vault. The cranker pays gas + signs `transfer_subscription`.
 - Publish a plan: `POST /v1/admin/solana/recurring/plans`
   `{plan_id, token_symbol:"USDC", amount_base_units, period_hours, price_id}` →
@@ -108,7 +108,7 @@ Identical to the full-stack steps above:
 2. `~/openrails-host/docker-compose.override.yaml` pinning `image: openrails:local` +
    `SOLANA_NETWORK: devnet` / `SOLANA_RPC_URL: https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
    then `docker compose up -d postgres openrails`.
-3. Seed the tenant cranker secret `solana/private_key` and publish a USDC plan
+3. Seed the merchant cranker secret `solana/private_key` and publish a USDC plan
    (`POST /v1/admin/solana/recurring/plans` with `token_symbol:"USDC"`,
    `period_hours`, `price_id`).
 4. Bring up the host-app frontend pointed at the local OpenRails

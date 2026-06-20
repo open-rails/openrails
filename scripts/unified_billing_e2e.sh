@@ -2,9 +2,9 @@
 # Unified-billing e2e harness — deployed-stack edition (issue #244).
 #
 # Drives the FULL unified-billing money path against a *running, standalone*
-# OpenRails over its service token-authenticated public service routes — the exact
+# OpenRails over its API-key-authenticated public service routes — the exact
 # server-to-server contract gen-orchestrator / Tensorhub use in production
-# (issue #233 topology, #222 public service token routes). Unlike the in-repo Go harness
+# (issue #233 topology, #222 public service routes). Unlike the in-repo Go harness
 # (tests/unified_billing_e2e_test.go, which needs testcontainers), this hits a
 # real deployed service + its own Postgres, so it runs anywhere the stack is up
 # (e.g. ~/cozy/e2e) and is the artifact that proved #244 end-to-end.

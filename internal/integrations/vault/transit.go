@@ -10,7 +10,7 @@ import (
 )
 
 // TransitAdapter implements solana.TransitClient over a Vault Transit mount. The
-// per-tenant Ed25519 key is created non-extractable (exportable=false) so it
+// per-merchant Ed25519 key is created non-extractable (exportable=false) so it
 // NEVER leaves Vault; OpenRails only ever requests signatures.
 type TransitAdapter struct {
 	client *vaultapi.Client
@@ -49,7 +49,7 @@ func (t *TransitAdapter) Sign(ctx context.Context, name string, input []byte) ([
 }
 
 // PublicKey returns the raw 32-byte Ed25519 public key for the latest version of
-// key `name` (which is the tenant's Solana address as base58).
+// key `name` (which is the merchant's Solana address as base58).
 func (t *TransitAdapter) PublicKey(ctx context.Context, name string) ([]byte, error) {
 	res, err := t.client.Logical().ReadWithContext(ctx, t.mount+"/keys/"+name)
 	if err != nil {

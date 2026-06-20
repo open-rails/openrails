@@ -29,9 +29,8 @@ const (
 // it; tests can inject a fake. A nil resolver is a wiring bug (#469: the
 // standalone always has a control plane) and the middleware fails closed.
 type DelegatedResolver interface {
-	// ResolveDelegated verifies the delegated access token (aud=openrails, no
-	// sub, self-permissions) and resolves its merchant + acting user
-	// (delegated_sub).
+	// ResolveDelegated verifies the delegated access token (aud=openrails, no sub)
+	// and resolves its merchant + acting user (delegated_sub).
 	ResolveDelegated(ctx context.Context, token string, origin string) (*controlplane.ResolvedDelegated, error)
 }
 
@@ -41,7 +40,7 @@ type DelegatedResolver interface {
 //
 // A merchant's host frontend mints a short-lived delegated access token for the
 // logged-in end-user (canonical claims minted by AuthKit: `aud` includes
-// `openrails`, `merchant`, `delegated_sub`, `permissions: ["openrails:self:*"]`)
+// `openrails`, `merchant`, `delegated_sub`)
 // and the browser presents it as `Authorization: Bearer <jwt>` directly to
 // OpenRails. This lets a browser self-serve its OWN billing without routing
 // through the host backend, while OpenRails remains the authorization boundary.
@@ -52,11 +51,11 @@ type DelegatedResolver interface {
 //   - sets the acting user (the token's `delegated_sub`) as the request's
 //     user context, so the existing user-facing `me` handlers naturally scope
 //     every read/write to that user — never another user's data,
-//   - records the token's self-permissions for RequireDelegatedPermission gates.
+//   - records any browser-safe org permissions for admin route gates.
 //
 // Rejected (fail-closed): missing/expired/revoked tokens, normal-`sub` (non-
 // delegated) tokens, wrong audience/issuer/signature, tokens carrying any
-// non-`openrails:self:*` permission, and cross-merchant / unmapped tokens.
+// platform/unknown permission, and cross-merchant / unmapped tokens.
 func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if resolver == nil {
@@ -79,11 +78,11 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 				response.UnauthorizedWithMessage(c, "delegated_token_expired")
 			case errors.Is(err, authcore.ErrAccessTokenRevoked):
 				response.UnauthorizedWithMessage(c, "delegated_token_revoked")
-			case errors.Is(err, controlplane.ErrServiceTokenMerchantUnresolved),
+			case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved),
 				errors.Is(err, controlplane.ErrDelegatedIssuerUnknown):
 				// Token's merchant/issuer maps to no active merchant (cross-merchant /
 				// unmapped / unregistered or disabled federated issuer).
-				response.ForbiddenWithMessage(c, "delegated_tenant_unresolved")
+				response.ForbiddenWithMessage(c, "delegated_merchant_unresolved")
 			case errors.Is(err, controlplane.ErrDelegatedOriginNotAllowed):
 				response.ForbiddenWithMessage(c, "delegated_origin_not_allowed")
 			case errors.Is(err, controlplane.ErrDelegatedNotConfigured):
@@ -128,15 +127,14 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 // one credential. It is the host-pluggable counterpart of
 // DelegatedSelfRequired and produces the EXACT SAME context payload (pinned
 // merchant, acting user, resolved-delegated record), so every downstream
-// handler and RequireDelegatedPermission gate works unchanged.
+// handler and admin RequirePermission gate works unchanged.
 //
 // EXPLICIT MAPPING — NO FALLBACKS: the principal must carry the resolved
 // merchant id and subject. A principal with an empty/unparseable merchant, an
-// empty subject, no permissions, or any permission outside the delegated
-// catalog (`openrails:self:*` / `openrails:merchant:*`) is rejected (401, fail
-// closed) — mirroring the verify-time catalog gate on real delegated tokens,
-// so a host can never smuggle a service/operator grant onto the browser
-// surface.
+// empty subject, or any permission outside the delegated browser admin catalog
+// is rejected (401, fail closed), so a host can never smuggle a
+// service/operator/platform grant onto the browser surface. Permissions are
+// optional for self-service routes.
 func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if authn == nil {
@@ -160,7 +158,7 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.Ha
 
 		// Identical context payload to DelegatedSelfRequired: pin the resolved
 		// merchant (#223), bind the acting user, and record the delegated state for
-		// the per-route permission gates.
+		// the admin route permission gates.
 		ctx := merchant.WithID(c.Request.Context(), resolved.MerchantID)
 		uc := authprovider.UserContext{
 			UserID:        resolved.DelegatedSubject,
@@ -182,8 +180,8 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.Ha
 
 // resolvedFromHostPrincipal validates a host-supplied principal and converts
 // it to the *controlplane.ResolvedDelegated shape the delegated context
-// carries. Validation is strict and fail-closed: explicit merchant + subject,
-// at least one permission, and every permission inside the delegated catalog.
+// carries. Validation is strict and fail-closed: explicit merchant + subject and
+// every supplied permission inside the delegated browser catalog.
 func resolvedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*controlplane.ResolvedDelegated, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -193,7 +191,8 @@ func resolvedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*controlplane
 		return nil, billingauth.ErrDelegatedPrincipalInvalid
 	}
 	subject := strings.TrimSpace(p.SubjectID)
-	if len(p.Permissions) == 0 {
+	customerID := identity.CustomerIDFromString(subject)
+	if customerID.IsZero() {
 		return nil, billingauth.ErrDelegatedPrincipalInvalid
 	}
 	perms := make([]string, 0, len(p.Permissions))
@@ -206,14 +205,10 @@ func resolvedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*controlplane
 	}
 
 	return &controlplane.ResolvedDelegated{
-		Merchant:     strings.TrimSpace(p.MerchantSlug),
-		MerchantID:   tenantID,
-		MerchantSlug: strings.TrimSpace(p.MerchantSlug),
-		// The self handlers key billing rows by the subject's own UUID
-		// (identity.CustomerIDFromString), so mirror that derivation here.
-		// Zero when the subject is not a UUID — exactly like the handlers, which
-		// reject a zero payer.
-		CustomerID:       identity.CustomerIDFromString(subject).UUID(),
+		Merchant:         strings.TrimSpace(p.MerchantSlug),
+		MerchantID:       tenantID,
+		MerchantSlug:     strings.TrimSpace(p.MerchantSlug),
+		CustomerID:       customerID.UUID(),
 		DelegatedSubject: subject,
 		Issuer:           strings.TrimSpace(p.Issuer),
 		Permissions:      perms,

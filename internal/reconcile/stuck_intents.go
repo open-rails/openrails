@@ -56,7 +56,7 @@ type StuckIntentSource interface {
 }
 
 // PGStuckIntentSource reads the intent ledger through the sqlc layer on a
-// tenant-pinned connection.
+// merchant-pinned connection.
 type PGStuckIntentSource struct {
 	DB *db.DB
 }

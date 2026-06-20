@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -53,8 +52,8 @@ func TestSelfInvoicesHTTP_ReflectsReceivablePaymentsAndScopesToSubject(t *testin
 	require.EqualValues(t, 200, partial.AmountPaid)
 	require.EqualValues(t, 300, partial.AmountDue)
 
-	routerA := newHostSeamSelfRouter(t, suite, subjectA, []string{controlplane.PermSelfBillingRead})
-	routerB := newHostSeamSelfRouter(t, suite, subjectB, []string{controlplane.PermSelfBillingRead})
+	routerA := newHostSeamSelfRouter(t, suite, subjectA, nil)
+	routerB := newHostSeamSelfRouter(t, suite, subjectB, nil)
 
 	w := doHostSeamSelf(routerA, http.MethodGet, "/v1/me/invoices?limit=10", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

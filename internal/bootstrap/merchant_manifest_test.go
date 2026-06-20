@@ -71,7 +71,7 @@ version: 1
 authority:
   bootstrap_org_slug: local-stack
   initial_admin_user_id: usr_admin
-  mint_initial_service_token: false
+  mint_initial_api_key: false
 `)
 	manifest, err := ParseBootstrapManifest(raw)
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ authority:
 	opts := manifest.BootstrapOptions()
 	require.Equal(t, "local-stack", opts.BootstrapOrgSlug)
 	require.Equal(t, "usr_admin", opts.InitialAdminUserID)
-	require.False(t, opts.MintInitialServiceToken)
+	require.False(t, opts.MintInitialAPIKey)
 }
 
 func TestExampleBootstrapManifestParses(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +23,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	require.NotNil(t, rt.DB)
 	require.NotNil(t, rt.EntitlementService)
 
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-60 * 24 * time.Hour)
 	clock := suite.SetMockClock(t0)
@@ -41,9 +42,10 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 			"premium": nil,
 			"extra":   nil,
 		},
-		Status:    models.CatalogStatusActive,
-		CreatedAt: clock.Now().UTC(),
-		UpdatedAt: clock.Now().UTC(),
+		Status:     models.CatalogStatusActive,
+		MerchantID: dbtest.TestMerchantID.UUID(),
+		CreatedAt:  clock.Now().UTC(),
+		UpdatedAt:  clock.Now().UTC(),
 	})
 
 	suite.InsertPrice(ctx, &models.Price{
@@ -53,6 +55,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 		Amount:           999,
 		Currency:         "usd",
 		BillingCycleDays: &billingDays,
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		CreatedAt:        clock.Now().UTC(),
 		UpdatedAt:        clock.Now().UTC(),
 	})
@@ -176,7 +179,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 
 func TestEntitlementSoftDeleteExcludedFromIsEntitled(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	userID := uuid.New().String()
 	entName := "soft_delete_test_entitlement"
@@ -223,7 +226,7 @@ func TestEntitlements_RevokeExistingEntitlement_DropsAccessImmediately(t *testin
 	require.NotNil(t, rt)
 	require.NotNil(t, rt.EntitlementService)
 
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	baseNow := time.Now().UTC().Truncate(time.Second)
 	t0 := baseNow.Add(-30 * 24 * time.Hour)
 	clock := suite.SetMockClock(t0)

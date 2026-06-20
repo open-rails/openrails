@@ -38,35 +38,40 @@ List endpoints use a Stripe-like envelope:
 | Surface | How to authenticate |
 |---------|---------------------|
 | Public catalog (`/`, `/v1/products`, `/v1/prices`, `/v1/solana/tokens`, health probes) | No auth required |
-| Self routes (`/v1/me/*`) | Standalone: `Authorization: Bearer <delegated JWT>` signed by a registered issuer with `delegated_sub` and `openrails:self:*` permissions. Embedded: the host's configured AuthKit/user bearer is adapted to the same self principal. |
-| Delegated billing-admin routes (`/v1/admin/*`, except operator provisioning under `/v1/admin/merchants/*`) | Same delegated JWT shape, with `openrails:merchant:*` permissions |
+| Self routes (`/v1/me/*`) | Standalone: `Authorization: Bearer <delegated JWT>` signed by a registered issuer with `delegated_sub`. Embedded: the host's configured AuthKit/user bearer is adapted to the same customer principal. |
+| Delegated billing-admin routes (`/v1/admin/*`, except platform provisioning under `/v1/admin/merchants/*`) | Same delegated JWT shape, with browser-safe `org:*` permissions |
 | User/session routes (`/v1/checkout`) | Host JWT auth where still mounted by the embedding deployment |
-| Operator merchant provisioning (`/v1/admin/merchants/*`) | Host JWT auth with `openrails:admin` |
-| Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <generated API key or first-party service JWT>`; each route requires an `openrails:*` permission (see Service API section) |
+| Platform merchant provisioning (`/v1/admin/merchants/*`) | Host JWT auth with AuthKit `platform:` authority |
+| Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <generated API key or first-party service JWT>`; each route requires an `org:*` permission (see Service API section) |
 | Webhooks (`/v1/webhooks/:provider`, `/v1/merchants/:merchant/webhooks/:provider`) | Provider-specific verification (see notes) |
 
 Delegated JWTs and machine credentials are intentionally different credentials.
 Delegated JWTs are browser/direct-user credentials verified through OIDC issuer,
-JWKS, audience, expiry, and permission checks. OpenRails stores/touches only the
-minimal payable customer reference `(merchant_id, issuer, subject)` needed for billing
-and audit references; it does not create OpenRails-native users for delegated
-subjects. Generated API keys and first-party service JWTs are backend
+JWKS, audience, expiry, and optional permission checks. OpenRails stores/touches
+the payable customer reference `(merchant_id, subject)` needed for billing;
+`issuer` is audit/last-seen source metadata, not identity. OpenRails does not
+create OpenRails-native users for delegated subjects. Generated API keys and first-party service JWTs are backend
 credentials and are rejected by delegated self/admin routes.
 
 Delegated JWT examples:
 
 - Doujins/Hentai0 membership UI: the host frontend presents a short-lived token
-  signed by its registered issuer with `aud: "openrails-app"`,
-  `delegated_sub: "<canonical-user-id>"`, and permissions such as
-  `openrails:self:billing:read`, `openrails:self:checkout:create`, or
-  `openrails:self:subscriptions:cancel` for `/v1/me/*`.
+  signed by its registered issuer with `aud: "openrails-app"` and
+  `delegated_sub: "<canonical-user-id>"`. `/v1/me/*` acts only on that subject.
 - Cozy Art billing-admin membership UI: an admin browser token is signed by the
   Cozy issuer with `delegated_sub: "<admin-subject>"` and
-  `openrails:merchant:*` permissions for `/v1/admin/*`.
+  browser-safe `org:*` permissions for `/v1/admin/*`.
 - Tensorhub merchant balance UI: Cozy Art can present a delegated JWT whose
-  subject is the upstream merchant/company subject, with self billing permission,
-  to read its own balance through browser/direct OpenRails routes. Backend
+  subject is the upstream merchant/company subject to read its own balance
+  through browser/direct OpenRails routes. Backend
   reserve/capture/release remains machine-credential-only.
+
+Verified AuthKit user-token `entitlements` claims are authoritative short-lived
+snapshots for premium/product access decisions. `sid` remains session identity
+for logout, reauth, and freshness flows; it is not profile data. Embedded
+deployments that need grant/revoke changes reflected before token expiry can
+configure a live freshness check, but standalone/remote mode accepts verified
+JWT entitlement claims without that optional check.
 
 ## Health & Service Banner
 
@@ -155,9 +160,9 @@ Confirms a Solana checkout session.
 
 ## Self-Service API (`/v1/me`)
 
-Every endpoint in this section requires a self principal for the current user:
-delegated JWT in standalone mode, or the embedded host's authenticated user
-bearer adapted to `openrails:self:*`.
+Every endpoint in this section requires an authenticated customer principal for
+the current user: a delegated JWT in standalone mode, or the embedded host's
+authenticated user bearer mapped to a customer principal.
 
 ### GET /v1/me/status
 Aggregated premium status: whether the user currently has an active membership, the enriched
@@ -300,29 +305,28 @@ to a merchant is the authorization: OpenRails resolves the issuer to its merchan
 treats the token's `permissions` claim as authoritative, and scopes every
 resource to that merchant (a token can never reach another merchant's resources).
 
-The canonical permission vocabulary is colon-form
-`openrails:<resource>:<action>`:
+The canonical machine permission vocabulary is AuthKit org-scoped
+`org:<resource>:<action>`:
 
 Machine-credential examples:
 
 - Doujins/Hentai0/Cozy backend entitlement read: first-party service JWT subject
-  such as `service:doujins-runtime`, permission `openrails:entitlements:read`,
+  such as `service:doujins-runtime`, permission `org:entitlements:read`,
   resource `openrails.merchant=<merchant_uuid>`, route
   `GET /v1/service/customers/{customer_id}/entitlements`.
 - Tensorhub balance reserve/capture/release: permissions
-  `openrails:credits:read`, `openrails:credits:write`, and
-  `openrails:credits:spend`; resources include `openrails.merchant=<merchant_uuid>`
+  `org:credits:read`, `org:credits:update`, and
+  `org:credits:spend`; resources include `openrails.merchant=<merchant_uuid>`
   and, for payer-scoped generated tokens or service-JWT grants,
   `openrails.customer=<customer_uuid>`.
 
 | Route | Required permission |
 |-------|---------------------|
-| `GET /v1/service/customers/{customer_id}/entitlements` | `openrails:entitlements:read` |
-| `GET /v1/service/invokers/{invoker_id}/credits`, `GET /v1/service/credits/invokers/{invoker_id}`, `GET /v1/service/credits/transactions/lookup`, `GET /v1/service/credit-types` | `openrails:credits:read` |
-| `POST /v1/service/credits/{deposit,withdraw,hold}`, `.../hold(s)/{id}/{capture,release}` | `openrails:credits:write` |
-| `POST/PATCH /v1/service/credit-types*` (definition writes) | `openrails:catalog:write` |
+| `GET /v1/service/customers/{customer_id}/entitlements` | `org:entitlements:read` |
+| `GET /v1/service/invokers/{invoker_id}/credits`, `GET /v1/service/credits/invokers/{invoker_id}`, `GET /v1/service/credits/transactions/lookup`, `GET /v1/service/credit-types` | `org:credits:read` |
+| `POST /v1/service/credits/{deposit,withdraw,hold}`, `.../hold(s)/{id}/{capture,release}` | `org:credits:update` |
+| `POST/PATCH /v1/service/credit-types*` (definition writes) | `org:catalog:update` |
 
-`openrails:admin` satisfies any permission check, but not resource-scope checks.
 Embedded hosts skip HTTP entirely and call the in-process `pkg/service` facade
 after authorizing the action themselves.
 

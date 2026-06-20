@@ -20,8 +20,6 @@ type EntitlementRepo struct {
 
 func NewEntitlementRepo(d *db.DB) *EntitlementRepo { return &EntitlementRepo{db: d} }
 
-const selfIssuer = "openrails:self"
-
 func (r *EntitlementRepo) SetEndAtTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, endAt *time.Time, now time.Time) error {
 	return SetEntitlementEndAtTx(ctx, tx, id, endAt, now)
 }
@@ -223,36 +221,19 @@ func (r *EntitlementRepo) ListActiveRecordsByCustomer(ctx context.Context, tenan
 	return entitlementsFromGen(rows), nil
 }
 
-// ListActiveRecordsByExternalSubjects (#354/#491): one query, grouped by the
+// ListActiveRecordsByExternalSubjects (#354/#539): one query, grouped by the
 // caller-supplied subject; subjects with no active rows are absent from the map.
-// #491 replaced the deterministic FederatedCustomerID derivation with the re-added
-// (merchant, issuer, subject) natural key: we LOOK UP the org-less customer ids for
-// the batch, then query by id and map results back to the original subject string.
+// Issuer is accepted for API compatibility/audit context only. Customer identity
+// is merchant + stable host/AuthKit subject.
 func (r *EntitlementRepo) ListActiveRecordsByExternalSubjects(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	merchantID := tid.UUID()
-	if issuer == selfIssuer {
-		subjectByCustomerID := make(map[uuid.UUID]string, len(subjects))
-		customerIDs := make([]uuid.UUID, 0, len(subjects))
-		for _, subject := range subjects {
-			uid, err := ResolveCustomerID(subject)
-			if err != nil {
-				return nil, err
-			}
-			if uid == uuid.Nil {
-				continue
-			}
-			subjectByCustomerID[uid] = subject
-			customerIDs = append(customerIDs, uid)
-		}
-		return r.listActiveRecordsByCustomerIDs(ctx, merchantID, subjectByCustomerID, customerIDs, at)
-	}
-	resolved, err := r.db.Gen(ctx).LookupCustomerIDsByIssuerSubjects(ctx, gen.LookupCustomerIDsByIssuerSubjectsParams{
+	_ = issuer
+	resolved, err := r.db.Gen(ctx).LookupCustomerIDsBySubjects(ctx, gen.LookupCustomerIDsBySubjectsParams{
 		MerchantID: merchantID,
-		Issuer:     &issuer,
 		Subjects:   subjects,
 	})
 	if err != nil {

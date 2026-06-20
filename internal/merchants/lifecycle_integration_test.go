@@ -19,11 +19,12 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// schemaDDL stands up the minimal openrails.* schema the tenancy service touches:
-// the tenant directory (with #225 columns), one representative tenant-owned table
+// schemaDDL stands up the minimal openrails.* schema the merchant service touches:
+// the merchant directory (with #225 columns), one representative merchant-owned table
 // (entitlements) so export/delete have rows to purge, and the #225 control-plane
 // tables. It mirrors migrations 039 + 041 for the columns under test.
 const schemaDDL = `
@@ -110,6 +111,7 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 		postgres.WithDatabase("openrails"),
 		postgres.WithUsername("test"),
 		postgres.WithPassword("test"),
+		dbtest.WithPostgresLimits(),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(60*time.Second)),
@@ -203,7 +205,7 @@ func TestSuspend_DeniesWritesAllowsReads(t *testing.T) {
 	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"})
 	require.NoError(t, err)
 
-	// Active tenant is writable.
+	// Active merchant is writable.
 	w, err := svc.IsWritable(ctx, tn.ID)
 	require.NoError(t, err)
 	require.True(t, w)
@@ -212,10 +214,10 @@ func TestSuspend_DeniesWritesAllowsReads(t *testing.T) {
 	require.NoError(t, svc.Suspend(ctx, tn.ID))
 	w, err = svc.IsWritable(ctx, tn.ID)
 	require.NoError(t, err)
-	require.False(t, w, "suspended tenant must deny writes")
+	require.False(t, w, "suspended merchant must deny writes")
 
 	got, err := svc.Get(ctx, tn.ID)
-	require.NoError(t, err, "suspended tenant must still be readable")
+	require.NoError(t, err, "suspended merchant must still be readable")
 	require.Equal(t, StatusSuspended, got.Status)
 	require.NotNil(t, got.SuspendedAt)
 
@@ -235,7 +237,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"})
 	require.NoError(t, err)
 
-	// Seed a tenant-owned row + a secret so the purge has something to remove.
+	// Seed a merchant-owned row + a secret so the purge has something to remove.
 	_, err = svc.pool.Exec(ctx, `
 		WITH subject AS (
 			INSERT INTO openrails.customers (merchant_id)
@@ -266,7 +268,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 
 	var entCount int
 	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1::uuid`, tn.ID.String()).Scan(&entCount))
-	require.Equal(t, 0, entCount, "delete must purge tenant-owned rows")
+	require.Equal(t, 0, entCount, "delete must purge merchant-owned rows")
 
 	// The directory row is tombstoned (no longer resolvable as active).
 	_, err = svc.Get(ctx, tn.ID)
@@ -312,8 +314,8 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	_, err = svc.ResolveBySlug(ctx, "nope")
 	require.True(t, errors.Is(err, ErrMerchantRouteUnresolved))
 
-	// After resolution the caller loads THAT tenant's signing secret (the trust
-	// boundary), which is namespaced to the tenant.
+	// After resolution the caller loads THAT merchant's signing secret (the trust
+	// boundary), which is namespaced to the merchant.
 	seedProviderAccount(t, svc, tn.ID, "stripe", "live", "acct_acme")
 	secretName, err := ProviderAccountSecretName("stripe", "live", "acct_acme", "webhook_signing_secret")
 	require.NoError(t, err)
@@ -323,8 +325,8 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "whsec_acme", creds.WebhookSigningSecret)
 
-	// A suspended tenant still RESOLVES (webhooks keep being verified/processed).
+	// A suspended merchant still RESOLVES (webhooks keep being verified/processed).
 	require.NoError(t, svc.Suspend(ctx, tn.ID))
 	_, err = svc.ResolveBySlug(ctx, "acme")
-	require.NoError(t, err, "suspended tenant must still route webhooks")
+	require.NoError(t, err, "suspended merchant must still route webhooks")
 }

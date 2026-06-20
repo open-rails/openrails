@@ -50,6 +50,31 @@ func newIntentsCmd() *cobra.Command {
 	cmd.Flags().IntVar(&limit, "limit", 500, "Maximum rows to list")
 
 	var (
+		logProvider        string
+		logIntent          string
+		logProviderAccount string
+		logPhase           string
+		logFormat          string
+		logMerchant        string
+		logLimit           int
+	)
+	logCmd := &cobra.Command{
+		Use:   "log",
+		Short: "List append-only external provider mutation attempts/results (#533)",
+		RunE: func(c *cobra.Command, _ []string) error {
+			return runIntentsMutationLog(c, logProvider, logIntent, logProviderAccount, logPhase, logFormat, logMerchant, logLimit)
+		},
+	}
+	logCmd.Flags().StringVar(&logProvider, "provider", "", "Provider filter (e.g. mobius, stripe)")
+	logCmd.Flags().StringVar(&logIntent, "intent", "", "Provider intent id filter")
+	logCmd.Flags().StringVar(&logProviderAccount, "provider-account", "", "Provider account id filter")
+	logCmd.Flags().StringVar(&logPhase, "phase", "", "Phase filter: attempting, succeeded, failed, unknown, parked")
+	logCmd.Flags().StringVar(&logFormat, "format", "table", "Output format: table, json")
+	logCmd.Flags().StringVar(&logMerchant, "merchant", "", "Merchant slug or id (default: the default merchant)")
+	logCmd.Flags().IntVar(&logLimit, "limit", 500, "Maximum rows to list")
+	cmd.AddCommand(logCmd)
+
+	var (
 		rebindProvider string
 		rebindMerchant string
 		rebindYes      bool
@@ -221,6 +246,118 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 				byMode["limited"], byMode["full"])
 		}
 		return nil
+	})
+}
+
+func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, providerAccountID, phase, format, merchantSlug string, limit int) error {
+	var providerFilter *string
+	if p := strings.ToLower(strings.TrimSpace(provider)); p != "" {
+		providerFilter = &p
+	}
+	var intentFilter *uuid.UUID
+	if raw := strings.TrimSpace(intentID); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return fmt.Errorf("invalid --intent %q: %w", raw, err)
+		}
+		intentFilter = &id
+	}
+	var accountFilter *uuid.UUID
+	if raw := strings.TrimSpace(providerAccountID); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return fmt.Errorf("invalid --provider-account %q: %w", raw, err)
+		}
+		accountFilter = &id
+	}
+	var phaseFilter *string
+	if p := strings.ToLower(strings.TrimSpace(phase)); p != "" {
+		switch p {
+		case string(intents.MutationLogPhaseAttempting), string(intents.MutationLogPhaseSucceeded), string(intents.MutationLogPhaseFailed), string(intents.MutationLogPhaseUnknown), string(intents.MutationLogPhaseParked):
+			phaseFilter = &p
+		default:
+			return fmt.Errorf("invalid --phase %q", phase)
+		}
+	}
+	format = strings.ToLower(strings.TrimSpace(format))
+	if format == "" {
+		format = "table"
+	}
+	if format != "table" && format != "json" {
+		return fmt.Errorf("invalid --format %q", format)
+	}
+	if limit <= 0 {
+		limit = 500
+	}
+
+	return withIntentsListDB(cmd, merchantSlug, func(ctx context.Context, database *db.DB) error {
+		q := database.Gen(ctx)
+		countArgs := gen.CountExternalProviderMutationLogsParams{
+			Provider: providerFilter, ProviderIntentID: intentFilter, ProviderAccountID: accountFilter, Phase: phaseFilter,
+		}
+		total, err := q.CountExternalProviderMutationLogs(ctx, countArgs)
+		if err != nil {
+			return fmt.Errorf("count external provider mutation logs: %w", err)
+		}
+		rows, err := q.ListExternalProviderMutationLogs(ctx, gen.ListExternalProviderMutationLogsParams{
+			Provider: providerFilter, ProviderIntentID: intentFilter, ProviderAccountID: accountFilter, Phase: phaseFilter,
+			PageLimit: int64(limit), PageOffset: 0,
+		})
+		if err != nil {
+			return fmt.Errorf("list external provider mutation logs: %w", err)
+		}
+
+		if format == "json" {
+			items := make([]map[string]any, 0, len(rows))
+			for _, row := range rows {
+				item := map[string]any{
+					"id":                  row.ID,
+					"merchant_id":         row.MerchantID,
+					"provider":            row.Provider,
+					"provider_account_id": row.ProviderAccountID,
+					"provider_intent_id":  row.ProviderIntentID,
+					"intent_type":         row.IntentType,
+					"idempotency_key":     row.IdempotencyKey,
+					"attempt":             row.Attempt,
+					"phase":               row.Phase,
+					"reason":              row.Reason,
+					"created_at":          row.CreatedAt,
+				}
+				if len(row.Evidence) > 0 {
+					item["evidence"] = json.RawMessage(row.Evidence)
+				}
+				items = append(items, item)
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(map[string]any{"total": total, "external_provider_mutation_logs": items})
+		}
+
+		fmt.Printf("External provider mutation log: %d total, showing %d\n\n", total, len(rows))
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "CREATED\tPROVIDER\tACCOUNT\tINTENT\tTYPE\tATTEMPT\tPHASE\tREASON")
+		for _, row := range rows {
+			account := ""
+			if row.ProviderAccountID != nil {
+				account = row.ProviderAccountID.String()
+			}
+			intent := ""
+			if row.ProviderIntentID != nil {
+				intent = row.ProviderIntentID.String()
+			}
+			intentType := ""
+			if row.IntentType != nil {
+				intentType = *row.IntentType
+			}
+			reason := ""
+			if row.Reason != nil {
+				reason = *row.Reason
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+				row.CreatedAt.Format("2006-01-02 15:04"),
+				row.Provider, account, intent, intentType, row.Attempt, row.Phase, reason)
+		}
+		return w.Flush()
 	})
 }
 

@@ -10,7 +10,7 @@ import (
 )
 
 // stripeSig builds a Stripe-style signature header for the merchant-webhook
-// integration test. The per-merchant webhook trust boundary (cross-tenant secret
+// integration test. The per-merchant webhook trust boundary (cross-merchant secret
 // isolation, missing/invalid signature) is unit-tested in the handlers package
 // against prepareStripeMultiSecret — the function the live MerchantWebhook handler
 // uses — and asserted end-to-end (wrong secret → 401) by the integration test.

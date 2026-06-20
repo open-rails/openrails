@@ -11,7 +11,7 @@ package tests
 // correctly: ADMIT for an estimate (places a Redis spendgate hold), CAPTURE the
 // metered actual (full and PARTIAL), RELEASE on failure, REJECT when in-flight
 // holds exhaust the spendable balance, dedupe on replay, and scope every
-// operation to a tenant subject.
+// operation to a customer.
 //
 // POST-#513/#512 MODEL (what changed from the original single-entry version):
 //   - There is NO /credits/hold create route anymore: placing a hold IS
@@ -27,7 +27,7 @@ package tests
 //     service (GetBalanceForCustomer / GetTransactionsByCustomer), not the
 //     dropped money_transactions/money_blocks tables.
 //
-// Everything flows over the service-token-authenticated PUBLIC service routes
+// Everything flows over the service-credential-authenticated PUBLIC service routes
 // (deposit, admit, capture, release, balance) — the standalone server-to-server
 // contract gen-orchestrator / Tensorhub actually use.
 
@@ -54,9 +54,9 @@ import (
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
-// billingE2EHarness is a small reusable driver over the service-token-authenticated public
+// billingE2EHarness is a small reusable driver over the service-credential-authenticated public
 // service routes. It mirrors the harness style already established in
-// service_facade_parity_test.go (stubServiceTokenResolver + RegisterServiceRoutes) so
+// service_facade_parity_test.go (stubServiceCredentialResolver + RegisterServiceRoutes) so
 // the same server-to-server contract gen-orchestrator / Tensorhub use is exercised here.
 type billingE2EHarness struct {
 	t          *testing.T
@@ -82,14 +82,14 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 	group := router.Group("/v1/service")
 	// Merchant-wide token (no CustomerResource): AllowsCustomer returns true for
 	// every customer under the merchant, so each test's random payer is in scope.
-	resolver := stubServiceTokenResolver{permissions: []string{
+	resolver := stubServiceCredentialResolver{permissions: []string{
 		controlplane.PermCreditsRead,
 		controlplane.PermCreditsWrite,
 		controlplane.PermCreditsSpend,
 	}, resources: []authcore.APIKeyResource{
 		controlplane.MerchantResource(dbtest.TestMerchantID),
 	}}
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver))
+	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceCredentialRequired(resolver))
 
 	return &billingE2EHarness{
 		t:          t,
@@ -119,7 +119,7 @@ func (h *billingE2EHarness) do(method, path string, body any) *httptest.Response
 	return w
 }
 
-// deposit funds a tenant subject's balance via the public deposit route (a #512
+// deposit funds a customer's balance via the public deposit route (a #512
 // ledger deposit; the deposit path ensures the customer row).
 func (h *billingE2EHarness) deposit(userID string, amount int64) {
 	h.t.Helper()
@@ -128,6 +128,7 @@ func (h *billingE2EHarness) deposit(userID string, amount int64) {
 		"customer_id": personalOwnerID(userID).String(),
 		"invoker":     userID,
 		"credit_type": h.creditType,
+		"currency":    money.DefaultCurrency,
 		"amount":      amount,
 		"source":      "e2e_deposit",
 		"source_id":   srcID.String(),
@@ -202,7 +203,7 @@ func (h *billingE2EHarness) balance(userID string) balanceView {
 	return balanceView{Balance: payload.BalanceAmount, HeldBalance: payload.HeldAmount}
 }
 
-// ledgerTxns returns the durable #512 ledger transfers for a tenant subject
+// ledgerTxns returns the durable #512 ledger transfers for a customer
 // (USD) as MoneyTransaction DTOs — deposits and captured withdrawals; there are
 // no "hold" rows (holds are Redis-only).
 func (h *billingE2EHarness) ledgerTxns(userID string) []models.MoneyTransaction {
@@ -395,11 +396,11 @@ func TestUnifiedBilling_OwnerScoping(t *testing.T) {
 	}
 }
 
-// TestUnifiedBilling_LifecycleViaPublicServiceTokenRoutes is the end-to-end
+// TestUnifiedBilling_LifecycleViaPublicServiceCredentialRoutes is the end-to-end
 // "happy path" a gen-orchestrator / Tensorhub driver runs for a single job, all
-// over the service-token-authenticated public surface: fund -> admit estimate ->
+// over the service-credential-authenticated public surface: fund -> admit estimate ->
 // capture actual -> ledger conserved, with the public balance endpoint agreeing.
-func TestUnifiedBilling_LifecycleViaPublicServiceTokenRoutes(t *testing.T) {
+func TestUnifiedBilling_LifecycleViaPublicServiceCredentialRoutes(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
 	user := uuid.NewString()

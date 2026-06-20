@@ -2,7 +2,7 @@
 // interface (Client) with two constructors —
 //
 //   - NewRemote(baseURL, opts...) talks to a standalone OpenRails over its
-//     service-token-authenticated /v1/service/* routes (this file + remote.go,
+//     service-credential-authenticated /v1/service/* routes (this file + remote.go,
 //     ported from the go-client module, which this package supersedes);
 //   - openrails/embed.New(...).Client() runs the engine in-process and adapts
 //     pkg/service.Service to the same interface.
@@ -76,17 +76,17 @@ type Client interface {
 	UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
 	// BudgetStatus returns the invoker's fixed money-budget windows under the
 	// payer's stored tier policy without reserving (#304 introspection).
-	BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]BudgetWindow, error)
+	BudgetStatus(ctx context.Context, customerID, invokerID, currency, tier string) ([]BudgetWindow, error)
 	// SetPayerSpendLimits upserts a per-payer tier money policy (#298): fixed
 	// money-budget windows and wasted-spend grace windows.
-	SetPayerSpendLimits(ctx context.Context, tenantSubjectID string, in PayerSpendLimitInput) error
-	// SetTierSchedule persists the tenant's tier SCHEDULE once (#476): the ordered
+	SetPayerSpendLimits(ctx context.Context, customerID string, in PayerSpendLimitInput) error
+	// SetTierSchedule persists the merchant's tier SCHEDULE once (#476): the ordered
 	// ladder [{tier, min_cumulative_paid_amount}] for one currency. OpenRails then
 	// AUTO-maintains each payer's same-currency tier from cumulative spend — the
-	// host never cranks graduation. An EMPTY tenantSubjectID sets the tenant-wide
+	// host never cranks graduation. An EMPTY customerID sets the merchant-wide
 	// default schedule (the common case); a non-empty one sets a per-subject
 	// override. owner=platform (the subject cannot see/loosen it).
-	SetTierSchedule(ctx context.Context, tenantSubjectID, currency string, schedule []TierScheduleRung) error
+	SetTierSchedule(ctx context.Context, customerID, currency string, schedule []TierScheduleRung) error
 	// SetMerchantConfiguration configures merchant-scoped OpenRails behavior.
 	// Missing keys fall back to hardcoded service defaults. OPERATOR-only — NOT
 	// self-serve.
@@ -96,7 +96,7 @@ type Client interface {
 	// against the persisted schedule (#476), or a manual admin override. Empty
 	// when the payer has never graduated (the host treats that as the
 	// lowest/default tier).
-	GetTier(ctx context.Context, tenantSubjectID, currency string) (string, error)
+	GetTier(ctx context.Context, customerID, currency string) (string, error)
 	// ReportWastedSpend records host-reported WASTED $ (#497): delegated invokers
 	// accrue toward their flat cutoff; direct payer credentials use trust-tier
 	// grace and charge overage through the normal ledger. Source+SourceID are
@@ -105,24 +105,24 @@ type Client interface {
 	// AbuseUsage returns the payer's and invoker's running WASTED-$ totals + budgets
 	// (#488 introspection) in one currency. Empty invoker omits the invoker
 	// windows; empty tier resolves the payer's current tier.
-	AbuseUsage(ctx context.Context, tenantSubjectID, invoker, currency, tier string) (*AbuseUsageResponse, error)
+	AbuseUsage(ctx context.Context, customerID, invoker, currency, tier string) (*AbuseUsageResponse, error)
 	// SetCreditLimit sets the admin/operator arrears credit line for a payer
 	// (#489): under billing_mode=arrears the balance may go NEGATIVE up to
 	// creditLimit; AdmitHold denies insufficient_credit when a new hold would
 	// exceed it. 0 = off (prepaid / existing-arrears behavior, unchanged).
 	// OPERATOR-only — NOT self-serve.
-	SetCreditLimit(ctx context.Context, tenantSubjectID, currency string, creditLimit int64) error
+	SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error
 	// GetCreditLimit returns the admin-set arrears credit line for a payer (#489).
-	GetCreditLimit(ctx context.Context, tenantSubjectID, currency string) (int64, error)
+	GetCreditLimit(ctx context.Context, customerID, currency string) (int64, error)
 	// SetInvokerSpendLimits upserts a per-invoker spend limit (#473/#517): the
 	// payer's cap on a delegated invoker (scope=invoker), a role (scope=role,
 	// RoleID = the role uuid), or an invoker-at-tier (scope=invoker_tier).
-	SetInvokerSpendLimits(ctx context.Context, tenantSubjectID string, in InvokerSpendLimitInput) error
+	SetInvokerSpendLimits(ctx context.Context, customerID string, in InvokerSpendLimitInput) error
 	// InvokerSpendLimits reads back the payer's per-invoker spend limits (#473/#517)
 	// for the host to reconcile.
-	InvokerSpendLimits(ctx context.Context, tenantSubjectID string) ([]InvokerSpendLimit, error)
+	InvokerSpendLimits(ctx context.Context, customerID string) ([]InvokerSpendLimit, error)
 	// ResourceRevenueDaily returns per-day revenue for a resource across all
-	// payers in the tenant (#410).
+	// payers in the merchant (#410).
 	ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error)
 	// ListActiveEntitlements returns the entitlement records active at `at`
 	// for subjects addressed by their EXTERNAL identity — the issuer +
@@ -136,6 +136,13 @@ type Client interface {
 	// token-issuance enrichment and list renders: bake names into token
 	// claims and gate per-request from the token, not from this call.
 	ListActiveEntitlements(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error)
+	// ListCustomersWithEntitlement is the REVERSE of ListActiveEntitlements (#535):
+	// the customer ids (== external subject ids, #364 UUID-only) holding an ACTIVE
+	// window of `entitlement` for the merchant. It walks the keyset-paginated
+	// reverse query to completion and returns the full set. A zero `at` means
+	// "now". Backs a host directory's filter-by-entitlement (the authkit
+	// EntitlementFilterProvider).
+	ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]string, error)
 	// AdmitBatch performs one cross-payer batch admission (#335): N admit items
 	// (mixed payers) in ONE call with per-item verdicts. Per-item isolation: one
 	// item's deny or error never fails the batch; the returned slice is

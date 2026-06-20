@@ -19,8 +19,8 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
 // TestProbeVerdictCacheRoundtrip exercises the #348 probe-cooldown persistence
 // exactly as the boot path uses it: the unprivileged openrails_app role on a
-// NON-tenant-pinned connection (openrails.probe_verdicts is RLS-exempt by
-// design — the probe runs before any tenant context exists).
+// non-merchant-pinned connection (openrails.probe_verdicts is RLS-exempt by
+// design — the probe runs before any merchant context exists).
 func TestProbeVerdictCacheRoundtrip(t *testing.T) {
 	_, appDSN := dbtest.SharedRLSPostgres(t)
 	pool, err := pgxpool.New(context.Background(), appDSN)

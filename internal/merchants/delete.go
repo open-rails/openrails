@@ -12,24 +12,24 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// merchantOwnedTables are the openrails.* tables that carry a tenant_id. Merchant
-// deletion purges these rows for the target tenant. Kept in sync with the
-// consolidated schema's tenant-owned table set AND with
+// merchantOwnedTables are the openrails.* tables that carry the persisted tenant_id
+// column. Merchant deletion purges these rows for the target merchant. Kept in
+// sync with the consolidated schema's merchant-owned table set AND with
 // queries/tenant_lifecycle.sql + the dispatch switches below (#334: each table
 // has a STATIC generated count/purge query — no runtime SQL assembly).
 var merchantOwnedTables = []string{
 	"products", "prices", "catalog_drift_events", "payment_methods",
 	"subscriptions", "entitlements", "payments",
 	"notification_queue", "processor_customers",
-	"checkout_sessions", "provider_intents",
+	"checkout_sessions", "external_provider_mutation_logs", "provider_intents",
 	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
 	// tables are gone. The append-only ledger_transfers/grants are immutable
 	// (REVOKE DELETE) and intentionally NOT row-purged here.
 	"money_settings",
 }
 
-// countTenantRows dispatches to the table's generated count query.
-func countTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.UUID) (int64, error) {
+// countMerchantRows dispatches to the table's generated count query.
+func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uuid.UUID) (int64, error) {
 	switch table {
 	case "products":
 		return q.CountMerchantRowsProducts(ctx, id)
@@ -51,17 +51,19 @@ func countTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.CountMerchantRowsProcessorCustomers(ctx, id)
 	case "checkout_sessions":
 		return q.CountMerchantRowsCheckoutSessions(ctx, id)
+	case "external_provider_mutation_logs":
+		return q.CountMerchantRowsExternalProviderMutationLogs(ctx, id)
 	case "provider_intents":
 		return q.CountMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
 		return q.CountMerchantRowsMoneyAccounts(ctx, id)
 	default:
-		return 0, fmt.Errorf("tenancy: no count query for table %q", table)
+		return 0, fmt.Errorf("merchants: no count query for table %q", table)
 	}
 }
 
-// purgeTenantRows dispatches to the table's generated purge query.
-func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.UUID) error {
+// purgeMerchantRows dispatches to the table's generated purge query.
+func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uuid.UUID) error {
 	switch table {
 	case "products":
 		return q.PurgeMerchantRowsProducts(ctx, id)
@@ -83,12 +85,14 @@ func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.PurgeMerchantRowsProcessorCustomers(ctx, id)
 	case "checkout_sessions":
 		return q.PurgeMerchantRowsCheckoutSessions(ctx, id)
+	case "external_provider_mutation_logs":
+		return q.PurgeMerchantRowsExternalProviderMutationLogs(ctx, id)
 	case "provider_intents":
 		return q.PurgeMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
 		return q.PurgeMerchantRowsMoneyAccounts(ctx, id)
 	default:
-		return fmt.Errorf("tenancy: no purge query for table %q", table)
+		return fmt.Errorf("merchants: no purge query for table %q", table)
 	}
 }
 
@@ -104,7 +108,7 @@ func (s *Service) Export(ctx context.Context, id merchant.ID) (string, map[strin
 		return "", nil, err
 	}
 
-	tables, err := s.existingTenantTables(ctx)
+	tables, err := s.existingMerchantTables(ctx)
 	if err != nil {
 		return "", nil, err
 	}
@@ -112,9 +116,9 @@ func (s *Service) Export(ctx context.Context, id merchant.ID) (string, map[strin
 	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		for _, tbl := range tables {
-			n, err := countTenantRows(ctx, q, tbl, id.UUID())
+			n, err := countMerchantRows(ctx, q, tbl, id.UUID())
 			if err != nil {
-				return fmt.Errorf("tenancy: export count %s: %w", tbl, err)
+				return fmt.Errorf("merchants: export count %s: %w", tbl, err)
 			}
 			counts[tbl] = int(n)
 		}
@@ -123,12 +127,12 @@ func (s *Service) Export(ctx context.Context, id merchant.ID) (string, map[strin
 		return "", nil, err
 	}
 
-	// Enumerate per-tenant secret NAMES (never values) for the portability manifest.
+	// Enumerate per-merchant secret NAMES (never values) for the portability manifest.
 	var secretNames []string
 	if s.secrets != nil {
 		names, err := s.secrets.List(ctx, id)
 		if err != nil {
-			return "", nil, fmt.Errorf("tenancy: export enumerate secrets: %w", err)
+			return "", nil, fmt.Errorf("merchants: export enumerate secrets: %w", err)
 		}
 		secretNames = names
 	}
@@ -136,7 +140,7 @@ func (s *Service) Export(ctx context.Context, id merchant.ID) (string, map[strin
 	manifest := map[string]any{"row_counts": counts, "secret_names": secretNames}
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
-		return "", nil, fmt.Errorf("tenancy: marshal export manifest: %w", err)
+		return "", nil, fmt.Errorf("merchants: marshal export manifest: %w", err)
 	}
 
 	var exportID string
@@ -148,7 +152,7 @@ func (s *Service) Export(ctx context.Context, id merchant.ID) (string, map[strin
 		`, id.String(), string(manifestJSON)).Scan(&exportID)
 	})
 	if err != nil {
-		return "", nil, fmt.Errorf("tenancy: record export: %w", err)
+		return "", nil, fmt.Errorf("merchants: record export: %w", err)
 	}
 	return exportID, counts, nil
 }
@@ -168,11 +172,11 @@ type DeleteOptions struct {
 //     credential/audit/export bookkeeping, then tombstones the directory row
 //     (status='deleted', deleted_at set) inside ONE transaction.
 //
-// Re-running Delete on an already-deleted tenant returns ErrMerchantNotFound (the
+// Re-running Delete on an already-deleted merchant returns ErrMerchantNotFound (the
 // active-row lookup misses), so the purge itself is not re-run.
 func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions) error {
 	if !opts.Confirm {
-		return errors.New("tenancy: delete requires confirmation")
+		return errors.New("merchants: delete requires confirmation")
 	}
 	if _, err := s.merchantByID(ctx, id); err != nil {
 		return err
@@ -181,7 +185,7 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 	// Resolve which merchant-owned tables actually exist BEFORE opening the tx: a
 	// statement error inside a Postgres tx aborts the whole tx (SQLSTATE 25P02),
 	// so we must not issue a DELETE against a missing table.
-	tables, err := s.existingTenantTables(ctx)
+	tables, err := s.existingMerchantTables(ctx)
 	if err != nil {
 		return err
 	}
@@ -193,7 +197,7 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 			SELECT count(*) FROM openrails.merchant_exports
 			 WHERE merchant_id = $1::uuid AND status = 'completed'
 		`, id.String()).Scan(&exportCount); err != nil {
-			return fmt.Errorf("tenancy: check export-before-delete: %w", err)
+			return fmt.Errorf("merchants: check export-before-delete: %w", err)
 		}
 		if exportCount == 0 {
 			return ErrExportRequired
@@ -201,8 +205,8 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 
 		txq := gen.New(tx)
 		for _, tbl := range tables {
-			if err := purgeTenantRows(ctx, txq, tbl, id.UUID()); err != nil {
-				return fmt.Errorf("tenancy: purge %s: %w", tbl, err)
+			if err := purgeMerchantRows(ctx, txq, tbl, id.UUID()); err != nil {
+				return fmt.Errorf("merchants: purge %s: %w", tbl, err)
 			}
 		}
 
@@ -218,7 +222,7 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 			   SET status = 'deleted', deleted_at = current_timestamp, updated_at = current_timestamp
 			 WHERE id = $1::uuid
 		`, id.String()); err != nil {
-			return fmt.Errorf("tenancy: tombstone tenant: %w", err)
+			return fmt.Errorf("merchants: tombstone merchant: %w", err)
 		}
 		return nil
 	}); err != nil {
@@ -237,17 +241,17 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 	return nil
 }
 
-// existingTenantTables returns the subset of merchantOwnedTables that actually
+// existingMerchantTables returns the subset of merchantOwnedTables that actually
 // exist in the billing schema, so export/delete tolerate a partial schema
 // without aborting a transaction on a missing table. The names are intersected
 // against a fixed allow-list, never user input.
-func (s *Service) existingTenantTables(ctx context.Context) ([]string, error) {
+func (s *Service) existingMerchantTables(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT table_name FROM information_schema.tables
 		 WHERE table_schema = $1 AND table_name = ANY($2)
 	`, s.pool.Schema(), merchantOwnedTables)
 	if err != nil {
-		return nil, fmt.Errorf("tenancy: list existing tenant tables: %w", err)
+		return nil, fmt.Errorf("merchants: list existing merchant tables: %w", err)
 	}
 	defer rows.Close()
 	present := make(map[string]bool)

@@ -9,7 +9,7 @@
 //	vault secrets enable transit
 //	go test -tags vaultint -run Vault ./internal/integrations/vault/...
 //
-// They exercise the REAL KV-v2 put/get/list/delete + tenant path isolation and
+// They exercise the REAL KV-v2 put/get/list/delete + merchant path isolation and
 // real Transit Ed25519 create/sign/verify against the boundary OpenRails uses.
 package vault
 
@@ -61,7 +61,7 @@ func TestVaultKVRoundTripAndIsolation(t *testing.T) {
 		t.Fatalf("read A: %v", err)
 	}
 	if got["value"] != "keyA" {
-		t.Fatalf("tenant A value = %q, want keyA (isolation/round-trip broken)", got["value"])
+		t.Fatalf("merchant A value = %q, want keyA (isolation/round-trip broken)", got["value"])
 	}
 
 	missing, err := kv.ReadSecret(ctx, "secret/openrails/merchants/tenant-a/does/not/exist")

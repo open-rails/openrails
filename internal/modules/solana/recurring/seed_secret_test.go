@@ -10,11 +10,11 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-func TestSeedConfiguredTenantSolanaSecret_SeedsWhenAbsent(t *testing.T) {
+func TestSeedConfiguredMerchantSolanaSecret_SeedsWhenAbsent(t *testing.T) {
 	store := merchants.NewMemorySecretStore()
 	const key = "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 
-	if err := SeedConfiguredTenantSolanaSecret(context.Background(), store, dbtest.TestMerchantID, key); err != nil {
+	if err := SeedConfiguredMerchantSolanaSecret(context.Background(), store, dbtest.TestMerchantID, key); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	got, err := store.Get(context.Background(), dbtest.TestMerchantID, solanaint.SecretSolanaPrivateKey)
@@ -26,18 +26,18 @@ func TestSeedConfiguredTenantSolanaSecret_SeedsWhenAbsent(t *testing.T) {
 	}
 }
 
-func TestSeedTenantSolanaSecret_SeedsRequestedTenant(t *testing.T) {
+func TestSeedMerchantSolanaSecret_SeedsRequestedMerchant(t *testing.T) {
 	store := merchants.NewMemorySecretStore()
-	tenantID, err := merchant.ParseID("019e986d-145c-7a4d-ab33-e7e087f4ce0d")
+	merchantID, err := merchant.ParseID("019e986d-145c-7a4d-ab33-e7e087f4ce0d")
 	if err != nil {
 		t.Fatalf("parse merchant id: %v", err)
 	}
 	const key = "TENANT_SOLANA_KEY"
 
-	if err := SeedTenantSolanaSecret(context.Background(), store, tenantID, key); err != nil {
+	if err := SeedMerchantSolanaSecret(context.Background(), store, merchantID, key); err != nil {
 		t.Fatalf("seed merchant: %v", err)
 	}
-	got, err := store.Get(context.Background(), tenantID, solanaint.SecretSolanaPrivateKey)
+	got, err := store.Get(context.Background(), merchantID, solanaint.SecretSolanaPrivateKey)
 	if err != nil {
 		t.Fatalf("get merchant key: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestSeedTenantSolanaSecret_SeedsRequestedTenant(t *testing.T) {
 	}
 }
 
-func TestSeedConfiguredTenantSolanaSecret_NoOpWhenPresent(t *testing.T) {
+func TestSeedConfiguredMerchantSolanaSecret_NoOpWhenPresent(t *testing.T) {
 	store := merchants.NewMemorySecretStore()
 	const existing = "EXISTING_TENANT_KEY"
 	if _, err := store.Put(context.Background(), dbtest.TestMerchantID, solanaint.SecretSolanaPrivateKey, existing); err != nil {
@@ -57,7 +57,7 @@ func TestSeedConfiguredTenantSolanaSecret_NoOpWhenPresent(t *testing.T) {
 	}
 
 	// Global config has a DIFFERENT key; seeding must NOT overwrite the existing one.
-	if err := SeedConfiguredTenantSolanaSecret(context.Background(), store, dbtest.TestMerchantID, "GLOBAL_CONFIG_KEY"); err != nil {
+	if err := SeedConfiguredMerchantSolanaSecret(context.Background(), store, dbtest.TestMerchantID, "GLOBAL_CONFIG_KEY"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	got, err := store.Get(context.Background(), dbtest.TestMerchantID, solanaint.SecretSolanaPrivateKey)
@@ -69,11 +69,11 @@ func TestSeedConfiguredTenantSolanaSecret_NoOpWhenPresent(t *testing.T) {
 	}
 }
 
-func TestSeedConfiguredTenantSolanaSecret_NoOpWhenConfigEmpty(t *testing.T) {
+func TestSeedConfiguredMerchantSolanaSecret_NoOpWhenConfigEmpty(t *testing.T) {
 	store := merchants.NewMemorySecretStore()
 
 	for _, cfg := range []string{"", "   "} {
-		if err := SeedConfiguredTenantSolanaSecret(context.Background(), store, dbtest.TestMerchantID, cfg); err != nil {
+		if err := SeedConfiguredMerchantSolanaSecret(context.Background(), store, dbtest.TestMerchantID, cfg); err != nil {
 			t.Fatalf("seed(%q): %v", cfg, err)
 		}
 	}

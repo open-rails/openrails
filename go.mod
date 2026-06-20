@@ -17,7 +17,8 @@ require (
 	github.com/knadh/koanf/providers/env v1.1.0
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/v2 v2.2.2
-	github.com/open-rails/authkit v0.41.0
+	github.com/moby/moby/api v1.54.3-0.20260603163940-285b47192d4b
+	github.com/open-rails/authkit v0.42.0
 	github.com/open-rails/migratekit v1.1.0
 	github.com/redis/go-redis/v9 v9.12.1
 	github.com/riverqueue/river v0.26.0
@@ -43,7 +44,6 @@ require (
 	github.com/hashicorp/hcl v1.0.1-vault-7 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
-	github.com/moby/moby/api v1.54.3-0.20260603163940-285b47192d4b // indirect
 	github.com/moby/moby/client v0.4.2-0.20260603163940-285b47192d4b // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect

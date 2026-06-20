@@ -31,9 +31,9 @@ type Merchant struct {
 	SuspendedAt *time.Time
 }
 
-// ProvisionRequest parameterizes tenant provisioning.
+// ProvisionRequest parameterizes merchant provisioning.
 type ProvisionRequest struct {
-	// Slug is the stable org slug (used in routes and tenant resolution).
+	// Slug is the stable merchant slug (used in routes and merchant resolution).
 	Slug string `json:"slug"`
 	// OwnerOrgID is the AuthKit org uuid that owns/administers this merchant
 	// namespace (#500 ownership link, NOT identity). Required for control-plane
@@ -49,13 +49,13 @@ var ErrMerchantNotFound = errors.New("merchants: merchant not found")
 var ErrOwnerOrgRequired = errors.New("merchants: owner org required")
 
 // ErrExportRequired is returned by Delete when no completed export exists for the
-// tenant (export-before-delete is enforced).
+// merchant (export-before-delete is enforced).
 var ErrExportRequired = errors.New("merchants: export required before delete")
 
 // Service is the merchant provisioning + lifecycle service (issue #225). It owns
 // the openrails.merchants directory rows (billing buckets) and per-merchant
 // secrets. #481: it no longer auto-mints an AuthKit org per merchant — owner-org
-// ownership is set explicitly (the explicit register -> create-tenant ->
+// ownership is set explicitly (the explicit register -> create-org ->
 // create-remote_application -> create-merchant flow), never auto-minted here.
 type Service struct {
 	pool    *db.Pool
@@ -66,7 +66,7 @@ type Service struct {
 // directory). secrets may be nil (credential management disabled).
 func NewService(pool *db.Pool, secrets MerchantSecretStore) (*Service, error) {
 	if pool == nil {
-		return nil, errors.New("tenancy: pgx pool is required")
+		return nil, errors.New("merchants: pgx pool is required")
 	}
 	return &Service{pool: pool, secrets: secrets}, nil
 }
@@ -76,12 +76,12 @@ func NewService(pool *db.Pool, secrets MerchantSecretStore) (*Service, error) {
 // lifecycle methods such as Provision still require NewService with a DB pool.
 func NewSecretManagementService(secrets MerchantSecretStore) (*Service, error) {
 	if secrets == nil {
-		return nil, errors.New("tenancy: secret store is required")
+		return nil, errors.New("merchants: secret store is required")
 	}
 	return &Service{secrets: secrets}, nil
 }
 
-// Secrets exposes the per-tenant secret store (may be nil).
+// Secrets exposes the per-merchant secret store (may be nil).
 func (s *Service) Secrets() MerchantSecretStore { return s.secrets }
 
 // Provision idempotently provisions a merchant:
@@ -89,14 +89,14 @@ func (s *Service) Secrets() MerchantSecretStore { return s.secrets }
 //  1. create/ensure the openrails.merchants namespace row (resolve by slug),
 //  2. record the owning AuthKit org id supplied by the caller.
 //
-// Re-running with the same slug returns the existing tenant (no duplicate row,
-// so provisioning is safe to retry. Default-tenant seeding of catalog/credit
+// Re-running with the same slug returns the existing merchant (no duplicate row),
+// so provisioning is safe to retry. Default-merchant seeding of catalog/credit
 // definitions is left to the existing bootstrap/seed paths and is not duplicated
 // here.
 func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchant, error) {
 	slug := normalizeSlug(req.Slug)
 	if slug == "" {
-		return nil, errors.New("tenancy: provision requires a slug")
+		return nil, errors.New("merchants: provision requires a slug")
 	}
 	ownerOrgID := strings.TrimSpace(req.OwnerOrgID)
 	if ownerOrgID == "" {
@@ -112,7 +112,7 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 		ON CONFLICT (slug) DO NOTHING
 	`, slug, ownerOrgID)
 	if err != nil {
-		return nil, fmt.Errorf("tenancy: insert merchant %q: %w", slug, err)
+		return nil, fmt.Errorf("merchants: insert merchant %q: %w", slug, err)
 	}
 
 	t, err := s.merchantBySlug(ctx, slug)
@@ -127,20 +127,20 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 			   SET owner_org_id = $2, updated_at = current_timestamp
 			 WHERE id = $1::uuid AND owner_org_id IS DISTINCT FROM $2
 		`, t.ID.String(), ownerOrgID); uerr != nil {
-		return nil, fmt.Errorf("tenancy: record owner org on merchant: %w", uerr)
+		return nil, fmt.Errorf("merchants: record owner org on merchant: %w", uerr)
 	}
 	t.OwnerOrgID = ownerOrgID
 
 	return s.merchantBySlug(ctx, slug)
 }
 
-// Suspend marks a tenant suspended: reads return maintenance and writes are
+// Suspend marks a merchant suspended: reads return maintenance and writes are
 // denied (enforced by IsWritable / the suspension middleware). Idempotent.
 func (s *Service) Suspend(ctx context.Context, id merchant.ID) error {
 	return s.setStatus(ctx, id, StatusSuspended, true)
 }
 
-// Resume clears suspension and returns the tenant to active. Idempotent.
+// Resume clears suspension and returns the merchant to active. Idempotent.
 func (s *Service) Resume(ctx context.Context, id merchant.ID) error {
 	return s.setStatus(ctx, id, StatusActive, false)
 }
@@ -158,7 +158,7 @@ func (s *Service) setStatus(ctx context.Context, id merchant.ID, status Merchant
 		 WHERE id = $1::uuid AND deleted_at IS NULL
 	`, suspendedExpr), id.String(), string(status))
 	if err != nil {
-		return fmt.Errorf("tenancy: set status %s: %w", status, err)
+		return fmt.Errorf("merchants: set status %s: %w", status, err)
 	}
 	if ct.RowsAffected() == 0 {
 		return ErrMerchantNotFound
@@ -166,9 +166,9 @@ func (s *Service) setStatus(ctx context.Context, id merchant.ID, status Merchant
 	return nil
 }
 
-// IsWritable reports whether the tenant currently accepts writes. Suspended or
-// deleted tenants are read-only; the default tenant and active tenants are
-// writable. A missing tenant is treated as not writable.
+// IsWritable reports whether the merchant currently accepts writes. Suspended or
+// deleted merchants are read-only; the default merchant and active merchants are
+// writable. A missing merchant is treated as not writable.
 func (s *Service) IsWritable(ctx context.Context, id merchant.ID) (bool, error) {
 	t, err := s.merchantByID(ctx, id)
 	if err != nil {
@@ -180,24 +180,24 @@ func (s *Service) IsWritable(ctx context.Context, id merchant.ID) (bool, error) 
 	return t.Status == StatusActive, nil
 }
 
-// Get returns the tenant directory row by id.
+// Get returns the merchant directory row by id.
 func (s *Service) Get(ctx context.Context, id merchant.ID) (*Merchant, error) {
 	return s.merchantByID(ctx, id)
 }
 
-// GetBySlug returns the tenant directory row by slug.
+// GetBySlug returns the merchant directory row by slug.
 func (s *Service) GetBySlug(ctx context.Context, slug string) (*Merchant, error) {
 	return s.merchantBySlug(ctx, normalizeSlug(slug))
 }
 
-// SearchMerchants returns active tenant directory rows whose slug matches the
-// (case-insensitive) query substring. It is the cross-tenant search backing
+// SearchMerchants returns active merchant directory rows whose slug matches the
+// (case-insensitive) query substring. It is the cross-merchant search backing
 // the platform-superadmin API (issue #226); the CALLER is responsible for
-// auditing the search (it is a sensitive cross-tenant read). limit is clamped.
+// auditing the search (it is a sensitive cross-merchant read). limit is clamped.
 func (s *Service) SearchMerchants(ctx context.Context, q string, limit int) ([]Merchant, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
-		return nil, errors.New("tenancy: search requires a non-empty query")
+		return nil, errors.New("merchants: search requires a non-empty query")
 	}
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -209,7 +209,7 @@ func (s *Service) SearchMerchants(ctx context.Context, q string, limit int) ([]M
 		  AND lower(slug) LIKE $1
 		ORDER BY slug LIMIT $2`, pattern, limit)
 	if err != nil {
-		return nil, fmt.Errorf("tenancy: search tenants: %w", err)
+		return nil, fmt.Errorf("merchants: search merchants: %w", err)
 	}
 	defer rows.Close()
 	var out []Merchant

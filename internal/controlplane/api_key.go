@@ -13,64 +13,65 @@ import (
 )
 
 const (
-	// APIKeyPrefix is the fixed OpenRails service-token brand marker.
+	// APIKeyPrefix is the fixed OpenRails shared-secret API-key marker.
 	APIKeyPrefix = "openrails"
 
-	// ResourceKindMerchant scopes a service token to one OpenRails merchant. Resource
-	// IDs are canonical openrails.merchants UUID strings.
+	// ResourceKindMerchant scopes a service credential to one OpenRails merchant.
+	// Resource IDs are canonical openrails.merchants UUID strings.
 	ResourceKindMerchant = "openrails.merchant"
-	// ResourceKindCustomer scopes a service token to one OpenRails payable
+	// ResourceKindCustomer scopes a service credential to one OpenRails payable
 	// subject. Resource IDs are canonical openrails.customers UUID strings.
 	ResourceKindCustomer = "openrails.customer"
 )
 
-// ResolvedServiceToken is the result of validating an OpenRails-issued service
-// token against live AuthKit + merchant-directory state. It carries everything
-// route authorization needs: the calling AuthKit org that owns the
-// merchant, the resolved OpenRails merchant, and the granted permission strings.
+// ResolvedServiceCredential is the common authorization result for
+// merchant-scoped programmatic credentials: OpenRails-issued shared-secret API
+// keys, first-party service JWTs, and AuthKit remote-application self tokens.
+// It carries everything route authorization needs: the calling AuthKit org that
+// owns the merchant, the resolved OpenRails merchant, and the granted permission
+// strings.
 //
 // #481: the merchant is NOT the caller's identity. The caller is an AuthKit
 // principal (user OR remote_application); its authority over the merchant comes
 // from a ROLE on the merchant's owner_org_id (the owning org), never from an
 // identity-equation with the merchant.
-type ResolvedServiceToken struct {
+type ResolvedServiceCredential struct {
 	// OwnerOrgID is the AuthKit org uuid that owns/administers the
 	// merchant — the caller's authority anchor (#481). Resolved by AuthKit's
-	// opaque service-token lookup (the token's owning org) or the issuer ->
-	// remote_application -> tenant mapping on the service-JWT path.
+	// opaque API-key lookup (the key's owning org) or the issuer ->
+	// remote_application -> org mapping on the JWT credential paths.
 	OwnerOrgID string
 	// OwnerOrgSlug is that owning org's slug (presentation/audit only).
 	OwnerOrgSlug string
-	// MerchantID is the OpenRails merchant (#480) the service token administers.
+	// MerchantID is the OpenRails merchant (#480) the credential administers.
 	MerchantID merchant.ID
 	// MerchantSlug is the resolved merchant's slug.
 	MerchantSlug string
-	// Permissions is the service token's granted OpenRails permission catalog
-	// entries (colon-form, e.g. "openrails:credits:write").
+	// Permissions is the credential's granted OpenRails permission set
+	// (`org:` permissions for merchant-local API keys).
 	Permissions []string
-	// Resources is the service token's AuthKit-stored OpenRails resource scope.
+	// Resources is the credential's OpenRails resource scope.
 	// OpenRails interprets only ResourceKindMerchant and ResourceKindCustomer;
-	// unknown kinds fail closed during service token resolution.
+	// unknown kinds fail closed during credential resolution.
 	Resources []authcore.APIKeyResource
 }
 
-// HasPermission reports whether the resolved service token grants perm. The broad
-// PermAdmin grant satisfies any permission check.
-func (r *ResolvedServiceToken) HasPermission(perm string) bool {
+// HasPermission reports whether the resolved credential grants perm.
+func (r *ResolvedServiceCredential) HasPermission(perm string) bool {
 	perm = strings.TrimSpace(perm)
 	for _, p := range r.Permissions {
-		if p == perm || p == PermAdmin {
+		if p == perm {
 			return true
 		}
 	}
 	return false
 }
 
-// AllowsCustomer reports whether this service token may act for a payable
-// subject inside its resolved merchant. Merchant-wide tokens carry only
-// ResourceKindMerchant; subject-scoped tokens additionally carry the exact
+// AllowsCustomer reports whether this credential may act for a payable subject
+// inside its resolved merchant. Merchant-wide credentials carry only
+// ResourceKindMerchant; subject-scoped credentials additionally carry the exact
 // ResourceKindCustomer id.
-func (r *ResolvedServiceToken) AllowsCustomer(subject uuid.UUID) bool {
+func (r *ResolvedServiceCredential) AllowsCustomer(subject uuid.UUID) bool {
 	if r == nil || subject == uuid.Nil {
 		return false
 	}
@@ -92,12 +93,12 @@ func CustomerResource(id uuid.UUID) authcore.APIKeyResource {
 }
 
 // MerchantScope resolves a merchant reference (slug or UUID) to the canonical
-// OpenRails merchant id/slug and AuthKit service token merchant resource.
+// OpenRails merchant id/slug and AuthKit resource scope for that merchant.
 func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.ID, string, authcore.APIKeyResource, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		// No default merchant (#480): the merchant to scope to must be named explicitly.
-		return merchant.ID{}, "", authcore.APIKeyResource{}, ErrServiceTokenMerchantUnresolved
+		return merchant.ID{}, "", authcore.APIKeyResource{}, ErrServiceCredentialMerchantUnresolved
 	}
 	if c == nil || c.pool == nil {
 		return merchant.ID{}, "", authcore.APIKeyResource{}, errors.New("controlplane: pgx pool unavailable for merchant resolution")
@@ -116,12 +117,12 @@ func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.
 	`, ref).Scan(&idStr, &slug, &status)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return merchant.ID{}, "", authcore.APIKeyResource{}, ErrServiceTokenMerchantUnresolved
+			return merchant.ID{}, "", authcore.APIKeyResource{}, ErrServiceCredentialMerchantUnresolved
 		}
 		return merchant.ID{}, "", authcore.APIKeyResource{}, err
 	}
 	if status != "active" {
-		return merchant.ID{}, "", authcore.APIKeyResource{}, ErrServiceTokenMerchantUnresolved
+		return merchant.ID{}, "", authcore.APIKeyResource{}, ErrServiceCredentialMerchantUnresolved
 	}
 	mid, err := merchant.ParseID(idStr)
 	if err != nil {
@@ -130,20 +131,20 @@ func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.
 	return mid, slug, MerchantResource(mid), nil
 }
 
-// TokenPrefix returns the fixed service token brand prefix used to recognize and
-// parse presented service tokens.
+// TokenPrefix returns the fixed shared-secret API-key brand prefix used to
+// recognize and parse presented OpenRails API keys.
 func (c *ControlPlane) TokenPrefix() string {
 	return APIKeyPrefix
 }
 
-// LooksLikeServiceToken reports whether token carries this deployment's service token marker. Used
-// by the service token middleware to route a Bearer credential to service token validation rather
-// than JWT verification.
-func (c *ControlPlane) LooksLikeServiceToken(token string) bool {
+// LooksLikeAPIKey reports whether token carries this deployment's
+// shared-secret API-key marker. Used by the service credential middleware to
+// route a Bearer credential to API-key validation rather than JWT verification.
+func (c *ControlPlane) LooksLikeAPIKey(token string) bool {
 	return authcore.HasAPIKeyPrefix(c.TokenPrefix(), strings.TrimSpace(token))
 }
 
-// ResolveServiceToken validates a presented service token string end-to-end:
+// ResolveAPIKey validates a presented shared-secret API key end-to-end:
 //
 //   - parses the <prefix>_st_<key_id>_<secret> shape,
 //   - resolves key id + secret hash via AuthKit core (owning org, permissions,
@@ -154,8 +155,8 @@ func (c *ControlPlane) LooksLikeServiceToken(token string) bool {
 //     administers), not identity — the merchant is never "equal to" the org.
 //
 // A caller whose AuthKit org owns no active merchant yields
-// ErrServiceTokenMerchantUnresolved so the caller can reject the request.
-func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*ResolvedServiceToken, error) {
+// ErrServiceCredentialMerchantUnresolved so the caller can reject the request.
+func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*ResolvedServiceCredential, error) {
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
 	}
@@ -180,7 +181,7 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 		return nil, err
 	}
 
-	return &ResolvedServiceToken{
+	return &ResolvedServiceCredential{
 		OwnerOrgID:   resolved.OrgID,
 		OwnerOrgSlug: resolved.OrgSlug,
 		MerchantID:   mid,
@@ -190,25 +191,26 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 	}, nil
 }
 
-// ErrServiceTokenMerchantUnresolved indicates the caller's owning AuthKit org
+// ErrServiceCredentialMerchantUnresolved indicates the caller's owning AuthKit org
 // owns no active OpenRails merchant (no openrails.merchants row with that
 // owner_org_id, or the merchant is suspended/deleted). Treated as an
 // authorization failure: the caller cannot act on any merchant surface.
-var ErrServiceTokenMerchantUnresolved = errors.New("controlplane: service token caller owns no active merchant")
+var ErrServiceCredentialMerchantUnresolved = errors.New("controlplane: API key caller owns no active merchant")
 
-// ErrServiceTokenScopeDenied indicates an otherwise valid service token lacks the required
-// OpenRails merchant resource scope or carries unknown OpenRails resource kinds.
-var ErrServiceTokenScopeDenied = errors.New("controlplane: service token resource scope denied")
+// ErrServiceCredentialScopeDenied indicates an otherwise valid service credential
+// lacks the required OpenRails merchant resource scope or carries unknown
+// OpenRails resource kinds.
+var ErrServiceCredentialScopeDenied = errors.New("controlplane: API key resource scope denied")
 
 func validateAPIKeyResources(mid merchant.ID, resources []authcore.APIKeyResource) error {
 	if !hasResource(resources, ResourceKindMerchant, mid.String()) {
-		return ErrServiceTokenScopeDenied
+		return ErrServiceCredentialScopeDenied
 	}
 	for _, r := range resources {
 		switch strings.TrimSpace(r.Kind) {
 		case ResourceKindMerchant, ResourceKindCustomer:
 		default:
-			return ErrServiceTokenScopeDenied
+			return ErrServiceCredentialScopeDenied
 		}
 	}
 	return nil
@@ -243,18 +245,18 @@ func hasAnyResourceKind(resources []authcore.APIKeyResource, kind string) bool {
 //
 // (When an org owns several merchants, the request names which via MerchantScope
 // + AuthorizeMerchant; this single-merchant resolution serves the common
-// one-merchant-per-tenant service-token path and fails closed otherwise.)
+// one-merchant-per-org API-key path and fails closed otherwise.)
 func (c *ControlPlane) merchantForOwnerOrg(ctx context.Context, ownerOrgID string) (merchant.ID, string, error) {
 	ownerOrgID = strings.TrimSpace(ownerOrgID)
 	if c.pool == nil {
 		return merchant.ID{}, "", errors.New("controlplane: pgx pool unavailable for merchant resolution")
 	}
 	if ownerOrgID == "" {
-		return merchant.ID{}, "", ErrServiceTokenMerchantUnresolved
+		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	mid, slug, err := c.merchantDirectoryRow(ctx, `owner_org_id = $1`, ownerOrgID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return merchant.ID{}, "", ErrServiceTokenMerchantUnresolved
+		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	return mid, slug, err
 }
@@ -269,7 +271,7 @@ func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, ownerOrgID string,
 		return errors.New("controlplane: pgx pool unavailable for merchant authorization")
 	}
 	if ownerOrgID == "" || mid.IsZero() {
-		return ErrServiceTokenMerchantUnresolved
+		return ErrServiceCredentialMerchantUnresolved
 	}
 	var owner *string
 	var status string
@@ -281,12 +283,12 @@ func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, ownerOrgID string,
 	`, mid.UUID()).Scan(&owner, &status)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrServiceTokenMerchantUnresolved
+			return ErrServiceCredentialMerchantUnresolved
 		}
 		return err
 	}
 	if status != "active" || owner == nil || strings.TrimSpace(*owner) != ownerOrgID {
-		return ErrServiceTokenScopeDenied
+		return ErrServiceCredentialScopeDenied
 	}
 	return nil
 }
@@ -329,11 +331,11 @@ func (c *ControlPlane) merchantDirectoryRow(ctx context.Context, where, arg stri
 		return merchant.ID{}, "", pgx.ErrNoRows
 	}
 	if len(matches) > 1 {
-		return merchant.ID{}, "", ErrServiceTokenMerchantUnresolved
+		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	idStr, slug, status := matches[0].idStr, matches[0].slug, matches[0].status
 	if status != "active" {
-		return merchant.ID{}, "", ErrServiceTokenMerchantUnresolved
+		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 
 	mid, err := merchant.ParseID(idStr)

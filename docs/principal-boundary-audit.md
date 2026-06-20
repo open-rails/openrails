@@ -18,15 +18,15 @@ OpenRails resolves the issuer to its merchant, treats the token's self-assigned
 token can never reach another merchant's resources). Route-level permission gates
 then require the relevant service permission:
 
-- Entitlement reads: `openrails:entitlements:read`.
-- Credit and account/balance reads: `openrails:credits:read`.
-- Credit writes and hold/capture/release flows: `openrails:credits:write`, with
-  spend operations also requiring `openrails:credits:spend`.
-- Merchant issuer registration and token-bootstrap management routes:
-  `openrails:admin`.
+- Entitlement reads: `org:entitlements:read`.
+- Credit and account/balance reads: `org:credits:read`.
+- Credit writes and hold/capture/release flows: `org:credits:update`, with
+  spend operations also requiring `org:credits:spend`.
+- Merchant issuer registration and token-bootstrap management routes use
+  merchant-local `org:` authority.
 
 Credit/account/balance handlers that act on a `customer_id` call
-`RequireServiceTokenCustomerScope` before touching service logic, so merchant-wide
+`RequireServiceCredentialCustomerScope` before touching service logic, so merchant-wide
 API keys may act across the merchant and customer-scoped API keys are denied for
 other customers.
 
@@ -39,9 +39,9 @@ merchant from the verified issuer mapping, and binds the acting
 `token_use=service` JWTs fail this resolver and are rejected before any
 delegated route permission gate runs.
 
-Self routes require `openrails:self:*` permissions. Delegated admin routes require
-`openrails:merchant:*` permissions. API-key permissions do not satisfy
-delegated route gates.
+Self routes require a delegated/customer principal and always target the
+authenticated subject. Delegated admin routes require browser-safe `org:*`
+permissions. API-key credentials do not satisfy delegated route gates.
 
 ## Bootstrap and admin surfaces
 
@@ -50,13 +50,11 @@ or API-key route. Standalone merchant lifecycle admin routes remain behind
 the configured user auth provider plus the live Principal permission gate; they are not
 part of the API-key server-to-server surface.
 
-**Admin authority is deployment authority (#312).** A caller is an OpenRails
-admin iff they hold the LIVE `openrails:admin` permission in their owning AuthKit
-org — evaluated at request time by the control plane — or present a
-deployment-minted admin API key carrying `openrails:admin`. There is NO
-separate "operator"/"admin"/"platform" AuthKit org acting as the admin
-authority, no JWT role-claim gate, and no global-admin DB fallback. The bootstrap
-org hosts its own admin role. Initial generated admin API keys are
+**Admin authority is deployment authority (#537).** Merchant-local authority is
+live AuthKit `org:` permission state in the owning merchant org. Cross-merchant
+directory authority is live AuthKit `platform:` state, not a special platform
+org or JWT role claim. The bootstrap org hosts its own operator role. Initial
+generated admin API keys are
 minted only through explicit operator/admin token-minting commands, not through
 declarative bootstrap YAML. The control plane is always present in standalone
 mode (#469); `/v1/admin/*` (and `/v1/admin/merchants/*`) fail closed for embedded
@@ -73,10 +71,10 @@ API key exactly as defined there.
 The following tests cover the boundary:
 
 - `TestServiceEntitlementRouteRequiresEntitlementReadPermission`
-- `TestServiceCreditBalanceRouteRejectsWrongTenantSubjectScope`
+- `TestServiceCreditBalanceRouteRejectsWrongMerchantSubjectScope`
 - `TestCreditServiceRoutesRejectDelegatedJWTs`
-- `TestSelfService_RejectsServiceTokenCredential`
-- `TestDelegatedSelfRequired_DeniesServiceTokenCredential`
-- `TestServiceTokenRequired_DeniesNonServiceTokenCredential`
-- `TestServiceTokenRequired_SucceedsForServiceJWT`
+- `TestSelfService_RejectsServiceCredential`
+- `TestDelegatedSelfRequired_DeniesServiceCredential`
+- `TestServiceCredentialRequired_DeniesNonServiceCredential`
+- `TestServiceCredentialRequired_SucceedsForServiceJWT`
 - `TestFederatedDelegatedTokens`

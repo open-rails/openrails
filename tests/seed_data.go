@@ -18,7 +18,7 @@ import (
 func (suite *TestContainerSuite) ensureCustomer(ctx context.Context, userID string) uuid.UUID {
 	suite.t.Helper()
 	tenantSubjectID, err := dbrepo.EnsureCustomerID(ctx, suite.Pool, dbtest.TestMerchantID.UUID(), userID)
-	require.NoError(suite.t, err, "Failed to ensure tenant subject")
+	require.NoError(suite.t, err, "Failed to ensure customer")
 	return tenantSubjectID
 }
 
@@ -28,7 +28,7 @@ func (suite *TestContainerSuite) ensureCustomer(ctx context.Context, userID stri
 func (suite *TestContainerSuite) resolveCustomer(ctx context.Context, userID string) uuid.UUID {
 	suite.t.Helper()
 	tenantSubjectID, err := dbrepo.ResolveCustomerID(userID)
-	require.NoError(suite.t, err, "Failed to resolve tenant subject")
+	require.NoError(suite.t, err, "Failed to resolve customer")
 	return tenantSubjectID
 }
 

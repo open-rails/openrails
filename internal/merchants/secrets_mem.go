@@ -9,10 +9,10 @@ import (
 )
 
 // memSecretStore is an in-memory MerchantSecretStore for tests and pure-dev runs
-// with no database. It is fully tenant-namespaced and safe for concurrent use.
+// with no database. It is fully merchant-namespaced and safe for concurrent use.
 type memSecretStore struct {
 	mu   sync.RWMutex
-	data map[string]map[string]Secret // tenantID -> name -> Secret
+	data map[string]map[string]Secret // merchantID -> name -> Secret
 }
 
 // NewMemorySecretStore returns an in-memory MerchantSecretStore. It requires no
@@ -22,13 +22,13 @@ func NewMemorySecretStore() MerchantSecretStore {
 	return &memSecretStore{data: make(map[string]map[string]Secret)}
 }
 
-func (m *memSecretStore) Get(_ context.Context, tenantID merchant.ID, name string) (Secret, error) {
-	if err := validateSecretRef(tenantID, name); err != nil {
+func (m *memSecretStore) Get(_ context.Context, merchantID merchant.ID, name string) (Secret, error) {
+	if err := validateSecretRef(merchantID, name); err != nil {
 		return Secret{}, err
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	byName, ok := m.data[tenantID.String()]
+	byName, ok := m.data[merchantID.String()]
 	if !ok {
 		return Secret{}, ErrSecretNotFound
 	}
@@ -39,13 +39,13 @@ func (m *memSecretStore) Get(_ context.Context, tenantID merchant.ID, name strin
 	return s, nil
 }
 
-func (m *memSecretStore) Put(_ context.Context, tenantID merchant.ID, name, value string) (Secret, error) {
-	if err := validateSecretRef(tenantID, name); err != nil {
+func (m *memSecretStore) Put(_ context.Context, merchantID merchant.ID, name, value string) (Secret, error) {
+	if err := validateSecretRef(merchantID, name); err != nil {
 		return Secret{}, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	key := tenantID.String()
+	key := merchantID.String()
 	byName, ok := m.data[key]
 	if !ok {
 		byName = make(map[string]Secret)
@@ -64,25 +64,25 @@ func (m *memSecretStore) Put(_ context.Context, tenantID merchant.ID, name, valu
 	return s, nil
 }
 
-func (m *memSecretStore) Delete(_ context.Context, tenantID merchant.ID, name string) error {
-	if err := validateSecretRef(tenantID, name); err != nil {
+func (m *memSecretStore) Delete(_ context.Context, merchantID merchant.ID, name string) error {
+	if err := validateSecretRef(merchantID, name); err != nil {
 		return err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if byName, ok := m.data[tenantID.String()]; ok {
+	if byName, ok := m.data[merchantID.String()]; ok {
 		delete(byName, name)
 	}
 	return nil
 }
 
-func (m *memSecretStore) List(_ context.Context, tenantID merchant.ID) ([]string, error) {
-	if tenantID.IsZero() {
-		return nil, validateSecretRef(tenantID, "x")
+func (m *memSecretStore) List(_ context.Context, merchantID merchant.ID) ([]string, error) {
+	if merchantID.IsZero() {
+		return nil, validateSecretRef(merchantID, "x")
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	byName, ok := m.data[tenantID.String()]
+	byName, ok := m.data[merchantID.String()]
 	if !ok {
 		return nil, nil
 	}

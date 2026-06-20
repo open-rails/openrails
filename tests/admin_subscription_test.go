@@ -21,8 +21,8 @@ import (
 
 // #528 hard cut: the admin surface is the delegated /v1/admin model — a host-app
 // issuer registered as the merchant's `owner` mints delegated tokens carrying
-// openrails:merchant:* permissions. The retired per-user admin-JWT model
-// (openrails:admin via a live AuthKit grant) is gone, so these tests authenticate
+// browser-safe org permissions. The retired per-user admin-JWT model
+// is gone, so these tests authenticate
 // as a delegated merchant principal via newHostSeamAdminRouter.
 
 // TestAdminGetUserBillingProfile exercises GET /v1/admin/users/:id under the
@@ -45,7 +45,7 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 
 		var response map[string]interface{}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-		// The profile is keyed by the payable tenant subject (for the
+		// The profile is keyed by the payable customer (for the
 		// personal/self-hosted case this is the user's own UUID).
 		assert.Equal(t, userID, response["customer_id"], "customer_id should match")
 	})

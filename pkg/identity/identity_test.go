@@ -7,7 +7,7 @@ import (
 )
 
 // TestCustomerIDFromString_ParsesUUID asserts a valid UUID subject resolves to
-// the same tenant subject id (the caller-provided personal tenant-subject / account id).
+// the same customer id (the caller-provided personal merchant-subject / account id).
 func TestCustomerIDFromString_ParsesUUID(t *testing.T) {
 	u := uuid.New()
 	got := CustomerIDFromString(u.String())

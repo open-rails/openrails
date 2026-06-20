@@ -56,6 +56,7 @@ func EnsureCustomerID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, user
 	return gen.New(qx).EnsureCustomer(ctx, gen.EnsureCustomerParams{
 		ID:         uid,
 		MerchantID: tenantID,
+		Subject:    &userID,
 	})
 }
 
@@ -96,5 +97,8 @@ func ensureCustomerRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsi
 	return gen.New(qx).EnsureCustomerRow(ctx, gen.EnsureCustomerRowParams{
 		ID:         tsid,
 		MerchantID: tenantID,
+		Subject:    stringPtr(tsid.String()),
 	})
 }
+
+func stringPtr(s string) *string { return &s }

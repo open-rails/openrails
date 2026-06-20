@@ -17,7 +17,7 @@ import (
 //  2. "local"    — the local retry fields (last_retry_at / retry_attempts /
 //     next_retry_at), imported from legacy by the migration;
 //  3. "history"  — OpenRails' ClickHouse analytics events
-//     (payment_events/subscription_events), which for migrated tenants
+//     (payment_events/subscription_events), which for migrated merchants
 //     include the imported legacy rebill/scheduler history — deep history the
 //     provider APIs cannot return.
 type DunningForensics struct {

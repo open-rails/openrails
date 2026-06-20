@@ -15,7 +15,7 @@ import (
 )
 
 // memDEKStore is an in-memory DEKStore for unit tests. PutWrappedDEK keeps the
-// first wrapped DEK ever stored for a tenant (mirroring the DB store's
+// first wrapped DEK ever stored for a merchant (mirroring the DB store's
 // concurrent-first-use semantics) and returns it.
 type memDEKStore struct {
 	mu   sync.Mutex
@@ -54,12 +54,12 @@ func testMasterKey(t *testing.T) string {
 	return base64.StdEncoding.EncodeToString(key)
 }
 
-func newTenant(t *testing.T) merchant.ID {
+func newMerchant(t *testing.T) merchant.ID {
 	t.Helper()
 	return merchant.ID(uuid.New())
 }
 
-func TestEncrypt_RoundTripsPerTenant(t *testing.T) {
+func TestEncrypt_RoundTripsPerMerchant(t *testing.T) {
 	ctx := context.Background()
 	enc, err := NewEncryptor(testMasterKey(t), newMemDEKStore())
 	if err != nil {
@@ -69,7 +69,7 @@ func TestEncrypt_RoundTripsPerTenant(t *testing.T) {
 		t.Fatal("encryptor should be enabled with a master key")
 	}
 
-	tA := newTenant(t)
+	tA := newMerchant(t)
 	plaintext := []byte("sk_live_super_secret")
 	ct, err := enc.Encrypt(ctx, tA, plaintext)
 	if err != nil {
@@ -90,7 +90,7 @@ func TestEncrypt_RoundTripsPerTenant(t *testing.T) {
 func TestEncrypt_NonDeterministic(t *testing.T) {
 	ctx := context.Background()
 	enc, _ := NewEncryptor(testMasterKey(t), newMemDEKStore())
-	tA := newTenant(t)
+	tA := newMerchant(t)
 	c1, _ := enc.Encrypt(ctx, tA, []byte("same"))
 	c2, _ := enc.Encrypt(ctx, tA, []byte("same"))
 	if c1 == c2 {
@@ -98,19 +98,19 @@ func TestEncrypt_NonDeterministic(t *testing.T) {
 	}
 }
 
-func TestDecrypt_CrossTenantFails(t *testing.T) {
+func TestDecrypt_CrossMerchantFails(t *testing.T) {
 	ctx := context.Background()
 	enc, _ := NewEncryptor(testMasterKey(t), newMemDEKStore())
-	tA := newTenant(t)
-	tB := newTenant(t)
+	tA := newMerchant(t)
+	tB := newMerchant(t)
 
 	ctA, err := enc.Encrypt(ctx, tA, []byte("tenant-A-secret"))
 	if err != nil {
 		t.Fatalf("Encrypt A: %v", err)
 	}
-	// Merchant B's DEK must NOT be able to decrypt tenant A's ciphertext.
+	// Merchant B's DEK must NOT be able to decrypt merchant A's ciphertext.
 	if _, err := enc.Decrypt(ctx, tB, ctA); err == nil {
-		t.Fatal("tenant B must not decrypt tenant A's ciphertext")
+		t.Fatal("merchant B must not decrypt merchant A's ciphertext")
 	}
 }
 
@@ -118,7 +118,7 @@ func TestDEK_CreatedLazilyAndReused(t *testing.T) {
 	ctx := context.Background()
 	store := newMemDEKStore()
 	enc, _ := NewEncryptor(testMasterKey(t), store)
-	tA := newTenant(t)
+	tA := newMerchant(t)
 
 	// No DEK exists before first use.
 	if _, ok, _ := store.GetWrappedDEK(ctx, tA); ok {
@@ -151,7 +151,7 @@ func TestDEK_SurvivesNewEncryptorInstance(t *testing.T) {
 	ctx := context.Background()
 	master := testMasterKey(t)
 	store := newMemDEKStore()
-	tA := newTenant(t)
+	tA := newMerchant(t)
 
 	enc1, _ := NewEncryptor(master, store)
 	ct, err := enc1.Encrypt(ctx, tA, []byte("persisted"))
@@ -174,7 +174,7 @@ func TestDEK_SurvivesNewEncryptorInstance(t *testing.T) {
 func TestDecrypt_WrongMasterKeyFails(t *testing.T) {
 	ctx := context.Background()
 	store := newMemDEKStore()
-	tA := newTenant(t)
+	tA := newMerchant(t)
 
 	enc1, _ := NewEncryptor(testMasterKey(t), store)
 	ct, _ := enc1.Encrypt(ctx, tA, []byte("secret"))
@@ -195,7 +195,7 @@ func TestDisabledEncryptor(t *testing.T) {
 	if enc.Enabled() {
 		t.Fatal("encryptor with no master key must be disabled")
 	}
-	if _, err := enc.Encrypt(ctx, newTenant(t), []byte("x")); !errors.Is(err, ErrEncryptionDisabled) {
+	if _, err := enc.Encrypt(ctx, newMerchant(t), []byte("x")); !errors.Is(err, ErrEncryptionDisabled) {
 		t.Fatalf("expected ErrEncryptionDisabled, got %v", err)
 	}
 }

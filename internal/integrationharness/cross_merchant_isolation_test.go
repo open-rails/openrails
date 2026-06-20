@@ -47,22 +47,22 @@ type selfAccountSnapshot struct {
 	AvailableAmount int64  `json:"available_amount"`
 }
 
-// TestServiceTokenCrossMerchantIsolationHTTP: merchant A's service token sees only
+// TestAPIKeyCrossMerchantIsolationHTTP: merchant A's API key sees only
 // A's ledger for a payer, never merchant B's balance for the same payer id.
-func TestServiceTokenCrossMerchantIsolationHTTP(t *testing.T) {
+func TestAPIKeyCrossMerchantIsolationHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd") // server runs as openrails_app: real RLS enforces
 
 	// Merchant A = the bootstrapped test merchant. Merchant B = freshly provisioned.
-	aToken := surface.MintServiceToken(
+	aToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"iso-a-"+uuid.NewString(),
 		[]string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	b := surface.ProvisionOwnedMerchant("iso-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
-	bToken := surface.MintServiceToken(
+	bToken := surface.MintAPIKey(
 		b.OrgSlug,
 		"iso-b-tok-"+uuid.NewString(),
 		[]string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite},
@@ -127,7 +127,7 @@ func TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP(t *testing.T) {
 		controlplane.OperatorRole,
 	)
 	b := surface.ProvisionOwnedMerchant("iso-ra-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
-	bToken := surface.MintServiceToken(
+	bToken := surface.MintAPIKey(
 		b.OrgSlug,
 		"iso-ra-b-tok-"+uuid.NewString(),
 		[]string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite},
@@ -138,8 +138,9 @@ func TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP(t *testing.T) {
 	depositCredits(t, surface.BaseURL, bToken, payer, 5000)
 	require.EqualValues(t, 5000, serviceBalance(t, surface.BaseURL, bToken, payer).BalanceAmount)
 
-	// A remote_application self-token is pinned from its STORED issuer authority.
-	// Reading B's payer id through A returns A's isolated view, never B's balance.
+	// A remote application access token is pinned from its STORED issuer
+	// authority. Reading B's payer id through A returns A's isolated view, never
+	// B's balance.
 	assertNoServiceBalance(t, surface.BaseURL, remoteA.Token, payer)
 
 	// Mutating with A's token affects A's merchant ledger only, while B's ledger
@@ -149,7 +150,7 @@ func TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP(t *testing.T) {
 	require.EqualValues(t, 7000, serviceBalance(t, surface.BaseURL, remoteA.Token, aPayer).BalanceAmount)
 	require.EqualValues(t, 5000, serviceBalance(t, surface.BaseURL, bToken, payer).BalanceAmount)
 
-	// A self-token cannot widen authority by claiming permissions in the JWT.
+	// A remote application access token cannot widen authority by claiming permissions in the JWT.
 	// With no stored role/grant on the remote_application, even a token claiming
 	// read/write permissions is denied before it reaches the service handler.
 	claimOnly := surface.RegisterRemoteApplicationWithPermissionsClaim(
@@ -170,7 +171,7 @@ func TestDelegatedAdminCrossMerchantIsolationHTTP(t *testing.T) {
 	surface := h.StartStandalone("usd")
 
 	b := surface.ProvisionOwnedMerchant("iso-admin-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
-	bToken := surface.MintServiceToken(
+	bToken := surface.MintAPIKey(
 		b.OrgSlug,
 		"iso-admin-b-tok-"+uuid.NewString(),
 		[]string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite},
@@ -206,7 +207,7 @@ func TestDelegatedSelfTokenSubjectIsolationHTTP(t *testing.T) {
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
 
-	serviceToken := surface.MintServiceToken(
+	serviceToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"iso-self-service-"+uuid.NewString(),
 		[]string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite},
@@ -221,13 +222,13 @@ func TestDelegatedSelfTokenSubjectIsolationHTTP(t *testing.T) {
 		"iso-self-a-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
 		dbtest.TestMerchantSlug,
 		subjectA,
-		[]string{controlplane.PermSelfBillingRead},
+		nil,
 	)
 	selfB := surface.RegisterDelegatedCaller(
 		"iso-self-b-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
 		dbtest.TestMerchantSlug,
 		subjectB,
-		[]string{controlplane.PermSelfBillingRead},
+		nil,
 	)
 
 	require.EqualValues(t, 5000, selfAccount(t, surface.BaseURL, selfB.Token).BalanceAmount,
@@ -263,7 +264,7 @@ func TestMerchantDirectoryRejectsMerchantAdminUserHTTP(t *testing.T) {
 	status, body := requestJSON(t, http.MethodGet,
 		surface.BaseURL+"/v1/admin/merchants/"+dbtest.TestMerchantID.String(), token, nil)
 	require.Equalf(t, http.StatusForbidden, status,
-		"per-merchant openrails:admin user must not reach global merchant directory: %s", string(body))
+		"per-merchant org admin user must not reach global merchant directory: %s", string(body))
 }
 
 func depositCredits(t *testing.T, baseURL, token, payer string, amount int64) {

@@ -16,7 +16,7 @@ import (
 
 // MerchantAdminPrefix is the platform-gated merchant provisioning/lifecycle API
 // (issue #225). It is a cross-merchant directory surface, so it requires
-// openrails:platform:superadmin rather than per-merchant openrails:admin.
+// AuthKit `platform:` authority rather than per-merchant `org:` authority.
 const MerchantAdminPrefix = "/admin/merchants"
 
 // registerMerchantAdminRoutes mounts the platform-gated merchant provisioning API.

@@ -34,12 +34,14 @@ caused an action when that differs from the payable subject.
 
 ## Already Converted
 
-- `billing.tenant_subjects` exists with `(tenant_id, issuer, subject)` uniqueness.
+- Customer rows use the host/AuthKit UUID subject as the payable customer id;
+  OpenRails' current natural key is `(merchant_id, subject)`.
 - Credit balances, transactions, blocks, account settings, spend limits, tier
   policies, budget reservations, usage events, and invoices have the
   `tenant_subject_id` column through migrations 071/072 and Go models.
 - Service-token resource scope uses `openrails.customer` with UUID values.
-- Delegated JWT resolution touches `(tenant_id, issuer, subject)` idempotently.
+- Delegated JWT resolution touches `(merchant_id, subject)` idempotently;
+  issuer is audit/last-seen source metadata only.
 
 ## Hard-Cut Rules
 

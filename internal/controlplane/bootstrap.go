@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-const BootstrapAdminServiceTokenName = "openrails-bootstrap-admin"
+const BootstrapAdminAPIKeyName = "openrails-bootstrap-admin"
 
 // BootstrapResult reports what the idempotent bootstrap did/ensured.
 type BootstrapResult struct {
@@ -21,18 +21,18 @@ type BootstrapResult struct {
 	BootstrapOrgID   string
 	// OrgCreated is true if CreateOrg ran (false if the AuthKit org already existed).
 	OrgCreated bool
-	// ServiceTokenMinted is true if an initial admin service token was minted on this run
-	// (false if one already existed). When true, ServiceTokenSecret holds the one-time
-	// plaintext token — it is NOT persisted by AuthKit and cannot be recovered.
-	ServiceTokenMinted bool
-	ServiceTokenSecret string
-	ServiceTokenKeyID  string
+	// APIKeyMinted is true if an initial admin API key was minted on this run
+	// (false if one already existed). When true, APIKeySecret holds the one-time
+	// plaintext key — it is NOT persisted by AuthKit and cannot be recovered.
+	APIKeyMinted bool
+	APIKeySecret string
+	APIKeyID     string
 }
 
 // BootstrapOptions parameterizes the control-plane bootstrap.
 type BootstrapOptions struct {
 	// BootstrapOrgSlug is the AuthKit org slug under which this merchant's
-	// admin role + deployment admin service token are seeded (#312). It is also
+	// admin role + deployment admin API key are seeded (#312). It is also
 	// the OpenRails org slug used to locate the directory row to link the org
 	// onto (#336): there is NO default merchant, so an empty slug is an error and a
 	// matching openrails.merchants row must already exist. There is NO separate
@@ -40,30 +40,30 @@ type BootstrapOptions struct {
 	BootstrapOrgSlug string
 
 	// InitialAdminUserID, when set, is assigned the admin role in the bootstrap
-	// tenant (the user must already exist and be a member, or AddMember is
-	// attempted first). Optional: self-hosted bootstrap may seed the admin service
-	// token alone and add an admin user later.
+	// org (the user must already exist and be a member, or AddMember is
+	// attempted first). Optional: self-hosted bootstrap may seed the admin API
+	// key alone and add an admin user later.
 	InitialAdminUserID string
 
-	// MintInitialServiceToken controls whether a deployment admin service token is
+	// MintInitialAPIKey controls whether a deployment admin API key is
 	// minted when none exists. Defaults to true.
-	MintInitialServiceToken bool
+	MintInitialAPIKey bool
 }
 
 // Bootstrap idempotently ensures the OpenRails control-plane state for the
-// DEFAULT tenant (#223/#312): the default merchant's AuthKit org exists, the
-// OpenRails admin role is defined and granted the full `openrails:*` permission
-// catalog, the default merchant directory row records its AuthKit org, and
-// (optionally) an initial deployment admin service token is minted when the org
-// has none. HARDCUT (#312): there is NO separate "operator" AuthKit org —
-// admin authority is the openrails:admin permission held under the default
-// merchant's own org (or carried on the minted admin service token).
+// bootstrap merchant (#223/#312): the merchant's AuthKit org exists, the
+// OpenRails operator role is defined and granted the concrete merchant-local
+// `org:` permission catalog, the default merchant directory row records its
+// AuthKit org, and an initial deployment admin API key is optionally minted
+// when the org has none. HARDCUT (#312): there is NO separate "operator" AuthKit org -
+// admin authority is merchant-local AuthKit `org:` permission state under the
+// default merchant's own org (or carried on the minted admin API key).
 //
 // It runs AFTER migrations / at startup, exclusively through in-process AuthKit
 // CORE calls (CreateOrg / DefineRole / SetRolePermissions / AssignRole /
-// MintServiceToken) — never raw AuthKit SQL or a private HTTP route. Re-running
-// it is safe: tenant creation, role definition, and catalog seeding are upserts;
-// the service token is minted only when none already exists.
+// MintAPIKey) - never raw AuthKit SQL or a private HTTP route. Re-running
+// it is safe: org creation, role definition, and catalog seeding are upserts;
+// the API key is minted only when none already exists.
 func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*BootstrapResult, error) {
 	if c == nil {
 		return nil, errors.New("controlplane: nil control plane")
@@ -131,33 +131,33 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	// 4. Record the owning AuthKit org on the bootstrap merchant's directory row
 	//    (openrails.merchants.owner_org_id, keyed by slug) so role-based authz can
 	//    map this merchant -> owning org (#481 ownership link, NOT identity). The
-	//    resolved OpenRails merchant id is what the admin service token below is
+	//    resolved OpenRails merchant id is what the admin API key below is
 	//    resource-scoped to (no default merchant; #480).
 	bootstrapMerchantID, err := c.recordOwnerOrgBySlug(ctx, slug, authkitOrg.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 5. Mint an initial deployment admin service token only when the org has none yet.
-	if opts.MintInitialServiceToken {
+	// 5. Mint an initial deployment admin API key only when the org has none yet.
+	if opts.MintInitialAPIKey {
 		existing, lerr := core.ListAPIKeys(ctx, slug)
 		if lerr != nil {
-			return nil, fmt.Errorf("controlplane: list admin service tokens: %w", lerr)
+			return nil, fmt.Errorf("controlplane: list admin API keys: %w", lerr)
 		}
-		if !anyLiveServiceToken(existing) {
-			serviceToken, secret, merr := core.MintAPIKeyWithOptions(ctx, slug, authcore.APIKeyMintOptions{
-				Name:        BootstrapAdminServiceTokenName,
+		if !anyLiveAPIKey(existing) {
+			apiKey, secret, merr := core.MintAPIKeyWithOptions(ctx, slug, authcore.APIKeyMintOptions{
+				Name:        BootstrapAdminAPIKeyName,
 				Permissions: OperatorRolePermissions(),
 				Resources:   []authcore.APIKeyResource{MerchantResource(bootstrapMerchantID)},
 			})
 			if merr != nil {
-				return nil, fmt.Errorf("controlplane: mint initial admin service token: %w", merr)
+				return nil, fmt.Errorf("controlplane: mint initial admin API key: %w", merr)
 			}
-			res.ServiceTokenMinted = true
-			res.ServiceTokenSecret = secret
-			res.ServiceTokenKeyID = serviceToken.KeyID
-			log.WithFields(log.Fields{"bootstrap_org": slug, "service_token_key_id": serviceToken.KeyID}).
-				Warn("controlplane: minted initial admin service token (secret shown once)")
+			res.APIKeyMinted = true
+			res.APIKeySecret = secret
+			res.APIKeyID = apiKey.KeyID
+			log.WithFields(log.Fields{"bootstrap_org": slug, "api_key_id": apiKey.KeyID}).
+				Warn("controlplane: minted initial admin API key (secret shown once)")
 		}
 	}
 
@@ -182,9 +182,9 @@ func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstra
 	return nil, nil
 }
 
-// anyLiveServiceToken reports whether the AuthKit org already has at least one non-revoked service token,
+// anyLiveAPIKey reports whether the AuthKit org already has at least one non-revoked API key,
 // so bootstrap does not mint a duplicate on re-run.
-func anyLiveServiceToken(toks []authcore.APIKey) bool {
+func anyLiveAPIKey(toks []authcore.APIKey) bool {
 	for _, t := range toks {
 		if t.RevokedAt == nil {
 			return true

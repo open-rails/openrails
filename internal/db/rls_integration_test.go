@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -103,6 +104,7 @@ func startRLSContainer(t *testing.T) (superDSN string, appDSN string) {
 		postgres.WithDatabase("openrails"),
 		postgres.WithUsername("super"),
 		postgres.WithPassword("super"),
+		testcontainers.WithHostConfigModifier(postgresTestLimits),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(60*time.Second)),
@@ -118,6 +120,11 @@ func startRLSContainer(t *testing.T) (superDSN string, appDSN string) {
 	superDSN = fmt.Sprintf("postgresql://super:super@%s:%s/openrails?sslmode=disable", host, port.Port())
 	appDSN = fmt.Sprintf("postgresql://openrails_app:app_pw@%s:%s/openrails?sslmode=disable", host, port.Port())
 	return superDSN, appDSN
+}
+
+func postgresTestLimits(hc *container.HostConfig) {
+	hc.Resources.Memory = 2 << 30
+	hc.Resources.NanoCPUs = 2_000_000_000
 }
 
 // TestRLSPosture_Reporting proves CheckRLSPosture/EnforceRLSPosture classify

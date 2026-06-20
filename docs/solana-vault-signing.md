@@ -18,7 +18,7 @@ Covers issues **#253** (merchant signer + tx builder) and **#251** (Vault KV ada
                      │     loads solana/private_key from merchants.MerchantSecretStore
                      │     (DB+envelope self-hosted, or Vault KV managed), signs in-proc
                      └── transitSigner   "sign this"        — RECOMMENDED in prod
-                           calls Vault transit/sign/<tenant-key>; key never leaves Vault
+                           calls Vault transit/sign/<merchant-key>; key never leaves Vault
 ```
 
 Both are selected per-deployment by config. The tx-builder and pull worker only
@@ -39,21 +39,21 @@ import (
     "context"
 
     solanago "github.com/gagliardetto/solana-go"
-    "github.com/open-rails/openrails/pkg/tenant"
+    "github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Signer produces Solana signatures for a merchant key WITHOUT
-// exposing the private key to callers. Resolved per tenant; there is no
+// exposing the private key to callers. Resolved per merchant; there is no
 // process-global signer.
 type Signer interface {
     // PublicKey is the merchant address (also the fee payer / required
     // signer on every plan + pull transaction).
-    PublicKey(ctx context.Context, tenantID tenant.ID) (solanago.PublicKey, error)
+    PublicKey(ctx context.Context, merchantID merchant.ID) (solanago.PublicKey, error)
 
     // SignMessage signs the raw serialized Solana *message* bytes
-    // (tx.Message.MarshalBinary()) with the tenant key and returns the 64-byte
+    // (tx.Message.MarshalBinary()) with the merchant key and returns the 64-byte
     // Ed25519 signature.
-    SignMessage(ctx context.Context, tenantID tenant.ID, message []byte) (solanago.Signature, error)
+    SignMessage(ctx context.Context, merchantID merchant.ID, message []byte) (solanago.Signature, error)
 }
 ```
 
@@ -61,7 +61,7 @@ type Signer interface {
 
 ```go
 // signAndSubmit builds the final wire tx: merchant is fee payer + sole signer.
-func signAndSubmit(ctx context.Context, tid tenant.ID, s Signer, rpc *RPCClient,
+func signAndSubmit(ctx context.Context, tid merchant.ID, s Signer, rpc *RPCClient,
     instrs []solanago.Instruction) (solanago.Signature, error) {
 
     payer, err := s.PublicKey(ctx, tid)
@@ -101,16 +101,16 @@ func signAndSubmit(ctx context.Context, tid tenant.ID, s Signer, rpc *RPCClient,
 
 Loads `solana/private_key` from the **existing** `merchants.MerchantSecretStore`
 (whatever backend is wired — DB+envelope, or Vault KV), parses the Ed25519 key,
-signs locally. Caches the parsed key per tenant with a short TTL so we don't hit
+signs locally. Caches the parsed key per merchant with a short TTL so we don't hit
 the store per signature.
 
 ```go
 type keypairSigner struct {
     secrets merchants.MerchantSecretStore
-    cache   *ttlCache[tenant.ID, solanago.PrivateKey] // 60s TTL (decided), configurable; invalidate on Secret.Version bump
+    cache   *ttlCache[merchant.ID, solanago.PrivateKey] // 60s TTL (decided), configurable; invalidate on Secret.Version bump
 }
 
-func (k *keypairSigner) load(ctx context.Context, tid tenant.ID) (solanago.PrivateKey, error) {
+func (k *keypairSigner) load(ctx context.Context, tid merchant.ID) (solanago.PrivateKey, error) {
     if pk, ok := k.cache.Get(tid); ok {
         return pk, nil
     }
@@ -120,19 +120,19 @@ func (k *keypairSigner) load(ctx context.Context, tid tenant.ID) (solanago.Priva
     }
     pk, err := solanago.PrivateKeyFromBase58(sec.Value) // or raw bytes per storage choice
     if err != nil {
-        return nil, fmt.Errorf("parse tenant solana key: %w", err)
+        return nil, fmt.Errorf("parse merchant solana key: %w", err)
     }
     k.cache.Put(tid, pk)
     return pk, nil
 }
 
-func (k *keypairSigner) PublicKey(ctx context.Context, tid tenant.ID) (solanago.PublicKey, error) {
+func (k *keypairSigner) PublicKey(ctx context.Context, tid merchant.ID) (solanago.PublicKey, error) {
     pk, err := k.load(ctx, tid)
     if err != nil { return solanago.PublicKey{}, err }
     return pk.PublicKey(), nil
 }
 
-func (k *keypairSigner) SignMessage(ctx context.Context, tid tenant.ID, msg []byte) (solanago.Signature, error) {
+func (k *keypairSigner) SignMessage(ctx context.Context, tid merchant.ID, msg []byte) (solanago.Signature, error) {
     pk, err := k.load(ctx, tid)
     if err != nil { return solanago.Signature{}, err }
     return pk.Sign(msg) // in-process Ed25519
@@ -146,7 +146,7 @@ in managed prod, prefer `transitSigner`.
 
 ## 3. `transitSigner` — Vault Transit, key never leaves Vault (`signer_transit.go`)
 
-The tenant key is a **non-extractable Ed25519 key inside Vault Transit**. We ask
+The merchant key is a **non-extractable Ed25519 key inside Vault Transit**. We ask
 Vault to sign; we only ever receive a signature. The public key (= Solana
 address) is exported once and cached (it's stable for the key version).
 
@@ -162,11 +162,11 @@ type TransitClient interface {
 
 type transitSigner struct {
     transit TransitClient
-    keyName func(tenant.ID) string            // e.g. "openrails-tenant-<id>"
-    pubs    *ttlCache[tenant.ID, solanago.PublicKey]
+    keyName func(merchant.ID) string            // e.g. "openrails-merchant-<id>"
+    pubs    *ttlCache[merchant.ID, solanago.PublicKey]
 }
 
-func (t *transitSigner) PublicKey(ctx context.Context, tid tenant.ID) (solanago.PublicKey, error) {
+func (t *transitSigner) PublicKey(ctx context.Context, tid merchant.ID) (solanago.PublicKey, error) {
     if pk, ok := t.pubs.Get(tid); ok {
         return pk, nil
     }
@@ -177,7 +177,7 @@ func (t *transitSigner) PublicKey(ctx context.Context, tid tenant.ID) (solanago.
     return pk, nil
 }
 
-func (t *transitSigner) SignMessage(ctx context.Context, tid tenant.ID, msg []byte) (solanago.Signature, error) {
+func (t *transitSigner) SignMessage(ctx context.Context, tid merchant.ID, msg []byte) (solanago.Signature, error) {
     raw, err := t.transit.Sign(ctx, t.keyName(tid), msg) // 64-byte sig
     if err != nil { return solanago.Signature{}, err }
     return solanago.SignatureFromBytes(raw)
@@ -186,11 +186,11 @@ func (t *transitSigner) SignMessage(ctx context.Context, tid tenant.ID, msg []by
 
 ### Vault-side Transit details (the gotchas)
 
-- **Key type:** `vault write transit/keys/openrails-tenant-<id> type=ed25519 exportable=false`. `exportable=false` is the whole point — the key can never be read out.
+- **Key type:** `vault write transit/keys/openrails-merchant-<id> type=ed25519 exportable=false`. `exportable=false` is the whole point — the key can never be read out.
 - **Solana curve == Ed25519.** A Solana address *is* the base58 of the 32-byte Ed25519 public key, so the Transit key's public key is directly the merchant address. **No separate address storage needed** — derive it from Vault.
 - **Sign request:** `POST transit/sign/<name>` with `input = base64(message)`, **`prehashed=false`** (default). For Ed25519 Vault signs the raw message (PureEdDSA, hashes internally) and **ignores `hash_algorithm`**. Do **not** prehash — Solana verifies over the raw message.
 - **Response parsing:** signature comes back as `"vault:v1:<base64>"`. Strip the `vault:v<n>:` prefix, base64-decode → 64 bytes. (The `TransitClient.Sign` adapter does this so callers get raw bytes.)
-- **Key versioning:** rotating the Transit key version changes the public key → new Solana address → forces plan re-publish + re-enroll (plan PDA derives from the merchant address). So pin a key version per tenant and treat rotation as the heavy operation it is (runbook in #258).
+- **Key versioning:** rotating the Transit key version changes the public key → new Solana address → forces plan re-publish + re-enroll (plan PDA derives from the merchant address). So pin a key version per merchant and treat rotation as the heavy operation it is (runbook in #258).
 
 ---
 
@@ -198,7 +198,7 @@ func (t *transitSigner) SignMessage(ctx context.Context, tid tenant.ID, msg []by
 
 When no Vault is configured, `keypairSigner` reads `solana/private_key` from
 `dbSecretStore` wrapped by `encryptedSecretStore` — the private key is
-envelope-encrypted at rest (master key wraps per-tenant DEK; `internal/crypto`,
+envelope-encrypted at rest (master key wraps per-merchant DEK; `internal/crypto`,
 issue #227). Same `Signer` interface, same callers. This is the default and
 needs no new infra.
 
@@ -284,8 +284,8 @@ func (a *KVv2Adapter) ListSecrets(ctx context.Context, path string) ([]string, e
 ### 5b. `auth.go` — app authenticates ONCE as itself, token auto-renewed
 
 ```go
-// Login authenticates the OpenRails process to Vault (NOT per-tenant; tenant
-// isolation is enforced by the (tenant, name) addressing). AppRole for VMs,
+// Login authenticates the OpenRails process to Vault (NOT per-merchant; merchant
+// isolation is enforced by the (merchant, name) addressing). AppRole for VMs,
 // Kubernetes auth for pods. Returns a client whose token is kept fresh.
 func Login(ctx context.Context, cfg Config) (*vaultapi.Client, error) {
     client, err := vaultapi.NewClient(&vaultapi.Config{Address: cfg.Address})
@@ -377,7 +377,7 @@ if cfg.Vault != nil && cfg.Vault.Enabled {
 | Condition | Classify as | Action |
 |---|---|---|
 | Vault unreachable / token expired / 5xx | **operational** | retry; **never** cancel a sub or skip verification |
-| `ErrSecretNotFound` / Transit key missing | **terminal for that tenant** | mark tenant misconfigured; alert; don't pull |
+| `ErrSecretNotFound` / Transit key missing | **terminal for that merchant** | mark merchant misconfigured; alert; don't pull |
 | Signature OK, tx fails (insufficient USDC) | subscriber dunning | `FailMembership` (§7.5) |
 | Signature OK, tx fails (insufficient SOL gas) | **operational** | retry; top-up fee wallet (#258) |
 

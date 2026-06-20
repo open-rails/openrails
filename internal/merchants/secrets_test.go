@@ -9,7 +9,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-func TestMemSecretStore_RoundTripPerTenant(t *testing.T) {
+func TestMemSecretStore_RoundTripPerMerchant(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemorySecretStore()
 
@@ -19,7 +19,7 @@ func TestMemSecretStore_RoundTripPerTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Put for tenant A, then Get round-trips.
+	// Put for merchant A, then Get round-trips.
 	if _, err := store.Put(ctx, a, SecretStripeSecretKey, "sk_a"); err != nil {
 		t.Fatalf("put A: %v", err)
 	}
@@ -31,19 +31,19 @@ func TestMemSecretStore_RoundTripPerTenant(t *testing.T) {
 		t.Fatalf("get A value = %q, want sk_a", got.Value)
 	}
 
-	// Merchant B does NOT see tenant A's secret (namespacing).
+	// Merchant B does NOT see merchant A's secret (namespacing).
 	if _, err := store.Get(ctx, b, SecretStripeSecretKey); !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("get B before put = %v, want ErrSecretNotFound", err)
 	}
 
-	// Put for tenant B with a DIFFERENT value; A's value is unchanged.
+	// Put for merchant B with a DIFFERENT value; A's value is unchanged.
 	if _, err := store.Put(ctx, b, SecretStripeSecretKey, "sk_b"); err != nil {
 		t.Fatalf("put B: %v", err)
 	}
 	gotA, _ := store.Get(ctx, a, SecretStripeSecretKey)
 	gotB, _ := store.Get(ctx, b, SecretStripeSecretKey)
 	if gotA.Value != "sk_a" || gotB.Value != "sk_b" {
-		t.Fatalf("cross-tenant leak: A=%q B=%q", gotA.Value, gotB.Value)
+		t.Fatalf("cross-merchant leak: A=%q B=%q", gotA.Value, gotB.Value)
 	}
 }
 
@@ -96,14 +96,14 @@ func TestMemSecretStore_DeleteAndList(t *testing.T) {
 	}
 }
 
-func TestMemSecretStore_ZeroTenantRejected(t *testing.T) {
+func TestMemSecretStore_ZeroMerchantRejected(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemorySecretStore()
 	if _, err := store.Get(ctx, merchant.ID{}, SecretStripeSecretKey); err == nil {
-		t.Fatal("get with zero tenant should error")
+		t.Fatal("get with zero merchant should error")
 	}
 	if _, err := store.Put(ctx, merchant.ID{}, SecretStripeSecretKey, "x"); err == nil {
-		t.Fatal("put with zero tenant should error")
+		t.Fatal("put with zero merchant should error")
 	}
 }
 

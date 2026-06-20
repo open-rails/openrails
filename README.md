@@ -606,7 +606,9 @@ openrails pull-provider report --merchant=<slug> --run=<uuid>   # a specific run
 The same runs are exposed behind the admin API (`POST /v1/admin/reconcile/runs`);
 see [docs/operations.md](docs/operations.md) for the finding taxonomy and the
 confirmed-absence gate (destructive repairs are held until the source domain is
-fully reconciled).
+fully reconciled). `pull-provider` records local mirror plans/changes only; remote
+provider writes executed later through provider intents are recorded separately in
+`openrails intents log`.
 
 **`intents`** — read-only view of the provider intent ledger (#358): every queued
 outbound provider mutation. Under `MODE=limited`/`readonly` this is the dry-run
@@ -618,6 +620,8 @@ intents execute under `limited`, system-origin only under `full`, nothing under
 openrails intents --merchant=<slug>                         # pending intents + drain forecast by mode
 openrails intents --merchant=<slug> --status=all            # full ledger history
 openrails intents --merchant=<slug> --type=nmi_delete_subscription --format=json
+openrails intents log --merchant=<slug> --provider=stripe   # remote provider mutation attempts/results
+openrails intents log --merchant=<slug> --intent=<uuid> --format=json
 
 # also: GET /v1/admin/intents?status=&processor=&type=&subscription_id=
 ```

@@ -67,7 +67,7 @@ func TestKeypairSignerPublicKeyAndSign(t *testing.T) {
 		t.Fatalf("SignMessage: %v", err)
 	}
 	if !sig.Verify(pub, msg) {
-		t.Fatal("signature did not verify against the tenant public key")
+		t.Fatal("signature did not verify against the merchant public key")
 	}
 }
 
@@ -124,7 +124,7 @@ func TestKeypairSignerFailClosed(t *testing.T) {
 	}
 }
 
-func TestKeypairSignerRejectsZeroTenant(t *testing.T) {
+func TestKeypairSignerRejectsZeroMerchant(t *testing.T) {
 	key := newTestKey(t)
 	signer := NewKeypairSigner(&fakeSecrets{value: key.String()}, time.Minute)
 	if _, err := signer.SignMessage(context.Background(), merchant.ID{}, []byte("x")); err == nil {

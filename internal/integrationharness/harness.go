@@ -2,13 +2,13 @@
 
 // Package integrationharness boots REAL OpenRails servers over REAL HTTP for
 // integration tests — no stubs. It exposes two surfaces, both implementing the
-// same service-token-authenticated /v1/service/* contract, so any integration
+// same service-credential-authenticated /v1/service/* contract, so any integration
 // test can drive identical operation scripts against both and assert parity (the
 // embed conformance test is the first consumer; #485):
 //
 //   - EMBEDDED no-auth HOST (Server 1, ≈ doujins minus auth). Builds the engine
 //     with embed.New (host-owns-auth) and serves the embedded /v1/service/*
-//     surface over httptest with a TRUSTING service-token resolver that accepts
+//     surface over httptest with a TRUSTING API-key resolver that accepts
 //     every request and pins the bound merchant — it verifies NOTHING (fine for
 //     tests). This is "doujins with a no-op authenticator": real HTTP, real
 //     engine, no auth checks. Mirrors internal/billing/openrailsembed in the
@@ -19,14 +19,14 @@
 //     internal/http, the same graph cmd/openrails run-server uses) with the
 //     OpenRails-owned AuthKit control plane attached, provisions the merchant via
 //     the REAL control-plane bootstrap (links owner_org_id + mints a real
-//     admin service token through AuthKit core), and authenticates the client
+//     admin API key through AuthKit core), and authenticates the client
 //     with that real token. The /v1/service/* requests are resolved by the real
-//     ServiceTokenRequired -> control plane ResolveServiceToken -> AuthKit core
+//     ServiceCredentialRequired -> control plane ResolveAPIKey -> AuthKit core
 //     path, exercising #481 role-based merchant authz. NO stubResolver.
 //
 // Both servers run against the SAME shared migrated Postgres (dbtest.RunPostgres
 // applies BOTH OpenRails AND AuthKit profiles.* migrations) and a shared Redis
-// testcontainer for the admission-throughput axis. Tests scope state by
+// for the admission-throughput axis. Tests scope state by
 // per-side payer ids, so the two surfaces never collide.
 package integrationharness
 
@@ -47,7 +47,6 @@ import (
 	authtesting "github.com/open-rails/authkit/testing"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
-	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
@@ -65,7 +64,7 @@ import (
 )
 
 // Harness owns the infrastructure shared by both surfaces (the migrated Postgres
-// DSN + a Redis client over a testcontainer). Build one per test with New, then
+// DSN + a Redis client). Build one per test with New, then
 // start whichever surfaces the test needs. Cleanup is registered on t.
 type Harness struct {
 	t   *testing.T
@@ -73,7 +72,7 @@ type Harness struct {
 
 	// DSN is the shared, fully-migrated Postgres (OpenRails + AuthKit profiles.*).
 	DSN string
-	// Redis is a client over a Redis testcontainer (admission throughput axis).
+	// Redis is a client over shared Redis (admission throughput axis).
 	Redis *redis.Client
 
 	pool *pgxpool.Pool
@@ -104,14 +103,14 @@ type Surface struct {
 	// BaseURL is the server's HTTP base (no trailing /v1).
 	BaseURL string
 	// Token is the bearer the remote client presents. For the standalone surface
-	// it is a REAL minted service token; for the embedded host it is an arbitrary
+	// it is a REAL minted API key; for the embedded host it is an arbitrary
 	// trusting-resolver-accepted token.
 	Token string
 
 	// h/app are the standalone surface's harness + booted app, used by
-	// RegisterRemoteApplication to exercise the #484 JWKS-principal credential
-	// through the SAME real control plane the server authenticates against. Nil for
-	// the embedded host.
+	// RegisterRemoteApplication to exercise the #484 remote application access
+	// token through the SAME real control plane the server authenticates against.
+	// Nil for the embedded host.
 	h   *Harness
 	app *app.App
 
@@ -138,21 +137,12 @@ func New(t *testing.T, ctx context.Context) *Harness {
 
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	rc, err := tcredis.Run(ctx, "redis:7-alpine")
-	require.NoError(t, err, "start redis testcontainer")
-	t.Cleanup(func() { _ = rc.Terminate(context.Background()) })
-	redisURL, err := rc.ConnectionString(ctx)
-	require.NoError(t, err)
-	ropt, err := redis.ParseURL(redisURL)
-	require.NoError(t, err)
-	rdb := redis.NewClient(ropt)
-	t.Cleanup(func() { _ = rdb.Close() })
-	require.NoError(t, rdb.Ping(ctx).Err())
+	rdb, _ := dbtest.SharedRedisClient(t)
 
 	return &Harness{t: t, ctx: ctx, DSN: dsn, Redis: rdb}
 }
 
-// trustingResolver is the embedded no-auth host's service-token resolver: it
+// trustingResolver is the embedded no-auth host's API-key resolver: it
 // accepts EVERY presented token as a merchant-wide PermAdmin credential for the
 // bound merchant and verifies NOTHING. This is the "no-op authenticator" half of
 // "doujins minus auth" — the host is trusted for its own merchant, exactly as an
@@ -163,21 +153,21 @@ type trustingResolver struct {
 	merchantSlug string
 }
 
-func (trustingResolver) LooksLikeServiceToken(string) bool { return true }
+func (trustingResolver) LooksLikeAPIKey(string) bool { return true }
 
-func (r trustingResolver) ResolveServiceToken(context.Context, string) (*controlplane.ResolvedServiceToken, error) {
-	return &controlplane.ResolvedServiceToken{
+func (r trustingResolver) ResolveAPIKey(context.Context, string) (*controlplane.ResolvedServiceCredential, error) {
+	return &controlplane.ResolvedServiceCredential{
 		OwnerOrgSlug: "embedded-host",
 		MerchantID:   r.merchantID,
 		MerchantSlug: r.merchantSlug,
-		Permissions:  []string{controlplane.PermAdmin},
+		Permissions:  controlplane.OperatorRolePermissions(),
 		Resources:    []authcore.APIKeyResource{controlplane.MerchantResource(r.merchantID)},
 	}, nil
 }
 
 // StartEmbeddedHost boots Server 1: an embedded engine (embed.New, host-owns-auth)
 // over the shared Postgres + Redis, serving the real embedded /v1/service/*
-// surface over httptest behind the REAL ServiceTokenRequired middleware wired to
+// surface over httptest behind the REAL ServiceCredentialRequired middleware wired to
 // a TRUSTING resolver (no auth). It registers the bound merchant (embed.New does
 // this) and returns a Surface whose client speaks real HTTP. currency is the
 // client's default currency (Balance keys off it).
@@ -199,7 +189,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 	ginroutes.RegisterServiceRoutes(
 		router.Group("/v1/service"),
 		rt.Embedded().App().Runtime,
-		ginmw.ServiceTokenRequired(trustingResolver{
+		ginmw.ServiceCredentialRequired(trustingResolver{
 			merchantID:   dbtest.TestMerchantID,
 			merchantSlug: dbtest.TestMerchantSlug,
 		}),
@@ -219,9 +209,9 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 // -> internal/http, the cmd/openrails run-server graph) over the shared Postgres +
 // Redis with the OpenRails control plane attached, then provisions the merchant
 // through the REAL control-plane bootstrap (links owner_org_id + mints a real
-// admin service token via AuthKit core) and returns a Surface whose client
+// admin API key via AuthKit core) and returns a Surface whose client
 // authenticates with that real token. The /v1/service/* path is authenticated by
-// the real ServiceTokenRequired -> ResolveServiceToken -> AuthKit core chain
+// the real ServiceCredentialRequired -> ResolveAPIKey -> AuthKit core chain
 // (#481 role-based merchant authz). No stubs.
 // StartStandalone boots the standalone server for an integration test. The server
 // connects as the unprivileged openrails_app role (NOBYPASSRLS), so the per-merchant
@@ -261,28 +251,28 @@ func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 	h.t.Cleanup(func() { _ = app.Close(context.Background()) })
 
 	// Real control-plane bootstrap: ensures the operator AuthKit org + role, links
-	// the merchant's owner_org_id to it, and mints a REAL admin service token
+	// the merchant's owner_org_id to it, and mints a REAL admin API key
 	// scoped to the merchant — the production provisioning path (cmd/openrails
-	// run-server does the same at boot). MintInitialServiceToken returns the
+	// run-server does the same at boot). MintInitialAPIKey returns the
 	// one-time secret we hand to the client.
 	res, err := embcp.RunBootstrap(h.ctx, app, controlplane.BootstrapOptions{
-		BootstrapOrgSlug:        dbtest.TestMerchantSlug,
-		MintInitialServiceToken: true,
+		BootstrapOrgSlug:  dbtest.TestMerchantSlug,
+		MintInitialAPIKey: true,
 	})
 	require.NoError(h.t, err, "control plane bootstrap")
 	require.NotNil(h.t, res)
-	token := res.ServiceTokenSecret
+	token := res.APIKeySecret
 	if token == "" {
 		// A previous run already minted one (shared DB across the package): mint a
 		// fresh real token directly through AuthKit core, scoped to the merchant.
-		token = h.mintFreshServiceToken(app)
+		token = h.mintFreshAPIKey(app)
 	}
-	require.NotEmpty(h.t, token, "standalone service token")
+	require.NotEmpty(h.t, token, "standalone API key")
 	// Sanity: the real resolver must accept the real token end-to-end (#481 path).
 	cp := embcp.Get(app)
 	require.NotNil(h.t, cp, "control plane attached")
-	resolved, rerr := cp.ResolveServiceToken(h.ctx, token)
-	require.NoError(h.t, rerr, "real service token must resolve through AuthKit core")
+	resolved, rerr := cp.ResolveAPIKey(h.ctx, token)
+	require.NoError(h.t, rerr, "real API key must resolve through AuthKit core")
 	require.Equal(h.t, dbtest.TestMerchantID, resolved.MerchantID)
 
 	// Workers: the conformance script does not need background workers, but River
@@ -302,16 +292,16 @@ func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
 	}
 }
 
-// RemoteAppCaller is a JWKS principal (remote_application, #76/#484) provisioned
+// RemoteAppCaller is a remote_application (#76/#484) provisioned
 // against the standalone surface's real control plane: its registered slug/issuer
-// and a freshly minted remote-application-access+jwt SELF-token. Present it as a
-// Bearer credential to the /v1/service/* surface to drive the #484 path.
+// and a freshly minted remote application access token. Present it as a Bearer
+// credential to the /v1/service/* surface to drive the #484 path.
 type RemoteAppCaller struct {
 	Slug   string
 	Issuer string
-	// Token is a minted self-token (typ=remote-application-access+jwt) signed by
-	// the principal's own key. Authority is STORED (assigned role/perms), never
-	// self-claimed.
+	// Token is a minted remote application access token
+	// (typ=remote-application-access+jwt) signed by the principal's own key.
+	// Authority is STORED (assigned role/perms), never self-claimed.
 	Token string
 }
 
@@ -344,7 +334,7 @@ type ServiceJWTCaller struct {
 
 // ProvisionOwnedMerchant creates an AuthKit org, grants it the OpenRails
 // operator role, links an OpenRails merchant row to that org, and mints a real
-// service token scoped to the merchant. It is for standalone integration
+// API key scoped to the merchant. It is for standalone integration
 // fixtures that need more than the default bootstrapped merchant.
 func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 	h := s.h
@@ -373,7 +363,7 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 	`, mid.UUID(), slug, org.ID)
 	require.NoError(h.t, err, "insert owned merchant")
 
-	token := s.MintServiceToken(slug, slug+"-operator", controlplane.OperatorRolePermissions(),
+	token := s.MintAPIKey(slug, slug+"-operator", controlplane.OperatorRolePermissions(),
 		[]authcore.APIKeyResource{controlplane.MerchantResource(mid)})
 
 	return OwnedMerchant{
@@ -443,11 +433,11 @@ func (s *Surface) MintUserAccessToken(username string) string {
 	return token
 }
 
-// RegisterRemoteApplication provisions a static-key principal (#484) on the standalone
-// surface's REAL control plane and returns a minted self-token. It stands up a
+// RegisterRemoteApplication provisions a static-key remote_application (#484) on the standalone
+// surface's REAL control plane and returns a minted remote application access token. It stands up a
 // test issuer for the principal, registers the remote_application, assigns it
-// role (when non-empty) on ownerOrgSlug — the tenant that
-// owns the test merchant — and signs a self-token with the principal's own key.
+// role (when non-empty) on ownerOrgSlug — the merchant that
+// owns the test merchant — and signs a token with the principal's own key.
 //
 // With OperatorRole on the merchant's owner_org, the principal can administer
 // the merchant via the existing #481 role-based authz. Pass role="" to provision
@@ -456,9 +446,9 @@ func (s *Surface) RegisterRemoteApplication(slug, ownerOrgSlug, role string) Rem
 	return s.registerRemoteApplication(slug, ownerOrgSlug, role, nil)
 }
 
-// RegisterRemoteApplicationWithPermissionsClaim is the same JWKS-principal setup
-// as RegisterRemoteApplication, but includes an explicit permissions claim in
-// the self-token. AuthKit treats this as a down-scope request against STORED
+// RegisterRemoteApplicationWithPermissionsClaim is the same remote_application
+// setup as RegisterRemoteApplication, but includes an explicit permissions claim
+// in the remote application access token. AuthKit treats this as a down-scope request against STORED
 // authority, never as a widening grant; tests use this to prove self-claimed
 // permissions alone do not authorize a principal.
 func (s *Surface) RegisterRemoteApplicationWithPermissionsClaim(slug, ownerOrgSlug, role string, permissions []string) RemoteAppCaller {
@@ -508,7 +498,7 @@ func (s *Surface) registerRemoteApplication(slug, ownerOrgSlug, role string, per
 		TTL:         time.Hour,
 		Permissions: permissionsClaim,
 	})
-	require.NoError(h.t, err, "mint remote_application self-token")
+	require.NoError(h.t, err, "mint remote application access token")
 
 	return RemoteAppCaller{Slug: slug, Issuer: issuer.URL(), Token: token}
 }
@@ -532,7 +522,7 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerOrgSlug, subject string, pe
 
 	ownerOrg, err := core.ResolveOrgBySlug(h.ctx, ownerOrgSlug)
 	require.NoError(h.t, err, "resolve owner org")
-	_, err = core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
+	ra, err := core.UpsertRemoteApplication(h.ctx, authcore.RemoteApplication{
 		Slug:       slug,
 		OrgID:      ownerOrg.ID,
 		Issuer:     issuer.URL(),
@@ -542,6 +532,12 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerOrgSlug, subject string, pe
 		Enabled:    true,
 	})
 	require.NoError(h.t, err, "register delegated issuer")
+	if len(permissions) > 0 {
+		role := slug + "-delegated"
+		require.NoError(h.t, core.DefineRole(h.ctx, ownerOrgSlug, role), "define delegated remote application role")
+		require.NoError(h.t, core.SetRolePermissions(h.ctx, ownerOrgSlug, role, permissions), "grant delegated remote application permissions")
+		require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ownerOrgSlug, ra.ID, role), "assign delegated remote application role")
+	}
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
 	token, err := authcore.MintDelegatedAccessToken(h.ctx, issuer.Signer(), authcore.DelegatedAccessParams{
@@ -583,19 +579,14 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 		Audiences:  []string{"openrails"},
 		Enabled:    true,
 	})
-	require.NoError(h.t, err, "register service-JWT issuer")
-	require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ownerOrgSlug, ra.ID, "member"), "assign org membership")
-
 	if len(permissions) == 0 {
 		permissions = []string{controlplane.PermCreditsWrite}
 	}
-	// BND-C1: grant each requested permission as a STORED direct grant so the
-	// authority intersection in ResolveServiceJWT can approve the token's
-	// self-asserted permissions. Without this, every service JWT would be
-	// rejected (empty intersection → ErrServiceTokenScopeDenied).
-	for _, perm := range permissions {
-		require.NoError(h.t, core.AddRemoteApplicationPermission(h.ctx, ra.ID, perm), "grant stored permission %q to %s", perm, slug)
-	}
+	require.NoError(h.t, err, "register service-JWT issuer")
+	role := slug + "-service-jwt"
+	require.NoError(h.t, core.DefineRole(h.ctx, ownerOrgSlug, role), "define remote application role")
+	require.NoError(h.t, core.SetRolePermissions(h.ctx, ownerOrgSlug, role, permissions), "grant stored role permissions to %s", slug)
+	require.NoError(h.t, core.AddRemoteApplicationMember(h.ctx, ownerOrgSlug, ra.ID, role), "assign org membership")
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
 	token, _, err := authcore.MintServiceJWT(h.ctx, issuer.Signer(), issuer.URL(), authcore.ServiceJWTMintOptions{
@@ -610,12 +601,12 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 	return ServiceJWTCaller{Slug: slug, Issuer: issuer.URL(), Token: token}
 }
 
-// MintServiceToken mints a real AuthKit service token through the standalone
+// MintAPIKey mints a real AuthKit API key through the standalone
 // control plane.
-func (s *Surface) MintServiceToken(orgSlug, name string, permissions []string, resources []authcore.APIKeyResource) string {
+func (s *Surface) MintAPIKey(orgSlug, name string, permissions []string, resources []authcore.APIKeyResource) string {
 	h := s.h
 	h.t.Helper()
-	require.NotNil(h.t, s.app, "MintServiceToken requires the standalone surface")
+	require.NotNil(h.t, s.app, "MintAPIKey requires the standalone surface")
 	cp := embcp.Get(s.app)
 	require.NotNil(h.t, cp, "control plane attached")
 	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, orgSlug, authcore.APIKeyMintOptions{
@@ -623,14 +614,14 @@ func (s *Surface) MintServiceToken(orgSlug, name string, permissions []string, r
 		Permissions: permissions,
 		Resources:   resources,
 	})
-	require.NoError(h.t, err, "mint service token")
+	require.NoError(h.t, err, "mint API key")
 	return secret
 }
 
-// mintFreshServiceToken mints a new real admin service token through AuthKit core,
+// mintFreshAPIKey mints a new real admin API key through AuthKit core,
 // scoped to the test merchant — used when bootstrap found an existing token (the
 // shared-DB second-run case) and returned no secret.
-func (h *Harness) mintFreshServiceToken(a *app.App) string {
+func (h *Harness) mintFreshAPIKey(a *app.App) string {
 	h.t.Helper()
 	cp := embcp.Get(a)
 	require.NotNil(h.t, cp, "control plane attached")
@@ -639,7 +630,7 @@ func (h *Harness) mintFreshServiceToken(a *app.App) string {
 		Permissions: controlplane.OperatorRolePermissions(),
 		Resources:   []authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	})
-	require.NoError(h.t, err, "mint fresh service token")
+	require.NoError(h.t, err, "mint fresh API key")
 	return secret
 }
 

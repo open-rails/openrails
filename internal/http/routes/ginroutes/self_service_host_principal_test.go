@@ -20,10 +20,8 @@ import (
 // surface (issue #339): a host-supplied billingauth.DelegatedAuthenticator
 // authenticates /v1/me/* with NO control plane wired in the test fixture
 // (the host seam overrides the control-plane verifier), and the
-// explicit-mapping contract is enforced fail-closed (empty
-// tenant/subject/permissions => 401; permissions
-// outside the delegated catalog => 401; missing write permission => 403 on
-// the settings PUT).
+// explicit-mapping contract is enforced fail-closed (empty merchant/subject =>
+// 401; permissions outside the delegated catalog => 401).
 
 // stubDelegatedAuthenticator is a host-style DelegatedAuthenticator returning
 // a fixed principal (or error).
@@ -41,8 +39,8 @@ func newHostPrincipalSelfRouter(t *testing.T, authn billingauth.DelegatedAuthent
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
 	group := e.Group("/v1/me")
-	// rt==nil: the wrapped handlers are never reached on the 401/403 paths
-	// these tests assert; a 500/panic would mean the gate admitted the request.
+	// rt==nil: a request accepted past auth reaches the wrapped handler and
+	// panics, which these tests recover when checking mounted self routes.
 	RegisterSelfServiceRoutes(group, nil, ginmw.DelegatedPrincipalRequired(authn))
 	return e
 }
@@ -66,66 +64,58 @@ func doHostSelf(e *gin.Engine, method, path string) *httptest.ResponseRecorder {
 	return w
 }
 
-// A host principal authenticates the self surface with NO control plane: the
-// per-route permission gate runs (403 for a missing perm — proving the route
-// is mounted AND the principal was accepted past authentication).
+// A host principal authenticates the self surface with NO control plane, and
+// self routes do not require OpenRails-owned self permissions.
 func TestHostPrincipal_SelfSurfaceAcceptsPrincipalWithoutControlPlane(t *testing.T) {
 	e := newHostPrincipalSelfRouter(t, stubDelegatedAuthenticator{
-		principal: hostPrincipal(controlplane.PermSelfBillingRead),
+		principal: hostPrincipal(),
 	})
 
-	// A read-permission principal reaches past auth; the checkout gate then
-	// 403s (not 401, not 404) — authentication succeeded via the host seam.
-	w := doHostSelf(e, http.MethodPost, "/v1/me/checkout")
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
-
-	// And a read route passes both auth and the read gate. With rt==nil the
-	// handler panics if reached, which proves the gates admitted the request.
 	func() {
 		defer func() { _ = recover() }()
-		w := doHostSelf(e, http.MethodGet, "/v1/me/account")
+		w := doHostSelf(e, http.MethodPost, "/v1/me/checkout")
 		require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	}()
 }
 
-// EXPLICIT MAPPING — NO FALLBACKS: a principal missing its tenant or subject
-// (or carrying no/invalid permissions) is rejected with 401 before any route
+// EXPLICIT MAPPING — NO FALLBACKS: a principal missing its merchant or subject
+// (or carrying invalid permissions) is rejected with 401 before any route
 // logic runs.
 func TestHostPrincipal_InvalidPrincipalsRejected(t *testing.T) {
 	cases := []struct {
 		name      string
 		principal *billingauth.DelegatedPrincipal
+		wantCode  int
 	}{
-		{"nil principal", nil},
-		{"empty tenant", &billingauth.DelegatedPrincipal{
-			SubjectID: "user-1", Permissions: []string{controlplane.PermSelfBillingRead},
-		}},
+		{"nil principal", nil, http.StatusUnauthorized},
+		{"empty merchant", &billingauth.DelegatedPrincipal{
+			SubjectID: "user-1",
+		}, http.StatusUnauthorized},
 		{"empty subject", &billingauth.DelegatedPrincipal{
-			MerchantID: dbtest.TestMerchantID.String(), Permissions: []string{controlplane.PermSelfBillingRead},
-		}},
-		{"non-uuid tenant", &billingauth.DelegatedPrincipal{
-			MerchantID: "tensorhub", SubjectID: "user-1", Permissions: []string{controlplane.PermSelfBillingRead},
-		}},
-		{"no permissions", &billingauth.DelegatedPrincipal{
+			MerchantID: dbtest.TestMerchantID.String(),
+		}, http.StatusUnauthorized},
+		{"non-uuid merchant", &billingauth.DelegatedPrincipal{
+			MerchantID: "tensorhub", SubjectID: "user-1",
+		}, http.StatusUnauthorized},
+		{"unknown grant smuggled", &billingauth.DelegatedPrincipal{
 			MerchantID: dbtest.TestMerchantID.String(), SubjectID: "user-1",
-		}},
-		{"service grant smuggled", &billingauth.DelegatedPrincipal{
+			Permissions: []string{"org:not_in_browser_catalog:read"},
+		}, http.StatusUnauthorized},
+		{"platform grant smuggled", &billingauth.DelegatedPrincipal{
 			MerchantID: dbtest.TestMerchantID.String(), SubjectID: "user-1",
-			Permissions: []string{controlplane.PermCreditsWrite},
-		}},
-		{"admin grant smuggled", &billingauth.DelegatedPrincipal{
-			MerchantID: dbtest.TestMerchantID.String(), SubjectID: "user-1",
-			Permissions: []string{controlplane.PermSelfBillingRead, controlplane.PermAdmin},
-		}},
+			Permissions: []string{controlplane.PermPlatformSuperadmin},
+		}, http.StatusUnauthorized},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newHostPrincipalSelfRouter(t, stubDelegatedAuthenticator{principal: tc.principal})
 			w := doHostSelf(e, http.MethodGet, "/v1/me/account")
-			require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
-			require.Contains(t, w.Body.String(), "delegated_principal_invalid")
+			require.Equal(t, tc.wantCode, w.Code, w.Body.String())
+			if tc.wantCode == http.StatusUnauthorized {
+				require.Contains(t, w.Body.String(), "delegated_principal_invalid")
+			}
 		})
 	}
 }
@@ -137,39 +127,24 @@ func TestHostPrincipal_AuthenticatorErrorIs401(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 }
 
-// The #339 account routes are mounted and gated: a read-only principal can
-// read the account but gets 403 on the settings PUT (the dedicated
-// self billing:write permission is required — negative scope-separation test).
-func TestHostPrincipal_AccountSettingsPutRequiresBillingWrite(t *testing.T) {
-	readOnly := newHostPrincipalSelfRouter(t, stubDelegatedAuthenticator{
-		principal: hostPrincipal(controlplane.PermSelfBillingRead),
+func TestHostPrincipal_AccountRoutesMountedWithoutPermissions(t *testing.T) {
+	router := newHostPrincipalSelfRouter(t, stubDelegatedAuthenticator{
+		principal: hostPrincipal(),
 	})
 
-	w := doHostSelf(readOnly, http.MethodPut, "/v1/me/account/settings")
-	require.Equal(t, http.StatusForbidden, w.Code,
-		"settings PUT must be mounted and write-gated (403, not 404/401): %s", w.Body.String())
-
-	// Transactions list rides the read permission and is mounted.
 	func() {
 		defer func() { _ = recover() }()
-		w := doHostSelf(readOnly, http.MethodGet, "/v1/me/account/transactions")
+		w := doHostSelf(router, http.MethodPut, "/v1/me/account/settings")
+		require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	}()
 
-	// A write principal passes the settings gate (proven by the nil-runtime
-	// panic guard: the gate no longer 403s).
-	writer := newHostPrincipalSelfRouter(t, stubDelegatedAuthenticator{
-		principal: hostPrincipal(controlplane.PermSelfBillingWrite),
-	})
 	func() {
 		defer func() { _ = recover() }()
-		w := doHostSelf(writer, http.MethodPut, "/v1/me/account/settings")
+		w := doHostSelf(router, http.MethodGet, "/v1/me/account/transactions")
+		require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	}()
-
-	// And the write permission alone does NOT grant reads (distinct gates).
-	w = doHostSelf(writer, http.MethodGet, "/v1/me/account")
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }

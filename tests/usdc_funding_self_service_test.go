@@ -104,9 +104,8 @@ func TestUSDCFundingSelfServiceCreateGetIdempotencyAndIsolation(t *testing.T) {
 
 	userA := uuid.NewString()
 	userB := uuid.NewString()
-	perms := []string{controlplane.PermSelfBillingRead, controlplane.PermSelfCheckoutCreate}
-	routerA := newUSDCFundingSelfRouter(t, suite, userA, perms)
-	routerB := newUSDCFundingSelfRouter(t, suite, userB, []string{controlplane.PermSelfBillingRead})
+	routerA := newUSDCFundingSelfRouter(t, suite, userA, nil)
+	routerB := newUSDCFundingSelfRouter(t, suite, userB, nil)
 
 	body := `{
 		"provider": "robinhood",
@@ -153,10 +152,7 @@ func TestUSDCFundingSelfServiceRejectsUnsupportedProviderAndNetwork(t *testing.T
 	suite := getSharedTestSuite(t)
 	configureUSDCFundingProviders(t, suite)
 
-	router := newUSDCFundingSelfRouter(t, suite, uuid.NewString(), []string{
-		controlplane.PermSelfBillingRead,
-		controlplane.PermSelfCheckoutCreate,
-	})
+	router := newUSDCFundingSelfRouter(t, suite, uuid.NewString(), nil)
 
 	baseBody := `{
 		"provider": "coinbase",

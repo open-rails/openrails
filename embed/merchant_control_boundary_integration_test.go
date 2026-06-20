@@ -33,7 +33,7 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, body)
 	assertBalance(t, ctx, standalone.Client(), customerA, 1_000)
 
-	// A different org's service token is valid, but it is pinned to that org's
+	// A different org's API key is valid, but it is pinned to that org's
 	// own merchant.
 	merchantBClient := standalone.Client(openrails.WithTokenProvider(func(context.Context) (string, error) {
 		return merchantB.APIKey, nil
@@ -43,24 +43,24 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	assertBalance(t, ctx, merchantBClient, customerB, 2_000)
 	assertBalance(t, ctx, standalone.Client(), customerA, 1_000)
 
-	// A service token owned by merchant B's org but explicitly resource-scoped to
+	// An API key owned by merchant B's org but explicitly resource-scoped to
 	// merchant A is rejected before any handler mutation.
-	crossScopedServiceToken := standalone.MintServiceToken(
+	crossScopedAPIKey := standalone.MintAPIKey(
 		merchantB.OrgSlug,
-		"or502-cross-service-token",
+		"or502-cross-api-key",
 		controlplane.OperatorRolePermissions(),
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
-	status, body = postDepositCredits(t, standalone.BaseURL, crossScopedServiceToken, uuid.New(), 10)
+	status, body = postDepositCredits(t, standalone.BaseURL, crossScopedAPIKey, uuid.New(), 10)
 	require.Equal(t, http.StatusForbidden, status, body)
 	assertBalance(t, ctx, standalone.Client(), customerA, 1_000)
 	assertBalance(t, ctx, merchantBClient, customerB, 2_000)
 
 	// An AuthKit org with no active OpenRails merchant owns no merchant surface.
 	orphanOrg := standalone.CreateAuthKitOrg("or502-orphan")
-	orphanToken := standalone.MintServiceToken(
+	orphanToken := standalone.MintAPIKey(
 		orphanOrg,
-		"or502-orphan-service-token",
+		"or502-orphan-API-key",
 		controlplane.OperatorRolePermissions(),
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)

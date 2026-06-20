@@ -12,7 +12,7 @@ import (
 // the `app.merchant_id` GUC on it, so every merchant-owned query the request issues
 // through db.Qx(ctx)/Gen(ctx) is constrained by the migration-050 RLS policies (issue
 // #227). It MUST be mounted AFTER the merchant has been resolved onto the request
-// context (ResolveMerchant for the configured merchant; ServiceTokenRequired / DelegatedSelfRequired
+// context (ResolveMerchant for the configured merchant; ServiceCredentialRequired / DelegatedSelfRequired
 // for the multi-merchant service/self/delegated-admin groups, which override the
 // merchant) — otherwise the connection would be pinned to the wrong merchant.
 //

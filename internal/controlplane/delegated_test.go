@@ -3,7 +3,9 @@ package controlplane
 import (
 	"context"
 	"crypto"
-	"errors"
+	"crypto/x509"
+	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,10 +22,10 @@ import (
 // decisions the browser-direct self-service surface depends on (issue #222
 // browser tier): canonical audience enforcement, AuthKit delegated profile +
 // no-`sub`
-// requirement, and the openrails:self:* permission-catalog gate. They build the
+// requirement, and the self permission gate. They build the
 // exact verifier configuration newDelegatedVerifier uses, so they pin the real
-// behavior without needing a database (the AuthKit-tenant -> OpenRails-tenant mapping in
-// ResolveDelegated keys on the registered issuer, covered by the service token path + the
+// behavior without needing a database (the AuthKit org -> OpenRails merchant mapping in
+// ResolveDelegated keys on the registered issuer, covered by the API key path + the
 // middleware tests).
 
 const (
@@ -31,12 +33,12 @@ const (
 	testDelegatedKID     = "test-kid-1"
 	canonicalAudience    = "openrails"
 	testDelegatedSubject = "end-user-42"
-	// testDelegatedTenant / testDelegatedTenantID are LEGACY claim values used
+	// testDelegatedOrg / testDelegatedOrgID are LEGACY claim values used
 	// only to prove the issuer-only hard cut (#361, authkit v0.23.0): tokens
 	// carrying `tenant` (slug) or `tenant_id` (uuid) are rejected.
-	testDelegatedTenant   = "operator"
-	testDelegatedTenantID = "11111111-1111-1111-1111-111111111111"
-	wrongAudience         = "tensorhub"
+	testDelegatedOrg   = "operator"
+	testDelegatedOrgID = "11111111-1111-1111-1111-111111111111"
+	wrongAudience      = "tensorhub"
 )
 
 // newTestDelegatedVerifier builds a Verifier identical to newDelegatedVerifier's
@@ -48,23 +50,34 @@ func newTestDelegatedVerifier(t *testing.T) (*authhttp.Verifier, jwtkit.Signer) 
 	require.NoError(t, err)
 
 	v := authhttp.NewVerifier(
-		authhttp.WithPermissionCatalog(func(permissions []string) error {
-			if len(permissions) == 0 {
-				return errors.New("delegated token carries no permissions")
-			}
+		authhttp.WithPermissions(func(permissions []string) error {
 			for _, p := range permissions {
 				if !IsDelegatedPermission(p) {
-					return errors.New("permission not in delegated catalog: " + p)
+					return fmt.Errorf("permission %q is not a browser-safe org: permission", p)
 				}
 			}
 			return nil
 		}),
 	)
-	pub := signer.PublicKey()
-	require.NoError(t, v.AddIssuer(testDelegatedIssuer, []string{canonicalAudience}, authhttp.IssuerOptions{
-		RawKeys: map[string]crypto.PublicKey{testDelegatedKID: pub},
-	}))
+	require.NoError(t, v.LoadRemoteApplications(context.Background(), delegatedRemoteAppSource{{
+		ID:      "remote-app-1",
+		Slug:    "openrails-test",
+		Issuer:  testDelegatedIssuer,
+		Mode:    authcore.RemoteAppModeStatic,
+		Enabled: true,
+		PublicKeys: []authcore.RemoteAppKey{{
+			KID:          testDelegatedKID,
+			PublicKeyPEM: testPublicKeyPEM(t, signer.PublicKey()),
+		}},
+	}}, []string{canonicalAudience}))
 	return v, signer
+}
+
+func testPublicKeyPEM(t *testing.T, pub crypto.PublicKey) string {
+	t.Helper()
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	require.NoError(t, err)
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
 }
 
 func mintDelegated(t *testing.T, signer jwtkit.Signer, p authhttp.DelegatedAccessParams) string {
@@ -99,6 +112,15 @@ func (s delegatedRemoteAppSource) GetRemoteApplication(_ context.Context, issuer
 	return nil, authcore.ErrRemoteApplicationNotFound
 }
 
+func (s delegatedRemoteAppSource) ResolveRemoteApplicationAuthority(_ context.Context, appID string) ([]authcore.OrgMembership, []string, error) {
+	for i := range s {
+		if s[i].ID == appID {
+			return nil, MerchantCatalogNames(), nil
+		}
+	}
+	return nil, nil, authcore.ErrRemoteApplicationNotFound
+}
+
 func testJWKS(t *testing.T, signer *jwtkit.RSASigner) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -109,17 +131,15 @@ func testJWKS(t *testing.T, signer *jwtkit.RSASigner) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-func TestDelegatedVerify_SucceedsWithSelfPermissionAndAudience(t *testing.T) {
+func TestDelegatedVerify_SucceedsWithoutPermissionsAndAudience(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
-	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Permissions: []string{PermSelfBillingRead, PermSelfCheckoutCreate},
-	})
+	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{})
 	cl, dp, err := v.VerifyDelegatedAccess(tok)
 	require.NoError(t, err)
 	require.Equal(t, "", cl.UserID, "delegated token must not carry a normal sub")
 	require.Equal(t, testDelegatedSubject, dp.DelegatedSubject)
-	require.Equal(t, testDelegatedIssuer, dp.Issuer, "the validated iss is the tenant identity")
-	require.Contains(t, dp.Permissions, PermSelfBillingRead)
+	require.Equal(t, testDelegatedIssuer, dp.Issuer, "the validated iss is the merchant issuer identity")
+	require.Empty(t, dp.Permissions)
 }
 
 func TestResolveDelegatedRejectsOriginNotAllowedByIssuer(t *testing.T) {
@@ -138,9 +158,7 @@ func TestResolveDelegatedRejectsOriginNotAllowedByIssuer(t *testing.T) {
 		Enabled:        true,
 	}}, []string{canonicalAudience}))
 	cp := &ControlPlane{delegatedVerifier: v}
-	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Permissions: []string{PermSelfBillingRead},
-	})
+	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{})
 
 	_, err = cp.ResolveDelegated(context.Background(), tok, "https://evil.example")
 	require.ErrorIs(t, err, ErrDelegatedOriginNotAllowed)
@@ -149,14 +167,13 @@ func TestResolveDelegatedRejectsOriginNotAllowedByIssuer(t *testing.T) {
 func TestDelegatedVerify_RejectsWrongAudience(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Audiences:   []string{wrongAudience},
-		Permissions: []string{PermSelfBillingRead},
+		Audiences: []string{wrongAudience},
 	})
 	_, _, err := v.VerifyDelegatedAccess(tok)
 	require.Error(t, err, "a token whose aud does not include openrails must be rejected")
 }
 
-func TestDelegatedVerify_RejectsNonSelfPermission(t *testing.T) {
+func TestDelegatedVerify_RejectsPlatformPermission(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	// An operator/server-to-server grant on a browser token must be rejected.
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
@@ -166,13 +183,13 @@ func TestDelegatedVerify_RejectsNonSelfPermission(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestDelegatedVerify_RejectsMixedSelfAndOperatorPermission(t *testing.T) {
+func TestDelegatedVerify_RejectsMixedAdminAndPlatformPermission(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Permissions: []string{PermSelfBillingRead, PermCreditsWrite},
+		Permissions: []string{PermMerchantBillingRead, PermPlatformSuperadmin},
 	})
 	_, _, err := v.VerifyDelegatedAccess(tok)
-	require.Error(t, err, "any non-self permission taints the whole token")
+	require.Error(t, err, "any platform permission taints the whole token")
 }
 
 func TestDelegatedVerify_RejectsExpired(t *testing.T) {
@@ -187,7 +204,6 @@ func TestDelegatedVerify_RejectsExpired(t *testing.T) {
 			"iss":           testDelegatedIssuer,
 			"aud":           []string{canonicalAudience},
 			"delegated_sub": testDelegatedSubject,
-			"permissions":   []string{PermSelfBillingRead},
 			"iat":           past.Unix(),
 			"exp":           past.Add(time.Minute).Unix(),
 		},
@@ -211,9 +227,8 @@ func TestDelegatedVerify_RejectsOrgIDClaim(t *testing.T) {
 		jwt.MapClaims{
 			"iss":           testDelegatedIssuer,
 			"aud":           []string{canonicalAudience},
-			"org_id":        testDelegatedTenantID,
+			"org_id":        testDelegatedOrgID,
 			"delegated_sub": testDelegatedSubject,
-			"permissions":   []string{PermSelfBillingRead},
 			"iat":           now.Unix(),
 			"exp":           now.Add(time.Minute).Unix(),
 		},
@@ -234,9 +249,8 @@ func TestDelegatedVerify_RejectsOrgClaim(t *testing.T) {
 		jwt.MapClaims{
 			"iss":           testDelegatedIssuer,
 			"aud":           []string{canonicalAudience},
-			"org":           testDelegatedTenant,
+			"org":           testDelegatedOrg,
 			"delegated_sub": testDelegatedSubject,
-			"permissions":   []string{PermSelfBillingRead},
 			"iat":           now.Unix(),
 			"exp":           now.Add(time.Minute).Unix(),
 		},
@@ -247,28 +261,10 @@ func TestDelegatedVerify_RejectsOrgClaim(t *testing.T) {
 	require.Error(t, verr, "a delegated token carrying an org slug claim must be rejected (issuer-only hard cut)")
 }
 
-func TestDelegatedVerify_RejectsNoPermissions(t *testing.T) {
-	v, signer := newTestDelegatedVerifier(t)
-	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{})
-	_, _, err := v.VerifyDelegatedAccess(tok)
-	require.Error(t, err, "a delegated token with no permissions is rejected")
-}
-
-func TestDelegatedVerify_RejectsServiceTokenCredential(t *testing.T) {
+func TestDelegatedVerify_RejectsServiceCredential(t *testing.T) {
 	v, _ := newTestDelegatedVerifier(t)
 	_, _, err := v.VerifyDelegatedAccess("openrails_st_keyid_secret")
-	require.Error(t, err, "service tokens must not verify as delegated browser tokens")
-}
-
-// IsSelfPermission must accept exactly the four self-service permissions and
-// reject operator/server-to-server grants.
-func TestIsSelfPermission(t *testing.T) {
-	for _, p := range SelfCatalogNames() {
-		require.True(t, IsSelfPermission(p), p)
-	}
-	for _, p := range []string{PermAdmin, PermCreditsWrite, PermSubscriptionsCancel, "openrails:self:unknown", ""} {
-		require.False(t, IsSelfPermission(p), p)
-	}
+	require.Error(t, err, "API keys must not verify as delegated browser tokens")
 }
 
 // guard: ensure authcore error sentinels are wired for the resolver's mapping.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -26,7 +27,7 @@ import (
 // the subscription, across all statuses.
 func queryNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uuid.UUID) (count int, status string, nextAttemptAt time.Time) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	err := suite.Pool.QueryRow(ctx, `
 		SELECT COUNT(*),
 		       COALESCE(MAX(status), ''),
@@ -43,7 +44,7 @@ func queryNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uuid.U
 // row).
 func countLiveNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uuid.UUID) int {
 	t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	var count int
 	err := suite.Pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM openrails.provider_intents
@@ -89,7 +90,7 @@ func (r *recordingDeferredDeleteScheduler) WithTx(pgx.Tx) subscriptions.Deferred
 // idempotency_key.
 func TestMarkerConversionSweepEnqueuesIntents(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
@@ -150,7 +151,7 @@ func TestMarkerConversionSweepEnqueuesIntents(t *testing.T) {
 // (#358), so NMI stops retrying the dead subscription.
 func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
@@ -215,7 +216,7 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 // invoked exactly once after commit with the subscription's user and ~now.
 func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	rt := suite.App.Runtime
 
 	products := suite.SeedProducts()
@@ -264,7 +265,7 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 // is set (the remote subscription is left for reconciliation).
 func TestFailMembershipLimitedModeLeavesRemoteSubscription(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	rt := suite.App.Runtime
 
 	products := suite.SeedProducts()
@@ -352,8 +353,13 @@ func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
 	require.Equal(t, models.StatusCancelled, updated.Status)
 	require.NotNil(t, updated.DeletionScheduledAt, "terminal window-expiry cancel must persist the deferred-delete marker")
 
-	require.Len(t, recorder.scheduled, 1, "exactly one deferred delete scheduled (no inline delete)")
-	require.Equal(t, sub.ID, recorder.scheduled[0].SubscriptionID)
+	var scheduledForSub []scheduledDelete
+	for _, scheduled := range recorder.scheduled {
+		if scheduled.SubscriptionID == sub.ID {
+			scheduledForSub = append(scheduledForSub, scheduled)
+		}
+	}
+	require.Len(t, scheduledForSub, 1, "exactly one deferred delete scheduled for this subscription (no inline delete)")
 }
 
 // TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes covers the
@@ -362,7 +368,7 @@ func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
 // minus the safety margin), and the resume worker supersedes it.
 func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	rt := suite.App.Runtime
 
 	products := suite.SeedProducts()

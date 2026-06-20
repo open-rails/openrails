@@ -244,7 +244,7 @@ func TestSubscriptionExpiryWithMockClock(t *testing.T) {
 // TestLifecycleServiceUsesMockClock verifies that SubscriptionLifecycleService uses the mock clock
 func TestLifecycleServiceUsesMockClock(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Seed products
 	products := suite.SeedProducts()

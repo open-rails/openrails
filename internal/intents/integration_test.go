@@ -122,6 +122,8 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 		deletionScheduledAt.UTC(), fx.userID, tenantID)
 
 	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM openrails.external_provider_mutation_logs
+			WHERE provider_intent_id IN (SELECT id FROM openrails.provider_intents WHERE subscription_id = $1)`, fx.subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.provider_intents WHERE subscription_id = $1", fx.subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", fx.subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
@@ -194,6 +196,34 @@ func TestExecutorDeletesPresentSubscription(t *testing.T) {
 	assert.EqualValues(t, 1, fake.queryCalls.Load(), "verify-then-execute reads first")
 	assert.EqualValues(t, 1, fake.deleteCalls.Load())
 	assert.Nil(t, fx.deletionMarker(t), "success finalizes the read model (marker cleared)")
+
+	rows, err := fx.db.Pool().Query(context.Background(), `
+		SELECT phase, attempt, evidence::text
+		FROM openrails.external_provider_mutation_logs
+		WHERE provider_intent_id = $1
+		ORDER BY created_at, id`, row.ID)
+	require.NoError(t, err)
+	defer rows.Close()
+	var phases []string
+	var attempts []int32
+	var evidence []string
+	for rows.Next() {
+		var phase string
+		var attempt int32
+		var ev *string
+		require.NoError(t, rows.Scan(&phase, &attempt, &ev))
+		phases = append(phases, phase)
+		attempts = append(attempts, attempt)
+		if ev != nil {
+			evidence = append(evidence, *ev)
+		}
+	}
+	require.NoError(t, rows.Err())
+	assert.Equal(t, []string{"attempting", "succeeded"}, phases)
+	assert.Equal(t, []int32{1, 1}, attempts)
+	require.NotEmpty(t, evidence)
+	assert.Contains(t, evidence[len(evidence)-1], `"deleted": true`)
+	assert.Contains(t, evidence[len(evidence)-1], fx.subID.String())
 }
 
 // TestExecutorVerifiedAbsentIsSuccess: absent at the provider = success

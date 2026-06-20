@@ -85,9 +85,9 @@ jobs:
           go-version-file: go.mod
       - name: Download modules
         run: go mod download
-      # Integration tests self-provision their infra (Postgres/Redis/ClickHouse)
-      # via testcontainers — ubuntu-latest ships with Docker, so no `services:`
-      # block is needed. See internal/dbtest and tests/testcontainer_suite.go.
+      # Integration tests share one compose-backed Postgres/Garnet/ClickHouse
+      # stack and run serially. Testcontainers remain capped fallbacks for
+      # direct package runs, not the normal CI path.
       - name: Integration test
         continue-on-error: true
-        run: go test -tags=integration -timeout 25m ./...
+        run: bash scripts/test_integration.sh ./...

@@ -317,7 +317,7 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 	paymentRowID := prepared.payment.ID
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, 0, adminRefundHTTPError(http.StatusInternalServerError, "no tenant resolved on request")
+		return nil, 0, adminRefundHTTPError(http.StatusInternalServerError, "no merchant resolved on request")
 	}
 	intent, err := r.State.IntentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
 		MerchantID:     tid.UUID(),

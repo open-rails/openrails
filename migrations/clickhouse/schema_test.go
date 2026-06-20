@@ -70,6 +70,8 @@ func TestClickHouseSchemaConsolidationInvariants(t *testing.T) {
 		"index idx_acu_events_merchant (merchant_id) type set(0) granularity 1",
 		"index idx_chargeback_events_merchant (merchant_id) type set(0) granularity 1",
 		"index idx_premium_status_daily_merchant (merchant_id) type set(0) granularity 1",
+		"alter table subscription_events rename column if exists tenant_id to merchant_id",
+		"drop table if exists mv_daily_metrics",
 	} {
 		if !strings.Contains(schema, want) {
 			t.Errorf("consolidated ClickHouse schema missing invariant %q", want)
@@ -77,8 +79,6 @@ func TestClickHouseSchemaConsolidationInvariants(t *testing.T) {
 	}
 
 	for _, forbidden := range []string{
-		"alter table",
-		"drop table",
 		"migration 002",
 		"migration 004",
 		"migration 005",

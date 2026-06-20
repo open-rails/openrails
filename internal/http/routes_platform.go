@@ -11,15 +11,13 @@ import (
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 )
 
-// PlatformPrefix is the cross-merchant managed-hosting superadmin API (issue #226).
-// It is gated by openrails:platform:superadmin in the SEPARATE platform org —
-// DISTINCT from the per-merchant operator-admin gate on /v1/admin/*. A merchant
-// operator admin cannot reach this surface.
+// PlatformPrefix is the cross-merchant managed-hosting platform API (issue #226).
+// It is gated by AuthKit `platform:` RBAC, distinct from merchant-local `org:`
+// authority on /v1/admin/*. A merchant operator admin cannot reach this surface.
 const PlatformPrefix = "/platform"
 
-// registerPlatformRoutes mounts the platform-superadmin cross-merchant API. No-op
-// when no platform org is configured (the superadmin gate could never pass,
-// so the surface stays closed).
+// registerPlatformRoutes mounts the platform cross-merchant API. No-op when
+// platform RBAC is not configured, so the surface stays closed.
 func (s *Server) registerPlatformRoutes(e *gin.Engine) {
 	if s.controlPlane.PlatformOrgSlug() == "" {
 		// No platform org configured: do not mount a surface nobody can pass.

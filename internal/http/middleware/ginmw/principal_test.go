@@ -42,8 +42,8 @@ func TestUserSessionAdminPrincipalUsesLivePermissionCheck(t *testing.T) {
 	r.GET("/admin", UserSessionAdminPrincipalRequired(fakeAdminPrincipalChecker{
 		allowedOrg:  "merchant-org",
 		allowedUser: "admin-1",
-		allowedPerm: controlplane.PermAdmin,
-	}), RequirePermission(controlplane.PermAdmin), func(c *gin.Context) {
+		allowedPerm: controlplane.PermCreditsRead,
+	}), RequirePermission(controlplane.PermCreditsRead), func(c *gin.Context) {
 		p, ok := PrincipalFromGin(c)
 		require.True(t, ok)
 		require.Equal(t, CredentialUserSession, p.CredentialType)
@@ -55,8 +55,8 @@ func TestUserSessionAdminPrincipalUsesLivePermissionCheck(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 
-func TestUserSessionAdminPrincipalDeniesNonAdminPermissions(t *testing.T) {
-	for _, perm := range []string{controlplane.PermCreditsRead, controlplane.PermSelfBillingRead} {
+func TestUserSessionAdminPrincipalDeniesNonOrgPermissions(t *testing.T) {
+	for _, perm := range []string{controlplane.PermPlatformSuperadmin} {
 		t.Run(perm, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			r := gin.New()
@@ -100,27 +100,25 @@ func TestUserSessionPlatformPrincipalDoesNotUseMerchantAdminPermission(t *testin
 func TestPrincipalPermissionClassesDoNotBleedAcrossCredentialTypes(t *testing.T) {
 	ctx := context.Background()
 
-	servicePrincipal := principalFromServiceCredential(&controlplane.ResolvedServiceToken{
+	servicePrincipal := principalFromServiceCredential(&controlplane.ResolvedServiceCredential{
 		OwnerOrgSlug: "merchant-org",
 		MerchantID:   dbtest.TestMerchantID,
 		Permissions: []string{
 			controlplane.PermCreditsRead,
-			controlplane.PermSelfBillingRead,
 		},
 	}, CredentialAPIKey)
 	require.NotNil(t, servicePrincipal)
 	require.Empty(t, servicePrincipal.Subject)
 	require.True(t, servicePrincipal.Can(ctx, controlplane.PermCreditsRead))
-	require.False(t, servicePrincipal.Can(ctx, controlplane.PermSelfBillingRead))
 
 	delegatedPrincipal := principalFromDelegated(&controlplane.ResolvedDelegated{
 		MerchantID:       dbtest.TestMerchantID,
 		DelegatedSubject: "user-1",
-		Permissions:      []string{controlplane.PermSelfBillingRead, controlplane.PermCreditsRead, controlplane.PermPlatformSuperadmin},
+		Permissions:      []string{controlplane.PermMerchantBillingRead, controlplane.PermCreditsRead, controlplane.PermPlatformSuperadmin},
 	}, CredentialDelegatedUser)
 	require.NotNil(t, delegatedPrincipal)
 	require.Equal(t, "user-1", delegatedPrincipal.Subject)
-	require.True(t, delegatedPrincipal.Can(ctx, controlplane.PermSelfBillingRead))
+	require.True(t, delegatedPrincipal.Can(ctx, controlplane.PermMerchantBillingRead))
 	require.False(t, delegatedPrincipal.Can(ctx, controlplane.PermCreditsRead))
 	require.False(t, delegatedPrincipal.Can(ctx, controlplane.PermPlatformSuperadmin))
 }

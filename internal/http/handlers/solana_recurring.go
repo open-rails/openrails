@@ -88,13 +88,13 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 	if user.Email != nil {
 		email = *user.Email
 	}
-	tenantID, err := merchant.Require(r.Request.Context())
+	merchantID, err := merchant.Require(r.Request.Context())
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "no tenant resolved on request")
+		r.ErrorJSON(http.StatusInternalServerError, "no merchant resolved on request")
 		return
 	}
 	sub, err := svc.ConfirmEnrollment(r.Request.Context(), recurring.EnrollInput{
-		MerchantID:       tenantID,
+		MerchantID:       merchantID,
 		UserID:           user.ID,
 		UserEmail:        email,
 		PriceID:          priceID,
@@ -475,13 +475,13 @@ func PrepareSolanaTierChange(r *httprequest.Request) {
 		return
 	}
 
-	tenantID, err := merchant.Require(r.Request.Context())
+	merchantID, err := merchant.Require(r.Request.Context())
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "no tenant resolved on request")
+		r.ErrorJSON(http.StatusInternalServerError, "no merchant resolved on request")
 		return
 	}
 	res, err := svc.Prepare(r.Request.Context(), recurring.PrepareTierChangeInput{
-		MerchantID:           tenantID,
+		MerchantID:           merchantID,
 		SubscriberWallet:     resolved.oldRow.SubscriberWallet,
 		MintSymbol:           resolved.newTerms.mintSymbol,
 		OldPlanPDA:           resolved.oldRow.PlanPDA,
@@ -537,13 +537,13 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 	// not trust a client-supplied PDA. PrepareTierChangeService returns it, but the
 	// confirm body only carries the signature + price; deriving it server-side from
 	// the canonical terms keeps the mirror authoritative.
-	tenantID, err := merchant.Require(r.Request.Context())
+	merchantID, err := merchant.Require(r.Request.Context())
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "no tenant resolved on request")
+		r.ErrorJSON(http.StatusInternalServerError, "no merchant resolved on request")
 		return
 	}
 	prep, err := r.State.SolanaPrepareTierChangeService.Prepare(r.Request.Context(), recurring.PrepareTierChangeInput{
-		MerchantID:           tenantID,
+		MerchantID:           merchantID,
 		SubscriberWallet:     resolved.oldRow.SubscriberWallet,
 		MintSymbol:           resolved.newTerms.mintSymbol,
 		OldPlanPDA:           resolved.oldRow.PlanPDA,

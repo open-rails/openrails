@@ -142,7 +142,7 @@ type serviceAdmitVerdict struct {
 // serviceAdmitBatchVerdicts runs the per-item admission loop with FULL per-item
 // isolation: a bad payer id, scope denial, deny, or backend error on one item
 // never fails the others. allows gates each item's payer against the service
-// token's tenant-subject scope; admit is the (injected) single-admit core.
+// API key's customer scope; admit is the (injected) single-admit core.
 //
 // Follow-up (#335): each item currently runs the full single-admit path. An
 // obvious optimization is batching shared payer reads inside one transaction.
@@ -164,7 +164,7 @@ func serviceAdmitBatchVerdicts(
 			continue
 		}
 		if !allows(*payer) {
-			out[i] = serviceAdmitVerdict{Status: http.StatusForbidden, Error: "service_token_tenant_subject_scope_denied"}
+			out[i] = serviceAdmitVerdict{Status: http.StatusForbidden, Error: "service_credential_customer_scope_denied"}
 			continue
 		}
 		res, err := admit(ctx, admitInputFromRequest(item, *payer))
@@ -196,7 +196,7 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "too many items")
 		return
 	}
-	resolved, status, msg := serviceTokenFromRequest(r)
+	resolved, status, msg := serviceCredentialFromRequest(r)
 	if resolved == nil {
 		r.ErrorJSON(status, msg)
 		return
@@ -247,7 +247,7 @@ func ServiceGetBudget(r *httprequest.Request) {
 
 // ServiceGetTier returns the payer's CURRENT graduated tier (#477): the tier
 // OpenRails auto-maintains from cumulative paid spend against the persisted tier
-// schedule (#476). customer_id is a query param; the tenant is pinned from
+// schedule (#476). customer_id is a query param; the merchant is pinned from
 // the API key. Empty tier => the payer has never graduated (caller treats
 // it as the lowest/default). Operator API key, credits:read.
 func ServiceGetTier(r *httprequest.Request) {
@@ -381,7 +381,7 @@ type serviceCreditLimitRequest struct {
 // ServiceSetCreditLimit sets the admin/operator arrears credit line for a payer
 // (#489): under billing_mode=arrears the balance may go NEGATIVE up to the limit;
 // AdmitHold denies insufficient_credit when a new hold would exceed it. 0 = off.
-// OPERATOR-ADMIN gated at the route (openrails:admin) — NOT self-serve.
+// Merchant-admin gated at the route (`org:credits:update`) - NOT self-serve.
 func ServiceSetCreditLimit(r *httprequest.Request) {
 	var req serviceCreditLimitRequest
 	if !r.BindJSON(&req) {
@@ -450,7 +450,7 @@ type servicePayerSpendLimitRequest struct {
 }
 
 // ServiceSetPayerSpendLimits upserts a tier money policy (#298 tier admin API). An
-// EMPTY customer_id sets the tenant-wide DEFAULT policy for the tier (#477,
+// EMPTY customer_id sets the merchant-wide DEFAULT policy for the tier (#477,
 // the platform capacity ladder declared once); a non-empty one sets a
 // per-subject override (scope-checked).
 func ServiceSetPayerSpendLimits(r *httprequest.Request) {
@@ -488,9 +488,9 @@ type serviceTierScheduleRequest struct {
 	Schedule   []billingservice.TierScheduleRung `json:"schedule"`
 }
 
-// ServiceSetTierSchedule persists the tenant's tier SCHEDULE (#476): the host
+// ServiceSetTierSchedule persists the merchant's tier SCHEDULE (#476): the host
 // declares the ladder ONCE and OpenRails AUTO-maintains each payer's tier from
-// cumulative spend. An EMPTY customer_id sets the tenant-wide default
+// cumulative spend. An EMPTY customer_id sets the merchant-wide default
 // schedule (the common case); a non-empty one sets a per-subject override
 // (scope-checked). owner=platform. Operator API key, credits:write.
 func ServiceSetTierSchedule(r *httprequest.Request) {

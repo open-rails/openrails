@@ -81,7 +81,7 @@ func RegisterUserRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts Route
 
 // RegisterMerchantActionRoutes registers merchant-scoped administrative action
 // routes such as catalog product/price mutation. These routes require the
-// narrow openrails:catalog:write permission rather than the broad admin grant.
+// narrow org:catalog:update permission rather than a broad owner grant.
 func RegisterMerchantActionRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts RouteOptions) {
 	a := e.App()
 	if a == nil {

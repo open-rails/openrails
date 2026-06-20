@@ -44,6 +44,17 @@ func (q *Queries) CountMerchantRowsEntitlements(ctx context.Context, merchantID 
 	return count, err
 }
 
+const countMerchantRowsExternalProviderMutationLogs = `-- name: CountMerchantRowsExternalProviderMutationLogs :one
+SELECT count(*) FROM openrails.external_provider_mutation_logs WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsExternalProviderMutationLogs(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsExternalProviderMutationLogs, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countMerchantRowsMoneyAccounts = `-- name: CountMerchantRowsMoneyAccounts :one
 SELECT count(*) FROM openrails.money_settings WHERE merchant_id = $1
 `
@@ -172,6 +183,15 @@ DELETE FROM openrails.entitlements WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsEntitlements(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsEntitlements, merchantID)
+	return err
+}
+
+const purgeMerchantRowsExternalProviderMutationLogs = `-- name: PurgeMerchantRowsExternalProviderMutationLogs :exec
+DELETE FROM openrails.external_provider_mutation_logs WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsExternalProviderMutationLogs(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsExternalProviderMutationLogs, merchantID)
 	return err
 }
 

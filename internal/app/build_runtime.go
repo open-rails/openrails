@@ -61,16 +61,16 @@ const (
 )
 
 // standaloneRiverSchema returns the schema for River tables when OpenRails
-// constructs its own River client (standalone mode). Per issue #165 the standalone
-// River schema is the same as the OpenRails Postgres schema (db.schema, default
-// `billing`) — it is NOT separately configurable. In embedded/library mode the
-// host instead injects its own River client via embedded.SetRiverClient, and that
-// client owns its schema; OpenRails never overrides it.
-func standaloneRiverSchema(cfg *config.Config) string {
-	if cfg == nil || cfg.DB == nil {
-		return config.DefaultSchema
-	}
-	return cfg.DB.SchemaName()
+// constructs its own River client (standalone, or embedded with no injected
+// client). River tables ALWAYS live in `public` (#545, config.RiverSchema) —
+// River's own documented default — so the OpenRails billing schema stays free of
+// non-portable runtime state (keeps the #544 data move a clean whole-schema
+// dump). This is NO LONGER tied to db.schema (reversing the #165 coupling). In
+// embedded/library mode a host that runs River injects its own client via
+// embedded.SetRiverClient, and that client owns its schema; OpenRails never
+// overrides it.
+func standaloneRiverSchema(_ *config.Config) string {
+	return config.RiverSchema
 }
 
 type runtimeOverrides struct {
@@ -452,7 +452,7 @@ func createDatabase(cfg *config.Config) (*db.DB, error) {
 	// Surface (and, outside development, enforce) the Row Level Security
 	// posture of the connected role (issue #227): RLS policies only constrain a
 	// non-superuser, non-BYPASSRLS role. Non-development boots fail if the app
-	// would connect as a privileged role that silently bypasses every per-tenant
+	// would connect as a privileged role that silently bypasses every per-merchant
 	// policy.
 	if err := database.EnforceRLSPosture(context.Background(), cfg.RequiresRLS()); err != nil {
 		return nil, err

@@ -25,36 +25,36 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// stubServiceTokenResolver is a test resolver (issue #222) that accepts any non-empty
-// bearer token as a valid service token for the test merchant with the given
-// permissions, so the parity test can exercise the service-token-authenticated
+// stubServiceCredentialResolver is a test resolver (issue #222) that accepts any non-empty
+// bearer token as a valid API key for the test merchant with the given
+// permissions, so the parity test can exercise the service-credential-authenticated
 // public service routes without standing up a full AuthKit control plane.
-type stubServiceTokenResolver struct {
+type stubServiceCredentialResolver struct {
 	permissions []string
 	resources   []authcore.APIKeyResource
 	serviceJWT  bool
 }
 
-func (s stubServiceTokenResolver) LooksLikeServiceToken(token string) bool {
+func (s stubServiceCredentialResolver) LooksLikeAPIKey(token string) bool {
 	return token != "" && !s.serviceJWT
 }
 
-func (s stubServiceTokenResolver) ResolveServiceToken(_ context.Context, token string) (*controlplane.ResolvedServiceToken, error) {
+func (s stubServiceCredentialResolver) ResolveAPIKey(_ context.Context, token string) (*controlplane.ResolvedServiceCredential, error) {
 	if token == "" || s.serviceJWT {
 		return nil, authcore.ErrInvalidAccessToken
 	}
 	return s.resolved()
 }
 
-func (s stubServiceTokenResolver) ResolveServiceJWT(_ context.Context, token string) (*controlplane.ResolvedServiceToken, error) {
+func (s stubServiceCredentialResolver) ResolveServiceJWT(_ context.Context, token string) (*controlplane.ResolvedServiceCredential, error) {
 	if token == "" || !s.serviceJWT {
 		return nil, authcore.ErrInvalidServiceJWT
 	}
 	return s.resolved()
 }
 
-func (s stubServiceTokenResolver) resolved() (*controlplane.ResolvedServiceToken, error) {
-	return &controlplane.ResolvedServiceToken{
+func (s stubServiceCredentialResolver) resolved() (*controlplane.ResolvedServiceCredential, error) {
+	return &controlplane.ResolvedServiceCredential{
 		OwnerOrgSlug: "operator",
 		MerchantID:   dbtest.TestMerchantID,
 		MerchantSlug: dbtest.TestMerchantSlug,
@@ -65,15 +65,13 @@ func (s stubServiceTokenResolver) resolved() (*controlplane.ResolvedServiceToken
 
 func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	// In-process facade calls require the tenant pinned in context (the raw
-	// Service has no default tenant; the HTTP path below pins it via middleware).
+	// In-process facade calls require the merchant pinned in context (the raw
+	// Service has no default merchant; the HTTP path below pins it via middleware).
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	userID := uuid.NewString()
 	tenantSubjectID := suite.ensureCustomer(ctx, userID)
 	tenantSubject := identity.CustomerID(tenantSubjectID)
-	// credit_type is accepted-and-ignored on the wire; money needs no type row.
-	creditTypeName := "svc_test_credits_" + uuid.NewString()
 
 	// Seed a starting money balance (USD) via the #512 ledger deposit (the
 	// single-entry money_blocks table was dropped in the hard cut; balance is now
@@ -126,14 +124,14 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
 
-	// Build the service-token-authenticated PUBLIC service routes (issue #222)
+	// Build the service-credential-authenticated PUBLIC service routes (issue #222)
 	// directly, with a stub resolver granting the credit + entitlement permissions. This
 	// is the same surface registered on the public handler at /v1/service/*.
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
 	group := router.Group("/v1/service")
-	resolver := stubServiceTokenResolver{
+	resolver := stubServiceCredentialResolver{
 		permissions: []string{
 			controlplane.PermCreditsRead,
 			controlplane.PermCreditsWrite,
@@ -145,9 +143,9 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 			controlplane.CustomerResource(tenantSubjectID),
 		},
 	}
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver))
+	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceCredentialRequired(resolver))
 
-	withServiceToken := func(req *http.Request) {
+	withServiceCredential := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer openrails_st_testkeyid_testsecret")
 	}
 
@@ -165,7 +163,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.Contains(t, subjectEnts, "premium-1")
 
 	reqEnt := httptest.NewRequest(http.MethodGet, "/v1/service/customers/"+tenantSubjectID.String()+"/entitlements", nil)
-	withServiceToken(reqEnt)
+	withServiceCredential(reqEnt)
 	wEnt := httptest.NewRecorder()
 	router.ServeHTTP(wEnt, reqEnt)
 	require.Equal(t, http.StatusOK, wEnt.Code)
@@ -189,7 +187,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	jwtGroup := jwtRouter.Group("/v1/service")
 	jwtResolver := resolver
 	jwtResolver.serviceJWT = true
-	httproutes.RegisterServiceRoutes(jwtGroup, suite.App.Runtime, ginmw.ServiceTokenRequired(jwtResolver))
+	httproutes.RegisterServiceRoutes(jwtGroup, suite.App.Runtime, ginmw.ServiceCredentialRequired(jwtResolver))
 	withServiceJWT := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer eyJ.service.jwt")
 	}
@@ -201,7 +199,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.Equal(t, http.StatusOK, wJWTEnt.Code)
 	require.Contains(t, wJWTEnt.Body.String(), "premium-1")
 
-	reqJWTBalance := httptest.NewRequest(http.MethodGet, "/v1/service/credits/balance?customer_id="+tenantSubjectID.String()+"&credit_type="+creditTypeName, nil)
+	reqJWTBalance := httptest.NewRequest(http.MethodGet, "/v1/service/credits/balance?customer_id="+tenantSubjectID.String()+"&currency="+money.DefaultCurrency, nil)
 	withServiceJWT(reqJWTBalance)
 	wJWTBalance := httptest.NewRecorder()
 	jwtRouter.ServeHTTP(wJWTBalance, reqJWTBalance)

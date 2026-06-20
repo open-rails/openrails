@@ -45,7 +45,7 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (merchants.Me
 	if cfg != nil && cfg.Vault != nil && cfg.Vault.Enabled {
 		// Managed: Vault KV-v2 backend (#251), same (tenant, name) addressing.
 		// Vault encrypts at rest, so no envelope wrapper. Transit keeps the
-		// per-tenant Solana key non-extractable.
+		// per-merchant Solana key non-extractable.
 		vc := cfg.Vault
 		vclient, err := vault.Login(ctx, vault.Config{
 			Address: vc.Address, AuthMethod: vc.AuthMethod, Token: vc.Token, RoleID: vc.RoleID,
@@ -58,13 +58,13 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (merchants.Me
 		return store, vault.NewTransitAdapter(vclient, vaultTransitMount), nil
 	}
 
-	// Self-hosted default: DB-backed store + per-tenant envelope encryption
+	// Self-hosted default: DB-backed store + per-merchant envelope encryption
 	// (issue #227). With no master key, most secrets keep the legacy plaintext
 	// behavior, but Solana private keys are write-blocked below so recurring
 	// signing keys are never newly stored plaintext.
 	dbStore, err := merchants.NewDBSecretStore(pool)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build tenant secret store: %w", err)
+		return nil, nil, fmt.Errorf("build merchant secret store: %w", err)
 	}
 	var masterKey string
 	if cfg != nil && cfg.Encryption != nil {
@@ -72,15 +72,15 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (merchants.Me
 	}
 	dekStore, err := crypto.NewDBDEKStore(pool)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build tenant DEK store: %w", err)
+		return nil, nil, fmt.Errorf("build merchant DEK store: %w", err)
 	}
 	enc, err := crypto.NewEncryptor(masterKey, dekStore)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build tenant encryptor: %w", err)
+		return nil, nil, fmt.Errorf("build merchant encryptor: %w", err)
 	}
 	store, err := merchants.NewEncryptedSecretStore(dbStore, enc)
 	if err != nil {
-		return nil, nil, fmt.Errorf("wrap tenant secret store with encryption: %w", err)
+		return nil, nil, fmt.Errorf("wrap merchant secret store with encryption: %w", err)
 	}
 	if !enc.Enabled() {
 		blocked := map[string]string{solanaint.SecretSolanaPrivateKey: solanaPlaintextWriteBlockReason}

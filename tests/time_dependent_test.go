@@ -25,7 +25,7 @@ import (
 // when checked at different points in time using the mock clock.
 func TestEntitlementExpiry(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a known starting point
 	startTime := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -90,7 +90,7 @@ func TestEntitlementExpiry(t *testing.T) {
 // TestEntitlementStacking tests that granting additional entitlements extends the expiry
 func TestEntitlementStacking(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a known starting point
 	startTime := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -162,7 +162,7 @@ func TestEntitlementStacking(t *testing.T) {
 // TestIndefiniteEntitlement tests that indefinite entitlements never expire
 func TestIndefiniteEntitlement(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a known starting point
 	startTime := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -221,7 +221,7 @@ func TestIndefiniteEntitlement(t *testing.T) {
 // and that access is revoked after period end (using mock clock to verify time-based behavior).
 func TestCancelAccessAtPeriodEnd(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a known starting point
 	startTime := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -421,7 +421,7 @@ func TestAdminRevokeAccess(t *testing.T) {
 // subscriptions when next_retry_at has passed.
 func TestDunningRetrySchedule(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a known starting point
 	startTime := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -514,7 +514,7 @@ func TestDunningRetrySchedule(t *testing.T) {
 // and that entitlements remain revoked even as time advances (using mock clock).
 func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a known starting point
 	startTime := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -620,7 +620,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 // and verifies period dates are correctly calculated using mock clock.
 func TestDunningSuccessReactivates(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a known starting point
 	startTime := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -727,7 +727,7 @@ func TestDunningSuccessReactivates(t *testing.T) {
 // TestSubscriptionRenewalWithMockClock tests renewal extends period using mock clock
 func TestSubscriptionRenewalWithMockClock(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a known starting point
 	startTime := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -812,7 +812,7 @@ func TestSubscriptionRenewalWithMockClock(t *testing.T) {
 // use the mock clock (PurchasedAt is set by the application, CreatedAt is DB-controlled).
 func TestPaymentTimestampUsesMockClock(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a specific time
 	fixedTime := time.Date(2024, time.June, 15, 14, 30, 0, 0, time.UTC)
@@ -880,7 +880,7 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 // TestSubscriptionExpiryAtExactBoundary tests behavior exactly at the expiry moment
 func TestSubscriptionExpiryAtExactBoundary(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a known starting point
 	startTime := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -952,7 +952,7 @@ func TestSubscriptionExpiryAtExactBoundary(t *testing.T) {
 // TestCancellationTimestamp tests that cancellation timestamps use mock clock
 func TestCancellationTimestamp(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a specific time
 	cancelTime := time.Date(2024, time.March, 15, 10, 30, 0, 0, time.UTC)
@@ -1029,7 +1029,7 @@ func TestCancellationTimestamp(t *testing.T) {
 // TestVaultTimestamps tests that vault/payment method timestamps use mock clock
 func TestVaultTimestamps(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Set clock to a specific time
 	vaultTime := time.Date(2024, time.July, 4, 16, 0, 0, 0, time.UTC)

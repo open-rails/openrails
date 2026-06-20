@@ -11,7 +11,7 @@ import (
 )
 
 // ListSecretStatuses returns the registry plus configured/audit state for a
-// tenant. It never returns plaintext values.
+// merchant. It never returns plaintext values.
 func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]MerchantSecretStatus, error) {
 	if id.IsZero() {
 		return nil, validateSecretRef(id, "x")
@@ -74,14 +74,14 @@ func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]Mer
 	return out, nil
 }
 
-// DeleteCredential deletes a tenant secret.
+// DeleteCredential deletes a merchant secret.
 func (s *Service) DeleteCredential(ctx context.Context, id merchant.ID, name string) error {
 	if s.secrets == nil {
-		return errors.New("tenancy: no secret store configured")
+		return errors.New("merchants: no secret store configured")
 	}
 	name = cleanSecretName(name)
 	if !SecretWritable(name) {
-		return fmt.Errorf("tenancy: unknown tenant secret %q", name)
+		return fmt.Errorf("merchants: unknown merchant secret %q", name)
 	}
 	if err := s.secrets.Delete(ctx, id, name); err != nil {
 		return err
@@ -94,11 +94,11 @@ func (s *Service) DeleteCredential(ctx context.Context, id merchant.ID, name str
 func (s *Service) ValidateCredential(ctx context.Context, id merchant.ID, name, value string, stripeTester func(context.Context, string) error) error {
 	name = cleanSecretName(name)
 	if !SecretWritable(name) {
-		return fmt.Errorf("tenancy: unknown tenant secret %q", name)
+		return fmt.Errorf("merchants: unknown merchant secret %q", name)
 	}
 	if strings.TrimSpace(value) == "" {
 		if s.secrets == nil {
-			return errors.New("tenancy: no secret store configured")
+			return errors.New("merchants: no secret store configured")
 		}
 		sec, err := s.secrets.Get(ctx, id, name)
 		if err != nil {

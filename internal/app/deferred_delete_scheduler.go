@@ -61,7 +61,7 @@ func (s *intentDeferredDeleteScheduler) ScheduleNMIDelete(ctx context.Context, u
 	if s == nil || s.db == nil {
 		return fmt.Errorf("intent ledger unavailable for deferred delete scheduling")
 	}
-	// The subscription row carries the tenant + provider the intent needs.
+	// The subscription row carries the merchant + provider the intent needs.
 	sub, err := s.db.Gen(ctx).GetSubscriptionByID(ctx, subscriptionID)
 	if err != nil {
 		return fmt.Errorf("load subscription for deferred delete intent: %w", err)

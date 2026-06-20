@@ -2,7 +2,7 @@
 
 // JWKS-principal programmatic auth on the standalone control plane (#484).
 //
-// authkit #76 added a SECOND programmatic credential alongside service tokens: a
+// authkit #76 added a SECOND programmatic credential alongside API keys: a
 // remote_application presenting a SELF-signed token (typ=remote-application-
 // access+jwt) whose authority is STORED (assigned org role/permissions),
 // resolved server-side from the validated `iss` — never self-claimed.
@@ -11,7 +11,7 @@
 // real AuthKit control plane (integrationharness.StartStandalone):
 //
 //   - a JWKS principal holding the operator ROLE on the merchant's owner_org
-//     can administer the merchant (the #481 role-based authz the service-token
+//     can administer the merchant (the #481 role-based authz the API-key
 //     path already runs), and
 //   - a JWKS principal with NO role/perm on that tenant is DENIED.
 //
@@ -94,8 +94,8 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 			"deny must surface as unauthorized/forbidden, got %v", err)
 	})
 
-	t.Run("service-token auth still works", func(t *testing.T) {
-		// The harness client carries a REAL minted service token; it must keep
+	t.Run("API-key auth still works", func(t *testing.T) {
+		// The harness client carries a REAL minted API key; it must keep
 		// working unchanged (the JWKS path is purely additive).
 		c := standalone.Client()
 		payer := uuid.New()
@@ -108,9 +108,9 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 			Amount:      1_000,
 			Source:      "or484",
 			SourceID:    &src,
-			Description: "service-token still works",
+			Description: "API-key still works",
 		})
-		require.NoError(t, err, "service-token auth must keep working")
+		require.NoError(t, err, "API-key auth must keep working")
 	})
 }
 

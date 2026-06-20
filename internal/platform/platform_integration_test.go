@@ -18,6 +18,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -62,6 +63,7 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 		postgres.WithDatabase("openrails"),
 		postgres.WithUsername("test"),
 		postgres.WithPassword("test"),
+		dbtest.WithPostgresLimits(),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(60*time.Second)),

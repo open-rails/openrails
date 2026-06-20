@@ -229,6 +229,17 @@ const DefaultSchema = "openrails"
 // for this value, so hosts must keep it in lockstep.
 const MigratekitApp = "openrails"
 
+// RiverSchema is the Postgres schema River job-queue tables (`river_*`) always
+// live in, in every mode (#545). It is deliberately NOT the OpenRails billing
+// schema: River is runtime/infra state, never portable billing data, so keeping
+// it in `public` (River's own documented default, alongside `public.migrations`
+// and `pgcrypto`) leaves the OpenRails billing schema 100% portable for the
+// embedded↔standalone data move (#544). In embedded mode a host that runs River
+// injects its own client (which owns its schema); OpenRails only uses this when
+// it constructs its own River client (standalone, or embedded with no injected
+// client).
+const RiverSchema = "public"
+
 // schemaIdentRe restricts the OpenRails schema to a safe SQL identifier: it must
 // start with a letter or underscore and contain only letters, digits, and
 // underscores. This forbids quotes, spaces, and dots, so the value can be used to
@@ -365,10 +376,10 @@ type ProcessorConfig struct {
 
 	// PrivateKey is the merchant/cranker Solana signing keypair (base58) for a
 	// SINGLE-TENANT install that configures Solana via global config rather than
-	// the per-tenant secret store. At boot it is seeded into the default merchant's
+	// the per-merchant secret store. At boot it is seeded into the default merchant's
 	// secret store as solana/private_key (idempotently, never overwriting an
 	// existing secret) so recurring Solana can sign (issue #253). Leave empty in
-	// multi-tenant / Vault deployments, where each tenant supplies its own key.
+	// multi-merchant / Vault deployments, where each merchant supplies its own key.
 	PrivateKey string `koanf:"private_key"`
 }
 
@@ -484,10 +495,10 @@ type RedisConfig struct {
 // permissions are seeded as AuthKit state rather than trusted from runtime
 // config.yaml/.env issuer allow-lists.
 type AuthConfig struct {
-	// HARDCUT (#312): there is no `auth.operator_tenant_slug` /
-	// `auth.operator_tenant_admin_roles`. Admin authority is the LIVE
-	// openrails:admin permission held in the caller's OWN tenant (or carried on a
-	// deployment-minted admin API key) — deployment authority, not
+	// HARDCUT (#312/#537): there is no `auth.operator_tenant_slug` /
+	// `auth.operator_tenant_admin_roles`. Admin authority is live merchant-local
+	// AuthKit org permission state (or a deployment-minted admin API key) -
+	// deployment authority, not
 	// membership in a separate "operator" AuthKit org. Load rejects the
 	// deprecated keys.
 
@@ -1314,7 +1325,6 @@ func Load(configPath string) (*Config, error) {
 		k.Exists("auth.control_plane.public_tenant_registration") ||
 		k.Exists("auth.control_plane.public_hosted") ||
 		k.Exists("auth.control_plane.token_prefix") ||
-		k.Exists("auth.control_plane.bootstrap_admin_service_token_name") ||
 		k.Exists("auth.control_plane.platform_org_slug") ||
 		k.Exists("auth.control_plane.platform_admin_user_id") ||
 		os.Getenv("AUTH_CONTROL_PLANE_ISSUER") != "" ||

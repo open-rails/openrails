@@ -64,12 +64,12 @@ Merchant control is not direct user ownership. The chain is:
 AuthKit credential -> AuthKit org permission -> OpenRails merchant owner_org_id
 ```
 
-Service tokens and remote applications are credentials controlled by the org.
+API keys and remote applications are credentials controlled by the org.
 They are not merchant owners.
 
 ## Migration Note
 
 Older documentation and historical issue text used `tenant` for the OpenRails
 merchant namespace. Current code, APIs, schema, and docs should use `merchant`
-unless referring to an intentional AuthKit `tenant` claim key, old
-`tenant_subject` history, or a documented storage-path remnant.
+unless referring to an intentional legacy JWT claim rejection, the persisted
+`tenant_subject`/`tenant_id` schema names, or a documented storage-path remnant.

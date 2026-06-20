@@ -66,6 +66,7 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 		postgres.WithDatabase("test_db"),
 		postgres.WithUsername("test_user"),
 		postgres.WithPassword("test_password"),
+		testcontainers.WithHostConfigModifier(postgresTestLimits),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(60*time.Second),

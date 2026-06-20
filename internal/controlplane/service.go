@@ -19,7 +19,7 @@ import (
 
 // ControlPlane is OpenRails' in-process AuthKit control plane (issue #224). It
 // wraps an AuthKit http.Service (which exposes selectable route groups) and its
-// underlying core.Service (used for in-process tenant/role/service-token bootstrap calls).
+// underlying core.Service (used for in-process org/role/API-key bootstrap calls).
 //
 // HARD CUT (#469): the control plane is mandatory in standalone mode — the
 // standalone binary always constructs it at boot and a construction failure is
@@ -36,7 +36,7 @@ type ControlPlane struct {
 	// delegatedVerifier validates browser-direct delegated access tokens for the
 	// self-service surface (issue #222 browser tier). It is built from the same
 	// issuer/audience/keys the control plane signs with, plus a self-service
-	// permission-catalog validator. See delegated.go.
+	// permissions validator. See delegated.go.
 	delegatedVerifier *authhttp.Verifier
 
 	// issuer is the control plane's token issuer (`iss`), stamped on minted tokens
@@ -74,7 +74,7 @@ func newOptions(opts []Option) options {
 	return out
 }
 
-// delegatedIssuerJWKSCacheTTL is how long the verifier treats a fetched tenant
+// delegatedIssuerJWKSCacheTTL is how long the verifier treats a fetched merchant
 // JWKS as fresh before a scheduled refresh (issue #259, ~hourly cadence). The
 // verifier also refetches on-demand when a presented `kid` is unknown.
 const delegatedIssuerJWKSCacheTTL = time.Hour
@@ -111,7 +111,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		return nil, errors.New("controlplane: auth.issuer is required")
 	}
 
-	// (authkit issue 60) Tenants are always a supported primitive — no tenant-mode
+	// (authkit issue 60) Orgs are always a supported primitive — no org-mode
 	// config or core flag.
 
 	// Build the signing KeySource ONCE and inject it into the core config, so the
@@ -148,16 +148,16 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		ExpectedAudiences: []string{"openrails"},
 		APIKeyPrefix:      APIKeyPrefix,
 		Environment:       strings.TrimSpace(cfg.Env),
-		PermissionCatalog: Catalog(),
+		Permissions:       Catalog(),
 		DefaultRoles: []authcore.DefaultRole{
-			// The operator role is also declared as a per-tenant DefaultRole so that
-			// AssignRole can materialize it lazily even on tenants created outside the
+			// The operator role is also declared as a per-org DefaultRole so that
+			// AssignRole can materialize it lazily even on orgs created outside the
 			// bootstrap path. Bootstrap still defines+sets it explicitly.
 			{Name: OperatorRole, Permissions: OperatorRolePermissions()},
 		},
 		// Private standalone posture: no public user self-registration, no public
 		// org onboarding/management. Embedded bootstrap/core calls
-		// (CreateOrg/AssignRole/MintServiceToken) are unaffected. Hosted products
+		// (CreateOrg/AssignRole/MintAPIKey) are unaffected. Hosted products
 		// opt in with WithHostedPosture; no config/env knob opens this in standalone.
 		NativeUserRegistrationMode: registrationMode(lockedRegistration),
 		OrgRegistrationMode:        registrationMode(lockedRegistration),
@@ -170,8 +170,9 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	authSvc = authSvc.WithPostgres(pool)
 
 	// Build the browser-direct delegated-access-token verifier (#222 browser
-	// tier). It accepts ONLY this control plane's own delegated tokens with the
-	// canonical `openrails` audience and `openrails:self:*` permissions.
+		// tier). It accepts registered delegated tokens with the canonical
+		// `openrails` audience. Customer self-service tokens may be permissionless;
+		// any supplied permissions must be browser-safe merchant-admin grants.
 	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), APIKeyPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
@@ -204,7 +205,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 }
 
 // Core returns the underlying AuthKit core service used for in-process
-// org/role/service token operations.
+// org/role/API key operations.
 func (c *ControlPlane) Core() *authcore.Service {
 	if c == nil {
 		return nil

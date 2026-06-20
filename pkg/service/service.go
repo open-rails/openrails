@@ -586,6 +586,16 @@ const EntitlementsBatchMaxSubjects = 500
 // ListActiveEntitlementRecordsByExternalSubjects (#354): active rows for many
 // external subjects of one (ambient-merchant, issuer) in one query, grouped by
 // subject; subjects with no rows are absent. Callers trim/dedupe/cap.
+// ListCustomersWithEntitlement is the reverse lookup (#535): customer ids holding
+// an active window of `entitlement` for the merchant, keyset-paginated (afterID
+// exclusive; uuid.Nil starts). A zero `at` means now.
+func (s *Service) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time, afterID uuid.UUID, limit int) ([]uuid.UUID, error) {
+	if at.IsZero() {
+		at = s.now().UTC()
+	}
+	return s.entitlementService().ListCustomersWithEntitlement(ctx, entitlement, at.UTC(), afterID, limit)
+}
+
 func (s *Service) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
 	issuer = strings.TrimSpace(issuer)
 	if issuer == "" {

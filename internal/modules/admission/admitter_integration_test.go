@@ -9,9 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
-	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -47,16 +45,7 @@ func admitEnv(t *testing.T, deposit int64) (*admission.Admitter, *admission.Invo
 		require.NoError(t, err)
 	}
 
-	rc, err := tcredis.Run(ctx, "redis:7-alpine")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = rc.Terminate(ctx) })
-	conn, err := rc.ConnectionString(ctx)
-	require.NoError(t, err)
-	opt, err := redis.ParseURL(conn)
-	require.NoError(t, err)
-	rdb := redis.NewClient(opt)
-	t.Cleanup(func() { _ = rdb.Close() })
-	require.NoError(t, rdb.Ping(ctx).Err())
+	rdb, _ := dbtest.SharedRedisClient(t)
 
 	bpStore := admission.NewInvokerSpendLimitStore(dbi)
 	loader := admission.NewSpendgatePolicyLoader(admission.NewPayerSpendLimitStore(dbi), bpStore, nil)

@@ -53,7 +53,7 @@ type RunRecord struct {
 }
 
 // Store is the engine-facing persistence surface. The pg implementation runs
-// tenant-scoped; the unit-test fake is in-memory.
+// merchant-scoped; the unit-test fake is in-memory.
 type Store interface {
 	CreateRun(ctx context.Context, mode Mode, providers []Provider, since, until *time.Time) (uuid.UUID, error)
 	FinishRun(ctx context.Context, runID uuid.UUID, status string, summary []byte, runErr string) error
@@ -68,7 +68,7 @@ type Store interface {
 	MarkFindingAutoFixed(ctx context.Context, id uuid.UUID, resolutionEvidence map[string]any) error
 }
 
-// PGStore persists runs + findings via the sqlc layer on a tenant-pinned
+// PGStore persists runs + findings via the sqlc layer on a merchant-pinned
 // connection.
 type PGStore struct {
 	DB *db.DB

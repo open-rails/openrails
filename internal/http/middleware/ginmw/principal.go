@@ -100,7 +100,8 @@ func UserSessionAdminPrincipalRequired(checker AdminPermissionChecker) gin.Handl
 			CredentialType: CredentialUserSession,
 			Subject:        strings.TrimSpace(uc.UserID),
 			can: func(ctx context.Context, perm string) bool {
-				if strings.TrimSpace(perm) != controlplane.PermAdmin {
+				perm = strings.TrimSpace(perm)
+				if !strings.HasPrefix(perm, "org:") {
 					return false
 				}
 				allowed, err := checker.HasAdminPermission(ctx, uc.Org, uc.UserID, perm)
@@ -132,7 +133,8 @@ func UserSessionPlatformPrincipalRequired(checker PlatformSuperadminChecker) gin
 			CredentialType: CredentialUserSession,
 			Subject:        strings.TrimSpace(uc.UserID),
 			can: func(ctx context.Context, perm string) bool {
-				if strings.TrimSpace(perm) != controlplane.PermPlatformSuperadmin {
+				perm = strings.TrimSpace(perm)
+				if !strings.HasPrefix(perm, "platform:") {
 					return false
 				}
 				allowed, err := checker.HasPlatformSuperadmin(ctx, uc.UserID)
@@ -167,7 +169,7 @@ func requirePermissionWithMessage(perm, message string) gin.HandlerFunc {
 	}
 }
 
-func principalFromServiceCredential(resolved *controlplane.ResolvedServiceToken, typ CredentialType) *Principal {
+func principalFromServiceCredential(resolved *controlplane.ResolvedServiceCredential, typ CredentialType) *Principal {
 	if resolved == nil {
 		return nil
 	}
@@ -177,9 +179,6 @@ func principalFromServiceCredential(resolved *controlplane.ResolvedServiceToken,
 		MerchantSource: "service_credential",
 		CredentialType: typ,
 		can: func(_ context.Context, perm string) bool {
-			if controlplane.IsDelegatedPermission(perm) {
-				return false
-			}
 			return resolved.HasPermission(perm)
 		},
 	}

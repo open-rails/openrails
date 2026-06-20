@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -24,7 +25,7 @@ import (
 // TestTierGroupDetection tests that the checkout service correctly detects tier groups
 func TestTierGroupDetection(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Seed tiered products (Premium, Premium+, Premium Ultimate)
 	tieredProducts := suite.SeedTieredProducts()
@@ -166,7 +167,7 @@ func TestTierProrationCalculation(t *testing.T) {
 // TestScheduledDowngrade tests that downgrades are scheduled and applied at renewal
 func TestScheduledDowngrade(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Seed tiered products
 	tieredProducts := suite.SeedTieredProducts()
@@ -270,7 +271,7 @@ func TestScheduledDowngrade(t *testing.T) {
 // TestEntitlementChangesOnTierChange tests that entitlements are correctly updated
 func TestEntitlementChangesOnTierChange(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Seed tiered products
 	tieredProducts := suite.SeedTieredProducts()

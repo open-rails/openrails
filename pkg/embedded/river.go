@@ -1,26 +1,31 @@
 // Package embedded exposes OpenRails billing as an in-process library.
 //
-// # Schema contract (issue #165)
+// # Schema contract (issues #165, #545)
 //
 // OpenRails owns a single configurable Postgres schema, set via config `db.schema`
-// / env `DB_SCHEMA`, defaulting to `billing`. It is used for OpenRails' own DDL/DML.
+// / env `DB_SCHEMA`, defaulting to `openrails`. It holds OpenRails' own DDL/DML —
+// the portable billing data, and ONLY that.
 //
-// River job-queue tables (river_*) follow these rules:
+// River job-queue tables (river_*) are runtime/infra state, NEVER portable billing
+// data, so they NEVER live in the OpenRails billing schema. They follow these
+// rules (#545):
 //
-//   - Standalone: OpenRails constructs its own River client, and the River schema
-//     equals the OpenRails schema (db.schema). It is NOT separately configurable.
+//   - River tables ALWAYS live in `public` (config.RiverSchema) — River's own
+//     documented default, alongside `public.migrations` and `pgcrypto`. This keeps
+//     the OpenRails billing schema 100% portable for the embedded↔standalone data
+//     move (#544).
 //
-//   - Embedded/library (this package): the HOST owns River. Inject your unified
-//     River client via SetRiverClient — OpenRails then enqueues through it and
-//     NEVER constructs a River client or assumes/overrides a River schema. Your
-//     injected client owns its schema entirely, so OpenRails' River jobs land
-//     wherever your client is configured (e.g. the host's primary schema), which
-//     may differ from OpenRails' db.schema. This lets a host keep billing tables
-//     under a billing schema while sharing River tables in its own schema.
+//   - Standalone: OpenRails constructs its own River client in `public`.
 //
-// Migration safety: switching db.schema does not move existing tables — it creates
-// a second set under the new schema. OpenRails does not auto-migrate River tables
-// across schemas. If you change schemas, decommission the old objects yourself.
+//   - Embedded/library (this package): the HOST owns River. If the host runs River,
+//     inject your unified client via SetRiverClient — OpenRails then enqueues
+//     through it and NEVER constructs a River client (host + OpenRails share one
+//     `public.river_*` set). If no client is injected, OpenRails constructs its own
+//     River client in `public`.
+//
+// Migration safety: River does not auto-migrate its tables across schemas. Hosts
+// or deployments still on an alternate River schema must drain and decommission
+// the old `<schema>.river_*` objects when cutting over to `public`.
 package embedded
 
 import (

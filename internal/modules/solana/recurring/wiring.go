@@ -15,31 +15,31 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// SeedConfiguredTenantSolanaSecret bridges a SINGLE-TENANT install that
+// SeedConfiguredMerchantSolanaSecret bridges a single-merchant install that
 // configures its Solana signing key via global config into the per-merchant
 // secret store the recurring Solana services read (issue #253). The
 // Submitter/signer always reads solana/private_key from the merchant secret store;
 // a global-config-only install would otherwise have an EMPTY store for its
 // merchant and could not sign without a manual secret write.
 //
-// tenantID is the engine's configured merchant (#336 — there is no default
+// merchantID is the engine's configured merchant (#336 — there is no default
 // merchant). It is idempotent and safe to call on every boot:
 //
-//   - tenantID zero          -> no-op (no configured merchant to seed for).
+//   - merchantID zero        -> no-op (no configured merchant to seed for).
 //   - configKey empty        -> no-op (Solana not configured via global config).
 //   - secret already present -> no-op (NEVER overwrites a manual/rotated key).
 //   - secret absent          -> seed it from configKey and log once.
 //
 // A backend error (store unavailable) is returned so the caller can fail boot
 // loudly rather than start a signer that will never resolve a key.
-func SeedConfiguredTenantSolanaSecret(ctx context.Context, store merchants.MerchantSecretStore, tenantID merchant.ID, configKey string) error {
-	if tenantID.IsZero() {
+func SeedConfiguredMerchantSolanaSecret(ctx context.Context, store merchants.MerchantSecretStore, merchantID merchant.ID, configKey string) error {
+	if merchantID.IsZero() {
 		return nil
 	}
-	return SeedTenantSolanaSecret(ctx, store, tenantID, configKey)
+	return SeedMerchantSolanaSecret(ctx, store, merchantID, configKey)
 }
 
-func SeedTenantSolanaSecret(ctx context.Context, store merchants.MerchantSecretStore, tenantID merchant.ID, configKey string) error {
+func SeedMerchantSolanaSecret(ctx context.Context, store merchants.MerchantSecretStore, merchantID merchant.ID, configKey string) error {
 	key := strings.TrimSpace(configKey)
 	if key == "" {
 		return nil // nothing configured via global config
@@ -47,7 +47,7 @@ func SeedTenantSolanaSecret(ctx context.Context, store merchants.MerchantSecretS
 	if store == nil {
 		return fmt.Errorf("recurring: seed merchant solana secret: nil secret store")
 	}
-	_, err := store.Get(ctx, tenantID, solanaint.SecretSolanaPrivateKey)
+	_, err := store.Get(ctx, merchantID, solanaint.SecretSolanaPrivateKey)
 	switch {
 	case err == nil:
 		return nil // already present — never overwrite an existing secret
@@ -56,10 +56,10 @@ func SeedTenantSolanaSecret(ctx context.Context, store merchants.MerchantSecretS
 	default:
 		return fmt.Errorf("recurring: check merchant solana secret: %w", err)
 	}
-	if _, err := store.Put(ctx, tenantID, solanaint.SecretSolanaPrivateKey, key); err != nil {
+	if _, err := store.Put(ctx, merchantID, solanaint.SecretSolanaPrivateKey, key); err != nil {
 		return fmt.Errorf("recurring: seed merchant solana secret: %w", err)
 	}
-	log.WithField("merchant", tenantID.String()).
+	log.WithField("merchant", merchantID.String()).
 		Info("seeded merchant Solana signing key from global config (solana/private_key)")
 	return nil
 }
@@ -72,8 +72,8 @@ type secretStoreGetter struct {
 	store merchants.MerchantSecretStore
 }
 
-func (g secretStoreGetter) GetSecret(ctx context.Context, tenantID merchant.ID, name string) (string, error) {
-	sec, err := g.store.Get(ctx, tenantID, name)
+func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID, name string) (string, error) {
+	sec, err := g.store.Get(ctx, merchantID, name)
 	if err != nil {
 		return "", err
 	}

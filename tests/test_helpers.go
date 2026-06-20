@@ -5,19 +5,27 @@ package tests
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	authtesting "github.com/open-rails/authkit/testing"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
+	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 var (
@@ -30,8 +38,8 @@ var (
 	sharedSuite     *TestContainerSuite
 )
 
-// personalOwnerID returns the tenant-subject id for the self-hosted /
-// single-tenant personal case. HARDCUT (#221): this matches the caller-provided
+// personalOwnerID returns the merchant-subject id for the self-hosted /
+// single-merchant personal case. HARDCUT (#221): this matches the caller-provided
 // payable subject id, never a synthesized stand-in. Test user ids are UUIDs, so
 // the subject is simply the parsed value.
 func personalOwnerID(userID string) uuid.UUID {
@@ -57,6 +65,74 @@ func GetTestIssuerURL() string {
 	return getTestIssuer().URL()
 }
 
+type testTokenClaims struct {
+	Subject  string `json:"sub"`
+	Email    string `json:"email"`
+	Username string `json:"username"`
+	Expires  int64  `json:"exp"`
+}
+
+func parseTestBearer(r *http.Request) (testTokenClaims, error) {
+	if r == nil {
+		return testTokenClaims{}, billingauth.ErrUnauthenticated
+	}
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	const prefix = "Bearer "
+	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return testTokenClaims{}, billingauth.ErrUnauthenticated
+	}
+	parts := strings.Split(strings.TrimSpace(header[len(prefix):]), ".")
+	if len(parts) != 3 {
+		return testTokenClaims{}, errors.New("invalid_token")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return testTokenClaims{}, errors.New("invalid_token")
+	}
+	var claims testTokenClaims
+	if err := json.Unmarshal(raw, &claims); err != nil {
+		return testTokenClaims{}, errors.New("invalid_token")
+	}
+	if claims.Subject == "" {
+		return testTokenClaims{}, errors.New("invalid_token")
+	}
+	if claims.Expires > 0 && time.Now().Unix() >= claims.Expires {
+		return testTokenClaims{}, errors.New("invalid_token")
+	}
+	return claims, nil
+}
+
+type suiteTestAuthenticator struct{}
+
+func (suiteTestAuthenticator) Authenticate(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
+	claims, err := parseTestBearer(r)
+	if err != nil {
+		return billingauth.UserContext{}, err
+	}
+	return billingauth.UserContext{
+		UserID:   claims.Subject,
+		Email:    claims.Email,
+		Username: claims.Username,
+	}, nil
+}
+
+type suiteTestDelegatedAuthenticator struct{}
+
+func (suiteTestDelegatedAuthenticator) AuthenticateDelegated(_ context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
+	claims, err := parseTestBearer(r)
+	if err != nil {
+		return nil, err
+	}
+	return &billingauth.DelegatedPrincipal{
+		MerchantID:   dbtest.TestMerchantID.String(),
+		MerchantSlug: dbtest.TestMerchantSlug,
+		SubjectID:    claims.Subject,
+		Issuer:       getTestIssuer().URL(),
+		Email:        claims.Email,
+		Username:     claims.Username,
+	}, nil
+}
+
 // getSharedTestSuite returns a shared TestContainerSuite for integration tests.
 // The suite is initialized once and reused across tests for performance.
 func getSharedTestSuite(t *testing.T) *TestContainerSuite {
@@ -69,6 +145,7 @@ func getSharedTestSuite(t *testing.T) *TestContainerSuite {
 	// The suite is shared across tests; keep its t handle fresh to avoid panics
 	// when helpers call require/assert via suite.t.
 	sharedSuite.t = t
+	sharedSuite.ResetMutableRuntimeState()
 	return sharedSuite
 }
 

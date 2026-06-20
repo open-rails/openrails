@@ -10,25 +10,25 @@ import (
 )
 
 // ErrMerchantRouteUnresolved indicates an inbound webhook could not be mapped to an
-// active tenant. The webhook handler MUST reject the request rather than fall
-// back to a default merchant: routing the wrong tenant's signing secret would break
+// active merchant. The webhook handler MUST reject the request rather than fall
+// back to a default merchant: routing the wrong merchant's signing secret would break
 // the trust boundary.
-var ErrMerchantRouteUnresolved = errors.New("tenancy: webhook host/slug maps to no active tenant")
+var ErrMerchantRouteUnresolved = errors.New("merchants: webhook host/slug maps to no active merchant")
 
-// WebhookRoute is the resolved tenant for an inbound webhook, plus its routing
+// WebhookRoute is the resolved merchant for an inbound webhook, plus its routing
 // metadata.
 type WebhookRoute struct {
 	MerchantID   merchant.ID
 	MerchantSlug string
 }
 
-// WebhookResolver maps an explicit webhook path slug to a tenant. It is the
+// WebhookResolver maps an explicit webhook path slug to a merchant. It is the
 // FIRST step of webhook handling; the resolver is NOT the trust boundary — after
 // resolution OpenRails loads that merchant's signing secret and verifies the
 // signature.
 type WebhookResolver interface {
 	// ResolveBySlug maps an explicit merchant slug
-	// to its tenant. Returns ErrMerchantRouteUnresolved for unknown/inactive tenants.
+	// to its merchant. Returns ErrMerchantRouteUnresolved for unknown/inactive merchants.
 	ResolveBySlug(ctx context.Context, slug string) (WebhookRoute, error)
 }
 
@@ -53,8 +53,8 @@ func (s *Service) routeFromScan(idStr, slug, status string, err error) (WebhookR
 		}
 		return WebhookRoute{}, err
 	}
-	// A suspended tenant still RESOLVES (webhooks must keep being verified +
-	// processed so historical billing state stays correct); only deleted tenants
+	// A suspended merchant still RESOLVES (webhooks must keep being verified +
+	// processed so historical billing state stays correct); only deleted merchants
 	// (filtered above) are unroutable. The suspension write-gate applies to
 	// merchant-admin mutations and service writes, not to processor webhooks.
 	if MerchantStatus(status) == StatusDeleted {

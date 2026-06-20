@@ -21,7 +21,7 @@ import (
 // #511: a manual admin entitlement grant is now an `admin`-sourced entry in the
 // grant ledger (the entitlement is the projected effect) — there is no separate
 // entitlement_grants provenance row anymore. #528 hard cut: the grant is
-// authorized by the delegated openrails:merchant:entitlements:write capability.
+// authorized by the delegated org:entitlements:update capability.
 func TestAdminEntitlementGrantCreatesEntitlement(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "b8888888-8888-4888-8888-888888888888",

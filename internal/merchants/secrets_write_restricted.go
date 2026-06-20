@@ -35,24 +35,24 @@ func NewWriteRestrictedSecretStore(inner MerchantSecretStore, reasons map[string
 	return &writeRestrictedSecretStore{inner: inner, reasons: clean}
 }
 
-func (s *writeRestrictedSecretStore) Get(ctx context.Context, tenantID merchant.ID, name string) (Secret, error) {
-	return s.inner.Get(ctx, tenantID, name)
+func (s *writeRestrictedSecretStore) Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error) {
+	return s.inner.Get(ctx, merchantID, name)
 }
 
-func (s *writeRestrictedSecretStore) Put(ctx context.Context, tenantID merchant.ID, name, value string) (Secret, error) {
+func (s *writeRestrictedSecretStore) Put(ctx context.Context, merchantID merchant.ID, name, value string) (Secret, error) {
 	if reason, ok := s.reasons[strings.TrimSpace(name)]; ok {
 		if reason == "" {
 			reason = "write is restricted"
 		}
-		return Secret{}, fmt.Errorf("tenancy: refusing to store secret %q: %s", name, reason)
+		return Secret{}, fmt.Errorf("merchants: refusing to store secret %q: %s", name, reason)
 	}
-	return s.inner.Put(ctx, tenantID, name, value)
+	return s.inner.Put(ctx, merchantID, name, value)
 }
 
-func (s *writeRestrictedSecretStore) Delete(ctx context.Context, tenantID merchant.ID, name string) error {
-	return s.inner.Delete(ctx, tenantID, name)
+func (s *writeRestrictedSecretStore) Delete(ctx context.Context, merchantID merchant.ID, name string) error {
+	return s.inner.Delete(ctx, merchantID, name)
 }
 
-func (s *writeRestrictedSecretStore) List(ctx context.Context, tenantID merchant.ID) ([]string, error) {
-	return s.inner.List(ctx, tenantID)
+func (s *writeRestrictedSecretStore) List(ctx context.Context, merchantID merchant.ID) ([]string, error) {
+	return s.inner.List(ctx, merchantID)
 }

@@ -9,7 +9,7 @@ import (
 )
 
 // Catalog drift handlers (issue #209/#510). Mounted under /merchant/catalog/*
-// with the live openrails:catalog:write permission gate. These surface the alert-only catalog
+// with the live org:catalog:update permission gate. These surface the alert-only catalog
 // reconciliation loop's findings; they never mutate Stripe or the catalog rows.
 // Operators resolve drift through the existing per-price reconcile action.
 

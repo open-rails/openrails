@@ -93,7 +93,7 @@ func TestEncryptedSecretStore_IdempotentRotation(t *testing.T) {
 	}
 }
 
-func TestEncryptedSecretStore_CrossTenantIsolation(t *testing.T) {
+func TestEncryptedSecretStore_CrossMerchantIsolation(t *testing.T) {
 	ctx := context.Background()
 	inner := NewMemorySecretStore()
 	enc := newEnc(t)
@@ -104,10 +104,10 @@ func TestEncryptedSecretStore_CrossTenantIsolation(t *testing.T) {
 	if _, err := store.Put(ctx, tA, SecretStripeSecretKey, "A-secret"); err != nil {
 		t.Fatalf("Put A: %v", err)
 	}
-	// Merchant B has its own DEK; tenant A's ciphertext is unreadable as B.
+	// Merchant B has its own DEK; merchant A's ciphertext is unreadable as B.
 	rawA, _ := inner.Get(ctx, tA, SecretStripeSecretKey)
 	if _, err := enc.Decrypt(ctx, tB, rawA.Value); err == nil {
-		t.Fatal("tenant B must not decrypt tenant A's stored secret")
+		t.Fatal("merchant B must not decrypt merchant A's stored secret")
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/platform"
@@ -58,6 +59,7 @@ func newPlatformTestPool(t *testing.T) *pgxpool.Pool {
 
 	c, err := postgres.Run(ctx, "postgres:18-alpine",
 		postgres.WithDatabase("openrails"), postgres.WithUsername("test"), postgres.WithPassword("test"),
+		dbtest.WithPostgresLimits(),
 		testcontainers.WithWaitStrategy(wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(60*time.Second)))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Terminate(context.Background()) })

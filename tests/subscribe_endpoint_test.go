@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
 )
 
 // MockNMIServer simulates the NMI Direct Post API for testing
@@ -60,6 +61,11 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 			failReason = "DECLINE"
 		}
 		response = fmt.Sprintf("response=2&responsetext=%s&response_code=300", failReason)
+	} else if r.Form.Get("report_type") == "profile" {
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `<response><merchant><company>OpenRails Test Merchant</company><email>billing@test.example</email></merchant></response>`)
+		return
 	} else if customerVault == "add_customer" {
 		// Create customer vault response
 		vaultID := fmt.Sprintf("vault_%s_%d", m.IDPrefix, atomic.AddInt32(&m.VaultIDCounter, 1))
@@ -125,20 +131,26 @@ func SetupSuiteWithMockNMI(t *testing.T) (*TestContainerSuite, *MockNMIServer) {
 
 	// Override the DirectPostURL to point to mock server
 	client.DirectPostURL = mock.URL()
+	client.QueryURL = mock.URL()
 
 	// Inject the mock client into the runtime
 	suite.App.Runtime.NMIClients = map[string]*nmi.NMIClient{
 		"mobius": client,
 	}
+	suite.App.Runtime.CheckoutSessionService.SetProviderAccounts(intents.NewRuntimeProviderAccounts(suite.Config, suite.Processors, suite.App.Runtime.NMIClients))
 
 	// Also update the subscription service's NMI clients
 	if suite.App.Runtime.SubscriptionService != nil {
 		suite.App.Runtime.SubscriptionService.NMIClients = suite.App.Runtime.NMIClients
 	}
 	if suite.App.Runtime.VaultService != nil {
+		suite.App.Runtime.VaultService.SetMerchantSecretStore(nil)
+		suite.App.Runtime.VaultService.SetProviderAccountSecretResolver(nil)
 		suite.App.Runtime.VaultService.NMIClients = suite.App.Runtime.NMIClients
 	}
 	if suite.App.Runtime.CheckoutService != nil {
+		suite.App.Runtime.CheckoutService.SetMerchantSecretStore(nil)
+		suite.App.Runtime.CheckoutService.SetProviderAccountSecretResolver(nil)
 		suite.App.Runtime.CheckoutService.NMIClients = suite.App.Runtime.NMIClients
 		if suite.App.Runtime.CheckoutService.NMISaleService != nil {
 			suite.App.Runtime.CheckoutService.NMISaleService.NMIClients = suite.App.Runtime.NMIClients

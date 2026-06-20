@@ -69,7 +69,7 @@ func userContextFromClaims(cl authhttp.Claims) authprovider.UserContext {
 		SessionID:       cl.SessionID,
 		Roles:           cl.Roles,
 		Entitlements:    cl.Entitlements,
-		// Operator-tenant admin authority (#224, hardcut): the tenant slug +
+		// Operator-org admin authority (#224, hardcut): the org slug +
 		// org-scoped roles carried in the AuthKit claims are the ONLY admin
 		// authority path now that the legacy global-admin DB fallback is removed.
 		Org:      cl.Org,

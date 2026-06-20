@@ -41,8 +41,8 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 	}
 
 	if _, berr := embcp.RunBootstrap(ctx, application, controlplane.BootstrapOptions{
-		BootstrapOrgSlug:        authorityOrgSlug,
-		MintInitialServiceToken: false,
+		BootstrapOrgSlug:  authorityOrgSlug,
+		MintInitialAPIKey: false,
 	}); berr != nil {
 		return fmt.Errorf("bootstrap authority/role: %w", berr)
 	}
@@ -77,7 +77,7 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 	}
 
 	resources := []authcore.APIKeyResource{merchantResource}
-	serviceToken, token, err := cp.Core().MintAPIKeyWithOptions(ctx, authorityOrgSlug, authcore.APIKeyMintOptions{
+	apiKey, token, err := cp.Core().MintAPIKeyWithOptions(ctx, authorityOrgSlug, authcore.APIKeyMintOptions{
 		Name:        name,
 		Permissions: permissions,
 		Resources:   resources,
@@ -91,9 +91,9 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 		"name":        name,
 		"merchant":    merchantSlug,
 		"merchant_id": merchantID.String(),
-		"api_key_id":  serviceToken.KeyID,
+		"api_key_id":  apiKey.KeyID,
 		"api_key":     token,
-		"permissions": serviceToken.Permissions,
-		"resources":   serviceToken.Resources,
+		"permissions": apiKey.Permissions,
+		"resources":   apiKey.Resources,
 	})
 }

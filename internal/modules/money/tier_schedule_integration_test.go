@@ -73,20 +73,21 @@ func TestTierSchedule_AutoGraduationByCumulativeSpend(t *testing.T) {
 	require.Equal(t, "vip", tier(), "admin override wins over the schedule")
 }
 
-// TestTierSchedule_MultiTenantIsolation confirms a merchant-wide default schedule
+// TestTierSchedule_MultiMerchantIsolation confirms a merchant-wide default schedule
 // in one merchant does not affect a payer in another merchant.
-func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
+func TestTierSchedule_MultiMerchantIsolation(t *testing.T) {
 	svc, pool, _, _, _ := moneyInEnv(t)
 	ctx := context.Background()
 
-	// Two distinct tenants, each with its own payer.
+	// Two distinct merchants, each with its own payer.
 	tA := dbtest.TestMerchantID
 	ctxA := dbtest.WithTestMerchant(ctx)
 	payerA := identity.CustomerIDFromString(uuid.NewString())
 
 	// Merchant B (a second, isolated merchant row).
 	tenantB := uuid.New()
-	slugB := "tier-iso-" + tenantB.String()[:8]
+	merchantB := merchant.ID(tenantB)
+	slugB := "tier-iso-" + merchantB.String()[:8]
 	_, err := pool.Exec(ctx,
 		"INSERT INTO openrails.merchants (id, slug, status) VALUES ($1,$2,'active')",
 		tenantB, slugB)
@@ -100,8 +101,8 @@ func TestTierSchedule_MultiTenantIsolation(t *testing.T) {
 			_, _ = pool.Exec(bg, "DELETE FROM openrails.tier_schedules WHERE customer_id = $1", p)
 			_, _ = pool.Exec(bg, "DELETE FROM openrails.money_settings WHERE customer_id = $1", p)
 		}
-		_, _ = pool.Exec(bg, "DELETE FROM openrails.tier_schedules WHERE merchant_id = $1", tenantB)
-		_, _ = pool.Exec(bg, "DELETE FROM openrails.merchants WHERE id = $1", tenantB)
+		_, _ = pool.Exec(bg, "DELETE FROM openrails.tier_schedules WHERE merchant_id = $1", merchantB)
+		_, _ = pool.Exec(bg, "DELETE FROM openrails.merchants WHERE id = $1", merchantB)
 	})
 	_ = tA
 

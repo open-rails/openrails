@@ -3,7 +3,7 @@
 // expose NewHTTPHandler without importing gin: route groups are registered via
 // the neutral router.NewMux (request.NewHTTP backend) and the captcha discovery
 // routes are plain net/http handlers, all wrapped with the net/http base
-// middleware stack (security headers, CORS, body limit, tenant resolution).
+// middleware stack (security headers, CORS, body limit, merchant resolution).
 //
 // The gin Server (internal/http) and standalone cmd/ keep gin; this package is
 // the gin-free analogue of the embedded assembly that used to live there.
@@ -113,7 +113,7 @@ func FromApp(a *app.App) *Assembler {
 // *http.ServeMux (issue #282). Route groups are registered via router.NewMux
 // (request.NewHTTP backend), and the captcha routes are plain net/http handlers.
 // The mux is wrapped with the net/http base middleware stack (security headers,
-// CORS, body limit, tenant resolution) — the gin-free analogue of the global
+// CORS, body limit, merchant resolution) — the gin-free analogue of the global
 // engine middleware. The returned handler imports zero gin on the request path.
 //
 // Rate-limiting + the captcha challenge flow ARE enforced here: the embedded
@@ -155,10 +155,10 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		httproutes.RegisterMerchantWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime)
 	}
 
-	// Resolve the configured tenant SLUG → internal merchant.ID once at
+	// Resolve the configured merchant SLUG → internal merchant.ID once at
 	// bootstrap (#336): the resolver pins it per request. A non-empty-but-
 	// unknown slug is a configuration error. EMBEDDED boot (embed.New) ensures
-	// the bound tenant row before this runs, so it never trips here; a
+	// the bound merchant row before this runs, so it never trips here; a
 	var rateLimits *config.RateLimitsConfig
 	var captchaCfg *config.CaptchaConfig
 	if s.Cfg != nil {

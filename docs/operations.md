@@ -220,6 +220,10 @@ Manual-only — **never scheduled**. It never writes to a provider:
 - `openrails pull-provider --prune`: delete eligible local subscriptions or
   payments attributed to the pulled provider account that are absent from the
   provider source.
+- `openrails intents log`: render append-only external provider mutation
+  attempts/results created by the provider-intent executor. This is the
+  opposite direction from `pull-provider`: it records remote provider writes,
+  not local mirror corrections.
 - `openrails reconcile report [--run=ID]`: render the latest (or given) run's
   summary, dunning forensics, and standing open findings.
 

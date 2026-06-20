@@ -26,8 +26,8 @@ import (
 )
 
 // #528 hard cut: the admin payments surface is the delegated /v1/admin model.
-// Reads require openrails:merchant:billing:read; refunds require
-// openrails:merchant:payments:write. Tests authenticate as a delegated merchant
+// Reads require org:billing:read; refunds require org:payments:update. Tests
+// authenticate as a delegated merchant
 // principal via newHostSeamAdminRouter (the retired per-user admin JWT is gone).
 
 // adminPaymentsReader mounts the delegated admin surface with billing:read.
@@ -602,11 +602,11 @@ func TestAdminRefundPayment(t *testing.T) {
 	})
 }
 
-// TestAdminRefundReachesAnyUserInTenant confirms a merchant admin holding
+// TestAdminRefundReachesAnyUserInMerchant confirms a merchant admin holding
 // payments:write can drive a refund against ANY user's payment within its
-// tenant — the operator is merchant-scoped, not user-scoped. (CCBill returns a
+// merchant — the operator is merchant-scoped, not user-scoped. (CCBill returns a
 // processor error, which proves the request reached the handler, not an auth gate.)
-func TestAdminRefundReachesAnyUserInTenant(t *testing.T) {
+func TestAdminRefundReachesAnyUserInMerchant(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := adminPaymentsWriter(t, suite)
 

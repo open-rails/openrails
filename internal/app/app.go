@@ -32,7 +32,7 @@ type App struct {
 	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
 	// the browser-direct self-service surface (issue #339): the host verifies
 	// the incoming credential itself and supplies the explicitly mapped
-	// {tenant, subject, permissions} principal. When set, the standalone/gin
+	// {merchant, subject, permissions} principal. When set, the standalone/gin
 	// server mounts /v1/me/* + /v1/admin/* authenticated by this seam
 	// even without a control plane.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator

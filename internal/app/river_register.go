@@ -170,8 +170,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add credit reconcile worker: %w", err)
 	}
-	// Solana recurring cranker (#256). The Cranker (per-tenant signer + RPC) is
-	// wired once tenant Solana signing lands; until then it log-and-skips like the
+	// Solana recurring cranker (#256). The Cranker (per-merchant signer + RPC) is
+	// wired once merchant Solana signing lands; until then it log-and-skips like the
 	// money-in workers above. Lifecycle is wired so renewals + dunning route
 	// correctly the moment the Cranker is connected.
 	solanaCrankWorker := &riverjobs.SolanaCrankWorker{
@@ -186,7 +186,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, solanaCrankWorker); err != nil {
 		return fmt.Errorf("add solana cranker worker: %w", err)
 	}
-	// Solana cranker-wallet gas-float alert (#258): warns when a tenant's cranker
+	// Solana cranker-wallet gas-float alert (#258): warns when a merchant's cranker
 	// wallet is low on SOL. Alert-only, no auto-top-up.
 	if err := river.AddWorkerSafely(workers, &riverjobs.SolanaGasAlertWorker{
 		DB:  r.DB,

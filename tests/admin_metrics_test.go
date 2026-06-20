@@ -97,7 +97,7 @@ func seedClickHouseDailyMetrics(t *testing.T, suite *TestContainerSuite, amount 
 // TestAdminMetricsFolded exercises the #528 folded GET /v1/admin/metrics endpoint
 // (was /metrics/{summary,revenue,subscriptions,processors,churn}). With a single
 // currency present each section is a bare object; the response carries all five
-// sections in one document. Authorized by openrails:merchant:metrics:read.
+// sections in one document. Authorized by org:metrics:read.
 func TestAdminMetricsFolded(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "bd000000-0000-4000-8000-000000000003",

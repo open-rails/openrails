@@ -18,6 +18,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -30,14 +31,12 @@ import (
 func TestAdminMetricsCrossMerchantIsolation(t *testing.T) {
 	ctx := context.Background()
 
-	const (
-		dbName = "test_analytics"
-		dbUser = "test_user"
-		dbPass = "test_password"
-	)
+	dbName := envOr("OPENRAILS_TEST_CH_DATABASE", "test_analytics")
+	dbUser := envOr("OPENRAILS_TEST_CH_USERNAME", "test_user")
+	dbPass := envOr("OPENRAILS_TEST_CH_PASSWORD", "test_password")
 
 	var clientAddr string
-	if env := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_ADDR")); env != "" {
+	if env := firstEnv("OPENRAILS_TEST_CH_ADDR", "OPENRAILS_TEST_CH_NATIVE_ADDR"); env != "" {
 		// Escape hatch for flaky-testcontainers hosts: point at a ClickHouse on a
 		// stable address (e.g. a --network host container at 127.0.0.1:9000) with
 		// the same user/db/pass below.
@@ -48,6 +47,7 @@ func TestAdminMetricsCrossMerchantIsolation(t *testing.T) {
 			chmod.WithUsername(dbUser),
 			chmod.WithPassword(dbPass),
 			chmod.WithDatabase(dbName),
+			dbtest.WithClickHouseLimits(),
 			testcontainers.WithWaitStrategy(
 				wait.ForListeningPort("9000/tcp").
 					WithStartupTimeout(180*time.Second).
@@ -201,6 +201,22 @@ func TestAdminMetricsCrossMerchantIsolation(t *testing.T) {
 	if crossSummary[0].SubscriptionRevenue != 1000+9999 {
 		t.Fatalf("GetSummaryCrossMerchant subscription_revenue = %d, want %d (both merchants summed)", crossSummary[0].SubscriptionRevenue, 1000+9999)
 	}
+}
+
+func envOr(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // createMinimalDailyMetrics creates a single-node (non-replicated) daily_metrics

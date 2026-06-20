@@ -32,7 +32,7 @@ type Options struct {
 	// the browser-direct self-service surface (/v1/me/* + /v1/admin/*,
 	// issue #339). A host that verifies platform credentials itself implements
 	// billingauth.DelegatedAuthenticator and returns the EXPLICITLY mapped
-	// {tenant, subject, permissions} principal; the standalone/gin handler then
+	// {merchant, subject, permissions} principal; the standalone/gin handler then
 	// mounts the self surface authenticated by it, even without a control
 	// plane. When nil, the surface authenticates via the control plane's
 	// delegated-token verifier (the default). See

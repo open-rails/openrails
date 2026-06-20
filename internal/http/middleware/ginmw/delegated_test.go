@@ -30,7 +30,11 @@ func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string, string)
 func newDelegatedTestRouter(resolver DelegatedResolver, perm string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/self", DelegatedSelfRequired(resolver), RequirePermission(perm), func(c *gin.Context) {
+	handlers := []gin.HandlerFunc{DelegatedSelfRequired(resolver)}
+	if perm != "" {
+		handlers = append(handlers, RequirePermission(perm))
+	}
+	handlers = append(handlers, func(c *gin.Context) {
 		resolved, _ := DelegatedFromGin(c)
 		tid, _ := merchant.FromContext(c.Request.Context())
 		uc, _ := ginauth.UserContextFromGin(c)
@@ -43,6 +47,7 @@ func newDelegatedTestRouter(resolver DelegatedResolver, perm string) *gin.Engine
 			"username":       uc.Username,
 		})
 	})
+	r.GET("/self", handlers...)
 	return r
 }
 
@@ -70,13 +75,12 @@ func TestDelegatedSelfRequired_SucceedsAndBindsActingUser(t *testing.T) {
 			MerchantID:       dbtest.TestMerchantID,
 			MerchantSlug:     dbtest.TestMerchantSlug,
 			DelegatedSubject: "user-123",
-			Permissions:      []string{controlplane.PermSelfBillingRead},
 			Email:            "user@example.test",
 			EmailVerified:    true,
 			Username:         "user123",
 		},
 	}
-	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
+	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusOK, w.Code)
 	// Merchant pinned + acting user bound to delegated_sub so reused `me` handlers
@@ -93,20 +97,19 @@ func TestDelegatedSelfRequired_DeniesMissingPermission(t *testing.T) {
 			Merchant:         "operator",
 			MerchantID:       dbtest.TestMerchantID,
 			DelegatedSubject: "user-123",
-			Permissions:      []string{controlplane.PermSelfBillingRead}, // read only
 		},
 	}
-	// Require the cancel scope, which the token does not carry.
-	r := newDelegatedTestRouter(resolver, controlplane.PermSelfSubscriptionCancel)
+	// Require a merchant-admin scope, which the customer token does not carry.
+	r := newDelegatedTestRouter(resolver, controlplane.PermMerchantBillingRead)
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.Contains(t, w.Body.String(), "permission_required")
 }
 
 func TestDelegatedSelfRequired_NoAdminOverride(t *testing.T) {
-	// Self tokens must NOT honor a broad operator/admin grant. A token carrying
-	// openrails:admin (which should never happen — verify rejects it — but is
-	// asserted here for the gate itself) does not satisfy a self permission gate.
+	// Delegated browser tokens must NOT honor a broad merchant-owner grant. A token carrying
+	// `org:*` (which should never happen - verify rejects it - but is asserted
+	// here for the gate itself) does not satisfy a concrete admin permission gate.
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{
 			Merchant:         "operator",
@@ -115,14 +118,14 @@ func TestDelegatedSelfRequired_NoAdminOverride(t *testing.T) {
 			Permissions:      []string{controlplane.PermAdmin},
 		},
 	}
-	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
+	r := newDelegatedTestRouter(resolver, controlplane.PermMerchantBillingRead)
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
 }
 
 func TestDelegatedSelfRequired_DeniesExpired(t *testing.T) {
 	resolver := fakeDelegatedResolver{err: authcore.ErrAccessTokenExpired}
-	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
+	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Contains(t, w.Body.String(), "delegated_token_expired")
@@ -130,7 +133,7 @@ func TestDelegatedSelfRequired_DeniesExpired(t *testing.T) {
 
 func TestDelegatedSelfRequired_DeniesRevoked(t *testing.T) {
 	resolver := fakeDelegatedResolver{err: authcore.ErrAccessTokenRevoked}
-	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
+	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Contains(t, w.Body.String(), "delegated_token_revoked")
@@ -140,32 +143,32 @@ func TestDelegatedSelfRequired_DeniesNormalSubOrInvalid(t *testing.T) {
 	// A normal-`sub` (non-delegated) token, bad audience, or any forbidden
 	// permission collapses to the sanitized invalid error from the resolver.
 	resolver := fakeDelegatedResolver{err: controlplane.ErrDelegatedInvalid}
-	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
+	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Contains(t, w.Body.String(), "delegated_token_invalid")
 }
 
-func TestDelegatedSelfRequired_DeniesServiceTokenCredential(t *testing.T) {
+func TestDelegatedSelfRequired_DeniesServiceCredential(t *testing.T) {
 	resolver := fakeDelegatedResolver{err: controlplane.ErrDelegatedInvalid}
-	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
+	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedBearerRequest(r, "openrails_st_keyid_secret")
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Contains(t, w.Body.String(), "delegated_token_invalid")
 }
 
-func TestDelegatedSelfRequired_DeniesCrossTenant(t *testing.T) {
+func TestDelegatedSelfRequired_DeniesCrossMerchant(t *testing.T) {
 	// Token's merchant maps to no active merchant for this deployment.
-	resolver := fakeDelegatedResolver{err: controlplane.ErrServiceTokenMerchantUnresolved}
-	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
+	resolver := fakeDelegatedResolver{err: controlplane.ErrServiceCredentialMerchantUnresolved}
+	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
-	require.Contains(t, w.Body.String(), "delegated_tenant_unresolved")
+	require.Contains(t, w.Body.String(), "delegated_merchant_unresolved")
 }
 
 func TestDelegatedSelfRequired_DeniesOriginMismatch(t *testing.T) {
 	resolver := fakeDelegatedResolver{err: controlplane.ErrDelegatedOriginNotAllowed}
-	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
+	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.Contains(t, w.Body.String(), "delegated_origin_not_allowed")
@@ -175,14 +178,14 @@ func TestDelegatedSelfRequired_DeniesMissingBearer(t *testing.T) {
 	resolver := fakeDelegatedResolver{
 		resolved: &controlplane.ResolvedDelegated{DelegatedSubject: "user-123"},
 	}
-	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
+	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, false)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Contains(t, w.Body.String(), "delegated bearer token required")
 }
 
 func TestDelegatedSelfRequired_NilResolverFailsClosed(t *testing.T) {
-	r := newDelegatedTestRouter(nil, controlplane.PermSelfBillingRead)
+	r := newDelegatedTestRouter(nil, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 }

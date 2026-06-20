@@ -18,7 +18,7 @@ import (
 // API keys; it is always present on this surface (#469).
 func (s *Server) registerServiceRoutes(e *gin.Engine) {
 	group := e.Group(StandaloneV1Prefix + httproutes.ServiceRoutePrefix)
-	httproutes.RegisterServiceRoutes(group, s.runtime, ginmw.ServiceTokenRequired(s.controlPlane))
+	httproutes.RegisterServiceRoutes(group, s.runtime, ginmw.ServiceCredentialRequired(s.controlPlane))
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.ServiceRoutePrefix).
 		Info("API-key-authenticated service API routes registered on public handler")

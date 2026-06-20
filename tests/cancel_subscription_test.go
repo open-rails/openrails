@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
@@ -50,7 +49,7 @@ func TestCancelSubscriptionRequiresAuth(t *testing.T) {
 func TestCancelSubscriptionNotFound(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	userID := uuid.New().String()
-	router := newHostSeamSelfRouter(t, suite, userID, []string{controlplane.PermSelfSubscriptionCancel})
+	router := newHostSeamSelfRouter(t, suite, userID, nil)
 
 	body := map[string]string{"feedback": "test feedback"}
 	jsonBody, _ := json.Marshal(body)
@@ -68,7 +67,7 @@ func TestCancelSubscriptionNotFound(t *testing.T) {
 func TestCancelSubscriptionCCBill(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	userID := uuid.New().String()
-	router := newHostSeamSelfRouter(t, suite, userID, []string{controlplane.PermSelfSubscriptionCancel})
+	router := newHostSeamSelfRouter(t, suite, userID, nil)
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
@@ -102,7 +101,7 @@ func TestCancelSubscriptionCCBill(t *testing.T) {
 func TestCancelSubscriptionAlreadyCancelled(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	userID := uuid.New().String()
-	router := newHostSeamSelfRouter(t, suite, userID, []string{controlplane.PermSelfSubscriptionCancel})
+	router := newHostSeamSelfRouter(t, suite, userID, nil)
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
@@ -135,7 +134,7 @@ func TestCancelSubscriptionAuthBoundaries(t *testing.T) {
 
 	userAID := uuid.New().String()
 	userBID := uuid.New().String()
-	routerA := newHostSeamSelfRouter(t, suite, userAID, []string{controlplane.PermSelfSubscriptionCancel})
+	routerA := newHostSeamSelfRouter(t, suite, userAID, nil)
 
 	subB := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:         userBID,

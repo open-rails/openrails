@@ -122,7 +122,26 @@ tasks:
       - echo "Running tests..."
       - go test -v -race ./...
       - echo "Running integration tests..."
-      - go test -v -tags=integration ./...
+      - task test-integration-core
+
+  test-integration:
+    desc: Run core Docker-backed integration tests serially
+    deps: [test-integration-core]
+
+  test-integration-core:
+    desc: Run the local core integration tier against the shared compose stack
+    cmds:
+      - bash scripts/test_integration.sh ./tests ./embed ./internal/river ./pkg/service
+
+  test-integration-all:
+    desc: Run every integration package serially against the shared compose stack
+    cmds:
+      - bash scripts/test_integration.sh ./...
+
+  test-authkit-rbac-live:
+    desc: Run live Docker Compose HTTP E2E for AuthKit delegated RBAC/customer identity
+    cmds:
+      - bash scripts/authkit_rbac_live_e2e.sh
 
   fmt:
     desc: Format code

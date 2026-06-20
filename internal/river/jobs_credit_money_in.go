@@ -107,7 +107,7 @@ const KindInvoice = "openrails.invoice"
 // ArrearsMonthlyFloorAmount (the $1 floor, so we don't burn processor fees on
 // dust). "Whichever comes first." Payments are idempotent per invoice, so the
 // two cadences never double-collect.
-// TODO(#301): make these configurable per-tenant; decide calendar-month vs
+// TODO(#301): make these configurable per-merchant; decide calendar-month vs
 // fixed-interval boundary.
 const (
 	ArrearsHourlyThresholdAmount = 50_000_000 // $50 in USD internal precision

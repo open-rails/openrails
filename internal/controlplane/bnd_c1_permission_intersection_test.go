@@ -2,13 +2,13 @@ package controlplane
 
 // BND-C1 regression: service-JWT permissions must be intersected against
 // stored authority; a token cannot self-assert permissions that were never
-// granted (e.g. openrails:admin).
+// granted (e.g. org:*).
 
 import "testing"
 
 func TestIntersectPermissions_EmptyStoredDeniesAll(t *testing.T) {
 	// Stored authority is empty → no permissions survive, regardless of what
-	// the token claims (including openrails:admin).
+	// the token claims (including org:*).
 	claimed := []string{PermAdmin, PermCreditsRead, PermCreditsWrite}
 	got := intersectPermissions(claimed, nil)
 	if len(got) != 0 {
@@ -34,7 +34,7 @@ func TestIntersectPermissions_OnlyGrantedPermissionsSurvive(t *testing.T) {
 }
 
 func TestIntersectPermissions_AdminNotGrantedUnlessStored(t *testing.T) {
-	// The critical BND-C1 case: a token self-asserts openrails:admin but the
+	// The critical BND-C1 case: a token self-asserts org:* but the
 	// remote_application's stored authority only grants credits:read. The admin
 	// claim must be stripped.
 	stored := []string{PermCreditsRead}
@@ -46,7 +46,7 @@ func TestIntersectPermissions_AdminNotGrantedUnlessStored(t *testing.T) {
 }
 
 func TestIntersectPermissions_AdminGrantedWhenStored(t *testing.T) {
-	// If an operator EXPLICITLY grants openrails:admin to a remote_application
+	// If an operator EXPLICITLY grants org:* to a remote_application
 	// (unusual but valid), the token may claim it and it should pass through.
 	stored := []string{PermAdmin, PermCreditsRead}
 	claimed := []string{PermAdmin}

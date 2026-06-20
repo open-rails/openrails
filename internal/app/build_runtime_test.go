@@ -29,29 +29,29 @@ func TestCreateCCBillDataLinkClientPropagatesTestEnv(t *testing.T) {
 	require.True(t, client.DevMode)
 }
 
-// TestStandaloneRiverSchemaTracksDBSchema verifies the issue #165 standalone rule:
-// the schema OpenRails hands to its self-constructed River client is exactly the
-// configured OpenRails Postgres schema (db.schema), defaulting to `openrails`.
-func TestStandaloneRiverSchemaTracksDBSchema(t *testing.T) {
+// TestStandaloneRiverSchemaIsAlwaysPublic verifies the #545 rule: when OpenRails
+// constructs its own River client, River tables ALWAYS live in `public`
+// (config.RiverSchema, River's documented default) — decoupled from the
+// OpenRails billing schema (reversing the #165 coupling) so the billing schema
+// stays a clean whole-schema dump (#544). db.schema no longer changes it.
+func TestStandaloneRiverSchemaIsAlwaysPublic(t *testing.T) {
 	t.Parallel()
 
-	t.Run("default is openrails", func(t *testing.T) {
-		cfg := config.GetDefaultBillingConfig()
-		require.Equal(t, "openrails", standaloneRiverSchema(cfg))
-		// Standalone River schema == OpenRails DB schema.
-		require.Equal(t, cfg.DB.SchemaName(), standaloneRiverSchema(cfg))
+	require.Equal(t, "public", config.RiverSchema)
+
+	t.Run("default", func(t *testing.T) {
+		require.Equal(t, config.RiverSchema, standaloneRiverSchema(config.GetDefaultBillingConfig()))
 	})
 
-	t.Run("custom schema is honored", func(t *testing.T) {
+	t.Run("custom db.schema does not change it", func(t *testing.T) {
 		cfg := config.GetDefaultBillingConfig()
 		cfg.DB.Schema = "host_billing"
-		require.Equal(t, "host_billing", standaloneRiverSchema(cfg))
-		require.Equal(t, cfg.DB.SchemaName(), standaloneRiverSchema(cfg))
+		require.Equal(t, config.RiverSchema, standaloneRiverSchema(cfg))
 	})
 
-	t.Run("nil db falls back to default", func(t *testing.T) {
-		require.Equal(t, "openrails", standaloneRiverSchema(&config.Config{}))
-		require.Equal(t, "openrails", standaloneRiverSchema(nil))
+	t.Run("nil db/config", func(t *testing.T) {
+		require.Equal(t, config.RiverSchema, standaloneRiverSchema(&config.Config{}))
+		require.Equal(t, config.RiverSchema, standaloneRiverSchema(nil))
 	})
 }
 

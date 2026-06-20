@@ -34,7 +34,7 @@ import (
 // fixed ResolvedDelegated carrying the supplied permission set.
 type fakeDelegatedResolver struct {
 	permissions []string
-	tenantID    merchantpkg.ID
+	merchantID  merchantpkg.ID
 	err         error
 }
 
@@ -42,13 +42,13 @@ func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string, string)
 	if f.err != nil {
 		return nil, f.err
 	}
-	tenantID := f.tenantID
-	if tenantID.IsZero() {
-		tenantID = dbtest.TestMerchantID
+	merchantID := f.merchantID
+	if merchantID.IsZero() {
+		merchantID = dbtest.TestMerchantID
 	}
 	return &controlplane.ResolvedDelegated{
 		Merchant:         "acme-org",
-		MerchantID:       tenantID,
+		MerchantID:       merchantID,
 		MerchantSlug:     "acme-org",
 		DelegatedSubject: "user-42",
 		Permissions:      f.permissions,
@@ -80,13 +80,13 @@ func newMerchantAdminRouter(t *testing.T, perms []string) *gin.Engine {
 	return e
 }
 
-func newMerchantAdminRouterWithRuntime(t *testing.T, perms []string, tenantID merchantpkg.ID, svc *merchants.Service) *gin.Engine {
+func newMerchantAdminRouterWithRuntime(t *testing.T, perms []string, merchantID merchantpkg.ID, svc *merchants.Service) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
 	group := e.Group("/v1/admin")
 	rt := &app.Runtime{Merchants: svc}
-	RegisterAdminRoutes(group, rt, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms, tenantID: tenantID}))
+	RegisterAdminRoutes(group, rt, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms, merchantID: merchantID}))
 	return e
 }
 
@@ -113,13 +113,7 @@ func doSelfBearerBody(e *gin.Engine, method, path, token, body string) *httptest
 	return w
 }
 
-// The resume / change-tier / payment-method mutations are now MOUNTED on the
-// self surface. Without the required permission the per-route gate returns 403
-// (NOT 404) — proving the route exists and is gated, not absent.
-func TestSelfService_SubscriptionMutationsMountedAndGated(t *testing.T) {
-	// A read-only token: holds neither the cancel scope nor the payment scope.
-	readOnly := []string{controlplane.PermSelfBillingRead}
-
+func TestSelfService_PermissionlessPrincipalReachesMountedSelfRoutes(t *testing.T) {
 	cases := []struct {
 		name   string
 		method string
@@ -139,68 +133,26 @@ func TestSelfService_SubscriptionMutationsMountedAndGated(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			e := newSelfRouter(t, readOnly)
-			w := doSelf(e, tc.method, tc.path, true)
-			require.Equal(t, http.StatusForbidden, w.Code,
-				"%s must be mounted and gated (403, not 404): %s", tc.name, w.Body.String())
+			e := newSelfRouter(t, nil)
+			func() {
+				defer func() { _ = recover() }()
+				w := doSelf(e, tc.method, tc.path, true)
+				require.NotEqual(t, http.StatusUnauthorized, w.Code, "%s authenticated principal rejected", tc.name)
+				require.NotEqual(t, http.StatusForbidden, w.Code, "%s must not require self permissions", tc.name)
+				require.NotEqual(t, http.StatusNotFound, w.Code, "%s must be mounted", tc.name)
+			}()
 		})
 	}
 }
 
-// resume and change-tier ride the SAME subscription-cancel scope as cancel: a
-// token holding openrails:self:subscriptions:cancel passes the gate (so it does
-// NOT 403/404 at the gate). With rt==nil the handler would panic if reached, so
-// we only assert the gate admits the request — proven by it not being 403.
-func TestSelfService_CancelScopeAdmitsResumeAndChangeTier(t *testing.T) {
-	perms := []string{controlplane.PermSelfSubscriptionCancel}
-	for _, path := range []string{
-		"/v1/me/subscriptions/sub_123/resume",
-		"/v1/me/subscriptions/sub_123/change-tier",
-	} {
-		e := newSelfRouter(t, perms)
-		// Recover the handler panic (nil runtime) so we can assert the GATE
-		// admitted the request rather than rejecting it.
-		func() {
-			defer func() { _ = recover() }()
-			w := doSelf(e, http.MethodPost, path, true)
-			require.NotEqual(t, http.StatusForbidden, w.Code, "cancel scope must admit %s", path)
-			require.NotEqual(t, http.StatusNotFound, w.Code, "%s must be mounted", path)
-		}()
-	}
-}
-
-// payment-method update requires the payment-methods:manage scope — the cancel
-// scope must NOT be sufficient for it (and vice versa), confirming the gates are
-// distinct.
-func TestSelfService_PaymentMethodRequiresManageScope(t *testing.T) {
-	// Holding only the cancel scope: payment-method update is forbidden.
-	e := newSelfRouter(t, []string{controlplane.PermSelfSubscriptionCancel})
-	w := doSelf(e, http.MethodPut, "/v1/me/subscriptions/sub_123/payment-method", true)
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
-}
-
-func TestSelfService_WalletsRequireWalletManageScope(t *testing.T) {
-	e := newSelfRouter(t, []string{controlplane.PermSelfPaymentMethods})
-	w := doSelf(e, http.MethodPut, "/v1/me/wallets/solana", true)
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
-
-	e = newSelfRouter(t, []string{controlplane.PermSelfWallets})
-	func() {
-		defer func() { _ = recover() }()
-		w := doSelf(e, http.MethodPut, "/v1/me/wallets/solana", true)
-		require.NotEqual(t, http.StatusForbidden, w.Code, "wallet manage scope must admit wallet upsert")
-		require.NotEqual(t, http.StatusNotFound, w.Code, "wallet upsert route must be mounted")
-	}()
-}
-
 // No token at all is rejected by the delegated auth middleware before any gate.
 func TestSelfService_ResumeRejectedWithoutToken(t *testing.T) {
-	e := newSelfRouter(t, []string{controlplane.PermSelfSubscriptionCancel})
+	e := newSelfRouter(t, nil)
 	w := doSelf(e, http.MethodPost, "/v1/me/subscriptions/sub_123/resume", false)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
-func TestSelfService_RejectsServiceTokenCredential(t *testing.T) {
+func TestSelfService_RejectsServiceCredential(t *testing.T) {
 	e := newSelfRouterWithResolver(t, fakeDelegatedResolver{err: controlplane.ErrDelegatedInvalid})
 	w := doSelfBearer(e, http.MethodPost, "/v1/me/subscriptions/sub_123/resume", "openrails_st_keyid_secret")
 	require.Equal(t, http.StatusUnauthorized, w.Code)
@@ -208,7 +160,7 @@ func TestSelfService_RejectsServiceTokenCredential(t *testing.T) {
 }
 
 func TestMerchantAdmin_OperationalListsMountedAndGated(t *testing.T) {
-	readless := []string{controlplane.PermSelfBillingRead}
+	readless := []string{}
 
 	cases := []struct {
 		name string
@@ -355,8 +307,8 @@ func TestMerchantAdmin_SecretRoutesWriteOnlyRuntimeBehavior(t *testing.T) {
 	svc, err := merchants.NewSecretManagementService(store)
 	require.NoError(t, err)
 
-	tenantA := dbtest.TestMerchantID
-	tenantB, err := merchantpkg.ParseID("22222222-2222-2222-2222-222222222222")
+	merchantA := dbtest.TestMerchantID
+	merchantB, err := merchantpkg.ParseID("22222222-2222-2222-2222-222222222222")
 	require.NoError(t, err)
 	perms := []string{
 		controlplane.PermMerchantSecretsList,
@@ -365,11 +317,11 @@ func TestMerchantAdmin_SecretRoutesWriteOnlyRuntimeBehavior(t *testing.T) {
 		controlplane.PermMerchantSecretsTest,
 	}
 
-	eA := newMerchantAdminRouterWithRuntime(t, perms, tenantA, svc)
+	eA := newMerchantAdminRouterWithRuntime(t, perms, merchantA, svc)
 	w := doSelfBearerBody(eA, http.MethodPut, "/v1/admin/secrets/stripe/secret_key", "delegated.jwt.token", `{"value":"sk_test_route_secret"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), "sk_test_route_secret")
-	got, err := store.Get(context.Background(), tenantA, merchants.SecretStripeSecretKey)
+	got, err := store.Get(context.Background(), merchantA, merchants.SecretStripeSecretKey)
 	require.NoError(t, err)
 	require.Equal(t, "sk_test_route_secret", got.Value)
 
@@ -378,7 +330,7 @@ func TestMerchantAdmin_SecretRoutesWriteOnlyRuntimeBehavior(t *testing.T) {
 	w = doSelfBearerBody(eA, http.MethodPut, "/v1/admin/secrets/"+scopedName, "delegated.jwt.token", `{"value":"sk_test_scoped_route_secret"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), "sk_test_scoped_route_secret")
-	got, err = store.Get(context.Background(), tenantA, scopedName)
+	got, err = store.Get(context.Background(), merchantA, scopedName)
 	require.NoError(t, err)
 	require.Equal(t, "sk_test_scoped_route_secret", got.Value)
 
@@ -396,23 +348,23 @@ func TestMerchantAdmin_SecretRoutesWriteOnlyRuntimeBehavior(t *testing.T) {
 	w = doSelfBearerBody(eA, http.MethodPut, "/v1/admin/secrets/solana/private_key", "delegated.jwt.token", `{"value":"private"}`)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 
-	eB := newMerchantAdminRouterWithRuntime(t, perms, tenantB, svc)
+	eB := newMerchantAdminRouterWithRuntime(t, perms, merchantB, svc)
 	w = doSelfBearer(eB, http.MethodGet, "/v1/admin/secrets", "delegated.jwt.token")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), `"version":1`)
-	if _, err := store.Get(context.Background(), tenantB, merchants.SecretStripeSecretKey); err == nil {
-		t.Fatal("tenant B should not see tenant A's Stripe secret")
+	if _, err := store.Get(context.Background(), merchantB, merchants.SecretStripeSecretKey); err == nil {
+		t.Fatal("merchant B should not see merchant A's Stripe secret")
 	}
 
 	w = doSelfBearer(eA, http.MethodDelete, "/v1/admin/secrets/stripe/secret_key", "delegated.jwt.token")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), "sk_test_route_secret")
-	_, err = store.Get(context.Background(), tenantA, merchants.SecretStripeSecretKey)
+	_, err = store.Get(context.Background(), merchantA, merchants.SecretStripeSecretKey)
 	require.ErrorIs(t, err, merchants.ErrSecretNotFound)
 
 	w = doSelfBearer(eA, http.MethodDelete, "/v1/admin/secrets/"+scopedName, "delegated.jwt.token")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), "sk_test_scoped_route_secret")
-	_, err = store.Get(context.Background(), tenantA, scopedName)
+	_, err = store.Get(context.Background(), merchantA, scopedName)
 	require.ErrorIs(t, err, merchants.ErrSecretNotFound)
 }

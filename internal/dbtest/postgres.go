@@ -59,6 +59,7 @@ var (
 func RunMain(m *testing.M) {
 	code := m.Run()
 	TerminateShared()
+	TerminateSharedRedis()
 	os.Exit(code)
 }
 
@@ -114,6 +115,7 @@ func provision(ctx context.Context) (string, error) {
 					WaitingFor: wait.ForLog("database system is ready to accept connections").
 						WithOccurrence(2).
 						WithStartupTimeout(60 * time.Second),
+					HostConfigModifier: PostgresHostConfigModifier,
 				},
 				Started: true,
 			},

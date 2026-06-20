@@ -33,9 +33,9 @@ type BootstrapAuthorityManifest struct {
 	// admin authority is merchant-scoped, so the merchant must already exist.
 	BootstrapOrgSlug   string `yaml:"bootstrap_org_slug"`
 	InitialAdminUserID string `yaml:"initial_admin_user_id,omitempty"`
-	// MintInitialServiceToken defaults true when omitted. Set false when the
+	// MintInitialAPIKey defaults true when omitted. Set false when the
 	// deploy will create admin access through another AuthKit path.
-	MintInitialServiceToken *bool `yaml:"mint_initial_service_token,omitempty"`
+	MintInitialAPIKey *bool `yaml:"mint_initial_api_key,omitempty"`
 }
 
 // LoadBootstrapManifest reads and validates a bootstrap manifest.
@@ -77,14 +77,14 @@ func (m *BootstrapManifest) BootstrapOptions() controlplane.BootstrapOptions {
 	if m == nil {
 		return controlplane.BootstrapOptions{}
 	}
-	mintInitialServiceToken := true
-	if m.Authority.MintInitialServiceToken != nil {
-		mintInitialServiceToken = *m.Authority.MintInitialServiceToken
+	mintInitialAPIKey := true
+	if m.Authority.MintInitialAPIKey != nil {
+		mintInitialAPIKey = *m.Authority.MintInitialAPIKey
 	}
 	return controlplane.BootstrapOptions{
-		BootstrapOrgSlug:        strings.ToLower(strings.TrimSpace(m.Authority.BootstrapOrgSlug)),
-		InitialAdminUserID:      strings.TrimSpace(m.Authority.InitialAdminUserID),
-		MintInitialServiceToken: mintInitialServiceToken,
+		BootstrapOrgSlug:   strings.ToLower(strings.TrimSpace(m.Authority.BootstrapOrgSlug)),
+		InitialAdminUserID: strings.TrimSpace(m.Authority.InitialAdminUserID),
+		MintInitialAPIKey:  mintInitialAPIKey,
 	}
 }
 

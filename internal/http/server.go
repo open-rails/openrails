@@ -70,16 +70,16 @@ type Server struct {
 	delegatedResolver      ginmw.DelegatedResolver
 	captchaStore           *captcha.ChallengeStore
 
-	// tenancy is the tenant provisioning + lifecycle + per-merchant secret service
+	// merchants is the merchant provisioning + lifecycle + per-merchant secret service
 	// (issue #225). It reuses the control plane's pgx pool (the openrails.*
-	// control-plane DB) and operator-tenant provisioner, and is always built
+	// control-plane DB) and operator-org provisioner, and is always built
 	// (#469: the control plane is mandatory on this surface).
 	merchants *merchants.Service
 
-	// Platform superadmin layer (issue #226), DISTINCT from per-tenant operator
+	// Platform superadmin layer (issue #226), DISTINCT from per-merchant operator
 	// admin, sharing the openrails.* control-plane pool. platformMetrics
-	// aggregates platform-wide tenant metrics. The /v1/platform/* surface itself
-	// is mounted only when a platform tenant is configured.
+	// aggregates platform-wide merchant metrics. The /v1/platform/* surface itself
+	// is mounted only when a platform org is configured.
 	platformMetrics *platform.Metrics
 
 	// configuredMerchant scopes THIS engine instance to one merchant — set by embedded
@@ -177,9 +177,9 @@ func New(deps Dependencies) (*Server, error) {
 		captchaStore:           captcha.NewChallengeStore(deps.Redis),
 	}
 
-	// Build the tenant provisioning/lifecycle/secret service (issue #225). It
+	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
 	// reuses the control plane's pgx pool (the OpenRails-owned openrails.*
-	// control-plane DB) and operator-tenant provisioner. The DB-backed secret
+	// control-plane DB) and operator-org provisioner. The DB-backed secret
 	// store is the self-hosted default and needs no live Vault; a managed
 	// deployment swaps in the Vault-backed store with the same addressing.
 	{
@@ -209,25 +209,25 @@ func New(deps Dependencies) (*Server, error) {
 
 		// Single-install bridge (#253): an in-memory Solana private key is seeded
 		// only into the CONFIGURED merchant's secret store as solana/private_key
-		// (#336: no default merchant — the seed no-ops when no tenant is configured).
+		// (#336: no default merchant — the seed no-ops when no merchant is configured).
 		// Named tenants must be configured explicitly by an operator credential
 		// rotation. Idempotent; never overwrites an existing secret. No-op when
 		// Solana is unconfigured or uses Vault Transit (non-extractable key, so no
 		// global private key is set).
 		if pc := deps.Runtime.Processors.GetSolanaProcessor(); pc != nil {
-			if err := recurring.SeedConfiguredTenantSolanaSecret(context.Background(), secretStore, s.configuredMerchant, pc.PrivateKey); err != nil {
-				return nil, fmt.Errorf("seed configured tenant solana secret: %w", err)
+			if err := recurring.SeedConfiguredMerchantSolanaSecret(context.Background(), secretStore, s.configuredMerchant, pc.PrivateKey); err != nil {
+				return nil, fmt.Errorf("seed configured merchant solana secret: %w", err)
 			}
 		}
 
-		// Recurring Solana services (#254/#255/#256): build one per-tenant
+		// Recurring Solana services (#254/#255/#256): build one per-merchant
 		// Submitter (Transit when configured so the key never leaves Vault, else a
 		// keypair signer over the secret store) and share it across the cranker,
 		// plan-publish, and enroll services. The cranker MUST be injected BEFORE
 		// workers start (InitRiver).
 		if deps.Runtime != nil && deps.Runtime.SolanaRPC != nil {
 			var submitter recurring.Submitter
-			// solanaSigner is the SAME per-tenant signer the Submitter wraps. The
+			// solanaSigner is the SAME per-merchant signer the Submitter wraps. The
 			// tier-change prepare service (#272) co-signs the merchant/cranker slot
 			// with it directly, so it MUST be the same key as the cranker.
 			var solanaSigner solanaint.Signer
@@ -365,9 +365,8 @@ func New(deps Dependencies) (*Server, error) {
 	// Operator-gated merchant provisioning/lifecycle admin API (issue #225).
 	s.registerMerchantAdminRoutes(s.publicHandler)
 
-	// Platform-superadmin cross-merchant admin API (issue #226), gated by
-	// openrails:platform:superadmin in the SEPARATE platform tenant. No-op without
-	// the control plane / platform tenant configured.
+	// Platform cross-merchant admin API (issue #226), gated by AuthKit
+	// platform RBAC. No-op without the control plane / platform RBAC configured.
 	s.registerPlatformRoutes(s.publicHandler)
 
 	log.Info("Billing service initialized successfully")
@@ -388,9 +387,9 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	// remain the real request security boundary.
 	e.Use(ginmw.CORSFromSource(s.browserCORSOrigins))
 	e.Use(ginmw.BodyLimit(middleware.DefaultMaxBodyBytes))
-	// Resolve the tenant / billing namespace before authorization and before any
+	// Resolve the merchant / billing namespace before authorization and before any
 	// merchant-owned DB access (issue #223). Pins the construction-time configured
-	// tenant resolved once at boot (#336); zero when none is configured, in
+	// merchant resolved once at boot (#336); zero when none is configured, in
 	// which case merchant-owned operations hard-fail (there is no default merchant).
 	e.Use(ginmw.ResolveMerchant(s.configuredMerchant))
 	if s.authProvider != nil {

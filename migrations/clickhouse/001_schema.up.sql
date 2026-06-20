@@ -181,6 +181,18 @@ ORDER BY (snapshot_date, currency, merchant_id)
 PARTITION BY toYYYYMM(snapshot_date)
 SETTINGS index_granularity = 8192;
 
+-- Compatibility for persistent local/upgrade databases created before the
+-- merchant terminology hard cut.
+ALTER TABLE subscription_events RENAME COLUMN IF EXISTS tenant_id TO merchant_id;
+ALTER TABLE payment_events RENAME COLUMN IF EXISTS tenant_id TO merchant_id;
+ALTER TABLE webhook_events RENAME COLUMN IF EXISTS tenant_id TO merchant_id;
+ALTER TABLE acu_events RENAME COLUMN IF EXISTS tenant_id TO merchant_id;
+ALTER TABLE chargeback_events RENAME COLUMN IF EXISTS tenant_id TO merchant_id;
+ALTER TABLE premium_status_daily RENAME COLUMN IF EXISTS tenant_id TO merchant_id;
+ALTER TABLE daily_metrics ADD COLUMN IF NOT EXISTS version DateTime('UTC') DEFAULT now();
+
+DROP TABLE IF EXISTS mv_daily_metrics;
+
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_daily_metrics {{ON_CLUSTER}}
 TO daily_metrics
 AS

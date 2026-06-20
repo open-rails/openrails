@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/dbtest"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
@@ -42,6 +43,7 @@ func startCryptoPostgres(t *testing.T) (*db.Pool, context.Context) {
 			postgres.WithDatabase("test_db"),
 			postgres.WithUsername("test_user"),
 			postgres.WithPassword("test_password"),
+			dbtest.WithPostgresLimits(),
 			testcontainers.WithWaitStrategy(
 				wait.ForLog("database system is ready to accept connections").
 					WithOccurrence(2).WithStartupTimeout(60*time.Second),

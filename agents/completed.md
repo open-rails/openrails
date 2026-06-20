@@ -9,6 +9,87 @@
 
 ---
 
+# #533: Log external provider mutations executed by convergence/provider intents
+
+**Completed:** yes
+
+**Status:** DONE 2026-06-20. Provider-intent execution now writes append-only external provider mutation history rows before and after remote handler execution. The log is table-backed, merchant/provider/account/intent/idempotency scoped, scrubbed before persistence, and queryable with `openrails intents log`. `pull-provider` docs now call out the read-side/write-side symmetry.
+
+**Scope note:** This pass centralizes logging at the provider-intent runner boundary, which covers the current durable remote-mutation executor path. Non-intent direct provider writes can be migrated onto the same writer API as they are retired or converted into provider intents.
+
+**Validation:**
+- `task sqlc`
+- `go test ./internal/intents ./internal/merchants ./cmd/openrails`
+- `go test -tags integration ./internal/intents -run 'TestExecutorDeletesPresentSubscription' -count=1` (real local HTTP NMI fake; asserts `attempting` + `succeeded` log rows for the remote delete)
+
+---
+
+# #538: Entitlement claim authority and optional freshness checks
+
+**Completed:** yes
+
+**Status:** DONE 2026-06-20. OpenRails treats verified AuthKit user-token entitlement claims as authoritative short-lived snapshots by default, keeps `sid` as session identity, and exposes a minimal optional freshness resolver for embedded deployments that need grant/revoke reflection before access-token expiry.
+
+**Validation:**
+- `go test ./pkg/billingauth ./internal/db/repo ./internal/modules/money`
+- `task sqlc`
+- `go test ./internal/controlplane ./internal/http/middleware/ginmw ./internal/http/routes/ginroutes ./pkg/embedded/gin`
+- `go test -tags integration ./tests -run 'Test(SelfAccountSurface_HostPrincipalFullLoopAndScoping|SelfInvoicesHTTP_ReflectsReceivablePaymentsAndScopesToSubject|USDCFundingSelfService(CreateGetIdempotencyAndIsolation|RejectsUnsupportedProviderAndNetwork)|CancelSubscription(RequiresAuth|NotFound|CCBill|AlreadyCancelled|AuthBoundaries)|AdminUserDetailComposite_Delegated|AdminUserPaymentMethodDelete_Delegated|ListCustomersWithEntitlement_Reverse)$' -count=1`
+- `go test -tags integration ./internal/integrationharness`
+
+---
+
+# #539: Customer identity must be merchant + host user UUID, not issuer-scoped
+
+**Completed:** yes
+
+**Status:** DONE 2026-06-20. Customer identity now keys on the stable host/AuthKit user UUID under the OpenRails merchant, not the remote-application issuer URL. Issuer is retained only as source/audit metadata. The schema, sqlc queries, customer touch/upsert paths, embedded host principal handling, entitlement reverse lookup, and focused regression coverage were updated.
+
+**Validation:**
+- `task sqlc`
+- `go test ./internal/db/repo ./internal/modules/money`
+- `go test ./internal/controlplane ./internal/http/middleware/ginmw ./internal/http/routes/ginroutes ./pkg/embedded/gin`
+- `go test -tags integration ./tests -run 'Test(SelfAccountSurface_HostPrincipalFullLoopAndScoping|SelfInvoicesHTTP_ReflectsReceivablePaymentsAndScopesToSubject|USDCFundingSelfService(CreateGetIdempotencyAndIsolation|RejectsUnsupportedProviderAndNetwork)|CancelSubscription(RequiresAuth|NotFound|CCBill|AlreadyCancelled|AuthBoundaries)|AdminUserDetailComposite_Delegated|AdminUserPaymentMethodDelete_Delegated|ListCustomersWithEntitlement_Reverse)$' -count=1`
+- `go test -tags integration ./internal/integrationharness`
+- `task test-authkit-rbac-live` (Docker Compose live OpenRails HTTP server: two issuers on one merchant share the same customer UUID/balance)
+
+---
+
+# #540: Remove `self:` permissions from regular customer `/me` routes
+
+**Completed:** yes
+
+**Status:** DONE 2026-06-20. Regular customer `/v1/me/*` routes now authorize by authenticated customer subject and handler scoping, not permanent `self:*` permissions. Delegated customer tokens and embedded host principals may omit permissions; browser delegated admin tokens still validate only browser-safe merchant `org:` permissions and reject platform/unknown grants.
+
+**Validation:**
+- `go test ./internal/controlplane ./internal/http/middleware/ginmw ./internal/http/routes/ginroutes ./pkg/embedded/gin`
+- `go test ./pkg/billingauth ./internal/db/repo ./internal/modules/money`
+- `task sqlc`
+- `go test -tags integration ./tests -run 'Test(SelfAccountSurface_HostPrincipalFullLoopAndScoping|SelfInvoicesHTTP_ReflectsReceivablePaymentsAndScopesToSubject|USDCFundingSelfService(CreateGetIdempotencyAndIsolation|RejectsUnsupportedProviderAndNetwork)|CancelSubscription(RequiresAuth|NotFound|CCBill|AlreadyCancelled|AuthBoundaries)|AdminUserDetailComposite_Delegated|AdminUserPaymentMethodDelete_Delegated|ListCustomersWithEntitlement_Reverse)$' -count=1`
+- `go test -tags integration ./internal/integrationharness`
+- `task test-authkit-rbac-live` (Docker Compose live OpenRails HTTP server: permissionless delegated `/v1/me/account` works; delegated platform permission is rejected)
+
+**Dependency note:** OpenRails is pinned to pushed AuthKit commit `945c5c5b5c20` as `github.com/open-rails/authkit v0.41.1-0.20260620181053-945c5c5b5c20`; no local `replace` is required.
+
+---
+
+# #537: Hard-cut OpenRails permission strings onto AuthKit `org:` / `platform:` RBAC
+
+**Completed:** yes
+
+**Status:** OpenRails-side complete and verified 2026-06-20. Permission constants, route gates, delegated verifier allowlists, bootstrap/docs/examples, and tests now use `self:` for delegated end-user browser tokens, `org:` for merchant-local server/API-key/delegated-admin authority, and AuthKit `platform:` grants for directory/platform authority.
+
+`openrails:admin` magic behavior is gone. The remaining `PermAdmin` identifier is only a deprecated source-compatibility alias for `org:*`; it is not cataloged and does not satisfy arbitrary exact permission checks. API-key and service-JWT checks are exact/intersection-based, and delegated browser tokens reject `platform:` plus unknown/out-of-layer grants.
+
+**Verified:**
+- `go test -modfile=<temp with replace github.com/open-rails/authkit=/home/fidika/authkit> ./...`
+- `git diff --check`
+- Active code/docs/tests are clean for retired `openrails:{admin,platform:superadmin,merchant,self,credits,catalog,entitlements,payments,subscriptions}` permission strings.
+
+**Follow-up outside this OpenRails issue:** bump `github.com/open-rails/authkit` after AuthKit #94/#95 land in a consumable module ref; move API-key/remote-application grants to AuthKit role APIs when that model is available; patch tensorhub/cozy-art/doujins/hentai0 consumers in the same hard-cut rollout.
+
+---
+
 # #528: Converge billing admin on the delegated model — retire per-user /v1/admin, rename /merchant-admin → /admin
 
 **Completed:** yes
@@ -164,9 +245,9 @@ Cut from this issue. #528 is about CONVERGING the admin surface on the delegated
 
 Two DIFFERENT needs were conflated under "user search," neither belongs in #528, and BOTH are deferred (build when needed) — they live in **future.md** now (the old #108 was deleted):
 1. **OpenRails' own admin-dashboard user search** — a human operator browsing/filtering users in an OpenRails-hosted billing console. Embedded hosts (doujins/cozy-art/etc.) DON'T need this: they own their user tables and have their own admin UIs. Only useful once a STANDALONE OpenRails admin GUI exists (it doesn't yet). → folded into **#228** (future.md), the standalone admin-console plan; punt.
-2. **A host-facing "which of my users have entitlement X" query** — useful for BOTH embedded and standalone hosts; now ACTIVE (doujins needs it). → **#535** (progress.md) as the billing-enrichment FILTER provider behind AuthKit's directory, not an OpenRails admin-console search.
+2. **A host-facing "which of my users have entitlement X" query** — useful for BOTH embedded and standalone hosts; shipped in **#535** (completed.md) as the billing-enrichment FILTER provider behind AuthKit's directory, not an OpenRails admin-console search.
 
-Net: #528 ships the delegated admin surface (composite user-DETAIL by id) WITHOUT a user LIST/search. See **#535** (progress.md, active) for the reverse-query provider, and **#228** (future.md) for the standalone admin console.
+Net: #528 ships the delegated admin surface (composite user-DETAIL by id) WITHOUT a user LIST/search. See **#535** (completed.md) for the reverse-query provider, and **#228** (future.md) for the standalone admin console.
 
 ### Cross-cutting cleanup
 - [x] **CRITICAL — migrate the `tests/` admin INTEGRATION suite to the delegated model. DONE (2026-06-19) — hard cut, per-user model fully removed.** All admin integration files now authenticate as a delegated merchant principal via `newHostSeamAdminRouter(t, suite, subject, []perms)` (host-seam `DelegatedPrincipalRequired`), hit the new `/v1/admin` paths, and assert the redesigned shapes. `go test ./tests/ -tags integration -run 'TestAdmin|TestRemoved'` is GREEN (57s, real Postgres+ClickHouse+Redis).
@@ -7711,7 +7792,7 @@ Generated opaque service tokens remain useful for non-OIDC clients, bootstrap/ad
 - [x] Remove Doujins/Hentai0/Tensorhub runtime service-token output generation from OpenRails bootstrap manifests, compose examples, docs, and Vault expectations. The local-stack bootstrap example now uses `service_jwt_principals[]` for Doujins/Hentai0 instead of Vault-written runtime tokens; docs reserve generated `service_tokens[]` for non-OIDC/generated-token use cases.
 - [x] Update the unified bootstrap manifest work so `service_tokens` means generated opaque tokens only; first-party issuer flows use `service_jwt_principals` declarations instead.
 - [x] Add negative tests for wrong audience, expired token, excessive lifetime, missing `token_use`, missing `jti`, missing `iat`, missing `nbf`, unknown issuer, disabled issuer, ungranted subject, and caller-requested permission not present in the OpenRails grant.
-- [x] Add positive integration coverage proving valid Doujins/Hentai0 service JWTs can read tenant-subject entitlements and valid Tensorhub service JWTs can call OpenRails service credit/usage APIs without any OpenRails-generated runtime token in Vault. Current coverage proves real Postgres/JWKS verification for Doujins/Hentai0/Tensorhub-style service principals plus route-gate acceptance of resolved service-JWT principals; full consumer route e2e remains blocked on downstream JWT minting adoption. DONE: TestFederatedServiceJWTs mints valid Doujins/Hentai0 service JWTs (incl. hentai0 entitlement-read with openrails:entitlements:read), resolves them, and asserts JWT-requested permissions intersect the server-side grant; TestServiceTokenRequired_SucceedsForServiceJWT proves middleware acceptance on a route.
+- [x] Add positive integration coverage proving valid Doujins/Hentai0 service JWTs can read tenant-subject entitlements and valid Tensorhub service JWTs can call OpenRails service credit/usage APIs without any OpenRails-generated runtime token in Vault. Current coverage proves real Postgres/JWKS verification for Doujins/Hentai0/Tensorhub-style service principals plus route-gate acceptance of resolved service-JWT principals; full consumer route e2e remains blocked on downstream JWT minting adoption. DONE: TestFederatedServiceJWTs mints valid Doujins/Hentai0 service JWTs (incl. hentai0 entitlement-read with openrails:entitlements:read), resolves them, and asserts JWT-requested permissions intersect the server-side grant; TestServiceCredentialRequired_SucceedsForServiceJWT proves middleware acceptance on a route.
 - [x] Update principal-boundary docs to describe generated opaque service tokens vs first-party OIDC service JWTs and when each should be used.
 - [x] Validate with focused Go tests, service-JWT integration tests, `task build`, `go test ./... -run '^$'`, broad `go test` excluding unrelated dirty `internal/modules/solana`, and docker-compose `openrails-migrate`. Hentai0/Doujins/Tensorhub compose integration paths still need broader validation once consumer-side JWT minting issues are implemented; full `go test ./...` is blocked by unrelated dirty Solana test work. DONE: go test -tags=integration ./internal/controlplane (TestFederatedServiceJWTs / ClaimRejections / Delegated) pass; go build ./... clean.
 
@@ -7928,7 +8009,7 @@ Remove `operator tenant`, `platform tenant`, `admin tenant`, and old AuthKit ten
 - [x] Register Doujins as a tenant issuer under the same OpenRails tenant using OIDC fields `issuer`, `jwks_uri`, and allowed `audiences`; validated with direct Doujins/OpenRails compose startup and issuer registration logs.
 - [x] Resolve Hentai0 browser/admin delegated JWTs as external delegated subjects, not native OpenRails users; federated tokens now validate against the tenant resource-account slug and create/touch `tenant_subjects` rows by `(tenant_id, issuer, subject)`.
 - [x] Finish any remaining delegated-JWT consumer paths outside Hentai0 and persist only minimal delegated user references if OpenRails needs a billing/audit row. Delegated browser/admin routes resolve through `ControlPlane.ResolveDelegated`, federated issuers pin the tenant from validated OIDC `iss`, and successful delegated JWT use touches only `billing.tenant_subjects` keyed by `(tenant_id, issuer, subject)` for billing/audit identity.
-- [x] Keep service tokens separate from delegated JWTs and native sessions in middleware principal types; service routes require `ServiceTokenRequired`, delegated routes require `DelegatedSelfRequired`, service tokens are rejected by delegated routes, delegated JWTs are rejected by service routes, and the separation is documented in `docs/principal-boundary-audit.md`.
+- [x] Keep service tokens separate from delegated JWTs and native sessions in middleware principal types; service routes require `ServiceCredentialRequired`, delegated routes require `DelegatedSelfRequired`, service tokens are rejected by delegated routes, delegated JWTs are rejected by service routes, and the separation is documented in `docs/principal-boundary-audit.md`.
 - [x] Update OpenRails docs to state: tenant = OpenRails customer/integration boundary; delegated user = external OIDC subject; service token = opaque server-to-server credential. `docs/authkit-tenant-oidc-glossary.md`, `docs/api/endpoints.md`, `docs/principal-boundary-audit.md`, and `docs/tenant-provisioning.md` now use this terminology.
 - [x] Add tests proving old operator-org/org config is rejected and the new tenant/delegated-user model is the only supported path: config load rejects deprecated `auth.operator_tenant_slug` / `auth.operator_tenant_admin_roles` / `auth.control_plane.org_mode`, existing manifest strict-YAML coverage rejects `operator_tenant_slug`, and route normalization fixtures use tenant paths.
 
@@ -8103,7 +8184,7 @@ Billing-domain tables should reference `tenant_subject_id` and recover tenant/is
 - [x] Update the Hentai0 consumer after the hard cut: tenant manifest v2, service-token terminology, delegated tenant slug, and external-subject entitlement reads are validated by the live compose integration.
 - [x] Update the Doujins consumer after the hard cut: AuthKit entitlement enrichment now queries OpenRails by OIDC `issuer` + `subject` through `/v1/service/tenant-subjects/by-external-subject/entitlements`, and direct compose startup validated the service-token route.
 - [x] Update Tensorhub consumers after the hard cut: bumped AuthKit to v0.12.5, migrated service-token parsing/resolution to `cozy_st_`, switched runtime source/scopes to `service_token` / `service_token_scopes`, kept OpenRails calls on `tenant_subject_id`, and validated `task build`, compile-only `go test ./... -run '^$'`, plus focused identity/authz/API/orchestrator OpenRails tests.
-- [x] Add negative tests proving legacy service-token resource kinds are rejected: `tenant_subject_id`, `payer_account_id`, `account_id`, payable `delegated_user_id`, `subject_type`, `openrails.payer_account`, `openrails.account`, and `openrails.delegated_user` now fail `validateServiceTokenResources` with `ErrServiceTokenScopeDenied`.
+- [x] Add negative tests proving legacy service-token resource kinds are rejected: `tenant_subject_id`, `payer_account_id`, `account_id`, payable `delegated_user_id`, `subject_type`, `openrails.payer_account`, `openrails.account`, and `openrails.delegated_user` now fail `validateServiceTokenResources` with `ErrServiceCredentialScopeDenied`.
 - [x] Add remaining negative tests proving old payable JSON/config fields are rejected on request/config surfaces: top-level JSON request bodies now reject `payer_account_id`, `account_id`, payable `delegated_user_id`, `subject_type`, `owner_id`, and `payer` in both net/http and gin transports while nested metadata stays allowed; config files/env-derived keys now reject the retired payable identity keys with `tenant_subject_id` / `invoker_id` guidance.
 
 ---
@@ -9370,7 +9451,7 @@ Start the actual standalone server (`cmd/billing`, the real router + control pla
 BOTH OpenRails migrations AND AuthKit `profiles.*` migrations (authkit/migrations/postgres 001–006) applied.
 Provision via the REAL control-plane bootstrap (`cmd/billing/bootstrap_apply.go`) + mint a REAL service token /
 operator JWT (`mint_operator_jwt.go`) through real AuthKit `core` — NO stub. The remote client authenticates with
-that real token, resolved by the real `ServiceTokenRequired` → control-plane `ResolveServiceToken` → AuthKit. This
+that real token, resolved by the real `ServiceCredentialRequired` → control-plane `ResolveAPIKey` → AuthKit. This
 validates the production auth path (service tokens, #481 owner_tenant role authz; later #76 JWKS principal via #484).
 
 ## C. Parity preserved across the REAL surfaces
@@ -9391,13 +9472,13 @@ explicit requirement). Keep any fast adapter-level unit coverage where it exists
 **Tasks:**
 - [x] A: no-auth embedding-host harness (mirrors openrailsembed; trusting authenticator; mounts the embedded HTTP surface).
       `internal/integrationharness.Harness.StartEmbeddedHost` — `embed.New` (host-owns-auth) over the shared migrated
-      Postgres + Redis, serving the real embedded `/v1/service/*` on httptest behind the REAL `ServiceTokenRequired`
+      Postgres + Redis, serving the real embedded `/v1/service/*` on httptest behind the REAL `ServiceCredentialRequired`
       middleware wired to a `trustingResolver` (accepts every token, pins the bound merchant, verifies nothing).
 - [x] B: standalone harness — boot the real standalone server (`ginboot.NewServer` → `internal/http`, the cmd/billing
       run-server graph) + real AuthKit `core`; OpenRails + AuthKit `profiles.*` migrations applied by
       `migrate.RunPostgres` (migratekit over `authkit/migrations/postgres`, via `dbtest`); provision via the REAL
       control-plane bootstrap (`RunBootstrap` links `owner_tenant_id` + mints a real admin service token through
-      AuthKit core); the client auths with that real token resolved by `ServiceTokenRequired` → `ResolveServiceToken`
+      AuthKit core); the client auths with that real token resolved by `ServiceCredentialRequired` → `ResolveAPIKey`
       → AuthKit core (#481). No stub. `Harness.StartStandalone`.
 - [x] C: re-pointed the conformance parity script to A (embedded-real) vs B (standalone-real); `stubResolver` DELETED.
       `embed/conformance_integration_test.go` now drives `openrails.NewRemote` against BOTH harness surfaces and asserts
@@ -12552,7 +12633,7 @@ authority:
   bootstrap_org_slug: doujins
   # Optional existing AuthKit user id to grant openrails:admin in this org.
   # initial_admin_user_id: usr_admin
-  mint_initial_service_token: true
+  mint_initial_api_key: true
 ```
 
 ### `merchants.yaml`
@@ -12812,3 +12893,623 @@ Completed validation:
 - `go test ./...`
 
 ---
+
+# #536: Core readiness for openrails-saas composition — directory authority + webhook/registration seams
+
+**Status:** completed
+
+`~/openrails-saas` will be a separate single-binary Go app that IMPORTS core OpenRails
+as a library (`pkg/embedded`), turns on standalone-equivalent runtime, and adds the
+SaaS-only surfaces: public self-service registration, a platform-operator console,
+Host-routed webhooks, onboarding, and meta-billing. It must NOT fork or reimplement
+OpenRails runtime behavior (saas-repo #12). This issue is the CORE side: the seams +
+boundary changes core ships so saas composes it cleanly. Core stays "a multi-merchant
+billing engine"; it never learns it is "a SaaS" (no `saas_mode` flag — activation is
+which binary you deploy + what the host injects).
+
+## The two-mode authority model (same gate in both modes)
+
+- **`platform:superadmin`** = platform/deployment authority. Owns the merchant DIRECTORY
+  (provision / suspend / delete / export / rotate-creds of ANY merchant). Inherently
+  cross-merchant. Seeded only to a platform org, never to per-merchant operators.
+- **`openrails:admin`** = per-merchant operator authority. Full authority over their OWN
+  merchant's billing (catalog, customers, entitlements, subs). NEVER the directory.
+
+Private standalone (this repo, what everyone runs): no self-service registration
+(`registrationMode` hard-locked to `AdminBootstrapOnly` — `RegistrationModeOpen` is the
+dead branch reserved for saas); provisioning is platform-only AND CLI-driven
+(`cmd/openrails/{merchant_cli,bootstrap_apply,mint_merchant_api_key}.go`) — the operator
+has direct control-plane access and does not need an HTTP directory. Public saas: the
+platform team holds `platform:superadmin` and drives the directory over HTTP; a
+self-registered merchant manages only its own merchant (ownership-scoped).
+
+## Tasks
+
+- [x] **Directory-authority gate fix (the linchpin — may be tracked/owned as its own
+      issue; coordinate before editing the route).** Gate `/v1/admin/merchants/*` on
+      `platform:superadmin`: swap `UserSessionAdminPrincipalRequired` +
+      `RequirePermission(PermAdmin)` → `UserSessionPlatformPrincipalRequired` +
+      `RequirePermission(PermPlatformSuperadmin)` (`routes_merchant_admin.go:31-32`,
+      mirroring `routes_platform.go:32-33`). Today the directory is wrongly gated on the
+      PER-merchant permission. Effect: PRIVATE → directory closed-by-default (no
+      platform-superadmin holder; provisioning stays CLI) and per-merchant `openrails:admin`
+      operators can no longer reach it (hole closed, no bootstrap change); SAAS → the
+      platform team holds `platform:superadmin`, HTTP directory works for them. Validated
+      by #534's real standalone HTTP test where a real AuthKit user holding per-merchant
+      `openrails:admin` receives 403 on `/v1/admin/merchants/:id`.
+- [x] **AuthKit posture seam (registration mode + which route groups mount) — the
+      mechanism EXISTS; make it host-settable.** No authkit-core subset library is needed:
+      standalone links full AuthKit but mounts only the locked subset
+      `[RouteCore, RoutePassword, RouteUser]` (`internal/controlplane/routes.go`
+      `IntentionalRouteGroups` / `MountedRouteGroups`), deliberately excluding
+      `RouteRegister`, `RouteOrganizations`, `RouteAdmin`, Solana/OIDC/2FA/verification; and
+      registration is locked to `AdminBootstrapOnly` (`registrationMode(lockedRegistration)`,
+      `internal/controlplane/service.go`). Both are gated on `SelfHostedPosture()`, and the
+      host-settable toggle ALREADY EXISTS: `WithHostedPosture` flips `locked=false` →
+      `MountedRouteGroups()` returns nil (mount the full AuthKit `DefaultAPI`: register,
+      organizations) AND `registrationMode` opens. **AuthKit itself needs NO change** — it
+      already exposes the selectable route groups and both registration modes
+      (`AdminBootstrapOnly` / `Open`); the posture POLICY + toggle are OpenRails-owned. So the
+      remaining work is NOT building the switch — it's: (a) openrails-saas CONSUMING
+      `WithHostedPosture` (or its `pkg/embedded` equivalent) to run hosted; (b) confirming the
+      `pkg/embedded` composition surface actually exposes it to the host; (c) asserting
+      private standalone stays locked + fail-closed (nothing in core config/env can open it),
+      which also keeps the audit's `/register/availability` enumeration oracle unmountable in
+      standalone.
+- [x] **Global webhook composition seam (de-mount from core; Host-resolver in saas).** The
+      global `/webhooks/:provider` is vestigial in core (per-merchant slug is canonical,
+      #529; the `merchant.Require` guard already fail-closes it). De-mount it from the core
+      standalone + embedded default wiring, but keep `httphandlers.Webhook` + the
+      verify/dispatch primitives as reusable building blocks. Expose a `pkg/embedded` seam
+      so saas can mount a Host→merchant resolver middleware in front (saas #15: resolve
+      tenant from Host, pin the merchant on context, then core verifies with THAT merchant's
+      secret — never infer merchant from an unverified payload). Private mode mounts no
+      global surface.
+- [x] **Composition-seam audit for `pkg/embedded` (feeds saas #12).** Inventory what
+      `pkg/embedded` (`embedded.go`, `gin/`, `authkit`, `controlplane`, `river`) exposes vs
+      what the saas host needs: construct runtime, mount routes/workers, reach the embedded
+      AuthKit from the SaaS signup UI, inject the platform principal/authenticator, inject
+      the Host webhook resolver, flip registration to Open, and seed a platform org with
+      `platform:superadmin`. File each missing seam as its own OpenRails issue (do not let
+      saas work around it locally).
+- [x] **Document the core↔saas boundary (a CORE doc).** Stays-in-core: billing engine,
+      per-merchant surfaces, CLI provisioning, exported handlers + injection seams,
+      registration locked. Lives-in-saas: open registration, platform-operator console, Host
+      webhook resolver, onboarding, meta-billing. Vocab map: core = "merchant"
+      (`pkg/merchant`); saas = "tenant" (saas #0) — same entity.
+
+## Validation
+- `go test ./internal/controlplane ./internal/http/... ./pkg/embedded/...`
+- `go test -tags integration ./internal/http -run TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe -count=1`
+- `go test -tags integration ./tests -run 'Test(EmbeddedHandlers_Surface|HTTPHandlerOptions_WebhooksOnly)$' -count=1`
+- `go test -tags integration ./internal/integrationharness -run 'TestAPIKeyCrossMerchantIsolationHTTP|TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP|TestDelegatedAdminCrossMerchantIsolationHTTP|TestDelegatedSelfTokenSubjectIsolationHTTP|TestMerchantDirectoryRejectsMerchantAdminUserHTTP' -count=1`
+- `task build`
+- Private standalone is unchanged: directory is platform-superadmin gated, registration
+  remains locked by default, and global `/v1/webhooks/:provider` is no longer mounted by
+  standalone or embedded defaults.
+- The hosted seams are code-only opt-ins: `AttachWithOptions(... HostedPosture: true)`
+  opens AuthKit posture for an embedding host, and `RegisterHostWebhookRoutes` lets saas
+  mount Host-resolved webhooks after pinning `merchant.ID`.
+
+## Related
+- saas-repo: #16 (platform-operator console — the `platform:superadmin` consumer of the
+  directory fix), #12 (library-mode parity), #15 (host-routed webhooks), #2/#3
+  (registration + tenant lifecycle — the self-service half).
+- openrails: #534 (unified `Principal` + `RequirePermission` — the gate this reuses), #528
+  (delegated admin), #529 (per-merchant webhooks), #226 (`/v1/platform/*` superadmin surface).
+
+---
+
+# #535: Entitlement reverse-query — billing-enrichment FILTER provider for AuthKit's user directory
+
+**Completed:** yes
+
+OpenRails now provides the reverse entitlement lookup AuthKit needs to filter its user directory by billing state. AuthKit owns the user directory; OpenRails owns billing enrichment/filter data keyed by customer/subject.
+
+## Shipped
+
+- `EntitlementService.ListCustomersWithEntitlement(ctx, entitlement, at, afterID, limit)` returns customer IDs holding an active, non-revoked, non-deleted entitlement window, ordered by customer ID with keyset pagination.
+- SQLC query `ListCustomersWithEntitlement` and partial lookup index `017_entitlements_reverse_lookup_index.up.sql`.
+- Standalone service API: `GET /v1/service/entitlements/:entitlement/customers?cursor=&limit=&at=` gated by `openrails:entitlements:read`, returning `{customers, next_cursor, has_more}`.
+- Embedded hosts can use the Go service method directly instead of raw SQL against `openrails.*`.
+- Downstream release/tag/bump remains cross-repo consumption work for AuthKit #91 and doujins #414; there is no remaining OpenRails core implementation gap.
+
+## Validation
+
+- `go test -tags integration ./tests -run TestListCustomersWithEntitlement_Reverse -count=1`
+- `go test -tags integration ./internal/integrationharness -run TestEntitlementReverseLookupStandaloneHTTP -count=1`
+- `task build`
+
+The integration coverage is real: the DB test runs against Postgres, and the standalone HTTP test boots the real OpenRails standalone server, authenticates with a real AuthKit-minted service token, seeds real entitlement rows, and calls the service endpoint over HTTP.
+
+---
+
+# #534: Unify bearer-auth trust models behind one Principal + RequirePermission; harden shared-handler reuse
+
+**Status:** complete
+
+The public API *looks* like ~7 distinct trust tiers, but that count conflates
+authentication (how you prove identity) with authorization (what you may do). The
+real shape is much smaller; the apparent sprawl is the error-prone part, and it is
+what makes the heavy handler-reuse across tiers risky.
+
+## Problem
+
+Reality is **2 non-bearer mechanisms + 1 bearer channel carrying 4 credential profiles**:
+
+- **Non-bearer (irreducible):** public (no credential); webhooks (HMAC signature — a
+  payment processor cannot present a bearer).
+- **Bearer channel** (`Authorization: Bearer …`), 4 credential profiles:
+  - AuthKit user session/bearer — backs `/me` and `/platform` (+`platform:superadmin`).
+  - OpenRails API key (currently named service token internally) — `/service`
+    (merchant = API-key owner). This is a shared-secret API key, not a signed JWT.
+  - Remote-application self JWT — `/service` machine/app credential signed by a
+    registered issuer with no `delegated_sub`; internally `ResolveRemoteApplication`
+    returns the same `ResolvedServiceToken` shape as API keys today, but the credential
+    type is distinct.
+  - Delegated JWT — `/me` (`openrails:self:*`) and `/admin` (`openrails:merchant:*`,
+    the #528 delegated admin surface; stale `/merchant-admin` wording should be removed).
+    This is user-delegated and has `delegated_sub`.
+  Standalone is MULTI-MERCHANT: the server leaves `configuredMerchant` zero and resolves the
+  merchant PER-CREDENTIAL (API-key owner / delegated issuer). `configuredMerchant` is
+  the EMBEDDED single-merchant binding only. (#528 retired the per-user `openrails:admin`
+  surface — there is no longer a user-bearer `/admin` operator tier.)
+
+So the "7 tiers" are mostly **authorization granularity** (which is good) layered on
+**4 bearer profiles**, where each format grew its own middleware family + per-tier
+permission-gate helper, applied inconsistently per route group:
+`requiredMW` (+ live admin checker); `ServiceCredentialRequired` + `RequireServiceTokenPermission`
+(legacy/internal names for the API-key gate);
+`DelegatedSelfRequired`/`DelegatedPrincipalRequired` + `RequireDelegatedPermission`.
+
+**The risk (ties to #227 / #528):** the same handlers are reused across tiers — the
+admin handlers back operator-admin *and* federated merchant-admin (#528); the user
+handlers back session *and* delegated self. Every handler trusts `r.GetUser()` + the
+pinned merchant, so cross-merchant isolation rests entirely on **four different
+middlewares each pinning the merchant correctly**. One bug in any of them is
+cross-merchant exposure. RLS (`MerchantDBConnMW`, #227) is a backstop, not a boundary
+test.
+
+## Target Model
+
+One authentication boundary resolves **any bearer** into a common, intentionally small principal:
+
+    Principal{ MerchantID, MerchantSource, CredentialType, Subject, Can(ctx, perm) }
+
+(Vocabulary: in OpenRails the data-scoping entity is the **merchant**
+(`pkg/merchant`, `merchant.ID`); the AuthKit/tensorhub equivalent term is **org**. A
+merchant is *owned by* an AuthKit org (`OwnerOrgID`) — a separate axis. "tenant"
+survives only in legacy comments / generic prose below, never as a type.)
+
+Every route then becomes exactly one of: `public` | `webhook(verifySignature)` |
+`RequirePermission("openrails:…")`. The real distinctions (machine vs human vs
+delegated; which merchant; which scope) become **data on the Principal**, not separate
+middleware stacks. The multi-format resolver already exists in embryo —
+`resolveServiceCredential` (`internal/http/routes/routes.go`) already multiplexes
+API-key/service-token / remote-app-JWT / service-JWT, and the merchant-catalog gate
+already does "API-key OR user." Extend that into the unified bearer boundary.
+
+Do not force webhooks into this model. Processor HMAC/webhook authentication is a
+separate non-bearer boundary and should stay outside `Principal`.
+
+### Invariant that makes this safe-or-not
+
+Merchant-binding — the `merchant.ID` that scopes all data access, today pinned per
+request via `merchant.WithID` — differs per credential and MUST be preserved verbatim:
+- user bearer → merchant = ResolveMerchant (URL/config-pinned merchant)
+- API key → merchant = key's owning merchant
+- remote-application self JWT → merchant = the registered remote application's owner org
+  mapped to its OpenRails merchant
+- delegated JWT → merchant = token issuer's merchant
+
+The unified `Principal` carries `MerchantID` + `MerchantSource` (its provenance) +
+`CredentialType` (`api_key`, `remote_application`, `delegated_user`, `user_session`).
+The resolver sets it per format. Centralizing this is the entire point — **one
+place to get merchant-pinning right instead of four.** Webhooks + public stay
+separate by design.
+
+### Second invariant: where permissions come from also differs
+
+The gate becomes uniform (`RequirePermission`), and the permission STRINGS are already
+one catalog today (the colon-form `controlplane.Perm*` constants). But a principal's
+permission SET/evaluator is obtained differently per credential, and the resolver must
+preserve that when it populates `Principal.Permissions` or `Principal.Can(ctx, perm)`:
+- API key (service token internally) → permissions come from server-side API-key
+  resolution; the bearer itself is a shared secret, not a self-verifying JWT.
+- Remote-application self JWT → signature/issuer/audience prove the application,
+  but authority comes from stored AuthKit/OpenRails remote_application grants/roles,
+  not from self-claimed permissions in the JWT.
+- Delegated JWT → permissions are carried in the signed token / delegated grant model.
+- operator-admin / platform-superadmin → permissions are evaluated LIVE against the
+  caller's own org roles at request time (#312 live authority), NOT from a claim.
+
+Do NOT flatten operator-admin/platform into a static token claim — that would silently
+drop the live-authority guarantee. Prefer `Principal.Can(ctx, perm)` or an explicit
+permission-source field over a bare static `[]string` unless the resolver has already
+performed the live authority lookup.
+
+## Phases (smallest / safest first)
+
+### Phase 1 — alias cleanup (cheap, no behavior change)
+- Delete the **dead singular** `POST /v1/service/credits/hold/:id/{capture,release}`
+  routes (`internal/http/routes/ginroutes/routes.go`). The SDK (`remote.go`) and all
+  consumers use only the plural `holds/:id/…`; nothing first-party hits the singular.
+- Document the **intentional** `drift/refresh` ≡ `drift/reconcile-all` alias (both →
+  `AdminRefreshCatalogDrift`, `registerCatalogActionRoutes` in
+  `internal/http/routes/routes.go`) so it does not read as an accident.
+- (optional) tiny test asserting any retained alias maps to the same handler + same
+  permission gate.
+
+### Phase 2 — cross-merchant isolation test suite (cheap, high value, no prod-code change)
+HTTP-boundary tests that pin the reuse invariant BEFORE the refactor. Phase 3 must not
+start until these are green:
+- delegated admin token for merchant A hitting
+  `/v1/admin/users/{B-user}/…` → fail closed (404/forbidden or empty isolated profile,
+  depending on the handler contract).
+- API key for merchant A → cannot read/mutate merchant B's payer on `/v1/service/*`.
+- remote-application self JWT for merchant A → cannot read/mutate merchant B on
+  `/v1/service/*` or other machine surfaces.
+- self token → can only act on its own `delegated_sub` (no `:user_id` reachable).
+- operator-admin in merchant A → cannot touch merchant B.
+These become the regression net for Phase 3 and any future refactor.
+
+### Phase 3 — bearer unification (the simplification; reviewed effort)
+- Introduce `Principal` + a single `Authenticate(bearer) → Principal` resolver
+  (extending `resolveServiceCredential` to the user + delegated formats).
+- Replace the per-tier permission helpers with one `RequirePermission(perm)` gate
+  calling `Principal.Can(ctx, perm)`.
+- Migrate route groups one at a time behind the new gate; keep RLS as backstop.
+- **Collapse `/me` and `/self` into ONE path — decision: keep `/v1/me/*` as the
+  unified surface name.** `/v1/me/*` (AuthKit user-session bearer, embedded) and
+  legacy `/v1/self/*` (delegated JWT, standalone) were the SAME handlers + the SAME
+  `openrails:self:*` permission catalog; they differ ONLY in credential profile,
+  which is now data on the `Principal` (set by the injected authenticator), never
+  the URL. So they are ONE migration, not two: mount the self-service handlers once
+  under `/v1/me/*`, union `/me`'s few unique routes (notifications, `stripe/portal`,
+  my-products) onto it, then retire `RegisterUserRoutes`' `/me` group AND the
+  `/self` path. The `openrails:self:*` permission strings are unchanged (path name ≠
+  permission name). Splitting the surface by deployment mode (embedded vs standalone)
+  was the wrong axis — mode is a construction-time auth concern, not a URL.
+- **Embedded default authenticator (so raw-Bearer simplicity survives the
+  collapse).** `pkg/embedded/gin/self.go:57` currently HARD-REQUIRES a host
+  `DelegatedAuthenticator` (errors if nil) — that friction is exactly why cozy-art
+  still uses the raw-JWT `/me`. Add a built-in embedded authenticator that validates
+  the AuthKit Bearer with OpenRails' own embedded authprovider (already in the
+  embedded mux chain) → `Principal{Subject: user, MerchantID: configured,
+  MerchantSource: configured, Permissions: full openrails:self:*}`. Then the unified
+  `/v1/me/*` accepts the SAME raw AuthKit Bearer cozy-art sends today with ZERO host
+  code, and the old `/me` group is genuinely deletable. Hosts wanting scoped /
+  short-TTL browser tokens still override with their own `DelegatedAuthenticator`.
+  Net for cozy-art: same bearer, same path name, no forced token-exchange.
+- **Consolidate N-way handler registrations once the gate is uniform.** The stale
+  `ginroutes/product_access.go` registrar is deleted: product access now lives only
+  where the canonical surfaces mount it (`/me`, `/service`, `/admin`) with the
+  unified `RequirePermission` gates. Merchant configuration keeps its two URL contracts
+  for now (`/service/merchant-configuration` for API keys and
+  `/admin/merchant-configuration` for delegated merchant admins), but both use the
+  same `openrails:merchant:configuration:{read,write}` permissions, so the
+  authorization meaning is no longer split by surface.
+- Eng-review before starting — security-critical.
+
+## Tasks
+
+### Phase 1 — alias cleanup (cheap, no behavior change)
+- [x] Delete singular `POST /v1/service/credits/hold/:id/{capture,release}` (`ginroutes/routes.go`); keep plural `holds/:id`
+- [x] Make the `drift/refresh` ≡ `drift/reconcile-all` shared-handler intent explicit in a comment
+- [x] `go build ./...` + service-route tests green
+
+### Phase 2 — cross-merchant isolation suite (no prod-code change)
+`internal/integrationharness/cross_merchant_isolation_test.go` (//go:build integration).
+RLS-real: the server runs under `StartStandalone` connected as `openrails_app`
+(NOBYPASSRLS), so real per-merchant RLS enforces — not just the in-app predicate.
+Fixtures are seeded via the super pool.
+- [x] Harness: two merchants A/B + a payer (`ProvisionOwnedMerchant` + `MintServiceToken`)
+- [x] API key / service token (A) → `/v1/service/*` cannot read merchant B's payer balance (green, real server+DB)
+- [x] remote-application self JWT (A) → `/v1/service/*` cannot read/mutate merchant B;
+      prove stored remote_application authority, not self-claimed JWT permissions, is what
+      grants access. Green in real standalone+RLS HTTP suite; includes deny case for
+      a self-token that claims read/write permissions without stored authority.
+- [x] delegated admin token (A) → `/v1/admin/users/{B-user}/…` isolated — building block
+      found: `authcore.MintDelegatedAccessToken(signer, {Issuer, Audiences:["openrails"],
+      DelegatedSubject, Permissions:["openrails:merchant:billing:read"]})` signed by a
+      `RegisterRemoteApplication` issuer (the verifier trusts remote_application issuers, #481);
+      harness helper added. ASSERTION SHAPE: `GetAdminUserBillingProfile` returns
+      200 with an EMPTY profile (not 404) for an unknown user, so the test is "A sees an empty
+      profile / B sees a populated one" — seeded through real service HTTP deposit under B.
+- [x] self token → only its own `delegated_sub`; no `:user_id` reachable — same delegated-mint helper
+- [x] delegated `/v1/admin` (the #528 delegated admin surface) cross-merchant — same
+      delegated-mint dependency as `/me`. CORRECTION: standalone is MULTI-MERCHANT by design.
+      `ginboot.NewServer` leaves `configuredMerchant` ZERO, so the server resolves the merchant
+      PER-CREDENTIAL (API-key owner / delegated token issuer) — proven by THIS suite serving
+      merchants A and B through one standalone server. `configuredMerchant` is the EMBEDDED
+      single-merchant binding only (`embed.Options.Merchant`); it never pins standalone. (#528
+      retired the per-user operator `/admin`; `/admin` IS the delegated multi-merchant surface now.)
+- [x] API-key case green; the cornerstone multi-merchant surface is pinned
+- [x] Phase 2 suite green with real standalone HTTP + `openrails_app` RLS:
+      `go test -tags integration ./internal/integrationharness -run 'TestAPIKeyCrossMerchantIsolationHTTP|TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP|TestDelegatedAdminCrossMerchantIsolationHTTP|TestDelegatedSelfTokenSubjectIsolationHTTP' -count=1`
+- [x] Full standalone denial test: a real AuthKit user holding per-merchant
+      `openrails:admin` cannot reach `/v1/admin/merchants/:id`, proving the
+      global merchant directory is platform-only in private OpenRails.
+
+### Phase 3 — bearer unification (in progress)
+- [x] Design `Principal{MerchantID, MerchantSource, CredentialType, Subject, Can(ctx, perm)}` + first resolver adapters for service credentials and delegated credentials
+- [x] Preserve both invariants in migrated groups: per-credential merchant-binding + live-vs-claim permission source
+- [x] One `RequirePermission(perm)` gate calling `Principal.Can(ctx, perm)` for migrated Gin route groups
+- [x] Rename public/operator terminology from service-token to API-key throughout
+      docs, CLI/help, route comments, and response fields where feasible. Keep
+      existing internal code names only as temporary compatibility/migration labels
+      until the auth boundary refactor can safely rename them. Completed for public
+      docs/comments/CLI output touched by this issue; internal `ServiceToken*`
+      symbols, AuthKit option names, and compatibility error strings remain unchanged.
+- [x] Migrate `/service`
+- [x] Collapse `/self` + `/me` into ONE `/v1/me/*` surface (decision: `/me` is the unified name; `openrails:self:*` perms unchanged): mounted the self-service handlers once under `/v1/me/*`, unioned `/me`'s unique routes (notifications, `stripe/portal`, my-products), retired `RegisterUserRoutes`' `/me` group AND the `/self` path
+- [x] Embedded default authenticator: relaxed `pkg/embedded/gin/self.go` (stop hard-requiring a host `DelegatedAuthenticator`); added built-in AuthKit-Bearer→configured-merchant full `openrails:self:*` delegated principal so unified `/v1/me/*` works zero-config embedded; host override still available for scoped/short-TTL browser tokens
+- [x] Migrate `/admin`
+- [x] Migrate `/admin/merchants`
+- [x] Migrate `/platform`
+- [x] Consolidate N-way handler registrations now that the gate is uniform: deleted stale `ginroutes/product_access.go`; product-access registrations now live only on the canonical surface route tables, and merchant-configuration now uses the same `openrails:merchant:configuration:{read,write}` gates on `/service` and `/admin`
+- [x] Delete superseded middleware families (admin-checker path, old `RequireServiceTokenPermission`/`RequireDelegatedPermission` gates; keep the authentication middlewares that still resolve credentials and attach Principal)
+- [x] Do not start this refactor until the full Phase 2 isolation suite is green.
+- [x] Phase 2 suite green before + after; per-tier auth tests still pass for migrated surfaces
+
+### Phase 3 — review follow-ups (eng-review)
+- [x] **SECURITY (cross-merchant):** `/v1/admin/merchants/*` gates on `RequirePermission(PermAdmin)`, but
+      `openrails:admin` is in `OperatorRolePermissions` (EVERY merchant operator holds it in their own
+      org), and the handlers act on the arbitrary `:id` with NO `owner_org(:id) == caller-org` check, on
+      the GLOBAL non-RLS `merchants` table → a merchant-A operator can suspend/delete/export/rotate the
+      credentials of merchant-B. A single-merchant-era gate (old `#312`) that became a multi-merchant
+      hole; pre-existing, the migration preserved it.
+      **DECISION: platform-only.** The merchant directory is platform authority in BOTH modes. Fix: gate
+      on `openrails:platform:superadmin` (`UserSessionPlatformPrincipalRequired` + `RequirePermission(PermPlatformSuperadmin)`).
+      No bootstrap change needed — in private standalone, provisioning is CLI-driven (`merchant_cli.go` /
+      `bootstrap_apply.go` / `mint_merchant_api_key.go`) and the HTTP directory becomes closed-by-default
+      (no platform-superadmin holder), which is correct; in saas the platform team holds it. `openrails:admin`
+      = per-merchant authority, never the directory. Self-service registration is a SEPARATE saas-only
+      surface, not this directory; per-merchant credential self-management stays on the delegated
+      `/v1/admin/secrets/*` surface.
+- [x] `Principal.Subject` = the acting END-USER only (`sub` native / `delegated_sub` delegated); EMPTY
+      for machine credentials (service token / remote-app). Stop overloading it with `OwnerOrgSlug` for
+      service principals — `CredentialType` already distinguishes native vs delegated. Document the
+      contract before any handler reads `Principal.Subject`, so an org slug is never mistaken for a user id.
+- [x] Symmetric cross-perm denial: `principalFromDelegated.can` explicitly returns false for
+      non-delegated (service/operator/platform) perms, mirroring the service side's `IsDelegatedPermission`
+      deny (today the delegated side relies only on the verify-time catalog gate).
+- [x] Principal-level unit test: cross-perm denial BOTH ways — a service principal fails a delegated-perm
+      gate, a delegated principal fails a service/operator-perm gate, and a user-session fails both.
+
+## Validation
+- Phase 2 cross-merchant suite green BEFORE and AFTER Phase 3.
+  - Current Phase 2 gate: `go test -tags integration ./internal/integrationharness -run 'TestAPIKeyCrossMerchantIsolationHTTP|TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP|TestDelegatedAdminCrossMerchantIsolationHTTP|TestDelegatedSelfTokenSubjectIsolationHTTP' -count=1`
+  - Existing remote-application harness gate: `go test -tags integration ./embed -run 'TestStandaloneRemoteApplicationAuth|TestMerchantControlBoundary' -count=1`
+- Existing per-tier auth tests still pass (no permission-semantics change).
+- No new public surface; per-credential merchant-binding semantics identical.
+
+**Latest Phase 3 validation (2026-06-19):**
+- `go test ./internal/http/routes/ginroutes ./pkg/embedded/gin ./internal/http/middleware/ginmw`
+- `go test ./internal/http/middleware/ginmw ./internal/http/routes/ginroutes ./internal/http ./pkg/embedded/gin ./pkg/embedded`
+- `go test ./internal/http/routes`
+- `go test ./internal/http`
+- `go test ./pkg/embedded`
+- `go build ./...`
+- `go test ./...`
+- `go test -tags integration ./internal/http -run 'TestPlatformAPI_GateSearchAndMetrics|TestMerchantDirectoryAPI_IsPlatformOnly' -count=1`
+- `go test -tags integration ./embed -run 'TestStandaloneRemoteApplicationAuth|TestMerchantControlBoundary' -count=1`
+- `go test -tags integration ./internal/integrationharness -run 'TestMerchantDirectoryRejectsMerchantAdminUserHTTP|TestAPIKeyCrossMerchantIsolationHTTP|TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP|TestDelegatedAdminCrossMerchantIsolationHTTP|TestDelegatedSelfTokenSubjectIsolationHTTP|TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant' -count=1`
+- Review verification rerun (2026-06-19):
+  - `go test -tags integration ./internal/integrationharness -run 'TestMerchantDirectoryRejectsMerchantAdminUserHTTP|TestAPIKeyCrossMerchantIsolationHTTP|TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP|TestDelegatedAdminCrossMerchantIsolationHTTP|TestDelegatedSelfTokenSubjectIsolationHTTP|TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant' -count=1`
+  - `go test -tags integration ./tests -run 'Test(EmbeddedHandlers_Surface|HTTPHandlerOptions_WebhooksOnly)$' -count=1`
+
+## Related
+- #528 (delegated-admin convergence — same admin surface this builds on)
+- #227 (RLS merchant scoping — the backstop these tests + the unified resolver protect)
+
+---
+
+# #525: Use API-key terminology in bootstrap authority seeding
+
+**Completed:** yes
+
+OpenRails bootstrap should use `api_keys` for long-lived machine credentials instead of exposing AuthKit's legacy storage terminology.
+
+AuthKit issue #86 owns the primitive and manifest alias. OpenRails owns the bootstrap YAML/docs/examples that seed OpenRails authority through AuthKit.
+
+Target bootstrap shape:
+
+```yaml
+auth:
+  orgs:
+    - slug: local-stack
+      api_keys:
+        - name: local-stack-operator
+          permissions:
+            - openrails:admin
+            - openrails:catalog:write
+          resources:
+            - kind: openrails.merchant
+              id: local-stack
+          output:
+            file: ./.secrets/openrails/local-stack-operator.key
+```
+
+Prefix direction:
+- AuthKit #86 now exposes the public `APIKeyPrefix` name while preserving the existing `<prefix>_st_<key_id>_<secret>` resolver mechanics.
+- OpenRails still uses the existing OpenRails brand prefix/wire format for generated keys until the deeper AuthKit key-format migration is done.
+- Prefix is not the merchant/org/user and has no authorization meaning.
+- Do not put merchant identifiers or secrets in the prefix.
+
+**Tasks:**
+- [x] Update bootstrap parsing/examples from legacy shared-secret credential wording to `api_keys`.
+- [x] Use AuthKit's `api_keys` manifest/provisioning shape directly; no OpenRails compatibility shim remains.
+- [x] Update `config/merchants*.yaml`, docs, CLI text, and tests to say API key.
+- [x] Reject the legacy field instead of carrying an undocumented alias.
+- [x] Ensure generated outputs use `.key` or similarly clear filenames, not `.token`.
+- [x] Tests: example bootstrap manifest with `api_keys` parses and produces the same AuthKit provisioning request.
+
+---
+
+# #524: embedded merchant configuration startup parity
+
+**Completed:** yes
+
+DONE 2026-06-19: embedded startup now has parity with standalone merchant-config seeding. `embed.Options.MerchantConfiguration` accepts the public SDK merchant configuration shape, registers the bound merchant first, then seeds `merchant_configurations` through `Runtime.Client().SetMerchantConfiguration`. Public `openrails.MerchantConfigurationInput` now includes `Profile`, and both remote and embedded client adapters write profile plus delegated wasted-spend windows.
+
+Embedded hosts should be able to seed the same merchant-scoped configuration that standalone/SaaS OpenRails seeds through `openrails push-merchant-config`.
+
+Original gap: `merchant_configurations.config.profile` is the correct home for sender/display branding, and the service HTTP route already supported it, but `openrails.Client.SetMerchantConfiguration` only exposed delegated wasted-spend windows and `embed.New` only registered the merchant row.
+
+Lazy plan:
+- [x] Add profile to the public `openrails.MerchantConfigurationInput`.
+- [x] Wire profile through remote and embedded `SetMerchantConfiguration`.
+- [x] Add one `embed.Options.MerchantConfiguration` field so embedded startup can seed all current merchant-configuration fields after the merchant slug is registered.
+- [x] Test embedded startup profile seeding and SDK conformance for profile writes.
+
+---
+
+# #513: admission-and-holds-redis-simplification
+
+**Completed:** yes
+**Status:** DONE 2026-06-18. The whole admission path now runs on the Redis `spendgate` + the #512/#514 ledger; the Postgres-with-locks machinery is gone. Shipped: (A) budget windows moved off `budget_window_state`/`budget_inflight_holds` onto the Redis limiter and those tables dropped (migration 007); `internal/modules/holds` deleted, `internal/modules/budgets` gutted to `types.go`. (B) cap taxonomy collapsed to TWO symmetrical spend limits via #517 (`PayerSpendLimits` platform/tier + `InvokerSpendLimits` payer/scope); the dead `spend_policy.go` enforcement + `money_spend_limits` removed (B1, migration 005). (C) balance cache removed after #512 Phase H — admit does one O(1) `GetAdmissionCapacity` read; policy config stays cached (15-min TTL, tier-only; invoker grants read LIVE). (D) one atomic admit/capture/release Lua gate wired into `admitter.go` + `pkg/service`. (E) capture writes the durable #512 ledger off the hot path, no outbox. (F) money_windows credit-window API + table deleted (migration 012). Windows are fixed-only (#517 removed cadence). DROPPED as unneeded (do NOT build later): the `held`-gauge reconciliation sweep and the optional "max concurrent in-flight $" cap (both noted inline). The dead throughput/concurrency surface was removed (fleet fairness = consumer scheduler's job). `go build ./...` + `go vet -tags integration ./...` clean. Remaining tail is outside this repo: tensorhub SDK lockstep (#517 already did the rename + Admit rewire; verify build/tests against local openrails).
+**Update 2026-06-18:** balance cache REMOVED after #512 Phase H made balance an O(1) account-counter read. Admit now does a direct `GetAdmissionCapacity` point lookup (balance + held + billing mode + credit limit) and then the same Redis `spendgate` EVAL. Policy config cache stays. There is no `admission.BalanceCache`, no runtime field, and no `CachedBalance` spendgate input anymore.
+
+The north star is decision 8 of #512 (the five-step model: balance-check → Redis hold → capture actual → release; failures record wasted-spend in Redis). This issue generalizes that to the *whole* admission system, including budget/spend caps and rate windows.
+
+## Why (the current hot path is heavy and muddled)
+
+Traced in `internal/modules/admission/admitter.go` `Admit` — one DELEGATED admit does:
+1. `money.GetTier` → Postgres read.
+2. `policies.GetTierPolicy` → Postgres read (cacheable).
+3. FX convert estimate → policy currency (`internal/integrations/fx`).
+4. wasted-spend gate → **Redis** (`WastedSpendGuard` on `ratelimit.Limiter`) — already efficient ✅.
+5. `buildBudgetScopes` → Postgres reads of `budget_policies`.
+6. `budgets.ReserveScopes` → `budgets.Reserve` → **Postgres tx, `budget_window_state` locked `FOR UPDATE`, INSERT `budget_inflight_holds`**.
+7. `money.AuthorizeAndHold` → **Postgres tx, `customers` row locked `FOR UPDATE`, derive balance by SUM(`money_blocks`)+`money_windows`** → then the Redis hold.
+
+So one admit = ~3 Postgres reads + **two Postgres write-txns each taking a `FOR UPDATE` row lock**; capture (`CaptureAuthorized`/`spendBalanceThenOwedTx` + `budgets.CaptureByCoords`) adds more locked txns. The two row locks (customer row + window-state row) serialize a payer's concurrent requests — the throughput ceiling.
+
+Two structural problems:
+- **Policy and accounting are muddled.** Policy = read-mostly config (what the caps/tiers are: `money_settings`, `money_spend_limits`, `budget_policies`, `tier_policies`, `tier_schedules`). Accounting = hot counters (how much used this window: `budget_window_state`, `budget_inflight_holds`, balance derivation, the Redis hold, the Redis wasted-spend). Accounting belongs in Redis; policy belongs in a versioned in-memory cache. Today budget accounting is the one axis still in Postgres-with-locks while throughput + wasted-spend already ride Redis.
+- **The cap taxonomy has ~4 overlapping shapes** for "max $X over window W for scope S": `money_settings.max_spend_per_day/month`, `money_spend_limits` (per invoker), `budget_policies` (hierarchical scopes), `tier_policies` (per-tier windows). There also appear to be TWO generations of spend-cap code: the newer `budget_policies`/`tier_policies` path in `admitter.go` and an older `money_settings`/`money_spend_limits` path in `spend_policy.go` (`CheckSpendAllowed`/`getSpendLimit`).
+
+## Guiding principles
+
+1. **Policy is cached config; accounting is Redis counters.** The hot path does one O(1) Postgres capacity/config read on misses, but no Postgres locks or write-side budget reservations.
+2. **One windowed-cap primitive.** Reuse the `ratelimit.Limiter` fixed-window Redis counter that throughput + wasted-spend already use; every cap (throughput / budget-$ / wasted-$) becomes the same counter.
+3. **Atomicity without locks.** Admit and capture are each a single Redis `EVAL` (Lua), atomic by Redis's single thread — no `FOR UPDATE`, no races.
+4. **Bounded over-admission is acceptable** (decision 8, #512): Redis/cache loss relaxes caps temporarily; the worst case is bounded over-spend, never ledger corruption. The durable truth is the #512 ledger, written off the hot path.
+5. **Simplify aggressively, but map before cutting** — confirm each retired mechanism is dead/covered before deleting.
+
+## Metadata
+
+- Category: architecture
+- Status: done
+- Passes: true
+
+## Work breakdown
+
+### A. Unify windowed caps onto the existing Redis limiter
+- [ ] Move money-budget windows off `budget_window_state` + `budget_inflight_holds` (Postgres, `FOR UPDATE` per request) onto `ratelimit.Limiter`. Reserved (holds) + used (captured) become two counter contributions per (scope, window) key, TTL = window. (touch: `internal/modules/budgets/*`, `internal/modules/admission/admitter.go`)
+- [ ] Delete `budgets.Reserve/ReserveScopes/Capture/Release/CaptureByCoords` locked-tx machinery once windows are Redis-backed.
+- [ ] Drop tables `budget_window_state` and `budget_inflight_holds` (migration); window history that reporting needs comes from the durable spend events (#512 ledger), not these.
+
+### B. Collapse the cap taxonomy to one shape
+What the "spend-policy cap" IS (for the record): a TIME-WINDOWED ceiling on cumulative ACTUAL spend — per-customer max spend per UTC calendar DAY + per MONTH (`money_settings.max_spend_per_day/month`), the same per-invoker (`money_spend_limits`), plus an arrears OUTSTANDING-owed ceiling (deny codes `daily_cap`/`monthly_cap`/`invoker_*_cap`/`outstanding_cap`). It is NOT a concurrent-in-flight-hold cap — it bounds spend velocity, orthogonal to the balance gate ("even with $10k, this API key can't burn >$100/day").
+VERIFIED DEAD 2026-06-17: the `spend_policy.go` enforcement (`AuthorizeSpend` → `CheckSpendAllowed` → `evaluateSpend`) has ZERO live callers — no HTTP route, nothing. `admitter.Admit` never reads it; day/month/outstanding caps are now expressed via `budget_policies`/`tier_policies` windowed scopes. `money_spend_limits` is still WRITTEN (`SetSpendLimit` API wired) but enforced nowhere on the hot path.
+- [ ] One policy shape: a list of `{scope, window, limit}`, scope ∈ {payer, invoker, role, tier}; effective policy = merge of matching scopes, DENY if any window over. Tiers just *name* a policy. Day/month become fixed-calendar windows; outstanding-owed stays a balance-side ceiling.
+#### B1. DECIDED 2026-06-17 (Paul): delete the dead spend-limit feature in full. It is a MIX of dead + live-shared, so surgical, not a wholesale file delete:
+- [x] Dead-only logic — DELETED 2026-06-17: `pkg/service/spend.go` `AuthorizeSpend`/`AuthorizeSpendRequest`/`AuthorizeSpendResult` + `SetSpendLimit` (service wrapper); `internal/modules/money/spend_policy.go` `CheckSpendAllowed`, `evaluateSpend`, `capInput`, `CapResult`, `dayWindow`, `monthWindow`, `SetSpendLimit`, `getSpendLimit`, `spentInWindow`, `activeHoldsTotal`, `ActiveHeldForCurrency`, and the cap deny-codes `DenyInvokerDailyCap`/`DenyInvokerMonthlyCap`/`DenyDailyCap`/`DenyMonthlyCap`/`DenyOutstandingCap`.
+- [x] PRESERVED the live-shared bits 2026-06-17: kept `BillingModePrepaid`/`BillingModeArrears` consts + `SpendDecision` in `spend_policy.go` (no relocation needed — the file still hosts the live account-settings code). `SpendDecision` trimmed to `{Allowed, HardStop, DenyCode}` — the only fields `authorize.go`/`admitter.go` set or read; dropped `Caps`/`AlertCode`/`RetryAfterSeconds`/`NextAllowedAt`.
+- [x] `pkg/service/spend.go` `DenyInsufficientBalance` REMOVED 2026-06-17 (had only test callers; live deny is `money.DenyInsufficientBalance`). Updated `authorize_and_hold_integration_test.go` to reference `money.DenyInsufficientBalance`.
+- [x] DONE 2026-06-17 (unblocked once the #512/#514 agent finished): added forward migration `005_drop_money_spend_limits.up.sql` (`DROP TABLE IF EXISTS openrails.money_spend_limits`, mirroring their `004_drop_single_entry` pattern; `001` baseline + the `merchant_aware_schema_test.go` table list left intact, same convention they used for `money_blocks`/`money_transactions`).
+- [x] DONE 2026-06-17 — removed the `money_spend_limits` queries from `money_accounts.sql` (`Get/Upsert`) + `merchant_lifecycle.sql` (`Count/Purge`) and ran `sqlc generate` (vet DB built from migrations via `scripts/sqlc-vet-db.sh` on the compose Postgres). Dropped the gen methods/structs (`Get/Upsert MoneySpendLimit`, `Count/Purge MerchantRowsMoneySpendLimits`, `gen.OpenrailsMoneySpendLimit`) + the already-orphaned `SumSpentInMoneyWindow`. NOTE: the same regen SYNCED the #512/#514 agent's stale staged gen (`grants.sql.go`/`ledger.sql.go`/`money_ledger.sql.go`/`models.go`) to their current `.sql` — whole-repo `go build` + integration-tag `go vet` green across grants/ledger/money/admission/merchants/service, so the sync is correct (it's what CI's `sqlc generate + diff` enforces).
+- [x] Removed the `money_spend_limits` cascade entries from `internal/merchants/delete.go` (the list + count + purge switch arms) 2026-06-17. The `merchant_lifecycle.sql` query removal + regen is folded into the STAGED sqlc pass above.
+- [x] Deleted the dead tests 2026-06-17: `internal/modules/money/spend_policy_eval_test.go`, `spend_policy_integration_test.go`; pruned the two dead `AuthorizeSpend` funcs in `pkg/service/spend_integration_test.go` (kept `TestGetCreditAccount_Snapshot`). `money_in_integration_test.go`/`reconcile_integration_test.go` had NO dead refs (the original note was off). Re-homed the shared `strptr` helper (was defined in the deleted `spend_policy_integration_test.go`, used by 6 money tests) to money `main_test.go`.
+- [x] No HTTP route exposes `SetSpendLimit`/`AuthorizeSpend` (re-verified — only test callers).
+- [x] After removal: `go build ./...` + integration-tag `go vet` clean 2026-06-17. The per-invoker spend cap it provided is covered by `budget_policies` scope=invoker windows (Phase A/B unified policy).
+- [~] DROPPED 2026-06-18 (do NOT build): a "max concurrent in-flight $" cap is explicitly NOT openrails' job — fleet fairness/concurrency belongs to the consumer's scheduler (see protection 2; tensorhub WFQ), and the openrails throughput/concurrency surface was already deleted. Concurrency stays implicitly bounded by available balance. Recorded here so it isn't re-built as a "gauge window."
+
+### C. Cache policy config; read balance directly
+- [~] Balance cache REMOVED 2026-06-18 per Paul after #512 Phase H: balance/held are O(1) account-counter reads, and admission uses one `GetAdmissionCapacity` point lookup instead of a staleness-tolerant cache.
+- [x] Policy cache: load `tier_policies`/`budget_policies`/tier ladders into memory, invalidate on the existing `policy_version`/`schedule_version`/`config_version` bumps. (These version columns already exist — they were built for this.)
+- [ ] Tier resolution from cache, not `money.GetTier` Postgres read; tier graduation stays a background recompute (on deposit), it just selects the policy.
+
+### D. One atomic admit, one atomic capture (Lua)
+BUILT + INTEGRATION-TESTED 2026-06-17 (8/8 green against real Redis via testcontainers): `internal/modules/admission/spendgate/` (`policy.go` + `gate.go` + `gate_integration_test.go`) — the `{scope,cadence,duration,limit}` model + `EffectiveWindows` merge + 3 `redis.NewScript` scripts (admit/capture/release) + `Gate.Admit/Capture/Release/HeldAmount`. Decisions baked in (Paul, 2026-06-17):
+- **Direct O(1) account balance, not Redis `:bal`.** `Admit` takes the caller's ledger snapshot as `AccountBalance` ARGV; the affordability gate is `accountBalance − held − cost ≥ −creditLimit`. Only the shared `held` gauge + per-request `hold:<reqID>` + window counters live in Redis. NO `:bal` key, NO balance-refresh job/cache.
+- **Anchored, estimate-based windows.** Cadence = session|fixed (per-user-anchored, #337); the Lua stores the per-(payer,scope,window) anchor in Redis and buckets relative to it (`floor((now−anchor)/dur)` for fixed; session = one key, TTL=dur set at open, never refreshed). Windows count the ESTIMATE; **capture does NOT true the window up to actual** (only the caller-side balance/#512 ledger trues up); **release frees the estimate from the windows**. Tested: prepaid + arrears-credit floor, fixed-window reset across a bucket boundary (fake clock), idempotent replay, multi-scope deny-on-any, capture-keeps-window vs release-frees-window.
+- **Wire contract:** clean break + lockstep (Paul) — the eventual admit/capture/release HTTP+SDK shapes may change freely; tensorhub + embedders move in lockstep.
+`held`-gauge reconciliation sweep: DROPPED 2026-06-18 (do NOT build) — the Redis `held` gauge can drift on a crash/EVAL-loss, but per decision 8 (#512) bounded over-admission is acceptable and the durable #512 ledger is the truth, so a periodic reconciliation sweep is unnecessary complexity. Cadence also no longer exists (#517 made windows fixed-only), so the loader carries no cadence. DONE since the original draft: Postgres→`spendgate.Policy` loader (tier_policies + budget_policies → scoped windows), direct O(1) admission capacity read, and the admitter/`Service.{Admit,CaptureHold,ReleaseHold}` rewire that deletes `internal/modules/holds` + the `budgets` Postgres machinery + `money.AuthorizeAndHold`'s capacity read.
+
+**WINDOW-ANCHORING GAP — found AND RESOLVED 2026-06-17.** The original draft `spendgate` bucketed windows by GLOBALLY-ALIGNED time, but the live budgets engine (`internal/modules/budgets/budgets_service.go`, #337) uses PER-USER-ANCHORED windows (each opens at the payer's first charge; staggered resets; 5h session / 7d fixed — SHIPPED behavior tensorhub/cozy-art rely on). FIXED in the rebuilt `gate.go`: the Lua stores the per-(payer,scope,window) anchor in Redis and buckets relative to it (`floor((now−anchor)/dur)` for fixed; session = one TTL-bounded key opened at first reserve). The integration test exercises the fixed reset across a bucket boundary. Cadence (session|fixed) maps straight from `BudgetWindowPolicy.Cadence`; the loader (TODO) carries it through. Per Paul, windows are estimate-based (no per-bucket capture true-up), which is what made the faithful port tractable. Until the wire lands, the budgets Postgres path stays the live engine.
+
+SUBSUMES (hard-cut: delete on switch-over, do NOT coexist): `spendgate` replaces THREE current mechanisms that today split one decision — (1) the live Redis hold store `internal/modules/holds` (`Place`/`Release`/`ActiveAmount`, used by `pkg/service/service.go` + `admission.go`); (2) the Postgres money-capacity calc in `money.AuthorizeAndHold`; (3) the `budgets` Postgres window path (Phase A). All three collapse into the one Lua gate. After the cut, `internal/modules/holds` is deleted and `AuthorizeAndHold`'s capacity read is gone — there must NOT be two Redis-hold implementations (`holds.Store` + `spendgate`) running side by side.
+- [x] Admit = one `EVAL`: check `account_balance − Σ holds ≥ cost` AND every window `used + reserved + cost ≤ limit`; if all pass, place the request-id hold + bump reserved. One Redis round trip after the O(1) DB capacity/config reads.
+- [ ] Capture = one `EVAL`: move reserved→used by ACTUAL cost, drop the hold, and enqueue the durable spend (off hot path). 
+- [ ] Fail/release = one `EVAL`: drop hold + reserved, bump the wasted-spend counter for abuse.
+- [x] Holds in SHARED Redis keyed by the provider/tensorhub request-id (cross-instance agreement); no balance cache remains.
+
+### E. Durable-spend seam (to #512, off the hot path)
+RESOLVED 2026-06-17 (Paul): crash-loss of in-flight captures is acceptable — NO durable outbox. Keep it simple.
+- [x] Capture releases the Redis hold and calls the #512 durable ledger writer (`CaptureAuthorized`). No balance cache or background drainer remains; no at-least-once outbox/WAL was added.
+
+### F. money_windows (prepaid bulk reservation) — DELETE (verified zero consumers)
+VERIFIED 2026-06-17: `money_windows` is API-exposed (#335: `POST /v1/service/credits/windows`, `/:id/refill`, `/:id/close`, settle) but NO consumer uses it — grep of tensorhub, doujins, cozy-art (incl. cozy-art's embedded in-process calls) found zero `OpenWindow`/`credits/windows` usage. Under the hard cut it's a dormant public API → remove it entirely, don't re-express it.
+- [x] DONE 2026-06-18: deleted the credit-window API end to end — routes (`credits.POST /windows|/settle|/:id/refill|/:id/close`), handlers (`service_credit_window.go`), service (`pkg/service/windows.go`), money methods (`internal/modules/money/windows.go`), SDK interface + DTOs (`client.go`/`remote.go` `OpenWindow`/`SettleWindowItems`/`RefillWindow`/`CloseWindow` + `CreditWindow`/`OpenWindowRequest`/`WindowSettle*`), and the embed transcription (`embed/client.go` window block). Also removed the now-dead `HoldExpiryWorker` (durable money-hold sweep — holds are Redis-only per #505): `internal/river/jobs_hold_expiry.go` + its registration/periodic job + `hold_expiry_worker_test.go`. The kept admit-batch bound was renamed `maxWindowBatchItems`→`maxAdmitBatchItems` and re-homed (it had lived in the deleted credit-window handler).
+- [x] DONE 2026-06-18: dropped `money_windows` via migration `012_drop_money_windows.up.sql` (frozen-`001`-baseline + new-drop-migration pattern, same as `004`/`005`/`007`; `001` and `merchant_aware_schema_test.go`'s table list keep it — sqlc reads all migrations so the final gen state has no `MoneyWindow` model). Removed its sqlc queries + `SumActiveMoneyHeld`; `deriveBalance`/`GetCreditAccount` now report `HeldBalance: 0` (held = spendgate Redis only).
+- [x] DONE 2026-06-18: `go build ./...` + `go vet -tags integration ./...` clean; no orphaned `MoneyWindow`/`money_windows`/credit-window refs (conformance + reconcile + e2e tests updated). NOTE: the e2e `ledgerRows`/`rawBalanceRow` helpers still target the #512-dropped `money_transactions`/`money_blocks` — flagged in `db_helpers.go` as a #512 follow-up, NOT #513.
+
+### G. Tests
+- [ ] Admit/capture/release atomicity under concurrency (Redis EVAL, no lost updates, no double-spend).
+- [ ] Cap-merge correctness across payer/invoker/role/tier scopes; deny when any window over.
+- [~] Balance-cache staleness bound + deposit invalidation — N/A after 2026-06-18 cache deletion; funded payer is visible on the next direct O(1) ledger-account read.
+- [ ] Redis-loss behaviour: caps relax, over-admission stays bounded, ledger stays correct.
+- [ ] Migration: `budget_window_state`/`budget_inflight_holds` removed; in-flight reservations drained or expired cleanly.
+
+## What stays (don't lose) — and a VERIFIED inventory of the three protections (2026-06-17)
+
+The three protections spend limits exist for, mapped to their LIVE system (all SEPARATE from the dead `spend_policy.go`):
+1. **Abuse (request velocity / low-trust)** — LIVE: edge rate-limit middleware mounted globally (`internal/http/server.go:473` `ginmw.RateLimitWithChallengeStore`, per-IP/route + captcha + attack-mode), card-abuse guard (`abuse/card_abuse.go`), velocity guard (`abuse/velocity.go`), wasted-spend guard (`abuse/wasted_spend.go`, in `admitter.Admit`), and the low-default tier for new accounts (#300).
+2. **Fairness (rich payer can't crowd out others)** — RESOLVED 2026-06-17, NOT openrails' job: fleet fairness is owned by the CONSUMER'S SCHEDULER, not openrails. Verified in tensorhub (`~/cozy/tensorhub/internal/orchestrator/grpc/fairness.go`): a work-conserving weighted-fair-queue dispatches the shared GPU fleet — L1 per-payer / L2 per-user nesting, a per-payer in-flight **$** soft cap that scales by platform tier, weighted by the OpenRails hold ESTIMATE (#486), never idles a slot, never rejects. OpenRails owns the HARD money decision (affordability/hold) + $-budget windows + abuse; tensorhub owns scheduling/reordering and the live in-flight tally. This is the right split — openrails can't fairly schedule a fleet it doesn't see. CONSEQUENCE: openrails' throughput/concurrency surface (`ThroughputPolicy` written-not-read, `AcquireConcurrency` zero callers, the `ratelimit/concurrency.go` primitive) is dead-on-PURPOSE — tensorhub explicitly stopped sending throughput units (`invoke_admission.go:66`). Do NOT wire it; REMOVE it (same treatment as `spend_policy.go`), and document the contract: openrails = money truth + $-budget + abuse; the consumer's scheduler owns fleet fairness. The edge per-IP limiter stays as the DoS backstop for schedulerless consumers (doujins/cozy-art/direct API).
+3. **Delegated spend-control (cap what another invoker spends + how often)** — LIVE: `budget_policies` scope=invoker/role/invoker_tier windowed `$` caps, built in `buildBudgetScopes` and reserved in `admitter.Admit`. This is strictly MORE general than the dead per-invoker day/month caps. (Subject-wide windowed cap = the payer's own velocity limit, distinct from balance: exists as config `ScopeSubject`/tier BudgetWindows but `buildBudgetScopes` skips subject — verify whether it's enforced anywhere on admit, or fold it into the one shape.)
+
+Keep through the simplification:
+- Hierarchical delegated-spend SEMANTICS (an invoker may spend the payer's money up to a cap) — keep; only the accounting + policy-shape change.
+- FX conversion for cross-currency policy comparison (`internal/integrations/fx`) — pure function on the estimate.
+- Tier graduation from cumulative paid (`tier_schedules`) — background; selects the policy.
+- Wasted-spend abuse gate — already Redis; it becomes one consumer of the unified primitive.
+- [x] REMOVE the dead fairness/throughput surface from openrails (NOT wire it — see protection 2): DONE 2026-06-17. Deleted `ratelimit/concurrency.go` (`AcquireConcurrency`/`ReleaseConcurrency`/`ConcurrencyCount`, zero callers) + `ratelimit/units.go` (#472 weighted queue pools `AcquireUnits`/`AcquireQueue`/`ReleaseQueueByRequest`, zero callers) + both integration tests; renamed `models.ThroughputPolicy` → `models.TierMoneyPolicy` (the misnomer carried no throughput axis). `AdmitRequest` had no throughput-unit field to drop. Fleet fairness is the consumer scheduler's job (tensorhub WFQ). `valuewindow.go` (wasted-spend `AddWindowValue`/`WindowValue`/`ClaimOnce`) + `limiter.go` `Check` (edge rate-limit) are LIVE and kept.
+
+## Non-goals
+
+- Not changing WHAT the caps mean or the delegated-spend model — only where state lives and how it's checked.
+- Not building the durable ledger here (that's #512); this issue only enqueues to it.
+
+## HARD CUT — no legacy, no backward compatibility (decided 2026-06-17, Paul)
+
+Move to the new system completely; do NOT leave old code or compat shims around.
+- NO feature flag toggling old-vs-new admission; NO dual-write / shadow mode; NO parallel "Postgres-budget AND Redis-budget" running side by side. One path, the new one.
+- DELETE, don't deprecate: `budget_window_state`, `budget_inflight_holds`, the `budgets.Reserve/ReserveScopes/Capture/Release` locked-tx machinery, `spend_policy.go` enforcement + `money_spend_limits`, and the dead throughput/concurrency surface (`ThroughputPolicy`, `ratelimit/concurrency.go`) all go.
+- NO on-the-wire backward-compat window on the admit/capture contract: if the API shape changes, change it outright. Consumers (tensorhub, doujins, cozy-art) move in LOCKSTEP via a coordinated openrails version bump — same model as the #403/#404 hard cut that already deleted the legacy broker.
+- Exit gate: after the cut, `grep` finds no reference to the deleted tables/types/functions anywhere (no orphaned readers, no commented-out fallbacks); `go build ./... && go vet ./...` clean.
+
+## Lockstep cutover (consumers) — verified 2026-06-17
+
+Hard cut = every consumer moves to the new contract in ONE coordinated openrails version bump; no compat window, and APIs with zero consumers are deleted outright. Verified coupling + surface each consumer touches:
+
+- **tensorhub** — standalone HTTP/SDK client (openrails SDK pinned, currently v0.36.0). Calls the USAGE surface: `AdmitHold` (admit), capture-on-job-result, `ReportWastedSpend`, `/credits/deposit`, `credit-types`, `/billing/v1/self/*`. **Most affected** — the admit/capture/wasted contract changes under #513. Lockstep: bump SDK, update the admit/capture/release/wasted call sites in `internal/orchestrator/http/invoke_admission.go` + `internal/billing/openrailsclient`.
+- **doujins** — EMBEDS openrails in-process (`go.mod` `open-rails/openrails v0.39.0`; mounts routes in `internal/server/server.go` + `internal/di/builder.go`). Uses the SUBSCRIPTION surface, not admit/holds/windows/spend-limits (grep clean). Lockstep: bump the module dep + recompile — a compile break is the signal if it touches any removed symbol; subscription API is unchanged by #512/#513.
+- **cozy-art** — EMBEDS openrails in-process; frontend hits `/billing/v1/me/subscriptions|payments|payment-methods`, `/checkout`, `/products`, `/stripe/portal`. Subscription-only; does NOT touch admit/holds/credits. Lockstep: bump the module dep + recompile; frontend endpoints unchanged.
+- **Zero-consumer APIs being deleted — break nobody:** the credit-window API (#335 / `money_windows`) and the spend-limit API (`SetSpendLimit`/`money_spend_limits`) have NO consumer in any of the three repos → delete with no consumer migration.
+- **#512 (ledger) is internal** — the consumer-facing deposit/charge/balance/subscription wire shapes (amounts already minor units) should NOT change; verify the API responses are byte-stable so #512 needs no consumer change beyond the embedded-dep bump.
+
+## Efficiency (before → after)
+
+- Admit: ~3 PG reads + 2 PG txns w/ `FOR UPDATE`  →  1 Redis `EVAL` + in-memory policy/balance.
+- Capture: 1–2 locked PG txns  →  1 Redis `EVAL` + async durable enqueue.
+- Per-payer concurrency: serialized by 2 row locks  →  lock-free.
+- Cap surface: 4 policy shapes + 2 PG accounting tables  →  1 policy shape + 1 Redis counter primitive.
+
+## References
+
+- Current code: `internal/modules/admission/admitter.go`, `internal/modules/budgets/{budgets_service,scopes}.go`, `internal/modules/abuse/wasted_spend.go` (the Redis pattern to copy), `internal/modules/money/{authorize,unified_spend,windows,spend_policy}.go`, `pkg/service/{admission,spend,windows}.go`.
+- Tables: `budget_window_state`, `budget_inflight_holds`, `budget_policies`, `tier_policies`, `tier_schedules`, `money_spend_limits`, `money_settings`, `money_windows`.
+- Relationship: realizes decision 8 of #512 across the whole admission path; #512 Phase C defers here for the admission/holds detail.

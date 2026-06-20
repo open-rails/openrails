@@ -39,14 +39,18 @@ type UserContext struct {
 	// DiscordUsername is the user's Discord handle (optional).
 	DiscordUsername string
 
-	// SessionID is the identifier for the current session (optional).
+	// SessionID is the identifier for the current session (optional). AuthKit's
+	// `sid` claim remains session identity for logout/reauth/freshness flows; it
+	// is not profile or authorization data.
 	SessionID string
 
 	// Roles is a list of roles assigned to the user (e.g., "admin", "moderator").
 	Roles []string
 
-	// Entitlements is a list of entitlements/permissions the user has (e.g.,
-	// "premium", "pro").
+	// Entitlements is the verified AuthKit token's entitlement snapshot. OpenRails
+	// treats these claims as authoritative for short-lived user-token access
+	// decisions by default. Embedded deployments that need grant/revoke changes
+	// before token expiry can opt into EntitlementFreshnessResolver at the gate.
 	Entitlements []string
 
 	// Org is the slug of the user's active AuthKit org context (optional).
@@ -81,7 +85,8 @@ func (uc UserContext) HasRole(role string) bool {
 	return false
 }
 
-// HasEntitlement checks if the user has a specific entitlement (case-insensitive).
+// HasEntitlement checks the verified token entitlement snapshot for a specific
+// entitlement (case-insensitive).
 func (uc UserContext) HasEntitlement(ent string) bool {
 	for _, e := range uc.Entitlements {
 		if strings.EqualFold(e, ent) {
@@ -89,6 +94,32 @@ func (uc UserContext) HasEntitlement(ent string) bool {
 		}
 	}
 	return false
+}
+
+// EntitlementFreshnessResolver is an optional embedded hook for deployments that
+// need entitlement grant/revoke changes reflected before the short-lived access
+// token expires. It is a freshness/revocation check, not a replacement authority
+// model: nil means trust the verified token snapshot.
+type EntitlementFreshnessResolver interface {
+	HasFreshEntitlement(ctx context.Context, user UserContext, entitlement string) (bool, error)
+}
+
+// EntitlementFreshnessResolverFunc adapts a function to EntitlementFreshnessResolver.
+type EntitlementFreshnessResolverFunc func(ctx context.Context, user UserContext, entitlement string) (bool, error)
+
+// HasFreshEntitlement implements EntitlementFreshnessResolver.
+func (f EntitlementFreshnessResolverFunc) HasFreshEntitlement(ctx context.Context, user UserContext, entitlement string) (bool, error) {
+	return f(ctx, user, entitlement)
+}
+
+// HasEntitlementFresh checks an entitlement using an optional embedded freshness
+// resolver. With no resolver configured, verified JWT entitlement claims are the
+// authoritative short-lived snapshot.
+func (uc UserContext) HasEntitlementFresh(ctx context.Context, resolver EntitlementFreshnessResolver, entitlement string) (bool, error) {
+	if resolver != nil {
+		return resolver.HasFreshEntitlement(ctx, uc, entitlement)
+	}
+	return uc.HasEntitlement(entitlement), nil
 }
 
 // HasAnyOrgRole returns true if the user holds any of the listed roles within

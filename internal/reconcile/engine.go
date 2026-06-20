@@ -19,9 +19,9 @@ import (
 // findings in the admin queue (requires_admin), and the fetchers are
 // read-only by construction.
 //
-// The caller must run the engine on a tenant-scoped context (a pinned tenant
-// connection / tenant in context) so every read and write is RLS-constrained
-// to one tenant; a run executes under exactly one tenant.
+// The caller must run the engine on a merchant-scoped context (a pinned merchant
+// connection / merchant in context) so every read and write is RLS-constrained
+// to one merchant; a run executes under exactly one merchant.
 type Engine struct {
 	Fetchers map[Provider]ProcessorFetcher
 	Store    Store

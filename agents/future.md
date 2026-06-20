@@ -324,7 +324,7 @@ This is intentionally split out of #508 so Stripe and NMI/Mobius invoice collect
 **Completed:** no — future direction only.
 
 The old Postgres-backed `platform_audit`, `platform_break_glass`, and
-`tenant_credential_audit` features were removed as unnecessary platform slop.
+`merchant_credential_audit` features were removed as unnecessary platform slop.
 Do not recreate those tables by default.
 
 If OpenRails later needs this capability, design it deliberately:
@@ -335,7 +335,7 @@ If OpenRails later needs this capability, design it deliberately:
 - Global break-glass/admin takeover should be a separate, explicit security
   feature with clear operational controls, expiry, approval/justification model,
   alerting, and tests. It should not be implied by ordinary platform metrics or
-  tenant-admin routes.
+  merchant-admin routes.
 
 Bring this back only when there is a concrete hosted-operations requirement.
 
@@ -345,7 +345,7 @@ Bring this back only when there is a concrete hosted-operations requirement.
 
 **Completed:** no — future direction (not blocking). Surfaced comparing OpenRails to OpenMeter
 (openmeterio/openmeter). OpenRails is already a superset (metering + entitlements + its own
-billing/payments/dunning + multi-tenant control plane + admission/rate-limit/fairness-policy +
+billing/payments/dunning + multi-merchant control plane + admission/rate-limit/fairness-policy +
 spend-graduated tiers), but two OpenMeter concepts are worth adopting:
 
 1. **First-class configurable METERS.** Today usage is recorded as `usage_events` (#289) + dimensions
@@ -396,7 +396,7 @@ So the dashboard composes three already-mostly-built backends (AuthKit directory
 The standalone console manages THREE distinct entity sets; do NOT conflate them:
 1. **Dashboard operators/staff** (the humans who LOG IN to this console) → **AuthKit** owns this. List/search/sort/invite + role assignment = AuthKit's user directory + RBAC (AuthKit #91, the SAME surface doujins/cozy-art reuse). OpenRails builds NONE of this — the console calls AuthKit's `GET /admin/users` for operator management. (Public/SaaS adds registration/onboarding in the separate `openrails-saas` repo.)
 2. **Customers** (the merchant's PAYERS — delegated subjects from the merchant's issuer; NOT the same people as operators in the SaaS case) → **OpenRails billing domain**. `openrails.customers` holds only `(merchant_id, org_id, issuer, subject, created_at, last_seen_at)` — NO email/username. So OpenRails owns a customer LIST/search/sort by BILLING attributes (subject, subscription status, entitlement, spend, last_seen), and ENRICHES identity from AuthKit when AuthKit is the merchant's issuer (the inverse of the doujins enrich seam); when the issuer is external, it shows subject + billing only. This is net-new OpenRails work (no admin customer-list query exists today).
-3. **Merchants** (the tenants — multi-merchant public/platform deployments) → **OpenRails control-plane / platform-superadmin**. Reuse the existing `/v1/platform/*` superadmin layer (`internal/platform`, `PermPlatformSuperadmin`); add merchant list/search/sort there. Single-merchant private installs skip this.
+3. **Merchants** (multi-merchant public/platform deployments) → **OpenRails control-plane / platform-superadmin**. Reuse the existing `/v1/platform/*` superadmin layer (`internal/platform`, `PermPlatformSuperadmin`); add merchant list/search/sort there. Single-merchant private installs skip this.
 
 So: OpenRails DOES build customer + merchant admin listing (billing/control-plane entities it owns); it does NOT build operator/user-directory listing (AuthKit's). In the EMBEDDED-host case (doujins) operators==customers==AuthKit users (one set, two facets), so there's just the enriched user directory and no separate customer page; the separate "Customers" page only appears in standalone where operators ≠ payers.
 
@@ -418,7 +418,7 @@ So: OpenRails DOES build customer + merchant admin listing (billing/control-plan
 - Give merchants confidence in non-Stripe rails by showing processor configuration, test/live mode, last successful
   checks, catalog provider status, and known limitations.
 - Use the unified merchant action auth model from #510. The UI is just a client using the same capability-gated merchant
-  action routes as service tokens, remote applications, delegated merchant admins, and user access tokens.
+  action routes as API keys, remote applications, delegated merchant admins, and user access tokens.
 
 ## Non-goals (initially)
 
@@ -433,9 +433,9 @@ So: OpenRails DOES build customer + merchant admin listing (billing/control-plan
 - Keep the surface area minimal: read-heavy analytics and support visibility first, then a small set of high-confidence mutations.
 - Every mutation must be gated + audited (who/what/when/why) through the same route/auth model as #510.
 - Treat this as the productized surface for the backend roadmap items around processor capabilities, routing/fallback, provider certification, catalog-as-code status, dunning, and credits.
-- Private mode should be useful with no public registration enabled. Admin users, service tokens, remote applications,
+- Private mode should be useful with no public registration enabled. Admin users, API keys, remote applications,
   roles, and permissions come from bootstrap/AuthKit.
-- Public mode is a hosted-platform concern: `openrails-saas` can enable AuthKit public registration, tenant creation,
+- Public mode is a hosted-platform concern: `openrails-saas` can enable AuthKit public registration, merchant creation,
   onboarding flows, plan/billing for OpenRails customers, marketing/product UX, and managed-hosting support workflows.
 - OpenRails should expose the API primitives and private admin UI; `openrails-saas` composes those primitives into the
   public hosted product.
@@ -451,7 +451,7 @@ So: OpenRails DOES build customer + merchant admin listing (billing/control-plan
       no separate admin-only route/auth model; UI calls capability-gated merchant action routes with a user access token
       carrying the required permissions for that merchant.
 - [ ] Define the normalized UI principal display:
-      user, service token, service JWT, remote application, delegated merchant admin, merchant scope, permissions, and
+      user, API key, service JWT, remote application, delegated merchant admin, merchant scope, permissions, and
       platform-superadmin state where applicable.
 - [ ] Add structured audit log events for merchant action mutations:
       actor, credential type, merchant, action, target, before/after where safe, request_id, reason, source UI/API.
@@ -484,7 +484,7 @@ So: OpenRails DOES build customer + merchant admin listing (billing/control-plan
 - [ ] Provider health page: configured processors, sandbox/test/live mode, credential presence, last successful API call, supported capabilities, and known limitations
 - [ ] Catalog/provider page: catalog-as-code apply status, provider object ids, NMI recurring plan ids, Stripe Product/Price ids, CCBill pending_manual_actions, Solana plan accounts, and open catalog drift events
 - [ ] Bootstrap/provisioning page for private mode:
-      show current merchant, owner org, roles, service tokens (metadata only), remote applications, catalog manifest status,
+      show current merchant, owner org, roles, API keys (metadata only), remote applications, catalog manifest status,
       last apply result, and prune/archive-extra warnings.
 - [ ] Catalog apply UI:
       upload/paste/select manifest, dry-run plan, apply, optional `--prune` equivalent with explicit warning that
@@ -503,7 +503,7 @@ So: OpenRails DOES build customer + merchant admin listing (billing/control-plan
       onboarding checklists, and product/marketing pages.
 - [ ] Keep `openrails-saas` private/non-source-available; it can depend on OpenRails APIs and SDKs without pushing hosted
       product concerns into this repo.
-- [ ] Routing policy page when #288 exists: show preferred processors, fallback order, disabled rails, and dry-run/explain selected processor for a price/user/tenant
+- [ ] Routing policy page when #288 exists: show preferred processors, fallback order, disabled rails, and dry-run/explain selected processor for a price/user/merchant
 - [ ] Certification matrix page or linked view when #290 exists: show last verified date/environment/command for provider flows without exposing secrets
 - 
 - API + DATA LAYER:
@@ -768,9 +768,9 @@ Slippage abuse (clamp bps server-side, reject excessive values); stale quotes (s
 DEFERRED (analytics, work later). Analytics surfaces for recurring Solana (the remaining #258 analytics tasks): active recurring subs, MRR (USDC/USD1 at $1 peg), failed pulls, recovered-vs-churned, cranker gas spend. Admin endpoints + dashboard wiring, consistent with the existing Stripe/NMI metrics. Depends: #258.
 
 **Tasks:**
-- [ ] active recurring Solana subs + MRR per tenant (sum plan amounts at $1 peg)
+- [ ] active recurring Solana subs + MRR per merchant (sum plan amounts at $1 peg)
 - [ ] failed-pull / dunning metrics; recovered vs churned
-- [ ] cranker gas spend per tenant (surface alongside the gas-alert #258)
+- [ ] cranker gas spend per merchant (surface alongside the gas-alert #258)
 - [ ] admin endpoints / dashboard wiring matching the card-processor metrics shape
 
 ---
@@ -791,7 +791,7 @@ DOKS is cheap + popular with the indie/self-host audience; ship a DOKS quickstar
 - [ ] Chart skeleton (deployment for the API, a separate deployment/args for the River workers, service, configmap, secret, HPA, PDB, serviceaccount); helm lint + a CI render test.
 - [ ] values.yaml profiles: self-hosted (in-cluster Postgres/Redis/ClickHouse subcharts) vs managed (externalDatabase/externalRedis/externalClickHouse pointing at DO/GCP/etc managed services). ClickHouse/analytics fully optional (toggle).
 - [ ] Migrations as a pre-install/pre-upgrade Job (helm hook) running the OpenRails migrator; gate the app start on it.
-- [ ] Secrets: support k8s Secrets, Vault (the existing vault KV/transit adapter #251), and sealed-secrets/external-secrets; document the per-tenant DEK/secret-store wiring.
+- [ ] Secrets: support k8s Secrets, Vault (the existing vault KV/transit adapter #251), and sealed-secrets/external-secrets; document the per-merchant DEK/secret-store wiring.
 - [ ] Ingress + TLS via cert-manager (Let's Encrypt) + an nginx/traefik example; configurable host, CORS allowlist, and the public base URL the Solana Pay endpoints need.
 - [ ] Resource requests/limits + HPA (CPU/RAM, and a worker-queue-depth custom metric later); readiness/liveness probes on the health endpoint.
 - [ ] DigitalOcean DOKS quickstart: DO managed Postgres + managed Redis + DO LB; a values-do.yaml + a runbook; evaluate a DO Marketplace 1-click listing.
@@ -807,21 +807,21 @@ DOKS is cheap + popular with the indie/self-host audience; ship a DOKS quickstar
 Stand up a HOSTED OpenRails SaaS where a user signs up and spins up their own OpenRails in a few clicks — no infra to run. THIS IS THE MAIN BUSINESS MODEL. Self-hosting stays free/OSS; the managed service is the commercial offering: we run, scale, monitor, and upgrade OpenRails for customers who just want billing-as-a-service.
 
 ## What it is
-A control plane + dashboard on top of OpenRails' existing multi-tenant foundation: signup -> provision a tenant (or an isolated instance) -> the customer gets API keys + a dashboard to configure products/prices, connect their processors (Stripe/NMI/CCBill/Solana), and watch revenue. We lean on the multi-tenant work already built — RLS isolation + per-tenant secret store / DEK (#227/#259), federated/delegated tokens, the catalog-as-code apply, the de-embed/standalone deploy (#249). The Helm charts (#292 / [[openrails-helm-charts-k8s-deploy]]) are the deploy substrate for the managed pods (and keep self-host parity).
+A control plane + dashboard on top of OpenRails' existing multi-merchant foundation: signup -> provision a merchant (or an isolated instance) -> the customer gets API keys + a dashboard to configure products/prices, connect their processors (Stripe/NMI/CCBill/Solana), and watch revenue. We lean on the multi-merchant work already built — RLS isolation + per-merchant secret store / DEK (#227/#259), federated/delegated tokens, the catalog-as-code apply, the de-embed/standalone deploy (#249). The Helm charts (#292 / [[openrails-helm-charts-k8s-deploy]]) are the deploy substrate for the managed pods (and keep self-host parity).
 
 ## Isolation model (decide early)
-Two tiers: (a) SHARED multi-tenant cluster with RLS + per-tenant DEK (cheap, for small customers / free tier), and (b) DEDICATED per-tenant instance/namespace (for larger customers needing hard isolation / their own DB). Same image + chart, different provisioning.
+Two tiers: (a) SHARED multi-merchant cluster with RLS + per-merchant DEK (cheap, for small customers / free tier), and (b) DEDICATED per-merchant instance/namespace (for larger customers needing hard isolation / their own DB). Same image + chart, different provisioning.
 
 ## Meta-billing (the fun part)
 We bill our SaaS customers... using OpenRails itself (dogfood): usage metering (API calls / active subscriptions / GMV %), pricing tiers, free tier, Stripe for the SaaS subscription. OpenRails-billing-OpenRails.
 
 **Tasks:**
-- [ ] Signup + onboarding: create an account -> provision a tenant (RLS row + per-tenant secret store/DEK) -> issue API keys + a delegated dashboard token. Self-serve, < 5 min to first test charge.
-- [ ] Control-plane dashboard (web): manage products/prices (catalog-as-code #162 under the hood), connect processors (Stripe/NMI/CCBill/Solana keys into the per-tenant secret store), view subscriptions/revenue/dunning, manage webhooks.
-- [ ] Isolation tiers: (a) shared cluster + RLS + per-tenant DEK for free/small; (b) dedicated instance/namespace via the Helm chart (#292) for enterprise. Provisioning automation for both.
+- [ ] Signup + onboarding: create an account -> provision a merchant (RLS row + per-merchant secret store/DEK) -> issue API keys + a delegated dashboard token. Self-serve, < 5 min to first test charge.
+- [ ] Control-plane dashboard (web): manage products/prices (catalog-as-code #162 under the hood), connect processors (Stripe/NMI/CCBill/Solana keys into the per-merchant secret store), view subscriptions/revenue/dunning, manage webhooks.
+- [ ] Isolation tiers: (a) shared cluster + RLS + per-merchant DEK for free/small; (b) dedicated instance/namespace via the Helm chart (#292) for enterprise. Provisioning automation for both.
 - [ ] Meta-billing: dogfood OpenRails to bill SaaS customers — usage metering (active subs / API volume / optional GMV %), pricing tiers + free tier, Stripe for the SaaS plan, dunning on our own customers.
-- [ ] Usage metering + quotas + rate limiting per tenant; surface usage in the dashboard; enforce plan limits.
-- [ ] Scaling + ops: per-tenant/queue autoscaling, monitoring/alerting (cranker gas, failed pulls, webhook lag), backups, on-call runbooks, status page.
+- [ ] Usage metering + quotas + rate limiting per merchant; surface usage in the dashboard; enforce plan limits.
+- [ ] Scaling + ops: per-merchant/queue autoscaling, monitoring/alerting (cranker gas, failed pulls, webhook lag), backups, on-call runbooks, status page.
 - [ ] Migration paths: self-host -> managed import, and managed -> self-host export (no lock-in; OSS core is the trust anchor).
 - [ ] Security/compliance posture for handling processor keys + payment data at scale (secret rotation, audit log, SOC2 trajectory, PCI scope minimization since processors hold the PANs).
 - [ ] Pricing + positioning: free tier (self-host parity), usage-based paid tiers, the 'Stripe-like billing infra you actually own, hosted for you' pitch.
@@ -888,7 +888,7 @@ FAST mode (this issue): per-request money decision against a Redis/Garnet HEADRO
 WHEN TO BUILD: only when a single payer needs hundreds+ req/s where the per-payer FOR UPDATE serialization or the admission round-trip becomes the bottleneck. Until then strict is plenty. Source: internal/modules/admission + the #298 latency design.
 
 **Tasks:**
-- [ ] CONFIGURABLE consistency per host/tenant (optionally per endpoint/credit_type): STRICT (sync AuthorizeAndHold, exact, zero overspend, higher latency) vs FAST (Redis headroom, eventual, bounded overspend, sub-ms). Default STRICT; opt into FAST for high-QPS.
+- [ ] CONFIGURABLE consistency per host/merchant (optionally per endpoint/credit_type): STRICT (sync AuthorizeAndHold, exact, zero overspend, higher latency) vs FAST (Redis headroom, eventual, bounded overspend, sub-ms). Default STRICT; opt into FAST for high-QPS.
 - [ ] FAST PATH: admission = one Redis/Garnet op (throughput windows + cached money-headroom counter, atomic decrement); NO Postgres lock/round-trip per request. Keep strict FOR-UPDATE AuthorizeAndHold for low-QPS/exact callers.
 - [ ] WRITE-BEHIND + RECONCILE: durable PG debit + usage_event async via host RecordUsage (#289); periodically resync the Redis headroom from the authoritative PG balance.
 - [ ] BOUNDED OVERSPEND: atomic Redis decrement (no concurrent oversell) + credit_limit cap + reconcile-lag bound (throughput caps spend-rate); make the tolerance tier-tunable.
@@ -902,17 +902,17 @@ WHEN TO BUILD: only when a single payer needs hundreds+ req/s where the per-paye
 
 Deferred refinements to the usage-billing/admission system (core shipped + live-validated). None blocking; each is a small, well-scoped follow-up.
 
-- TENANT->OWNER limit level (#304): admission enforces owner->actor budgets/throughput today; add the second level so a TENANT can cap each OWNER (tensorhub caps cozy), via the SAME admitter logic at a tenant-scoped key + tenant-level tier policy (owner sentinel). The budgets/limiter engines already support arbitrary scope keys.
+- MERCHANT->OWNER limit level (#304): admission enforces owner->actor budgets/throughput today; add the second level so a MERCHANT can cap each OWNER (tensorhub caps cozy), via the SAME admitter logic at a merchant-scoped key + merchant-level tier policy (owner sentinel). The budgets/limiter engines already support arbitrary scope keys.
 - BUDGET CAPTURE tie-to-ledger (#304): on ledger CaptureHold, also budgets.Capture the matching reservation so reserved->used converts immediately. NOT required for correctness (the rolling window self-heals: an un-captured reservation ages out of the window), so it's an accuracy nicety.
 - /v1/self delegated budget introspection (#304): a browser-token variant of GET /v1/service/budget. Redundant while hosts proxy the service endpoint; add if browsers should read budgets directly.
-- usage_events MONTH PARTITIONING (#289): partition billing.usage_events by month for scale. Wrinkle: the idempotency unique index (tenant,owner,event_type,source,source_id) must include the partition key, weakening cross-month dedup (acceptable since source_ids are request/time-scoped). Premature until event volume demands it.
+- usage_events MONTH PARTITIONING (#289): partition billing.usage_events by month for scale. Wrinkle: the idempotency unique index (merchant,owner,event_type,source,source_id) must include the partition key, weakening cross-month dedup (acceptable since source_ids are request/time-scoped). Premature until event volume demands it.
 - INVOICE admin list + CSV export (#303): an admin (cross-owner) invoice list + CSV download. Self endpoints (GET /v1/self/invoices[/:id]) cover the customer need; admin/CSV on demand. (PDF rendering intentionally NOT planned.)
 - tensorhub->OpenRails platform_policies ownership migration (#304): cross-repo move of tensorhub's tier policies onto OpenRails' tier_policies; do when consolidating.
 
 **Tasks:**
 - [ ] Tier policy carries money caps (credit_limit/monthly) + graduation applies them to account settings (auto credit-limit by tier).
 - [ ] Arrears authorize gate: combine prepaid balance + remaining credit line as headroom (currently line-only; conservative).
-- [ ] TENANT->OWNER admission level (tensorhub caps cozy) via tenant-scoped tier policy + admitter check.
+- [ ] MERCHANT->OWNER admission level (tensorhub caps cozy) via merchant-scoped tier policy + admitter check.
 - [ ] Tie budgets.Capture/Release to ledger CaptureHold/ReleaseHold (accuracy; window self-heals without it).
 - [ ] /v1/self delegated budget introspection variant.
 - [ ] usage_events month partitioning (include partition key in the idempotency index).

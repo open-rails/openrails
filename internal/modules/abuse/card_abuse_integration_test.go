@@ -9,11 +9,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
-	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 )
 
 func newCardAbuse(t *testing.T, cfg abuse.CardAbuseConfig) (*abuse.CardAbuseGuard, *captcha.ChallengeStore, context.Context) {
@@ -27,17 +26,7 @@ func newCardAbuse(t *testing.T, cfg abuse.CardAbuseConfig) (*abuse.CardAbuseGuar
 // longer window keeps accruing).
 func newCardAbuseWithClock(t *testing.T, cfg abuse.CardAbuseConfig) (*abuse.CardAbuseGuard, *captcha.ChallengeStore, *ratelimit.Limiter, context.Context) {
 	t.Helper()
-	ctx := context.Background()
-	c, err := tcredis.Run(ctx, "redis:7-alpine")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = c.Terminate(ctx) })
-	conn, err := c.ConnectionString(ctx)
-	require.NoError(t, err)
-	opt, err := redis.ParseURL(conn)
-	require.NoError(t, err)
-	rdb := redis.NewClient(opt)
-	t.Cleanup(func() { _ = rdb.Close() })
-	require.NoError(t, rdb.Ping(ctx).Err())
+	rdb, ctx := dbtest.SharedRedisClient(t)
 
 	challenges := captcha.NewChallengeStore(nil) // memory-backed challenge store
 	lim := ratelimit.NewLimiter(rdb)

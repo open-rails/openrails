@@ -181,7 +181,7 @@ func (w *SubscriptionLivenessWorker) Work(ctx context.Context, job *river.Job[Su
 
 	var repaired, failed, adopted, cancelled, unreachable, skipped int
 	for i := range cohort {
-		// #336: pin the subscription's tenant so the lifecycle convergence
+		// #336: pin the subscription's merchant so the lifecycle convergence
 		// writes (renew/fail/adopt) carry the app.tenant_id GUC.
 		outcome := livenessOutcomeUnreachable
 		if err := w.DB.RunInMerchantConn(merchant.WithID(ctx, merchant.ID(cohort[i].MerchantID)), func(tctx context.Context) error {
@@ -189,7 +189,7 @@ func (w *SubscriptionLivenessWorker) Work(ctx context.Context, job *river.Job[Su
 			return nil
 		}); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("subscription_id", cohort[i].ID).
-				Error("Liveness: failed to pin tenant connection; counting subscription as unreachable")
+				Error("Liveness: failed to pin merchant connection; counting subscription as unreachable")
 		}
 		switch outcome {
 		case livenessOutcomeRepaired:

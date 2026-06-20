@@ -11,14 +11,14 @@ import (
 )
 
 // ErrDelegatedIssuerUnknown indicates a presented token's validated `iss` is not
-// a registered AuthKit remote_application mapped (via tenant ownership) to an
+// a registered AuthKit remote_application mapped (via org ownership) to an
 // active merchant. Fail closed: the token is rejected even if well-formed.
 var ErrDelegatedIssuerUnknown = errors.New("controlplane: delegated token issuer maps to no active merchant")
 
 // loadRemoteApplications loads AuthKit's ACTIVE remote_applications into the
 // delegated verifier (#481): standalone JWKS/issuer trust is AuthKit's
 // remote_application registry (#74), NOT an OpenRails-owned table (the
-// tenant_delegated_issuers registry was dropped in #480). The verifier's
+// old delegated-issuer registry was dropped in #480). The verifier's
 // in-house JWKS fetch/refresh handles keys; this is also re-callable to pick up
 // store changes, and the verifier lazy-loads any single issuer on first use.
 func (c *ControlPlane) loadRemoteApplications(ctx context.Context) error {

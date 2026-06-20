@@ -2,7 +2,7 @@
 // durable, effectively-once outbox for ALL outbound provider mutations.
 //
 // Every action OpenRails wants to perform against an external payment provider
-// is enqueued as a openrails.provider_intents row (idempotent per tenant on
+// is enqueued as a openrails.provider_intents row (idempotent per merchant on
 // idempotency_key). A scheduled executor (the Runner, driven by a River
 // worker) claims due intents under a SKIP LOCKED lease, checks per-type
 // relevance, gates execution on operating mode x origin, executes via the

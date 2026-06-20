@@ -35,7 +35,7 @@ type Config struct {
 
 const defaultK8sJWTPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
-// Login authenticates the OpenRails process to Vault (NOT per-tenant — tenant
+// Login authenticates the OpenRails process to Vault (NOT per-merchant — merchant
 // isolation is enforced by the (tenant, name) addressing) and returns a client
 // whose token is kept fresh by a background renewer until ctx is cancelled.
 func Login(ctx context.Context, cfg Config) (*vaultapi.Client, error) {

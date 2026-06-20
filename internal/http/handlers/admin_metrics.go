@@ -17,7 +17,7 @@ import (
 // GET /admin/metrics is the PER-MERCHANT admin dashboard surface. AdminMetricsService
 // resolves the merchant id from the request context (merchant.Require) and pins
 // every ClickHouse query to WHERE merchant_id = ?, so a merchant operator can only
-// ever read their OWN metrics — never cross-tenant (that is the separate
+// ever read their OWN metrics — never cross-merchant (that is the separate
 // platform-superadmin path).
 //
 // Query params control the shape: ?period/?start/?end (date range), ?granularity

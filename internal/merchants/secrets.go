@@ -3,7 +3,7 @@
 // (issue #225). It builds on the #223 merchant primitive (pkg/merchant +
 // openrails.merchants)
 // and the #224 in-process AuthKit control plane (internal/controlplane): the
-// lifecycle service mints/links owner orgs and service tokens through control-plane core
+// lifecycle service mints/links owner orgs and API keys through control-plane core
 // calls and records merchant directory state directly in openrails.* (OpenRails-owned
 // control-plane state).
 package merchants

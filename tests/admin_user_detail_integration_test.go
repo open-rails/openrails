@@ -30,7 +30,7 @@ import (
 // host-seam delegated principal carrying the given merchant permissions. This is
 // the migration pattern for the admin integration suite: the per-user admin-JWT
 // model is retired, so admin tests authenticate as a delegated merchant principal
-// (openrails:merchant:*), exactly like the host-app issuer→owner token does in
+// (browser-safe org permissions), exactly like the host-app issuer owner token does in
 // production. (Reuses hostSeamAuthenticator from self_account_host_principal_test.)
 func newHostSeamAdminRouter(t *testing.T, suite *TestContainerSuite, subject string, perms []string) *gin.Engine {
 	t.Helper()
@@ -44,7 +44,7 @@ func newHostSeamAdminRouter(t *testing.T, suite *TestContainerSuite, subject str
 
 // TestAdminUserDetailComposite_Delegated validates the #528 delegated /v1/admin
 // surface end-to-end against Postgres: a merchant admin holding
-// openrails:merchant:billing:read reads a user's COMPOSITE billing detail, which
+// org:billing:read reads a user's COMPOSITE billing detail, which
 // embeds the entitlements section (plus the payment_methods + product_access
 // sections introduced in #528 increment 4).
 func TestAdminUserDetailComposite_Delegated(t *testing.T) {

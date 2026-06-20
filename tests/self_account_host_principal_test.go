@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
@@ -28,12 +27,11 @@ import (
 // billingauth.DelegatedAuthenticator seam, NO control plane delegated
 // verifier) drives the /v1/me/account surface end-to-end against a real
 // database — reads its account, configures its settings, lists its
-// transactions — and another subject's data is never visible. A read-only
-// principal is denied the settings write (scope separation).
+// transactions — and another subject's data is never visible.
 
 // hostSeamAuthenticator is the host's DelegatedAuthenticator: the host has
 // already verified its own credential and supplies the explicitly mapped
-// principal (tenant + subject + permissions).
+// principal (merchant + subject + optional permissions).
 type hostSeamAuthenticator struct {
 	subject string
 	perms   []string
@@ -100,10 +98,8 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	readWrite := []string{controlplane.PermSelfBillingRead, controlplane.PermSelfBillingWrite}
-	routerA := newHostSeamSelfRouter(t, suite, subjectA, readWrite)
-	routerB := newHostSeamSelfRouter(t, suite, subjectB, readWrite)
-	routerAReadOnly := newHostSeamSelfRouter(t, suite, subjectA, []string{controlplane.PermSelfBillingRead})
+	routerA := newHostSeamSelfRouter(t, suite, subjectA, nil)
+	routerB := newHostSeamSelfRouter(t, suite, subjectB, nil)
 
 	// --- GET /v1/me/account: A sees its own balance. ---
 	w := doHostSeamSelf(routerA, http.MethodGet, "/v1/me/account?currency="+currency, "")
@@ -165,10 +161,4 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	txnsB := decodeHostSeamBody(t, w)
 	require.EqualValues(t, 0, txnsB["total"], "B must not see A's transactions: %s", w.Body.String())
 
-	// --- NEGATIVE: a read-only principal cannot write settings. ---
-	w = doHostSeamSelf(routerAReadOnly, http.MethodPut, "/v1/me/account/settings", settingsBody)
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
-	// ...but can still read its account.
-	w = doHostSeamSelf(routerAReadOnly, http.MethodGet, "/v1/me/account?currency="+currency, "")
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }

@@ -44,7 +44,7 @@ import (
 //			return &billingauth.DelegatedPrincipal{
 //				MerchantID:    hostCfg.OpenRailsTenantID, // explicit per-deployment mapping to a real tenant
 //				SubjectID:   user.CanonicalID,
-//				Permissions: []string{"openrails:self:billing:read"},
+//				Permissions: []string{"self:billing:read"},
 //			}, nil
 //		})
 type Options struct {
@@ -95,7 +95,7 @@ type Runtime struct {
 
 	// tenantID is the engine's construction-time bound tenant, resolved once from
 	// Options.Merchant. The unified Client adapter injects it onto each call's
-	// context so an embedded host can call the service-token-equivalent surface
+	// context so an embedded host can call the API-key-equivalent surface
 	// with a plain context. Zero when no tenant is bound.
 	tenantID merchant.ID
 
@@ -234,7 +234,7 @@ func (r *Runtime) Service() *service.Service { return r.svc }
 func (r *Runtime) Embedded() *embedded.Embedded { return r.emb }
 
 // Handler returns the mountable embedded HTTP surface (/billing/v1/*) — a thin
-// passthrough to pkg/embedded.NewHTTPHandler. The service-token-authenticated
+// passthrough to pkg/embedded.NewHTTPHandler. The service-credential-authenticated
 // /v1/service/* surface is part of the standalone server
 // (pkg/embedded/gin.StandaloneHandler / internal/http); an embedded host
 // normally uses Client() instead.

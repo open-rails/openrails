@@ -22,6 +22,7 @@ type ledger interface {
 	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error)
 	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error)
 	ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
+	LogExternalMutation(ctx context.Context, p MutationLogParams) error
 	MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error
 	MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
@@ -171,7 +172,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsProviderInt
 	})
 	now := r.now()
 
-	// Pin the intent's tenant so handler execution (and any tenant-scoped DB
+	// Pin the intent's merchant so handler execution (and any merchant-scoped DB
 	// write it triggers, e.g. membership renewal) resolves it (#336).
 	ctx = merchant.WithID(ctx, merchant.ID(intent.MerchantID))
 
@@ -210,7 +211,15 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsProviderInt
 		return
 	}
 
-	r.apply(ctx, logEntry, stats, handler, intent, handler.Execute(ctx, intent), false)
+	if err := r.logExternalMutation(ctx, intent, MutationLogPhaseAttempting, "", nil); err != nil {
+		r.park(ctx, logEntry, stats, intent.ID, now, "mutation log unavailable: "+err.Error())
+		return
+	}
+	outcome := handler.Execute(ctx, intent)
+	if err := r.logExternalMutation(ctx, intent, mutationLogPhase(outcome), outcome.Reason, outcome.Evidence); err != nil {
+		logEntry.WithError(err).Error("intent executor: external mutation result log failed")
+	}
+	r.apply(ctx, logEntry, stats, handler, intent, outcome, false)
 }
 
 // EnqueueAndExecute records the intent and immediately claims + executes THAT
@@ -268,7 +277,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 	stats.Claimed = len(claimed)
 
 	for _, intent := range claimed {
-		// Pin the intent's tenant for tenant-scoped verify/repair writes (#336).
+		// Pin the intent's merchant for merchant-scoped verify/repair writes (#336).
 		ctx := merchant.WithID(ctx, merchant.ID(intent.MerchantID))
 		logEntry := log.WithContext(ctx).WithFields(log.Fields{
 			"intent_id":   intent.ID,
@@ -365,4 +374,50 @@ func (r *Runner) park(ctx context.Context, logEntry *log.Entry, stats *Stats, id
 	}
 	stats.Parked++
 	logEntry.WithField("reason", reason).Warn("intent parked (stays pending)")
+}
+
+func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsProviderIntent, phase MutationLogPhase, reason string, evidence map[string]any) error {
+	intentID := intent.ID
+	return r.Store.LogExternalMutation(ctx, MutationLogParams{
+		MerchantID:        intent.MerchantID,
+		Provider:          intent.Provider,
+		ProviderAccountID: intent.ProviderAccountID,
+		ProviderIntentID:  &intentID,
+		IntentType:        intent.IntentType,
+		IdempotencyKey:    intent.IdempotencyKey,
+		Attempt:           intent.Attempts,
+		Phase:             phase,
+		Reason:            reason,
+		Evidence:          mutationLogEvidence(intent, evidence),
+	})
+}
+
+func mutationLogPhase(outcome Outcome) MutationLogPhase {
+	switch outcome.Class {
+	case OutcomeSucceeded:
+		return MutationLogPhaseSucceeded
+	case OutcomeAmbiguous:
+		return MutationLogPhaseUnknown
+	case OutcomeParked:
+		return MutationLogPhaseParked
+	default:
+		return MutationLogPhaseFailed
+	}
+}
+
+func mutationLogEvidence(intent gen.OpenrailsProviderIntent, evidence map[string]any) map[string]any {
+	out := map[string]any{}
+	if intent.SubscriptionID != nil {
+		out["subscription_id"] = intent.SubscriptionID.String()
+	}
+	if intent.PaymentID != nil {
+		out["payment_id"] = intent.PaymentID.String()
+	}
+	if intent.PriceID != nil {
+		out["price_id"] = intent.PriceID.String()
+	}
+	for k, v := range evidence {
+		out[k] = v
+	}
+	return out
 }

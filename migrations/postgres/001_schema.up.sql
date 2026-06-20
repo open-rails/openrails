@@ -116,8 +116,7 @@ CREATE TABLE openrails.customers (
 );
 
 CREATE INDEX idx_customers_merchant ON openrails.customers USING btree (merchant_id);
-CREATE UNIQUE INDEX uq_customers_merchant_org ON openrails.customers USING btree (merchant_id, org_id) WHERE (org_id IS NOT NULL);
-CREATE UNIQUE INDEX uq_customers_merchant_issuer_subject ON openrails.customers USING btree (merchant_id, issuer, subject) WHERE ((org_id IS NULL) AND (issuer IS NOT NULL) AND (subject IS NOT NULL));
+CREATE UNIQUE INDEX uq_customers_merchant_subject ON openrails.customers USING btree (merchant_id, subject) WHERE (subject IS NOT NULL);
 
 ALTER TABLE ONLY openrails.customers FORCE ROW LEVEL SECURITY;
 
@@ -126,10 +125,10 @@ CREATE POLICY merchant_isolation ON openrails.customers USING ((merchant_id = (N
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.customers TO openrails_app;
 
-COMMENT ON TABLE openrails.customers IS 'OpenRails payable identity. id is the payable UUID; org-bound issuers resolve one customer per (merchant, org_id), org-less issuers resolve by (merchant, issuer, subject), and native/embedded callers may materialize the subject UUID directly as id.';
-COMMENT ON COLUMN openrails.customers.org_id IS '#491 org-bound payer natural key: authkit org id. One customer per (merchant, org). NULL for org-less/native payers.';
-COMMENT ON COLUMN openrails.customers.issuer IS '#491 org-less payer natural key part: validated issuer. NULL for org-bound and native payers.';
-COMMENT ON COLUMN openrails.customers.subject IS '#491 org-less payer natural key part: merchant-supplied stable subject. NULL for org-bound and native payers.';
+COMMENT ON TABLE openrails.customers IS 'OpenRails payable identity. Customer identity is merchant_id plus the host/AuthKit stable UUID subject; id is that payable UUID. issuer is audit/last-seen source only.';
+COMMENT ON COLUMN openrails.customers.org_id IS 'Deprecated customer identity metadata. Merchant ownership is represented by merchant_id; org/issuer do not key customers.';
+COMMENT ON COLUMN openrails.customers.issuer IS 'Audit/last-seen source issuer for delegated/remote customer touches. Not part of customer identity.';
+COMMENT ON COLUMN openrails.customers.subject IS 'Host/AuthKit stable UUID subject. Natural key is (merchant_id, subject); issuer does not participate.';
 
 -- =============================================================================
 -- merchant_deks

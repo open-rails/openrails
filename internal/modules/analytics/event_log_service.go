@@ -112,12 +112,12 @@ func (s *EventLogService) Clock() clockwork.Clock {
 	return s.clock
 }
 
-// resolveTenantID returns the merchant id to stamp on a ClickHouse analytics
+// resolveMerchantID returns the merchant id to stamp on a ClickHouse analytics
 // event. It prefers a merchant_id already set on the event (e.g. resolved by an
 // upstream writer), otherwise resolves it from the request context. A missing
 // merchant is an error: analytics events must always be merchant-scoped, so we
 // never write an unscoped hosted event (issue #232).
-func resolveTenantID(ctx context.Context, existing string) (string, error) {
+func resolveMerchantID(ctx context.Context, existing string) (string, error) {
 	if existing != "" {
 		return existing, nil
 	}
@@ -255,7 +255,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
+			if d.MerchantID, err = resolveMerchantID(ctx, d.MerchantID); err != nil {
 				log.WithError(err).Warn("resolve merchant for subscription")
 				dead(p)
 				continue
@@ -275,7 +275,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
+			if d.MerchantID, err = resolveMerchantID(ctx, d.MerchantID); err != nil {
 				log.WithError(err).Warn("resolve merchant for payment")
 				dead(p)
 				continue
@@ -302,7 +302,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
+			if d.MerchantID, err = resolveMerchantID(ctx, d.MerchantID); err != nil {
 				log.WithError(err).Warn("resolve merchant for transaction")
 				dead(p)
 				continue
@@ -348,7 +348,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
+			if d.MerchantID, err = resolveMerchantID(ctx, d.MerchantID); err != nil {
 				log.WithError(err).Warn("resolve merchant for acu")
 				dead(p)
 				continue
@@ -368,7 +368,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			if d.MerchantID, err = resolveTenantID(ctx, d.MerchantID); err != nil {
+			if d.MerchantID, err = resolveMerchantID(ctx, d.MerchantID); err != nil {
 				log.WithError(err).Warn("resolve merchant for chargeback")
 				dead(p)
 				continue
@@ -624,7 +624,7 @@ func (s *EventLogService) LogSubscriptionEvent(ctx context.Context, data Subscri
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	if resolved, err := resolveTenantID(ctx, data.MerchantID); err != nil {
+	if resolved, err := resolveMerchantID(ctx, data.MerchantID); err != nil {
 		return err
 	} else {
 		data.MerchantID = resolved
@@ -670,7 +670,7 @@ func (s *EventLogService) LogPaymentEvent(ctx context.Context, data PaymentEvent
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	if resolved, err := resolveTenantID(ctx, data.MerchantID); err != nil {
+	if resolved, err := resolveMerchantID(ctx, data.MerchantID); err != nil {
 		return err
 	} else {
 		data.MerchantID = resolved
@@ -722,7 +722,7 @@ func (s *EventLogService) LogTransactionEvent(ctx context.Context, data Transact
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	if resolved, err := resolveTenantID(ctx, data.MerchantID); err != nil {
+	if resolved, err := resolveMerchantID(ctx, data.MerchantID); err != nil {
 		return err
 	} else {
 		data.MerchantID = resolved
@@ -792,7 +792,7 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	if resolved, err := resolveTenantID(ctx, data.MerchantID); err != nil {
+	if resolved, err := resolveMerchantID(ctx, data.MerchantID); err != nil {
 		return err
 	} else {
 		data.MerchantID = resolved
@@ -864,7 +864,7 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	if resolved, err := resolveTenantID(ctx, data.MerchantID); err != nil {
+	if resolved, err := resolveMerchantID(ctx, data.MerchantID); err != nil {
 		return err
 	} else {
 		data.MerchantID = resolved

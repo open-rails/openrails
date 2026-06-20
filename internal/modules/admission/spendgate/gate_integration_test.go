@@ -9,10 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
-	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 )
 
 // clock is a mutable test clock so anchored-window resets can be exercised
@@ -32,17 +31,7 @@ func (c *clock) add(d time.Duration) {
 
 func newGate(t *testing.T) (*spendgate.Gate, *clock, context.Context) {
 	t.Helper()
-	ctx := context.Background()
-	c, err := tcredis.Run(ctx, "redis:7-alpine")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = c.Terminate(ctx) })
-	conn, err := c.ConnectionString(ctx)
-	require.NoError(t, err)
-	opt, err := redis.ParseURL(conn)
-	require.NoError(t, err)
-	rdb := redis.NewClient(opt)
-	t.Cleanup(func() { _ = rdb.Close() })
-	require.NoError(t, rdb.Ping(ctx).Err())
+	rdb, ctx := dbtest.SharedRedisClient(t)
 
 	g := spendgate.New(rdb)
 	clk := &clock{t: time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)}

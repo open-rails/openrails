@@ -13,15 +13,18 @@ import (
 
 const ensureCustomer = `-- name: EnsureCustomer :one
 
-INSERT INTO openrails.customers (id, merchant_id)
-VALUES ($1, $2)
-ON CONFLICT (id) DO UPDATE SET last_seen_at = now()
+INSERT INTO openrails.customers (id, merchant_id, subject)
+VALUES ($1, $2, $3)
+ON CONFLICT (id) DO UPDATE SET
+  subject = EXCLUDED.subject,
+  last_seen_at = now()
 RETURNING id
 `
 
 type EnsureCustomerParams struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
+	Subject    *string
 }
 
 // openrails.customers: payable balance account (#491). A customer is a PURE
@@ -30,59 +33,57 @@ type EnsureCustomerParams struct {
 // merchant. The caller supplies id (the payable UUID). ON CONFLICT refreshes
 // last_seen_at so concurrent first-touch is safe.
 func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, ensureCustomer, arg.ID, arg.MerchantID)
+	row := q.db.QueryRow(ctx, ensureCustomer, arg.ID, arg.MerchantID, arg.Subject)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
 }
 
 const ensureCustomerRow = `-- name: EnsureCustomerRow :exec
-INSERT INTO openrails.customers (id, merchant_id)
-VALUES ($1, $2)
+INSERT INTO openrails.customers (id, merchant_id, subject)
+VALUES ($1, $2, $3)
 ON CONFLICT DO NOTHING
 `
 
 type EnsureCustomerRowParams struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
+	Subject    *string
 }
 
 // FK-target materialization before commerce inserts; no-op when present.
 func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowParams) error {
-	_, err := q.db.Exec(ctx, ensureCustomerRow, arg.ID, arg.MerchantID)
+	_, err := q.db.Exec(ctx, ensureCustomerRow, arg.ID, arg.MerchantID, arg.Subject)
 	return err
 }
 
-const lookupCustomerIDsByIssuerSubjects = `-- name: LookupCustomerIDsByIssuerSubjects :many
+const lookupCustomerIDsBySubjects = `-- name: LookupCustomerIDsBySubjects :many
 SELECT id, subject FROM openrails.customers
-WHERE merchant_id = $1 AND org_id IS NULL AND issuer = $2
-  AND subject = ANY($3::text[])
+WHERE merchant_id = $1
+  AND subject = ANY($2::text[])
 `
 
-type LookupCustomerIDsByIssuerSubjectsParams struct {
+type LookupCustomerIDsBySubjectsParams struct {
 	MerchantID uuid.UUID
-	Issuer     *string
 	Subjects   []string
 }
 
-type LookupCustomerIDsByIssuerSubjectsRow struct {
+type LookupCustomerIDsBySubjectsRow struct {
 	ID      uuid.UUID
 	Subject *string
 }
 
-// #491: resolve (merchant, issuer, subject) -> id for a batch of org-less
-// subjects. Replaces the dropped deterministic FederatedCustomerID derivation
-// with a real lookup against the re-added natural key. Absent subjects are simply
-// not returned.
-func (q *Queries) LookupCustomerIDsByIssuerSubjects(ctx context.Context, arg LookupCustomerIDsByIssuerSubjectsParams) ([]LookupCustomerIDsByIssuerSubjectsRow, error) {
-	rows, err := q.db.Query(ctx, lookupCustomerIDsByIssuerSubjects, arg.MerchantID, arg.Issuer, arg.Subjects)
+// Resolve merchant-local stable host subjects to customer ids. Issuer is audit
+// metadata only and never participates in identity.
+func (q *Queries) LookupCustomerIDsBySubjects(ctx context.Context, arg LookupCustomerIDsBySubjectsParams) ([]LookupCustomerIDsBySubjectsRow, error) {
+	rows, err := q.db.Query(ctx, lookupCustomerIDsBySubjects, arg.MerchantID, arg.Subjects)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []LookupCustomerIDsByIssuerSubjectsRow
+	var items []LookupCustomerIDsBySubjectsRow
 	for rows.Next() {
-		var i LookupCustomerIDsByIssuerSubjectsRow
+		var i LookupCustomerIDsBySubjectsRow
 		if err := rows.Scan(&i.ID, &i.Subject); err != nil {
 			return nil, err
 		}
@@ -94,46 +95,26 @@ func (q *Queries) LookupCustomerIDsByIssuerSubjects(ctx context.Context, arg Loo
 	return items, nil
 }
 
-const upsertCustomerByIssuerSubject = `-- name: UpsertCustomerByIssuerSubject :one
-INSERT INTO openrails.customers (merchant_id, issuer, subject)
-VALUES ($1, $2, $3)
-ON CONFLICT (merchant_id, issuer, subject) WHERE org_id IS NULL AND issuer IS NOT NULL AND subject IS NOT NULL
-DO UPDATE SET last_seen_at = now()
+const upsertCustomerBySubject = `-- name: UpsertCustomerBySubject :one
+INSERT INTO openrails.customers (id, merchant_id, issuer, subject)
+VALUES ($1::uuid, $2, $3, $1)
+ON CONFLICT (id) DO UPDATE SET
+  subject = EXCLUDED.subject,
+  issuer = COALESCE(EXCLUDED.issuer, openrails.customers.issuer),
+  last_seen_at = now()
 RETURNING id
 `
 
-type UpsertCustomerByIssuerSubjectParams struct {
+type UpsertCustomerBySubjectParams struct {
+	Subject    *uuid.UUID
 	MerchantID uuid.UUID
 	Issuer     *string
-	Subject    *string
 }
 
-// #491 org-less/standalone-federated payer: per (merchant, issuer, subject).
-// uuidv7 pk minted once, looked up by the natural key.
-func (q *Queries) UpsertCustomerByIssuerSubject(ctx context.Context, arg UpsertCustomerByIssuerSubjectParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, upsertCustomerByIssuerSubject, arg.MerchantID, arg.Issuer, arg.Subject)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
-const upsertCustomerByOrg = `-- name: UpsertCustomerByOrg :one
-INSERT INTO openrails.customers (merchant_id, org_id)
-VALUES ($1, $2)
-ON CONFLICT (merchant_id, org_id) WHERE org_id IS NOT NULL
-DO UPDATE SET last_seen_at = now()
-RETURNING id
-`
-
-type UpsertCustomerByOrgParams struct {
-	MerchantID uuid.UUID
-	OrgID      *string
-}
-
-// #491 org-bound payer: ONE customer per (merchant, org). uuidv7 pk minted once,
-// looked up by the natural key (no derived uuidv5). Returns the stable id.
-func (q *Queries) UpsertCustomerByOrg(ctx context.Context, arg UpsertCustomerByOrgParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, upsertCustomerByOrg, arg.MerchantID, arg.OrgID)
+// Customer identity is the merchant plus the host/AuthKit stable UUID subject.
+// The row id is that subject UUID; issuer is kept only as last-seen audit source.
+func (q *Queries) UpsertCustomerBySubject(ctx context.Context, arg UpsertCustomerBySubjectParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, upsertCustomerBySubject, arg.Subject, arg.MerchantID, arg.Issuer)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err

@@ -217,15 +217,15 @@ type OpenrailsCustomCreditType struct {
 	UpdatedAt time.Time
 }
 
-// OpenRails payable identity. id is the payable UUID; org-bound issuers resolve one customer per (merchant, org_id), org-less issuers resolve by (merchant, issuer, subject), and native/embedded callers may materialize the subject UUID directly as id.
+// OpenRails payable identity. Customer identity is merchant_id plus the host/AuthKit stable UUID subject; id is that payable UUID. issuer is audit/last-seen source only.
 type OpenrailsCustomer struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// #491 org-bound payer natural key: authkit org id. One customer per (merchant, org). NULL for org-less/native payers.
+	// Deprecated customer identity metadata. Merchant ownership is represented by merchant_id; org/issuer do not key customers.
 	OrgID *string
-	// #491 org-less payer natural key part: validated issuer. NULL for org-bound and native payers.
+	// Audit/last-seen source issuer for delegated/remote customer touches. Not part of customer identity.
 	Issuer *string
-	// #491 org-less payer natural key part: merchant-supplied stable subject. NULL for org-bound and native payers.
+	// Host/AuthKit stable UUID subject. Natural key is (merchant_id, subject); issuer does not participate.
 	Subject    *string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
@@ -260,6 +260,24 @@ type OpenrailsEntitlementFeature struct {
 	Metadata   []byte
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+}
+
+// Append-only operator history for external provider mutations executed from provider intents/convergence (#533).
+type OpenrailsExternalProviderMutationLog struct {
+	ID                uuid.UUID
+	MerchantID        uuid.UUID
+	Provider          string
+	ProviderAccountID *uuid.UUID
+	ProviderIntentID  *uuid.UUID
+	IntentType        *string
+	IdempotencyKey    *string
+	Attempt           int32
+	// Provider mutation lifecycle phase: attempting before the remote call, then succeeded/failed/unknown/parked after the handler classifies the result.
+	Phase  string
+	Reason *string
+	// Scrubbed structured metadata only. Never store API keys, authorization headers, card data, private keys, or unsanitized provider bodies.
+	Evidence  []byte
+	CreatedAt time.Time
 }
 
 // #514 append-only grant ledger: the access-domain sibling of the #512 money ledger. Immutable events (grant/revoke/expire/supersede/adjust); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount+currency and IS the FIFO credit lot (subsumes the old money_blocks role); derive-2 emits its #512 deposit transfer tagged source=grant.

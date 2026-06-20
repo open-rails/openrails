@@ -28,6 +28,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -451,6 +452,7 @@ func newMerchantManifestTestPool(t *testing.T) *pgxpool.Pool {
 		postgres.WithDatabase("openrails"),
 		postgres.WithUsername("test"),
 		postgres.WithPassword("test"),
+		dbtest.WithPostgresLimits(),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(60*time.Second)),

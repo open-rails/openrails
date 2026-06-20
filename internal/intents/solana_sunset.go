@@ -64,7 +64,7 @@ type planAccountReader interface {
 // planSunsetter is the write surface (interface for unit tests). Satisfied by
 // *recurring.PlanService.
 type planSunsetter interface {
-	SunsetPlan(ctx context.Context, tenantID merchant.ID, planPDA solanago.PublicKey, current *subscriptions.PlanAccount) (string, error)
+	SunsetPlan(ctx context.Context, merchantID merchant.ID, planPDA solanago.PublicKey, current *subscriptions.PlanAccount) (string, error)
 }
 
 // SolanaSunsetPlanHandler implements verify-then-execute sunsetting:
@@ -74,7 +74,7 @@ type planSunsetter interface {
 //     "rejoined the local catalog") supersedes the intent.
 //   - execute: read the plan account first — absent or already sunset IS
 //     success with evidence; else update_plan(status=sunset) signed by the
-//     tenant's merchant key. A submit error is ambiguous (the verifier
+//     merchant's merchant key. A submit error is ambiguous (the verifier
 //     re-reads the account's status).
 //   - unconfigured Solana stack (no RPC / no plan service) parks the intent
 //     pending with the reason recorded, never failed.

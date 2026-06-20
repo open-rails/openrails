@@ -13,18 +13,16 @@ var ErrNoControlPlane = errors.New("controlplane: not configured")
 
 // HasAdminPermission reports whether the given user holds perm in the caller's
 // OWN AuthKit org according to LIVE AuthKit effective-permission state (not
-// stale JWT claims). This is the #312 deploy-authority primitive: admin writes
-// are gated by the openrails:admin permission held in the caller's tenant + the
-// OpenRails permission catalog, evaluated at request time — NOT by membership in
-// a separate "operator" AuthKit org.
+// stale JWT claims). Merchant-local authority is `org:` authority in the
+// caller's merchant org.
 //
-// tenantSlug is the caller's tenant. An empty slug yields no authority (there is
-// no operator-tenant fallback): the caller must present a tenant context.
-func (c *ControlPlane) HasAdminPermission(ctx context.Context, tenantSlug, userID, perm string) (bool, error) {
+// orgSlug is the caller's org. An empty slug yields no authority (there is
+// no operator-org fallback): the caller must present an org context.
+func (c *ControlPlane) HasAdminPermission(ctx context.Context, orgSlug, userID, perm string) (bool, error) {
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane
 	}
-	slug := strings.ToLower(strings.TrimSpace(tenantSlug))
+	slug := strings.ToLower(strings.TrimSpace(orgSlug))
 	if slug == "" {
 		return false, nil
 	}
@@ -35,10 +33,19 @@ func (c *ControlPlane) HasAdminPermission(ctx context.Context, tenantSlug, userI
 	return c.Core().HasPermission(ctx, slug, userID, strings.TrimSpace(perm))
 }
 
-// IsAdmin reports whether the user holds the broad openrails:admin permission in
-// their own AuthKit org via live AuthKit state.
-func (c *ControlPlane) IsAdmin(ctx context.Context, tenantSlug, userID string) (bool, error) {
-	return c.HasAdminPermission(ctx, tenantSlug, userID, PermAdmin)
+// IsAdmin reports whether the user holds a broad merchant-owner grant in their
+// own AuthKit org via live AuthKit state.
+func (c *ControlPlane) IsAdmin(ctx context.Context, orgSlug, userID string) (bool, error) {
+	perms, err := c.Core().EffectivePermissions(ctx, orgSlug, userID)
+	if err != nil {
+		return false, err
+	}
+	for _, p := range perms {
+		if strings.HasPrefix(p, "org:") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // PlatformOrgSlug returns "" because OpenRails no longer supports a config-seeded
@@ -48,27 +55,16 @@ func (c *ControlPlane) PlatformOrgSlug() string {
 	return ""
 }
 
-// HasPlatformSuperadmin reports whether userID holds PermPlatformSuperadmin in
-// the platform org (issue #226) according to LIVE AuthKit effective-permission
-// state — NOT in any org operator org. This is the cross-tenant authority
-// primitive: it is what gates the /v1/platform/* surface.
-//
-// It ALWAYS evaluates against the configured platform org slug, ignoring the
-// caller's claimed org. This is what makes a org operator admin (who holds
-// openrails:admin in a org operator org but is NOT a member of the platform
-// tenant) fail the gate: their permission lives in the wrong tenant. When no platform
-// tenant is configured it returns false (the platform surface is disabled).
+// HasPlatformSuperadmin reports whether userID holds the concrete platform
+// permission used by the OpenRails platform directory routes according to
+// AuthKit's platform RBAC layer.
 func (c *ControlPlane) HasPlatformSuperadmin(ctx context.Context, userID string) (bool, error) {
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane
-	}
-	slug := c.PlatformOrgSlug()
-	if slug == "" {
-		return false, nil
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return false, nil
 	}
-	return c.Core().HasPermission(ctx, slug, userID, PermPlatformSuperadmin)
+	return c.Core().HasPlatformPermission(ctx, userID, PermPlatformSuperadmin)
 }

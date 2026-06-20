@@ -103,15 +103,15 @@ func RunBootstrap(ctx context.Context, a *app.App, opts controlplane.BootstrapOp
 	if cp == nil {
 		return nil, fmt.Errorf("control plane bootstrap: no control plane attached (call Attach first)")
 	}
-	if !opts.MintInitialServiceToken {
-		opts.MintInitialServiceToken = true
+	if !opts.MintInitialAPIKey {
+		opts.MintInitialAPIKey = true
 	}
 	res, err := cp.Bootstrap(ctx, opts)
 	if err != nil {
 		return res, err
 	}
 	// #226 compatibility: also ensure the legacy managed-hosting superadmin role
-	// when configured. No-op in single-tenant / non-managed deployments.
+	// when configured. No-op in single-merchant / non-managed deployments.
 	if _, perr := cp.BootstrapPlatform(ctx); perr != nil {
 		return res, fmt.Errorf("platform superadmin bootstrap: %w", perr)
 	}

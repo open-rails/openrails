@@ -39,11 +39,29 @@ func (suite *TestContainerSuite) Count(ctx context.Context, query string, args .
 
 func (suite *TestContainerSuite) InsertProduct(ctx context.Context, p *models.Product) {
 	suite.t.Helper()
+	if p.MerchantID == uuid.Nil {
+		tid, err := merchant.Require(ctx)
+		if err != nil {
+			ctx = dbtest.WithTestMerchant(ctx)
+			tid, err = merchant.Require(ctx)
+		}
+		require.NoError(suite.t, err, "Failed to resolve merchant for product")
+		p.MerchantID = tid.UUID()
+	}
 	require.NoError(suite.t, dbrepo.NewProductRepo(suite.App.Runtime.DB).Create(ctx, p), "Failed to insert product")
 }
 
 func (suite *TestContainerSuite) InsertPrice(ctx context.Context, p *models.Price) {
 	suite.t.Helper()
+	if p.MerchantID == uuid.Nil {
+		tid, err := merchant.Require(ctx)
+		if err != nil {
+			ctx = dbtest.WithTestMerchant(ctx)
+			tid, err = merchant.Require(ctx)
+		}
+		require.NoError(suite.t, err, "Failed to resolve merchant for price")
+		p.MerchantID = tid.UUID()
+	}
 	require.NoError(suite.t, dbrepo.NewPriceRepo(suite.App.Runtime.DB).Create(ctx, p), "Failed to insert price")
 }
 
@@ -66,7 +84,7 @@ func (suite *TestContainerSuite) InsertEntitlement(ctx context.Context, e *model
 	suite.t.Helper()
 	// The entitlement repo writes through the RLS-aware Runtime.DB, which requires
 	// a merchant on the context to set app.merchant_id. The suite is single-merchant
-	// (#336: no default tenant), so default to the canonical test merchant when a
+	// (#336: no default merchant), so default to the canonical test merchant when a
 	// caller didn't pin one — keeping bare-context seeders working post-RLS.
 	if _, err := merchant.Require(ctx); err != nil {
 		ctx = dbtest.WithTestMerchant(ctx)
@@ -76,6 +94,9 @@ func (suite *TestContainerSuite) InsertEntitlement(ctx context.Context, e *model
 
 func (suite *TestContainerSuite) InsertNotification(ctx context.Context, n *models.NotificationQueue) {
 	suite.t.Helper()
+	if _, err := merchant.Require(ctx); err != nil {
+		ctx = dbtest.WithTestMerchant(ctx)
+	}
 	require.NoError(suite.t, dbrepo.NewNotificationQueueRepo(suite.App.Runtime.DB).Create(ctx, n), "Failed to insert notification")
 }
 

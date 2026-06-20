@@ -16,10 +16,9 @@ import (
 
 // ResolvedDelegated is the result of validating a browser-direct DELEGATED ACCESS
 // TOKEN against the OpenRails control plane (issue #222 browser-tier foundation).
-// It carries everything the self-service routes need to authorize a human
-// end-user acting on their OWN billing: the acting user (the token's
-// `delegated_sub`), the resolved OpenRails merchant the user belongs to, and the
-// token's `openrails:self:*` permission grants.
+// It carries everything the self-service routes need for a human end-user acting
+// on their OWN billing: the acting user (the token's `delegated_sub`) and the
+// resolved OpenRails merchant the user belongs to.
 type ResolvedDelegated struct {
 	// Merchant is the resolved merchant's slug, sourced from the issuer registry
 	// (openrails.merchants via the validated `iss`). Delegated tokens carry NO
@@ -31,7 +30,7 @@ type ResolvedDelegated struct {
 	// MerchantSlug is the resolved merchant's slug.
 	MerchantSlug string
 	// CustomerID is the durable OpenRails payable subject for
-	// (MerchantID, Issuer, DelegatedSubject).
+	// (MerchantID, DelegatedSubject).
 	CustomerID uuid.UUID
 	// DelegatedSubject is the acting end-user id (`delegated_sub`). This is the
 	// user the self-service handlers scope every read/write to. There is NEVER a
@@ -39,20 +38,20 @@ type ResolvedDelegated struct {
 	//
 	// SHARED-USER-NAMESPACE REQUIREMENT (issue #259): for a federated merchant whose
 	// users are shared across multiple issuers (e.g. multiple host apps = distinct
-	// issuers, one tenant, one user set), `delegated_sub` MUST be the merchant's
+	// issuers, one merchant, one user set), `delegated_sub` MUST be the merchant's
 	// CANONICAL user id (the shared AuthKit subject) so a token from EITHER issuer
 	// resolves to the SAME OpenRails billing account. OpenRails cannot detect a
 	// divergent per-service local id, so the HOST is responsible for presenting
 	// the canonical id; OpenRails uses this value verbatim as the billing account
 	// key. (For merchant-admin tokens this is the ACTING ADMIN, recorded for audit.)
 	DelegatedSubject string
-	// Issuer is the VALIDATED token `iss`: the registered merchant issuer the tenant
+	// Issuer is the VALIDATED token `iss`: the registered merchant issuer the merchant
 	// was pinned from (every delegated token is FEDERATED merchant-signed, #259).
 	// Used for audit and issuer/subject attribution (#246).
 	Issuer string
-	// Permissions are the token's granted permission strings — a subset of the
-	// `openrails:self:*` (self) and `openrails:merchant:*` (merchant-admin) catalogs
-	// (#259). Enforced at verify time; never service/operator grants.
+	// Permissions are optional for self-service tokens. When present, they must be
+	// browser-safe `org:` merchant-admin permissions (#259), never
+	// service/operator/platform grants.
 	Permissions []string
 	// Email/Username are optional non-authoritative identity fields from delegated
 	// token attributes. They are for hosted checkout/contact metadata only;
@@ -70,10 +69,8 @@ type ResolvedDelegated struct {
 
 // HasPermission reports whether the resolved delegated token grants perm.
 //
-// Unlike service tokens, delegated self tokens do NOT honor a broad admin grant: a browser
-// token can only carry `openrails:self:*` permissions (enforced at verify time),
-// so every permission check is an exact-string match against what the token
-// actually carries.
+// Unlike API keys, delegated browser tokens do NOT honor a broad admin grant:
+// every permission check is an exact-string match against what the token carries.
 func (r *ResolvedDelegated) HasPermission(perm string) bool {
 	perm = strings.TrimSpace(perm)
 	for _, p := range r.Permissions {
@@ -90,7 +87,7 @@ func (r *ResolvedDelegated) HasPermission(perm string) bool {
 var ErrDelegatedNotConfigured = errors.New("controlplane: delegated access verifier not configured")
 
 // ErrDelegatedInvalid is the sanitized error for any delegated-token rejection
-// that is not specifically expiry/revocation/tenant-unresolved. It never leaks
+// that is not specifically expiry/revocation/merchant-unresolved. It never leaks
 // internal verifier detail to the response.
 var ErrDelegatedInvalid = errors.New("controlplane: invalid delegated access token")
 
@@ -110,10 +107,10 @@ func (c *ControlPlane) DelegatedVerifier() *authhttp.Verifier {
 }
 
 // newDelegatedVerifier builds the delegated-access-token Verifier seeded with
-// this control plane's OWN self-issuer (the #222 path): the same issuer the
-// control plane signs as, the canonical `openrails` audience, the local signing
-// public keys, and a permission-catalog validator that rejects any permission
-// outside the {self-service, merchant-admin} catalog (issue #259).
+// this control plane's delegated browser verifier: the canonical `openrails`
+// audience and a permissions validator that rejects any permission outside the
+// browser-safe merchant-admin catalog (issue #259). Empty permissions are valid
+// for customer self-service routes.
 // VerifyDelegatedAccess additionally enforces AuthKit's delegated access token
 // profile + the no-`sub`/`delegated_sub`-present invariant.
 //
@@ -132,18 +129,13 @@ func newDelegatedVerifier(coreSvc *authcore.Service, tokenPrefix string) (*authh
 	// self-issuer seed — OpenRails never signs delegated tokens itself.
 	v := authhttp.NewVerifier(
 		authhttp.WithAPIKeyPrefix(tokenPrefix),
-		// Enforce that every permission on a browser token belongs to the
-		// {self-service, merchant-admin} catalog (issue #259). A token carrying an
-		// operator/server-to-server grant (or any unknown permission) is rejected
-		// by VerifyDelegatedAccess. This is the SOLE permission gate for
-		// merchant-signed tokens, so it is load-bearing: exact-match, no wildcard.
-		authhttp.WithPermissionCatalog(func(permissions []string) error {
-			if len(permissions) == 0 {
-				return errors.New("delegated token carries no permissions")
-			}
+		// Enforce that every supplied permission on a browser token belongs to the
+		// browser-safe merchant-admin catalog (issue #259). Permissionless tokens
+		// are valid for customer self-service routes.
+		authhttp.WithPermissions(func(permissions []string) error {
 			for _, p := range permissions {
 				if !IsDelegatedPermission(p) {
-					return fmt.Errorf("permission %q is not an openrails:self:* or openrails:merchant:* delegated permission", p)
+					return fmt.Errorf("permission %q is not a browser-safe org: permission", p)
 				}
 			}
 			return nil
@@ -153,25 +145,25 @@ func newDelegatedVerifier(coreSvc *authcore.Service, tokenPrefix string) (*authh
 }
 
 // ResolveDelegated validates a presented delegated access token end-to-end for
-// the browser-direct self-service surface:
+// the browser-direct self-service/admin surface:
 //
 //   - verifies signature/issuer/audience/expiry and requires it to be an
 //     AuthKit delegated access token (`delegated_sub` present, NO `sub`),
-//   - enforces that every `permissions` entry is in the {self, merchant-admin}
-//     catalog (#259), never a service/operator grant,
+//   - enforces that every supplied `permissions` entry is in the merchant-admin
+//     browser catalog (#259), never a service/operator/platform grant,
 //   - resolves the OpenRails merchant from the VALIDATED `iss` via the issuer
-//     registry (issuer is globally unique -> pins exactly one tenant). Tokens
+//     registry (issuer is globally unique -> pins exactly one merchant). Tokens
 //     carry NO merchant claims (authkit v0.23.0 issuer-only profile); the
 //     verifier rejects any token carrying `tenant` or `tenant_id`.
 //
 // Returns:
 //   - authcore.ErrAccessTokenExpired for an expired token,
 //   - ErrDelegatedIssuerUnknown when a federated token's issuer is not
-//     registered+enabled for an active tenant (cross-tenant / unmapped),
+//     registered+enabled for an active merchant (cross-merchant / unmapped),
 //   - ErrDelegatedOriginNotAllowed when the optional browser Origin
 //     defense-in-depth check fails for the verified issuer,
 //   - ErrDelegatedInvalid for any other rejection (bad signature/audience/type,
-//     normal-sub token, missing/forbidden permission, forbidden merchant claim).
+//     normal-sub token, forbidden permission, forbidden merchant claim).
 func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origin string) (*ResolvedDelegated, error) {
 	if c == nil || c.delegatedVerifier == nil {
 		return nil, ErrDelegatedNotConfigured
@@ -209,7 +201,7 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origi
 
 	issuer := strings.TrimSpace(principal.Issuer)
 	// Browser defense-in-depth only: real authorization is already the validated
-	// delegated JWT shape, issuer, audience, permission catalog, and merchant
+	// delegated JWT shape, issuer, audience, permissions, and merchant
 	// owner mapping below. Do not treat Origin as an API security boundary.
 	allowed, err := c.delegatedVerifier.OriginAllowedForIssuer(ctx, issuer, origin, true)
 	if err != nil || !allowed {
@@ -218,8 +210,8 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origi
 
 	// FEDERATED merchant-signed token (issue #259): the merchant is pinned from the
 	// VALIDATED `iss` via the issuer registry. Because `issuer` is globally unique,
-	// a given signing key can only ever resolve to its own tenant
-	// (no-cross-tenant-forgery). An unregistered/disabled issuer fails closed.
+	// a given signing key can only ever resolve to its own merchant
+	// (no-cross-merchant-forgery). An unregistered/disabled issuer fails closed.
 	// The token carries no merchant claims (issuer-only profile, authkit v0.23.0):
 	// the issuer registry is the SOLE source of merchant identity, so slug renames
 	// never invalidate in-flight tokens.
@@ -228,7 +220,7 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origi
 		return nil, err
 	}
 
-	tenantSubjectID, err := c.TouchCustomer(ctx, tid, issuer, subject)
+	customerID, err := c.TouchCustomer(ctx, tid, issuer, subject)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +229,7 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origi
 		Merchant:             tslug,
 		MerchantID:           tid,
 		MerchantSlug:         tslug,
-		CustomerID:           tenantSubjectID,
+		CustomerID:           customerID,
 		DelegatedSubject:     subject,
 		Issuer:               issuer,
 		Permissions:          append([]string(nil), principal.Permissions...),

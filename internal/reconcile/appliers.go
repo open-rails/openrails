@@ -28,7 +28,7 @@ type LocalWriter interface {
 	MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error)
 }
 
-// PGLocalWriter applies enforce writes via the sqlc layer on a tenant-pinned
+// PGLocalWriter applies enforce writes via the sqlc layer on a merchant-pinned
 // connection.
 type PGLocalWriter struct {
 	DB  *db.DB

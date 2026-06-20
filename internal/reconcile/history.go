@@ -13,7 +13,7 @@ import (
 // evidence source (decision 2026-06-11): alongside the provider-pulled
 // transaction timeline ("provider") and the local retry fields ("local"), the
 // ClickHouse payment/subscription events ("history") carry deep history the
-// provider APIs cannot return — including, for migrated tenants, the imported
+// provider APIs cannot return — including, for migrated merchants, the imported
 // legacy rebill/scheduler events (doujins #387).
 type HistoryEvent struct {
 	// Table is the originating ClickHouse table (payment_events |
@@ -39,7 +39,7 @@ type HistoryEventSource interface {
 	// ClickHouse present in the config). Unconfigured sources are noted in
 	// the report and skipped.
 	Configured() bool
-	// ListEvents returns the tenant's events for the given local processor
+	// ListEvents returns the merchant's events for the given local processor
 	// names, oldest first. Zero since/until = unbounded on that side.
 	ListEvents(ctx context.Context, processorNames []string, since, until time.Time) ([]HistoryEvent, error)
 }

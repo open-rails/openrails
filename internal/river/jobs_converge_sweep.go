@@ -32,7 +32,7 @@ func (ConvergeSweepArgs) Kind() string { return KindConvergeSweep }
 // interval. Clean merchants cost a no-op (Converge does zero writes when nothing
 // drifted), so the sweep is cheap to run often.
 //
-// Cross-tenant by design: the merchant directory is read on a privileged no-GUC
+// Cross-merchant by design: the merchant directory is read on a privileged no-GUC
 // connection (merchants is a control-plane table, not RLS-scoped), then each
 // merchant's Converge runs inside its own RunInMerchantConn so all detection and
 // repair is RLS-scoped to that merchant. One merchant's failure is logged and

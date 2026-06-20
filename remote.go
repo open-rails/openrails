@@ -13,15 +13,15 @@ import (
 )
 
 // remote is the HTTP implementation of Client, ported from go-client/client.go
-// (#338). It talks to a standalone OpenRails over the service-token /
-// service-JWT-authenticated /v1/service/* routes.
+// (#338). It talks to a standalone OpenRails over service-credential
+// authenticated /v1/service/* routes.
 type remote struct {
 	baseURL  string
 	currency string
 	client   *http.Client
 	timeout  time.Duration
 	// tokenFn mints the per-call Bearer (e.g. a host-signed AuthKit service JWT,
-	// #411, or an OpenRails-issued service token). It is the SOLE credential; a
+	// #411, or an OpenRails-issued API key). It is the SOLE credential; a
 	// mint failure errors the call so the problem surfaces instead of being
 	// masked.
 	tokenFn func(context.Context) (string, error)
@@ -298,9 +298,9 @@ func (c *remote) UsageRollup(ctx context.Context, customerID, currency string, f
 }
 
 // BudgetStatus implements Client (handler ServiceGetBudget).
-func (c *remote) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, currency, tier string) ([]BudgetWindow, error) {
+func (c *remote) BudgetStatus(ctx context.Context, customerID, invokerID, currency, tier string) ([]BudgetWindow, error) {
 	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
+	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", normalizeCurrency(currency))
 	if invokerID != "" {
 		q.Set("invoker", invokerID)
@@ -318,9 +318,9 @@ func (c *remote) BudgetStatus(ctx context.Context, tenantSubjectID, invokerID, c
 }
 
 // SetPayerSpendLimits implements Client (handler ServiceSetPayerSpendLimits).
-func (c *remote) SetPayerSpendLimits(ctx context.Context, tenantSubjectID string, in PayerSpendLimitInput) error {
+func (c *remote) SetPayerSpendLimits(ctx context.Context, customerID string, in PayerSpendLimitInput) error {
 	body := map[string]any{
-		"customer_id":     strings.TrimSpace(tenantSubjectID),
+		"customer_id":     strings.TrimSpace(customerID),
 		"tier":            in.Tier,
 		"budget_windows":  in.BudgetWindows,
 		"policy_currency": in.PolicyCurrency,
@@ -332,9 +332,9 @@ func (c *remote) SetPayerSpendLimits(ctx context.Context, tenantSubjectID string
 }
 
 // SetTierSchedule implements Client (handler ServiceSetTierSchedule, #476).
-func (c *remote) SetTierSchedule(ctx context.Context, tenantSubjectID, currency string, schedule []TierScheduleRung) error {
+func (c *remote) SetTierSchedule(ctx context.Context, customerID, currency string, schedule []TierScheduleRung) error {
 	body := map[string]any{
-		"customer_id": strings.TrimSpace(tenantSubjectID),
+		"customer_id": strings.TrimSpace(customerID),
 		"currency":    strings.TrimSpace(currency),
 		"schedule":    schedule,
 	}
@@ -347,9 +347,9 @@ func (c *remote) SetMerchantConfiguration(ctx context.Context, in MerchantConfig
 }
 
 // GetTier implements Client (handler ServiceGetTier, #477).
-func (c *remote) GetTier(ctx context.Context, tenantSubjectID, currency string) (string, error) {
+func (c *remote) GetTier(ctx context.Context, customerID, currency string) (string, error) {
 	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
+	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", strings.TrimSpace(currency))
 	var resp struct {
 		Currency string `json:"currency"`
@@ -381,9 +381,9 @@ func (c *remote) ReportWastedSpend(ctx context.Context, report WastedSpendReport
 }
 
 // AbuseUsage implements Client (handler ServiceAbuseUsage, #488).
-func (c *remote) AbuseUsage(ctx context.Context, tenantSubjectID, invoker, currency, tier string) (*AbuseUsageResponse, error) {
+func (c *remote) AbuseUsage(ctx context.Context, customerID, invoker, currency, tier string) (*AbuseUsageResponse, error) {
 	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
+	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", normalizeCurrency(currency))
 	if invoker != "" {
 		q.Set("invoker", invoker)
@@ -399,9 +399,9 @@ func (c *remote) AbuseUsage(ctx context.Context, tenantSubjectID, invoker, curre
 }
 
 // SetCreditLimit implements Client (handler ServiceSetCreditLimit, #489).
-func (c *remote) SetCreditLimit(ctx context.Context, tenantSubjectID, currency string, creditLimit int64) error {
+func (c *remote) SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error {
 	body := map[string]any{
-		"customer_id":         strings.TrimSpace(tenantSubjectID),
+		"customer_id":         strings.TrimSpace(customerID),
 		"currency":            normalizeCurrency(currency),
 		"credit_limit_amount": creditLimit,
 	}
@@ -409,9 +409,9 @@ func (c *remote) SetCreditLimit(ctx context.Context, tenantSubjectID, currency s
 }
 
 // GetCreditLimit implements Client (handler ServiceGetCreditLimit, #489).
-func (c *remote) GetCreditLimit(ctx context.Context, tenantSubjectID, currency string) (int64, error) {
+func (c *remote) GetCreditLimit(ctx context.Context, customerID, currency string) (int64, error) {
 	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
+	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", normalizeCurrency(currency))
 	var resp struct {
 		Currency          string `json:"currency"`
@@ -424,13 +424,13 @@ func (c *remote) GetCreditLimit(ctx context.Context, tenantSubjectID, currency s
 }
 
 // SetInvokerSpendLimits implements Client (handler ServiceSetInvokerSpendLimits, #473).
-func (c *remote) SetInvokerSpendLimits(ctx context.Context, tenantSubjectID string, in InvokerSpendLimitInput) error {
+func (c *remote) SetInvokerSpendLimits(ctx context.Context, customerID string, in InvokerSpendLimitInput) error {
 	scopeKey := strings.TrimSpace(in.ScopeKey)
 	if scopeKey == "" {
 		scopeKey = strings.TrimSpace(in.RoleID)
 	}
 	body := map[string]any{
-		"customer_id": strings.TrimSpace(tenantSubjectID),
+		"customer_id": strings.TrimSpace(customerID),
 		"scope":       in.Scope,
 		"scope_key":   scopeKey,
 		"role_id":     in.RoleID,
@@ -440,9 +440,9 @@ func (c *remote) SetInvokerSpendLimits(ctx context.Context, tenantSubjectID stri
 }
 
 // InvokerSpendLimits implements Client (handler ServiceGetInvokerSpendLimits, #473).
-func (c *remote) InvokerSpendLimits(ctx context.Context, tenantSubjectID string) ([]InvokerSpendLimit, error) {
+func (c *remote) InvokerSpendLimits(ctx context.Context, customerID string) ([]InvokerSpendLimit, error) {
 	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(tenantSubjectID))
+	q.Set("customer_id", strings.TrimSpace(customerID))
 	var resp struct {
 		Policies []InvokerSpendLimit `json:"policies"`
 	}
@@ -483,6 +483,42 @@ func (c *remote) ListActiveEntitlements(ctx context.Context, issuer string, subj
 		out = map[string][]EntitlementRecord{}
 	}
 	return out, nil
+}
+
+// ListCustomersWithEntitlement implements Client (handler
+// ServiceGetCustomersWithEntitlement). It walks the keyset-paginated reverse
+// route to completion.
+func (c *remote) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]string, error) {
+	entitlement = strings.TrimSpace(entitlement)
+	if entitlement == "" {
+		return nil, fmt.Errorf("openrails: entitlement is required")
+	}
+	base := "/v1/service/entitlements/" + url.PathEscape(entitlement) + "/customers?limit=1000"
+	if !at.IsZero() {
+		base += "&at=" + url.QueryEscape(at.UTC().Format(time.RFC3339))
+	}
+	var all []string
+	cursor := ""
+	for {
+		path := base
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		var out struct {
+			Customers  []string `json:"customers"`
+			NextCursor string   `json:"next_cursor"`
+			HasMore    bool     `json:"has_more"`
+		}
+		if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+			return nil, err
+		}
+		all = append(all, out.Customers...)
+		if !out.HasMore || strings.TrimSpace(out.NextCursor) == "" {
+			break
+		}
+		cursor = out.NextCursor
+	}
+	return all, nil
 }
 
 // ResourceRevenueDaily implements Client (handler ServiceResourceRevenue).

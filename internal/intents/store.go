@@ -15,7 +15,7 @@ import (
 )
 
 // Store persists intents on the ledger. Producers call Enqueue/Supersede from
-// request contexts (tenant-pinned connections, RLS double-checks the stamp);
+// request contexts (merchant-pinned connections, RLS double-checks the stamp);
 // the Runner's claims and transitions run on the worker pool.
 type Store struct {
 	db *db.DB

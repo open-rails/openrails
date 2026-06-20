@@ -26,9 +26,9 @@ func userContext(r *request.Request) (billingauth.UserContext, bool) {
 }
 
 // AdminPermissionRequiredMW is the framework-neutral analogue of
-// AdminPermissionRequired (#282/#312). HARDCUT: admin authority is the live
-// openrails:admin permission held in the CALLER'S OWN tenant — there is no
-// claim-based operator-tenant gate. A nil checker is a config error and fails
+// AdminPermissionRequired (#282/#312/#537). HARDCUT: admin authority is live
+// merchant-local `org:` permission state in the CALLER'S OWN org. There is no
+// claim-based operator-org gate. A nil checker is a config error and fails
 // closed with 500: a deployment that mounts admin routes must wire the live
 // permission checker (the control plane).
 func AdminPermissionRequiredMW(checker AdminPermissionChecker, perm string) router.Middleware {

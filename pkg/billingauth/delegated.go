@@ -12,12 +12,13 @@ import (
 // issue #339). It is the framework-neutral counterpart of the control plane's
 // resolved delegated token: the host verifies the incoming credential however
 // it likes (its own federated-issuer registry, a session, a gateway header)
-// and returns the EXPLICITLY mapped {tenant, subject, permissions} principal.
+// and returns the EXPLICITLY mapped {merchant, subject, optional permissions}
+// principal.
 //
 // EXPLICIT SUBSYSTEM MAPPING — NO FALLBACKS: the host must resolve BOTH the
 // OpenRails merchant and the acting subject itself. OpenRails performs no
 // try-merchant-then-subject (or any other implicit) resolution on a
-// host-supplied principal; a principal with an empty/invalid tenant or
+// host-supplied principal; a principal with an empty/invalid merchant or
 // subject is rejected with 401 (fail closed).
 type DelegatedPrincipal struct {
 	// MerchantID is the resolved OpenRails merchant id in UUID string form
@@ -43,11 +44,10 @@ type DelegatedPrincipal struct {
 	// same audit slot as a delegated token's validated `iss`.
 	Issuer string
 
-	// Permissions are the granted permission strings. They must come from the
-	// delegated catalog (`openrails:self:*` / `openrails:merchant:*`); OpenRails
-	// rejects a principal carrying any service/operator grant, mirroring the
-	// verify-time catalog gate on real delegated tokens. At least one
-	// permission is required.
+	// Permissions are optional for self-service routes. When present, they must
+	// come from the browser-safe `org:*` merchant-admin set; OpenRails rejects
+	// platform/unknown grants, mirroring the verify-time gate on real delegated
+	// tokens.
 	Permissions []string
 
 	// Email / EmailVerified / Username are optional non-authoritative contact
@@ -59,8 +59,8 @@ type DelegatedPrincipal struct {
 }
 
 // ErrDelegatedPrincipalInvalid indicates a host-supplied principal is missing
-// its explicit tenant or subject mapping. OpenRails maps it to 401.
-var ErrDelegatedPrincipalInvalid = errors.New("delegated principal requires an explicit tenant and subject")
+// its explicit merchant or subject mapping. OpenRails maps it to 401.
+var ErrDelegatedPrincipalInvalid = errors.New("delegated principal requires an explicit merchant and subject")
 
 // Validate enforces the explicit-mapping contract: a usable principal carries
 // a non-empty merchant id and subject. (Merchant-id FORMAT and the permission
@@ -97,10 +97,9 @@ type DelegatedAuthenticator interface {
 //				return nil, billingauth.ErrUnauthenticated
 //			}
 //			return &billingauth.DelegatedPrincipal{
-//				MerchantID:    deploymentTenantID, // explicit per-deployment mapping
+//				MerchantID:    deploymentMerchantID, // explicit per-deployment mapping
 //				SubjectID:   user.CanonicalID,
 //				Issuer:      "https://auth.host.example",
-//				Permissions: []string{"openrails:self:billing:read"},
 //			}, nil
 //		})
 type DelegatedAuthenticatorFunc func(ctx context.Context, r *http.Request) (*DelegatedPrincipal, error)

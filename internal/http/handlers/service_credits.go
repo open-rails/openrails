@@ -64,14 +64,14 @@ func parseServiceCustomerID(raw string) (*billingidentity.CustomerID, error) {
 	return &tenantSubject, nil
 }
 
-// serviceTokenFromRequest returns the resolved API key credential the auth
+// serviceCredentialFromRequest returns the resolved service credential the auth
 // middleware pinned onto the context, or a (status, message) error pair.
-func serviceTokenFromRequest(r *httprequest.Request) (*controlplane.ResolvedServiceToken, int, string) {
-	v, ok := r.Get(ginmw.ServiceTokenContextKey)
+func serviceCredentialFromRequest(r *httprequest.Request) (*controlplane.ResolvedServiceCredential, int, string) {
+	v, ok := r.Get(ginmw.ServiceCredentialContextKey)
 	if !ok {
 		return nil, http.StatusUnauthorized, "API key required"
 	}
-	resolved, ok := v.(*controlplane.ResolvedServiceToken)
+	resolved, ok := v.(*controlplane.ResolvedServiceCredential)
 	if !ok || resolved == nil {
 		return nil, http.StatusInternalServerError, "API key state invalid"
 	}
@@ -79,19 +79,19 @@ func serviceTokenFromRequest(r *httprequest.Request) (*controlplane.ResolvedServ
 }
 
 func requireServiceCustomerScope(r *httprequest.Request, tenantSubject billingidentity.CustomerID) bool {
-	resolved, status, msg := serviceTokenFromRequest(r)
+	resolved, status, msg := serviceCredentialFromRequest(r)
 	if resolved == nil {
 		r.ErrorJSON(status, msg)
 		return false
 	}
 	if !resolved.AllowsCustomer(tenantSubject.UUID()) {
-		r.ErrorJSON(http.StatusForbidden, "service_token_tenant_subject_scope_denied")
+		r.ErrorJSON(http.StatusForbidden, "service_credential_customer_scope_denied")
 		return false
 	}
 	return true
 }
 
-// serviceBalanceResponse is the tenant-subject balance snapshot served by
+// serviceBalanceResponse is the customer balance snapshot served by
 // GET /v1/service/credits/balance (issue #235/#247).
 type serviceBalanceResponse struct {
 	CustomerID            uuid.UUID `json:"customer_id"`
@@ -103,9 +103,9 @@ type serviceBalanceResponse struct {
 	OutstandingOwedAmount int64     `json:"outstanding_owed_amount"`
 }
 
-// ServiceGetCreditsBalance returns the tenant subject's REAL balance snapshot (issue
+// ServiceGetCreditsBalance returns the customer's REAL balance snapshot (issue
 // #235/#247): available = balance - held, plus outstanding owed + billing mode.
-// Merchant-bound by the API key (RLS); tenant subject supplied via ?customer_id=.
+// Merchant-bound by the API key (RLS); customer supplied via ?customer_id=.
 func ServiceGetCreditsBalance(r *httprequest.Request) {
 	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
 	if !ok {
@@ -144,7 +144,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 	})
 }
 
-// serviceQueryCustomer extracts the tenant subject from the query string.
+// serviceQueryCustomer extracts the customer from the query string.
 func serviceQueryCustomer(r *httprequest.Request) (*identity.CustomerID, error) {
 	return parseServiceCustomerID(r.Request.URL.Query().Get("customer_id"))
 }
@@ -161,7 +161,7 @@ func serviceRequiredCurrency(r *httprequest.Request, raw string) (string, bool) 
 	return money.NormalizeCurrency(currency), true
 }
 
-// serviceAccountSettingsRequest is the PUT body for configuring a tenant subject's credit
+// serviceAccountSettingsRequest is the PUT body for configuring a customer's credit
 // billing account (issue #242). All settings are optional pointers (only the
 // supplied fields are changed); customer_id + currency identify the account.
 type serviceAccountSettingsRequest struct {
@@ -181,7 +181,7 @@ type serviceAccountSettingsRequest struct {
 }
 
 // ServiceSetCreditAccountSettings (PUT /v1/service/credits/account-settings)
-// configures a tenant subject's billing account: prepaid vs arrears mode, spend caps,
+// configures a customer's billing account: prepaid vs arrears mode, spend caps,
 // auto-top-up, and expiry default (issue #242). Tensorhub's billing-admin surface
 // proxies to this with its service API key; OpenRails owns the settings.
 func ServiceSetCreditAccountSettings(r *httprequest.Request) {
@@ -236,7 +236,7 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 }
 
 // ServiceGetCreditAccountSettings (GET /v1/service/credits/account-settings)
-// reads a tenant subject's current billing-account settings (issue #242).
+// reads a customer's current billing-account settings (issue #242).
 func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
 	if !ok {
@@ -264,7 +264,7 @@ func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 }
 
 // ServiceListCustomerCreditTransactions (GET /v1/service/credits/transactions)
-// lists a tenant subject's credit transactions (usage history) for the billing-account
+// lists a customer's credit transactions (usage history) for the billing-account
 // admin surface (issue #242). Query: customer_id, currency, limit, offset.
 func ServiceListCustomerCreditTransactions(r *httprequest.Request) {
 	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
@@ -330,7 +330,7 @@ type serviceEndpointRevenueRequest struct {
 }
 
 // ServiceResourceRevenue returns per-day revenue for a resource (by usage_event
-// the typed resource column) across all tenant subjects in the tenant (#410) — powers
+// the typed resource column) across all customers in the merchant (#410) — powers
 // tensorhub endpoint revenue analytics. Operator API key, credits:read.
 func ServiceResourceRevenue(r *httprequest.Request) {
 	var req serviceEndpointRevenueRequest
@@ -358,7 +358,7 @@ func ServiceResourceRevenue(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"currency": currency, "revenue_amount": total, "daily": rows})
 }
 
-// ServiceUsageRollup returns per-dimension-value spend for a tenant subject over a
+// ServiceUsageRollup returns per-dimension-value spend for a customer over a
 // window (#311) — the OpenRails-sourced data behind the tensorhub platform's
 // /budget-usage + revenue analytics. Operator API key, credits:read scope.
 func ServiceUsageRollup(r *httprequest.Request) {

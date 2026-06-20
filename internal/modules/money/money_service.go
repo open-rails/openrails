@@ -478,9 +478,11 @@ func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUI
 		tenantID = tid.UUID()
 	}
 	return q.EnsureCustomerRow(ctx, gen.EnsureCustomerRowParams{
-		ID: tsid, MerchantID: tenantID,
+		ID: tsid, MerchantID: tenantID, Subject: stringPtr(tsid.String()),
 	})
 }
+
+func stringPtr(s string) *string { return &s }
 
 // depositTx records a money-in as a #514 credit grant (kind=credit), then
 // materializes it (derive-2) into a #512 ledger deposit (DR processor_clearing /

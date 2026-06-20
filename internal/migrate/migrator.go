@@ -65,9 +65,13 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 	}
 	log.Info("✓ AuthKit migrations completed successfully")
 
-	// ---------- 2. River Migrations (OpenRails schema) ----------
-	log.Infof("Running River migrations (schema %q)...", schema)
-	if err := runRiverMigrations(ctx, cfg, schema); err != nil {
+	// ---------- 2. River Migrations (always `public`, #545) ----------
+	// River job-queue tables live in `public` (config.RiverSchema), NOT the
+	// OpenRails billing schema, so the billing schema stays 100% portable for the
+	// embedded↔standalone data move (#544). Must match the runtime client schema
+	// (app.standaloneRiverSchema).
+	log.Infof("Running River migrations (schema %q)...", config.RiverSchema)
+	if err := runRiverMigrations(ctx, cfg, config.RiverSchema); err != nil {
 		return fmt.Errorf("river migrations failed: %w", err)
 	}
 
