@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -89,6 +90,11 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 			return nil
 		}
 	}
+	// Pin the owning merchant on the job context (#336): the cancel persists a
+	// deferred-delete intent and re-converges the customer, both of which require
+	// merchant resolution. River job contexts carry no ambient merchant.
+	ctx = merchant.WithID(ctx, merchant.ID(sub.MerchantID))
+
 	log.WithContext(ctx).WithFields(log.Fields{
 		"user_id":         userID,
 		"subscription_id": sub.ID,

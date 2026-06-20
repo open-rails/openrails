@@ -71,11 +71,6 @@ tasks:
     cmds:
       - bash scripts/mint_jwt.sh
 
-  seed-e2e-nmi:
-    desc: Seed a minimal NMI sandbox catalog using the mobius provider slug
-    cmds:
-      - bash scripts/seed_e2e_mobius.sh
-
   e2e-dump-local:
     desc: Dump local rows for current E2E_RUN_ID/E2E_USER_ID
     cmds:
@@ -86,15 +81,11 @@ tasks:
     cmds:
       - bash scripts/nmi_query.sh {{if .TXN_ID}}--transaction-id "{{.TXN_ID}}"{{end}} {{if .SUB_ID}}--subscription-id "{{.SUB_ID}}"{{end}}
 
-  e2e-nmi-sandbox:
-    desc: Start compose + start cloudflared + send signed test webhook (requires cloudflared + env vars)
-    cmds:
-      - bash scripts/mobius_sandbox_e2e.sh
-
   e2e-nmi-live:
-    desc: Run the self-verifying NMI payment lifecycle E2E harness using the mobius provider slug
+    desc: Run the live NMI sandbox payment lifecycle E2E (Go integration test against the real sandbox; needs NMI_SANDBOX_SECURITY_KEY in .env)
+    dotenv: ['.env']
     cmds:
-      - bash scripts/mobius_live_lifecycle_e2e.sh
+      - bash scripts/test_integration.sh ./tests -run TestNMILiveLifecycleE2E
 
   sqlc:
     desc: Regenerate internal/db/gen from internal/db/queries and vet every query (PREPARE against a fresh DB built from migrations/)
