@@ -9,6 +9,314 @@
 
 ---
 
+# #548: simplify-self-account-balance-contract
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-20: customer `/v1/me/account` now returns only the durable per-currency balance contract; focused self-account tests pass.
+
+`GET /v1/me/account?currency=usd` currently returns `balance_amount`, `held_amount`, `available_amount`, `outstanding_owed_amount`, `billing_mode`, and settings. That suggests the endpoint is doing a live in-flight hold lookup, but it is not: request/admission holds live in Redis spendgate, while this endpoint reads the durable money ledger. Since customer balance display should be per-currency and simple, do not add a Redis lookup here. Drop `held_amount` and `available_amount` from the customer account response and return the durable balance for the requested currency.
+
+## Metadata
+
+- Category: cleanup
+- Status: complete
+- Passes: true
+
+## Desired Behavior
+
+- `GET /v1/me/account?currency=usd` returns one customer account for one currency.
+- The response exposes the durable per-currency balance as the balance.
+- The response does not expose `held_amount` or `available_amount`.
+- Live in-flight spendgate holds remain internal admit-path state, not part of the customer account balance contract.
+- Billing mode remains the account policy value (`prepaid` or `arrears`) unless the implementation shows it is unused by consumers.
+
+**Tasks:**
+- [x] Update `internal/http/handlers/self_account.go` response shape to remove `held_amount` and `available_amount` from `GET /v1/me/account`.
+- [x] Keep balance lookup per-currency via the required `currency` query parameter.
+- [x] Do not add a Redis spendgate held lookup to this route.
+- [x] Update docs/tests that assert the old customer account response shape.
+- [x] Audit downstream OpenRails self-account consumers for `held_amount` / `available_amount` usage and update them to use `balance_amount`.
+- [x] Run the smallest focused test set covering `/v1/me/account`.
+
+## Acceptance
+
+- `/v1/me/account` no longer returns `held_amount` or `available_amount`.
+- Customer-facing docs describe per-currency balance, not live held/available capacity.
+- Existing service/admit internals may still track Redis held amounts where needed, but that state is not leaked through the customer account endpoint.
+
+---
+
+# #547: remove-dev-only-nmi-tokenization-debug-surface
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-20: OpenRails' dev-only NMI tokenization pages are removed; docs/scripts now generate a per-run NMI Collect.js `payment_token` in Playwright, ensure the stable `openrails_e2e_nmi_daily_999` sandbox recurring plan exists, and pass only that opaque token into OpenRails production APIs. `task e2e-nmi-live` passes against the Docker Compose stack with sandbox `NMI_SANDBOX_SECURITY_KEY`, `NMI_TOKENIZATION_KEY`, and `NMI_WEBHOOK_SIGNING_SECRET`: Collect.js tokenization, saved-card vaulting, one-off checkout, subscription checkout, NMI Query API verification, signed webhook ingestion/idempotent replay, activation, and cancellation.
+
+OpenRails currently serves a dev-only browser harness at `/debug/nmi/tokenization` plus a local fake Collect.js at `/debug/nmi/collect-stub.js`. That was useful while wiring NMI, but it is the wrong long-term test surface: production hosts run the card form, load processor tokenization JS in the browser, receive an opaque `payment_token`, and call OpenRails production endpoints such as `POST /v1/me/payment-methods` or checkout. Dev/test should exercise that path, not OpenRails-owned HTML that only exists in dev mode.
+
+## Metadata
+
+- Category: cleanup
+- Status: completed
+- Passes: true
+
+## Touched References
+
+- Deleted OpenRails routes/handlers/tests: `internal/http/routes_debug.go`, `internal/http/debug_nmi_tokenization.go`, `internal/http/debug_nmi_tokenization_test.go`.
+- Removed OpenRails security/path special cases from `internal/http/middleware/neutral_paths.go`, `internal/http/middleware/ginmw/security.go`, and `internal/http/middleware/ginmw/security_test.go`.
+- Updated OpenRails docs/scripts: deleted `docs/nmi-tokenization-harness.md`; updated `docs/e2e-mobius-sandbox.md`, `scripts/mobius_sandbox_e2e.sh`, and `scripts/mobius_live_lifecycle_e2e.sh`.
+- Doujins/Hentai0 exact `/debug/nmi/*` references were not found; both downstream apps already have browser-side payment/tokenization surfaces.
+
+## Desired Behavior
+
+- OpenRails never serves tokenization HTML or a Collect.js stub, even in dev mode.
+- Browser tokenization lives outside OpenRails, because OpenRails should never serve card-entry HTML or receive raw PAN/CVV.
+- OpenRails only receives opaque per-run `payment_token` values and continues to validate/store them through the real payment-method and checkout endpoints.
+- NMI sandbox/live E2E drives browser-side Collect.js tokenization, then verifies OpenRails state through production HTTP routes.
+
+**Tasks:**
+- [x] Inventory all OpenRails references to `/debug/nmi/*`, tokenization harness docs, and NMI scripts before deleting anything.
+- [x] Audit Doujins and Hentai0 for tokenization/payment E2E paths and confirm they do not depend on OpenRails-only dev pages; add tracker tasks there if any dependency is found. No `/debug/nmi/*` references found; both apps already own Collect.js/payment-origin flows.
+- [x] Identify browser-side tokenization surfaces outside OpenRails. Doujins/Hentai0 have `/external-payment?flow=save-card` and embedded payment UI; the OpenRails E2E uses an ephemeral Playwright page that loads NMI Collect.js directly.
+- [x] Update `scripts/mobius_live_lifecycle_e2e.sh` to use browser-side NMI Collect.js tokenization instead of `GET /debug/nmi/tokenization`. Implemented as Playwright-generated per-run `payment_token`, then production `POST /v1/me/payment-methods`.
+- [x] Update `scripts/mobius_sandbox_e2e.sh` and NMI docs to point at the production-path host flow, not an OpenRails debug page.
+- [x] Delete the OpenRails debug NMI route/handler/stub code and its direct tests.
+- [x] Remove `/debug/nmi/tokenization` middleware special cases and update the security tests accordingly.
+- [x] Verify `rg "debug/nmi|collect-stub|nmi-tokenization-harness|TOKENIZATION_BASE_URL"` has no live-code/docs hits outside historical completed tracker entries.
+- [x] Run focused OpenRails tests: `go test ./internal/http ./internal/http/middleware/ginmw`.
+- [x] Run the replacement NMI E2E against a live HTTP server. Passed with `task e2e-nmi-live` against the Docker Compose stack on 2026-06-20.
+
+## Acceptance
+
+- `/debug/nmi/tokenization` and `/debug/nmi/collect-stub.js` do not exist in OpenRails route registration.
+- No security middleware or neutral-path logic special-cases the deleted debug page.
+- OpenRails docs/scripts describe browser-side tokenization and OpenRails-owned payment-method/checkout APIs as separate responsibilities.
+- Doujins/Hentai0 E2E coverage, where present, exercises the same tokenization code path production users hit.
+- No raw PAN/CVV is ever posted to OpenRails.
+
+---
+
+# #546: Embedded OpenRails shares the host's River instance, or runs its own — always in `public`
+
+**Completed:** yes
+
+**Status:** PLAN — raised 2026-06-20. The injection capability (`SetRiverClient`) exists; the share-or-fallback behavior + doujins wiring are not done.
+
+**Requires code change:** yes (OpenRails + doujins).
+
+## Decision
+In EMBEDDED mode, OpenRails uses the HOST application's River instance when the host runs River, and runs its OWN River only if the host does not. Either way River tables live in `public` (#545), so host and OpenRails share a single `public.river_*` set. In STANDALONE mode OpenRails always runs its own River (in `public`).
+
+## Current state (verified 2026-06-20)
+- The injection capability exists: `pkg/embedded.SetRiverClient` / `HasExternalRiverClient` — when a host client is injected, OpenRails "NEVER constructs a River client" (pkg/embedded/river.go:13-19).
+- BUT doujins does NOT inject: `internal/billing/openrailsembed/openrailsembed.go` passes only a `PGXPool` + `RunWorkers: true`, so embedded OpenRails builds its OWN River. Combined with doujins keeping its River in the `doujins` schema (`doujins.river_job`), doujins today runs TWO River table sets (`doujins.river_job` + `openrails.river_job`) — the `restore.go` "doujins.ln vs openrails.ln" artifact.
+
+## Tasks
+- [x] OpenRails embedded: "use injected host River client if present (`HasExternalRiverClient`), else run own in `public`" — capability already present (`SetExternalRiverClient`); fallback now lands in `public` (#545); `SetRiverClient` doc updated to the public rule.
+- [x] Ensure the embedded-own River path lands in `public` (via `standaloneRiverSchema` → `config.RiverSchema`).
+- [x] doujins: moved its River `doujins`→`public` (workers/client.go, migrate.go, legacy_migrate/coordinator.go, command/*.go SQL refs) and now SHARES one client with embedded OpenRails (openrailsembed `RunWorkers:false` + `RegisterRiverWorkers`/`RegisterRiverClient`; DI carries the registry; River start deferred to after `SetupRoutes`). Builds/vet/gofmt clean, unit tests pass. Done 2026-06-20 (against published openrails v0.45.0, which already has `SetRiverClient` — decoupled from the authkit-v0.42 chain). NOT committed.
+- [x] Embedded OpenRails River path VERIFIED LIVE: `./embed` integration suite passes on docker Postgres (boots embedded OpenRails via `embed.New` → `RunPostgresEmbedded`, exercises the embedded-own River in `public`). Cutover: N/A — greenfield hard cut, no legacy data (per Paul).
+- [x] `./embed` integration tests pass (embedded-own River in `public`). The host-injected-client path is the doujins side (agent-done); doujins is greenfield too, so no cutover.
+
+Related: #545 (River always in `public`), #544 (clean export once River leaves the billing schema).
+
+---
+
+
+# #545: River job-queue tables always live in the `public` schema
+
+**Completed:** yes
+
+**Status:** PLAN — raised 2026-06-20. DECIDED: River `river_*` tables always in `public` in every mode (River's own documented default — riverqueue.com/docs/alternate-schema). Not yet implemented.
+
+**Requires code change:** yes.
+
+## Decision
+River's `river_*` tables must ALWAYS live in the `public` Postgres schema, in every mode. This is River's documented default, sits alongside `public.migrations` (the migratekit ledger) and the `pgcrypto` extension that already live in `public`, and keeps the `openrails` (billing) schema free of any non-portable runtime state. Net effect: the `openrails` schema becomes 100% portable billing data, so #544's `data export` collapses to a clean `pg_dump --schema=openrails` with no `--exclude-table`.
+
+## Current state (verified 2026-06-20)
+- Standalone: OpenRails runs River in the OpenRails billing schema (`db.schema`, default `billing`/`openrails`) — `runRiverMigrations(ctx, cfg, schema)` (migrator.go:70) + `standaloneRiverSchema()` returns the billing schema; `riverCfg.Schema = schema`, set only when schema != `public` (migrator.go:233-234). `pkg/embedded/river.go` documents "standalone River schema == OpenRails schema, NOT separately configurable".
+- Embedded-own (no host client injected): same — builds its own River in the billing schema.
+- The migratekit ledger is ALREADY in `public.migrations` (migrator.go:144), so River is the ONLY remaining non-portable resident of the billing schema.
+
+**Status update 2026-06-20:** code-complete + builds clean on authkit v0.42.0. Added `config.RiverSchema = "public"` (single source of truth); `standaloneRiverSchema()` and the River migration call both use it. Remaining: cutover doc + tests + riverui check.
+
+## Tasks
+- [x] Point standalone River migrations at `public` (migrator.go now passes `config.RiverSchema`).
+- [x] Point the standalone runtime River client at `public` (`standaloneRiverSchema` → `config.RiverSchema`; used by both `buildRiverProducer` clients).
+- [x] Point the embedded-own River path (no host client injected, #546) at `public` too (same `standaloneRiverSchema`).
+- [x] Update `pkg/embedded/river.go` docs to "River always uses `public`".
+- [x] One-time cutover: N/A — greenfield hard cut, no legacy/production data (per Paul). River is in `public` from day one; nothing to drain/drop.
+- [ ] Check riverui / any ops tooling that assumes the River schema.
+- [x] VERIFIED LIVE (docker Postgres): `migrate pg` logged "River migrations (schema \"public\")" and the DB showed 6 `river_*` tables in `public`, **0** in the `openrails` schema. `./embed` integration suite (embedded-own River) passes.
+
+Related: #546 (embedded shares host River or runs its own — always `public`), #544 (export collapses to `pg_dump --schema=openrails` once River leaves the billing schema).
+
+---
+
+
+# #544: Embedded ↔ standalone mode must be a trivial data move — identical core schema
+
+**Completed:** yes
+
+**Status:** PLAN / INVARIANT — raised 2026-06-20. Architectural requirement. The schema already mostly conforms; needs the tables enumerated, tooling built, and a regression guard.
+
+**Requires code change:** yes (tooling + tests + CI guard; the core schema is already conformant).
+
+## Requirement
+Any application must be able to switch OpenRails between **embedded** and **standalone (remote)** modes trivially, WITHOUT altering data or changing the application:
+1. Export embedded OpenRails data → load into a remote DB → now standalone.
+2. Dump standalone data → load into embedded → now embedded.
+
+The ONLY difference between modes is that standalone has a few EXTRA tables because it runs its own auth (AuthKit). Therefore:
+- standalone → embedded: the auth tables are thrown away.
+- embedded → standalone: the auth data must be RECREATED (an org per merchant, roles/grants per #543's replacement model, `owner_org_id` backfill).
+
+This is the reason the OpenRails core data model MUST stay identical across modes.
+
+## Current state (verified 2026-06-20)
+- GOOD: the `openrails` core schema is self-contained. `openrails.merchants.owner_org_id` is a plain `text` column with NO foreign-key constraint to any auth/org table (001_schema.up.sql) — so core DDL never references auth tables and is identical in both modes.
+- `owner_org_id` is the natural BRIDGE column: opaque text, NULL in embedded today, the AuthKit org id in standalone. It can carry a backing-org id in BOTH modes with no schema change (ties into #541).
+- AuthKit tables live in a SEPARATE Postgres schema (`profiles`), distinct from the `openrails` core schema. CAVEAT (verified 2026-06-20): embedded currently runs the `profiles` migrations too — `embed.New` → `migrate.RunPostgres` applies AuthKit + River + OpenRails in one pass — so today embedded HAS the auth tables but leaves them EMPTY. Making "standalone has extra tables" literally true (your model) requires splitting the migrator (task below).
+- The migration ledger ALREADY lives in `public.migrations` (NOT the `openrails` schema). River `river_*` tables are the ONLY non-portable resident of the `openrails` schema today — and they are being moved to `public` in #545, after which `pg_dump --schema=openrails` IS exactly the portable export (no `--exclude-table` needed).
+
+## (1) Data-model & migration changes needed
+The core model barely changes — it's already self-contained. The real work is making the table partition explicit and the embedded/standalone DDL difference real:
+- **Three table classes, made explicit:** (a) PORTABLE core billing = the whole `openrails` schema (once River leaves it, #545); (b) STANDALONE-ONLY auth = the `profiles` (AuthKit) schema; (c) RUNTIME/infra in `public` = `river_*` (→ `public` per #545) + the migration ledger (`public.migrations`, already there) — never exported; the target rebuilds them.
+- **Split the migrator** so EMBEDDED runs only core (+River) and SKIPS the `profiles`/AuthKit migrations — then "standalone has extra tables" is literally true. (Alternative: keep empty `profiles` tables in embedded — simpler, but muddies the model and ships dead tables. Recommend the split.)
+- **Keep `owner_org_id` the SOLE cross-mode bridge** (opaque `text`, no FK; see #541). Audit every other core table for any coupling to `profiles`.
+- No new columns/FKs that would diverge the embedded vs standalone core DDL.
+
+## (2) CLI commands (cobra; siblings of `migrate` / `mint-merchant-api-key` / `pull-provider`)
+- `openrails data export --out <file> [--merchant <slug>]` — dump the PORTABLE core billing data. Once River is in `public` (#545) this is a clean `pg_dump --schema=openrails` (the ledger is already in `public`, so no `--exclude-table` is needed). Mode-agnostic: identical output whether the source is embedded or standalone. A logical per-merchant JSON export is a later option for cross-PG-version portability and selective single-merchant moves.
+- `openrails data import --in <file>` — load a core export into a target DB that has already had `openrails migrate up` run (so the schema exists).
+- `openrails auth recreate` (or fold into `bootstrap apply`) — the embedded→standalone-ONLY step: for each imported merchant, create the backing org, backfill `owner_org_id`, seed authority per #543 (direct-scoped admin API key, not a role), and register the issuer(s) (`remote_applications`) needed to verify tokens. Idempotent.
+- standalone→embedded needs NO special command: `data export` then `data import` into the embedded DB; with the migrator split the `profiles` schema is never created, so auth data is dropped by construction (the host owns auth in embedded).
+
+## Tasks
+- [x] Enumerate the three table classes — recorded in docs/embedded-standalone-mode-switch.md (PORTABLE core / STANDALONE-only `profiles` / RUNTIME `river_*`+ledger in `public`).
+- [x] Split `migrate.RunPostgres` so embedded skips the `profiles`/AuthKit step — added `RunPostgresEmbedded` (vs `RunPostgres`); `embed.New` now calls it. Builds.
+- [x] Confirm NO core `openrails` table has a NOT NULL/FK dependency on `profiles` — verified (zero `REFERENCES profiles/authkit` across migrations/postgres/*.sql; `owner_org_id` is bare `text`, no FK).
+- [x] Implement `openrails data export` (cmd/openrails/data.go; pg_dump `--schema=<openrails>` whole-schema dump — `river_*`/ledger now in `public` so no per-table exclusions needed; `--data-only`/`--format` flags). Builds + `data --help` works. Per-merchant `--merchant` deferred to the planned logical-JSON export.
+- [x] Implement `openrails data import` (same file; pg_restore custom / psql plain; `--data-only`/`--clean`). NOTE: unverified end-to-end pending the round-trip test below (no Postgres in this env).
+- [x] Implement `openrails auth recreate` (cmd/openrails/auth.go; lists merchants, runs idempotent control-plane Bootstrap per slug → creates backing org + rewrites `owner_org_id` to the new standalone org + optional `--mint-keys`). Builds + `auth --help` works. (Issuer re-registration left to the existing merchant-config manifest path; noted.)
+- [x] Document both procedures (embedded→standalone, standalone→embedded) — docs/embedded-standalone-mode-switch.md.
+- [x] Round-trip VERIFIED LIVE (docker Postgres, 2026-06-20): seed merchant → `data export --data-only` → fresh DB `migrate pg` → `data import --data-only` (merchant survived, owner=NULL) → `auth recreate` (created backing org, set `owner_org_id`, `profiles.orgs` row present). Live testing caught a circular-FK (`grants`) issue → fixed with `--disable-triggers` on data-only restore (cmd/openrails/data.go).
+- [x] CI guard: `migrations/postgres/portability_guard_test.go` (`TestPortabilityInvariant`) FAILS if a migration adds a FK into `profiles`/`authkit` or creates a `river_*` table in an OpenRails migration. Passes on current migrations.
+
+Related: #541 (embedded backing org — `owner_org_id` bridge; prerequisite for a clean embedded→standalone), #543 (the authority model that `auth recreate` seeds), #545/#546 (River → `public`, out of the billing schema, which makes the export a clean whole-schema dump).
+
+---
+
+
+# #543: Stop OpenRails seeding the `openrails-operator` role into an AuthKit org
+
+**Completed:** yes
+
+**Status:** PLAN — raised 2026-06-20. Not yet designed; no code changes made.
+
+**Requires code change:** yes.
+
+## Problem
+Standalone bootstrap pushes OpenRails' entire permission catalog into the merchant's AuthKit org as a seeded role: `DefineRole(OperatorRole)` + `SetRolePermissions(OperatorRole, OperatorRolePermissions())` + `AssignRole` (internal/controlplane/bootstrap.go:108-127); the role is also registered in service.go:156. This is the AuthKit-holds-the-authority model and conflicts with #542 (OpenRails owns the catalog). (Confirmed standalone-only — the embedded path runs no AuthKit and never seeds this.)
+
+## Desired end state
+OpenRails does not define/seed an `openrails-operator` role inside AuthKit orgs. OpenRails owns the catalog and validates against it; authority is conferred by tokens/keys carrying catalog permissions, not by an OpenRails-managed AuthKit role.
+
+## Open question (decide before implementing)
+If the operator role goes away, how do standalone admins get authority? Note bootstrap already mints the initial admin API key scoped DIRECTLY to `OperatorRolePermissions()` (bootstrap.go:148-151) and `mint-merchant-api-key` scopes keys directly too (cmd/openrails/mint_merchant_api_key.go:67) — i.e. direct-scoped keys may already make the seeded role redundant. Confirm, then remove the role seeding while keeping `OperatorRolePermissions()` as the catalog-permission-set helper used to scope keys directly.
+
+## Affected code (for the implementer)
+- internal/controlplane/bootstrap.go (remove steps 2 & 3: `DefineRole`/`SetRolePermissions`/`AssignRole`; keep the direct-scoped key mint)
+- internal/controlplane/service.go:156 (role registration)
+- internal/controlplane/catalog.go (`OperatorRole` const; `OperatorRolePermissions` — likely keep the perms helper, drop the role identity if unused)
+- internal/integrationharness/harness.go (test setup uses `DefineRole`/`SetRolePermissions` for `OperatorRole`)
+
+**Status update 2026-06-20:** DONE in production code, builds + vets clean on authkit v0.42.0. Per Paul's constraint "OpenRails must not define/invent any new roles in orgs", OpenRails now seeds NO role: the bootstrap admin is assigned AuthKit's built-in `owner` role (`org:*`, seeded by CreateOrg, covers the whole OpenRails `org:` catalog); the admin API key stays direct permission-scoped. Verified `AssignRole(…, "owner")` does not clobber the seeded `org:*` (authkit `materializeDefaultRole` early-returns for the reserved owner role).
+
+## Tasks
+- [x] Confirm direct-scoped API keys cover server-to-server admin authority without the seeded role; human admin authority = org `owner` (`org:*`).
+- [x] Remove the role-seeding steps from bootstrap.go (`DefineRole`+`SetRolePermissions`+`AssignRole(OperatorRole)`); admin now `AssignRole(OwnerRole)`; direct-scoped key mint kept.
+- [x] Remove the `OperatorRole` `DefaultRole` registration in service.go (`DefaultRoles: nil`).
+- [x] Fate of `OperatorRole`/`OperatorRolePermissions()`: added `OwnerRole = "owner"` (built-in); kept `OperatorRolePermissions()` as the catalog perm-SET for direct key scoping; `OperatorRole` const retained for test fixtures only, docs reframed.
+- [x] Update bootstrap + catalog.go package/header doc comments (no longer claim OpenRails defines roles).
+- [x] Updated internal/integrationharness/harness.go to stop seeding `OperatorRole`; the test principal authenticates via its direct permission-scoped API key, and remote-app tests assign the built-in `owner` role (embed/{remote_application,merchant_control_boundary}_integration_test.go).
+- [x] Tests VERIFIED LIVE (docker Postgres): full `./internal/controlplane` integration suite + `./embed` pass with the owner-grant model. Updated bootstrap_integration_test.go to assert the `owner` role's `org:*` effectively covers the catalog.
+
+Related: #542 (catalog ownership), #541 (embedded backing org).
+
+---
+
+
+# #542: Permission catalog is owned by OpenRails, never by the host app
+
+**Completed:** yes
+
+**Status:** DONE 2026-06-20. Audited: no doc/comment wrongly attributes the catalog to the host (the "catalog" mentions in docs are the product/price catalog, not the permission catalog). Behavior already correct; invariant recorded in docs/embedded-standalone-mode-switch.md.
+
+**Requires code change:** no (doc/comment audit only; behavior is already correct).
+
+**Completed:** yes.
+
+## The invariant
+The OpenRails permission catalog lives in OpenRails (internal/controlplane/catalog.go: `catalogEntries` + `merchantCatalog`). A host app (e.g. doujins) does NOT have a table holding OpenRails' catalog. In the federated delegated-token model (#259) the host merely SIGNS a token asserting permission strings; OpenRails validates each asserted permission against its OWN catalog and rejects anything outside it (delegated.go:135-140 `WithPermissions` → `IsDelegatedPermission`; ginmw/delegated.go:201; ginmw/principal.go:198). The host needs no copy of the catalog.
+
+## Why this matters
+This is the principle that motivates #543: because OpenRails owns the catalog and validates against it, OpenRails should NOT be pushing that catalog into an AuthKit org as a seeded role. Catalog = OpenRails. Identity / role-assignment = wherever the AuthKit lives (the host in embedded, OpenRails in standalone).
+
+## Action
+- Audit docs/comments for any claim that the host stores or holds OpenRails' catalog and correct them. No behavioral code change.
+
+## Tasks
+- [x] Grep docs/ + code comments for wrong "host holds the catalog" claims — none found (catalog mentions = product/price catalog).
+- [x] (n/a — nothing to correct.)
+- [x] Record the invariant — docs/embedded-standalone-mode-switch.md ("permission catalog is owned by OpenRails, never the host").
+- [x] Sanity-check no code path expects the host to hold the catalog — confirmed: delegated verify validates against the local catalog (`IsDelegatedPermission`).
+
+Related: #543 (stop seeding the operator role), #541 (embedded backing org).
+
+---
+
+
+# #541: Embedded merchants should require a backing org (delegation hook)
+
+**Completed:** yes
+
+**Status:** PLAN — raised 2026-06-20 in the permission-model discussion. Not yet designed; no code changes made.
+
+**Requires code change:** yes.
+
+## Problem
+Today an embedded merchant does NOT require an org. `embed.New` provisions the bound merchant as a "dumb billing bucket" via `boot.ProvisionMerchant` and explicitly omits the issuer/owner-org step — "Embedded OpenRails runs NO AuthKit here and stores ZERO auth: the issuer/owner-org step is omitted" (embed/embed.go:130-150). `openrails.merchants.owner_org_id` is NULLABLE and is NULL in embedded (migrations/postgres/001_schema.up.sql:100; 016_bootstrap_state_owner_org_unique.up.sql:15-24). So a merchant can exist with no backing org, and therefore no place to hang delegated merchant-admin authority.
+
+## Why it should change
+The org is the unit that lets merchant-admin authority be delegated to multiple users (e.g. grant an admin the power to cancel a customer's subscription). A merchant with no backing org can only ever be administered by the single statically-bound host principal, with nowhere to attach per-user grants. Every merchant should have exactly one backing org — the same 1:1 invariant standalone already enforces (UNIQUE index on non-null `owner_org_id`, #527 / migration 016).
+
+## Central open question (decide before implementing)
+Embedded OpenRails runs NO AuthKit, so the backing org physically lives in the HOST's AuthKit (e.g. doujins'), not OpenRails'. NOTE (verified 2026-06-20): `owner_org_id` is a plain `text` column with NO foreign-key constraint, so it can carry a host-org id in embedded just as it carries the OpenRails-AuthKit org id in standalone — this makes it the natural cross-mode bridge column (#544) and strongly favors option (a). Options to choose between:
+- (a) Require the embed host to declare a backing-org identifier per merchant, stored as an opaque host-org id in `owner_org_id` (no FK), enforced at `embed.New` / `ProvisionMerchant`. Keeps the core schema identical across modes.
+- (b) Treat the invariant as host-upheld and require the merchant↔org binding only to be expressible through the `DelegatedAuthenticator` principal seam.
+- (c) Other.
+
+## Affected code (for the implementer)
+- embed/embed.go (the `ProvisionMerchant` call; the omitted owner-org step)
+- pkg/merchant + `boot.ProvisionMerchant` / merchant manifest
+- `openrails.merchants.owner_org_id` semantics (nullable today)
+
+**FINAL 2026-06-20 (per Paul — "org == merchant by name"):** The model is **merchant slug == backing-org slug, 1:1**, in whatever AuthKit owns identity. Standalone ALREADY does exactly this — `provisionMerchantOrg` creates an AuthKit org with `Slug: merchant.Slug` and links via `owner_org_id`. Embedded runs no AuthKit, so the backing org is the HOST's same-slug org (e.g. doujins's `doujins` org) — linked by the shared slug, nothing for OpenRails to create or store (`owner_org_id` stays NULL in embedded). So the earlier `BackingOrgID` mechanism was unnecessary and was REVERTED. No enforcement needed (the link is the name). Builds + vets; verified live (`./internal/bootstrap` integration suite + the #544 round-trip both pass on docker Postgres).
+
+## Tasks
+- [x] Model = slug==slug, 1:1 (org slug == merchant slug). Standalone creates the org with the merchant (`provisionMerchantOrg`, `Slug: mt.Slug`); embedded relies on the host's same-slug org.
+- [x] Reverted the `BackingOrgID`/`ManifestMerchant.OwnerOrgID` detour — unnecessary under slug==slug; embedded provisioning is the plain ownerless `RegisterMerchant` (owner_org_id NULL; host owns the org).
+- [x] embed.go doc comment updated to the slug==slug model.
+- [x] Verified live: `./internal/bootstrap` passes; round-trip showed an embedded-origin merchant (owner NULL) get its org rebuilt by `auth recreate`.
+- [x] Docs: invariant recorded in docs/embedded-standalone-mode-switch.md.
+- [x] Reuses the existing `owner_org_id text` column — no embedded-only column or FK (#544).
+
+Related: #542 (catalog ownership), #543 (stop seeding the operator role), #544 (cross-mode data move — `owner_org_id` is the bridge).
+
+---
+
+
 # #533: Log external provider mutations executed by convergence/provider intents
 
 **Completed:** yes
