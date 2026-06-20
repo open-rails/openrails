@@ -240,13 +240,13 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	require.Len(t, ch.charges, 1)
-	// auto_topup_amount_cents charges the card in cents, as configured.
+	// auto_topup_amount is stored in native units; the processor receives cents.
 	require.Equal(t, int64(5000), ch.charges[0].AmountCents)
 	require.Equal(t, pm, ch.charges[0].PaymentMethodID)
 
 	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
 	require.NoError(t, err)
-	// Ledger uses internal units: 500 seed + 5000 cents * 10_000 units/cent deposited.
+	// Ledger uses internal units: 500 seed + configured native-unit top-up deposited.
 	require.Equal(t, int64(50_000_500), bal.Balance)
 
 	// Re-run within cooldown: no second charge.

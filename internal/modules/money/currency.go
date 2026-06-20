@@ -17,15 +17,13 @@ const DefaultCurrency = "USD"
 type Currency struct {
 	Code     string
 	Decimals int    // internal units per major unit = 10^Decimals
-	Kind     string // "fiat" | "crypto"
+	Kind     string // "fiat"
 }
 
 var currencies = map[string]Currency{
-	"USD":  {Code: "USD", Decimals: 6, Kind: "fiat"},
-	"USDC": {Code: "USDC", Decimals: 6, Kind: "crypto"},
-	"EUR":  {Code: "EUR", Decimals: 6, Kind: "fiat"},
-	"JPY":  {Code: "JPY", Decimals: 4, Kind: "fiat"},
-	"SOL":  {Code: "SOL", Decimals: 9, Kind: "crypto"},
+	"USD": {Code: "USD", Decimals: 6, Kind: "fiat"},
+	"EUR": {Code: "EUR", Decimals: 6, Kind: "fiat"},
+	"JPY": {Code: "JPY", Decimals: 4, Kind: "fiat"},
 }
 
 // normalizeCurrency upper-cases the code, so built-in currency codes are

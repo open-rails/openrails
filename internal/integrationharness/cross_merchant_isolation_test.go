@@ -314,8 +314,8 @@ func adminProfile(t *testing.T, baseURL, token, userID string) adminBillingProfi
 
 func selfAccount(t *testing.T, baseURL, token string) selfAccountSnapshot {
 	t.Helper()
-	status, body := requestJSON(t, http.MethodGet, baseURL+"/v1/me/account?currency=usd", token, nil)
-	require.Equalf(t, http.StatusOK, status, "self account: %s", string(body))
+	status, body := requestJSON(t, http.MethodGet, baseURL+"/v1/me/balance?currency=usd", token, nil)
+	require.Equalf(t, http.StatusOK, status, "self balance: %s", string(body))
 	var raw map[string]any
 	require.NoError(t, json.Unmarshal(body, &raw))
 	require.NotContains(t, raw, "held_amount")

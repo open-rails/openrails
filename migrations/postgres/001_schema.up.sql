@@ -843,40 +843,6 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoice_payments TO openrai
 COMMENT ON TABLE openrails.invoice_payments IS 'Payment attempts and settled payments allocated to a specific invoice.';
 
 -- =============================================================================
--- linked_wallets
--- =============================================================================
-
-CREATE TABLE openrails.linked_wallets (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL,
-    customer_id uuid NOT NULL,
-    chain text NOT NULL,
-    address text NOT NULL,
-    verification_provider text NOT NULL,
-    verified_at timestamp with time zone NOT NULL,
-    display_name text,
-    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT linked_wallets_pkey PRIMARY KEY (id),
-    CONSTRAINT linked_wallets_unique_chain_address UNIQUE (merchant_id, chain, address),
-    CONSTRAINT linked_wallets_unique_subject_chain UNIQUE (merchant_id, customer_id, chain),
-    CONSTRAINT linked_wallets_chain_address_nonempty CHECK (((btrim(chain) <> ''::text) AND (btrim(address) <> ''::text))),
-    CONSTRAINT linked_wallets_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES openrails.customers(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_linked_wallets_customer ON openrails.linked_wallets USING btree (merchant_id, customer_id);
-
-ALTER TABLE ONLY openrails.linked_wallets FORCE ROW LEVEL SECURITY;
-
-ALTER TABLE openrails.linked_wallets ENABLE ROW LEVEL SECURITY;
-CREATE POLICY merchant_isolation ON openrails.linked_wallets USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.linked_wallets TO openrails_app;
-
-COMMENT ON TABLE openrails.linked_wallets IS 'Verified user wallet links for browser self-service billing identity. The wallet must come from trusted delegated-token claims, not request body input.';
-
--- =============================================================================
 -- notification_queue
 -- =============================================================================
 
@@ -1478,7 +1444,7 @@ CREATE POLICY merchant_isolation ON openrails.money_blocks USING ((merchant_id =
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_blocks TO openrails_app;
 
 COMMENT ON TABLE openrails.money_blocks IS 'Spendable money blocks. Amount values use the row currency internal precision.';
-COMMENT ON COLUMN openrails.money_blocks.currency IS 'System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.';
+COMMENT ON COLUMN openrails.money_blocks.currency IS 'System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.';
 
 -- money_balances was a read-cache roll-up; dropped in #491. available is derived
 -- from money_blocks, held from active holds + open windows. This partial index
@@ -1523,7 +1489,8 @@ CREATE TABLE openrails.money_settings (
     CONSTRAINT money_settings_outstanding_owed_nonneg_chk CHECK ((outstanding_owed_amount >= 0)),
     CONSTRAINT money_settings_tier_source_chk CHECK ((tier_source = ANY (ARRAY['auto'::text, 'admin'::text]))),
     CONSTRAINT money_settings_credit_limit_amount_nonneg_chk CHECK ((credit_limit_amount >= 0)),
-    CONSTRAINT money_settings_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id)
+    CONSTRAINT money_settings_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id),
+    CONSTRAINT money_settings_auto_topup_payment_method_fk FOREIGN KEY (auto_topup_payment_method_id) REFERENCES openrails.payment_methods(id) ON DELETE SET NULL
 );
 
 ALTER TABLE ONLY openrails.money_settings FORCE ROW LEVEL SECURITY;
@@ -1536,7 +1503,7 @@ CREATE POLICY merchant_isolation ON openrails.money_settings USING ((merchant_id
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_settings TO openrails_app;
 
 COMMENT ON TABLE openrails.money_settings IS 'Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision.';
-COMMENT ON COLUMN openrails.money_settings.currency IS 'System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.';
+COMMENT ON COLUMN openrails.money_settings.currency IS 'System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.';
 COMMENT ON COLUMN openrails.money_settings.max_spend_per_day IS 'Optional daily spend cap in the row currency internal precision; NULL = uncapped.';
 COMMENT ON COLUMN openrails.money_settings.max_spend_per_month IS 'Optional monthly spend cap in the row currency internal precision; NULL = uncapped.';
 COMMENT ON COLUMN openrails.money_settings.max_outstanding_owed_amount IS 'Optional arrears owed ceiling in the row currency internal precision; NULL = uncapped.';

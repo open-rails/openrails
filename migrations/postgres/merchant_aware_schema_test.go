@@ -28,7 +28,6 @@ var merchantOwnedTables = []string{
 	"invoices",
 	"invoice_items",
 	"invoice_payments",
-	"linked_wallets",
 	"notification_queue",
 	"payment_blocklist",
 	"processor_customers",

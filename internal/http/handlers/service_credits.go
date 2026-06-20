@@ -173,7 +173,7 @@ type serviceAccountSettingsRequest struct {
 	MaxOutstandingOwedAmount *int64  `json:"max_outstanding_owed_amount"`
 	LowBalanceThreshold      *int64  `json:"low_balance_threshold"`
 	AutoTopupEnabled         *bool   `json:"auto_topup_enabled"`
-	AutoTopupAmountCents     *int64  `json:"auto_topup_amount_cents"`
+	AutoTopupAmount          *int64  `json:"auto_topup_amount"`
 	AutoTopupPaymentMethod   *string `json:"auto_topup_payment_method_id"`
 	DefaultCreditExpiryDays  *int    `json:"default_credit_expiry_days"`
 	HardStopOnBreach         *bool   `json:"hard_stop_on_breach"`
@@ -208,15 +208,26 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 		MaxOutstandingOwedAmount: req.MaxOutstandingOwedAmount,
 		LowBalanceThreshold:      req.LowBalanceThreshold,
 		AutoTopupEnabled:         req.AutoTopupEnabled,
-		AutoTopupAmountCents:     req.AutoTopupAmountCents,
+		AutoTopupAmountCents:     req.AutoTopupAmount,
 		DefaultCreditExpiryDays:  req.DefaultCreditExpiryDays,
 		HardStopOnBreach:         req.HardStopOnBreach,
 		AlertThresholdPct:        req.AlertThresholdPct,
 	}
 	if req.AutoTopupPaymentMethod != nil {
-		if pm, perr := uuid.Parse(strings.TrimSpace(*req.AutoTopupPaymentMethod)); perr == nil {
-			in.AutoTopupPaymentMethod = &pm
+		pm, perr := uuid.Parse(strings.TrimSpace(*req.AutoTopupPaymentMethod))
+		if perr != nil {
+			r.ErrorJSON(http.StatusBadRequest, "invalid auto_topup_payment_method_id")
+			return
 		}
+		if r.State.PaymentMethodService == nil {
+			r.ErrorJSON(http.StatusInternalServerError, "payment method service unavailable")
+			return
+		}
+		if err := r.State.PaymentMethodService.ValidateOwnership(r.Request.Context(), pm, tenantSubject.String()); err != nil {
+			r.ErrorJSON(http.StatusBadRequest, "auto_topup_payment_method_id does not belong to this customer")
+			return
+		}
+		in.AutoTopupPaymentMethod = &pm
 	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {

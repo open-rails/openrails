@@ -57,7 +57,7 @@ type MoneyAccount struct {
 	MaxOutstandingOwedAmount *int64     `json:"max_outstanding_owed_amount,omitempty"`
 	LowBalanceThreshold      *int64     `json:"low_balance_threshold,omitempty"`
 	AutoTopupEnabled         bool       `json:"auto_topup_enabled"`
-	AutoTopupAmountCents     *int64     `json:"auto_topup_amount_cents,omitempty"`
+	AutoTopupAmountCents     *int64     `json:"auto_topup_amount,omitempty"`
 	AutoTopupPaymentMethod   *uuid.UUID `json:"auto_topup_payment_method_id,omitempty"`
 	DefaultCreditExpiryDays  *int       `json:"default_credit_expiry_days,omitempty"`
 	HardStopOnBreach         bool       `json:"hard_stop_on_breach"`

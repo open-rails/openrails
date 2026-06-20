@@ -111,7 +111,7 @@ func TestHostPrincipal_InvalidPrincipalsRejected(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newHostPrincipalSelfRouter(t, stubDelegatedAuthenticator{principal: tc.principal})
-			w := doHostSelf(e, http.MethodGet, "/v1/me/account")
+			w := doHostSelf(e, http.MethodGet, "/v1/me/balance")
 			require.Equal(t, tc.wantCode, w.Code, w.Body.String())
 			if tc.wantCode == http.StatusUnauthorized {
 				require.Contains(t, w.Body.String(), "delegated_principal_invalid")
@@ -123,7 +123,7 @@ func TestHostPrincipal_InvalidPrincipalsRejected(t *testing.T) {
 // The host authenticator's own rejection maps to 401.
 func TestHostPrincipal_AuthenticatorErrorIs401(t *testing.T) {
 	e := newHostPrincipalSelfRouter(t, stubDelegatedAuthenticator{err: billingauth.ErrUnauthenticated})
-	w := doHostSelf(e, http.MethodGet, "/v1/me/account")
+	w := doHostSelf(e, http.MethodGet, "/v1/me/balance")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 }
 
@@ -134,7 +134,7 @@ func TestHostPrincipal_AccountRoutesMountedWithoutPermissions(t *testing.T) {
 
 	func() {
 		defer func() { _ = recover() }()
-		w := doHostSelf(router, http.MethodPut, "/v1/me/account/settings")
+		w := doHostSelf(router, http.MethodPut, "/v1/me/settings")
 		require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
@@ -142,7 +142,7 @@ func TestHostPrincipal_AccountRoutesMountedWithoutPermissions(t *testing.T) {
 
 	func() {
 		defer func() { _ = recover() }()
-		w := doHostSelf(router, http.MethodGet, "/v1/me/account/transactions")
+		w := doHostSelf(router, http.MethodGet, "/v1/me/transactions")
 		require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())

@@ -127,9 +127,9 @@ func TestSelfService_PermissionlessPrincipalReachesMountedSelfRoutes(t *testing.
 		{"solana-cancel-confirm", http.MethodPost, "/v1/me/subscriptions/sub_123/solana-cancel"},
 		{"solana-tier-change", http.MethodPost, "/v1/me/subscriptions/sub_123/solana-tier-change"},
 		{"solana-tier-change-confirm", http.MethodPost, "/v1/me/subscriptions/sub_123/solana-tier-change/confirm"},
-		{"solana-wallet-link", http.MethodPut, "/v1/me/wallets/solana"},
-		{"solana-wallet-unlink", http.MethodDelete, "/v1/me/wallets/solana"},
-		{"usdc-funding-create", http.MethodPost, "/v1/me/usdc-funding-sessions"},
+		{"balance", http.MethodGet, "/v1/me/balance"},
+		{"transactions", http.MethodGet, "/v1/me/transactions"},
+		{"settings", http.MethodPut, "/v1/me/settings"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -436,21 +436,6 @@ type OpenrailsLedgerTransfer struct {
 	CreatedAt  time.Time
 }
 
-// Verified user wallet links for browser self-service billing identity. The wallet must come from trusted delegated-token claims, not request body input.
-type OpenrailsLinkedWallet struct {
-	ID                   uuid.UUID
-	MerchantID           uuid.UUID
-	CustomerID           uuid.UUID
-	Chain                string
-	Address              string
-	VerificationProvider string
-	VerifiedAt           time.Time
-	DisplayName          *string
-	Metadata             []byte
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-}
-
 // Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant.
 type OpenrailsMerchant struct {
 	ID uuid.UUID

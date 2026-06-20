@@ -13,13 +13,10 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// Self-service credit-ACCOUNT surface (issue #339 gap-fill): the authenticated
-// merchant_subject reads and configures its OWN billing account — settings
-// (billing mode, spend caps, auto-top-up) + balance/outstanding + transaction
-// history. These mirror the service-side account-settings routes
-// (service_credits.go, issue #242) but the subject is ALWAYS the delegated
-// principal's subject (r.GetUser()), never caller-supplied: there is no
-// customer_id parameter anywhere on this surface.
+// Self-service money surface: the authenticated merchant_subject reads its own
+// balance and transaction history, and can set only self-imposed spend caps plus
+// auto-top-up preferences. Platform-owned policy fields are intentionally not
+// accepted on this surface.
 //
 // The payer is resolved exactly like the rest of /v1/me
 // (identity.CustomerIDFromString over the acting subject — see
@@ -42,23 +39,12 @@ func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 	return payer, true
 }
 
-// selfAccountResponse is the caller's account view: the live balance snapshot
-// (balance/held/available/outstanding + billing mode) plus the stored settings.
-type selfAccountResponse struct {
-	Currency              string `json:"currency"`
-	BillingMode           string `json:"billing_mode"`
-	BalanceAmount         int64  `json:"balance_amount"`
-	HeldAmount            int64  `json:"held_amount"`
-	AvailableAmount       int64  `json:"available_amount"`
-	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
-	Settings              any    `json:"settings"`
+type selfBalanceResponse struct {
+	Currency      string `json:"currency"`
+	BalanceAmount int64  `json:"balance_amount"`
 }
 
-// GetMyCreditAccount (GET /v1/me/account?currency=) returns the authenticated
-// subject's account settings + balance/outstanding for one currency
-// (issue #339). It reuses the service-side GetCreditAccount/settings logic,
-// scoped to the delegated subject.
-func GetMyCreditAccount(r *httprequest.Request) {
+func GetMyBalance(r *httprequest.Request) {
 	payer, ok := selfAccountPayer(r)
 	if !ok {
 		return
@@ -78,45 +64,29 @@ func GetMyCreditAccount(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), payer, currency)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	r.SuccessJSON(selfAccountResponse{
-		Currency:              snap.Currency,
-		BillingMode:           snap.BillingMode,
-		BalanceAmount:         snap.BalanceAmount,
-		HeldAmount:            snap.HeldAmount,
-		AvailableAmount:       snap.AvailableAmount,
-		OutstandingOwedAmount: snap.OutstandingOwedAmount,
-		Settings:              settings,
-	})
+	r.SuccessJSON(selfBalanceResponse{Currency: snap.Currency, BalanceAmount: snap.BalanceAmount})
 }
 
-// selfAccountSettingsRequest is the PUT body for configuring the caller's own
-// credit account. It is the service-side serviceAccountSettingsRequest WITHOUT
-// customer_id: the subject is always the delegated principal's subject.
 type selfAccountSettingsRequest struct {
-	Currency                 string  `json:"currency"`
-	BillingMode              *string `json:"billing_mode"` // "prepaid" | "arrears"
-	MaxSpendPerDay           *int64  `json:"max_spend_per_day"`
-	MaxSpendPerMonth         *int64  `json:"max_spend_per_month"`
-	MaxOutstandingOwedAmount *int64  `json:"max_outstanding_owed_amount"`
-	LowBalanceThreshold      *int64  `json:"low_balance_threshold"`
-	AutoTopupEnabled         *bool   `json:"auto_topup_enabled"`
-	AutoTopupAmountCents     *int64  `json:"auto_topup_amount_cents"`
-	AutoTopupPaymentMethod   *string `json:"auto_topup_payment_method_id"`
-	DefaultCreditExpiryDays  *int    `json:"default_credit_expiry_days"`
-	HardStopOnBreach         *bool   `json:"hard_stop_on_breach"`
-	AlertThresholdPct        *int    `json:"alert_threshold_pct"`
+	Currency               string  `json:"currency"`
+	MaxSpendPerDay         *int64  `json:"max_spend_per_day"`
+	MaxSpendPerMonth       *int64  `json:"max_spend_per_month"`
+	LowBalanceThreshold    *int64  `json:"low_balance_threshold"`
+	AutoTopupEnabled       *bool   `json:"auto_topup_enabled"`
+	AutoTopupAmount        *int64  `json:"auto_topup_amount"`
+	AutoTopupPaymentMethod *string `json:"auto_topup_payment_method_id"`
 }
 
-// SetMyCreditAccountSettings (PUT /v1/me/account/settings) configures the
-// authenticated subject's OWN billing account (issue #339): billing mode,
-// spend caps, auto-top-up, expiry default. Gated by the dedicated
-// authenticated customer principal.
-// Returns the stored settings after the update, like the service-side route.
+type selfAccountSettingsResponse struct {
+	Currency               string     `json:"currency"`
+	MaxSpendPerDay         *int64     `json:"max_spend_per_day,omitempty"`
+	MaxSpendPerMonth       *int64     `json:"max_spend_per_month,omitempty"`
+	LowBalanceThreshold    *int64     `json:"low_balance_threshold,omitempty"`
+	AutoTopupEnabled       bool       `json:"auto_topup_enabled"`
+	AutoTopupAmount        *int64     `json:"auto_topup_amount,omitempty"`
+	AutoTopupPaymentMethod *uuid.UUID `json:"auto_topup_payment_method_id,omitempty"`
+}
+
 func SetMyCreditAccountSettings(r *httprequest.Request) {
 	payer, ok := selfAccountPayer(r)
 	if !ok {
@@ -132,21 +102,25 @@ func SetMyCreditAccountSettings(r *httprequest.Request) {
 	}
 
 	in := money.AccountSettingsInput{
-		BillingMode:              req.BillingMode,
-		MaxSpendPerDay:           req.MaxSpendPerDay,
-		MaxSpendPerMonth:         req.MaxSpendPerMonth,
-		MaxOutstandingOwedAmount: req.MaxOutstandingOwedAmount,
-		LowBalanceThreshold:      req.LowBalanceThreshold,
-		AutoTopupEnabled:         req.AutoTopupEnabled,
-		AutoTopupAmountCents:     req.AutoTopupAmountCents,
-		DefaultCreditExpiryDays:  req.DefaultCreditExpiryDays,
-		HardStopOnBreach:         req.HardStopOnBreach,
-		AlertThresholdPct:        req.AlertThresholdPct,
+		MaxSpendPerDay:       req.MaxSpendPerDay,
+		MaxSpendPerMonth:     req.MaxSpendPerMonth,
+		LowBalanceThreshold:  req.LowBalanceThreshold,
+		AutoTopupEnabled:     req.AutoTopupEnabled,
+		AutoTopupAmountCents: req.AutoTopupAmount,
 	}
 	if req.AutoTopupPaymentMethod != nil {
 		pm, perr := uuid.Parse(strings.TrimSpace(*req.AutoTopupPaymentMethod))
 		if perr != nil {
 			r.ErrorJSON(http.StatusBadRequest, "invalid auto_topup_payment_method_id")
+			return
+		}
+		if r.State.PaymentMethodService == nil {
+			r.ErrorJSON(http.StatusInternalServerError, "payment method service unavailable")
+			return
+		}
+		user := r.GetUser()
+		if err := r.State.PaymentMethodService.ValidateOwnership(r.Request.Context(), pm, user.ID); err != nil {
+			r.ErrorJSON(http.StatusBadRequest, "auto_topup_payment_method_id does not belong to this customer")
 			return
 		}
 		in.AutoTopupPaymentMethod = &pm
@@ -166,10 +140,18 @@ func SetMyCreditAccountSettings(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	r.SuccessJSON(settings)
+	r.SuccessJSON(selfAccountSettingsResponse{
+		Currency:               settings.Currency,
+		MaxSpendPerDay:         settings.MaxSpendPerDay,
+		MaxSpendPerMonth:       settings.MaxSpendPerMonth,
+		LowBalanceThreshold:    settings.LowBalanceThreshold,
+		AutoTopupEnabled:       settings.AutoTopupEnabled,
+		AutoTopupAmount:        settings.AutoTopupAmountCents,
+		AutoTopupPaymentMethod: settings.AutoTopupPaymentMethod,
+	})
 }
 
-// GetMyAccountTransactions (GET /v1/me/account/transactions?currency=&limit=&offset=)
+// GetMyAccountTransactions (GET /v1/me/transactions?currency=&limit=&offset=)
 // lists the authenticated subject's transactions for one currency
 // (issue #339), newest first. Same wire shape as the service-side route, scoped
 // to the delegated subject.
@@ -206,9 +188,24 @@ func GetMyAccountTransactions(r *httprequest.Request) {
 	for _, t := range items {
 		out = append(out, serviceTxnResponse{
 			ID: t.ID, CustomerID: t.CustomerID, Invoker: t.Invoker, Amount: t.Amount,
-			Currency: t.Currency, TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
+			Currency: t.Currency, TransactionType: customerTransactionType(t.TransactionType), Status: t.Status, Source: t.Source,
 			CreatedAt: t.CreatedAt,
 		})
 	}
 	r.SuccessJSON(map[string]any{"transactions": out, "total": total})
+}
+
+func customerTransactionType(txType string) string {
+	switch strings.ToLower(strings.TrimSpace(txType)) {
+	case "withdrawal", "credit_spend":
+		return "spend"
+	case "credit_expire", "expiry":
+		return "expiry"
+	case "owed_accrual":
+		return "arrears_accrual"
+	case "owed_payment":
+		return "arrears_payment"
+	default:
+		return txType
+	}
 }

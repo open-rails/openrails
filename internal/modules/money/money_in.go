@@ -186,7 +186,7 @@ func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r mone
 		Payer:           payer,
 		Invoker:         payer.UUID().String(),
 		PaymentMethodID: *r.PaymentMethodID,
-		AmountCents:     *r.TopupAmount,
+		AmountCents:     nativeAmountToProcessorMinor(r.Currency, *r.TopupAmount),
 		Currency:        normalizeCurrency(r.Currency),
 		IdempotencyKey:  episode,
 		Description:     "auto top-up",
@@ -201,13 +201,11 @@ func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r mone
 		return false, err
 	}
 
-	// auto_topup_amount_cents is the card charge in cents; the ledger is
-	// USD internal units (1 cent = 10,000 internal units).
 	if _, err := s.Deposit(ctx, DepositParams{
 		CustomerID:                &payer,
 		Invoker:                   payer.UUID().String(),
 		Currency:                  r.Currency,
-		Amount:                    *r.TopupAmount * 10_000,
+		Amount:                    *r.TopupAmount,
 		Source:                    "auto_topup",
 		SourceID:                  &depositSourceID,
 		ApplyAccountExpiryDefault: true,
@@ -218,6 +216,23 @@ func (s *MoneyService) topUpAccount(ctx context.Context, charger Charger, r mone
 		return false, err
 	}
 	return true, nil
+}
+
+func nativeAmountToProcessorMinor(currency string, amount int64) int64 {
+	scale, ok := CurrencyScale(currency)
+	if !ok {
+		return amount
+	}
+	if scale <= 2 {
+		for range 2 - scale {
+			amount *= 10
+		}
+		return amount
+	}
+	for range scale - 2 {
+		amount /= 10
+	}
+	return amount
 }
 
 // stampMoneyInTimestamp sets a single timestamp column on the settings row.

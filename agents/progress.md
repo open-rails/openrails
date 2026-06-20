@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 547
+next_id: 549
 
 ---
 
@@ -737,3 +737,42 @@ In EMBEDDED mode, OpenRails uses the HOST application's River instance when the 
 - [ ] Tests: embedded-with-injection uses the host River and creates NO OpenRails River tables; embedded-without-injection runs its own River in `public`.
 
 Related: #545 (River always in `public`), #544 (clean export once River leaves the billing schema).
+
+---
+
+
+# #547: `auth recreate` registers the host issuer (one-command federated embedded→standalone)
+
+**Completed:** no
+
+**Status:** PLAN — 2026-06-20. Decided (Paul). Builds on #544's `auth recreate`.
+
+**Requires code change:** yes (OpenRails).
+
+## Tasks
+- [ ] Add per-merchant issuer input to `auth recreate` (`--issuers <manifest.yaml>`: merchant slug → {uri, jwks_uri|public_keys, audiences, allowed_origins}).
+- [ ] Per merchant, after creating the backing org, register the issuer as the org `owner` remote-application — reuse the `provisionMerchantOrg` issuer path (no duplication).
+- [ ] Idempotent + re-runnable; a merchant with no declared issuer just gets org + owner + key.
+- [ ] Verify live: import billing → `auth recreate --issuers …` → merchant has backing org + issuer-as-owner; a delegated token from that issuer administers it.
+- [ ] Doc: docs/embedded-standalone-mode-switch.md → one-command flow.
+
+Related: #544, #259/#527 (federated issuer-as-owner), #548.
+
+---
+
+
+# #548: Enforce merchant.slug == backing-org.slug (hard invariant)
+
+**Completed:** no
+
+**Status:** PLAN — 2026-06-20. Decided (Paul): a merchant's slug MUST equal its backing-org slug; reject divergence. `owner_org_id` stays the authority link, but the linked org's slug must match.
+
+**Requires code change:** yes (OpenRails).
+
+## Tasks
+- [ ] Standalone hard guard: when linking `owner_org_id` (`merchants.Service.Provision` / `recordOwnerOrgBySlug` / `provisionMerchantOrg`), assert the referenced org's slug == merchant.slug and REJECT a mismatch.
+- [ ] Align merchant-slug validation with AuthKit's org-slug ruleset (a merchant slug is always a legal org slug).
+- [ ] Embedded: keep the single-slug shape (no separate org field) + document the host contract; no cross-AuthKit check (keeps #541/#543 decoupling).
+- [ ] Tests (live): standalone rejects a merchant↔org slug mismatch; accepts the match; invalid merchant slug rejected.
+
+Related: #541, #543, #544, #547.

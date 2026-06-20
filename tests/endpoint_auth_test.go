@@ -20,10 +20,10 @@ func TestEndpointAuthRequirements(t *testing.T) {
 		method string
 		path   string
 	}{
-		// Notification endpoints
-		{"GET", "/v1/me/notifications"},
-		{"GET", "/v1/me/notifications/unread-count"},
-		{"POST", "/v1/me/notifications/123/read"},
+		// Money self-service endpoints
+		{"GET", "/v1/me/balance"},
+		{"GET", "/v1/me/transactions"},
+		{"PUT", "/v1/me/settings"},
 		// Payment method endpoints
 		{"GET", "/v1/me/payment-methods"},
 		{"PUT", "/v1/me/payment-methods/123"},

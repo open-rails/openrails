@@ -189,19 +189,12 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 		group.Use(ginmw.MerchantDBConn(rt.DB))
 	}
 
-	// Credit ACCOUNT surface (issue #339 gap-fill): the caller's OWN account
-	// settings + balance/outstanding, settings writes, and transaction history.
-	// The subject is ALWAYS the delegated principal's subject — no
-	// customer_id parameter exists on this surface.
-	group.GET("/account", wrap(httphandlers.GetMyCreditAccount))
-	group.PUT("/account/settings", wrap(httphandlers.SetMyCreditAccountSettings))
-	group.GET("/account/transactions", wrap(httphandlers.GetMyAccountTransactions))
-
-	// Account + balance/credits read.
+	// Customer money self-service. Customer routes operate only on the
+	// authenticated subject; no self permissions or customer_id path params.
+	group.GET("/balance", wrap(httphandlers.GetMyBalance))
+	group.GET("/transactions", wrap(httphandlers.GetMyAccountTransactions))
+	group.PUT("/settings", wrap(httphandlers.SetMyCreditAccountSettings))
 	group.GET("/status", wrap(httphandlers.GetMyBillingStatus))
-	group.GET("/credits", wrap(httphandlers.GetMyCredits))
-	group.GET("/credits/:currency", wrap(httphandlers.GetMyCreditsType))
-	group.GET("/credits/:currency/transactions", wrap(httphandlers.GetMyCreditTransactions))
 
 	// Usage breakdown (issue #289): the acting user's metered usage rolled up by
 	// event_type (endpoint/model) over a [from, to) window, with summed dimensions.
@@ -218,12 +211,6 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	group.GET("/payments", wrap(httphandlers.GetUserPayments))
 	group.GET("/entitlements/active", wrap(httphandlers.SelfGetActiveEntitlements))
 
-	// Notifications and owned product access were the only read-only endpoints
-	// unique to the old raw-auth `/me` group. They live here now so `/v1/me/*`
-	// is the single self-service surface.
-	group.GET("/notifications", wrap(httphandlers.GetNotifications))
-	group.GET("/notifications/unread-count", wrap(httphandlers.GetUnreadNotificationCount))
-	group.POST("/notifications/:id/read", wrap(httphandlers.MarkNotificationRead))
 	group.GET("/products", wrap(httphandlers.GetMyProducts))
 	group.GET("/products/:product_id/access", wrap(httphandlers.GetMyProductAccess))
 
@@ -258,11 +245,6 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	pm.PUT("/:id", wrap(httphandlers.UpdatePaymentMethod))
 	pm.DELETE("/:id", wrap(httphandlers.DeletePaymentMethod))
 
-	wallets := group.Group("/wallets")
-	wallets.GET("/solana", wrap(httphandlers.GetMySolanaWallet))
-	wallets.PUT("/solana", wrap(httphandlers.UpsertMySolanaWallet))
-	wallets.DELETE("/solana", wrap(httphandlers.DeleteMySolanaWallet))
-
 	// Checkout: create a session and read/confirm it (browser self-checkout).
 	checkout := group.Group("/checkout")
 	checkout.POST("", wrap(httphandlers.CreateCheckoutSession))
@@ -272,13 +254,6 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	// Stripe customer portal handoff, moved from the old `/stripe/portal` raw
 	// user route to the canonical self surface.
 	group.POST("/stripe/portal", wrap(httphandlers.CreatePortalSession))
-
-	// USDC funding handoff: external providers fund the user's live wallet, then
-	// the existing checkout path collects from that wallet after balance checks.
-	group.GET("/usdc-funding-options", wrap(httphandlers.GetUSDCFundingOptions))
-	funding := group.Group("/usdc-funding-sessions")
-	funding.POST("", wrap(httphandlers.CreateUSDCFundingSession))
-	funding.GET("/:id", wrap(httphandlers.GetUSDCFundingSession))
 }
 
 // RegisterAdminRoutes mounts the browser-direct delegated admin billing

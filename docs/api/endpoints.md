@@ -250,29 +250,17 @@ Soft-deletes the stored method. Response `{ success, message }`.
 ### PUT /v1/me/payment-methods/{id}/activate
 Re-verifies and marks the method active. Response `{ success, message }`.
 
-### GET /v1/me/notifications
-Query params: `limit` (1-100), `offset`, `seen` (`true`/`false`). Response list of
-notifications `{ id, event_type, data, seen, created_at }`.
+### GET /v1/me/balance
+Query param: `currency` (`USD`, `EUR`, `JPY`). Returns the caller's durable per-currency balance:
+`{ currency, balance_amount }`. Amounts use the currency's native internal precision; USD is micro-USD.
 
-### GET /v1/me/notifications/unread-count
-Returns `{ unread_count: <int> }`.
+### GET /v1/me/transactions
+Query params: `currency`, `limit`, `offset`. Lists the caller's ledger transactions newest first.
 
-### POST /v1/me/notifications/{id}/read
-Marks the notification as read. Response `{ message: "notification marked as read" }`.
-
-### GET /v1/me/credits
-Returns all active credit balances for the current user (promo + purchased).
-Each entry: `{ type, display_name, unit, decimal_places, balance, held_balance }`.
-
-Notes:
-- Expiring credit grants are supported via `expires_at` on deposits; balances returned here are totals (no permanent/expiring split).
-- Holds do not reserve specific expiring lots; expiry can reduce available balance and cause a later hold capture to fail.
-
-### GET /v1/me/credits/{type}
-Returns the credit balance for a single credit type (e.g. `api_credits`).
-
-### GET /v1/me/credits/{type}/transactions
-Lists credit transactions for the credit type (including hold lifecycle rows). Query params: `limit`, `offset`.
+### PUT /v1/me/settings
+Body accepts customer-owned self-imposed settings only: `currency`, `max_spend_per_day`,
+`max_spend_per_month`, `low_balance_threshold`, `auto_topup_enabled`, `auto_topup_amount`,
+and `auto_topup_payment_method_id`.
 
 ### POST /v1/me/stripe/portal
 Creates a Stripe customer portal session. Response `{ "url": "https://..." }`.
