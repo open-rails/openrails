@@ -50,12 +50,12 @@ merchants:
         account_id: nmi-local-stack-profile
         mode: primary
         secrets:
-          production_key:
-            env: LOCAL_STACK_MOBIUS_PRODUCTION_KEY
+          security_key:
+            env: LOCAL_STACK_NMI_SECURITY_KEY
           tokenization_key:
-            env: LOCAL_STACK_MOBIUS_TOKENIZATION_KEY
+            env: LOCAL_STACK_NMI_TOKENIZATION_KEY
           webhook_signing_secret:
-            env: LOCAL_STACK_MOBIUS_WEBHOOK_SECRET
+            env: LOCAL_STACK_NMI_WEBHOOK_SECRET
 
       - provider_type: ccbill
         environment: live

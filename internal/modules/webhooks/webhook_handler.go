@@ -222,8 +222,8 @@ func (h NMIWebhookHandler) Verify(msg *WebhookMessage) error {
 	if msg == nil {
 		return fmt.Errorf("nil webhook message")
 	}
-	secret := ""
-	if h.SecretFor != nil {
+	secret := strings.TrimSpace(msg.SigningSecret)
+	if secret == "" && h.SecretFor != nil {
 		secret = h.SecretFor(msg.Processor)
 	}
 	if strings.TrimSpace(secret) == "" {

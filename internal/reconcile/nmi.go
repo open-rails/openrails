@@ -20,7 +20,7 @@ type nmiQueryClient interface {
 	GetCustomerVaultData(customerVaultID string) (string, error)
 }
 
-// NMIFetcher pulls NMI/Mobius state via the Query API:
+// NMIFetcher pulls NMI state via the Query API:
 // report_type=recurring (all live recurring subscriptions),
 // report_type=transaction (date-ranged transaction search, declines included),
 // report_type=customer_vault (stored payment methods).

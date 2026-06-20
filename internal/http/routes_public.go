@@ -139,7 +139,7 @@ func (s *Server) registerStandaloneMetaRoutes(e *gin.Engine) {
 		c.JSON(http.StatusOK, gin.H{
 			"service":   "billing",
 			"status":    "ok",
-			"endpoints": []string{"/health/live", "/health/ready", "/health/services", StandaloneV1Prefix},
+			"endpoints": []string{"/health/live", "/health/ready", StandaloneV1Prefix},
 		})
 	})
 
@@ -148,7 +148,6 @@ func (s *Server) registerStandaloneMetaRoutes(e *gin.Engine) {
 	})
 
 	e.GET("/health/ready", s.readyHandler)
-	e.GET("/health/services", s.serviceHealthHandler)
 
 	// Kubernetes-style health check endpoints (aliases)
 	e.GET("/healthz", func(c *gin.Context) {
@@ -160,37 +159,29 @@ func (s *Server) registerStandaloneMetaRoutes(e *gin.Engine) {
 func (s *Server) readyHandler(c *gin.Context) {
 	services, servicesReady := s.requiredServiceHealth()
 	authReady := s.authProvider != nil
+	verbose := c.Query("verbose") == "1" || strings.EqualFold(c.Query("verbose"), "true")
 	if !servicesReady || !authReady {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"status":       "not_ready",
-			"service":      "billing",
-			"auth":         gin.H{"available": authReady},
-			"dependencies": services,
-		})
+		resp := gin.H{
+			"status":  "not_ready",
+			"service": "billing",
+			"auth":    gin.H{"available": authReady},
+		}
+		if verbose {
+			resp["dependencies"] = services
+		}
+		c.JSON(http.StatusServiceUnavailable, resp)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status":       "ready",
-		"service":      "billing",
-		"auth":         gin.H{"available": true},
-		"dependencies": services,
-	})
-}
-
-func (s *Server) serviceHealthHandler(c *gin.Context) {
-	services, ready := s.requiredServiceHealth()
-	status := http.StatusOK
-	statusText := "ready"
-	if !ready {
-		status = http.StatusServiceUnavailable
-		statusText = "not_ready"
+	resp := gin.H{
+		"status":  "ready",
+		"service": "billing",
+		"auth":    gin.H{"available": true},
 	}
-	c.JSON(status, gin.H{
-		"status":       statusText,
-		"service":      "billing",
-		"dependencies": services,
-	})
+	if verbose {
+		resp["dependencies"] = services
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func (s *Server) requiredServiceHealth() (gin.H, bool) {

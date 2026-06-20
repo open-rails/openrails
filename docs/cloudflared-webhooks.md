@@ -1,12 +1,12 @@
-# Cloudflared: deterministic webhook URL for Mobius/NMI sandbox
+# Cloudflared: deterministic webhook URL for NMI sandbox
 
-Mobius/NMI sandbox testing needs a stable public webhook URL that forwards to a local OpenRails instance.
+NMI sandbox testing needs a stable public webhook URL that forwards to a local OpenRails instance.
 
 This runbook uses **Cloudflare Tunnel** (`cloudflared`) to map a fixed hostname to `http://localhost:<openrails-port>`.
 
 ## Target URL shape
 
-Pick a stable hostname you can register once in the Mobius/NMI portal, for example:
+Pick a stable hostname you can register once in the NMI portal, for example:
 
 - `https://openrails-webhooks-sandbox.<your-domain>/v1/webhooks/mobius`
 
@@ -22,7 +22,7 @@ Pick a stable hostname you can register once in the Mobius/NMI portal, for examp
 1) Run OpenRails locally (example port `3053`):
 
 - Ensure webhook signature verification is seeded in merchant config, for
-  example `webhook_signing_secret: {env: MOBIUS_WEBHOOK_SIGNING_SECRET}` under
+  example `webhook_signing_secret: {env: NMI_WEBHOOK_SIGNING_SECRET}` under
   the merchant's NMI provider account.
 
 2) Run cloudflared with a named tunnel (choose one approach):
@@ -33,7 +33,7 @@ Pick a stable hostname you can register once in the Mobius/NMI portal, for examp
 Repo shortcuts (optional):
 - `task tunnel-webhooks` (runs `scripts/webhook_tunnel.sh`)
 - `task verify-webhook-tunnel` (curls `/health/live` + `/health/ready` via the public hostname)
-- `task e2e-mobius-sandbox` (runs compose + tunnel + signed test webhook)
+- `task e2e-nmi-sandbox` (runs compose + tunnel + signed test webhook)
 
 ### What is `cloudflared service install ...`?
 
@@ -63,7 +63,7 @@ webhooks simultaneously, give each developer or environment a distinct hostname,
 - `openrails-webhooks-sandbox-alice.<domain>`
 - `openrails-webhooks-sandbox-bob.<domain>`
 
-and register the corresponding URL(s) in Mobius/NMI (or swap the configured webhook endpoint when needed).
+and register the corresponding URL(s) in NMI (or swap the configured webhook endpoint when needed).
 
 3) Configure ingress to route the hostname to OpenRails.
 
@@ -74,7 +74,7 @@ Example ingress snippet:
 - `hostname: openrails-webhooks-sandbox.<your-domain>`
 - `service: http://localhost:3053`
 
-Then Mobius/NMI will call:
+Then NMI will call:
 - `https://openrails-webhooks-sandbox.<your-domain>/v1/merchants/local-stack/webhooks/mobius`
 
 and cloudflared will forward to:
@@ -85,9 +85,9 @@ and cloudflared will forward to:
 - Never commit tunnel tokens/credentials.
 - Prefer a dedicated sandbox hostname.
 - Consider Cloudflare Access / IP allowlists if possible.
-- Keep webhook signature verification enabled (OpenRails will reject unsigned Mobius/NMI webhooks).
+- Keep webhook signature verification enabled (OpenRails will reject unsigned NMI webhooks).
 
 ## Quick verification
 
 - Hit the webhook endpoint through the public hostname and ensure you see requests in your OpenRails logs.
-- Use Mobius/NMI portal “send test webhook” (if available) and confirm you receive it locally.
+- Use the NMI portal “send test webhook” (if available) and confirm you receive it locally.

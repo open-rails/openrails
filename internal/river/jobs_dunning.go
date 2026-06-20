@@ -91,7 +91,7 @@ func (w *DunningWorker) intentRunner() *intents.Runner {
 	if w.Intents != nil {
 		return w.Intents
 	}
-	providerAccounts := intents.NewRuntimeProviderAccounts(w.Config, w.Processors, w.NMIClients)
+	providerAccounts := intents.NewRuntimeProviderAccountsWithDB(w.Config, w.Processors, w.NMIClients, w.DB)
 	runner := &intents.Runner{
 		Store: intents.NewStore(w.DB).WithProviderAccounts(providerAccounts),
 		Registry: intents.NewRegistry(
@@ -660,7 +660,7 @@ func normalizeProcessor(value interface{}) string {
 		// Subscription.Processor and PaymentMethod.Processor are the named type
 		// models.Processor (type Processor string), which does NOT match `case
 		// string` in a Go type switch. Without this case resolveSubscriptionProcessor
-		// returns "" for every subscription, so NMIClients[""] is nil and NMI/Mobius
+		// returns "" for every subscription, so NMIClients[""] is nil and NMI
 		// dunning rebills are silently skipped (caught by the dunning integration test).
 		return normalize.Lower(string(v))
 	default:

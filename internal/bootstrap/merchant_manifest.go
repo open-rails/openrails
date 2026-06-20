@@ -859,9 +859,14 @@ func stringPtrIfNotEmpty(v string) *string {
 // from the merchant slug (1:1 backing org). Idempotent: re-applying converges
 // the org + issuer state. (#527)
 func provisionMerchantOrg(ctx context.Context, cp *controlplane.ControlPlane, mt ManifestMerchant) (*authcore.Org, error) {
-	slug := strings.ToLower(strings.TrimSpace(mt.Slug))
+	slug := merchant.NormalizeSlug(mt.Slug)
 	if slug == "" {
 		return nil, fmt.Errorf("merchant slug is required")
+	}
+	// #548: the merchant's backing org has the SAME slug (1:1). Validate the
+	// merchant slug as a legal org slug up front for a clear error.
+	if err := merchant.ValidateSlug(slug); err != nil {
+		return nil, err
 	}
 	req := authcore.OrgProvisionRequest{Slug: slug}
 	if mt.Issuer != nil {
@@ -870,6 +875,11 @@ func provisionMerchantOrg(ctx context.Context, cp *controlplane.ControlPlane, mt
 	res, err := cp.Core().ProvisionOrg(ctx, req, nil)
 	if err != nil {
 		return nil, err
+	}
+	// #548 hard guard: the backing org slug MUST equal the merchant slug. Reject a
+	// divergence rather than silently linking a mis-slugged org.
+	if res.Org.Slug != slug {
+		return nil, fmt.Errorf("merchant bootstrap: backing org slug %q != merchant slug %q (#548: merchant.slug must equal backing-org.slug)", res.Org.Slug, slug)
 	}
 	return &res.Org, nil
 }

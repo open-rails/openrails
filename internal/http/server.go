@@ -335,7 +335,6 @@ func New(deps Dependencies) (*Server, error) {
 	// Standalone mode owns service-level health/debug routes.
 	s.publicHandler = s.newPublicEngine()
 	s.registerStandaloneMetaRoutes(s.publicHandler)
-	s.registerDebugRoutes(s.publicHandler)
 	// Canonical: /v1/*
 	s.registerUserRoutes(s.publicHandler)
 	// #528: the per-user `/v1/admin` surface is retired. The admin surface is the

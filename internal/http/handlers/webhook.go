@@ -296,6 +296,7 @@ func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchant
 		Payload:        prepared.Body,
 		IPAddress:      r.GetRemoteIP(),
 		Signature:      prepared.Signature,
+		SigningSecret:  signingKey,
 		SignatureValid: &signatureVerified,
 		ReceivedAt:     time.Now(),
 	}

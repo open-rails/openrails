@@ -71,8 +71,8 @@ tasks:
     cmds:
       - bash scripts/mint_jwt.sh
 
-  seed-e2e-mobius:
-    desc: Seed a minimal Mobius/NMI catalog (1 product + recurring and one-off prices) into local Postgres
+  seed-e2e-nmi:
+    desc: Seed a minimal NMI sandbox catalog using the mobius provider slug
     cmds:
       - bash scripts/seed_e2e_mobius.sh
 
@@ -82,17 +82,17 @@ tasks:
       - bash scripts/e2e_dump_local.sh
 
   nmi-query:
-    desc: Call NMI Query API (requires NMI_QUERY_SECURITY_KEY or MOBIUS_PRODUCTION_KEY)
+    desc: Call NMI Query API (requires NMI_QUERY_SECURITY_KEY)
     cmds:
       - bash scripts/nmi_query.sh {{if .TXN_ID}}--transaction-id "{{.TXN_ID}}"{{end}} {{if .SUB_ID}}--subscription-id "{{.SUB_ID}}"{{end}}
 
-  e2e-mobius-sandbox:
+  e2e-nmi-sandbox:
     desc: Start compose + start cloudflared + send signed test webhook (requires cloudflared + env vars)
     cmds:
       - bash scripts/mobius_sandbox_e2e.sh
 
-  e2e-mobius-live:
-    desc: Run the self-verifying live Mobius/NMI payment lifecycle E2E harness
+  e2e-nmi-live:
+    desc: Run the self-verifying NMI payment lifecycle E2E harness using the mobius provider slug
     cmds:
       - bash scripts/mobius_live_lifecycle_e2e.sh
 

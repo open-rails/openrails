@@ -274,6 +274,16 @@ Body accepts customer-owned self-imposed settings only: `currency`, `max_spend_p
 `max_spend_per_month`, `low_balance_threshold`, `auto_topup_enabled`, `auto_topup_amount`,
 and `auto_topup_payment_method_id`.
 
+### GET /v1/me/notifications
+Query params: `limit` (1-100), `offset`, `seen` (`true`/`false`). Response list of
+notifications `{ id, event_type, data, seen, created_at }`.
+
+### GET /v1/me/notifications/unread-count
+Returns `{ unread_count: <int> }`.
+
+### POST /v1/me/notifications/{id}/read
+Marks the notification as read. Response `{ message: "notification marked as read" }`.
+
 ### POST /v1/me/stripe/portal
 Creates a Stripe customer portal session. Response `{ "url": "https://..." }`.
 

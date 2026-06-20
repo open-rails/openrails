@@ -9,11 +9,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ProviderAccountIdentity is the provider ACCOUNT the CURRENT credentials for
@@ -65,6 +68,7 @@ type RuntimeProviderAccounts struct {
 	Config     *config.Config
 	Processors config.ProcessorSet
 	NMI        map[string]*nmi.NMIClient
+	DB         *db.DB
 	// StripeBaseURL overrides https://api.stripe.com in tests.
 	StripeBaseURL string
 
@@ -81,6 +85,12 @@ type nmiIdentityEntry struct {
 // NewRuntimeProviderAccounts builds the resolver over the live clients/config.
 func NewRuntimeProviderAccounts(cfg *config.Config, processors config.ProcessorSet, nmiClients map[string]*nmi.NMIClient) *RuntimeProviderAccounts {
 	return &RuntimeProviderAccounts{Config: cfg, Processors: processors, NMI: nmiClients}
+}
+
+func NewRuntimeProviderAccountsWithDB(cfg *config.Config, processors config.ProcessorSet, nmiClients map[string]*nmi.NMIClient, database *db.DB) *RuntimeProviderAccounts {
+	r := NewRuntimeProviderAccounts(cfg, processors, nmiClients)
+	r.DB = database
+	return r
 }
 
 func (r *RuntimeProviderAccounts) ResolveProviderAccount(ctx context.Context, provider string) (ProviderAccountIdentity, bool) {
@@ -136,7 +146,54 @@ func (r *RuntimeProviderAccounts) ResolveProviderAccount(ctx context.Context, pr
 			}
 		}
 	}
+	if account, ok := r.dbPrimaryProviderAccount(ctx, p); ok {
+		return account, true
+	}
 	return ProviderAccountIdentity{}, false
+}
+
+func (r *RuntimeProviderAccounts) dbPrimaryProviderAccount(ctx context.Context, provider string) (ProviderAccountIdentity, bool) {
+	if r == nil || r.DB == nil || r.DB.Pool() == nil {
+		return ProviderAccountIdentity{}, false
+	}
+	providerType := dbProviderType(provider)
+	if providerType == "" {
+		return ProviderAccountIdentity{}, false
+	}
+	mid, ok := merchant.FromContext(ctx)
+	if !ok || mid.IsZero() {
+		return ProviderAccountIdentity{}, false
+	}
+	var out ProviderAccountIdentity
+	err := r.DB.Pool().QueryRow(ctx, `
+		SELECT provider_type, environment, account_id, coalesce(display_name, '')
+		  FROM openrails.provider_accounts
+		 WHERE merchant_id = $1::uuid
+		   AND provider_type = $2
+		   AND environment = 'live'
+		   AND role = 'primary'
+		   AND status = 'enabled'
+		 LIMIT 1
+	`, mid.String(), providerType).Scan(&out.ProviderType, &out.Environment, &out.AccountID, &out.DisplayName)
+	if err != nil {
+		if err != pgx.ErrNoRows {
+			log.WithContext(ctx).WithError(err).WithField("provider", provider).
+				Warn("intents: db provider account lookup failed")
+		}
+		return ProviderAccountIdentity{}, false
+	}
+	out.ProviderKey = strings.ToLower(strings.TrimSpace(provider))
+	out.Evidence = map[string]any{"source": "provider_accounts.primary"}
+	return out, true
+}
+
+func dbProviderType(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "mobius", config.ProcessorTypeNMI:
+		return config.ProcessorTypeNMI
+	default:
+		return ""
+	}
 }
 
 // FindProviderAccount returns the currently configured credential set that

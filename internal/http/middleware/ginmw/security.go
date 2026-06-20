@@ -34,10 +34,6 @@ func BodyLimit(maxBytes int64) gin.HandlerFunc {
 	}
 }
 
-func isDebugNMITokenizationPath(path string) bool {
-	return strings.EqualFold(path, "/debug/nmi/tokenization")
-}
-
 // CORSOriginSource returns the browser Origin allow-list for the current
 // request. Standalone wires this to AuthKit remote_application.allowed_origins.
 type CORSOriginSource func(context.Context) ([]string, error)
@@ -193,9 +189,7 @@ func SecurityHeaders() gin.HandlerFunc {
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-XSS-Protection", "1; mode=block")
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
-		if !isDebugNMITokenizationPath(c.Request.URL.Path) {
-			c.Header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'")
-		}
+		c.Header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'")
 
 		// Remove server information
 		c.Header("Server", "")

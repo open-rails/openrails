@@ -61,3 +61,25 @@ func TestParseID(t *testing.T) {
 		t.Fatal("ParseID(invalid) err = nil, want error")
 	}
 }
+
+func TestValidateSlug(t *testing.T) {
+	// Must mirror AuthKit's org-slug rule (#548): lowercase a-z0-9 + hyphens,
+	// no leading/trailing hyphen, <=63 chars; normalized (trim+lowercase) first.
+	// Valid INCLUDING inputs that only become valid after normalize (trim+lower) —
+	// "UPPER"->"upper", "  Tensorhub  "->"tensorhub" — exactly the canonical
+	// lowercase form AuthKit org slugs require, so the invariant still holds.
+	valid := []string{"tensorhub", "doujins", "monkey", "a", "ab", "a-b-c", "x1-2y", "  Tensorhub  ", "UPPER"}
+	for _, s := range valid {
+		if err := ValidateSlug(s); err != nil {
+			t.Errorf("ValidateSlug(%q) = %v, want nil", s, err)
+		}
+	}
+	invalid := []string{"", "-x", "x-", "a_b", "a.b", "a b", "héllo", "a--b-"}
+	// 64 chars exceeds the 63 cap.
+	invalid = append(invalid, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	for _, s := range invalid {
+		if err := ValidateSlug(s); err == nil {
+			t.Errorf("ValidateSlug(%q) = nil, want error", s)
+		}
+	}
+}

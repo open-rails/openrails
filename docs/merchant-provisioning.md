@@ -68,7 +68,7 @@ Examples:
 
 - `provider_accounts/stripe/live/acct_123/secret_key`
 - `provider_accounts/stripe/live/acct_123/webhook_signing_secret`
-- `provider_accounts/nmi/live/mobius-profile-id/production_key`
+- `provider_accounts/nmi/live/mobius-profile-id/security_key` (manifest key; legacy storage may still normalize this to `production_key`)
 - `provider_accounts/ccbill/live/900000-0000/account_config`
 
 Secret stores:
@@ -144,9 +144,9 @@ merchants:
         account_id: mobius-profile-id
         mode: primary
         secrets:
-          production_key: {env: DOUJINS_MOBIUS_PRODUCTION_KEY}
-          tokenization_key: {env: DOUJINS_MOBIUS_TOKENIZATION_KEY}
-          webhook_signing_secret: {env: DOUJINS_MOBIUS_WEBHOOK_SECRET}
+          security_key: {env: DOUJINS_NMI_SECURITY_KEY}
+          tokenization_key: {env: DOUJINS_NMI_TOKENIZATION_KEY}
+          webhook_signing_secret: {env: DOUJINS_NMI_WEBHOOK_SECRET}
 ```
 
 Catalog manifests are explicitly catalog-scoped and may contain one or more

@@ -35,9 +35,9 @@ if [ -z "${CLOUDFLARED_PUBLIC_HOSTNAME:-}" ]; then
   echo "Missing CLOUDFLARED_PUBLIC_HOSTNAME" >&2
   exit 1
 fi
-MOBIUS_WEBHOOK_SIGNING_SECRET="${MOBIUS_WEBHOOK_SIGNING_SECRET:-${MOBIUS_WEBHOOK_SECRET:-}}"
-if [ -z "$MOBIUS_WEBHOOK_SIGNING_SECRET" ]; then
-  echo "Missing MOBIUS_WEBHOOK_SIGNING_SECRET (OpenRails will reject unsigned webhooks)" >&2
+NMI_WEBHOOK_SIGNING_SECRET="${NMI_WEBHOOK_SIGNING_SECRET:-}"
+if [ -z "$NMI_WEBHOOK_SIGNING_SECRET" ]; then
+  echo "Missing NMI_WEBHOOK_SIGNING_SECRET (OpenRails will reject unsigned webhooks)" >&2
   exit 1
 fi
 
@@ -86,7 +86,7 @@ echo "5) Sending signed test webhook to public URL..."
 EVENT_ID="e2e_test_$(date +%s%N)"
 BODY="{\"event_id\":\"$EVENT_ID\",\"event_type\":\"test\",\"event_body\":{}}"
 TS="$(date +%s)"
-SIG="$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$MOBIUS_WEBHOOK_SIGNING_SECRET" | awk '{print $NF}')"
+SIG="$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$NMI_WEBHOOK_SIGNING_SECRET" | awk '{print $NF}')"
 
 curl -i "$PUBLIC_BASE/v1/webhooks/mobius" \
   -H "Content-Type: application/json" \
@@ -95,10 +95,9 @@ curl -i "$PUBLIC_BASE/v1/webhooks/mobius" \
 
 echo ""
 echo "Next steps:"
-echo "  - Register webhook URL in Mobius/NMI portal:"
+echo "  - Register webhook URL in the NMI portal for this provider profile:"
 echo "      $PUBLIC_BASE/v1/webhooks/mobius"
-echo "  - Use tokenization harness (if env=dev):"
-echo "      $PUBLIC_BASE/debug/nmi/tokenization?mode=real&provider=mobius"
+echo "  - Tokenize cards in the host payment UI, then pass the opaque token to OpenRails APIs."
 echo ""
 echo "Cloudflared logs: /tmp/cloudflared-openrails-webhooks.log"
 echo "Leave this running while testing. Ctrl+C to stop."

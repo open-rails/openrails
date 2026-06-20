@@ -20,9 +20,9 @@ require() {
 
 require curl
 
-SECURITY_KEY="${NMI_QUERY_SECURITY_KEY:-${MOBIUS_PRODUCTION_KEY:-}}"
+SECURITY_KEY="${NMI_QUERY_SECURITY_KEY:-}"
 if [ -z "$SECURITY_KEY" ]; then
-  echo "Missing NMI_QUERY_SECURITY_KEY (or MOBIUS_PRODUCTION_KEY)" >&2
+  echo "Missing NMI_QUERY_SECURITY_KEY" >&2
   exit 1
 fi
 

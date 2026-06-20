@@ -32,7 +32,7 @@ const (
 	// SecretStripeWebhookSigningThin is the merchant's Stripe "thin" Event
 	// Destination signing secret (a single endpoint may receive both).
 	SecretStripeWebhookSigningThin = "stripe/webhook_signing_secret_thin"
-	// SecretNMIMobiusProductionKey is the merchant's Mobius/NMI production key.
+	// SecretNMIMobiusProductionKey is the legacy broad NMI security-key secret.
 	SecretNMIMobiusProductionKey = "nmi/mobius/production_key"
 	// SecretNMIMobiusTokenizationKey is the merchant's public Collect.js key.
 	// It is client-side configuration, but it is still merchant-scoped provider
@@ -41,7 +41,7 @@ const (
 	// SecretNMIMobiusTokenizationURL overrides the Collect.js script URL for a
 	// merchant/provider. Most NMI accounts use DefaultNMICollectJSURL.
 	SecretNMIMobiusTokenizationURL = "nmi/mobius/tokenization_url"
-	// SecretNMIMobiusWebhookSigning is the merchant's Mobius/NMI webhook signing
+	// SecretNMIMobiusWebhookSigning is the merchant's NMI webhook signing
 	// secret, used to verify inbound webhooks after merchant/provider resolution.
 	SecretNMIMobiusWebhookSigning = "nmi/mobius/webhook_signing_secret"
 	// SecretCCBillAccountConfig is the merchant's CCBill account/config payload.
@@ -71,10 +71,10 @@ var merchantSecretRegistry = []SecretDefinition{
 	{Name: SecretStripeSecretKey, Provider: "stripe", Purpose: "api_key", DisplayLabel: "Stripe secret key", ManualVault: true, MerchantWritable: true, Validation: "stripe_balance_check"},
 	{Name: SecretStripeWebhookSigning, Provider: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
 	{Name: SecretStripeWebhookSigningThin, Provider: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe thin event signing secret", ManualVault: true, MerchantWritable: true, Validation: "format"},
-	{Name: SecretNMIMobiusProductionKey, Provider: "nmi", Purpose: "mobius_production_key", DisplayLabel: "Mobius/NMI production key", ManualVault: true, MerchantWritable: true, Validation: "presence"},
-	{Name: SecretNMIMobiusTokenizationKey, Provider: "nmi", Purpose: "tokenization_key", DisplayLabel: "Mobius/NMI tokenization key", ManualVault: true, MerchantWritable: true, Validation: "presence", PlaintextReadable: true},
-	{Name: SecretNMIMobiusTokenizationURL, Provider: "nmi", Purpose: "tokenization_url", DisplayLabel: "Mobius/NMI Collect.js URL", ManualVault: true, MerchantWritable: true, Validation: "url", PlaintextReadable: true},
-	{Name: SecretNMIMobiusWebhookSigning, Provider: "nmi", Purpose: "webhook_signing", DisplayLabel: "Mobius/NMI webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "presence"},
+	{Name: SecretNMIMobiusProductionKey, Provider: "nmi", Purpose: "security_key", DisplayLabel: "NMI security key", ManualVault: true, MerchantWritable: true, Validation: "presence"},
+	{Name: SecretNMIMobiusTokenizationKey, Provider: "nmi", Purpose: "tokenization_key", DisplayLabel: "NMI tokenization key", ManualVault: true, MerchantWritable: true, Validation: "presence", PlaintextReadable: true},
+	{Name: SecretNMIMobiusTokenizationURL, Provider: "nmi", Purpose: "tokenization_url", DisplayLabel: "NMI Collect.js URL", ManualVault: true, MerchantWritable: true, Validation: "url", PlaintextReadable: true},
+	{Name: SecretNMIMobiusWebhookSigning, Provider: "nmi", Purpose: "webhook_signing", DisplayLabel: "NMI webhook signing secret", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 	{Name: SecretCCBillAccountConfig, Provider: "ccbill", Purpose: "account_config", DisplayLabel: "CCBill account configuration", ManualVault: true, MerchantWritable: true, Validation: "presence"},
 	{Name: SecretSolanaPrivateKey, Provider: "solana", Purpose: "signing_keypair", DisplayLabel: "Solana signing keypair", ManualVault: true, MerchantWritable: false, Validation: "presence"},
 }

@@ -107,8 +107,8 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	acct := decodeHostSeamBody(t, w)
 	require.Equal(t, currency, acct["currency"])
 	require.EqualValues(t, 7_500_000, acct["balance_amount"])
-	require.NotContains(t, acct, "available_amount")
 	require.NotContains(t, acct, "held_amount")
+	require.NotContains(t, acct, "available_amount")
 
 	// --- PUT /v1/me/settings: A configures its own self-imposed settings. ---
 	settingsBody := fmt.Sprintf(`{

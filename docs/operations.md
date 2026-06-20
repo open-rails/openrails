@@ -244,7 +244,7 @@ changes are fully reconstructable from the log or the findings table.
 Before a provider's data is treated as authoritative, `check` / `fix` resolves
 the configured provider key to a provider account identity and verifies it
 against the merchant's enabled primary `provider_accounts` row. A changed
-credential that points at a different Stripe/NMI/Mobius/CCBill/Solana account
+credential that points at a different Stripe/NMI/CCBill/Solana account
 aborts the provider run before local mirror rows are inserted or overwritten.
 The run summary and provider fetch params carry the local `provider_account_id`;
 local mirror reads/writes are scoped to that row. Historical NULL

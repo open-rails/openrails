@@ -201,7 +201,7 @@ func (s *NMIWebhookService) resolveSubscriptionFromReference(ctx context.Context
 		return nil, fmt.Errorf("load subscription by processor subscription ID: %w", err)
 	}
 
-	// NMI/Mobius transaction.sale.success may only include the original order/PO.
+	// NMI transaction.sale.success may only include the original order/PO.
 	// Resolve those references through local subscription metadata before granting access.
 	subscription, err = s.SubscriptionService.GetByProcessorMetadataValue(ctx, provider, "order_id", ref)
 	if err == nil {

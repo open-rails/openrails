@@ -211,6 +211,9 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	group.GET("/payments", wrap(httphandlers.GetUserPayments))
 	group.GET("/entitlements/active", wrap(httphandlers.SelfGetActiveEntitlements))
 
+	group.GET("/notifications", wrap(httphandlers.GetNotifications))
+	group.GET("/notifications/unread-count", wrap(httphandlers.GetUnreadNotificationCount))
+	group.POST("/notifications/:id/read", wrap(httphandlers.MarkNotificationRead))
 	group.GET("/products", wrap(httphandlers.GetMyProducts))
 	group.GET("/products/:product_id/access", wrap(httphandlers.GetMyProductAccess))
 

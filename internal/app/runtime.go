@@ -164,7 +164,7 @@ type Runtime struct {
 // account.
 func (r *Runtime) ProviderAccounts() intents.ProviderAccountResolver {
 	r.intentProviderAccountsOnce.Do(func() {
-		r.intentProviderAccounts = intents.NewRuntimeProviderAccounts(r.Config, r.Processors, r.NMIClients)
+		r.intentProviderAccounts = intents.NewRuntimeProviderAccountsWithDB(r.Config, r.Processors, r.NMIClients, r.DB)
 	})
 	return r.intentProviderAccounts
 }

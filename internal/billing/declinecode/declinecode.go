@@ -4,7 +4,7 @@
 // stable `decline_code`.
 //
 // The codes align with Stripe's decline_code taxonomy and OpenRails' existing
-// NMI/Mobius localization IDs (see internal/integrations/nmi/client.go), so the
+// NMI localization IDs (see internal/integrations/nmi/client.go), so the
 // new Solana cranker speaks the same language the card processors already do.
 package declinecode
 

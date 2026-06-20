@@ -51,21 +51,13 @@ func TestBodyLimitAppliesToNonWebhookRoutes(t *testing.T) {
 	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 }
 
-func TestSecurityHeadersSkipsCSPForNMITokenizationDebugPage(t *testing.T) {
+func TestSecurityHeadersSetsCSP(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(SecurityHeaders())
-	r.GET("/debug/nmi/tokenization", func(c *gin.Context) { c.Status(http.StatusOK) })
 	r.GET("/v1/products", func(c *gin.Context) { c.Status(http.StatusOK) })
-
-	debugReq := httptest.NewRequest(http.MethodGet, "/debug/nmi/tokenization", nil)
-	debugW := httptest.NewRecorder()
-	r.ServeHTTP(debugW, debugReq)
-	require.Equal(t, http.StatusOK, debugW.Code)
-	require.Empty(t, debugW.Header().Get("Content-Security-Policy"))
-	require.Equal(t, "nosniff", debugW.Header().Get("X-Content-Type-Options"))
 
 	apiReq := httptest.NewRequest(http.MethodGet, "/v1/products", nil)
 	apiW := httptest.NewRecorder()

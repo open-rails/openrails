@@ -14,7 +14,7 @@ import (
 // merchant resolution (the router is not the trust boundary; the signature is).
 //
 // Both the standalone gin server and the embedded mux mount the SAME neutral
-// httphandlers.MerchantWebhook (Stripe + NMI/Mobius + CCBill), so the two
+// httphandlers.MerchantWebhook (Stripe + NMI-backed processors + CCBill), so the two
 // deployments cannot drift. This replaced a gin-only reimplementation that handled
 // Stripe ONLY — it silently rejected NMI/CCBill on the standalone per-merchant
 // surface while the embedded mux (already on the neutral handler) accepted them.

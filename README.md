@@ -681,7 +681,7 @@ The next pull + Converge independently verifies reality converged.
 - **Entitlements model:** [docs/entitlements_timeline.md](docs/entitlements_timeline.md)
 - **Merchant provisioning & API keys:** [docs/merchant-provisioning.md](docs/merchant-provisioning.md)
 - **Testing with business time:** [docs/business-time.md](docs/business-time.md)
-- More runbooks (Solana, NMI/Mobius sandbox, vault secrets, reconciliation) under `docs/`.
+- More runbooks (Solana, NMI sandbox, vault secrets, reconciliation) under `docs/`.
 
 ## Developer tasks
 

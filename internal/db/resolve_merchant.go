@@ -43,12 +43,20 @@ func ResolveMerchantSlug(ctx context.Context, qx gen.DBTX, slug string) (merchan
 // boot calls it after migrations. Returns the canonical merchant id. An empty
 // slug is a no-op.
 func RegisterMerchant(ctx context.Context, qx gen.DBTX, opts RegisterMerchantOptions) (merchant.ID, error) {
-	if opts.Slug == "" {
+	slug := merchant.NormalizeSlug(opts.Slug)
+	if slug == "" {
 		return merchant.ID{}, nil
 	}
-	id, err := gen.New(qx).RegisterMerchant(ctx, opts.Slug)
+	// #548: a merchant slug MUST be a legal AuthKit org slug, so the merchant can
+	// own a same-slug backing org in standalone. Embedded never creates the org,
+	// so validate here too — otherwise an embedded-only slug could break a later
+	// embedded→standalone move.
+	if err := merchant.ValidateSlug(slug); err != nil {
+		return merchant.ID{}, err
+	}
+	id, err := gen.New(qx).RegisterMerchant(ctx, slug)
 	if err != nil {
-		return merchant.ID{}, fmt.Errorf("register merchant slug %q: %w", opts.Slug, err)
+		return merchant.ID{}, fmt.Errorf("register merchant slug %q: %w", slug, err)
 	}
 	return merchant.ID(id), nil
 }

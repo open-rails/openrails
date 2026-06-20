@@ -877,7 +877,7 @@ func createServices(database *db.DB, cfg *config.Config, processorSet config.Pro
 		processorSet,
 		clock,
 	)
-	checkoutSessionService.SetProviderAccounts(intents.NewRuntimeProviderAccounts(cfg, processorSet, nmiClients))
+	checkoutSessionService.SetProviderAccounts(intents.NewRuntimeProviderAccountsWithDB(cfg, processorSet, nmiClients, database))
 	webhookDispatcher.CheckoutSessionService = checkoutSessionService
 	solanaPayService.SetEligibilityChecker(&solanaEligibilityAdapter{service: checkoutService})
 

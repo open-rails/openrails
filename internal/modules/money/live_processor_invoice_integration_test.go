@@ -94,9 +94,9 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 
 func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	requireLiveProcessorTest(t)
-	securityKey := liveEnvValue("PROCESSORS_MOBIUS_SECURITY_KEY", "BILLING_PROCESSORS_MOBIUS_SECURITY_KEY")
+	securityKey := liveEnvValue("NMI_SANDBOX_SECURITY_KEY", "PROCESSORS_MOBIUS_SECURITY_KEY", "BILLING_PROCESSORS_MOBIUS_SECURITY_KEY")
 	if securityKey == "" {
-		t.Skip("NMI/Mobius sandbox security key missing")
+		t.Skip("NMI sandbox security key missing")
 	}
 
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)

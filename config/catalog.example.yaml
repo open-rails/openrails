@@ -11,7 +11,7 @@ catalogs:
     name: local-stack-default
 
     # Provider labels here are catalog-provider adapters. Use "mobius" for the
-    # NMI/Mobius catalog adapter, even though merchant provider_accounts use
+    # NMI catalog adapter, even though merchant provider_accounts use
     # provider_type: nmi.
     default_providers: [stripe, mobius]
 

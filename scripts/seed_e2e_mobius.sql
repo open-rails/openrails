@@ -1,12 +1,13 @@
--- Seed a minimal Mobius/NMI catalog for local E2E.
+-- Seed a minimal NMI catalog for local E2E using the mobius provider slug.
 --
 -- Requires psql variables:
---   :mobius_plan_id
---   :mobius_recurring_amount
---   :mobius_one_off_amount
+--   :nmi_plan_id
+--   :nmi_recurring_amount
+--   :nmi_one_off_amount
+--   :merchant_slug
 --
 -- Example:
---   psql ... -v mobius_plan_id="123" -v mobius_recurring_amount="999" -v mobius_one_off_amount="499" -f scripts/seed_e2e_mobius.sql
+--   psql ... -v nmi_plan_id="123" -v nmi_recurring_amount="999" -v nmi_one_off_amount="499" -f scripts/seed_e2e_mobius.sql
 
 \set ON_ERROR_STOP on
 
@@ -17,29 +18,43 @@ BEGIN
   END IF;
 END $$;
 
--- Create product (idempotent by slug)
-INSERT INTO openrails.products (slug, display_name, description, tier_group, tier_rank, status)
-VALUES ('e2e_mobius', 'E2E Mobius Plan', 'Local E2E product for Mobius/NMI sandbox', 'e2e', 1, 'active')
-ON CONFLICT (slug) DO UPDATE
-SET display_name = EXCLUDED.display_name,
-    description = EXCLUDED.description,
-    tier_group = EXCLUDED.tier_group,
-    tier_rank = EXCLUDED.tier_rank,
-    status = 'active',
-    updated_at = current_timestamp;
+-- Create product (idempotent by merchant + slug)
+WITH merchant AS (
+  SELECT id AS merchant_id FROM openrails.merchants WHERE slug = :'merchant_slug'
+), updated AS (
+  UPDATE openrails.products product
+  SET display_name = 'E2E NMI Plan',
+      description = 'Local E2E product for the NMI sandbox',
+      tier_group = 'e2e',
+      tier_rank = 1,
+      status = 'active',
+      updated_at = current_timestamp
+  FROM merchant
+  WHERE product.merchant_id = merchant.merchant_id
+    AND product.slug = 'e2e_mobius'
+  RETURNING product.id
+)
+INSERT INTO openrails.products (merchant_id, slug, display_name, description, tier_group, tier_rank, status)
+SELECT merchant.merchant_id, 'e2e_mobius', 'E2E NMI Plan', 'Local E2E product for the NMI sandbox', 'e2e', 1, 'active'
+FROM merchant
+WHERE NOT EXISTS (SELECT 1 FROM updated);
 
 -- Create recurring price (idempotent by financial-substance unique constraint).
 -- There is no price slug: a price's identity is (product, amount, currency, cycle).
 WITH p AS (
-  SELECT id AS product_id FROM openrails.products WHERE slug = 'e2e_mobius'
+  SELECT p.id AS product_id, p.merchant_id
+  FROM openrails.products p
+  JOIN openrails.merchants m ON m.id = p.merchant_id
+  WHERE m.slug = :'merchant_slug' AND p.slug = 'e2e_mobius'
 )
-INSERT INTO openrails.prices (product_id, amount, currency, billing_cycle_days, processors, status)
+INSERT INTO openrails.prices (merchant_id, product_id, amount, currency, billing_cycle_days, processors, status)
 SELECT
+  p.merchant_id,
   p.product_id,
-  :mobius_recurring_amount,
+  :nmi_recurring_amount,
   'usd',
   1,
-  jsonb_build_object('mobius', jsonb_build_object('plan_id', :'mobius_plan_id', 'provider', 'mobius')),
+  jsonb_build_object('mobius', jsonb_build_object('plan_id', :'nmi_plan_id', 'provider', 'mobius')),
   'active'
 FROM p
 ON CONFLICT (product_id, amount, currency, billing_cycle_days) DO UPDATE
@@ -51,7 +66,10 @@ SET processors = EXCLUDED.processors,
 -- OpenRails checkout. PostgreSQL UNIQUE constraints treat NULL billing cycles as
 -- distinct, so do this as UPDATE-or-INSERT instead of ON CONFLICT.
 WITH p AS (
-  SELECT id AS product_id FROM openrails.products WHERE slug = 'e2e_mobius'
+  SELECT p.id AS product_id, p.merchant_id
+  FROM openrails.products p
+  JOIN openrails.merchants m ON m.id = p.merchant_id
+  WHERE m.slug = :'merchant_slug' AND p.slug = 'e2e_mobius'
 ), updated AS (
   UPDATE openrails.prices price
   SET processors = jsonb_build_object('mobius', jsonb_build_object('provider', 'mobius')),
@@ -59,15 +77,17 @@ WITH p AS (
       updated_at = current_timestamp
   FROM p
   WHERE price.product_id = p.product_id
-    AND price.amount = :mobius_one_off_amount
+    AND price.merchant_id = p.merchant_id
+    AND price.amount = :nmi_one_off_amount
     AND price.currency = 'usd'
     AND price.billing_cycle_days IS NULL
   RETURNING price.id
 )
-INSERT INTO openrails.prices (product_id, amount, currency, billing_cycle_days, processors, status)
+INSERT INTO openrails.prices (merchant_id, product_id, amount, currency, billing_cycle_days, processors, status)
 SELECT
+  p.merchant_id,
   p.product_id,
-  :mobius_one_off_amount,
+  :nmi_one_off_amount,
   'usd',
   NULL,
   jsonb_build_object('mobius', jsonb_build_object('provider', 'mobius')),
@@ -76,14 +96,17 @@ FROM p
 WHERE NOT EXISTS (SELECT 1 FROM updated);
 
 -- Output IDs for copy/paste.
-SELECT 'product_id' AS key, id::text AS value FROM openrails.products WHERE slug='e2e_mobius'
+SELECT 'product_id' AS key, p.id::text AS value
+FROM openrails.products p
+JOIN openrails.merchants m ON m.id = p.merchant_id
+WHERE m.slug = :'merchant_slug' AND p.slug='e2e_mobius'
 UNION ALL
 SELECT 'recurring_price_id' AS key, id::text AS value
 FROM openrails.prices
-WHERE product_id = (SELECT id FROM openrails.products WHERE slug='e2e_mobius')
-  AND amount = :mobius_recurring_amount AND currency='usd' AND billing_cycle_days=1
+WHERE product_id = (SELECT p.id FROM openrails.products p JOIN openrails.merchants m ON m.id = p.merchant_id WHERE m.slug = :'merchant_slug' AND p.slug='e2e_mobius')
+  AND amount = :nmi_recurring_amount AND currency='usd' AND billing_cycle_days=1
 UNION ALL
 SELECT 'one_off_price_id' AS key, id::text AS value
 FROM openrails.prices
-WHERE product_id = (SELECT id FROM openrails.products WHERE slug='e2e_mobius')
-  AND amount = :mobius_one_off_amount AND currency='usd' AND billing_cycle_days IS NULL;
+WHERE product_id = (SELECT p.id FROM openrails.products p JOIN openrails.merchants m ON m.id = p.merchant_id WHERE m.slug = :'merchant_slug' AND p.slug='e2e_mobius')
+  AND amount = :nmi_one_off_amount AND currency='usd' AND billing_cycle_days IS NULL;

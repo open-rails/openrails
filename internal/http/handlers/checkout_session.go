@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails/config"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -14,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -85,7 +87,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	if !processors.IsConfigured(r.State.Processors, req.Payment.Processor) {
+	if !checkoutProcessorConfigured(r, req.Payment.Processor) {
 		r.ErrorJSON(http.StatusBadRequest, "unsupported processor")
 		return
 	}
@@ -122,6 +124,24 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(resp)
+}
+
+func checkoutProcessorConfigured(r *httprequest.Request, processor string) bool {
+	if r == nil || r.State == nil {
+		return false
+	}
+	if processors.IsConfigured(r.State.Processors, processor) {
+		return true
+	}
+	if !processors.IsNMIBacked(processor) || r.State.Merchants == nil {
+		return false
+	}
+	mid, ok := merchant.FromContext(r.Request.Context())
+	if !ok {
+		return false
+	}
+	_, ok, err := r.State.Merchants.PrimaryProviderAccountSecretName(r.Request.Context(), mid, config.ProcessorTypeNMI, "live", "security_key")
+	return err == nil && ok
 }
 func GetCheckoutSession(r *httprequest.Request) {
 	sessionID := strings.TrimSpace(r.Param("id"))

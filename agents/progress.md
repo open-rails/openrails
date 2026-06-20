@@ -7,16 +7,260 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 549
+next_id: 552
+
+---
+
+# #549: fix-money-account-settings-units-and-self-editable-surface
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-20: customer money-account settings now use the real ledger currency contract, customer self-service is flat/narrow, USDC/SOL are no longer account currencies, saved OpenRails wallet linking and self-service USDC funding routes are removed, and Solana receipt metadata stays on `payments.metadata`.
+
+Validation: `go test ./internal/http/routes/ginroutes ./internal/http/handlers ./internal/modules/money ./internal/modules/solana ./internal/modules/solana/recurring ./internal/river -run 'Test(SelfService|HostPrincipal|RunAutoTopups|ConfirmEnrollment|Solana|Bearer)'`; `go test -tags=integration ./tests -run TestSelfAccountSurface_HostPrincipalFullLoopAndScoping -count=1`; `go test -tags=integration ./internal/modules/money -run TestRunAutoTopups_ChargesAndDeposits -count=1 -timeout=60s`.
+
+The `/v1/me/account/settings` contract currently mixes correct ledger-currency behavior with misleading field names and too much customer authority. OpenRails uses per-currency ledgers; `currency` means the actual accounting currency for the account, not a display preference or FX presentation layer. Amounts use that currency's registered internal precision. For USD, that means micro-USD (`decimals=6`), not cents. Fields like `auto_topup_amount_cents` are therefore wrong for this API and invite bugs. USDC and SOL also do not belong in the money-account currency registry: USDC is a USD-denominated stablecoin/payment rail, not a separate account currency; SOL is a crypto asset and not useful as a customer billing-account currency.
+
+## Metadata
+
+- Category: cleanup
+- Status: complete
+- Passes: true
+
+## Decisions
+
+- `currency` on money/account APIs is the actual ledger currency.
+- Do not auto-display a USD balance as JPY/EUR/etc. through this API; display preferences belong in the host/app presentation layer.
+- Every settings/balance amount is in the native decimal precision OpenRails registers for that currency.
+- USD amounts are micro-USD everywhere in the OpenRails money system.
+- Remove USDC and SOL from account/billing currencies. Stablecoins and crypto assets may remain processor/payment assets, but account ledgers should use real billing currencies such as USD.
+- Customer self-settings should be narrow. Merchant/admin/service routes own billing policy and credit-risk knobs.
+- Spend-cap breaches hard-stop by default. Near-limit alerts, if any, use platform constants instead of per-customer `hard_stop_on_breach` / `alert_threshold_pct` settings.
+- `billing_mode` remains meaningful account policy/read-state (`prepaid` vs `arrears`), but it is platform-owned and must not be customer-editable.
+- Self-service should stay flat under `/v1/me` because host apps already mount OpenRails under paths such as `/billing/v1`. Use `/v1/me/balance`, `/v1/me/transactions`, and `/v1/me/settings`; cut `/v1/me/account*` and `/v1/me/credits*` instead of keeping aliases.
+- Customer transaction history should expose understandable movement types (`deposit`, `spend`, `expiry`, `arrears_accrual`, `arrears_payment`) even if internal ledger transfer names stay `owed_accrual` / `owed_payment`.
+- Delete the unfinished USDC funding self-service feature; it is not part of the core customer billing surface.
+- Do not model AuthKit/account-control wallet linking inside OpenRails. AuthKit may link Solana wallets as an authentication factor; OpenRails should only record wallet/token-account data when it is needed for a concrete payment/subscription flow.
+- Delete OpenRails saved-wallet linking entirely: no customer wallet-link routes, no `linked_wallets` table, no linked-wallet repo/model. A customer may pay into their OpenRails account with any Solana wallet; the payment/subscription record is the audit trail.
+- `payments.transaction_id` is the provider-specific external payment id. For Solana this is the chain transaction signature. Do not duplicate it in metadata.
+- Do not add a one-off Solana payments table. `openrails.payments` is the durable receipt; Solana-specific receipt details live in `payments.metadata`. `openrails.solana_subscriptions` remains only for recurring on-chain subscription state.
+- Keep `POST /v1/me/stripe/portal` while Stripe is supported; it is the provider handoff that returns a Stripe Billing Portal URL.
+- Keep internal notification storage/email delivery. Downstream audit found Doujins still renders OpenRails billing notifications via `/v1/me/notifications*`, so customer notification inbox routes stay until that host migrates.
+
+## Current Customer-Editable Fields To Review
+
+- `billing_mode` (meaningful, but platform-owned; not customer-editable)
+- `max_spend_per_day`
+- `max_spend_per_month`
+- `max_outstanding_owed_amount`
+- `low_balance_threshold`
+- `auto_topup_enabled`
+- `auto_topup_amount_cents` (wrong; replace with native-precision `auto_topup_amount`)
+- `auto_topup_payment_method_id`
+- `default_credit_expiry_days` (wrong for customer self-service; platform/merchant decides credit expiry)
+- `hard_stop_on_breach` (wrong for customer self-service; hard-stop should be default behavior)
+- `alert_threshold_pct` (wrong for customer self-service; near-limit alert threshold should be a platform constant)
+
+## Proposed Customer Self-Service Surface
+
+Final `PUT /v1/me/settings` request body:
+
+```json
+{
+  "currency": "USD",
+  "low_balance_threshold": 10000000,
+  "auto_topup_enabled": true,
+  "auto_topup_amount": 25000000,
+  "auto_topup_payment_method_id": "pm_uuid",
+  "max_spend_per_day": 100000000,
+  "max_spend_per_month": 1000000000
+}
+```
+
+- Keep:
+  - `currency`
+  - `low_balance_threshold`
+  - `auto_topup_enabled`
+  - `auto_topup_amount`
+  - `auto_topup_payment_method_id`
+  - `max_spend_per_day`
+  - `max_spend_per_month`
+- Remove from customer self-service:
+  - `billing_mode`
+  - `max_outstanding_owed_amount`
+  - `default_credit_expiry_days`
+  - `hard_stop_on_breach`
+  - `alert_threshold_pct`
+  - `credit_limit_amount`
+  - `tier`
+  - `tier_source`
+  - `suspended_at`
+  - `suspend_reason`
+  - `verified_payment_method`
+
+## Customer Route Cuts
+
+- Delete:
+  - `GET /v1/me/account`
+  - `PUT /v1/me/account/settings`
+  - `GET /v1/me/account/transactions`
+  - `GET /v1/me/credits`
+  - `GET /v1/me/credits/:currency`
+  - `GET /v1/me/credits/:currency/transactions`
+  - `GET /v1/me/usdc-funding-options`
+  - `POST /v1/me/usdc-funding-sessions`
+  - `GET /v1/me/wallets/solana`
+  - `PUT /v1/me/wallets/solana`
+  - `DELETE /v1/me/wallets/solana`
+- Keep/replace with:
+  - `GET /v1/me/balance?currency=USD`
+  - `GET /v1/me/transactions?currency=USD`
+  - `PUT /v1/me/settings`
+  - `GET /v1/me/payments`
+  - `GET /v1/me/usage?currency=USD&from=YYYY-MM-DD&to=YYYY-MM-DD`
+  - `GET /v1/me/invoices`
+  - `GET /v1/me/invoices/:id`
+  - `POST /v1/me/stripe/portal`
+
+**Tasks:**
+- [x] Document that account-setting amount fields use the registered currency precision; for USD this is micro-USD.
+- [x] Remove USDC and SOL from the OpenRails account/billing currency registry and tests/docs that present them as customer account currencies.
+- [x] Keep stablecoin/crypto asset handling, where needed, in payment/processor-specific flows instead of the money-account currency enum.
+- [x] Replace the customer wire field `auto_topup_amount_cents` with native-precision `auto_topup_amount`; do not expose cents-specific names in a multi-currency API.
+- [x] Audit service/admin account-settings routes for the same `auto_topup_amount_cents` naming bug and either rename them too or document a short compatibility alias.
+- [x] Keep `auto_topup_payment_method_id` as the saved payment method selector, but make it a real FK to `openrails.payment_methods(id)` with `ON DELETE SET NULL`.
+- [x] In customer self-settings writes, verify `auto_topup_payment_method_id` belongs to the authenticated customer and current merchant before storing it.
+- [x] In service/admin settings writes, verify `auto_topup_payment_method_id` belongs to the target customer and current merchant before storing it.
+- [x] Replace customer routes with flat names: `GET /v1/me/balance?currency=USD`, `GET /v1/me/transactions?currency=USD`, and `PUT /v1/me/settings`.
+- [x] Make `GET /v1/me/transactions` return customer-facing transaction type names; do not leak confusing `owed_*` labels unless explicitly kept as internal metadata.
+- [x] Delete customer `/v1/me/account`, `/v1/me/account/settings`, and `/v1/me/account/transactions` route registrations after moving them to the flat routes.
+- [x] Narrow `PUT /v1/me/settings` so customers cannot change merchant/admin-owned policy knobs.
+- [x] Make the customer self-settings request body exactly: `currency`, `low_balance_threshold`, `auto_topup_enabled`, `auto_topup_amount`, `auto_topup_payment_method_id`, `max_spend_per_day`, `max_spend_per_month`.
+- [x] Remove `default_credit_expiry_days` from customer self-settings; credit expiry is platform/merchant policy.
+- [x] Remove `hard_stop_on_breach` and `alert_threshold_pct` from customer self-settings; hard-stop is the default and alert thresholds are platform constants.
+- [x] Delete self-service `GET /v1/me/credits`, `GET /v1/me/credits/:currency`, and `GET /v1/me/credits/:currency/transactions`.
+- [x] Delete now-unused self-service credits handlers/tests/docs after the route cut; keep service/admin account-credit APIs as needed.
+- [x] Delete unfinished self-service USDC funding routes: `GET /v1/me/usdc-funding-options` and `POST /v1/me/usdc-funding-sessions`.
+- [x] Delete saved Solana wallet self-service routes: `GET /v1/me/wallets/solana`, `PUT /v1/me/wallets/solana`, and `DELETE /v1/me/wallets/solana`; do not confuse billing payment state with AuthKit wallet-as-auth-factor identity.
+- [x] Delete the saved-wallet storage surface: `openrails.linked_wallets`, `internal/db/models/linked_wallet.go`, `internal/db/repo/linked_wallet.go`, `internal/db/queries/linked_wallets.sql`, generated sqlc code, RLS/docs/tests that only exist for linked wallets.
+- [x] Ensure Solana payment receipts persist where the money came from. The chain signature remains `payments.transaction_id`; do not duplicate it in metadata.
+- [x] Harden Solana one-off receipt metadata. For transaction-request checkout, copy the bound `processor_state.payer` into `payments.metadata.solana_payer_wallet`; keep `solana_reference`, `checkout_session_id`, token symbol/mint/base-unit amount, recipient wallet, and quote timestamp/FX metadata when present.
+- [x] Harden Solana transfer-request receipt metadata. Plain transfer-request receipts keep signature/reference/recipient/token amount but no payer wallet because the poller does not currently derive fee-payer/source wallet from chain transaction details; transaction-request checkout is the audited wallet-provenance path.
+- [x] Harden Solana recurring payment metadata. Initial subscribe payment and renewal/crank payments include `solana_subscriber_wallet`, `solana_subscription_pda`, `solana_token_mint`, `solana_token_amount`, and `solana_recipient_wallet`; authority/plan PDA stay on `solana_subscriptions`.
+- [x] Audit customer notification inbox routes (`GET /v1/me/notifications`, `GET /v1/me/notifications/unread-count`, `POST /v1/me/notifications/:id/read`): Doujins consumes them through `billingApiService`, so they remain mounted for now.
+- [x] Delete now-unused USDC funding handlers/tests/docs after the route cut.
+- [x] Keep service/admin account-settings routes capable of setting operator-owned policy fields where still needed.
+- [x] Update docs and tests for micro-USD examples, especially any `$25.00 == 25_000_000` style values.
+- [x] Audit downstream consumers for `auto_topup_amount_cents` and account-settings fields before removing any wire name.
+- [x] Run focused account-settings tests.
+
+## Acceptance
+
+- No customer-facing OpenRails docs imply USD cents for money-account settings.
+- USDC and SOL are not accepted or documented as customer money-account currencies.
+- The customer settings API does not expose `billing_mode`, arrears/owed caps, credit-line, tier, suspension, or verification knobs.
+- The customer settings API does not expose credit-expiry or enforcement-policy knobs.
+- `auto_topup_payment_method_id` cannot point at another customer's saved payment method and is cleared safely when that payment method is deleted.
+- The customer self-service `/v1/me/account*` and `/v1/me/credits*` route families are gone; balance/history/settings use `/v1/me/balance`, `/v1/me/transactions`, and `/v1/me/settings`.
+- The unfinished self-service USDC funding route family is gone.
+- The saved Solana wallet route/table/repo/model family is gone; Solana payment receipts record wallet/source metadata in `payments.metadata` while `payments.transaction_id` remains the provider id / chain signature, and subscriptions carry their own `subscriber_wallet`.
+- Customer notification inbox routes remain because Doujins is a confirmed downstream consumer; internal notification/email workflows remain.
+- USD examples use micro-USD.
+- `currency` is documented as real ledger currency, not preferred display currency.
+
+---
+
+# #548: simplify-self-account-balance-contract
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-20: customer `/v1/me/account` now returns only the durable per-currency balance contract; focused self-account tests pass.
+
+`GET /v1/me/account?currency=usd` currently returns `balance_amount`, `held_amount`, `available_amount`, `outstanding_owed_amount`, `billing_mode`, and settings. That suggests the endpoint is doing a live in-flight hold lookup, but it is not: request/admission holds live in Redis spendgate, while this endpoint reads the durable money ledger. Since customer balance display should be per-currency and simple, do not add a Redis lookup here. Drop `held_amount` and `available_amount` from the customer account response and return the durable balance for the requested currency.
+
+## Metadata
+
+- Category: cleanup
+- Status: complete
+- Passes: true
+
+## Desired Behavior
+
+- `GET /v1/me/account?currency=usd` returns one customer account for one currency.
+- The response exposes the durable per-currency balance as the balance.
+- The response does not expose `held_amount` or `available_amount`.
+- Live in-flight spendgate holds remain internal admit-path state, not part of the customer account balance contract.
+- Billing mode remains the account policy value (`prepaid` or `arrears`) unless the implementation shows it is unused by consumers.
+
+**Tasks:**
+- [x] Update `internal/http/handlers/self_account.go` response shape to remove `held_amount` and `available_amount` from `GET /v1/me/account`.
+- [x] Keep balance lookup per-currency via the required `currency` query parameter.
+- [x] Do not add a Redis spendgate held lookup to this route.
+- [x] Update docs/tests that assert the old customer account response shape.
+- [x] Audit downstream OpenRails self-account consumers for `held_amount` / `available_amount` usage and update them to use `balance_amount`.
+- [x] Run the smallest focused test set covering `/v1/me/account`.
+
+## Acceptance
+
+- `/v1/me/account` no longer returns `held_amount` or `available_amount`.
+- Customer-facing docs describe per-currency balance, not live held/available capacity.
+- Existing service/admit internals may still track Redis held amounts where needed, but that state is not leaked through the customer account endpoint.
+
+---
+
+# #547: remove-dev-only-nmi-tokenization-debug-surface
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-20: OpenRails' dev-only NMI tokenization pages are removed; docs/scripts now generate a per-run NMI Collect.js `payment_token` in Playwright, ensure the stable `openrails_e2e_nmi_daily_999` sandbox recurring plan exists, and pass only that opaque token into OpenRails production APIs. `task e2e-nmi-live` passes against the Docker Compose stack with sandbox `NMI_SANDBOX_SECURITY_KEY`, `NMI_TOKENIZATION_KEY`, and `NMI_WEBHOOK_SIGNING_SECRET`: Collect.js tokenization, saved-card vaulting, one-off checkout, subscription checkout, NMI Query API verification, signed webhook ingestion/idempotent replay, activation, and cancellation.
+
+OpenRails currently serves a dev-only browser harness at `/debug/nmi/tokenization` plus a local fake Collect.js at `/debug/nmi/collect-stub.js`. That was useful while wiring NMI, but it is the wrong long-term test surface: production hosts run the card form, load processor tokenization JS in the browser, receive an opaque `payment_token`, and call OpenRails production endpoints such as `POST /v1/me/payment-methods` or checkout. Dev/test should exercise that path, not OpenRails-owned HTML that only exists in dev mode.
+
+## Metadata
+
+- Category: cleanup
+- Status: completed
+- Passes: true
+
+## Touched References
+
+- Deleted OpenRails routes/handlers/tests: `internal/http/routes_debug.go`, `internal/http/debug_nmi_tokenization.go`, `internal/http/debug_nmi_tokenization_test.go`.
+- Removed OpenRails security/path special cases from `internal/http/middleware/neutral_paths.go`, `internal/http/middleware/ginmw/security.go`, and `internal/http/middleware/ginmw/security_test.go`.
+- Updated OpenRails docs/scripts: deleted `docs/nmi-tokenization-harness.md`; updated `docs/e2e-mobius-sandbox.md`, `scripts/mobius_sandbox_e2e.sh`, and `scripts/mobius_live_lifecycle_e2e.sh`.
+- Doujins/Hentai0 exact `/debug/nmi/*` references were not found; both downstream apps already have browser-side payment/tokenization surfaces.
+
+## Desired Behavior
+
+- OpenRails never serves tokenization HTML or a Collect.js stub, even in dev mode.
+- Browser tokenization lives outside OpenRails, because OpenRails should never serve card-entry HTML or receive raw PAN/CVV.
+- OpenRails only receives opaque per-run `payment_token` values and continues to validate/store them through the real payment-method and checkout endpoints.
+- NMI sandbox/live E2E drives browser-side Collect.js tokenization, then verifies OpenRails state through production HTTP routes.
+
+**Tasks:**
+- [x] Inventory all OpenRails references to `/debug/nmi/*`, tokenization harness docs, and NMI scripts before deleting anything.
+- [x] Audit Doujins and Hentai0 for tokenization/payment E2E paths and confirm they do not depend on OpenRails-only dev pages; add tracker tasks there if any dependency is found. No `/debug/nmi/*` references found; both apps already own Collect.js/payment-origin flows.
+- [x] Identify browser-side tokenization surfaces outside OpenRails. Doujins/Hentai0 have `/external-payment?flow=save-card` and embedded payment UI; the OpenRails E2E uses an ephemeral Playwright page that loads NMI Collect.js directly.
+- [x] Update `scripts/mobius_live_lifecycle_e2e.sh` to use browser-side NMI Collect.js tokenization instead of `GET /debug/nmi/tokenization`. Implemented as Playwright-generated per-run `payment_token`, then production `POST /v1/me/payment-methods`.
+- [x] Update `scripts/mobius_sandbox_e2e.sh` and NMI docs to point at the production-path host flow, not an OpenRails debug page.
+- [x] Delete the OpenRails debug NMI route/handler/stub code and its direct tests.
+- [x] Remove `/debug/nmi/tokenization` middleware special cases and update the security tests accordingly.
+- [x] Verify `rg "debug/nmi|collect-stub|nmi-tokenization-harness|TOKENIZATION_BASE_URL"` has no live-code/docs hits outside historical completed tracker entries.
+- [x] Run focused OpenRails tests: `go test ./internal/http ./internal/http/middleware/ginmw`.
+- [x] Run the replacement NMI E2E against a live HTTP server. Passed with `task e2e-nmi-live` against the Docker Compose stack on 2026-06-20.
+
+## Acceptance
+
+- `/debug/nmi/tokenization` and `/debug/nmi/collect-stub.js` do not exist in OpenRails route registration.
+- No security middleware or neutral-path logic special-cases the deleted debug page.
+- OpenRails docs/scripts describe browser-side tokenization and OpenRails-owned payment-method/checkout APIs as separate responsibilities.
+- Doujins/Hentai0 E2E coverage, where present, exercises the same tokenization code path production users hit.
+- No raw PAN/CVV is ever posted to OpenRails.
 
 ---
 
 # #330: nmi-immediate-subscription-checkout-stuck-pending
 
 **Completed:** no
-**Status:** IN_PROGRESS 2026-06-08: immediate NMI checkout activation patch is implemented; package tests and focused mock-provider regression pass; configured-account Mobius recurring test has been added and compiles/skips locally because `MOBIUS_PRODUCTION_KEY` is not set. Remaining work: run real Mobius credential test and repair/replay Paul2 after fixed code is deployed.
+**Status:** IN_PROGRESS 2026-06-08: immediate NMI checkout activation patch is implemented; package tests and focused mock-provider regression pass; configured-account NMI recurring test has been added and compiles/skips locally because `NMI_SANDBOX_SECURITY_KEY` is not set. Remaining work: run real NMI credential test and repair/replay Paul2 after fixed code is deployed.
 
-Fix the NMI/Mobius subscription checkout path where an immediately approved recurring checkout is persisted as pending, leaving host apps such as Doujins stuck on the pending-subscription screen even though NMI accepted the transaction.
+Fix the NMI subscription checkout path where an immediately approved recurring checkout is persisted as pending, leaving host apps such as Doujins stuck on the pending-subscription screen even though NMI accepted the transaction.
 
 ## Metadata
 
@@ -27,7 +271,7 @@ Fix the NMI/Mobius subscription checkout path where an immediately approved recu
 ## Live findings from Doujins/Paul2 on 2026-06-08
 
 - OpenRails received the checkout request and `POST /v1/self/checkout` returned HTTP 200.
-- NMI/Mobius accepted the card vault and transaction: payment vault `314825442`, provider transaction `12162933364`, provider subscription `12162933429`.
+- NMI accepted the card vault and transaction: payment vault `314825442`, provider transaction `12162933364`, provider subscription `12162933429`.
 - Local checkout session `019ea96b-221b-7274-a341-8cdc85cb72d6` was marked `succeeded` with processor `mobius` and amount `2300 usd`.
 - Local subscription `019ea96b-223b-75b1-926b-35956d10eba5` stayed `pending`, with no current period start/end timestamps.
 - Local payments only had a pending attempt row keyed as `nmi_sub_attempt:sub_cb204b034d2c3ec46be93b0470ff44df`; there was no completed payment row keyed by the real NMI transaction id.
@@ -39,7 +283,7 @@ Fix the NMI/Mobius subscription checkout path where an immediately approved recu
 
 ## Desired behavior
 
-For immediate NMI/Mobius subscription approvals, OpenRails should finish the local checkout atomically from the direct provider response: mark the subscription active, set current period timestamps, record the completed payment against the real provider transaction id, grant entitlements, and return a succeeded checkout response. Delayed-start subscriptions and genuinely asynchronous provider states should remain pending and rely on follow-up provider events/reconciliation.
+For immediate NMI subscription approvals, OpenRails should finish the local checkout atomically from the direct provider response: mark the subscription active, set current period timestamps, record the completed payment against the real provider transaction id, grant entitlements, and return a succeeded checkout response. Delayed-start subscriptions and genuinely asynchronous provider states should remain pending and rely on follow-up provider events/reconciliation.
 
 **Tasks:**
 - [x] Capture live-stack evidence for the Paul2 failure: NMI accepted the transaction, checkout succeeded, subscription stayed pending, payment stayed as a pending attempt, and no entitlement was granted.
@@ -48,8 +292,8 @@ For immediate NMI/Mobius subscription approvals, OpenRails should finish the loc
 - [x] Preserve pending behavior for delayed/future-start NMI subscriptions.
 - [x] Fix stale integration-test helpers that still query billing tables by `user_id` instead of `tenant_subject_id`.
 - [x] Add/validate focused integration coverage proving an immediate NMI subscription checkout grants the premium entitlement synchronously.
-- [x] Add an actual NMI test-account integration path so the live provider contract is exercised, guarded by Mobius/NMI test credentials.
-- [ ] Run the actual Mobius/NMI configured-account recurring-subscription integration with `MOBIUS_PRODUCTION_KEY` set.
+- [x] Add an actual NMI test-account integration path so the live provider contract is exercised, guarded by NMI test credentials.
+- [ ] Run the actual NMI configured-account recurring-subscription integration with `NMI_SANDBOX_SECURITY_KEY` set.
 - [x] Run focused OpenRails checkout/module tests and NMI regression tests.
 - [ ] After deployment/restart, repair or replay the affected live pending subscription row for Paul2 if it still exists.
 
@@ -338,7 +582,7 @@ Add deterministic processor selection and fallback policy so checkout can choose
 
 ## Motivation
 
-- Hyperswitch wins on payment orchestration. OpenRails should not chase broad smart-routing, but customers do need basic processor redundancy and product/merchant-aware routing, especially high-risk merchants with Stripe plus NMI/Mobius/CCBill/Solana.
+- Hyperswitch wins on payment orchestration. OpenRails should not chase broad smart-routing, but customers do need basic processor redundancy and product/merchant-aware routing, especially high-risk merchants with Stripe plus NMI/CCBill/Solana.
 - Keep checkout sessions one-processor-at-a-time; route before session creation.
 
 ## Non-goals
@@ -367,8 +611,8 @@ Add deterministic processor selection and fallback policy so checkout can choose
 -
 - VERIFY:
 - [ ] Unit-test policy precedence and fallback filtering.
-- [ ] Integration-test Stripe primary -> Mobius fallback when Stripe is disabled/unavailable before charge.
-- [ ] Integration-test product constrained to Mobius does not route to Stripe even if Stripe is configured.
+- [ ] Integration-test Stripe primary -> NMI fallback when Stripe is disabled/unavailable before charge.
+- [ ] Integration-test product constrained to NMI does not route to Stripe even if NMI is configured.
 
 ---
 
@@ -376,7 +620,7 @@ Add deterministic processor selection and fallback policy so checkout can choose
 
 **Completed:** no
 
-Publish and maintain a provider certification matrix for Stripe, NMI/Mobius, CCBill, and Solana that records exactly which customer-visible flows are supported, sandbox/devnet tested, live/test-mode tested, and known-limited.
+Publish and maintain a provider certification matrix for Stripe, NMI, CCBill, and Solana that records exactly which customer-visible flows are supported, sandbox/devnet tested, live/test-mode tested, and known-limited.
 
 ## Metadata
 
@@ -386,7 +630,7 @@ Publish and maintain a provider certification matrix for Stripe, NMI/Mobius, CCB
 
 ## Motivation
 
-- OpenRails' strongest differentiator is deep support for real non-Stripe rails, especially NMI-compatible high-risk gateways like Mobius. Customers need confidence that the specific flows they care about actually work.
+- OpenRails' strongest differentiator is deep support for real non-Stripe rails, especially NMI-compatible high-risk gateways. Customers need confidence that the specific flows they care about actually work.
 - This should become both documentation and an executable certification harness where practical.
 
 **Tasks:**
@@ -397,11 +641,11 @@ Publish and maintain a provider certification matrix for Stripe, NMI/Mobius, CCB
 -
 - DOCS:
 - [ ] Add docs/providers.md or equivalent with the current matrix and exact tested commands.
-- [ ] Add NMI-compatible gateway guidance: required security_key, Collect.js/tokenization key if needed, direct/query endpoints, test_mode behavior, and how Mobius/NMI white-label accounts map to the same interface.
+- [ ] Add NMI-compatible gateway guidance: required security_key, Collect.js/tokenization key if needed, direct/query endpoints, test_mode behavior, and how white-label NMI accounts map to the same interface.
 - [ ] Add troubleshooting for common provider failures: bad endpoint, key belongs to different gateway user, sandbox URL not supported, recurring plan query mismatch, webhook signature failure.
 -
 - EXECUTABLE CERTIFICATION:
-- [ ] Add or formalize focused integration tests for NMI/Mobius sale, vault, recurring plan create/readback, and query API.
+- [ ] Add or formalize focused integration tests for NMI sale, vault, recurring plan create/readback, and query API.
 - [ ] Add Stripe test-mode catalog command + subscription sync certification steps.
 - [ ] Add Solana devnet read-back certification for plan accounts and recurring lifecycle.
 - [ ] Add CCBill manual-action verification path so unsupported remote catalog operations surface as pending_manual_actions rather than errors.
@@ -426,12 +670,12 @@ Expose processor capability metadata in code, APIs, catalog planning, checkout v
 
 ## Motivation
 
-- Stripe, NMI/Mobius, CCBill, and Solana have different lifecycle semantics. Customers need predictable errors and routing decisions. OpenRails also needs a shared capability source for routing/fallback, catalog-as-code, checkout validation, and the provider certification matrix.
+- Stripe, NMI, CCBill, and Solana have different lifecycle semantics. Customers need predictable errors and routing decisions. OpenRails also needs a shared capability source for routing/fallback, catalog-as-code, checkout validation, and the provider certification matrix.
 
 **Tasks:**
 - CAPABILITY MODEL:
 - [ ] Define ProcessorCapabilities with booleans/enums for recurring, one_time, vault/tokenization, hosted checkout, redirect checkout, direct sale, catalog push, recurring plan push, refund, dispute, cancel immediate, cancel deferred, remote subscription listing, remote dedup check, webhooks, drift enumeration, and manual actions.
-- [ ] Add capability details for current processors: stripe, mobius/NMI-backed, ccbill, solana.
+- [ ] Add capability details for current processors: stripe, NMI-backed (`mobius`), ccbill, solana.
 - [ ] Distinguish processor class capabilities (NMI-backed) from named provider overrides (Mobius).
 -
 - INTEGRATION POINTS:
@@ -550,15 +794,15 @@ Embedded OpenRails runs NO AuthKit, so the backing org physically lives in the H
 - pkg/merchant + `boot.ProvisionMerchant` / merchant manifest
 - `openrails.merchants.owner_org_id` semantics (nullable today)
 
+**FINAL 2026-06-20 (per Paul — "org == merchant by name"):** The model is **merchant slug == backing-org slug, 1:1**, in whatever AuthKit owns identity. Standalone ALREADY does exactly this — `provisionMerchantOrg` creates an AuthKit org with `Slug: merchant.Slug` and links via `owner_org_id`. Embedded runs no AuthKit, so the backing org is the HOST's same-slug org (e.g. doujins's `doujins` org) — linked by the shared slug, nothing for OpenRails to create or store (`owner_org_id` stays NULL in embedded). So the earlier `BackingOrgID` mechanism was unnecessary and was REVERTED. No enforcement needed (the link is the name). Builds + vets; verified live (`./internal/bootstrap` integration suite + the #544 round-trip both pass on docker Postgres).
+
 ## Tasks
-- [ ] Decide the embedded backing-org model — option (a) host declares an opaque backing-org id, (b) binding lives only in the `DelegatedAuthenticator` principal, or (c) other. Record the choice here.
-- [ ] Add the backing-org binding to the embed surface (`embed.Options` / `boot.ProvisionMerchantRequest`) so a host must supply it when provisioning a merchant.
-- [ ] Make `embed.New` / `ProvisionMerchant` FAIL when a merchant is provisioned without a backing org (today it silently provisions with none).
-- [ ] Thread the backing-org id into the merchant row (or chosen store); define `owner_org_id` semantics for embedded (opaque host-org id vs leave NULL + store elsewhere) and update the column comment.
-- [ ] Update the embed.go doc comment that currently says "the issuer/owner-org step is omitted".
-- [ ] Tests: embedded provisioning requires + records a backing org; standalone path unchanged.
-- [ ] Docs: state the "every merchant has exactly one backing org" invariant in docs/merchant-aware-core.md (+ openrails-saas-composition.md if relevant).
-- [ ] Ensure whatever stores the embedded backing-org binding keeps the core schema identical to standalone (#544) — i.e. reuse the existing `owner_org_id text` column, do NOT add an embedded-only column or FK.
+- [x] Model = slug==slug, 1:1 (org slug == merchant slug). Standalone creates the org with the merchant (`provisionMerchantOrg`, `Slug: mt.Slug`); embedded relies on the host's same-slug org.
+- [x] Reverted the `BackingOrgID`/`ManifestMerchant.OwnerOrgID` detour — unnecessary under slug==slug; embedded provisioning is the plain ownerless `RegisterMerchant` (owner_org_id NULL; host owns the org).
+- [x] embed.go doc comment updated to the slug==slug model.
+- [x] Verified live: `./internal/bootstrap` passes; round-trip showed an embedded-origin merchant (owner NULL) get its org rebuilt by `auth recreate`.
+- [x] Docs: invariant recorded in docs/embedded-standalone-mode-switch.md.
+- [x] Reuses the existing `owner_org_id text` column — no embedded-only column or FK (#544).
 
 Related: #542 (catalog ownership), #543 (stop seeding the operator role), #544 (cross-mode data move — `owner_org_id` is the bridge).
 
@@ -569,9 +813,11 @@ Related: #542 (catalog ownership), #543 (stop seeding the operator role), #544 (
 
 **Completed:** no
 
-**Status:** PRINCIPLE / clarification — raised 2026-06-20. Current code already behaves this way; this entry records the invariant and flags any doc/comment that contradicts it.
+**Status:** DONE 2026-06-20. Audited: no doc/comment wrongly attributes the catalog to the host (the "catalog" mentions in docs are the product/price catalog, not the permission catalog). Behavior already correct; invariant recorded in docs/embedded-standalone-mode-switch.md.
 
 **Requires code change:** no (doc/comment audit only; behavior is already correct).
+
+**Completed:** yes.
 
 ## The invariant
 The OpenRails permission catalog lives in OpenRails (internal/controlplane/catalog.go: `catalogEntries` + `merchantCatalog`). A host app (e.g. doujins) does NOT have a table holding OpenRails' catalog. In the federated delegated-token model (#259) the host merely SIGNS a token asserting permission strings; OpenRails validates each asserted permission against its OWN catalog and rejects anything outside it (delegated.go:135-140 `WithPermissions` → `IsDelegatedPermission`; ginmw/delegated.go:201; ginmw/principal.go:198). The host needs no copy of the catalog.
@@ -583,10 +829,10 @@ This is the principle that motivates #543: because OpenRails owns the catalog an
 - Audit docs/comments for any claim that the host stores or holds OpenRails' catalog and correct them. No behavioral code change.
 
 ## Tasks
-- [ ] Grep docs/ + code comments for any claim that the host stores/holds/syncs OpenRails' permission catalog; list the offenders here.
-- [ ] Correct each to state: OpenRails owns the catalog; the host only SIGNS assertions, which OpenRails validates against its own catalog.
-- [ ] Record the invariant explicitly in docs/authkit-merchant-oidc-glossary.md (and/or docs/merchant-aware-core.md).
-- [ ] Sanity-check no code path expects the host to supply/hold the catalog (delegated verify already validates locally — confirm).
+- [x] Grep docs/ + code comments for wrong "host holds the catalog" claims — none found (catalog mentions = product/price catalog).
+- [x] (n/a — nothing to correct.)
+- [x] Record the invariant — docs/embedded-standalone-mode-switch.md ("permission catalog is owned by OpenRails, never the host").
+- [x] Sanity-check no code path expects the host to hold the catalog — confirmed: delegated verify validates against the local catalog (`IsDelegatedPermission`).
 
 Related: #543 (stop seeding the operator role), #541 (embedded backing org).
 
@@ -616,14 +862,16 @@ If the operator role goes away, how do standalone admins get authority? Note boo
 - internal/controlplane/catalog.go (`OperatorRole` const; `OperatorRolePermissions` — likely keep the perms helper, drop the role identity if unused)
 - internal/integrationharness/harness.go (test setup uses `DefineRole`/`SetRolePermissions` for `OperatorRole`)
 
+**Status update 2026-06-20:** DONE in production code, builds + vets clean on authkit v0.42.0. Per Paul's constraint "OpenRails must not define/invent any new roles in orgs", OpenRails now seeds NO role: the bootstrap admin is assigned AuthKit's built-in `owner` role (`org:*`, seeded by CreateOrg, covers the whole OpenRails `org:` catalog); the admin API key stays direct permission-scoped. Verified `AssignRole(…, "owner")` does not clobber the seeded `org:*` (authkit `materializeDefaultRole` early-returns for the reserved owner role).
+
 ## Tasks
-- [ ] Confirm direct-scoped API keys fully cover admin authority without the seeded role (bootstrap.go:148-151 mints the initial admin key scoped to `OperatorRolePermissions()`; cmd/openrails/mint_merchant_api_key.go:67 scopes keys directly).
-- [ ] Remove the role-seeding steps from internal/controlplane/bootstrap.go (`DefineRole` + `SetRolePermissions` + `AssignRole`); keep the direct-scoped key mint.
-- [ ] Remove/adjust the `OperatorRole` registration in internal/controlplane/service.go:156.
-- [ ] Decide the fate of `OperatorRole` const + `OperatorRolePermissions()` in catalog.go — keep the perms helper (used to scope keys directly), drop the role identity if unused.
-- [ ] Update internal/integrationharness/harness.go to stop seeding `OperatorRole`; scope test principals via direct catalog permissions instead.
-- [ ] Update bootstrap doc comments + the package doc in catalog.go that describe the `DefineRole`/`AssignRole` seeding flow.
-- [ ] Tests: standalone bootstrap no longer creates the role; an admin API key still authorizes the `/v1/admin/*` surface.
+- [x] Confirm direct-scoped API keys cover server-to-server admin authority without the seeded role; human admin authority = org `owner` (`org:*`).
+- [x] Remove the role-seeding steps from bootstrap.go (`DefineRole`+`SetRolePermissions`+`AssignRole(OperatorRole)`); admin now `AssignRole(OwnerRole)`; direct-scoped key mint kept.
+- [x] Remove the `OperatorRole` `DefaultRole` registration in service.go (`DefaultRoles: nil`).
+- [x] Fate of `OperatorRole`/`OperatorRolePermissions()`: added `OwnerRole = "owner"` (built-in); kept `OperatorRolePermissions()` as the catalog perm-SET for direct key scoping; `OperatorRole` const retained for test fixtures only, docs reframed.
+- [x] Update bootstrap + catalog.go package/header doc comments (no longer claim OpenRails defines roles).
+- [x] Updated internal/integrationharness/harness.go to stop seeding `OperatorRole`; the test principal authenticates via its direct permission-scoped API key, and remote-app tests assign the built-in `owner` role (embed/{remote_application,merchant_control_boundary}_integration_test.go).
+- [x] Tests VERIFIED LIVE (docker Postgres): full `./internal/controlplane` integration suite + `./embed` pass with the owner-grant model. Updated bootstrap_integration_test.go to assert the `owner` role's `org:*` effectively covers the catalog.
 
 Related: #542 (catalog ownership), #541 (embedded backing org).
 
@@ -669,15 +917,15 @@ The core model barely changes — it's already self-contained. The real work is 
 - standalone→embedded needs NO special command: `data export` then `data import` into the embedded DB; with the migrator split the `profiles` schema is never created, so auth data is dropped by construction (the host owns auth in embedded).
 
 ## Tasks
-- [ ] Enumerate the three table classes — PORTABLE core / STANDALONE-only `profiles` / RUNTIME `river_*`+ledger — and record the lists in docs.
-- [ ] Split `migrate.RunPostgres` so embedded runs core(+River)-only and skips the `profiles`/AuthKit step; wire `embed.New` to the embedded variant. (Decide this vs. the empty-tables alternative first.)
-- [ ] Confirm NO core `openrails` table has a NOT NULL/FK dependency on `profiles` (`owner_org_id` already clean — verify the rest).
-- [ ] Implement `openrails data export` (pg_dump-based; excludes `river_*`/ledger; optional `--merchant`).
-- [ ] Implement `openrails data import`.
-- [ ] Implement `openrails auth recreate` (embedded→standalone auth reconstruction: org + `owner_org_id` backfill + #543 admin key + issuer registration; idempotent).
-- [ ] Document both procedures (embedded→standalone, standalone→embedded) in docs/openrails-saas-composition.md.
-- [ ] Round-trip test: embedded → `data export` → standalone (`import` + `auth recreate`) → `data export` → embedded `import`; assert the portable core data is identical end-to-end.
-- [ ] CI guard: FAIL if a new migration couples a core table to `profiles` (FK/NOT NULL) or places portable billing data in `river_*`.
+- [x] Enumerate the three table classes — recorded in docs/embedded-standalone-mode-switch.md (PORTABLE core / STANDALONE-only `profiles` / RUNTIME `river_*`+ledger in `public`).
+- [x] Split `migrate.RunPostgres` so embedded skips the `profiles`/AuthKit step — added `RunPostgresEmbedded` (vs `RunPostgres`); `embed.New` now calls it. Builds.
+- [x] Confirm NO core `openrails` table has a NOT NULL/FK dependency on `profiles` — verified (zero `REFERENCES profiles/authkit` across migrations/postgres/*.sql; `owner_org_id` is bare `text`, no FK).
+- [x] Implement `openrails data export` (cmd/openrails/data.go; pg_dump `--schema=<openrails>` whole-schema dump — `river_*`/ledger now in `public` so no per-table exclusions needed; `--data-only`/`--format` flags). Builds + `data --help` works. Per-merchant `--merchant` deferred to the planned logical-JSON export.
+- [x] Implement `openrails data import` (same file; pg_restore custom / psql plain; `--data-only`/`--clean`). NOTE: unverified end-to-end pending the round-trip test below (no Postgres in this env).
+- [x] Implement `openrails auth recreate` (cmd/openrails/auth.go; lists merchants, runs idempotent control-plane Bootstrap per slug → creates backing org + rewrites `owner_org_id` to the new standalone org + optional `--mint-keys`). Builds + `auth --help` works. (Issuer re-registration left to the existing merchant-config manifest path; noted.)
+- [x] Document both procedures (embedded→standalone, standalone→embedded) — docs/embedded-standalone-mode-switch.md.
+- [x] Round-trip VERIFIED LIVE (docker Postgres, 2026-06-20): seed merchant → `data export --data-only` → fresh DB `migrate pg` → `data import --data-only` (merchant survived, owner=NULL) → `auth recreate` (created backing org, set `owner_org_id`, `profiles.orgs` row present). Live testing caught a circular-FK (`grants`) issue → fixed with `--disable-triggers` on data-only restore (cmd/openrails/data.go).
+- [x] CI guard: `migrations/postgres/portability_guard_test.go` (`TestPortabilityInvariant`) FAILS if a migration adds a FK into `profiles`/`authkit` or creates a `river_*` table in an OpenRails migration. Passes on current migrations.
 
 Related: #541 (embedded backing org — `owner_org_id` bridge; prerequisite for a clean embedded→standalone), #543 (the authority model that `auth recreate` seeds), #545/#546 (River → `public`, out of the billing schema, which makes the export a clean whole-schema dump).
 
@@ -700,14 +948,16 @@ River's `river_*` tables must ALWAYS live in the `public` Postgres schema, in ev
 - Embedded-own (no host client injected): same — builds its own River in the billing schema.
 - The migratekit ledger is ALREADY in `public.migrations` (migrator.go:144), so River is the ONLY remaining non-portable resident of the billing schema.
 
+**Status update 2026-06-20:** code-complete + builds clean on authkit v0.42.0. Added `config.RiverSchema = "public"` (single source of truth); `standaloneRiverSchema()` and the River migration call both use it. Remaining: cutover doc + tests + riverui check.
+
 ## Tasks
-- [ ] Point standalone River migrations at `public` (pass `public`/empty to `runRiverMigrations`; leave `riverCfg.Schema` unset → River defaults to `public`).
-- [ ] Point the standalone runtime River client at `public` (`standaloneRiverSchema` → `public`/unset; `buildRiverProducer`).
-- [ ] Point the embedded-own River path (no host client injected, #546) at `public` too.
-- [ ] Update `pkg/embedded/river.go` docs (currently "standalone River schema == OpenRails schema") to "River always uses `public`".
-- [ ] One-time cutover: River does NOT auto-move tables across schemas (pkg/embedded/river.go:21-23) — document/script decommissioning existing `<schema>.river_*` and draining/moving jobs to `public.river_*` for already-deployed standalone DBs.
+- [x] Point standalone River migrations at `public` (migrator.go now passes `config.RiverSchema`).
+- [x] Point the standalone runtime River client at `public` (`standaloneRiverSchema` → `config.RiverSchema`; used by both `buildRiverProducer` clients).
+- [x] Point the embedded-own River path (no host client injected, #546) at `public` too (same `standaloneRiverSchema`).
+- [x] Update `pkg/embedded/river.go` docs to "River always uses `public`".
+- [x] One-time cutover: N/A — greenfield hard cut, no legacy/production data (per Paul). River is in `public` from day one; nothing to drain/drop.
 - [ ] Check riverui / any ops tooling that assumes the River schema.
-- [ ] Tests: standalone + embedded-own River both create tables in `public`.
+- [x] VERIFIED LIVE (docker Postgres): `migrate pg` logged "River migrations (schema \"public\")" and the DB showed 6 `river_*` tables in `public`, **0** in the `openrails` schema. `./embed` integration suite (embedded-own River) passes.
 
 Related: #546 (embedded shares host River or runs its own — always `public`), #544 (export collapses to `pg_dump --schema=openrails` once River leaves the billing schema).
 
@@ -730,49 +980,57 @@ In EMBEDDED mode, OpenRails uses the HOST application's River instance when the 
 - BUT doujins does NOT inject: `internal/billing/openrailsembed/openrailsembed.go` passes only a `PGXPool` + `RunWorkers: true`, so embedded OpenRails builds its OWN River. Combined with doujins keeping its River in the `doujins` schema (`doujins.river_job`), doujins today runs TWO River table sets (`doujins.river_job` + `openrails.river_job`) — the `restore.go` "doujins.ln vs openrails.ln" artifact.
 
 ## Tasks
-- [ ] OpenRails embedded: formalize "use injected host River client if present (`HasExternalRiverClient`), else run own in `public`"; make the fallback explicit + documented.
-- [ ] Ensure the embedded-own River path lands in `public` (depends on #545) so host + OpenRails can never split across schemas.
-- [ ] doujins: move its own River from the `doujins` schema to `public` (one shared `public.river_*` set), then inject that client into embedded OpenRails via `SetRiverClient` in `openrailsembed.go`. (Cross-repo — also track in doujins' tracker.)
-- [ ] Verify embedded OpenRails enqueues + workers run against the shared `public` River when injected; remove the second (`openrails.river_*`) set after cutover.
-- [ ] Tests: embedded-with-injection uses the host River and creates NO OpenRails River tables; embedded-without-injection runs its own River in `public`.
+- [x] OpenRails embedded: "use injected host River client if present (`HasExternalRiverClient`), else run own in `public`" — capability already present (`SetExternalRiverClient`); fallback now lands in `public` (#545); `SetRiverClient` doc updated to the public rule.
+- [x] Ensure the embedded-own River path lands in `public` (via `standaloneRiverSchema` → `config.RiverSchema`).
+- [x] doujins: moved its River `doujins`→`public` (workers/client.go, migrate.go, legacy_migrate/coordinator.go, command/*.go SQL refs) and now SHARES one client with embedded OpenRails (openrailsembed `RunWorkers:false` + `RegisterRiverWorkers`/`RegisterRiverClient`; DI carries the registry; River start deferred to after `SetupRoutes`). Builds/vet/gofmt clean, unit tests pass. Done 2026-06-20 (against published openrails v0.45.0, which already has `SetRiverClient` — decoupled from the authkit-v0.42 chain). NOT committed.
+- [x] Embedded OpenRails River path VERIFIED LIVE: `./embed` integration suite passes on docker Postgres (boots embedded OpenRails via `embed.New` → `RunPostgresEmbedded`, exercises the embedded-own River in `public`). Cutover: N/A — greenfield hard cut, no legacy data (per Paul).
+- [x] `./embed` integration tests pass (embedded-own River in `public`). The host-injected-client path is the doujins side (agent-done); doujins is greenfield too, so no cutover.
 
 Related: #545 (River always in `public`), #544 (clean export once River leaves the billing schema).
 
 ---
 
 
-# #547: `auth recreate` registers the host issuer (one-command federated embedded→standalone)
+# #550: `auth recreate` registers the host issuer (one-command federated embedded→standalone)
 
 **Completed:** no
 
-**Status:** PLAN — 2026-06-20. Decided (Paul). Builds on #544's `auth recreate`.
+**Status:** PLAN — 2026-06-20. Decided (Paul): one step is simpler. Builds on #544's `auth recreate`.
 
 **Requires code change:** yes (OpenRails).
 
-## Tasks
-- [ ] Add per-merchant issuer input to `auth recreate` (`--issuers <manifest.yaml>`: merchant slug → {uri, jwks_uri|public_keys, audiences, allowed_origins}).
-- [ ] Per merchant, after creating the backing org, register the issuer as the org `owner` remote-application — reuse the `provisionMerchantOrg` issuer path (no duplication).
-- [ ] Idempotent + re-runnable; a merchant with no declared issuer just gets org + owner + key.
-- [ ] Verify live: import billing → `auth recreate --issuers …` → merchant has backing org + issuer-as-owner; a delegated token from that issuer administers it.
-- [ ] Doc: docs/embedded-standalone-mode-switch.md → one-command flow.
+## Problem
+`auth recreate` (cmd/openrails/auth.go) creates each merchant's backing org + owner + optional admin key, but does NOT register the host's issuer / remote-application. For a FEDERATED standalone (e.g. tensorhub as issuer-owner), that linkage lives in AuthKit, not in the billing export, so it can't be reconstructed from the dump — today it's a separate manifest step. Fold it in so federated embedded→standalone is ONE command.
 
-Related: #544, #259/#527 (federated issuer-as-owner), #548.
+**Status update 2026-06-20:** DONE + VERIFIED LIVE. `auth recreate --issuers <merchant-config.yaml>` reuses the tested merchant-config reconcile (`ReconcileMerchantManifestData` → `provisionMerchantOrg`); merchants without a manifest issuer fall back to `cp.Bootstrap` (org+owner+key). Builds + vets.
+
+## Tasks
+- [x] Added `--issuers <manifest.yaml>` to `auth recreate` (cmd/openrails/auth.go).
+- [x] Per manifest merchant: backing org + issuer registered as org `owner` remote-application — via `ReconcileMerchantManifestData`/`provisionMerchantOrg` (no duplicated logic).
+- [x] Idempotent (Insert+Overwrite); merchants not in the manifest get `cp.Bootstrap` (org+owner+key).
+- [x] VERIFIED LIVE (docker Postgres): `auth recreate --issuers` on a fresh standalone DB → merchant `monkey` (owner_org_id set) + backing org `monkey` (same id, slug==slug) + remote-app `monkey-app` for `https://monkey.example` assigned **role=owner**.
+- [x] Doc: docs/embedded-standalone-mode-switch.md updated to the `--issuers` one-command federated flow.
+
+Related: #544 (data move), #259/#527 (federated issuer-as-owner), #551 (slug==slug).
 
 ---
 
 
-# #548: Enforce merchant.slug == backing-org.slug (hard invariant)
+# #551: Enforce merchant.slug == backing-org.slug (hard invariant)
 
 **Completed:** no
 
-**Status:** PLAN — 2026-06-20. Decided (Paul): a merchant's slug MUST equal its backing-org slug; reject divergence. `owner_org_id` stays the authority link, but the linked org's slug must match.
+**Status:** PLAN — 2026-06-20. Decided (Paul): a merchant's slug MUST equal its backing-org slug; any divergence invites confusion and must be rejected. `owner_org_id` stays the authority link, but the linked org's slug MUST match.
 
 **Requires code change:** yes (OpenRails).
 
-## Tasks
-- [ ] Standalone hard guard: when linking `owner_org_id` (`merchants.Service.Provision` / `recordOwnerOrgBySlug` / `provisionMerchantOrg`), assert the referenced org's slug == merchant.slug and REJECT a mismatch.
-- [ ] Align merchant-slug validation with AuthKit's org-slug ruleset (a merchant slug is always a legal org slug).
-- [ ] Embedded: keep the single-slug shape (no separate org field) + document the host contract; no cross-AuthKit check (keeps #541/#543 decoupling).
-- [ ] Tests (live): standalone rejects a merchant↔org slug mismatch; accepts the match; invalid merchant slug rejected.
+## Problem
+slug==slug holds by construction in standalone today (`provisionMerchantOrg` creates the org with the merchant slug), but nothing REJECTS a divergence, and embedded relies on an unenforced host convention. Make it a hard boundary where it is code-enforceable.
 
-Related: #541, #543, #544, #547.
+## Tasks
+- [x] Standalone hard guard: `provisionMerchantOrg` now asserts `res.Org.Slug == merchant.slug` and REJECTs a mismatch; `merchants.Service.Provision` validates the slug. (Manifest can't point at a divergent org — `ManifestMerchant` has no separate org field; the backing org is derived from the merchant slug.)
+- [x] Align merchant-slug validation with AuthKit's org-slug ruleset: added `merchant.NormalizeSlug` + `merchant.ValidateSlug` (mirrors `authkit/core validateOrgSlug` regex `^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`), enforced at `db.RegisterMerchant` (embedded) + `merchants.Service.Provision` (standalone). Unit-tested (`TestValidateSlug`, passes).
+- [x] Embedded: single-slug shape kept (BackingOrgID already reverted); `db.RegisterMerchant` now validates the slug so embedded merchants stay standalone-compatible; no cross-AuthKit check (keeps #541/#543 decoupling).
+- [x] Tests: `TestValidateSlug` (pkg/merchant) passes; `./internal/controlplane` + `./internal/bootstrap` integration suites pass LIVE against docker Postgres (exercise provisioning with the new slug validation + the `provisionMerchantOrg` `org.slug == merchant.slug` assert — valid path unaffected). The federated `auth recreate` run (#547) further confirmed `owner_org_id` links to the same-slug org.
+
+Related: #541 (`owner_org_id` bridge), #543 (no OpenRails-seeded roles), #544 (mode switch), #550.

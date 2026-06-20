@@ -98,6 +98,11 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 	if slug == "" {
 		return nil, errors.New("merchants: provision requires a slug")
 	}
+	// #548: the merchant slug must be a legal AuthKit org slug (it owns a same-slug
+	// backing org).
+	if err := merchant.ValidateSlug(slug); err != nil {
+		return nil, err
+	}
 	ownerOrgID := strings.TrimSpace(req.OwnerOrgID)
 	if ownerOrgID == "" {
 		return nil, ErrOwnerOrgRequired

@@ -40,6 +40,7 @@ type WebhookMessage struct {
 	Payload        []byte
 	IPAddress      string
 	Signature      string
+	SigningSecret  string
 	SignatureValid *bool
 	ReceivedAt     time.Time
 }
@@ -131,9 +132,9 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 	if !webhookSignatureVerified(event) {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("nmi webhook signature was not verified before processing"))
 	}
-	client := d.NMIClients[event.Processor]
-	if client == nil {
-		return fmt.Errorf("nmi client '%s' not configured", event.Processor)
+	var client *nmi.NMIClient
+	if d.NMIClients != nil {
+		client = d.NMIClients[event.Processor]
 	}
 	if err := h.Verify(event); err != nil {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("nmi queued webhook signature verification failed: %w", err))

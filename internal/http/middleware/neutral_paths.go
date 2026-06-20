@@ -22,7 +22,3 @@ func isWebhookPath(path string) bool {
 	return strings.HasPrefix(path, "/v1/webhooks") ||
 		(strings.HasPrefix(path, "/v1/merchants/") && strings.Contains(path, "/webhooks/"))
 }
-
-func isDebugNMITokenizationPath(path string) bool {
-	return strings.EqualFold(path, "/debug/nmi/tokenization")
-}

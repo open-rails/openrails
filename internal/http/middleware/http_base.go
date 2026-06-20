@@ -41,9 +41,7 @@ func SecurityHeadersHTTP() HTTPMiddleware {
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("X-XSS-Protection", "1; mode=block")
 			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-			if !isDebugNMITokenizationPath(r.URL.Path) {
-				h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'")
-			}
+			h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'")
 			h.Set("Server", "")
 			next.ServeHTTP(w, r)
 		})

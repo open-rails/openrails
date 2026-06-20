@@ -10,7 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
-// NMICollectionAdapter collects invoices and top-ups from NMI/Mobius customer
+// NMICollectionAdapter collects invoices and top-ups from NMI customer
 // vault payment methods.
 type NMICollectionAdapter struct {
 	Client *nmi.NMIClient

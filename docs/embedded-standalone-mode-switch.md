@@ -63,17 +63,24 @@ openrails data export --data-only --out billing.dump
 
 # On the standalone target (after `openrails migrate up` creates the schema):
 openrails data import --data-only --in billing.dump
-openrails auth recreate --mint-keys                    # rebuild AuthKit orgs per merchant
+
+# Federated hosts (e.g. tensorhub): one command rebuilds org + issuer-as-owner.
+openrails auth recreate --issuers merchants.yaml        # backing org + host issuer per merchant
+# Non-federated merchants (admin via API key): omit --issuers, add --mint-keys.
+openrails auth recreate --mint-keys
 ```
 
 `import --data-only` loads into the freshly-migrated schema and passes
 `--disable-triggers` so the billing schema's circular foreign keys (e.g. `grants`)
 restore cleanly (requires a superuser/owner restore role).
 
-`auth recreate` creates a backing AuthKit org for every imported merchant, rewrites
-`merchants.owner_org_id` to the new standalone org id (the imported value was the
-host's org and is meaningless here), and optionally mints a deployment admin API
-key per merchant. It reuses the idempotent control-plane bootstrap, so it is safe
+`auth recreate` creates a backing AuthKit org for every imported merchant (slug ==
+merchant slug, #548), rewrites `merchants.owner_org_id` to the new standalone org
+id, and — with `--issuers <merchant-config.yaml>` (#547) — registers each declared
+host issuer as the org `owner` remote-application, so the host's delegated tokens
+administer that merchant. Without an issuer a merchant gets an admin API key
+(`--mint-keys`). The imported `owner_org_id` was the host's org and is
+meaningless here. It reuses the idempotent control-plane bootstrap, so it is safe
 to re-run.
 
 ## Notes

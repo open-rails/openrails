@@ -1,47 +1,53 @@
-# Mobius/NMI Sandbox E2E Runbook (OpenRails)
+# NMI Sandbox E2E Runbook (OpenRails)
 
-This runbook exercises the **real** Mobius/NMI sandbox end-to-end. Prefer the
-self-verifying harness first; use the manual steps below only when debugging a
-specific portal/tunnel/browser problem.
+This runbook exercises the **real** NMI sandbox end-to-end through the
+configured `mobius` provider slug. Prefer the self-verifying harness first; use
+the manual steps below only when debugging a specific portal/tunnel/browser
+problem.
 
 ```bash
-task e2e-mobius-live
+task e2e-nmi-live
 ```
 
-The harness starts the compose E2E stack, seeds the Mobius catalog, mints a JWT,
-uses real Collect.js tokenization, saves a card in OpenRails, charges the saved
-vault through one-off checkout, creates a saved-card subscription checkout,
-verifies local DB state, queries NMI remotely, verifies signed webhook
-ingestion/idempotent replay, and cancels the subscription.
+The harness starts the compose E2E stack, seeds the NMI catalog, mints a JWT,
+loads Collect.js in a browser, enters an NMI sandbox test card, receives a real
+opaque `payment_token`, saves a card in OpenRails, charges the saved vault
+through one-off checkout, creates a saved-card subscription checkout, verifies
+local DB state, queries NMI remotely, verifies signed webhook
+ingestion/idempotent replay, and cancels the subscription. It provisions the
+local `local-stack` merchant and mints a short-lived delegated JWT with a
+throwaway test key for the run.
 
 Required environment:
 
-- `MOBIUS_PRODUCTION_KEY`
-- `MOBIUS_TOKENIZATION_KEY`
-- `MOBIUS_WEBHOOK_SIGNING_SECRET`
+- `NMI_SANDBOX_SECURITY_KEY`
+- `NMI_TOKENIZATION_KEY` for the same sandbox NMI account
+- `NMI_WEBHOOK_SIGNING_SECRET`
 
 Optional environment:
 
-- `E2E_MOBIUS_PLAN_ID`; when omitted, the harness creates a per-run 1-day
-  sandbox recurring plan through the NMI direct-post API.
-- `E2E_MOBIUS_ONE_OFF_AMOUNT` defaults to a per-run value from 500 to 899 cents
+- `E2E_NMI_PLAN_ID` defaults to `openrails_e2e_nmi_daily_999`. The harness
+  attempts to create that 1-day sandbox recurring plan every run and uses it
+  when NMI reports that it already exists.
+- `E2E_NMI_ONE_OFF_AMOUNT` defaults to a per-run value from 500 to 899 cents
   so repeated sandbox runs do not trip NMI duplicate-transaction checks.
-- `E2E_MOBIUS_RECURRING_AMOUNT` defaults to the existing-plan amount `999`
-  cents when `E2E_MOBIUS_PLAN_ID` is supplied; otherwise it defaults to a
-  per-run amount from 1000 to 1399 cents for the auto-created sandbox plan.
+- `E2E_NMI_RECURRING_AMOUNT` defaults to a per-run value from 1000 to 1399
+  cents for the same reason; the plan id stays stable.
 - `OPENRAILS_HOST_PORT` defaults to `3053`; use another free port when a
   different local E2E stack already owns `3053`.
-- `MOBIUS_E2E_BASE_URL` defaults to `http://localhost:$OPENRAILS_HOST_PORT`.
-- `MOBIUS_E2E_TOKENIZATION_BASE_URL` defaults to `MOBIUS_E2E_BASE_URL`.
-- `MOBIUS_E2E_START_COMPOSE` defaults to `true`.
-- `MOBIUS_E2E_BUILD` defaults to `true`; set to `false` for faster reruns
+- `NMI_E2E_BASE_URL` defaults to `http://localhost:$OPENRAILS_HOST_PORT`.
+- `NMI_E2E_START_COMPOSE` defaults to `true`.
+- `NMI_E2E_BUILD` defaults to `true`; set to `false` for faster reruns
   against an already-current compose image.
-- `MOBIUS_E2E_START_TUNNEL` defaults to `false`; set it to `true` when your
-  Collect.js tokenization key requires the Cloudflared HTTPS origin.
-- `AUTHKIT_DEV_MINT_SECRET` defaults to the compose issuer's local dev secret.
+- `NMI_E2E_START_TUNNEL` defaults to `false`; set it to `true` when NMI
+  webhooks need the Cloudflared HTTPS origin during the run.
+- `NMI_COLLECT_JS_URL` defaults to `https://secure.networkmerchants.com/token/Collect.js`.
+- `NMI_E2E_CARD_NUMBER`, `NMI_E2E_CARD_EXPIRY`, and `NMI_E2E_CARD_CVV` default
+  to sandbox test-card values.
+- `E2E_NMI_MERCHANT_SLUG` defaults to `local-stack`.
 
 The manual flow below covers the same surfaces:
-- browser-side tokenization (Collect.js) → `payment_token`
+- browser-side tokenization with NMI Collect.js → `payment_token`
 - create vault/payment method in billing
 - create a subscription purchase (NMI recurring)
 - receive + verify webhooks over a deterministic Cloudflared hostname
@@ -55,13 +61,12 @@ The manual flow below covers the same surfaces:
 - `cloudflared` (for deterministic webhooks)
 - `curl`
 
-### Mobius/NMI portal setup (one-time)
-- Create a sandbox recurring plan (recommended: **1 day** cadence to test rebills quickly).
+### NMI sandbox account setup (one-time)
 - Register billing webhook endpoint:
-  - URL: `https://$CLOUDFLARED_PUBLIC_HOSTNAME/v1/webhooks/mobius`
+  - URL: `https://$CLOUDFLARED_PUBLIC_HOSTNAME/v1/merchants/local-stack/webhooks/mobius`
   - Signing secret: **exactly** the merchant secret value you seed as
     `webhook_signing_secret` (the helper scripts read
-    `MOBIUS_WEBHOOK_SIGNING_SECRET`)
+    `NMI_WEBHOOK_SIGNING_SECRET`)
 
 ## 1) Configure `.env`
 
@@ -71,25 +76,23 @@ Minimum set (fill in real values):
 # sandbox mode
 TEST_ENV=true
 
-# AuthKit devserver mint secret (used by scripts/mint_jwt.sh); choose a local-only random value
-AUTHKIT_DEV_MINT_SECRET=$(openssl rand -hex 32)
-
-# Mobius/NMI values used by the bootstrap manifest and helper scripts.
-MOBIUS_PRODUCTION_KEY=...
-MOBIUS_TOKENIZATION_KEY=...
-MOBIUS_WEBHOOK_SIGNING_SECRET=...               # HMAC shared secret for webhooks
+# NMI sandbox values used by the bootstrap manifest and helper scripts.
+NMI_SANDBOX_SECURITY_KEY=...
+NMI_TOKENIZATION_KEY=...                     # public Collect.js tokenization key for the sandbox account
+NMI_WEBHOOK_SIGNING_SECRET=...               # HMAC shared secret for webhooks
 
 # Cloudflared (deterministic webhook hostname)
 CLOUDFLARED_TUNNEL_TOKEN=...
 CLOUDFLARED_PUBLIC_HOSTNAME=openrails-webhooks.example.com
 
-# Optional sandbox plan id for local seed. If omitted, task e2e-mobius-live
-# creates a per-run 1-day plan automatically.
-E2E_MOBIUS_PLAN_ID=YOUR_SANDBOX_PLAN_ID
+# Optional sandbox plan id for local seed. If omitted, task e2e-nmi-live
+# creates or reuses openrails_e2e_nmi_daily_999.
+E2E_NMI_PLAN_ID=openrails_e2e_nmi_daily_999
 ```
 
 Notes:
-- Billing uses fixed NMI gateway endpoints for Mobius/NMI direct-post and query calls. Use sandbox/test credentials when `TEST_ENV=true`.
+- Billing uses fixed NMI gateway endpoints for direct-post and query calls. Use
+  sandbox/test credentials when `TEST_ENV=true`.
 - OpenRails does not read PROCESSORS_* from `.env`. Seed merchant-scoped
   provider credentials through `openrails push-merchant-config`:
 
@@ -104,17 +107,17 @@ merchants:
         account_id: mobius-profile-id
         mode: primary
         secrets:
-          production_key: {env: MOBIUS_PRODUCTION_KEY}
-          tokenization_key: {env: MOBIUS_TOKENIZATION_KEY}
-          webhook_signing_secret: {env: MOBIUS_WEBHOOK_SIGNING_SECRET}
+          security_key: {env: NMI_SANDBOX_SECURITY_KEY}
+          webhook_signing_secret: {env: NMI_WEBHOOK_SIGNING_SECRET}
 ```
 
-- Collect.js origin restrictions: if your tokenization key is origin-locked, you must load the harness over **HTTPS** via Cloudflared (not `http://localhost`).
+- Collect.js origin restrictions belong to the browser origin that loads
+  Collect.js. OpenRails should only receive the opaque `payment_token`.
 
-## 2) Start the local stack (+ local issuer)
+## 2) Start the local stack
 
 ```bash
-task docker-up-e2e-sandbox
+task docker-up
 ```
 
 This starts:
@@ -122,7 +125,6 @@ This starts:
 - Garnet/Redis
 - ClickHouse (+ bootstrap)
 - OpenRails migrations + OpenRails server
-- AuthKit devserver issuer (`issuer:8080`, exposed on `http://localhost:8080`)
 
 ## 3) Start a deterministic webhook hostname
 
@@ -141,18 +143,18 @@ task verify-webhook-tunnel
 Optional: send a signed test webhook through the public hostname:
 
 ```bash
-task e2e-mobius-sandbox
+task e2e-nmi-sandbox
 ```
 
 ## 4) Seed a minimal local catalog
 
 ```bash
-task seed-e2e-mobius
+task seed-e2e-nmi
 ```
 
 This creates:
 - `billing.products.slug = e2e_mobius`
-- one active `billing.prices` row with `processors.mobius.plan_id = $E2E_MOBIUS_PLAN_ID`
+- one active `billing.prices` row with `processors.mobius.plan_id = $E2E_NMI_PLAN_ID`
 
 ## 5) Mint a JWT for API calls
 
@@ -167,17 +169,18 @@ This prints:
 
 Keep those exported for the remaining steps.
 
-## 6) Tokenize in the browser (Collect.js)
+## 6) Run the live NMI E2E
 
-Open (over Cloudflared HTTPS):
+The script opens an ephemeral local browser page, loads NMI Collect.js with
+`NMI_TOKENIZATION_KEY`, fills the sandbox card fields, captures the
+`payment_token`, and then posts only that opaque token to OpenRails:
 
+```bash
+task e2e-nmi-live
 ```
-https://$CLOUDFLARED_PUBLIC_HOSTNAME/debug/nmi/tokenization?mode=real&provider=mobius
-```
 
-1. Generate `payment_token`.
-2. Paste `E2E_JWT` (and optionally `E2E_RUN_ID`) and click **Create payment method**.
-3. Copy the created payment method ID from the response (`pm_...`).
+The raw test card only enters NMI-hosted Collect.js fields in the browser; it is
+never posted to OpenRails.
 
 ## 7) Create a subscription checkout session
 
@@ -188,7 +191,7 @@ Use:
 Example (replace `price_PRICE_UUID` + `pm_PAYMENT_METHOD_UUID`):
 
 ```bash
-curl -fsS "https://$CLOUDFLARED_PUBLIC_HOSTNAME/v1/checkout" \
+curl -fsS "https://$CLOUDFLARED_PUBLIC_HOSTNAME/v1/me/checkout" \
   -H "Authorization: Bearer $E2E_JWT" \
   -H "Content-Type: application/json" \
   -H "X-E2E-Run-ID: $E2E_RUN_ID" \
@@ -234,7 +237,7 @@ curl -fsS "https://$CLOUDFLARED_PUBLIC_HOSTNAME/v1/me/subscriptions/subscription
 ```
 
 Then:
-- confirm Mobius/NMI portal shows cancellation (and/or Query API)
+- confirm the NMI portal shows cancellation (and/or Query API)
 - confirm billing receives the cancellation webhook and updates local state
 
 ## 10) Rebill testing
