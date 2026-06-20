@@ -691,6 +691,10 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 		Metadata: map[string]any{
 			"solana_reference":    reference,
 			"checkout_session_id": strings.TrimSpace(pending.SessionID),
+			"solana_token_symbol": pending.Token,
+			"solana_token_mint":   pending.TokenMint,
+			"solana_token_amount": pending.TokenAmount,
+			"solana_recipient":    pending.Recipient,
 		},
 	})
 

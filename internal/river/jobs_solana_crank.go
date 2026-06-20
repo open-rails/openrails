@@ -291,6 +291,13 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 		Currency:                currency,
 		CurrentPeriodStartsAt:   &now,
 		CurrentPeriodEndsAt:     &periodEnd,
+		PaymentMetadata: map[string]any{
+			"solana_subscriber_wallet": row.SubscriberWallet,
+			"solana_subscription_pda":  row.SubscriptionPDA,
+			"solana_token_mint":        row.Mint,
+			"solana_token_amount":      amountBaseUnits,
+			"solana_recipient_wallet":  row.MerchantAddress,
+		},
 	}); err != nil {
 		return fmt.Errorf("solana crank: renew membership: %w", err)
 	}

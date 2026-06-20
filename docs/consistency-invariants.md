@@ -80,7 +80,7 @@ consistency checks run.
 
 **Provider actions** are the outbound solution channel. Any diagnostic plane may
 enqueue a `provider_intent` or operator task when the repair must happen at Stripe,
-NMI/Mobius, CCBill, Solana, or another provider. Examples: cancelling an extra
+NMI-backed processors, CCBill, Solana, or another provider. Examples: cancelling an extra
 remote subscription, retrying a scheduled cancellation, or pushing a catalog plan
 definition. Those actions are linked remediation for `life.*` or `consistency.*` findings,
 not `PUSH-*` findings.
@@ -326,7 +326,7 @@ Provider-Pull is account-bound. Before `check` or `pull` treats provider output
 as truth, OpenRails resolves the live credentials through the provider's
 account/profile/whoami endpoint and compares the returned provider account id to
 the targeted `provider_accounts.account_id`. Stripe uses the account id
-from `/v1/account` (for example `acct_...`); NMI/Mobius uses the gateway
+from `/v1/account` (for example `acct_...`); NMI uses the gateway
 merchant/account identity returned by the profile endpoint; CCBill should use its
 account/subaccount identity once implemented. A merchant may have multiple
 bindings for the same provider type, such as Stripe-A for legacy rebills and

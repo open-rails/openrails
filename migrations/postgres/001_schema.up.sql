@@ -1409,7 +1409,7 @@ CREATE POLICY merchant_isolation ON openrails.money_transactions USING ((merchan
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_transactions TO openrails_app;
 
 COMMENT ON TABLE openrails.money_transactions IS 'Ledger transactions. Amount values use the row currency internal precision.';
-COMMENT ON COLUMN openrails.money_transactions.currency IS 'System currency code (USD/USDC/EUR/JPY/SOL); the Go registry defines the amount precision.';
+COMMENT ON COLUMN openrails.money_transactions.currency IS 'System account currency code (USD/EUR/JPY); the Go registry defines the amount precision. Stablecoins and crypto tokens are payment assets, not account currencies.';
 COMMENT ON COLUMN openrails.money_transactions.metadata IS 'Optional caller-supplied long-tail attribution. Opaque to OpenRails; joins use source/source_id, never these.';
 COMMENT ON COLUMN openrails.money_transactions.invoker_id IS 'Caller-supplied principal string that caused this charge. Opaque to OpenRails; used as the per-invoker spend-cap grouping key and as attribution.';
 COMMENT ON COLUMN openrails.money_transactions.resource IS 'Caller-supplied free-form string for what the charge was for (charge-A was for resource-B). Opaque to OpenRails; nullable.';
@@ -1543,7 +1543,7 @@ CREATE POLICY merchant_isolation ON openrails.money_spend_limits USING ((merchan
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_spend_limits TO openrails_app;
 
 COMMENT ON TABLE openrails.money_spend_limits IS 'Optional per-(invoker, currency) money spend caps for a customer. Amount values use the row currency internal precision.';
-COMMENT ON COLUMN openrails.money_spend_limits.currency IS 'System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.';
+COMMENT ON COLUMN openrails.money_spend_limits.currency IS 'System account currency code (USD/EUR/JPY); the Go registry is the authority.';
 COMMENT ON COLUMN openrails.money_spend_limits.invoker_id IS 'Caller-supplied opaque principal string whose spend is capped by this row.';
 
 -- =============================================================================
@@ -1580,7 +1580,7 @@ CREATE POLICY merchant_isolation ON openrails.money_windows USING ((merchant_id 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_windows TO openrails_app;
 
 COMMENT ON TABLE openrails.money_windows IS 'Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. Amount values use the row currency internal precision.';
-COMMENT ON COLUMN openrails.money_windows.currency IS 'System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.';
+COMMENT ON COLUMN openrails.money_windows.currency IS 'System account currency code (USD/EUR/JPY); the Go registry is the authority.';
 COMMENT ON COLUMN openrails.money_windows.held_amount IS 'Total reserved for this window (open + refills). Held balance is derived from active holds plus open windows.';
 COMMENT ON COLUMN openrails.money_windows.settled_amount IS 'Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.';
 

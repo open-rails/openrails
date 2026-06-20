@@ -48,7 +48,7 @@ func TestRequiredMWPinsUserContextForHandler(t *testing.T) {
 		middleware.ResolveMerchantHTTP(dbtest.TestMerchantID),
 	)
 
-	req := httptest.NewRequest(http.MethodGet, "/billing/v1/me/credits", nil)
+	req := httptest.NewRequest(http.MethodGet, "/billing/v1/me/balance", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

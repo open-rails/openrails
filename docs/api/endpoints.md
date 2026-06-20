@@ -84,7 +84,7 @@ Unconditional liveness probes.
 
 ### GET /health/ready, /readyz
 Runs readiness checks against Postgres, Redis, and the AuthKit verifier. Returns 200 when all checks pass,
-or 503 with `{ status: "not_ready", checks: {...} }`.
+or 503 with `{ status: "not_ready", ... }`. Add `?verbose=1` to include dependency details.
 
 ## Public Catalog Endpoints
 
@@ -164,6 +164,18 @@ Every endpoint in this section requires an authenticated customer principal for
 the current user: a delegated JWT in standalone mode, or the embedded host's
 authenticated user bearer mapped to a customer principal.
 
+### GET /v1/me/balance
+Query param: `currency` (`USD`, `EUR`, `JPY`). Returns the caller's durable per-currency balance:
+`{ currency, balance_amount }`. Amounts use the currency's native internal precision; USD is micro-USD.
+
+### GET /v1/me/transactions
+Query params: `currency`, `limit`, `offset`. Lists the caller's ledger transactions newest first.
+
+### PUT /v1/me/settings
+Body accepts customer-owned self-imposed settings only: `currency`, `max_spend_per_day`,
+`max_spend_per_month`, `low_balance_threshold`, `auto_topup_enabled`, `auto_topup_amount`,
+and `auto_topup_payment_method_id`.
+
 ### GET /v1/me/status
 Aggregated premium status: whether the user currently has an active membership, the enriched
 subscription object, the next renewal timestamp, and all entitlement records.
@@ -219,7 +231,7 @@ Unified tier change endpoint for upgrades and downgrades across all processors.
 | Processor | Upgrade | Downgrade |
 |-----------|---------|-----------|
 | Stripe | `succeeded` (immediate with proration) | `succeeded` + `delayed_start` (scheduled for period end) |
-| Mobius/NMI | `succeeded` (immediate proration charge) | `succeeded` + `delayed_start` (scheduled) |
+| NMI-backed processors | `succeeded` (immediate proration charge) | `succeeded` + `delayed_start` (scheduled) |
 | CCBill | `requires_action` + top-level `url` redirect to FlexForm | `blocked` + message |
 | Solana | HTTP 400 (not supported) | HTTP 400 (not supported) |
 
@@ -421,7 +433,7 @@ Create a product. Body includes at least `{ slug, display_name }`, and may inclu
 
 Renewal semantics:
 - `cadence=once` is granted on initial subscription activation.
-- `cadence=per_renewal` is granted on confirmed renewal/rebill success (Stripe invoice paid; Mobius/NMI rebill success; CCBill RenewalSuccess).
+- `cadence=per_renewal` is granted on confirmed renewal/rebill success (Stripe invoice paid; NMI rebill success; CCBill RenewalSuccess).
 
 Idempotency / webhook replay safety:
 - Recurring grants are idempotent per `(subscription_id, credit_type_id, period_end)` by using a deterministic deposit `source_id` derived from those fields (no dedicated idempotency table).
@@ -443,7 +455,7 @@ Processor mapping modes:
 
 Auto-create support:
 - Stripe: supported (`create`), using Stripe API.
-- Mobius/NMI: link-only (provide `plan_id`).
+- NMI-backed processors: link-only (provide `plan_id`).
 - CCBill: link-only (provide `form_name` + `flex_id`).
 
 ### PATCH /v1/merchant/catalog/prices/{id}
@@ -472,7 +484,7 @@ re-attaches to the existing provider objects rather than duplicating them.
 | Provider | Registration |
 |----------|--------------|
 | Stripe | **Auto-creates** products and prices on sync (and stamps the content keys above). |
-| Mobius / NMI | **Link-only** — the operator must supply the existing NMI/mobius `plan_id` in the catalog. Not auto-created. |
+| NMI-backed processors | **Link-only** — the operator must supply the existing NMI `plan_id` in the catalog. Not auto-created. |
 | CCBill | **Link-only** — the operator must supply the CCBill `form_name` + `flex_id` (FlexForm) in the catalog. Not auto-created. |
 
 A link-only provider with no operator-supplied ids is recorded as

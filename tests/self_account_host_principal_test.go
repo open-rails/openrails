@@ -129,6 +129,7 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 
 	settings, err := svc.GetCreditAccountSettings(ctx, payerA, currency)
 	require.NoError(t, err)
+	require.NotNil(t, settings.MaxSpendPerDay)
 	require.EqualValues(t, 1_000_000, *settings.MaxSpendPerDay)
 	require.Equal(t, "prepaid", settings.BillingMode, "customer self-service must not change platform billing mode")
 

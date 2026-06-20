@@ -196,6 +196,14 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 		Currency:                in.Currency,
 		CurrentPeriodStartsAt:   &now,
 		CurrentPeriodEndsAt:     &periodEnd,
+		PaymentMetadata: map[string]any{
+			"solana_subscriber_wallet": row.SubscriberWallet,
+			"solana_subscription_pda":  row.SubscriptionPDA,
+			"solana_token_symbol":      in.MintSymbol,
+			"solana_token_mint":        row.Mint,
+			"solana_token_amount":      in.AmountBaseUnits,
+			"solana_recipient_wallet":  row.MerchantAddress,
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("recurring: create membership: %w", err)

@@ -1806,6 +1806,11 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		Metadata: map[string]any{
 			"solana_reference":    referenceValue,
 			"checkout_session_id": session.ID.String(),
+			"solana_payer_wallet": checkoutStateString(session.ProcessorState, "payer"),
+			"solana_token_symbol": checkoutStateString(session.ProcessorState, "token_symbol"),
+			"solana_token_mint":   checkoutStateString(session.ProcessorState, "token_mint"),
+			"solana_token_amount": checkoutStateUint64(session.ProcessorState, "token_amount"),
+			"solana_recipient":    checkoutStateString(session.ProcessorState, "recipient"),
 		},
 	})
 	if err != nil {
@@ -2126,6 +2131,38 @@ func setSolanaQuoteState(processorState map[string]any, tokenAmount uint64, toke
 	processorState["quote_expires_at"] = quoteExpiresAt.UTC().Format(time.RFC3339)
 
 	return nil
+}
+
+func checkoutStateString(state map[string]any, key string) string {
+	if state == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(state[key]))
+}
+
+func checkoutStateUint64(state map[string]any, key string) uint64 {
+	if state == nil {
+		return 0
+	}
+	switch v := state[key].(type) {
+	case uint64:
+		return v
+	case uint:
+		return uint64(v)
+	case int:
+		if v > 0 {
+			return uint64(v)
+		}
+	case int64:
+		if v > 0 {
+			return uint64(v)
+		}
+	case float64:
+		if v > 0 {
+			return uint64(v)
+		}
+	}
+	return 0
 }
 
 // GetSessionForSolanaPay retrieves and validates a checkout session for Solana Pay spec endpoints.

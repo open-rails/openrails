@@ -573,8 +573,9 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 
 // FinalizeDueInvoices finalizes the [from, to) invoice for every (payer, currency)
 // pair with money activity in the request merchant. Idempotent per pair. Returns the
-// number of invoices finalized/returned. Invoices are denominated per currency
-// (#474), so a payer with both USD and USDC balances gets one invoice each.
+// number of invoices finalized/returned. Invoices are denominated per fiat
+// account currency (#474), so a payer with both USD and EUR balances gets one
+// invoice each.
 func (s *MoneyService) FinalizeDueInvoices(ctx context.Context, from, to time.Time) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")

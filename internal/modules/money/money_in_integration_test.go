@@ -119,7 +119,7 @@ func seedPaymentMethod(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pa
 func seedPaymentMethodWithVault(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, processor, vaultID string) uuid.UUID {
 	t.Helper()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payer.UUID().String())
-	pm := uuid.New()
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
 	return seedPaymentMethodRow(t, pool, ctx, payer, processor, pm, vaultID)
 }
 
@@ -224,9 +224,9 @@ func TestRunLowBalanceAlerts(t *testing.T) {
 // --- #239 auto-top-up ---
 
 func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
-	svc, _, payer, currency, ctx := moneyInEnv(t)
-	thr, amt := int64(1000), int64(5000)
-	pm := uuid.New()
+	svc, pool, payer, currency, ctx := moneyInEnv(t)
+	thr, amt := int64(1000), int64(50_000_000)
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
 	enabled := true
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
@@ -257,9 +257,9 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 }
 
 func TestRunAutoTopups_Declined(t *testing.T) {
-	svc, _, payer, currency, ctx := moneyInEnv(t)
-	thr, amt := int64(1000), int64(5000)
-	pm := uuid.New()
+	svc, pool, payer, currency, ctx := moneyInEnv(t)
+	thr, amt := int64(1000), int64(50_000_000)
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.ProcessorMobius))
 	enabled := true
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
