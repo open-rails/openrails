@@ -53,10 +53,6 @@ func (s *Service) routeFromScan(idStr, slug, status string, err error) (WebhookR
 		}
 		return WebhookRoute{}, err
 	}
-	// A suspended merchant still RESOLVES (webhooks must keep being verified +
-	// processed so historical billing state stays correct); only deleted merchants
-	// (filtered above) are unroutable. The suspension write-gate applies to
-	// merchant-admin mutations and service writes, not to processor webhooks.
 	if MerchantStatus(status) == StatusDeleted {
 		return WebhookRoute{}, ErrMerchantRouteUnresolved
 	}

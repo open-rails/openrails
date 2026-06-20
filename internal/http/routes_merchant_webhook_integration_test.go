@@ -192,10 +192,8 @@ func applyMerchantWebhookRouteSchema(t *testing.T, ctx context.Context, pool *pg
 			slug text NOT NULL UNIQUE,
 			status text NOT NULL DEFAULT 'active',
 			owner_org_id text,
-			provisioned_at timestamptz,
 			created_at timestamptz NOT NULL DEFAULT current_timestamp,
 			updated_at timestamptz NOT NULL DEFAULT current_timestamp,
-			suspended_at timestamptz,
 			deleted_at timestamptz
 		);
 		CREATE TABLE IF NOT EXISTS openrails.provider_accounts (

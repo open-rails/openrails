@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -56,6 +59,19 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 		name = "openrails-merchant-api-key"
 	}
 
+	// AuthKit v0.43.0 mints API keys against an org ROLE, not a raw permission
+	// bundle: the key's effective permissions are resolved from the role at verify
+	// time. The CLI supports two UX paths:
+	//   --role <slug>     mint against an existing org role as-is.
+	//   --permission ...  ensure an org role carrying exactly these permissions
+	//                     (defaulting to the full merchant API set) and mint it.
+	// The two are mutually exclusive.
+	roleFlag, err := cmd.Flags().GetString("role")
+	if err != nil {
+		return fmt.Errorf("read role flag: %w", err)
+	}
+	roleFlag = strings.TrimSpace(roleFlag)
+
 	permissions, err := cmd.Flags().GetStringSlice("permission")
 	if err != nil {
 		return fmt.Errorf("read permission flags: %w", err)
@@ -63,8 +79,9 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 	for i := range permissions {
 		permissions[i] = strings.TrimSpace(permissions[i])
 	}
-	if len(permissions) == 0 {
-		permissions = controlplane.OperatorRolePermissions()
+
+	if roleFlag != "" && len(permissions) > 0 {
+		return fmt.Errorf("--role and --permission are mutually exclusive")
 	}
 
 	merchantRef, err := cmd.Flags().GetString("merchant")
@@ -76,11 +93,27 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("resolve merchant %q: %w", merchantRef, err)
 	}
 
+	// Resolve the role to mint against. With --role, use it verbatim (it must
+	// already exist in the org). Otherwise ensure a role carrying the requested
+	// (or default full) permission set and mint against that.
+	role := roleFlag
+	if role == "" {
+		if len(permissions) == 0 {
+			permissions = controlplane.OperatorRolePermissions()
+			role = controlplane.OperatorRole
+		} else {
+			role = permissionRoleSlug(permissions)
+		}
+		if _, err := controlplane.EnsureRole(ctx, cp.Core(), authorityOrgSlug, role, permissions); err != nil {
+			return fmt.Errorf("ensure role %q: %w", role, err)
+		}
+	}
+
 	resources := []authcore.APIKeyResource{merchantResource}
 	apiKey, token, err := cp.Core().MintAPIKeyWithOptions(ctx, authorityOrgSlug, authcore.APIKeyMintOptions{
-		Name:        name,
-		Permissions: permissions,
-		Resources:   resources,
+		Name:      name,
+		Role:      role,
+		Resources: resources,
 	})
 	if err != nil {
 		return fmt.Errorf("mint merchant API key: %w", err)
@@ -93,7 +126,19 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 		"merchant_id": merchantID.String(),
 		"api_key_id":  apiKey.KeyID,
 		"api_key":     token,
+		"role":        role,
 		"permissions": apiKey.Permissions,
 		"resources":   apiKey.Resources,
 	})
+}
+
+// permissionRoleSlug derives a deterministic, valid org-role slug for a bespoke
+// permission set so re-running the CLI with the same --permission set reuses
+// (and re-asserts) the same role rather than accumulating roles. The slug is
+// stable under permission ordering.
+func permissionRoleSlug(perms []string) string {
+	sorted := append([]string(nil), perms...)
+	sort.Strings(sorted)
+	sum := sha256.Sum256([]byte(strings.Join(sorted, "\n")))
+	return "openrails-key-" + hex.EncodeToString(sum[:8])
 }

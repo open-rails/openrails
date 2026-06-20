@@ -141,7 +141,8 @@ func main() {
 	mintMerchantAPIKeyCmd.Flags().String("name", "openrails-merchant-api-key", "API key display name")
 	mintMerchantAPIKeyCmd.Flags().String("org", "", "AuthKit org slug that owns the API key")
 	mintMerchantAPIKeyCmd.Flags().String("merchant", "", "OpenRails merchant slug or id (defaults to configured merchant)")
-	mintMerchantAPIKeyCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to full merchant API permissions")
+	mintMerchantAPIKeyCmd.Flags().String("role", "", "Existing org role slug to mint the key against (AuthKit v0.43.0 resolves the key's permissions from the role). Mutually exclusive with --permission; when neither is set the full merchant API permission set is used.")
+	mintMerchantAPIKeyCmd.Flags().StringSlice("permission", nil, "Permission(s) the minted key should carry; repeat or comma-separate. The CLI ensures an org role with exactly these permissions and mints against it. Defaults to full merchant API permissions. Mutually exclusive with --role.")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
 	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushBootstrapCmd(), newPushMerchantConfigCmd(), mintMerchantAPIKeyCmd, newPushCatalogCmd(), newPullProviderCmd(), newIntentsCmd(), newDataCmd(), newAuthCmd())

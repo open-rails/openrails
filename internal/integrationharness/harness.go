@@ -32,9 +32,12 @@ package integrationharness
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -358,8 +361,8 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 
 	mid := merchant.ID(uuid.New())
 	_, err = h.sharedPool().Exec(h.ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, owner_org_id, provisioned_at)
-		VALUES ($1, $2, 'active', $3, current_timestamp)
+		INSERT INTO openrails.merchants (id, slug, status, owner_org_id)
+		VALUES ($1, $2, 'active', $3)
 	`, mid.UUID(), slug, org.ID)
 	require.NoError(h.t, err, "insert owned merchant")
 
@@ -394,8 +397,8 @@ func (s *Surface) RequireProvisionMerchantForOrgRejected(slug, orgSlug string) {
 
 	mid := merchant.ID(uuid.New())
 	_, err = h.sharedPool().Exec(h.ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, owner_org_id, provisioned_at)
-		VALUES ($1, $2, 'active', $3, current_timestamp)
+		INSERT INTO openrails.merchants (id, slug, status, owner_org_id)
+		VALUES ($1, $2, 'active', $3)
 	`, mid.UUID(), slug, org.ID)
 	require.Error(h.t, err, "insert additional owned merchant must fail")
 	require.Contains(h.t, err.Error(), "uq_merchants_owner_org_id")
@@ -601,21 +604,59 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 	return ServiceJWTCaller{Slug: slug, Issuer: issuer.URL(), Token: token}
 }
 
-// MintAPIKey mints a real AuthKit API key through the standalone
-// control plane.
+// MintAPIKey mints a real AuthKit API key through the standalone control plane.
+//
+// AuthKit v0.43.0 mints keys against an org ROLE (not a permission bundle): the
+// key's permissions are resolved from the role at verify time. To keep callers
+// ergonomic (each test passes the bespoke permission slice it wants), this helper
+// ENSURES an org role in orgSlug carrying exactly `permissions`, then mints
+// against that role. The role is derived deterministically from the permission
+// set, so repeated calls with the same perms reuse one role.
 func (s *Surface) MintAPIKey(orgSlug, name string, permissions []string, resources []authcore.APIKeyResource) string {
 	h := s.h
 	h.t.Helper()
 	require.NotNil(h.t, s.app, "MintAPIKey requires the standalone surface")
 	cp := embcp.Get(s.app)
 	require.NotNil(h.t, cp, "control plane attached")
+	role, err := controlplane.EnsureRole(h.ctx, cp.Core(), orgSlug, roleForPerms(permissions), permissions)
+	require.NoError(h.t, err, "ensure role for API key permissions")
 	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, orgSlug, authcore.APIKeyMintOptions{
-		Name:        name,
-		Permissions: permissions,
-		Resources:   resources,
+		Name:      name,
+		Role:      role,
+		Resources: resources,
 	})
 	require.NoError(h.t, err, "mint API key")
 	return secret
+}
+
+// roleForPerms returns a deterministic org-role slug for a permission set: the
+// canonical OperatorRole when perms is the full `org:` catalog, else a stable
+// hash-derived slug. Stable under permission ordering so repeated mints with the
+// same perms reuse one role.
+func roleForPerms(perms []string) string {
+	if samePermSet(perms, controlplane.OperatorRolePermissions()) {
+		return controlplane.OperatorRole
+	}
+	sorted := append([]string(nil), perms...)
+	sort.Strings(sorted)
+	sum := sha256.Sum256([]byte(strings.Join(sorted, "\n")))
+	return "harness-key-" + hex.EncodeToString(sum[:8])
+}
+
+func samePermSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	x := append([]string(nil), a...)
+	y := append([]string(nil), b...)
+	sort.Strings(x)
+	sort.Strings(y)
+	for i := range x {
+		if x[i] != y[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // mintFreshAPIKey mints a new real admin API key through AuthKit core,
@@ -625,10 +666,12 @@ func (h *Harness) mintFreshAPIKey(a *app.App) string {
 	h.t.Helper()
 	cp := embcp.Get(a)
 	require.NotNil(h.t, cp, "control plane attached")
+	role, err := controlplane.EnsureOperatorRole(h.ctx, cp.Core(), dbtest.TestMerchantSlug)
+	require.NoError(h.t, err, "ensure operator role for fresh API key")
 	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, dbtest.TestMerchantSlug, authcore.APIKeyMintOptions{
-		Name:        "integrationharness-extra",
-		Permissions: controlplane.OperatorRolePermissions(),
-		Resources:   []authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
+		Name:      "integrationharness-extra",
+		Role:      role,
+		Resources: []authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	})
 	require.NoError(h.t, err, "mint fresh API key")
 	return secret

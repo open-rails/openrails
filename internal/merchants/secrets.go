@@ -236,7 +236,7 @@ var ErrSecretNotFound = errors.New("merchants: merchant secret not found")
 //   - secret ABSENT (ErrSecretNotFound)      -> terminal for that merchant; never
 //     retry, and (critically) NEVER treat as "verification disabled".
 //   - backend UNAVAILABLE (this error)       -> RETRY; do NOT cancel a
-//     subscription, suspend a merchant, or skip a webhook signature check.
+//     subscription, delete a merchant, or skip a webhook signature check.
 //
 // The recurring Solana pull worker and the webhook signature verifier both branch
 // on errors.Is(err, ErrSecretBackendUnavailable) to retry rather than treat a

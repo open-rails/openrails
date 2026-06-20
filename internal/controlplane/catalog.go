@@ -19,6 +19,9 @@
 package controlplane
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	authcore "github.com/open-rails/authkit/core"
@@ -202,4 +205,36 @@ func OperatorRolePermissions() []string {
 // expands this to concrete `platform:` permissions; it never reaches `org:`.
 func PlatformRolePermissions() []string {
 	return []string{authcore.PlatformSuperAdminGrant}
+}
+
+// EnsureRole idempotently ensures an org role exists with exactly the given
+// permission set, returning the canonical role slug to mint against. AuthKit
+// v0.43.0 mints API keys with a single org ROLE (not a permission bundle): the
+// key's effective permissions are resolved from the role at verify time. So any
+// caller that wants a bespoke permission set must first DEFINE a role carrying
+// those perms, then mint with that role slug.
+//
+// Both steps are idempotent: DefineRole is INSERT ... ON CONFLICT DO NOTHING,
+// SetRolePermissions replaces the role's permission set. perms must be concrete
+// `org:` catalog tokens (no wildcards / reserved-write tokens) — the OpenRails
+// catalog is, so OperatorRolePermissions() and its subsets are always valid.
+func EnsureRole(ctx context.Context, core *authcore.Service, orgSlug, role string, perms []string) (string, error) {
+	if core == nil {
+		return "", errors.New("controlplane: nil core service")
+	}
+	if err := core.DefineRole(ctx, orgSlug, role); err != nil {
+		return "", fmt.Errorf("controlplane: define role %q in org %q: %w", role, orgSlug, err)
+	}
+	if err := core.SetRolePermissions(ctx, orgSlug, role, perms); err != nil {
+		return "", fmt.Errorf("controlplane: set permissions on role %q in org %q: %w", role, orgSlug, err)
+	}
+	return role, nil
+}
+
+// EnsureOperatorRole idempotently ensures the OpenRails operator role
+// (OperatorRole) exists in the org carrying the full `org:` catalog
+// (OperatorRolePermissions). It is the role an admin/deployment API key is minted
+// against under the v0.43.0 role-unified mint model. Returns the role slug.
+func EnsureOperatorRole(ctx context.Context, core *authcore.Service, orgSlug string) (string, error) {
+	return EnsureRole(ctx, core, orgSlug, OperatorRole, OperatorRolePermissions())
 }

@@ -245,8 +245,8 @@ func TestBootstrapPlatform_NoopsInSelfHostedOpenRails(t *testing.T) {
 // merchantForOwnerOrg relies on: the merchant is resolved via the
 // owner_org_id OWNERSHIP link (the AuthKit org that administers it), NOT an
 // identity-equation. It covers the happy path, an unowned credential, an unknown
-// owner, a suspended merchant, and authorizing a SPECIFIC merchant when one
-// org owns TWO merchants.
+// owner, a deleted merchant, and authorizing a SPECIFIC merchant when one org
+// owns TWO merchants.
 func TestMerchantForOwnerOrg(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
@@ -264,10 +264,10 @@ func TestMerchantForOwnerOrg(t *testing.T) {
 		VALUES ('00000000-0000-0000-0000-000000000004', 'second', 'active', 'ak-default-id')
 		ON CONFLICT (id) DO NOTHING`)
 	require.NoError(t, err)
-	// A suspended merchant owned by a distinct org.
+	// A deleted merchant owned by a distinct org.
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, owner_org_id)
-		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'suspended', 'ak-acme-id')
+		INSERT INTO openrails.merchants (id, slug, status, owner_org_id, deleted_at)
+		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'deleted', 'ak-acme-id', current_timestamp)
 		ON CONFLICT (id) DO NOTHING`)
 	require.NoError(t, err)
 	// A single-merchant owner still supports the inferred common path.
@@ -294,7 +294,7 @@ func TestMerchantForOwnerOrg(t *testing.T) {
 	_, _, err = cp.merchantForOwnerOrg(ctx, "ak-nobody-id")
 	require.ErrorIs(t, err, ErrServiceCredentialMerchantUnresolved)
 
-	// A suspended merchant's owner resolves to no ACTIVE merchant.
+	// A deleted merchant's owner resolves to no merchant.
 	_, _, err = cp.merchantForOwnerOrg(ctx, "ak-acme-id")
 	require.ErrorIs(t, err, ErrServiceCredentialMerchantUnresolved)
 

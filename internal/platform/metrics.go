@@ -21,13 +21,12 @@ type MerchantMetric struct {
 
 // PlatformMetrics is the platform-wide aggregate (issue #226 platform metrics).
 type PlatformMetrics struct {
-	MerchantCount          int              `json:"merchant_count"`
-	ActiveMerchantCount    int              `json:"active_merchant_count"`
-	SuspendedMerchantCount int              `json:"suspended_merchant_count"`
-	TotalActiveSubs        int64            `json:"total_active_subscriptions"`
-	TotalRevenueMinor      int64            `json:"total_revenue_minor"`
-	TotalWebhookFailures   int64            `json:"total_webhook_failures"`
-	Merchants              []MerchantMetric `json:"merchants"`
+	MerchantCount        int              `json:"merchant_count"`
+	ActiveMerchantCount  int              `json:"active_merchant_count"`
+	TotalActiveSubs      int64            `json:"total_active_subscriptions"`
+	TotalRevenueMinor    int64            `json:"total_revenue_minor"`
+	TotalWebhookFailures int64            `json:"total_webhook_failures"`
+	Merchants            []MerchantMetric `json:"merchants"`
 }
 
 // Metrics aggregates platform-wide merchant metrics from existing billing tables
@@ -98,11 +97,8 @@ func (m *Metrics) Compute(ctx context.Context) (*PlatformMetrics, error) {
 
 	out.MerchantCount = len(out.Merchants)
 	for _, tm := range out.Merchants {
-		switch tm.Status {
-		case "active":
+		if tm.Status == "active" {
 			out.ActiveMerchantCount++
-		case "suspended":
-			out.SuspendedMerchantCount++
 		}
 		out.TotalActiveSubs += tm.ActiveSubs
 		out.TotalRevenueMinor += tm.RevenueMinor

@@ -7,7 +7,104 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 552
+next_id: 553
+
+---
+
+# #552: replace-platform-org-gate-with-openrails-platform-rbac
+
+**Completed:** no
+**Status:** PLANNED 2026-06-20: align OpenRails authorization with AuthKit's RBAC model. Platform is not an org. There is one AuthKit RBAC permission system; applications such as OpenRails extend it with their own `platform:*` and org-local permission names, then check those permissions in both embedded and standalone mode.
+
+OpenRails currently still carries old "platform org" language and gate wiring around the cross-merchant admin routes. That is the wrong model. AuthKit's useful lesson is the boundary inside one RBAC system: `platform:orgs:recover` and `org:roles:update` are different permission scopes, not separate product-specific auth systems. OpenRails should extend AuthKit's permission set with OpenRails-defined permissions: `platform:*` permissions authorize OpenRails platform/control-plane actions, while OpenRails org-local permissions authorize a user/admin/API key acting inside one merchant-owned org.
+
+## Metadata
+
+- Category: auth
+- Status: planned
+- Passes: false
+
+## Decisions
+
+- There is no OpenRails "platform org".
+- Do not use AuthKit org membership or org roles to authorize OpenRails platform routes.
+- Do not model platform admins as merchant admins on a special merchant.
+- OpenRails owns the permission names and route gates; AuthKit owns the single RBAC model, role assignment, and effective-permission resolution.
+- Platform permissions use `platform:<resource>:<action>` and are global to the OpenRails installation.
+- Org-local OpenRails permissions use the AuthKit org RBAC plane and are scoped to exactly one merchant/org.
+- `platform:*` must never imply any org-local OpenRails permission inside a merchant/org.
+- Org-local OpenRails permissions must never imply any `platform:*` permission.
+- Standalone mode uses OpenRails' bundled AuthKit control plane for RBAC.
+- Embedded mode uses the host application's AuthKit RBAC/principal mapping; OpenRails still checks the same permission names.
+
+## Initial OpenRails Platform Permissions To Add
+
+- `platform:merchants:read`
+- `platform:merchants:create`
+- `platform:merchants:update`
+- `platform:merchants:delete`
+- `platform:merchant-secrets:read`
+- `platform:merchant-secrets:update`
+- `platform:merchant-secrets:delete`
+- `platform:merchant-secrets:test`
+- `platform:metrics:read`
+- `platform:roles:read`
+- `platform:roles:create`
+- `platform:roles:update`
+- `platform:roles:delete`
+- `platform:members:read`
+- `platform:members:create`
+- `platform:members:delete`
+
+## Initial OpenRails Org-Local Permissions To Add
+
+- `org:merchant:read`
+- `org:merchant:update`
+- `org:billing:read`
+- `org:payments:read`
+- `org:payments:update`
+- `org:subscriptions:read`
+- `org:subscriptions:update`
+- `org:entitlements:update`
+- `org:product-access:update`
+- `org:metrics:read`
+- `org:merchant-secrets:read`
+- `org:merchant-secrets:update`
+- `org:merchant-secrets:delete`
+- `org:merchant-secrets:test`
+
+## Current Smells To Remove
+
+- `controlPlane.PlatformOrgSlug()` as a mount switch for `/v1/platform/*`.
+- `PermPlatformSuperadmin` as a single fake route gate instead of concrete OpenRails `platform:*` permissions.
+- Route comments that imply platform administration is tied to an AuthKit org.
+- Any test setup that grants platform route access by creating or referencing an org-like authority.
+- Any route-specific permission name that still says `merchant:*` if the route is actually governed by AuthKit org-local RBAC.
+
+## Tasks
+
+- [ ] Define the OpenRails platform permissions and add/register them in AuthKit during bootstrap/config sync.
+- [ ] Define the OpenRails org-local permissions and add/register them in AuthKit during bootstrap/config sync.
+- [ ] Rely on AuthKit's single RBAC model to reject invalid permission/scope combinations: non-`platform:` permissions in platform roles and `platform:` permissions in org roles.
+- [ ] Replace `PlatformOrgSlug()` route mounting with a normal platform-principal permission gate; platform routes should not depend on any org slug existing.
+- [ ] Replace `/v1/platform/*` and `/v1/admin/merchants*` gates with specific OpenRails `platform:*` permission checks instead of one fake superadmin permission.
+- [ ] Rename or remove `PermPlatformSuperadmin`; prefer concrete permissions plus `platform:*` expansion.
+- [ ] Ensure delegated/browser merchant admin tokens cannot satisfy platform gates, even if they carry `platform:*`.
+- [ ] Ensure platform principals cannot satisfy org-local merchant gates without explicit org-scoped authority for that merchant/org.
+- [ ] Rename merchant-local permission constants/routes/docs to the chosen org-local OpenRails permission names where needed.
+- [ ] Ensure standalone mode checks the bundled AuthKit control plane for both platform and org-local OpenRails permissions.
+- [ ] Ensure embedded mode checks the same permission names from the host/AuthKit principal mapping.
+- [ ] Add integration coverage proving platform RBAC is independent from merchant RBAC: platform admin can list merchants, merchant admin cannot; platform admin cannot mutate a merchant customer/subscription through merchant routes unless separately authorized.
+- [ ] Update docs and comments to use "platform RBAC" and "org-local merchant RBAC", not "platform org".
+
+## Acceptance
+
+- No OpenRails route requires or references a "platform org".
+- Platform admin routes are protected by OpenRails-defined AuthKit `platform:*` permissions.
+- Merchant admin routes are protected by OpenRails-defined AuthKit org-local permissions.
+- A platform role cannot contain org-local permissions, bare `*`, or negated permissions.
+- A merchant role/token cannot grant `platform:*`.
+- Integration tests prove the platform and merchant permission planes are disjoint.
 
 ---
 

@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -59,12 +60,7 @@ type ResolvedServiceCredential struct {
 // HasPermission reports whether the resolved credential grants perm.
 func (r *ResolvedServiceCredential) HasPermission(perm string) bool {
 	perm = strings.TrimSpace(perm)
-	for _, p := range r.Permissions {
-		if p == perm {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(r.Permissions, perm)
 }
 
 // AllowsCustomer reports whether this credential may act for a payable subject
@@ -193,7 +189,7 @@ func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*Resolv
 
 // ErrServiceCredentialMerchantUnresolved indicates the caller's owning AuthKit org
 // owns no active OpenRails merchant (no openrails.merchants row with that
-// owner_org_id, or the merchant is suspended/deleted). Treated as an
+// owner_org_id, or the merchant is deleted). Treated as an
 // authorization failure: the caller cannot act on any merchant surface.
 var ErrServiceCredentialMerchantUnresolved = errors.New("controlplane: API key caller owns no active merchant")
 
@@ -237,15 +233,14 @@ func hasAnyResourceKind(resources []authcore.APIKeyResource, kind string) bool {
 	return false
 }
 
-// merchantForOwnerOrg resolves the OpenRails merchant a caller administers, by
-// ROLE on the owning AuthKit org (#481): the merchant whose owner_org_id is
-// the caller's authenticated AuthKit org uuid. This is OWNERSHIP (who may
-// administer), not IDENTITY — one org owns many merchants; the merchant is
-// never "equal to" the org. Suspended/deleted merchants are rejected.
-//
-// (When an org owns several merchants, the request names which via MerchantScope
-// + AuthorizeMerchant; this single-merchant resolution serves the common
-// one-merchant-per-org API-key path and fails closed otherwise.)
+// merchantForOwnerOrg resolves the OpenRails merchant a caller administers from
+// its authenticated AuthKit org uuid: the merchant whose owner_org_id equals it.
+// #527 makes owner_org_id UNIQUE on non-null, so this is a deterministic 1:1
+// lookup — one org backs at most one merchant (the org is the controlling
+// organization, the merchant the resource it controls). With that 1:1 link and
+// merchant.slug == backing-org.slug (#548), the backing org is effectively the
+// merchant's AuthKit identity, not merely its administrator. Suspended/deleted
+// merchants are rejected.
 func (c *ControlPlane) merchantForOwnerOrg(ctx context.Context, ownerOrgID string) (merchant.ID, string, error) {
 	ownerOrgID = strings.TrimSpace(ownerOrgID)
 	if c.pool == nil {
@@ -261,10 +256,11 @@ func (c *ControlPlane) merchantForOwnerOrg(ctx context.Context, ownerOrgID strin
 	return mid, slug, err
 }
 
-// AuthorizeMerchant checks that the caller's owning AuthKit org owns the named
-// merchant (#481 role-based authz): the merchant's owner_org_id must equal the
-// caller's AuthKit org. Use it when a request NAMES a merchant (an org owning
-// many merchants) rather than relying on the single-merchant resolution.
+// AuthorizeMerchant checks that the caller's AuthKit org backs the named merchant:
+// the merchant's owner_org_id must equal the caller's AuthKit org, and the
+// merchant must be active. With the 1:1 link (#527) merchantForOwnerOrg already
+// resolves the org's single merchant; AuthorizeMerchant is the explicit
+// fail-closed gate for any path that NAMES a merchant id directly.
 func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, ownerOrgID string, mid merchant.ID) error {
 	ownerOrgID = strings.TrimSpace(ownerOrgID)
 	if c == nil || c.pool == nil {

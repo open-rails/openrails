@@ -28,8 +28,6 @@ func (s *Server) registerMerchantAdminRoutes(e *gin.Engine) {
 
 	group.POST("", s.merchantProvisionHandler())
 	group.GET("/:id", s.merchantGetHandler())
-	group.POST("/:id/suspend", s.merchantLifecycleHandler("suspend"))
-	group.POST("/:id/resume", s.merchantLifecycleHandler("resume"))
 	group.POST("/:id/export", s.merchantExportHandler())
 	group.POST("/:id/delete", s.merchantDeleteHandler())
 
@@ -82,27 +80,6 @@ func (s *Server) merchantGetHandler() gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, merchantView(t))
-	}
-}
-
-func (s *Server) merchantLifecycleHandler(op string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, ok := merchantIDParam(c)
-		if !ok {
-			return
-		}
-		var err error
-		switch op {
-		case "suspend":
-			err = s.merchants.Suspend(c.Request.Context(), id)
-		case "resume":
-			err = s.merchants.Resume(c.Request.Context(), id)
-		}
-		if err != nil {
-			s.merchantErr(c, err)
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	}
 }
 

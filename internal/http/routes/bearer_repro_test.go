@@ -32,7 +32,7 @@ func TestRequiredMWPinsUserContextForHandler(t *testing.T) {
 	mux := http.NewServeMux()
 	rr := router.NewMux(mux, "/billing/v1", &app.Runtime{})
 	opts := Options{Authenticator: authn}
-	rr.Handle(http.MethodGet, "/me/credits", func(r *httprequest.Request) {
+	rr.Handle(http.MethodGet, "/me/balance", func(r *httprequest.Request) {
 		uc, ok := r.UserContext() // exactly what the real handlers call
 		sawOK = ok
 		if ok {

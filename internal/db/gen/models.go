@@ -443,12 +443,10 @@ type OpenrailsMerchant struct {
 	Slug   string
 	Status string
 	// OWNERSHIP FK to the AuthKit org that backs this merchant (#527). One merchant <-> one backing org (UNIQUE on non-null). NULL in embedded (no AuthKit). Injective, not bijective: most orgs have no merchant.
-	OwnerOrgID    *string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	SuspendedAt   *time.Time
-	DeletedAt     *time.Time
-	ProvisionedAt *time.Time
+	OwnerOrgID *string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	DeletedAt  *time.Time
 }
 
 // One merchant-scoped JSON configuration row. Missing keys use service defaults.
@@ -538,7 +536,7 @@ type OpenrailsMoneySetting struct {
 	Tier          *string
 	// auto = tier maintained by tier_schedule auto-graduation; admin = explicit override that auto-graduation must not overwrite.
 	TierSource string
-	// System currency code (USD/USDC/EUR/JPY/SOL); the Go registry is the authority.
+	// System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.
 	Currency string
 	// Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.
 	CreditLimitAmount int64

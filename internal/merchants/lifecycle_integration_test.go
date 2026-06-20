@@ -35,10 +35,8 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
     slug             TEXT NOT NULL UNIQUE,
     status           TEXT NOT NULL DEFAULT 'active',
     owner_org_id  TEXT,
-    provisioned_at   TIMESTAMPTZ,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    suspended_at     TIMESTAMPTZ,
     deleted_at       TIMESTAMPTZ
 );
 
@@ -199,38 +197,6 @@ func TestProvision_Idempotent(t *testing.T) {
 	require.ErrorIs(t, err, ErrOwnerOrgRequired, "control-plane provisioning must not create an ownerless merchant")
 }
 
-func TestSuspend_DeniesWritesAllowsReads(t *testing.T) {
-	ctx := context.Background()
-	svc := newSvc(t)
-	tn, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", OwnerOrgID: "org-acme"})
-	require.NoError(t, err)
-
-	// Active merchant is writable.
-	w, err := svc.IsWritable(ctx, tn.ID)
-	require.NoError(t, err)
-	require.True(t, w)
-
-	// Suspend -> writes denied, but the row still resolves (safe reads allowed).
-	require.NoError(t, svc.Suspend(ctx, tn.ID))
-	w, err = svc.IsWritable(ctx, tn.ID)
-	require.NoError(t, err)
-	require.False(t, w, "suspended merchant must deny writes")
-
-	got, err := svc.Get(ctx, tn.ID)
-	require.NoError(t, err, "suspended merchant must still be readable")
-	require.Equal(t, StatusSuspended, got.Status)
-	require.NotNil(t, got.SuspendedAt)
-
-	// Suspend is idempotent.
-	require.NoError(t, svc.Suspend(ctx, tn.ID))
-
-	// Resume restores writes.
-	require.NoError(t, svc.Resume(ctx, tn.ID))
-	w, err = svc.IsWritable(ctx, tn.ID)
-	require.NoError(t, err)
-	require.True(t, w)
-}
-
 func TestDelete_RequiresExport(t *testing.T) {
 	ctx := context.Background()
 	svc := newSvc(t)
@@ -325,8 +291,11 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "whsec_acme", creds.WebhookSigningSecret)
 
-	// A suspended merchant still RESOLVES (webhooks keep being verified/processed).
-	require.NoError(t, svc.Suspend(ctx, tn.ID))
+	// A deleted merchant no longer resolves.
+	exportID, _, err := svc.Export(ctx, tn.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, exportID)
+	require.NoError(t, svc.Delete(ctx, tn.ID, DeleteOptions{Confirm: true}))
 	_, err = svc.ResolveBySlug(ctx, "acme")
-	require.NoError(t, err, "suspended merchant must still route webhooks")
+	require.ErrorIs(t, err, ErrMerchantRouteUnresolved)
 }

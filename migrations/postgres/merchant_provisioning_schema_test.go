@@ -38,3 +38,16 @@ func TestConsolidatedSchemaOmitsProvisioningTransitionDDL(t *testing.T) {
 		}
 	}
 }
+
+func TestConsolidatedMerchantSchemaOmitsSuspensionState(t *testing.T) {
+	merchantTable := tableBlock(t, loadSchema001(t), "merchants")
+	for _, forbidden := range []string{
+		"suspended_at",
+		"provisioned_at",
+		"'suspended'::text",
+	} {
+		if strings.Contains(merchantTable, forbidden) {
+			t.Errorf("openrails.merchants must not carry merchant suspension state %q", forbidden)
+		}
+	}
+}

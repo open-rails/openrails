@@ -143,10 +143,17 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 			return nil, fmt.Errorf("controlplane: list admin API keys: %w", lerr)
 		}
 		if !anyLiveAPIKey(existing) {
+			// AuthKit v0.43.0 mints keys against an org ROLE, not a permission
+			// bundle. Ensure the operator role exists in this org carrying the full
+			// `org:` catalog, then mint the deployment admin key against it.
+			operatorRole, rerr := EnsureOperatorRole(ctx, core, slug)
+			if rerr != nil {
+				return nil, fmt.Errorf("controlplane: ensure operator role for admin API key: %w", rerr)
+			}
 			apiKey, secret, merr := core.MintAPIKeyWithOptions(ctx, slug, authcore.APIKeyMintOptions{
-				Name:        BootstrapAdminAPIKeyName,
-				Permissions: OperatorRolePermissions(),
-				Resources:   []authcore.APIKeyResource{MerchantResource(bootstrapMerchantID)},
+				Name:      BootstrapAdminAPIKeyName,
+				Role:      operatorRole,
+				Resources: []authcore.APIKeyResource{MerchantResource(bootstrapMerchantID)},
 			})
 			if merr != nil {
 				return nil, fmt.Errorf("controlplane: mint initial admin API key: %w", merr)

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
@@ -17,18 +16,16 @@ import (
 type MerchantStatus string
 
 const (
-	StatusActive    MerchantStatus = "active"
-	StatusSuspended MerchantStatus = "suspended"
-	StatusDeleted   MerchantStatus = "deleted"
+	StatusActive  MerchantStatus = "active"
+	StatusDeleted MerchantStatus = "deleted"
 )
 
 // Merchant is the directory view of a row in openrails.merchants.
 type Merchant struct {
-	ID          merchant.ID
-	Slug        string
-	Status      MerchantStatus
-	OwnerOrgID  string // AuthKit org that owns/administers this merchant namespace (#500).
-	SuspendedAt *time.Time
+	ID         merchant.ID
+	Slug       string
+	Status     MerchantStatus
+	OwnerOrgID string // AuthKit org that owns/administers this merchant namespace (#500).
 }
 
 // ProvisionRequest parameterizes merchant provisioning.
@@ -112,8 +109,8 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 	//    existing row, then we re-read so provision is idempotent. The AuthKit org
 	//    owner is resolved/created by the caller and recorded here.
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (slug, status, owner_org_id, provisioned_at)
-		VALUES ($1, 'active', NULLIF($2,''), current_timestamp)
+		INSERT INTO openrails.merchants (slug, status, owner_org_id)
+		VALUES ($1, 'active', NULLIF($2,''))
 		ON CONFLICT (slug) DO NOTHING
 	`, slug, ownerOrgID)
 	if err != nil {
@@ -137,52 +134,6 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 	t.OwnerOrgID = ownerOrgID
 
 	return s.merchantBySlug(ctx, slug)
-}
-
-// Suspend marks a merchant suspended: reads return maintenance and writes are
-// denied (enforced by IsWritable / the suspension middleware). Idempotent.
-func (s *Service) Suspend(ctx context.Context, id merchant.ID) error {
-	return s.setStatus(ctx, id, StatusSuspended, true)
-}
-
-// Resume clears suspension and returns the merchant to active. Idempotent.
-func (s *Service) Resume(ctx context.Context, id merchant.ID) error {
-	return s.setStatus(ctx, id, StatusActive, false)
-}
-
-func (s *Service) setStatus(ctx context.Context, id merchant.ID, status MerchantStatus, suspended bool) error {
-	var suspendedExpr string
-	if suspended {
-		suspendedExpr = "COALESCE(suspended_at, current_timestamp)"
-	} else {
-		suspendedExpr = "NULL"
-	}
-	ct, err := s.pool.Exec(ctx, fmt.Sprintf(`
-		UPDATE openrails.merchants
-		   SET status = $2, suspended_at = %s, updated_at = current_timestamp
-		 WHERE id = $1::uuid AND deleted_at IS NULL
-	`, suspendedExpr), id.String(), string(status))
-	if err != nil {
-		return fmt.Errorf("merchants: set status %s: %w", status, err)
-	}
-	if ct.RowsAffected() == 0 {
-		return ErrMerchantNotFound
-	}
-	return nil
-}
-
-// IsWritable reports whether the merchant currently accepts writes. Suspended or
-// deleted merchants are read-only; the default merchant and active merchants are
-// writable. A missing merchant is treated as not writable.
-func (s *Service) IsWritable(ctx context.Context, id merchant.ID) (bool, error) {
-	t, err := s.merchantByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, ErrMerchantNotFound) {
-			return false, nil
-		}
-		return false, err
-	}
-	return t.Status == StatusActive, nil
 }
 
 // Get returns the merchant directory row by id.
@@ -232,16 +183,15 @@ func normalizeSlug(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-const merchantSelectCols = `id::text, slug, status, COALESCE(owner_org_id,''), suspended_at`
+const merchantSelectCols = `id::text, slug, status, COALESCE(owner_org_id,'')`
 
 func scanMerchant(row pgx.Row) (*Merchant, error) {
 	var (
-		t           Merchant
-		idStr       string
-		status      string
-		suspendedAt *time.Time
+		t      Merchant
+		idStr  string
+		status string
 	)
-	if err := row.Scan(&idStr, &t.Slug, &status, &t.OwnerOrgID, &suspendedAt); err != nil {
+	if err := row.Scan(&idStr, &t.Slug, &status, &t.OwnerOrgID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrMerchantNotFound
 		}
@@ -253,7 +203,6 @@ func scanMerchant(row pgx.Row) (*Merchant, error) {
 	}
 	t.ID = id
 	t.Status = MerchantStatus(status)
-	t.SuspendedAt = suspendedAt
 	return &t, nil
 }
 

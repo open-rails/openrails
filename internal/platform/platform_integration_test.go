@@ -126,7 +126,7 @@ func TestMetrics_AggregatesAcrossMerchants(t *testing.T) {
 	ctx := context.Background()
 	pool := newTestPool(t)
 	acme := seedMerchant(t, pool, "acme", "active")
-	globex := seedMerchant(t, pool, "globex", "suspended")
+	globex := seedMerchant(t, pool, "globex", "active")
 	_ = seedMerchant(t, pool, "empty", "active")
 
 	exec := func(q string, args ...any) {
@@ -144,8 +144,7 @@ func TestMetrics_AggregatesAcrossMerchants(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 3, m.MerchantCount)
-	require.Equal(t, 2, m.ActiveMerchantCount)
-	require.Equal(t, 1, m.SuspendedMerchantCount)
+	require.Equal(t, 3, m.ActiveMerchantCount)
 	require.Equal(t, int64(3), m.TotalActiveSubs)
 	require.Equal(t, int64(500+1500+300), m.TotalRevenueMinor)
 	require.Equal(t, int64(1), m.TotalWebhookFailures)

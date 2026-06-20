@@ -83,12 +83,10 @@ CREATE TABLE openrails.merchants (
     owner_org_id text,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    suspended_at timestamp with time zone,
     deleted_at timestamp with time zone,
-    provisioned_at timestamp with time zone,
     CONSTRAINT merchants_pkey PRIMARY KEY (id),
     CONSTRAINT uq_merchants_slug UNIQUE (slug),
-    CONSTRAINT merchants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'suspended'::text, 'deleted'::text])))
+    CONSTRAINT merchants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'deleted'::text])))
 );
 
 CREATE INDEX idx_merchants_owner_org_id ON openrails.merchants USING btree (owner_org_id) WHERE (owner_org_id IS NOT NULL);
@@ -97,7 +95,7 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchants TO openrails_app;
 
 COMMENT ON TABLE openrails.merchants IS 'Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant.';
 COMMENT ON COLUMN openrails.merchants.slug IS 'Stable merchant slug used in merchant-scoped routes and resolution.';
-COMMENT ON COLUMN openrails.merchants.owner_org_id IS 'OWNERSHIP (not identity) FK to the AuthKit org that owns/administers this merchant (#481). NULL in embedded (no AuthKit). One org owns MANY merchants; never used to resolve a merchant from a token.';
+COMMENT ON COLUMN openrails.merchants.owner_org_id IS 'OWNERSHIP FK to the AuthKit org that backs this merchant. NULL in embedded (no AuthKit) and for merchant-less orgs. The org is the controlling organization; the merchant is the resource it controls. This baseline index is non-unique, but #527 (migration 016) makes the link 1:1 — one org backs at most one merchant; with merchant.slug == backing-org.slug (#548) the backing org effectively IS the merchant identity in AuthKit. Injective, not bijective: most orgs have no merchant.';
 
 -- =============================================================================
 -- customers

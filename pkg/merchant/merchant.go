@@ -26,6 +26,18 @@ import (
 // merchant slug is ALWAYS a legal backing-org slug. The merchant.slug ==
 // backing-org.slug invariant (#548) requires this: a merchant must be able to
 // own a same-slug AuthKit org in standalone mode.
+//
+// #548 is a PROVISION-TIME invariant, not a maintained one. AuthKit allows an
+// org to be re-slugged (core.RenameOrgSlug / RenameOrgSlugForce, v0.43.0) and
+// merchant.slug is immutable here (there is no UPDATE-slug path), so after an
+// org rename merchant.slug and backing-org.slug diverge. That is SAFE: the
+// durable merchant<->org link is merchants.owner_org_id (the stable org UUID),
+// and merchant-scoped secret/Vault paths key on the OpenRails-owned
+// merchant.slug — neither depends on the two slugs still matching. Do NOT
+// resolve a merchant's backing org by slug==merchant.slug as if authoritative;
+// always use owner_org_id. (A renamed-away org slug can later be reclaimed by a
+// DIFFERENT org once AuthKit's reuse-hold lapses, so slug-equality must never be
+// trusted for authorization.)
 var slugRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // NormalizeSlug returns the canonical form of a merchant slug (trimmed,

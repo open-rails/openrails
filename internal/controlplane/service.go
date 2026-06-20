@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	authcore "github.com/open-rails/authkit/core"
@@ -73,11 +72,6 @@ func newOptions(opts []Option) options {
 	}
 	return out
 }
-
-// delegatedIssuerJWKSCacheTTL is how long the verifier treats a fetched merchant
-// JWKS as fresh before a scheduled refresh (issue #259, ~hourly cadence). The
-// verifier also refetches on-demand when a presented `kid` is unknown.
-const delegatedIssuerJWKSCacheTTL = time.Hour
 
 // registrationMode maps the lock flag to an AuthKit registration mode.
 //

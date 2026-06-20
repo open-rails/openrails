@@ -43,10 +43,8 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
     slug                TEXT NOT NULL UNIQUE,
     status              TEXT NOT NULL DEFAULT 'active',
     owner_org_id     TEXT,
-    provisioned_at      TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    suspended_at        TIMESTAMPTZ,
     deleted_at          TIMESTAMPTZ
 );
 

@@ -58,7 +58,7 @@ func doSelf(h http.Handler, method, path string) *httptest.ResponseRecorder {
 	return w
 }
 
-// The #339 account routes answer at the CANONICAL embedded paths. rt==nil:
+// The self account routes answer at the CANONICAL embedded paths. rt==nil:
 // reaching the handler panics (gin Recovery turns it into a 500), which proves
 // auth admitted the request — a 401/403/404 would mean the surface is unmounted
 // or gated wrong.
@@ -67,17 +67,17 @@ func TestSelfHandler_EmbeddedPathsMountedWithoutSelfPermissions(t *testing.T) {
 		principal: selfPrincipal(),
 	}, merchant.ID{})
 
-	w := doSelf(self, http.MethodGet, "/billing/v1/me/account")
+	w := doSelf(self, http.MethodGet, "/billing/v1/me/balance")
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 
-	w = doSelf(self, http.MethodGet, "/billing/v1/me/account/transactions")
+	w = doSelf(self, http.MethodGet, "/billing/v1/me/transactions")
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 
-	w = doSelf(self, http.MethodPut, "/billing/v1/me/account/settings")
+	w = doSelf(self, http.MethodPut, "/billing/v1/me/settings")
 	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
@@ -92,7 +92,7 @@ func TestSelfHandler_EmbeddedPathsMountedWithoutSelfPermissions(t *testing.T) {
 // exactly like the standalone host-pluggable mode.
 func TestSelfHandler_FailClosed(t *testing.T) {
 	h := newSelfHandler(nil, stubSelfAuthenticator{err: billingauth.ErrUnauthenticated}, merchant.ID{})
-	w := doSelf(h, http.MethodGet, "/billing/v1/me/account")
+	w := doSelf(h, http.MethodGet, "/billing/v1/me/balance")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 
 	// Principal missing its explicit merchant mapping => 401.
@@ -101,7 +101,7 @@ func TestSelfHandler_FailClosed(t *testing.T) {
 			SubjectID: "user-1",
 		},
 	}, merchant.ID{})
-	w = doSelf(h, http.MethodGet, "/billing/v1/me/account")
+	w = doSelf(h, http.MethodGet, "/billing/v1/me/balance")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "delegated_principal_invalid")
 
@@ -109,7 +109,7 @@ func TestSelfHandler_FailClosed(t *testing.T) {
 	h = newSelfHandler(nil, stubSelfAuthenticator{
 		principal: selfPrincipal("platform:metrics:read"),
 	}, merchant.ID{})
-	w = doSelf(h, http.MethodGet, "/billing/v1/me/account")
+	w = doSelf(h, http.MethodGet, "/billing/v1/me/balance")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 }
 
@@ -129,7 +129,7 @@ func TestSelfHandler_DefaultUserAuthenticatorGetsSelfSurface(t *testing.T) {
 	// Default embedded auth produces a permissionless self principal. With
 	// rt==nil, reaching the handler produces a 500 through gin Recovery, which
 	// proves auth admitted the request.
-	w := doSelf(h, http.MethodPut, "/billing/v1/me/account/settings")
+	w := doSelf(h, http.MethodPut, "/billing/v1/me/settings")
 	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
