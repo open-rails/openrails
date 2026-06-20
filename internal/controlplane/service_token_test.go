@@ -37,15 +37,15 @@ func TestResolvedServiceToken_EmptyDeniesAll(t *testing.T) {
 
 func TestControlPlane_TokenPrefix_NilSafe(t *testing.T) {
 	var c *ControlPlane
-	if got := c.TokenPrefix(); got != ServiceTokenPrefix {
-		t.Errorf("nil control plane TokenPrefix() = %q, want %q", got, ServiceTokenPrefix)
+	if got := c.TokenPrefix(); got != APIKeyPrefix {
+		t.Errorf("nil control plane TokenPrefix() = %q, want %q", got, APIKeyPrefix)
 	}
-	if !c.LooksLikeServiceToken(ServiceTokenPrefix + "_st_key_secret") {
+	if !c.LooksLikeServiceToken(APIKeyPrefix + "_st_key_secret") {
 		t.Error("service token prefix should be fixed even for nil control plane")
 	}
 }
 
-func TestValidateServiceTokenResourcesRejectsLegacyPayableKinds(t *testing.T) {
+func TestValidateAPIKeyResourcesRejectsLegacyPayableKinds(t *testing.T) {
 	legacyKinds := []string{
 		"customer_id",
 		"payer_account_id",
@@ -58,12 +58,12 @@ func TestValidateServiceTokenResourcesRejectsLegacyPayableKinds(t *testing.T) {
 	}
 	for _, kind := range legacyKinds {
 		t.Run(kind, func(t *testing.T) {
-			err := validateServiceTokenResources(dbtest.TestMerchantID, []authcore.ServiceTokenResource{
+			err := validateAPIKeyResources(dbtest.TestMerchantID, []authcore.APIKeyResource{
 				MerchantResource(dbtest.TestMerchantID),
 				{Kind: kind, ID: "legacy"},
 			})
 			if err != ErrServiceTokenScopeDenied {
-				t.Fatalf("validateServiceTokenResources(%q) error = %v, want %v", kind, err, ErrServiceTokenScopeDenied)
+				t.Fatalf("validateAPIKeyResources(%q) error = %v, want %v", kind, err, ErrServiceTokenScopeDenied)
 			}
 		})
 	}
@@ -72,6 +72,6 @@ func TestValidateServiceTokenResourcesRejectsLegacyPayableKinds(t *testing.T) {
 // Service-JWT authority is no longer an intersection of a requested permission
 // set against a server-side grant. Registering an issuer to a tenant grants that
 // tenant full authority over its own resources; the self-signed token's claims
-// are authoritative, bounded only by validateServiceTokenResources (own-tenant
+// are authoritative, bounded only by validateAPIKeyResources (own-tenant
 // scope). The former intersectPermissions/intersectResources tests were removed
 // with that logic.

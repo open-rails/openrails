@@ -53,13 +53,13 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 
 	// Self-assigned resources, defaulting to the resolved merchant when the token
 	// declares none. The wall: every resource must belong to this merchant
-	// (validateServiceTokenResources rejects any cross-merchant or unknown-kind
+	// (validateAPIKeyResources rejects any cross-merchant or unknown-kind
 	// resource).
 	resources := principal.Resources
 	if len(resources) == 0 {
-		resources = []authcore.ServiceTokenResource{MerchantResource(mid)}
+		resources = []authcore.APIKeyResource{MerchantResource(mid)}
 	}
-	if err := validateServiceTokenResources(mid, resources); err != nil {
+	if err := validateAPIKeyResources(mid, resources); err != nil {
 		return nil, err
 	}
 

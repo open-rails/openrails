@@ -539,7 +539,7 @@ func cozyArtMerchantManifest() *MerchantManifest {
 	}
 }
 
-func resourceIDs(resources []authcore.ServiceTokenResource, kind string) []string {
+func resourceIDs(resources []authcore.APIKeyResource, kind string) []string {
 	out := make([]string, 0, len(resources))
 	for _, r := range resources {
 		if r.Kind == kind {

@@ -86,7 +86,7 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 		controlplane.PermCreditsRead,
 		controlplane.PermCreditsWrite,
 		controlplane.PermCreditsSpend,
-	}, resources: []authcore.ServiceTokenResource{
+	}, resources: []authcore.APIKeyResource{
 		controlplane.MerchantResource(dbtest.TestMerchantID),
 	}}
 	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver))

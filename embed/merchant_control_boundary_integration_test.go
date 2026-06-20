@@ -36,9 +36,9 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	// A different org's service token is valid, but it is pinned to that org's
 	// own merchant.
 	merchantBClient := standalone.Client(openrails.WithTokenProvider(func(context.Context) (string, error) {
-		return merchantB.ServiceToken, nil
+		return merchantB.APIKey, nil
 	}))
-	status, body = postDepositCredits(t, standalone.BaseURL, merchantB.ServiceToken, customerB, 2_000)
+	status, body = postDepositCredits(t, standalone.BaseURL, merchantB.APIKey, customerB, 2_000)
 	require.Equal(t, http.StatusOK, status, body)
 	assertBalance(t, ctx, merchantBClient, customerB, 2_000)
 	assertBalance(t, ctx, standalone.Client(), customerA, 1_000)
@@ -49,7 +49,7 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 		merchantB.OrgSlug,
 		"or502-cross-service-token",
 		controlplane.OperatorRolePermissions(),
-		[]authcore.ServiceTokenResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
+		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	status, body = postDepositCredits(t, standalone.BaseURL, crossScopedServiceToken, uuid.New(), 10)
 	require.Equal(t, http.StatusForbidden, status, body)
@@ -62,7 +62,7 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 		orphanOrg,
 		"or502-orphan-service-token",
 		controlplane.OperatorRolePermissions(),
-		[]authcore.ServiceTokenResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
+		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	status, body = postDepositCredits(t, standalone.BaseURL, orphanToken, uuid.New(), 10)
 	require.Equal(t, http.StatusForbidden, status, body)
@@ -104,7 +104,7 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 		"or502-jwt-cross",
 		merchantB.OrgSlug,
 		[]string{controlplane.PermCreditsWrite},
-		[]authcore.ServiceTokenResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
+		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	status, body = postDepositCredits(t, standalone.BaseURL, crossScopedServiceJWT.Token, uuid.New(), 10)
 	require.Equal(t, http.StatusForbidden, status, body)

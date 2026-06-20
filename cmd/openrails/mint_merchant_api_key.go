@@ -76,8 +76,8 @@ func mintMerchantAPIKey(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("resolve merchant %q: %w", merchantRef, err)
 	}
 
-	resources := []authcore.ServiceTokenResource{merchantResource}
-	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, authorityOrgSlug, authcore.ServiceTokenMintOptions{
+	resources := []authcore.APIKeyResource{merchantResource}
+	serviceToken, token, err := cp.Core().MintAPIKeyWithOptions(ctx, authorityOrgSlug, authcore.APIKeyMintOptions{
 		Name:        name,
 		Permissions: permissions,
 		Resources:   resources,

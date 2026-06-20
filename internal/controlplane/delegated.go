@@ -131,7 +131,7 @@ func newDelegatedVerifier(coreSvc *authcore.Service, tokenPrefix string) (*authh
 	// by reloadDelegatedIssuers after construction. There is no control-plane
 	// self-issuer seed — OpenRails never signs delegated tokens itself.
 	v := authhttp.NewVerifier(
-		authhttp.WithServiceTokenPrefix(tokenPrefix),
+		authhttp.WithAPIKeyPrefix(tokenPrefix),
 		// Enforce that every permission on a browser token belongs to the
 		// {self-service, merchant-admin} catalog (issue #259). A token carrying an
 		// operator/server-to-server grant (or any unknown permission) is rejected

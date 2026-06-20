@@ -68,7 +68,7 @@ func TestRequireServiceTokenCustomerScope(t *testing.T) {
 			OwnerOrgSlug: "operator",
 			MerchantID:   dbtest.TestMerchantID,
 			Permissions:  []string{controlplane.PermCreditsSpend},
-			Resources: []authcore.ServiceTokenResource{
+			Resources: []authcore.APIKeyResource{
 				controlplane.MerchantResource(dbtest.TestMerchantID),
 				controlplane.CustomerResource(payer),
 			},

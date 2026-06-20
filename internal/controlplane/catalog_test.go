@@ -116,13 +116,13 @@ func TestAnyLiveServiceToken(t *testing.T) {
 	if anyLiveServiceToken(nil) {
 		t.Error("nil service tokens should not be live")
 	}
-	if anyLiveServiceToken([]authcore.ServiceToken{{RevokedAt: revoked}}) {
+	if anyLiveServiceToken([]authcore.APIKey{{RevokedAt: revoked}}) {
 		t.Error("only-revoked service tokens should not count as live")
 	}
-	if !anyLiveServiceToken([]authcore.ServiceToken{{RevokedAt: nil}}) {
+	if !anyLiveServiceToken([]authcore.APIKey{{RevokedAt: nil}}) {
 		t.Error("a non-revoked service token should count as live")
 	}
-	if !anyLiveServiceToken([]authcore.ServiceToken{{RevokedAt: revoked}, {RevokedAt: nil}}) {
+	if !anyLiveServiceToken([]authcore.APIKey{{RevokedAt: revoked}, {RevokedAt: nil}}) {
 		t.Error("a mix with one live service token should count as live")
 	}
 }

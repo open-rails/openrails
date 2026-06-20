@@ -31,7 +31,7 @@ import (
 // public service routes without standing up a full AuthKit control plane.
 type stubServiceTokenResolver struct {
 	permissions []string
-	resources   []authcore.ServiceTokenResource
+	resources   []authcore.APIKeyResource
 	serviceJWT  bool
 }
 
@@ -140,7 +140,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 			controlplane.PermCreditsSpend,
 			controlplane.PermEntitlementsRead,
 		},
-		resources: []authcore.ServiceTokenResource{
+		resources: []authcore.APIKeyResource{
 			controlplane.MerchantResource(dbtest.TestMerchantID),
 			controlplane.CustomerResource(tenantSubjectID),
 		},

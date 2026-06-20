@@ -171,7 +171,7 @@ func (r trustingResolver) ResolveServiceToken(context.Context, string) (*control
 		MerchantID:   r.merchantID,
 		MerchantSlug: r.merchantSlug,
 		Permissions:  []string{controlplane.PermAdmin},
-		Resources:    []authcore.ServiceTokenResource{controlplane.MerchantResource(r.merchantID)},
+		Resources:    []authcore.APIKeyResource{controlplane.MerchantResource(r.merchantID)},
 	}, nil
 }
 
@@ -331,7 +331,7 @@ type OwnedMerchant struct {
 	OrgID        string
 	MerchantID   merchant.ID
 	MerchantSlug string
-	ServiceToken string
+	APIKey       string
 }
 
 // ServiceJWTCaller is a registered first-party service-JWT issuer plus a freshly
@@ -374,14 +374,14 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 	require.NoError(h.t, err, "insert owned merchant")
 
 	token := s.MintServiceToken(slug, slug+"-operator", controlplane.OperatorRolePermissions(),
-		[]authcore.ServiceTokenResource{controlplane.MerchantResource(mid)})
+		[]authcore.APIKeyResource{controlplane.MerchantResource(mid)})
 
 	return OwnedMerchant{
 		OrgSlug:      slug,
 		OrgID:        org.ID,
 		MerchantID:   mid,
 		MerchantSlug: slug,
-		ServiceToken: token,
+		APIKey:       token,
 	}
 }
 
@@ -560,7 +560,7 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerOrgSlug, subject string, pe
 // mints a service JWT from it. Registering the issuer to the org is the
 // authority root; resources, when present, are still validated against the
 // merchant owned by that org at request time.
-func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permissions []string, resources []authcore.ServiceTokenResource) ServiceJWTCaller {
+func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permissions []string, resources []authcore.APIKeyResource) ServiceJWTCaller {
 	h := s.h
 	h.t.Helper()
 	require.NotNil(h.t, s.app, "RegisterServiceJWTIssuer requires the standalone surface")
@@ -612,13 +612,13 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 
 // MintServiceToken mints a real AuthKit service token through the standalone
 // control plane.
-func (s *Surface) MintServiceToken(orgSlug, name string, permissions []string, resources []authcore.ServiceTokenResource) string {
+func (s *Surface) MintServiceToken(orgSlug, name string, permissions []string, resources []authcore.APIKeyResource) string {
 	h := s.h
 	h.t.Helper()
 	require.NotNil(h.t, s.app, "MintServiceToken requires the standalone surface")
 	cp := embcp.Get(s.app)
 	require.NotNil(h.t, cp, "control plane attached")
-	_, secret, err := cp.Core().MintServiceTokenWithOptions(h.ctx, orgSlug, authcore.ServiceTokenMintOptions{
+	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, orgSlug, authcore.APIKeyMintOptions{
 		Name:        name,
 		Permissions: permissions,
 		Resources:   resources,
@@ -634,10 +634,10 @@ func (h *Harness) mintFreshServiceToken(a *app.App) string {
 	h.t.Helper()
 	cp := embcp.Get(a)
 	require.NotNil(h.t, cp, "control plane attached")
-	_, secret, err := cp.Core().MintServiceTokenWithOptions(h.ctx, dbtest.TestMerchantSlug, authcore.ServiceTokenMintOptions{
+	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, dbtest.TestMerchantSlug, authcore.APIKeyMintOptions{
 		Name:        "integrationharness-extra",
 		Permissions: controlplane.OperatorRolePermissions(),
-		Resources:   []authcore.ServiceTokenResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
+		Resources:   []authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	})
 	require.NoError(h.t, err, "mint fresh service token")
 	return secret

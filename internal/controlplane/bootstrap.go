@@ -140,15 +140,15 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 
 	// 5. Mint an initial deployment admin service token only when the org has none yet.
 	if opts.MintInitialServiceToken {
-		existing, lerr := core.ListServiceTokens(ctx, slug)
+		existing, lerr := core.ListAPIKeys(ctx, slug)
 		if lerr != nil {
 			return nil, fmt.Errorf("controlplane: list admin service tokens: %w", lerr)
 		}
 		if !anyLiveServiceToken(existing) {
-			serviceToken, secret, merr := core.MintServiceTokenWithOptions(ctx, slug, authcore.ServiceTokenMintOptions{
+			serviceToken, secret, merr := core.MintAPIKeyWithOptions(ctx, slug, authcore.APIKeyMintOptions{
 				Name:        BootstrapAdminServiceTokenName,
 				Permissions: OperatorRolePermissions(),
-				Resources:   []authcore.ServiceTokenResource{MerchantResource(bootstrapMerchantID)},
+				Resources:   []authcore.APIKeyResource{MerchantResource(bootstrapMerchantID)},
 			})
 			if merr != nil {
 				return nil, fmt.Errorf("controlplane: mint initial admin service token: %w", merr)
@@ -184,7 +184,7 @@ func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstra
 
 // anyLiveServiceToken reports whether the AuthKit org already has at least one non-revoked service token,
 // so bootstrap does not mint a duplicate on re-run.
-func anyLiveServiceToken(toks []authcore.ServiceToken) bool {
+func anyLiveServiceToken(toks []authcore.APIKey) bool {
 	for _, t := range toks {
 		if t.RevokedAt == nil {
 			return true

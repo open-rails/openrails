@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	// ServiceTokenPrefix is the fixed OpenRails service-token brand marker.
-	ServiceTokenPrefix = "openrails"
+	// APIKeyPrefix is the fixed OpenRails service-token brand marker.
+	APIKeyPrefix = "openrails"
 
 	// ResourceKindMerchant scopes a service token to one OpenRails merchant. Resource
 	// IDs are canonical openrails.merchants UUID strings.
@@ -51,7 +51,7 @@ type ResolvedServiceToken struct {
 	// Resources is the service token's AuthKit-stored OpenRails resource scope.
 	// OpenRails interprets only ResourceKindMerchant and ResourceKindCustomer;
 	// unknown kinds fail closed during service token resolution.
-	Resources []authcore.ServiceTokenResource
+	Resources []authcore.APIKeyResource
 }
 
 // HasPermission reports whether the resolved service token grants perm. The broad
@@ -83,24 +83,24 @@ func (r *ResolvedServiceToken) AllowsCustomer(subject uuid.UUID) bool {
 	return hasResource(r.Resources, ResourceKindCustomer, subject.String())
 }
 
-func MerchantResource(id merchant.ID) authcore.ServiceTokenResource {
-	return authcore.ServiceTokenResource{Kind: ResourceKindMerchant, ID: id.String()}
+func MerchantResource(id merchant.ID) authcore.APIKeyResource {
+	return authcore.APIKeyResource{Kind: ResourceKindMerchant, ID: id.String()}
 }
 
-func CustomerResource(id uuid.UUID) authcore.ServiceTokenResource {
-	return authcore.ServiceTokenResource{Kind: ResourceKindCustomer, ID: id.String()}
+func CustomerResource(id uuid.UUID) authcore.APIKeyResource {
+	return authcore.APIKeyResource{Kind: ResourceKindCustomer, ID: id.String()}
 }
 
 // MerchantScope resolves a merchant reference (slug or UUID) to the canonical
 // OpenRails merchant id/slug and AuthKit service token merchant resource.
-func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.ID, string, authcore.ServiceTokenResource, error) {
+func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.ID, string, authcore.APIKeyResource, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		// No default merchant (#480): the merchant to scope to must be named explicitly.
-		return merchant.ID{}, "", authcore.ServiceTokenResource{}, ErrServiceTokenMerchantUnresolved
+		return merchant.ID{}, "", authcore.APIKeyResource{}, ErrServiceTokenMerchantUnresolved
 	}
 	if c == nil || c.pool == nil {
-		return merchant.ID{}, "", authcore.ServiceTokenResource{}, errors.New("controlplane: pgx pool unavailable for merchant resolution")
+		return merchant.ID{}, "", authcore.APIKeyResource{}, errors.New("controlplane: pgx pool unavailable for merchant resolution")
 	}
 	var (
 		idStr  string
@@ -116,16 +116,16 @@ func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.
 	`, ref).Scan(&idStr, &slug, &status)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return merchant.ID{}, "", authcore.ServiceTokenResource{}, ErrServiceTokenMerchantUnresolved
+			return merchant.ID{}, "", authcore.APIKeyResource{}, ErrServiceTokenMerchantUnresolved
 		}
-		return merchant.ID{}, "", authcore.ServiceTokenResource{}, err
+		return merchant.ID{}, "", authcore.APIKeyResource{}, err
 	}
 	if status != "active" {
-		return merchant.ID{}, "", authcore.ServiceTokenResource{}, ErrServiceTokenMerchantUnresolved
+		return merchant.ID{}, "", authcore.APIKeyResource{}, ErrServiceTokenMerchantUnresolved
 	}
 	mid, err := merchant.ParseID(idStr)
 	if err != nil {
-		return merchant.ID{}, "", authcore.ServiceTokenResource{}, err
+		return merchant.ID{}, "", authcore.APIKeyResource{}, err
 	}
 	return mid, slug, MerchantResource(mid), nil
 }
@@ -133,14 +133,14 @@ func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.
 // TokenPrefix returns the fixed service token brand prefix used to recognize and
 // parse presented service tokens.
 func (c *ControlPlane) TokenPrefix() string {
-	return ServiceTokenPrefix
+	return APIKeyPrefix
 }
 
 // LooksLikeServiceToken reports whether token carries this deployment's service token marker. Used
 // by the service token middleware to route a Bearer credential to service token validation rather
 // than JWT verification.
 func (c *ControlPlane) LooksLikeServiceToken(token string) bool {
-	return authcore.HasServiceTokenPrefix(c.TokenPrefix(), strings.TrimSpace(token))
+	return authcore.HasAPIKeyPrefix(c.TokenPrefix(), strings.TrimSpace(token))
 }
 
 // ResolveServiceToken validates a presented service token string end-to-end:
@@ -159,12 +159,12 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
 	}
-	keyID, secret, ok := authcore.ParseServiceToken(c.TokenPrefix(), strings.TrimSpace(token))
+	keyID, secret, ok := authcore.ParseAPIKey(c.TokenPrefix(), strings.TrimSpace(token))
 	if !ok {
 		return nil, authcore.ErrInvalidAccessToken
 	}
 
-	resolved, err := c.Core().ResolveServiceTokenWithResources(ctx, keyID, secret)
+	resolved, err := c.Core().ResolveAPIKeyWithResources(ctx, keyID, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 	if err != nil {
 		return nil, err
 	}
-	if err := validateServiceTokenResources(mid, resolved.Resources); err != nil {
+	if err := validateAPIKeyResources(mid, resolved.Resources); err != nil {
 		return nil, err
 	}
 
@@ -200,7 +200,7 @@ var ErrServiceTokenMerchantUnresolved = errors.New("controlplane: service token 
 // OpenRails merchant resource scope or carries unknown OpenRails resource kinds.
 var ErrServiceTokenScopeDenied = errors.New("controlplane: service token resource scope denied")
 
-func validateServiceTokenResources(mid merchant.ID, resources []authcore.ServiceTokenResource) error {
+func validateAPIKeyResources(mid merchant.ID, resources []authcore.APIKeyResource) error {
 	if !hasResource(resources, ResourceKindMerchant, mid.String()) {
 		return ErrServiceTokenScopeDenied
 	}
@@ -214,7 +214,7 @@ func validateServiceTokenResources(mid merchant.ID, resources []authcore.Service
 	return nil
 }
 
-func hasResource(resources []authcore.ServiceTokenResource, kind, id string) bool {
+func hasResource(resources []authcore.APIKeyResource, kind, id string) bool {
 	kind = strings.TrimSpace(kind)
 	id = strings.TrimSpace(id)
 	for _, r := range resources {
@@ -225,7 +225,7 @@ func hasResource(resources []authcore.ServiceTokenResource, kind, id string) boo
 	return false
 }
 
-func hasAnyResourceKind(resources []authcore.ServiceTokenResource, kind string) bool {
+func hasAnyResourceKind(resources []authcore.APIKeyResource, kind string) bool {
 	kind = strings.TrimSpace(kind)
 	for _, r := range resources {
 		if strings.TrimSpace(r.Kind) == kind {

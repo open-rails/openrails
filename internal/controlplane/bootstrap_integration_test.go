@@ -147,7 +147,7 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.Equal(t, res1.BootstrapOrgID, res2.BootstrapOrgID)
 
 	// Exactly one service token exists after two runs.
-	serviceTokens, err := cp.Core().ListServiceTokens(ctx, dbtest.TestMerchantSlug)
+	serviceTokens, err := cp.Core().ListAPIKeys(ctx, dbtest.TestMerchantSlug)
 	require.NoError(t, err)
 	require.Len(t, serviceTokens, 1, "exactly one admin service token after two bootstrap runs")
 	require.ElementsMatch(t, []string{ResourceKindMerchant}, resourceKinds(serviceTokens[0].Resources))
@@ -159,7 +159,7 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.Contains(t, resourceIDs(resolved.Resources, ResourceKindMerchant), dbtest.TestMerchantID.String())
 }
 
-func resourceKinds(resources []authcore.ServiceTokenResource) []string {
+func resourceKinds(resources []authcore.APIKeyResource) []string {
 	out := make([]string, 0, len(resources))
 	for _, r := range resources {
 		out = append(out, r.Kind)
@@ -167,7 +167,7 @@ func resourceKinds(resources []authcore.ServiceTokenResource) []string {
 	return out
 }
 
-func resourceIDs(resources []authcore.ServiceTokenResource, kind string) []string {
+func resourceIDs(resources []authcore.APIKeyResource, kind string) []string {
 	out := make([]string, 0, len(resources))
 	for _, r := range resources {
 		if r.Kind == kind {

@@ -140,15 +140,15 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	lockedRegistration := !options.hosted
 
 	coreCfg := authcore.Config{
-		Keys:               keySource,
-		VerifyOnly:         verifyOnly,
-		Issuer:             issuer,
-		BaseURL:            issuer,
-		IssuedAudiences:    []string{"openrails"},
-		ExpectedAudiences:  []string{"openrails"},
-		ServiceTokenPrefix: ServiceTokenPrefix,
-		Environment:        strings.TrimSpace(cfg.Env),
-		PermissionCatalog:  Catalog(),
+		Keys:              keySource,
+		VerifyOnly:        verifyOnly,
+		Issuer:            issuer,
+		BaseURL:           issuer,
+		IssuedAudiences:   []string{"openrails"},
+		ExpectedAudiences: []string{"openrails"},
+		APIKeyPrefix:      APIKeyPrefix,
+		Environment:       strings.TrimSpace(cfg.Env),
+		PermissionCatalog: Catalog(),
 		DefaultRoles: []authcore.DefaultRole{
 			// The operator role is also declared as a per-tenant DefaultRole so that
 			// AssignRole can materialize it lazily even on tenants created outside the
@@ -172,7 +172,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// Build the browser-direct delegated-access-token verifier (#222 browser
 	// tier). It accepts ONLY this control plane's own delegated tokens with the
 	// canonical `openrails` audience and `openrails:self:*` permissions.
-	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), ServiceTokenPrefix)
+	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), APIKeyPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
 	}

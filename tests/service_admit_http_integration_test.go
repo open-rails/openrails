@@ -53,7 +53,7 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	group := router.Group("/v1/service")
 	resolver := stubServiceTokenResolver{
 		permissions: []string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite, controlplane.PermCreditsSpend},
-		resources: []authcore.ServiceTokenResource{
+		resources: []authcore.APIKeyResource{
 			controlplane.MerchantResource(dbtest.TestMerchantID),
 			controlplane.CustomerResource(payerID),
 		},

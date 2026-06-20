@@ -16,13 +16,13 @@ func TestResolvedServiceTokenAllowsCustomerScopes(t *testing.T) {
 
 	tenantWide := &ResolvedServiceToken{
 		MerchantID: dbtest.TestMerchantID,
-		Resources:  []authcore.ServiceTokenResource{MerchantResource(dbtest.TestMerchantID)},
+		Resources:  []authcore.APIKeyResource{MerchantResource(dbtest.TestMerchantID)},
 	}
 	require.True(t, tenantWide.AllowsCustomer(subject))
 
 	subjectScoped := &ResolvedServiceToken{
 		MerchantID: dbtest.TestMerchantID,
-		Resources: []authcore.ServiceTokenResource{
+		Resources: []authcore.APIKeyResource{
 			MerchantResource(dbtest.TestMerchantID),
 			CustomerResource(subject),
 		},
@@ -31,16 +31,16 @@ func TestResolvedServiceTokenAllowsCustomerScopes(t *testing.T) {
 	require.False(t, subjectScoped.AllowsCustomer(other))
 }
 
-func TestValidateServiceTokenResourcesRequiresTenantAndKnownKinds(t *testing.T) {
-	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestMerchantID, nil), ErrServiceTokenScopeDenied)
-	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestMerchantID, []authcore.ServiceTokenResource{
+func TestValidateAPIKeyResourcesRequiresTenantAndKnownKinds(t *testing.T) {
+	require.ErrorIs(t, validateAPIKeyResources(dbtest.TestMerchantID, nil), ErrServiceTokenScopeDenied)
+	require.ErrorIs(t, validateAPIKeyResources(dbtest.TestMerchantID, []authcore.APIKeyResource{
 		CustomerResource(uuid.New()),
 	}), ErrServiceTokenScopeDenied)
-	require.ErrorIs(t, validateServiceTokenResources(dbtest.TestMerchantID, []authcore.ServiceTokenResource{
+	require.ErrorIs(t, validateAPIKeyResources(dbtest.TestMerchantID, []authcore.APIKeyResource{
 		MerchantResource(dbtest.TestMerchantID),
 		{Kind: "openrails.unknown", ID: "x"},
 	}), ErrServiceTokenScopeDenied)
-	require.NoError(t, validateServiceTokenResources(dbtest.TestMerchantID, []authcore.ServiceTokenResource{
+	require.NoError(t, validateAPIKeyResources(dbtest.TestMerchantID, []authcore.APIKeyResource{
 		MerchantResource(dbtest.TestMerchantID),
 		CustomerResource(uuid.New()),
 	}))

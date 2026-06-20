@@ -90,7 +90,7 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 		// A JWKS principal carries merchant-WIDE authority over the merchant its
 		// owning org owns; scope it to that merchant resource so subject-scope
 		// checks (AllowsCustomer) behave like a merchant-wide service token.
-		Resources: []authcore.ServiceTokenResource{MerchantResource(mid)},
+		Resources: []authcore.APIKeyResource{MerchantResource(mid)},
 	}, nil
 }
 
