@@ -23,15 +23,24 @@ import (
 
 var replicatedReplacingMergeTreePattern = regexp.MustCompile(`ReplicatedReplacingMergeTree\([^)]*\{replica\}'(?:,\s*([A-Za-z_][A-Za-z0-9_]*))?\)`)
 
-// RunPostgres applies all Postgres migrations:
-// 0. River (OpenRails schema, == DB.SchemaName()) - via rivermigrate
-// 1. Billing (OpenRails schema, == DB.SchemaName()) - via migratekit
-//
-// The OpenRails Postgres schema is configurable via db.schema / DB_SCHEMA and
-// defaults to `billing` (#165). In standalone mode the River job-queue tables
-// live in this same schema. (Embedded hosts own River separately via an injected
-// River client — see pkg/embedded.)
+// RunPostgres applies all Postgres migrations for STANDALONE OpenRails:
+// 0. bootstrap schema/extensions, 1. AuthKit (`profiles` schema), 2. River
+// (`public`, #545), 3. OpenRails (billing schema). Embedded hosts call
+// RunPostgresEmbedded, which skips the AuthKit step.
 func RunPostgres(ctx context.Context, cfg *config.Config) error {
+	return runPostgres(ctx, cfg, true)
+}
+
+// RunPostgresEmbedded applies the embedded subset — bootstrap + River + OpenRails
+// — SKIPPING the AuthKit (`profiles`) migrations (#544). Embedded OpenRails runs
+// no AuthKit; the host owns its identity layer. So `profiles` is the standalone-
+// only "extra" table set: never created in embedded, which keeps the OpenRails
+// schema the only portable set and "standalone has extra tables" literally true.
+func RunPostgresEmbedded(ctx context.Context, cfg *config.Config) error {
+	return runPostgres(ctx, cfg, false)
+}
+
+func runPostgres(ctx context.Context, cfg *config.Config, includeAuthKit bool) error {
 	if cfg == nil || cfg.DB == nil {
 		return fmt.Errorf("missing database config")
 	}
@@ -44,8 +53,8 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 	}
 	defer func() { _ = sqlDB.Close() }()
 
-	// Effective OpenRails schema (defaults to `billing`). Standalone River tables
-	// share this schema. Validated as a safe identifier during config load (#165).
+	// Effective OpenRails schema (defaults to `openrails`). Validated as a safe
+	// identifier during config load (#165).
 	schema := cfg.DB.SchemaName()
 
 	// ---------- 0. Bootstrap schema/extensions ----------
@@ -53,17 +62,22 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("postgres bootstrap failed: %w", err)
 	}
 
-	// ---------- 1. AuthKit Migrations (profiles schema) ----------
-	log.Info("Running AuthKit migrations (profiles schema)...")
-	authMigrations, err := migratekit.LoadFromFS(authkitpostgres.FS)
-	if err != nil {
-		return fmt.Errorf("authkit: load migrations: %w", err)
+	// ---------- 1. AuthKit Migrations (profiles schema) — STANDALONE ONLY ----------
+	// Embedded OpenRails runs no AuthKit, so the `profiles` schema is never created
+	// there; it is the standalone-only "extra" set thrown away / recreated on a
+	// mode switch (#544).
+	if includeAuthKit {
+		log.Info("Running AuthKit migrations (profiles schema)...")
+		authMigrations, err := migratekit.LoadFromFS(authkitpostgres.FS)
+		if err != nil {
+			return fmt.Errorf("authkit: load migrations: %w", err)
+		}
+		authMigrator := migratekit.NewPostgres(sqlDB, "authkit")
+		if err := authMigrator.ApplyMigrations(ctx, authMigrations); err != nil {
+			return fmt.Errorf("authkit: apply migrations: %w", err)
+		}
+		log.Info("✓ AuthKit migrations completed successfully")
 	}
-	authMigrator := migratekit.NewPostgres(sqlDB, "authkit")
-	if err := authMigrator.ApplyMigrations(ctx, authMigrations); err != nil {
-		return fmt.Errorf("authkit: apply migrations: %w", err)
-	}
-	log.Info("✓ AuthKit migrations completed successfully")
 
 	// ---------- 2. River Migrations (always `public`, #545) ----------
 	// River job-queue tables live in `public` (config.RiverSchema), NOT the

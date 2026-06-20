@@ -1,0 +1,122 @@
+package main
+
+import (
+	"context"
+	"fmt"
+
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
+
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/controlplane"
+	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+)
+
+// newAuthCmd wires the embedded→standalone auth-reconstruction CLI (#544).
+//
+//	openrails auth recreate [--mint-keys]
+//
+// After `data import` loads the portable OpenRails billing data into a STANDALONE
+// target, the AuthKit (`profiles`) side is empty — it was never exported (the
+// dump is billing data only) and embedded never created it (#544). `auth recreate`
+// rebuilds the standalone auth scaffolding for every imported merchant: it creates
+// each merchant's backing AuthKit org (slug-derived), records the NEW org id on
+// `merchants.owner_org_id` (replacing any stale embedded host-org id), and
+// optionally mints a fresh deployment admin API key per merchant. It reuses the
+// idempotent control-plane Bootstrap path, so re-running is safe.
+func newAuthCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "auth",
+		Short: "Standalone auth-plane operations (#544)",
+	}
+	cmd.AddCommand(newAuthRecreateCmd())
+	return cmd
+}
+
+func newAuthRecreateCmd() *cobra.Command {
+	var mintKeys bool
+	cmd := &cobra.Command{
+		Use:   "recreate",
+		Short: "Rebuild standalone AuthKit orgs for every imported merchant (embedded→standalone)",
+		RunE: func(c *cobra.Command, _ []string) error {
+			return runAuthRecreate(c, mintKeys)
+		},
+	}
+	cmd.Flags().BoolVar(&mintKeys, "mint-keys", false, "Mint a fresh deployment admin API key per merchant (printed once)")
+	return cmd
+}
+
+func runAuthRecreate(c *cobra.Command, mintKeys bool) error {
+	ctx := c.Context()
+	out := c.OutOrStdout()
+	cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+	if cfg == nil {
+		return fmt.Errorf("config not loaded; auth recreate requires --config")
+	}
+
+	application := &app.App{Config: cfg}
+	defer func() {
+		if err := application.Close(context.Background()); err != nil {
+			log.WithError(err).Error("auth recreate cleanup failed")
+		}
+	}()
+	if err := embcp.Attach(ctx, application, cfg, nil); err != nil {
+		return fmt.Errorf("attach control plane: %w", err)
+	}
+	cp := embcp.Get(application)
+	if cp == nil {
+		return fmt.Errorf("auth recreate: control plane not attached (standalone AuthKit is required)")
+	}
+
+	slugs, err := listMerchantSlugs(ctx, cp)
+	if err != nil {
+		return err
+	}
+	if len(slugs) == 0 {
+		fmt.Fprintln(out, "auth recreate: no merchants found; nothing to do")
+		return nil
+	}
+
+	for _, slug := range slugs {
+		res, berr := cp.Bootstrap(ctx, controlplane.BootstrapOptions{
+			BootstrapOrgSlug:  slug,
+			MintInitialAPIKey: mintKeys,
+		})
+		if berr != nil {
+			return fmt.Errorf("auth recreate: merchant %q: %w", slug, berr)
+		}
+		fmt.Fprintf(out, "auth recreate: merchant %q -> org %s (created=%t, api_key_minted=%t)\n",
+			res.BootstrapOrgSlug, res.BootstrapOrgID, res.OrgCreated, res.APIKeyMinted)
+		if res.APIKeyMinted && res.APIKeySecret != "" {
+			fmt.Fprintf(out, "  admin API key (shown once): %s\n", res.APIKeySecret)
+		}
+	}
+	fmt.Fprintf(out, "auth recreate: reconciled %d merchant(s)\n", len(slugs))
+	return nil
+}
+
+// listMerchantSlugs returns every non-deleted merchant slug from the control
+// plane's OpenRails schema. The schema name is a validated SQL identifier
+// (config.validateSchema), so direct interpolation is injection-free.
+func listMerchantSlugs(ctx context.Context, cp *controlplane.ControlPlane) ([]string, error) {
+	schema := cp.Pool().Schema()
+	rows, err := cp.Pool().Raw().Query(ctx,
+		fmt.Sprintf(`SELECT slug FROM %s.merchants WHERE status <> 'deleted' ORDER BY slug`, schema))
+	if err != nil {
+		return nil, fmt.Errorf("auth recreate: list merchants: %w", err)
+	}
+	defer rows.Close()
+	var slugs []string
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, fmt.Errorf("auth recreate: scan merchant slug: %w", err)
+		}
+		slugs = append(slugs, slug)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("auth recreate: iterate merchants: %w", err)
+	}
+	return slugs, nil
+}

@@ -268,6 +268,10 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 
 func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *controlplane.ControlPlane, mt ManifestMerchant) (*merchants.Merchant, error) {
 	if cp == nil {
+		// Embedded: OpenRails runs no AuthKit, so it creates/records no backing org.
+		// The merchant's backing org is the host's AuthKit org of the SAME slug
+		// (#541 — merchant slug == org slug, 1:1); owner_org_id stays NULL here and
+		// is set only in standalone, where OpenRails owns the org.
 		id, err := db.RegisterMerchant(ctx, database.Qx(ctx), db.RegisterMerchantOptions{Slug: mt.Slug})
 		if err != nil {
 			return nil, err

@@ -113,7 +113,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		if opts.Config.DB == nil || opts.Config.DB.URL == "" {
 			return nil, fmt.Errorf("openrails embed: RunMigrations requires config.DB.URL (or run migrations yourself via cmd/openrails migrate)")
 		}
-		if err := migrate.RunPostgres(ctx, opts.Config); err != nil {
+		// Embedded skips the AuthKit (`profiles`) migrations (#544): the host owns
+		// auth, so OpenRails creates only its own portable schema + River (`public`).
+		if err := migrate.RunPostgresEmbedded(ctx, opts.Config); err != nil {
 			return nil, fmt.Errorf("openrails embed: run postgres migrations: %w", err)
 		}
 		if opts.Config.ClickHouse != nil {
@@ -130,7 +132,10 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	// Idempotently provision the bound merchant (a billing bucket) from the
 	// explicit embedded construction option through the same #527 merchant
 	// provisioning boundary used by standalone manifests. Embedded OpenRails runs
-	// NO AuthKit here and stores ZERO auth: the issuer/owner-org step is omitted.
+	// NO AuthKit here and creates no AuthKit objects; the merchant's backing org is
+	// the host's AuthKit org of the SAME slug (#541 — merchant slug == org slug,
+	// 1:1), so OpenRails neither creates nor records it (owner_org_id stays NULL in
+	// embedded, set only in standalone where OpenRails owns the org).
 	var boundMerchant merchant.ID
 	if opts.Merchant != "" {
 		if a := emb.App(); a != nil && a.Runtime != nil && a.Runtime.DB != nil {

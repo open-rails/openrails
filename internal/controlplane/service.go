@@ -149,12 +149,11 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		APIKeyPrefix:      APIKeyPrefix,
 		Environment:       strings.TrimSpace(cfg.Env),
 		Permissions:       Catalog(),
-		DefaultRoles: []authcore.DefaultRole{
-			// The operator role is also declared as a per-org DefaultRole so that
-			// AssignRole can materialize it lazily even on orgs created outside the
-			// bootstrap path. Bootstrap still defines+sets it explicitly.
-			{Name: OperatorRole, Permissions: OperatorRolePermissions()},
-		},
+		// OpenRails declares NO org roles of its own (#543). Merchant-admin
+		// authority comes from AuthKit's built-in `owner` role (`org:*`, which
+		// expands over the OpenRails `org:` catalog) for human admins, and from
+		// direct permission-scoped API keys for server-to-server automation.
+		DefaultRoles: nil,
 		// Private standalone posture: no public user self-registration, no public
 		// org onboarding/management. Embedded bootstrap/core calls
 		// (CreateOrg/AssignRole/MintAPIKey) are unaffected. Hosted products
@@ -170,9 +169,9 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	authSvc = authSvc.WithPostgres(pool)
 
 	// Build the browser-direct delegated-access-token verifier (#222 browser
-		// tier). It accepts registered delegated tokens with the canonical
-		// `openrails` audience. Customer self-service tokens may be permissionless;
-		// any supplied permissions must be browser-safe merchant-admin grants.
+	// tier). It accepts registered delegated tokens with the canonical
+	// `openrails` audience. Customer self-service tokens may be permissionless;
+	// any supplied permissions must be browser-safe merchant-admin grants.
 	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), APIKeyPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)

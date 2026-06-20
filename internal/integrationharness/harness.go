@@ -353,8 +353,8 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 		org, err = core.CreateOrg(h.ctx, slug)
 	}
 	require.NoError(h.t, err, "ensure AuthKit org")
-	require.NoError(h.t, core.DefineRole(h.ctx, slug, controlplane.OperatorRole), "define operator role")
-	require.NoError(h.t, core.SetRolePermissions(h.ctx, slug, controlplane.OperatorRole, controlplane.OperatorRolePermissions()), "seed operator permissions")
+	// OpenRails defines NO org role (#543); the test principal authenticates via the
+	// direct permission-scoped API key minted below, not an org role.
 
 	mid := merchant.ID(uuid.New())
 	_, err = h.sharedPool().Exec(h.ctx, `
@@ -439,9 +439,9 @@ func (s *Surface) MintUserAccessToken(username string) string {
 // role (when non-empty) on ownerOrgSlug — the merchant that
 // owns the test merchant — and signs a token with the principal's own key.
 //
-// With OperatorRole on the merchant's owner_org, the principal can administer
-// the merchant via the existing #481 role-based authz. Pass role="" to provision
-// a principal with NO authority (the deny case).
+// With the org `owner` role on the merchant's owner_org, the principal can
+// administer the merchant via the existing #481 role-based authz. Pass role=""
+// to provision a principal with NO authority (the deny case).
 func (s *Surface) RegisterRemoteApplication(slug, ownerOrgSlug, role string) RemoteAppCaller {
 	return s.registerRemoteApplication(slug, ownerOrgSlug, role, nil)
 }

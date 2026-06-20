@@ -102,9 +102,10 @@ func (e *Embedded) GetPeriodicJobs(ctx context.Context) ([]*river.PeriodicJob, e
 //   - Billing will use it for enqueueing jobs (e.g., dunning, cleanup)
 //   - Billing will NOT create its own River client
 //   - RunWorkers() becomes a no-op (you're responsible for starting the client)
-//   - The host client OWNS the River schema. OpenRails neither assumes nor
-//     overrides it (issue #165), so River tables live wherever you configured
-//     this client — independent of OpenRails' db.schema.
+//   - The host client OWNS the River schema. River tables must live in `public`
+//     (#545) so host and OpenRails share one `public.river_*` set; configure this
+//     client accordingly. If you do NOT inject a client, OpenRails builds its own
+//     in `public`.
 //
 // Example:
 //

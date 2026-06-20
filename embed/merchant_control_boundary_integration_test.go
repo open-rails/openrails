@@ -74,9 +74,9 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, status, body)
 
 	// JWKS remote_application self-tokens use stored AuthKit org authority. A
-	// principal with the operator role mutates only its org's merchant; one
+	// principal with the org owner role mutates only its org's merchant; one
 	// without a role is denied.
-	remoteAppB := standalone.RegisterRemoteApplication("or502-ra-b", merchantB.OrgSlug, controlplane.OperatorRole)
+	remoteAppB := standalone.RegisterRemoteApplication("or502-ra-b", merchantB.OrgSlug, controlplane.OwnerRole)
 	status, body = postDepositCredits(t, standalone.BaseURL, remoteAppB.Token, customerB, 3_000)
 	require.Equal(t, http.StatusOK, status, body)
 	assertBalance(t, ctx, merchantBClient, customerB, 5_000)

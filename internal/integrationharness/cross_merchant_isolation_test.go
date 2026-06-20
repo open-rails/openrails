@@ -42,9 +42,8 @@ type adminBillingProfileSnapshot struct {
 }
 
 type selfAccountSnapshot struct {
-	Currency        string `json:"currency"`
-	BalanceAmount   int64  `json:"balance_amount"`
-	AvailableAmount int64  `json:"available_amount"`
+	Currency      string `json:"currency"`
+	BalanceAmount int64  `json:"balance_amount"`
 }
 
 // TestAPIKeyCrossMerchantIsolationHTTP: merchant A's API key sees only
@@ -317,6 +316,10 @@ func selfAccount(t *testing.T, baseURL, token string) selfAccountSnapshot {
 	t.Helper()
 	status, body := requestJSON(t, http.MethodGet, baseURL+"/v1/me/account?currency=usd", token, nil)
 	require.Equalf(t, http.StatusOK, status, "self account: %s", string(body))
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(body, &raw))
+	require.NotContains(t, raw, "held_amount")
+	require.NotContains(t, raw, "available_amount")
 	var out selfAccountSnapshot
 	require.NoError(t, json.Unmarshal(body, &out))
 	return out

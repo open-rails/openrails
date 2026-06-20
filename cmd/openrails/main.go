@@ -144,7 +144,7 @@ func main() {
 	mintMerchantAPIKeyCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to full merchant API permissions")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushBootstrapCmd(), newPushMerchantConfigCmd(), mintMerchantAPIKeyCmd, newPushCatalogCmd(), newPullProviderCmd(), newIntentsCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushBootstrapCmd(), newPushMerchantConfigCmd(), mintMerchantAPIKeyCmd, newPushCatalogCmd(), newPullProviderCmd(), newIntentsCmd(), newDataCmd(), newAuthCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

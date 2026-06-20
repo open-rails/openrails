@@ -41,7 +41,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 	// (the tenant that owns the test merchant). Its STORED authority lets it
 	// administer the merchant via the existing #481 role-based authz.
 	authorized := standalone.RegisterRemoteApplication(
-		"or484-authorized", dbtest.TestMerchantSlug, controlplane.OperatorRole)
+		"or484-authorized", dbtest.TestMerchantSlug, controlplane.OwnerRole)
 
 	// A JWKS principal with NO membership/role on the owner_org: it owns no
 	// active merchant, so it cannot administer this one (fail closed).

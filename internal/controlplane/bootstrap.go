@@ -60,10 +60,12 @@ type BootstrapOptions struct {
 // default merchant's own org (or carried on the minted admin API key).
 //
 // It runs AFTER migrations / at startup, exclusively through in-process AuthKit
-// CORE calls (CreateOrg / DefineRole / SetRolePermissions / AssignRole /
-// MintAPIKey) - never raw AuthKit SQL or a private HTTP route. Re-running
-// it is safe: org creation, role definition, and catalog seeding are upserts;
-// the API key is minted only when none already exists.
+// CORE calls (CreateOrg / AddMember / AssignRole / MintAPIKey) - never raw
+// AuthKit SQL or a private HTTP route. OpenRails defines NO role of its own
+// (#543): the admin is made the org `owner` (AuthKit's built-in `org:*` role),
+// and the API key is direct permission-scoped. Re-running it is safe: org
+// creation and owner assignment are idempotent; the API key is minted only when
+// none already exists.
 func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*BootstrapResult, error) {
 	if c == nil {
 		return nil, errors.New("controlplane: nil control plane")
@@ -105,27 +107,23 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	}
 	res.BootstrapOrgID = authkitOrg.ID
 
-	// 2. Define the admin role and seed it the full OpenRails catalog
-	//    (idempotent: DefineRole upserts, SetRolePermissions replaces).
-	if err := core.DefineRole(ctx, slug, OperatorRole); err != nil {
-		return nil, fmt.Errorf("controlplane: define admin role: %w", err)
-	}
-	if err := core.SetRolePermissions(ctx, slug, OperatorRole, OperatorRolePermissions()); err != nil {
-		return nil, fmt.Errorf("controlplane: seed admin role permissions: %w", err)
-	}
-
-	// 3. Optionally assign the admin role to an initial admin user.
+	// 2. Make the initial admin the org OWNER. OpenRails defines/seeds NO role of
+	//    its own (#543): authority comes from AuthKit's built-in `owner` role,
+	//    whose `org:*` grant (seeded by CreateOrg) already covers every OpenRails
+	//    `org:` catalog permission. Server-to-server automation uses the
+	//    direct permission-scoped admin API key minted below, never a role.
 	if adminID := strings.TrimSpace(opts.InitialAdminUserID); adminID != "" {
-		// AddMember is idempotent (ON CONFLICT DO NOTHING semantics in AuthKit);
-		// AssignRole only succeeds once the user is a member.
+		// AddMember is idempotent; AssignRole only succeeds once a member.
+		// Assigning the reserved `owner` role does NOT alter its seeded `org:*`
+		// grant — AssignRole's materialize step is a no-op for the owner role.
 		if err := core.AddMember(ctx, slug, adminID); err != nil {
 			return nil, fmt.Errorf("controlplane: add initial admin to bootstrap org: %w", err)
 		}
-		if err := core.AssignRole(ctx, slug, adminID, OperatorRole); err != nil {
-			return nil, fmt.Errorf("controlplane: assign admin role to initial admin: %w", err)
+		if err := core.AssignRole(ctx, slug, adminID, OwnerRole); err != nil {
+			return nil, fmt.Errorf("controlplane: assign org owner to initial admin: %w", err)
 		}
 		log.WithFields(log.Fields{"bootstrap_org": slug, "user_id": adminID}).
-			Info("controlplane: assigned admin role to initial admin")
+			Info("controlplane: assigned org owner to initial admin")
 	}
 
 	// 4. Record the owning AuthKit org on the bootstrap merchant's directory row

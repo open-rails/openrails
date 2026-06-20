@@ -7,10 +7,11 @@
 //   - mounts only the AuthKit route groups it intentionally exposes (NOT the
 //     full DefaultAPI surface),
 //   - runs with public user registration and public org management disabled,
-//   - bootstraps the default merchant's own AuthKit org, OpenRails roles, the
-//     OpenRails `org:` permission set, and an initial deployment admin API key
-//     through in-process AuthKit CORE calls (CreateOrg / DefineRole /
-//     AssignRole / MintAPIKey) — never raw SQL or a private HTTP route.
+//   - bootstraps the default merchant's own AuthKit org, the OpenRails `org:`
+//     permission catalog, and an initial deployment admin API key through
+//     in-process AuthKit CORE calls (CreateOrg / AssignRole / MintAPIKey) — never
+//     raw SQL or a private HTTP route. OpenRails defines NO org role of its own
+//     (#543): the admin is made the org `owner`; the API key is permission-scoped.
 //
 // HARDCUT (#537): merchant-local authority lives in the caller's merchant
 // AuthKit org (`org:` permissions). Cross-merchant directory authority lives in
@@ -167,20 +168,32 @@ func CatalogNames() []string {
 	return out
 }
 
-// Admin-role identity. The operator role is a merchant-local org role. The
-// role identifier is kept stable ("openrails-operator") to avoid re-seeding
-// existing deployments.
+// Admin-role identity.
+//
+// OpenRails defines/seeds NO org role of its own (#543): merchant-admin authority
+// comes from AuthKit's built-in `owner` role for human admins (OwnerRole, holds
+// `org:*`) and from direct permission-scoped API keys for server-to-server
+// automation. `OperatorRole` survives only as a test-fixture name; production
+// never defines it in an org.
 const (
-	// OperatorRole is the OpenRails admin role seeded under a merchant's own AuthKit
-	// org. It holds the merchant-local OpenRails `org:` permissions.
+	// OwnerRole is AuthKit's built-in, reserved org-owner role (core's hardcoded
+	// "owner"). Its `org:*` grant — seeded by AuthKit on CreateOrg — expands over
+	// the OpenRails `org:` catalog, so the org owner can perform every
+	// merchant-admin operation. OpenRails does NOT define this role; it only
+	// ASSIGNS it to the bootstrap admin.
+	OwnerRole = "owner"
+
+	// OperatorRole is a legacy role name retained for TEST FIXTURES only. OpenRails
+	// no longer seeds or declares it in any org (#543).
 	OperatorRole = "openrails-operator"
 
 	// PlatformRole is the AuthKit platform role name used by hosted deployments.
 	PlatformRole = "openrails-platform-superadmin"
 )
 
-// OperatorRolePermissions returns the permission names granted to a merchant's
-// operator role: the OpenRails host-defined `org:` permission set.
+// OperatorRolePermissions returns the full OpenRails `org:` catalog permission
+// set. It is NOT a role: it is used to DIRECT-SCOPE the admin API key (a key
+// carries permissions, not a role) and by test fixtures. See CatalogNames.
 func OperatorRolePermissions() []string {
 	return CatalogNames()
 }
