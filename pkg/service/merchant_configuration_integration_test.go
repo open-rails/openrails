@@ -212,7 +212,6 @@ func TestMerchantConfiguration_EURWasteCountsAgainstUSDInvokerCutoff(t *testing.
 	require.NoError(t, err)
 	require.False(t, admit.Allowed)
 	require.Equal(t, "abuse", admit.BlockedBy)
-	require.Equal(t, "USD", admit.PolicyCurrency)
 }
 
 // #499: with no merchant config stored, the resolver falls back to

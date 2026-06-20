@@ -8,27 +8,23 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
-	policyginmw "github.com/open-rails/openrails/internal/auth/policy/ginmw"
 	"github.com/open-rails/openrails/internal/controlplane"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// MerchantAdminPrefix is the admin-gated merchant provisioning/lifecycle API
-// (issue #225). It is gated by the SAME admin authority as the rest of /v1/admin
-// (#312): only a caller holding the LIVE openrails:admin permission in their own
-// merchant may provision, suspend, resume, delete, or change a merchant's tier or
-// processor credentials.
+// MerchantAdminPrefix is the platform-gated merchant provisioning/lifecycle API
+// (issue #225). It is a cross-merchant directory surface, so it requires
+// openrails:platform:superadmin rather than per-merchant openrails:admin.
 const MerchantAdminPrefix = "/admin/merchants"
 
-// registerMerchantAdminRoutes mounts the admin-gated merchant provisioning API.
+// registerMerchantAdminRoutes mounts the platform-gated merchant provisioning API.
 func (s *Server) registerMerchantAdminRoutes(e *gin.Engine) {
 	group := e.Group(StandaloneV1Prefix + MerchantAdminPrefix)
 	group.Use(s.authProvider.Required())
-	// HARDCUT (#312): merchant provisioning is gated by the LIVE openrails:admin
-	// permission held in the caller's own merchant — not a claim-based operator
-	// merchant. The control plane (always present, #469) is the checker.
-	group.Use(policyginmw.AdminPermissionRequired(s.controlPlane, controlplane.PermAdmin))
+	group.Use(ginmw.UserSessionPlatformPrincipalRequired(s.controlPlane))
+	group.Use(ginmw.RequirePermission(controlplane.PermPlatformSuperadmin))
 
 	group.POST("", s.merchantProvisionHandler())
 	group.GET("/:id", s.merchantGetHandler())
@@ -45,7 +41,7 @@ func (s *Server) registerMerchantAdminRoutes(e *gin.Engine) {
 	group.POST("/:id/credentials/test-stripe", s.merchantTestStripeHandler())
 
 	log.WithField("prefix", StandaloneV1Prefix+MerchantAdminPrefix).
-		Info("admin-gated merchant provisioning routes registered")
+		Info("platform-gated merchant provisioning routes registered")
 }
 
 func merchantIDParam(c *gin.Context) (merchant.ID, bool) {

@@ -21,7 +21,7 @@ import (
 // principal's subject (r.GetUser()), never caller-supplied: there is no
 // customer_id parameter anywhere on this surface.
 //
-// The payer is resolved exactly like the rest of /v1/self
+// The payer is resolved exactly like the rest of /v1/me
 // (identity.CustomerIDFromString over the acting subject — see
 // GetMyUsage/GetMyInvoices), and every query runs RLS-scoped to the pinned
 // tenant.
@@ -54,7 +54,7 @@ type selfAccountResponse struct {
 	Settings              any    `json:"settings"`
 }
 
-// GetMyCreditAccount (GET /v1/self/account?currency=) returns the authenticated
+// GetMyCreditAccount (GET /v1/me/account?currency=) returns the authenticated
 // subject's account settings + balance/outstanding for one currency
 // (issue #339). It reuses the service-side GetCreditAccount/settings logic,
 // scoped to the delegated subject.
@@ -112,7 +112,7 @@ type selfAccountSettingsRequest struct {
 	AlertThresholdPct        *int    `json:"alert_threshold_pct"`
 }
 
-// SetMyCreditAccountSettings (PUT /v1/self/account/settings) configures the
+// SetMyCreditAccountSettings (PUT /v1/me/account/settings) configures the
 // authenticated subject's OWN billing account (issue #339): billing mode,
 // spend caps, auto-top-up, expiry default. Gated by the dedicated
 // openrails:self:billing:write permission (read tokens cannot reconfigure).
@@ -169,7 +169,7 @@ func SetMyCreditAccountSettings(r *httprequest.Request) {
 	r.SuccessJSON(settings)
 }
 
-// GetMyAccountTransactions (GET /v1/self/account/transactions?currency=&limit=&offset=)
+// GetMyAccountTransactions (GET /v1/me/account/transactions?currency=&limit=&offset=)
 // lists the authenticated subject's transactions for one currency
 // (issue #339), newest first. Same wire shape as the service-side route, scoped
 // to the delegated subject.

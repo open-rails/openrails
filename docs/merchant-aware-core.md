@@ -2,7 +2,7 @@
 
 OpenRails is merchant-aware: every billing row belongs to an explicit merchant,
 and there is no default merchant fallback. The merchant id is the isolation key
-for Postgres RLS, background jobs, service-token resource scopes, ClickHouse
+for Postgres RLS, background jobs, API-key resource scopes, ClickHouse
 analytics, and webhook credential lookup.
 
 ## Vocabulary
@@ -35,7 +35,7 @@ The Go primitive is `pkg/merchant`:
 
 There is no `FromContextOrDefault` path. Embedded hosts bind a merchant at
 construction time or provide a principal mapper that returns an explicit
-merchant id. Standalone HTTP requests resolve the merchant from service-token
+merchant id. Standalone HTTP requests resolve the merchant from API-key
 resources, registered issuer/JWKS mapping, route parameters, or control-plane
 admin authorization.
 

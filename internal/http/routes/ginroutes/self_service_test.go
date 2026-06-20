@@ -19,7 +19,7 @@ import (
 )
 
 // These tests pin the SELF-SERVICE route table (RegisterSelfServiceRoutes) for
-// the browser-direct `/v1/self/*` surface that host apps call with
+// the browser-direct `/v1/me/*` surface that host apps call with
 // delegated tokens (issues #215/#216 consumer gap). The gap closed here: resume,
 // change-tier, and update-subscription-payment-method were previously mounted
 // ONLY on the legacy login-JWT `/me/*` group, so a browser holding a delegated
@@ -64,7 +64,7 @@ func newSelfRouterWithResolver(t *testing.T, resolver ginmw.DelegatedResolver) *
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	group := e.Group("/v1/self")
+	group := e.Group("/v1/me")
 	// rt==nil: MerchantDBConn is skipped, and the wrapped handlers are never
 	// reached on the 401/403 paths these tests assert.
 	RegisterSelfServiceRoutes(group, nil, ginmw.DelegatedSelfRequired(resolver))
@@ -125,17 +125,17 @@ func TestSelfService_SubscriptionMutationsMountedAndGated(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"resume", http.MethodPost, "/v1/self/subscriptions/sub_123/resume"},
-		{"change-tier", http.MethodPost, "/v1/self/subscriptions/sub_123/change-tier"},
-		{"update-payment-method", http.MethodPut, "/v1/self/subscriptions/sub_123/payment-method"},
-		{"cancel", http.MethodPost, "/v1/self/subscriptions/sub_123/cancel"},
-		{"solana-cancel-tx", http.MethodPost, "/v1/self/subscriptions/sub_123/solana-cancel-tx"},
-		{"solana-cancel-confirm", http.MethodPost, "/v1/self/subscriptions/sub_123/solana-cancel"},
-		{"solana-tier-change", http.MethodPost, "/v1/self/subscriptions/sub_123/solana-tier-change"},
-		{"solana-tier-change-confirm", http.MethodPost, "/v1/self/subscriptions/sub_123/solana-tier-change/confirm"},
-		{"solana-wallet-link", http.MethodPut, "/v1/self/wallets/solana"},
-		{"solana-wallet-unlink", http.MethodDelete, "/v1/self/wallets/solana"},
-		{"usdc-funding-create", http.MethodPost, "/v1/self/usdc-funding-sessions"},
+		{"resume", http.MethodPost, "/v1/me/subscriptions/sub_123/resume"},
+		{"change-tier", http.MethodPost, "/v1/me/subscriptions/sub_123/change-tier"},
+		{"update-payment-method", http.MethodPut, "/v1/me/subscriptions/sub_123/payment-method"},
+		{"cancel", http.MethodPost, "/v1/me/subscriptions/sub_123/cancel"},
+		{"solana-cancel-tx", http.MethodPost, "/v1/me/subscriptions/sub_123/solana-cancel-tx"},
+		{"solana-cancel-confirm", http.MethodPost, "/v1/me/subscriptions/sub_123/solana-cancel"},
+		{"solana-tier-change", http.MethodPost, "/v1/me/subscriptions/sub_123/solana-tier-change"},
+		{"solana-tier-change-confirm", http.MethodPost, "/v1/me/subscriptions/sub_123/solana-tier-change/confirm"},
+		{"solana-wallet-link", http.MethodPut, "/v1/me/wallets/solana"},
+		{"solana-wallet-unlink", http.MethodDelete, "/v1/me/wallets/solana"},
+		{"usdc-funding-create", http.MethodPost, "/v1/me/usdc-funding-sessions"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -154,8 +154,8 @@ func TestSelfService_SubscriptionMutationsMountedAndGated(t *testing.T) {
 func TestSelfService_CancelScopeAdmitsResumeAndChangeTier(t *testing.T) {
 	perms := []string{controlplane.PermSelfSubscriptionCancel}
 	for _, path := range []string{
-		"/v1/self/subscriptions/sub_123/resume",
-		"/v1/self/subscriptions/sub_123/change-tier",
+		"/v1/me/subscriptions/sub_123/resume",
+		"/v1/me/subscriptions/sub_123/change-tier",
 	} {
 		e := newSelfRouter(t, perms)
 		// Recover the handler panic (nil runtime) so we can assert the GATE
@@ -175,19 +175,19 @@ func TestSelfService_CancelScopeAdmitsResumeAndChangeTier(t *testing.T) {
 func TestSelfService_PaymentMethodRequiresManageScope(t *testing.T) {
 	// Holding only the cancel scope: payment-method update is forbidden.
 	e := newSelfRouter(t, []string{controlplane.PermSelfSubscriptionCancel})
-	w := doSelf(e, http.MethodPut, "/v1/self/subscriptions/sub_123/payment-method", true)
+	w := doSelf(e, http.MethodPut, "/v1/me/subscriptions/sub_123/payment-method", true)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }
 
 func TestSelfService_WalletsRequireWalletManageScope(t *testing.T) {
 	e := newSelfRouter(t, []string{controlplane.PermSelfPaymentMethods})
-	w := doSelf(e, http.MethodPut, "/v1/self/wallets/solana", true)
+	w := doSelf(e, http.MethodPut, "/v1/me/wallets/solana", true)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 
 	e = newSelfRouter(t, []string{controlplane.PermSelfWallets})
 	func() {
 		defer func() { _ = recover() }()
-		w := doSelf(e, http.MethodPut, "/v1/self/wallets/solana", true)
+		w := doSelf(e, http.MethodPut, "/v1/me/wallets/solana", true)
 		require.NotEqual(t, http.StatusForbidden, w.Code, "wallet manage scope must admit wallet upsert")
 		require.NotEqual(t, http.StatusNotFound, w.Code, "wallet upsert route must be mounted")
 	}()
@@ -196,13 +196,13 @@ func TestSelfService_WalletsRequireWalletManageScope(t *testing.T) {
 // No token at all is rejected by the delegated auth middleware before any gate.
 func TestSelfService_ResumeRejectedWithoutToken(t *testing.T) {
 	e := newSelfRouter(t, []string{controlplane.PermSelfSubscriptionCancel})
-	w := doSelf(e, http.MethodPost, "/v1/self/subscriptions/sub_123/resume", false)
+	w := doSelf(e, http.MethodPost, "/v1/me/subscriptions/sub_123/resume", false)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
 func TestSelfService_RejectsServiceTokenCredential(t *testing.T) {
 	e := newSelfRouterWithResolver(t, fakeDelegatedResolver{err: controlplane.ErrDelegatedInvalid})
-	w := doSelfBearer(e, http.MethodPost, "/v1/self/subscriptions/sub_123/resume", "openrails_st_keyid_secret")
+	w := doSelfBearer(e, http.MethodPost, "/v1/me/subscriptions/sub_123/resume", "openrails_st_keyid_secret")
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Contains(t, w.Body.String(), "delegated_token_invalid")
 }

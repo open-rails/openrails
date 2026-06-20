@@ -9,6 +9,181 @@
 
 ---
 
+# #528: Converge billing admin on the delegated model — retire per-user /v1/admin, rename /merchant-admin → /admin
+
+**Completed:** yes
+
+**Actual-code audit (2026-06-19):** OpenRails side is complete. The delegated
+billing-admin surface is `/v1/admin/*`; composite user-detail includes
+subscriptions, entitlements, payments, payment methods, product access,
+multi-currency credit balances, and owed money; payment methods have an admin
+delete action; old dedicated admin reads/actions and the old live-admin catalog
+checker path are gone. Host-repo path migration is complete: Doujins live code
+uses `/api/openrails/v1/admin/*`; Cozy Art only had a tracker note, now updated;
+Tensorhub had no `/merchant-admin` references in the searched checkout.
+
+**Remaining-scope decision (2026-06-19):** admins MUST be able to inspect a user's
+multi-currency credit balances, owed money, and payment methods, and must be able
+to delete payment methods when needed. Do this in the composite admin user-detail
+plus explicit payment-method delete action; do not keep old processor-specific
+read endpoints. Unused old live-admin catalog/checker paths can be cleaned up.
+
+The per-user `/v1/admin` model is outdated. The correct model (same as #527's bootstrap): a merchant has an org + issuer in OpenRails' AuthKit; the issuer (host app) mints JWTs that grant ITS users permissions in OpenRails — a user reading/modifying their own billing (`openrails:self:*`), or an admin-user acting on another user (`openrails:merchant:*`). That is the **delegated** model, served today by `/v1/merchant-admin/*` (+ `/v1/self/*`). The per-user `openrails:admin` surface (`/v1/admin/*`, `HasAdminPermission(org,userID)` live check) assumes local users that the standalone model doesn't have.
+
+**Investigation (2026-06-19):**
+- No consumer calls OpenRails' billing `/v1/admin/*`: embedded hosts (cozy-art/doujins/tensorhub) use `/v1/merchant-admin/*` + `/v1/self/*`; their own `/v1/admin/*` paths are app-admin (runpod/fleet/galleries), unrelated. No host imports `embgin.RegisterAdminRoutes`. In standalone it's unreachable (no local users). So the per-user surface is effectively dead.
+- It is NOT a pure rename: the two surfaces each have unique endpoints.
+  - `/v1/admin` only: `GET /payments`+`/payments/:id`, `/intents`, `POST /solana/recurring/plans`, `/users/:id/product-access` (get/grant/revoke), entitlement-features (RegisterEntitlementFeatureRoutes), `/reconcile/*`.
+  - `/v1/merchant-admin` only: `/merchant-configuration` (get/put), `/secrets/*`.
+  - Shared (handlers reused): subscriptions, refund, off-channel, users/* profile+entitlements+nmi+ccbill, metrics, repair-alerts, manual-rebill-attempts.
+
+**Plan:**
+- Phase 1 (OpenRails, non-breaking): port the `/v1/admin`-only endpoints onto the delegated surface (RegisterMerchantAdminRoutes) with `openrails:merchant:*` perms; delete the per-user RegisterAdminRoutes + `registerAdminRoutesOn/At` + server.go mount + embedhttp mount + `embgin.RegisterAdminRoutes`. (Leave `HasAdminPermission`/`IsLiveAdmin` for now — still used by admin-gated catalog reads; migrate those to the delegated principal as a follow-up.)
+- Phase 2 (breaking, cross-repo): rename `MerchantAdminRoutePrefix` `/merchant-admin` → `/admin` and `RegisterMerchantAdminRoutes` → `RegisterAdminRoutes`; update host frontends `/v1/merchant-admin/*` → `/v1/admin/*` (and `/billing/...`) in cozy-art/doujins/tensorhub.
+
+**Sequencing decision (RESOLVED):** Phase 2 breaks host frontends the moment the path changes. Either (a) hard cut + update all three host repos in lockstep, or (b) mount the delegated surface at BOTH `/admin` and `/merchant-admin` for a deprecation window, migrate hosts, then drop `/merchant-admin`.
+
+**DECIDED:** hard cut (no alias, no old-route support); hosts updated later. Also redesign routes + request/response shapes while consolidating — minimal RESTful surface, only fields actually used, no theoretical/unused routes or fields.
+
+## Historical proposed minimal RESTful surface (superseded by the resolution below)
+
+Single delegated admin surface at `/v1/admin/*` (`openrails:merchant:*` perms). Consolidations vs today in **bold**:
+
+```
+Subscriptions
+  GET    /admin/subscriptions
+  GET    /admin/subscriptions/{id}
+  DELETE /admin/subscriptions/{id}                 # cancel (was POST /:id/cancel)
+
+Payments
+  GET    /admin/payments[?user_id=]                # **folds /users/{id}/payments into a filter**
+  GET    /admin/payments/{id}
+  POST   /admin/payments/{id}/refunds              # was POST /:id/refund
+  POST   /admin/payments                           # record off-channel (body: user_id + fields)
+
+Users (billing)
+  GET    /admin/users/{id}                         # billing profile
+  GET    /admin/users/{id}/payment-methods         # **folds /nmi + /ccbill + their /metrics into one shape**
+  GET    /admin/users/{id}/entitlements
+  POST   /admin/users/{id}/entitlements
+  DELETE /admin/users/{id}/entitlements/{id}
+
+Entitlement features / product features
+  GET/POST        /admin/features
+  GET/POST/DELETE /admin/products/{id}/features
+
+Metrics
+  GET /admin/metrics                               # **one response folding summary/revenue/subscriptions/processors/churn**
+
+Configuration & secrets
+  GET/PUT          /admin/configuration
+  GET              /admin/secrets
+  PUT/DELETE       /admin/secrets/{name}
+  POST             /admin/secrets/{name}/validate
+
+Operational
+  GET /admin/repair-alerts
+  GET /admin/manual-rebill-attempts
+  GET /admin/provider-intents                      # was /intents
+
+Reconciliation (#107)
+  GET/POST /admin/reconcile/runs
+  GET      /admin/reconcile/runs/{id}
+  GET      /admin/reconcile/findings
+  PATCH    /admin/reconcile/findings/{id}          # {status: acknowledged|dismissed}; was POST /ack + /dismiss
+
+Recurring plans (#254)
+  POST /admin/recurring-plans                      # was /solana/recurring/plans
+```
+
+Shapes: trim each request/response to fields a consumer actually reads (ground in host frontend usage during impl); drop pagination/filter knobs nothing uses, collapse single-use nested objects.
+
+**Usage data (host repos, 2026-06-19):** of the merchant-admin surface, hosts only call `merchant-admin/subscriptions`, `merchant-admin/users/{id}`, `merchant-admin/metrics/summary`. (`/v1/self/*` is heavily used for self-service; `/v1/service/*` for s2s — both out of #528 scope. The `/v1/admin/*` paths in host repos are the hosts' OWN app admin — runpod/galleries/creators/etc. — not OpenRails billing.) Admin UIs are incomplete, so "uncalled" ≠ "droppable" for obvious console operations.
+
+**Resolution (FINAL — user decisions 2026-06-19):**
+- DROP (routes + dead handlers): `/provider-intents`, `/reconcile/*` (#107), `/recurring-plans` (#254), entitlement-features + `active_entitlements` (#245).
+- Metrics: fold the 5 into one `GET /admin/metrics`.
+- **Three separate concepts, kept distinct** (NOT merged): entitlements, product-access/ownership (#250), credit balance. Each is its own section in user reads + its own write actions.
+- **No dedicated read endpoints for entitlements/product-access/credits.** Their info is EMBEDDED in user reads (user-detail + user list/search). Writes stay as dedicated actions.
+
+Resulting user surface:
+```
+GET    /admin/users[?entitlement={slug}&...]   # list/search; each row embeds entitlements/product-access/credit summary (NEW — admin user search)
+GET    /admin/users/{id}                        # billing profile: subscriptions + payment-methods + entitlements + product-access + credit-balance sections
+POST   /admin/users/{id}/entitlements           # grant
+DELETE /admin/users/{id}/entitlements/{slug}    # revoke
+POST   /admin/users/{id}/product-access         # grant ownership (#250, separate concept)
+DELETE /admin/users/{id}/product-access/{id}    # revoke ownership
+# credit-balance read embedded; credit write = existing PermMerchantCreditsWrite op (keep if present)
+# DROPPED reads: GET /users/{id}/entitlements, /product-access, /nmi, /ccbill, /nmi/metrics, /ccbill/metrics, active_entitlements
+```
+- `payment-methods` folds /nmi + /ccbill (+ metrics) into one embedded section / `GET /admin/users/{id}/payment-methods`.
+- Self surface (`/v1/self/*`) likewise embeds the caller's active entitlements in their self-detail response.
+- Admin user search (`GET /admin/users?entitlement=`) is NEW capability (no current handler) — build minimal (list + filter), or flag as follow-up if the list query is non-trivial.
+
+**Implementation plan — build-safe increments (DECIDED, in progress). Detailed checklists below.**
+
+### Increment 1 (structural) — DONE (commit 53fbbe3c)
+- [x] ginroutes/routes.go: `MerchantAdminRoutePrefix`→`AdminRoutePrefix` ("/admin"); `RegisterMerchantAdminRoutes`→`RegisterAdminRoutes`; ported `GET /admin/payments` + `/payments/:id` (`read`).
+- [x] Unmount per-user surface: `server.go` (drop `registerAdminRoutesOn` call), `embedhttp.go` (drop `RegisterAdminRoutes` mount), `pkg/embedded/gin/gin.go` (delete `embgin.RegisterAdminRoutes`).
+- [x] Rewire callers: routes_self.go, pkg/embedded/gin/self.go. Update tests: ginroutes/self_service_test.go, routes_self_test.go, pkg/embedded/gin/self_test.go, embedded_mux_test.go.
+- [x] Validated via HTTP route harness (`go test ./internal/http/... ./pkg/embedded/gin/...`).
+
+### Increment 2 (drops) — DONE (commit a89ca887): dropped features' routes + dead per-user code removed; self handlers + product-access kept; build+vet+route tests green.
+- [x] Delete dead per-user `RegisterAdminRoutes` (internal/http/routes/routes.go) + `registerAdminRoutesAt`/`registerAdminRoutesOn` (internal/http/routes_admin.go).
+- [x] **Before deleting each handler, grep its callers** — DONE (2026-06-19): kept lower-level `/self`, `/service`, worker, repo, and catalog-action code; removed only admin-only reads/actions.
+- [x] `/provider-intents`: drop route + `httphandlers.GetAdminProviderIntents` (verify not used elsewhere). DONE (2026-06-19): no handler/function/route remains; provider-intent DB/worker code stays live.
+- [x] `/reconcile/*` (#107): drop routes + `AdminReconcile{Run,ListRuns,GetRun,ListFindings,AckFinding,DismissFinding}`. DONE (2026-06-19): old admin-run handlers are gone; convergence/reconcile services, workers, migrations, and catalog item reconcile actions remain live and intentionally kept.
+- [x] `/recurring-plans` (#254): drop route + `AdminPublishSolanaPlan` + `publishSolanaPlanRequest` (internal/http/handlers/solana_recurring.go). DONE (2026-06-19): old admin plan-publish handler is gone; on-chain execution/webhook paths remain live.
+- [x] entitlement-features + `active_entitlements` (#245): delete `RegisterEntitlementFeatureRoutes` (internal/http/routes/entitlement_features.go) + handlers `Create/ListEntitlementFeatures`, `ServiceGetActiveEntitlements`, `List/Attach/DetachProductFeature`. DONE (2026-06-19): old route/handlers are gone; repo/sqlc code remains for internal product-access/feature data.
+- [x] Fix orphaned imports; remove/upd tests referencing dropped handlers. Build + vet + route tests green. DONE (2026-06-19): focused route/handler packages are green.
+
+### Increment 3 (RESTful route shapes) — DONE (commit d0336be0)
+- [x] ginroutes/routes.go: subscription cancel `POST /subscriptions/:id/cancel` → `DELETE /subscriptions/:id` (handler `AdminCancelSubscription` unchanged).
+- [x] refund `POST /payments/:id/refund` → `POST /payments/:id/refunds` (in route; DB-validated by `TestAdminRefundPayment*` against the delegated surface).
+- [x] Update ginroutes/self_service_test.go path assertions. Build + tests green.
+
+### Increment 4 (shapes — handler logic; the big one) — NOT a mechanical pass; needs design decisions + DB/ClickHouse integration tests. Findings from increment-2/3 investigation:
+> - **product-access is currently DEAD code**: `ginroutes.RegisterProductAccessRoutes` (which mounts /me + /service + /admin product-access) is defined but **mounted nowhere**. So "porting" it = reviving a dormant feature; also decide the /me + /service surfaces, not just /admin. Handlers exist (`GetMyProducts`, `GetAdminUserProductAccess`, `Grant/RevokeAdminProductAccess`, `ServiceGetUserProductAccess`).
+> - **metrics fold is a design decision, not a fold**: the 5 handlers (admin_metrics.go) have DIFFERENT default ranges (churn 180d, others 30d), `granularity` params (revenue/subscriptions), and per-section multi-currency disambiguation (`?currency`, else error on multi). A single `GET /admin/metrics` must decide: one `?period`+`?currency` applied uniformly (churn computes its own window internally), sections as `{summary,revenue,subscriptions,processors,churn}`. Confirm the unified shape before building. ClickHouse-backed → needs the analytics stack to integration-test.
+> - composite user-detail + payment-methods + self-entitlements compose multiple services → DB-integration-test against dbtest/compose.
+- [x] New perm `PermMerchantProductAccessWrite = "openrails:merchant:product-access:write"` in internal/controlplane/catalog.go (const + merchantCatalog map + MerchantCatalogNames — placed beside its sibling `PermMerchantEntitlementsWrite`; merchant perms deliberately live in merchantCatalog, NOT catalogEntries).
+- [x] Port product-access WRITES to ginroutes/routes.go: `POST /admin/users/:user_id/product-access` (`GrantAdminProductAccess`) + `DELETE /admin/users/:user_id/product-access/:id` (`RevokeAdminProductAccess`), gated by the new perm. DB-validated by `tests/admin_product_access_test.go`: grant→201 (customer_id=userID, status active) → appears in composite product_access section → DELETE→200; + 403 gate without the perm. Handlers resolve the target by `path.UserID` (no federated-v7 bug — consistent with reads).
+- [x] Composite `GET /admin/users/:user_id` (`GetAdminUserBillingProfile`, `internal/http/handlers/admin_users.go`): embeds `entitlements[]` + `payments[]` + `payment_methods[]` + `product_access[]` + `subscription` (single active). DB-validated by `TestAdminUserDetailComposite_Delegated`. The two remaining sections (`subscriptions[]`, `credit_balance[]`) are the two sub-items below.
+- [x] **`subscription` (single active) → `subscriptions[]` (ALL active).** DONE (2026-06-19): `GetAdminUserBillingProfile` now returns `subscriptions []models.Subscription` via `SubscriptionService.GetActiveSubscriptionsByUserID`; the legacy singular `subscription` field is gone. `TestAdminUserDetailComposite_Delegated` asserts `subscriptions` is present and `subscription` is absent.
+- [x] **`credit_balance[]` + owed-money section is REQUIRED.** DONE (2026-06-19): `MoneyService.ListBalancesForCustomer` lists every currency where the user has balance/settings/owed exposure, and the composite embeds `credit_balance[]` with `{currency,balance,held_balance,outstanding_owed_amount,...}`. `TestAdminUserDetailComposite_Delegated` asserts a funded currency plus an owed-only currency.
+- [x] DROP dedicated reads (routes + handlers if now-unused): `GET /users/:id/entitlements`, `/product-access` (admin), `/nmi`, `/nmi/metrics`, `/ccbill`, `/ccbill/metrics`. DONE (2026-06-19): unmounted the old admin reads from `RegisterAdminRoutes`, removed the dead NMI/CCBill/admin-entitlements/admin-product-access read handlers, and kept write actions plus composite user-detail.
+- [x] `payment_methods[]` admin visibility is REQUIRED, plus a delete action. DONE (2026-06-19): composite user-detail returns payment methods through the existing payment-method API DTO; `DELETE /admin/users/:user_id/payment-methods/:id` is gated by `openrails:merchant:payments:write` and refuses active/pending/past_due subscription-linked methods. `TestAdminUserPaymentMethodDelete_Delegated` validates delete + the composite no longer listing the method.
+- [x] Fold metrics → one `GET /admin/metrics` returning `{summary, revenue, subscriptions, processors, churn}`; 5 sub-routes removed. `GetAdminMetrics` composes the 5 analytics calls + generic `resolveMetricSection[T]` (single-currency → bare object; multi-currency needs `?currency` else 400 — this disambiguation is specific to metrics' SCALAR summaries; credit_balance above does NOT need it). DB-validated (ClickHouse) by `TestAdminMetricsFolded` (all 5 sections) + `TestAdminMetrics_RequiresMetricsRead` (403 gate).
+- [x] Self surface: caller's active entitlements ALREADY embedded — `GET /v1/self/status` (`GetMyBillingStatus`, `billing_status.go`) returns `BillingStatusResponse.Entitlements`; plus the dedicated `GET /v1/self/entitlements/active` (`SelfGetActiveEntitlements`). No further work unless we also want them in another self-detail shape.
+- [x] Shape trimming: DROPPED from #528 (2026-06-19). This is speculative DTO churn without a failing consumer; #528 now limits shape work to the required composite fixes (`subscriptions[]`, `credit_balance[]`, owed money, `payment_methods[]`, delete action) and deleted dead dedicated reads.
+- [x] DB-integration-test the composite (`subscriptions[]` + `credit_balance[]`/owed money + payment-method visibility) and admin payment-method delete against the dbtest/compose harness (extend `tests/admin_user_detail_integration_test.go`). DONE (2026-06-19): `go test ./tests -tags integration -run 'TestAdminUserDetailComposite_Delegated|TestAdminUserPaymentMethodDelete_Delegated|TestAdminSurface_RejectsWithoutBillingRead' -count=1` green.
+
+### Increment 5 (admin user search) — DROPPED from #528 (2026-06-19, user decision)
+Cut from this issue. #528 is about CONVERGING the admin surface on the delegated model, not building a new search capability — bolting a net-new `GET /admin/users?entitlement=` search on here over-scoped it.
+
+Two DIFFERENT needs were conflated under "user search," neither belongs in #528, and BOTH are deferred (build when needed) — they live in **future.md** now (the old #108 was deleted):
+1. **OpenRails' own admin-dashboard user search** — a human operator browsing/filtering users in an OpenRails-hosted billing console. Embedded hosts (doujins/cozy-art/etc.) DON'T need this: they own their user tables and have their own admin UIs. Only useful once a STANDALONE OpenRails admin GUI exists (it doesn't yet). → folded into **#228** (future.md), the standalone admin-console plan; punt.
+2. **A host-facing "which of my users have entitlement X" query** — useful for BOTH embedded and standalone hosts; now ACTIVE (doujins needs it). → **#535** (progress.md) as the billing-enrichment FILTER provider behind AuthKit's directory, not an OpenRails admin-console search.
+
+Net: #528 ships the delegated admin surface (composite user-DETAIL by id) WITHOUT a user LIST/search. See **#535** (progress.md, active) for the reverse-query provider, and **#228** (future.md) for the standalone admin console.
+
+### Cross-cutting cleanup
+- [x] **CRITICAL — migrate the `tests/` admin INTEGRATION suite to the delegated model. DONE (2026-06-19) — hard cut, per-user model fully removed.** All admin integration files now authenticate as a delegated merchant principal via `newHostSeamAdminRouter(t, suite, subject, []perms)` (host-seam `DelegatedPrincipalRequired`), hit the new `/v1/admin` paths, and assert the redesigned shapes. `go test ./tests/ -tags integration -run 'TestAdmin|TestRemoved'` is GREEN (57s, real Postgres+ClickHouse+Redis).
+  - Migrated files: `admin_user_detail_integration_test.go` (composite read + 403 gate), `admin_offchannel_payments_test.go` (payments:write), `admin_subscription_test.go` (billing:read profile + `GET /subscriptions` list + `extend`→404 regression + public health), `admin_entitlements_source_test.go` (entitlements:write grant + append-after-end + `/grants`→404 + **403 without entitlements:write**), `admin_payments_test.go` (billing:read list/get/filter + payments:write refund via `/refunds` + **403 without payments:write** + reaches-any-user-in-tenant), `admin_metrics_test.go` (single folded `GET /metrics` asserting all 5 sections + **403 without metrics:read**).
+  - Per-user model CUT from `tests/test_helpers.go`: deleted `setupTestSuiteWithAdminAuth`, `CreateAdminIdentity`, `adminOrgClaims`, `testAdminOrgSlug` (+ unused `controlplane`/`dbtest`/`embcp` imports); `setupAdminTestSuite` deleted from `admin_subscription_test.go`.
+  - **Bugs the migration EXPOSED + FIXED:**
+    1. **Grant-target customer-resolution bug (real handler bug, fixed in `internal/http/handlers/entitlements.go`):** `GrantAdminEntitlement`'s delegated branch minted a federated `(issuer,subject)` v7 customer via `UpsertCustomerByIssuerSubject`, but the admin READ path (`GetAdminUserBillingProfile`→`identity.CustomerIDFromString(userID)`), off-channel payments (`RegisterPurchase`→`customerIDFromUser`), and seeds all key on the raw `userID` (#364 UUID-only). So an admin-granted entitlement landed on a DIFFERENT customer than the user's reads/payments — the admin couldn't see what they just granted, and append-after-latest-end couldn't see prior windows. Collapsed `tenantSubjectForEntitlementGrantTarget` to always resolve by `userID` (the #364 subject), identical to reads + commerce writers. This is exactly the "wrong assumption" #528 set out to remove.
+    2. **Test-helper bit-rot vs the tenant→merchant rename:** `tests/seed_data.go` (products + prices) and `tests/db_helpers.go` (`entitlementCols`) still inserted/scanned a `tenant_id` column that no longer exists (schema uses `merchant_id`). Fixed all three.
+    3. **RLS bit-rot:** `InsertEntitlement` (and `TestAdminRevokeAccess`) called RLS-aware `Runtime.DB` with a bare context. Made `InsertEntitlement` default the canonical test merchant when none is pinned (#336 single-merchant suite); pinned the merchant in `TestAdminRevokeAccess`.
+- [x] Migrate admin-gated catalog reads off the per-user model (self-contained, DB-testable). DONE (2026-06-19): public catalog `GET /products` and `GET /prices` no longer expose inactive rows through `IsLiveAdmin`; inactive/draft catalog management belongs to `/merchant/catalog/*`. Deleted `runtime.AdminChecker`, the `server.go` runtime wiring, and dead `policy.IsLiveAdmin` + tests. Kept `AdminPermissionChecker`/`AdminPermissionRequired*` because they are still real gates for merchant action routes and `/v1/admin/merchants`, not leftover billing-admin user-detail paths.
+- [x] Docs + comment sweep (deferred from Increment 1): DONE (2026-06-19). Current docs/comments now describe `/v1/admin/*` / `/billing/v1/admin/*` and `RegisterAdminRoutes`; only historical tracker notes/test names still use `merchant-admin` as old-state or conceptual wording.
+- [x] (Later, separate repos) update host frontends (cozy-art/doujins/tensorhub): `/v1/merchant-admin/*`→`/v1/admin/*` paths + new shapes; cozy-art may switch any per-user `/v1/admin` billing calls to the delegated surface. DONE (2026-06-19): Doujins embedded route bridge, frontend admin billing client, admin edit billing loads, metrics calls, and Playwright contract probes now use `/v1/admin`; Cozy Art tracker note updated; Tensorhub search found no stale OpenRails billing admin path.
+
+**Verification each increment:** build + vet + route/unit tests, AND DB-integration tests via the `internal/dbtest` harness (testcontainers, or `OPENRAILS_TEST_DB_URL` against `docker-compose.yaml`); host-level e2e via `~/cozy/e2e` and the host repos' full-stack compose. (Earlier "not DB-testable" note was WRONG — corrected.)
+
+---
+
 # #1: seed-data-helpers
 
 **Category:** testing-infra
@@ -12191,7 +12366,7 @@ Provider-account notes:
 - `go test -tags integration ./internal/bootstrap -run TestReconcileMerchantManifestAppliesMerchantConfiguration -count=1`
 - `go test -tags integration ./internal/integrationharness -run TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant -count=1` — boots the real standalone server graph and posts to `/v1/merchants/{merchant}/webhooks/stripe`.
 - `go test ./migrations/postgres`
-- `SQLC_ADMIN_DATABASE_URL='postgres://admin:admin_password@127.0.0.1:25432/openrails_db?sslmode=disable' task sqlc`
+- `POSTGRES_HOST_PORT=5434 task sqlc`
 - `git diff --check`
 
 ---

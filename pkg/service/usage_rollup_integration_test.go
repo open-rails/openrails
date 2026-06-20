@@ -44,6 +44,7 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 		require.NoError(t, ms.InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
 			CustomerID: payer.UUID(),
 			Invoker:    "user:a",
+			Currency:   money.DefaultCurrency,
 			EventType:  "owner/" + e.endpoint,
 			Amount:     e.amount,
 			Resource:   e.endpoint,

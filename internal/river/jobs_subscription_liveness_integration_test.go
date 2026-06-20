@@ -70,6 +70,7 @@ func newLivenessFixture(t *testing.T, processor models.Processor, periodEndAgo t
 	description := "Liveness test"
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		ID: f.productID, Slug: "live_product_" + uuid.New().String(), DisplayName: "Liveness Product",
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description, Status: string(models.CatalogStatusActive),
 		EntitlementsSpec: []byte(`{"premium": null}`),
 		CreatedAt:        now, UpdatedAt: now,
@@ -77,7 +78,8 @@ func newLivenessFixture(t *testing.T, processor models.Processor, periodEndAgo t
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID: f.priceID, ProductID: f.productID, Amount: 999, Currency: "usd",
-		Status: string(models.CatalogStatusActive), BillingCycleDays: &billingDays32, CreatedAt: now, UpdatedAt: now,
+		MerchantID: dbtest.TestMerchantID.UUID(),
+		Status:     string(models.CatalogStatusActive), BillingCycleDays: &billingDays32, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
@@ -47,7 +48,9 @@ func TestCancelSubscriptionRequiresAuth(t *testing.T) {
 }
 
 func TestCancelSubscriptionNotFound(t *testing.T) {
-	suite, token, _ := setupTestSuiteWithAuth(t)
+	suite := getSharedTestSuite(t)
+	userID := uuid.New().String()
+	router := newHostSeamSelfRouter(t, suite, userID, []string{controlplane.PermSelfSubscriptionCancel})
 
 	body := map[string]string{"feedback": "test feedback"}
 	jsonBody, _ := json.Marshal(body)
@@ -56,14 +59,16 @@ func TestCancelSubscriptionNotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+subID+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer host-credential")
 
-	suite.Server.Handler().ServeHTTP(w, req)
+	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestCancelSubscriptionCCBill(t *testing.T) {
-	suite, token, userID := setupTestSuiteWithAuth(t)
+	suite := getSharedTestSuite(t)
+	userID := uuid.New().String()
+	router := newHostSeamSelfRouter(t, suite, userID, []string{controlplane.PermSelfSubscriptionCancel})
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
@@ -82,9 +87,9 @@ func TestCancelSubscriptionCCBill(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer host-credential")
 
-	suite.Server.Handler().ServeHTTP(w, req)
+	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
 
 	var response map[string]any
@@ -95,7 +100,9 @@ func TestCancelSubscriptionCCBill(t *testing.T) {
 }
 
 func TestCancelSubscriptionAlreadyCancelled(t *testing.T) {
-	suite, token, userID := setupTestSuiteWithAuth(t)
+	suite := getSharedTestSuite(t)
+	userID := uuid.New().String()
+	router := newHostSeamSelfRouter(t, suite, userID, []string{controlplane.PermSelfSubscriptionCancel})
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
@@ -114,9 +121,9 @@ func TestCancelSubscriptionAlreadyCancelled(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer host-credential")
 
-	suite.Server.Handler().ServeHTTP(w, req)
+	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusAccepted, w.Code)
 }
 
@@ -128,7 +135,7 @@ func TestCancelSubscriptionAuthBoundaries(t *testing.T) {
 
 	userAID := uuid.New().String()
 	userBID := uuid.New().String()
-	tokenA := getTestIssuer().CreateToken(userAID, "usera@test.com")
+	routerA := newHostSeamSelfRouter(t, suite, userAID, []string{controlplane.PermSelfSubscriptionCancel})
 
 	subB := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:         userBID,
@@ -144,8 +151,8 @@ func TestCancelSubscriptionAuthBoundaries(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+subB.ID.String()+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+tokenA)
+	req.Header.Set("Authorization", "Bearer host-credential")
 
-	suite.Server.Handler().ServeHTTP(w, req)
+	routerA.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }

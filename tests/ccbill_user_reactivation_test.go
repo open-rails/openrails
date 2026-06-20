@@ -9,12 +9,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCCBillUserReactivation_RestoresEntitlementsAfterExpiration(t *testing.T) {
 	suite, userID, processorSubID, subscriptionID, now := seedCCBillActiveSubscriptionWithEntitlement(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	expiredAt := now
 	expiredPeriodEnd := now.Add(-time.Hour)
@@ -67,7 +68,7 @@ func TestCCBillUserReactivation_RestoresEntitlementsAfterExpiration(t *testing.T
 
 func TestCCBillUserReactivation_BlocksTerminalChargebackTransition(t *testing.T) {
 	suite, userID, processorSubID, _, now := seedCCBillActiveSubscriptionWithEntitlement(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	postCCBillTerminalEvent(t, suite, "Chargeback", "testdata/webhooks/ccbill/chargeback.json", processorSubID, now)
 
@@ -109,7 +110,7 @@ func TestCCBillUserReactivation_BlocksTerminalChargebackTransition(t *testing.T)
 
 func TestCCBillRenewalSuccess_BlocksTerminalChargebackTransition(t *testing.T) {
 	suite, userID, processorSubID, _, now := seedCCBillActiveSubscriptionWithEntitlement(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	postCCBillTerminalEvent(t, suite, "Chargeback", "testdata/webhooks/ccbill/chargeback.json", processorSubID, now)
 
@@ -149,7 +150,7 @@ func TestCCBillRenewalSuccess_BlocksTerminalChargebackTransition(t *testing.T) {
 
 func TestCCBillChargeback_DedupesDuplicateDelivery(t *testing.T) {
 	suite, userID, processorSubID, _, now := seedCCBillActiveSubscriptionWithEntitlement(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	payload := mustLoadJSONMap(t, "testdata/webhooks/ccbill/chargeback.json")
 	txID := "ccbill_chargeback_dupe_" + uuid.New().String()
@@ -185,7 +186,7 @@ func seedCCBillActiveSubscriptionWithEntitlement(t *testing.T) (*TestContainerSu
 	t.Helper()
 
 	suite := getSharedTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	products := suite.SeedProducts()
 	require.NotEmpty(t, products)

@@ -64,16 +64,16 @@ func parseServiceCustomerID(raw string) (*billingidentity.CustomerID, error) {
 	return &tenantSubject, nil
 }
 
-// serviceTokenFromRequest returns the resolved service token the auth
+// serviceTokenFromRequest returns the resolved API key credential the auth
 // middleware pinned onto the context, or a (status, message) error pair.
 func serviceTokenFromRequest(r *httprequest.Request) (*controlplane.ResolvedServiceToken, int, string) {
 	v, ok := r.Get(ginmw.ServiceTokenContextKey)
 	if !ok {
-		return nil, http.StatusUnauthorized, "service token required"
+		return nil, http.StatusUnauthorized, "API key required"
 	}
 	resolved, ok := v.(*controlplane.ResolvedServiceToken)
 	if !ok || resolved == nil {
-		return nil, http.StatusInternalServerError, "service token state invalid"
+		return nil, http.StatusInternalServerError, "API key state invalid"
 	}
 	return resolved, 0, ""
 }
@@ -105,7 +105,7 @@ type serviceBalanceResponse struct {
 
 // ServiceGetCreditsBalance returns the tenant subject's REAL balance snapshot (issue
 // #235/#247): available = balance - held, plus outstanding owed + billing mode.
-// Merchant-bound by the service token (RLS); tenant subject supplied via ?customer_id=.
+// Merchant-bound by the API key (RLS); tenant subject supplied via ?customer_id=.
 func ServiceGetCreditsBalance(r *httprequest.Request) {
 	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
 	if !ok {
@@ -183,7 +183,7 @@ type serviceAccountSettingsRequest struct {
 // ServiceSetCreditAccountSettings (PUT /v1/service/credits/account-settings)
 // configures a tenant subject's billing account: prepaid vs arrears mode, spend caps,
 // auto-top-up, and expiry default (issue #242). Tensorhub's billing-admin surface
-// proxies to this with its service service token; OpenRails owns the settings.
+// proxies to this with its service API key; OpenRails owns the settings.
 func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 	var req serviceAccountSettingsRequest
 	if !r.BindJSON(&req) {
@@ -331,7 +331,7 @@ type serviceEndpointRevenueRequest struct {
 
 // ServiceResourceRevenue returns per-day revenue for a resource (by usage_event
 // the typed resource column) across all tenant subjects in the tenant (#410) — powers
-// tensorhub endpoint revenue analytics. Operator service token, credits:read.
+// tensorhub endpoint revenue analytics. Operator API key, credits:read.
 func ServiceResourceRevenue(r *httprequest.Request) {
 	var req serviceEndpointRevenueRequest
 	if !r.BindJSON(&req) {
@@ -360,7 +360,7 @@ func ServiceResourceRevenue(r *httprequest.Request) {
 
 // ServiceUsageRollup returns per-dimension-value spend for a tenant subject over a
 // window (#311) — the OpenRails-sourced data behind the tensorhub platform's
-// /budget-usage + revenue analytics. Operator-service token, credits:read scope.
+// /budget-usage + revenue analytics. Operator API key, credits:read scope.
 func ServiceUsageRollup(r *httprequest.Request) {
 	var req serviceUsageRollupRequest
 	if !r.BindJSON(&req) {

@@ -47,12 +47,14 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	description := "Materialize test"
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		ID: productID, Slug: "mat_product_" + uuid.New().String(), DisplayName: "Materialize Product",
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description, Status: string(models.CatalogStatusActive), CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
-		Status: string(models.CatalogStatusActive), BillingCycleDays: &billingDays32, CreatedAt: now, UpdatedAt: now,
+		MerchantID: dbtest.TestMerchantID.UUID(),
+		Status:     string(models.CatalogStatusActive), BillingCycleDays: &billingDays32, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 
@@ -174,12 +176,14 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	description := "Window expiry test"
 	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		ID: productID, Slug: "wexp_product_" + uuid.New().String(), DisplayName: "Window Expiry Product",
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description, Status: string(models.CatalogStatusActive), CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
-		Status: string(models.CatalogStatusActive), BillingCycleDays: &billingDays32, CreatedAt: now, UpdatedAt: now,
+		MerchantID: dbtest.TestMerchantID.UUID(),
+		Status:     string(models.CatalogStatusActive), BillingCycleDays: &billingDays32, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 

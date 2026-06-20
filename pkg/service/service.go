@@ -342,7 +342,7 @@ type ServiceUsageRollupRequest struct {
 
 // ServiceUsageRollup returns per-dimension-value spend for a payer over a
 // window (#311) — the OpenRails-sourced data behind the platform's
-// /budget-usage + revenue analytics. Service-scoped (operator service token).
+// /budget-usage + revenue analytics. Service-scoped (operator API key).
 func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollupRequest) ([]ServiceUsageRollupRow, error) {
 	if req.CustomerID == nil || req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")

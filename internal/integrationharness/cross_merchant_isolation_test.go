@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
 // Cross-merchant isolation suite (#534 Phase 2): a credential scoped to merchant A
@@ -51,7 +52,7 @@ type selfAccountSnapshot struct {
 func TestServiceTokenCrossMerchantIsolationHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
-	surface := h.StartStandaloneRLS("usd") // server runs as openrails_app: real RLS enforces
+	surface := h.StartStandalone("usd") // server runs as openrails_app: real RLS enforces
 
 	// Merchant A = the bootstrapped test merchant. Merchant B = freshly provisioned.
 	aToken := surface.MintServiceToken(
@@ -118,7 +119,7 @@ func TestServiceTokenCrossMerchantIsolationHTTP(t *testing.T) {
 func TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
-	surface := h.StartStandaloneRLS("usd")
+	surface := h.StartStandalone("usd")
 
 	remoteA := surface.RegisterRemoteApplication(
 		"iso-ra-a-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
@@ -166,7 +167,7 @@ func TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP(t *testing.T) {
 func TestDelegatedAdminCrossMerchantIsolationHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
-	surface := h.StartStandaloneRLS("usd")
+	surface := h.StartStandalone("usd")
 
 	b := surface.ProvisionOwnedMerchant("iso-admin-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
 	bToken := surface.MintServiceToken(
@@ -203,7 +204,7 @@ func TestDelegatedAdminCrossMerchantIsolationHTTP(t *testing.T) {
 func TestDelegatedSelfTokenSubjectIsolationHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
-	surface := h.StartStandaloneRLS("usd")
+	surface := h.StartStandalone("usd")
 
 	serviceToken := surface.MintServiceToken(
 		dbtest.TestMerchantSlug,
@@ -238,6 +239,31 @@ func TestDelegatedSelfTokenSubjectIsolationHTTP(t *testing.T) {
 		surface.BaseURL+"/v1/admin/users/"+subjectB, selfA.Token, nil)
 	require.Equalf(t, http.StatusForbidden, status,
 		"self token must not be usable on :user_id admin routes: %s", string(body))
+}
+
+func TestMerchantDirectoryRejectsMerchantAdminUserHTTP(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	surface := h.StartStandalone("usd")
+
+	cp := embcp.Get(surface.app)
+	require.NotNil(t, cp, "control plane attached")
+	core := cp.Core()
+	require.NotNil(t, core, "authkit core")
+
+	username := "merchant-admin-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	email := username + "@example.com"
+	user, err := core.CreateUser(ctx, email, username)
+	require.NoError(t, err, "create merchant admin user")
+	require.NoError(t, core.AddMember(ctx, dbtest.TestMerchantSlug, user.ID), "add user to merchant org")
+	require.NoError(t, core.AssignRole(ctx, dbtest.TestMerchantSlug, user.ID, controlplane.OperatorRole), "assign per-merchant admin role")
+	token, _, err := core.IssueAccessToken(ctx, user.ID, email, nil)
+	require.NoError(t, err, "issue merchant admin user access token")
+
+	status, body := requestJSON(t, http.MethodGet,
+		surface.BaseURL+"/v1/admin/merchants/"+dbtest.TestMerchantID.String(), token, nil)
+	require.Equalf(t, http.StatusForbidden, status,
+		"per-merchant openrails:admin user must not reach global merchant directory: %s", string(body))
 }
 
 func depositCredits(t *testing.T, baseURL, token, payer string, amount int64) {
@@ -288,7 +314,7 @@ func adminProfile(t *testing.T, baseURL, token, userID string) adminBillingProfi
 
 func selfAccount(t *testing.T, baseURL, token string) selfAccountSnapshot {
 	t.Helper()
-	status, body := requestJSON(t, http.MethodGet, baseURL+"/v1/self/account?currency=usd", token, nil)
+	status, body := requestJSON(t, http.MethodGet, baseURL+"/v1/me/account?currency=usd", token, nil)
 	require.Equalf(t, http.StatusOK, status, "self account: %s", string(body))
 	var out selfAccountSnapshot
 	require.NoError(t, json.Unmarshal(body, &out))

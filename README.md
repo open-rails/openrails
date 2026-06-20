@@ -328,6 +328,30 @@ can instead use `pkg/embedded/gin` (`embgin.RegisterUserRoutes(e, group, …)` /
 Your frontend now calls these routes with its **normal session credential** — your
 `Authenticator` is the only gate. One system, one token.
 
+**Rate-limiting & captcha (built in).** The embedded surface runs OpenRails' own
+per-IP/per-user rate limiting + captcha **in-process** — you do not need to front it
+with your own gateway. It is on but **inert until you set `Config.RateLimits`** (a
+safe no-op otherwise). Set it on the config you pass to `embedded.New`/`embed.New`
+(Redis-backed when `Options.Redis` is set, in-memory per-process otherwise):
+
+```go
+cfg.RateLimits = &config.RateLimitsConfig{
+    "default":   {RequestsPerMinute: 300},  // general API (SPA/NAT-friendly)
+    "checkout":  {RequestsPerMinute: 10},   // tight: deters card-testing
+    "subscribe": {RequestsPerMinute: 20},
+    "payment":   {RequestsPerMinute: 40},
+    "webhook":   {RequestsPerMinute: 1200}, // per source IP; absorbs processor bursts
+}
+// Optional captcha escalation on extreme abuse (needs your Turnstile/reCAPTCHA keys):
+// cfg.Captcha = &config.CaptchaConfig{Provider: config.CaptchaProviderTurnstile,
+//     SiteKey: "...", SecretKey: "..."}
+```
+
+Buckets key per-IP **and** per-authenticated-user (strictest wins), and apply to both
+the user surface and the delegated self/admin surface (`embgin.SelfHandler`). The
+values above mirror the standalone defaults. **Embedding hosts: do this when you wire
+the engine — it's easy to forget, and without it billing endpoints are unthrottled.**
+
 ### 3. Call OpenRails in-process
 
 Skip HTTP entirely on hot paths — e.g. metered usage:

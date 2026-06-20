@@ -540,49 +540,6 @@ func (q *Queries) ListActiveEntitlementNames(ctx context.Context, arg ListActive
 	return items, nil
 }
 
-const listCustomersWithEntitlement = `-- name: ListCustomersWithEntitlement :many
-SELECT DISTINCT ent.customer_id FROM openrails.entitlements ent
-WHERE ent.entitlement = $1::text
-  AND ent.start_at <= $2::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $2::timestamptz)
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND ent.customer_id > $3::uuid
-ORDER BY ent.customer_id
-LIMIT $4::int
-`
-
-type ListCustomersWithEntitlementParams struct {
-	Entitlement string
-	At          time.Time
-	AfterID     uuid.UUID
-	Lim         int32
-}
-
-// Reverse lookup (#535): customer ids holding an ACTIVE window of `entitlement`,
-// keyset-paginated by customer_id (after_id is an exclusive lower bound — pass the
-// zero uuid to start). merchant scoping is RLS (no explicit merchant_id), matching
-// ListActiveEntitlementNames. Backs AuthKit's EntitlementFilterProvider (#91).
-func (q *Queries) ListCustomersWithEntitlement(ctx context.Context, arg ListCustomersWithEntitlementParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listCustomersWithEntitlement, arg.Entitlement, arg.At, arg.AfterID, arg.Lim)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var customer_id uuid.UUID
-		if err := rows.Scan(&customer_id); err != nil {
-			return nil, err
-		}
-		items = append(items, customer_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listActiveEntitlementNamesMerchant = `-- name: ListActiveEntitlementNamesMerchant :many
 SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
 WHERE ent.merchant_id = $1
@@ -826,6 +783,54 @@ func (q *Queries) ListActiveGraceWindowsForUpdate(ctx context.Context, arg ListA
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCustomersWithEntitlement = `-- name: ListCustomersWithEntitlement :many
+SELECT DISTINCT ent.customer_id FROM openrails.entitlements ent
+WHERE ent.entitlement = $1::text
+  AND ent.start_at <= $2::timestamptz
+  AND (ent.end_at IS NULL OR ent.end_at > $2::timestamptz)
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.customer_id > $3::uuid
+ORDER BY ent.customer_id
+LIMIT $4::int
+`
+
+type ListCustomersWithEntitlementParams struct {
+	Entitlement string
+	At          time.Time
+	AfterID     uuid.UUID
+	Lim         int32
+}
+
+// Reverse lookup (#535): customer ids holding an ACTIVE window of `entitlement`,
+// keyset-paginated by customer_id (after_id is an exclusive lower bound — pass the
+// zero uuid to start). merchant scoping is RLS (no explicit merchant_id), matching
+// ListActiveEntitlementNames. Backs AuthKit's EntitlementFilterProvider (#91).
+func (q *Queries) ListCustomersWithEntitlement(ctx context.Context, arg ListCustomersWithEntitlementParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listCustomersWithEntitlement,
+		arg.Entitlement,
+		arg.At,
+		arg.AfterID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var customer_id uuid.UUID
+		if err := rows.Scan(&customer_id); err != nil {
+			return nil, err
+		}
+		items = append(items, customer_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

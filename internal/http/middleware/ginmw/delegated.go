@@ -115,6 +115,7 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 		c.Set("openrails.user_context", uc)
 		c.Set("openrails.merchant_id", resolved.MerchantID)
 		c.Set(DelegatedContextKey, resolved)
+		c.Set(PrincipalContextKey, principalFromDelegated(resolved, CredentialDelegatedUser))
 
 		c.Next()
 	}
@@ -173,6 +174,7 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.Ha
 		c.Set("openrails.user_context", uc)
 		c.Set("openrails.merchant_id", resolved.MerchantID)
 		c.Set(DelegatedContextKey, resolved)
+		c.Set(PrincipalContextKey, principalFromDelegated(resolved, CredentialHostDelegatedUser))
 
 		c.Next()
 	}
@@ -219,33 +221,6 @@ func resolvedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*controlplane
 		EmailVerified:    p.EmailVerified,
 		Username:         p.Username,
 	}, nil
-}
-
-// RequireDelegatedPermission gates a self-service route on a specific
-// `openrails:self:*` permission held by the authenticated delegated token. Must
-// run AFTER DelegatedSelfRequired. There is no admin override for self tokens.
-func RequireDelegatedPermission(perm string) gin.HandlerFunc {
-	perm = strings.TrimSpace(perm)
-	return func(c *gin.Context) {
-		value, ok := c.Get(DelegatedContextKey)
-		if !ok {
-			response.UnauthorizedWithMessage(c, "delegated token required")
-			c.Abort()
-			return
-		}
-		resolved, ok := value.(*controlplane.ResolvedDelegated)
-		if !ok || resolved == nil {
-			response.InternalError(c, "delegated state invalid")
-			c.Abort()
-			return
-		}
-		if !resolved.HasPermission(perm) {
-			response.ForbiddenWithMessage(c, "delegated_permission_required")
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
 }
 
 // DelegatedFromGin returns the resolved delegated token attached to the request,

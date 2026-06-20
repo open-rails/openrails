@@ -45,7 +45,7 @@ type Dependencies struct {
 	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
 	// the browser-direct self-service surface (issue #339). When set, the host
 	// verifies the incoming credential itself and supplies the explicitly
-	// mapped principal for /v1/self/* + /v1/admin/*, OVERRIDING the
+	// mapped principal for /v1/me/* + /v1/admin/*, OVERRIDING the
 	// control plane's default delegated-token verifier.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	ConfiguredMerchant     merchant.ID
@@ -94,7 +94,7 @@ type Server struct {
 
 	// publicHandler is the single "full surface" HTTP handler. It includes
 	// health + debug (dev only) + user + admin + webhook routes AND the
-	// service token-authenticated server-to-server service routes (issue #222). There is no
+	// API-key-authenticated server-to-server service routes (issue #222). There is no
 	// separate private/service trust surface or port.
 	publicHandler *gin.Engine
 }
@@ -284,7 +284,7 @@ func New(deps Dependencies) (*Server, error) {
 
 				// Subscribe-via-checkout (#261/#262): the prepare service builds the
 				// unsigned init/subscribe txns; enroll confirms. Wire both into the
-				// checkout session service so /v1/self/checkout(+confirm) drives the
+				// checkout session service so /v1/me/checkout(+confirm) drives the
 				// recurring Solana subscription flow.
 				if deps.Runtime.CheckoutSessionService != nil {
 					// The subscribe step is now an ATOMIC co-signed bundle (#286):
@@ -341,14 +341,13 @@ func New(deps Dependencies) (*Server, error) {
 	// #528: the per-user `/v1/admin` surface is retired. The admin surface is the
 	// delegated `/v1/admin` mounted by registerSelfServiceRoutes (issuer→owner).
 	s.registerMerchantActionRoutesOn(s.publicHandler)
-	s.registerWebhookRoutes(s.publicHandler)
 
 	// Selective AuthKit route mounting (#224). In locked-down mode this mounts
 	// ONLY the intentional AuthKit route groups (login/session/user) under
 	// /auth — never AuthKit DefaultAPI.
 	s.registerControlPlaneAuthRoutes(s.publicHandler)
 
-	// Server-to-server service API: service token-authenticated, on the SAME
+	// Server-to-server service API: API-key-authenticated, on the SAME
 	// public engine (issue #222). No private port, no mTLS listener.
 	s.registerServiceRoutes(s.publicHandler)
 
@@ -450,7 +449,7 @@ func (s *Server) embeddedAuthenticator() billingauth.Authenticator {
 }
 
 // Handler returns the full public HTTP surface: health + debug (dev only) + user
-// + admin + webhooks + service token-authenticated server-to-server service routes
+// + admin + webhooks + API-key-authenticated server-to-server service routes
 // (issue #222). There is no separate private/service handler — embedded hosts use
 // the in-process pkg/service facade (Embedded.Service()) or this same public
 // surface. It is designed to be mounted at a path prefix via http.StripPrefix.

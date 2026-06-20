@@ -145,9 +145,29 @@ func MerchantWebhook(r *httprequest.Request) {
 	}
 	ctx := merchant.WithID(r.Request.Context(), route.MerchantID)
 	r.Request = r.Request.WithContext(ctx)
+	processResolvedMerchantWebhook(r, provider, route.MerchantID)
+}
 
+// HostWebhook handles a webhook after an embedding host has resolved Host to a
+// merchant and pinned it on context. The host resolver is routing only; this
+// handler still verifies with that merchant's stored signing secret.
+func HostWebhook(r *httprequest.Request) {
+	if r.State == nil || r.State.Merchants == nil {
+		r.ErrorJSON(http.StatusServiceUnavailable, "Merchant webhook routing is not configured")
+		return
+	}
+	provider := webhookutil.CanonicalProvider(r.Param("provider"))
+	merchantID, err := merchant.Require(r.Request.Context())
+	if err != nil {
+		r.ErrorJSON(http.StatusNotFound, "Unknown merchant")
+		return
+	}
+	processResolvedMerchantWebhook(r, provider, merchantID)
+}
+
+func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID merchant.ID) {
 	if processors.IsNMIBacked(provider) {
-		if processMerchantNMIWebhook(r, provider, route.MerchantID) {
+		if processMerchantNMIWebhook(r, provider, merchantID) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
 		return
@@ -172,7 +192,7 @@ func MerchantWebhook(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	creds, err := r.State.Merchants.LoadStripeCredentials(ctx, route.MerchantID)
+	creds, err := r.State.Merchants.LoadStripeCredentials(r.Request.Context(), merchantID)
 	if err != nil {
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "Secret backend temporarily unavailable, retry")
@@ -220,7 +240,7 @@ func MerchantWebhook(r *httprequest.Request) {
 		SignatureValid: &signatureVerified,
 		ReceivedAt:     time.Now(),
 	}
-	if err := r.State.WebhookDispatcher.Process(ctx, msg); err != nil {
+	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
 		if webhooks.IsWebhookErrorNonRetryable(err) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 			return

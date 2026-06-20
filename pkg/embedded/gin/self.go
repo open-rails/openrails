@@ -1,6 +1,7 @@
 package gin
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
@@ -20,16 +22,16 @@ import (
 )
 
 // SelfHandler returns the mountable browser-direct SELF-SERVICE + MERCHANT-ADMIN
-// surface for an embedded host (issues #339/#467), authenticated by the
-// host-supplied billingauth.DelegatedAuthenticator from Options — one system,
-// one credential: the host verifies its own token and returns the explicitly
-// mapped {tenant, subject, permissions} principal, exactly like the standalone
-// server's host-pluggable mode (internal/http registerSelfServiceRoutes).
+// surface for an embedded host (issues #339/#467). A host-supplied
+// billingauth.DelegatedAuthenticator wins when present. Otherwise OpenRails
+// adapts the embedded billingauth.Authenticator into a self-service principal
+// pinned to the configured embedded merchant and carrying the full
+// openrails:self:* permission catalog.
 //
 // Routes are served at the CANONICAL embedded paths, alongside the
 // NewHTTPHandler surface:
 //
-//	/billing/v1/self/*          (RegisterSelfServiceRoutes — openrails:self:*)
+//	/billing/v1/me/*            (RegisterSelfServiceRoutes — openrails:self:*)
 //	/billing/v1/admin/*         (RegisterAdminRoutes — openrails:merchant:*)
 //
 // so a host that mounts NewHTTPHandler under /billing without prefix stripping
@@ -42,10 +44,8 @@ import (
 //
 // This lives in the gin-coupled pkg/embedded/gin subpackage (#285) because the
 // self surface registration is gin (ginroutes); the core pkg/embedded handler
-// stays gin-free. Errors when the app graph is not initialized or no
-// DelegatedAuthenticator was supplied — the surface is identity-gated and is
-// never mounted without an identity source (fail closed, mirroring the
-// standalone server's "surface not mounted" behavior).
+// stays gin-free. Errors when the app graph is not initialized or no identity
+// source can be derived — the surface is never mounted without authentication.
 func SelfHandler(e *embedded.Embedded) (http.Handler, error) {
 	if e == nil {
 		return nil, fmt.Errorf("embedded billing: not initialized")
@@ -54,14 +54,42 @@ func SelfHandler(e *embedded.Embedded) (http.Handler, error) {
 	if a == nil {
 		return nil, fmt.Errorf("embedded billing: not initialized")
 	}
-	if a.DelegatedAuthenticator == nil {
-		return nil, fmt.Errorf("embedded billing: self surface requires Options.DelegatedAuthenticator (#339)")
-	}
 	var configured merchant.ID
 	if a.Runtime != nil {
 		configured = a.Runtime.ConfiguredMerchant
 	}
-	return newSelfHandler(a.Runtime, a.DelegatedAuthenticator, configured), nil
+	authn := a.DelegatedAuthenticator
+	if authn == nil {
+		authn = delegatedAuthenticatorFromUserAuthenticator(a.Authenticator, configured)
+	}
+	if authn == nil {
+		return nil, fmt.Errorf("embedded billing: self surface requires Options.Authenticator plus configured merchant, or Options.DelegatedAuthenticator")
+	}
+	return newSelfHandler(a.Runtime, authn, configured), nil
+}
+
+func delegatedAuthenticatorFromUserAuthenticator(authn billingauth.Authenticator, configured merchant.ID) billingauth.DelegatedAuthenticator {
+	if authn == nil || configured.IsZero() {
+		return nil
+	}
+	return billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
+		uc, err := authn.Authenticate(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		if err := uc.ValidateSubject(); err != nil {
+			return nil, err
+		}
+		return &billingauth.DelegatedPrincipal{
+			MerchantID:    configured.String(),
+			SubjectID:     uc.UserID,
+			Issuer:        "embedded",
+			Permissions:   controlplane.SelfCatalogNames(),
+			Email:         uc.Email,
+			EmailVerified: uc.EmailVerified,
+			Username:      uc.Username,
+		}, nil
+	})
 }
 
 // newSelfHandler assembles the self + delegated-admin gin engine and wraps it in

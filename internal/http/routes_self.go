@@ -9,9 +9,8 @@ import (
 )
 
 // registerSelfServiceRoutes mounts the browser-direct self-service billing
-// surface on the PUBLIC API engine under /v1/self/*, authenticated by a
-// browser's DELEGATED ACCESS TOKEN (issue #222 browser-tier foundation, the
-// backend prerequisite for browser-direct self-service consumers.
+// surface on the PUBLIC API engine under /v1/me/*, authenticated by a bearer
+// principal carrying openrails:self:* permissions.
 //
 // A merchant's host frontend mints a short-lived AuthKit delegated access token
 // (aud=openrails, tenant, delegated_sub, openrails:self:* perms) for the
@@ -37,7 +36,7 @@ func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 	// authenticates; per-route gates require `openrails:merchant:*` permissions and
 	// the handlers act on a `:user_id` WITHIN the token's pinned tenant. This is
 	// THE admin surface (#528 retired the per-user `/v1/admin`). Mounted on the
-	// same public engine alongside /v1/self/*.
+	// same public engine alongside /v1/me/*.
 	adminGroup := e.Group(StandaloneV1Prefix + httproutes.AdminRoutePrefix)
 	httproutes.RegisterAdminRoutes(adminGroup, s.runtime, delegatedMW)
 

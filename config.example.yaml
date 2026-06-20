@@ -19,7 +19,7 @@ logger:
 db:
   url: ""           # optional; overrides the fields below when set
   host: localhost
-  port: "5433"
+  port: "5434"
   database: openrails_db
   username: admin
   password: admin_password

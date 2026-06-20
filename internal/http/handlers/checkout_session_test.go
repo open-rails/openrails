@@ -15,7 +15,7 @@ func TestWriteCheckoutSessionErrorIncludesUSDCFundingMetadata(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httprequest.NewHTTP(
 		rec,
-		httptest.NewRequest(http.MethodPost, "/v1/self/checkout/chk_123/confirm", nil),
+		httptest.NewRequest(http.MethodPost, "/v1/me/checkout/chk_123/confirm", nil),
 		&app.Runtime{},
 	)
 

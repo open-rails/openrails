@@ -2647,7 +2647,7 @@ func (s *CheckoutService) processTierChangeSolana(
 	// mirror the confirmed switch into the DB. Direct the client there for BOTH an
 	// upgrade (prorated first pull, charged atomically) and a downgrade (deferred
 	// to the old period end, no immediate charge).
-	endpoint := fmt.Sprintf("POST /v1/self/subscriptions/%s/solana-tier-change", subIDStr)
+	endpoint := fmt.Sprintf("POST /v1/me/subscriptions/%s/solana-tier-change", subIDStr)
 	var msg string
 	if action == "downgrade" {
 		msg = fmt.Sprintf(

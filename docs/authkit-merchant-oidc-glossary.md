@@ -3,7 +3,7 @@
 | Term | Meaning |
 |---|---|
 | OpenRails merchant | Billing/isolation namespace. It scopes subscriptions, payments, credits, usage, credentials, webhooks, and analytics. |
-| AuthKit org | Ownership and control authority. Users, service tokens, and remote applications receive permissions through org roles. |
+| AuthKit org | Ownership and control authority. Users, API keys, and remote applications receive permissions through org roles. |
 | Remote application | AuthKit registered issuer/JWKS principal that can sign delegated or service JWTs. It is a credential controlled by an org, not an OpenRails owner. |
 | Delegated user | External OIDC subject from a registered issuer, carried as AuthKit `delegated_sub`. |
 | Customer | OpenRails payable subject under a merchant. |
@@ -12,11 +12,11 @@
 ## Standalone Chain
 
 ```text
-JWT or service token -> AuthKit org -> OpenRails merchant
+JWT or API key -> AuthKit org -> OpenRails merchant
 ```
 
 The OpenRails merchant stores `owner_org_id`. AuthKit decides which users,
-service tokens, and remote applications can act for that org. OpenRails then
+API keys, and remote applications can act for that org. OpenRails then
 checks whether the request is scoped to a merchant owned by that org.
 
 ## Delegated Browser Flow

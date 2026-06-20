@@ -6,27 +6,37 @@ import (
 	authcore "github.com/open-rails/authkit/core"
 )
 
-// TestPrivatePostureIsLockedInThisRepo guards the "private by construction"
-// invariant documented on SelfHostedPosture and registrationMode: standalone
-// OpenRails in THIS repo never exposes public/open self-registration of users or
-// merchants, and never widens /auth/* to the AuthKit DefaultAPI surface
-// (RouteRegister / RouteOrganizations).
-//
-// Public, hosted, self-serve registration is owned ENTIRELY by the separate,
-// private openrails-saas repo, which overrides this posture. If this test fails,
-// someone made the posture or registration mode configurable here — that change
-// almost certainly belongs in openrails-saas, not in this repo.
+// TestPrivatePostureIsLockedInThisRepo guards the default "private by
+// construction" invariant: standalone never passes WithHostedPosture.
 func TestPrivatePostureIsLockedInThisRepo(t *testing.T) {
-	// Posture is hardcoded true → RouteSpecs() never returns DefaultAPI(), so the
-	// public-onboarding AuthKit groups are never mounted on /auth/* here.
-	if !(&ControlPlane{}).SelfHostedPosture() {
+	cp := &ControlPlane{}
+	if !cp.SelfHostedPosture() {
 		t.Fatal("SelfHostedPosture() must be true in this repo: open/public registration belongs in openrails-saas, not here")
 	}
+	if got := cp.MountedRouteGroups(); len(got) != len(IntentionalRouteGroups) {
+		t.Fatalf("MountedRouteGroups() len = %d, want %d", len(got), len(IntentionalRouteGroups))
+	}
 
-	// Both registration call sites in New() pass locked=true → admin-bootstrap-only
-	// (no public user self-registration, no public merchant/org onboarding).
 	if got := registrationMode(true); got != authcore.RegistrationModeAdminBootstrapOnly {
 		t.Fatalf("registrationMode(true) = %q, want %q (no public self-registration in this repo)",
 			got, authcore.RegistrationModeAdminBootstrapOnly)
+	}
+}
+
+func TestHostedPostureIsCodeOnlyOptIn(t *testing.T) {
+	opts := newOptions([]Option{WithHostedPosture()})
+	if !opts.hosted {
+		t.Fatal("WithHostedPosture did not set hosted posture")
+	}
+
+	cp := &ControlPlane{hosted: true}
+	if cp.SelfHostedPosture() {
+		t.Fatal("hosted posture should not report self-hosted")
+	}
+	if got := cp.MountedRouteGroups(); got != nil {
+		t.Fatalf("MountedRouteGroups() = %#v, want nil for AuthKit DefaultAPI", got)
+	}
+	if got := registrationMode(false); got != authcore.RegistrationModeOpen {
+		t.Fatalf("registrationMode(false) = %q, want %q", got, authcore.RegistrationModeOpen)
 	}
 }

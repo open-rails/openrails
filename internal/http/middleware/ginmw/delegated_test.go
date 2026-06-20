@@ -30,7 +30,7 @@ func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string, string)
 func newDelegatedTestRouter(resolver DelegatedResolver, perm string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/self", DelegatedSelfRequired(resolver), RequireDelegatedPermission(perm), func(c *gin.Context) {
+	r.GET("/self", DelegatedSelfRequired(resolver), RequirePermission(perm), func(c *gin.Context) {
 		resolved, _ := DelegatedFromGin(c)
 		tid, _ := merchant.FromContext(c.Request.Context())
 		uc, _ := ginauth.UserContextFromGin(c)
@@ -100,7 +100,7 @@ func TestDelegatedSelfRequired_DeniesMissingPermission(t *testing.T) {
 	r := newDelegatedTestRouter(resolver, controlplane.PermSelfSubscriptionCancel)
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
-	require.Contains(t, w.Body.String(), "delegated_permission_required")
+	require.Contains(t, w.Body.String(), "permission_required")
 }
 
 func TestDelegatedSelfRequired_NoAdminOverride(t *testing.T) {

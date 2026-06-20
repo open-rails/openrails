@@ -74,7 +74,7 @@ const (
 	PermSubscriptionsCancel = "openrails:subscriptions:cancel"
 
 	// Self-service (browser-direct) permissions. These gate the merchant-scoped
-	// self-service surface (`/v1/self/*`) reached with a DELEGATED ACCESS TOKEN
+	// self-service surface (`/v1/me/*`) reached with a DELEGATED ACCESS TOKEN
 	// minted by a merchant's host frontend (issue #222 foundation for the browser
 	// tier. Unlike the coarse
 	// server-to-server service token permissions above, `openrails:self:*` authorizes a
@@ -167,7 +167,7 @@ var catalogEntries = []Permission{
 }
 
 // selfCatalog is the set of self-service permissions accepted on delegated
-// access tokens for the browser-direct `/v1/self/*` surface. A delegated token
+// access tokens for the browser-direct `/v1/me/*` surface. A delegated token
 // presenting any permission OUTSIDE this set is rejected: browser tokens must
 // not carry operator/server-to-server grants.
 var selfCatalog = map[string]struct{}{

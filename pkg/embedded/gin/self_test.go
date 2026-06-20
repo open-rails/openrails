@@ -15,7 +15,7 @@ import (
 )
 
 // These tests pin the EMBEDDED mount of the host-pluggable self surface
-// (#339/#467): newSelfHandler serves /billing/v1/self/* (and delegated admin)
+// (#339/#467): newSelfHandler serves /billing/v1/me/* (and delegated admin)
 // at the canonical embedded paths, authenticated by the host-supplied
 // DelegatedAuthenticator, with the per-route permission gates intact.
 // They mirror the ginroutes host-principal tests but assert the EMBEDDED
@@ -28,6 +28,15 @@ type stubSelfAuthenticator struct {
 
 func (s stubSelfAuthenticator) AuthenticateDelegated(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 	return s.principal, s.err
+}
+
+type stubUserAuthenticator struct {
+	user billingauth.UserContext
+	err  error
+}
+
+func (s stubUserAuthenticator) Authenticate(context.Context, *http.Request) (billingauth.UserContext, error) {
+	return s.user, s.err
 }
 
 func selfPrincipal(perms ...string) *billingauth.DelegatedPrincipal {
@@ -59,18 +68,18 @@ func TestSelfHandler_EmbeddedPathsMountedAndGated(t *testing.T) {
 	}, merchant.ID{})
 
 	// Read route past both gates (500 = nil-runtime handler reached).
-	w := doSelf(readOnly, http.MethodGet, "/billing/v1/self/account")
+	w := doSelf(readOnly, http.MethodGet, "/billing/v1/me/account")
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 
 	// Transactions list rides the read permission.
-	w = doSelf(readOnly, http.MethodGet, "/billing/v1/self/account/transactions")
+	w = doSelf(readOnly, http.MethodGet, "/billing/v1/me/account/transactions")
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 
 	// Settings PUT is mounted but write-gated: read-only principal => 403.
-	w = doSelf(readOnly, http.MethodPut, "/billing/v1/self/account/settings")
+	w = doSelf(readOnly, http.MethodPut, "/billing/v1/me/account/settings")
 	require.Equal(t, http.StatusForbidden, w.Code,
 		"settings PUT must be mounted and write-gated (403, not 404/401): %s", w.Body.String())
 
@@ -78,7 +87,7 @@ func TestSelfHandler_EmbeddedPathsMountedAndGated(t *testing.T) {
 	writer := newSelfHandler(nil, stubSelfAuthenticator{
 		principal: selfPrincipal("openrails:self:billing:write"),
 	}, merchant.ID{})
-	w = doSelf(writer, http.MethodPut, "/billing/v1/self/account/settings")
+	w = doSelf(writer, http.MethodPut, "/billing/v1/me/account/settings")
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 
@@ -92,7 +101,7 @@ func TestSelfHandler_EmbeddedPathsMountedAndGated(t *testing.T) {
 // exactly like the standalone host-pluggable mode.
 func TestSelfHandler_FailClosed(t *testing.T) {
 	h := newSelfHandler(nil, stubSelfAuthenticator{err: billingauth.ErrUnauthenticated}, merchant.ID{})
-	w := doSelf(h, http.MethodGet, "/billing/v1/self/account")
+	w := doSelf(h, http.MethodGet, "/billing/v1/me/account")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 
 	// Principal missing its explicit tenant mapping => 401.
@@ -102,7 +111,7 @@ func TestSelfHandler_FailClosed(t *testing.T) {
 			Permissions: []string{"openrails:self:billing:read"},
 		},
 	}, merchant.ID{})
-	w = doSelf(h, http.MethodGet, "/billing/v1/self/account")
+	w = doSelf(h, http.MethodGet, "/billing/v1/me/account")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "delegated_principal_invalid")
 
@@ -110,8 +119,31 @@ func TestSelfHandler_FailClosed(t *testing.T) {
 	h = newSelfHandler(nil, stubSelfAuthenticator{
 		principal: selfPrincipal("openrails:credits:write"),
 	}, merchant.ID{})
-	w = doSelf(h, http.MethodGet, "/billing/v1/self/account")
+	w = doSelf(h, http.MethodGet, "/billing/v1/me/account")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+}
+
+func TestSelfHandler_DefaultUserAuthenticatorGetsFullSelfSurface(t *testing.T) {
+	authn := delegatedAuthenticatorFromUserAuthenticator(stubUserAuthenticator{
+		user: billingauth.UserContext{
+			UserID:        "0d4cdb35-9f3f-4a16-bb83-90a8aa20a2c1",
+			Email:         "user@example.com",
+			EmailVerified: true,
+			Username:      "user",
+		},
+	}, dbtest.TestMerchantID)
+	require.NotNil(t, authn)
+
+	h := newSelfHandler(nil, authn, dbtest.TestMerchantID)
+
+	// Default embedded auth receives the complete self permission catalog: a
+	// write route must pass the permission gate. With rt==nil, reaching the
+	// handler produces a 500 through gin Recovery, which proves auth/gating
+	// admitted the request.
+	w := doSelf(h, http.MethodPut, "/billing/v1/me/account/settings")
+	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
+	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 }
 
 // SelfHandler (the exported constructor) fails loud without an initialized app

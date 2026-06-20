@@ -217,7 +217,7 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 
 // ServiceGetBudget returns the invoker's fixed money-budget windows (#304
 // introspection) for a host's /status dashboard. customer_id + invoker + tier are
-// query params; the tenant is pinned from the service token.
+// query params; the merchant is pinned from the API key.
 func ServiceGetBudget(r *httprequest.Request) {
 	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {
@@ -248,8 +248,8 @@ func ServiceGetBudget(r *httprequest.Request) {
 // ServiceGetTier returns the payer's CURRENT graduated tier (#477): the tier
 // OpenRails auto-maintains from cumulative paid spend against the persisted tier
 // schedule (#476). customer_id is a query param; the tenant is pinned from
-// the service token. Empty tier => the payer has never graduated (caller treats
-// it as the lowest/default). Operator service token, credits:read.
+// the API key. Empty tier => the payer has never graduated (caller treats
+// it as the lowest/default). Operator API key, credits:read.
 func ServiceGetTier(r *httprequest.Request) {
 	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {
@@ -293,7 +293,7 @@ type serviceReportWastedSpendRequest struct {
 
 // ServiceReportWastedSpend records host-reported WASTED $ (#497): delegated
 // invokers accrue toward their flat cutoff; direct payer credentials use
-// trust-tier grace and then normal ledger charging. Operator service token,
+// trust-tier grace and then normal ledger charging. Operator API key,
 // credits:write.
 func ServiceReportWastedSpend(r *httprequest.Request) {
 	var req serviceReportWastedSpendRequest
@@ -344,8 +344,8 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 
 // ServiceAbuseUsage returns the payer's + invoker's running WASTED-$ totals +
 // budgets (#488 introspection). customer_id + optional invoker + currency + tier
-// are query params; the tenant is pinned from the service token. Operator service
-// token, credits:read.
+// are query params; the merchant is pinned from the API key. Operator API key,
+// credits:read.
 func ServiceAbuseUsage(r *httprequest.Request) {
 	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {
@@ -416,8 +416,8 @@ func ServiceSetCreditLimit(r *httprequest.Request) {
 }
 
 // ServiceGetCreditLimit returns the admin-set arrears credit line for a payer
-// (#489). customer_id is a query param; the tenant is pinned from the service
-// token. Operator service token, credits:read.
+// (#489). customer_id is a query param; the merchant is pinned from the API key.
+// Operator API key, credits:read.
 func ServiceGetCreditLimit(r *httprequest.Request) {
 	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {
@@ -492,7 +492,7 @@ type serviceTierScheduleRequest struct {
 // declares the ladder ONCE and OpenRails AUTO-maintains each payer's tier from
 // cumulative spend. An EMPTY customer_id sets the tenant-wide default
 // schedule (the common case); a non-empty one sets a per-subject override
-// (scope-checked). owner=platform. Operator service token, credits:write.
+// (scope-checked). owner=platform. Operator API key, credits:write.
 func ServiceSetTierSchedule(r *httprequest.Request) {
 	var req serviceTierScheduleRequest
 	if !r.BindJSON(&req) {
@@ -570,7 +570,7 @@ func ServiceGetMerchantConfiguration(r *httprequest.Request) {
 }
 
 // ServiceSetMerchantConfiguration persists the merchant-scoped configuration
-// row. Operator service token, credits:write.
+// row. Operator API key or delegated merchant admin with configuration:write.
 func ServiceSetMerchantConfiguration(r *httprequest.Request) {
 	var req serviceMerchantConfigurationRequest
 	if !r.BindJSON(&req) {
@@ -669,7 +669,7 @@ type serviceInvokerSpendLimitRequest struct {
 // (scope=role; scope_key/role_id is the role uuid), an invoker grant
 // (scope=invoker; scope_key is the invoker string), or an invoker-tier grant
 // (scope=invoker_tier; scope_key is the tier key). The owner is forced to
-// "subject" by the service facade. Operator service token, credits:write.
+// "subject" by the service facade. Operator API key, credits:write.
 func ServiceSetInvokerSpendLimits(r *httprequest.Request) {
 	var req serviceInvokerSpendLimitRequest
 	if !r.BindJSON(&req) {
@@ -705,8 +705,8 @@ func ServiceSetInvokerSpendLimits(r *httprequest.Request) {
 
 // ServiceGetInvokerSpendLimits returns ONLY the subject-owned budget-scope
 // policies (#473) for host reconciliation — platform-owned caps are invisible.
-// customer_id is a query param; the tenant is pinned from the service
-// token. Operator service token, credits:read.
+// customer_id is a query param; the merchant is pinned from the API key.
+// Operator API key, credits:read.
 func ServiceGetInvokerSpendLimits(r *httprequest.Request) {
 	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {

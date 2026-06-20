@@ -71,6 +71,24 @@ func (l *Ledger) EnsureCustomerBalance(ctx context.Context, customer uuid.UUID, 
 	return l.ensureAccount(ctx, CustomerBalance, currency, &c, true, false)
 }
 
+// CustomerBalanceAccountID returns the customer's balance account id, and false
+// when it does not exist yet. Read-only: unlike EnsureCustomerBalance it NEVER
+// creates the account, so a balance READ for a never-registered customer is a
+// clean zero, not an account-creating write (#534).
+func (l *Ledger) CustomerBalanceAccountID(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, bool, error) {
+	c := customer
+	acc, err := l.q.GetLedgerAccount(ctx, gen.GetLedgerAccountParams{
+		MerchantID: l.merchant, AccountType: string(CustomerBalance), Currency: currency, CustomerID: &c,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, false, nil
+		}
+		return uuid.Nil, false, fmt.Errorf("ledger: get customer_balance account: %w", err)
+	}
+	return acc.ID, true, nil
+}
+
 func (l *Ledger) ensureAccount(ctx context.Context, t AccountType, currency string, customer *uuid.UUID, dmnec, cmned bool) (uuid.UUID, error) {
 	get := gen.GetLedgerAccountParams{MerchantID: l.merchant, AccountType: string(t), Currency: currency, CustomerID: customer}
 	acc, err := l.q.GetLedgerAccount(ctx, get)

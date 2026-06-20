@@ -29,7 +29,7 @@ type Options struct {
 	// gin Provider can adapt it with ginauth.AsAuthenticator (#285).
 	Authenticator billingauth.Authenticator
 	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
-	// the browser-direct self-service surface (/v1/self/* + /v1/admin/*,
+	// the browser-direct self-service surface (/v1/me/* + /v1/admin/*,
 	// issue #339). A host that verifies platform credentials itself implements
 	// billingauth.DelegatedAuthenticator and returns the EXPLICITLY mapped
 	// {tenant, subject, permissions} principal; the standalone/gin handler then

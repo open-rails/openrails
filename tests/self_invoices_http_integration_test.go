@@ -56,7 +56,7 @@ func TestSelfInvoicesHTTP_ReflectsReceivablePaymentsAndScopesToSubject(t *testin
 	routerA := newHostSeamSelfRouter(t, suite, subjectA, []string{controlplane.PermSelfBillingRead})
 	routerB := newHostSeamSelfRouter(t, suite, subjectB, []string{controlplane.PermSelfBillingRead})
 
-	w := doHostSeamSelf(routerA, http.MethodGet, "/v1/self/invoices?limit=10", "")
+	w := doHostSeamSelf(routerA, http.MethodGet, "/v1/me/invoices?limit=10", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	listBody := decodeHostSeamBody(t, w)
 	require.EqualValues(t, 1, listBody["total"], w.Body.String())
@@ -71,7 +71,7 @@ func TestSelfInvoicesHTTP_ReflectsReceivablePaymentsAndScopesToSubject(t *testin
 	require.EqualValues(t, 200, listed["amount_paid"])
 	require.EqualValues(t, 300, listed["amount_due"])
 
-	w = doHostSeamSelf(routerA, http.MethodGet, "/v1/self/invoices/"+inv.ID.String(), "")
+	w = doHostSeamSelf(routerA, http.MethodGet, "/v1/me/invoices/"+inv.ID.String(), "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	detail := decodeHostSeamBody(t, w)
 	require.Equal(t, inv.ID.String(), detail["id"])
@@ -83,7 +83,7 @@ func TestSelfInvoicesHTTP_ReflectsReceivablePaymentsAndScopesToSubject(t *testin
 	require.Equal(t, "paid", paid.Status)
 	require.EqualValues(t, 0, paid.AmountDue)
 
-	w = doHostSeamSelf(routerA, http.MethodGet, "/v1/self/invoices/"+inv.ID.String(), "")
+	w = doHostSeamSelf(routerA, http.MethodGet, "/v1/me/invoices/"+inv.ID.String(), "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	paidDetail := decodeHostSeamBody(t, w)
 	require.Equal(t, "paid", paidDetail["status"])
@@ -91,12 +91,12 @@ func TestSelfInvoicesHTTP_ReflectsReceivablePaymentsAndScopesToSubject(t *testin
 	require.EqualValues(t, 0, paidDetail["amount_due"])
 	require.NotEmpty(t, paidDetail["paid_at"])
 
-	w = doHostSeamSelf(routerB, http.MethodGet, "/v1/self/invoices?limit=10", "")
+	w = doHostSeamSelf(routerB, http.MethodGet, "/v1/me/invoices?limit=10", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	subjectBList := decodeHostSeamBody(t, w)
 	require.EqualValues(t, 0, subjectBList["total"], "subject B must not see subject A invoices: %s", w.Body.String())
 
-	w = doHostSeamSelf(routerB, http.MethodGet, "/v1/self/invoices/"+inv.ID.String(), "")
+	w = doHostSeamSelf(routerB, http.MethodGet, "/v1/me/invoices/"+inv.ID.String(), "")
 	require.Equal(t, http.StatusNotFound, w.Code, "subject B must not read subject A invoice detail: %s", w.Body.String())
 }
 

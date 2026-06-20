@@ -11,7 +11,7 @@ import (
 )
 
 // TestListInvoices_Statement proves the facade methods backing
-// GET /v1/self/invoices and GET /v1/self/invoices/:id (issue #303): after
+// GET /v1/me/invoices and GET /v1/me/invoices/:id (issue #303): after
 // FinalizeInvoice rolls up a window into a statement, ListInvoices returns it for
 // the payer (paginated, newest first) and GetInvoice returns it with its line
 // items. Mirrors TestGetUsage_Breakdown — it exercises the public service facade

@@ -218,7 +218,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Issue #222: there is no separate private/service listener. Server-to-server
-	// callers authenticate with OpenRails-issued merchant service tokens against the SAME
+	// callers authenticate with OpenRails-issued merchant API keys against the SAME
 	// public API surface (publicSrv); embedded hosts use the in-process facade.
 
 	// Start public server in a goroutine

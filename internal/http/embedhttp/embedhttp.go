@@ -152,7 +152,6 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
 	}
 	if opts.IncludeWebhooks {
-		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.Runtime), s.Runtime)
 		httproutes.RegisterMerchantWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime)
 	}
 

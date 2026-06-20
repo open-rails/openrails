@@ -22,10 +22,11 @@ import (
 func authzEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, identity.CustomerID, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
+	dbtest.EnsureTestMerchant(ctx, t, pool)
 
 	var ok bool
 	require.NoError(t, pool.QueryRow(ctx,

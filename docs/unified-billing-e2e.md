@@ -2,12 +2,12 @@
 
 Two complementary harnesses prove the unified credit money path
 (estimate → authorize+hold → capture/release) on OpenRails' standalone public
-service-token surface -- the exact server-to-server contract gen-orchestrator /
+API-key surface -- the exact server-to-server contract gen-orchestrator /
 Tensorhub call (#233/#222).
 
 ## 1. In-repo Go harness (CI) — `tests/unified_billing_e2e_test.go`
 
-Build tag `integration`. Drives the lifecycle through the service-token-authenticated public
+Build tag `integration`. Drives the lifecycle through the API-key-authenticated public
 routes (`/v1/service/credits/*`) against a test Postgres, then asserts ledger
 rows/statuses/balances directly. Scenarios:
 
@@ -29,7 +29,7 @@ go test -tags integration -run TestUnifiedBilling ./tests/
 
 ## 2. Deployed-stack harness — `scripts/unified_billing_e2e.sh`
 
-POSIX sh + curl. Hits a *running, standalone* OpenRails over the public service-token
+POSIX sh + curl. Hits a *running, standalone* OpenRails over the public API-key
 routes — fresh credit type per run, so balances are deterministic. Asserts:
 create credit-type → deposit → GET balance (#247) → atomic authorize+hold (#235)
 → partial capture → balance reflects actual → over-balance authorize DENIED

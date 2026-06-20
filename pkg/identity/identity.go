@@ -14,7 +14,7 @@ import (
 // rejects passing the wrong one.
 type CustomerID uuid.UUID
 
-// Invoker is the user / service token / delegated principal that invoked
+// Invoker is the user / API key / delegated principal that invoked
 // usage. It is attribution + budgeting, never ownership.
 type Invoker string
 

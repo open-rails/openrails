@@ -41,6 +41,11 @@ func TestPrepareStripeMultiSecret(t *testing.T) {
 	// No secrets configured at all -> signature required.
 	_, err = prepareStripeMultiSecret(body, nil, signStripe(thin, body), time.Minute)
 	require.ErrorIs(t, err, webhookutil.ErrWebhookSignatureRequired)
+
+	// Secrets configured but a MISSING signature header is rejected — the router
+	// (the resolved merchant slug) is never the trust boundary; the signature is.
+	_, err = prepareStripeMultiSecret(body, []string{snapshot, thin}, "", time.Minute)
+	require.ErrorIs(t, err, webhookutil.ErrWebhookSignatureMissing)
 }
 
 func TestHydrateThinStripeEvent(t *testing.T) {

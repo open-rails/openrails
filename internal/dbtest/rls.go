@@ -62,7 +62,7 @@ func enableAppRoleLogin(ctx context.Context, superDSN string) error {
 	if _, err := sqlDB.ExecContext(ctx, `ALTER ROLE `+appRole+` WITH LOGIN PASSWORD '`+appPassword+`'`); err != nil {
 		return fmt.Errorf("grant %s login: %w", appRole, err)
 	}
-	// Full-app RLS tests (StartStandaloneRLS) run the whole server as openrails_app,
+	// Full-app integration tests (the StartStandalone harness) run the whole server as openrails_app,
 	// which shares one pool with AuthKit's profiles.* schema and reads public.migrations
 	// at boot. Grant those (prod-faithful — the prod app role holds both); the role
 	// stays NOBYPASSRLS, so openrails.* RLS still enforces. Guarded on schema existence.

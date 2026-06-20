@@ -272,7 +272,7 @@ openrails.NewHTTPHandler(embedded.HTTPHandlerOptions{
 // Server-to-server operations: embedded hosts call the in-process Service()
 // facade (below) after authorizing the action themselves. There is no separate
 // private/mTLS HTTP surface — standalone machine callers use OpenRails-issued
-// service tokens against the public /v1/service/* routes (issue #222).
+// API keys against the public /v1/service/* routes (issue #222).
 ```
 
 ## In-Process Service API

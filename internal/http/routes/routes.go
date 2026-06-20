@@ -31,8 +31,8 @@ type Options struct {
 	AdminPermissionChecker authpolicy.AdminPermissionChecker
 
 	// ServiceCredentialResolver validates merchant-scoped programmatic
-	// credentials: generated service tokens, remote-application self tokens, and
-	// service JWTs. The control plane satisfies this in standalone mode.
+	// credentials: generated API keys, remote-application self tokens, and service
+	// JWTs. The control plane satisfies this in standalone mode.
 	ServiceCredentialResolver ServiceCredentialResolver
 }
 
@@ -124,32 +124,6 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	// Solana recurring enrollment (#255): the wallet signs subscribe client-side,
 	// then confirms here to charge the first cycle + create the membership.
 	group.Handle(http.MethodPost, "/solana/recurring/enroll", h(httphandlers.ConfirmSolanaEnrollment))
-
-	me := group.Group("/me", required)
-	me.Handle(http.MethodGet, "/status", h(httphandlers.GetMyBillingStatus))
-	me.Handle(http.MethodGet, "/subscriptions", h(httphandlers.GetMySubscriptions))
-	me.Handle(http.MethodGet, "/subscriptions/:id", h(httphandlers.GetSubscription))
-	me.Handle(http.MethodPut, "/subscriptions/:id/payment-method", h(httphandlers.UpdateSubscriptionPaymentMethod))
-	me.Handle(http.MethodPost, "/subscriptions/:id/cancel", h(httphandlers.CancelSubscription))
-	me.Handle(http.MethodPost, "/subscriptions/:id/resume", h(httphandlers.ResumeSubscription))
-	me.Handle(http.MethodPost, "/subscriptions/:id/change-tier", h(httphandlers.ChangeTier))
-	me.Handle(http.MethodPost, "/subscriptions/:id/change-tier/preview", h(httphandlers.ChangeTierPreview))
-	me.Handle(http.MethodGet, "/payments", h(httphandlers.GetUserPayments))
-	me.Handle(http.MethodGet, "/payment-methods", h(httphandlers.ListPaymentMethods))
-	me.Handle(http.MethodPost, "/payment-methods", h(httphandlers.CreatePaymentMethod))
-	me.Handle(http.MethodPut, "/payment-methods/:id", h(httphandlers.UpdatePaymentMethod))
-	me.Handle(http.MethodDelete, "/payment-methods/:id", h(httphandlers.DeletePaymentMethod))
-	me.Handle(http.MethodGet, "/notifications", h(httphandlers.GetNotifications))
-	me.Handle(http.MethodGet, "/notifications/unread-count", h(httphandlers.GetUnreadNotificationCount))
-	me.Handle(http.MethodPost, "/notifications/:id/read", h(httphandlers.MarkNotificationRead))
-	me.Handle(http.MethodGet, "/credits", h(httphandlers.GetMyCredits))
-	me.Handle(http.MethodGet, "/credits/:currency", h(httphandlers.GetMyCreditsType))
-	me.Handle(http.MethodGet, "/credits/:currency/transactions", h(httphandlers.GetMyCreditTransactions))
-	me.Handle(http.MethodGet, "/products", h(httphandlers.GetMyProducts))
-	me.Handle(http.MethodGet, "/products/:product_id/access", h(httphandlers.GetMyProductAccess))
-
-	stripe := group.Group("/stripe", required)
-	stripe.Handle(http.MethodPost, "/portal", h(httphandlers.CreatePortalSession))
 }
 
 // #528: the per-user `/v1/admin` surface (RegisterAdminRoutes) was retired. The
@@ -330,10 +304,24 @@ func registerCatalogActionRoutes(catalog router.Router) {
 	catalog.Handle(http.MethodGet, "/stripe/orphans", h(httphandlers.AdminListStripeOrphans))
 }
 
+// RegisterWebhookRoutes mounts the legacy configured-merchant webhook surface.
+// Standalone and embedded defaults do not call this; hosts should prefer
+// RegisterMerchantWebhookRoutes or RegisterHostWebhookRoutes.
 func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/:provider", h(httphandlers.Webhook))
 }
 
+// RegisterHostWebhookRoutes mounts POST /:provider for embedding hosts that
+// resolve Host -> merchant in middleware before OpenRails verifies the webhook.
+func RegisterHostWebhookRoutes(rr router.Router, rt *app.Runtime) {
+	rr.Handle(http.MethodPost, "/:provider", h(httphandlers.HostWebhook))
+}
+
+// RegisterMerchantWebhookRoutes mounts the CANONICAL merchant-scoped webhook surface
+// (POST /merchants/:merchant/webhooks/:provider, issue #529) — the active inbound
+// webhook surface for every deployment. One handler (httphandlers.MerchantWebhook,
+// Stripe + NMI/Mobius + CCBill) is shared by both the standalone gin server and the
+// embedded mux, so the two cannot drift.
 func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider", h(httphandlers.MerchantWebhook))
 }

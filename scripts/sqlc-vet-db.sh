@@ -5,7 +5,9 @@
 # possibly-drifted dev volume.
 #
 #   SQLC_ADMIN_DATABASE_URL  admin connection used to drop/create the vet DB
-#                            (default: local docker-compose postgres)
+#                            (default: local docker-compose postgres on 5434)
+#   SQLC_POSTGRES_HOST       default admin host (default: 127.0.0.1)
+#   POSTGRES_HOST_PORT       default admin port (default: 5434)
 #   SQLC_VET_DB              vet database name (default: openrails_sqlc_vet)
 #
 # Prints the vet database URL on stdout (everything else goes to stderr), so:
@@ -13,7 +15,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ADMIN_URL="${SQLC_ADMIN_DATABASE_URL:-postgres://admin:admin_password@127.0.0.1:5433/openrails_db?sslmode=disable}"
+POSTGRES_HOST="${SQLC_POSTGRES_HOST:-127.0.0.1}"
+POSTGRES_PORT="${POSTGRES_HOST_PORT:-5434}"
+ADMIN_URL="${SQLC_ADMIN_DATABASE_URL:-postgres://admin:admin_password@${POSTGRES_HOST}:${POSTGRES_PORT}/openrails_db?sslmode=disable}"
 VET_DB="${SQLC_VET_DB:-openrails_sqlc_vet}"
 
 psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q \

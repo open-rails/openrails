@@ -21,9 +21,9 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
-	policyginmw "github.com/open-rails/openrails/internal/auth/policy/ginmw"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/pkg/authprovider"
@@ -114,16 +114,39 @@ func newPlatformServer(t *testing.T, pool *pgxpool.Pool) *Server {
 	return &Server{merchants: tsvc, platformMetrics: metrics}
 }
 
-func doReq(t *testing.T, s *Server, checker authpolicy.PlatformSuperadminChecker, method, path string, uc authprovider.UserContext, body string) *httptest.ResponseRecorder {
+func doReq(t *testing.T, s *Server, checker ginmw.PlatformSuperadminChecker, method, path string, uc authprovider.UserContext, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
 	e.Use(func(c *gin.Context) { c.Set("openrails.user_context", uc); c.Next() })
 	g := e.Group(StandaloneV1Prefix + PlatformPrefix)
-	g.Use(policyginmw.PlatformSuperadminRequired(checker))
+	g.Use(ginmw.UserSessionPlatformPrincipalRequired(checker))
+	g.Use(ginmw.RequirePermission(controlplane.PermPlatformSuperadmin))
 	g.GET("/merchants", s.platformListMerchantsHandler())
 	g.GET("/search", s.platformSearchHandler())
 	g.GET("/metrics", s.platformMetricsHandler())
+
+	var req *http.Request
+	if body != "" {
+		req = httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req = httptest.NewRequest(method, path, nil)
+	}
+	rr := httptest.NewRecorder()
+	e.ServeHTTP(rr, req)
+	return rr
+}
+
+func doMerchantDirectoryReq(t *testing.T, s *Server, checker ginmw.PlatformSuperadminChecker, method, path string, uc authprovider.UserContext, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	e := gin.New()
+	e.Use(func(c *gin.Context) { c.Set("openrails.user_context", uc); c.Next() })
+	g := e.Group(StandaloneV1Prefix + MerchantAdminPrefix)
+	g.Use(ginmw.UserSessionPlatformPrincipalRequired(checker))
+	g.Use(ginmw.RequirePermission(controlplane.PermPlatformSuperadmin))
+	g.GET("/:id", s.merchantGetHandler())
 
 	var req *http.Request
 	if body != "" {
@@ -160,4 +183,23 @@ func TestPlatformAPI_GateSearchAndMetrics(t *testing.T) {
 	var m platform.PlatformMetrics
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &m))
 	require.Equal(t, 1, m.MerchantCount)
+}
+
+func TestMerchantDirectoryAPI_IsPlatformOnly(t *testing.T) {
+	pool := newPlatformTestPool(t)
+	checker := fakeSuperadminChecker{allow: map[string]bool{"platform-admin": true}}
+	s := newPlatformServer(t, pool)
+
+	var merchantID string
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT id::text FROM openrails.merchants WHERE slug = 'acme'`).Scan(&merchantID))
+
+	base := StandaloneV1Prefix + MerchantAdminPrefix + "/" + merchantID
+	platformUC := authprovider.UserContext{UserID: "platform-admin", Org: "openrails-platform"}
+	merchantAdminUC := authprovider.UserContext{UserID: "merchant-admin", Org: "tenant-acme", OrgRoles: []string{"admin"}}
+
+	rr := doMerchantDirectoryReq(t, s, checker, http.MethodGet, base, merchantAdminUC, "")
+	require.Equal(t, http.StatusForbidden, rr.Code, "merchant operator admin must not reach the global merchant directory")
+
+	rr = doMerchantDirectoryReq(t, s, checker, http.MethodGet, base, platformUC, "")
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 }

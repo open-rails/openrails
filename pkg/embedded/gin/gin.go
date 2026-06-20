@@ -34,7 +34,7 @@ type RouteOptions struct {
 }
 
 // StandaloneHandler returns the full standalone gin HTTP surface for the embedded app:
-// health + debug (dev only) + user + admin + webhooks + the service token-authenticated
+// health + debug (dev only) + user + admin + webhooks + the API-key-authenticated
 // server-to-server service routes. It is built from the gin-free app graph and
 // is intended for the standalone server entrypoint (cmd/openrails).
 func StandaloneHandler(e *embedded.Embedded) (http.Handler, error) {
@@ -101,9 +101,9 @@ func RegisterMerchantActionRoutes(e *embedded.Embedded, group *gin.RouterGroup, 
 	httproutes.RegisterMerchantActionRoutes(ginrouter.New(group, a.Runtime), a.Runtime, actionOpts)
 }
 
-// RegisterWebhookRoutes registers webhook routes on the provided gin router
-// group. These routes handle incoming webhooks from payment processors (Stripe,
-// CCBill, NMI, etc.).
+// RegisterWebhookRoutes registers legacy configured-merchant webhook routes.
+// Embedded hosts should usually use RegisterMerchantWebhookRoutes or
+// RegisterHostWebhookRoutes.
 //
 // Example:
 //
@@ -116,6 +116,16 @@ func RegisterWebhookRoutes(e *embedded.Embedded, group *gin.RouterGroup) {
 		panic("embedded billing: not initialized")
 	}
 	httproutes.RegisterWebhookRoutes(ginrouter.New(group, a.Runtime), a.Runtime)
+}
+
+// RegisterHostWebhookRoutes registers POST /:provider on a group that already
+// has host middleware pinning merchant.ID on the request context.
+func RegisterHostWebhookRoutes(e *embedded.Embedded, group *gin.RouterGroup) {
+	a := e.App()
+	if a == nil {
+		panic("embedded billing: not initialized")
+	}
+	httproutes.RegisterHostWebhookRoutes(ginrouter.New(group, a.Runtime), a.Runtime)
 }
 
 // routeAuthenticator resolves the framework-neutral Authenticator for a gin

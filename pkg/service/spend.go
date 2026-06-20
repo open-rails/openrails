@@ -119,7 +119,7 @@ type InvoiceLineItemDTO struct {
 }
 
 // InvoiceDTO is the public view of a finalized monthly itemized invoice (issue
-// #303), served by the customer-facing GET /v1/self/invoices[/:id] routes. It is
+// #303), served by the customer-facing GET /v1/me/invoices[/:id] routes. It is
 // a public projection of models.Invoice so callers don't import internal types.
 type InvoiceDTO struct {
 	ID                uuid.UUID            `json:"id"`

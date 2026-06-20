@@ -8,7 +8,7 @@ import (
 )
 
 // DelegatedPrincipal is the resolved identity a host supplies for the
-// browser-direct SELF-SERVICE surface (/v1/self/* and /v1/admin/*,
+// browser-direct SELF-SERVICE surface (/v1/me/* and /v1/admin/*,
 // issue #339). It is the framework-neutral counterpart of the control plane's
 // resolved delegated token: the host verifies the incoming credential however
 // it likes (its own federated-issuer registry, a session, a gateway header)

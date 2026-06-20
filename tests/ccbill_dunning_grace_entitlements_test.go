@@ -17,11 +17,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 func TestCCBillDunningGraceEntitlements(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// Ensure catalog + profile mapping exists for webhook resolution.
 	products := suite.SeedProducts()
@@ -124,7 +125,7 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 
 func TestCCBillCancellationKeepsAccessUntilPaidTermEnd(t *testing.T) {
 	suite := getSharedTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 
 	_ = suite.SeedProducts()
 
@@ -186,7 +187,7 @@ func postCCBillWebhook(t *testing.T, baseURL, eventType string, payload map[stri
 	body, err := json.Marshal(payload)
 	require.NoError(t, err)
 
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/v1/webhooks/ccbill?eventType="+eventType, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/v1/merchants/"+dbtest.TestMerchantSlug+"/webhooks/ccbill?eventType="+eventType, bytes.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 

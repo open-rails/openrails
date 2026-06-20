@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -28,7 +29,8 @@ func TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant(t *testing.T) 
 
 	require.True(t, surface.app.Runtime.ConfiguredMerchant.IsZero(), "standalone must not carry a default merchant")
 
-	status, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/service/merchant-configuration", surface.Token, nil)
+	payerID := uuid.NewString()
+	status, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/service/credits/balance?currency=usd&customer_id="+payerID, surface.Token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 
 	cp := embcp.Get(surface.app)

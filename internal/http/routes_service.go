@@ -9,17 +9,17 @@ import (
 )
 
 // registerServiceRoutes mounts the server-to-server billing surface on the PUBLIC
-// API engine under /v1/service/*, authenticated by OpenRails-issued tenant service tokens
+// API engine under /v1/service/*, authenticated by OpenRails-issued merchant API keys
 // (issue #222). This REPLACES the retired private/mTLS listener entirely: there is
-// no separate trust surface or port — machine callers present a service token as a Bearer
+// no separate trust surface or port — machine callers present an API key as a Bearer
 // token on the one public tenant API.
 //
 // The OpenRails-owned AuthKit control plane is what resolves and authorizes
-// service tokens; it is always present on this surface (#469).
+// API keys; it is always present on this surface (#469).
 func (s *Server) registerServiceRoutes(e *gin.Engine) {
 	group := e.Group(StandaloneV1Prefix + httproutes.ServiceRoutePrefix)
 	httproutes.RegisterServiceRoutes(group, s.runtime, ginmw.ServiceTokenRequired(s.controlPlane))
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.ServiceRoutePrefix).
-		Info("service token-authenticated service API routes registered on public handler")
+		Info("API-key-authenticated service API routes registered on public handler")
 }

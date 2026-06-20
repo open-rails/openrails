@@ -18,7 +18,7 @@ import (
 
 // These tests pin the HOST-PLUGGABLE identity seam for the self-service
 // surface (issue #339): a host-supplied billingauth.DelegatedAuthenticator
-// authenticates /v1/self/* with NO control plane wired in the test fixture
+// authenticates /v1/me/* with NO control plane wired in the test fixture
 // (the host seam overrides the control-plane verifier), and the
 // explicit-mapping contract is enforced fail-closed (empty
 // tenant/subject/permissions => 401; permissions
@@ -40,7 +40,7 @@ func newHostPrincipalSelfRouter(t *testing.T, authn billingauth.DelegatedAuthent
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	group := e.Group("/v1/self")
+	group := e.Group("/v1/me")
 	// rt==nil: the wrapped handlers are never reached on the 401/403 paths
 	// these tests assert; a 500/panic would mean the gate admitted the request.
 	RegisterSelfServiceRoutes(group, nil, ginmw.DelegatedPrincipalRequired(authn))
@@ -76,14 +76,14 @@ func TestHostPrincipal_SelfSurfaceAcceptsPrincipalWithoutControlPlane(t *testing
 
 	// A read-permission principal reaches past auth; the checkout gate then
 	// 403s (not 401, not 404) — authentication succeeded via the host seam.
-	w := doHostSelf(e, http.MethodPost, "/v1/self/checkout")
+	w := doHostSelf(e, http.MethodPost, "/v1/me/checkout")
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 
 	// And a read route passes both auth and the read gate. With rt==nil the
 	// handler panics if reached, which proves the gates admitted the request.
 	func() {
 		defer func() { _ = recover() }()
-		w := doHostSelf(e, http.MethodGet, "/v1/self/account")
+		w := doHostSelf(e, http.MethodGet, "/v1/me/account")
 		require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
@@ -123,7 +123,7 @@ func TestHostPrincipal_InvalidPrincipalsRejected(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newHostPrincipalSelfRouter(t, stubDelegatedAuthenticator{principal: tc.principal})
-			w := doHostSelf(e, http.MethodGet, "/v1/self/account")
+			w := doHostSelf(e, http.MethodGet, "/v1/me/account")
 			require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 			require.Contains(t, w.Body.String(), "delegated_principal_invalid")
 		})
@@ -133,7 +133,7 @@ func TestHostPrincipal_InvalidPrincipalsRejected(t *testing.T) {
 // The host authenticator's own rejection maps to 401.
 func TestHostPrincipal_AuthenticatorErrorIs401(t *testing.T) {
 	e := newHostPrincipalSelfRouter(t, stubDelegatedAuthenticator{err: billingauth.ErrUnauthenticated})
-	w := doHostSelf(e, http.MethodGet, "/v1/self/account")
+	w := doHostSelf(e, http.MethodGet, "/v1/me/account")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 }
 
@@ -145,14 +145,14 @@ func TestHostPrincipal_AccountSettingsPutRequiresBillingWrite(t *testing.T) {
 		principal: hostPrincipal(controlplane.PermSelfBillingRead),
 	})
 
-	w := doHostSelf(readOnly, http.MethodPut, "/v1/self/account/settings")
+	w := doHostSelf(readOnly, http.MethodPut, "/v1/me/account/settings")
 	require.Equal(t, http.StatusForbidden, w.Code,
 		"settings PUT must be mounted and write-gated (403, not 404/401): %s", w.Body.String())
 
 	// Transactions list rides the read permission and is mounted.
 	func() {
 		defer func() { _ = recover() }()
-		w := doHostSelf(readOnly, http.MethodGet, "/v1/self/account/transactions")
+		w := doHostSelf(readOnly, http.MethodGet, "/v1/me/account/transactions")
 		require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	}()
@@ -164,12 +164,12 @@ func TestHostPrincipal_AccountSettingsPutRequiresBillingWrite(t *testing.T) {
 	})
 	func() {
 		defer func() { _ = recover() }()
-		w := doHostSelf(writer, http.MethodPut, "/v1/self/account/settings")
+		w := doHostSelf(writer, http.MethodPut, "/v1/me/account/settings")
 		require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	}()
 
 	// And the write permission alone does NOT grant reads (distinct gates).
-	w = doHostSelf(writer, http.MethodGet, "/v1/self/account")
+	w = doHostSelf(writer, http.MethodGet, "/v1/me/account")
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }

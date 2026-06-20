@@ -118,6 +118,9 @@ func (s *Server) registerUserRoutes(e *gin.Engine) {
 	s.registerUserRoutesAt(e, StandaloneV1Prefix)
 }
 
+// registerWebhookRoutesAt mounts the legacy configured-merchant webhook surface.
+// It is intentionally not called by default; private standalone uses the
+// merchant-scoped surface, and hosted products mount host-resolved webhooks.
 func (s *Server) registerWebhookRoutesAt(e *gin.Engine, apiPrefix string) {
 	api := e.Group(apiPrefix)
 	webhooks := api.Group("/webhooks")

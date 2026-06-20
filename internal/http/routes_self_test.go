@@ -43,7 +43,7 @@ func TestRegisterSelfServiceRoutes_MountedWithHostDelegatedAuthenticatorOnly(t *
 	// A write route the read-only principal cannot pass: 403 proves the surface
 	// is MOUNTED and the host principal was ACCEPTED past authentication
 	// (unmounted would 404; rejected principal would 401).
-	req := httptest.NewRequest(http.MethodPost, "/v1/self/checkout", nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/me/checkout", nil)
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
@@ -78,7 +78,7 @@ func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *t
 	ts := httptest.NewServer(e)
 	t.Cleanup(ts.Close)
 
-	preflight, err := http.NewRequest(http.MethodOptions, ts.URL+"/v1/self/status", nil)
+	preflight, err := http.NewRequest(http.MethodOptions, ts.URL+"/v1/me/status", nil)
 	require.NoError(t, err)
 	preflight.Header.Set("Origin", "https://evil.example")
 	preflight.Header.Set("Access-Control-Request-Method", http.MethodGet)
@@ -91,7 +91,7 @@ func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *t
 	require.Empty(t, preflightResp.Header.Get("Access-Control-Allow-Origin"))
 	require.Empty(t, preflightResp.Header.Get("Access-Control-Allow-Credentials"))
 
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/self/status", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/me/status", nil)
 	require.NoError(t, err)
 	req.Header.Set("Origin", "https://evil.example")
 	req.Header.Set("Authorization", "Bearer delegated.jwt.token")

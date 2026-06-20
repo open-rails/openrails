@@ -223,16 +223,14 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 // authenticates with that real token. The /v1/service/* path is authenticated by
 // the real ServiceTokenRequired -> ResolveServiceToken -> AuthKit core chain
 // (#481 role-based merchant authz). No stubs.
+// StartStandalone boots the standalone server for an integration test. The server
+// connects as the unprivileged openrails_app role (NOBYPASSRLS), so the per-merchant
+// RLS policies enforce exactly as in production — every integration test exercises
+// real RLS, never a privileged bypass. Fixtures are still seeded via the super pool
+// (h.sharedPool), which bypasses RLS for cross-merchant setup an admin does out of band.
 func (h *Harness) StartStandalone(currency string) *Surface {
-	return h.startStandalone(currency, h.DSN, "standalone")
-}
-
-// StartStandaloneRLS is StartStandalone with the server connected as openrails_app
-// (NOBYPASSRLS), so real per-merchant RLS constrains every query it runs. Fixtures
-// are still seeded via the super pool (h.sharedPool), which bypasses RLS.
-func (h *Harness) StartStandaloneRLS(currency string) *Surface {
 	_, appDSN := dbtest.SharedRLSPostgres(h.t)
-	return h.startStandalone(currency, appDSN, "standalone-rls")
+	return h.startStandalone(currency, appDSN, "standalone")
 }
 
 func (h *Harness) startStandalone(currency, appDSN, name string) *Surface {
@@ -318,7 +316,7 @@ type RemoteAppCaller struct {
 }
 
 // DelegatedCaller is a registered remote_application issuer plus a delegated
-// access token signed by that issuer. Present it to /v1/self/* or /v1/admin/*.
+// access token signed by that issuer. Present it to /v1/me/* or /v1/admin/*.
 type DelegatedCaller struct {
 	Slug    string
 	Issuer  string

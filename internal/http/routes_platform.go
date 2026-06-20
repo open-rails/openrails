@@ -7,7 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
-	policyginmw "github.com/open-rails/openrails/internal/auth/policy/ginmw"
+	"github.com/open-rails/openrails/internal/controlplane"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 )
 
 // PlatformPrefix is the cross-merchant managed-hosting superadmin API (issue #226).
@@ -28,7 +29,8 @@ func (s *Server) registerPlatformRoutes(e *gin.Engine) {
 
 	group := e.Group(StandaloneV1Prefix + PlatformPrefix)
 	group.Use(s.authProvider.Required())
-	group.Use(policyginmw.PlatformSuperadminRequired(s.controlPlane))
+	group.Use(ginmw.UserSessionPlatformPrincipalRequired(s.controlPlane))
+	group.Use(ginmw.RequirePermission(controlplane.PermPlatformSuperadmin))
 
 	// Cross-merchant directory + inspect.
 	group.GET("/merchants", s.platformListMerchantsHandler())

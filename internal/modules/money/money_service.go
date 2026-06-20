@@ -684,13 +684,17 @@ func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer id
 // caller holds the customers-row lock (#491).
 func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string) (*models.MoneyBalance, error) {
 	l := ledger.New(q, tenantID)
-	acc, err := l.EnsureCustomerBalance(ctx, payerID, cur)
+	// A balance READ must never create the account (#534): no account = zero
+	// balance. EnsureCustomerBalance (create) is reserved for the write flows.
+	acc, found, err := l.CustomerBalanceAccountID(ctx, payerID, cur)
 	if err != nil {
 		return nil, err
 	}
-	bal, err := l.Balance(ctx, acc)
-	if err != nil {
-		return nil, err
+	var bal int64
+	if found {
+		if bal, err = l.Balance(ctx, acc); err != nil {
+			return nil, err
+		}
 	}
 	// HeldBalance is always 0 in the durable ledger: admission holds live in Redis
 	// (#513) and the prepaid money_windows reservation was removed (dormant,

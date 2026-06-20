@@ -1095,7 +1095,7 @@ func GetDefaultBillingConfig() *Config {
 		APIURL: "http://localhost:3053",
 		DB: &DBConfig{
 			Host:     "localhost",
-			Port:     "5433",
+			Port:     "5434",
 			Database: "openrails_db",
 			Username: "admin",
 			Password: "admin_password",

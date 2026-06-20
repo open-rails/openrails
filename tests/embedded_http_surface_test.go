@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 func TestEmbeddedHandlers_Surface(t *testing.T) {
@@ -28,17 +30,23 @@ func TestEmbeddedHandlers_Surface(t *testing.T) {
 		require.NotEqual(t, http.StatusNotFound, w.Code)
 	}
 	{
-		// Admin route exists (will likely be 401 without auth, but must not be 404).
-		req := httptest.NewRequest(http.MethodGet, "/v1/admin/metrics/summary", nil)
+		// Merchant action route exists (will likely be 401 without auth, but must not be 404).
+		req := httptest.NewRequest(http.MethodGet, "/v1/merchant/catalog/products", nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, req)
 		require.NotEqual(t, http.StatusNotFound, w.Code)
 	}
 	{
-		// Webhook route exists (will likely be 400 for missing body/provider handling, but must not be 404).
-		req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/stripe", nil)
+		// Merchant webhook route exists; global /v1/webhooks is intentionally not mounted.
+		req := httptest.NewRequest(http.MethodPost, "/v1/merchants/"+dbtest.TestMerchantSlug+"/webhooks/stripe", nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, req)
 		require.NotEqual(t, http.StatusNotFound, w.Code)
+	}
+	{
+		req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/stripe", nil)
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		require.Equal(t, http.StatusNotFound, w.Code)
 	}
 }

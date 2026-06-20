@@ -69,6 +69,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		ID:          productID,
 		Slug:        "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description,
 		CreditsSpec: creditsSpecJSON,
 		Status:      string(models.CatalogStatusActive),
@@ -92,6 +93,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		ProductID:        productID,
 		Amount:           999,
 		Currency:         "usd",
+		MerchantID:       dbtest.TestMerchantID.UUID(),
 		Status:           string(models.CatalogStatusActive),
 		BillingCycleDays: &billingDays32,
 		CreatedAt:        now,
@@ -246,6 +248,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		ID:          productID,
 		Slug:        "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description,
 		Status:      string(models.CatalogStatusActive),
 		CreatedAt:   now,
@@ -253,7 +256,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
+		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd", MerchantID: dbtest.TestMerchantID.UUID(),
 		Status: string(models.CatalogStatusActive), BillingCycleDays: &billingDays32,
 		CreatedAt: now, UpdatedAt: now,
 	})

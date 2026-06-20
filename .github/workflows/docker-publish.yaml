@@ -36,10 +36,81 @@ jobs:
           echo "Tagged commit must be reachable from main or master" >&2
           exit 1
 
+  smoke-image:
+    name: Smoke test Docker image
+    runs-on: ubuntu-latest
+    needs: verify-source
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: openrails_db
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin_password
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      garnet:
+        image: ghcr.io/microsoft/garnet:latest
+        ports:
+          - 6380:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build smoke image
+        run: docker build -t openrails-smoke:${GITHUB_SHA} .
+
+      - name: Migrate smoke database
+        run: |
+          docker run --rm --network host \
+            -e ENV=development \
+            -e TEST_ENV=true \
+            -e DB_HOST=127.0.0.1 \
+            -e DB_PORT=5434 \
+            -e DB_DATABASE=openrails_db \
+            -e DB_USERNAME=admin \
+            -e DB_PASSWORD=admin_password \
+            -e DB_SSLMODE=disable \
+            -e REDIS_ADDR=127.0.0.1:6380 \
+            -e CLICKHOUSE_HTTP_ADDR= \
+            -e CLICKHOUSE_CLIENT_ADDR= \
+            openrails-smoke:${GITHUB_SHA} migrate pg
+
+      - name: Boot server and check readiness
+        run: |
+          cid="$(docker run -d --network host \
+            -e ENV=development \
+            -e TEST_ENV=true \
+            -e PORT=3053 \
+            -e API_URL=http://127.0.0.1:3053 \
+            -e AUTH_ISSUER=http://127.0.0.1:3053 \
+            -e DB_HOST=127.0.0.1 \
+            -e DB_PORT=5434 \
+            -e DB_DATABASE=openrails_db \
+            -e DB_USERNAME=admin \
+            -e DB_PASSWORD=admin_password \
+            -e DB_SSLMODE=disable \
+            -e REDIS_ADDR=127.0.0.1:6380 \
+            -e CLICKHOUSE_HTTP_ADDR= \
+            -e CLICKHOUSE_CLIENT_ADDR= \
+            openrails-smoke:${GITHUB_SHA} server --no-workers)"
+          trap 'docker logs "$cid"; docker rm -f "$cid"' EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3053/health/ready; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
   build-x86:
     name: Build x86 image
     runs-on: ubuntu-latest
-    needs: verify-source
+    needs: smoke-image
     steps:
       - uses: actions/checkout@v4
 
@@ -88,7 +159,7 @@ jobs:
   build-arm64:
     name: Build arm64 image
     runs-on: ubuntu-24.04-arm
-    needs: verify-source
+    needs: smoke-image
     steps:
       - uses: actions/checkout@v4
 

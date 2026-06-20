@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestGetUsage_Breakdown proves the facade method backing GET /v1/self/usage
+// TestGetUsage_Breakdown proves the facade method backing GET /v1/me/usage
 // returns the per-event_type rollup (summed amount, event count, summed
 // dimensions) for a seeded payer over a window (issue #289). It mirrors the
 // money-package usage rollup test but exercises the public service facade the

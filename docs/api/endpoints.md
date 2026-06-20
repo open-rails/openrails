@@ -38,9 +38,9 @@ List endpoints use a Stripe-like envelope:
 | Surface | How to authenticate |
 |---------|---------------------|
 | Public catalog (`/`, `/v1/products`, `/v1/prices`, `/v1/solana/tokens`, health probes) | No auth required |
-| Delegated self routes (`/v1/self/*`) | `Authorization: Bearer <delegated JWT>` signed by a registered issuer; token must carry OIDC `iss`, `sub` via AuthKit `delegated_sub`, accepted `aud`, and `openrails:self:*` permissions |
+| Self routes (`/v1/me/*`) | Standalone: `Authorization: Bearer <delegated JWT>` signed by a registered issuer with `delegated_sub` and `openrails:self:*` permissions. Embedded: the host's configured AuthKit/user bearer is adapted to the same self principal. |
 | Delegated billing-admin routes (`/v1/admin/*`, except operator provisioning under `/v1/admin/merchants/*`) | Same delegated JWT shape, with `openrails:merchant:*` permissions |
-| User/session routes (`/v1/checkout`, `/v1/me/*`) | Host JWT auth where still mounted by the embedding deployment |
+| User/session routes (`/v1/checkout`) | Host JWT auth where still mounted by the embedding deployment |
 | Operator merchant provisioning (`/v1/admin/merchants/*`) | Host JWT auth with `openrails:admin` |
 | Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <generated API key or first-party service JWT>`; each route requires an `openrails:*` permission (see Service API section) |
 | Webhooks (`/v1/webhooks/:provider`, `/v1/merchants/:merchant/webhooks/:provider`) | Provider-specific verification (see notes) |
@@ -59,7 +59,7 @@ Delegated JWT examples:
   signed by its registered issuer with `aud: "openrails-app"`,
   `delegated_sub: "<canonical-user-id>"`, and permissions such as
   `openrails:self:billing:read`, `openrails:self:checkout:create`, or
-  `openrails:self:subscriptions:cancel` for `/v1/self/*`.
+  `openrails:self:subscriptions:cancel` for `/v1/me/*`.
 - Cozy Art billing-admin membership UI: an admin browser token is signed by the
   Cozy issuer with `delegated_sub: "<admin-subject>"` and
   `openrails:merchant:*` permissions for `/v1/admin/*`.
@@ -153,9 +153,11 @@ Confirms a Solana checkout session.
 - Response: `CheckoutSessionResponse`
 - Errors: 400 validation, 403 forbidden, 404 not found, 409 conflict, 410 expired
 
-## Authenticated User API (`/v1/me`)
+## Self-Service API (`/v1/me`)
 
-Every endpoint in this section requires a valid JWT for the current user.
+Every endpoint in this section requires a self principal for the current user:
+delegated JWT in standalone mode, or the embedded host's authenticated user
+bearer adapted to `openrails:self:*`.
 
 ### GET /v1/me/status
 Aggregated premium status: whether the user currently has an active membership, the enriched
@@ -267,7 +269,7 @@ Returns the credit balance for a single credit type (e.g. `api_credits`).
 ### GET /v1/me/credits/{type}/transactions
 Lists credit transactions for the credit type (including hold lifecycle rows). Query params: `limit`, `offset`.
 
-### POST /v1/me/portal
+### POST /v1/me/stripe/portal
 Creates a Stripe customer portal session. Response `{ "url": "https://..." }`.
 
 ## Service API (`/v1/service/*`, machine-credential-authenticated)

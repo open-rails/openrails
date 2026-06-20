@@ -27,6 +27,7 @@ import (
 type ControlPlane struct {
 	cfg     *config.Config
 	authSvc *authhttp.Service
+	hosted  bool
 	// pool is the schema-aware wrapper used for OpenRails' own control-plane
 	// queries (openrails.* tables). AuthKit's own profiles.* queries go through
 	// authSvc, which holds the raw pool (#471).
@@ -43,8 +44,34 @@ type ControlPlane struct {
 	issuer string
 	// delegatedAudiences are the audiences (`aud`) stamped on minted delegated
 	// access tokens. They are the control plane's accepted (expected) audiences, so
-	// every minted token is accepted by delegatedVerifier (and the /v1/self gate).
+	// every minted token is accepted by delegatedVerifier (and the /v1/me gate).
 	delegatedAudiences []string
+}
+
+type options struct {
+	hosted bool
+}
+
+// Option configures the control plane for embedding hosts.
+type Option func(*options)
+
+// WithHostedPosture opens AuthKit registration and mounts the full AuthKit API.
+// Standalone never passes this; hosted products such as openrails-saas opt in
+// through pkg/embedded/controlplane.
+func WithHostedPosture() Option {
+	return func(o *options) {
+		o.hosted = true
+	}
+}
+
+func newOptions(opts []Option) options {
+	var out options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&out)
+		}
+	}
+	return out
 }
 
 // delegatedIssuerJWKSCacheTTL is how long the verifier treats a fetched tenant
@@ -54,14 +81,9 @@ const delegatedIssuerJWKSCacheTTL = time.Hour
 
 // registrationMode maps the lock flag to an AuthKit registration mode.
 //
-// INVARIANT (see SelfHostedPosture): in THIS repo both call sites pass locked=true
-// unconditionally, so registration is always RegistrationModeAdminBootstrapOnly —
-// there is no public user self-registration and no public merchant/org onboarding,
-// and no config knob exists to change that. The RegistrationModeOpen branch is
-// reachable ONLY from a caller that passes locked=false, which this repo never
-// does. PUBLIC, OPEN REGISTRATION IS A FEATURE OF THE SEPARATE, PRIVATE
-// openrails-saas REPO — NOT THIS ONE. Do not wire `locked` to config here; if you
-// need open registration you are working in the wrong repo.
+// Standalone passes locked=true, so registration is
+// RegistrationModeAdminBootstrapOnly and no config/env knob can open it.
+// Embedded hosts can opt into locked=false with WithHostedPosture.
 func registrationMode(locked bool) authcore.RegistrationMode {
 	if locked {
 		return authcore.RegistrationModeAdminBootstrapOnly
@@ -76,7 +98,7 @@ func registrationMode(locked bool) authcore.RegistrationMode {
 //
 // The control plane is mandatory in standalone mode (#469): every input is
 // required and a failure here is a boot failure, never a silent downgrade.
-func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlPlane, error) {
+func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Option) (*ControlPlane, error) {
 	if cfg == nil || cfg.Auth == nil {
 		return nil, errors.New("controlplane: auth.issuer is required (the control plane is mandatory in standalone mode, #469)")
 	}
@@ -114,6 +136,9 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		verifyOnly = true
 	}
 
+	options := newOptions(opts)
+	lockedRegistration := !options.hosted
+
 	coreCfg := authcore.Config{
 		Keys:               keySource,
 		VerifyOnly:         verifyOnly,
@@ -132,10 +157,10 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		},
 		// Private standalone posture: no public user self-registration, no public
 		// org onboarding/management. Embedded bootstrap/core calls
-		// (CreateOrg/AssignRole/MintServiceToken) are unaffected. Public hosted
-		// registration belongs in the private openrails-saas layer, not this repo.
-		NativeUserRegistrationMode: registrationMode(true),
-		OrgRegistrationMode:        registrationMode(true),
+		// (CreateOrg/AssignRole/MintServiceToken) are unaffected. Hosted products
+		// opt in with WithHostedPosture; no config/env knob opens this in standalone.
+		NativeUserRegistrationMode: registrationMode(lockedRegistration),
+		OrgRegistrationMode:        registrationMode(lockedRegistration),
 	}
 
 	authSvc, err := authhttp.NewService(coreCfg)
@@ -159,6 +184,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 	cp2 := &ControlPlane{
 		cfg:                cfg,
 		authSvc:            authSvc,
+		hosted:             options.hosted,
 		pool:               db.WrapPool(pool, cfg.DB.SchemaName()),
 		delegatedVerifier:  delegatedVerifier,
 		issuer:             issuer,
@@ -208,25 +234,12 @@ func (c *ControlPlane) Pool() *db.Pool {
 }
 
 // SelfHostedPosture reports whether this control plane mounts only the
-// intentional AuthKit route groups (RouteCore + RoutePassword + RouteUser) rather
-// than the full DefaultAPI surface.
-//
-// IT IS HARDCODED TRUE AND IS NOT CONFIGURABLE. This is the single switch that
-// keeps OpenRails "private by construction":
-//
-//   - RouteSpecs() therefore NEVER returns DefaultAPI(), so the public-onboarding
-//     groups RouteRegister (user self-registration) and RouteOrganizations
-//     (tenant onboarding/management) are NEVER mounted on /auth/* in this repo —
-//     that branch is dead code here.
-//   - registrationMode is likewise hardcoded to the locked mode (see its doc).
-//   - config.go HARD-REJECTS the old auth.control_plane.enabled knob (#469) so a
-//     deployment cannot believe it is toggling posture.
-//
-// PUBLIC, HOSTED, SELF-SERVE REGISTRATION OF USERS AND MERCHANTS IS OWNED ENTIRELY
-// BY THE SEPARATE, PRIVATE openrails-saas REPO, which overrides this posture. It
-// must never become reachable/configurable from this repo. If you are reaching for
-// a way to flip this to false, you are in the wrong repo. The companion test
-// TestPrivatePostureIsLockedInThisRepo guards this invariant.
+// intentional AuthKit route groups (RouteCore + RoutePassword + RouteUser).
+// Standalone construction never passes WithHostedPosture, so private OpenRails
+// remains locked by default; embedded hosts can opt into hosted posture in code.
 func (c *ControlPlane) SelfHostedPosture() bool {
-	return true
+	if c == nil {
+		return true
+	}
+	return !c.hosted
 }

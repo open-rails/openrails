@@ -52,8 +52,15 @@ func TestEmbeddedMuxAssembles(t *testing.T) {
 
 	// Required-auth route without a credential -> 401 from the neutral requiredMW.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/me/status", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/checkout", nil))
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	// Self-service /me is no longer owned by the gin-free base mux. The unified
+	// self surface is mounted through embgin.SelfHandler so it can share the
+	// Principal/permission gate with standalone.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/me/status", nil))
+	require.Equal(t, http.StatusNotFound, rec.Code)
 
 	// Captcha discovery route (net/http handler) is reachable.
 	rec = httptest.NewRecorder()

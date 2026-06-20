@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
 )
 
@@ -18,12 +19,18 @@ func TestHTTPHandlerOptions_WebhooksOnly(t *testing.T) {
 
 	h := srv.NewHTTPHandler(server.HTTPHandlerOptions{IncludeWebhooks: true})
 
-	// Webhook route should exist.
+	// Merchant-scoped webhook route should exist; global /webhooks is not mounted.
+	{
+		req := httptest.NewRequest(http.MethodPost, "/billing/v1/merchants/"+dbtest.TestMerchantSlug+"/webhooks/stripe", nil)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		require.NotEqual(t, http.StatusNotFound, w.Code)
+	}
 	{
 		req := httptest.NewRequest(http.MethodPost, "/billing/v1/webhooks/stripe", nil)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
-		require.NotEqual(t, http.StatusNotFound, w.Code)
+		require.Equal(t, http.StatusNotFound, w.Code)
 	}
 
 	// User routes should be excluded.

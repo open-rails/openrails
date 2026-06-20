@@ -6,9 +6,10 @@ server-to-server machine credentials.
 ## Service credential surface
 
 `/v1/service/*` is always mounted (the OpenRails AuthKit control plane is
-mandatory in standalone mode, #469). Every route is behind `ServiceTokenRequired`. That middleware accepts either:
+mandatory in standalone mode, #469). Every route is behind the API-key machine
+credential resolver. That middleware accepts either:
 
-- a generated OpenRails/AuthKit opaque service token; or
+- a generated OpenRails/AuthKit opaque API key; or
 - a first-party OIDC service JWT from a registered issuer.
 
 For service JWTs, the caller is authorized by its issuer's merchant registration:
@@ -25,37 +26,37 @@ then require the relevant service permission:
   `openrails:admin`.
 
 Credit/account/balance handlers that act on a `customer_id` call
-`requireServiceCustomerScope` before touching service logic, so merchant-wide
-tokens may act across the merchant and customer-scoped tokens are denied for
+`RequireServiceTokenCustomerScope` before touching service logic, so merchant-wide
+API keys may act across the merchant and customer-scoped API keys are denied for
 other customers.
 
 ## Delegated browser/admin surface
 
-`/v1/self/*` and `/v1/admin/*` are mounted only with
+`/v1/me/*` and `/v1/admin/*` are mounted only with
 `DelegatedSelfRequired`. That middleware resolves an OIDC delegated JWT, pins the
 merchant from the verified issuer mapping, and binds the acting
-`delegated_sub` as request user context. Generated service tokens and
+`delegated_sub` as request user context. Generated API keys and
 `token_use=service` JWTs fail this resolver and are rejected before any
 delegated route permission gate runs.
 
 Self routes require `openrails:self:*` permissions. Delegated admin routes require
-`openrails:merchant:*` permissions. Service-token permissions do not satisfy
+`openrails:merchant:*` permissions. API-key permissions do not satisfy
 delegated route gates.
 
 ## Bootstrap and admin surfaces
 
 The declarative merchant manifest/bootstrap path is a deploy action, not a browser
-or service-token route. Standalone merchant lifecycle admin routes remain behind
-the configured user auth provider plus the admin policy middleware; they are not
-part of the service-token server-to-server surface.
+or API-key route. Standalone merchant lifecycle admin routes remain behind
+the configured user auth provider plus the live Principal permission gate; they are not
+part of the API-key server-to-server surface.
 
 **Admin authority is deployment authority (#312).** A caller is an OpenRails
 admin iff they hold the LIVE `openrails:admin` permission in their owning AuthKit
 org — evaluated at request time by the control plane — or present a
-deployment-minted admin service token carrying `openrails:admin`. There is NO
+deployment-minted admin API key carrying `openrails:admin`. There is NO
 separate "operator"/"admin"/"platform" AuthKit org acting as the admin
 authority, no JWT role-claim gate, and no global-admin DB fallback. The bootstrap
-org hosts its own admin role. Initial generated admin service tokens are
+org hosts its own admin role. Initial generated admin API keys are
 minted only through explicit operator/admin token-minting commands, not through
 declarative bootstrap YAML. The control plane is always present in standalone
 mode (#469); `/v1/admin/*` (and `/v1/admin/merchants/*`) fail closed for embedded
@@ -65,7 +66,7 @@ evaluate.
 Canonical identity vocabulary lives in
 `docs/authkit-merchant-oidc-glossary.md`. New docs and route examples should use
 OpenRails merchant, registered issuer, delegated user, customer, invoker, and
-service token exactly as defined there.
+API key exactly as defined there.
 
 ## Validation
 

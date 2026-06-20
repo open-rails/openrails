@@ -23,6 +23,13 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 )
 
+// AttachOptions configures the embedded AuthKit control-plane seam.
+type AttachOptions struct {
+	// HostedPosture opens AuthKit registration and mounts the full AuthKit API.
+	// Leave false for private standalone-compatible embedded hosts.
+	HostedPosture bool
+}
+
 // Get recovers the concrete *controlplane.ControlPlane attached to the app, or
 // nil when no control plane has been attached (an embedded host that never
 // called Attach) or the field holds some other type.
@@ -41,6 +48,11 @@ func Get(a *app.App) *controlplane.ControlPlane {
 // as the control-plane pool; otherwise Attach creates an OpenRails-owned pool
 // whose lifecycle App.Close manages.
 func Attach(ctx context.Context, a *app.App, cfg *config.Config, injectedPool *pgxpool.Pool) error {
+	return AttachWithOptions(ctx, a, cfg, injectedPool, AttachOptions{})
+}
+
+// AttachWithOptions builds the control plane with host-selected posture.
+func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, injectedPool *pgxpool.Pool, opts AttachOptions) error {
 	if a == nil || cfg == nil {
 		return fmt.Errorf("control plane: app and config are required")
 	}
@@ -58,7 +70,11 @@ func Attach(ctx context.Context, a *app.App, cfg *config.Config, injectedPool *p
 		ownedPool = true
 	}
 
-	cp, err := controlplane.New(ctx, cfg, pool)
+	var cpOpts []controlplane.Option
+	if opts.HostedPosture {
+		cpOpts = append(cpOpts, controlplane.WithHostedPosture())
+	}
+	cp, err := controlplane.New(ctx, cfg, pool, cpOpts...)
 	if err != nil {
 		if ownedPool {
 			pool.Close()
@@ -76,7 +92,7 @@ func Attach(ctx context.Context, a *app.App, cfg *config.Config, injectedPool *p
 
 // RunBootstrap idempotently bootstraps the OpenRails-owned AuthKit control plane
 // (#224): ensures the bootstrap authority, OpenRails operator role, the
-// openrails.* permission catalog, and an initial operator service token.
+// openrails.* permission catalog, and an initial operator API key.
 // Calling it without an attached control plane is a wiring error (#469: the
 // standalone always attaches one first).
 //

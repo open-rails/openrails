@@ -81,10 +81,10 @@ func TestCORS_AllowsConfiguredTenantOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(CORS([]string{"https://app.example.com", "https://app.example.com"}))
-	r.POST("/v1/self/status", func(c *gin.Context) { c.Status(http.StatusOK) })
+	r.POST("/v1/me/status", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	// Preflight (OPTIONS) from an allowed browser origin.
-	req := httptest.NewRequest(http.MethodOptions, "/v1/self/status", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/v1/me/status", nil)
 	req.Header.Set("Origin", "https://app.example.com")
 	req.Header.Set("Access-Control-Request-Method", "POST")
 	req.Header.Set("Access-Control-Request-Headers", "authorization")
@@ -99,9 +99,9 @@ func TestCORS_DeniesUnlistedOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(CORS([]string{"https://app.example.com", "https://app.example.com"}))
-	r.POST("/v1/self/status", func(c *gin.Context) { c.Status(http.StatusOK) })
+	r.POST("/v1/me/status", func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	req := httptest.NewRequest(http.MethodOptions, "/v1/self/status", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/v1/me/status", nil)
 	req.Header.Set("Origin", "https://evil.example.net")
 	req.Header.Set("Access-Control-Request-Method", "POST")
 	w := httptest.NewRecorder()

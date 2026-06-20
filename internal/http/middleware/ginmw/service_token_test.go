@@ -42,7 +42,7 @@ func (f fakeServiceTokenResolver) ResolveServiceJWT(context.Context, string) (*c
 func newServiceTokenTestRouter(resolver ServiceTokenResolver, perm string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/svc", ServiceTokenRequired(resolver), RequireServiceTokenPermission(perm), func(c *gin.Context) {
+	r.GET("/svc", ServiceTokenRequired(resolver), RequirePermission(perm), func(c *gin.Context) {
 		resolved, _ := ServiceTokenFromGin(c)
 		tid, _ := merchant.FromContext(c.Request.Context())
 		c.JSON(http.StatusOK, gin.H{"authkit_org": resolved.OwnerOrgSlug, "merchant": tid.String()})
@@ -156,7 +156,7 @@ func TestServiceTokenRequired_DeniesMissingPermission(t *testing.T) {
 	r := newServiceTokenTestRouter(resolver, controlplane.PermCreditsWrite)
 	w := doServiceTokenRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
-	require.Contains(t, w.Body.String(), "service_token_permission_required")
+	require.Contains(t, w.Body.String(), "permission_required")
 }
 
 func TestServiceTokenRequired_DeniesUnknownPermissionSet(t *testing.T) {

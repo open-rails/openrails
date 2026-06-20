@@ -49,7 +49,7 @@ func newUSDCFundingSelfRouter(t *testing.T, suite *TestContainerSuite, subject s
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	group := e.Group("/v1/self")
+	group := e.Group("/v1/me")
 	ginroutes.RegisterSelfServiceRoutes(group, suite.App.Runtime, ginmw.DelegatedSelfRequired(usdcFundingDelegatedResolver{
 		subject:     subject,
 		permissions: permissions,
@@ -117,7 +117,7 @@ func TestUSDCFundingSelfServiceCreateGetIdempotencyAndIsolation(t *testing.T) {
 		"return_url": "https://doujins.example/checkout/return"
 	}`
 
-	first := doUSDCFundingSelf(routerA, http.MethodPost, "/v1/self/usdc-funding-sessions", body, "idem-usdc-funding")
+	first := doUSDCFundingSelf(routerA, http.MethodPost, "/v1/me/usdc-funding-sessions", body, "idem-usdc-funding")
 	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
 	firstBody := decodeUSDCFundingBody(t, first)
 	require.Equal(t, "robinhood", firstBody["provider"])
@@ -135,17 +135,17 @@ func TestUSDCFundingSelfServiceCreateGetIdempotencyAndIsolation(t *testing.T) {
 	require.Contains(t, providerURL, "address="+testUSDCFundingWallet)
 	require.Contains(t, providerURL, "network=solana")
 
-	replay := doUSDCFundingSelf(routerA, http.MethodPost, "/v1/self/usdc-funding-sessions", body, "idem-usdc-funding")
+	replay := doUSDCFundingSelf(routerA, http.MethodPost, "/v1/me/usdc-funding-sessions", body, "idem-usdc-funding")
 	require.Equal(t, http.StatusOK, replay.Code, replay.Body.String())
 	replayBody := decodeUSDCFundingBody(t, replay)
 	require.Equal(t, id, replayBody["id"])
 
-	getA := doUSDCFundingSelf(routerA, http.MethodGet, "/v1/self/usdc-funding-sessions/"+id, `{}`, "")
+	getA := doUSDCFundingSelf(routerA, http.MethodGet, "/v1/me/usdc-funding-sessions/"+id, `{}`, "")
 	require.Equal(t, http.StatusOK, getA.Code, getA.Body.String())
 	getABody := decodeUSDCFundingBody(t, getA)
 	require.Equal(t, id, getABody["id"])
 
-	getB := doUSDCFundingSelf(routerB, http.MethodGet, "/v1/self/usdc-funding-sessions/"+id, `{}`, "")
+	getB := doUSDCFundingSelf(routerB, http.MethodGet, "/v1/me/usdc-funding-sessions/"+id, `{}`, "")
 	require.Equal(t, http.StatusNotFound, getB.Code, getB.Body.String())
 }
 
@@ -165,7 +165,7 @@ func TestUSDCFundingSelfServiceRejectsUnsupportedProviderAndNetwork(t *testing.T
 		"asset": "USDC",
 		"amount": "5.00"
 	}`
-	baseResp := doUSDCFundingSelf(router, http.MethodPost, "/v1/self/usdc-funding-sessions", baseBody, "")
+	baseResp := doUSDCFundingSelf(router, http.MethodPost, "/v1/me/usdc-funding-sessions", baseBody, "")
 	require.Equal(t, http.StatusBadRequest, baseResp.Code, baseResp.Body.String())
 	require.Contains(t, baseResp.Body.String(), "provider is unavailable")
 
@@ -176,7 +176,7 @@ func TestUSDCFundingSelfServiceRejectsUnsupportedProviderAndNetwork(t *testing.T
 		"asset": "USDC",
 		"amount": "5.00"
 	}`
-	moonPayResp := doUSDCFundingSelf(router, http.MethodPost, "/v1/self/usdc-funding-sessions", moonPayBody, "")
+	moonPayResp := doUSDCFundingSelf(router, http.MethodPost, "/v1/me/usdc-funding-sessions", moonPayBody, "")
 	require.Equal(t, http.StatusBadRequest, moonPayResp.Code, moonPayResp.Body.String())
 	require.Contains(t, moonPayResp.Body.String(), "provider required")
 }
