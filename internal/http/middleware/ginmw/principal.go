@@ -90,23 +90,30 @@ func UserSessionAdminPrincipalRequired(checker AdminPermissionChecker) gin.Handl
 			c.Abort()
 			return
 		}
-		c.Set(PrincipalContextKey, &Principal{
-			MerchantSource: "user_session_org",
-			CredentialType: CredentialUserSession,
-			Subject:        strings.TrimSpace(uc.UserID),
-			can: func(ctx context.Context, perm string) bool {
-				perm = strings.TrimSpace(perm)
-				// Org-plane namespaces only: AuthKit org-management (`org:`) and
-				// OpenRails app-defined merchant resources (`merchant:`, #554). The
-				// separate `platform:` layer is never reachable from an org session.
-				if !strings.HasPrefix(perm, "org:") && !strings.HasPrefix(perm, "merchant:") {
-					return false
-				}
-				allowed, err := checker.HasAdminPermission(ctx, uc.Org, uc.UserID, perm)
-				return err == nil && allowed
-			},
-		})
+		c.Set(PrincipalContextKey, userSessionPrincipal(uc.UserID, uc.Org, checker))
 		c.Next()
+	}
+}
+
+// userSessionPrincipal builds the Principal for a live AuthKit user session acting
+// in its OWN org. Its permission evaluator stays a live AuthKit check and admits
+// only org-plane namespaces — AuthKit org-management (`org:`) and OpenRails
+// app-defined merchant resources (`merchant:`, #554). The separate `platform:`
+// layer is never reachable from an org session.
+func userSessionPrincipal(userID, orgSlug string, checker AdminPermissionChecker) *Principal {
+	userID = strings.TrimSpace(userID)
+	return &Principal{
+		MerchantSource: "user_session_org",
+		CredentialType: CredentialUserSession,
+		Subject:        userID,
+		can: func(ctx context.Context, perm string) bool {
+			perm = strings.TrimSpace(perm)
+			if !strings.HasPrefix(perm, "org:") && !strings.HasPrefix(perm, "merchant:") {
+				return false
+			}
+			allowed, err := checker.HasAdminPermission(ctx, orgSlug, userID, perm)
+			return err == nil && allowed
+		},
 	}
 }
 
