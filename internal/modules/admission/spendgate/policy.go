@@ -37,7 +37,7 @@ const (
 	ScopePayer   Scope = "payer"   // the customer overall
 	ScopeInvoker Scope = "invoker" // a specific API key / principal
 	ScopeRole    Scope = "role"    // a role the invoker holds
-	ScopeTier    Scope = "tier"    // the payer's tier
+	ScopeTier    Scope = "tier"    // the payer's trust tier
 )
 
 // Window is one {scope, duration, limit} cap. Limit and all reserved amounts are

@@ -25,7 +25,7 @@ type AdmitInput struct {
 	CustomerID  identity.CustomerID
 	Invoker     string
 	InvokerType string
-	Tier        string
+	Tier        string // payer trust tier
 	Resource    string
 	// Roles are the immutable role UUIDs the invoker holds (#473). Each role with a
 	// matching (subject, role) budget policy gates this request's spend. The host
@@ -167,9 +167,9 @@ func startCapacity(accountCapacity, activeHeld int64) int64 {
 }
 
 // BudgetStatus returns the payer's spend-cap windows for (payer, invoker) at a
-// tier WITHOUT reserving (#304 introspection) — powers a host's /status dashboard
-// (e.g. cozy-art useGenerationBudgetStatus). It reads the spendgate Redis counters
-// (#513); no Postgres window state.
+// trust tier WITHOUT reserving (#304 introspection) — powers a host's /status
+// dashboard (e.g. cozy-art useGenerationBudgetStatus). It reads the spendgate
+// Redis counters (#513); no Postgres window state.
 func (s *Service) BudgetStatus(ctx context.Context, payer identity.CustomerID, invoker, currency, tier string) ([]AdmitBudgetWindowDTO, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
@@ -285,8 +285,8 @@ func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.Custome
 	return out, nil
 }
 
-// TierBudgetWindowInput / PayerSpendLimitInput configure a tier's money policy via
-// the admin endpoint (#298: tier admin API).
+// TierBudgetWindowInput / PayerSpendLimitInput configure a trust tier's money
+// policy via the admin endpoint (#298: tier admin API).
 type TierBudgetWindowInput struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
@@ -295,7 +295,9 @@ type TierBudgetWindowInput struct {
 }
 
 type PayerSpendLimitInput struct {
-	Tier           string                  `json:"tier"`
+	TrustTier string `json:"trust_tier,omitempty"`
+	// Tier is a deprecated alias for TrustTier, kept while current clients migrate.
+	Tier           string                  `json:"tier,omitempty"`
 	BudgetWindows  []TierBudgetWindowInput `json:"budget_windows"`
 	PolicyCurrency string                  `json:"policy_currency,omitempty"`
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
@@ -404,7 +406,7 @@ func (s *Service) invokerWastedSpendPolicy(ctx context.Context) ([]abuse.WastedW
 }
 
 // payerWastedWindows resolves the PAYER's wasted-spend budget windows from the
-// tier policy's bad_spend windows (#488) at the payer's current tier.
+// trust-tier policy's bad_spend windows (#488) at the payer's current trust tier.
 func (s *Service) payerWastedWindows(ctx context.Context, payer identity.CustomerID, currency, tier string) ([]abuse.WastedWindow, error) {
 	if tier == "" {
 		if t, err := s.GetTier(ctx, payer, currency); err == nil && t != "" {
@@ -704,16 +706,20 @@ func toAbuseUsageWindows(ws []abuse.WindowUsage) []AbuseUsageWindow {
 	return out
 }
 
-// SetPayerSpendLimits upserts a per-payer tier money policy.
+// SetPayerSpendLimits upserts a per-payer trust-tier money policy.
 func (s *Service) SetPayerSpendLimits(ctx context.Context, payer identity.CustomerID, in PayerSpendLimitInput) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	// A ZERO payer writes the TENANT-WIDE DEFAULT tier policy (#477): the platform
-	// capacity ladder declared once, applied to every payer at the tier. A non-zero
+	// A ZERO payer writes the TENANT-WIDE DEFAULT trust-tier policy (#477): the
+	// platform capacity ladder declared once, applied to every payer at the trust tier. A non-zero
 	// payer writes a per-subject override.
-	if in.Tier == "" {
-		return fmt.Errorf("tier required")
+	tier := strings.TrimSpace(in.TrustTier)
+	if tier == "" {
+		tier = strings.TrimSpace(in.Tier)
+	}
+	if tier == "" {
+		return fmt.Errorf("trust_tier required")
 	}
 	pol := models.TierMoneyPolicy{PolicyCurrency: in.PolicyCurrency}
 	for _, b := range in.BudgetWindows {
@@ -722,7 +728,7 @@ func (s *Service) SetPayerSpendLimits(ctx context.Context, payer identity.Custom
 	for _, b := range in.BadSpendWindows {
 		pol.BadSpendWindows = append(pol.BadSpendWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, Limit: b.Limit, Currency: b.Currency})
 	}
-	return admission.NewPayerSpendLimitStore(s.rt.DB).UpsertPayerSpendLimitsFull(ctx, payer, in.Tier, pol)
+	return admission.NewPayerSpendLimitStore(s.rt.DB).UpsertPayerSpendLimitsFull(ctx, payer, tier, pol)
 }
 
 // TierScheduleRung is one rung of a persisted same-currency tier ladder (#476):
@@ -733,9 +739,9 @@ type TierScheduleRung struct {
 	MinCumulativePaidAmount int64  `json:"min_cumulative_paid_amount"`
 }
 
-// SetTierSchedule persists the merchant's tier SCHEDULE (#476): the host declares
+// SetTierSchedule persists the merchant's trust-tier SCHEDULE (#476): the host declares
 // the same-currency ladder ONCE and OpenRails then AUTO-maintains each payer's
-// tier from cumulative spend (no host cranking). A zero payer sets the
+// trust tier from cumulative spend (no host cranking). A zero payer sets the
 // merchant-wide default schedule; a non-zero payer sets a per-subject override.
 // owner=platform.
 func (s *Service) SetTierSchedule(ctx context.Context, payer identity.CustomerID, currency string, schedule []TierScheduleRung) error {
@@ -757,11 +763,10 @@ func (s *Service) SetTierSchedule(ctx context.Context, payer identity.CustomerID
 	return moneySvc.SetTierSchedule(ctx, payer, cur, rungs)
 }
 
-// GetTier returns the payer's CURRENT graduated tier (#477) for one currency:
-// the tier OpenRails auto-maintains from same-currency cumulative paid spend
-// against the persisted tier schedule (#476), or a manual admin override. Empty
-// when the payer has never graduated (no tier set) — the caller treats that as
-// the lowest/default tier.
+// GetTier returns the payer's current trust tier (#477) for one currency:
+// the value OpenRails auto-maintains from same-currency cumulative paid spend
+// against the persisted trust-tier schedule (#476), or a manual admin override.
+// Empty means the caller treats it as the lowest/default trust tier.
 func (s *Service) GetTier(ctx context.Context, payer identity.CustomerID, currency string) (string, error) {
 	if s == nil || s.rt == nil {
 		return "", fmt.Errorf("service not initialized")

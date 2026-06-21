@@ -142,7 +142,7 @@ func TestAdmitter_DelegatedInvokerWindowEnforced(t *testing.T) {
 }
 
 func TestAdmitter_StaggeredPerPayerWindows(t *testing.T) {
-	// Two payers, identical tier policy, first-charge at DIFFERENT times → their
+	// Two payers, identical trust-tier policy, first-charge at DIFFERENT times → their
 	// fixed windows are anchored independently (staggered), never a global reset.
 	// Here we assert isolation: payer A maxing its window does NOT affect payer B.
 	adm, bpStore, payerA, ctx, pool := admitEnv(t, 1_000_000_000)

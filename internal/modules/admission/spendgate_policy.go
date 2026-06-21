@@ -27,7 +27,7 @@ type SpendgatePolicyLoader struct {
 }
 
 // NewSpendgatePolicyLoader wires the loader. budgetScopes may be nil (then only
-// the tier policy's payer-scope windows are loaded).
+// the trust-tier policy's payer-scope windows are loaded).
 func NewSpendgatePolicyLoader(tiers *PayerSpendLimitStore, budgetScopes *InvokerSpendLimitStore, fxp fx.Provider) *SpendgatePolicyLoader {
 	return &SpendgatePolicyLoader{tiers: tiers, budgets: budgetScopes, fx: fxp}
 }

@@ -9,6 +9,38 @@
 
 ---
 
+# #118: merchant-admin-dashboard-and-metrics
+
+**Completed:** no — future direction only.
+
+OpenRails will eventually need a merchant admin dashboard plus per-merchant routes that expose the dashboard data. Do not build this as part of the current merchant route/RBAC recut; the exact dashboard cards, route shapes, and metric definitions should be designed when there is a real UI.
+
+## Target Model
+
+- Dashboard data is merchant-scoped and authorized through merchant/org RBAC.
+- Prefer a small number of dashboard/reporting endpoints over narrow implementation endpoints such as `manual-rebill-attempts`.
+- Aggregate dunning/rebill information as metrics, for example attempted/succeeded/failed counts by period.
+- Use `repair-alerts` for operator-actionable failures; use subscription/payment event history for drill-down.
+- Keep metric definitions explicit when this is built: revenue, subscriber counts, churn, failed payments, refunds, disputes, dunning outcomes, provider breakdowns, and period comparisons.
+- Avoid caching, ClickHouse-specific rollups, or many endpoint variants until the first dashboard needs them.
+
+## Tasks
+
+- [ ] Define the first merchant admin dashboard screens before committing route shapes.
+- [ ] Choose the smallest per-merchant metrics/reporting API that supports those screens.
+- [ ] Define metric semantics and units, including recurring revenue, one-time payments, refunds, disputes, failed payments, and dunning/rebill outcomes.
+- [ ] Decide whether dashboard data comes from Postgres queries, existing analytics tables, or a later rollup store.
+- [ ] Add merchant/org RBAC permissions for dashboard reads when routes are actually added.
+- [ ] Add integration tests with seeded payments/subscriptions/dunning events once the API shape exists.
+
+## Acceptance
+
+- OpenRails has a merchant admin dashboard route/API design backed by an actual UI need.
+- Dashboard metrics include dunning/rebill aggregate outcomes without exposing a bespoke `manual-rebill-attempts` endpoint.
+- Operator-actionable payment problems still go through repair alerts, not dashboard counters.
+
+---
+
 # #512: Merchant-downloadable report artifacts backed by S3-compatible storage
 
 **Completed:** no — future direction only.

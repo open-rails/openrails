@@ -39,9 +39,9 @@ type PayerSpendLimits struct {
 	BadSpendWindows []models.BudgetWindowPolicy
 }
 
-// UpsertPayerSpendLimitsFull sets the full tier money policy.
-// A ZERO payer writes the TENANT-WIDE DEFAULT policy for the tier (#477): the
-// platform capacity ladder declared once, applied to every payer at that tier
+// UpsertPayerSpendLimitsFull sets the full trust-tier money policy.
+// A ZERO payer writes the TENANT-WIDE DEFAULT policy for the trust tier (#477):
+// the platform capacity ladder declared once, applied to every payer at that tier
 // (selected by GetPayerSpendLimits when the payer has no own override).
 func (s *PayerSpendLimitStore) UpsertPayerSpendLimitsFull(ctx context.Context, payer identity.CustomerID, tier string, policy models.TierMoneyPolicy) error {
 	tid, err := merchant.Require(ctx)
@@ -53,7 +53,7 @@ func (s *PayerSpendLimitStore) UpsertPayerSpendLimitsFull(ctx context.Context, p
 	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		policyJSON, err := json.Marshal(policy)
 		if err != nil {
-			return fmt.Errorf("admission: encode tier policy: %w", err)
+			return fmt.Errorf("admission: encode trust-tier policy: %w", err)
 		}
 		// Merchant-wide default (#477): no subject row to materialize, NULL subject.
 		if payer.IsZero() {
@@ -112,7 +112,7 @@ func (s *PayerSpendLimitStore) GetPayerSpendLimits(ctx context.Context, payer id
 		}
 		if len(genRow.Policy) > 0 {
 			if uerr := json.Unmarshal(genRow.Policy, &row.Policy); uerr != nil {
-				return fmt.Errorf("admission: decode tier policy: %w", uerr)
+				return fmt.Errorf("admission: decode trust-tier policy: %w", uerr)
 			}
 		}
 		found = true

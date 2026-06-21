@@ -111,22 +111,25 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	group.POST("/admit/batch", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAdmitBatch))
 	// Budget introspection (#304): spend-cap windows for a host /status dashboard.
 	group.GET("/budget", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetBudget))
-	// Tier policy admin (#298): configure a tier's throughput + entitled endpoints + money budgets.
+	// Trust-tier policy admin (#298): configure spend/trust-tier money budgets.
 	group.PUT("/payer-spend-limits", creditsWrite, wrap(httphandlers.ServiceSetPayerSpendLimits))
-	// Tier SCHEDULE admin (#476): declare the cumulative-spend ladder ONCE; OpenRails
-	// then auto-maintains each payer's tier (no host cranking of GraduateTier).
+	// Trust-tier SCHEDULE admin (#476): declare the cumulative-spend ladder ONCE;
+	// OpenRails then auto-maintains each payer's trust tier.
 	group.PUT("/tier-schedules", creditsWrite, wrap(httphandlers.ServiceSetTierSchedule))
 	// Merchant-scoped configuration. Service API keys and delegated merchant
 	// admins use the same merchant-configuration permission names; only the
 	// credential profile differs.
 	group.GET("/merchant-configuration", ginmw.RequirePermission(controlplane.PermMerchantConfigurationRead), wrap(httphandlers.ServiceGetMerchantConfiguration))
 	group.PUT("/merchant-configuration", ginmw.RequirePermission(controlplane.PermMerchantConfigurationWrite), wrap(httphandlers.ServiceSetMerchantConfiguration))
-	// Graduated-tier READ (#477): the payer's current auto-maintained tier, for a
+	// Trust-tier READ (#477): the payer's current auto-maintained trust tier, for a
 	// host that drives its OWN per-tier capacity (e.g. tensorhub's scheduler cap).
+	group.GET("/trust-tier", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetTier))
+	// Deprecated alias kept while current clients migrate.
 	group.GET("/tier", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetTier))
 	// Wasted-spend report (#488): the host reports a FAILED attempt that cost it $
-	// (a refunded hold, a content-filter reject). Accrues into the payer's per-tier
-	// bad_spend windows + the invoker's flat windows; admit denies when over.
+	// (a refunded hold, a content-filter reject). Accrues into the payer's
+	// trust-tier bad_spend windows + the invoker's flat windows; admit denies when
+	// over.
 	group.POST("/wasted-spend", creditsWrite, wrap(httphandlers.ServiceReportWastedSpend))
 	// Wasted-spend usage READ (#488): the payer's + invoker's running wasted-$ totals.
 	group.GET("/abuse-usage", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceAbuseUsage))

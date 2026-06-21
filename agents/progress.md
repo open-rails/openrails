@@ -7,18 +7,151 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 553
+next_id: 563
 
 ---
 
-# #552: replace-platform-org-gate-with-openrails-platform-rbac
+# #554: define final OpenRails permission catalog for public, org-treasury, and merchant routes
 
 **Completed:** no
-**Status:** PLANNED 2026-06-20: align OpenRails authorization with AuthKit's RBAC model. Platform is not an org. There is one AuthKit RBAC permission system; applications such as OpenRails extend it with their own `platform:*` and org-local permission names, then check those permissions in both embedded and standalone mode.
+**Status:** planned 2026-06-20: define the complete OpenRails permission vocabulary from the planned route model. Cut permissions that do not bind to a planned route and collapse theoretical fine-grained splits into the smallest useful role boundaries. Rename merchant-resource permissions from `org:*` to `merchant:*`; they are still granted/evaluated in the AuthKit org scope that owns the merchant. This issue supersedes the rough "Initial OpenRails Platform/Org-Local Permissions" list inside #552.
 
-OpenRails currently still carries old "platform org" language and gate wiring around the cross-merchant admin routes. That is the wrong model. AuthKit's useful lesson is the boundary inside one RBAC system: `platform:orgs:recover` and `org:roles:update` are different permission scopes, not separate product-specific auth systems. OpenRails should extend AuthKit's permission set with OpenRails-defined permissions: `platform:*` permissions authorize OpenRails platform/control-plane actions, while OpenRails org-local permissions authorize a user/admin/API key acting inside one merchant-owned org.
+## Model
 
-The same cleanup applies to merchant lookup routes. `/v1/service/*` currently means "merchant-owned server/API-key routes", but the URL describes the credential type instead of the resource boundary. These routes should move under `/v1/merchant/*` and accept any credential that resolves to the org owning the merchant with the needed permission: regular logged-in user, delegated JWT, self-service/browser JWT with org authority, or API key.
+- OpenRails core has four route buckets: public, personal customer self, org-customer treasury, and merchant.
+- Public routes require no OpenRails RBAC permission.
+- Individual customer self routes are authenticated self-access by subject; personal user balances are not delegable.
+- Org customer treasury routes are explicit `/v1/orgs/:org_id/*` routes and AuthKit-org scoped. This covers "I am acting for this org customer/payer, and I want to read billing or share this org balance."
+- Merchant routes are AuthKit-org scoped where the AuthKit org owns exactly one OpenRails merchant.
+- OpenRails core should not define platform-admin permissions for the merchant/customer surface. OpenRails SaaS tracks platform operator permissions separately (`platform:merchants:read/delete/restore`).
+- Permission names describe the OpenRails resource. Merchant-resource permissions use `merchant:<resource>:<action>` even though AuthKit stores/evaluates the grant in the owning org scope.
+
+## Public Routes
+
+No permissions.
+
+## Personal Customer Self Permissions
+
+None. Authenticated self-subject is enough for `/v1/me/*`.
+
+## Org Customer Treasury Permissions
+
+Only define permissions for the org-customer treasury routes that actually exist:
+
+```text
+org:spend-delegations:read       # read org balance-sharing policy
+org:spend-delegations:update     # replace org balance-sharing policy
+```
+
+`org:spend-delegations:*` only applies to the org named in `/v1/orgs/:org_id/spend-delegations`. Do not allow an individual/personal customer to delegate their personal balance.
+
+## Merchant Permissions
+
+Scoped to the AuthKit org that owns the OpenRails merchant:
+
+```text
+merchant:settings:read             # GET /v1/merchant/settings
+merchant:settings:update           # PUT /v1/merchant/settings
+
+merchant:payment-providers:read    # GET /v1/merchant/payment-providers*
+merchant:payment-providers:update  # PUT/DELETE payment provider config
+
+merchant:catalog:read              # GET catalog products, prices, drift
+merchant:catalog:update            # product/price writes, drift refresh, catalog publish
+
+merchant:customers:read            # list/read customers, balances, transactions, support profile
+merchant:customers:update          # customer support writes: grants, balance adjustments, credit limits, off-channel payments, payment-method removal
+
+merchant:payments:read             # search/read payments and customer payment history
+merchant:payments:refund           # refund a payment
+
+merchant:subscriptions:read        # search/read subscriptions
+merchant:subscriptions:update      # cancel/update a subscription
+
+merchant:admissions:create         # create, capture, release admissions; report wasted spend
+merchant:usage:read                # POST /v1/merchant/usage/*
+
+merchant:repair-alerts:read        # GET /v1/merchant/repair-alerts
+```
+
+Merged permission mapping:
+
+- `merchant:payment-providers:update` covers provider update and delete/disable.
+- `merchant:catalog:update` covers product/price writes, drift refresh/repair,
+  and `POST /v1/merchant/catalog/publish`.
+- `merchant:customers:read` covers customer profile, balance, transaction,
+  entitlement, product-access, payment, and subscription reads under a customer.
+- `merchant:customers:update` covers manual entitlement/product-access grants,
+  balance adjustments, credit-limit changes, off-channel payment recording, and
+  support payment-method removal.
+- `merchant:subscriptions:update` covers cancellation/update workflows.
+- `merchant:admissions:create` covers the whole admission lifecycle: create,
+  capture, release, and wasted-spend report.
+
+## Tasks
+
+- [ ] Replace #552's rough initial permission list with this catalog once implementation starts.
+- [ ] Add these permission definitions to the OpenRails AuthKit permission catalog.
+- [ ] Delete old planned permissions that have no route: org-customer `billing`, `checkout`, `payment-methods`, and `subscriptions` permissions.
+- [ ] Rename merchant-resource permission constants/docs/tests from `org:*` to `merchant:*`, while keeping the AuthKit scope check tied to the owning org.
+- [ ] Collapse old fine-grained merchant permissions into the smaller set above; do not keep separate `balances`, `credit-limits`, `entitlements`, `product-access`, `payment-methods`, `payment-providers:delete`, `catalog:repair`, `payments:create`, `subscriptions:cancel`, `admissions:capture`, `admissions:release`, or `wasted-spend:create` gates unless a real role split later requires them.
+- [ ] Map every planned `/v1/me/*` route to authenticated personal self-access and every planned `/v1/orgs/:org_id/*` route to one of the org customer permissions above.
+- [ ] Map every planned `/v1/merchant/*` route to one merchant permission above.
+- [ ] Add tests proving individual self-access does not require org permissions but org-scoped treasury access does.
+- [ ] Add tests proving personal/individual customers cannot use `spend-delegations`.
+- [ ] Add tests proving merchant permissions are scoped to the merchant-owner org and do not apply to customer/payer orgs unless it is the same org.
+- [ ] Add docs showing OpenRails SaaS platform operator permissions live outside this core catalog.
+
+## Acceptance
+
+- OpenRails has one concrete permission catalog for all non-public core routes.
+- No core merchant/customer route depends on a fake platform org or platform-admin permission.
+- Every defined OpenRails core permission binds to at least one planned route.
+- Merchant-resource permission strings use `merchant:*`, not `org:*`; org scope is part of the AuthKit grant/check context.
+- Merchant permissions are coarse enough to match real roles; fine-grained splits are only added when a concrete admin persona needs them.
+- `org:spend-delegations:*` is org-customer-only and cannot delegate personal user balances.
+- Route tests cover public/no-permission, personal self-access, org-scoped treasury access, and merchant org access.
+
+---
+
+# #553: rename payer tier to trust-tier
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-20: trust-tier wire/API rename is implemented for the live admission/service surfaces. Canonical graduated-tier route is `/v1/service/trust-tier`; `/v1/service/tier` and old `tier` request fields remain compatibility aliases because Tensorhub still uses the current Go client `Tier` fields. Validation: `go test . ./internal/http/handlers ./internal/http/routes/ginroutes ./pkg/service ./embed`; `go test ./internal/modules/admission/...`; `git diff --check`.
+
+## Scope
+
+- Rename API response fields from `tier` to `trust_tier` when the value is the customer's auto-maintained trust/spend level.
+- Rename route/docs wording from "payer tier" or "customer tier" to "trust tier" where that is the actual meaning.
+- Keep product/catalog terminology unchanged: product tiers, tier groups, prices, and subscription plans are not trust tiers.
+- Keep internal database column renames optional unless the current names leak into generated APIs or make code misleading. Prefer API/docs clarity over churn.
+- Preserve compatibility aliases only if downstreams still read `tier`; otherwise hard-cut before the new merchant route surface ships.
+
+## Tasks
+
+- [x] Audit OpenRails for payer/customer `tier` usages and classify each as trust-tier vs product/catalog tier.
+- [x] Update merchant customer profile responses to return `trust_tier` instead of ambiguous `tier`. DONE 2026-06-20: no live merchant-customer profile handler exists yet; the live graduated-tier read response now returns `trust_tier`.
+- [x] Update admission/settings policy docs so trust-tier language is explicit where it refers to spend/trust classification.
+- [x] Update Go DTOs/client names if they expose payer/customer tier publicly.
+- [x] Update tests and fixtures to use `trust_tier`.
+- [x] Verify catalog/product tier terminology remains unchanged.
+
+## Acceptance
+
+- Merchant/customer APIs no longer expose ambiguous `tier` for payer trust classification.
+- Product/catalog tier names are untouched.
+- Tests cover the renamed customer profile/admission DTO fields.
+
+---
+
+# #552: merchant-api-surface-recut (/v1/service → /v1/merchant) [EPIC — children #554–#562]
+
+**Completed:** no
+**Status:** PLANNED 2026-06-20: this is a route + principal recut, NOT an auth-model change. The two RBAC planes already exist and are already separate: `platform:*` (control-plane platform layer, no org — and per #554 platform/operator permissions live in OpenRails SaaS, not core) and org-scoped OpenRails permissions (named `merchant:*` / `org:*`, evaluated in the owning AuthKit org). "Platform org" is dead legacy scaffolding, not a proposed model: `PlatformOrgSlug()` already returns "" and `/v1/platform/*` never mounts in core. So the real work is: (1) move merchant-owned `/v1/service/*` to resource-named `/v1/merchant/*`, (2) normalize every credential type into one merchant/org principal check, (3) recut the customer-self / org-treasury / Tensorhub surfaces, and (4) delete the dead platform-org wiring. The contracts below are the shared design source of truth; the work is sliced into the child issues under "## Child Issues".
+
+HARD CUT — no backwards compatibility, no data migration, no aliases. `/v1/service/*` and `/v1/self/*` are deleted, not aliased. All consumers (Doujins, Tensorhub, Cozy Art) are first-party and bump in lockstep.
+
+`/v1/service/*` describes the credential type, not the resource boundary. Merchant-owned operations move under `/v1/merchant/*` and accept any credential that resolves to the owning org with the needed permission: regular logged-in user, delegated JWT, self-service/browser JWT with org authority, or API key.
 
 ## Metadata
 
@@ -33,7 +166,7 @@ The same cleanup applies to merchant lookup routes. `/v1/service/*` currently me
 - Do not model platform admins as merchant admins on a special merchant.
 - OpenRails owns the permission names and route gates; AuthKit owns the single RBAC model, role assignment, and effective-permission resolution.
 - Platform permissions use `platform:<resource>:<action>` and are global to the OpenRails installation.
-- Org-local OpenRails permissions use the AuthKit org RBAC plane and are scoped to exactly one merchant/org.
+- Org-scoped OpenRails permissions use the AuthKit org RBAC plane but the permission string names the OpenRails resource, e.g. `merchant:payments:refund` for a merchant route scoped to the merchant-owner org.
 - Merchant route authorization is tied to the AuthKit org that owns the OpenRails merchant.
 - Route paths should describe the resource boundary, not the auth mechanism: use `/v1/merchant/*`, not `/v1/service/*`, for merchant-owned operations.
 - Do not add `/admin` inside merchant routes. `/v1/merchant/*` already means "authorized actor operating inside the authenticated merchant/org"; admin-ness comes from the permission gate, not the path.
@@ -43,44 +176,39 @@ The same cleanup applies to merchant lookup routes. `/v1/service/*` currently me
 - Drop `issuer` from merchant entitlement lookup request bodies once customer identity is `(merchant_id, subject)`; merchant/org comes from auth, subject comes from the request.
 - Merchant HTTP routes should be classified by deployment need: standalone/remote needs HTTP APIs; embedded hosts should prefer the Go interface into OpenRails and direct DB access through OpenRails services.
 - Embedded mode should mount browser-facing/customer/admin/webhook routes as needed, but should not require internal merchant lookup HTTP routes just to let the host call back into OpenRails.
+- OpenRails routes should fall into four product buckets in the core product:
+  public routes, personal customer self routes, org-customer treasury routes,
+  and merchant routes. Platform/operator routes belong to OpenRails SaaS, not
+  the core merchant/customer surface.
 - `platform:*` must never imply any org-local OpenRails permission inside a merchant/org.
 - Org-local OpenRails permissions must never imply any `platform:*` permission.
 - Standalone mode uses OpenRails' bundled AuthKit control plane for RBAC.
 - Embedded mode uses the host application's AuthKit RBAC/principal mapping; OpenRails still checks the same permission names.
 
-## Initial OpenRails Platform Permissions To Add
+## Child Issues
 
-- `platform:merchants:read`
-- `platform:merchants:create`
-- `platform:merchants:update`
-- `platform:merchants:delete`
-- `platform:payment-providers:read`
-- `platform:payment-providers:update`
-- `platform:payment-providers:delete`
-- `platform:payment-providers:test`
-- `platform:roles:read`
-- `platform:roles:create`
-- `platform:roles:update`
-- `platform:roles:delete`
-- `platform:members:read`
-- `platform:members:create`
-- `platform:members:delete`
+This epic is the design source of truth; the master checklist under "## Tasks" is decomposed into landable child issues. Each child carries its own detailed `- [ ]` task list and acceptance, and is a hard cut (no aliases).
 
-## Initial OpenRails Org-Local Permissions To Add
+- [ ] #554 — final OpenRails permission catalog (public / personal-self / org-treasury / merchant; `merchant:*` naming). *(created)*
+- [ ] #555 — `/v1/service` → `/v1/merchant` rename + one merchant/org principal resolver; drop `issuer`; customer-forward vs directory split.
+- [ ] #556 — embedded route-set presets (replace `IncludeUser` / `IncludeAdmin` / `IncludeWebhooks` booleans).
+- [ ] #557 — customer self `/v1/me/*` + org-treasury `/v1/orgs/:org_id/*` (spend-delegations); delete `/v1/self/*`.
+- [ ] #558 — Tensorhub client recut into Admission/PolicySync/AdminFunding Go interfaces + settings/policy split; batch-native admission.
+- [ ] #559 — merchant payment-provider config API (replace flat secret-name CRUD; atomic validate-then-store).
+- [ ] #560 — merchant catalog publish/drift over HTTP (HTTP form of `push-merchant-catalog`; plan-only default).
+- [ ] #561 — merchant customer-support + payments/subscriptions admin surface (resource-named, grant-ledger audited).
+- [ ] #562 — delete dead platform-org wiring from core (empty-slug mount switch + `PermPlatformSuperadmin` alias).
 
-- `org:merchant:read`
-- `org:merchant:update`
-- `org:billing:read`
-- `org:payments:read`
-- `org:payments:update`
-- `org:subscriptions:read`
-- `org:subscriptions:update`
-- `org:entitlements:update`
-- `org:product-access:update`
-- `org:payment-providers:read`
-- `org:payment-providers:update`
-- `org:payment-providers:delete`
-- `org:payment-providers:test`
+## Permission Catalog
+
+Use #554 as the core OpenRails permission catalog. This issue should not keep a
+second rough list. OpenRails core currently plans only:
+
+- org-customer treasury permissions for `/v1/orgs/:org_id/spend-delegations`.
+- `merchant:*` permissions for actual `/v1/merchant/*` routes, scoped to the
+  AuthKit org that owns the merchant.
+
+OpenRails SaaS tracks platform/operator permissions separately.
 
 ## Current Smells To Remove
 
@@ -88,7 +216,7 @@ The same cleanup applies to merchant lookup routes. `/v1/service/*` currently me
 - `PermPlatformSuperadmin` as a single fake route gate instead of concrete OpenRails `platform:*` permissions.
 - Route comments that imply platform administration is tied to an AuthKit org.
 - Any test setup that grants platform route access by creating or referencing an org-like authority.
-- Any route-specific permission name that still says `merchant:*` if the route is actually governed by AuthKit org-local RBAC.
+- Any route-specific merchant permission that still uses the misleading `org:*` prefix. Merchant-resource permissions should be `merchant:*` and scoped by the AuthKit org grant context.
 - `/v1/service/*` as the primary path for merchant-owned APIs.
 - `POST /v1/service/customers/by-external-subject/entitlements`: badly named, carries obsolete `issuer`, and mixes standalone remote identity lookup with the simpler merchant/customer model.
 - Auth middleware split by credential type instead of normalizing credentials into one org/merchant principal.
@@ -200,6 +328,85 @@ Lazy rule: embedded defaults exclude `RouteSetMerchantAPI` because the host can
 call OpenRails' Go service directly. Hosts may opt in when they intentionally
 want HTTP loopback parity or expose a remote-compatible API surface.
 
+## Customer Self-Service Route Recut
+
+Customer routes are browser/delegated self-service for the authenticated
+customer/payer. They do not need RBAC permissions for ordinary own-account
+operations; the auth subject is the customer.
+
+Core customer self routes:
+
+```text
+GET    /v1/me/balance?currency=USD
+GET    /v1/me/transactions?currency=USD&limit=&offset=
+GET    /v1/me/settings
+PUT    /v1/me/settings
+GET    /v1/me/payment-methods
+POST   /v1/me/payment-methods
+DELETE /v1/me/payment-methods/:id
+POST   /v1/me/checkout
+GET    /v1/me/subscriptions
+GET    /v1/me/subscriptions/:id
+POST   /v1/me/subscriptions/:id/cancel
+GET    /v1/me/payments
+GET    /v1/me/invoices
+GET    /v1/me/invoices/:id
+GET    /v1/me/usage?currency=USD&from=&to=
+```
+
+Org-customer delegated spend sharing:
+
+```text
+GET    /v1/orgs/:org_id/spend-delegations
+PUT    /v1/orgs/:org_id/spend-delegations
+```
+
+`spend-delegations` is the self-service shape for "I am acting as this org
+customer, and I want selected users/roles to spend this org's balance, subject
+to budget windows." It is org-customer policy only: personal/individual customer
+balances cannot be delegated. `:org_id` is the payer/customer org whose balance
+is being shared. The caller must have AuthKit authority in that org and hold the
+org permission that allows reading or changing spend delegation. It is not a
+merchant-admin support override. The request should be a full replacement document
+with boring scopes. This is a view over the same delegated-spend limit records
+OpenRails admission enforces; do not create a second delegation system:
+
+```json
+{
+  "currency": "USD",
+  "delegations": [
+    {
+      "scope": "invoker_tier",
+      "scope_id": "tier_1",
+      "windows": [
+        {"key": "5h", "window_seconds": 18000, "amount": 5000000}
+      ]
+    },
+    {
+      "scope": "role",
+      "scope_id": "role-uuid",
+      "windows": [
+        {"key": "1w", "window_seconds": 604800, "amount": 35000000}
+      ]
+    }
+  ]
+}
+```
+
+Scope semantics:
+
+- `invoker_tier`: a per-invoker meter selected by the delegated user's tier.
+- `role`: a shared meter selected by role UUID; every delegated user carrying
+  the role shares the same window.
+- `amount` is the currency-native integer amount. For USD, it is micro-dollars.
+- No per-user custom override until a real UI/workflow needs it.
+
+For embedded Tensorhub/Cozy Art, the host can keep using its Go/policy path:
+Cozy Art authors role/tier budgets, Tensorhub checks AuthKit `billing:spend`
+and passes payer/invoker/role/tier to OpenRails admission. These `/v1/me`
+routes are only needed when OpenRails itself owns the customer-facing UI for
+sharing a balance.
+
 ## Tensorhub Merchant API Recut
 
 Tensorhub is the only real consumer of the broad `/v1/service/*` credit/admit
@@ -243,8 +450,6 @@ POST /v1/merchant/admissions                    # always batch-shaped; one item 
 POST /v1/merchant/admissions/:request_id/capture
 POST /v1/merchant/admissions/:request_id/release
 POST /v1/merchant/wasted-spend
-GET  /v1/merchant/customers/:customer_id/tier?currency=USD
-
 GET  /v1/merchant/settings
 PUT  /v1/merchant/settings
 
@@ -392,7 +597,7 @@ Customer support:
 | Route | Purpose | Request | Response |
 |---|---|---|---|
 | `GET /v1/merchant/customers` | Search/list merchant customers. | query filters/page | `{data:[customer],page}` |
-| `GET /v1/merchant/customers/:customer_id` | Customer billing/support profile. | none | `{customer,balance_summary,active_entitlements,subscriptions}` |
+| `GET /v1/merchant/customers/:customer_id` | Customer billing/support profile, including trust tier. | optional `?currency=USD` | `{customer,balance_summary,trust_tier,active_entitlements,subscriptions}` |
 | `GET /v1/merchant/customers/:customer_id/balance` | Per-currency balance. | `?currency=USD` | `{currency,balance}` |
 | `GET /v1/merchant/customers/:customer_id/transactions` | Customer ledger history. | `?currency=&limit=&offset=` | `{data:[transaction],page}` |
 | `GET /v1/merchant/customers/:customer_id/entitlements` | List active/history entitlement grants. | query filters/page | `{data:[entitlement],page}` |
@@ -409,7 +614,6 @@ Customer support:
 | `GET /v1/merchant/customers/:customer_id/subscriptions` | Customer subscriptions, current and historical. | `?status=&limit=&offset=` | `{data:[subscription],page}` |
 | `POST /v1/merchant/customers/:customer_id/balance-adjustments` | Append-only support adjustment to the customer's prepaid balance; for comp credits, corrections, or migrations, not normal purchases. | `{currency,amount,reason,idempotency_key?}` | `{transaction}` |
 | `PUT /v1/merchant/customers/:customer_id/credit-limit` | Set platform/merchant-approved arrears exposure for this customer. | `{currency,limit,reason}` | `{currency,limit}` |
-| `GET /v1/merchant/customers/:customer_id/tier` | Read auto-maintained payer trust/spend tier. | `?currency=USD` | `{currency,tier}` |
 
 Merchant-wide payments and subscriptions:
 
@@ -450,6 +654,10 @@ Policy split:
   Tensorhub-style org delegation should stay in the host app and reach
   OpenRails through the embedded Go API or a future host-internal sync path only
   if standalone deployment needs it.
+- If OpenRails owns the customer-facing UI for this, expose it as
+  `/v1/orgs/:org_id/spend-delegations`, because the route must explicitly name
+  the payer org/customer whose spend-sharing policy is changing. Do not allow
+  individual/personal customer balances to be delegated.
 - OpenRails should still trivially accommodate Tensorhub org-delegated spend:
   admission already has the right generic shape — payer/customer id, invoker,
   invoker type, tier, role UUIDs, estimated amount, request id, and resource.
@@ -514,7 +722,9 @@ Rules:
   lifecycle dates the admin UI needs: started, current period start/end, cancel
   time, next retry/renewal where available, status, price/product, and processor
   references.
-- Customer balance checks use `GET /v1/merchant/customers/:customer_id/balance`.
+- Customer profile reads include the customer's auto-maintained trust/spend tier;
+  do not keep a separate `GET /v1/merchant/customers/:customer_id/tier` route.
+  Customer balance checks use `GET /v1/merchant/customers/:customer_id/balance`.
   `balance-adjustments` is append-only support/migration/correction credit,
   not a purchase path. `credit-limit` is explicit arrears exposure, not a
   billing-mode toggle. Tier is read-only and auto-maintained from spend/trust
@@ -535,8 +745,7 @@ Rules:
 
 ## Tasks
 
-- [ ] Define the OpenRails platform permissions and add/register them in AuthKit during bootstrap/config sync.
-- [ ] Define the OpenRails org-local permissions and add/register them in AuthKit during bootstrap/config sync.
+- [ ] Define/register only the OpenRails core permissions from #554 during bootstrap/config sync.
 - [ ] Rely on AuthKit's single RBAC model to reject invalid permission/scope combinations: non-`platform:` permissions in platform roles and `platform:` permissions in org roles.
 - [ ] Replace `PlatformOrgSlug()` route mounting with a normal platform-principal permission gate; platform routes should not depend on any org slug existing.
 - [ ] Replace `/v1/platform/*` and `/v1/admin/merchants*` gates with specific OpenRails `platform:*` permission checks instead of one fake superadmin permission.
@@ -550,6 +759,7 @@ Rules:
 - [ ] Make `/v1/merchant/*` routes accept every supported credential type that resolves to the owning org/merchant and required permission: logged-in user, delegated JWT, self-service/browser JWT with org authority, and API key.
 - [ ] Replace route-level "service credential required" assumptions with a shared principal resolver for merchant routes.
 - [ ] Remove nested `/admin` naming from merchant-owned routes; use resource paths such as `/v1/merchant/subscriptions/:id`, with permissions deciding who may call them.
+- [ ] Normalize personal customer self-service routes under `/v1/me/*` and add org-customer-owned `GET/PUT /v1/orgs/:org_id/spend-delegations` for org balance sharing; personal customer balances must not be delegable.
 - [ ] Replace `POST /v1/service/customers/by-external-subject/entitlements` with `POST /v1/merchant/customers/entitlements:batch`; remove `issuer` from the request once customer identity is `(merchant_id, subject)`.
 - [ ] Split customer-forward lookups from directory/filter reverse lookups in both HTTP and Go APIs.
 - [ ] Keep the Go library API and HTTP API names/shapes aligned so embedded and standalone hosts use the same concepts.
@@ -587,7 +797,7 @@ Rules:
 - [ ] Rename/update Go library policy methods to prefer one merchant settings call, e.g. `GetMerchantSettings` and `SetMerchantSettings`; do not add customer delegated-spend methods unless a real standalone host sync path requires them.
 - [ ] Keep broad merchant-level "invoker can spend" grants out of the model; invoker/role spend authority must be attached to the payer/customer whose balance is being spent.
 - [ ] Preserve OpenRails admission support for Tensorhub org-delegated spend budgets with generic fields: payer/customer id, invoker, invoker type, tier, role UUIDs, estimated amount, request id, and resource.
-- [ ] Do not expose Tensorhub org delegated-spend budgets as OpenRails merchant-admin routes; if standalone Tensorhub needs remote sync later, add a host-internal API, not a customer-support override.
+- [ ] Do not expose Tensorhub org delegated-spend budgets as OpenRails merchant-admin routes; org-customer-owned sharing belongs under `/v1/orgs/:org_id/spend-delegations`, while embedded Tensorhub/Cozy Art can keep their host-owned policy sync path.
 - [ ] Keep `ResourceRevenueDaily` / `/v1/merchant/usage/resource-revenue` as reporting-only endpoint analytics, not admission settlement.
 - [ ] Cut planned `GET /v1/merchant/manual-rebill-attempts`; rebill attempts are dunning/provider-intent events, so surface failures needing attention through `repair-alerts` and defer aggregate dashboard counts/history drill-downs to the future admin dashboard work.
 - [ ] Add integration coverage proving platform RBAC is independent from merchant RBAC: platform admin can list merchants, merchant admin cannot; platform admin cannot mutate a merchant customer/subscription through merchant routes unless separately authorized.
@@ -603,19 +813,19 @@ Rules:
 - No OpenRails route requires or references a "platform org".
 - Platform admin routes are protected by OpenRails-defined AuthKit `platform:*` permissions.
 - Merchant admin routes are protected by OpenRails-defined AuthKit org-local permissions.
-- Merchant-owned routes are exposed under `/v1/merchant/*`; `/v1/service/*` is gone or compatibility-only.
+- Merchant-owned routes are exposed under `/v1/merchant/*`; `/v1/service/*` is deleted (hard cut, no alias).
 - The same merchant permission gate works for regular users, delegated JWTs, self-service/browser JWTs with org authority, and API keys.
 - Batch entitlement lookup no longer accepts or requires `issuer`; merchant/org is resolved from auth.
 - Customer-forward lookup APIs are simple and mirrored between HTTP and Go.
 - Standalone/remote merchant lookup routes are available over HTTP; embedded hosts can use the Go API without routing through HTTP.
 - Tensorhub's hot path uses only admission/capture/release/wasted-spend/tier reads, with policy sync and admin funding/reporting kept separate.
-- Tensorhub org-delegated spend budgets can be enforced by OpenRails admission without adding merchant-admin delegated-spend override routes.
+- Tensorhub/Cozy Art org-delegated spend budgets can be enforced by OpenRails admission without adding merchant-admin delegated-spend override routes; if OpenRails owns the UI, it is org-customer self-service via `/v1/orgs/:org_id/spend-delegations`.
 - Admission has one batch-shaped API; a one-item admission request uses the same route and response shape.
 - Routes removed from the Tensorhub-required surface either have no downstream caller or are replaced by the OpenRails Go interface/customer/merchant surface.
 - Merchant admin routes are resource-named under `/v1/merchant/*`, not hidden under credential-shaped `/v1/admin/*` or `/v1/service/*` paths.
 - Merchant admins cannot create, delete, export, disable, or reassign merchants; those stay platform-only.
 - Merchant customer-management actions are audited with the acting admin and scoped to the authenticated merchant/org.
-- Merchant provider credentials are configured through payment-provider routes with redacted field status; direct secret-name routes are compatibility-only or gone.
+- Merchant provider credentials are configured through payment-provider routes with redacted field status; direct secret-name routes are deleted (hard cut).
 - Catalog publish/apply is available through both CLI and HTTP, using one shared engine and the same plan-only-by-default semantics.
 - A platform role cannot contain org-local permissions, bare `*`, or negated permissions.
 - A merchant role/token cannot grant `platform:*`.

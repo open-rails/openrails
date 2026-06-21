@@ -37,7 +37,7 @@ const (
 )
 
 // Client is the unified OpenRails service surface (#338): credits/holds,
-// unified admission, budgets, tier policy, account settings, and usage/revenue
+// unified admission, budgets, trust-tier policy, account settings, and usage/revenue
 // analytics. All types are wire types (strings/ints/time) — no internal types.
 //
 // Method semantics (idempotency keys, deny-vs-error, defaulting) are defined by
@@ -75,14 +75,14 @@ type Client interface {
 	// resource|invoker|function|tier.
 	UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
 	// BudgetStatus returns the invoker's fixed money-budget windows under the
-	// payer's stored tier policy without reserving (#304 introspection).
+	// payer's stored trust-tier policy without reserving (#304 introspection).
 	BudgetStatus(ctx context.Context, customerID, invokerID, currency, tier string) ([]BudgetWindow, error)
-	// SetPayerSpendLimits upserts a per-payer tier money policy (#298): fixed
+	// SetPayerSpendLimits upserts a per-payer trust-tier money policy (#298): fixed
 	// money-budget windows and wasted-spend grace windows.
 	SetPayerSpendLimits(ctx context.Context, customerID string, in PayerSpendLimitInput) error
-	// SetTierSchedule persists the merchant's tier SCHEDULE once (#476): the ordered
+	// SetTierSchedule persists the merchant's trust-tier SCHEDULE once (#476): the ordered
 	// ladder [{tier, min_cumulative_paid_amount}] for one currency. OpenRails then
-	// AUTO-maintains each payer's same-currency tier from cumulative spend — the
+	// AUTO-maintains each payer's same-currency trust tier from cumulative spend — the
 	// host never cranks graduation. An EMPTY customerID sets the merchant-wide
 	// default schedule (the common case); a non-empty one sets a per-subject
 	// override. owner=platform (the subject cannot see/loosen it).
@@ -91,11 +91,10 @@ type Client interface {
 	// Missing keys fall back to hardcoded service defaults. OPERATOR-only — NOT
 	// self-serve.
 	SetMerchantConfiguration(ctx context.Context, in MerchantConfigurationInput) error
-	// GetTier returns the payer's CURRENT graduated tier (#477) for one currency:
-	// the tier OpenRails auto-maintains from same-currency cumulative paid spend
+	// GetTier returns the payer's current trust tier (#477) for one currency:
+	// the value OpenRails auto-maintains from same-currency cumulative paid spend
 	// against the persisted schedule (#476), or a manual admin override. Empty
-	// when the payer has never graduated (the host treats that as the
-	// lowest/default tier).
+	// means the host treats it as the lowest/default trust tier.
 	GetTier(ctx context.Context, customerID, currency string) (string, error)
 	// ReportWastedSpend records host-reported WASTED $ (#497): delegated invokers
 	// accrue toward their flat cutoff; direct payer credentials use trust-tier
@@ -104,7 +103,7 @@ type Client interface {
 	ReportWastedSpend(ctx context.Context, report WastedSpendReport) (*WastedSpendResponse, error)
 	// AbuseUsage returns the payer's and invoker's running WASTED-$ totals + budgets
 	// (#488 introspection) in one currency. Empty invoker omits the invoker
-	// windows; empty tier resolves the payer's current tier.
+	// windows; empty tier resolves the payer's current trust tier.
 	AbuseUsage(ctx context.Context, customerID, invoker, currency, tier string) (*AbuseUsageResponse, error)
 	// SetCreditLimit sets the admin/operator arrears credit line for a payer
 	// (#489): under billing_mode=arrears the balance may go NEGATIVE up to
@@ -220,14 +219,16 @@ type CreditTransaction struct {
 // capacity, delegated spend policy, delegated wasted-spend cutoff, and places the
 // request hold when allowed.
 //
-// Tier selects money policy. Resource is host-side attribution only; endpoint
-// authorization stays with the host.
+// TrustTier selects money policy. Resource is host-side attribution only;
+// endpoint authorization stays with the host.
 // EstimatedAmount is the upper-bound charge to hold. A zero EstimatedAmount runs
 // the limit checks without placing a money hold.
 type AdmitRequest struct {
-	CustomerID      string `json:"customer_id"`
-	Invoker         string `json:"invoker"`
-	InvokerType     string `json:"invoker_type,omitempty"`
+	CustomerID  string `json:"customer_id"`
+	Invoker     string `json:"invoker"`
+	InvokerType string `json:"invoker_type,omitempty"`
+	TrustTier   string `json:"trust_tier,omitempty"`
+	// Tier is a deprecated alias for TrustTier, kept for current Go callers.
 	Tier            string `json:"tier,omitempty"`
 	Resource        string `json:"resource,omitempty"`
 	Currency        string `json:"currency,omitempty"`
@@ -365,16 +366,18 @@ type BudgetWindow struct {
 	Allowed bool      `json:"allowed"`
 }
 
-// PayerSpendLimitInput configures a per-payer tier policy via
+// PayerSpendLimitInput configures a per-payer trust-tier policy via
 // PUT /v1/service/payer-spend-limits (#298): fixed money-budget windows and wasted
 // spend grace windows (pkg/service.PayerSpendLimitInput on the wire; customer_id
 // travels alongside it).
 type PayerSpendLimitInput struct {
-	Tier           string              `json:"tier"`
+	TrustTier string `json:"trust_tier,omitempty"`
+	// Tier is a deprecated alias for TrustTier, kept for current Go callers.
+	Tier           string              `json:"tier,omitempty"`
 	BudgetWindows  []BudgetWindowInput `json:"budget_windows"`
 	PolicyCurrency string              `json:"policy_currency,omitempty"`
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
-	// windows for this tier: at most Limit of host-reported wasted spend is
+	// windows for this trust tier: at most Limit of host-reported wasted spend is
 	// forgiven per window; direct-payer overage is charged.
 	BadSpendWindows []BudgetWindowInput `json:"bad_spend_windows,omitempty"`
 }

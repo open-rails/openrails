@@ -94,7 +94,7 @@ func (c *remote) bearer(ctx context.Context) (string, error) {
 // nil error — matching the embedded transport, where a deny is (Allowed=false,
 // nil). Handler: ServiceAdmit (service_admission.go).
 func (c *remote) Admit(ctx context.Context, req AdmitRequest) (*AdmitResponse, error) {
-	status, raw, err := c.doRaw(ctx, http.MethodPost, "/v1/service/admit", req)
+	status, raw, err := c.doRaw(ctx, http.MethodPost, "/v1/service/admit", admitRequestBody(req))
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +110,41 @@ func (c *remote) Admit(ctx context.Context, req AdmitRequest) (*AdmitResponse, e
 		return &out, nil
 	}
 	return nil, statusErrorFromBody(status, raw)
+}
+
+func admitRequestBody(req AdmitRequest) map[string]any {
+	body := map[string]any{
+		"customer_id":      req.CustomerID,
+		"estimated_amount": req.EstimatedAmount,
+		"request_id":       req.RequestID,
+	}
+	if req.Invoker != "" {
+		body["invoker"] = req.Invoker
+	}
+	if req.InvokerType != "" {
+		body["invoker_type"] = req.InvokerType
+	}
+	if tier := strings.TrimSpace(req.TrustTier); tier != "" {
+		body["trust_tier"] = tier
+	} else if tier := strings.TrimSpace(req.Tier); tier != "" {
+		body["trust_tier"] = tier
+	}
+	if req.Resource != "" {
+		body["resource"] = req.Resource
+	}
+	if req.Currency != "" {
+		body["currency"] = req.Currency
+	}
+	if req.Source != "" {
+		body["source"] = req.Source
+	}
+	if req.ExpiresAt != nil {
+		body["expires_at"] = *req.ExpiresAt
+	}
+	if len(req.Roles) > 0 {
+		body["roles"] = req.Roles
+	}
+	return body
 }
 
 // CaptureHold implements Client (handler ServiceCaptureHold).
@@ -306,7 +341,7 @@ func (c *remote) BudgetStatus(ctx context.Context, customerID, invokerID, curren
 		q.Set("invoker", invokerID)
 	}
 	if tier != "" {
-		q.Set("tier", tier)
+		q.Set("trust_tier", tier)
 	}
 	var resp struct {
 		Windows []BudgetWindow `json:"windows"`
@@ -319,9 +354,13 @@ func (c *remote) BudgetStatus(ctx context.Context, customerID, invokerID, curren
 
 // SetPayerSpendLimits implements Client (handler ServiceSetPayerSpendLimits).
 func (c *remote) SetPayerSpendLimits(ctx context.Context, customerID string, in PayerSpendLimitInput) error {
+	tier := strings.TrimSpace(in.TrustTier)
+	if tier == "" {
+		tier = strings.TrimSpace(in.Tier)
+	}
 	body := map[string]any{
 		"customer_id":     strings.TrimSpace(customerID),
-		"tier":            in.Tier,
+		"trust_tier":      tier,
 		"budget_windows":  in.BudgetWindows,
 		"policy_currency": in.PolicyCurrency,
 	}
@@ -352,11 +391,15 @@ func (c *remote) GetTier(ctx context.Context, customerID, currency string) (stri
 	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", strings.TrimSpace(currency))
 	var resp struct {
-		Currency string `json:"currency"`
-		Tier     string `json:"tier"`
+		Currency  string `json:"currency"`
+		TrustTier string `json:"trust_tier"`
+		Tier      string `json:"tier"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/service/tier?"+q.Encode(), nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/service/trust-tier?"+q.Encode(), nil, &resp); err != nil {
 		return "", err
+	}
+	if resp.TrustTier != "" {
+		return resp.TrustTier, nil
 	}
 	return resp.Tier, nil
 }
@@ -389,7 +432,7 @@ func (c *remote) AbuseUsage(ctx context.Context, customerID, invoker, currency, 
 		q.Set("invoker", invoker)
 	}
 	if tier != "" {
-		q.Set("tier", tier)
+		q.Set("trust_tier", tier)
 	}
 	var out AbuseUsageResponse
 	if err := c.do(ctx, http.MethodGet, "/v1/service/abuse-usage?"+q.Encode(), nil, &out); err != nil {
@@ -456,10 +499,14 @@ func (c *remote) InvokerSpendLimits(ctx context.Context, customerID string) ([]I
 // itself answers 200 with positional per-item verdicts; batch-level validation
 // (empty / oversized) is the server's, so both transports reject identically.
 func (c *remote) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error) {
+	bodies := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		bodies = append(bodies, admitRequestBody(item))
+	}
 	var out struct {
 		Items []AdmitBatchVerdict `json:"items"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/service/admit/batch", map[string]any{"items": items}, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/service/admit/batch", map[string]any{"items": bodies}, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil

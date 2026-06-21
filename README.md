@@ -159,7 +159,7 @@ curl -X POST https://openrails.example/v1/service/credits/holds/{id}/capture \
 API keys carry explicit permissions (`openrails:credits:write`,
 `openrails:credits:read`, `openrails:catalog:write`, …) and are bound to your merchant —
 a key can never act on another merchant's data. Other `/v1/service/*` groups cover
-admission/rate-limiting (`/admit`, `/budget`, `/tier-policies`), account settings, credit
+admission/rate-limiting (`/admit`, `/budget`, trust-tier policies), account settings, credit
 windows, usage rollups, and the issuer registry used in the next step.
 
 ### 3. Frontend integration (delegated tokens)

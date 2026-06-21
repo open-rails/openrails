@@ -83,3 +83,13 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 	// Item 6: negative estimate -> per-item 400.
 	require.Equal(t, http.StatusBadRequest, out[6].Status)
 }
+
+func TestAdmitInputFromRequest_UsesTrustTierWithTierFallback(t *testing.T) {
+	payer := billingidentity.CustomerID(uuid.New())
+
+	got := admitInputFromRequest(serviceAdmitRequest{TrustTier: "trusted", Tier: "legacy"}, payer)
+	require.Equal(t, "trusted", got.Tier)
+
+	got = admitInputFromRequest(serviceAdmitRequest{Tier: "legacy"}, payer)
+	require.Equal(t, "legacy", got.Tier)
+}

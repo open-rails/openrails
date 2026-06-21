@@ -21,8 +21,10 @@ const maxAdmitBatchItems = 1000
 type serviceAdmitRequest struct {
 	CustomerID string `json:"customer_id"`
 	// Invoker is the end-user attribution/abuse label (#491).
-	Invoker         string `json:"invoker"`
-	InvokerType     string `json:"invoker_type"`
+	Invoker     string `json:"invoker"`
+	InvokerType string `json:"invoker_type"`
+	TrustTier   string `json:"trust_tier"`
+	// Tier is a deprecated alias for TrustTier, kept while current clients migrate.
 	Tier            string `json:"tier"`
 	Resource        string `json:"resource"`
 	Currency        string `json:"currency"`
@@ -96,7 +98,7 @@ func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.Custom
 		CustomerID:      payer,
 		Invoker:         strings.TrimSpace(req.Invoker),
 		InvokerType:     req.InvokerType,
-		Tier:            req.Tier,
+		Tier:            trustTier(req.TrustTier, req.Tier),
 		Resource:        req.Resource,
 		Currency:        req.Currency,
 		EstimatedAmount: req.EstimatedAmount,
@@ -108,6 +110,13 @@ func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.Custom
 		in.ExpiresAtUnix = *req.ExpiresAt
 	}
 	return in
+}
+
+func trustTier(primary, alias string) string {
+	if v := strings.TrimSpace(primary); v != "" {
+		return v
+	}
+	return strings.TrimSpace(alias)
 }
 
 // admitVerdictStatus maps an admission result onto the HTTP status the single
@@ -216,8 +225,8 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 }
 
 // ServiceGetBudget returns the invoker's fixed money-budget windows (#304
-// introspection) for a host's /status dashboard. customer_id + invoker + tier are
-// query params; the merchant is pinned from the API key.
+// introspection) for a host's /status dashboard. customer_id + invoker +
+// trust_tier are query params; the merchant is pinned from the API key.
 func ServiceGetBudget(r *httprequest.Request) {
 	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {
@@ -237,7 +246,7 @@ func ServiceGetBudget(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	windows, err := svc.BudgetStatus(r.Request.Context(), *payer, invoker, currency, r.Query("tier"))
+	windows, err := svc.BudgetStatus(r.Request.Context(), *payer, invoker, currency, trustTierQuery(r))
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "budget lookup failed")
 		return
@@ -245,11 +254,11 @@ func ServiceGetBudget(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"currency": currency, "windows": windows})
 }
 
-// ServiceGetTier returns the payer's CURRENT graduated tier (#477): the tier
-// OpenRails auto-maintains from cumulative paid spend against the persisted tier
-// schedule (#476). customer_id is a query param; the merchant is pinned from
-// the API key. Empty tier => the payer has never graduated (caller treats
-// it as the lowest/default). Operator API key, credits:read.
+// ServiceGetTier returns the payer's current trust tier (#477): the value
+// OpenRails auto-maintains from cumulative paid spend against the persisted
+// trust-tier schedule (#476). customer_id is a query param; the merchant is
+// pinned from the API key. Empty trust_tier means the payer has never graduated
+// (caller treats it as the lowest/default). Operator API key, credits:read.
 func ServiceGetTier(r *httprequest.Request) {
 	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {
@@ -277,7 +286,7 @@ func ServiceGetTier(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "tier lookup failed")
 		return
 	}
-	r.SuccessJSON(map[string]any{"currency": currency, "tier": tier})
+	r.SuccessJSON(map[string]any{"currency": currency, "trust_tier": tier})
 }
 
 type serviceReportWastedSpendRequest struct {
@@ -343,9 +352,9 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 }
 
 // ServiceAbuseUsage returns the payer's + invoker's running WASTED-$ totals +
-// budgets (#488 introspection). customer_id + optional invoker + currency + tier
-// are query params; the merchant is pinned from the API key. Operator API key,
-// credits:read.
+// budgets (#488 introspection). customer_id + optional invoker + currency +
+// trust_tier are query params; the merchant is pinned from the API key. Operator
+// API key, credits:read.
 func ServiceAbuseUsage(r *httprequest.Request) {
 	payer, err := parseServiceCustomerID(r.Query("customer_id"))
 	if err != nil || payer == nil {
@@ -364,7 +373,7 @@ func ServiceAbuseUsage(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	pw, aw, err := svc.AbuseUsage(r.Request.Context(), *payer, r.Query("invoker"), currency, r.Query("tier"))
+	pw, aw, err := svc.AbuseUsage(r.Request.Context(), *payer, r.Query("invoker"), currency, trustTierQuery(r))
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "abuse usage lookup failed")
 		return
@@ -376,6 +385,10 @@ type serviceCreditLimitRequest struct {
 	CustomerID        string `json:"customer_id"`
 	Currency          string `json:"currency"`
 	CreditLimitAmount int64  `json:"credit_limit_amount"`
+}
+
+func trustTierQuery(r *httprequest.Request) string {
+	return trustTier(r.Query("trust_tier"), r.Query("tier"))
 }
 
 // ServiceSetCreditLimit sets the admin/operator arrears credit line for a payer
@@ -449,8 +462,8 @@ type servicePayerSpendLimitRequest struct {
 	billingservice.PayerSpendLimitInput
 }
 
-// ServiceSetPayerSpendLimits upserts a tier money policy (#298 tier admin API). An
-// EMPTY customer_id sets the merchant-wide DEFAULT policy for the tier (#477,
+// ServiceSetPayerSpendLimits upserts a trust-tier money policy (#298 tier admin API). An
+// EMPTY customer_id sets the merchant-wide DEFAULT policy for the trust tier (#477,
 // the platform capacity ladder declared once); a non-empty one sets a
 // per-subject override (scope-checked).
 func ServiceSetPayerSpendLimits(r *httprequest.Request) {
@@ -476,7 +489,7 @@ func ServiceSetPayerSpendLimits(r *httprequest.Request) {
 		return
 	}
 	if err := svc.SetPayerSpendLimits(r.Request.Context(), payer, req.PayerSpendLimitInput); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "set tier policy failed")
+		r.ErrorJSON(http.StatusInternalServerError, "set trust-tier policy failed")
 		return
 	}
 	r.SuccessJSONMessage("ok")
@@ -489,7 +502,7 @@ type serviceTierScheduleRequest struct {
 }
 
 // ServiceSetTierSchedule persists the merchant's tier SCHEDULE (#476): the host
-// declares the ladder ONCE and OpenRails AUTO-maintains each payer's tier from
+// declares the ladder ONCE and OpenRails AUTO-maintains each payer's trust tier from
 // cumulative spend. An EMPTY customer_id sets the merchant-wide default
 // schedule (the common case); a non-empty one sets a per-subject override
 // (scope-checked). owner=platform. Operator API key, credits:write.

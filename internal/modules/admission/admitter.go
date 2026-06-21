@@ -2,7 +2,7 @@
 // affordability + delegated spend-cap gate and the delegated wasted-spend cutoff.
 //
 // #513 hard cut: admission is ONE atomic Redis decision (internal/modules/admission/spendgate).
-// The admitter resolves the payer tier, enforces the delegated wasted-spend
+// The admitter resolves the payer trust tier, enforces the delegated wasted-spend
 // cutoff, loads the cached cap windows, reads the O(1) ledger balance, and runs
 // the single spendgate EVAL that checks affordability + every window and places
 // the in-flight hold. No Postgres locks, no per-request budget reservation rows.

@@ -204,11 +204,15 @@ func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*o
 // the embedded analogue of handlers.admitInputFromRequest, shared by Admit and
 // each AdmitBatch item.
 func admitInputFromSDK(req openrails.AdmitRequest, payer identity.CustomerID) billingservice.AdmitInput {
+	tier := strings.TrimSpace(req.TrustTier)
+	if tier == "" {
+		tier = strings.TrimSpace(req.Tier)
+	}
 	in := billingservice.AdmitInput{
 		CustomerID:      payer,
 		Invoker:         strings.TrimSpace(req.Invoker),
 		InvokerType:     req.InvokerType,
-		Tier:            req.Tier,
+		Tier:            tier,
 		Resource:        req.Resource,
 		Currency:        req.Currency,
 		EstimatedAmount: req.EstimatedAmount,
@@ -602,7 +606,7 @@ func (c *localClient) BudgetStatus(ctx context.Context, tenantSubjectID, invoker
 // (service_admission.go).
 func (c *localClient) SetPayerSpendLimits(ctx context.Context, tenantSubjectID string, in openrails.PayerSpendLimitInput) error {
 	ctx = c.ensureTenant(ctx)
-	// An EMPTY customer_id sets the tenant-wide DEFAULT tier policy (#477,
+	// An EMPTY customer_id sets the tenant-wide DEFAULT trust-tier policy (#477,
 	// the platform capacity ladder declared once); a non-empty one is a per-subject
 	// override.
 	var payer identity.CustomerID
@@ -613,8 +617,12 @@ func (c *localClient) SetPayerSpendLimits(ctx context.Context, tenantSubjectID s
 			return err
 		}
 	}
+	tier := strings.TrimSpace(in.TrustTier)
+	if tier == "" {
+		tier = strings.TrimSpace(in.Tier)
+	}
 	pol := billingservice.PayerSpendLimitInput{
-		Tier:           in.Tier,
+		TrustTier:      tier,
 		PolicyCurrency: in.PolicyCurrency,
 	}
 	for _, b := range in.BudgetWindows {
@@ -628,7 +636,7 @@ func (c *localClient) SetPayerSpendLimits(ctx context.Context, tenantSubjectID s
 		})
 	}
 	if err := c.svc.SetPayerSpendLimits(ctx, payer, pol); err != nil {
-		return internalErr("set tier policy failed")
+		return internalErr("set trust-tier policy failed")
 	}
 	return nil
 }
