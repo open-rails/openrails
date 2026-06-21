@@ -196,6 +196,98 @@ func TestGate_MultiScopeDenyOnAnyWindow(t *testing.T) {
 	require.True(t, d.Allowed)
 }
 
+func TestGate_RoleWindowIsPerInvoker(t *testing.T) {
+	g, _, ctx := newGate(t)
+	m, c, cur := payer()
+	big := int64(1_000_000)
+	pol := spendgate.Policy{Scopes: []spendgate.ScopedWindows{{
+		Scope:   spendgate.ScopeRole,
+		ScopeID: "role:editors",
+		Windows: []spendgate.Window{{
+			Scope: spendgate.ScopeRole, Duration: time.Hour, Limit: 1000, Key: "role-1h",
+		}},
+	}}}
+	admit := func(invoker string, cost int64) spendgate.Decision {
+		t.Helper()
+		d, err := g.Admit(ctx, spendgate.AdmitInput{
+			Merchant:       m,
+			Customer:       c,
+			Currency:       cur,
+			RequestID:      rid(),
+			Cost:           cost,
+			AccountBalance: big,
+			Policy:         pol,
+			Request:        spendgate.Request{Invoker: invoker, Roles: []string{"role:editors"}},
+		})
+		require.NoError(t, err)
+		return d
+	}
+
+	require.True(t, admit("user:one", 700).Allowed)
+	d := admit("user:one", 400)
+	require.False(t, d.Allowed, "same invoker should exhaust its own role window")
+	require.NotNil(t, d.BlockedWindow)
+	require.Equal(t, "role-1h", d.BlockedWindow.Key)
+
+	require.True(t, admit("user:two", 700).Allowed, "different invoker with same role should get an independent role window")
+}
+
+func TestGate_DelegatedScopesPerInvokerPayerScopeAggregate(t *testing.T) {
+	g, _, ctx := newGate(t)
+	m, c, cur := payer()
+	big := int64(1_000_000)
+
+	t.Run("invoker scope is per concrete invoker", func(t *testing.T) {
+		pol := spendgate.Policy{Scopes: []spendgate.ScopedWindows{
+			{Scope: spendgate.ScopeInvoker, ScopeID: "user:one", Windows: []spendgate.Window{{Scope: spendgate.ScopeInvoker, Duration: time.Hour, Limit: 1000, Key: "invoker-1h"}}},
+			{Scope: spendgate.ScopeInvoker, ScopeID: "user:two", Windows: []spendgate.Window{{Scope: spendgate.ScopeInvoker, Duration: time.Hour, Limit: 1000, Key: "invoker-1h"}}},
+		}}
+		admit := func(invoker string, cost int64) spendgate.Decision {
+			t.Helper()
+			d, err := g.Admit(ctx, spendgate.AdmitInput{
+				Merchant:       m,
+				Customer:       c,
+				Currency:       cur,
+				RequestID:      rid(),
+				Cost:           cost,
+				AccountBalance: big,
+				Policy:         pol,
+				Request:        spendgate.Request{Invoker: invoker},
+			})
+			require.NoError(t, err)
+			return d
+		}
+		require.True(t, admit("user:one", 700).Allowed)
+		require.False(t, admit("user:one", 400).Allowed)
+		require.True(t, admit("user:two", 700).Allowed)
+	})
+
+	t.Run("payer scope is aggregate", func(t *testing.T) {
+		m, c, cur := payer()
+		pol := fixedPayerPolicy(1000, time.Hour)
+		admit := func(invoker string, cost int64) spendgate.Decision {
+			t.Helper()
+			d, err := g.Admit(ctx, spendgate.AdmitInput{
+				Merchant:       m,
+				Customer:       c,
+				Currency:       cur,
+				RequestID:      rid(),
+				Cost:           cost,
+				AccountBalance: big,
+				Policy:         pol,
+				Request:        spendgate.Request{Invoker: invoker},
+			})
+			require.NoError(t, err)
+			return d
+		}
+		require.True(t, admit("user:one", 700).Allowed)
+		d := admit("user:two", 400)
+		require.False(t, d.Allowed, "payer scope should stay aggregate across invokers")
+		require.NotNil(t, d.BlockedWindow)
+		require.Equal(t, "win", d.BlockedWindow.Key)
+	})
+}
+
 func TestGate_ResolvePointer(t *testing.T) {
 	g, _, ctx := newGate(t)
 	m, c, cur := payer()

@@ -169,24 +169,6 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	return res, nil
 }
 
-// PlatformBootstrapResult reports what the platform-superadmin bootstrap did.
-type PlatformBootstrapResult struct {
-	PlatformOrgSlug string
-	PlatformOrgID   string
-	OrgCreated      bool
-	AdminAssigned   bool
-}
-
-// BootstrapPlatform is intentionally inert in the source-available OpenRails
-// control plane. Cross-merchant platform administration belongs in the private
-// openrails-saas deployment layer, not in self-hosted OpenRails config.
-func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstrapResult, error) {
-	if c == nil {
-		return nil, errors.New("controlplane: nil control plane")
-	}
-	return nil, nil
-}
-
 // anyLiveAPIKey reports whether the AuthKit org already has at least one non-revoked API key,
 // so bootstrap does not mint a duplicate on re-run.
 func anyLiveAPIKey(toks []authcore.APIKey) bool {

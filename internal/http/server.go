@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -75,12 +74,6 @@ type Server struct {
 	// control-plane DB) and operator-org provisioner, and is always built
 	// (#469: the control plane is mandatory on this surface).
 	merchants *merchants.Service
-
-	// Platform superadmin layer (issue #226), DISTINCT from per-merchant operator
-	// admin, sharing the openrails.* control-plane pool. platformMetrics
-	// aggregates platform-wide merchant metrics. The /v1/platform/* surface itself
-	// is mounted only when a platform org is configured.
-	platformMetrics *platform.Metrics
 
 	// configuredMerchant scopes THIS engine instance to one merchant — set by embedded
 	// hosts (embed.Options.Merchant) that run one engine per merchant. Zero in standalone,
@@ -323,12 +316,6 @@ func New(deps Dependencies) (*Server, error) {
 			}
 		}
 
-		// Platform superadmin layer: platform metrics over the control-plane pool.
-		metrics, merr := platform.NewMetrics(deps.ControlPlane.Pool())
-		if merr != nil {
-			return nil, fmt.Errorf("build platform metrics: %w", merr)
-		}
-		s.platformMetrics = metrics
 	}
 
 	// Single (standalone-friendly) HTTP surface.
@@ -360,13 +347,6 @@ func New(deps Dependencies) (*Server, error) {
 	// resolves the merchant from the path slug, then loads THAT merchant's signing
 	// secret and verifies the signature AFTER merchant resolution.
 	s.registerMerchantWebhookRoutes(s.publicHandler)
-
-	// Operator-gated merchant provisioning/lifecycle admin API (issue #225).
-	s.registerMerchantAdminRoutes(s.publicHandler)
-
-	// Platform cross-merchant admin API (issue #226), gated by AuthKit
-	// platform RBAC. No-op without the control plane / platform RBAC configured.
-	s.registerPlatformRoutes(s.publicHandler)
 
 	log.Info("Billing service initialized successfully")
 	return s, nil
@@ -425,9 +405,7 @@ func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
 	asm.AdminChecker = s.controlPlane
 	asm.ServiceCredentialResolver = s.controlPlane
 	return asm.NewHTTPHandler(embedhttp.Options{
-		IncludeUser:     opts.IncludeUser,
-		IncludeAdmin:    opts.IncludeAdmin,
-		IncludeWebhooks: opts.IncludeWebhooks,
+		RouteSets: opts.RouteSets,
 	})
 }
 

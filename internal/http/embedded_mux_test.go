@@ -10,7 +10,9 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -22,6 +24,14 @@ func (stubAuthenticator) Authenticate(_ context.Context, r *http.Request) (billi
 		return billingauth.UserContext{UserID: "user_1"}, nil
 	}
 	return billingauth.UserContext{}, billingauth.ErrUnauthenticated
+}
+
+type stubServiceCredentialResolver struct{}
+
+func (stubServiceCredentialResolver) LooksLikeAPIKey(token string) bool { return token == "test-key" }
+
+func (stubServiceCredentialResolver) ResolveAPIKey(context.Context, string) (*controlplane.ResolvedServiceCredential, error) {
+	return &controlplane.ResolvedServiceCredential{}, nil
 }
 
 // TestEmbeddedMuxAssembles ensures the gin-free embedded ServeMux assembly does
@@ -36,7 +46,9 @@ func TestEmbeddedMuxAssembles(t *testing.T) {
 		authenticator: stubAuthenticator{},
 	}
 
-	h := s.newHTTPHandlerMux(HTTPHandlerOptions{IncludeUser: true, IncludeWebhooks: true})
+	h := s.newHTTPHandlerMux(HTTPHandlerOptions{
+		RouteSets: []RouteSet{RouteSetPublicCatalog, RouteSetCustomer, RouteSetWebhooks},
+	})
 
 	// Optional-auth public route: reaches the handler even unauthenticated.
 	// (GetSupportedTokens has no auth and no DB dependency.)
@@ -86,11 +98,11 @@ func TestEmbeddedMuxAdminAssembles(t *testing.T) {
 		authenticator: stubAuthenticator{},
 	}
 
-	h := s.newHTTPHandlerMux(HTTPHandlerOptions{IncludeAdmin: true})
+	h := s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetMerchantAdmin}})
 
 	// #528: the per-user `/admin` surface was removed from the base handler — the
 	// admin surface is now the delegated one mounted via embgin.SelfHandler.
-	// IncludeAdmin assembles the merchant action routes; mounted => 401 (not 404).
+	// RouteSetMerchantAdmin assembles the merchant action routes; mounted => 401 (not 404).
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/catalog/products", nil))
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
@@ -109,11 +121,43 @@ func TestEmbeddedMuxPrivilegedRoutesRequireAuthenticatorAtConstruction(t *testin
 
 	require.PanicsWithError(t,
 		"embedded billing: user/admin route groups require Options.Authenticator",
-		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{IncludeAdmin: true}) },
+		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetMerchantAdmin}}) },
 	)
 	require.PanicsWithError(t,
 		"embedded billing: user/admin route groups require Options.Authenticator",
-		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{IncludeUser: true}) },
+		func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetCustomer}}) },
 	)
-	require.NotPanics(t, func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{IncludeWebhooks: true}) })
+	require.NotPanics(t, func() { _ = s.newHTTPHandlerMux(HTTPHandlerOptions{RouteSets: []RouteSet{RouteSetWebhooks}}) })
+}
+
+func TestEmbeddedDefaultExcludesMerchantAPI(t *testing.T) {
+	s := &Server{
+		cfg:           &config.Config{Captcha: &config.CaptchaConfig{}},
+		runtime:       &app.Runtime{},
+		authenticator: stubAuthenticator{},
+	}
+
+	h := s.newHTTPHandlerMux(HTTPHandlerOptions{})
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/service/admit", nil))
+	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestEmbeddedMerchantAPIOptInMountsServiceRoutes(t *testing.T) {
+	asm := &embedhttp.Assembler{
+		Cfg:                       &config.Config{Captcha: &config.CaptchaConfig{}},
+		Runtime:                   &app.Runtime{},
+		ServiceCredentialResolver: stubServiceCredentialResolver{},
+	}
+	h := asm.NewHTTPHandler(embedhttp.Options{RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetMerchantAPI}})
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/service/admit", nil))
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+func TestEmbeddedRouteSetPresets(t *testing.T) {
+	require.NotContains(t, EmbeddedDefaultRouteSets, RouteSetMerchantAPI)
+	require.Contains(t, StandaloneDefaultRouteSets, RouteSetMerchantAPI)
 }

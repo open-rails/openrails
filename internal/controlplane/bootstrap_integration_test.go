@@ -133,12 +133,13 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.Equal(t, res1.BootstrapOrgID, ownerOrgID)
 
 	// OpenRails seeds NO role of its own (#543): admin authority is the org
-	// `owner` role (AuthKit built-in), which holds `org:*` — covering the full
-	// OpenRails `org:` catalog but NOT the cross-merchant platform grant (#226).
+	// `owner` role (AuthKit built-in), which holds `org:*`.
 	perms, err := cp.Core().GetRolePermissions(ctx, dbtest.TestMerchantSlug, OwnerRole)
 	require.NoError(t, err)
 	require.Contains(t, perms, PermAdmin) // org:*
-	require.NotContains(t, perms, PermPlatformSuperadmin)
+	for _, p := range perms {
+		require.Falsef(t, strings.HasPrefix(p, "platform:"), "merchant owner role must not hold platform permission %q", p)
+	}
 
 	// Second run: idempotent. No new org, no new API key.
 	res2, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: true})
@@ -189,15 +190,15 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	require.NoError(t, err)
 
 	// The org `owner` role's `org:*` grant effectively expands over every per-org
-	// catalog permission; the cross-merchant platform superadmin permission is NOT
-	// covered (it lives in the separate `platform:` layer, #226). OpenRails seeds
-	// no role of its own (#543).
+	// catalog permission. OpenRails seeds no role of its own (#543).
 	eff, err := cp.Core().EffectiveRolePermissions(ctx, dbtest.TestMerchantSlug, OwnerRole)
 	require.NoError(t, err)
 	for _, want := range OperatorRolePermissions() {
 		require.Containsf(t, eff, want, "org owner should effectively hold %q", want)
 	}
-	require.NotContains(t, eff, PermPlatformSuperadmin)
+	for _, p := range eff {
+		require.Falsef(t, strings.HasPrefix(p, "platform:"), "org owner effective permissions must not include platform permission %q", p)
+	}
 
 	// Re-running keeps the grant stable.
 	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: false})
@@ -205,40 +206,6 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	eff2, err := cp.Core().EffectiveRolePermissions(ctx, dbtest.TestMerchantSlug, OwnerRole)
 	require.NoError(t, err)
 	require.ElementsMatch(t, eff, eff2, fmt.Sprintf("permissions should be stable across reruns: %v vs %v", eff, eff2))
-}
-
-func TestBootstrapPlatform_NoopsInSelfHostedOpenRails(t *testing.T) {
-	ctx := context.Background()
-	pool := newBootstrapTestPool(t)
-
-	cfg := &config.Config{
-		Env:  "test",
-		Auth: &config.AuthConfig{Issuer: "https://openrails.test"},
-	}
-	cp, err := New(ctx, cfg, pool)
-	require.NoError(t, err)
-	require.NotNil(t, cp)
-
-	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapOrgSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: false})
-	require.NoError(t, err)
-	pres, err := cp.BootstrapPlatform(ctx)
-	require.NoError(t, err)
-	require.Nil(t, pres)
-	require.Equal(t, "", cp.PlatformOrgSlug())
-
-	// A per-merchant admin is still not a platform superadmin. The cross-merchant
-	// SaaS admin layer belongs in openrails-saas, not this self-hosted control plane.
-	tAdmin, err := cp.Core().CreateUser(ctx, "merchant-admin@test.local", "tenantadmin")
-	require.NoError(t, err)
-	orgOperatorAdminID := tAdmin.ID
-	require.NoError(t, cp.Core().AddMember(ctx, dbtest.TestMerchantSlug, orgOperatorAdminID))
-	require.NoError(t, cp.Core().AssignRole(ctx, dbtest.TestMerchantSlug, orgOperatorAdminID, OwnerRole))
-	opIsAdmin, err := cp.IsAdmin(ctx, dbtest.TestMerchantSlug, orgOperatorAdminID)
-	require.NoError(t, err)
-	require.True(t, opIsAdmin, "per-merchant admin (org owner) should hold merchant-local org authority in their own org")
-	opIsPlatform, err := cp.HasPlatformSuperadmin(ctx, orgOperatorAdminID)
-	require.NoError(t, err)
-	require.False(t, opIsPlatform, "per-merchant admin must NOT be a platform superadmin")
 }
 
 // TestMerchantForOwnerOrg exercises the #500 ROLE-BASED merchant resolution

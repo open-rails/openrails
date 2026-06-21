@@ -37,23 +37,9 @@ import (
 const EmbeddedV1Prefix = "/billing/v1"
 
 // Options controls which billing HTTP route groups are included in the returned
-// handler. If all fields are false (zero value), it defaults to user + admin +
-// webhooks.
+// handler. A zero RouteSets slice uses EmbeddedDefaultRouteSets.
 type Options struct {
-	IncludeUser     bool
-	IncludeAdmin    bool
-	IncludeWebhooks bool
-}
-
-func (o Options) isZero() bool {
-	return !o.IncludeUser && !o.IncludeAdmin && !o.IncludeWebhooks
-}
-
-func (o Options) withDefaults() Options {
-	if !o.isZero() {
-		return o
-	}
-	return Options{IncludeUser: true, IncludeAdmin: true, IncludeWebhooks: true}
+	RouteSets []RouteSet
 }
 
 // Assembler builds the gin-free embedded billing surface from the gin-free
@@ -123,13 +109,13 @@ func FromApp(a *app.App) *Assembler {
 // an authenticated caller is keyed per-user, not only per-IP (mirroring the
 // standalone engine's authProvider.Optional() → RateLimit order).
 func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
-	opts = opts.withDefaults()
-	if err := s.validateAuthBoundary(opts); err != nil {
+	routeSets := routeSetMap(opts.RouteSets)
+	if err := s.validateAuthBoundary(routeSets); err != nil {
 		panic(err)
 	}
 	mux := http.NewServeMux()
 
-	if opts.IncludeUser {
+	if routeSets[RouteSetPublicCatalog] || routeSets[RouteSetCustomer] {
 		// Captcha discovery routes (net/http), mirroring registerUserRoutesAt.
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/status", s.captchaStatusHandler)
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/client.js", s.captchaClientScriptHandler)
@@ -137,7 +123,7 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 			Authenticator: s.Authenticator,
 		})
 	}
-	if opts.IncludeAdmin {
+	if routeSets[RouteSetMerchantAdmin] {
 		adminOpts := httproutes.Options{
 			Authenticator: s.Authenticator,
 		}
@@ -151,7 +137,12 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		// via embgin.SelfHandler (issuer→owner), not the base handler.
 		httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
 	}
-	if opts.IncludeWebhooks {
+	if routeSets[RouteSetMerchantAPI] {
+		httproutes.RegisterServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/service", s.Runtime), s.Runtime, httproutes.Options{
+			ServiceCredentialResolver: s.ServiceCredentialResolver,
+		})
+	}
+	if routeSets[RouteSetWebhooks] {
 		httproutes.RegisterMerchantWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime)
 	}
 
@@ -177,12 +168,12 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	)
 }
 
-func (s *Assembler) validateAuthBoundary(opts Options) error {
-	if !opts.IncludeUser && !opts.IncludeAdmin {
-		return nil
-	}
-	if s == nil || s.Authenticator == nil {
+func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {
+	if (routeSets[RouteSetPublicCatalog] || routeSets[RouteSetCustomer] || routeSets[RouteSetMerchantAdmin]) && (s == nil || s.Authenticator == nil) {
 		return fmt.Errorf("embedded billing: user/admin route groups require Options.Authenticator")
+	}
+	if routeSets[RouteSetMerchantAPI] && (s == nil || s.ServiceCredentialResolver == nil) {
+		return fmt.Errorf("embedded billing: merchant API route group requires Options.ServiceCredentialResolver")
 	}
 	return nil
 }

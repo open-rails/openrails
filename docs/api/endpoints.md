@@ -39,9 +39,8 @@ List endpoints use a Stripe-like envelope:
 |---------|---------------------|
 | Public catalog (`/`, `/v1/products`, `/v1/prices`, `/v1/solana/tokens`, health probes) | No auth required |
 | Self routes (`/v1/me/*`) | Standalone: `Authorization: Bearer <delegated JWT>` signed by a registered issuer with `delegated_sub`. Embedded: the host's configured AuthKit/user bearer is adapted to the same customer principal. |
-| Delegated billing-admin routes (`/v1/admin/*`, except platform provisioning under `/v1/admin/merchants/*`) | Same delegated JWT shape, with browser-safe `org:*` permissions |
+| Delegated billing-admin routes (`/v1/admin/*`) | Same delegated JWT shape, with browser-safe `org:*` permissions |
 | User/session routes (`/v1/checkout`) | Host JWT auth where still mounted by the embedding deployment |
-| Platform merchant provisioning (`/v1/admin/merchants/*`) | Host JWT auth with AuthKit `platform:` authority |
 | Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <generated API key or first-party service JWT>`; each route requires an `org:*` permission (see Service API section) |
 | Webhooks (`/v1/webhooks/:provider`, `/v1/merchants/:merchant/webhooks/:provider`) | Provider-specific verification (see notes) |
 

@@ -19,6 +19,9 @@
 //     true the window up to actual (only the balance, caller-side, trues up).
 //     Release (failure) frees the estimate from the windows. Caps therefore run
 //     slightly conservative and self-heal at each window reset.
+//   - Delegated scopes are PER-INVOKER. A role or tier selects which invokers a
+//     window applies to; it never creates a shared pool across those invokers.
+//     Only payer scope is aggregate across the whole payer account.
 //
 // Policy is read-mostly config (cached in memory, invalidated on policy_version
 // bump); the Lua scripts + client live in gate.go.
@@ -36,7 +39,7 @@ type Scope string
 const (
 	ScopePayer   Scope = "payer"   // the customer overall
 	ScopeInvoker Scope = "invoker" // a specific API key / principal
-	ScopeRole    Scope = "role"    // a role the invoker holds
+	ScopeRole    Scope = "role"    // per-invoker cap selected by a role the invoker holds
 	ScopeTier    Scope = "tier"    // the payer's trust tier
 )
 
@@ -79,12 +82,15 @@ type Request struct {
 type resolvedWindow struct {
 	Window
 	scopeID string
+	invoker string
 }
 
 // EffectiveWindows returns every window that applies to req under collect-all
 // semantics: all payer-scope windows, invoker-scope windows whose ScopeID matches
 // req.Invoker, role-scope windows for any of req.Roles, and tier-scope windows for
-// req.Tier. The gate DENIES if ANY returned window is over its limit.
+// req.Tier. Role windows include req.Invoker in their Redis identity, so a role
+// budget is independently metered for each concrete delegated invoker holding the
+// role. The gate DENIES if ANY returned window is over its limit.
 func (p Policy) EffectiveWindows(req Request) []resolvedWindow {
 	roles := make(map[string]bool, len(req.Roles))
 	for _, r := range req.Roles {
@@ -99,7 +105,7 @@ func (p Policy) EffectiveWindows(req Request) []resolvedWindow {
 		case ScopeInvoker:
 			match = req.Invoker != "" && sw.ScopeID == req.Invoker
 		case ScopeRole:
-			match = roles[sw.ScopeID]
+			match = req.Invoker != "" && roles[sw.ScopeID]
 		case ScopeTier:
 			match = req.Tier != "" && sw.ScopeID == req.Tier
 		}
@@ -107,7 +113,11 @@ func (p Policy) EffectiveWindows(req Request) []resolvedWindow {
 			continue
 		}
 		for _, w := range sw.Windows {
-			out = append(out, resolvedWindow{Window: w, scopeID: sw.ScopeID})
+			rw := resolvedWindow{Window: w, scopeID: sw.ScopeID}
+			if sw.Scope == ScopeRole {
+				rw.invoker = req.Invoker
+			}
+			out = append(out, rw)
 		}
 	}
 	return out
@@ -119,6 +129,9 @@ func (p Policy) EffectiveWindows(req Request) []resolvedWindow {
 // base is hash-tagged ({merchant:customer}) so every key the Lua touches co-locates
 // on one Cluster slot.
 func (w resolvedWindow) identity(base string) string {
+	if w.Scope == ScopeRole {
+		return fmt.Sprintf("%s:w:%s:%s:%s:%s", base, w.Scope, scrub(w.scopeID), scrub(w.invoker), scrub(w.Key))
+	}
 	return fmt.Sprintf("%s:w:%s:%s:%s", base, w.Scope, scrub(w.scopeID), scrub(w.Key))
 }
 

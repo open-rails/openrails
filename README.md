@@ -309,13 +309,15 @@ defer openrails.Close(ctx)
 go openrails.RunWorkers(ctx)
 
 // Mount the billing surface. Routes live under /billing/v1/*.
-//   user routes  → products, prices, checkout, subscriptions, payments, credits
-//   admin routes → subscription/payment/user management, metrics (see §5)
-//   webhooks     → processor callbacks
+// Zero value uses embedded.EmbeddedDefaultRouteSets:
+// public catalog, customer, merchant admin, and webhooks.
 handler := openrails.NewHTTPHandler(embedded.HTTPHandlerOptions{
-    IncludeUser:     true,
-    IncludeAdmin:    true,
-    IncludeWebhooks: true,
+    RouteSets: []embedded.RouteSet{
+        embedded.RouteSetPublicCatalog,
+        embedded.RouteSetCustomer,
+        embedded.RouteSetMerchantAdmin,
+        embedded.RouteSetWebhooks,
+    },
 })
 mux := http.NewServeMux()
 mux.Handle("/billing/v1/", handler) // plain net/http; or gin.WrapH(handler) / chi Mount
@@ -412,8 +414,8 @@ Admin authority is the **live `openrails:admin` permission in the caller's own o
 checked per request against the control plane — OpenRails never interprets your role names,
 and there is no role-string fallback. The standalone service always runs the control plane;
 for embedded hosts it is opt-in
-(`pkg/embedded/controlplane.Attach`); if you don't attach one, mount with
-`IncludeAdmin: false` and run admin operations through the in-process `Service()` facade
+(`pkg/embedded/controlplane.Attach`); if you don't attach one, omit
+`embedded.RouteSetMerchantAdmin` and run admin operations through the in-process `Service()` facade
 or your own tooling instead — admin routes without a permission checker fail closed.
 
 ---

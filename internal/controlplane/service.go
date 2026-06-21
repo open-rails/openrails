@@ -142,12 +142,15 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		ExpectedAudiences: []string{"openrails"},
 		APIKeyPrefix:      APIKeyPrefix,
 		Environment:       strings.TrimSpace(cfg.Env),
-		Permissions:       Catalog(),
+		Permissions: Catalog(),
 		// OpenRails declares NO org roles of its own (#543). Merchant-admin
-		// authority comes from AuthKit's built-in `owner` role (`org:*`, which
-		// expands over the OpenRails `org:` catalog) for human admins, and from
-		// direct permission-scoped API keys for server-to-server automation.
-		DefaultRoles: nil,
+		// authority comes from AuthKit's built-in `owner` role for human admins,
+		// and from direct permission-scoped API keys for server-to-server
+		// automation. OwnerOwnsAppResources makes the owner's apex grant cover
+		// OpenRails' app-defined resource namespaces too (e.g. `merchant:*`), not
+		// just `org:*` — owning the org owns the merchant (org⇄merchant 1:1, #554/#100).
+		OwnerOwnsAppResources: true,
+		DefaultRoles:          nil,
 		// Private standalone posture: no public user self-registration, no public
 		// org onboarding/management. Embedded bootstrap/core calls
 		// (CreateOrg/AssignRole/MintAPIKey) are unaffected. Hosted products

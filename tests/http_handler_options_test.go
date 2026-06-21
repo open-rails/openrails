@@ -17,7 +17,7 @@ func TestHTTPHandlerOptions_WebhooksOnly(t *testing.T) {
 	srv := setupTestServer(t)
 	require.NotNil(t, srv)
 
-	h := srv.NewHTTPHandler(server.HTTPHandlerOptions{IncludeWebhooks: true})
+	h := srv.NewHTTPHandler(server.HTTPHandlerOptions{RouteSets: []server.RouteSet{server.RouteSetWebhooks}})
 
 	// Merchant-scoped webhook route should exist; global /webhooks is not mounted.
 	{
@@ -64,4 +64,34 @@ func TestHTTPHandlerOptions_WebhooksOnly(t *testing.T) {
 		h.ServeHTTP(w, req)
 		require.Equal(t, http.StatusNotFound, w.Code)
 	}
+}
+
+func TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer(t *testing.T) {
+	srv := setupTestServer(t)
+	require.NotNil(t, srv)
+
+	embeddedDefault := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{}))
+	t.Cleanup(embeddedDefault.Close)
+	require.Equal(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodPost, embeddedDefault.URL+"/billing/v1/service/admit"))
+
+	embeddedMerchantAPI := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{
+		RouteSets: []server.RouteSet{server.RouteSetMerchantAPI},
+	}))
+	t.Cleanup(embeddedMerchantAPI.Close)
+	require.NotEqual(t, http.StatusNotFound, status(t, embeddedMerchantAPI.Client(), http.MethodPost, embeddedMerchantAPI.URL+"/billing/v1/service/admit"))
+
+	standalone := httptest.NewServer(srv.Handler())
+	t.Cleanup(standalone.Close)
+	require.NotEqual(t, http.StatusNotFound, status(t, standalone.Client(), http.MethodPost, standalone.URL+"/v1/service/admit"))
+}
+
+func status(t *testing.T, client *http.Client, method, url string) int {
+	t.Helper()
+
+	req, err := http.NewRequest(method, url, nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	return resp.StatusCode
 }

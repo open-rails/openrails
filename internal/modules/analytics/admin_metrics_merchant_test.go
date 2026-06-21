@@ -40,10 +40,9 @@ func TestMerchantFilterScopedMerchant(t *testing.T) {
 	}
 }
 
-// TestMerchantFilterCrossMerchantHasNoPredicate proves the platform-superadmin
+// TestMerchantFilterCrossMerchantHasNoPredicate proves the SaaS/operator
 // cross-merchant path emits NO merchant predicate, so it can read across all
-// merchants (issue #232). This path is library-only and must be gated on
-// controlplane.PermPlatformSuperadmin by its (future) caller.
+// merchants (issue #232). This path is library-only in core.
 func TestMerchantFilterCrossMerchantHasNoPredicate(t *testing.T) {
 	filter, args := merchantFilter(dbtest.TestMerchantID, true)
 	if filter != "" {

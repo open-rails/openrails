@@ -104,15 +104,9 @@ with the resolved merchant's secret is.
 
 ## Admin Surface
 
-Merchant lifecycle and credential routes are mounted under:
-
-```text
-/v1/admin/merchants
-```
-
-These routes are gated by live AuthKit org permissions. A user, API key, or
-registered JWKS issuer controls a merchant only through its authority over the
-merchant's `owner_org_id`.
+OpenRails core no longer exposes cross-merchant lifecycle or credential routes.
+Merchant-owned admin APIs are scoped to the authenticated merchant/org; any
+future platform operator surface belongs in OpenRails SaaS.
 
 ## Merchant Config Manifest
 

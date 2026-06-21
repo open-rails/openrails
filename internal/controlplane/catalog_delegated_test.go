@@ -23,7 +23,7 @@ func TestIsDelegatedPermission_HardRejectsPlatformAndUnknownGrants(t *testing.T)
 	// None of these may EVER ride a browser token.
 	forbidden := []string{
 		PermAdmin,
-		PermPlatformSuperadmin,
+		"platform:orgs:update",
 		"platform:*",
 		"platform:metrics:read",
 		"org:totally_unknown:read",
@@ -56,7 +56,7 @@ func TestDelegatedVerify_AcceptsMerchantAdminPermission(t *testing.T) {
 func TestDelegatedVerify_RejectsPlatformPermissionEvenWhenMerchantSigned(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Permissions: []string{PermPlatformSuperadmin},
+		Permissions: []string{"platform:orgs:update"},
 	})
 	_, _, err := v.VerifyDelegatedAccess(tok)
 	require.Error(t, err, "a platform grant must be rejected even on a validly-signed token")

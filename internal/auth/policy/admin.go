@@ -16,8 +16,3 @@ const PermCatalogWrite = "org:catalog:update"
 type AdminPermissionChecker interface {
 	HasAdminPermission(ctx context.Context, tenantSlug, userID, perm string) (bool, error)
 }
-
-// PlatformSuperadminChecker is the live AuthKit platform-RBAC check.
-type PlatformSuperadminChecker interface {
-	HasPlatformSuperadmin(ctx context.Context, userID string) (bool, error)
-}

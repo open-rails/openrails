@@ -26,8 +26,8 @@ import (
 // TENANT SCOPING (issue #232): every query in this service is filtered by the
 // merchant id resolved from the request context (merchant.Require), so
 // a merchant operator can only ever read their OWN metrics. Cross-merchant
-// (platform-wide) reads are a SEPARATE, explicit control-plane path gated on
-// controlplane.PermPlatformSuperadmin — see the *CrossMerchant methods below.
+// reads are library-only helpers for a future SaaS operator surface — see the
+// *CrossMerchant methods below.
 type AdminMetricsService struct {
 	cfg   *config.ClickHouseConfig
 	clock clockwork.Clock
@@ -342,14 +342,10 @@ func (s *AdminMetricsService) GetSummary(ctx context.Context, rng MetricsDateRan
 	return s.getSummary(ctx, rng, currency, tid, false)
 }
 
-// GetSummaryCrossMerchant returns platform-wide (all-merchant) summaries. This is
-// the explicit control-plane path and MUST only be reached by a caller holding
-// controlplane.PermPlatformSuperadmin (issue #232). It is NOT wired to the
-// per-merchant admin handlers.
+// GetSummaryCrossMerchant returns platform-wide (all-merchant) summaries. It is
+// NOT wired to the core HTTP surface.
 //
-// TODO(#232): expose this behind a dedicated platform-superadmin HTTP/control-
-// plane surface once that surface exists; until then it is library-only and
-// exercised by tests.
+// TODO(#232): expose this from OpenRails SaaS if an operator dashboard needs it.
 func (s *AdminMetricsService) GetSummaryCrossMerchant(ctx context.Context, rng MetricsDateRange, currency string) ([]SummaryResponse, error) {
 	return s.getSummary(ctx, rng, currency, merchant.ID{}, true)
 }

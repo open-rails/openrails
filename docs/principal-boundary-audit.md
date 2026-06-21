@@ -57,9 +57,9 @@ org or JWT role claim. The bootstrap org hosts its own operator role. Initial
 generated admin API keys are
 minted only through explicit operator/admin token-minting commands, not through
 declarative bootstrap YAML. The control plane is always present in standalone
-mode (#469); `/v1/admin/*` (and `/v1/admin/merchants/*`) fail closed for embedded
-hosts that wire no control plane, because there is then no live authority to
-evaluate.
+mode (#469); `/v1/admin/*` fails closed for embedded hosts that wire no control
+plane, because there is then no live authority to evaluate. Core does not expose
+platform/cross-merchant admin routes.
 
 Canonical identity vocabulary lives in
 `docs/authkit-merchant-oidc-glossary.md`. New docs and route examples should use

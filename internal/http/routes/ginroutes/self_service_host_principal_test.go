@@ -10,7 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -105,7 +104,7 @@ func TestHostPrincipal_InvalidPrincipalsRejected(t *testing.T) {
 		}, http.StatusUnauthorized},
 		{"platform grant smuggled", &billingauth.DelegatedPrincipal{
 			MerchantID: dbtest.TestMerchantID.String(), SubjectID: "user-1",
-			Permissions: []string{controlplane.PermPlatformSuperadmin},
+			Permissions: []string{"platform:orgs:update"},
 		}, http.StatusUnauthorized},
 	}
 	for _, tc := range cases {

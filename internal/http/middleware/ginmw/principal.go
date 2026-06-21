@@ -74,11 +74,6 @@ type AdminPermissionChecker interface {
 	HasAdminPermission(ctx context.Context, orgSlug, userID, perm string) (bool, error)
 }
 
-// PlatformSuperadminChecker evaluates live cross-merchant platform authority.
-type PlatformSuperadminChecker interface {
-	HasPlatformSuperadmin(ctx context.Context, userID string) (bool, error)
-}
-
 // UserSessionAdminPrincipalRequired turns the authenticated AuthKit user session
 // already attached by the auth provider into a Principal whose permission
 // evaluator remains a live AuthKit check.
@@ -105,39 +100,6 @@ func UserSessionAdminPrincipalRequired(checker AdminPermissionChecker) gin.Handl
 					return false
 				}
 				allowed, err := checker.HasAdminPermission(ctx, uc.Org, uc.UserID, perm)
-				return err == nil && allowed
-			},
-		})
-		c.Next()
-	}
-}
-
-// UserSessionPlatformPrincipalRequired turns an authenticated AuthKit user
-// session into a platform principal. Its Can method intentionally delegates to
-// the live platform-superadmin check, which ignores the caller's active org.
-func UserSessionPlatformPrincipalRequired(checker PlatformSuperadminChecker) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uc, ok := ginauth.UserContextFromGin(c)
-		if !ok || strings.TrimSpace(uc.UserID) == "" {
-			response.UnauthorizedWithMessage(c, "authentication required")
-			c.Abort()
-			return
-		}
-		if checker == nil {
-			response.InternalError(c, "authorization unavailable")
-			c.Abort()
-			return
-		}
-		c.Set(PrincipalContextKey, &Principal{
-			MerchantSource: "platform_user_session",
-			CredentialType: CredentialUserSession,
-			Subject:        strings.TrimSpace(uc.UserID),
-			can: func(ctx context.Context, perm string) bool {
-				perm = strings.TrimSpace(perm)
-				if !strings.HasPrefix(perm, "platform:") {
-					return false
-				}
-				allowed, err := checker.HasPlatformSuperadmin(ctx, uc.UserID)
 				return err == nil && allowed
 			},
 		})

@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -71,9 +72,6 @@ func TestOperatorRolePermissions_AreOrgCatalog(t *testing.T) {
 	for _, p := range perms {
 		set[p] = true
 	}
-	if set[PermPlatformSuperadmin] {
-		t.Fatalf("operator role must NOT include %q", PermPlatformSuperadmin)
-	}
 	for _, n := range names {
 		if !set[n] {
 			t.Errorf("operator role missing catalog permission %q", n)
@@ -109,12 +107,10 @@ func TestAnyLiveAPIKey(t *testing.T) {
 	}
 }
 
-// TestOperatorRoleExcludesPlatformSuperadmin proves the layer separation: a
-// merchant operator role is granted only org-layer catalog permissions.
-func TestOperatorRoleExcludesPlatformSuperadmin(t *testing.T) {
+func TestOperatorRolePermissions_AreOrgOnly(t *testing.T) {
 	for _, p := range OperatorRolePermissions() {
-		if p == PermPlatformSuperadmin {
-			t.Fatalf("operator role must NOT include %q", PermPlatformSuperadmin)
+		if strings.HasPrefix(p, "platform:") {
+			t.Fatalf("operator role must NOT include platform permission %q", p)
 		}
 	}
 	if contains(OperatorRolePermissions(), PermAdmin) {
@@ -152,20 +148,39 @@ func TestCreditsSpendPermission_GateSemantics(t *testing.T) {
 	}
 }
 
-// TestPlatformRoleHoldsSuperadminGlob proves the platform role uses AuthKit's
-// platform-layer apex grant.
-func TestPlatformRoleHoldsOnlySuperadmin(t *testing.T) {
-	perms := PlatformRolePermissions()
-	if len(perms) != 1 || perms[0] != authcore.PlatformSuperAdminGrant {
-		t.Fatalf("platform role must hold only %q, got %v", authcore.PlatformSuperAdminGrant, perms)
+func TestCatalogNames_AreOrgOnly(t *testing.T) {
+	for _, p := range CatalogNames() {
+		if strings.HasPrefix(p, "platform:") {
+			t.Fatalf("org catalog must not include platform permission %q", p)
+		}
 	}
 }
 
-// TestSuperadminPermNotInOrgCatalog proves platform authority is outside the
-// OpenRails org permission catalog.
-func TestSuperadminPermInCatalog(t *testing.T) {
-	if contains(CatalogNames(), PermPlatformSuperadmin) {
-		t.Fatalf("org catalog must not include %q", PermPlatformSuperadmin)
+// TestCatalogPermissionsCoveredByOwnerGrant guards every catalog permission against
+// a merchant-owner lockout — correct both before and after the #554 `merchant:*`
+// rename.
+//
+// The owner-coverage fix now exists (AuthKit #100): OpenRails sets
+// authcore OwnerOwnsAppResources (see internal/controlplane/service.go), so the
+// bootstrapped org owner's apex grant covers `org:*` PLUS one `<ns>:*` glob for
+// every app namespace OpenRails declares (e.g. `merchant:*`) — owning the org owns
+// the merchant (org⇄merchant 1:1). The ONE namespace an org owner can never hold is
+// the separate `platform:` layer. So the surviving invariant is: every catalog
+// permission must be namespaced and must NOT be `platform:`, or a merchant owner
+// cannot exercise it. This passes today (all `org:`) and keeps passing after the
+// rename to `merchant:`, while still catching a `platform:` leak or an unnamespaced
+// perm. (#554/#100)
+func TestCatalogPermissionsCoveredByOwnerGrant(t *testing.T) {
+	platformNS := strings.SplitN(authcore.PlatformSuperAdminGrant, ":", 2)[0] // "platform"
+	for _, name := range CatalogNames() {
+		ns := strings.SplitN(name, ":", 2)[0]
+		if ns == "" || ns == name {
+			t.Fatalf("catalog permission %q has no namespace; owner-grant coverage is namespace-anchored (#554/#100)", name)
+		}
+		if ns == platformNS {
+			t.Fatalf("catalog permission %q is in the %q: layer, which no org owner can ever hold; "+
+				"OpenRails org-scoped perms must be org: or an app namespace like merchant: (#554/#100)", name, platformNS)
+		}
 	}
 }
 

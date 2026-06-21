@@ -78,8 +78,24 @@ type Options struct {
 }
 
 // HandlerOptions selects the HTTP route groups for Runtime.Handler. It is
-// pkg/embedded.HTTPHandlerOptions; zero value defaults to user+admin+webhooks.
+// pkg/embedded.HTTPHandlerOptions; zero value uses EmbeddedDefaultRouteSets.
 type HandlerOptions = embedded.HTTPHandlerOptions
+
+// RouteSet names a mountable billing HTTP route group.
+type RouteSet = embedded.RouteSet
+
+const (
+	RouteSetPublicCatalog = embedded.RouteSetPublicCatalog
+	RouteSetCustomer      = embedded.RouteSetCustomer
+	RouteSetMerchantAdmin = embedded.RouteSetMerchantAdmin
+	RouteSetMerchantAPI   = embedded.RouteSetMerchantAPI
+	RouteSetWebhooks      = embedded.RouteSetWebhooks
+)
+
+var (
+	EmbeddedDefaultRouteSets   = append([]RouteSet(nil), embedded.EmbeddedDefaultRouteSets...)
+	StandaloneDefaultRouteSets = append([]RouteSet(nil), embedded.StandaloneDefaultRouteSets...)
+)
 
 // PaymentProvider is one embedded payment-provider credential set. It aliases
 // pkg/embedded.PaymentProvider so hosts using embed.New can configure multiple
@@ -240,16 +256,13 @@ func (r *Runtime) Embedded() *embedded.Embedded { return r.emb }
 
 // Handler returns the mountable embedded HTTP surface (/billing/v1/*) — a thin
 // passthrough to pkg/embedded.NewHTTPHandler. The service-credential-authenticated
-// /v1/service/* surface is part of the standalone server
-// (pkg/embedded/gin.StandaloneHandler / internal/http); an embedded host
-// normally uses Client() instead.
+// /billing/v1/service/* surface is opt-in via embedded.RouteSetMerchantAPI; an
+// embedded host normally uses Client() instead.
 func (r *Runtime) Handler(opts HandlerOptions) http.Handler {
 	asm := embedhttp.FromApp(r.emb.App())
 	asm.ConfiguredMerchant = r.tenantID
 	return asm.NewHTTPHandler(embedhttp.Options{
-		IncludeUser:     opts.IncludeUser,
-		IncludeAdmin:    opts.IncludeAdmin,
-		IncludeWebhooks: opts.IncludeWebhooks,
+		RouteSets: opts.RouteSets,
 	})
 }
 

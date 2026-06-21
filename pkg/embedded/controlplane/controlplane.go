@@ -110,10 +110,5 @@ func RunBootstrap(ctx context.Context, a *app.App, opts controlplane.BootstrapOp
 	if err != nil {
 		return res, err
 	}
-	// #226 compatibility: also ensure the legacy managed-hosting superadmin role
-	// when configured. No-op in single-merchant / non-managed deployments.
-	if _, perr := cp.BootstrapPlatform(ctx); perr != nil {
-		return res, fmt.Errorf("platform superadmin bootstrap: %w", perr)
-	}
 	return res, nil
 }

@@ -126,6 +126,147 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	group.Handle(http.MethodPost, "/solana/recurring/enroll", h(httphandlers.ConfirmSolanaEnrollment))
 }
 
+// RegisterServiceRoutes mounts the server-to-server billing surface on a
+// merchant-scoped route group authenticated by OpenRails-issued merchant API
+// keys or service JWTs.
+func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	group := rr.Group("", opts.serviceCredentialRequiredMW())
+	if rt != nil && rt.DB != nil {
+		group = group.Group("", middleware.MerchantDBConnMW(rt.DB))
+	}
+
+	group.Handle(http.MethodPost, "/customers/by-external-subject/entitlements",
+		h(httphandlers.ServiceGetExternalSubjectEntitlements),
+		opts.servicePermissionMW(controlplane.PermEntitlementsRead),
+	)
+
+	customers := group.Group("/customers/:customer_id")
+	customers.Handle(http.MethodGet, "/entitlements",
+		h(httphandlers.ServiceGetCustomerEntitlements),
+		opts.servicePermissionMW(controlplane.PermEntitlementsRead),
+	)
+
+	entitlements := group.Group("/entitlements")
+	entitlements.Handle(http.MethodGet, "/:entitlement/customers",
+		h(httphandlers.ServiceGetCustomersWithEntitlement),
+		opts.servicePermissionMW(controlplane.PermEntitlementsRead),
+	)
+
+	users := group.Group("/users/:user_id")
+	users.Handle(http.MethodGet, "/product-access",
+		h(httphandlers.ServiceGetUserProductAccess),
+		opts.servicePermissionMW(controlplane.PermEntitlementsRead),
+	)
+
+	invokers := group.Group("/invokers/:invoker")
+	invokers.Handle(http.MethodGet, "/credits",
+		h(httphandlers.ServiceGetInvokerCredits),
+		opts.servicePermissionMW(controlplane.PermCreditsRead),
+	)
+
+	credits := group.Group("/credits")
+	creditsSpend := opts.servicePermissionMW(controlplane.PermCreditsSpend)
+	creditsWrite := opts.servicePermissionMW(controlplane.PermCreditsWrite)
+	creditsRead := opts.servicePermissionMW(controlplane.PermCreditsRead)
+
+	group.Handle(http.MethodPost, "/admit", h(httphandlers.ServiceAdmit), creditsWrite, creditsSpend)
+	group.Handle(http.MethodPost, "/admit/batch", h(httphandlers.ServiceAdmitBatch), creditsWrite, creditsSpend)
+	group.Handle(http.MethodGet, "/budget", h(httphandlers.ServiceGetBudget), creditsRead)
+	group.Handle(http.MethodPut, "/payer-spend-limits", h(httphandlers.ServiceSetPayerSpendLimits), creditsWrite)
+	group.Handle(http.MethodPut, "/tier-schedules", h(httphandlers.ServiceSetTierSchedule), creditsWrite)
+	group.Handle(http.MethodGet, "/merchant-configuration",
+		h(httphandlers.ServiceGetMerchantConfiguration),
+		opts.servicePermissionMW(controlplane.PermMerchantConfigurationRead),
+	)
+	group.Handle(http.MethodPut, "/merchant-configuration",
+		h(httphandlers.ServiceSetMerchantConfiguration),
+		opts.servicePermissionMW(controlplane.PermMerchantConfigurationWrite),
+	)
+	group.Handle(http.MethodGet, "/trust-tier", h(httphandlers.ServiceGetTier), creditsRead)
+	group.Handle(http.MethodGet, "/tier", h(httphandlers.ServiceGetTier), creditsRead)
+	group.Handle(http.MethodPost, "/wasted-spend", h(httphandlers.ServiceReportWastedSpend), creditsWrite)
+	group.Handle(http.MethodGet, "/abuse-usage", h(httphandlers.ServiceAbuseUsage), creditsRead)
+	group.Handle(http.MethodPut, "/credit-limit", h(httphandlers.ServiceSetCreditLimit), creditsWrite)
+	group.Handle(http.MethodGet, "/credit-limit", h(httphandlers.ServiceGetCreditLimit), creditsRead)
+	group.Handle(http.MethodPut, "/invoker-spend-limits", h(httphandlers.ServiceSetInvokerSpendLimits), creditsWrite)
+	group.Handle(http.MethodGet, "/invoker-spend-limits", h(httphandlers.ServiceGetInvokerSpendLimits), creditsRead)
+
+	credits.Handle(http.MethodGet, "/balance", h(httphandlers.ServiceGetCreditsBalance), creditsRead)
+	credits.Handle(http.MethodPost, "/deposit", h(httphandlers.ServiceDepositCredits), creditsWrite)
+	credits.Handle(http.MethodPost, "/withdraw", h(httphandlers.ServiceWithdrawCredits), creditsWrite)
+	credits.Handle(http.MethodPost, "/holds/:id/capture", h(httphandlers.ServiceCaptureHold), creditsWrite, creditsSpend)
+	credits.Handle(http.MethodPost, "/holds/:id/release", h(httphandlers.ServiceReleaseHold), creditsWrite)
+	credits.Handle(http.MethodPost, "/usage/rollup", h(httphandlers.ServiceUsageRollup), creditsRead)
+	credits.Handle(http.MethodPost, "/usage/resource-revenue", h(httphandlers.ServiceResourceRevenue), creditsRead)
+	credits.Handle(http.MethodGet, "/transactions/lookup", h(httphandlers.ServiceLookupCreditTransaction), creditsRead)
+	credits.Handle(http.MethodPut, "/account-settings", h(httphandlers.ServiceSetCreditAccountSettings), creditsWrite)
+	credits.Handle(http.MethodGet, "/account-settings", h(httphandlers.ServiceGetCreditAccountSettings), creditsRead)
+	credits.Handle(http.MethodGet, "/transactions", h(httphandlers.ServiceListCustomerCreditTransactions), creditsRead)
+}
+
+func (opts Options) serviceCredentialRequiredMW() router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			if opts.ServiceCredentialResolver == nil {
+				r.AbortJSON(http.StatusInternalServerError, "API key authentication not configured")
+				return
+			}
+			token := ""
+			if r != nil && r.Request != nil {
+				token = bearerToken(r.Request.Header.Get("Authorization"))
+			}
+			if token == "" {
+				r.AbortJSON(http.StatusUnauthorized, "API key bearer token required")
+				return
+			}
+			resolved, handled := opts.resolveServiceCredential(r)
+			if handled && resolved == nil {
+				return
+			}
+			if resolved == nil {
+				r.AbortJSON(http.StatusUnauthorized, "service_credential_invalid")
+				return
+			}
+			if r.Request != nil {
+				r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), resolved.MerchantID))
+			}
+			r.Set("openrails.merchant_id", resolved.MerchantID)
+			r.Set("openrails.service_credential", resolved)
+			r.Set("openrails.service_credential_authkit_org_slug", resolved.OwnerOrgSlug)
+			next(r)
+		}
+	}
+}
+
+func (opts Options) servicePermissionMW(perm string) router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			resolved, ok := serviceCredentialFromRequest(r)
+			if !ok {
+				r.AbortJSON(http.StatusUnauthorized, "bearer principal required")
+				return
+			}
+			if !resolved.HasPermission(perm) {
+				r.AbortJSON(http.StatusForbidden, "permission_required")
+				return
+			}
+			next(r)
+		}
+	}
+}
+
+func serviceCredentialFromRequest(r *httprequest.Request) (*controlplane.ResolvedServiceCredential, bool) {
+	if r == nil {
+		return nil, false
+	}
+	v, ok := r.Get("openrails.service_credential")
+	if !ok {
+		return nil, false
+	}
+	resolved, ok := v.(*controlplane.ResolvedServiceCredential)
+	return resolved, ok && resolved != nil
+}
+
 // #528: the per-user `/v1/admin` surface (RegisterAdminRoutes) was retired. The
 // admin API is the delegated issuer-owner surface (ginroutes.RegisterAdminRoutes,
 // browser-safe `org:` permissions). The dropped features (provider-intents, reconcile,

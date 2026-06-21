@@ -24,14 +24,6 @@ func (f fakeAdminPrincipalChecker) HasAdminPermission(_ context.Context, orgSlug
 	return orgSlug == f.allowedOrg && userID == f.allowedUser && perm == f.allowedPerm, nil
 }
 
-type fakePlatformPrincipalChecker struct {
-	allowedUser string
-}
-
-func (f fakePlatformPrincipalChecker) HasPlatformSuperadmin(_ context.Context, userID string) (bool, error) {
-	return userID == f.allowedUser, nil
-}
-
 func TestUserSessionAdminPrincipalUsesLivePermissionCheck(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -56,7 +48,7 @@ func TestUserSessionAdminPrincipalUsesLivePermissionCheck(t *testing.T) {
 }
 
 func TestUserSessionAdminPrincipalDeniesNonOrgPermissions(t *testing.T) {
-	for _, perm := range []string{controlplane.PermPlatformSuperadmin} {
+	for _, perm := range []string{"platform:orgs:update"} {
 		t.Run(perm, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			r := gin.New()
@@ -79,24 +71,6 @@ func TestUserSessionAdminPrincipalDeniesNonOrgPermissions(t *testing.T) {
 	}
 }
 
-func TestUserSessionPlatformPrincipalDoesNotUseMerchantAdminPermission(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.Use(func(c *gin.Context) {
-		c.Set("openrails.user_context", ginauth.UserContext{UserID: "merchant-admin", Org: "merchant-org"})
-		c.Next()
-	})
-	r.GET("/platform", UserSessionPlatformPrincipalRequired(fakePlatformPrincipalChecker{
-		allowedUser: "platform-admin",
-	}), RequirePermission(controlplane.PermPlatformSuperadmin), func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/platform", nil))
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
-}
-
 func TestPrincipalPermissionClassesDoNotBleedAcrossCredentialTypes(t *testing.T) {
 	ctx := context.Background()
 
@@ -114,11 +88,11 @@ func TestPrincipalPermissionClassesDoNotBleedAcrossCredentialTypes(t *testing.T)
 	delegatedPrincipal := principalFromDelegated(&controlplane.ResolvedDelegated{
 		MerchantID:       dbtest.TestMerchantID,
 		DelegatedSubject: "user-1",
-		Permissions:      []string{controlplane.PermMerchantBillingRead, controlplane.PermCreditsRead, controlplane.PermPlatformSuperadmin},
+		Permissions:      []string{controlplane.PermMerchantBillingRead, controlplane.PermCreditsRead, "platform:orgs:update"},
 	}, CredentialDelegatedUser)
 	require.NotNil(t, delegatedPrincipal)
 	require.Equal(t, "user-1", delegatedPrincipal.Subject)
 	require.True(t, delegatedPrincipal.Can(ctx, controlplane.PermMerchantBillingRead))
 	require.False(t, delegatedPrincipal.Can(ctx, controlplane.PermCreditsRead))
-	require.False(t, delegatedPrincipal.Can(ctx, controlplane.PermPlatformSuperadmin))
+	require.False(t, delegatedPrincipal.Can(ctx, "platform:orgs:update"))
 }

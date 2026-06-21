@@ -17,6 +17,22 @@ import (
 	"github.com/open-rails/openrails/pkg/service"
 )
 
+// RouteSet names a mountable billing HTTP route group.
+type RouteSet = embedhttp.RouteSet
+
+const (
+	RouteSetPublicCatalog = embedhttp.RouteSetPublicCatalog
+	RouteSetCustomer      = embedhttp.RouteSetCustomer
+	RouteSetMerchantAdmin = embedhttp.RouteSetMerchantAdmin
+	RouteSetMerchantAPI   = embedhttp.RouteSetMerchantAPI
+	RouteSetWebhooks      = embedhttp.RouteSetWebhooks
+)
+
+var (
+	EmbeddedDefaultRouteSets   = append([]RouteSet(nil), embedhttp.EmbeddedDefaultRouteSets...)
+	StandaloneDefaultRouteSets = append([]RouteSet(nil), embedhttp.StandaloneDefaultRouteSets...)
+)
+
 type Options struct {
 	Config *config.Config
 	// PGXPool is the host-supplied database handle (pgx/v5). The bun-era
@@ -89,14 +105,12 @@ func (e *Embedded) App() *app.App {
 
 // HTTPHandlerOptions controls which billing HTTP route groups are included in the returned handler.
 //
-// If all fields are false (zero value), the options default to user + admin + webhooks.
+// A zero RouteSets slice uses EmbeddedDefaultRouteSets.
 //
 // Note: billing health endpoints are not exposed in embedded mode.
 // If a host wants billing readiness, call IsBillingReady and include it in the host's /readyz.
 type HTTPHandlerOptions struct {
-	IncludeUser     bool
-	IncludeAdmin    bool
-	IncludeWebhooks bool
+	RouteSets []RouteSet
 }
 
 // NewHTTPHandler returns a single mountable `http.Handler` for the selected route groups.
@@ -107,9 +121,7 @@ func (e *Embedded) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 		return nil
 	}
 	return embedhttp.FromApp(e.app).NewHTTPHandler(embedhttp.Options{
-		IncludeUser:     opts.IncludeUser,
-		IncludeAdmin:    opts.IncludeAdmin,
-		IncludeWebhooks: opts.IncludeWebhooks,
+		RouteSets: opts.RouteSets,
 	})
 }
 

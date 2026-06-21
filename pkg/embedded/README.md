@@ -259,20 +259,23 @@ The embedded instance provides HTTP handlers suitable for mounting into your hos
 Canonical embedded contract: routes live under `/billing/v1/*`.
 
 ```go
-// Full public OpenRails API (health + user + admin + webhooks; debug routes in dev only)
+// Full standalone OpenRails API (health + user + admin + webhooks + merchant API; debug routes in dev only)
 openrails.Handler() http.Handler
 
 // Selective handler (choose route groups)
 openrails.NewHTTPHandler(embedded.HTTPHandlerOptions{
-	IncludeUser:     true,
-	IncludeAdmin:    true,
-	IncludeWebhooks: true,
+	RouteSets: []embedded.RouteSet{
+		embedded.RouteSetPublicCatalog,
+		embedded.RouteSetCustomer,
+		embedded.RouteSetMerchantAdmin,
+		embedded.RouteSetWebhooks,
+	},
 })
 
 // Server-to-server operations: embedded hosts call the in-process Service()
-// facade (below) after authorizing the action themselves. There is no separate
-// private/mTLS HTTP surface — standalone machine callers use OpenRails-issued
-// API keys against the public /v1/service/* routes (issue #222).
+// facade (below) after authorizing the action themselves. Hosts that need HTTP
+// loopback parity can opt into embedded.RouteSetMerchantAPI; standalone machine
+// callers use OpenRails-issued API keys against the public /v1/service/* routes.
 ```
 
 ## In-Process Service API

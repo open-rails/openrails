@@ -47,24 +47,3 @@ func (c *ControlPlane) IsAdmin(ctx context.Context, orgSlug, userID string) (boo
 	}
 	return false, nil
 }
-
-// PlatformOrgSlug returns "" because OpenRails no longer supports a config-seeded
-// platform-superadmin org. Cross-merchant SaaS administration belongs in the
-// private openrails-saas layer, not the source-available self-hosted control plane.
-func (c *ControlPlane) PlatformOrgSlug() string {
-	return ""
-}
-
-// HasPlatformSuperadmin reports whether userID holds the concrete platform
-// permission used by the OpenRails platform directory routes according to
-// AuthKit's platform RBAC layer.
-func (c *ControlPlane) HasPlatformSuperadmin(ctx context.Context, userID string) (bool, error) {
-	if c == nil || c.Core() == nil {
-		return false, ErrNoControlPlane
-	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return false, nil
-	}
-	return c.Core().HasPlatformPermission(ctx, userID, PermPlatformSuperadmin)
-}

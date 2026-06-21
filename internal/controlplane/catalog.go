@@ -32,9 +32,8 @@ import (
 type Permission = authcore.PermissionDef
 
 // OpenRails permissions. `org:` permissions are merchant-local AuthKit org
-// permissions. `platform:` permissions come from AuthKit platform RBAC. Customer
-// self-service routes do not carry OpenRails `self:` grants: the authenticated
-// subject is the route target.
+// permissions. Customer self-service routes do not carry OpenRails `self:`
+// grants: the authenticated subject is the route target.
 const (
 	// PermAdmin is kept as a deprecated source-compatibility alias for the
 	// merchant-owner apex grant. It is NOT a magic permission and does not satisfy
@@ -68,11 +67,6 @@ const (
 	PermMerchantSecretsDelete      = "org:secrets:delete"
 	PermMerchantSecretsTest        = "org:secrets:test"
 	PermMerchantMetricsRead        = "org:metrics:read"
-
-	// Existing route groups still use this name for the merchant directory gate.
-	// The value is a concrete AuthKit platform permission; super-admin roles hold
-	// authcore.PlatformSuperAdminGrant (`platform:*`), which expands to this.
-	PermPlatformSuperadmin = authcore.PermPlatformOrgsUpdate
 )
 
 // catalogEntries is the canonical ordered list of OpenRails permissions with
@@ -189,9 +183,6 @@ const (
 	// OperatorRole is a legacy role name retained for TEST FIXTURES only. OpenRails
 	// no longer seeds or declares it in any org (#543).
 	OperatorRole = "openrails-operator"
-
-	// PlatformRole is the AuthKit platform role name used by hosted deployments.
-	PlatformRole = "openrails-platform-superadmin"
 )
 
 // OperatorRolePermissions returns the full OpenRails `org:` catalog permission
@@ -199,12 +190,6 @@ const (
 // carries permissions, not a role) and by test fixtures. See CatalogNames.
 func OperatorRolePermissions() []string {
 	return CatalogNames()
-}
-
-// PlatformRolePermissions returns the AuthKit platform super-admin grant. AuthKit
-// expands this to concrete `platform:` permissions; it never reaches `org:`.
-func PlatformRolePermissions() []string {
-	return []string{authcore.PlatformSuperAdminGrant}
 }
 
 // EnsureRole idempotently ensures an org role exists with exactly the given

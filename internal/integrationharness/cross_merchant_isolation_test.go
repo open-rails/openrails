@@ -241,7 +241,7 @@ func TestDelegatedSelfTokenSubjectIsolationHTTP(t *testing.T) {
 		"self token must not be usable on :user_id admin routes: %s", string(body))
 }
 
-func TestMerchantDirectoryRejectsMerchantAdminUserHTTP(t *testing.T) {
+func TestCoreDoesNotMountPlatformAdminRoutesHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
@@ -260,10 +260,14 @@ func TestMerchantDirectoryRejectsMerchantAdminUserHTTP(t *testing.T) {
 	token, _, err := core.IssueAccessToken(ctx, user.ID, email, nil)
 	require.NoError(t, err, "issue merchant admin user access token")
 
-	status, body := requestJSON(t, http.MethodGet,
-		surface.BaseURL+"/v1/admin/merchants/"+dbtest.TestMerchantID.String(), token, nil)
-	require.Equalf(t, http.StatusForbidden, status,
-		"per-merchant org admin user must not reach global merchant directory: %s", string(body))
+	for _, path := range []string{
+		"/v1/admin/merchants/" + dbtest.TestMerchantID.String(),
+		"/v1/platform/merchants",
+	} {
+		status, body := requestJSON(t, http.MethodGet, surface.BaseURL+path, token, nil)
+		require.Equalf(t, http.StatusNotFound, status,
+			"core must not mount platform/cross-merchant admin route %s: %s", path, string(body))
+	}
 }
 
 func depositCredits(t *testing.T, baseURL, token, payer string, amount int64) {
