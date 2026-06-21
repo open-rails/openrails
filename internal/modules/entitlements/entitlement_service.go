@@ -109,8 +109,8 @@ func (s *EntitlementService) ListActiveRecordsByCustomer(ctx context.Context, te
 	return s.repo.ListActiveRecordsByCustomer(ctx, tenantSubjectID, at)
 }
 
-func (s *EntitlementService) ListActiveRecordsByExternalSubjects(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
-	return s.repo.ListActiveRecordsByExternalSubjects(ctx, issuer, subjects, at)
+func (s *EntitlementService) ListActiveRecordsByExternalSubjects(ctx context.Context, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
+	return s.repo.ListActiveRecordsByExternalSubjects(ctx, subjects, at)
 }
 
 func (s *EntitlementService) ListDistinctEntitlementNamesBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID) ([]string, error) {

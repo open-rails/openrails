@@ -135,7 +135,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 		group = group.Group("", middleware.MerchantDBConnMW(rt.DB))
 	}
 
-	group.Handle(http.MethodPost, "/customers/by-external-subject/entitlements",
+	group.Handle(http.MethodPost, "/customers/entitlements:batch",
 		h(httphandlers.ServiceGetExternalSubjectEntitlements),
 		opts.servicePermissionMW(controlplane.PermMerchantCustomersRead),
 	)

@@ -596,18 +596,14 @@ func (s *Service) ListCustomersWithEntitlement(ctx context.Context, entitlement 
 	return s.entitlementService().ListCustomersWithEntitlement(ctx, entitlement, at.UTC(), afterID, limit)
 }
 
-func (s *Service) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
-	issuer = strings.TrimSpace(issuer)
-	if issuer == "" {
-		return nil, fmt.Errorf("issuer required")
-	}
+func (s *Service) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Context, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
 	if len(subjects) == 0 {
 		return map[string][]EntitlementRecord{}, nil
 	}
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
-	grouped, err := s.entitlementService().ListActiveRecordsByExternalSubjects(ctx, issuer, subjects, at.UTC())
+	grouped, err := s.entitlementService().ListActiveRecordsByExternalSubjects(ctx, subjects, at.UTC())
 	if err != nil {
 		return nil, err
 	}

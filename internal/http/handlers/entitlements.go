@@ -173,7 +173,6 @@ func ServiceGetCustomersWithEntitlement(r *httprequest.Request) {
 }
 
 type serviceExternalSubjectEntitlementsRequest struct {
-	Issuer   string   `json:"issuer"`
 	Subjects []string `json:"subjects"`
 	At       string   `json:"at,omitempty"` // RFC3339; empty = now
 }
@@ -181,15 +180,12 @@ type serviceExternalSubjectEntitlementsRequest struct {
 // ServiceGetExternalSubjectEntitlements is always batch (#354): one query
 // answers many subjects; a single lookup is an array of one. Response is
 // keyed by subject with an entry per requested subject (unknown = [], never
-// an error) after trim + dedupe; over-cap is a 400.
+// an error) after trim + dedupe; over-cap is a 400. The merchant is pinned from
+// the request credential, so no issuer is accepted (#555); customer identity is
+// (merchant, subject).
 func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
 	var req serviceExternalSubjectEntitlementsRequest
 	if !r.BindJSON(&req) {
-		return
-	}
-	issuer := strings.TrimSpace(req.Issuer)
-	if issuer == "" {
-		r.ErrorJSON(http.StatusBadRequest, "issuer required")
 		return
 	}
 	subjects := make([]string, 0, len(req.Subjects))
@@ -228,7 +224,7 @@ func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	grouped, err := svc.ListActiveEntitlementRecordsByExternalSubjects(r.Request.Context(), issuer, subjects, at)
+	grouped, err := svc.ListActiveEntitlementRecordsByExternalSubjects(r.Request.Context(), subjects, at)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
 		return

@@ -124,9 +124,9 @@ type Client interface {
 	// payers in the merchant (#410).
 	ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error)
 	// ListActiveEntitlements returns the entitlement records active at `at`
-	// for subjects addressed by their EXTERNAL identity — the issuer +
-	// subject ids the host's auth system already holds (the same key a
-	// delegated token pins via `iss`/`delegated_sub`). Always batch (#354):
+	// for subjects addressed by their EXTERNAL identity — the subject ids the
+	// host's auth system already holds, scoped to the request credential's
+	// merchant (#555: no issuer; identity is (merchant, subject)). Always batch (#354):
 	// one engine query answers the whole list, keyed by subject with an entry
 	// per requested subject after trim + dedupe; an unknown subject — a user
 	// who has never touched billing — is an empty slice, never an error.
@@ -134,7 +134,7 @@ type Client interface {
 	// errors, never silently truncates. A zero `at` means "now". For
 	// token-issuance enrichment and list renders: bake names into token
 	// claims and gate per-request from the token, not from this call.
-	ListActiveEntitlements(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error)
+	ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time) (map[string][]EntitlementRecord, error)
 	// ListCustomersWithEntitlement is the REVERSE of ListActiveEntitlements (#535):
 	// the customer ids (== external subject ids, #364 UUID-only) holding an ACTIVE
 	// window of `entitlement` for the merchant. It walks the keyset-paginated

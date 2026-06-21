@@ -254,7 +254,6 @@ type scriptResult struct {
 	Entitlements              []obsEntitlement
 	EntitlementsUnknownEmpty  bool
 	EntitlementsKeyCount      int
-	ErrEntitlementsNoIssuer   obsErr
 	ErrEntitlementsNoSubjects obsErr
 	ErrEntitlementsOverCap    obsErr
 }
@@ -618,23 +617,22 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 
 	// 20) Entitlements (#354, always batch): seeded subject + an unknown one
 	// in one call (dupes deduped), an entry per requested subject, plus the
-	// no-issuer / empty-subjects / over-cap validation errors.
-	ents, err := c.ListActiveEntitlements(ctx, env.issuer,
+	// empty-subjects / over-cap validation errors (#555: merchant from the
+	// credential, no issuer).
+	ents, err := c.ListActiveEntitlements(ctx,
 		[]string{env.subject, " " + env.subject, "ghost-" + env.subject}, time.Time{})
 	require.NoError(t, err, "%s entitlements", env.side)
 	r.Entitlements = observeEntitlements(ents[env.subject], env.payer)
 	ghostRecs, ghostPresent := ents["ghost-"+env.subject]
 	r.EntitlementsUnknownEmpty = ghostPresent && len(ghostRecs) == 0
 	r.EntitlementsKeyCount = len(ents)
-	_, err = c.ListActiveEntitlements(ctx, "", []string{env.subject}, time.Time{})
-	r.ErrEntitlementsNoIssuer = observeErr(t, env.side+" entitlements without issuer", err)
-	_, err = c.ListActiveEntitlements(ctx, env.issuer, []string{" ", ""}, time.Time{})
+	_, err = c.ListActiveEntitlements(ctx, []string{" ", ""}, time.Time{})
 	r.ErrEntitlementsNoSubjects = observeErr(t, env.side+" entitlements empty subjects", err)
 	overCap := make([]string, 501)
 	for i := range overCap {
 		overCap[i] = fmt.Sprintf("s-%d", i)
 	}
-	_, err = c.ListActiveEntitlements(ctx, env.issuer, overCap, time.Time{})
+	_, err = c.ListActiveEntitlements(ctx, overCap, time.Time{})
 	r.ErrEntitlementsOverCap = observeErr(t, env.side+" entitlements over cap", err)
 
 	// 21) Hierarchical budget-scope policies on the unified client (#473): write a

@@ -909,11 +909,8 @@ func wireEntitlementRecords(recs []billingservice.EntitlementRecord) []openrails
 // handlers.ServiceGetExternalSubjectEntitlements (entitlements.go): trim +
 // dedupe, cap, one query, an entry per requested subject. The service-credential
 // scope gate is not transcribed — embedded hosts are the principal.
-func (c *localClient) ListActiveEntitlements(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]openrails.EntitlementRecord, error) {
+func (c *localClient) ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time) (map[string][]openrails.EntitlementRecord, error) {
 	ctx = c.ensureTenant(ctx)
-	if strings.TrimSpace(issuer) == "" {
-		return nil, invalidErr("issuer required")
-	}
 	deduped := make([]string, 0, len(subjects))
 	seen := make(map[string]struct{}, len(subjects))
 	for _, s := range subjects {
@@ -933,7 +930,7 @@ func (c *localClient) ListActiveEntitlements(ctx context.Context, issuer string,
 	if len(deduped) > billingservice.EntitlementsBatchMaxSubjects {
 		return nil, invalidErr(fmt.Sprintf("too many subjects: %d > %d per call", len(deduped), billingservice.EntitlementsBatchMaxSubjects))
 	}
-	grouped, err := c.svc.ListActiveEntitlementRecordsByExternalSubjects(ctx, strings.TrimSpace(issuer), deduped, at)
+	grouped, err := c.svc.ListActiveEntitlementRecordsByExternalSubjects(ctx, deduped, at)
 	if err != nil {
 		return nil, internalErr("failed to fetch entitlements")
 	}

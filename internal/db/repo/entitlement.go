@@ -221,17 +221,16 @@ func (r *EntitlementRepo) ListActiveRecordsByCustomer(ctx context.Context, tenan
 	return entitlementsFromGen(rows), nil
 }
 
-// ListActiveRecordsByExternalSubjects (#354/#539): one query, grouped by the
+// ListActiveRecordsByExternalSubjects (#354/#539/#555): one query, grouped by the
 // caller-supplied subject; subjects with no active rows are absent from the map.
-// Issuer is accepted for API compatibility/audit context only. Customer identity
-// is merchant + stable host/AuthKit subject.
-func (r *EntitlementRepo) ListActiveRecordsByExternalSubjects(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
+// Customer identity is (merchant, stable host/AuthKit subject) — the merchant is
+// pinned from the request credential (RLS), so no issuer is needed.
+func (r *EntitlementRepo) ListActiveRecordsByExternalSubjects(ctx context.Context, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	merchantID := tid.UUID()
-	_ = issuer
 	resolved, err := r.db.Gen(ctx).LookupCustomerIDsBySubjects(ctx, gen.LookupCustomerIDsBySubjectsParams{
 		MerchantID: merchantID,
 		Subjects:   subjects,

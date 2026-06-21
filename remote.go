@@ -514,16 +514,15 @@ func (c *remote) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitB
 
 // ListActiveEntitlements implements Client (handler
 // ServiceGetExternalSubjectEntitlements, entitlements.go).
-func (c *remote) ListActiveEntitlements(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
+func (c *remote) ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
 	body := map[string]any{
-		"issuer":   strings.TrimSpace(issuer),
 		"subjects": subjects,
 	}
 	if !at.IsZero() {
 		body["at"] = at.UTC().Format(time.RFC3339)
 	}
 	var out map[string][]EntitlementRecord
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/by-external-subject/entitlements", body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/entitlements:batch", body, &out); err != nil {
 		return nil, err
 	}
 	if out == nil {
