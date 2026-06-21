@@ -31,7 +31,7 @@ func TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant(t *testing.T) 
 	require.True(t, surface.app.Runtime.ConfiguredMerchant.IsZero(), "standalone must not carry a default merchant")
 
 	payerID := uuid.NewString()
-	status, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/service/credits/balance?currency=usd&customer_id="+payerID, surface.Token, nil)
+	status, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payerID, surface.Token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 
 	cp := embcp.Get(surface.app)

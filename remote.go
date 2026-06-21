@@ -14,7 +14,7 @@ import (
 
 // remote is the HTTP implementation of Client, ported from go-client/client.go
 // (#338). It talks to a standalone OpenRails over service-credential
-// authenticated /v1/service/* routes.
+// authenticated /v1/merchant/* routes.
 type remote struct {
 	baseURL  string
 	currency string
@@ -94,7 +94,7 @@ func (c *remote) bearer(ctx context.Context) (string, error) {
 // nil error — matching the embedded transport, where a deny is (Allowed=false,
 // nil). Handler: ServiceAdmit (service_admission.go).
 func (c *remote) Admit(ctx context.Context, req AdmitRequest) (*AdmitResponse, error) {
-	status, raw, err := c.doRaw(ctx, http.MethodPost, "/v1/service/admit", admitRequestBody(req))
+	status, raw, err := c.doRaw(ctx, http.MethodPost, "/v1/merchant/admit", admitRequestBody(req))
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func admitRequestBody(req AdmitRequest) map[string]any {
 // CaptureHold implements Client (handler ServiceCaptureHold).
 func (c *remote) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*CreditTransaction, error) {
 	var out CreditTransaction
-	path := "/v1/service/credits/holds/" + url.PathEscape(strings.TrimSpace(req.RequestID)) + "/capture"
+	path := "/v1/merchant/credits/holds/" + url.PathEscape(strings.TrimSpace(req.RequestID)) + "/capture"
 	if err := c.do(ctx, http.MethodPost, path, map[string]any{"amount": req.Amount}, &out); err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func (c *remote) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cred
 
 // ReleaseHold implements Client (handler ServiceReleaseHold).
 func (c *remote) ReleaseHold(ctx context.Context, requestID string) error {
-	return c.do(ctx, http.MethodPost, "/v1/service/credits/holds/"+url.PathEscape(strings.TrimSpace(requestID))+"/release", map[string]any{}, nil)
+	return c.do(ctx, http.MethodPost, "/v1/merchant/credits/holds/"+url.PathEscape(strings.TrimSpace(requestID))+"/release", map[string]any{}, nil)
 }
 
 // WithdrawCredits implements Client (handler ServiceWithdrawCredits).
@@ -173,7 +173,7 @@ func (c *remote) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest
 		sourceID = req.SourceID.String()
 	}
 	var out CreditTransaction
-	err := c.do(ctx, http.MethodPost, "/v1/service/credits/withdraw", map[string]any{
+	err := c.do(ctx, http.MethodPost, "/v1/merchant/credits/withdraw", map[string]any{
 		"customer_id": customerIDString(req.CustomerID),
 		"invoker":     req.Invoker,
 		"currency":    currency,
@@ -212,13 +212,13 @@ func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 		body["description"] = req.Description
 	}
 	var out CreditTransaction
-	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/deposit", body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/credits/deposit", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// captureBody is the POST /v1/service/credits/holds/:id/capture body. The wire
+// captureBody is the POST /v1/merchant/credits/holds/:id/capture body. The wire
 // field is "amount" (the handler binds it as REQUIRED).
 type captureBody struct {
 	Amount    int64          `json:"amount"`
@@ -243,7 +243,7 @@ func (c *remote) Capture(ctx context.Context, requestID string, capturedAmount i
 		body.Source = usage.Source
 		body.SourceID = usage.SourceID
 	}
-	path := "/v1/service/credits/holds/" + url.PathEscape(strings.TrimSpace(requestID)) + "/capture"
+	path := "/v1/merchant/credits/holds/" + url.PathEscape(strings.TrimSpace(requestID)) + "/capture"
 	return c.do(ctx, http.MethodPost, path, body, nil)
 }
 
@@ -253,7 +253,7 @@ func (c *remote) Release(ctx context.Context, requestID string) error {
 	if strings.TrimSpace(requestID) == "" {
 		return fmt.Errorf("openrails: release requires request_id")
 	}
-	path := "/v1/service/credits/holds/" + url.PathEscape(strings.TrimSpace(requestID)) + "/release"
+	path := "/v1/merchant/credits/holds/" + url.PathEscape(strings.TrimSpace(requestID)) + "/release"
 	return c.do(ctx, http.MethodPost, path, nil, nil)
 }
 
@@ -265,7 +265,7 @@ func (c *remote) Balance(ctx context.Context, customerID string) (*BalanceRespon
 		q.Set("currency", c.currency)
 	}
 	var out BalanceResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/service/credits/balance?"+q.Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/balance?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -277,7 +277,7 @@ func (c *remote) GetCreditAccount(ctx context.Context, customerID, currency stri
 	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", normalizeCurrency(currency))
 	var out CreditAccount
-	if err := c.do(ctx, http.MethodGet, "/v1/service/credits/balance?"+q.Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/balance?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -291,7 +291,7 @@ func (c *remote) SetCreditAccountSettings(ctx context.Context, customerID, curre
 		"currency":    normalizeCurrency(currency),
 	}
 	addAccountSettingFields(body, in)
-	if err := c.do(ctx, http.MethodPut, "/v1/service/credits/account-settings", body, nil); err != nil {
+	if err := c.do(ctx, http.MethodPut, "/v1/merchant/credits/account-settings", body, nil); err != nil {
 		return nil, err
 	}
 	return c.GetCreditAccount(ctx, customerID, currency)
@@ -308,7 +308,7 @@ func (c *remote) ListCreditTransactions(ctx context.Context, customerID, currenc
 		q.Set("limit", fmt.Sprintf("%d", limit))
 	}
 	var out json.RawMessage
-	if err := c.do(ctx, http.MethodGet, "/v1/service/credits/transactions?"+q.Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/transactions?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -326,7 +326,7 @@ func (c *remote) UsageRollup(ctx context.Context, customerID, currency string, f
 		"to":          to.UTC().Unix(),
 		"group_by":    groupBy,
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/usage/rollup", body, &resp); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/credits/usage/rollup", body, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Rows, nil
@@ -346,7 +346,7 @@ func (c *remote) BudgetStatus(ctx context.Context, customerID, invokerID, curren
 	var resp struct {
 		Windows []BudgetWindow `json:"windows"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/service/budget?"+q.Encode(), nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/budget?"+q.Encode(), nil, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Windows, nil
@@ -367,7 +367,7 @@ func (c *remote) SetPayerSpendLimits(ctx context.Context, customerID string, in 
 	if len(in.BadSpendWindows) > 0 {
 		body["bad_spend_windows"] = in.BadSpendWindows
 	}
-	return c.do(ctx, http.MethodPut, "/v1/service/payer-spend-limits", body, nil)
+	return c.do(ctx, http.MethodPut, "/v1/merchant/payer-spend-limits", body, nil)
 }
 
 // SetTierSchedule implements Client (handler ServiceSetTierSchedule, #476).
@@ -377,12 +377,12 @@ func (c *remote) SetTierSchedule(ctx context.Context, customerID, currency strin
 		"currency":    strings.TrimSpace(currency),
 		"schedule":    schedule,
 	}
-	return c.do(ctx, http.MethodPut, "/v1/service/tier-schedules", body, nil)
+	return c.do(ctx, http.MethodPut, "/v1/merchant/tier-schedules", body, nil)
 }
 
 // SetMerchantConfiguration implements Client.
 func (c *remote) SetMerchantConfiguration(ctx context.Context, in MerchantConfigurationInput) error {
-	return c.do(ctx, http.MethodPut, "/v1/service/merchant-configuration", in, nil)
+	return c.do(ctx, http.MethodPut, "/v1/merchant/merchant-configuration", in, nil)
 }
 
 // GetTier implements Client (handler ServiceGetTier, #477).
@@ -395,7 +395,7 @@ func (c *remote) GetTier(ctx context.Context, customerID, currency string) (stri
 		TrustTier string `json:"trust_tier"`
 		Tier      string `json:"tier"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/service/trust-tier?"+q.Encode(), nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/trust-tier?"+q.Encode(), nil, &resp); err != nil {
 		return "", err
 	}
 	if resp.TrustTier != "" {
@@ -417,7 +417,7 @@ func (c *remote) ReportWastedSpend(ctx context.Context, report WastedSpendReport
 		"reason":       report.Reason,
 	}
 	var out WastedSpendResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/service/wasted-spend", body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/wasted-spend", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -435,7 +435,7 @@ func (c *remote) AbuseUsage(ctx context.Context, customerID, invoker, currency, 
 		q.Set("trust_tier", tier)
 	}
 	var out AbuseUsageResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/service/abuse-usage?"+q.Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/abuse-usage?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -448,7 +448,7 @@ func (c *remote) SetCreditLimit(ctx context.Context, customerID, currency string
 		"currency":            normalizeCurrency(currency),
 		"credit_limit_amount": creditLimit,
 	}
-	return c.do(ctx, http.MethodPut, "/v1/service/credit-limit", body, nil)
+	return c.do(ctx, http.MethodPut, "/v1/merchant/credit-limit", body, nil)
 }
 
 // GetCreditLimit implements Client (handler ServiceGetCreditLimit, #489).
@@ -460,7 +460,7 @@ func (c *remote) GetCreditLimit(ctx context.Context, customerID, currency string
 		Currency          string `json:"currency"`
 		CreditLimitAmount int64  `json:"credit_limit_amount"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/service/credit-limit?"+q.Encode(), nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credit-limit?"+q.Encode(), nil, &resp); err != nil {
 		return 0, err
 	}
 	return resp.CreditLimitAmount, nil
@@ -479,7 +479,7 @@ func (c *remote) SetInvokerSpendLimits(ctx context.Context, customerID string, i
 		"role_id":     in.RoleID,
 		"windows":     in.Windows,
 	}
-	return c.do(ctx, http.MethodPut, "/v1/service/invoker-spend-limits", body, nil)
+	return c.do(ctx, http.MethodPut, "/v1/merchant/invoker-spend-limits", body, nil)
 }
 
 // InvokerSpendLimits implements Client (handler ServiceGetInvokerSpendLimits, #473).
@@ -489,7 +489,7 @@ func (c *remote) InvokerSpendLimits(ctx context.Context, customerID string) ([]I
 	var resp struct {
 		Policies []InvokerSpendLimit `json:"policies"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/service/invoker-spend-limits?"+q.Encode(), nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/invoker-spend-limits?"+q.Encode(), nil, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Policies, nil
@@ -506,7 +506,7 @@ func (c *remote) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitB
 	var out struct {
 		Items []AdmitBatchVerdict `json:"items"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/service/admit/batch", map[string]any{"items": bodies}, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/admit/batch", map[string]any{"items": bodies}, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -523,7 +523,7 @@ func (c *remote) ListActiveEntitlements(ctx context.Context, issuer string, subj
 		body["at"] = at.UTC().Format(time.RFC3339)
 	}
 	var out map[string][]EntitlementRecord
-	if err := c.do(ctx, http.MethodPost, "/v1/service/customers/by-external-subject/entitlements", body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/by-external-subject/entitlements", body, &out); err != nil {
 		return nil, err
 	}
 	if out == nil {
@@ -540,7 +540,7 @@ func (c *remote) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 	if entitlement == "" {
 		return nil, fmt.Errorf("openrails: entitlement is required")
 	}
-	base := "/v1/service/entitlements/" + url.PathEscape(entitlement) + "/customers?limit=1000"
+	base := "/v1/merchant/entitlements/" + url.PathEscape(entitlement) + "/customers?limit=1000"
 	if !at.IsZero() {
 		base += "&at=" + url.QueryEscape(at.UTC().Format(time.RFC3339))
 	}
@@ -577,7 +577,7 @@ func (c *remote) ResourceRevenueDaily(ctx context.Context, resource, currency st
 		"to":       toUnix,
 	}
 	var out ResourceRevenueResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/usage/resource-revenue", body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/credits/usage/resource-revenue", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

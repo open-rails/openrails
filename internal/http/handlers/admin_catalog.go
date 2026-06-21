@@ -14,7 +14,7 @@ import (
 )
 
 // Catalog action handlers (issue #205/#510). Mounted under
-// /merchant/catalog/* with the live org:catalog:update permission gate.
+// /merchant/catalog/* with the live merchant:catalog:update permission gate.
 //
 // Each handler is a thin shim: bind input -> call pkg/service facade -> emit
 // JSON. The pkg/service facade is the canonical surface; embedded callers and

@@ -333,9 +333,9 @@ func New(deps Dependencies) (*Server, error) {
 	// /auth — never AuthKit DefaultAPI.
 	s.registerControlPlaneAuthRoutes(s.publicHandler)
 
-	// Server-to-server service API: API-key-authenticated, on the SAME
-	// public engine (issue #222). No private port, no mTLS listener.
-	s.registerServiceRoutes(s.publicHandler)
+	// #555 HARD CUT: the server-to-server billing routes moved from the gin
+	// `/v1/service/*` surface to the router-based `/v1/merchant/*` surface mounted
+	// by registerMerchantActionRoutesOn above. The `/v1/service` duplicate is gone.
 
 	// Browser-direct self-service API: delegated-access-token-authenticated, on
 	// the SAME public engine (issue #222 browser tier). Always mounted (#469);

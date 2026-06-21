@@ -34,8 +34,8 @@ func TestUserSessionAdminPrincipalUsesLivePermissionCheck(t *testing.T) {
 	r.GET("/admin", UserSessionAdminPrincipalRequired(fakeAdminPrincipalChecker{
 		allowedOrg:  "merchant-org",
 		allowedUser: "admin-1",
-		allowedPerm: controlplane.PermCreditsRead,
-	}), RequirePermission(controlplane.PermCreditsRead), func(c *gin.Context) {
+		allowedPerm: controlplane.PermMerchantCustomersRead,
+	}), RequirePermission(controlplane.PermMerchantCustomersRead), func(c *gin.Context) {
 		p, ok := PrincipalFromGin(c)
 		require.True(t, ok)
 		require.Equal(t, CredentialUserSession, p.CredentialType)
@@ -78,12 +78,12 @@ func TestPrincipalPermissionClassesDoNotBleedAcrossCredentialTypes(t *testing.T)
 		OwnerOrgSlug: "merchant-org",
 		MerchantID:   dbtest.TestMerchantID,
 		Permissions: []string{
-			controlplane.PermCreditsRead,
+			controlplane.PermMerchantCustomersRead,
 		},
 	}, CredentialAPIKey)
 	require.NotNil(t, servicePrincipal)
 	require.Empty(t, servicePrincipal.Subject)
-	require.True(t, servicePrincipal.Can(ctx, controlplane.PermCreditsRead))
+	require.True(t, servicePrincipal.Can(ctx, controlplane.PermMerchantCustomersRead))
 
 	delegatedPrincipal := principalFromDelegated(&controlplane.ResolvedDelegated{
 		MerchantID:       dbtest.TestMerchantID,

@@ -19,10 +19,10 @@ import (
 
 func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
 	// #528 hard cut: the off-channel write is on the delegated /v1/admin surface,
-	// authorized by org:payments:update - no per-user admin model.
+	// authorized by merchant:customers:update - no per-user admin model.
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "b5555555-5555-4555-8555-555555555555",
-		[]string{controlplane.PermMerchantPaymentsWrite})
+		[]string{controlplane.PermMerchantCustomersUpdate})
 	products := suite.SeedProducts()
 
 	// Use the one-time "lifetime" product so the entitlements granted are sensible as a one-off.

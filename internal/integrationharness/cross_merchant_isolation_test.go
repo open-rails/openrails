@@ -57,14 +57,14 @@ func TestAPIKeyCrossMerchantIsolationHTTP(t *testing.T) {
 	aToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"iso-a-"+uuid.NewString(),
-		[]string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite},
+		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	b := surface.ProvisionOwnedMerchant("iso-b-" + strings.ReplaceAll(uuid.NewString(), "-", ""))
 	bToken := surface.MintAPIKey(
 		b.OrgSlug,
 		"iso-b-tok-"+uuid.NewString(),
-		[]string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite},
+		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(b.MerchantID)},
 	)
 
@@ -72,7 +72,7 @@ func TestAPIKeyCrossMerchantIsolationHTTP(t *testing.T) {
 	payer := uuid.NewString()
 
 	deposit := func(token string, amount int64) {
-		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/service/credits/deposit", token, map[string]any{
+		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/credits/deposit", token, map[string]any{
 			"customer_id": payer,
 			"invoker":     "iso-test-invoker",
 			"currency":    "usd",
@@ -84,7 +84,7 @@ func TestAPIKeyCrossMerchantIsolationHTTP(t *testing.T) {
 	}
 	balance := func(token string) serviceBalanceSnapshot {
 		status, body := requestJSON(t, http.MethodGet,
-			surface.BaseURL+"/v1/service/credits/balance?currency=usd&customer_id="+payer, token, nil)
+			surface.BaseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payer, token, nil)
 		require.Equalf(t, http.StatusOK, status, "balance: %s", string(body))
 		var out serviceBalanceSnapshot
 		require.NoError(t, json.Unmarshal(body, &out))
@@ -98,7 +98,7 @@ func TestAPIKeyCrossMerchantIsolationHTTP(t *testing.T) {
 	// Isolation: A querying the same payer id finds no account under A — a zero
 	// balance (200) or absent (404), never B's 5000.
 	aStatus, aBody := requestJSON(t, http.MethodGet,
-		surface.BaseURL+"/v1/service/credits/balance?currency=usd&customer_id="+payer, aToken, nil)
+		surface.BaseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payer, aToken, nil)
 	if aStatus == http.StatusOK {
 		var aSnap serviceBalanceSnapshot
 		require.NoError(t, json.Unmarshal(aBody, &aSnap))
@@ -129,7 +129,7 @@ func TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP(t *testing.T) {
 	bToken := surface.MintAPIKey(
 		b.OrgSlug,
 		"iso-ra-b-tok-"+uuid.NewString(),
-		[]string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite},
+		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(b.MerchantID)},
 	)
 	payer := uuid.NewString()
@@ -156,10 +156,10 @@ func TestRemoteApplicationSelfJWTCrossMerchantIsolationHTTP(t *testing.T) {
 		"iso-ra-claim-only-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
 		dbtest.TestMerchantSlug,
 		"",
-		[]string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite},
+		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate},
 	)
 	status, body := requestJSON(t, http.MethodGet,
-		surface.BaseURL+"/v1/service/credits/balance?currency=usd&customer_id="+payer, claimOnly.Token, nil)
+		surface.BaseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payer, claimOnly.Token, nil)
 	require.Containsf(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status,
 		"self-claimed remote_application permissions must not authorize without stored authority: %s", string(body))
 }
@@ -173,7 +173,7 @@ func TestDelegatedAdminCrossMerchantIsolationHTTP(t *testing.T) {
 	bToken := surface.MintAPIKey(
 		b.OrgSlug,
 		"iso-admin-b-tok-"+uuid.NewString(),
-		[]string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite},
+		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(b.MerchantID)},
 	)
 	targetUser := uuid.NewString()
@@ -183,13 +183,13 @@ func TestDelegatedAdminCrossMerchantIsolationHTTP(t *testing.T) {
 		"iso-admin-a-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
 		dbtest.TestMerchantSlug,
 		uuid.NewString(),
-		[]string{controlplane.PermMerchantBillingRead},
+		[]string{controlplane.PermMerchantCustomersRead},
 	)
 	adminB := surface.RegisterDelegatedCaller(
 		"iso-admin-b-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
 		b.OrgSlug,
 		uuid.NewString(),
-		[]string{controlplane.PermMerchantBillingRead},
+		[]string{controlplane.PermMerchantCustomersRead},
 	)
 
 	bProfile := adminProfile(t, surface.BaseURL, adminB.Token, targetUser)
@@ -209,7 +209,7 @@ func TestDelegatedSelfTokenSubjectIsolationHTTP(t *testing.T) {
 	serviceToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"iso-self-service-"+uuid.NewString(),
-		[]string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite},
+		[]string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	subjectA := uuid.NewString()
@@ -272,7 +272,7 @@ func TestCoreDoesNotMountPlatformAdminRoutesHTTP(t *testing.T) {
 
 func depositCredits(t *testing.T, baseURL, token, payer string, amount int64) {
 	t.Helper()
-	status, body := requestJSON(t, http.MethodPost, baseURL+"/v1/service/credits/deposit", token, map[string]any{
+	status, body := requestJSON(t, http.MethodPost, baseURL+"/v1/merchant/credits/deposit", token, map[string]any{
 		"customer_id": payer,
 		"invoker":     "iso-test-invoker",
 		"currency":    "usd",
@@ -286,7 +286,7 @@ func depositCredits(t *testing.T, baseURL, token, payer string, amount int64) {
 func serviceBalance(t *testing.T, baseURL, token, payer string) serviceBalanceSnapshot {
 	t.Helper()
 	status, body := requestJSON(t, http.MethodGet,
-		baseURL+"/v1/service/credits/balance?currency=usd&customer_id="+payer, token, nil)
+		baseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payer, token, nil)
 	require.Equalf(t, http.StatusOK, status, "balance: %s", string(body))
 	var out serviceBalanceSnapshot
 	require.NoError(t, json.Unmarshal(body, &out))
@@ -296,7 +296,7 @@ func serviceBalance(t *testing.T, baseURL, token, payer string) serviceBalanceSn
 func assertNoServiceBalance(t *testing.T, baseURL, token, payer string) {
 	t.Helper()
 	status, body := requestJSON(t, http.MethodGet,
-		baseURL+"/v1/service/credits/balance?currency=usd&customer_id="+payer, token, nil)
+		baseURL+"/v1/merchant/credits/balance?currency=usd&customer_id="+payer, token, nil)
 	if status == http.StatusOK {
 		var out serviceBalanceSnapshot
 		require.NoError(t, json.Unmarshal(body, &out))

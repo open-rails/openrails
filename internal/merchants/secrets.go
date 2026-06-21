@@ -132,8 +132,11 @@ func SecretWritable(name string) bool {
 	if def, ok := SecretDefinitionFor(name); ok {
 		return def.MerchantWritable
 	}
-	_, _, _, _, ok, err := ParseProviderAccountSecretName(name)
-	return ok && err == nil
+	providerType, _, _, key, ok, err := ParseProviderAccountSecretName(name)
+	if !ok || err != nil {
+		return false
+	}
+	return !(providerType == "solana" && key == "private_key")
 }
 
 // NormalizeProviderAccountSecretKey canonicalizes manifest/admin secret keys for

@@ -100,7 +100,7 @@ func TestDelegatedSelfRequired_DeniesMissingPermission(t *testing.T) {
 		},
 	}
 	// Require a merchant-admin scope, which the customer token does not carry.
-	r := newDelegatedTestRouter(resolver, controlplane.PermMerchantBillingRead)
+	r := newDelegatedTestRouter(resolver, controlplane.PermMerchantCustomersRead)
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.Contains(t, w.Body.String(), "permission_required")
@@ -115,10 +115,10 @@ func TestDelegatedSelfRequired_NoAdminOverride(t *testing.T) {
 			Merchant:         "operator",
 			MerchantID:       dbtest.TestMerchantID,
 			DelegatedSubject: "user-123",
-			Permissions:      []string{controlplane.PermAdmin},
+			Permissions:      []string{authcore.OrgOwnerGrant},
 		},
 	}
-	r := newDelegatedTestRouter(resolver, controlplane.PermMerchantBillingRead)
+	r := newDelegatedTestRouter(resolver, controlplane.PermMerchantCustomersRead)
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)
 }

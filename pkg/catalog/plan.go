@@ -37,7 +37,7 @@ const (
 // OpenRails (current). It is computed without mutating anything, printed, and
 // then converged by Apply.
 type ApplyPlan struct {
-	Groups []GroupPlan
+	Groups []GroupPlan `json:"groups"`
 }
 
 // PlanOptions controls how the manifest is compared to the live catalog.
@@ -53,34 +53,34 @@ type PlanOptions struct {
 
 // GroupPlan is the diff for one tier group.
 type GroupPlan struct {
-	Slug     string
-	Products []ProductPlan
+	Slug     string        `json:"slug"`
+	Products []ProductPlan `json:"products"`
 	// RemovedProducts are active OpenRails products in this tier group not
 	// declared in the manifest; they are archived (deactivated) on apply.
-	RemovedProducts []billingservice.CatalogProduct
+	RemovedProducts []billingservice.CatalogProduct `json:"removed_products,omitempty"`
 }
 
 // ProductPlan is the diff for one product plus its price set.
 type ProductPlan struct {
-	Slug   string
-	Action ProductAction
+	Slug   string        `json:"slug"`
+	Action ProductAction `json:"action"`
 
 	// CreateReq / UpdateReq / UpdateID are prepared for apply.
-	CreateReq billingservice.CreateProductRequest
-	UpdateReq billingservice.UpdateProductRequest
-	UpdateID  uuid.UUID
+	CreateReq billingservice.CreateProductRequest `json:"create_req,omitempty"`
+	UpdateReq billingservice.UpdateProductRequest `json:"update_req,omitempty"`
+	UpdateID  uuid.UUID                           `json:"update_id,omitempty"`
 
-	Prices []PricePlan
+	Prices []PricePlan `json:"prices,omitempty"`
 }
 
 // PricePlan is the diff for one price (identity = financial substance).
 type PricePlan struct {
-	Label  string
-	Action PriceAction
+	Label  string      `json:"label"`
+	Action PriceAction `json:"action"`
 
 	// ExistingID is the matched OpenRails price (uuid.Nil when creating).
-	ExistingID uuid.UUID
-	CreateReq  billingservice.CreatePriceRequest
+	ExistingID uuid.UUID                         `json:"existing_id,omitempty"`
+	CreateReq  billingservice.CreatePriceRequest `json:"create_req,omitempty"`
 }
 
 // Plan computes the convergence diff for a manifest against the catalog exposed

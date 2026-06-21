@@ -19,7 +19,12 @@ func (s *Server) registerMerchantActionRoutesAt(e *gin.Engine, apiPrefix string)
 		opts.AdminPermissionChecker = authpolicy.AdminPermissionChecker(s.controlPlane)
 		opts.ServiceCredentialResolver = s.controlPlane
 	}
+	// #555 HARD CUT: the merchant API surface is `/v1/merchant/*`. The catalog
+	// admin actions and the (formerly `/v1/service/*`) machine billing routes both
+	// mount here, gated by `merchant:*` permissions; the old gin `/v1/service`
+	// duplicate is deleted.
 	httproutes.RegisterMerchantActionRoutes(ginrouter.New(group, s.runtime), s.runtime, opts)
+	httproutes.RegisterServiceRoutes(ginrouter.New(group, s.runtime), s.runtime, opts)
 }
 
 func (s *Server) registerMerchantActionRoutesOn(e *gin.Engine) {

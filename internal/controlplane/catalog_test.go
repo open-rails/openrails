@@ -50,6 +50,40 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 	}
 }
 
+func TestCatalog_HardCutsOldOrgMerchantPermissions(t *testing.T) {
+	old := []string{
+		"org:credits:read",
+		"org:credits:update",
+		"org:credits:spend",
+		"org:billing:read",
+		"org:billing:update",
+		"org:checkout:create",
+		"org:subscriptions:read",
+		"org:subscriptions:update",
+		"org:payment-methods:read",
+		"org:payment-methods:update",
+		"org:entitlements:read",
+		"org:entitlements:update",
+		"org:product_access:update",
+		"org:catalog:update",
+		"org:secrets:read",
+		"org:configuration:read",
+		"org:metrics:read",
+	}
+	names := map[string]bool{}
+	for _, name := range CatalogNames() {
+		names[name] = true
+	}
+	for _, name := range old {
+		if names[name] {
+			t.Fatalf("old OpenRails org permission %q must not be in the #554 catalog", name)
+		}
+		if IsDelegatedPermission(name) {
+			t.Fatalf("old OpenRails org permission %q must not satisfy delegated permission checks", name)
+		}
+	}
+}
+
 func TestCatalog_IsACopy(t *testing.T) {
 	a := Catalog()
 	if len(a) == 0 {
@@ -112,38 +146,38 @@ func TestOperatorRolePermissions_AreOrgOnly(t *testing.T) {
 			t.Fatalf("operator role must NOT include platform permission %q", p)
 		}
 	}
-	if contains(OperatorRolePermissions(), PermAdmin) {
-		t.Fatalf("operator role must not include apex grant %q", PermAdmin)
+	if contains(OperatorRolePermissions(), authcore.OrgOwnerGrant) {
+		t.Fatalf("operator role must not include apex grant %q", authcore.OrgOwnerGrant)
 	}
 }
 
-// TestCreditsSpendPermission_GateSemantics proves the billing:spend (#246) gate:
-// the operator role holds credits:spend by default (member role default-grant),
-// and an API key WITHOUT it fails the spend gate while still passing credits:write.
-func TestCreditsSpendPermission_GateSemantics(t *testing.T) {
-	// Default-grant: the operator role includes billing:spend.
-	if !contains(OperatorRolePermissions(), PermCreditsSpend) {
-		t.Fatalf("operator role must include %q (default member grant, #246)", PermCreditsSpend)
+// TestAdmissionCreatePermission_GateSemantics proves the admission hot-path gate:
+// the operator role holds merchant:admissions:create by default, and an API key
+// WITHOUT it fails the admission gate while still passing customer writes.
+func TestAdmissionCreatePermission_GateSemantics(t *testing.T) {
+	// Default-grant: the operator role includes merchant:admissions:create.
+	if !contains(OperatorRolePermissions(), PermMerchantAdmissionsCreate) {
+		t.Fatalf("operator role must include %q (default member grant, #246)", PermMerchantAdmissionsCreate)
 	}
 
-	// A cost-governed API key with write but NOT spend fails the spend gate.
-	writeOnly := &ResolvedServiceCredential{Permissions: []string{PermCreditsWrite}}
-	if writeOnly.HasPermission(PermCreditsSpend) {
-		t.Fatalf("credits:write must NOT imply credits:spend (#246: separate gates)")
+	// A customer-write key without admission authority fails the spend gate.
+	writeOnly := &ResolvedServiceCredential{Permissions: []string{PermMerchantCustomersUpdate}}
+	if writeOnly.HasPermission(PermMerchantAdmissionsCreate) {
+		t.Fatalf("merchant:customers:update must NOT imply merchant:admissions:create")
 	}
-	if !writeOnly.HasPermission(PermCreditsWrite) {
+	if !writeOnly.HasPermission(PermMerchantCustomersUpdate) {
 		t.Fatalf("write-only API key must still pass the write gate")
 	}
 
-	// An API key holding billing:spend passes the spend gate.
-	spender := &ResolvedServiceCredential{Permissions: []string{PermCreditsWrite, PermCreditsSpend}}
-	if !spender.HasPermission(PermCreditsSpend) {
-		t.Fatalf("API key holding %q must pass the spend gate", PermCreditsSpend)
+	// An API key holding merchant:admissions:create passes the spend gate.
+	spender := &ResolvedServiceCredential{Permissions: []string{PermMerchantCustomersUpdate, PermMerchantAdmissionsCreate}}
+	if !spender.HasPermission(PermMerchantAdmissionsCreate) {
+		t.Fatalf("API key holding %q must pass the spend gate", PermMerchantAdmissionsCreate)
 	}
 
-	admin := &ResolvedServiceCredential{Permissions: []string{PermAdmin}}
-	if admin.HasPermission(PermCreditsSpend) {
-		t.Fatalf("apex grant %q must not bypass exact spend gate", PermAdmin)
+	admin := &ResolvedServiceCredential{Permissions: []string{authcore.OrgOwnerGrant}}
+	if admin.HasPermission(PermMerchantAdmissionsCreate) {
+		t.Fatalf("apex grant %q must not bypass exact spend gate", authcore.OrgOwnerGrant)
 	}
 }
 

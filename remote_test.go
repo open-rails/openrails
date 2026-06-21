@@ -15,17 +15,17 @@ func TestRemoteTrustTierWireNames(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/v1/service/payer-spend-limits":
+		case "/v1/merchant/payer-spend-limits":
 			if err := json.NewDecoder(r.Body).Decode(&payerLimitBody); err != nil {
 				t.Fatalf("decode payer-spend-limits body: %v", err)
 			}
 			_, _ = w.Write([]byte(`{}`))
-		case "/v1/service/admit":
+		case "/v1/merchant/admit":
 			if err := json.NewDecoder(r.Body).Decode(&admitBody); err != nil {
 				t.Fatalf("decode admit body: %v", err)
 			}
 			_, _ = w.Write([]byte(`{"allowed":true}`))
-		case "/v1/service/trust-tier":
+		case "/v1/merchant/trust-tier":
 			_, _ = w.Write([]byte(`{"currency":"USD","trust_tier":"gold"}`))
 		default:
 			http.NotFound(w, r)

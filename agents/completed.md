@@ -14024,3 +14024,28 @@ slug==slug holds by construction in standalone today (`provisionMerchantOrg` cre
 - [x] Tests: `TestValidateSlug` (pkg/merchant) passes; `./internal/controlplane` + `./internal/bootstrap` integration suites pass LIVE against docker Postgres (exercise provisioning with the new slug validation + the `provisionMerchantOrg` `org.slug == merchant.slug` assert — valid path unaffected). The federated `auth recreate` run (#547) further confirmed `owner_org_id` links to the same-slug org.
 
 Related: #541 (`owner_org_id` bridge), #543 (no OpenRails-seeded roles), #544 (mode switch), #550.
+
+---
+
+# #331: Tune card-abuse rate-limit windows (#371): 15-min 3->captcha/6->block, 24h 10->block per user+ip, keep global 100->attack-mode
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-21: stale tracker item. `DefaultCardAbuseConfig`, `RecordChargeFailure`, and `card_abuse_integration_test.go` already implement the requested #331 policy: 15m per-subject 3 -> captcha / 6 -> block, independent 24h per-subject 10 -> daily block, and unchanged global 24h/100 attack mode. Verified with `go test -tags=integration ./internal/modules/abuse`.
+
+The #371 CardAbuseGuard (internal/modules/abuse/card_abuse.go), middleware subject-key plumbing, checkout hook, and integration tests already landed on master. This refines the policy to the agreed windows. Card-testing is defined by volume over time, so pair a short BURST window with a rolling DAILY cap, both keyed per user AND per IP. Final thresholds (user-specified): a 15-MINUTE rolling window per (user+ip) where 3 failed card charges -> future attempts require captcha, and 6 failed charges -> cut off (blocked) for the remainder of that 15-min window; PLUS a 24-HOUR rolling cap of 10 failed charges per (user+ip) -> cut off for the day. Keep the existing site-wide GLOBAL cap of 100 failed charges / 24h -> attack mode (captcha for every request from everyone).
+
+**Tasks:**
+- [x] DefaultCardAbuseConfig: short window 15 min, CaptchaAfter=3, BlockAfter=6 (block lasts the remainder of the window)
+- [x] Add a second per-subject rolling 24h window with a cap of 10 failed charges -> block; the Limiter already returns multiple windows, so configure the daily window + add the second-window check in RecordChargeFailure
+- [x] Keep both subject keys (user: and ip:) so a logged-in attacker rotating cards and a bot rotating accounts behind one IP are both caught
+- [x] Keep the global 24h/100 attack-mode (captcha for everyone) unchanged
+- [x] Extend the abuse integration tests (real Redis) to cover the 15-min 3/6 thresholds and the 24h/10 daily cap; focused verification clean
+
+---
+
+# #340: e2e: 5 tier/lifecycle tests fail on master (pre-existing, surfaced by #334 verification)
+
+**Completed:** yes
+**Status:** COMPLETE 2026-06-21: stale tracker item. The old cleanup failure mode is gone in the current tree and the five named tier/lifecycle tests now pass. Verified with `go test -tags=integration ./tests -run 'Test(CardAbuse_DO_NOT_MATCH|TierGroupDetection|EntitlementChangesOnTierChange|ScheduledDowngrade|RenewMembershipDuplicateTransactionIsNoOp|LifecycleServiceUsesMockClock)$'`.
+
+TestTierGroupDetection, TestEntitlementChangesOnTierChange, TestScheduledDowngrade, TestRenewMembershipDuplicateTransactionIsNoOp, TestLifecycleServiceUsesMockClock fail identically on origin/master (bun era) and on the sqlc-migration branch — verified via worktree runs on 2026-06-10 during #334 final verification, so they are NOT migration regressions. Observed modes: duplicate key on uq_subscriptions_tenant_subject_tier_group_active across subtests (CleanupSubscriptionsForUser resolves non-UUID test user ids to uuid.Nil via identity.TenantSubjectIDFromString, so per-user cleanup deletes nothing), and mock-clock/lifecycle assertion failures. Distinct from the admin_* family (#333). Suspect shared-suite state + the broken per-user cleanup; fix the cleanup to resolve the tenant subject through billing.tenant_subjects (issuer 'openrails:legacy-user') instead of pure-parsing.

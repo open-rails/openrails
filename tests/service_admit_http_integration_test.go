@@ -18,13 +18,14 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	ginrouter "github.com/open-rails/openrails/internal/http/router/ginrouter"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // TestServiceAdmit_HTTP_EndToEnd drives the #513 spendgate admission path through
-// the REAL HTTP service routes (POST /v1/service/admit + /credits/holds/:id/
+// the REAL HTTP service routes (POST /v1/merchant/admit + /credits/holds/:id/
 // capture|release) against the suite's live Postgres + Redis — the full
 // route → handler → Service.Admit → spendgate stack, not the in-process layer.
 func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
@@ -51,15 +52,15 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
-	group := router.Group("/v1/service")
+	group := router.Group("/v1/merchant")
 	resolver := stubServiceCredentialResolver{
-		permissions: []string{controlplane.PermCreditsRead, controlplane.PermCreditsWrite, controlplane.PermCreditsSpend},
+		permissions: []string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantCustomersUpdate, controlplane.PermMerchantAdmissionsCreate},
 		resources: []authcore.APIKeyResource{
 			controlplane.MerchantResource(dbtest.TestMerchantID),
 			controlplane.CustomerResource(payerID),
 		},
 	}
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceCredentialRequired(resolver))
+	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{ServiceCredentialResolver: resolver})
 
 	post := func(path string, body any) *httptest.ResponseRecorder {
 		var rdr *bytes.Reader
@@ -94,14 +95,14 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	r3 := requestPrefix + "-r3"
 	r4 := requestPrefix + "-r4"
 
-	w := post("/v1/service/admit", admitBody(r1, 600))
+	w := post("/v1/merchant/admit", admitBody(r1, 600))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var a1 admitResp
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &a1))
 	require.True(t, a1.Allowed)
 
 	// 2) Admit another 600 → 402: only 400 spendable after the 600 in-flight hold.
-	w = post("/v1/service/admit", admitBody(r2, 600))
+	w = post("/v1/merchant/admit", admitBody(r2, 600))
 	require.Equal(t, http.StatusPaymentRequired, w.Code, w.Body.String())
 	var a2 admitResp
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &a2))
@@ -109,23 +110,23 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	require.Equal(t, "money", a2.BlockedBy)
 
 	// 3) Capture r1 at 500 (actual < estimate) → 200; durable ledger debit lands.
-	w = post("/v1/service/credits/holds/"+r1+"/capture", map[string]any{"amount": 500})
+	w = post("/v1/merchant/credits/holds/"+r1+"/capture", map[string]any{"amount": 500})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	bal, err := ms.GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(500), bal.Balance, "1000 − 500 captured = 500")
 
 	// 4) After capture freed the hold, a 300 admit fits the remaining 500 → 200.
-	w = post("/v1/service/admit", admitBody(r3, 300))
+	w = post("/v1/merchant/admit", admitBody(r3, 300))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var a3 admitResp
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &a3))
 	require.True(t, a3.Allowed, "the r1 hold was freed at capture, so 300 fits in 500")
 
 	// 5) Release r3 → 200; the hold is freed (no charge), so a fresh 500 admit fits.
-	w = post("/v1/service/credits/holds/"+r3+"/release", nil)
+	w = post("/v1/merchant/credits/holds/"+r3+"/release", nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	w = post("/v1/service/admit", admitBody(r4, 500))
+	w = post("/v1/merchant/admit", admitBody(r4, 500))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var a4 admitResp
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &a4))

@@ -19,7 +19,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	ginrouter "github.com/open-rails/openrails/internal/http/router/ginrouter"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -126,24 +127,24 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 
 	// Build the service-credential-authenticated PUBLIC service routes (issue #222)
 	// directly, with a stub resolver granting the credit + entitlement permissions. This
-	// is the same surface registered on the public handler at /v1/service/*.
+	// is the same surface registered on the public handler at /v1/merchant/*.
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
-	group := router.Group("/v1/service")
+	group := router.Group("/v1/merchant")
 	resolver := stubServiceCredentialResolver{
 		permissions: []string{
-			controlplane.PermCreditsRead,
-			controlplane.PermCreditsWrite,
-			controlplane.PermCreditsSpend,
-			controlplane.PermEntitlementsRead,
+			controlplane.PermMerchantCustomersRead,
+			controlplane.PermMerchantCustomersUpdate,
+			controlplane.PermMerchantAdmissionsCreate,
+			controlplane.PermMerchantCustomersRead,
 		},
 		resources: []authcore.APIKeyResource{
 			controlplane.MerchantResource(dbtest.TestMerchantID),
 			controlplane.CustomerResource(tenantSubjectID),
 		},
 	}
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceCredentialRequired(resolver))
+	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{ServiceCredentialResolver: resolver})
 
 	withServiceCredential := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer openrails_st_testkeyid_testsecret")
@@ -162,7 +163,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.NoError(t, err)
 	require.Contains(t, subjectEnts, "premium-1")
 
-	reqEnt := httptest.NewRequest(http.MethodGet, "/v1/service/customers/"+tenantSubjectID.String()+"/entitlements", nil)
+	reqEnt := httptest.NewRequest(http.MethodGet, "/v1/merchant/customers/"+tenantSubjectID.String()+"/entitlements", nil)
 	withServiceCredential(reqEnt)
 	wEnt := httptest.NewRecorder()
 	router.ServeHTTP(wEnt, reqEnt)
@@ -184,22 +185,22 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// principal; no OpenRails-generated runtime token is needed on these paths.
 	jwtRouter := gin.New()
 	jwtRouter.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
-	jwtGroup := jwtRouter.Group("/v1/service")
+	jwtGroup := jwtRouter.Group("/v1/merchant")
 	jwtResolver := resolver
 	jwtResolver.serviceJWT = true
-	httproutes.RegisterServiceRoutes(jwtGroup, suite.App.Runtime, ginmw.ServiceCredentialRequired(jwtResolver))
+	httproutes.RegisterServiceRoutes(ginrouter.New(jwtGroup, suite.App.Runtime), suite.App.Runtime, httproutes.Options{ServiceCredentialResolver: jwtResolver})
 	withServiceJWT := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer eyJ.service.jwt")
 	}
 
-	reqJWTEnt := httptest.NewRequest(http.MethodGet, "/v1/service/customers/"+tenantSubjectID.String()+"/entitlements", nil)
+	reqJWTEnt := httptest.NewRequest(http.MethodGet, "/v1/merchant/customers/"+tenantSubjectID.String()+"/entitlements", nil)
 	withServiceJWT(reqJWTEnt)
 	wJWTEnt := httptest.NewRecorder()
 	jwtRouter.ServeHTTP(wJWTEnt, reqJWTEnt)
 	require.Equal(t, http.StatusOK, wJWTEnt.Code)
 	require.Contains(t, wJWTEnt.Body.String(), "premium-1")
 
-	reqJWTBalance := httptest.NewRequest(http.MethodGet, "/v1/service/credits/balance?customer_id="+tenantSubjectID.String()+"&currency="+money.DefaultCurrency, nil)
+	reqJWTBalance := httptest.NewRequest(http.MethodGet, "/v1/merchant/credits/balance?customer_id="+tenantSubjectID.String()+"&currency="+money.DefaultCurrency, nil)
 	withServiceJWT(reqJWTBalance)
 	wJWTBalance := httptest.NewRecorder()
 	jwtRouter.ServeHTTP(wJWTBalance, reqJWTBalance)

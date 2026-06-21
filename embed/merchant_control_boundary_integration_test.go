@@ -92,7 +92,7 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	serviceJWTB := standalone.RegisterServiceJWTIssuer(
 		"or502-jwt-b",
 		merchantB.OrgSlug,
-		[]string{controlplane.PermCreditsWrite},
+		[]string{controlplane.PermMerchantCustomersUpdate},
 		nil,
 	)
 	status, body = postDepositCredits(t, standalone.BaseURL, serviceJWTB.Token, customerB, 4_000)
@@ -103,7 +103,7 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 	crossScopedServiceJWT := standalone.RegisterServiceJWTIssuer(
 		"or502-jwt-cross",
 		merchantB.OrgSlug,
-		[]string{controlplane.PermCreditsWrite},
+		[]string{controlplane.PermMerchantCustomersUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	status, body = postDepositCredits(t, standalone.BaseURL, crossScopedServiceJWT.Token, uuid.New(), 10)
@@ -125,7 +125,7 @@ func postDepositCredits(t *testing.T, baseURL, token string, customer uuid.UUID,
 		"source_id":   uuid.NewString(),
 	})
 	require.NoError(t, err)
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/v1/service/credits/deposit", bytes.NewReader(payload))
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/v1/merchant/credits/deposit", bytes.NewReader(payload))
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")

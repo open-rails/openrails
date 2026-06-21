@@ -394,7 +394,7 @@ func trustTierQuery(r *httprequest.Request) string {
 // ServiceSetCreditLimit sets the admin/operator arrears credit line for a payer
 // (#489): under billing_mode=arrears the balance may go NEGATIVE up to the limit;
 // AdmitHold denies insufficient_credit when a new hold would exceed it. 0 = off.
-// Merchant-admin gated at the route (`org:credits:update`) - NOT self-serve.
+// Merchant-admin gated at the route (`merchant:customers:update`) - NOT self-serve.
 func ServiceSetCreditLimit(r *httprequest.Request) {
 	var req serviceCreditLimitRequest
 	if !r.BindJSON(&req) {

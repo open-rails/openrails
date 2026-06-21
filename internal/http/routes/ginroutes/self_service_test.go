@@ -182,7 +182,7 @@ func TestMerchantAdmin_OperationalListsMountedAndGated(t *testing.T) {
 }
 
 func TestMerchantAdmin_PaymentWriteRoutesMountedAndGated(t *testing.T) {
-	readOnly := []string{controlplane.PermMerchantBillingRead}
+	readOnly := []string{controlplane.PermMerchantCustomersRead}
 
 	cases := []struct {
 		name   string
@@ -204,7 +204,7 @@ func TestMerchantAdmin_PaymentWriteRoutesMountedAndGated(t *testing.T) {
 }
 
 func TestMerchantAdmin_SecretRoutesMountedAndGated(t *testing.T) {
-	readless := []string{controlplane.PermMerchantBillingRead}
+	readless := []string{controlplane.PermMerchantCustomersRead}
 
 	cases := []struct {
 		name   string
@@ -228,7 +228,7 @@ func TestMerchantAdmin_SecretRoutesMountedAndGated(t *testing.T) {
 }
 
 func TestMerchantAdmin_ConfigurationRoutesMountedAndGated(t *testing.T) {
-	readless := []string{controlplane.PermMerchantBillingRead}
+	readless := []string{controlplane.PermMerchantCustomersRead}
 
 	cases := []struct {
 		name   string
@@ -255,8 +255,8 @@ func TestMerchantAdmin_ConfigurationPermissionsAreDistinct(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"read", []string{controlplane.PermMerchantConfigurationRead}, http.MethodGet, "/v1/admin/merchant-configuration"},
-		{"write", []string{controlplane.PermMerchantConfigurationWrite}, http.MethodPut, "/v1/admin/merchant-configuration"},
+		{"read", []string{controlplane.PermMerchantSettingsRead}, http.MethodGet, "/v1/admin/merchant-configuration"},
+		{"write", []string{controlplane.PermMerchantSettingsUpdate}, http.MethodPut, "/v1/admin/merchant-configuration"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -275,11 +275,11 @@ func TestMerchantAdmin_SecretPermissionsAreDistinct(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"list", []string{controlplane.PermMerchantSecretsList}, http.MethodGet, "/v1/admin/secrets"},
-		{"registry", []string{controlplane.PermMerchantSecretsList}, http.MethodGet, "/v1/admin/secrets/registry"},
-		{"write", []string{controlplane.PermMerchantSecretsWrite}, http.MethodPut, "/v1/admin/secrets/stripe/secret_key"},
-		{"delete", []string{controlplane.PermMerchantSecretsDelete}, http.MethodDelete, "/v1/admin/secrets/stripe/secret_key"},
-		{"test", []string{controlplane.PermMerchantSecretsTest}, http.MethodPost, "/v1/admin/secrets/validate/stripe/secret_key"},
+		{"list", []string{controlplane.PermMerchantPaymentProvidersRead}, http.MethodGet, "/v1/admin/secrets"},
+		{"registry", []string{controlplane.PermMerchantPaymentProvidersRead}, http.MethodGet, "/v1/admin/secrets/registry"},
+		{"write", []string{controlplane.PermMerchantPaymentProvidersUpdate}, http.MethodPut, "/v1/admin/secrets/stripe/secret_key"},
+		{"delete", []string{controlplane.PermMerchantPaymentProvidersUpdate}, http.MethodDelete, "/v1/admin/secrets/stripe/secret_key"},
+		{"test", []string{controlplane.PermMerchantPaymentProvidersUpdate}, http.MethodPost, "/v1/admin/secrets/validate/stripe/secret_key"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -311,10 +311,10 @@ func TestMerchantAdmin_SecretRoutesWriteOnlyRuntimeBehavior(t *testing.T) {
 	merchantB, err := merchantpkg.ParseID("22222222-2222-2222-2222-222222222222")
 	require.NoError(t, err)
 	perms := []string{
-		controlplane.PermMerchantSecretsList,
-		controlplane.PermMerchantSecretsWrite,
-		controlplane.PermMerchantSecretsDelete,
-		controlplane.PermMerchantSecretsTest,
+		controlplane.PermMerchantPaymentProvidersRead,
+		controlplane.PermMerchantPaymentProvidersUpdate,
+		controlplane.PermMerchantPaymentProvidersUpdate,
+		controlplane.PermMerchantPaymentProvidersUpdate,
 	}
 
 	eA := newMerchantAdminRouterWithRuntime(t, perms, merchantA, svc)

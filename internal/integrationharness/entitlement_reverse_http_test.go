@@ -85,7 +85,7 @@ func getEntitlementCustomers(t *testing.T, surface *Surface, entitlement string,
 		q.Set("cursor", cursor)
 	}
 	status, body := requestJSON(t, http.MethodGet,
-		surface.BaseURL+"/v1/service/entitlements/"+url.PathEscape(entitlement)+"/customers?"+q.Encode(),
+		surface.BaseURL+"/v1/merchant/entitlements/"+url.PathEscape(entitlement)+"/customers?"+q.Encode(),
 		surface.Token, nil)
 	require.Equalf(t, http.StatusOK, status, "reverse entitlement lookup: %s", string(body))
 	var out entitlementCustomersResponse

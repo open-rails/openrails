@@ -32,13 +32,13 @@ func TestStandaloneMerchantCatalogRoutesHTTP(t *testing.T) {
 	catalogToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"catalog-writer-"+uuid.NewString(),
-		[]string{controlplane.PermCatalogWrite},
+		[]string{controlplane.PermMerchantCatalogUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	readOnlyToken := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"catalog-denied-"+uuid.NewString(),
-		[]string{controlplane.PermCreditsRead},
+		[]string{controlplane.PermMerchantCustomersRead},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 
@@ -84,7 +84,7 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	token := surface.MintAPIKey(
 		dbtest.TestMerchantSlug,
 		"catalog-apply-"+uuid.NewString(),
-		[]string{controlplane.PermCatalogWrite},
+		[]string{controlplane.PermMerchantCatalogUpdate},
 		[]authcore.APIKeyResource{controlplane.MerchantResource(dbtest.TestMerchantID)},
 	)
 	applier := httpCatalogApplier{t: t, baseURL: surface.BaseURL, token: token}

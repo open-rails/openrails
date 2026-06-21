@@ -60,7 +60,8 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	ginrouter "github.com/open-rails/openrails/internal/http/router/ginrouter"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -146,7 +147,7 @@ func New(t *testing.T, ctx context.Context) *Harness {
 }
 
 // trustingResolver is the embedded no-auth host's API-key resolver: it
-// accepts EVERY presented token as a merchant-wide PermAdmin credential for the
+// accepts EVERY presented token as a merchant-wide credential for the
 // bound merchant and verifies NOTHING. This is the "no-op authenticator" half of
 // "doujins minus auth" — the host is trusted for its own merchant, exactly as an
 // embedding host treats its own in-process engine. It replaces the per-test
@@ -189,13 +190,16 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 
 	router := gin.New()
 	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
-	ginroutes.RegisterServiceRoutes(
-		router.Group("/v1/service"),
-		rt.Embedded().App().Runtime,
-		ginmw.ServiceCredentialRequired(trustingResolver{
-			merchantID:   dbtest.TestMerchantID,
-			merchantSlug: dbtest.TestMerchantSlug,
-		}),
+	runtime := rt.Embedded().App().Runtime
+	httproutes.RegisterServiceRoutes(
+		ginrouter.New(router.Group("/v1/merchant"), runtime),
+		runtime,
+		httproutes.Options{
+			ServiceCredentialResolver: trustingResolver{
+				merchantID:   dbtest.TestMerchantID,
+				merchantSlug: dbtest.TestMerchantSlug,
+			},
+		},
 	)
 	srv := httptest.NewServer(router)
 	h.t.Cleanup(srv.Close)
@@ -583,7 +587,7 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerOrgSlug string, permission
 		Enabled:    true,
 	})
 	if len(permissions) == 0 {
-		permissions = []string{controlplane.PermCreditsWrite}
+		permissions = []string{controlplane.PermMerchantCustomersUpdate}
 	}
 	require.NoError(h.t, err, "register service-JWT issuer")
 	role := slug + "-service-jwt"

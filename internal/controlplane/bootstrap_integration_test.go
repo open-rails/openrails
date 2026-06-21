@@ -136,7 +136,7 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	// `owner` role (AuthKit built-in), which holds `org:*`.
 	perms, err := cp.Core().GetRolePermissions(ctx, dbtest.TestMerchantSlug, OwnerRole)
 	require.NoError(t, err)
-	require.Contains(t, perms, PermAdmin) // org:*
+	require.Contains(t, perms, authcore.OrgOwnerGrant) // org:*
 	for _, p := range perms {
 		require.Falsef(t, strings.HasPrefix(p, "platform:"), "merchant owner role must not hold platform permission %q", p)
 	}

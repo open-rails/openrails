@@ -14,13 +14,13 @@ import (
 // manual actions surfaced by CreatePrice (e.g. CCBill, an unconfigured Solana
 // plan) that the operator must complete out-of-band.
 type ApplyResult struct {
-	ProductsCreated  int
-	ProductsUpdated  int
-	ProductsArchived int
-	PricesCreated    int
-	PricesActivated  int
-	PricesArchived   int
-	PendingActions   []PendingActionFor
+	ProductsCreated  int                `json:"products_created"`
+	ProductsUpdated  int                `json:"products_updated"`
+	ProductsArchived int                `json:"products_archived"`
+	PricesCreated    int                `json:"prices_created"`
+	PricesActivated  int                `json:"prices_activated"`
+	PricesArchived   int                `json:"prices_archived"`
+	PendingActions   []PendingActionFor `json:"pending_actions,omitempty"`
 }
 
 // ApplyOptions limits which mutation classes ApplyWithOptions executes. The
@@ -36,9 +36,9 @@ type ApplyOptions struct {
 // belongs to, so the apply output can tell the operator which price needs a
 // manual link.
 type PendingActionFor struct {
-	ProductSlug string
-	PriceLabel  string
-	Action      billingservice.PendingAction
+	ProductSlug string                       `json:"product_slug"`
+	PriceLabel  string                       `json:"price_label"`
+	Action      billingservice.PendingAction `json:"action"`
 }
 
 // Apply converges OpenRails onto the plan, driving the Applier. It is

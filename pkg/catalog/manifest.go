@@ -27,53 +27,53 @@ package catalog
 // catalog-wide provider list that individual products/prices inherit when they
 // don't specify their own.
 type Manifest struct {
-	Version          int         `yaml:"version"`
-	DefaultProviders []string    `yaml:"default_providers,omitempty"`
-	TierGroups       []TierGroup `yaml:"tier_groups"`
+	Version          int         `json:"version" yaml:"version"`
+	DefaultProviders []string    `json:"default_providers,omitempty" yaml:"default_providers,omitempty"`
+	TierGroups       []TierGroup `json:"tier_groups" yaml:"tier_groups"`
 }
 
 // TierGroup is a named grouping of products (e.g. a subscription plan family).
 // Mirrors cozy-art's tier_groups nesting for drop-in compatibility.
 type TierGroup struct {
-	Slug        string    `yaml:"slug"`
-	DisplayName string    `yaml:"display_name"`
-	Products    []Product `yaml:"products"`
+	Slug        string    `json:"slug" yaml:"slug"`
+	DisplayName string    `json:"display_name" yaml:"display_name"`
+	Products    []Product `json:"products" yaml:"products"`
 }
 
 // Product is a declared product. Identity is its slug.
 type Product struct {
-	Slug        string `yaml:"slug"`
-	DisplayName string `yaml:"display_name"`
-	Description string `yaml:"description,omitempty"`
-	TierRank    int    `yaml:"tier_rank"`
+	Slug        string `json:"slug" yaml:"slug"`
+	DisplayName string `json:"display_name" yaml:"display_name"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	TierRank    int    `json:"tier_rank" yaml:"tier_rank"`
 	// Status maps to the OpenRails CatalogStatus enum (draft|active|archived,
 	// issue #210). Empty defaults to active.
-	Status       string   `yaml:"status,omitempty"`
-	Entitlements []string `yaml:"entitlements,omitempty"`
+	Status       string   `json:"status,omitempty" yaml:"status,omitempty"`
+	Entitlements []string `json:"entitlements,omitempty" yaml:"entitlements,omitempty"`
 
 	// Providers is the per-product default provider list inherited by this
 	// product's prices when a price does not declare its own (issue #208).
 	// Empty falls back to the manifest's default_providers.
-	Providers []string `yaml:"providers,omitempty"`
+	Providers []string `json:"providers,omitempty" yaml:"providers,omitempty"`
 
-	Prices []Price `yaml:"prices"`
+	Prices []Price `json:"prices" yaml:"prices"`
 }
 
 // Price is a declared price. It has NO slug: a price's identity is its
 // financial substance (currency, unit_amount, interval, interval_count).
 type Price struct {
-	Currency      string `yaml:"currency,omitempty"`
-	UnitAmount    int64  `yaml:"unit_amount"`
-	Interval      string `yaml:"interval,omitempty"`
-	IntervalCount int    `yaml:"interval_count,omitempty"`
+	Currency      string `json:"currency,omitempty" yaml:"currency,omitempty"`
+	UnitAmount    int64  `json:"unit_amount" yaml:"unit_amount"`
+	Interval      string `json:"interval,omitempty" yaml:"interval,omitempty"`
+	IntervalCount int    `json:"interval_count,omitempty" yaml:"interval_count,omitempty"`
 
 	// Status maps to the OpenRails CatalogStatus enum. Empty defaults to active.
-	Status string `yaml:"status,omitempty"`
+	Status string `json:"status,omitempty" yaml:"status,omitempty"`
 
 	// Providers overrides the product/manifest provider list for this price.
 	// nil means "inherit"; an explicit empty list ([]) means "DB-only, no
 	// external providers".
-	Providers []string `yaml:"providers,omitempty"`
+	Providers []string `json:"providers,omitempty" yaml:"providers,omitempty"`
 
 	// ProviderLinks pre-supplies provider-specific link ids, mapping
 	// provider name -> key/value pairs. Maps straight onto
@@ -89,17 +89,17 @@ type Price struct {
 	//     mobius: {plan_id: premium}                           # NMI recurring plan; find-or-create at this id
 	//     solana: {plan_pda: 7Xy...PdA}                        # existing on-chain plan account
 	//     ccbill: {form_name: premium, flex_id: abc-123}       # operator-owned, unvalidated
-	ProviderLinks map[string]map[string]string `yaml:"provider_links,omitempty"`
+	ProviderLinks map[string]map[string]string `json:"provider_links,omitempty" yaml:"provider_links,omitempty"`
 
 	// StripePriceID is a cozy-art-compatible shorthand for
 	// provider_links.stripe.price_id. When set it is folded into ProviderLinks
 	// during load. This keeps cozy-art's billing_catalog.yaml loadable as-is.
-	StripePriceID string `yaml:"stripe_price_id,omitempty"`
+	StripePriceID string `json:"stripe_price_id,omitempty" yaml:"stripe_price_id,omitempty"`
 
 	// LegacyImport, when true, declares a historical price that already has
 	// subscribers but is no longer purchasable: it is created/converged to
 	// status=archived rather than active (no purchasable gap, no double-charge).
-	LegacyImport bool `yaml:"legacy_import,omitempty"`
+	LegacyImport bool `json:"legacy_import,omitempty" yaml:"legacy_import,omitempty"`
 }
 
 // providersFor returns the effective provider list for a price, applying the

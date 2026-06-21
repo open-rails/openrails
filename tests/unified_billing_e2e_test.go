@@ -15,7 +15,7 @@ package tests
 //
 // POST-#513/#512 MODEL (what changed from the original single-entry version):
 //   - There is NO /credits/hold create route anymore: placing a hold IS
-//     POST /v1/service/admit (the spendgate). The hold handle is the caller's
+//     POST /v1/merchant/admit (the spendgate). The hold handle is the caller's
 //     request_id; capture/release address it as /credits/holds/<request_id>/...
 //   - Holds live in Redis (#505), NOT as money_transactions rows. The durable
 //     ledger (#512: ledger_transfers/ledger_accounts) records only SETTLED money
@@ -49,7 +49,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	ginrouter "github.com/open-rails/openrails/internal/http/router/ginrouter"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 )
@@ -79,17 +80,17 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(ginmw.ResolveMerchant(dbtest.TestMerchantID))
-	group := router.Group("/v1/service")
+	group := router.Group("/v1/merchant")
 	// Merchant-wide token (no CustomerResource): AllowsCustomer returns true for
 	// every customer under the merchant, so each test's random payer is in scope.
 	resolver := stubServiceCredentialResolver{permissions: []string{
-		controlplane.PermCreditsRead,
-		controlplane.PermCreditsWrite,
-		controlplane.PermCreditsSpend,
+		controlplane.PermMerchantCustomersRead,
+		controlplane.PermMerchantCustomersUpdate,
+		controlplane.PermMerchantAdmissionsCreate,
 	}, resources: []authcore.APIKeyResource{
 		controlplane.MerchantResource(dbtest.TestMerchantID),
 	}}
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceCredentialRequired(resolver))
+	httproutes.RegisterServiceRoutes(ginrouter.New(group, suite.App.Runtime), suite.App.Runtime, httproutes.Options{ServiceCredentialResolver: resolver})
 
 	return &billingE2EHarness{
 		t:          t,
@@ -124,7 +125,7 @@ func (h *billingE2EHarness) do(method, path string, body any) *httptest.Response
 func (h *billingE2EHarness) deposit(userID string, amount int64) {
 	h.t.Helper()
 	srcID := uuid.New()
-	w := h.do(http.MethodPost, "/v1/service/credits/deposit", map[string]any{
+	w := h.do(http.MethodPost, "/v1/merchant/credits/deposit", map[string]any{
 		"customer_id": personalOwnerID(userID).String(),
 		"invoker":     userID,
 		"credit_type": h.creditType,
@@ -142,12 +143,12 @@ type admitView struct {
 	DenyCode  string `json:"deny_code"`
 }
 
-// admit places a spendgate hold for an estimate via POST /v1/service/admit. The
+// admit places a spendgate hold for an estimate via POST /v1/merchant/admit. The
 // request_id IS the hold handle (capture/release address it). Returns the
 // recorder so callers can assert allow (200) vs money-deny (402).
 func (h *billingE2EHarness) admit(userID, source, requestID string, amount int64) *httptest.ResponseRecorder {
 	h.t.Helper()
-	return h.do(http.MethodPost, "/v1/service/admit", map[string]any{
+	return h.do(http.MethodPost, "/v1/merchant/admit", map[string]any{
 		"customer_id":      personalOwnerID(userID).String(),
 		"invoker":          userID,
 		"invoker_type":     "payer",
@@ -173,14 +174,14 @@ func (h *billingE2EHarness) mustAdmit(userID, source, requestID string, amount i
 
 func (h *billingE2EHarness) capture(requestID string, amount int64) *httptest.ResponseRecorder {
 	h.t.Helper()
-	return h.do(http.MethodPost, "/v1/service/credits/holds/"+requestID+"/capture", map[string]any{
+	return h.do(http.MethodPost, "/v1/merchant/credits/holds/"+requestID+"/capture", map[string]any{
 		"amount": amount,
 	})
 }
 
 func (h *billingE2EHarness) release(requestID string) *httptest.ResponseRecorder {
 	h.t.Helper()
-	return h.do(http.MethodPost, "/v1/service/credits/holds/"+requestID+"/release", nil)
+	return h.do(http.MethodPost, "/v1/merchant/credits/holds/"+requestID+"/release", nil)
 }
 
 // balance reads available + held via the public balance route. NOTE: under #513
@@ -193,7 +194,7 @@ type balanceView struct {
 
 func (h *billingE2EHarness) balance(userID string) balanceView {
 	h.t.Helper()
-	w := h.do(http.MethodGet, "/v1/service/credits/balance?customer_id="+personalOwnerID(userID).String()+"&currency="+money.DefaultCurrency, nil)
+	w := h.do(http.MethodGet, "/v1/merchant/credits/balance?customer_id="+personalOwnerID(userID).String()+"&currency="+money.DefaultCurrency, nil)
 	require.Equal(h.t, http.StatusOK, w.Code, "balance body: %s", w.Body.String())
 	var payload struct {
 		BalanceAmount int64 `json:"balance_amount"`

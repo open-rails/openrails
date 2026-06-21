@@ -40,11 +40,6 @@ type Permission = authcore.PermissionDef
 // subject is the route target. The catalog is COARSE — one permission per real
 // role boundary, not per route.
 const (
-	// PermAdmin is a deprecated source-compatibility alias for the merchant-owner
-	// apex grant. It is NOT a magic permission and does not satisfy arbitrary checks.
-	PermAdmin = authcore.OrgOwnerGrant
-
-	// --- Canonical #554 merchant catalog ---
 	PermMerchantSettingsRead           = "merchant:settings:read"
 	PermMerchantSettingsUpdate         = "merchant:settings:update"
 	PermMerchantPaymentProvidersRead   = "merchant:payment-providers:read"
@@ -66,32 +61,6 @@ const (
 	// delegable. ---
 	PermOrgSpendDelegationsRead   = "org:spend-delegations:read"
 	PermOrgSpendDelegationsUpdate = "org:spend-delegations:update"
-
-	// --- Deprecated source-compat aliases (#554): the old constant identifiers now
-	// resolve to their collapsed `merchant:*` value, so existing routes/tests
-	// compile unchanged while every gate STRING becomes merchant:*. New code uses
-	// the canonical names above. The precise per-route fine-graining + alias
-	// removal land with the /v1/service -> /v1/merchant move (#555). ---
-	PermCreditsRead                = PermMerchantCustomersRead
-	PermCreditsWrite               = PermMerchantCustomersUpdate
-	PermCreditsSpend               = PermMerchantAdmissionsCreate
-	PermEntitlementsRead           = PermMerchantCustomersRead
-	PermCatalogWrite               = PermMerchantCatalogUpdate
-	PermPaymentsRefund             = PermMerchantPaymentsRefund
-	PermSubscriptionsCancel        = PermMerchantSubscriptionsUpdate
-	PermMerchantBillingRead        = PermMerchantCustomersRead
-	PermMerchantEntitlementsWrite  = PermMerchantCustomersUpdate
-	PermMerchantProductAccessWrite = PermMerchantCustomersUpdate
-	PermMerchantCreditsWrite       = PermMerchantCustomersUpdate
-	PermMerchantPaymentsWrite      = PermMerchantCustomersUpdate
-	PermMerchantSubscriptionsWrite = PermMerchantSubscriptionsUpdate
-	PermMerchantConfigurationRead  = PermMerchantSettingsRead
-	PermMerchantConfigurationWrite = PermMerchantSettingsUpdate
-	PermMerchantSecretsList        = PermMerchantPaymentProvidersRead
-	PermMerchantSecretsWrite       = PermMerchantPaymentProvidersUpdate
-	PermMerchantSecretsDelete      = PermMerchantPaymentProvidersUpdate
-	PermMerchantSecretsTest        = PermMerchantPaymentProvidersUpdate
-	PermMerchantMetricsRead        = PermMerchantUsageRead
 )
 
 // catalogEntries is the canonical ordered list of OpenRails permissions with

@@ -3,6 +3,7 @@ package controlplane
 import (
 	"testing"
 
+	authcore "github.com/open-rails/authkit/core"
 	authhttp "github.com/open-rails/authkit/http"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +23,7 @@ func TestIsDelegatedPermission_AcceptsMerchantAdminOnly(t *testing.T) {
 func TestIsDelegatedPermission_HardRejectsPlatformAndUnknownGrants(t *testing.T) {
 	// None of these may EVER ride a browser token.
 	forbidden := []string{
-		PermAdmin,
+		authcore.OrgOwnerGrant,
 		"platform:orgs:update",
 		"platform:*",
 		"platform:metrics:read",
@@ -42,11 +43,11 @@ func TestIsDelegatedPermission_HardRejectsPlatformAndUnknownGrants(t *testing.T)
 func TestDelegatedVerify_AcceptsMerchantAdminPermission(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Permissions: []string{PermMerchantBillingRead, PermMerchantEntitlementsWrite},
+		Permissions: []string{PermMerchantCustomersRead, PermMerchantCustomersUpdate},
 	})
 	_, dp, err := v.VerifyDelegatedAccess(tok)
 	require.NoError(t, err)
-	require.Contains(t, dp.Permissions, PermMerchantBillingRead)
+	require.Contains(t, dp.Permissions, PermMerchantCustomersRead)
 }
 
 // TestDelegatedVerify_RejectsServicePermissionEvenWhenMerchantSigned proves the

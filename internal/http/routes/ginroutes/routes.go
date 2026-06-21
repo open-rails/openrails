@@ -11,14 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/request/ginreq"
 )
 
-// ServiceRoutePrefix is the path under the merchant-scoped public API where
-// API-key-authenticated server-to-server billing operations live (issue #222).
-// It REPLACES the retired private/mTLS service listener: machine callers
-// present an OpenRails-issued merchant API key as a Bearer token against this
-// public surface. The acting merchant is bound by the API key's owner, not the
-// URL.
-const ServiceRoutePrefix = "/service"
-
 // SelfRoutePrefix is the canonical browser self-service billing surface. The
 // credential profile may be a delegated JWT in standalone mode or a host/user
 // bearer in embedded mode; the URL is intentionally one stable `/me` surface
@@ -40,132 +32,6 @@ func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFu
 	return func(c *gin.Context) {
 		fn(ginreq.New(c, rt))
 	}
-}
-
-// RegisterServiceRoutes mounts the server-to-server billing surface on a
-// merchant-scoped PUBLIC route group authenticated by OpenRails-issued merchant API keys
-// (issue #222). This replaces the retired private/mTLS listener and its
-// certificate-scope model: every operation is gated by an API-key permission from the
-// canonical colon-form OpenRails permission catalog, and the acting merchant is the
-// API key's owner (pinned by ServiceCredentialRequired before any merchant-owned DB access).
-//
-// oatMW must authenticate the service credential (typically ginmw.ServiceCredentialRequired);
-// it pins the resolved merchant + Principal onto the context that the per-route
-// RequirePermission gates and the handlers read.
-func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc) {
-	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
-		return wrapHandler(rt, fn)
-	}
-
-	group.Use(oatMW)
-	// Pin a merchant-scoped DB connection AFTER the API key resolves the merchant, so RLS
-	// constrains every merchant-owned query (issue #227).
-	if rt != nil && rt.DB != nil {
-		group.Use(ginmw.MerchantDBConn(rt.DB))
-	}
-
-	// #480/#481: federated delegated-token issuers are no longer an OpenRails-owned
-	// registry (the old delegated-issuer table was dropped). Standalone JWKS/
-	// issuer trust is AuthKit's remote_application registry (#74); register issuers
-	// via AuthKit, not an OpenRails route.
-
-	// Always batch (#354): one issuer, many subjects, one query; a single
-	// lookup is an array of one.
-	group.POST("/customers/by-external-subject/entitlements",
-		ginmw.RequirePermission(controlplane.PermEntitlementsRead),
-		wrap(httphandlers.ServiceGetExternalSubjectEntitlements),
-	)
-
-	customers := group.Group("/customers/:customer_id")
-	customers.GET("/entitlements", ginmw.RequirePermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetCustomerEntitlements))
-
-	// Reverse lookup (#535): customers holding an active window of an entitlement,
-	// keyset-paginated. Backs a host directory's filter-by-entitlement (AuthKit #91).
-	entGroup := group.Group("/entitlements")
-	entGroup.GET("/:entitlement/customers", ginmw.RequirePermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetCustomersWithEntitlement))
-
-	users := group.Group("/users/:user_id")
-	users.GET("/product-access", ginmw.RequirePermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
-
-	// Canonical invoker credits path. The legacy alias `/credits/invokers/:invoker`
-	// was removed (finishes the #534 service-route dedup): both hit the same
-	// handler, and a duplicate surface only has to be kept permission-symmetric.
-	invokers := group.Group("/invokers/:invoker")
-	invokers.GET("/credits", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
-
-	credits := group.Group("/credits")
-	// SPEND (hot-path billing) operations — authorize/hold/capture draw down a
-	// payer's balance, so they require BOTH the coarse credits:write operator
-	// capability AND the explicit billing:spend (credits:spend) "may you bill this
-	// payer" gate (issue #246). The two are checked in sequence. Release returns
-	// a remainder (un-bills), so it needs write but not spend.
-	creditsSpend := ginmw.RequirePermission(controlplane.PermCreditsSpend)
-	creditsWrite := ginmw.RequirePermission(controlplane.PermCreditsWrite)
-
-	// Unified ADMISSION (issue #298): throughput (rate-limit) + money (hold) +
-	// suspension + blocklist + endpoint gating in one call; emits x-ratelimit-*
-	// + 429/Retry-After. Hot-path gate hosts call before doing work.
-	group.POST("/admit", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAdmit))
-	// Cross-payer BATCH admission (#335): N admit items (mixed payers) in one
-	// hop, per-item verdicts with single-admit semantics. Same spend gates.
-	group.POST("/admit/batch", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAdmitBatch))
-	// Budget introspection (#304): spend-cap windows for a host /status dashboard.
-	group.GET("/budget", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetBudget))
-	// Trust-tier policy admin (#298): configure spend/trust-tier money budgets.
-	group.PUT("/payer-spend-limits", creditsWrite, wrap(httphandlers.ServiceSetPayerSpendLimits))
-	// Trust-tier SCHEDULE admin (#476): declare the cumulative-spend ladder ONCE;
-	// OpenRails then auto-maintains each payer's trust tier.
-	group.PUT("/tier-schedules", creditsWrite, wrap(httphandlers.ServiceSetTierSchedule))
-	// Merchant-scoped configuration. Service API keys and delegated merchant
-	// admins use the same merchant-configuration permission names; only the
-	// credential profile differs.
-	group.GET("/merchant-configuration", ginmw.RequirePermission(controlplane.PermMerchantConfigurationRead), wrap(httphandlers.ServiceGetMerchantConfiguration))
-	group.PUT("/merchant-configuration", ginmw.RequirePermission(controlplane.PermMerchantConfigurationWrite), wrap(httphandlers.ServiceSetMerchantConfiguration))
-	// Trust-tier READ (#477): the payer's current auto-maintained trust tier, for a
-	// host that drives its OWN per-tier capacity (e.g. tensorhub's scheduler cap).
-	group.GET("/trust-tier", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetTier))
-	// Deprecated alias kept while current clients migrate.
-	group.GET("/tier", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetTier))
-	// Wasted-spend report (#488): the host reports a FAILED attempt that cost it $
-	// (a refunded hold, a content-filter reject). Accrues into the payer's
-	// trust-tier bad_spend windows + the invoker's flat windows; admit denies when
-	// over.
-	group.POST("/wasted-spend", creditsWrite, wrap(httphandlers.ServiceReportWastedSpend))
-	// Wasted-spend usage READ (#488): the payer's + invoker's running wasted-$ totals.
-	group.GET("/abuse-usage", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceAbuseUsage))
-	// Arrears credit-line admin (#489): operator sets the per-payer
-	// negative-balance ceiling. Read is credits:read.
-	group.PUT("/credit-limit", ginmw.RequirePermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceSetCreditLimit))
-	group.GET("/credit-limit", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetCreditLimit))
-	// Per-invoker spend limits (#473/#517): the payer caps how much its delegated
-	// invokers/roles may spend. Written/read with the operator credits gates.
-	group.PUT("/invoker-spend-limits", creditsWrite, wrap(httphandlers.ServiceSetInvokerSpendLimits))
-	group.GET("/invoker-spend-limits", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerSpendLimits))
-
-	// Payer balance snapshot (issue #235/#247): available = balance - held.
-	credits.GET("/balance", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetCreditsBalance))
-
-	credits.POST("/deposit", creditsWrite, wrap(httphandlers.ServiceDepositCredits))
-	credits.POST("/withdraw", creditsWrite, wrap(httphandlers.ServiceWithdrawCredits))
-	// Canonical hold capture/release (plural). The legacy singular `hold/:id`
-	// aliases were removed (#534): the SDK (remote.go) and all consumers use the
-	// plural form, and a duplicate surface only has to be kept permission-symmetric.
-	credits.POST("/holds/:id/capture", creditsWrite, creditsSpend, wrap(httphandlers.ServiceCaptureHold))
-	credits.POST("/holds/:id/release", creditsWrite, wrap(httphandlers.ServiceReleaseHold))
-	// #311: per-dimension spend rollup for the platform usage/revenue surfaces.
-	credits.POST("/usage/rollup", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceUsageRollup))
-	// #410: per-resource daily revenue (by the usage_event resource column, cross-payer).
-	credits.POST("/usage/resource-revenue", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceResourceRevenue))
-	credits.GET("/transactions/lookup", ginmw.RequirePermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
-
-	// Merchant billing-account admin surface (issue #242): configure prepaid|arrears
-	// mode + spend caps + auto-top-up, read settings, and list usage. Tensorhub's
-	// billing-admin proxies to these with its service API key; OpenRails owns the model.
-	creditsRead := ginmw.RequirePermission(controlplane.PermCreditsRead)
-	credits.PUT("/account-settings", creditsWrite, wrap(httphandlers.ServiceSetCreditAccountSettings))
-	credits.GET("/account-settings", creditsRead, wrap(httphandlers.ServiceGetCreditAccountSettings))
-	credits.GET("/transactions", creditsRead, wrap(httphandlers.ServiceListCustomerCreditTransactions))
-	// #472: credit-type definition CRUD removed — money has no credit_type dimension.
 }
 
 // RegisterSelfServiceRoutes mounts the browser self-service billing surface on
@@ -294,19 +160,19 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gi
 		group.Use(ginmw.MerchantDBConn(rt.DB))
 	}
 
-	read := ginmw.RequirePermission(controlplane.PermMerchantBillingRead)
-	subRead := ginmw.RequirePermission(controlplane.PermMerchantBillingRead)
-	entWrite := ginmw.RequirePermission(controlplane.PermMerchantEntitlementsWrite)
-	productAccessWrite := ginmw.RequirePermission(controlplane.PermMerchantProductAccessWrite)
-	payWrite := ginmw.RequirePermission(controlplane.PermMerchantPaymentsWrite)
-	subWrite := ginmw.RequirePermission(controlplane.PermMerchantSubscriptionsWrite)
-	configRead := ginmw.RequirePermission(controlplane.PermMerchantConfigurationRead)
-	configWrite := ginmw.RequirePermission(controlplane.PermMerchantConfigurationWrite)
-	metricsRead := ginmw.RequirePermission(controlplane.PermMerchantMetricsRead)
-	secretsList := ginmw.RequirePermission(controlplane.PermMerchantSecretsList)
-	secretsWrite := ginmw.RequirePermission(controlplane.PermMerchantSecretsWrite)
-	secretsDelete := ginmw.RequirePermission(controlplane.PermMerchantSecretsDelete)
-	secretsTest := ginmw.RequirePermission(controlplane.PermMerchantSecretsTest)
+	read := ginmw.RequirePermission(controlplane.PermMerchantCustomersRead)
+	subRead := ginmw.RequirePermission(controlplane.PermMerchantCustomersRead)
+	entWrite := ginmw.RequirePermission(controlplane.PermMerchantCustomersUpdate)
+	productAccessWrite := ginmw.RequirePermission(controlplane.PermMerchantCustomersUpdate)
+	payWrite := ginmw.RequirePermission(controlplane.PermMerchantCustomersUpdate)
+	subWrite := ginmw.RequirePermission(controlplane.PermMerchantSubscriptionsUpdate)
+	configRead := ginmw.RequirePermission(controlplane.PermMerchantSettingsRead)
+	configWrite := ginmw.RequirePermission(controlplane.PermMerchantSettingsUpdate)
+	metricsRead := ginmw.RequirePermission(controlplane.PermMerchantUsageRead)
+	secretsList := ginmw.RequirePermission(controlplane.PermMerchantPaymentProvidersRead)
+	secretsWrite := ginmw.RequirePermission(controlplane.PermMerchantPaymentProvidersUpdate)
+	secretsDelete := ginmw.RequirePermission(controlplane.PermMerchantPaymentProvidersUpdate)
+	secretsTest := ginmw.RequirePermission(controlplane.PermMerchantPaymentProvidersUpdate)
 
 	// Merchant metrics (issue #259 + #232): a merchant admin reads THEIR OWN merchant's
 	// analytics. The metrics queries are merchant-scoped to the request's merchant

@@ -69,7 +69,7 @@ Per-invoker metering is only correct if the invoker key is stable across request
 # #554: define final OpenRails permission catalog for public, org-treasury, and merchant routes
 
 **Completed:** no
-**Status:** IN_PROGRESS 2026-06-21: HARD CUT. OpenRails defines `merchant:*` permissions plus only the new OpenRails org-customer treasury permissions `org:spend-delegations:read|update`. The old pre-554 OpenRails `org:*` route permissions (`org:credits:*`, `org:billing:*`, `org:entitlements:*`, `org:catalog:*`, etc.) are not aliases, are not cataloged, and must not satisfy any gate. AuthKit still owns its native `org:*` model (`org:*` owner grant, org membership/roles) and `platform:*`; OpenRails only expands that model with its app-defined `merchant:*` namespace and the specific `org:spend-delegations:*` permissions. AuthKit support is shipped in `authkit v0.44.0` via `OwnerOwnsAppResources`. Current code state: `internal/controlplane/catalog.go` contains only the 17 coarse `merchant:*` permissions + `org:spend-delegations:*`; route/test references have been moved to canonical `merchant:*` constants; deprecated source-compat permission aliases were deleted. Remaining work is route-bucket coverage under #555/#557, not old-permission compatibility.
+**Status:** IN_PROGRESS 2026-06-21: HARD CUT. OpenRails defines `merchant:*` permissions plus only the new OpenRails org-customer treasury permissions `org:spend-delegations:read|update`. The old pre-554 OpenRails `org:*` route permissions (`org:credits:*`, `org:billing:*`, `org:entitlements:*`, `org:catalog:*`, etc.) are not aliases, are not cataloged, and must not satisfy any gate. AuthKit still owns its native `org:*` model (`org:*` owner grant, org membership/roles) and `platform:*`; OpenRails only expands that model with its app-defined `merchant:*` namespace and the specific `org:spend-delegations:*` permissions. AuthKit support is shipped in `authkit v0.44.0` via `OwnerOwnsAppResources`. Current code state: `internal/controlplane/catalog.go` contains only the 17 coarse `merchant:*` permissions + `org:spend-delegations:*`; route/test references have been moved to canonical `merchant:*` constants; deprecated source-compat permission aliases were deleted. Validation: `go test ./...`; `go test ./internal/controlplane ./internal/auth/policy ./internal/http/middleware/ginmw ./internal/http/routes ./internal/http/routes/ginroutes`; `go test -tags=integration ./internal/controlplane ./internal/integrationharness ./embed`; targeted admin-permission integration tests under `./tests`; `git diff --check`. Remaining work is route-bucket coverage under #555/#557, not old-permission compatibility.
 
 ## Model
 
@@ -247,7 +247,7 @@ This epic is the design source of truth; the master checklist under "## Tasks" i
 
 - [ ] #554 — final OpenRails permission catalog (public / personal-self / org-treasury / merchant; `merchant:*` naming). *(created)*
 - [ ] #555 — `/v1/service` → `/v1/merchant` rename + one merchant/org principal resolver; drop `issuer`; customer-forward vs directory split.
-- [x] #556 — embedded route-set presets (replace `IncludeUser` / `IncludeAdmin` / `IncludeWebhooks` booleans).
+- [ ] #556 — embedded route-set presets and honest route-group split (replace `IncludeUser` / `IncludeAdmin` / `IncludeWebhooks` booleans; split checkout/customer/merchant dashboard/catalog/API).
 - [ ] #557 — customer self `/v1/me/*` + org-treasury `/v1/orgs/:org_id/*` (spend-delegations); delete `/v1/self/*`. Role-scope spend-delegation windows meter per-invoker per #563 (not a shared role pool).
 - [ ] #558 — Tensorhub client recut into Admission/PolicySync/AdminFunding Go interfaces + settings/policy split; batch-native admission.
 - [ ] #559 — merchant payment-provider config API (replace flat secret-name CRUD; atomic validate-then-store).
@@ -359,24 +359,27 @@ sets and presets instead:
 type RouteSet string
 
 const (
-	RouteSetPublicCatalog RouteSet = "public_catalog" // /products, /prices, solana config/pay helpers
-	RouteSetCustomer      RouteSet = "customer"       // /me/* browser self-service
-	RouteSetMerchantAdmin RouteSet = "merchant_admin" // /merchant/* delegated merchant UI/support
-	RouteSetMerchantAPI   RouteSet = "merchant_api"   // /merchant/* host-internal or remote merchant API
-	RouteSetWebhooks      RouteSet = "webhooks"       // processor callbacks
+	RouteSetCheckout          RouteSet = "checkout"           // buyer-facing products/prices/config + checkout/pay flows
+	RouteSetCustomer          RouteSet = "customer"           // /me/* browser self-service
+	RouteSetMerchantDashboard RouteSet = "merchant_dashboard" // /admin/* merchant dashboard/customer/payment/subscription ops
+	RouteSetMerchantCatalog   RouteSet = "merchant_catalog"   // /merchant/catalog/* catalog/product/price ops
+	RouteSetMerchantAPI       RouteSet = "merchant_api"       // machine-to-machine API; embedded opt-in only
+	RouteSetWebhooks          RouteSet = "webhooks"           // processor callbacks
 )
 
 var EmbeddedDefaultRouteSets = []RouteSet{
-	RouteSetPublicCatalog,
+	RouteSetCheckout,
 	RouteSetCustomer,
-	RouteSetMerchantAdmin,
+	RouteSetMerchantDashboard,
+	RouteSetMerchantCatalog,
 	RouteSetWebhooks,
 }
 
 var StandaloneDefaultRouteSets = []RouteSet{
-	RouteSetPublicCatalog,
+	RouteSetCheckout,
 	RouteSetCustomer,
-	RouteSetMerchantAdmin,
+	RouteSetMerchantDashboard,
+	RouteSetMerchantCatalog,
 	RouteSetMerchantAPI,
 	RouteSetWebhooks,
 }
@@ -384,7 +387,9 @@ var StandaloneDefaultRouteSets = []RouteSet{
 
 Lazy rule: embedded defaults exclude `RouteSetMerchantAPI` because the host can
 call OpenRails' Go service directly. Hosts may opt in when they intentionally
-want HTTP loopback parity or expose a remote-compatible API surface.
+want HTTP loopback parity or expose a remote-compatible API surface. Do not keep
+`public_catalog` as a separate route set: product/price/config discovery is part
+of the buyer-facing checkout surface.
 
 ## Customer Self-Service Route Recut
 
@@ -906,9 +911,9 @@ Delete `/v1/service/*` and mount merchant-owned operations under resource-named 
 
 - [x] Add a shared merchant-principal resolver that maps logged-in user / delegated JWT / browser-org JWT / API key to `(org, merchant, permissions)`. DONE: `MerchantPrincipalRequired` (`internal/http/middleware/ginmw/merchant_principal.go`) — fail-closed precedence (API-key-shaped -> service credential only; JWT -> programmatic then delegated; no bearer -> live user session), all four paths -> one `Principal` + pinned merchant. Unit tests cover every path + the no-fall-through invariant + no-credential 401. (commit f4a70655)
 - [ ] Resolve authority CONTEXT, not just identity: since org↔merchant is 1:1 (#527), one org id can act as a **merchant-owner** (merchant routes) AND as a **paying customer** of another merchant (treasury/customer routes). Bind the acting context to the route's resource boundary; a merchant-owner grant must never satisfy a customer/treasury gate, or vice versa, on the same org. Add a confused-deputy regression test. Mirror this contract in #557.
-- [ ] Delete the surviving #553 compatibility alias as part of this cut: remove the `/v1/service/tier` route alias (the trust-tier read moves onto the new surface); coordinate the matching `tier` Go-client field removal with #558.
-- [ ] Remove the credential-type-split auth middleware; gate `/v1/merchant/*` on the resolved principal + required `merchant:*` permission.
-- [ ] Move every merchant-owned `/v1/service/*` route to `/v1/merchant/*`; delete the old paths (hard cut, no alias).
+- [x] Delete the surviving #553 compatibility alias as part of this cut: removed the `/v1/service/tier` route alias (only `/v1/merchant/trust-tier` remains). The matching `tier` Go-client field removal stays coordinated with #558/Tensorhub.
+- [~] Remove the credential-type-split auth middleware; gate `/v1/merchant/*` on the resolved principal. PARTIAL: the unified `MerchantPrincipalRequired` resolver is built + unit-tested (commit f4a70655); `/v1/merchant/*` currently still authenticates via the router `serviceCredentialRequiredMW` (service credentials) + per-route `servicePermissionMW(merchant:*)`. Wiring the unified resolver (delegated/user-session) into the router `/v1/merchant` auth is the remaining step (needs a DelegatedResolver on `routes.Options`).
+- [x] Move every merchant-owned `/v1/service/*` route to `/v1/merchant/*`; delete the old paths (hard cut, no alias). DONE: the canonical surface is the router-based `routes.RegisterServiceRoutes` mounted at `/v1/merchant` (standalone via `registerMerchantActionRoutesAt`, embedded via `RouteSetMerchantAPI`); the gin `ginroutes.RegisterServiceRoutes` + `routes_service.go` + `ServiceRoutePrefix` are deleted; SDK (`remote.go`) + all integration tests moved to `/v1/merchant`. Validated green: unit (72 pkgs), integrationharness, tests/ service+route-set suites, embed boundary.
 - [ ] Implement the customer-forward lookup API over HTTP: list/check entitlements, batch entitlements, list/check product access, get balance.
 - [ ] Mirror those as Go library methods (`ListEntitlements`, `HasEntitlement`, `ListEntitlementsBatch`, `ListProductAccess`, `HasProductAccess`, `GetBalance`) with HTTP-aligned names/shapes.
 - [ ] Replace `POST /v1/service/customers/by-external-subject/entitlements` with `POST /v1/merchant/customers/entitlements:batch`; drop `issuer` (merchant/org from auth, subjects from body).
@@ -927,23 +932,35 @@ Delete `/v1/service/*` and mount merchant-owned operations under resource-named 
 
 # #556: embedded-route-set-presets
 
-**Completed:** yes
-**Status:** COMPLETE 2026-06-20: embedded handler options now use named `RouteSet` values and exported embedded/standalone presets. Embedded defaults exclude `RouteSetMerchantAPI`; standalone includes the service API; embedded hosts can opt into service routes explicitly. Cozy Art was migrated off boolean flags; Tensorhub already used the zero-value handler options. Validation: `go test ./internal/http -run 'TestEmbedded(Mux|Default|MerchantAPI|RouteSet)' -count=1`; `go test ./internal/http/routes -count=1`; `go test -tags integration ./tests -run 'TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer$' -count=1` (actual `httptest.NewServer` HTTP client/server coverage for embedded default, embedded opt-in, and standalone); `go test -tags integration ./tests -run 'Test(EmbeddedHandlers_Surface|HTTPHandlerOptions_WebhooksOnly|HTTPHandlerOptions_RouteSetPresetsOverHTTPServer)$' -count=1`; `go test ./...`; Cozy Art `go test ./internal/api`.
+**Completed:** no
+**Status:** REOPENED 2026-06-21: the first pass removed boolean flags, but the route-set names are still dishonest/incomplete. `public_catalog` and `customer` currently share one old user-route registration, and `/me/*` + `/admin/*` are still standalone-only Gin mounts. Recut the route sets to match actual product surfaces: `checkout`, `customer`, `merchant_dashboard`, `merchant_catalog`, `merchant_api`, and `webhooks`. Embedded defaults should expose real OpenRails browser/dashboard routes directly and exclude only machine-to-machine `merchant_api`.
 
-Replace the embedded `IncludeUser` / `IncludeAdmin` / `IncludeWebhooks` booleans with named `RouteSet` values + presets so hosts can see exactly what mounts. Embedded defaults exclude host-internal merchant HTTP lookup routes (the host calls the Go service directly); standalone includes them. See parent #552 "Embedded Route Group API".
+Replace the embedded `IncludeUser` / `IncludeAdmin` / `IncludeWebhooks` booleans with named `RouteSet` values + presets so hosts can see exactly what mounts. Embedded defaults exclude host-internal machine HTTP routes (the host calls the Go service directly); standalone includes them. See parent #552 "Embedded Route Group API".
 
 ## Tasks
 
-- [x] Define a `RouteSet` type and the canonical sets (public catalog, customer, merchant admin, merchant API, webhooks).
-- [x] Define `EmbeddedDefaultRouteSets` (excludes `RouteSetMerchantAPI`) and `StandaloneDefaultRouteSets` (includes it).
-- [x] Mount route groups by RouteSet; let hosts opt into `RouteSetMerchantAPI` for HTTP loopback parity.
+- [x] Define a `RouteSet` type and replace the old boolean handler options.
+- [ ] Replace the current canonical sets with: `checkout`, `customer`, `merchant_dashboard`, `merchant_catalog`, `merchant_api`, and `webhooks`.
+- [ ] Collapse old `public_catalog` into `checkout`; `checkout` owns products/prices/config discovery plus checkout/pay flows.
+- [ ] Rename self-service `/me/*` route grouping to `customer`.
+- [ ] Add `merchant_dashboard` for `/admin/*` browser delegated merchant dashboard routes.
+- [ ] Rename narrow catalog/operator actions to `merchant_catalog` for `/merchant/catalog/*`.
+- [ ] Keep `merchant_api` machine-to-machine only; embedded default excludes it, standalone includes it.
+- [ ] Make `/me/*` and `/admin/*` available through embedded route-set mounting instead of standalone-only Gin registration.
+- [ ] Define `EmbeddedDefaultRouteSets` as `checkout`, `customer`, `merchant_dashboard`, `merchant_catalog`, and `webhooks`.
+- [ ] Define `StandaloneDefaultRouteSets` as embedded default plus `merchant_api`.
+- [ ] Mount route groups by RouteSet; let hosts opt into `RouteSetMerchantAPI` for HTTP loopback parity.
 - [x] Migrate embedded hosts (Cozy Art, Tensorhub) off the boolean flags (hard cut); delete the booleans.
-- [x] Tests: embedded default mounts no host-internal merchant HTTP lookup routes; standalone does; opt-in adds them.
+- [ ] Tests: embedded default mounts checkout/customer/merchant-dashboard/merchant-catalog/webhooks; embedded default does not mount machine API; standalone does; opt-in adds machine API.
+- [ ] Integration test through a real `httptest.NewServer` HTTP client/server proving embedded route-set defaults and opt-in behavior.
 
 ## Acceptance
 
 - Hosts declare route sets, not booleans.
-- Embedded default has no host-internal merchant HTTP lookup routes; standalone does.
+- Route-set names map to product surfaces, not implementation leftovers.
+- Embedded default exposes real OpenRails browser/dashboard routes directly, with no host proxy routes needed.
+- Embedded default has no host-internal machine HTTP routes; standalone does.
+- `public_catalog` is gone as a standalone route set; buyer catalog discovery lives under `checkout`.
 
 ---
 
@@ -1001,19 +1018,19 @@ Replace Tensorhub's broad `/v1/service/*` dependency with three narrow OpenRails
 # #559: merchant-payment-provider-config-api
 
 **Completed:** no
-**Status:** PLANNED 2026-06-20. Child of #552.
+**Status:** IN_PROGRESS 2026-06-21: parallel handler/service slice is implemented but not mounted. Added merchant payment-provider config service methods over existing `provider_accounts` + provider-account-scoped secrets, plus route-agnostic handlers for list/read/PUT/DELETE. Updates validate supplied credential values before writing provider account rows or secrets; responses expose redacted configured/last_validated metadata only. Solana `private_key` is now explicitly non-merchant-writable even under provider-account scoped names. `/v1/merchant/*` route wiring and old `/secrets/*` hard cut remain blocked on #555.
 
 Replace flat secret-name CRUD with `/v1/merchant/payment-providers/*` (list/read/PUT/DELETE), provider in the path and environment in the body/query, gated by `merchant:payment-providers:*` (#554). Updates are atomic: validate supplied credentials against the provider, then store only on success. Status is returned as redacted field metadata, never plaintext. See parent #552 "Merchant Route Contracts".
 
 ## Tasks
 
-- [ ] Implement `GET /v1/merchant/payment-providers`, `GET/PUT/DELETE /v1/merchant/payment-providers/:provider`; keep `provider_accounts` as internal storage only.
-- [ ] Validate supplied credentials against the provider before storage; never persist on validation failure (no separate `/validate` route).
-- [ ] Return credential status as `{configured, updated_at, last_validated_at?}`; never return plaintext.
-- [ ] Support test/live environments explicitly; enforce one active config per `{merchant, provider, environment}`.
-- [ ] Cover current provider fields: Stripe, NMI/Mobius, CCBill, Solana (Solana private key stays platform-owned, not merchant-writable).
+- [x] Implement route-agnostic handlers for `GET /v1/merchant/payment-providers`, `GET/PUT/DELETE /v1/merchant/payment-providers/:provider`; keep `provider_accounts` as internal storage only. Route mounting waits for #555.
+- [x] Validate supplied credentials against the provider before storage; never persist on validation failure (no separate `/validate` route).
+- [x] Return credential status as `{configured, last_validated_at?}`; never return plaintext.
+- [x] Support test/live environments explicitly; enforce one active config per `{merchant, provider, environment}`.
+- [x] Cover current provider fields: Stripe, NMI/Mobius, CCBill, Solana (Solana private key stays platform-owned, not merchant-writable).
 - [ ] Delete direct `/v1/merchant/secrets/*` CRUD (hard cut); keep provider-account-scoped secret storage internal.
-- [ ] Tests: invalid credentials are not persisted; responses never leak plaintext; delete/disable removes a provider from future use.
+- [ ] Tests: invalid credentials are not persisted; responses never leak plaintext; delete/disable removes a provider from future use. DONE so far: focused unit coverage for invalid scoped Stripe validation not persisting, redacted response status, Solana private-key non-writability.
 
 ## Acceptance
 
@@ -1026,14 +1043,14 @@ Replace flat secret-name CRUD with `/v1/merchant/payment-providers/*` (list/read
 # #560: merchant-catalog-publish-over-http
 
 **Completed:** no
-**Status:** PLANNED 2026-06-20. Child of #552.
+**Status:** IN_PROGRESS 2026-06-21: parallel publish handler slice is implemented but not mounted. Added route-agnostic `MerchantPublishCatalog` handler that accepts the inner single-merchant `{catalog:{...}}` shape, validates it, computes `catalog.Plan`, stays plan-only by default, and applies through `catalog.ApplyWithOptions` only when `insert`, `overwrite`, or `prune` is explicit. Added JSON tags to catalog manifest/plan/apply structs for the HTTP shape. `/v1/merchant/catalog/publish` route wiring remains blocked on #555.
 
 Expose catalog-as-code over HTTP with the same plan/apply engine as `openrails push-merchant-catalog`, gated by `merchant:catalog:*` (#554). The route is single-merchant (merchant from auth) and plan-only by default; mutation requires explicit `insert`, `overwrite`, or `prune`. Product/price writes auto-enqueue provider sync. See parent #552 "Catalog".
 
 ## Tasks
 
 - [ ] Implement catalog product/price CRUD + activate/deactivate under `/v1/merchant/catalog/*`; writes auto-enqueue provider sync (no per-object reconcile routes).
-- [ ] Add `POST /v1/merchant/catalog/publish` reusing the CLI plan/apply engine; body is the inner single-merchant manifest (no `catalogs[]` wrapper); plan-only by default; mutation needs explicit `insert` / `overwrite` / `prune`.
+- [x] Add route-agnostic `POST /v1/merchant/catalog/publish` handler reusing the CLI plan/apply engine; body is the inner single-merchant manifest (no `catalogs[]` wrapper); plan-only by default; mutation needs explicit `insert` / `overwrite` / `prune`. Route mounting waits for #555.
 - [ ] Add `GET /v1/merchant/catalog/drift` (incl. `?kind=orphan`) and `POST /v1/merchant/catalog/drift/refresh`; no separate `/orphans` route.
 - [ ] Tests: plan-only vs mutating modes against the same engine as the CLI; a product/price write enqueues provider sync.
 

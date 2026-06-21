@@ -140,7 +140,7 @@ func TestEmbeddedDefaultExcludesMerchantAPI(t *testing.T) {
 	h := s.newHTTPHandlerMux(HTTPHandlerOptions{})
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/service/admit", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/admit", nil))
 	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -153,7 +153,7 @@ func TestEmbeddedMerchantAPIOptInMountsServiceRoutes(t *testing.T) {
 	h := asm.NewHTTPHandler(embedhttp.Options{RouteSets: []embedhttp.RouteSet{embedhttp.RouteSetMerchantAPI}})
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/service/admit", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/admit", nil))
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 

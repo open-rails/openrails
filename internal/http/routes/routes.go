@@ -137,37 +137,37 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 
 	group.Handle(http.MethodPost, "/customers/by-external-subject/entitlements",
 		h(httphandlers.ServiceGetExternalSubjectEntitlements),
-		opts.servicePermissionMW(controlplane.PermEntitlementsRead),
+		opts.servicePermissionMW(controlplane.PermMerchantCustomersRead),
 	)
 
 	customers := group.Group("/customers/:customer_id")
 	customers.Handle(http.MethodGet, "/entitlements",
 		h(httphandlers.ServiceGetCustomerEntitlements),
-		opts.servicePermissionMW(controlplane.PermEntitlementsRead),
+		opts.servicePermissionMW(controlplane.PermMerchantCustomersRead),
 	)
 
 	entitlements := group.Group("/entitlements")
 	entitlements.Handle(http.MethodGet, "/:entitlement/customers",
 		h(httphandlers.ServiceGetCustomersWithEntitlement),
-		opts.servicePermissionMW(controlplane.PermEntitlementsRead),
+		opts.servicePermissionMW(controlplane.PermMerchantCustomersRead),
 	)
 
 	users := group.Group("/users/:user_id")
 	users.Handle(http.MethodGet, "/product-access",
 		h(httphandlers.ServiceGetUserProductAccess),
-		opts.servicePermissionMW(controlplane.PermEntitlementsRead),
+		opts.servicePermissionMW(controlplane.PermMerchantCustomersRead),
 	)
 
 	invokers := group.Group("/invokers/:invoker")
 	invokers.Handle(http.MethodGet, "/credits",
 		h(httphandlers.ServiceGetInvokerCredits),
-		opts.servicePermissionMW(controlplane.PermCreditsRead),
+		opts.servicePermissionMW(controlplane.PermMerchantCustomersRead),
 	)
 
 	credits := group.Group("/credits")
-	creditsSpend := opts.servicePermissionMW(controlplane.PermCreditsSpend)
-	creditsWrite := opts.servicePermissionMW(controlplane.PermCreditsWrite)
-	creditsRead := opts.servicePermissionMW(controlplane.PermCreditsRead)
+	creditsSpend := opts.servicePermissionMW(controlplane.PermMerchantAdmissionsCreate)
+	creditsWrite := opts.servicePermissionMW(controlplane.PermMerchantCustomersUpdate)
+	creditsRead := opts.servicePermissionMW(controlplane.PermMerchantCustomersRead)
 
 	group.Handle(http.MethodPost, "/admit", h(httphandlers.ServiceAdmit), creditsWrite, creditsSpend)
 	group.Handle(http.MethodPost, "/admit/batch", h(httphandlers.ServiceAdmitBatch), creditsWrite, creditsSpend)
@@ -176,14 +176,13 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	group.Handle(http.MethodPut, "/tier-schedules", h(httphandlers.ServiceSetTierSchedule), creditsWrite)
 	group.Handle(http.MethodGet, "/merchant-configuration",
 		h(httphandlers.ServiceGetMerchantConfiguration),
-		opts.servicePermissionMW(controlplane.PermMerchantConfigurationRead),
+		opts.servicePermissionMW(controlplane.PermMerchantSettingsRead),
 	)
 	group.Handle(http.MethodPut, "/merchant-configuration",
 		h(httphandlers.ServiceSetMerchantConfiguration),
-		opts.servicePermissionMW(controlplane.PermMerchantConfigurationWrite),
+		opts.servicePermissionMW(controlplane.PermMerchantSettingsUpdate),
 	)
 	group.Handle(http.MethodGet, "/trust-tier", h(httphandlers.ServiceGetTier), creditsRead)
-	group.Handle(http.MethodGet, "/tier", h(httphandlers.ServiceGetTier), creditsRead)
 	group.Handle(http.MethodPost, "/wasted-spend", h(httphandlers.ServiceReportWastedSpend), creditsWrite)
 	group.Handle(http.MethodGet, "/abuse-usage", h(httphandlers.ServiceAbuseUsage), creditsRead)
 	group.Handle(http.MethodPut, "/credit-limit", h(httphandlers.ServiceSetCreditLimit), creditsWrite)
@@ -275,7 +274,7 @@ func serviceCredentialFromRequest(r *httprequest.Request) (*controlplane.Resolve
 
 func RegisterMerchantActionRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	mw := []router.Middleware{
-		opts.merchantActionPermissionMW(authpolicy.PermCatalogWrite),
+		opts.merchantActionPermissionMW(authpolicy.PermMerchantCatalogUpdate),
 	}
 	if rt != nil && rt.DB != nil {
 		mw = append(mw, middleware.MerchantDBConnMW(rt.DB))

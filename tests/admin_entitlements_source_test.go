@@ -21,11 +21,11 @@ import (
 // #511: a manual admin entitlement grant is now an `admin`-sourced entry in the
 // grant ledger (the entitlement is the projected effect) — there is no separate
 // entitlement_grants provenance row anymore. #528 hard cut: the grant is
-// authorized by the delegated org:entitlements:update capability.
+// authorized by the delegated merchant:customers:update capability.
 func TestAdminEntitlementGrantCreatesEntitlement(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "b8888888-8888-4888-8888-888888888888",
-		[]string{controlplane.PermMerchantEntitlementsWrite})
+		[]string{controlplane.PermMerchantCustomersUpdate})
 
 	userID := uuid.New().String()
 
@@ -57,7 +57,7 @@ func TestAdminEntitlementGrantCreatesEntitlement(t *testing.T) {
 func TestAdminEntitlementGrant_RequiresEntitlementsWrite(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "b9999999-9999-4999-8999-999999999999",
-		[]string{controlplane.PermMerchantBillingRead})
+		[]string{controlplane.PermMerchantCustomersRead})
 
 	body, _ := json.Marshal(map[string]any{"entitlement": "premium", "days": 7})
 	w := httptest.NewRecorder()
@@ -72,7 +72,7 @@ func TestAdminEntitlementGrant_RequiresEntitlementsWrite(t *testing.T) {
 func TestRemovedEntitlementGrantRoutesReturn404(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "ba000000-0000-4000-8000-000000000000",
-		[]string{controlplane.PermMerchantEntitlementsWrite})
+		[]string{controlplane.PermMerchantCustomersUpdate})
 
 	userID := uuid.New().String()
 
@@ -92,7 +92,7 @@ func TestRemovedEntitlementGrantRoutesReturn404(t *testing.T) {
 func TestAdminEntitlementAppendsAfterLatestEnd(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "ba111111-1111-4111-8111-111111111111",
-		[]string{controlplane.PermMerchantEntitlementsWrite})
+		[]string{controlplane.PermMerchantCustomersUpdate})
 
 	userID := uuid.New().String()
 	fixedNow := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

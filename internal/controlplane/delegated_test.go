@@ -177,7 +177,7 @@ func TestDelegatedVerify_RejectsPlatformPermission(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	// An operator/server-to-server grant on a browser token must be rejected.
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Permissions: []string{PermAdmin},
+		Permissions: []string{authcore.OrgOwnerGrant},
 	})
 	_, _, err := v.VerifyDelegatedAccess(tok)
 	require.Error(t, err)
@@ -186,7 +186,7 @@ func TestDelegatedVerify_RejectsPlatformPermission(t *testing.T) {
 func TestDelegatedVerify_RejectsMixedAdminAndPlatformPermission(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	tok := mintDelegated(t, signer, authhttp.DelegatedAccessParams{
-		Permissions: []string{PermMerchantBillingRead, "platform:orgs:update"},
+		Permissions: []string{PermMerchantCustomersRead, "platform:orgs:update"},
 	})
 	_, _, err := v.VerifyDelegatedAccess(tok)
 	require.Error(t, err, "any platform permission taints the whole token")

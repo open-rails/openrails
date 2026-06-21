@@ -45,7 +45,7 @@ func TestEmbeddedHandlers_Surface(t *testing.T) {
 	}
 	{
 		// Standalone includes host-internal merchant API routes.
-		req := httptest.NewRequest(http.MethodPost, "/v1/service/admit", nil)
+		req := httptest.NewRequest(http.MethodPost, "/v1/merchant/admit", nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, req)
 		require.NotEqual(t, http.StatusNotFound, w.Code)

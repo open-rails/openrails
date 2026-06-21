@@ -138,7 +138,7 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
 	}
 	if routeSets[RouteSetMerchantAPI] {
-		httproutes.RegisterServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/service", s.Runtime), s.Runtime, httproutes.Options{
+		httproutes.RegisterServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, httproutes.Options{
 			ServiceCredentialResolver: s.ServiceCredentialResolver,
 		})
 	}

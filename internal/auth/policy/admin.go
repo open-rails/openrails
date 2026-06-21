@@ -2,17 +2,13 @@ package policy
 
 import "context"
 
-// PermAdmin is a deprecated source-compatibility alias for the merchant-owner
-// apex grant. It is not a magic permission.
-const PermAdmin = "org:*"
-
-// PermCatalogWrite is the narrow merchant catalog mutation capability. It
-// mirrors controlplane.PermCatalogWrite (== merchant:catalog:update, #554)
+// PermMerchantCatalogUpdate is the narrow merchant catalog mutation capability. It
+// mirrors controlplane.PermMerchantCatalogUpdate (== merchant:catalog:update, #554)
 // without making gin-free route registration import the control-plane package.
-const PermCatalogWrite = "merchant:catalog:update"
+const PermMerchantCatalogUpdate = "merchant:catalog:update"
 
 // AdminPermissionChecker is the live AuthKit effective-permission check the
-// control plane provides for merchant-local `org:` permissions.
+// control plane provides for merchant-local `merchant:` permissions.
 type AdminPermissionChecker interface {
 	HasAdminPermission(ctx context.Context, tenantSlug, userID, perm string) (bool, error)
 }

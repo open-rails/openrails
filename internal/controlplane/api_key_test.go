@@ -9,28 +9,28 @@ import (
 )
 
 func TestResolvedServiceCredential_HasPermission(t *testing.T) {
-	r := &ResolvedServiceCredential{Permissions: []string{PermCreditsRead, PermCreditsWrite}}
+	r := &ResolvedServiceCredential{Permissions: []string{PermMerchantCustomersRead, PermMerchantCustomersUpdate}}
 
-	if !r.HasPermission(PermCreditsWrite) {
-		t.Errorf("expected granted permission %q to be held", PermCreditsWrite)
+	if !r.HasPermission(PermMerchantCustomersUpdate) {
+		t.Errorf("expected granted permission %q to be held", PermMerchantCustomersUpdate)
 	}
-	if r.HasPermission(PermCatalogWrite) {
-		t.Errorf("did not expect ungranted permission %q to be held", PermCatalogWrite)
+	if r.HasPermission(PermMerchantCatalogUpdate) {
+		t.Errorf("did not expect ungranted permission %q to be held", PermMerchantCatalogUpdate)
 	}
 }
 
 func TestResolvedServiceCredential_ApexGrantDoesNotBypassPermissionChecks(t *testing.T) {
-	r := &ResolvedServiceCredential{Permissions: []string{PermAdmin}}
+	r := &ResolvedServiceCredential{Permissions: []string{authcore.OrgOwnerGrant}}
 	for _, p := range CatalogNames() {
 		if r.HasPermission(p) {
-			t.Errorf("apex grant %q must not bypass exact check for %q", PermAdmin, p)
+			t.Errorf("apex grant %q must not bypass exact check for %q", authcore.OrgOwnerGrant, p)
 		}
 	}
 }
 
 func TestResolvedServiceCredential_EmptyDeniesAll(t *testing.T) {
 	r := &ResolvedServiceCredential{}
-	if r.HasPermission(PermCreditsRead) {
+	if r.HasPermission(PermMerchantCustomersRead) {
 		t.Error("empty API key should grant nothing")
 	}
 }

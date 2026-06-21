@@ -39,8 +39,8 @@ func TestRegisterMerchantActionRoutesRequiresCatalogWrite(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected forbidden before handler execution, got %d", rec.Code)
 	}
-	if checker.perm != policy.PermCatalogWrite {
-		t.Fatalf("expected %q permission, got %q", policy.PermCatalogWrite, checker.perm)
+	if checker.perm != policy.PermMerchantCatalogUpdate {
+		t.Fatalf("expected %q permission, got %q", policy.PermMerchantCatalogUpdate, checker.perm)
 	}
 
 	rec = httptest.NewRecorder()
