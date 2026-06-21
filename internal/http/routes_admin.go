@@ -18,6 +18,9 @@ func (s *Server) registerMerchantActionRoutesAt(e *gin.Engine, apiPrefix string)
 	if s.controlPlane != nil {
 		opts.AdminPermissionChecker = authpolicy.AdminPermissionChecker(s.controlPlane)
 		opts.ServiceCredentialResolver = s.controlPlane
+		// #555: standalone merchant action routes also accept a browser-direct
+		// delegated merchant-admin token (the control plane resolves it).
+		opts.DelegatedResolver = s.controlPlane
 	}
 	// #555 HARD CUT: the merchant API surface is `/v1/merchant/*`. The catalog
 	// admin actions and the (formerly `/v1/service/*`) machine billing routes both

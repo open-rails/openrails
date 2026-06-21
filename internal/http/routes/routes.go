@@ -34,11 +34,24 @@ type Options struct {
 	// credentials: generated API keys, remote-application self tokens, and service
 	// JWTs. The control plane satisfies this in standalone mode.
 	ServiceCredentialResolver ServiceCredentialResolver
+
+	// DelegatedResolver validates browser-direct delegated access tokens — a
+	// merchant's federated merchant-signed JWT for one of its admin users
+	// (#259). The control plane satisfies it in standalone mode; nil disables the
+	// delegated path on merchant action routes (#555). Only browser-safe
+	// `merchant:*` permissions are ever honored on a delegated token.
+	DelegatedResolver DelegatedResolver
 }
 
 type ServiceCredentialResolver interface {
 	LooksLikeAPIKey(token string) bool
 	ResolveAPIKey(ctx context.Context, token string) (*controlplane.ResolvedServiceCredential, error)
+}
+
+// DelegatedResolver validates a browser-direct delegated access token and
+// resolves its merchant + acting user (#259/#555).
+type DelegatedResolver interface {
+	ResolveDelegated(ctx context.Context, token string, origin string) (*controlplane.ResolvedDelegated, error)
 }
 
 type serviceJWTResolver interface {
@@ -301,6 +314,36 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 				r.Set("openrails.service_credential", resolved)
 				next(r)
 				return
+			}
+
+			// Browser-direct delegated access token (#555): a merchant admin's
+			// federated merchant-signed JWT. Only browser-safe `merchant:*` perms
+			// are honored — a delegated token can never carry a machine/operator
+			// grant (IsDelegatedPermission gate), and the merchant is pinned from
+			// the verified token, never the URL.
+			if opts.DelegatedResolver != nil && r.Request != nil {
+				if token := bearerToken(r.Request.Header.Get("Authorization")); controlplane.LooksLikeJWT(token) {
+					resolved, err := opts.DelegatedResolver.ResolveDelegated(r.Request.Context(), token, r.Request.Header.Get("Origin"))
+					if err != nil {
+						r.AbortJSON(http.StatusUnauthorized, "delegated_token_invalid")
+						return
+					}
+					if !controlplane.IsDelegatedPermission(perm) || !resolved.HasPermission(perm) {
+						r.AbortJSON(http.StatusForbidden, "permission_required")
+						return
+					}
+					r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), resolved.MerchantID))
+					r.Set("openrails.merchant_id", resolved.MerchantID)
+					r.SetUserContext(billingauth.UserContext{
+						UserID:        resolved.DelegatedSubject,
+						Email:         resolved.Email,
+						EmailVerified: resolved.EmailVerified,
+						Username:      resolved.Username,
+						Org:           resolved.Merchant,
+					})
+					next(r)
+					return
+				}
 			}
 
 			uc, ok := opts.authenticateUser(r)
