@@ -69,7 +69,7 @@ Per-invoker metering is only correct if the invoker key is stable across request
 # #554: define final OpenRails permission catalog for public, org-treasury, and merchant routes
 
 **Completed:** no
-**Status:** IN_PROGRESS 2026-06-21 (Claude): the AuthKit FOUNDATION this issue needs is DONE and SHIPPED — `merchant:*` is no longer a "rename", it is a NEW app-defined namespace AuthKit supports as of **authkit v0.44.0** (issue authkit#100, committed `24d383b` + tagged + pushed). OpenRails consumes the RELEASED version: `go.mod` bumped to `authkit v0.44.0`, the local-dev `go.work` removed, and the org owner opted into owning the namespace (`OwnerOwnsAppResources: true` in `internal/controlplane/service.go`). Validated: OpenRails builds + cross-merchant-isolation integration suite + controlplane tests green against released v0.44.0. So defining `merchant:*` perms will NOT lock owners out. REMAINING (this issue): swap the catalog constants in `internal/controlplane/catalog.go` from `org:*` to the collapsed `merchant:*` set + `org:spend-delegations:*`, and re-gate the routes that reference them. NOTE: the catalog rename is COUPLED to #555's route recut — the same old perm maps to DIFFERENT merchant perms per route (e.g. `org:credits:read` -> `merchant:customers:read` for a balance read vs `merchant:admissions:create` on the admission path), so the perm->route mapping must be done WITH the route move, not as a standalone catalog swap. Left for the #554+#555 unit. ORIGINAL: define the complete OpenRails permission vocabulary from the planned route model. Cut permissions that do not bind to a planned route and collapse fine-grained splits into the smallest useful role boundaries. Merchant-resource permissions use `merchant:*`, granted/evaluated in the AuthKit org scope that owns the merchant. Supersedes the rough "Initial OpenRails Platform/Org-Local Permissions" list inside #552.
+**Status:** IN_PROGRESS 2026-06-21: HARD CUT. OpenRails defines `merchant:*` permissions plus only the new OpenRails org-customer treasury permissions `org:spend-delegations:read|update`. The old pre-554 OpenRails `org:*` route permissions (`org:credits:*`, `org:billing:*`, `org:entitlements:*`, `org:catalog:*`, etc.) are not aliases, are not cataloged, and must not satisfy any gate. AuthKit still owns its native `org:*` model (`org:*` owner grant, org membership/roles) and `platform:*`; OpenRails only expands that model with its app-defined `merchant:*` namespace and the specific `org:spend-delegations:*` permissions. AuthKit support is shipped in `authkit v0.44.0` via `OwnerOwnsAppResources`. Current code state: `internal/controlplane/catalog.go` contains only the 17 coarse `merchant:*` permissions + `org:spend-delegations:*`; route/test references have been moved to canonical `merchant:*` constants; deprecated source-compat permission aliases were deleted. Remaining work is route-bucket coverage under #555/#557, not old-permission compatibility.
 
 ## Model
 
@@ -148,9 +148,9 @@ Merged permission mapping:
 - [x] Replace #552's rough initial permission list with this catalog. DONE: `internal/controlplane/catalog.go` `catalogEntries` is now exactly the 17-perm `merchant:*` + `org:spend-delegations:*` set.
 - [x] Add these permission definitions to the OpenRails AuthKit permission catalog. DONE: seeded via `Catalog()` -> `core.Config.Permissions`; bootstrap admin/operator role gets them via `OperatorRolePermissions()`; org owner auto-holds `merchant:*` via authkit#100.
 - [x] Delete old planned permissions that have no route: no org-customer `billing`/`checkout`/`payment-methods`/`subscriptions` perms exist; the only org-customer perms are `org:spend-delegations:read|update`.
-- [x] Rename merchant-resource permission constants/docs/tests from `org:*` to `merchant:*`, while keeping the AuthKit scope check tied to the owning org. DONE via the canonical `merchant:*` values; the old constant IDENTIFIERS remain as deprecated source-compat aliases (so every gate STRING is `merchant:*`); precise per-route fine-graining + alias removal land with #555. `internal/auth/policy/admin.go` mirror updated too.
+- [x] Rename merchant-resource permission constants/docs/tests from old OpenRails `org:*` route permissions to canonical `merchant:*`, while keeping the AuthKit scope check tied to the owning org. HARD CUT: no deprecated source-compat permission aliases remain.
 - [x] **AUTHZ-CRITICAL — found + RESOLVED 2026-06-20 (Claude):** AuthKit's prebuilt `owner` role holds `OrgOwnerGrant = "org:*"`, which is namespace-anchored (`permMatches`): `org:*` covers `org:<resource>:<action>` ONLY and can NEVER reach `merchant:*`. So renaming merchant perms to `merchant:*` without also granting the owner the `merchant:` namespace would **silently lock every merchant owner out of all merchant operations**. RESOLUTION: fixed in AuthKit as opt-in **#100** — new `Config.OwnerOwnsAppResources bool` makes the prebuilt `owner` (and the owner-role-minted bootstrap admin) auto-own every app-declared namespace (`merchant:*`; future TensorHub `endpoint:*`/`repo:*`/`dataset:*`) in addition to `org:*`; `EnsureOwnerGrants` reconciles pre-existing orgs. OpenRails sets the flag true in `internal/controlplane/service.go` (consumed via a gitignored `go.work` -> local `/home/fidika/authkit`). Proven end-to-end: authkit `TestOwnerHoldsAppNamespaceEndToEnd` (owner holds `merchant:*`, still cannot reach `platform:`) + full authkit `core` suite + OpenRails cross-merchant-isolation & auth-boundary integration suites, all green against local authkit. Guard `TestCatalogPermissionsCoveredByOwnerGrant` relaxed to the surviving invariant: every catalog perm must be namespaced and must never be `platform:`.
-- [x] Collapse old fine-grained merchant permissions into the smaller set above. DONE: the old `credits`/`entitlements`/`product_access`/`secrets`/`configuration`/`metrics`/`billing` perms now alias into the 17 coarse merchant perms (e.g. balance/entitlement/product-access/payment/subscription reads -> `merchant:customers:read`; secrets:* -> `merchant:payment-providers:read|update`; metrics -> `merchant:usage:read`; spend -> folded into `merchant:admissions:create`).
+- [x] Collapse old fine-grained merchant permissions into the smaller set above. HARD CUT: gates now use the coarse `merchant:*` constants directly; old `credits`/`entitlements`/`product_access`/`secrets`/`configuration`/`metrics`/`billing` permission names are not accepted or aliased.
 - [ ] Map every planned `/v1/me/*` route to authenticated personal self-access and every planned `/v1/orgs/:org_id/*` route to one of the org customer permissions above.
 - [ ] Map every planned `/v1/merchant/*` route to one merchant permission above.
 - [ ] Add tests proving individual self-access does not require org permissions but org-scoped treasury access does.
@@ -817,7 +817,7 @@ Rules:
 - [ ] Rename merchant-local permission constants/routes/docs to the chosen org-local OpenRails permission names where needed.
 - [ ] Ensure standalone mode checks the bundled AuthKit control plane for org-local OpenRails merchant permissions.
 - [ ] Ensure embedded mode checks the same permission names from the host/AuthKit principal mapping.
-- [ ] Move merchant-owned `/v1/service/*` routes to `/v1/merchant/*`; keep only a temporary compatibility alias if downstreams still require it.
+- [ ] Move merchant-owned `/v1/service/*` routes to `/v1/merchant/*`; hard cut the old paths, no compatibility aliases.
 - [ ] Make `/v1/merchant/*` routes accept every supported credential type that resolves to the owning org/merchant and required permission: logged-in user, delegated JWT, self-service/browser JWT with org authority, and API key.
 - [ ] Replace route-level "service credential required" assumptions with a shared principal resolver for merchant routes.
 - [ ] Remove nested `/admin` naming from merchant-owned routes; use resource paths such as `/v1/merchant/subscriptions/:id`, with permissions deciding who may call them.
@@ -828,13 +828,13 @@ Rules:
 - [ ] Separate merchant route registration by deployment mode: standalone mounts merchant HTTP lookup APIs; embedded exposes the same operations primarily through the Go interface and avoids unnecessary host-internal HTTP routes.
 - [ ] Replace/augment embedded `IncludeUser`, `IncludeAdmin`, `IncludeWebhooks` booleans with explicit named route sets or presets so hosts can see what should be mounted.
 - [ ] Make embedded defaults exclude merchant host-internal HTTP lookup routes; provide an opt-in route set for HTTP parity.
-- [ ] Audit Doujins, Tensorhub, and Cozy Art usage before removing compatibility aliases; expected common needs are account balance, check/list entitlements for JWT/auth, check/list product access, and Tensorhub `Admit`.
+- [ ] Update Doujins, Tensorhub, and Cozy Art in lockstep for the hard cut; expected common needs are account balance, check/list entitlements for JWT/auth, check/list product access, and Tensorhub `Admit`.
 - [ ] Recut Tensorhub's OpenRails dependency into explicit admission, policy-sync, and admin-funding/reporting Go interfaces; keep HTTP only for standalone/remote mode.
 - [ ] Make admission batch-native: one `POST /v1/merchant/admissions` endpoint and one Go method that both accept an item array; no separate single-admit route.
 - [ ] Replace Tensorhub's broad `/v1/service/*` expectations with the smaller `/v1/merchant/*` route set above.
 - [ ] Remove or compatibility-gate Tensorhub-unused service routes: `budget`, merchant configuration read, `abuse-usage`, credit-limit read, direct credit withdraw, transaction lookup, account settings, and generic credit transactions.
 - [ ] Keep OpenRails invoicing, payment processor state, and arrears charging internal to OpenRails; Tensorhub should only configure limits/policies and consume ledger/admission results.
-- [ ] Fold the existing delegated `/v1/admin/*` merchant-admin routes into the resource-named `/v1/merchant/*` surface; keep compatibility aliases only if downstreams still need them.
+- [ ] Fold the existing delegated `/v1/admin/*` merchant-admin routes into the resource-named `/v1/merchant/*` surface; hard cut the old admin paths.
 - [ ] Keep platform merchant provisioning routes separate from merchant self-admin routes: platform can create/delete/export/disable merchants; merchant admins can only manage their own merchant settings, payment providers, catalog, and customers.
 - [ ] Replace direct merchant secret-key CRUD with payment-provider configuration routes; store individual credentials as write-only fields under the provider account internally.
 - [ ] Cut generic `/v1/merchant/configuration`; use `/v1/merchant/settings` for merchant-owned settings and `/v1/merchant/payment-providers/*` for provider configuration.
@@ -904,7 +904,7 @@ Delete `/v1/service/*` and mount merchant-owned operations under resource-named 
 
 ## Tasks
 
-- [ ] Add a shared merchant-principal resolver that maps logged-in user / delegated JWT / browser-org JWT / API key to `(org, merchant, permissions)`.
+- [x] Add a shared merchant-principal resolver that maps logged-in user / delegated JWT / browser-org JWT / API key to `(org, merchant, permissions)`. DONE: `MerchantPrincipalRequired` (`internal/http/middleware/ginmw/merchant_principal.go`) — fail-closed precedence (API-key-shaped -> service credential only; JWT -> programmatic then delegated; no bearer -> live user session), all four paths -> one `Principal` + pinned merchant. Unit tests cover every path + the no-fall-through invariant + no-credential 401. (commit f4a70655)
 - [ ] Resolve authority CONTEXT, not just identity: since org↔merchant is 1:1 (#527), one org id can act as a **merchant-owner** (merchant routes) AND as a **paying customer** of another merchant (treasury/customer routes). Bind the acting context to the route's resource boundary; a merchant-owner grant must never satisfy a customer/treasury gate, or vice versa, on the same org. Add a confused-deputy regression test. Mirror this contract in #557.
 - [ ] Delete the surviving #553 compatibility alias as part of this cut: remove the `/v1/service/tier` route alias (the trust-tier read moves onto the new surface); coordinate the matching `tier` Go-client field removal with #558.
 - [ ] Remove the credential-type-split auth middleware; gate `/v1/merchant/*` on the resolved principal + required `merchant:*` permission.
@@ -1524,23 +1524,6 @@ This should integrate with the provider capability and routing work in #288, #29
 - [ ] Add tests with a mocked Hyperswitch server/client for tokenization/setup, saved-method charge, failure mapping, webhook signature verification, idempotency, merchant isolation, and no-sensitive-card-data persistence/logging.
 - [ ] Validate with focused Go tests for provider/checkout/vault/webhook code, compile-only full package coverage, `task build`, and an optional live sandbox/self-hosted smoke test when credentials or local Hyperswitch are available.
 
----
-
-# #331: Tune card-abuse rate-limit windows (#371): 15-min 3->captcha/6->block, 24h 10->block per user+ip, keep global 100->attack-mode
-
-**Completed:** no
-
-The #371 CardAbuseGuard (internal/modules/abuse/card_abuse.go), middleware subject-key plumbing, checkout hook, and integration tests already landed on master. This refines the policy to the agreed windows. Card-testing is defined by volume over time, so pair a short BURST window with a rolling DAILY cap, both keyed per user AND per IP. Final thresholds (user-specified): a 15-MINUTE rolling window per (user+ip) where 3 failed card charges -> future attempts require captcha, and 6 failed charges -> cut off (blocked) for the remainder of that 15-min window; PLUS a 24-HOUR rolling cap of 10 failed charges per (user+ip) -> cut off for the day. Keep the existing site-wide GLOBAL cap of 100 failed charges / 24h -> attack mode (captcha for every request from everyone).
-
-**Tasks:**
-- [ ] DefaultCardAbuseConfig: short window 15 min, CaptchaAfter=3, BlockAfter=6 (block lasts the remainder of the window)
-- [ ] Add a second per-subject rolling 24h window with a cap of 10 failed charges -> block; the Limiter already returns multiple windows, so configure the daily window + add the second-window check in RecordChargeFailure
-- [ ] Keep both subject keys (user: and ip:) so a logged-in attacker rotating cards and a bot rotating accounts behind one IP are both caught
-- [ ] Keep the global 24h/100 attack-mode (captcha for everyone) unchanged
-- [ ] Extend the abuse integration tests (real Redis) to cover the 15-min 3/6 thresholds and the 24h/10 daily cap; go build ./... + go vet ./... clean
-
----
-
 # #333: admin-e2e-suite-needs-control-plane-wiring
 
 **Completed:** no
@@ -1560,12 +1543,3 @@ NOTE: the admin-METRICS tests' 'Table test_analytics.daily_metrics does not exis
 - [ ] Provision admin test users in authkit profiles.users matching the JWT subs (or mint tokens from created users' ids); AddMember + AssignRole openrails:admin via control plane / authkit core APIs.
 - [ ] Re-run tests/admin_*.go on a fresh env; remove vestigial operatorAdminClaims if green.
 - [ ] (env hygiene) consider failing loudly or re-validating when the migratekit CH ledger says applied but the CH database lacks the tables (stale-ledger detection).
-
----
-
-# #340: e2e: 5 tier/lifecycle tests fail on master (pre-existing, surfaced by #334 verification)
-
-**Completed:** no
-**Status:** open (filed 2026-06-10 during #334 verification)
-
-TestTierGroupDetection, TestEntitlementChangesOnTierChange, TestScheduledDowngrade, TestRenewMembershipDuplicateTransactionIsNoOp, TestLifecycleServiceUsesMockClock fail identically on origin/master (bun era) and on the sqlc-migration branch — verified via worktree runs on 2026-06-10 during #334 final verification, so they are NOT migration regressions. Observed modes: duplicate key on uq_subscriptions_tenant_subject_tier_group_active across subtests (CleanupSubscriptionsForUser resolves non-UUID test user ids to uuid.Nil via identity.TenantSubjectIDFromString, so per-user cleanup deletes nothing), and mock-clock/lifecycle assertion failures. Distinct from the admin_* family (#333). Suspect shared-suite state + the broken per-user cleanup; fix the cleanup to resolve the tenant subject through billing.tenant_subjects (issuer 'openrails:legacy-user') instead of pure-parsing.
