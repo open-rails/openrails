@@ -96,7 +96,10 @@ func UserSessionAdminPrincipalRequired(checker AdminPermissionChecker) gin.Handl
 			Subject:        strings.TrimSpace(uc.UserID),
 			can: func(ctx context.Context, perm string) bool {
 				perm = strings.TrimSpace(perm)
-				if !strings.HasPrefix(perm, "org:") {
+				// Org-plane namespaces only: AuthKit org-management (`org:`) and
+				// OpenRails app-defined merchant resources (`merchant:`, #554). The
+				// separate `platform:` layer is never reachable from an org session.
+				if !strings.HasPrefix(perm, "org:") && !strings.HasPrefix(perm, "merchant:") {
 					return false
 				}
 				allowed, err := checker.HasAdminPermission(ctx, uc.Org, uc.UserID, perm)

@@ -31,65 +31,89 @@ import (
 // layers; OpenRails defines host resources inside `org:`.
 type Permission = authcore.PermissionDef
 
-// OpenRails permissions. `org:` permissions are merchant-local AuthKit org
-// permissions. Customer self-service routes do not carry OpenRails `self:`
-// grants: the authenticated subject is the route target.
+// OpenRails permissions (#554). Merchant-resource permissions live in the OpenRails
+// `merchant:` namespace: they are granted/evaluated in the AuthKit org that OWNS
+// the merchant (org<->merchant 1:1), and the org owner auto-holds `merchant:*` via
+// authkit OwnerOwnsAppResources (authkit#100). Org-customer treasury permissions
+// live in `org:spend-delegations:*` (the payer org sharing its OWN balance).
+// Customer self-service (`/v1/me/*`) carries no OpenRails grant: the authenticated
+// subject is the route target. The catalog is COARSE — one permission per real
+// role boundary, not per route.
 const (
-	// PermAdmin is kept as a deprecated source-compatibility alias for the
-	// merchant-owner apex grant. It is NOT a magic permission and does not satisfy
-	// arbitrary checks by itself.
+	// PermAdmin is a deprecated source-compatibility alias for the merchant-owner
+	// apex grant. It is NOT a magic permission and does not satisfy arbitrary checks.
 	PermAdmin = authcore.OrgOwnerGrant
 
-	PermCreditsRead  = "org:credits:read"
-	PermCreditsWrite = "org:credits:update"
+	// --- Canonical #554 merchant catalog ---
+	PermMerchantSettingsRead           = "merchant:settings:read"
+	PermMerchantSettingsUpdate         = "merchant:settings:update"
+	PermMerchantPaymentProvidersRead   = "merchant:payment-providers:read"
+	PermMerchantPaymentProvidersUpdate = "merchant:payment-providers:update"
+	PermMerchantCatalogRead            = "merchant:catalog:read"
+	PermMerchantCatalogUpdate          = "merchant:catalog:update"
+	PermMerchantCustomersRead          = "merchant:customers:read"
+	PermMerchantCustomersUpdate        = "merchant:customers:update"
+	PermMerchantPaymentsRead           = "merchant:payments:read"
+	PermMerchantPaymentsRefund         = "merchant:payments:refund"
+	PermMerchantSubscriptionsRead      = "merchant:subscriptions:read"
+	PermMerchantSubscriptionsUpdate    = "merchant:subscriptions:update"
+	PermMerchantAdmissionsCreate       = "merchant:admissions:create"
+	PermMerchantUsageRead              = "merchant:usage:read"
+	PermMerchantRepairAlertsRead       = "merchant:repair-alerts:read"
 
-	// PermCreditsSpend remains a domain action: spending payer balance is not the
-	// same operation as updating credit records.
-	PermCreditsSpend = "org:credits:spend"
+	// --- Org-customer treasury (NOT merchant-owner): scoped to the org named in
+	// /v1/orgs/:org_id/spend-delegations. A personal customer balance is never
+	// delegable. ---
+	PermOrgSpendDelegationsRead   = "org:spend-delegations:read"
+	PermOrgSpendDelegationsUpdate = "org:spend-delegations:update"
 
-	PermEntitlementsRead = "org:entitlements:read"
-
-	PermCatalogWrite = "org:catalog:update"
-
-	PermPaymentsRefund      = "org:payments:refund"
-	PermSubscriptionsCancel = "org:subscriptions:update"
-
-	PermMerchantBillingRead        = "org:billing:read"
-	PermMerchantEntitlementsWrite  = "org:entitlements:update"
-	PermMerchantProductAccessWrite = "org:product_access:update"
-	PermMerchantCreditsWrite       = PermCreditsWrite
-	PermMerchantPaymentsWrite      = "org:payments:update"
-	PermMerchantSubscriptionsWrite = PermSubscriptionsCancel
-	PermMerchantConfigurationRead  = "org:configuration:read"
-	PermMerchantConfigurationWrite = "org:configuration:update"
-	PermMerchantSecretsList        = "org:secrets:read"
-	PermMerchantSecretsWrite       = "org:secrets:update"
-	PermMerchantSecretsDelete      = "org:secrets:delete"
-	PermMerchantSecretsTest        = "org:secrets:test"
-	PermMerchantMetricsRead        = "org:metrics:read"
+	// --- Deprecated source-compat aliases (#554): the old constant identifiers now
+	// resolve to their collapsed `merchant:*` value, so existing routes/tests
+	// compile unchanged while every gate STRING becomes merchant:*. New code uses
+	// the canonical names above. The precise per-route fine-graining + alias
+	// removal land with the /v1/service -> /v1/merchant move (#555). ---
+	PermCreditsRead                = PermMerchantCustomersRead
+	PermCreditsWrite               = PermMerchantCustomersUpdate
+	PermCreditsSpend               = PermMerchantAdmissionsCreate
+	PermEntitlementsRead           = PermMerchantCustomersRead
+	PermCatalogWrite               = PermMerchantCatalogUpdate
+	PermPaymentsRefund             = PermMerchantPaymentsRefund
+	PermSubscriptionsCancel        = PermMerchantSubscriptionsUpdate
+	PermMerchantBillingRead        = PermMerchantCustomersRead
+	PermMerchantEntitlementsWrite  = PermMerchantCustomersUpdate
+	PermMerchantProductAccessWrite = PermMerchantCustomersUpdate
+	PermMerchantCreditsWrite       = PermMerchantCustomersUpdate
+	PermMerchantPaymentsWrite      = PermMerchantCustomersUpdate
+	PermMerchantSubscriptionsWrite = PermMerchantSubscriptionsUpdate
+	PermMerchantConfigurationRead  = PermMerchantSettingsRead
+	PermMerchantConfigurationWrite = PermMerchantSettingsUpdate
+	PermMerchantSecretsList        = PermMerchantPaymentProvidersRead
+	PermMerchantSecretsWrite       = PermMerchantPaymentProvidersUpdate
+	PermMerchantSecretsDelete      = PermMerchantPaymentProvidersUpdate
+	PermMerchantSecretsTest        = PermMerchantPaymentProvidersUpdate
+	PermMerchantMetricsRead        = PermMerchantUsageRead
 )
 
 // catalogEntries is the canonical ordered list of OpenRails permissions with
 // human-readable descriptions. Keep ordering stable so seeding is deterministic.
 var catalogEntries = []Permission{
-	{Name: PermCreditsRead, Description: "Read credit balances and transactions."},
-	{Name: PermCreditsWrite, Description: "Deposit, withdraw, hold, capture, and release credits."},
-	{Name: PermCreditsSpend, Description: "Bill (draw down) a customer's balance on the hot path: authorize, hold, and capture against the payer's account (issue #246)."},
-	{Name: PermEntitlementsRead, Description: "Read/enrich entitlements."},
-	{Name: PermCatalogWrite, Description: "Create and update products and prices."},
-	{Name: PermPaymentsRefund, Description: "Refund payments."},
-	{Name: PermSubscriptionsCancel, Description: "Cancel subscriptions on behalf of the operator."},
-	{Name: PermMerchantBillingRead, Description: "Merchant admin: read customer billing detail."},
-	{Name: PermMerchantEntitlementsWrite, Description: "Merchant admin: update customer entitlements."},
-	{Name: PermMerchantProductAccessWrite, Description: "Merchant admin: update customer product access."},
-	{Name: PermMerchantPaymentsWrite, Description: "Merchant admin: update payment state."},
-	{Name: PermMerchantConfigurationRead, Description: "Merchant admin: read merchant profile and operational configuration."},
-	{Name: PermMerchantConfigurationWrite, Description: "Merchant admin: update merchant profile and operational configuration."},
-	{Name: PermMerchantSecretsList, Description: "Merchant admin: list configured merchant-secret status without plaintext."},
-	{Name: PermMerchantSecretsWrite, Description: "Merchant admin: create or rotate write-only merchant secrets."},
-	{Name: PermMerchantSecretsDelete, Description: "Merchant admin: delete merchant secrets."},
-	{Name: PermMerchantSecretsTest, Description: "Merchant admin: validate merchant secrets without reading plaintext."},
-	{Name: PermMerchantMetricsRead, Description: "Merchant admin: read merchant analytics metrics."},
+	{Name: PermMerchantSettingsRead, Description: "Merchant: read merchant-owned settings (display, checkout, admission policy)."},
+	{Name: PermMerchantSettingsUpdate, Description: "Merchant: update merchant-owned settings."},
+	{Name: PermMerchantPaymentProvidersRead, Description: "Merchant: read configured payment-provider status (never plaintext)."},
+	{Name: PermMerchantPaymentProvidersUpdate, Description: "Merchant: configure/disable payment providers; credentials validated before storage."},
+	{Name: PermMerchantCatalogRead, Description: "Merchant: read catalog products, prices, and drift."},
+	{Name: PermMerchantCatalogUpdate, Description: "Merchant: create/update products and prices, publish catalog, refresh drift."},
+	{Name: PermMerchantCustomersRead, Description: "Merchant: read customer profile, balance, transactions, entitlements, product access, payments, and subscriptions."},
+	{Name: PermMerchantCustomersUpdate, Description: "Merchant support writes: entitlement/product-access grants, balance adjustments, credit limits, off-channel payments, payment-method removal."},
+	{Name: PermMerchantPaymentsRead, Description: "Merchant: search and read merchant payments."},
+	{Name: PermMerchantPaymentsRefund, Description: "Merchant: refund a payment."},
+	{Name: PermMerchantSubscriptionsRead, Description: "Merchant: search and read subscriptions."},
+	{Name: PermMerchantSubscriptionsUpdate, Description: "Merchant: cancel or update a subscription."},
+	{Name: PermMerchantAdmissionsCreate, Description: "Merchant: admission lifecycle — admit, capture, release, and report wasted spend (machine hot path)."},
+	{Name: PermMerchantUsageRead, Description: "Merchant: read usage/revenue rollups and analytics metrics."},
+	{Name: PermMerchantRepairAlertsRead, Description: "Merchant: read ledger/provider repair alerts."},
+	{Name: PermOrgSpendDelegationsRead, Description: "Org customer: read the org's balance-sharing (spend-delegation) policy."},
+	{Name: PermOrgSpendDelegationsUpdate, Description: "Org customer: replace the org's balance-sharing (spend-delegation) policy."},
 }
 
 // merchantCatalog is the set of merchant-admin permissions accepted on a FEDERATED
@@ -98,39 +122,45 @@ var catalogEntries = []Permission{
 // outside merchantCatalog is rejected: browser tokens must never carry
 // operator/server-to-server grants.
 var merchantCatalog = map[string]struct{}{
-	PermMerchantBillingRead:        {},
-	PermMerchantEntitlementsWrite:  {},
-	PermMerchantProductAccessWrite: {},
-	PermCatalogWrite:               {},
-	PermMerchantCreditsWrite:       {},
-	PermMerchantPaymentsWrite:      {},
-	PermMerchantSubscriptionsWrite: {},
-	PermMerchantConfigurationRead:  {},
-	PermMerchantConfigurationWrite: {},
-	PermMerchantSecretsList:        {},
-	PermMerchantSecretsWrite:       {},
-	PermMerchantSecretsDelete:      {},
-	PermMerchantSecretsTest:        {},
-	PermMerchantMetricsRead:        {},
+	PermMerchantSettingsRead:           {},
+	PermMerchantSettingsUpdate:         {},
+	PermMerchantPaymentProvidersRead:   {},
+	PermMerchantPaymentProvidersUpdate: {},
+	PermMerchantCatalogRead:            {},
+	PermMerchantCatalogUpdate:          {},
+	PermMerchantCustomersRead:          {},
+	PermMerchantCustomersUpdate:        {},
+	PermMerchantPaymentsRead:           {},
+	PermMerchantPaymentsRefund:         {},
+	PermMerchantSubscriptionsRead:      {},
+	PermMerchantSubscriptionsUpdate:    {},
+	PermMerchantUsageRead:              {},
+	PermMerchantRepairAlertsRead:       {},
+	PermOrgSpendDelegationsRead:        {},
+	PermOrgSpendDelegationsUpdate:      {},
 }
 
-// MerchantCatalogNames returns the merchant-admin permission names in catalog order.
+// MerchantCatalogNames returns the browser-safe merchant/treasury permission names
+// in catalog order. It EXCLUDES merchant:admissions:create — the machine hot-path
+// admit grant is never carried on a browser delegated token.
 func MerchantCatalogNames() []string {
 	return []string{
-		PermMerchantBillingRead,
-		PermMerchantEntitlementsWrite,
-		PermMerchantProductAccessWrite,
-		PermCatalogWrite,
-		PermMerchantCreditsWrite,
-		PermMerchantPaymentsWrite,
-		PermMerchantSubscriptionsWrite,
-		PermMerchantConfigurationRead,
-		PermMerchantConfigurationWrite,
-		PermMerchantSecretsList,
-		PermMerchantSecretsWrite,
-		PermMerchantSecretsDelete,
-		PermMerchantSecretsTest,
-		PermMerchantMetricsRead,
+		PermMerchantSettingsRead,
+		PermMerchantSettingsUpdate,
+		PermMerchantPaymentProvidersRead,
+		PermMerchantPaymentProvidersUpdate,
+		PermMerchantCatalogRead,
+		PermMerchantCatalogUpdate,
+		PermMerchantCustomersRead,
+		PermMerchantCustomersUpdate,
+		PermMerchantPaymentsRead,
+		PermMerchantPaymentsRefund,
+		PermMerchantSubscriptionsRead,
+		PermMerchantSubscriptionsUpdate,
+		PermMerchantUsageRead,
+		PermMerchantRepairAlertsRead,
+		PermOrgSpendDelegationsRead,
+		PermOrgSpendDelegationsUpdate,
 	}
 }
 

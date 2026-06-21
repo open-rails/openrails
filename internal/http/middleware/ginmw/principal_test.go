@@ -88,11 +88,13 @@ func TestPrincipalPermissionClassesDoNotBleedAcrossCredentialTypes(t *testing.T)
 	delegatedPrincipal := principalFromDelegated(&controlplane.ResolvedDelegated{
 		MerchantID:       dbtest.TestMerchantID,
 		DelegatedSubject: "user-1",
-		Permissions:      []string{controlplane.PermMerchantBillingRead, controlplane.PermCreditsRead, "platform:orgs:update"},
+		Permissions:      []string{controlplane.PermMerchantCustomersRead, controlplane.PermMerchantAdmissionsCreate, "platform:orgs:update"},
 	}, CredentialDelegatedUser)
 	require.NotNil(t, delegatedPrincipal)
 	require.Equal(t, "user-1", delegatedPrincipal.Subject)
-	require.True(t, delegatedPrincipal.Can(ctx, controlplane.PermMerchantBillingRead))
-	require.False(t, delegatedPrincipal.Can(ctx, controlplane.PermCreditsRead))
+	require.True(t, delegatedPrincipal.Can(ctx, controlplane.PermMerchantCustomersRead))
+	// merchant:admissions:create is the machine hot-path grant — even if a token
+	// claims it, it is NOT browser-delegatable, so the delegated principal is denied.
+	require.False(t, delegatedPrincipal.Can(ctx, controlplane.PermMerchantAdmissionsCreate))
 	require.False(t, delegatedPrincipal.Can(ctx, "platform:orgs:update"))
 }

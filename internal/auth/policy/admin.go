@@ -7,9 +7,9 @@ import "context"
 const PermAdmin = "org:*"
 
 // PermCatalogWrite is the narrow merchant catalog mutation capability. It
-// mirrors controlplane.PermCatalogWrite without making gin-free route
-// registration import the control-plane package.
-const PermCatalogWrite = "org:catalog:update"
+// mirrors controlplane.PermCatalogWrite (== merchant:catalog:update, #554)
+// without making gin-free route registration import the control-plane package.
+const PermCatalogWrite = "merchant:catalog:update"
 
 // AdminPermissionChecker is the live AuthKit effective-permission check the
 // control plane provides for merchant-local `org:` permissions.
