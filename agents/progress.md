@@ -918,7 +918,7 @@ Delete `/v1/service/*` and mount merchant-owned operations under resource-named 
 - [ ] Mirror those as Go library methods (`ListEntitlements`, `HasEntitlement`, `ListEntitlementsBatch`, `ListProductAccess`, `HasProductAccess`, `GetBalance`) with HTTP-aligned names/shapes.
 - [ ] Replace `POST /v1/service/customers/by-external-subject/entitlements` with `POST /v1/merchant/customers/entitlements:batch`; drop `issuer` (merchant/org from auth, subjects from body).
 - [ ] Split customer-forward lookups from directory/filter reverse lookups (`GET /v1/merchant/entitlements/:name/customers`) in both HTTP and Go.
-- [ ] Update Doujins / Tensorhub / Cozy Art call sites to the new paths/principal; bump in lockstep.
+- [~] Update Doujins / Tensorhub / Cozy Art call sites to the new paths/principal; bump in lockstep. ASSESSED 2026-06-21: all three use the OpenRails Go SDK (`openrails.NewRemote`), NOT raw `/v1/service` paths — the `/v1/service`->`/v1/merchant` move is internal to `remote.go`, so no path edits in consumers. The only breaking SDK signature is `Client.ListActiveEntitlements` (dropped `issuer`). **Tensorhub** calls Admit/Capture/Release/GetTier/Deposit/... (all unchanged) and does NOT call `ListActiveEntitlements` -> ZERO code changes, a clean `go.mod` bump only. **Doujins/Cozy-Art** must drop the `issuer` arg IFF they call `ListActiveEntitlements`. REMAINING (deploy step, not code): tag an OpenRails release (master = v0.47.0 + #554/#555 + in-flight #559-561; on authkit v0.44.0) and bump each consumer's `go.mod`.
 - [ ] Tests: each credential type passes the same gate; `issuer` is rejected; unknown subjects return `[]`; HTTP and Go return matching shapes.
 
 ## Acceptance
