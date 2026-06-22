@@ -41,6 +41,15 @@ type Options struct {
 	// delegated path on merchant routes (#555/#564). Permissions are bounded by
 	// AuthKit to the signing remote application's stored authority.
 	DelegatedResolver DelegatedResolver
+
+	// DelegatedAuthenticator is the IN-PROCESS host identity seam (#565): when
+	// OpenRails runs as a subsystem of a host application (embedded, no control
+	// plane), the host verifies its OWN credential and returns the explicitly
+	// mapped principal. In-process => the host is TRUSTED and its supplied
+	// permissions are authoritative — the same trust the gin self surface already
+	// grants via DelegatedPrincipalRequired. nil disables this path (standalone
+	// hosts use the control-plane resolvers above instead).
+	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 }
 
 type ServiceCredentialResolver interface {
@@ -275,6 +284,40 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 						return
 					}
 				}
+			}
+
+			// In-process host-delegated principal (#565): an embedded host's
+			// DelegatedAuthenticator verifies its OWN credential and returns the
+			// explicitly mapped principal. In-process => the host is trusted and its
+			// permissions are authoritative (same trust as the gin self surface's
+			// DelegatedPrincipalRequired); gate purely on permission, no control plane.
+			if opts.DelegatedAuthenticator != nil && r.Request != nil {
+				principal, err := opts.DelegatedAuthenticator.AuthenticateDelegated(r.Request.Context(), r.Request)
+				if err != nil {
+					r.AbortJSON(http.StatusUnauthorized, billingauth.UnauthenticatedMessage(err))
+					return
+				}
+				resolved, verr := controlplane.ResolvedDelegatedFromHostPrincipal(principal)
+				if verr != nil {
+					r.AbortJSON(http.StatusUnauthorized, "delegated_principal_invalid")
+					return
+				}
+				if !resolved.HasPermission(perm) {
+					r.AbortJSON(http.StatusForbidden, "permission_required")
+					return
+				}
+				r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), resolved.MerchantID))
+				r.Set("openrails.merchant_id", resolved.MerchantID)
+				r.Set(httphandlers.MerchantRoutePrincipalContextKey, true)
+				r.SetUserContext(billingauth.UserContext{
+					UserID:        resolved.DelegatedSubject,
+					Email:         resolved.Email,
+					EmailVerified: resolved.EmailVerified,
+					Username:      resolved.Username,
+					Org:           resolved.Merchant,
+				})
+				next(r)
+				return
 			}
 
 			if opts.Authenticator == nil {

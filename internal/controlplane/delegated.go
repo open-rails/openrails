@@ -7,9 +7,12 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/authkit/authbase"
 	authcore "github.com/open-rails/authkit/core"
 	authhttp "github.com/open-rails/authkit/http"
 
+	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -68,16 +71,60 @@ type ResolvedDelegated struct {
 
 // HasPermission reports whether the resolved delegated token grants perm.
 //
-// Unlike API keys, delegated browser tokens do NOT honor a broad admin grant:
-// every permission check is an exact-string match against what the token carries.
+// Glob-aware, identical to every other credential type (#565): a granted token
+// covers perm via AuthKit's namespace-anchored glob semantics, so a minter that
+// puts `merchant:*` on a token covers `merchant:catalog:update`, while an exact
+// grant still matches exactly. The minter chooses exact vs glob (a glob may
+// expose more than strictly necessary — the minter's call, not a gate rule).
 func (r *ResolvedDelegated) HasPermission(perm string) bool {
-	perm = strings.TrimSpace(perm)
-	for _, p := range r.Permissions {
-		if p == perm {
+	for _, grant := range r.Permissions {
+		if authbase.PermissionTokenCovers(grant, perm) {
 			return true
 		}
 	}
 	return false
+}
+
+// ResolvedDelegatedFromHostPrincipal validates a host-supplied IN-PROCESS
+// delegated principal (billingauth.DelegatedAuthenticator output) and converts it
+// to ResolvedDelegated. When OpenRails runs as a subsystem the embedding host is
+// TRUSTED (in process), so its supplied permissions are authoritative — no
+// allowlist (#564); merchant + subject must be explicit. Shared by the gin self
+// surface (ginmw) and the gin-free merchant routes so both gate the same way.
+func ResolvedDelegatedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*ResolvedDelegated, error) {
+	if p == nil {
+		return nil, billingauth.ErrDelegatedPrincipalInvalid
+	}
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+	merchantID, err := merchant.ParseID(strings.TrimSpace(p.MerchantID))
+	if err != nil || merchantID.IsZero() {
+		return nil, billingauth.ErrDelegatedPrincipalInvalid
+	}
+	subject := strings.TrimSpace(p.SubjectID)
+	customerID := identity.CustomerIDFromString(subject)
+	if customerID.IsZero() {
+		return nil, billingauth.ErrDelegatedPrincipalInvalid
+	}
+	perms := make([]string, 0, len(p.Permissions))
+	for _, perm := range p.Permissions {
+		if perm = strings.TrimSpace(perm); perm != "" {
+			perms = append(perms, perm)
+		}
+	}
+	return &ResolvedDelegated{
+		Merchant:         strings.TrimSpace(p.MerchantSlug),
+		MerchantID:       merchantID,
+		MerchantSlug:     strings.TrimSpace(p.MerchantSlug),
+		CustomerID:       customerID.UUID(),
+		DelegatedSubject: subject,
+		Issuer:           strings.TrimSpace(p.Issuer),
+		Permissions:      perms,
+		Email:            p.Email,
+		EmailVerified:    p.EmailVerified,
+		Username:         p.Username,
+	}, nil
 }
 
 // ErrDelegatedNotConfigured indicates the control plane has no delegated-token

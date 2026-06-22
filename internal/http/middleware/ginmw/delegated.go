@@ -3,7 +3,6 @@ package ginmw
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	authcore "github.com/open-rails/authkit/core"
@@ -13,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -149,7 +147,7 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.Ha
 			c.Abort()
 			return
 		}
-		resolved, verr := resolvedFromHostPrincipal(principal)
+		resolved, verr := controlplane.ResolvedDelegatedFromHostPrincipal(principal)
 		if verr != nil {
 			response.UnauthorizedWithMessage(c, "delegated_principal_invalid")
 			c.Abort()
@@ -176,46 +174,6 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.Ha
 
 		c.Next()
 	}
-}
-
-// resolvedFromHostPrincipal validates a host-supplied principal and converts it to
-// the *controlplane.ResolvedDelegated shape. The embedding host is trusted (in
-// process), so its supplied permissions are authoritative — no allowlist (#564);
-// merchant + subject must be explicit.
-func resolvedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*controlplane.ResolvedDelegated, error) {
-	if err := p.Validate(); err != nil {
-		return nil, err
-	}
-	tenantID, err := merchant.ParseID(strings.TrimSpace(p.MerchantID))
-	if err != nil || tenantID.IsZero() {
-		return nil, billingauth.ErrDelegatedPrincipalInvalid
-	}
-	subject := strings.TrimSpace(p.SubjectID)
-	customerID := identity.CustomerIDFromString(subject)
-	if customerID.IsZero() {
-		return nil, billingauth.ErrDelegatedPrincipalInvalid
-	}
-	perms := make([]string, 0, len(p.Permissions))
-	for _, perm := range p.Permissions {
-		perm = strings.TrimSpace(perm)
-		if perm == "" {
-			continue
-		}
-		perms = append(perms, perm)
-	}
-
-	return &controlplane.ResolvedDelegated{
-		Merchant:         strings.TrimSpace(p.MerchantSlug),
-		MerchantID:       tenantID,
-		MerchantSlug:     strings.TrimSpace(p.MerchantSlug),
-		CustomerID:       customerID.UUID(),
-		DelegatedSubject: subject,
-		Issuer:           strings.TrimSpace(p.Issuer),
-		Permissions:      perms,
-		Email:            p.Email,
-		EmailVerified:    p.EmailVerified,
-		Username:         p.Username,
-	}, nil
 }
 
 // DelegatedFromGin returns the resolved delegated token attached to the request,

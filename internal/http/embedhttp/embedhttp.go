@@ -58,9 +58,14 @@ type Assembler struct {
 	CaptchaStore              *captcha.ChallengeStore
 	// RDB is the Redis/Garnet client backing the rate-limit counters + captcha
 	// challenge store. nil falls back to per-process in-memory rate-limit windows.
-	RDB                *redis.Client
-	Authenticator      billingauth.Authenticator
-	ConfiguredMerchant merchant.ID
+	RDB           *redis.Client
+	Authenticator billingauth.Authenticator
+	// DelegatedAuthenticator is the in-process host identity seam (#565). When set
+	// (embedded hosts), the merchant routes accept the host's trusted principal and
+	// gate on its permissions — the gin-free counterpart of the self surface's
+	// DelegatedPrincipalRequired. nil for standalone (control-plane resolvers).
+	DelegatedAuthenticator billingauth.DelegatedAuthenticator
+	ConfiguredMerchant     merchant.ID
 }
 
 // FromApp builds an Assembler from the gin-free application graph (the same
@@ -88,6 +93,7 @@ func FromApp(a *app.App) *Assembler {
 		CaptchaStore:              captcha.NewChallengeStore(a.RedisClient),
 		RDB:                       a.RedisClient,
 		Authenticator:             a.Authenticator,
+		DelegatedAuthenticator:    a.DelegatedAuthenticator,
 	}
 	if a.Runtime != nil {
 		asm.ConfiguredMerchant = a.Runtime.ConfiguredMerchant
@@ -125,7 +131,8 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	}
 	if routeSets[RouteSetMerchantAdmin] {
 		adminOpts := httproutes.Options{
-			Authenticator: s.Authenticator,
+			Authenticator:          s.Authenticator,
+			DelegatedAuthenticator: s.DelegatedAuthenticator,
 		}
 		if s.AdminChecker != nil {
 			adminOpts.AdminPermissionChecker = s.AdminChecker
@@ -139,7 +146,8 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	}
 	if routeSets[RouteSetMerchantSettings] {
 		adminOpts := httproutes.Options{
-			Authenticator: s.Authenticator,
+			Authenticator:          s.Authenticator,
+			DelegatedAuthenticator: s.DelegatedAuthenticator,
 		}
 		if s.AdminChecker != nil {
 			adminOpts.AdminPermissionChecker = s.AdminChecker

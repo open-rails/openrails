@@ -146,7 +146,16 @@ services:
         CREATE USER IF NOT EXISTS {CLICKHOUSE_USER} ON CLUSTER openrails
           IDENTIFIED WITH plaintext_password BY '{CLICKHOUSE_PASSWORD}'
           HOST ANY;
+        SQL_EOF
 
+        for i in 1 2 3 4 5; do
+          if clickhouse-client --host clickhouse --user default --password "" --query "SELECT count() FROM system.users WHERE name = '$${BOOTSTRAP_CLICKHOUSE_USER}'" | grep -q 1; then
+            break
+          fi
+          sleep 1
+        done
+
+        cat <<'SQL_EOF' | sed "s/{CLICKHOUSE_USER}/$${BOOTSTRAP_CLICKHOUSE_USER}/g" | clickhouse-client --host clickhouse --user default --password "" --multiquery
         -- Grant full database access WITH GRANT OPTION so user can run migrations
         GRANT ON CLUSTER openrails ALL ON analytics.* TO {CLICKHOUSE_USER} WITH GRANT OPTION;
 

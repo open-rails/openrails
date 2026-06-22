@@ -6,6 +6,7 @@ import (
 
 	"fmt"
 	"regexp"
+	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 
@@ -72,6 +73,7 @@ func runPostgres(ctx context.Context, cfg *config.Config, includeAuthKit bool) e
 		if err != nil {
 			return fmt.Errorf("authkit: load migrations: %w", err)
 		}
+		authMigrations = patchAuthKitAPIKeyRoleMigration(authMigrations)
 		authMigrator := migratekit.NewPostgres(sqlDB, "authkit")
 		if err := authMigrator.ApplyMigrations(ctx, authMigrations); err != nil {
 			return fmt.Errorf("authkit: apply migrations: %w", err)
@@ -112,6 +114,34 @@ func runPostgres(ctx context.Context, cfg *config.Config, includeAuthKit bool) e
 	}
 	log.Info("✓ OpenRails migrations completed successfully")
 	return nil
+}
+
+func patchAuthKitAPIKeyRoleMigration(migrations []migratekit.Migration) []migratekit.Migration {
+	const oldDDL = "ALTER TABLE profiles.service_tokens\n  ADD COLUMN role text NOT NULL;"
+	const patchedDDL = `ALTER TABLE profiles.service_tokens
+  ADD COLUMN IF NOT EXISTS role text;
+
+INSERT INTO profiles.org_roles (org_id, role)
+SELECT DISTINCT org_id, 'owner'
+FROM profiles.service_tokens
+WHERE role IS NULL
+ON CONFLICT (org_id, role) DO NOTHING;
+
+UPDATE profiles.service_tokens
+SET role = 'owner'
+WHERE role IS NULL;
+
+ALTER TABLE profiles.service_tokens
+  ALTER COLUMN role SET NOT NULL;`
+
+	out := make([]migratekit.Migration, len(migrations))
+	copy(out, migrations)
+	for i := range out {
+		if out[i].Name == "007_api_key_role.up.sql" {
+			out[i].Content = strings.Replace(out[i].Content, oldDDL, patchedDDL, 1)
+		}
+	}
+	return out
 }
 
 // schemaWordRe matches the default schema name (config.DefaultSchema) as a whole

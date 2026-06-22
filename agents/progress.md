@@ -7,7 +7,30 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 565
+next_id: 566
+
+---
+
+# #565: finish #564 uniform auth — glob-aware perms for ALL credential types + embedded in-process host-principal path on /v1/merchant
+
+**Completed:** no
+**Status:** IN_PROGRESS 2026-06-22. Two gaps remain after #564's "all credentials → live perms → ONE gate" model:
+
+**(1) Glob perms were silently restricted.** `ResolvedDelegated.HasPermission` did an EXACT string compare (and `ResolvedServiceCredential.HasPermission` likewise), so a token/key carrying a namespace glob like `merchant:*` matched NO concrete route perm and silently 403'd everywhere — even though AuthKit's verifier already lets a signer MINT a glob within its authority. DECISION (maintainer): treat every auth method equally; the MINTER chooses exact or glob (accepting a glob may expose more than strictly necessary — that is the minter's call, not a gate-enforced rule). Both `HasPermission` impls use `authbase.PermissionTokenCovers` (namespace-anchored glob: `merchant:*` covers `merchant:catalog:update`; exact still matches exact; bare `*` never matches). No credential type is special.
+
+**(2) Embedded in-process host-principal can't reach `/v1/merchant/*`.** The neutral `merchantActionPermissionMW` branches are service-credential / control-plane `DelegatedResolver` / user-session (`AdminPermissionChecker`) — all control-plane-backed, all nil for an embedded no-control-plane host (doujins/hentai0). The gin self surface already trusts a host `billingauth.DelegatedAuthenticator` principal (`DelegatedPrincipalRequired` → `resolvedFromHostPrincipal`; #564 "in-process host is trusted, perms authoritative"), but the merchant routes don't. ADD that path so the SAME `/v1/merchant/*` routes serve API keys, control-plane JWTs, AND in-process host admins — no separate route, per #564.
+
+## Tasks
+- [ ] `ResolvedDelegated.HasPermission` + `ResolvedServiceCredential.HasPermission` → `authbase.PermissionTokenCovers` (glob-aware); update doc comments (drop "exact-match / no broad grant" wording).
+- [ ] Add shared `controlplane.ResolvedDelegatedFromHostPrincipal`; refactor ginmw `resolvedFromHostPrincipal` to use it (one impl).
+- [ ] `routes.Options.DelegatedAuthenticator` + an in-process host-principal branch in `merchantActionPermissionMW` (validate via the shared converter, gate on `resolved.HasPermission`).
+- [ ] Thread `app.DelegatedAuthenticator` through `embedhttp` (`FromApp` + `RouteSetMerchantAdmin`/`RouteSetMerchantSettings` mounts) into merchant `Options`.
+- [ ] Tests: a host principal with `merchant:*` (glob) passes a concrete merchant route; lacking it → 403; an exact perm still works; a browser delegated token carrying a glob now passes too.
+- [ ] Build + vet + unit tests; commit + tag + push.
+
+## Acceptance
+- A minter may put exact OR glob perms on ANY credential (delegated JWT, API key, in-process host principal); all matched identically via `PermissionTokenCovers`. No credential type silently drops globs.
+- Embedded no-control-plane hosts reach `/v1/merchant/*` with their `DelegatedAuthenticator` principal, gated purely by permission.
 
 ---
 
@@ -278,7 +301,9 @@ Merged permission mapping:
 # #552: merchant-api-surface-recut (/v1/service → /v1/merchant) [EPIC — children #554–#562]
 
 **Completed:** yes
-**Status:** COMPLETED 2026-06-22. OpenRails-side route/principal recut is implemented and validated across children #554, #555, #556, #557, #558, #559, #560, #561, and #562. First-party consumers were bumped in lockstep: Tensorhub now uses `github.com/open-rails/openrails v0.49.0` with no local replace, wraps batch-native admission through the Go client seam, and keeps org delegated-spend policy host-owned; Cozy Art is also pinned to OpenRails v0.49.0. Downstream validation: Tensorhub `go test ./...`; Tensorhub `go test ./internal/billing/openrailsclient ./internal/api ./internal/orchestrator/...`; Tensorhub Docker-backed `go test -tags=integration ./internal/billing/openrailsclient -run 'TestBudgetPolicySyncEnforcement|TestPlatformTierLadderEnforcement|TestOpenRailsClient' -count=1 -v`; Cozy Art `go test ./...`; `git diff --check` in both repos.
+**Status:** COMPLETED 2026-06-22. OpenRails-side route/principal recut is implemented and validated across children #554, #555, #556, #557, #558, #559, #560, #561, and #562. First-party Tensorhub was hard-cut in lockstep with no legacy routes/shims: it wraps batch-native admission through the Go client seam, pushes merchant admission policy through one `SetMerchantSettings` document, and syncs org delegated-spend grants through `SetOrgSpendDelegations` / `/v1/orgs/:org_id/spend-delegations` rather than old merchant-admin policy setters. Validation: OpenRails `go test . ./embed ./pkg/service ./internal/http/handlers ./internal/http/routes ./internal/http/routes/ginroutes ./pkg/embedded/gin`; OpenRails `go test -tags=integration ./tests -run TestOrgTreasurySpendDelegationsHTTPFullReplacement -count=1 -v`; Tensorhub normal module `GOWORK=off go test ./internal/billing/openrailsclient ./internal/api ./pkg/platformpolicy ./cmd`; Tensorhub against local OpenRails via temporary `/tmp/openrails-tensorhub-552.go.work` (no committed replace): `go test ./internal/billing/openrailsclient ./internal/api ./pkg/platformpolicy`; Tensorhub Docker-backed `go test -tags=integration ./internal/billing/openrailsclient -run 'TestPlatformTierLadderEnforcement|TestBudgetPolicySyncEnforcement|TestEmbeddedModeBootsEngine|TestEmbeddedSelfSurfaceHostIdentity' -count=1 -v`.
+
+**Fresh compose + HTTP revalidation 2026-06-22:** started a clean isolated Docker Compose stack (`COMPOSE_PROJECT_NAME=openrails552`, alternate host ports) through Postgres, Redis, ClickHouse, migrations, and the real `openrails server`; `/health/live` returned `{"service":"billing","status":"ok"}` and unauthenticated `POST /v1/merchant/admissions` returned the expected 401 from the live route. Fixed two compose-start blockers found during that proof: ClickHouse bootstrap now waits for `analytics_user` before grants, and OpenRails rewrites AuthKit v0.45.0's API-key role migration to backfill legacy `service_tokens` before `role NOT NULL`. Post-fix validation passed: `go test ./internal/migrate`; `docker compose --profile all config --quiet`; clean compose `up -d --build --wait openrails`; `go test -tags=integration ./internal/integrationharness -run 'Test(APIKeyCrossMerchantIsolationHTTP|RemoteApplicationSelfJWTCrossMerchantIsolationHTTP|StandaloneMerchantAdmitAccepts(DelegatedJWT|UserSession)ByPermissionHTTP|DelegatedAdminCrossMerchantIsolationHTTP|DelegatedSelfTokenSubjectIsolationHTTP|CoreDoesNotMountPlatformAdminRoutesHTTP|StandaloneMerchantCatalog(RoutesHTTP|ApplyOptionsOverHTTP|PublishHTTP)|StandaloneMerchantPaymentProviderConfigHTTP|StandaloneNoDefaultMerchantResolvesRequestScopedMerchant)' -count=1 -v`; `go test -tags=integration ./tests -run 'Test(ServiceAdmit_HTTP_EndToEnd|OrgTreasurySpendDelegationsHTTPFullReplacement)' -count=1 -v`; Tensorhub `GOWORK=/tmp/openrails-tensorhub-552.go.work go test -tags=integration ./internal/billing/openrailsclient -run 'TestPlatformTierLadderEnforcement|TestBudgetPolicySyncEnforcement|TestEmbeddedModeBootsEngine|TestEmbeddedSelfSurfaceHostIdentity' -count=1 -v`.
 
 HARD CUT — no backwards compatibility, no data migration, no aliases. `/v1/service/*` and `/v1/self/*` are deleted, not aliased. All consumers (Doujins, Tensorhub, Cozy Art) are first-party and bump in lockstep.
 
@@ -324,7 +349,7 @@ This epic is the design source of truth; the master checklist under "## Tasks" i
 - [x] #555 — `/v1/service` → `/v1/merchant` rename + one merchant/org principal resolver; drop `issuer`; customer-forward vs directory split. DONE 2026-06-21.
 - [x] #556 — embedded route-set presets and honest route-group split (replace `IncludeUser` / `IncludeAdmin` / `IncludeWebhooks` booleans; split checkout/customer/merchant admin/merchant settings/merchant API). DONE 2026-06-22.
 - [x] #557 — customer self `/v1/me/*` + org-treasury `/v1/orgs/:org_id/*` (spend-delegations); delete `/v1/self/*`. Role-scope spend-delegation windows meter per-invoker per #563 (not a shared role pool). DONE 2026-06-22.
-- [x] #558 — Tensorhub client recut into Admission/PolicySync/AdminFunding Go interfaces + settings/policy split; batch-native admission. DONE 2026-06-22; Tensorhub and Cozy Art consumer bumps completed.
+- [x] #558 — Tensorhub client recut into Admission/PolicySync/AdminFunding Go interfaces + settings/policy split; batch-native admission. DONE 2026-06-22; Tensorhub consumer hard-cut and integration validation completed.
 - [x] #559 — merchant payment-provider config API (replace flat secret-name CRUD; atomic validate-then-store). DONE 2026-06-21: moved to `agents/completed.md`; integration coverage passes.
 - [x] #560 — merchant catalog publish/drift over HTTP (HTTP form of `push-merchant-catalog`; plan-only default). DONE 2026-06-21: moved to `agents/completed.md`; integration coverage passes.
 - [x] #561 — merchant customer-support + payments/subscriptions admin surface (resource-named, grant-ledger audited). DONE 2026-06-22.
@@ -907,7 +932,7 @@ Rules:
 - [x] Normalize personal customer self-service routes under `/v1/me/*` and add org-customer-owned `GET/PUT /v1/orgs/:org_id/spend-delegations` for org balance sharing; personal customer balances must not be delegable. DONE under #557.
 - [x] Replace `POST /v1/service/customers/by-external-subject/entitlements` with `POST /v1/merchant/customers/entitlements:batch`; remove `issuer` from the request once customer identity is `(merchant_id, subject)`. DONE under #555 / OpenRails v0.48.0.
 - [x] Split customer-forward lookups from directory/filter reverse lookups in both HTTP and Go APIs. DONE under #555 / OpenRails v0.48.0; no reverse lookup route is in the primary merchant surface.
-- [x] Keep the Go library API and HTTP API names/shapes aligned so embedded and standalone hosts use the same concepts. DONE under #558; Tensorhub/Cozy Art consumer bumps validated.
+- [x] Keep the Go library API and HTTP API names/shapes aligned so embedded and standalone hosts use the same concepts. DONE under #558; Tensorhub consumer hard-cut validated.
 - [x] Separate merchant route registration by deployment mode: standalone mounts merchant HTTP lookup APIs; embedded exposes the same operations primarily through the Go interface and avoids unnecessary host-internal HTTP routes. DONE under #556/#558.
 - [x] Replace/augment embedded `IncludeUser`, `IncludeAdmin`, `IncludeWebhooks` booleans with explicit named route sets or presets so hosts can see what should be mounted. DONE under #556.
 - [x] Make embedded defaults exclude merchant host-internal HTTP lookup routes; provide an opt-in route set for HTTP parity. DONE under #556.
@@ -1080,7 +1105,7 @@ Normalize personal customer self routes under `/v1/me/*` and delete `/v1/self/*`
 # #558: tensorhub-client-recut-and-policy-split
 
 **Completed:** yes
-**Status:** COMPLETED 2026-06-22. Child of #552. OpenRails exposes the hard-cut batch-native merchant admission/settings/usage surface and the public SDK is split into `AdmissionClient`, `PolicySyncClient`, `AdminFundingClient`, and `CustomerLookupClient`. Legacy SDK shims/routes are not kept: no registered `/v1/merchant/admit`, `/admit/batch`, `/credits/holds/*`, `/credits/usage/*`, `/budget`, `/abuse-usage`, credit-limit read, direct withdraw, transaction lookup/list, or account-settings routes remain in Go. Downstream consumers are bumped: Tensorhub uses OpenRails v0.49.0 with `AdmitBatch` at its Go seam and one `SetMerchantSettings` policy sync; Cozy Art also pins OpenRails v0.49.0. Validation: OpenRails `go test . ./embed ./internal/http/handlers ./internal/http/routes ./internal/http/embedhttp ./internal/http`; OpenRails integration suites listed under #552; Tensorhub `go test ./...`; Tensorhub `go test -tags=integration ./internal/billing/openrailsclient -run 'TestBudgetPolicySyncEnforcement|TestPlatformTierLadderEnforcement|TestOpenRailsClient' -count=1 -v`; Cozy Art `go test ./...`; `git diff --check`.
+**Status:** COMPLETED 2026-06-22. Child of #552. OpenRails exposes the hard-cut batch-native merchant admission/settings/usage surface and the public SDK is split into `AdmissionClient`, `PolicySyncClient`, `AdminFundingClient`, and `CustomerLookupClient`. Legacy SDK shims/routes are not kept: no registered `/v1/merchant/admit`, `/admit/batch`, `/credits/holds/*`, `/credits/usage/*`, `/budget`, `/abuse-usage`, credit-limit read, direct withdraw, transaction lookup/list, or account-settings routes remain in Go. Tensorhub is cut to `AdmitBatch`, `SetMerchantSettings`, and `SetOrgSpendDelegations` on released OpenRails `v0.50.0` with no local replace; source grep has no active old OpenRails route/method references. Validation: OpenRails packages and org-treasury integration listed under #552; Tensorhub `go test ./internal/billing/openrailsclient ./internal/api ./internal/orchestrator/...`; Tensorhub `go test ./...`; Tensorhub Docker-backed `go test -tags=integration ./internal/billing/openrailsclient -count=1 -v`.
 
 Replace Tensorhub's broad `/v1/service/*` dependency with three narrow OpenRails Go interfaces (`AdmissionClient`, `PolicySyncClient`, `AdminFundingClient`) plus a minimal `/v1/merchant/*` HTTP surface for standalone/remote. Admission is batch-native. Merchant-wide admission policy lives in `/v1/merchant/settings`; payer authorization stays on the payer. See parent #552 "Tensorhub Merchant API Recut" and the admission/policy split under "Merchant Admin Frontend Surface".
 
@@ -1093,7 +1118,7 @@ Replace Tensorhub's broad `/v1/service/*` dependency with three narrow OpenRails
 - [x] Delete Tensorhub-unused service routes (hard cut): `budget`, merchant-configuration read, `abuse-usage`, credit-limit read, direct credit `withdraw`, transaction lookup, account-settings read/write, generic credit transactions are no longer registered under `/v1/merchant/*`.
 - [x] Remove the surviving #553 route/client compatibility alias from the OpenRails public SDK surface for this cut: no public `Client.Admit`, `CaptureHold`, `ReleaseHold`, `WithdrawCredits`, config setter shim, or old merchant policy route remains. NOTE: request-field `tier` aliases still exist on DTOs until downstream source stops constructing them; the registered route/API surface is hard-cut.
 - [x] Keep OpenRails invoicing, processor state, and arrears charging internal; Tensorhub only configures limits/policy and consumes ledger/admission results.
-- [x] Embedded Tensorhub uses the Go interfaces directly (no merchant HTTP mount); standalone uses the HTTP surface. Update Tensorhub + Cozy Art in lockstep. DONE: Tensorhub and Cozy Art both pin OpenRails v0.49.0; Tensorhub source grep has no old service/self route or removed SDK references.
+- [x] Embedded Tensorhub uses the Go interfaces directly (no merchant HTTP mount); standalone uses the HTTP surface. DONE: Tensorhub pins OpenRails v0.50.0 with no local replace; Tensorhub source grep has no old service/self route or removed SDK references.
 - [x] Tests: hot path admit/capture/release; one-item batch path via conformance; settings install policy without exposing customer delegated-spend as merchant-admin routes. See validation in Status.
 
 ## Acceptance

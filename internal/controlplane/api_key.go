@@ -3,11 +3,11 @@ package controlplane
 import (
 	"context"
 	"errors"
-	"slices"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/authkit/authbase"
 	authcore "github.com/open-rails/authkit/core"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -57,10 +57,17 @@ type ResolvedServiceCredential struct {
 	Resources []authcore.APIKeyResource
 }
 
-// HasPermission reports whether the resolved credential grants perm.
+// HasPermission reports whether the resolved credential grants perm. Glob-aware,
+// identical to every other credential type (#565): a granted token covers perm
+// via AuthKit's namespace-anchored glob semantics (`merchant:*` covers
+// `merchant:catalog:update`; an exact grant still matches exactly).
 func (r *ResolvedServiceCredential) HasPermission(perm string) bool {
-	perm = strings.TrimSpace(perm)
-	return slices.Contains(r.Permissions, perm)
+	for _, grant := range r.Permissions {
+		if authbase.PermissionTokenCovers(grant, perm) {
+			return true
+		}
+	}
+	return false
 }
 
 // AllowsCustomer reports whether this credential may act for a payable subject
