@@ -85,8 +85,9 @@ func (s *Service) AdminGetSubscription(ctx context.Context, subscriptionID uuid.
 	return &result, nil
 }
 
-// AdminCancelSubscription cancels a subscription by ID.
-func (s *Service) AdminCancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string) error {
+// AdminCancelSubscription cancels a subscription by ID. revokeAccess controls
+// whether subscription/grace entitlements are revoked immediately.
+func (s *Service) AdminCancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string, revokeAccess bool) error {
 	adminSubscriptions, err := s.requireAdminSubscriptionService()
 	if err != nil {
 		return err
@@ -95,7 +96,7 @@ func (s *Service) AdminCancelSubscription(ctx context.Context, subscriptionID uu
 		return fmt.Errorf("subscription_id required")
 	}
 
-	return adminSubscriptions.CancelSubscription(ctx, subscriptionID, reason)
+	return adminSubscriptions.CancelSubscription(ctx, subscriptionID, reason, revokeAccess)
 }
 
 // -------------------------------- Admin Payments --------------------------------

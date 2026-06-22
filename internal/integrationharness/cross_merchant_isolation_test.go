@@ -184,14 +184,14 @@ func TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP(t *testing.T
 		uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead},
 	)
-	status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admit", denied.Token, map[string]any{
+	status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admissions", denied.Token, map[string]any{"items": []map[string]any{{
 		"customer_id":      payer,
 		"invoker":          "delegated-denied",
 		"invoker_type":     "payer",
 		"currency":         "usd",
 		"estimated_amount": 100,
 		"request_id":       "admit-denied-" + uuid.NewString(),
-	})
+	}}})
 	require.Equalf(t, http.StatusForbidden, status,
 		"delegated JWT without merchant:admissions:create must fail by permission: %s", string(body))
 
@@ -201,21 +201,26 @@ func TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP(t *testing.T
 		uuid.NewString(),
 		[]string{controlplane.PermMerchantAdmissionsCreate},
 	)
-	status, body = requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admit", allowed.Token, map[string]any{
+	status, body = requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admissions", allowed.Token, map[string]any{"items": []map[string]any{{
 		"customer_id":      payer,
 		"invoker":          "delegated-allowed",
 		"invoker_type":     "payer",
 		"currency":         "usd",
 		"estimated_amount": 100,
 		"request_id":       "admit-allowed-" + uuid.NewString(),
-	})
+	}}})
 	require.Equalf(t, http.StatusOK, status,
 		"delegated JWT with merchant:admissions:create must reach admit handler: %s", string(body))
 	var admit struct {
-		Allowed bool `json:"allowed"`
+		Items []struct {
+			Result struct {
+				Allowed bool `json:"allowed"`
+			} `json:"result"`
+		} `json:"items"`
 	}
 	require.NoError(t, json.Unmarshal(body, &admit))
-	require.True(t, admit.Allowed, "delegated admit response must be allowed: %s", string(body))
+	require.Len(t, admit.Items, 1)
+	require.True(t, admit.Items[0].Result.Allowed, "delegated admit response must be allowed: %s", string(body))
 }
 
 func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T) {
@@ -253,33 +258,38 @@ func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T)
 	}
 
 	deniedToken := mintUserToken("r"+strings.ReplaceAll(uuid.NewString(), "-", "")[:20], []string{controlplane.PermMerchantCustomerSettingsRead})
-	status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admit", deniedToken, map[string]any{
+	status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admissions", deniedToken, map[string]any{"items": []map[string]any{{
 		"customer_id":      payer,
 		"invoker":          "user-denied",
 		"invoker_type":     "payer",
 		"currency":         "usd",
 		"estimated_amount": 100,
 		"request_id":       "admit-user-denied-" + uuid.NewString(),
-	})
+	}}})
 	require.Equalf(t, http.StatusForbidden, status,
 		"user session without merchant:admissions:create must fail by permission: %s", string(body))
 
 	allowedToken := mintUserToken("r"+strings.ReplaceAll(uuid.NewString(), "-", "")[:20], []string{controlplane.PermMerchantAdmissionsCreate})
-	status, body = requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admit", allowedToken, map[string]any{
+	status, body = requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/admissions", allowedToken, map[string]any{"items": []map[string]any{{
 		"customer_id":      payer,
 		"invoker":          "user-allowed",
 		"invoker_type":     "payer",
 		"currency":         "usd",
 		"estimated_amount": 100,
 		"request_id":       "admit-user-allowed-" + uuid.NewString(),
-	})
+	}}})
 	require.Equalf(t, http.StatusOK, status,
 		"user session with merchant:admissions:create must reach admit handler: %s", string(body))
 	var admit struct {
-		Allowed bool `json:"allowed"`
+		Items []struct {
+			Result struct {
+				Allowed bool `json:"allowed"`
+			} `json:"result"`
+		} `json:"items"`
 	}
 	require.NoError(t, json.Unmarshal(body, &admit))
-	require.True(t, admit.Allowed, "user-session admit response must be allowed: %s", string(body))
+	require.Len(t, admit.Items, 1)
+	require.True(t, admit.Items[0].Result.Allowed, "user-session admit response must be allowed: %s", string(body))
 }
 
 func TestDelegatedAdminCrossMerchantIsolationHTTP(t *testing.T) {
@@ -379,7 +389,6 @@ func TestCoreDoesNotMountPlatformAdminRoutesHTTP(t *testing.T) {
 	require.NoError(t, err, "issue merchant admin user access token")
 
 	for _, path := range []string{
-		"/v1/admin/merchants/" + dbtest.TestMerchantID.String(),
 		"/v1/platform/merchants",
 	} {
 		status, body := requestJSON(t, http.MethodGet, surface.BaseURL+path, token, nil)

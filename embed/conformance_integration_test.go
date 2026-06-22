@@ -218,43 +218,22 @@ type obsProductAccess struct {
 // scriptResult is everything one transport observed. The two transports'
 // results must be require.Equal.
 type scriptResult struct {
-	Deposit  obsTxn
-	Balance  openrails.BalanceResponse
-	Account  obsAccount
-	HoldOK   bool
-	Capture  obsTxn
-	Withdraw obsTxn
+	Deposit obsTxn
+	Balance openrails.BalanceResponse
+	Account obsAccount
+	HoldOK  bool
 
 	Admit1 obsAdmit // allowed (hold + budget reservation)
-	Admit2 obsAdmit // denied: budget exhausted
-	Admit3 obsAdmit // allowed: budget still has room
-	Admit4 obsAdmit // denied: budget window exhausted
-
-	BudgetStatus []obsBudget
-
-	// Hierarchical budget-scope policies on the unified client (#473).
-	InvokerSpendLimits []obsBudgetPolicy
-
-	// Merchant-configured flat delegated-invoker wasted-spend windows: the
-	// configured limit + over-budget state observed via AbuseUsage.
-	InvokerWastedUsage []openrails.AbuseUsageWindow
-	MerchantProfile    obsMerchantProfile
-
-	SettingsAccount obsAccount
+	Admit2 obsAdmit // denied: money exhausted
 
 	Usage []openrails.UsageRollupRow
-
-	Txns      []obsTxn
-	TxnsTotal int
 
 	RevenueTotal int64
 	RevenueDays  []int64
 
-	ErrWithdrawNoSource obsErr
-	ErrDepositBadType   obsErr
-	ErrBalanceBadID     obsErr
-	ErrRollupBadGroup   obsErr
-	ErrAdmitNegative    obsErr
+	ErrDepositBadType obsErr
+	ErrBalanceBadID   obsErr
+	ErrRollupBadGroup obsErr
 
 	// Cross-payer batch admission (#335).
 	BatchVerdicts []obsBatchVerdict
@@ -274,6 +253,9 @@ type scriptResult struct {
 	HasProductAccess      bool
 	HasNoProductAccess    bool
 	ErrProductAccessBadID obsErr
+
+	MerchantProfile       obsMerchantProfile
+	MerchantSettingsLimit int64
 }
 
 type obsEntitlement struct {
@@ -313,6 +295,20 @@ func observeBatchVerdicts(verdicts []openrails.AdmitBatchVerdict) []obsBatchVerd
 		out = append(out, o)
 	}
 	return out
+}
+
+func admitOne(ctx context.Context, c openrails.AdmissionClient, req openrails.AdmitRequest) (*openrails.AdmitResponse, error) {
+	verdicts, err := c.AdmitBatch(ctx, []openrails.AdmitRequest{req})
+	if err != nil {
+		return nil, err
+	}
+	if len(verdicts) != 1 {
+		return nil, fmt.Errorf("expected one admission verdict, got %d", len(verdicts))
+	}
+	if verdicts[0].Result == nil {
+		return nil, fmt.Errorf("admission failed with status %d: %s", verdicts[0].Status, verdicts[0].Error)
+	}
+	return verdicts[0].Result, nil
 }
 
 type scriptEnv struct {

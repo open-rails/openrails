@@ -313,7 +313,7 @@ type RemoteAppCaller struct {
 }
 
 // DelegatedCaller is a registered remote_application issuer plus a delegated
-// access token signed by that issuer. Present it to /v1/me/* or /v1/admin/*.
+// access token signed by that issuer. Present it to /v1/me/* or /v1/merchant/*.
 type DelegatedCaller struct {
 	Slug    string
 	Issuer  string

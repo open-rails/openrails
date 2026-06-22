@@ -39,7 +39,6 @@ List endpoints use a Stripe-like envelope:
 |---------|---------------------|
 | Public catalog (`/`, `/v1/products`, `/v1/prices`, `/v1/solana/tokens`, health probes) | No auth required |
 | Self routes (`/v1/me/*`) | Standalone: `Authorization: Bearer <delegated JWT>` signed by a registered issuer with `delegated_sub`. Embedded: the host's configured AuthKit/user bearer is adapted to the same customer principal. |
-| Delegated billing-admin routes (`/v1/admin/*`) | Same delegated JWT shape; requested permissions are bounded by the signing remote application's stored AuthKit authority |
 | User/session routes (`/v1/checkout`) | Host JWT auth where still mounted by the embedding deployment |
 | Merchant API (`/v1/merchant/*`, same public port) | `Authorization: Bearer <generated API key, first-party service JWT, delegated JWT, or user access token>`; each route requires a `merchant:*` permission |
 | Webhooks (`/v1/webhooks/:provider`, `/v1/merchants/:merchant/webhooks/:provider`) | Provider-specific verification (see notes) |
@@ -50,7 +49,7 @@ JWKS, audience, expiry, and optional permission checks. OpenRails stores/touches
 the payable customer reference `(merchant_id, subject)` needed for billing;
 `issuer` is audit/last-seen source metadata, not identity. OpenRails does not
 create OpenRails-native users for delegated subjects. Generated API keys and first-party service JWTs are backend
-credentials and are rejected by delegated self/admin routes.
+credentials and are rejected by delegated self routes.
 
 Delegated JWT examples:
 
@@ -59,7 +58,7 @@ Delegated JWT examples:
   `delegated_sub: "<canonical-user-id>"`. `/v1/me/*` acts only on that subject.
 - Cozy Art billing-admin membership UI: an admin browser token is signed by the
   Cozy issuer with `delegated_sub: "<admin-subject>"`; AuthKit bounds requested
-  permissions to that issuer's stored authority for `/v1/admin/*`.
+  permissions to that issuer's stored authority for `/v1/merchant/*`.
 - Tensorhub merchant balance UI: Cozy Art can present a delegated JWT whose
   subject is the upstream merchant/company subject to read its own balance
   through browser/direct OpenRails routes. Backend
@@ -516,150 +515,80 @@ selects. Stripe test and live are entirely separate namespaces (separate objects
 and lookup_keys), so a price registered in the test environment is never matched
 against a live object and vice versa.
 
-## Admin API (`/v1/admin`, JWT + `admin` role)
+## Merchant Support API (`/v1/merchant`, `merchant:*` permissions)
 
-### GET /v1/admin/subscriptions
-List subscriptions with filtering. Common query params include `user_id`, `status`, `price_id`, `processor`,
-`created_after`, `created_before`, `cancelled_after`, `cancelled_before`, `expires_before`, `sort_by`, `sort_order`,
-plus `limit`/`offset`. Response: list of admin subscription records (raw subscription + product/price).
+The old `/v1/admin/*` billing surface is removed. Staff/support calls use the
+resource-named merchant surface below. Merchant admins can read saved payment
+method metadata, but cannot create/update/delete customer payment methods.
 
-### GET /v1/admin/subscriptions/{id}
-Detailed subscription record including linked payments.
+### GET /v1/merchant/customers/{customer_id}
+Returns the customer billing profile: customer id, trust tier/status, balances,
+entitlements, product access, payment history, subscription history, and saved
+payment-method metadata. Requires `merchant:customer-settings:read`.
 
-### POST /v1/admin/subscriptions/{id}/cancel
-Immediate cancellation of the referenced subscription. Body `{ "reason": "optional" }`.
-Currently only supports NMI-backed processors. Subscription must be active.
-Cancels with payment processor, updates local record, and immediately revokes entitlements.
+### GET /v1/merchant/customers/{customer_id}/payment-methods
+Lists redacted saved payment-method metadata. Requires
+`merchant:customer-settings:read`.
 
-### GET /v1/admin/payments
-List of payments with filtering by processor, status, date range, etc. Response: list envelope of Stripe-style
-`PaymentObject` entries.
+### GET /v1/merchant/customers/{customer_id}/payments
+Lists payment history for one customer. Requires `merchant:payments:read`.
 
-### GET /v1/admin/payments/{id}
-Full payment detail including refund history.
+### POST /v1/merchant/customers/{customer_id}/payments/off-channel
+Records an off-channel/manual purchase and grants product entitlements through
+the normal checkout purchase path. Requires `merchant:customer-settings:update`.
 
-### POST /v1/admin/payments/{id}/refund
-Initiates a refund via the underlying processor's API and records it in the database.
+### POST /v1/merchant/customers/{customer_id}/entitlements
+Manually grants an entitlement through the grant ledger. Requires
+`merchant:customer-settings:update`.
 
-**Request Body:**
-```json
-{
-  "amount": 1234,
-  "reason": "requested_by_customer"
-}
-```
+### DELETE /v1/merchant/customers/{customer_id}/entitlements/{grant_id}
+Revokes a manual entitlement grant. Requires
+`merchant:customer-settings:update`.
 
-- `amount` (required): Amount in cents to refund. Must be greater than zero.
-- `reason` (optional): Refund reason. For Stripe, must be one of: `duplicate`, `fraudulent`, `requested_by_customer`.
+### POST /v1/merchant/customers/{customer_id}/product-access
+Manually grants product access through the grant ledger. Requires
+`merchant:customer-settings:update`.
 
-**Processor Behavior:**
-| Processor | Behavior |
-|-----------|----------|
-| Stripe | Issues refund via Stripe API. Supports partial refunds. |
-| NMI-backed processors (for example `mobius`) | Issues refund via NMI Direct Post API. Supports partial refunds. |
-| CCBill | Returns HTTP 400 with message directing to CCBill admin portal. CCBill does not expose a refund API. |
+### DELETE /v1/merchant/customers/{customer_id}/product-access/{grant_id}
+Revokes a manual product-access grant. Requires
+`merchant:customer-settings:update`.
 
-**Response:** Returns the created refund payment object on success.
+### GET /v1/merchant/payments
+Lists merchant payments with filters. Requires `merchant:payments:read`.
 
-### GET /v1/admin/users/{user_id}
-Returns the user's billing profile: `{ customer_id, subscription, entitlements, payments }`. The `{user_id}` path segment is the external subject the admin addresses; it is resolved to the payable `customer_id` internally (#317), and the response identifies the payable entity by `customer_id`.
+### GET /v1/merchant/payments/{id}
+Returns one payment with refund history. Requires `merchant:payments:read`.
 
-### GET /v1/admin/users/{user_id}/nmi
-Returns billing detail for the user's active NMI-backed subscription. Returns 404 if the user has no active
-NMI-backed subscription.
+### POST /v1/merchant/payments/{id}/refunds
+Issues or records a refund through the underlying processor. `revoke_access`
+must be explicit when the refund should also revoke one-off access granted by
+that payment. Requires `merchant:payments:refund`.
 
-Response:
-```json
-{
-  "vault_id": "vault_...",
-  "order_id": "subscription-uuid",
-  "amount": 999,
-  "currency": "usd",
-  "transaction_id": "txn_...",
-  "status": "active",
-  "start_date": "2024-01-01T00:00:00Z",
-  "expiry_date": "2024-02-01T00:00:00Z",
-  "total_so_far": 999,
-  "manual_expiry": null
-}
-```
+### GET /v1/merchant/subscriptions
+Lists merchant subscriptions with filters. Requires
+`merchant:subscriptions:read`.
 
-### GET /v1/admin/users/{user_id}/nmi/metrics
-Returns `{ successful, failed }` counts for the user's active NMI-backed processor.
+### GET /v1/merchant/subscriptions/{id}
+Returns one subscription. Requires `merchant:subscriptions:read`.
 
-### GET /v1/admin/users/{user_id}/ccbill
-Returns billing detail for the user's active CCBill subscription.
+### POST /v1/merchant/subscriptions/{id}/cancel
+Cancels a subscription. `revoke_access` must be explicit when cancellation
+should also revoke subscription/grace entitlements immediately. Requires
+`merchant:subscriptions:update`.
 
-Response:
-```json
-{
-  "subscription_id": "processor-subscription-id",
-  "transaction_id": "txn_...",
-  "status": "active",
-  "start_date": "2024-01-01T00:00:00Z",
-  "expiry_date": "2024-02-01T00:00:00Z",
-  "manual_expiry": null
-}
-```
+### POST /v1/merchant/subscriptions/{id}/resume
+Resumes a canceling subscription where the processor supports it. Requires
+`merchant:subscriptions:update`.
 
-### GET /v1/admin/users/{user_id}/ccbill/metrics
-Returns `{ successful, failed }` counts for the user's CCBill payments.
+### PUT /v1/merchant/subscriptions/{id}/payment-method
+Reassigns a subscription to another saved payment method owned by the same
+customer and merchant. Requires `merchant:subscriptions:update`.
 
-### GET /v1/admin/users/{user_id}/payments
-Lists all payments for the user. Query params: `limit`, `offset`.
+### GET /v1/merchant/metrics
+Returns folded support metrics. Requires `merchant:usage:read`.
 
-### POST /v1/admin/users/{user_id}/payments/off-channel
-Records an off-channel/manual purchase (cash, bank transfer, etc.) and grants entitlements/credits.
-Body:
-```json
-{
-  "price_id": "price_...",
-  "transaction_id": "unique-reference",
-  "amount": 1000,
-  "currency": "usd",
-  "purchased_at": "2024-01-15T00:00:00Z",
-  "discount_code": "PROMO10",
-  "discount_reason": "Staff discount"
-}
-```
-Returns `{ payment_id, entitlements, delayed_start, eligibility }`. Idempotent on `transaction_id`.
-
-### GET /v1/admin/users/{user_id}/entitlements
-Lists all entitlements. Optional `at` query param (RFC3339) for point-in-time lookup.
-
-### POST /v1/admin/users/{user_id}/entitlements
-Body `{ "entitlement": "premium", "days": 30 }`. Grants an entitlement for the requested duration (or indefinite
-if `days` is omitted).
-
-### DELETE /v1/admin/users/{user_id}/entitlements/{id}
-Revokes the referenced admin entitlement.
-
-### POST /v1/admin/users/{user_id}/grants
-Creates a structured grant record. Body `{ price_id, reason, duration_days?, amount?, currency?, transaction_id? }`.
-
-### GET /v1/admin/users/{user_id}/grants
-Lists grants issued to the user.
-
-### GET /v1/admin/grants/{id}
-Fetches a single grant record.
-
-### GET /v1/admin/metrics/summary
-Returns KPI card data (MRR, ARR, total revenue, churn, ARPU). Query params: `start`, `end`, `period`, `currency`.
-
-### GET /v1/admin/metrics/revenue
-Time-series revenue buckets. Query params: `start`, `end`, optional `granularity` (`day`, `week`, `month`), `currency`.
-
-### GET /v1/admin/metrics/subscriptions
-Subscription activity series (new subs, cancels, reactivations, net change). Supports `start`, `end`, `granularity`,
-`currency`.
-
-### GET /v1/admin/metrics/processors
-Aggregated revenue + counts by processor for a date range (defaults to last 30 days). Query params: `start`, `end`,
-`currency`.
-
-### GET /v1/admin/metrics/churn
-Monthly churn summary plus cancellation reason counts and coarse cohort retention info. Accepts `start`, `end`,
-`currency`.
+### GET /v1/merchant/repair-alerts
+Returns merchant repair alerts. Requires `merchant:repair-alerts:read`.
 
 ## Webhook Notes
 

@@ -15,7 +15,7 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// maxAdmitBatchItems bounds one /v1/service/admit-batch request (#335).
+// maxAdmitBatchItems bounds one /v1/merchant/admissions request (#335).
 const maxAdmitBatchItems = 1000
 
 type serviceAdmitRequest struct {
@@ -91,8 +91,7 @@ func ServiceAdmit(r *httprequest.Request) {
 	}
 }
 
-// admitInputFromRequest maps one admit body onto the service-facade input —
-// shared by the single /admit route and each /admit/batch item.
+// admitInputFromRequest maps one admission item onto the service-facade input.
 func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.CustomerID) billingservice.AdmitInput {
 	in := billingservice.AdmitInput{
 		CustomerID:      payer,
@@ -119,8 +118,8 @@ func trustTier(primary, alias string) string {
 	return strings.TrimSpace(alias)
 }
 
-// admitVerdictStatus maps an admission result onto the HTTP status the single
-// /admit route would return — reused per-item by the batch route.
+// admitVerdictStatus maps an admission result onto the per-item HTTP-equivalent
+// status returned by the batch route.
 func admitVerdictStatus(res *billingservice.AdmitResult) int {
 	if res.Allowed {
 		return http.StatusOK
@@ -140,8 +139,8 @@ type serviceAdmitBatchRequest struct {
 }
 
 // serviceAdmitVerdict is one per-item batch outcome (#335). Status is the
-// HTTP-equivalent status the single /admit route would have returned for this
-// item; Result carries the full admission decision when one was reached.
+// HTTP-equivalent status for this item; Result carries the full admission
+// decision when one was reached.
 type serviceAdmitVerdict struct {
 	Status int                         `json:"status"`
 	Error  string                      `json:"error,omitempty"`
@@ -188,7 +187,7 @@ func serviceAdmitBatchVerdicts(
 
 // ServiceAdmitBatch is the cross-payer batch admission endpoint (#335): one
 // request carries N admit items (mixed payers); the response carries N
-// positional verdicts with the same semantics as /v1/service/admit per item.
+// positional verdicts with the same semantics as a single admission per item.
 // The batch itself always answers 200 — per-item denial/errors live in the
 // items, so cold payers conflating admits collapse N hops into one without one
 // broke payer poisoning the flight.
@@ -555,6 +554,18 @@ type serviceMerchantConfigurationRequest struct {
 	DelegatedInvokerWastedSpendWindows []serviceMerchantConfigWindow        `json:"delegated_invoker_wasted_spend_windows"`
 }
 
+type serviceMerchantSettingsRequest struct {
+	Profile                           *serviceMerchantProfileConfiguration  `json:"profile,omitempty"`
+	TierSchedules                     []serviceMerchantTierSchedule         `json:"tier_schedules,omitempty"`
+	TierSpendLimits                   []billingservice.PayerSpendLimitInput `json:"tier_spend_limits,omitempty"`
+	DelegatedInvokerWastedSpendLimits []serviceMerchantConfigWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
+}
+
+type serviceMerchantTierSchedule struct {
+	Currency string                            `json:"currency"`
+	Schedule []billingservice.TierScheduleRung `json:"schedule"`
+}
+
 type serviceMerchantProfileConfiguration struct {
 	DisplayName string `json:"display_name,omitempty"`
 	LogoURL     string `json:"logo_url,omitempty"`
@@ -611,6 +622,78 @@ func ServiceSetMerchantConfiguration(r *httprequest.Request) {
 	r.SuccessJSONMessage("ok")
 }
 
+// ServiceGetMerchantSettings returns the merchant-owned policy-sync document.
+func ServiceGetMerchantSettings(r *httprequest.Request) {
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	cfg, _, err := svc.GetMerchantConfiguration(r.Request.Context())
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "get merchant settings failed")
+		return
+	}
+	r.SuccessJSON(serviceMerchantSettingsRequest{
+		Profile:                           merchantProfileResponsePtr(cfg.Profile),
+		DelegatedInvokerWastedSpendLimits: serviceMerchantConfigWindows(cfg.DelegatedInvokerWastedSpendWindows),
+	})
+}
+
+// ServiceSetMerchantSettings installs the merchant-owned admission policy in
+// one document: profile, trust-tier schedules, trust-tier spend policies, and
+// delegated-invoker wasted-spend limits.
+func ServiceSetMerchantSettings(r *httprequest.Request) {
+	var req serviceMerchantSettingsRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+
+	windows := make([]abuse.WastedWindow, 0, len(req.DelegatedInvokerWastedSpendLimits))
+	for _, w := range req.DelegatedInvokerWastedSpendLimits {
+		windows = append(windows, abuse.WastedWindow{
+			Key:      w.Key,
+			Window:   time.Duration(w.WindowSeconds) * time.Second,
+			Limit:    w.Limit,
+			Currency: w.Currency,
+		})
+	}
+	if err := svc.SetMerchantConfiguration(r.Request.Context(), billingservice.MerchantConfiguration{
+		Profile:                            merchantProfileInput(req.Profile),
+		DelegatedInvokerWastedSpendWindows: windows,
+	}); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "set merchant settings failed")
+		return
+	}
+
+	for _, schedule := range req.TierSchedules {
+		currency, ok := serviceRequiredCurrency(r, schedule.Currency)
+		if !ok {
+			return
+		}
+		if err := money.ValidateCurrency(currency); err != nil {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := svc.SetTierSchedule(r.Request.Context(), billingidentity.CustomerID{}, currency, schedule.Schedule); err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "set tier schedule failed")
+			return
+		}
+	}
+	for _, policy := range req.TierSpendLimits {
+		if err := svc.SetPayerSpendLimits(r.Request.Context(), billingidentity.CustomerID{}, policy); err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "set trust-tier policy failed")
+			return
+		}
+	}
+	r.SuccessJSONMessage("ok")
+}
+
 func merchantProfileInput(in *serviceMerchantProfileConfiguration) *models.MerchantProfileConfiguration {
 	if in == nil {
 		return nil
@@ -621,6 +704,14 @@ func merchantProfileInput(in *serviceMerchantProfileConfiguration) *models.Merch
 		FromEmail:   strings.TrimSpace(in.FromEmail),
 		SupportURL:  strings.TrimSpace(in.SupportURL),
 	}
+}
+
+func merchantProfileResponsePtr(in *models.MerchantProfileConfiguration) *serviceMerchantProfileConfiguration {
+	if in == nil {
+		return nil
+	}
+	out := merchantProfileResponse(in)
+	return &out
 }
 
 func merchantProfileResponse(in *models.MerchantProfileConfiguration) serviceMerchantProfileConfiguration {

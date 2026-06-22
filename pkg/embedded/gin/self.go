@@ -20,7 +20,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// SelfHandler returns the mountable browser-direct SELF-SERVICE + MERCHANT-ADMIN
+// SelfHandler returns the mountable browser-direct SELF-SERVICE
 // surface for an embedded host (issues #339/#467). A host-supplied
 // billingauth.DelegatedAuthenticator wins when present. Otherwise OpenRails
 // adapts the embedded billingauth.Authenticator into a self-service principal
@@ -30,10 +30,10 @@ import (
 // NewHTTPHandler surface:
 //
 //	/billing/v1/me/*            (RegisterSelfServiceRoutes)
-//	/billing/v1/admin/*         (RegisterAdminRoutes — browser-safe org:*)
+//	/billing/v1/orgs/:org_id/*  (RegisterOrgTreasuryRoutes)
 //
 // so a host that mounts NewHTTPHandler under /billing without prefix stripping
-// can route these two subtrees to this handler and everything else to the
+// can route this subtree to this handler and everything else to the
 // gin-free handler. The same neutral base middleware stack wraps it (security
 // headers, CORS, body limit, default merchant resolution — the delegated
 // middleware then pins the principal's merchant), keeping the two embedded
@@ -89,7 +89,7 @@ func delegatedAuthenticatorFromUserAuthenticator(authn billingauth.Authenticator
 	})
 }
 
-// newSelfHandler assembles the self + delegated-admin gin engine and wraps it in
+// newSelfHandler assembles the self-service gin engine and wraps it in
 // the neutral net/http base middleware stack (the gin-free analogue embedhttp
 // uses). Split from SelfHandler so the routing/auth behavior is unit-testable
 // without a live app graph.
@@ -100,10 +100,10 @@ func newSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, c
 	delegatedMW := ginmw.DelegatedPrincipalRequired(authn)
 	base := engine.Group(embedhttp.EmbeddedV1Prefix)
 	ginroutes.RegisterSelfServiceRoutes(base.Group(ginroutes.SelfRoutePrefix), rt, delegatedMW)
-	ginroutes.RegisterAdminRoutes(base.Group(ginroutes.AdminRoutePrefix), rt, delegatedMW)
+	ginroutes.RegisterOrgTreasuryRoutes(base.Group(ginroutes.OrgRoutePrefix), rt, delegatedMW)
 
-	// OpenRails-native rate-limiting + captcha on the embedded self-service +
-	// delegated-admin surface, matching the base NewHTTPHandler chain so an embedded
+	// OpenRails-native rate-limiting + captcha on the embedded self-service
+	// surface, matching the base NewHTTPHandler chain so an embedded
 	// host does not have to front it with its own gateway. It is IP-keyed: the
 	// delegated principal is pinned per-route (inside the gin engine, after this
 	// outer chain), exactly like the standalone self surface, whose global limiter

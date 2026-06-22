@@ -675,9 +675,10 @@ func (c *localClient) SetMerchantConfiguration(ctx context.Context, in openrails
 	ws := make([]abuse.WastedWindow, 0, len(in.DelegatedInvokerWastedSpendWindows))
 	for _, w := range in.DelegatedInvokerWastedSpendWindows {
 		ws = append(ws, abuse.WastedWindow{
-			Key:    w.Key,
-			Window: time.Duration(w.WindowSeconds) * time.Second,
-			Limit:  w.Limit,
+			Key:      w.Key,
+			Window:   time.Duration(w.WindowSeconds) * time.Second,
+			Limit:    w.Limit,
+			Currency: w.Currency,
 		})
 	}
 	if err := c.svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{
@@ -685,6 +686,50 @@ func (c *localClient) SetMerchantConfiguration(ctx context.Context, in openrails
 		DelegatedInvokerWastedSpendWindows: ws,
 	}); err != nil {
 		return internalErr("set merchant configuration failed")
+	}
+	return nil
+}
+
+// GetMerchantSettings transcribes handlers.ServiceGetMerchantSettings.
+func (c *localClient) GetMerchantSettings(ctx context.Context) (*openrails.MerchantSettings, error) {
+	ctx = c.ensureTenant(ctx)
+	cfg, _, err := c.svc.GetMerchantConfiguration(ctx)
+	if err != nil {
+		return nil, internalErr("get merchant settings failed")
+	}
+	return &openrails.MerchantSettings{
+		Profile:                           merchantProfileOutput(cfg.Profile),
+		DelegatedInvokerWastedSpendLimits: budgetWindowInputsFromAbuse(cfg.DelegatedInvokerWastedSpendWindows),
+	}, nil
+}
+
+// SetMerchantSettings transcribes handlers.ServiceSetMerchantSettings.
+func (c *localClient) SetMerchantSettings(ctx context.Context, settings openrails.MerchantSettings) error {
+	ctx = c.ensureTenant(ctx)
+	ws := make([]abuse.WastedWindow, 0, len(settings.DelegatedInvokerWastedSpendLimits))
+	for _, w := range settings.DelegatedInvokerWastedSpendLimits {
+		ws = append(ws, abuse.WastedWindow{
+			Key:      w.Key,
+			Window:   time.Duration(w.WindowSeconds) * time.Second,
+			Limit:    w.Limit,
+			Currency: w.Currency,
+		})
+	}
+	if err := c.svc.SetMerchantConfiguration(ctx, billingservice.MerchantConfiguration{
+		Profile:                            merchantProfileInput(settings.Profile),
+		DelegatedInvokerWastedSpendWindows: ws,
+	}); err != nil {
+		return internalErr("set merchant settings failed")
+	}
+	for _, schedule := range settings.TierSchedules {
+		if err := c.SetTierSchedule(ctx, "", schedule.Currency, schedule.Schedule); err != nil {
+			return err
+		}
+	}
+	for _, policy := range settings.TierSpendLimits {
+		if err := c.SetPayerSpendLimits(ctx, "", policy); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -699,6 +744,31 @@ func merchantProfileInput(in *openrails.MerchantProfileInput) *models.MerchantPr
 		FromEmail:   strings.TrimSpace(in.FromEmail),
 		SupportURL:  strings.TrimSpace(in.SupportURL),
 	}
+}
+
+func merchantProfileOutput(in *models.MerchantProfileConfiguration) *openrails.MerchantProfileInput {
+	if in == nil {
+		return nil
+	}
+	return &openrails.MerchantProfileInput{
+		DisplayName: in.DisplayName,
+		LogoURL:     in.LogoURL,
+		FromEmail:   in.FromEmail,
+		SupportURL:  in.SupportURL,
+	}
+}
+
+func budgetWindowInputsFromAbuse(windows []abuse.WastedWindow) []openrails.BudgetWindowInput {
+	out := make([]openrails.BudgetWindowInput, 0, len(windows))
+	for _, w := range windows {
+		out = append(out, openrails.BudgetWindowInput{
+			Key:           w.Key,
+			WindowSeconds: int64(w.Window / time.Second),
+			Limit:         w.Limit,
+			Currency:      w.Currency,
+		})
+	}
+	return out
 }
 
 // GetTier transcribes handlers.ServiceGetTier (service_admission.go, #477).

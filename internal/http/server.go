@@ -42,9 +42,9 @@ type Dependencies struct {
 	// intentional AuthKit route groups (never DefaultAPI in locked-down mode).
 	ControlPlane *controlplane.ControlPlane
 	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
-	// the browser-direct self-service surface (issue #339). When set, the host
-	// verifies the incoming credential itself and supplies the explicitly
-	// mapped principal for /v1/me/* + /v1/admin/*, OVERRIDING the
+	// the browser-direct self-service and merchant surfaces (issue #339). When
+	// set, the host verifies the incoming credential itself and supplies the
+	// explicitly mapped principal for /v1/me/* + /v1/merchant/*, OVERRIDING the
 	// control plane's default delegated-token verifier.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	ConfiguredMerchant     merchant.ID
@@ -324,8 +324,7 @@ func New(deps Dependencies) (*Server, error) {
 	s.registerStandaloneMetaRoutes(s.publicHandler)
 	// Canonical: /v1/*
 	s.registerUserRoutes(s.publicHandler)
-	// #528: the per-user `/v1/admin` surface is retired. The admin surface is the
-	// delegated `/v1/admin` mounted by registerSelfServiceRoutes (issuer→owner).
+	// #555/#561: merchant/support routes live only under `/v1/merchant/*`.
 	s.registerMerchantActionRoutesOn(s.publicHandler)
 
 	// Selective AuthKit route mounting (#224). In locked-down mode this mounts

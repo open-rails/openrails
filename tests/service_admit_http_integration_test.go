@@ -25,8 +25,8 @@ import (
 )
 
 // TestServiceAdmit_HTTP_EndToEnd drives the #513 spendgate admission path through
-// the REAL HTTP service routes (POST /v1/merchant/admit + /credits/holds/:id/
-// capture|release) against the suite's live Postgres + Redis — the full
+// the REAL HTTP merchant routes (POST /v1/merchant/admissions +
+// /v1/merchant/admissions/:id/capture|release) against the suite's live Postgres + Redis — the full
 // route → handler → Service.Admit → spendgate stack, not the in-process layer.
 func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	suite := getSharedTestSuite(t)
@@ -88,6 +88,20 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 		BlockedBy string `json:"blocked_by"`
 		DenyCode  string `json:"deny_code"`
 	}
+	type admitVerdict struct {
+		Status int       `json:"status"`
+		Result admitResp `json:"result"`
+	}
+	admit := func(reqID string, amount int64) admitVerdict {
+		w := post("/v1/merchant/admissions", map[string]any{"items": []map[string]any{admitBody(reqID, amount)}})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var batch struct {
+			Items []admitVerdict `json:"items"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &batch))
+		require.Len(t, batch.Items, 1)
+		return batch.Items[0]
+	}
 
 	// 1) Admit 600 → 200 allowed (places the Redis hold).
 	r1 := requestPrefix + "-r1"
@@ -95,40 +109,32 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	r3 := requestPrefix + "-r3"
 	r4 := requestPrefix + "-r4"
 
-	w := post("/v1/merchant/admit", admitBody(r1, 600))
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	var a1 admitResp
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &a1))
-	require.True(t, a1.Allowed)
+	a1 := admit(r1, 600)
+	require.Equal(t, http.StatusOK, a1.Status)
+	require.True(t, a1.Result.Allowed)
 
 	// 2) Admit another 600 → 402: only 400 spendable after the 600 in-flight hold.
-	w = post("/v1/merchant/admit", admitBody(r2, 600))
-	require.Equal(t, http.StatusPaymentRequired, w.Code, w.Body.String())
-	var a2 admitResp
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &a2))
-	require.False(t, a2.Allowed)
-	require.Equal(t, "money", a2.BlockedBy)
+	a2 := admit(r2, 600)
+	require.Equal(t, http.StatusPaymentRequired, a2.Status)
+	require.False(t, a2.Result.Allowed)
+	require.Equal(t, "money", a2.Result.BlockedBy)
 
 	// 3) Capture r1 at 500 (actual < estimate) → 200; durable ledger debit lands.
-	w = post("/v1/merchant/credits/holds/"+r1+"/capture", map[string]any{"amount": 500})
+	w := post("/v1/merchant/admissions/"+r1+"/capture", map[string]any{"amount": 500})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	bal, err := ms.GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(500), bal.Balance, "1000 − 500 captured = 500")
 
 	// 4) After capture freed the hold, a 300 admit fits the remaining 500 → 200.
-	w = post("/v1/merchant/admit", admitBody(r3, 300))
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	var a3 admitResp
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &a3))
-	require.True(t, a3.Allowed, "the r1 hold was freed at capture, so 300 fits in 500")
+	a3 := admit(r3, 300)
+	require.Equal(t, http.StatusOK, a3.Status)
+	require.True(t, a3.Result.Allowed, "the r1 hold was freed at capture, so 300 fits in 500")
 
 	// 5) Release r3 → 200; the hold is freed (no charge), so a fresh 500 admit fits.
-	w = post("/v1/merchant/credits/holds/"+r3+"/release", nil)
+	w = post("/v1/merchant/admissions/"+r3+"/release", nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	w = post("/v1/merchant/admit", admitBody(r4, 500))
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	var a4 admitResp
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &a4))
-	require.True(t, a4.Allowed, "release freed r3's hold, so the full 500 is spendable again")
+	a4 := admit(r4, 500)
+	require.Equal(t, http.StatusOK, a4.Status)
+	require.True(t, a4.Result.Allowed, "release freed r3's hold, so the full 500 is spendable again")
 }

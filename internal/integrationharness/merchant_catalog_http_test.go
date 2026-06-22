@@ -67,9 +67,6 @@ func TestStandaloneMerchantCatalogRoutesHTTP(t *testing.T) {
 	require.Equal(t, created.ID, fetched.ID)
 	require.Equal(t, productSlug, fetched.Slug)
 
-	oldStatus, oldBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/admin/catalog/products", catalogToken, nil)
-	require.Equal(t, http.StatusNotFound, oldStatus, string(oldBody))
-
 	unauthStatus, unauthBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products", "", nil)
 	require.Equal(t, http.StatusUnauthorized, unauthStatus, string(unauthBody))
 

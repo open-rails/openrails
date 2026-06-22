@@ -17,16 +17,11 @@ import (
 // and the credential profile lives on the resolved Principal.
 const SelfRoutePrefix = "/me"
 
-// AdminRoutePrefix is the path under the merchant-scoped public API where the
-// (delegated) ADMIN billing surface lives (#259, #528). A merchant's host
-// frontend mints a FEDERATED, MERCHANT-SIGNED delegated access token carrying
-// AuthKit-bounded merchant/admin permissions for one of its ADMIN users; the browser
-// presents it as a Bearer token directly against this surface to act on ANY user
-// WITHIN the token's merchant via the `:user_id` path param. The acting admin is
-// the token's `delegated_sub` (recorded for audit) and the acting merchant is
-// pinned from the token's validated issuer — never the URL. (#528 retired the
-// per-user admin surface; this delegated surface IS the admin API.)
-const AdminRoutePrefix = "/admin"
+// OrgRoutePrefix is the canonical org-customer treasury surface. These routes
+// are for an AuthKit org acting as a paying customer over its own org balance,
+// not for merchant/seller administration and not for an individual's personal
+// balance.
+const OrgRoutePrefix = "/orgs"
 
 func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -128,89 +123,27 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	group.POST("/stripe/portal", wrap(httphandlers.CreatePortalSession))
 }
 
-// RegisterAdminRoutes mounts the browser-direct delegated admin billing
-// surface on a merchant-scoped PUBLIC route group authenticated by a FEDERATED,
-// MERCHANT-SIGNED delegated access token carrying AuthKit-bounded merchant/admin permissions
-// (issue #259). Unlike the self-service surface (which has no `:user_id` and acts
-// only on the token's own subject), these routes act on ANY user WITHIN the
-// token's merchant via the `:user_id` path param.
-//
-// It REUSES the existing operator admin handlers unchanged. They are safe here
-// because:
-//   - the target user is the `:user_id` path param,
-//   - the acting admin is r.GetUser() == the token's `delegated_sub` (so audit
-//     fields like EntitlementGrant.GrantedBy record the acting admin),
-//   - the merchant is pinned onto the request context by delegatedMW from the
-//     token's validated issuer, so every merchant-owned query is scoped to that
-//     merchant (RLS-enforced, #227). A `:user_id` belonging to another merchant is
-//     therefore unreachable — fail closed, no cross-merchant access.
-//
-// delegatedMW must authenticate the delegated token (ginmw.DelegatedSelfRequired);
-// it pins the resolved merchant + acting admin + merchant-permissions onto the
-// context that the per-route RequirePermission gates and handlers read.
-func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
+// RegisterOrgTreasuryRoutes mounts the org-as-customer treasury surface. It is
+// deliberately separate from `/me` (personal self-service) and `/merchant`
+// (merchant/seller operations): the same AuthKit org may own a merchant and
+// also act as the paying customer for its own org balance, but those are
+// distinct permission namespaces.
+func RegisterOrgTreasuryRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
 
 	group.Use(delegatedMW)
-	// Pin a merchant-scoped DB connection AFTER the delegated token resolves the
-	// merchant, so RLS constrains every merchant-owned query (issue #227).
 	if rt != nil && rt.DB != nil {
 		group.Use(ginmw.MerchantDBConn(rt.DB))
 	}
 
-	read := ginmw.RequirePermission(controlplane.PermMerchantCustomerSettingsRead)
-	subRead := ginmw.RequirePermission(controlplane.PermMerchantCustomerSettingsRead)
-	entWrite := ginmw.RequirePermission(controlplane.PermMerchantCustomerSettingsUpdate)
-	productAccessWrite := ginmw.RequirePermission(controlplane.PermMerchantCustomerSettingsUpdate)
-	payWrite := ginmw.RequirePermission(controlplane.PermMerchantCustomerSettingsUpdate)
-	subWrite := ginmw.RequirePermission(controlplane.PermMerchantSubscriptionsUpdate)
-	metricsRead := ginmw.RequirePermission(controlplane.PermMerchantUsageRead)
-
-	// Merchant metrics (issue #259 + #232): a merchant admin reads THEIR OWN merchant's
-	// analytics. The metrics queries are merchant-scoped to the request's merchant
-	// (resolved from the delegated token's issuer + pinned above), so these never
-	// expose another merchant's numbers — cross-merchant aggregation is the separate
-	// platform-superadmin path, not reachable here.
-	// #528: one folded metrics endpoint (was /metrics/{summary,revenue,subscriptions,
-	// processors,churn}); ?period/?currency/?granularity control the shape.
-	group.GET("/metrics", metricsRead, wrap(httphandlers.GetAdminMetrics))
-
-	// Merchant-wide operational lists. They reuse admin handlers, but the delegated
-	// middleware pins the merchant before RLS-aware queries run.
-	group.GET("/repair-alerts", read, wrap(httphandlers.GetAdminRepairAlerts))
-
-	users := group.Group("/users/:user_id")
-
-	// Reads — the merchant-admin billing:read capability.
-	users.GET("", read, wrap(httphandlers.GetAdminUserBillingProfile))
-	users.GET("/payments", read, wrap(httphandlers.GetAdminUserPayments))
-
-	// Entitlement grants/revokes — entitlements:write.
-	users.POST("/entitlements", entWrite, wrap(httphandlers.GrantAdminEntitlement))
-	users.DELETE("/entitlements/:id", entWrite, wrap(httphandlers.RevokeAdminEntitlement))
-
-	// Product access (ownership) grants/revokes — product-access:write (#250, #528).
-	// A separate concept from entitlements: durable per-(user,product) ownership.
-	users.POST("/product-access", productAccessWrite, wrap(httphandlers.GrantAdminProductAccess))
-	users.DELETE("/product-access/:id", productAccessWrite, wrap(httphandlers.RevokeAdminProductAccess))
-
-	// Off-channel payment recording — payments:write.
-	users.POST("/payments/off-channel", payWrite, wrap(httphandlers.AdminCreateOffChannelPayment))
-	users.DELETE("/payment-methods/:id", payWrite, wrap(httphandlers.DeleteAdminUserPaymentMethod))
-
-	// Merchant-wide payments (#528: ported from the retired per-user surface).
-	payments := group.Group("/payments")
-	payments.GET("", read, wrap(httphandlers.GetAdminPayments))
-	payments.GET("/:id", read, wrap(httphandlers.GetAdminPayment))
-	payments.POST("/:id/refunds", payWrite, wrap(httphandlers.AdminRefundPayment))
-
-	// Subscriptions: a merchant admin may cancel a subscription owned by a user in
-	// its merchant. Subscriptions are addressed by id; the handler operates within
-	// the pinned merchant, so a sub outside the merchant is unreachable (fail closed).
-	subs := group.Group("/subscriptions")
-	subs.GET("", subRead, wrap(httphandlers.GetAdminSubscriptions))
-	subs.GET("/:id", subRead, wrap(httphandlers.GetAdminSubscription))
-	subs.DELETE("/:id", subWrite, wrap(httphandlers.AdminCancelSubscription)) // #528: cancel = DELETE
+	group.GET("/:org_id/spend-delegations",
+		ginmw.RequirePermission(controlplane.PermCustomerSpendDelegationsRead),
+		wrap(httphandlers.GetOrgSpendDelegations),
+	)
+	group.PUT("/:org_id/spend-delegations",
+		ginmw.RequirePermission(controlplane.PermCustomerSpendDelegationsUpdate),
+		wrap(httphandlers.PutOrgSpendDelegations),
+	)
 }

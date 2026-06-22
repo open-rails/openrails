@@ -36,8 +36,8 @@ func TestAdminEntitlementGrantCreatesEntitlement(t *testing.T) {
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/admin/users/"+userID+"/entitlements", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req, _ := http.NewRequest("POST", "/v1/merchant/customers/"+userID+"/entitlements", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	req.Header.Set("Content-Type", "application/json")
 	admin.ServeHTTP(w, req)
 
@@ -61,8 +61,8 @@ func TestAdminEntitlementGrant_RequiresEntitlementsWrite(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{"entitlement": "premium", "days": 7})
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/admin/users/"+uuid.New().String()+"/entitlements", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req, _ := http.NewRequest("POST", "/v1/merchant/customers/"+uuid.New().String()+"/entitlements", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	req.Header.Set("Content-Type", "application/json")
 	admin.ServeHTTP(w, req)
 
@@ -77,12 +77,12 @@ func TestRemovedEntitlementGrantRoutesReturn404(t *testing.T) {
 	userID := uuid.New().String()
 
 	for _, path := range []string{
-		"/v1/admin/users/" + userID + "/grants",
-		"/v1/admin/grants/" + uuid.New().String(),
+		"/v1/merchant/customers/" + userID + "/grants",
+		"/v1/merchant/grants/" + uuid.New().String(),
 	} {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", path, nil)
-		req.Header.Set("Authorization", "Bearer host-credential")
+		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusNotFound, w.Code, path)
@@ -125,8 +125,8 @@ func TestAdminEntitlementAppendsAfterLatestEnd(t *testing.T) {
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/admin/users/"+userID+"/entitlements", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req, _ := http.NewRequest("POST", "/v1/merchant/customers/"+userID+"/entitlements", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	req.Header.Set("Content-Type", "application/json")
 	admin.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())

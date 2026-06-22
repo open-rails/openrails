@@ -30,11 +30,9 @@ type App struct {
 	Authenticator billingauth.Authenticator
 
 	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
-	// the browser-direct self-service surface (issue #339): the host verifies
-	// the incoming credential itself and supplies the explicitly mapped
-	// {merchant, subject, permissions} principal. When set, the standalone/gin
-	// server mounts /v1/me/* + /v1/admin/* authenticated by this seam
-	// even without a control plane.
+	// the browser-direct self-service and merchant surfaces (issue #339): the
+	// host verifies the incoming credential itself and supplies the explicitly
+	// mapped {merchant, subject, permissions} principal.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 
 	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224),

@@ -34,9 +34,9 @@ type RouteOptions struct {
 }
 
 // StandaloneHandler returns the full standalone gin HTTP surface for the embedded app:
-// health + debug (dev only) + user + admin + webhooks + the API-key-authenticated
-// server-to-server service routes. It is built from the gin-free app graph and
-// is intended for the standalone server entrypoint (cmd/openrails).
+// health + debug (dev only) + user + merchant + webhooks + API-key
+// service routes. It is built from the gin-free app graph and is intended for
+// the standalone server entrypoint (cmd/openrails).
 func StandaloneHandler(e *embedded.Embedded) (http.Handler, error) {
 	srv, err := newServer(e)
 	if err != nil {
@@ -75,9 +75,6 @@ func RegisterUserRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts Route
 		Authenticator: authn,
 	})
 }
-
-// (#528) The per-user embgin.RegisterAdminRoutes was removed. The admin surface
-// is now the delegated issuer→owner surface mounted via embgin.SelfHandler.
 
 // RegisterMerchantActionRoutes registers merchant-scoped administrative action
 // routes such as catalog product/price mutation. These routes require the

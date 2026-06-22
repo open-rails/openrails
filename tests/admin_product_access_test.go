@@ -18,7 +18,7 @@ import (
 // TestAdminProductAccessGrantAndRevoke exercises the #528 delegated product-access
 // WRITE surface end-to-end against Postgres: a merchant admin holding
 // merchant:customer-settings:update grants a user ownership of a product
-// (POST /v1/admin/users/:id/product-access), the grant appears in the composite
+// (POST /v1/merchant/customers/:id/product-access), the grant appears in the composite
 // user-detail product_access section, and a DELETE revokes it. Product access
 // (#250) is a SEPARATE concept from entitlements, with its own write capability.
 func TestAdminProductAccessGrantAndRevoke(t *testing.T) {
@@ -33,8 +33,8 @@ func TestAdminProductAccessGrantAndRevoke(t *testing.T) {
 	// Grant ownership.
 	body, _ := json.Marshal(map[string]any{"product_id": productID.String()})
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/admin/users/"+userID+"/product-access", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req, _ := http.NewRequest("POST", "/v1/merchant/customers/"+userID+"/product-access", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	req.Header.Set("Content-Type", "application/json")
 	admin.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
@@ -53,8 +53,8 @@ func TestAdminProductAccessGrantAndRevoke(t *testing.T) {
 
 	// It appears in the composite user-detail product_access section.
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/v1/admin/users/"+userID, nil)
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req, _ = http.NewRequest("GET", "/v1/merchant/customers/"+userID, nil)
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	admin.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var profile map[string]any
@@ -65,8 +65,8 @@ func TestAdminProductAccessGrantAndRevoke(t *testing.T) {
 
 	// Revoke it.
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("DELETE", "/v1/admin/users/"+userID+"/product-access/"+grant.ID, nil)
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req, _ = http.NewRequest("DELETE", "/v1/merchant/customers/"+userID+"/product-access/"+grant.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	admin.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
@@ -81,8 +81,8 @@ func TestAdminProductAccess_RequiresProductAccessWrite(t *testing.T) {
 	products := suite.SeedProducts()
 	body, _ := json.Marshal(map[string]any{"product_id": products[0].Product.ID.String()})
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/admin/users/"+uuid.New().String()+"/product-access", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req, _ := http.NewRequest("POST", "/v1/merchant/customers/"+uuid.New().String()+"/product-access", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	req.Header.Set("Content-Type", "application/json")
 	admin.ServeHTTP(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())

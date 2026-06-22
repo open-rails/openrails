@@ -51,11 +51,6 @@ func TestRegisterSelfServiceRoutes_MountedWithHostDelegatedAuthenticatorOnly(t *
 		require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	}()
 
-	// The admin surface mounts alongside, gated the same way (#528: was /merchant-admin).
-	req = httptest.NewRequest(http.MethodGet, "/v1/admin/subscriptions", nil)
-	w = httptest.NewRecorder()
-	e.ServeHTTP(w, req)
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }
 
 type originRejectingDelegatedResolver struct {

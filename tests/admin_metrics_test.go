@@ -94,7 +94,7 @@ func seedClickHouseDailyMetrics(t *testing.T, suite *TestContainerSuite, amount 
 	require.NoError(t, batch.Send())
 }
 
-// TestAdminMetricsFolded exercises the #528 folded GET /v1/admin/metrics endpoint
+// TestAdminMetricsFolded exercises the #528 folded GET /v1/merchant/metrics endpoint
 // (was /metrics/{summary,revenue,subscriptions,processors,churn}). With a single
 // currency present each section is a bare object; the response carries all five
 // sections in one document. Authorized by merchant:usage:read.
@@ -106,8 +106,8 @@ func TestAdminMetricsFolded(t *testing.T) {
 	products := suite.SeedProducts()
 	seedMetricsData(t, suite, products[0].Prices[0].ID)
 
-	req, _ := http.NewRequest("GET", "/v1/admin/metrics?granularity=day", nil)
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req, _ := http.NewRequest("GET", "/v1/merchant/metrics?granularity=day", nil)
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	w := httptest.NewRecorder()
 	admin.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -156,8 +156,8 @@ func TestAdminMetrics_RequiresMetricsRead(t *testing.T) {
 	admin := newHostSeamAdminRouter(t, suite, "bd000000-0000-4000-8000-000000000004",
 		[]string{controlplane.PermMerchantCustomerSettingsRead})
 
-	req, _ := http.NewRequest("GET", "/v1/admin/metrics?granularity=day", nil)
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req, _ := http.NewRequest("GET", "/v1/merchant/metrics?granularity=day", nil)
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	w := httptest.NewRecorder()
 	admin.ServeHTTP(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())

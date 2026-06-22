@@ -154,6 +154,9 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	readMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsRead)}, dbMW...)
 	writeMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsUpdate)}, dbMW...)
 	admissionMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantAdmissionsCreate)}, dbMW...)
+	settingsReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsRead)}, dbMW...)
+	settingsWriteMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)}, dbMW...)
+	usageReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantUsageRead)}, dbMW...)
 
 	group.Handle(http.MethodPost, "/customers/entitlements:batch",
 		h(httphandlers.ServiceGetExternalSubjectEntitlements),
@@ -184,39 +187,25 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 		readMW...,
 	)
 
-	credits := group.Group("/credits")
-
-	group.Handle(http.MethodPost, "/admit", h(httphandlers.ServiceAdmit), admissionMW...)
-	group.Handle(http.MethodPost, "/admit/batch", h(httphandlers.ServiceAdmitBatch), admissionMW...)
-	group.Handle(http.MethodGet, "/budget", h(httphandlers.ServiceGetBudget), readMW...)
-	group.Handle(http.MethodPut, "/payer-spend-limits", h(httphandlers.ServiceSetPayerSpendLimits), writeMW...)
-	group.Handle(http.MethodPut, "/tier-schedules", h(httphandlers.ServiceSetTierSchedule), writeMW...)
+	group.Handle(http.MethodPost, "/admissions", h(httphandlers.ServiceAdmitBatch), admissionMW...)
+	group.Handle(http.MethodGet, "/settings", h(httphandlers.ServiceGetMerchantSettings), settingsReadMW...)
+	group.Handle(http.MethodPut, "/settings", h(httphandlers.ServiceSetMerchantSettings), settingsWriteMW...)
 	group.Handle(http.MethodGet, "/trust-tier", h(httphandlers.ServiceGetTier), readMW...)
 	group.Handle(http.MethodPost, "/wasted-spend", h(httphandlers.ServiceReportWastedSpend), admissionMW...)
-	group.Handle(http.MethodGet, "/abuse-usage", h(httphandlers.ServiceAbuseUsage), readMW...)
 	group.Handle(http.MethodPut, "/credit-limit", h(httphandlers.ServiceSetCreditLimit), writeMW...)
-	group.Handle(http.MethodGet, "/credit-limit", h(httphandlers.ServiceGetCreditLimit), readMW...)
-	group.Handle(http.MethodPut, "/invoker-spend-limits", h(httphandlers.ServiceSetInvokerSpendLimits), writeMW...)
-	group.Handle(http.MethodGet, "/invoker-spend-limits", h(httphandlers.ServiceGetInvokerSpendLimits), readMW...)
 
+	admissions := group.Group("/admissions")
+	admissions.Handle(http.MethodPost, "/:id/capture", h(httphandlers.ServiceCaptureHold), admissionMW...)
+	admissions.Handle(http.MethodPost, "/:id/release", h(httphandlers.ServiceReleaseHold), admissionMW...)
+
+	usage := group.Group("/usage")
+	usage.Handle(http.MethodPost, "/rollup", h(httphandlers.ServiceUsageRollup), usageReadMW...)
+	usage.Handle(http.MethodPost, "/resource-revenue", h(httphandlers.ServiceResourceRevenue), usageReadMW...)
+
+	credits := group.Group("/credits")
 	credits.Handle(http.MethodGet, "/balance", h(httphandlers.ServiceGetCreditsBalance), readMW...)
 	credits.Handle(http.MethodPost, "/deposit", h(httphandlers.ServiceDepositCredits), writeMW...)
-	credits.Handle(http.MethodPost, "/withdraw", h(httphandlers.ServiceWithdrawCredits), writeMW...)
-	credits.Handle(http.MethodPost, "/holds/:id/capture", h(httphandlers.ServiceCaptureHold), admissionMW...)
-	credits.Handle(http.MethodPost, "/holds/:id/release", h(httphandlers.ServiceReleaseHold), admissionMW...)
-	credits.Handle(http.MethodPost, "/usage/rollup", h(httphandlers.ServiceUsageRollup), readMW...)
-	credits.Handle(http.MethodPost, "/usage/resource-revenue", h(httphandlers.ServiceResourceRevenue), readMW...)
-	credits.Handle(http.MethodGet, "/transactions/lookup", h(httphandlers.ServiceLookupCreditTransaction), readMW...)
-	credits.Handle(http.MethodPut, "/account-settings", h(httphandlers.ServiceSetCreditAccountSettings), writeMW...)
-	credits.Handle(http.MethodGet, "/account-settings", h(httphandlers.ServiceGetCreditAccountSettings), readMW...)
-	credits.Handle(http.MethodGet, "/transactions", h(httphandlers.ServiceListCustomerCreditTransactions), readMW...)
 }
-
-// #528: the per-user `/v1/admin` surface (RegisterAdminRoutes) was retired. The
-// admin API is the delegated issuer-owner surface (ginroutes.RegisterAdminRoutes,
-// merchant-scoped permissions). The dropped features (provider-intents, reconcile,
-// solana recurring plans, entitlement-features) live only on the dead surface and
-// are removed; product-access moves to the delegated surface (#528 increment 4).
 
 func RegisterMerchantActionRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	var dbMW []router.Middleware
@@ -462,6 +451,7 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	payRefund := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentsRefund)}, dbMW...)
 	subRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSubscriptionsRead)}, dbMW...)
 	subWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSubscriptionsUpdate)}, dbMW...)
+	usageRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantUsageRead)}, dbMW...)
 	repairRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantRepairAlertsRead)}, dbMW...)
 
 	customers := rr.Group("/customers/:customer_id")
@@ -486,6 +476,7 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	subs.Handle(http.MethodPost, "/:id/resume", h(httphandlers.AdminResumeSubscription), subWrite...)
 	subs.Handle(http.MethodPut, "/:id/payment-method", h(httphandlers.AdminUpdateSubscriptionPaymentMethod), subWrite...)
 
+	rr.Handle(http.MethodGet, "/metrics", h(httphandlers.GetAdminMetrics), usageRead...)
 	rr.Handle(http.MethodGet, "/repair-alerts", h(httphandlers.GetAdminRepairAlerts), repairRead...)
 }
 

@@ -209,8 +209,6 @@ func ServiceGetUserProductAccess(r *httprequest.Request) {
 	r.JSON(http.StatusOK, productAccessResponses(r, grants))
 }
 
-// --- Admin (grant/revoke under /v1/admin/users/:user_id/product-access) ---
-
 // GrantAdminProductAccess creates a durable product access grant for a user
 // (support comps / migrations / manual purchases). Idempotent at the service
 // layer per (user, product, source).

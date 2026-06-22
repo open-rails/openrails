@@ -51,7 +51,7 @@ func TestHTTPHandlerOptions_WebhooksOnly(t *testing.T) {
 
 	// Admin routes should be excluded.
 	{
-		req := httptest.NewRequest(http.MethodGet, "/billing/v1/admin/metrics/summary", nil)
+		req := httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/metrics/summary", nil)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
 		require.Equal(t, http.StatusNotFound, w.Code)
@@ -72,14 +72,14 @@ func TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer(t *testing.T) {
 
 	embeddedDefault := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{}))
 	t.Cleanup(embeddedDefault.Close)
-	require.Equal(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodPost, embeddedDefault.URL+"/billing/v1/merchant/admit"))
+	require.Equal(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodPost, embeddedDefault.URL+"/billing/v1/merchant/admissions"))
 	require.Equal(t, http.StatusNotFound, status(t, embeddedDefault.Client(), http.MethodGet, embeddedDefault.URL+"/billing/v1/merchant/catalog/products"))
 
 	embeddedMerchantAPI := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{
 		RouteSets: []server.RouteSet{server.RouteSetMerchantAPI},
 	}))
 	t.Cleanup(embeddedMerchantAPI.Close)
-	require.NotEqual(t, http.StatusNotFound, status(t, embeddedMerchantAPI.Client(), http.MethodPost, embeddedMerchantAPI.URL+"/billing/v1/merchant/admit"))
+	require.NotEqual(t, http.StatusNotFound, status(t, embeddedMerchantAPI.Client(), http.MethodPost, embeddedMerchantAPI.URL+"/billing/v1/merchant/admissions"))
 
 	embeddedMerchantSettings := httptest.NewServer(srv.NewHTTPHandler(server.HTTPHandlerOptions{
 		RouteSets: []server.RouteSet{server.RouteSetMerchantSettings},
@@ -89,7 +89,7 @@ func TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer(t *testing.T) {
 
 	standalone := httptest.NewServer(srv.Handler())
 	t.Cleanup(standalone.Close)
-	require.NotEqual(t, http.StatusNotFound, status(t, standalone.Client(), http.MethodPost, standalone.URL+"/v1/merchant/admit"))
+	require.NotEqual(t, http.StatusNotFound, status(t, standalone.Client(), http.MethodPost, standalone.URL+"/v1/merchant/admissions"))
 	require.NotEqual(t, http.StatusNotFound, status(t, standalone.Client(), http.MethodGet, standalone.URL+"/v1/merchant/catalog/products"))
 }
 

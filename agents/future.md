@@ -936,9 +936,9 @@ Deferred refinements to the usage-billing/admission system (core shipped + live-
 
 - MERCHANT->OWNER limit level (#304): admission enforces owner->actor budgets/throughput today; add the second level so a MERCHANT can cap each OWNER (tensorhub caps cozy), via the SAME admitter logic at a merchant-scoped key + merchant-level tier policy (owner sentinel). The budgets/limiter engines already support arbitrary scope keys.
 - BUDGET CAPTURE tie-to-ledger (#304): on ledger CaptureHold, also budgets.Capture the matching reservation so reserved->used converts immediately. NOT required for correctness (the rolling window self-heals: an un-captured reservation ages out of the window), so it's an accuracy nicety.
-- /v1/self delegated budget introspection (#304): a browser-token variant of GET /v1/service/budget. Redundant while hosts proxy the service endpoint; add if browsers should read budgets directly.
+- /v1/me delegated budget introspection (#304): a browser-token variant of merchant budget reads. Redundant while hosts proxy the service endpoint; add if browsers should read budgets directly.
 - usage_events MONTH PARTITIONING (#289): partition billing.usage_events by month for scale. Wrinkle: the idempotency unique index (merchant,owner,event_type,source,source_id) must include the partition key, weakening cross-month dedup (acceptable since source_ids are request/time-scoped). Premature until event volume demands it.
-- INVOICE admin list + CSV export (#303): an admin (cross-owner) invoice list + CSV download. Self endpoints (GET /v1/self/invoices[/:id]) cover the customer need; admin/CSV on demand. (PDF rendering intentionally NOT planned.)
+- INVOICE admin list + CSV export (#303): an admin (cross-owner) invoice list + CSV download. Self endpoints (GET /v1/me/invoices[/:id]) cover the customer need; admin/CSV on demand. (PDF rendering intentionally NOT planned.)
 - tensorhub->OpenRails platform_policies ownership migration (#304): cross-repo move of tensorhub's tier policies onto OpenRails' tier_policies; do when consolidating.
 
 **Tasks:**
@@ -946,7 +946,7 @@ Deferred refinements to the usage-billing/admission system (core shipped + live-
 - [ ] Arrears authorize gate: combine prepaid balance + remaining credit line as headroom (currently line-only; conservative).
 - [ ] MERCHANT->OWNER admission level (tensorhub caps cozy) via merchant-scoped tier policy + admitter check.
 - [ ] Tie budgets.Capture/Release to ledger CaptureHold/ReleaseHold (accuracy; window self-heals without it).
-- [ ] /v1/self delegated budget introspection variant.
+- [ ] /v1/me delegated budget introspection variant.
 - [ ] usage_events month partitioning (include partition key in the idempotency index).
 - [ ] Invoice admin (cross-owner) list + CSV export.
 - [ ] Migrate tensorhub platform_policies -> OpenRails tier_policies (cross-repo).

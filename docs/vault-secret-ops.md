@@ -114,36 +114,28 @@ Dashboard callers use merchant-signed delegated access tokens with the exact
 merchant-secret permissions from the control-plane catalog. These endpoints never
 return plaintext secret values.
 
-List configured status:
+List configured payment providers:
 
 ```sh
 curl -H "Authorization: Bearer $DELEGATED_ADMIN_JWT" \
-  "$OPENRAILS_URL/v1/admin/secrets"
+  "$OPENRAILS_URL/v1/merchant/payment-providers"
 ```
 
-Validate before saving:
+Save a provider configuration. Secret fields are accepted on write, validated
+before storage, and redacted on read:
 
 ```sh
-curl -X PUT "$OPENRAILS_URL/v1/admin/secrets/stripe/secret_key" \
+curl -X PUT "$OPENRAILS_URL/v1/merchant/payment-providers/stripe" \
   -H "Authorization: Bearer $DELEGATED_ADMIN_JWT" \
   -H "Content-Type: application/json" \
-  -d '{"value":"sk_live_...","validate_only":true}'
+  -d '{"environment":"test","publishable_key":"pk_test_...","secret_key":"sk_test_...","webhook_signing_secret":"whsec_..."}'
 ```
 
-Save and validate:
+Delete/disable a provider configuration:
 
 ```sh
-curl -X PUT "$OPENRAILS_URL/v1/admin/secrets/stripe/secret_key" \
+curl -X DELETE "$OPENRAILS_URL/v1/merchant/payment-providers/stripe" \
   -H "Authorization: Bearer $DELEGATED_ADMIN_JWT" \
-  -H "Content-Type: application/json" \
-  -d '{"value":"sk_live_...","save_and_validate":true}'
-```
-
-Delete a configured secret:
-
-```sh
-curl -X DELETE "$OPENRAILS_URL/v1/admin/secrets/stripe/webhook_signing_secret" \
-  -H "Authorization: Bearer $DELEGATED_ADMIN_JWT"
 ```
 
 ## Migration: move DB-stored secrets into Vault

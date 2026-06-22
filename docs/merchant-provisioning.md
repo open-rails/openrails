@@ -41,7 +41,7 @@ See `config/merchants.example.yaml` for the manifest shape.
 
 Embedded hosts (cozy-art, doujins, tensorhub) instead provision via
 `embed.Options` (one merchant per engine, secrets passed programmatically) and
-authorize the `/v1/admin` surface with their own AuthKit/Authenticator — the
+authorize the `/v1/merchant` surface with their own AuthKit/Authenticator — the
 issuer-as-owner path is the standalone mechanism.
 
 ## Lifecycle

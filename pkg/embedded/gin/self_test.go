@@ -82,10 +82,8 @@ func TestSelfHandler_EmbeddedPathsMountedWithoutSelfPermissions(t *testing.T) {
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 
-	// The admin subtree is mounted on the same handler (org perm missing => 403
-	// proves mount + auth, not 404). #528: was /billing/v1/merchant-admin.
-	w = doSelf(self, http.MethodGet, "/billing/v1/admin/subscriptions")
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	w = doSelf(self, http.MethodGet, "/billing/v1/merchant/subscriptions")
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 }
 
 // Host authenticator rejection and invalid principals map to 401 (fail closed),
@@ -105,12 +103,12 @@ func TestSelfHandler_FailClosed(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "delegated_principal_invalid")
 
-	// A platform grant can never be smuggled into a merchant-admin gate.
+	// Merchant-admin routes live on the base embedded handler, not SelfHandler.
 	h = newSelfHandler(nil, stubSelfAuthenticator{
 		principal: selfPrincipal("platform:metrics:read"),
 	}, merchant.ID{})
-	w = doSelf(h, http.MethodGet, "/billing/v1/admin/metrics")
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	w = doSelf(h, http.MethodGet, "/billing/v1/merchant/metrics")
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 }
 
 func TestSelfHandler_DefaultUserAuthenticatorGetsSelfSurface(t *testing.T) {

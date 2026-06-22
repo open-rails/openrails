@@ -7,9 +7,6 @@ import (
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
-// #528: registerAdminRoutes{At,On} removed — the per-user `/v1/admin` surface is
-// retired; the delegated admin surface is mounted by registerSelfServiceRoutes.
-
 func (s *Server) registerMerchantActionRoutesAt(e *gin.Engine, apiPrefix string) {
 	group := e.Group(apiPrefix + "/merchant")
 	opts := httproutes.Options{

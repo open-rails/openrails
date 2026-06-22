@@ -20,7 +20,6 @@ package openrails
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,61 +35,15 @@ const (
 	InvokerTypePayer = "payer"
 )
 
-// Client is the unified OpenRails service surface (#338): credits/holds,
-// unified admission, budgets, trust-tier policy, account settings, and usage/revenue
-// analytics. All types are wire types (strings/ints/time) — no internal types.
-//
-// Method semantics (idempotency keys, deny-vs-error, defaulting) are defined by
-// the standalone HTTP handlers in internal/http/handlers/service_*.go; both
-// implementations follow them exactly.
-type Client interface {
-	// Admit checks delegated spend, delegated wasted-spend, and money capacity,
-	// then places the request hold when allowed. Idempotent on req.RequestID. A
-	// clean deny is (Allowed=false, nil error) on BOTH transports.
-	Admit(ctx context.Context, req AdmitRequest) (*AdmitResponse, error)
-	// CaptureHold settles a hold and returns the ledger transaction.
-	CaptureHold(ctx context.Context, req CaptureHoldRequest) (*CreditTransaction, error)
-	// ReleaseHold frees a hold without charging.
-	ReleaseHold(ctx context.Context, requestID string) error
-	// WithdrawCredits debits credits directly.
-	WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error)
-	// DepositCredits mints a credit block for a payer.
-	DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error)
+// AdmissionClient is the Tensorhub hot path: batch admission, settle, release,
+// wasted-spend reporting, and trust-tier read.
+type AdmissionClient interface {
+	AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error)
 	// Capture settles the admission/authorize hold request_id at the actual
 	// amount, optionally recording a usage analytics event (#311/#410).
 	Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) error
 	// Release frees the admission/authorize hold request_id without charging.
 	Release(ctx context.Context, requestID string) error
-	// Balance returns the payer's balance snapshot.
-	Balance(ctx context.Context, customerID string) (*BalanceResponse, error)
-	// GetCreditAccount reads a payer's balance + policy snapshot for one currency.
-	GetCreditAccount(ctx context.Context, customerID, currency string) (*CreditAccount, error)
-	// SetCreditAccountSettings upserts a payer's billing account settings and
-	// returns the refreshed account snapshot for one currency.
-	SetCreditAccountSettings(ctx context.Context, customerID, currency string, in AccountSettingsInput) (*CreditAccount, error)
-	// ListCreditTransactions reads a payer's transaction history and passes the
-	// canonical JSON through ({"transactions":[...],"total":N}) for one currency.
-	ListCreditTransactions(ctx context.Context, customerID, currency string, limit int) (json.RawMessage, error)
-	// UsageRollup returns grouped spend over [from, to). groupBy is
-	// resource|invoker|function|tier.
-	UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
-	// BudgetStatus returns the invoker's fixed money-budget windows under the
-	// payer's stored trust-tier policy without reserving (#304 introspection).
-	BudgetStatus(ctx context.Context, customerID, invokerID, currency, tier string) ([]BudgetWindow, error)
-	// SetPayerSpendLimits upserts a per-payer trust-tier money policy (#298): fixed
-	// money-budget windows and wasted-spend grace windows.
-	SetPayerSpendLimits(ctx context.Context, customerID string, in PayerSpendLimitInput) error
-	// SetTierSchedule persists the merchant's trust-tier SCHEDULE once (#476): the ordered
-	// ladder [{tier, min_cumulative_paid_amount}] for one currency. OpenRails then
-	// AUTO-maintains each payer's same-currency trust tier from cumulative spend — the
-	// host never cranks graduation. An EMPTY customerID sets the merchant-wide
-	// default schedule (the common case); a non-empty one sets a per-subject
-	// override. owner=platform (the subject cannot see/loosen it).
-	SetTierSchedule(ctx context.Context, customerID, currency string, schedule []TierScheduleRung) error
-	// SetMerchantConfiguration configures merchant-scoped OpenRails behavior.
-	// Missing keys fall back to hardcoded service defaults. OPERATOR-only — NOT
-	// self-serve.
-	SetMerchantConfiguration(ctx context.Context, in MerchantConfigurationInput) error
 	// GetTier returns the payer's current trust tier (#477) for one currency:
 	// the value OpenRails auto-maintains from same-currency cumulative paid spend
 	// against the persisted schedule (#476), or a manual admin override. Empty
@@ -101,28 +54,33 @@ type Client interface {
 	// grace and charge overage through the normal ledger. Source+SourceID are
 	// required for retry idempotency.
 	ReportWastedSpend(ctx context.Context, report WastedSpendReport) (*WastedSpendResponse, error)
-	// AbuseUsage returns the payer's and invoker's running WASTED-$ totals + budgets
-	// (#488 introspection) in one currency. Empty invoker omits the invoker
-	// windows; empty tier resolves the payer's current trust tier.
-	AbuseUsage(ctx context.Context, customerID, invoker, currency, tier string) (*AbuseUsageResponse, error)
-	// SetCreditLimit sets the admin/operator arrears credit line for a payer
-	// (#489): under billing_mode=arrears the balance may go NEGATIVE up to
-	// creditLimit; AdmitHold denies insufficient_credit when a new hold would
-	// exceed it. 0 = off (prepaid / existing-arrears behavior, unchanged).
-	// OPERATOR-only — NOT self-serve.
+}
+
+// PolicySyncClient installs merchant-owned admission policy in one settings
+// document.
+type PolicySyncClient interface {
+	GetMerchantSettings(ctx context.Context) (*MerchantSettings, error)
+	SetMerchantSettings(ctx context.Context, settings MerchantSettings) error
+	SetMerchantConfiguration(ctx context.Context, in MerchantConfigurationInput) error
+}
+
+// AdminFundingClient is the small non-hot-path funding/reporting surface used
+// by standalone admin jobs.
+type AdminFundingClient interface {
+	DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error)
 	SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error
-	// GetCreditLimit returns the admin-set arrears credit line for a payer (#489).
-	GetCreditLimit(ctx context.Context, customerID, currency string) (int64, error)
-	// SetInvokerSpendLimits upserts a per-invoker spend limit (#473/#517): the
-	// payer's cap on a delegated invoker (scope=invoker), a role (scope=role,
-	// RoleID = the role uuid), or an invoker-at-tier (scope=invoker_tier).
-	SetInvokerSpendLimits(ctx context.Context, customerID string, in InvokerSpendLimitInput) error
-	// InvokerSpendLimits reads back the payer's per-invoker spend limits (#473/#517)
-	// for the host to reconcile.
-	InvokerSpendLimits(ctx context.Context, customerID string) ([]InvokerSpendLimit, error)
+	UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
 	// ResourceRevenueDaily returns per-day revenue for a resource across all
 	// payers in the merchant (#410).
 	ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error)
+}
+
+// CustomerLookupClient reads customer-forward billing state.
+type CustomerLookupClient interface {
+	// Balance returns the payer's balance snapshot.
+	Balance(ctx context.Context, customerID string) (*BalanceResponse, error)
+	// GetCreditAccount reads a payer's balance snapshot for one currency.
+	GetCreditAccount(ctx context.Context, customerID, currency string) (*CreditAccount, error)
 	// ListActiveEntitlements returns the entitlement records active at `at`
 	// for subjects addressed by their EXTERNAL identity — the subject ids the
 	// host's auth system already holds, scoped to the request credential's
@@ -150,11 +108,15 @@ type Client interface {
 	ListProductAccess(ctx context.Context, subject string) ([]ProductAccessGrant, error)
 	// HasProductAccess checks one product id for one subject.
 	HasProductAccess(ctx context.Context, subject, productID string) (bool, error)
-	// AdmitBatch performs one cross-payer batch admission (#335): N admit items
-	// (mixed payers) in ONE call with per-item verdicts. Per-item isolation: one
-	// item's deny or error never fails the batch; the returned slice is
-	// positionally aligned with items. Idempotent per item on RequestID like Admit.
-	AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error)
+}
+
+// Client is the complete SDK surface. New hot-path callers should depend on the
+// smaller interfaces above.
+type Client interface {
+	AdmissionClient
+	PolicySyncClient
+	AdminFundingClient
+	CustomerLookupClient
 }
 
 // SelfIssuer is the issuer keying customers rows for self-service
@@ -223,7 +185,7 @@ type CreditTransaction struct {
 	UpdatedAt       time.Time
 }
 
-// AdmitRequest is the body for POST /v1/service/admit. It checks payer money
+// AdmitRequest is one item in POST /v1/merchant/admissions. It checks payer money
 // capacity, delegated spend policy, delegated wasted-spend cutoff, and places the
 // request hold when allowed.
 //
@@ -338,8 +300,8 @@ type BudgetWindowInput struct {
 	Currency      string `json:"currency,omitempty"`
 }
 
-// MerchantConfigurationInput is the public SDK shape for
-// PUT /v1/service/merchant-configuration.
+// MerchantConfigurationInput is the legacy SDK shape adapted onto
+// PUT /v1/merchant/settings.
 type MerchantConfigurationInput struct {
 	// Profile is merchant-owned branding and sender metadata. Nil preserves the
 	// stored profile; a non-nil empty value clears it.
@@ -356,6 +318,21 @@ type MerchantProfileInput struct {
 	LogoURL     string `json:"logo_url,omitempty"`
 	FromEmail   string `json:"from_email,omitempty"`
 	SupportURL  string `json:"support_url,omitempty"`
+}
+
+// MerchantSettings is the merchant-owned admission/policy document installed by
+// standalone policy sync jobs.
+type MerchantSettings struct {
+	Profile                           *MerchantProfileInput  `json:"profile,omitempty"`
+	TierSchedules                     []MerchantTierSchedule `json:"tier_schedules,omitempty"`
+	TierSpendLimits                   []PayerSpendLimitInput `json:"tier_spend_limits,omitempty"`
+	DelegatedInvokerWastedSpendLimits []BudgetWindowInput    `json:"delegated_invoker_wasted_spend_limits,omitempty"`
+}
+
+// MerchantTierSchedule is one currency's trust-tier ladder.
+type MerchantTierSchedule struct {
+	Currency string             `json:"currency"`
+	Schedule []TierScheduleRung `json:"schedule"`
 }
 
 // BudgetWindow is one computed window from POST /v1/service/budget/check,
@@ -532,7 +509,7 @@ type ProductAccessCheck struct {
 	HasAccess  bool   `json:"has_access"`
 }
 
-// AdmitBatchVerdict is one per-item verdict from POST /v1/service/admit/batch.
+// AdmitBatchVerdict is one per-item verdict from POST /v1/merchant/admissions.
 // Status is the HTTP-equivalent status the single Admit route would have
 // returned for this item (200/402/403/429/4xx/5xx); Result is the full
 // admission decision when one was reached.

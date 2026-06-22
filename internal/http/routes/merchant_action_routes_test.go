@@ -139,12 +139,6 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 		})
 	}
 
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/admin/catalog/products", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("old admin catalog route should not be registered, got %d", rec.Code)
-	}
-
 	for _, tc := range []struct {
 		method string
 		path   string
@@ -191,6 +185,27 @@ func TestMerchantActionRoutesDelegatedTokenGated(t *testing.T) {
 	}
 }
 
+func TestMerchantActionRoutesRejectCustomerTreasuryPermission(t *testing.T) {
+	mux := http.NewServeMux()
+	del := fakeMerchantDelegatedResolver{resolved: &controlplane.ResolvedDelegated{
+		DelegatedSubject: "admin-1",
+		MerchantID:       dbtest.TestMerchantID,
+		Merchant:         "merchant_1",
+		Permissions:      []string{controlplane.PermCustomerSpendDelegationsRead},
+	}}
+	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, Options{
+		DelegatedResolver: del,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111", nil)
+	req.Header.Set("Authorization", "Bearer aaa.bbb.ccc")
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("customer treasury permission must not satisfy merchant route, got %d", rec.Code)
+	}
+}
+
 func TestServiceRoutesDelegatedAdmitGatedByPermission(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -212,7 +227,7 @@ func TestServiceRoutesDelegatedAdmitGatedByPermission(t *testing.T) {
 				DelegatedResolver: del,
 			})
 			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/admit", nil)
+			req := httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/admissions", nil)
 			req.Header.Set("Authorization", "Bearer aaa.bbb.ccc")
 			mux.ServeHTTP(rec, req)
 			if rec.Code != tc.want {

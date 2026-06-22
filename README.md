@@ -43,8 +43,8 @@ As a result, self-hosted instances only need to meet PCI compliance requirements
 | | **Standalone service** | **Embedded library** |
 |---|---|---|
 | Deployment | Separate HTTP service (own process, port `:3053`) | Compiled into your Go binary |
-| Your backend calls it via | HTTP (`/v1/service/*`, API key) | In-process function calls (`pkg/service`) or HTTP |
-| Your frontend calls it via | HTTP, browser-direct (`/v1/self/*`, delegated token) | HTTP routes mounted on **your** server, **your** credential |
+| Your backend calls it via | HTTP (`/v1/merchant/*`, API key) | In-process function calls (`pkg/service`) or HTTP |
+| Your frontend calls it via | HTTP, browser-direct (`/v1/me/*`, delegated token) | HTTP routes mounted on **your** server, **your** credential |
 | Auth | OpenRails verifies tokens at its network edge | You hand OpenRails an identity; it never sees a credential |
 | Language requirement | None — any stack that speaks HTTP | Host must be Go |
 | Database | Owns its schema (can share your Postgres instance) | Shares your `pgx` pool (or connects itself) |
@@ -116,8 +116,8 @@ JWKS). Same seam, two serializations.
 
 | Surface | Standalone credential | Embedded credential |
 |---|---|---|
-| Backend / server-to-server | Service token (`/v1/service/*`) | In-process call — no credential |
-| Browser self-service | Delegated token, minted by your backend (`/v1/self/*`) | Your session credential, via `DelegatedAuthenticator` |
+| Backend / server-to-server | Service token (`/v1/merchant/*`) | In-process call — no credential |
+| Browser self-service | Delegated token, minted by your backend (`/v1/me/*`) | Your session credential, via `DelegatedAuthenticator` |
 | User billing routes | AuthKit user JWT (AuthKit-backed deployments) | Your session credential, via `Authenticator` |
 | Admin routes | Live `openrails:admin` permission, checked per request | Same (requires the control plane) |
 
@@ -132,8 +132,8 @@ task docker-up            # Postgres + Garnet(Redis) + ClickHouse + OpenRails, z
 curl http://localhost:3053/health
 ```
 
-The public API listens on `:3053`: user routes, the self-service surface, admin routes,
-webhooks, and the server-to-server `/v1/service/*` routes all share the port. See
+The public API listens on `:3053`: public routes, the self-service surface,
+merchant routes, and webhooks all share the port. See
 [docs/api/endpoints.md](docs/api/endpoints.md) for the full HTTP reference and
 [docs/merchant-provisioning.md](docs/merchant-provisioning.md) for creating your merchant and
 its first API key.
@@ -145,44 +145,31 @@ server-to-server with its API key. The high-traffic surface is credits/usage:
 
 ```bash
 # Pre-authorize + place a hold atomically before doing expensive work
-curl -X POST https://openrails.example/v1/service/credits/authorize \
+curl -X POST https://openrails.example/v1/merchant/admissions \
   -H "Authorization: Bearer openrails_st_..." \
-  -d '{"customer_id": "...", "invoker": "user-123", "credit_type": "api_credits",
-       "estimated_amount": 50000, "request_id": "req-789"}'
+  -d '{"items":[{"customer_id":"...","invoker":"user-123",
+       "estimated_amount":50000,"request_id":"req-789"}]}'
 
 # Settle the real cost (or POST .../holds/{id}/release on failure)
-curl -X POST https://openrails.example/v1/service/credits/holds/{id}/capture \
+curl -X POST https://openrails.example/v1/merchant/admissions/{id}/capture \
   -H "Authorization: Bearer openrails_st_..." \
-  -d '{"amount": 43000, "event_type": "chat.completion"}'
+  -d '{"amount":43000,"usage":{"event_type":"chat.completion"}}'
 ```
 
-API keys carry explicit permissions (`openrails:credits:write`,
-`openrails:credits:read`, `openrails:catalog:write`, …) and are bound to your merchant —
-a key can never act on another merchant's data. Other `/v1/service/*` groups cover
-admission/rate-limiting (`/admit`, `/budget`, trust-tier policies), account settings, credit
-windows, usage rollups, and the issuer registry used in the next step.
+API keys carry explicit `merchant:*` permissions and are bound to your merchant —
+a key can never act on another merchant's data. The `/v1/merchant/*` surface
+covers admission (`/admissions`), trust-tier policies, merchant settings,
+credit windows, usage rollups, and the issuer registry used in the next step.
 
 ### 3. Frontend integration (delegated tokens)
 
 Your users are not OpenRails users — they are *subjects of your merchant*. The browser talks
 to OpenRails directly using a short-lived delegated token that **your backend signs**.
 
-**3a. Register your issuer (one-time setup).** Tell OpenRails which signing keys speak for
-your merchant. Publish a JWKS endpoint (you almost certainly already have one for your own
-auth) and register it:
-
-```bash
-curl -X POST https://openrails.example/v1/service/merchant/issuers \
-  -H "Authorization: Bearer openrails_st_..." \
-  -d '{"issuer": "https://api.yourapp.com",
-       "jwks_uri": "https://api.yourapp.com/.well-known/jwks.json",
-       "audiences": ["openrails"]}'
-```
-
-The merchant is bound from your API key, so you can only register issuers for your own
-merchant; issuer strings are globally unique, which is what makes cross-merchant token forgery
-impossible. `POST /v1/service/merchant/issuers/disable` is the per-issuer kill switch;
-key *rotation* is just re-`POST`ing with the new JWKS.
+**3a. Register your remote application (one-time setup).** The host application
+is registered in the AuthKit/control-plane model as an owner of the merchant org.
+That stored authority determines which `merchant:*` permissions the host can put
+on delegated JWTs; OpenRails rejects over-claimed delegated tokens.
 
 **3b. Mint delegated tokens on your backend.** Add one endpoint to your API that exchanges
 a logged-in session for a delegated token. The claim contract:
@@ -228,24 +215,24 @@ Grant only the permissions the page needs:
 
 **3c. Call the self-service API from the browser.** Have your frontend fetch the delegated
 token from your exchange endpoint (cache it, re-fetch on expiry — a ~30-line helper makes
-this invisible to the rest of your client code), then hit `/v1/self/*` directly:
+this invisible to the rest of your client code), then hit `/v1/me/*` directly:
 
 ```
-GET  /v1/self/status                      balance + account overview
-GET  /v1/self/credits[/:type]             credit balances and transactions
-GET  /v1/self/usage                       metered usage rolled up by event type
-GET  /v1/self/invoices[/:id]              monthly itemized statements
-GET  /v1/self/subscriptions               own subscriptions
-POST /v1/self/subscriptions/:id/cancel    …cancel/resume/change-tier
-GET|POST|PUT|DELETE /v1/self/payment-methods
-POST /v1/self/checkout                    hosted/tokenized checkout session
+GET  /v1/me/status                      balance + account overview
+GET  /v1/me/transactions                credit transactions
+GET  /v1/me/usage                       metered usage rolled up by event type
+GET  /v1/me/invoices[/:id]              monthly itemized statements
+GET  /v1/me/subscriptions               own subscriptions
+POST /v1/me/subscriptions/:id/cancel    cancel/resume/change-tier
+GET|POST|PUT|DELETE /v1/me/payment-methods
+POST /v1/me/checkout                    hosted/tokenized checkout session
 ```
 
 There is no `:user_id` anywhere on this surface — every route is scoped to the token's
 `delegated_sub`, so a browser token can only ever act on its own subject. Browser origin
 policy for delegated calls is configured on the AuthKit `remote_application` issuer record,
-not in OpenRails runtime config. A parallel `/v1/admin/*`
-surface exists for your staff, using the same token mechanism with `openrails:merchant:*`
+not in OpenRails runtime config. Staff/support actions live under
+`/v1/merchant/*`, using the same token mechanism with `merchant:*`
 permissions.
 
 ### 4. Webhooks
@@ -378,7 +365,7 @@ ents, _ := svc.ListActiveEntitlements(ctx, userID, time.Now())
 
 ### 4. Browser self-service in embedded mode (one credential)
 
-The browser-direct self-service surface (`/v1/self/*`, `/v1/admin/*`) exists in
+The browser-direct self-service surface (`/v1/me/*`, `/v1/orgs/:org_id/*`) exists in
 embedded mode too — authenticated by **your** credential, not a delegated token. Implement
 `billingauth.DelegatedAuthenticator`: verify the request however you like, then return the
 explicitly mapped principal:
@@ -605,8 +592,7 @@ openrails pull-provider report --merchant=<slug> --run=<uuid>   # a specific run
 #   --format=table|json
 ```
 
-The same runs are exposed behind the admin API (`POST /v1/admin/reconcile/runs`);
-see [docs/operations.md](docs/operations.md) for the finding taxonomy and the
+See [docs/operations.md](docs/operations.md) for the finding taxonomy and the
 confirmed-absence gate (destructive repairs are held until the source domain is
 fully reconciled). `pull-provider` records local mirror plans/changes only; remote
 provider writes executed later through provider intents are recorded separately in
@@ -625,7 +611,7 @@ openrails intents --merchant=<slug> --type=nmi_delete_subscription --format=json
 openrails intents log --merchant=<slug> --provider=stripe   # remote provider mutation attempts/results
 openrails intents log --merchant=<slug> --intent=<uuid> --format=json
 
-# also: GET /v1/admin/intents?status=&processor=&type=&subscription_id=
+# No public HTTP route is exposed for this ledger in core OpenRails.
 ```
 
 Intents are bound to the provider ACCOUNT they were enqueued against (an
@@ -648,7 +634,7 @@ mode allows. This is the dry run for "what happens when we let it loose":
 ```bash
 openrails intents --merchant=<slug>          # pending rows + the drain forecast footer:
                                            #   "N execute under mode=limited, M require mode=full"
-# HTTP: GET /v1/admin/intents              (each row carries executes_under: limited|full)
+# No public HTTP route is exposed for this ledger in core OpenRails.
 ```
 
 If the forecast shows something you do NOT want to fire (e.g. a backlog of dunning
@@ -666,10 +652,7 @@ queue — that is the safety design, not an oversight:
 ```bash
 openrails pull-provider report --merchant=<slug>   # open + admin-pending + held findings of the latest run
 
-# HTTP, filterable across runs:
-#   GET  /v1/admin/reconcile/findings?admin_queue=true&status=admin_pending
-#   POST /v1/admin/reconcile/findings/:id/ack      {"notes": "cancelled dupe at NMI, refunded"}
-#   POST /v1/admin/reconcile/findings/:id/dismiss  {"notes": "false positive"}
+# No public HTTP route is exposed for this queue in core OpenRails.
 ```
 
 Work the queue by doing the remote action yourself at the processor (cancel, refund,

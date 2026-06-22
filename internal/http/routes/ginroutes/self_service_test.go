@@ -69,12 +69,12 @@ func newSelfRouterWithResolver(t *testing.T, resolver ginmw.DelegatedResolver) *
 	return e
 }
 
-func newMerchantAdminRouter(t *testing.T, perms []string) *gin.Engine {
+func newOrgTreasuryRouter(t *testing.T, perms []string) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	group := e.Group("/v1/admin")
-	RegisterAdminRoutes(group, nil, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
+	group := e.Group("/v1/orgs")
+	RegisterOrgTreasuryRoutes(group, nil, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
 	return e
 }
 
@@ -147,93 +147,51 @@ func TestSelfService_RejectsServiceCredential(t *testing.T) {
 	require.Contains(t, w.Body.String(), "delegated_token_invalid")
 }
 
-func TestMerchantAdmin_OperationalListsMountedAndGated(t *testing.T) {
-	readless := []string{}
+func TestOrgTreasurySpendDelegationsMountedAndGated(t *testing.T) {
+	e := newOrgTreasuryRouter(t, nil)
+	w := doSelf(e, http.MethodGet, "/v1/orgs/acme-org/spend-delegations", false)
+	require.Equal(t, http.StatusUnauthorized, w.Code)
 
-	cases := []struct {
-		name string
-		path string
-	}{
-		{"subscriptions-list", "/v1/admin/subscriptions"},
-		{"subscription-detail", "/v1/admin/subscriptions/sub_123"},
-		{"repair-alerts", "/v1/admin/repair-alerts"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			e := newMerchantAdminRouter(t, readless)
-			w := doSelf(e, http.MethodGet, tc.path, true)
-			require.Equal(t, http.StatusForbidden, w.Code,
-				"%s must be mounted and gated (403, not 404): %s", tc.name, w.Body.String())
-		})
-	}
+	e = newOrgTreasuryRouter(t, []string{controlplane.PermMerchantCustomerSettingsRead})
+	w = doSelf(e, http.MethodGet, "/v1/orgs/acme-org/spend-delegations", true)
+	require.Equal(t, http.StatusForbidden, w.Code, "merchant:* must not satisfy customer treasury")
+
+	e = newOrgTreasuryRouter(t, []string{controlplane.PermCustomerSpendDelegationsRead})
+	w = doSelf(e, http.MethodGet, "/v1/orgs/other-org/spend-delegations", true)
+	require.Equal(t, http.StatusForbidden, w.Code, "caller must be scoped to the org in the path")
+
+	w = doSelf(e, http.MethodGet, "/v1/orgs/acme-org/spend-delegations", true)
+	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
+	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
+
+	w = doSelf(e, http.MethodPut, "/v1/orgs/acme-org/spend-delegations", true)
+	require.Equal(t, http.StatusForbidden, w.Code, "read permission must not satisfy update")
 }
 
-func TestMerchantAdmin_ManualRebillAttemptsHardCut(t *testing.T) {
-	e := newMerchantAdminRouter(t, controlplane.OperatorRolePermissions())
-	w := doSelf(e, http.MethodGet, "/v1/admin/manual-rebill-attempts", true)
-	require.Equal(t, http.StatusNotFound, w.Code,
-		"manual rebill attempts should surface through repair-alerts instead: %s", w.Body.String())
-}
+func TestOrgTreasurySpendDelegationsRejectPersonalCustomerID(t *testing.T) {
+	e := newOrgTreasuryRouter(t, []string{controlplane.PermCustomerSpendDelegationsUpdate})
+	body := `{
+		"customer_id": "11111111-1111-1111-1111-111111111111",
+		"delegations": [{
+			"scope": "invoker",
+			"scope_key": "22222222-2222-2222-2222-222222222222",
+			"windows": [{"key": "day", "window_seconds": 86400, "limit": 1000, "currency": "USD"}]
+		}]
+	}`
+	w := doSelfBearerBody(e, http.MethodPut, "/v1/orgs/acme-org/spend-delegations", "delegated.jwt.token", body)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "customer_id")
 
-func TestMerchantAdmin_PaymentWriteRoutesMountedAndGated(t *testing.T) {
-	readOnly := []string{controlplane.PermMerchantCustomerSettingsRead}
-
-	cases := []struct {
-		name   string
-		method string
-		path   string
-	}{
-		{"off-channel-payment", http.MethodPost, "/v1/admin/users/user_123/payments/off-channel"},
-		{"payment-refund", http.MethodPost, "/v1/admin/payments/pay_123/refunds"},
-		{"subscription-cancel", http.MethodDelete, "/v1/admin/subscriptions/sub_123"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			e := newMerchantAdminRouter(t, readOnly)
-			w := doSelfBearerBody(e, tc.method, tc.path, "delegated.jwt.token", `{}`)
-			require.Equal(t, http.StatusForbidden, w.Code,
-				"%s must be mounted and gated (403, not 404): %s", tc.name, w.Body.String())
-		})
-	}
-}
-
-func TestMerchantAdmin_SecretRoutesHardCut(t *testing.T) {
-	cases := []struct {
-		name   string
-		method string
-		path   string
-	}{
-		{"secret-status", http.MethodGet, "/v1/admin/secrets"},
-		{"secret-registry", http.MethodGet, "/v1/admin/secrets/registry"},
-		{"secret-put", http.MethodPut, "/v1/admin/secrets/stripe/secret_key"},
-		{"secret-delete", http.MethodDelete, "/v1/admin/secrets/stripe/secret_key"},
-		{"secret-validate", http.MethodPost, "/v1/admin/secrets/validate/stripe/secret_key"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			e := newMerchantAdminRouter(t, controlplane.OperatorRolePermissions())
-			w := doSelf(e, tc.method, tc.path, true)
-			require.Equal(t, http.StatusNotFound, w.Code,
-				"%s must be hard-cut from /v1/admin; use /v1/merchant/payment-providers: %s", tc.name, w.Body.String())
-		})
-	}
-}
-
-func TestMerchantAdmin_ConfigurationRoutesHardCut(t *testing.T) {
-	cases := []struct {
-		name   string
-		method string
-		path   string
-	}{
-		{"configuration-get", http.MethodGet, "/v1/admin/merchant-configuration"},
-		{"configuration-put", http.MethodPut, "/v1/admin/merchant-configuration"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			e := newMerchantAdminRouter(t, controlplane.OperatorRolePermissions())
-			w := doSelf(e, tc.method, tc.path, true)
-			require.Equal(t, http.StatusNotFound, w.Code,
-				"%s must be hard-cut from /v1/admin; use /v1/merchant/settings or /v1/merchant/payment-providers: %s", tc.name, w.Body.String())
-		})
-	}
+	body = `{
+		"delegations": [{
+			"scope": "invoker",
+			"scope_key": "22222222-2222-2222-2222-222222222222",
+			"customer_id": "11111111-1111-1111-1111-111111111111",
+			"windows": [{"key": "day", "window_seconds": 86400, "limit": 1000, "currency": "USD"}]
+		}]
+	}`
+	w = doSelfBearerBody(e, http.MethodPut, "/v1/orgs/acme-org/spend-delegations", "delegated.jwt.token", body)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "customer_id")
 }

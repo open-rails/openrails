@@ -29,19 +29,13 @@ func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 	group := e.Group(StandaloneV1Prefix + httproutes.SelfRoutePrefix)
 	httproutes.RegisterSelfServiceRoutes(group, s.runtime, delegatedMW)
 
+	orgGroup := e.Group(StandaloneV1Prefix + httproutes.OrgRoutePrefix)
+	httproutes.RegisterOrgTreasuryRoutes(orgGroup, s.runtime, delegatedMW)
+
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("delegated self-service API routes registered on public handler")
-
-	// Browser-direct ADMIN surface (#259, #528): the SAME delegated middleware
-	// authenticates; per-route gates require AuthKit-bounded merchant/admin permissions and
-	// the handlers act on a `:user_id` WITHIN the token's pinned merchant. This is
-	// THE admin surface (#528 retired the per-user `/v1/admin`). Mounted on the
-	// same public engine alongside /v1/me/*.
-	adminGroup := e.Group(StandaloneV1Prefix + httproutes.AdminRoutePrefix)
-	httproutes.RegisterAdminRoutes(adminGroup, s.runtime, delegatedMW)
-
-	log.WithField("prefix", StandaloneV1Prefix+httproutes.AdminRoutePrefix).
-		Info("delegated admin API routes registered on public handler")
+	log.WithField("prefix", StandaloneV1Prefix+httproutes.OrgRoutePrefix).
+		Info("delegated org-treasury API routes registered on public handler")
 }
 
 // delegatedMiddleware picks the delegated-identity middleware for the

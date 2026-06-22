@@ -56,7 +56,8 @@ type adminSubscriptionPath struct {
 }
 
 type adminCancelSubscriptionRequest struct {
-	Reason string `json:"reason"`
+	Reason       string `json:"reason"`
+	RevokeAccess bool   `json:"revoke_access,omitempty"`
 }
 
 func GetAdminUserBillingProfile(r *httprequest.Request) {
@@ -265,7 +266,7 @@ func AdminCancelSubscription(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if err := r.State.AdminSubscriptionService.CancelSubscription(r.Request.Context(), subscriptionID, req.Reason); err != nil {
+	if err := r.State.AdminSubscriptionService.CancelSubscription(r.Request.Context(), subscriptionID, req.Reason, req.RevokeAccess); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

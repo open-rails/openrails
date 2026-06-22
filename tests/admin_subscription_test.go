@@ -19,13 +19,13 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-// #528 hard cut: the admin surface is the delegated /v1/admin model — a host-app
+// #528 hard cut: the admin surface is the delegated /v1/merchant model — a host-app
 // issuer registered as the merchant's `owner` mints delegated tokens carrying
 // browser-safe org permissions. The retired per-user admin-JWT model
 // is gone, so these tests authenticate
 // as a delegated merchant principal via newHostSeamAdminRouter.
 
-// TestAdminGetUserBillingProfile exercises GET /v1/admin/users/:id under the
+// TestAdminGetUserBillingProfile exercises GET /v1/merchant/customers/:id under the
 // billing:read capability: an empty profile for a new user, and the embedded
 // entitlements section for a user who holds one.
 func TestAdminGetUserBillingProfile(t *testing.T) {
@@ -37,8 +37,8 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 		userID := uuid.New().String()
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/users/%s", userID), nil)
-		req.Header.Set("Authorization", "Bearer host-credential")
+		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/merchant/customers/%s", userID), nil)
+		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -72,8 +72,8 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 		})
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/users/%s", userID), nil)
-		req.Header.Set("Authorization", "Bearer host-credential")
+		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/merchant/customers/%s", userID), nil)
+		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 		admin.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -87,20 +87,20 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 	})
 }
 
-// TestAdminListSubscriptions exercises GET /v1/admin/subscriptions under
-// billing:read: a seeded subscription appears in the merchant-scoped list.
+// TestAdminListSubscriptions exercises GET /v1/merchant/subscriptions under
+// merchant:subscriptions:read: a seeded subscription appears in the merchant-scoped list.
 func TestAdminListSubscriptions(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "b6666666-6666-4666-8666-666666666666",
-		[]string{controlplane.PermMerchantCustomerSettingsRead})
+		[]string{controlplane.PermMerchantSubscriptionsRead})
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
 	suite.CreateTestSubscription(uuid.New().String(), priceID, models.StatusActive)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/v1/admin/subscriptions?limit=10", nil)
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req, _ := http.NewRequest("GET", "/v1/merchant/subscriptions?limit=10", nil)
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	admin.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -121,8 +121,8 @@ func TestRemovedAdminSubscriptionExtendRoute(t *testing.T) {
 		[]string{controlplane.PermMerchantSubscriptionsUpdate})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/v1/admin/subscriptions/"+uuid.New().String()+"/extend", nil)
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req, _ := http.NewRequest("PUT", "/v1/merchant/subscriptions/"+uuid.New().String()+"/extend", nil)
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	admin.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code, "extend route must stay removed")

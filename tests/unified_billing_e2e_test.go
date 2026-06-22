@@ -15,7 +15,7 @@ package tests
 //
 // POST-#513/#512 MODEL (what changed from the original single-entry version):
 //   - There is NO /credits/hold create route anymore: placing a hold IS
-//     POST /v1/merchant/admit (the spendgate). The hold handle is the caller's
+//     POST /v1/merchant/admissions (the spendgate). The hold handle is the caller's
 //     request_id; capture/release address it as /credits/holds/<request_id>/...
 //   - Holds live in Redis (#505), NOT as money_transactions rows. The durable
 //     ledger (#512: ledger_transfers/ledger_accounts) records only SETTLED money
@@ -37,6 +37,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -143,12 +144,12 @@ type admitView struct {
 	DenyCode  string `json:"deny_code"`
 }
 
-// admit places a spendgate hold for an estimate via POST /v1/merchant/admit. The
+// admit places a spendgate hold for an estimate via POST /v1/merchant/admissions. The
 // request_id IS the hold handle (capture/release address it). Returns the
-// recorder so callers can assert allow (200) vs money-deny (402).
+// per-item recorder so callers can assert allow (200) vs money-deny (402).
 func (h *billingE2EHarness) admit(userID, source, requestID string, amount int64) *httptest.ResponseRecorder {
 	h.t.Helper()
-	return h.do(http.MethodPost, "/v1/merchant/admit", map[string]any{
+	w := h.do(http.MethodPost, "/v1/merchant/admissions", map[string]any{"items": []map[string]any{{
 		"customer_id":      personalOwnerID(userID).String(),
 		"invoker":          userID,
 		"invoker_type":     "payer",
@@ -157,7 +158,27 @@ func (h *billingE2EHarness) admit(userID, source, requestID string, amount int64
 		"request_id":       requestID,
 		"source":           source,
 		"expires_at":       time.Now().Add(15 * time.Minute).Unix(),
-	})
+	}}})
+	if w.Code != http.StatusOK {
+		return w
+	}
+	var batch struct {
+		Items []struct {
+			Status int             `json:"status"`
+			Result json.RawMessage `json:"result"`
+			Error  string          `json:"error"`
+		} `json:"items"`
+	}
+	require.NoError(h.t, json.Unmarshal(w.Body.Bytes(), &batch))
+	require.Len(h.t, batch.Items, 1)
+	out := httptest.NewRecorder()
+	out.Code = batch.Items[0].Status
+	if len(batch.Items[0].Result) > 0 {
+		_, _ = out.Body.Write(batch.Items[0].Result)
+	} else {
+		_, _ = out.Body.WriteString(`{"error":` + strconv.Quote(batch.Items[0].Error) + `}`)
+	}
+	return out
 }
 
 // mustAdmit admits and asserts the hold was placed (200, allowed=true). Returns
@@ -174,14 +195,14 @@ func (h *billingE2EHarness) mustAdmit(userID, source, requestID string, amount i
 
 func (h *billingE2EHarness) capture(requestID string, amount int64) *httptest.ResponseRecorder {
 	h.t.Helper()
-	return h.do(http.MethodPost, "/v1/merchant/credits/holds/"+requestID+"/capture", map[string]any{
+	return h.do(http.MethodPost, "/v1/merchant/admissions/"+requestID+"/capture", map[string]any{
 		"amount": amount,
 	})
 }
 
 func (h *billingE2EHarness) release(requestID string) *httptest.ResponseRecorder {
 	h.t.Helper()
-	return h.do(http.MethodPost, "/v1/merchant/credits/holds/"+requestID+"/release", nil)
+	return h.do(http.MethodPost, "/v1/merchant/admissions/"+requestID+"/release", nil)
 }
 
 // balance reads available + held via the public balance route. NOTE: under #513

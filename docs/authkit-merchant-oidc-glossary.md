@@ -27,8 +27,8 @@ checks whether the request is scoped to a merchant owned by that org.
 3. OpenRails resolves the issuer to its registered merchant.
 4. OpenRails touches the customer `(merchant_id, delegated_sub)`; issuer is
    audit/last-seen source metadata only.
-5. `/v1/me/*` routes target that authenticated subject. Browser-safe `org:`
-   permissions gate delegated `/v1/admin/*` routes.
+5. `/v1/me/*` routes target that authenticated subject. Merchant permissions
+   gate delegated `/v1/merchant/*` routes.
 
 Tokens must not carry OpenRails merchant claims. The registered issuer is the
 authority mapping.

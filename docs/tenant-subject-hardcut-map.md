@@ -29,7 +29,7 @@ caused an action when that differs from the payable subject.
 | `billing.product_access_grants`, `models.ProductAccessGrant` | `user_id text` | `tenant_subject_id uuid`; service/admin routes should use tenant-subject paths or bodies. |
 | `billing.notification_queue`, `models.NotificationQueue` | `user_id text` | `tenant_subject_id uuid` plus delivery metadata if notifications stay in OpenRails. |
 | Service entitlement route | `/v1/service/users/{user_id}/entitlements` | `/v1/service/tenant-subjects/{tenant_subject_id}/entitlements`. |
-| Admin user support routes | `/v1/admin/users/{user_id}...` | `/v1/admin/tenant-subjects/{tenant_subject_id}...` for payable billing state; keep external user search only where it is clearly host-support metadata. |
+| Merchant customer support routes | `/v1/admin/users/{user_id}...` | `/v1/merchant/customers/{customer_id}...` for payable billing state; keep external user search only where it is clearly host-support metadata. |
 | Credit/account APIs | Mixed historical `owner_id`, `payer`, `account-settings` wording | Existing DB/code mostly maps to `tenant_subject_id`; remaining JSON/query/docs should say `tenant_subject_id`. |
 
 ## Already Converted

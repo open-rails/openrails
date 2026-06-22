@@ -205,7 +205,7 @@ func (s *AdminSubscriptionService) cancelWithNMI(subscription *models.Subscripti
 }
 
 // CancelSubscription cancels a subscription (admin)
-func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string) error {
+func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string, revokeAccess bool) error {
 	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
 	if err != nil {
 		return fmt.Errorf("subscription not found: %w", err)
@@ -248,8 +248,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		return fmt.Errorf("failed to update subscription: %w", err)
 	}
 
-	// End entitlements for this subscription now
-	if s.EntitlementService != nil {
+	if revokeAccess && s.EntitlementService != nil {
 		if err := s.EntitlementService.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
 			log.WithFields(log.Fields{
 				"subscription_id": subscription.ID,

@@ -58,7 +58,7 @@ func TestCancelSubscriptionNotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+subID+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
@@ -86,7 +86,7 @@ func TestCancelSubscriptionCCBill(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
@@ -120,7 +120,7 @@ func TestCancelSubscriptionAlreadyCancelled(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusAccepted, w.Code)
@@ -150,7 +150,7 @@ func TestCancelSubscriptionAuthBoundaries(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+subB.ID.String()+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 
 	routerA.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)

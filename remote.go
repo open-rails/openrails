@@ -89,29 +89,6 @@ func (c *remote) bearer(ctx context.Context) (string, error) {
 	return strings.TrimSpace(tok), nil
 }
 
-// Admit implements Client. Verdict statuses (200 OK, 402 money, 403 gated, 429
-// abuse) all carry the AdmitResponse body and are returned as a decision with a
-// nil error — matching the embedded transport, where a deny is (Allowed=false,
-// nil). Handler: ServiceAdmit (service_admission.go).
-func (c *remote) Admit(ctx context.Context, req AdmitRequest) (*AdmitResponse, error) {
-	status, raw, err := c.doRaw(ctx, http.MethodPost, "/v1/merchant/admit", admitRequestBody(req))
-	if err != nil {
-		return nil, err
-	}
-	verdict := status == http.StatusOK ||
-		status == http.StatusPaymentRequired ||
-		status == http.StatusForbidden ||
-		status == http.StatusTooManyRequests
-	if verdict && !isErrorEnvelope(raw) {
-		var out AdmitResponse
-		if derr := json.Unmarshal(raw, &out); derr != nil {
-			return nil, fmt.Errorf("openrails: decode admit response: %w", derr)
-		}
-		return &out, nil
-	}
-	return nil, statusErrorFromBody(status, raw)
-}
-
 func admitRequestBody(req AdmitRequest) map[string]any {
 	body := map[string]any{
 		"customer_id":      req.CustomerID,
@@ -147,46 +124,6 @@ func admitRequestBody(req AdmitRequest) map[string]any {
 	return body
 }
 
-// CaptureHold implements Client (handler ServiceCaptureHold).
-func (c *remote) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*CreditTransaction, error) {
-	var out CreditTransaction
-	path := "/v1/merchant/credits/holds/" + url.PathEscape(strings.TrimSpace(req.RequestID)) + "/capture"
-	if err := c.do(ctx, http.MethodPost, path, map[string]any{"amount": req.Amount}, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ReleaseHold implements Client (handler ServiceReleaseHold).
-func (c *remote) ReleaseHold(ctx context.Context, requestID string) error {
-	return c.do(ctx, http.MethodPost, "/v1/merchant/credits/holds/"+url.PathEscape(strings.TrimSpace(requestID))+"/release", map[string]any{}, nil)
-}
-
-// WithdrawCredits implements Client (handler ServiceWithdrawCredits).
-func (c *remote) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error) {
-	currency := normalizeCurrency(req.Currency)
-	if currency == "" {
-		currency = normalizeCurrency(c.currency)
-	}
-	var sourceID any
-	if req.SourceID != nil {
-		sourceID = req.SourceID.String()
-	}
-	var out CreditTransaction
-	err := c.do(ctx, http.MethodPost, "/v1/merchant/credits/withdraw", map[string]any{
-		"customer_id": customerIDString(req.CustomerID),
-		"invoker":     req.Invoker,
-		"currency":    currency,
-		"amount":      req.Amount,
-		"source":      req.Source,
-		"source_id":   sourceID,
-	}, &out)
-	if err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // DepositCredits implements Client (handler ServiceDepositCredits).
 func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
 	currency := normalizeCurrency(req.Currency)
@@ -218,7 +155,7 @@ func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 	return &out, nil
 }
 
-// captureBody is the POST /v1/merchant/credits/holds/:id/capture body. The wire
+// captureBody is the POST /v1/merchant/admissions/:id/capture body. The wire
 // field is "amount" (the handler binds it as REQUIRED).
 type captureBody struct {
 	Amount    int64          `json:"amount"`
@@ -243,7 +180,7 @@ func (c *remote) Capture(ctx context.Context, requestID string, capturedAmount i
 		body.Source = usage.Source
 		body.SourceID = usage.SourceID
 	}
-	path := "/v1/merchant/credits/holds/" + url.PathEscape(strings.TrimSpace(requestID)) + "/capture"
+	path := "/v1/merchant/admissions/" + url.PathEscape(strings.TrimSpace(requestID)) + "/capture"
 	return c.do(ctx, http.MethodPost, path, body, nil)
 }
 
@@ -253,7 +190,7 @@ func (c *remote) Release(ctx context.Context, requestID string) error {
 	if strings.TrimSpace(requestID) == "" {
 		return fmt.Errorf("openrails: release requires request_id")
 	}
-	path := "/v1/merchant/credits/holds/" + url.PathEscape(strings.TrimSpace(requestID)) + "/release"
+	path := "/v1/merchant/admissions/" + url.PathEscape(strings.TrimSpace(requestID)) + "/release"
 	return c.do(ctx, http.MethodPost, path, nil, nil)
 }
 
@@ -283,37 +220,6 @@ func (c *remote) GetCreditAccount(ctx context.Context, customerID, currency stri
 	return &out, nil
 }
 
-// SetCreditAccountSettings implements Client (handler
-// ServiceSetCreditAccountSettings), then re-reads the account snapshot.
-func (c *remote) SetCreditAccountSettings(ctx context.Context, customerID, currency string, in AccountSettingsInput) (*CreditAccount, error) {
-	body := map[string]any{
-		"customer_id": strings.TrimSpace(customerID),
-		"currency":    normalizeCurrency(currency),
-	}
-	addAccountSettingFields(body, in)
-	if err := c.do(ctx, http.MethodPut, "/v1/merchant/credits/account-settings", body, nil); err != nil {
-		return nil, err
-	}
-	return c.GetCreditAccount(ctx, customerID, currency)
-}
-
-// ListCreditTransactions implements Client (handler
-// ServiceListCustomerCreditTransactions) and passes the canonical JSON
-// through.
-func (c *remote) ListCreditTransactions(ctx context.Context, customerID, currency string, limit int) (json.RawMessage, error) {
-	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(customerID))
-	q.Set("currency", normalizeCurrency(currency))
-	if limit > 0 {
-		q.Set("limit", fmt.Sprintf("%d", limit))
-	}
-	var out json.RawMessage
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/transactions?"+q.Encode(), nil, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // UsageRollup implements Client (handler ServiceUsageRollup).
 func (c *remote) UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
 	var resp struct {
@@ -326,63 +232,10 @@ func (c *remote) UsageRollup(ctx context.Context, customerID, currency string, f
 		"to":          to.UTC().Unix(),
 		"group_by":    groupBy,
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/credits/usage/rollup", body, &resp); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/usage/rollup", body, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Rows, nil
-}
-
-// BudgetStatus implements Client (handler ServiceGetBudget).
-func (c *remote) BudgetStatus(ctx context.Context, customerID, invokerID, currency, tier string) ([]BudgetWindow, error) {
-	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(customerID))
-	q.Set("currency", normalizeCurrency(currency))
-	if invokerID != "" {
-		q.Set("invoker", invokerID)
-	}
-	if tier != "" {
-		q.Set("trust_tier", tier)
-	}
-	var resp struct {
-		Windows []BudgetWindow `json:"windows"`
-	}
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/budget?"+q.Encode(), nil, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Windows, nil
-}
-
-// SetPayerSpendLimits implements Client (handler ServiceSetPayerSpendLimits).
-func (c *remote) SetPayerSpendLimits(ctx context.Context, customerID string, in PayerSpendLimitInput) error {
-	tier := strings.TrimSpace(in.TrustTier)
-	if tier == "" {
-		tier = strings.TrimSpace(in.Tier)
-	}
-	body := map[string]any{
-		"customer_id":     strings.TrimSpace(customerID),
-		"trust_tier":      tier,
-		"budget_windows":  in.BudgetWindows,
-		"policy_currency": in.PolicyCurrency,
-	}
-	if len(in.BadSpendWindows) > 0 {
-		body["bad_spend_windows"] = in.BadSpendWindows
-	}
-	return c.do(ctx, http.MethodPut, "/v1/merchant/payer-spend-limits", body, nil)
-}
-
-// SetTierSchedule implements Client (handler ServiceSetTierSchedule, #476).
-func (c *remote) SetTierSchedule(ctx context.Context, customerID, currency string, schedule []TierScheduleRung) error {
-	body := map[string]any{
-		"customer_id": strings.TrimSpace(customerID),
-		"currency":    strings.TrimSpace(currency),
-		"schedule":    schedule,
-	}
-	return c.do(ctx, http.MethodPut, "/v1/merchant/tier-schedules", body, nil)
-}
-
-// SetMerchantConfiguration implements Client.
-func (c *remote) SetMerchantConfiguration(ctx context.Context, in MerchantConfigurationInput) error {
-	return c.do(ctx, http.MethodPut, "/v1/merchant/merchant-configuration", in, nil)
 }
 
 // GetTier implements Client (handler ServiceGetTier, #477).
@@ -423,24 +276,6 @@ func (c *remote) ReportWastedSpend(ctx context.Context, report WastedSpendReport
 	return &out, nil
 }
 
-// AbuseUsage implements Client (handler ServiceAbuseUsage, #488).
-func (c *remote) AbuseUsage(ctx context.Context, customerID, invoker, currency, tier string) (*AbuseUsageResponse, error) {
-	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(customerID))
-	q.Set("currency", normalizeCurrency(currency))
-	if invoker != "" {
-		q.Set("invoker", invoker)
-	}
-	if tier != "" {
-		q.Set("trust_tier", tier)
-	}
-	var out AbuseUsageResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/abuse-usage?"+q.Encode(), nil, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // SetCreditLimit implements Client (handler ServiceSetCreditLimit, #489).
 func (c *remote) SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error {
 	body := map[string]any{
@@ -449,50 +284,6 @@ func (c *remote) SetCreditLimit(ctx context.Context, customerID, currency string
 		"credit_limit_amount": creditLimit,
 	}
 	return c.do(ctx, http.MethodPut, "/v1/merchant/credit-limit", body, nil)
-}
-
-// GetCreditLimit implements Client (handler ServiceGetCreditLimit, #489).
-func (c *remote) GetCreditLimit(ctx context.Context, customerID, currency string) (int64, error) {
-	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(customerID))
-	q.Set("currency", normalizeCurrency(currency))
-	var resp struct {
-		Currency          string `json:"currency"`
-		CreditLimitAmount int64  `json:"credit_limit_amount"`
-	}
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credit-limit?"+q.Encode(), nil, &resp); err != nil {
-		return 0, err
-	}
-	return resp.CreditLimitAmount, nil
-}
-
-// SetInvokerSpendLimits implements Client (handler ServiceSetInvokerSpendLimits, #473).
-func (c *remote) SetInvokerSpendLimits(ctx context.Context, customerID string, in InvokerSpendLimitInput) error {
-	scopeKey := strings.TrimSpace(in.ScopeKey)
-	if scopeKey == "" {
-		scopeKey = strings.TrimSpace(in.RoleID)
-	}
-	body := map[string]any{
-		"customer_id": strings.TrimSpace(customerID),
-		"scope":       in.Scope,
-		"scope_key":   scopeKey,
-		"role_id":     in.RoleID,
-		"windows":     in.Windows,
-	}
-	return c.do(ctx, http.MethodPut, "/v1/merchant/invoker-spend-limits", body, nil)
-}
-
-// InvokerSpendLimits implements Client (handler ServiceGetInvokerSpendLimits, #473).
-func (c *remote) InvokerSpendLimits(ctx context.Context, customerID string) ([]InvokerSpendLimit, error) {
-	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(customerID))
-	var resp struct {
-		Policies []InvokerSpendLimit `json:"policies"`
-	}
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/invoker-spend-limits?"+q.Encode(), nil, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Policies, nil
 }
 
 // AdmitBatch implements Client (handler ServiceAdmitBatch, #335). The batch
@@ -506,10 +297,33 @@ func (c *remote) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitB
 	var out struct {
 		Items []AdmitBatchVerdict `json:"items"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/admit/batch", map[string]any{"items": bodies}, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/admissions", map[string]any{"items": bodies}, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
+}
+
+// GetMerchantSettings implements PolicySyncClient.
+func (c *remote) GetMerchantSettings(ctx context.Context) (*MerchantSettings, error) {
+	var out MerchantSettings
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/settings", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SetMerchantSettings implements PolicySyncClient.
+func (c *remote) SetMerchantSettings(ctx context.Context, settings MerchantSettings) error {
+	return c.do(ctx, http.MethodPut, "/v1/merchant/settings", settings, nil)
+}
+
+// SetMerchantConfiguration keeps the legacy SDK startup hook on the new
+// merchant settings document.
+func (c *remote) SetMerchantConfiguration(ctx context.Context, in MerchantConfigurationInput) error {
+	return c.SetMerchantSettings(ctx, MerchantSettings{
+		Profile:                           in.Profile,
+		DelegatedInvokerWastedSpendLimits: in.DelegatedInvokerWastedSpendWindows,
+	})
 }
 
 // ListActiveEntitlements implements Client (handler
@@ -644,46 +458,10 @@ func (c *remote) ResourceRevenueDaily(ctx context.Context, resource, currency st
 		"to":       toUnix,
 	}
 	var out ResourceRevenueResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/credits/usage/resource-revenue", body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/usage/resource-revenue", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
-}
-
-func addAccountSettingFields(body map[string]any, in AccountSettingsInput) {
-	if in.BillingMode != nil {
-		body["billing_mode"] = *in.BillingMode
-	}
-	if in.MaxSpendPerDay != nil {
-		body["max_spend_per_day"] = *in.MaxSpendPerDay
-	}
-	if in.MaxSpendPerMonth != nil {
-		body["max_spend_per_month"] = *in.MaxSpendPerMonth
-	}
-	if in.MaxOutstandingOwedAmount != nil {
-		body["max_outstanding_owed_amount"] = *in.MaxOutstandingOwedAmount
-	}
-	if in.LowBalanceThreshold != nil {
-		body["low_balance_threshold"] = *in.LowBalanceThreshold
-	}
-	if in.AutoTopupEnabled != nil {
-		body["auto_topup_enabled"] = *in.AutoTopupEnabled
-	}
-	if in.AutoTopupAmountCents != nil {
-		body["auto_topup_amount_cents"] = *in.AutoTopupAmountCents
-	}
-	if in.AutoTopupPaymentMethod != nil {
-		body["auto_topup_payment_method_id"] = *in.AutoTopupPaymentMethod
-	}
-	if in.DefaultCreditExpiryDays != nil {
-		body["default_credit_expiry_days"] = *in.DefaultCreditExpiryDays
-	}
-	if in.HardStopOnBreach != nil {
-		body["hard_stop_on_breach"] = *in.HardStopOnBreach
-	}
-	if in.AlertThresholdPct != nil {
-		body["alert_threshold_pct"] = *in.AlertThresholdPct
-	}
 }
 
 // normalizeCurrency preserves non-empty currency/unit codes and lets the service

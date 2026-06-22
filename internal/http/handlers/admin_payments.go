@@ -38,8 +38,9 @@ type paymentPath struct {
 }
 
 type refundRequest struct {
-	Amount int64  `json:"amount" binding:"required,gt=0"`
-	Reason string `json:"reason,omitempty"`
+	Amount       int64  `json:"amount" binding:"required,gt=0"`
+	Reason       string `json:"reason,omitempty"`
+	RevokeAccess bool   `json:"revoke_access,omitempty"`
 }
 
 const adminRefundIdempotencyHeader = "X-Idempotency-Key"
@@ -110,7 +111,28 @@ func AdminRefundPayment(r *httprequest.Request) {
 		r.ErrorJSON(status, message)
 		return
 	}
+	if req.RevokeAccess {
+		if err := revokeAccessForRefund(r, paymentID); err != nil {
+			log.WithError(err).WithField("payment_id", paymentID).Error("admin refund succeeded but access revocation failed")
+			r.ErrorJSON(http.StatusInternalServerError, "refund succeeded but access revocation failed")
+			return
+		}
+	}
 	r.JSON(status, PaymentToAPI(refund, nil))
+}
+
+func revokeAccessForRefund(r *httprequest.Request, paymentID uuid.UUID) error {
+	if r.State.EntitlementService != nil {
+		if err := r.State.EntitlementService.EndActiveByPayment(r.Request.Context(), paymentID, models.EntitlementRevokeRefund); err != nil {
+			return err
+		}
+	}
+	if svc := productAccessService(r); svc != nil {
+		if _, err := svc.RevokeProductAccessByPayment(r.Request.Context(), paymentID, models.ProductAccessRevokeRefund); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, req refundRequest, idempotencyKey string) (*models.Payment, int, error) {

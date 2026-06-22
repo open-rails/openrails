@@ -18,31 +18,45 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	ginroutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	ginrouter "github.com/open-rails/openrails/internal/http/router/ginrouter"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// newHostSeamAdminRouter mounts the #528 delegated /v1/admin surface with a
-// host-seam delegated principal carrying the given merchant permissions. This is
-// the migration pattern for the admin integration suite: the per-user admin-JWT
-// model is retired, so admin tests authenticate as a delegated merchant principal
-// (browser-safe org permissions), exactly like the host-app issuer owner token does in
-// production. (Reuses hostSeamAuthenticator from self_account_host_principal_test.)
+type testDelegatedResolver struct {
+	subject string
+	perms   []string
+}
+
+const merchantDelegatedTestToken = "aaa.bbb.ccc"
+
+func (r testDelegatedResolver) ResolveDelegated(context.Context, string, string) (*controlplane.ResolvedDelegated, error) {
+	return &controlplane.ResolvedDelegated{
+		MerchantID:       dbtest.TestMerchantID,
+		Merchant:         dbtest.TestMerchantSlug,
+		MerchantSlug:     dbtest.TestMerchantSlug,
+		DelegatedSubject: r.subject,
+		Permissions:      r.perms,
+	}, nil
+}
+
+// newHostSeamAdminRouter mounts the resource-named /v1/merchant support surface
+// with a host-seam delegated principal carrying the given merchant permissions.
 func newHostSeamAdminRouter(t *testing.T, suite *TestContainerSuite, subject string, perms []string) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	group := e.Group("/v1/admin")
-	ginroutes.RegisterAdminRoutes(group, suite.App.Runtime,
-		ginmw.DelegatedPrincipalRequired(hostSeamAuthenticator{subject: subject, perms: perms}))
+	rr := ginrouter.New(e.Group("/v1/merchant"), suite.App.Runtime)
+	httproutes.RegisterMerchantActionRoutes(rr, suite.App.Runtime, httproutes.Options{
+		DelegatedResolver: testDelegatedResolver{subject: subject, perms: perms},
+	})
 	return e
 }
 
-// TestAdminUserDetailComposite_Delegated validates the #528 delegated /v1/admin
+// TestAdminUserDetailComposite_Delegated validates the #528 delegated /v1/merchant
 // surface end-to-end against Postgres: a merchant admin holding
 // merchant:customer-settings:read reads a user's COMPOSITE billing detail, which
 // embeds the entitlements section (plus the payment_methods + product_access
@@ -85,8 +99,8 @@ func TestAdminUserDetailComposite_Delegated(t *testing.T) {
 	require.Len(t, seededBalances, 2)
 	pm := suite.CreateTestPaymentMethod(userID)
 
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/admin/users/%s", userID), nil)
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/merchant/customers/%s", userID), nil)
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	w := httptest.NewRecorder()
 	admin.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -124,34 +138,7 @@ func TestAdminUserDetailComposite_Delegated(t *testing.T) {
 	require.True(t, ok, "composite must embed a product_access section")
 }
 
-func TestAdminUserPaymentMethodDelete_Delegated(t *testing.T) {
-	suite := getSharedTestSuite(t)
-	admin := newHostSeamAdminRouter(t, suite, "b5555555-5555-4555-8555-555555555555",
-		[]string{controlplane.PermMerchantCustomerSettingsUpdate})
-
-	userID := uuid.New().String()
-	pm := suite.CreateTestPaymentMethod(userID)
-	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/v1/admin/users/%s/payment-methods/%s", userID, api.FormatPaymentMethodID(pm.ID)), nil)
-	req.Header.Set("Authorization", "Bearer host-credential")
-	w := httptest.NewRecorder()
-	admin.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-
-	check := newHostSeamAdminRouter(t, suite, "b6666666-6666-4666-8666-666666666666",
-		[]string{controlplane.PermMerchantCustomerSettingsRead})
-	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/admin/users/%s", userID), nil)
-	req.Header.Set("Authorization", "Bearer host-credential")
-	w = httptest.NewRecorder()
-	check.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	var resp map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp), w.Body.String())
-	methods, ok := resp["payment_methods"].([]any)
-	require.True(t, ok, "payment_methods must be an array: %s", w.Body.String())
-	require.Empty(t, methods)
-}
-
-// TestAdminSurface_RejectsWithoutDelegatedPrincipal confirms the delegated /admin
+// TestAdminSurface_RejectsWithoutDelegatedPrincipal confirms the delegated merchant
 // gate fails closed: a delegated principal that lacks billing:read cannot read
 // the composite (403), proving the surface is gated, not open.
 func TestAdminSurface_RejectsWithoutBillingRead(t *testing.T) {
@@ -160,8 +147,8 @@ func TestAdminSurface_RejectsWithoutBillingRead(t *testing.T) {
 	admin := newHostSeamAdminRouter(t, suite, "b4444444-4444-4444-8444-444444444444",
 		[]string{controlplane.PermMerchantSubscriptionsUpdate})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/admin/users/"+uuid.New().String(), nil)
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req := httptest.NewRequest(http.MethodGet, "/v1/merchant/customers/"+uuid.New().String(), nil)
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	w := httptest.NewRecorder()
 	admin.ServeHTTP(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())

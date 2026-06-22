@@ -61,9 +61,9 @@ if connections reset).
 ### 3. Provision the merchant cranker key + a USDC recurring price
 - Seed the merchant secret `solana/private_key` (the cranker wallet) — DB-backed
   store (self-hosted) or Vault. The cranker pays gas + signs `transfer_subscription`.
-- Publish a plan: `POST /v1/admin/solana/recurring/plans`
-  `{plan_id, token_symbol:"USDC", amount_base_units, period_hours, price_id}` →
-  attaches the plan handle to the price's Solana config.
+- Obsolete: the old `POST /v1/admin/solana/recurring/plans` route was removed
+  with the admin-surface hard cut. Do not use this runbook as the source of
+  truth for publishing Solana recurring plans until the flow is redesigned.
 
 ### 4. Drive the subscribe → confirm → cancel flow
 Browser (host apps) or API directly:
@@ -108,9 +108,9 @@ Identical to the full-stack steps above:
 2. `~/openrails-host/docker-compose.override.yaml` pinning `image: openrails:local` +
    `SOLANA_NETWORK: devnet` / `SOLANA_RPC_URL: https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
    then `docker compose up -d postgres openrails`.
-3. Seed the merchant cranker secret `solana/private_key` and publish a USDC plan
-   (`POST /v1/admin/solana/recurring/plans` with `token_symbol:"USDC"`,
-   `period_hours`, `price_id`).
+3. Seed the merchant cranker secret `solana/private_key`. The old
+   `POST /v1/admin/solana/recurring/plans` publishing step is obsolete until
+   the Solana recurring plan flow is redesigned.
 4. Bring up the host-app frontend pointed at the local OpenRails
    (`cd ~/openrails-host/frontend && pnpm dev`, default `http://localhost:13000`).
 

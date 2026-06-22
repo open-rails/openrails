@@ -18,7 +18,7 @@ import (
 )
 
 func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
-	// #528 hard cut: the off-channel write is on the delegated /v1/admin surface,
+	// #528 hard cut: the off-channel write is on the delegated /v1/merchant surface,
 	// authorized by merchant:customer-settings:update - no per-user admin model.
 	suite := getSharedTestSuite(t)
 	admin := newHostSeamAdminRouter(t, suite, "b5555555-5555-4555-8555-555555555555",
@@ -45,8 +45,8 @@ func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/admin/users/"+userID+"/payments/off-channel", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer host-credential")
+	req, _ := http.NewRequest("POST", "/v1/merchant/customers/"+userID+"/payments/off-channel", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	req.Header.Set("Content-Type", "application/json")
 
 	admin.ServeHTTP(w, req)

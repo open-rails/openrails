@@ -182,7 +182,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 			_ = emb.Close(ctx)
 			return nil, fmt.Errorf("openrails embed: MerchantConfiguration requires Merchant")
 		}
-		if err := r.Client().SetMerchantConfiguration(ctx, startupMerchantConfiguration(opts.Merchant, opts.MerchantConfiguration)); err != nil {
+		if err := r.Client().SetMerchantSettings(ctx, startupMerchantSettings(opts.Merchant, opts.MerchantConfiguration)); err != nil {
 			_ = emb.Close(ctx)
 			return nil, fmt.Errorf("openrails embed: seed merchant configuration: %w", err)
 		}
@@ -200,13 +200,16 @@ func hasMerchantConfiguration(in openrails.MerchantConfigurationInput) bool {
 	return in.Profile != nil || len(in.DelegatedInvokerWastedSpendWindows) > 0
 }
 
-func startupMerchantConfiguration(merchantSlug string, in openrails.MerchantConfigurationInput) openrails.MerchantConfigurationInput {
+func startupMerchantSettings(merchantSlug string, in openrails.MerchantConfigurationInput) openrails.MerchantSettings {
 	if in.Profile != nil && in.Profile.DisplayName == "" {
 		profile := *in.Profile
 		profile.DisplayName = merchantSlug
 		in.Profile = &profile
 	}
-	return in
+	return openrails.MerchantSettings{
+		Profile:                           in.Profile,
+		DelegatedInvokerWastedSpendLimits: in.DelegatedInvokerWastedSpendWindows,
+	}
 }
 
 func embeddedManifestMerchant(merchantSlug string, cfg openrails.MerchantConfigurationInput) boot.ManifestMerchant {

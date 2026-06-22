@@ -152,8 +152,8 @@ event materializes as a finding. Inbound therefore has two layers — provider
 retries + reconcile — and we build neither.
 
 **Inspecting the ledger.** `openrails intents` (CLI; `--status pending|all|...`,
-`--provider`, `--type`, `--merchant`, `--format table|json`) and
-`GET /v1/admin/intents` list the queued outbound mutations read-only. Under
+`--provider`, `--type`, `--merchant`, `--format table|json`) lists the queued
+outbound mutations read-only. Under
 `mode=limited`/`readonly` this doubles as the dry-run view of a cutover:
 pending rows are exactly what the executor drains when the mode lifts, and
 each row's `executes_under` (derived from its origin via the GateExecution
@@ -231,11 +231,7 @@ Manual-only — **never scheduled**. It never writes to a provider:
 default = every configured provider), `--provider-account` (optional explicit
 provider account row id), `--since` / `--until` (RFC3339 or `YYYY-MM-DD`,
 bounding the transaction window), `--merchant` (slug or id; required), and
-`--format table|json`. The same engine sits behind the admin API:
-`POST /v1/admin/reconcile/runs` `{mode, providers, since, until}` runs
-synchronously; `GET .../runs`,
-`GET .../runs/:id`, `GET .../findings?status=&provider=&type=&admin_queue=`,
-and `POST .../findings/:id/{ack,dismiss}` work the queue.
+`--format table|json`.
 
 Every local write `fix` applies is logged (finding id, type, subject,
 evidence) and persisted as the finding's resolution evidence, so a run's
