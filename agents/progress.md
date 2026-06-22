@@ -7,7 +7,55 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 568
+next_id: 569
+
+---
+
+# #568: cycle-free entitlements wiring for embedded billing — read-client split (A) + post-construction hook (B)
+
+**Completed:** no
+**Status:** PLANNED 2026-06-22 (Claude). Retires the `deferredEntitlements` holder workaround now carried by doujins + hentai0 after the authkit v0.47.0 hardcut (#108) removed chainable `WithX`. Two FIRST-CLASS host options; maintainer PREFERS Option B. Option B has an authkit dependency (a sanctioned post-construction entitlements setter — track on the authkit side, bump authkit before openrails ships B).
+
+## Background: the embedding cycle
+Embedding OpenRails billing in a host creates a bidirectional dependency:
+- **Billing needs auth:** `openrailsembed.New` builds the runtime via `embed.New(...)` with the host's `Verifier` + `AuthKitCore` as the request `Authenticator` / `DelegatedAuthenticator` — every billing request authenticates through the host's authkit.
+- **Auth needs billing:** the host's authkit stamps minted tokens with entitlements from the engine's `EntitlementsProvider()` (which wraps `rt.Client()`).
+
+So `auth → engine → entitlements → auth`: neither is fully buildable before the other. Under authkit ≤v0.46 the host broke it with post-construction `svc.WithEntitlements(provider)`. authkit v0.47.0 made construction options-only, so doujins (`internal/server/server.go`) and hentai0 (`internal/infra/authkit.go`) now carry a `deferredEntitlements` holder — an empty box passed at construction, `.Set()` after the engine is built, before first mint. Correct (set-before-mint invariant) but a host-side mutable seam we want to delete.
+
+## Option A — split the read-client from the auth-bearing engine (openrails-only; no authkit change)
+The entitlements provider needs only a DB read client, never Verifier/Core. Expose that half standalone so construction is a straight line:
+```go
+billing := openrailsembed.NewClient(ctx, cfg, pg)               // DB reads only; no auth
+svc := authhttp.NewServer(cfg, pg,
+    authhttp.WithEntitlements(billing.EntitlementsProvider()))  // real provider at construction
+ors := openrailsembed.NewEngine(ctx, cfg, billing,              // request engine, now with auth
+    Deps{Verifier: svc.Verifier(), AuthKitCore: svc.Core()})
+```
+Cycle gone: entitlements half is auth-free; only request-handling needs auth. Pure constructor wiring, no mutation.
+
+## Option B — post-construction entitlements hook (PREFERRED; needs an authkit addition)
+Keep the natural order (auth → engine), then attach the engine's entitlements to the already-built auth service through a SANCTIONED authkit seam:
+```go
+svc := authhttp.NewServer(cfg, pg)                              // no entitlements yet
+ors := openrailsembed.New(ctx, cfg, Deps{Verifier: svc.Verifier(), AuthKitCore: svc.Core()})
+ors.AttachEntitlements(svc)                                     // openrails hook -> svc.SetEntitlementsProvider(...)
+```
+authkit exposes ONE blessed post-construction setter (`(*core.Service).SetEntitlementsProvider` + `authhttp` equivalent) — the single deliberate exception to #108's options-only rule, justified by the inherent cycle and the fact authkit reads the provider LAZILY at mint time. openrails exposes a thin `(*Service).AttachEntitlements(sink)` that installs `EntitlementsProvider()` into it. Replaces the host-side holder with a library one-liner.
+
+## Why it matters
+- Deletes the `deferredEntitlements` holder (~30 lines) from BOTH doujins and hentai0 — the "no hacks" win.
+- Makes the cycle library-supported and explicit instead of a host-owned mutable box guarded by a "set before mint" comment.
+- A and B are complementary, not either/or: A suits hosts wanting pure constructor wiring; B suits hosts preferring the natural auth→engine order with one explicit attach call.
+
+## Tasks
+- [ ] Option A: add `openrailsembed.NewClient(ctx, cfg, pg)` (DB read client + `EntitlementsProvider()`, no auth) and `NewEngine(ctx, cfg, client, Deps{Verifier, AuthKitCore})`; refactor `New(...)` into `NewClient` → `NewEngine` (keep `New` as a back-compat wrapper).
+- [ ] Option B (openrails side): add `(*Service).AttachEntitlements(sink)` that installs `EntitlementsProvider()` via the authkit setter; define the minimal sink interface openrails depends on.
+- [ ] Option B (authkit dependency — file a separate authkit issue): add the sanctioned post-construction entitlements setter + sink interface; document it as the one cyclic-dependency exception to #108. Bump+tag authkit before openrails ships B.
+- [ ] Migrate doujins (`internal/server/server.go`): drop `deferredEntitlements`; adopt the chosen option (B per preference).
+- [ ] Migrate hentai0 (`internal/infra/authkit.go`): same.
+- [ ] Tests: minted tokens carry entitlements after wiring under both options; no token is mintable before entitlements are attached (B); 3-repo build green; bump+tag openrails + consumer bumps.
+- [ ] Docs: embedding guide / README shows both wiring options.
 
 ---
 
