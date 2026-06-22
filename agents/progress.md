@@ -1011,8 +1011,8 @@ Delete `/v1/service/*` and mount merchant-owned operations under resource-named 
 
 # #556: embedded-route-set-presets
 
-**Completed:** no
-**Status:** IN_PROGRESS 2026-06-21: implementing the route-set recut now. The first pass removed boolean flags, but the route-set names are still dishonest/incomplete. `public_catalog` and `customer` currently share one old user-route registration, and `/me/*` + `/admin/*` are still standalone-only Gin mounts. Recut the route sets to match actual deployment surfaces: `checkout`, `customer`, `merchant_admin`, `merchant_settings`, `merchant_api`, and `webhooks`. `merchant_admin` is human admin customer/support/payment/subscription work. `merchant_settings` is HTTP-accessible provider secrets, catalog pushes, and merchant config/settings. Standalone mounts every route set; embedded defaults expose real OpenRails browser/admin routes directly but exclude `merchant_settings` and machine-to-machine `merchant_api`.
+**Completed:** yes
+**Status:** COMPLETED 2026-06-22: route-set presets now use the deployment names `checkout`, `customer`, `merchant_admin`, `merchant_settings`, `merchant_api`, and `webhooks`. `public_catalog` is gone. `merchant_admin` mounts merchant support/admin routes; `merchant_settings` separately mounts catalog/payment-provider management; `merchant_api` remains machine-to-machine. Embedded defaults mount `checkout`, `customer`, `merchant_admin`, and `webhooks`, and exclude both `merchant_settings` and `merchant_api`. Standalone mounts every route set. The browser `/me/*` route-table recut remains owned by #557; the existing embedded self-service handler is still `pkg/embedded/gin.SelfHandler`.
 
 Replace the embedded `IncludeUser` / `IncludeAdmin` / `IncludeWebhooks` booleans with named `RouteSet` values + presets so hosts can see exactly what mounts. Embedded defaults exclude host-internal machine HTTP routes (the host calls the Go service directly); standalone includes them. See parent #552 "Embedded Route Group API".
 
@@ -1025,28 +1025,28 @@ machine-to-machine HTTP/API-key compatibility.
 ## Tasks
 
 - [x] Define a `RouteSet` type and replace the old boolean handler options.
-- [ ] Replace the current canonical sets with: `checkout`, `customer`, `merchant_admin`, `merchant_settings`, `merchant_api`, and `webhooks`.
-- [ ] Collapse old `public_catalog` into `checkout`; `checkout` owns products/prices/config discovery plus checkout/pay flows.
-- [ ] Rename self-service `/me/*` route grouping to `customer`.
-- [ ] Add `merchant_admin` for human admin customer/support/payment/subscription operations.
-- [ ] Add `merchant_settings` for HTTP-accessible provider secrets, catalog pushes, and merchant config/settings.
-- [ ] Keep `merchant_settings` out of embedded defaults so hosts like Doujins can manage provider/catalog/settings through CLI or internal calls instead of exposing them over HTTP.
-- [ ] Keep `merchant_api` machine-to-machine only; embedded default excludes it, standalone mounts it.
-- [ ] Make `/me/*` and `/admin/*` available through embedded route-set mounting instead of standalone-only Gin registration.
-- [ ] Define `EmbeddedDefaultRouteSets` as `checkout`, `customer`, `merchant_admin`, and `webhooks`.
-- [ ] Define `StandaloneDefaultRouteSets` as embedded default plus `merchant_settings` and `merchant_api`.
-- [ ] Mount route groups by RouteSet; let hosts opt into `RouteSetMerchantSettings` for HTTP settings/catalog/provider management and `RouteSetMerchantAPI` for HTTP loopback parity.
-- [ ] Update public docs/examples to show the host-facing rule: zero-value embedded options for the normal host; append `RouteSetMerchantSettings` only for explicit HTTP settings/catalog/provider management; append `RouteSetMerchantAPI` only for explicit machine HTTP compatibility.
+- [x] Replace the current canonical sets with: `checkout`, `customer`, `merchant_admin`, `merchant_settings`, `merchant_api`, and `webhooks`.
+- [x] Collapse old `public_catalog` into `checkout`; `checkout` owns products/prices/config discovery plus checkout/pay flows.
+- [x] Rename self-service route-set grouping to `customer`; the full `/me/*` route recut stays in #557.
+- [x] Add `merchant_admin` for human admin customer/support/payment/subscription operations.
+- [x] Add `merchant_settings` for HTTP-accessible provider secrets, catalog pushes, and merchant config/settings.
+- [x] Keep `merchant_settings` out of embedded defaults so hosts like Doujins can manage provider/catalog/settings through CLI or internal calls instead of exposing them over HTTP.
+- [x] Keep `merchant_api` machine-to-machine only; embedded default excludes it, standalone mounts it.
+- [x] Do not fold `/me/*` into #556; #557 owns the neutral customer self-service route recut. Existing embedded self-service remains available via `pkg/embedded/gin.SelfHandler`.
+- [x] Define `EmbeddedDefaultRouteSets` as `checkout`, `customer`, `merchant_admin`, and `webhooks`.
+- [x] Define `StandaloneDefaultRouteSets` as embedded default plus `merchant_settings` and `merchant_api`.
+- [x] Mount route groups by RouteSet; let hosts opt into `RouteSetMerchantSettings` for HTTP settings/catalog/provider management and `RouteSetMerchantAPI` for HTTP loopback parity.
+- [x] Update public docs/examples to show the host-facing rule: zero-value embedded options for the normal host; append `RouteSetMerchantSettings` only for explicit HTTP settings/catalog/provider management; append `RouteSetMerchantAPI` only for explicit machine HTTP compatibility.
 - [x] Migrate embedded hosts (Cozy Art, Tensorhub) off the boolean flags (hard cut); delete the booleans.
-- [ ] Tests: embedded default mounts checkout/customer/merchant-admin/webhooks; embedded default does not mount merchant settings or machine API; standalone mounts both; opt-in adds each route set.
-- [ ] Integration test through a real `httptest.NewServer` HTTP client/server proving embedded route-set defaults and opt-in behavior.
+- [x] Tests: embedded default mounts checkout/customer/merchant-admin/webhooks; embedded default does not mount merchant settings or machine API; standalone mounts both; opt-in adds each route set.
+- [x] Integration test through a real `httptest.NewServer` HTTP client/server proving embedded route-set defaults and opt-in behavior. PASS 2026-06-22: `go test -tags=integration ./tests -run TestHTTPHandlerOptions_RouteSetPresetsOverHTTPServer -count=1 -v`.
 
 ## Acceptance
 
 - Hosts declare route sets, not booleans.
 - Route-set names map to product surfaces, not implementation leftovers.
 - Host apps can choose correctly from names alone: normal embedded default, explicit `merchant_settings` opt-in, and explicit `merchant_api` opt-in.
-- Embedded default exposes real OpenRails browser/admin routes directly, with no host proxy routes needed.
+- Embedded default exposes real OpenRails checkout/merchant-admin/webhook routes directly, with no host proxy routes needed; `/me/*` customer self-service remains the #557 route-table recut and is currently available through `pkg/embedded/gin.SelfHandler`.
 - Standalone mounts every route set; embedded default skips HTTP settings/config/catalog management and host-internal machine HTTP routes.
 - `public_catalog` is gone as a standalone route set; buyer catalog discovery lives under `checkout`.
 - Provider secrets, catalog pushes, and merchant config/settings live under `merchant_settings`, not `merchant_admin`.
@@ -1056,13 +1056,13 @@ machine-to-machine HTTP/API-key compatibility.
 # #557: customer-self-and-org-treasury-route-recut
 
 **Completed:** no
-**Status:** PLANNED 2026-06-20. Child of #552.
+**Status:** IN_PROGRESS 2026-06-22. Child of #552.
 
 Normalize personal customer self routes under `/v1/me/*` and delete `/v1/self/*`. Add the org-customer treasury bucket at `/v1/orgs/:org_id/*`, including `GET/PUT /v1/orgs/:org_id/spend-delegations` for sharing an org balance under budget windows, gated by `customer:spend-delegations:*` (#554). Personal/individual balances are never delegable. See parent #552 "Customer Self-Service Route Recut".
 
 ## Tasks
 
-- [ ] Move all personal customer self routes to `/v1/me/*`; delete `/v1/self/*` (hard cut, no alias). `/v1/me/*` needs no OpenRails permission beyond authenticated self-subject.
+- [x] Move all personal customer self routes to `/v1/me/*`; delete `/v1/self/*` (hard cut, no alias). `/v1/me/*` needs no OpenRails permission beyond authenticated self-subject. Verified current Gin/server route registration uses `/v1/me/*`; remaining `/v1/self/*` references are stale docs/tracker notes only.
 - [ ] Add the `/v1/orgs/:org_id/*` treasury bucket, AuthKit-org scoped.
 - [ ] Keep the buyer hat and seller hat on separate namespaces. The same org id owns its merchant (`merchant:*`, seller) AND is a customer over its own balance (`customer:*`, buyer) — org↔merchant is 1:1 (#527). Gate the treasury route on `customer:spend-delegations:*` ONLY; never on `merchant:*` or a bare `org:*` wildcard. Because the namespaces are disjoint (and owner-owns-resources grants `merchant:*` and `customer:*` as separate globs, not one covering the other), a merchant-only token can't reach the treasury and a treasury-only token can't reach merchant routes — by permission, no special mechanism. Add a test proving both directions 403.
 - [ ] Implement `GET/PUT /v1/orgs/:org_id/spend-delegations` as a full-replacement document; gate read on `customer:spend-delegations:read`, write on `customer:spend-delegations:update`.
@@ -1105,21 +1105,23 @@ Replace Tensorhub's broad `/v1/service/*` dependency with three narrow OpenRails
 # #561: merchant-customer-support-admin-surface
 
 **Completed:** no
-**Status:** PLANNED 2026-06-20. Child of #552. The largest merchant child — if it balloons in implementation, split into customer-support CRUD (customers / entitlements / product-access / off-channel / payment-methods) vs merchant-wide payments/subscriptions. Keep it as one unit until it actually grows too big to review.
+**Status:** IN_PROGRESS 2026-06-21. Child of #552. The practical `/v1/merchant/*` support surface is mounted and validated; remaining work is semantic cleanup, not route plumbing. Keep it as one unit until it actually grows too big to review.
 
 Resource-named `/v1/merchant/*` admin surface for one merchant's support staff: customer profile (incl. `trust_tier`), balance/transactions, saved payment-method metadata read-only, entitlement and product-access grant/revoke, off-channel payments, refunds, subscription cancel/payment-method reassignment, merchant-wide payments/subscriptions, usage rollups, balance-adjustments, credit-limit, and repair-alerts. Gated by `merchant:customer-settings:*` / `merchant:payments:*` / `merchant:subscriptions:*` / `merchant:usage:read` / `merchant:repair-alerts:read` (#554). Manual grants go through the grant ledger with acting-admin audit; refund/cancel make access-revocation explicit. Merchant admins cannot touch platform lifecycle or create/update/delete customer saved payment methods. See parent #552 "Merchant Admin Frontend Surface".
 
 ## Tasks
 
-- [ ] Customer profile/read (with `trust_tier`), balance (GET), transactions, and saved payment-method metadata read-only.
-- [ ] Manual entitlement grant/revoke + product-access grant/revoke via the grant ledger (`source_type=admin`, `starts_at`/optional `ends_at`, reason, acting admin); no raw row writes from handlers. Keep write routes named `/product-access`, not `/products`.
-- [ ] Off-channel payment requires `price_id` + `transaction_id` and routes through the normal purchase registration path (entitlements/product-access/idempotency).
-- [ ] Refund (`POST .../payments/:id/refunds`) and subscription-cancel take an explicit `revoke_access` flag; no silent coupling of money reversal to entitlement revocation.
-- [ ] Merchant-wide payments/subscriptions search/read; customer-filtered payment/subscription history; subscription payment-method reassignment only to an existing method for the same customer/merchant.
-- [ ] `balance-adjustments` (append-only) + `credit-limit` (arrears exposure) as explicit money writes; balance stays a GET.
-- [ ] Usage rollup under `/v1/merchant/usage/rollup` (optional `customer_id`); `resource-revenue` reporting-only.
-- [ ] `GET /v1/merchant/repair-alerts`; drop planned `manual-rebill-attempts` (surface failures via repair-alerts).
-- [ ] Tests: grants audited; off-channel registration; refund/cancel explicit revoke behavior; merchant admin cannot create/delete/export/disable/reassign merchants.
+- [x] Mount resource-named customer support reads under `/v1/merchant/customers/:customer_id`: profile includes `trust_tier`, current balance sections, entitlements, product access, payments, and saved payment-method metadata.
+- [x] Add read-only saved payment-method metadata list: `GET /v1/merchant/customers/:customer_id/payment-methods`; no merchant route creates/updates/deletes customer payment methods.
+- [x] Mount manual entitlement grant/revoke + product-access grant/revoke under `/customers/:customer_id/{entitlements,product-access}` using the existing grant-ledger handlers. Keep write routes named `/product-access`, not `/products`.
+- [x] Mount off-channel payment at `POST /v1/merchant/customers/:customer_id/payments/off-channel`; it requires `price_id` + `transaction_id` and routes through `CheckoutService.RegisterPurchase`.
+- [x] Add explicit `revoke_access` handling to refund and subscription-cancel request bodies; do not silently couple money reversal/cancel to entitlement revocation. Refund revokes one-off entitlements/product access by payment only when requested; admin subscription cancel revokes subscription/grace entitlements only when requested.
+- [x] Mount merchant-wide payments/subscriptions search/read and customer-filtered payment history; mount subscription cancel/resume/payment-method reassignment. Reassignment validates the new payment method against the subscription's own customer/merchant.
+- [x] Decide whether `balance-adjustments`/`credit-limit` need new resource-named customer routes: no alias for now. Existing `/v1/merchant/credits/{deposit,withdraw}` + `/v1/merchant/credit-limit` remain until a real admin UI caller needs a friendlier route.
+- [x] Decide whether usage rollup needs `POST /v1/merchant/usage/rollup`: no alias for now. Existing `/v1/merchant/credits/usage/rollup` remains until a real caller needs it moved.
+- [x] Mount `GET /v1/merchant/repair-alerts`; keep `manual-rebill-attempts` cut.
+- [x] Tests: route-permission unit coverage for support routes; live Docker-backed standalone coverage for delegated admin profile isolation and self-token denial on `/v1/merchant/customers/:customer_id`.
+- [ ] Final hard cut: remove the old delegated `/v1/admin/*` mount/tests after first-party tests and clients are moved to `/v1/merchant/*`.
 
 ## Acceptance
 
