@@ -7,7 +7,48 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 566
+next_id: 567
+
+---
+
+# #566: org-as-payer treasury routes — extend /v1/orgs/:org_id/* to the full payer subset of the customer surface
+
+**Completed:** no
+**Status:** PLANNED 2026-06-22 (Claude). Follow-on to #557 (which created `/v1/orgs/:org_id/*` with only `spend-delegations`). Builds on the #554 `customer:*` catalog.
+
+## Principle
+An org is a **payer**, not a **consumer**. It holds an API-credit balance, pre-pays, owes in arrears, has a billing mode, gets invoices, and sets payment methods — but it does NOT itself own catalog products, entitlements, or personal subscriptions (its *members* consume; the org *funds*). So the org surface should mirror the **payer subset** of `/v1/me/*`, scoped to the org's payable subject, and expose NONE of the consumer routes.
+
+This is modeled as **separate resource-scoped routes** under `/v1/orgs/:org_id/*` — NOT by shoehorning an org-target into the personal `/v1/me/*` routes. Rationale: (1) the payer SUBJECT differs (org payable subject vs token `delegated_sub`); `/v1/me` is deliberately self-only with no `customer_id` param, and adding an "act-as-org" param would break that invariant and invite confused-deputy bugs; (2) the AUTHZ differs (`/v1/me` needs no permission — authenticated self; the org surface needs `customer:*` because the org balance is a SHARED resource); (3) the org gets a strict SUBSET (no products/entitlements/subscriptions) which would mean conditionally disabling routes if folded into `/v1/me`. The route path NAMES the scope (`/v1/orgs/:org_id`), which is exactly the scoped-RBAC model and generalizes to future `/v1/<resource>/:id` surfaces. Handlers are SHARED (same money logic, payer resolved from the scope), so this is route separation, not handler duplication.
+
+## Target surface (additive to the existing `spend-delegations`)
+```
+GET   /v1/orgs/:org_id/balance | transactions | status | usage | payments
+GET   /v1/orgs/:org_id/invoices | /invoices/:id
+PUT   /v1/orgs/:org_id/settings                 # billing mode (prepaid|arrears), caps
+GET.. /v1/orgs/:org_id/payment-methods[/:id]    # list/create/update/delete
+POST  /v1/orgs/:org_id/checkout | /checkout/:id | /checkout/:id/confirm   # pre-pay / load credits
+POST  /v1/orgs/:org_id/stripe/portal
+GET/PUT /v1/orgs/:org_id/spend-delegations      # done in #557
+```
+EXCLUDED (consumer-only, stay on `/v1/me/*`): `products`, `products/:id/access`, `entitlements/active`, `subscriptions/*`, `notifications`.
+
+## Tasks
+- [ ] Factor the payer-subject resolution so each `/v1/me/*` money handler works for BOTH surfaces: `/v1/me` → token `delegated_sub`; `/v1/orgs/:org_id` → the org's payable subject (the same `customers` row the `spend-delegations` store already keys on). Reuse the `requireOrgTreasuryPrincipal` + `orgIDMatchesResolved` scope check (403 `org_scope_mismatch`).
+- [ ] Mount the payer-subset routes under `/v1/orgs/:org_id/*` on BOTH transports (standalone gin `RegisterOrgTreasuryRoutes` + embedded `embgin.SelfHandler`), reusing the existing money handlers — NOT new handler logic.
+- [ ] Do NOT mount the consumer routes (products/entitlements/subscriptions/notifications) on the org surface.
+- [ ] Permission split: extend the #554 catalog with a small `customer:*` split so a finance persona ≠ a spend-delegation editor — e.g. `customer:balance:read` (balance/transactions/status/usage/payments/invoices), `customer:billing:update` (settings/billing mode/caps), `customer:payment-methods:update` (payment-methods CRUD + stripe portal), `customer:checkout:create` (pre-pay), plus the existing `customer:spend-delegations:read|update`. Gate each route accordingly. (Finalize the exact granularity when implementing.)
+- [ ] Seed the new `customer:*` perms in the catalog; confirm the org owner auto-holds `customer:*` (already true — owner namespaces derive from `Config.Permissions` via `ownerGrantTokens()`).
+- [ ] Reject targeting a personal/individual balance through the org surface (no `customer_id` param; payer forced from `:org_id`) — same guard as `spend-delegations`.
+- [ ] Tests: org payer can read balance / load credits via checkout / set prepaid|arrears / manage payment-methods / view invoices, all scoped to the org's payable subject; a merchant-only token (`merchant:*`) cannot reach any org-payer route and vice versa (namespace separation); the org surface exposes NO consumer routes; cross-org access is 403.
+- [ ] Tensorhub use-case E2E: org loads balance via `checkout` → sets billing mode via `settings` → a delegated user draws it down within a `spend-delegations` window.
+- [ ] Update hosts only if they consume the new org-payer routes (tensorhub is the primary consumer); no consumer change for the personal surface.
+
+## Acceptance
+- An org has the full **payer** surface at `/v1/orgs/:org_id/*` (balance, pre-pay, arrears/billing-mode, invoices, payment-methods), scoped to the org's payable subject, gated by `customer:*`.
+- The org surface exposes NO consumer routes (products/entitlements/subscriptions).
+- Handlers are shared with `/v1/me/*` (payer resolved from the scope), not duplicated; nothing is shoehorned into `/v1/me/*`.
+- Merchant-only and cross-org credentials are rejected by permission + scope.
 
 ---
 
